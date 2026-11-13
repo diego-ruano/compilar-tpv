@@ -15,6 +15,7 @@ import type {
 	TrabajadoresStatsResponse,
 } from "@tpv/contracts";
 
+import { resumenAlDia } from "./resumenDiario";
 import type { StatsRange } from "./stats.schemas";
 
 function rows(rs: any): any[] {
@@ -79,63 +80,175 @@ async function tableExists(db: Client, table: string): Promise<boolean> {
 	return Boolean(r.name);
 }
 
+/**
+ * El inicio de hoy. Las estadísticas de productos y de mesas leen del resumen diario
+ * (`resumenDiario.ts`) los días del rango anteriores a éste, y de los cobros lo de hoy.
+ */
+const HOY = "datetime('now','localtime','start of day')";
+
+/**
+ * Antes de leer del resumen diario los días cerrados de un rango, rehace los que estén sucios
+ * (`resumenAlDia`). El rango de hoy no lee del resumen.
+ */
+async function resumenDelRangoAlDia(db: Client, range: StatsRange): Promise<void> {
+	if (range === "hoy") return;
+	await resumenAlDia(db, rangeBounds(range).start);
+}
+
+/**
+ * Los cobros de mesa del rango, por día y mesa (`por_mesa_dia`): la cabecera que comparten las
+ * sentencias de la estadística de mesas.
+ *
+ * Los días del rango anteriores a hoy salen de `_Estad_Mesa_Dia` y lo de hoy, de los cobros hasta
+ * ahora. Cada fila trae lo cobrado y tres recuentos de comandas, porque una comanda cobrada en dos
+ * días no puede contarse dos veces: `comandas` son las de ese día, `comandas_mes` las que tienen
+ * ese día su último cobro del mes y `comandas_rango` las que lo tienen de siempre (ver la tabla en
+ * `0001_inicial.sql`). Hoy las tres son lo mismo: es el último día del rango y de su mes.
+ *
+ * Una devolución de parte de un cobro (`ID_Pago_Origen`) resta de lo cobrado el día que se
+ * devuelve, pero no cuenta como comanda: no es un cobro. La venta rápida no tiene mesa
+ * (Canal='BARRA', ID_Mesa NULL). Mismo modelo que Main/Rust (STAT-01/02/06): la misma cabecera,
+ * en `sql_cobros_por_mesa_y_dia` de `tpv-infra-sqlite/src/stats.rs`.
+ */
+function sqlCobrosPorMesaYDia(range: StatsRange): string {
+	const { start, end } = rangeBounds(range);
+	return `
+		WITH
+		rng AS (SELECT ${start} AS start_dt, ${HOY} AS hoy_dt, ${end} AS end_dt),
+		por_mesa_dia AS (
+			SELECT
+				e.Dia AS dia,
+				e.ID_Mesa AS id_mesa,
+				e.Importe AS importe,
+				e.Comandas AS comandas,
+				e.Comandas_Ultimo_Mes AS comandas_mes,
+				e.Comandas_Ultimo AS comandas_rango
+			FROM _Estad_Mesa_Dia e
+			JOIN rng ON 1=1
+			WHERE e.Dia >= date(rng.start_dt)
+				AND e.Dia <  date(rng.hoy_dt)
+			UNION ALL
+			SELECT
+				date(rng.hoy_dt),
+				c.ID_Mesa,
+				SUM(p.Importe_Total),
+				COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END),
+				COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END),
+				COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END)
+			FROM Pagos p
+			JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+			JOIN rng ON 1=1
+			WHERE p.Fecha_Hora >= rng.hoy_dt
+				AND p.Fecha_Hora <  rng.end_dt
+				AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+				AND c.ID_Mesa IS NOT NULL
+			GROUP BY c.ID_Mesa
+		)`;
+}
+
+/** Ingresos y mesas servidas del rango. Una mesa cuenta si tiene algún cobro (no una devolución). */
+export function sqlMesasIngresos(range: StatsRange): string {
+	return `${sqlCobrosPorMesaYDia(range)}
+		SELECT
+			COALESCE(SUM(d.importe),0) AS total,
+			COUNT(DISTINCT CASE WHEN d.comandas > 0 THEN d.id_mesa END) AS ocupadas
+		FROM por_mesa_dia d
+		JOIN Mesas m ON m.ID_Mesa = d.id_mesa;`;
+}
+
+/** La mesa con más comandas cobradas en el rango. */
+export function sqlMesaTopComandas(range: StatsRange): string {
+	return `${sqlCobrosPorMesaYDia(range)}
+		SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, SUM(d.comandas_rango) AS comandas
+		FROM por_mesa_dia d
+		JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+		JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+		GROUP BY m.ID_Mesa
+		ORDER BY comandas DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+		LIMIT 1;`;
+}
+
+/**
+ * Las comandas cobradas de cada tramo de la gráfica. Por horas (hoy) se leen de los cobros; por
+ * días, del recuento de cada día; por meses, del que cuenta cada comanda una vez en su mes.
+ */
+export function sqlMesasServicios(range: StatsRange): string {
+	if (range === "hoy") {
+		const { start, end } = rangeBounds(range);
+		return `SELECT ${bucket(range, "p.Fecha_Hora")} AS label, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS value
+			 FROM Pagos p
+			 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+			 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+			 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+			   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+			 GROUP BY label ORDER BY label ASC;`;
+	}
+	const [tramo, recuento] =
+		range === "anio" ? ["strftime('%m/%Y', d.dia)", "d.comandas_mes"] : ["strftime('%d/%m', d.dia)", "d.comandas"];
+	return `${sqlCobrosPorMesaYDia(range)}
+		SELECT ${tramo} AS label, SUM(${recuento}) AS value
+		FROM por_mesa_dia d
+		JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+		GROUP BY label ORDER BY label ASC;`;
+}
+
+/**
+ * Las diez mesas que más han ingresado en el rango. Entre dos con lo mismo, primero la de número
+ * menor (y, con el mismo número en dos zonas, la de ID menor).
+ */
+export function sqlMesasTopIngresos(range: StatsRange): string {
+	return `${sqlCobrosPorMesaYDia(range)}
+		SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, COALESCE(SUM(d.importe),0) AS total
+		FROM por_mesa_dia d
+		JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+		JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+		GROUP BY m.ID_Mesa
+		ORDER BY total DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+		LIMIT 10;`;
+}
+
 export async function mesas(
 	db: Client,
 	range: StatsRange,
 ): Promise<MesasStatsResponse> {
-	const { start, end } = rangeBounds(range);
-	const b = bucket(range, "p.Fecha_Hora");
+	// Los días cerrados del rango se leen del resumen diario: primero, que esté al día.
+	await resumenDelRangoAlDia(db, range);
+	return mesasCon(db, {
+		ingresos: sqlMesasIngresos(range),
+		topComandas: sqlMesaTopComandas(range),
+		servicios: sqlMesasServicios(range),
+		topIngresos: sqlMesasTopIngresos(range),
+	});
+}
 
+/**
+ * Las cuatro sentencias de la estadística de mesas: ingresos y mesas servidas (`total`,
+ * `ocupadas`), la mesa con más comandas (`mesa`, `zona`, `comandas`), las comandas de cada tramo de
+ * la gráfica (`label`, `value`) y las diez mesas que más han ingresado (`mesa`, `zona`, `total`).
+ */
+export type SentenciasMesas = {
+	ingresos: string;
+	topComandas: string;
+	servicios: string;
+	topIngresos: string;
+};
+
+/**
+ * La estadística de mesas a partir de sus cuatro sentencias. Los tests de equivalencia le pasan las
+ * de antes del resumen diario, que recorren los cobros.
+ */
+export async function mesasCon(db: Client, sql: SentenciasMesas): Promise<MesasStatsResponse> {
 	const total = await one(
 		db,
 		"SELECT COUNT(*) AS n FROM Mesas WHERE Archivada_En IS NULL;",
 	);
 	// Ingresos al nivel de PAGO (fuente de verdad = Pagos, coherente con caja), semántica por-mesa:
-	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = SUM(Importe_Total). La venta
-	// rápida no tiene mesa (Canal='BARRA', ID_Mesa NULL), así que el JOIN con Mesas ya la excluye
-	// sin filtro extra. Mismo modelo que Main/Rust (STAT-01/02/06).
-	const ingresos = await one(
-		db,
-		`SELECT COALESCE(SUM(p.Importe_Total),0) AS total, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN c.ID_Mesa END) AS ocupadas
-		 FROM Pagos p
-		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';`,
-	);
-	const top = await one(
-		db,
-		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS comandas
-		 FROM Pagos p
-		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-		 GROUP BY m.ID_Mesa
-		 ORDER BY comandas DESC, m.Numero_Mesa ASC
-		 LIMIT 1;`,
-	);
-	const servRs = await db.execute(
-		`SELECT ${b} AS label, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS value
-		 FROM Pagos p
-		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-		 GROUP BY label ORDER BY label ASC;`,
-	);
-	const topRs = await db.execute(
-		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, SUM(p.Importe_Total) AS total
-		 FROM Pagos p
-		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-		 GROUP BY m.ID_Mesa
-		 ORDER BY total DESC LIMIT 10;`,
-	);
+	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = lo cobrado. Las cuatro
+	// sentencias leen lo mismo: `por_mesa_dia` (`sqlCobrosPorMesaYDia`).
+	const ingresos = await one(db, sql.ingresos);
+	const top = await one(db, sql.topComandas);
+	const servRs = await db.execute(sql.servicios);
+	const topRs = await db.execute(sql.topIngresos);
 	const servicios = rows(servRs);
 	const topMesas = rows(topRs);
 	const ocupadas = num(ingresos.ocupadas);
@@ -172,38 +285,53 @@ export async function listCategorias(db: Client): Promise<StatsCategoriaRow[]> {
 }
 
 /**
- * La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
+ * La sentencia de la estadística de productos: lo vendido en el rango, sin recorrer sus cobros.
  *
  * Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
  * (`de_venta = 1`, una por clave, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
  * mejor, el peor y los dos top 10 los saca `productos` de ahí sin hacer cuentas: todas las sumas y
  * los redondeos son de SQLite.
  *
- * Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y las
- * de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada producto:
- * con un año de datos eso no cabe en el SQLite del Durable Object, que atiende a todo el negocio en
- * un solo hilo. Así lo que tarda depende del rango pedido y no del histórico.
+ * Los días ya cerrados del rango salen de `_Estad_Producto_Dia`, que los tiene sumados por producto
+ * (antes de leer, `productos` rehace los que estén sucios), y sólo lo de hoy se lee de los cobros:
+ * lo que tarda no crece con el rango ni con el histórico, que es lo que hace falta en el SQLite del
+ * Durable Object, que atiende a todo el negocio en un solo hilo. Es una sola sentencia a propósito:
+ * con una por lista, cada una volvería a leer lo mismo.
  * La misma sentencia, en la Main: `sql_productos` de `tpv-infra-sqlite/src/stats.rs`.
  */
 export function sqlProductos(range: StatsRange): string {
 	const { start, end } = rangeBounds(range);
 	return `
 		WITH
-		rng AS (SELECT ${start} AS start_dt, ${end} AS end_dt),
+		rng AS (SELECT ${start} AS start_dt, ${HOY} AS hoy_dt, ${end} AS end_dt),
 		paid_det AS (
+			-- Las lineas cobradas HOY, hasta ahora.
 			-- STAT-07: cada linea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una linea
 			-- cobrada en dos veces saldria dos veces y sus unidades se contarian dobles.
 			-- Solo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, asi que sus
 			-- lineas no pueden aparecer en "lo mas vendido" ni sumar en el historico.
-			-- El rango va AQUI (RI-18): se agrupan los cobros del rango, no los de toda la historia.
 			SELECT pd.ID_Detalle AS ID_Detalle
 			FROM Pago_Detalles pd
 			JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
 			JOIN rng ON 1=1
 			WHERE p.Estado = 'ACTIVO'
-				AND p.Fecha_Hora >= rng.start_dt
+				AND p.Fecha_Hora >= rng.hoy_dt
 				AND p.Fecha_Hora <  rng.end_dt
 			GROUP BY pd.ID_Detalle
+		),
+		lineas AS (
+			-- Los dias del rango anteriores a hoy, del resumen: cada fila es lo que sumaron ese dia
+			-- las lineas de un producto con un mismo nombre, y cada linea esta en el dia de su ultimo
+			-- cobro, asi que la que se cobro ayer y otra vez hoy no sale aqui sino abajo.
+			SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Unidades AS Cantidad
+			FROM _Estad_Producto_Dia e
+			JOIN rng ON 1=1
+			WHERE e.Dia >= date(rng.start_dt)
+				AND e.Dia <  date(rng.hoy_dt)
+			UNION ALL
+			SELECT dc.ID_Producto, dc.Nombre_Producto, COALESCE(dc.Cantidad,1)
+			FROM paid_det cobrada
+			JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
 		),
 		vendido AS (
 			-- Se agrupa ANTES de mirar el catalogo: asi el catalogo se consulta una vez por clave y
@@ -214,14 +342,13 @@ export function sqlProductos(range: StatsRange): string {
 			-- nombre_linea es el de la linea que elige SQLite al agrupar, sin MIN ni MAX que se lo
 			-- cambien: el que se ensena cuando el producto ya no esta en el catalogo.
 			SELECT
-				COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
-				dc.Nombre_Producto AS nombre_linea,
-				SUM(COALESCE(dc.Cantidad,1)) AS suma,
-				SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
-				SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
-			FROM paid_det cobrada
-			JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
-			GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+				COALESCE(l.ID_Producto, l.Nombre_Producto) AS clave,
+				l.Nombre_Producto AS nombre_linea,
+				SUM(l.Cantidad) AS suma,
+				SUM(CASE WHEN l.ID_Producto IS NOT NULL THEN l.Cantidad END) AS suma_con_producto,
+				SUM(CASE WHEN l.ID_Producto IS NULL THEN l.Cantidad END) AS suma_sin_producto
+			FROM lineas l
+			GROUP BY COALESCE(l.ID_Producto, l.Nombre_Producto)
 		)
 		SELECT
 			1 AS de_venta,
@@ -280,7 +407,22 @@ export async function productos(
 	categoriaTopId: string | null,
 	categoriaWorstId: string | null,
 ): Promise<ProductosStatsResponse> {
-	const filas = rows(await db.execute(sqlProductos(range)));
+	// Los días cerrados del rango se leen del resumen diario: primero, que esté al día.
+	await resumenDelRangoAlDia(db, range);
+	return productosCon(db, sqlProductos(range), categoriaTopId, categoriaWorstId);
+}
+
+/**
+ * La estadística de productos a partir de su sentencia (`sqlProductos`). Los tests de equivalencia
+ * le pasan la de antes del resumen diario, que recorre los cobros.
+ */
+export async function productosCon(
+	db: Client,
+	sql: string,
+	categoriaTopId: string | null,
+	categoriaWorstId: string | null,
+): Promise<ProductosStatsResponse> {
+	const filas = rows(await db.execute(sql));
 	const vendidos = filas.filter((f) => num(f.de_venta) === 1);
 	const catalogo = filas.filter((f) => num(f.de_venta) !== 1);
 

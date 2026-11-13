@@ -98,6 +98,11 @@ en el mismo struct que devuelve el repositorio SQLite (`HttpClientesRepository::
 - Un `null` y un campo ausente son lo mismo (serde los acepta igual en un `Option<T>`).
 - `"omitir": ["campo"]` borra campos a cualquier profundidad antes de comparar, para lo que depende del
   reloj dentro del propio resultado (`login.punch_status` devuelve la fecha de hoy).
+- Las estadísticas de un rango que acaba hoy (`stats/productos_semana`, `stats/mesas_semana`, con
+  `entrada.range`) siembran con fechas relativas a hoy, todas claramente dentro o fuera del rango, y
+  llevan además `cambios`: el arnés no los usa; son las tandas de escrituras que aplican los tests de
+  equivalencia del resumen diario de cada lado (`tests_resumen_diario` en `stats.rs`,
+  `statsResumenDiario.test.ts`).
 
 ```jsonc
 {

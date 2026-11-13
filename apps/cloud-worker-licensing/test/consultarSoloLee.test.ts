@@ -8,8 +8,9 @@
 // - que `consultar` sólo lee: lo que no es una lectura se rechaza, también detrás de una (dos
 //   sentencias en un texto: un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja
 //   cambiada la conexión), y lo que parece una lectura y escribe (`WITH … DELETE`) se deshace entero;
-// - que lo único que se escribe fuera del motor es el estado propio de la nube (el freno del PIN y
-//   el checkpoint de la purga), por su propia puerta (`anotarEstado`), tabla por tabla;
+// - que lo único que se escribe fuera del motor es el estado propio de la nube (el freno del PIN, el
+//   checkpoint de la purga y el resumen diario de las estadísticas), por su propia puerta
+//   (`anotarEstado`), tabla por tabla y, en un lote, todo o nada;
 // - que el alta del negocio siembra su administrador dentro del DO (`aprovisionar`), sin SQL que
 //   viaje, y dice si la base ya estaba;
 // - que `/v1/sync/initialize-empty`, que corre dentro del DO, no se llama a sí mismo por RPC.
@@ -316,6 +317,40 @@ describe("el estado propio de la nube tiene su puerta, y sólo ése", () => {
 		expect(await enLaBase(t, (sql) => sql.exec("SELECT Intentos_Fallidos AS n FROM Intentos_Login;").one().n)).toBe(2);
 		await throttleReset(db, ADMIN, 0, 3_000);
 		expect(await enLaBase(t, (sql) => sql.exec("SELECT COUNT(*) AS n FROM Intentos_Login;").one().n)).toBe(0);
+	});
+
+	it("el resumen diario de las estadísticas se rehace por esa puerta, en un lote todo o nada", async () => {
+		// Lo que hace `resumenAlDia` con la ruta en el Worker: cada día es un lote de cinco sentencias
+		// (borrar y volver a insertar sus filas, y quitarle la marca), y entra entero o no entra.
+		const t = "estado-local-resumen";
+		await conBase(t);
+		const dia = "2026-03-02";
+		await enLaBase(t, (sql) => {
+			sql.exec("INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 10, 10);");
+			sql.exec("INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', '2026-03-02 12:00:00', 'Pagada');");
+			sql.exec("INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', '2026-03-02 13:00:00', 'Efectivo', 900, 'total');");
+		});
+		const db = clienteDelHub(env, t);
+		const { recalcularDia, sentenciasDeRecalculo } = await import("../src/domains/stats/resumenDiario");
+
+		await recalcularDia(db, dia);
+		expect(
+			await enLaBase(t, (sql) => ({
+				sucios: sql.exec("SELECT COUNT(*) AS n FROM _Estad_Dias_Sucios;").one().n,
+				mesas: sql.exec("SELECT ID_Mesa, Importe, Comandas FROM _Estad_Mesa_Dia;").toArray(),
+			})),
+		).toEqual({ sucios: 0, mesas: [{ ID_Mesa: "m1", Importe: 900, Comandas: 1 }] });
+
+		// Una sentencia del negocio detrás tumba el lote entero: ni se rehace el día ni se toca Zonas.
+		await enLaBase(t, (sql) => sql.exec("UPDATE Pagos SET Importe_Total = 1000 WHERE ID_Pago = 'p1';"));
+		const conIntrusa = [...sentenciasDeRecalculo(dia), { sql: "DELETE FROM Zonas;", args: [] }];
+		expect(await stub(t).anotarEstado(t, conIntrusa as any)).toEqual(ESTADO_NO_ADMITIDO);
+		await expect(db.batch(conIntrusa as any, "write")).rejects.toMatchObject({ code: "consulta_no_es_lectura" });
+		await enLaBase(t, (sql) => {
+			expect(zonas(sql)).toEqual(["Sala"]);
+			expect(sql.exec("SELECT Importe FROM _Estad_Mesa_Dia;").one().Importe).toBe(900);
+			expect(sql.exec("SELECT Dia FROM _Estad_Dias_Sucios;").toArray()).toEqual([{ Dia: dia }]);
+		});
 	});
 
 	it("con las rutas en el Worker, el catch-up sigue apuntando el checkpoint de la Main", async () => {

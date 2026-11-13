@@ -1334,6 +1334,11 @@ impl SyncRepository for SqliteSyncRepository {
                 .map_err(db_err)?;
             }
 
+            // El resumen diario de las estadísticas hablaba de los datos de antes. Los triggers ya
+            // han apuntado los días de lo que se ha borrado y de lo que ha entrado; aquí se vacía lo
+            // resumido y se deja por calcular todo día con cobros, dentro de la misma transacción.
+            crate::estadisticas_diarias::reiniciar(conn).await?;
+
             Ok(filas)
         }).await;
 
@@ -2004,6 +2009,67 @@ mod tests_bootstrap {
         assert_eq!(zonas(&db).await, vec!["Salon".to_string()]);
         assert_eq!(r.filas_restauradas, 1);
         assert_eq!(r.seq, 42);
+    }
+
+    /// El resumen diario de las estadísticas es una caché de la base de antes: restaurar lo vacía y
+    /// deja por rehacer todos los días con cobros de la base nueva.
+    #[tokio::test]
+    async fn restaurar_deja_por_rehacer_el_resumen_de_las_estadisticas() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Estad_Mesa_Dia VALUES ('2025-01-01', 'm-vieja', 999, 1, 1, 1);
+                     INSERT INTO _Estad_Producto_Dia VALUES ('2025-01-01', 'p-viejo', 'Viejo', 9);",
+                )
+                .await
+                .unwrap();
+        }
+
+        let fila = |id: &str, comanda: &str, cuando: &str| {
+            vec![json!(id), json!(comanda), json!(cuando), json!("Efectivo"), json!(500), json!("total")]
+        };
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 5,
+            total_filas: 4,
+            tablas: vec![
+                BootstrapTabla {
+                    nombre: "Comandas".into(),
+                    columnas: ["ID_Comanda", "Canal", "Fecha_Hora_Apertura", "Estado"].map(String::from).to_vec(),
+                    filas: vec![
+                        vec![json!("c1"), json!("BARRA"), json!("2026-03-02 12:00:00"), json!("Pagada")],
+                        vec![json!("c2"), json!("BARRA"), json!("2026-03-05 12:00:00"), json!("Pagada")],
+                    ],
+                    parcial: false,
+                },
+                BootstrapTabla {
+                    nombre: "Pagos".into(),
+                    columnas: ["ID_Pago", "ID_Comanda", "Fecha_Hora", "Metodo_Pago", "Importe_Total", "Tipo"]
+                        .map(String::from)
+                        .to_vec(),
+                    filas: vec![fila("p1", "c1", "2026-03-02 13:00:00"), fila("p2", "c2", "2026-03-05 13:00:00")],
+                    parcial: false,
+                },
+            ],
+            backfill: vec![],
+        }, "negocio-de-prueba")
+        .await
+        .unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT (SELECT COUNT(*) FROM _Estad_Mesa_Dia) + (SELECT COUNT(*) FROM _Estad_Producto_Dia), \
+                        (SELECT group_concat(Dia, ',') FROM (SELECT Dia FROM _Estad_Dias_Sucios ORDER BY Dia));",
+                (),
+            )
+            .await
+            .unwrap();
+        let f = rows.next().await.unwrap().unwrap();
+        assert_eq!(f.get_value(0).unwrap(), Value::Integer(0), "lo resumido de antes no se queda");
+        assert_eq!(f.get_value(1).unwrap(), Value::Text("2026-03-02,2026-03-05".into()));
     }
 
     /// El checkpoint queda EXACTAMENTE en el `seq` de la foto: es lo que hace que el catch-up

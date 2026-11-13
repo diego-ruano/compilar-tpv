@@ -210,6 +210,14 @@ fn opt_str(v: &Json) -> Option<String> {
     v.as_str().map(|s| s.to_string())
 }
 
+/// El rango de una estadística (`entrada.range`); sin él, hoy.
+fn rango(e: &Json) -> StatsRange {
+    match e.get("range") {
+        Some(r) if !r.is_null() => serde_json::from_value(r.clone()).expect("rango de estadística"),
+        _ => StatsRange::Hoy,
+    }
+}
+
 /// `entrada` → filtro de los listados de caja (rango + búsqueda + paginación por clave). El
 /// cursor se lee como lo mandaría el cliente (`cursor_fecha` + `cursor_id`), por el mismo
 /// `CuentasRangoArgs::cursor` que usa el comando.
@@ -324,7 +332,9 @@ lecturas_de_contrato! {
     reservas__buscar_cliente_por_telefono,
     stats__categorias,
     stats__mesas,
+    stats__mesas_semana,
     stats__productos,
+    stats__productos_semana,
     stats__productos_vendidos,
     stats__productos_vendidos_por_categoria,
     stats__productos_nombre_que_es_un_id,
@@ -718,13 +728,13 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
         }
         "stats.mesas" => {
             let repo = SqliteStatsRepository::new(db.clone());
-            serde_json::to_value(repo.mesas(StatsRange::Hoy).await.expect("stats mesas")).unwrap()
+            serde_json::to_value(repo.mesas(rango(e)).await.expect("stats mesas")).unwrap()
         }
         "stats.productos" => {
             let repo = SqliteStatsRepository::new(db.clone());
             let r = repo
                 .productos(ProductosStatsArgs {
-                    range: StatsRange::Hoy,
+                    range: rango(e),
                     categoria_top_id: opt_str(&e["categoria_top_id"]),
                     categoria_worst_id: opt_str(&e["categoria_worst_id"]),
                 })

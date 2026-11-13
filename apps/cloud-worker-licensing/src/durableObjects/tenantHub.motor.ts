@@ -336,12 +336,13 @@ export class MotorTenantHub {
 
 	/**
 	 * Lo único que el Worker escribe en la base sin pasar por el motor: el estado propio de la nube
-	 * (el freno del PIN, el checkpoint de la purga), que no se replica. Es para la ruta que corre en
-	 * el Worker; dentro del DO lo escribe con el cliente de al lado. Qué tablas son, y que la
-	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
+	 * (el freno del PIN, el checkpoint de la purga, el resumen diario de las estadísticas), que no
+	 * se replica. Es para la ruta que corre en el Worker; dentro del DO lo escribe con el cliente de
+	 * al lado. Una sentencia, o un lote que entra todo o nada. Qué tablas son, y que cada sentencia
+	 * sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
 	 */
-	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
+	async anotarEstado(tenantId: string, sentencia: Sentencia | Sentencia[]): Promise<RespuestaDeConsulta> {
+		return this.conLaBase(tenantId, (storage) => anotarEnBruto(storage, sentencia));
 	}
 
 	/**

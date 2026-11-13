@@ -1,0 +1,56 @@
+{
+  "mejor_producto": "Cerveza",
+  "peor_producto_vendible": "Gazpacho",
+  "top10_mejores": {
+    "labels": [
+      "Cerveza",
+      "Croquetas",
+      "Tortilla",
+      "Menú antiguo",
+      "Café",
+      "Paella",
+      "Vino",
+      "Flan",
+      "Agua",
+      "Zumo"
+    ],
+    "values": [
+      6,
+      5,
+      5,
+      3,
+      3,
+      3,
+      3,
+      2,
+      1,
+      1
+    ]
+  },
+  "top10_peores": {
+    "labels": [
+      "Gazpacho",
+      "Agua",
+      "Zumo",
+      "Flan",
+      "Café",
+      "Paella",
+      "Vino",
+      "Cerveza",
+      "Croquetas",
+      "Tortilla"
+    ],
+    "values": [
+      0,
+      1,
+      1,
+      2,
+      3,
+      3,
+      3,
+      5,
+      5,
+      5
+    ]
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "descripcion": "El resumen de mesas de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer el recuento: una comanda cobrada en dos dias (cuenta una vez en el rango), dos cobros de una comanda el mismo dia, una devolucion de parte de un cobro otro dia (resta y no es un cobro), un cobro anulado y otro anulado y vuelto a cobrar, una mesa archivada (sigue contando), la venta rapida (sin mesa, no cuenta), un cobro de hace ocho dias (fuera de la semana), un cobro de hoy, y empates: dos mesas con las mismas comandas (gana la de numero menor) y dos con los mismos ingresos (va antes la de numero menor). Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. `servicios` se omite: sus etiquetas son los dias del mes. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
+  "lectura": "stats.mesas",
+  "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-enc', '00000000-0000-7000-8000-000000000002', 'enc@bar.com', 'h', 'Eva');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-sala', 'Salon');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-terraza', 'Terraza');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('m1', 'z-sala', '1', 4, 0, 0, 'rect', 120, 70, NULL);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('m2', 'z-sala', '2', 4, 0, 0, 'rect', 120, 70, NULL);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('m3', 'z-terraza', '3', 4, 0, 0, 'rect', 120, 70, NULL);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('m4', 'z-terraza', '4', 4, 0, 0, 'rect', 120, 70, '2026-01-01 00:00:00');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('m5', 'z-sala', '5', 4, 0, 0, 'rect', 120, 70, NULL);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c2', 'MESA', 'm1', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c3', 'MESA', 'm2', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c4', 'MESA', 'm2', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c5', 'MESA', 'm3', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c6', 'MESA', 'm3', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c7', 'MESA', 'm4', datetime('now','localtime','start of day','-4 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('c8', 'BARRA', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c9', 'MESA', 'm1', datetime('now','localtime','start of day','-8 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c10', 'MESA', 'm2', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c11', 'MESA', 'm1', datetime('now','localtime','start of day','-5 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c12', 'MESA', 'm2', datetime('now','localtime','start of day','-6 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c1', 'c1', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Efectivo', 2000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c2a', 'c2', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Efectivo', 1000, 'parcial');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c2b', 'c2', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Efectivo', 1500, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c3', 'c3', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Tarjeta', 3500, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('p-c3-dev', 'c3', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', -500, 'DEVOLUCION', 'p-c3', 'Plato frio');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Baja) VALUES ('p-c4-anulado', 'c4', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 1000, 'total', 'ANULADO', datetime('now','localtime','start of day','-1 days','+12 hours'), 'u-enc', 'ERROR');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c4', 'c4', datetime('now','localtime','start of day','-1 days','+13 hours'), 'Efectivo', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c5', 'c5', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 3100, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c6', 'c6', datetime('now','localtime','start of day'), 'Efectivo', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c7', 'c7', datetime('now','localtime','start of day','-4 days','+12 hours'), 'Efectivo', 700, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c8', 'c8', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 999, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c9', 'c9', datetime('now','localtime','start of day','-8 days','+12 hours'), 'Efectivo', 5000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Baja) VALUES ('p-c10', 'c10', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Efectivo', 800, 'total', 'ANULADO', datetime('now','localtime','start of day','-2 days','+12 hours'), 'u-enc', 'ERROR');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c11a', 'c11', datetime('now','localtime','start of day','-5 days','+12 hours'), 'Efectivo', 600, 'parcial');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c11b', 'c11', datetime('now','localtime','start of day','-5 days','+13 hours'), 'Efectivo', 400, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c12', 'c12', datetime('now','localtime','start of day','-6 days','+12 hours'), 'Efectivo', 100, 'total');"
+  ],
+  "entrada": {
+    "range": "semana"
+  },
+  "omitir": [
+    "servicios"
+  ],
+  "cambios": [
+    [
+      "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c13', 'MESA', 'm3', datetime('now','localtime','start of month'), 'Pagada');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c13', 'c13', datetime('now','localtime','start of month','+5 hours'), 'Efectivo', 1300, 'total');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c14', 'MESA', 'm1', datetime('now','localtime','start of year'), 'Pagada');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c14', 'c14', datetime('now','localtime','start of year','+5 hours'), 'Efectivo', 1400, 'total');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c15', 'MESA', 'm2', datetime('now','localtime','start of day','-75 days','+12 hours'), 'Pagada');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c15a', 'c15', datetime('now','localtime','start of day','-75 days','+12 hours'), 'Efectivo', 1500, 'parcial');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c15b', 'c15', datetime('now','localtime','start of day','-40 days','+12 hours'), 'Efectivo', 500, 'total');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c16', 'MESA', 'm5', datetime('now','localtime','start of day','-200 days','+12 hours'), 'Pagada');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c16', 'c16', datetime('now','localtime','start of day','-200 days','+12 hours'), 'Efectivo', 1600, 'total');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c17', 'MESA', 'm1', datetime('now','localtime','start of day','-400 days','+12 hours'), 'Pagada');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c17a', 'c17', datetime('now','localtime','start of day','-400 days','+12 hours'), 'Efectivo', 1700, 'parcial');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c17b', 'c17', datetime('now','localtime','start of day','-20 days','+12 hours'), 'Efectivo', 300, 'total');"
+    ],
+    [
+      "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = datetime('now','localtime'), Anulado_Por = 'u-enc', Motivo_Baja = 'ERROR' WHERE ID_Pago = 'p-c1';"
+    ],
+    [
+      "UPDATE Pagos SET Fecha_Hora = datetime('now','localtime','start of day','-4 days','+12 hours') WHERE ID_Pago = 'p-c5';"
+    ],
+    [
+      "UPDATE Comandas SET ID_Mesa = 'm5' WHERE ID_Comanda = 'c2';"
+    ],
+    [
+      "DELETE FROM Comandas WHERE ID_Comanda = 'c12';"
+    ],
+    [
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c2c', 'c2', datetime('now','localtime','start of day'), 'Efectivo', 250, 'parcial');"
+    ],
+    [
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('p-c5-dev', 'c5', datetime('now','localtime','start of day'), 'Efectivo', -300, 'DEVOLUCION', 'p-c5', 'Plato frio');"
+    ],
+    [
+      "UPDATE Pagos SET Importe_Total = 1234 WHERE ID_Pago = 'p-c7';"
+    ],
+    [
+      "UPDATE Zonas SET Nombre_Zona = 'Jardin' WHERE ID_Zona = 'z-terraza';",
+      "UPDATE Mesas SET Numero_Mesa = '9' WHERE ID_Mesa = 'm2';"
+    ],
+    [
+      "UPDATE Pagos SET Fecha_Hora = datetime('now','localtime','start of day','-2 days','+12 hours') WHERE ID_Pago = 'p-c9';"
+    ],
+    [
+      "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = datetime('now','localtime'), Anulado_Por = 'u-enc', Motivo_Baja = 'ERROR' WHERE ID_Pago = 'p-c3-dev';"
+    ]
+  ]
+}

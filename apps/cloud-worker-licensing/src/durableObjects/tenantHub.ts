@@ -36,8 +36,11 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.consultar(tenantId, sentencias, enLote);
 	}
 
-	/** El estado propio de la nube (el freno del PIN, el checkpoint de la purga), para la ruta que corre en el Worker. */
-	anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
+	/**
+	 * El estado propio de la nube (el freno del PIN, el checkpoint de la purga, el resumen diario de
+	 * las estadísticas), para la ruta que corre en el Worker: una sentencia, o un lote todo o nada.
+	 */
+	anotarEstado(tenantId: string, sentencia: Sentencia | Sentencia[]): Promise<RespuestaDeConsulta> {
 		return this.motor.anotarEstado(tenantId, sentencia);
 	}
 

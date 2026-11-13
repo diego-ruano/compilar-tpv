@@ -249,12 +249,19 @@ export function leerEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 
 /**
  * Las tablas del esquema que son estado de la nube y de nadie más: el freno del PIN de las Handy
- * (`Intentos_Login`, LOGIN-01) y el checkpoint de cada Main, que es el suelo de la purga del log
- * (`Sync_Main_Checkpoints`, SYNC-12). No se replican, así que lo que una ruta escribe en ellas no
- * pasa por el motor. Dentro del DO las escribe con el cliente de al lado; cuando la ruta corre en el
- * Worker, por `anotarEstado`.
+ * (`Intentos_Login`, LOGIN-01), el checkpoint de cada Main, que es el suelo de la purga del log
+ * (`Sync_Main_Checkpoints`, SYNC-12), y el resumen diario de las estadísticas (`_Estad_*`, una caché
+ * que se rehace desde los cobros: `domains/stats/resumenDiario.ts`). No se replican, así que lo que
+ * una ruta escribe en ellas no pasa por el motor. Dentro del DO las escribe con el cliente de al
+ * lado; cuando la ruta corre en el Worker, por `anotarEstado`.
  */
-const TABLAS_DE_ESTADO: ReadonlySet<string> = new Set(["intentos_login", "sync_main_checkpoints"]);
+const TABLAS_DE_ESTADO: ReadonlySet<string> = new Set([
+	"intentos_login",
+	"sync_main_checkpoints",
+	"_estad_producto_dia",
+	"_estad_mesa_dia",
+	"_estad_dias_sucios",
+]);
 
 /** Un alta, un cambio o un borrado que dice a las claras en qué tabla: nada de `WITH` ni de `OR REPLACE`. */
 const ESCRITURA_EN_TABLA = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i;
@@ -269,10 +276,17 @@ export function esEscrituraDeEstado(s: Sentencia): boolean {
 	return !texto.trimEnd().replace(/;$/, "").includes(";");
 }
 
-/** Una escritura de estado de la nube (`esEscrituraDeEstado`); cualquier otra cosa se rechaza. */
-export function anotarEnBruto(storage: DurableObjectStorage, s: Sentencia): FilasEnBruto {
-	if (!esEscrituraDeEstado(s)) throw new HubError("estado_local_no_admitido", 500);
-	return storage.transactionSync(() => ejecutarEnBruto(storage.sql, s));
+/**
+ * Una escritura de estado de la nube (`esEscrituraDeEstado`), o un lote de ellas, todo o nada (el
+ * resumen de un día de las estadísticas se rehace borrando sus filas y volviéndolas a insertar).
+ * Si alguna sentencia no lo es, no se ejecuta ninguna.
+ */
+export function anotarEnBruto(storage: DurableObjectStorage, s: Sentencia | Sentencia[]): FilasEnBruto[] {
+	const sentencias = Array.isArray(s) ? s : [s];
+	if (sentencias.length === 0 || !sentencias.every(esEscrituraDeEstado)) {
+		throw new HubError("estado_local_no_admitido", 500);
+	}
+	return storage.transactionSync(() => sentencias.map((una) => ejecutarEnBruto(storage.sql, una)));
 }
 
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */

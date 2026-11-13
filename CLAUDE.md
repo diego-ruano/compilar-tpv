@@ -170,7 +170,9 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   fecha; la clave sólo desempata.
 - **La hora la pone quien escribe** ([0004](docs/decisiones/0004-la-hora-la-pone-quien-escribe.md)): ningún
   `DEFAULT` de hora en el esquema; en la Handy, `X-Client-Now` fija «ahora» en escrituras **y lecturas**.
-- **Los agregados (`Total_Comanda`…) se re-derivan en el SQL**, nunca se escriben como literal.
+- **Los agregados (`Total_Comanda`…) se re-derivan en el SQL**, nunca se escriben como literal. El
+  resumen diario de las estadísticas (`_Estad_*`) no es uno de ellos: es una caché local de cada lado,
+  que no se replica y cuyos triggers sólo apuntan días ([esquema.md](docs/arquitectura/esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)).
 - **Una divergencia se repara por estado** con `ON CONFLICT(pk) DO UPDATE`. ⚠️ **Nunca `INSERT OR
   REPLACE`**: borra y reinserta, y dispara las cascadas.
 - **En el `TenantHub` no hay estado en campos de instancia** (se pierde al hibernar) **ni variables de
@@ -305,6 +307,8 @@ lo que hay que revisar es el cambio, no el test:
   `fs` de la webview, ningún interruptor en el cobro).
 - `migrations.rs::todas_las_columnas_de_dinero_llevan_su_check`, `db.rs::ninguna_columna_del_esquema_elige_su_hora`
   y el snapshot del esquema.
+- `estadisticas_diarias.rs::los_triggers_solo_apuntan_dias`: los triggers del resumen diario de las
+  estadísticas no calculan ni pueden hacer fallar el cobro que los dispara.
 - `error.rs::tests_mensajes_en_espanol` (tpv-application): ningún mensaje del dominio ni de los casos de
   uso es un nombre de campo o está en inglés.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,

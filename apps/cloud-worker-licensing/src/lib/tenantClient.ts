@@ -8,8 +8,9 @@
 //
 // - `consultar` sólo lee: una escritura del negocio va por el motor del DO (`lib/hub.ts`), que es
 //   quien la apunta y la difunde. Lo único que una ruta escribe por aquí es el estado propio de la
-//   nube (el freno del PIN, el checkpoint de la purga), que no se replica: dentro del DO, con el
-//   cliente de al lado; desde el Worker, por su propia puerta (`anotarEstado`).
+//   nube (el freno del PIN, el checkpoint de la purga, el resumen diario de las estadísticas), que
+//   no se replica: dentro del DO, con el cliente de al lado; desde el Worker, por su propia puerta
+//   (`anotarEstado`), una sentencia suelta o un lote en el que todas lo son.
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
 // ── REV-03: «hoy» es el de quien pregunta, no el de la base ──────────────────────────────────────
@@ -63,9 +64,15 @@ export function clienteDelHub(env: Env, tenantId: string): Client {
 			return enLote ? db.batch(sentencias as any) : [await db.execute(sentencias[0] as any)];
 		}
 		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
+		// Estado propio de la nube: una sentencia suelta, o un lote en el que todas lo son (entra todo
+		// o nada). Un lote que mezcle una lectura o una escritura del negocio va por `consultar`, que
+		// lo rechaza.
+		const esEstado = sentencias.length > 0 && sentencias.every((s) => esEscrituraDeEstado(s));
 		const r = (
-			!enLote && esEscrituraDeEstado(sentencias[0])
-				? await medirTramo("hub-anota", () => stub.anotarEstado(tenantId, sentencias[0] as any))
+			esEstado
+				? await medirTramo("hub-anota", () =>
+						stub.anotarEstado(tenantId, (enLote ? sentencias : sentencias[0]) as any),
+					)
 				: await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))
 		) as unknown as RespuestaDeConsulta;
 		if (!r.ok) throw new HubError(r.code, r.status, r.details);

@@ -96,6 +96,19 @@ const CIFRADO_PII_INTERVAL_SECS: u64 = 6 * 60 * 60;
 /// golpe, y el chequeo recorre lotes y clientes enteros.
 const RECONCILIACION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
+/// Cada cuánto se rehacen los días sucios del resumen diario de las estadísticas
+/// (`tpv_infra_sqlite::estadisticas_diarias`). Quien abre la pantalla de estadísticas los rehace
+/// igual antes de leer; esto lo adelanta para que no le toque esperar. Sin nada sucio antes de hoy,
+/// que es lo normal salvo a primera hora, es una lectura.
+const RESUMEN_ESTADISTICAS_INTERVAL_SECS: u64 = 10 * 60;
+
+/// Cuánto tiempo sin escribir nada hace falta para rehacerlos: el resumen de un día toma el escritor
+/// unos milisegundos, y en hora punta no se le quitan a nadie.
+const RESUMEN_ESTADISTICAS_CALMA_MS: i64 = 2 * 60 * 1000;
+
+/// Lo que puede durar una pasada. Lo que no quepa queda apuntado para la siguiente.
+const RESUMEN_ESTADISTICAS_PRESUPUESTO: Duration = Duration::from_secs(3);
+
 /// Cada cuánto se poda `_Sync_Applied_Ops`. Los registros solo son purgables tras un TTL de 72 h,
 /// así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
@@ -279,6 +292,17 @@ pub(crate) fn catalogo() -> Vec<Job> {
             ejecutar: tarea(reconciliacion),
         },
         Job {
+            // El resumen diario de las estadísticas: rehace en un momento tranquilo los días que
+            // han cambiado. Hoy no lo toca (se lee de los cobros). Sin interruptor: no está en el
+            // camino del cobro, y apagarlo sólo haría que los rehiciera la pantalla al abrirse.
+            nombre: "resumen_estadisticas",
+            cada: Duration::from_secs(RESUMEN_ESTADISTICAS_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(4 * 60),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(resumen_estadisticas),
+        },
+        Job {
             nombre: "backup_local",
             cada: Duration::from_secs(BACKUP_LOCAL_INTERVAL_SECS),
             // La primera copia se hace pronto, pero fuera del camino crítico del arranque.
@@ -379,9 +403,27 @@ async fn licencia_reloj(app: AppHandle) -> Result<(), String> {
 /// se queda viejo. Esto los recalcula desde su origen y **avisa**; no corrige nada por su cuenta,
 /// ni siquiera el gasto (que sí sería derivable): quien decide qué hacer es quien lleva el negocio.
 ///
+/// Antes, el vigía del resumen diario de las estadísticas (`estadisticas_diarias::contrastar`):
+/// compara unos cuantos días ya resumidos con lo que sale de los cobros. Ése sí se corrige solo,
+/// porque es una caché, pero un día que no cuadra quiere decir que a algún cambio le falta su
+/// trigger, y eso es un fallo del programa: va a Sentry.
+///
 /// Idempotente: recalcular dos veces da lo mismo, y los avisos llevan `clave_dedupe`.
 async fn reconciliacion(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+
+    // El resumen diario no depende del histórico: lo que esté a medias de bajar está apuntado como
+    // sucio, y el vigía no lo mira.
+    let db = state.db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let contraste = tpv_infra_sqlite::estadisticas_diarias::contrastar(&db).await?;
+    if !contraste.descuadrados.is_empty() {
+        tracing::error!(
+            target: "tpv::jobs",
+            dias_mirados = contraste.dias_mirados,
+            descuadrados = ?contraste.descuadrados,
+            "estadísticas: el resumen diario no cuadraba con los cobros (rehecho); a algún cambio le falta su trigger"
+        );
+    }
 
     // SYNC-19: con el histórico a medias, esto no informa: MIENTE. Los dos valores "guardados"
     // (`Stock_Disponible`, `Total_Gastado`) son columnas de tablas MAESTRAS, que la fase 1 restaura
@@ -416,6 +458,30 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
             clientes_descuadrados = r.clientes_descuadrados,
             lotes_descuadrados = r.lotes_descuadrados,
             "reconciliación: valores derivados fuera de cuadre"
+        );
+    }
+    Ok(())
+}
+
+/// El resumen diario de las estadísticas (`tpv_infra_sqlite::estadisticas_diarias`): rehace los
+/// días sucios anteriores a hoy, del más reciente al más antiguo, si hace un rato que no se escribe
+/// nada y hasta agotar el presupuesto. Lo que quede, en la siguiente pasada o al abrir la pantalla.
+async fn resumen_estadisticas(app: AppHandle) -> Result<(), String> {
+    use tpv_infra_sqlite::estadisticas_diarias as resumen;
+
+    let db = app.state::<AppState>().db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let ahora_ms = tpv_infra_sqlite::util::now_ms();
+    if resumen::hay_escrituras_recientes(&db, ahora_ms, RESUMEN_ESTADISTICAS_CALMA_MS).await? {
+        tracing::debug!(target: "tpv::jobs", "resumen de estadísticas: no es un momento tranquilo");
+        return Ok(());
+    }
+    let pasada = resumen::recalcular_pendientes(&db, RESUMEN_ESTADISTICAS_PRESUPUESTO).await?;
+    if pasada.recalculados > 0 {
+        tracing::info!(
+            target: "tpv::jobs",
+            recalculados = pasada.recalculados,
+            quedan = pasada.quedan,
+            "resumen de estadísticas: días rehechos"
         );
     }
     Ok(())

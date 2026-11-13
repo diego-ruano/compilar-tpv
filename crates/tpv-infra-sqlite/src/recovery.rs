@@ -1142,6 +1142,15 @@ async fn ajustar_registro_de_fallos(db: &Db) -> AppResult<()> {
     .await
 }
 
+/// Vacía el resumen diario de las estadísticas de la copia que se va a instalar y deja por calcular
+/// todos sus días con cobros (`estadisticas_diarias::reiniciar`).
+async fn reiniciar_resumen_de_estadisticas(db: &Db) -> AppResult<()> {
+    use crate::db::Writer;
+    let w = db.write().await;
+    let conn: &Connection = w.raw();
+    conn.transaccion(crate::estadisticas_diarias::reiniciar(conn)).await
+}
+
 /// Guardia de toda restauración: reemplazar el fichero se lleva por delante el outbox actual.
 ///
 /// El camino real (una BD recién perdida) tiene el outbox vacío y no lo nota. Lo que para es el
@@ -1361,6 +1370,9 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
             .map_err(|e| corrupta(format!("No se puede preparar la copia: {e}")))?;
         mark_reconciliation_pending(&db).await?;
         ajustar_registro_de_fallos(&db).await?;
+        // El resumen diario de las estadísticas que trae la copia se rehace entero: es una caché,
+        // y así no depende de con qué versión se hizo la copia.
+        reiniciar_resumen_de_estadisticas(&db).await?;
         {
             let w = db.write().await;
             let _ = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await;
@@ -1596,6 +1608,40 @@ mod tests {
     async fn cuenta(db: &Db, sql: &str) -> i64 {
         let r = db.read().await;
         scalar_i64(r.conn(), sql).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn preparar_una_copia_deja_por_rehacer_el_resumen_de_las_estadisticas() {
+        // El resumen diario es una caché: el que trae la copia no se usa, venga de la versión que
+        // venga. Se vacía y quedan apuntados todos los días con cobros de la copia.
+        let dir = test_dir("resumen-estadisticas");
+        let db = db_operativa(&dir).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'BARRA', '2026-03-02 12:00:00', 'Pagada');
+                     INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', '2026-03-02 13:00:00', 'Efectivo', 500, 'total');
+                     DELETE FROM _Estad_Dias_Sucios;
+                     INSERT INTO _Estad_Producto_Dia VALUES ('2025-01-01', 'p-viejo', 'Viejo', 9);",
+                )
+                .await
+                .unwrap();
+        }
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
+
+        let restored = Db::open(prepared.to_str().unwrap()).await.unwrap();
+        assert_eq!(cuenta(&restored, "SELECT COUNT(*) FROM _Estad_Producto_Dia;").await, 0);
+        assert_eq!(
+            cuenta(&restored, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia = '2026-03-02';").await,
+            1
+        );
+        assert_eq!(cuenta(&restored, "SELECT COUNT(*) FROM _Estad_Dias_Sucios;").await, 1);
+
+        drop(restored);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Una base con el checkpoint en 10 y tres fallos de bajada: una cuarentena por debajo (7), un

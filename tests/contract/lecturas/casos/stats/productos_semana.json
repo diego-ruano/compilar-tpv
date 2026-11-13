@@ -1,0 +1,159 @@
+{
+  "descripcion": "Lo mas y lo menos vendido de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer la cuenta: una linea cobrada en dos dias (cuenta una vez), otra cobrada fuera de la semana y otra vez dentro (cuenta), otra cobrada dentro y otra vez hoy (cuenta una vez), una linea en dos cobros del mismo dia, un cobro anulado y una linea anulada y vuelta a cobrar, cantidades con decimales repartidas en varios dias (0,5 + 0,25 + 0,25 = 1; 2 + 1,5 + 1 = 4,5, que redondea a 5), una linea a 0, un producto archivado, una categoria no vendible, lineas sin producto (salen con su nombre), una linea sin producto cuyo nombre es el ID de un producto (comparte clave con el sin ser suya), un producto sin ventas (el peor) y empates que desempata el nombre del catalogo. Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
+  "lectura": "stats.productos",
+  "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-enc', '00000000-0000-7000-8000-000000000002', 'enc@bar.com', 'h', 'Eva');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-platos', 'Platos', 1);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-bebidas', 'Bebidas', 1);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-materia', 'Materia prima', 0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-tortilla', 'cat-platos', 'Tortilla', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-croquetas', 'cat-platos', 'Croquetas', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-paella', 'cat-platos', 'Paella', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-gazpacho', 'cat-platos', 'Gazpacho', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-flan', 'cat-platos', 'Flan', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-cerveza', 'cat-bebidas', 'Cerveza', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-agua', 'cat-bebidas', 'Agua', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-vino', 'cat-bebidas', 'Vino', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-zumo', 'cat-bebidas', 'Zumo', 100, NULL);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-cafe', 'cat-bebidas', 'Café', 100, '2026-01-01 00:00:00');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('p-harina', 'cat-materia', 'Harina', 100, NULL);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'BARRA', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'com-1', 'p-tortilla', 'Tortilla', 2, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'com-1', 'p-cerveza', 'Cerveza', 3, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-1', 'p-agua', 'Agua', 0.5, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Efectivo', 550, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-1');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-3');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-2', 'BARRA', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-4', 'com-2', 'p-tortilla', 'Tortilla', 1.5, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-5', 'com-2', 'p-vino', 'Vino', 2, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2a', 'com-2', datetime('now','localtime','start of day','-3 days','+12 hours'), 'Efectivo', 250, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2a', 'det-4');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2a', 'det-5');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2b', 'com-2', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 100, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2b', 'det-4');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-3', 'BARRA', datetime('now','localtime','start of day','-8 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-6', 'com-3', 'p-croquetas', 'Croquetas', 4, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-7', 'com-3', 'p-paella', 'Paella', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3a', 'com-3', datetime('now','localtime','start of day','-8 days','+12 hours'), 'Efectivo', 300, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-3a', 'det-6');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-3a', 'det-7');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3b', 'com-3', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Efectivo', 200, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-3b', 'det-6');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-4', 'BARRA', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-8', 'com-4', 'p-cerveza', 'Cerveza', 2, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-9', 'com-4', 'p-zumo', 'Zumo', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4a', 'com-4', datetime('now','localtime','start of day','-2 days','+12 hours'), 'Efectivo', 200, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-4a', 'det-8');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-4a', 'det-9');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4b', 'com-4', datetime('now','localtime','start of day'), 'Efectivo', 100, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-4b', 'det-8');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-5', 'BARRA', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-10', 'com-5', 'p-agua', 'Agua', 0.25, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-11', 'com-5', 'p-agua', 'Agua', 0.25, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-12', 'com-5', 'p-harina', 'Harina', 7, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-13', 'com-5', NULL, 'Menú antiguo', 2, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-14', 'com-5', NULL, 'p-cerveza', 1, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-15', 'com-5', 'p-cafe', 'Café', 3, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-5', 'com-5', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 1350, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-10');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-11');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-12');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-13');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-14');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-5', 'det-15');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-6', 'BARRA', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-16', 'com-6', 'p-flan', 'Flan', 2, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-17', 'com-6', 'p-vino', 'Vino', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Baja) VALUES ('pago-6', 'com-6', datetime('now','localtime','start of day','-1 days','+12 hours'), 'Efectivo', 300, 'total', 'ANULADO', datetime('now','localtime','start of day','-1 days','+12 hours'), 'u-enc', 'ERROR');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-6', 'det-16');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-6', 'det-17');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-6b', 'com-6', datetime('now','localtime','start of day','-1 days','+13 hours'), 'Efectivo', 200, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-6b', 'det-16');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-7', 'BARRA', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-18', 'com-7', 'p-tortilla', 'Tortilla', 1, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-19', 'com-7', NULL, 'Menú antiguo', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-7', 'com-7', datetime('now','localtime','start of day'), 'Efectivo', 200, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-7', 'det-18');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-7', 'det-19');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-8', 'BARRA', datetime('now','localtime','start of day','-5 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-20', 'com-8', 'p-paella', 'Paella', 2.5, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-21', 'com-8', 'p-zumo', 'Zumo', 0, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-22', 'com-8', 'p-croquetas', 'Croquetas', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-8', 'com-8', datetime('now','localtime','start of day','-5 days','+12 hours'), 'Efectivo', 350, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-8', 'det-20');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-8', 'det-21');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-8', 'det-22');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-9', 'BARRA', datetime('now','localtime','start of day','-4 days','+12 hours'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-23', 'com-9', 'p-vino', 'Vino', 1, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-9a', 'com-9', datetime('now','localtime','start of day','-4 days','+12 hours'), 'Efectivo', 50, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-9a', 'det-23');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-9b', 'com-9', datetime('now','localtime','start of day','-4 days','+13 hours'), 'Efectivo', 50, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-9b', 'det-23');"
+  ],
+  "entrada": {
+    "range": "semana",
+    "categoria_top_id": null,
+    "categoria_worst_id": null
+  },
+  "cambios": [
+    [
+      "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-10', 'BARRA', datetime('now','localtime','start of month'), 'Pagada');",
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-24', 'com-10', 'p-gazpacho', 'Gazpacho', 3, 100);",
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-25', 'com-10', 'p-agua', 'Agua', 0.1, 100);",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-10', 'com-10', datetime('now','localtime','start of month','+5 hours'), 'Efectivo', 310, 'total');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-10', 'det-24');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-10', 'det-25');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-11', 'BARRA', datetime('now','localtime','start of year'), 'Pagada');",
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-26', 'com-11', 'p-zumo', 'Zumo', 9, 100);",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-11', 'com-11', datetime('now','localtime','start of year','+5 hours'), 'Efectivo', 900, 'total');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-11', 'det-26');",
+      "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-12', 'BARRA', datetime('now','localtime','start of day','-400 days','+12 hours'), 'Pagada');",
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-27', 'com-12', 'p-vino', 'Vino', 50, 100);",
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-28', 'com-12', 'p-agua', 'Agua', 0.2, 100);",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-12a', 'com-12', datetime('now','localtime','start of day','-400 days','+12 hours'), 'Efectivo', 5000, 'parcial');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-12a', 'det-27');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-12a', 'det-28');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-12b', 'com-12', datetime('now','localtime','start of day','-45 days','+12 hours'), 'Efectivo', 20, 'parcial');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-12b', 'det-28');"
+    ],
+    [
+      "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = datetime('now','localtime'), Anulado_Por = 'u-enc', Motivo_Baja = 'ERROR' WHERE ID_Pago = 'pago-1';"
+    ],
+    [
+      "UPDATE Pagos SET Fecha_Hora = datetime('now','localtime','start of day','-7 days','+12 hours') WHERE ID_Pago = 'pago-5';"
+    ],
+    [
+      "UPDATE Detalle_Comanda SET Cantidad = 4 WHERE ID_Detalle = 'det-20';"
+    ],
+    [
+      "DELETE FROM Productos WHERE ID_Producto = 'p-flan';"
+    ],
+    [
+      "UPDATE Detalle_Comanda SET ID_Producto = 'p-paella', Nombre_Producto = 'Paella' WHERE ID_Detalle = 'det-22';"
+    ],
+    [
+      "DELETE FROM Detalle_Comanda WHERE ID_Detalle = 'det-9';"
+    ],
+    [
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-13', 'com-2', datetime('now','localtime','start of day'), 'Efectivo', 100, 'parcial');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-13', 'det-5');"
+    ],
+    [
+      "DELETE FROM Detalle_Comanda WHERE ID_Comanda = 'com-9';",
+      "DELETE FROM Comandas WHERE ID_Comanda = 'com-9';"
+    ],
+    [
+      "UPDATE Categorias_Producto SET Vendible = 0 WHERE ID_Categoria = 'cat-bebidas';",
+      "UPDATE Productos SET Nombre = 'Tortilla de patatas' WHERE ID_Producto = 'p-tortilla';"
+    ],
+    [
+      "DELETE FROM Pago_Detalles WHERE ID_Pago = 'pago-3b' AND ID_Detalle = 'det-6';"
+    ],
+    [
+      "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-29', 'com-7', 'p-vino', 'Vino', 8, 100);",
+      "UPDATE Detalle_Comanda SET Cantidad = 9 WHERE ID_Detalle = 'det-29';"
+    ]
+  ]
+}
