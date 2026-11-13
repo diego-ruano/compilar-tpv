@@ -14,9 +14,10 @@ pub const CANAL_MESA: &str = "MESA";
 pub const CANAL_BARRA: &str = "BARRA";
 
 /// UUID FIJO del administrador inicial. DEBE ser idéntico en la Main (`seed_admin_if_empty`) y en
-/// la nube (`ensureTenantInitialAdmin`): cada lado siembra su admin por separado, así que si el id
-/// difiere acaban siendo usuarios distintos y cualquier fila de la Handy que referencie al admin de
-/// la nube (fichajes, comandas…) revienta con FOREIGN KEY al aplicarse en la Main.
+/// la nube (`sembrarAdminInicial`, en `tenantHub.alta.ts`): cada lado siembra su admin por
+/// separado, así que si el id difiere acaban siendo usuarios distintos y cualquier fila de la Handy
+/// que referencie al admin de la nube (fichajes, comandas…) revienta con FOREIGN KEY al aplicarse
+/// en la Main.
 pub const ADMIN_USUARIO_ID: &str = "00000000-0000-7000-8000-000000000501";
 
 /// Epoch en milisegundos (para columnas `*_At_Ms`).

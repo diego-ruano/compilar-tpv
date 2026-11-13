@@ -534,7 +534,8 @@ impl Equipo {
 async fn equipo_de_a(nombre: &str) -> Equipo {
     let dir = dir_temporal(nombre);
     let db = init_main_db(&dir, None).await.unwrap();
-    // `ensureTenantInitialAdmin` siembra en la nube el mismo administrador que la Main.
+    // El alta de la nube (`sembrarAdminInicial`, en `tenantHub.alta.ts`) siembra el mismo
+    // administrador que la Main.
     let usuarios_de_un_negocio_nuevo = usuarios_como_la_nube(&db).await;
     let mut e = Equipo {
         dir,
