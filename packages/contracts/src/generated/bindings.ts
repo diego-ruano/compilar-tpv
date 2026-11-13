@@ -2078,6 +2078,13 @@ export type PreparacionCierreDto = {
 	 */
 	anulaciones: number,
 	anulaciones_importe: Dinero,
+	/**
+	 *  DO-02 · El histórico de una recuperación que todavía se está descargando, cuando por eso el
+	 *  esperado puede salir corto: en el primer cierre, que suma desde el principio, y la
+	 *  recuperación sólo trajo lo reciente. Con un cierre anterior no pasa: la recuperación trae
+	 *  siempre todo lo que hay desde él. `None` = nada que avisar. **No impide cerrar.**
+	 */
+	historico_pendiente: BackfillEstado | null,
 };
 
 /**  Lo que hace falta para imprimir un arqueo. CUENTA-06. */

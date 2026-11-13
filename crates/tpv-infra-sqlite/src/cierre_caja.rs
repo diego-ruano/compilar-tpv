@@ -1385,3 +1385,81 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod tests_historico_pendiente {
+    //! DO-02 («encoger y avisar»): un negocio que nunca ha cerrado la caja se recupera con lo
+    //! reciente y el resto del histórico baja después. Su primer arqueo suma desde el principio,
+    //! así que mientras baja se avisa de que puede salir corto. Nunca se impide cerrar.
+
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::Db;
+    use crate::ejecutor::Connection;
+    use crate::sync::SqliteSyncRepository;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_application::use_cases::cierre_caja as cierre_uc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("cierre_historico");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sql: &str) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        conn.execute_batch(sql).await.unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+    }
+
+    /// Como lo deja una recuperación: `Pagos` bajado, `Cuentas_Gastos` aún por bajar.
+    const HISTORICO_A_MEDIAS: &str = "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada, Filas_Traidas) VALUES
+        ('Pagos', 1, 1, 1200), ('Cuentas_Gastos', 2, 0, 0);";
+
+    async fn preparar(db: &Arc<Db>) -> tpv_contracts::cierre_caja::PreparacionCierreDto {
+        let historico = SqliteSyncRepository::new(db.clone()).backfill_estado().await.unwrap();
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+        cierre_uc::preparar(&repo, Dinero::CERO, Some(historico)).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn el_primer_cierre_con_el_historico_bajando_avisa_con_el_progreso() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, HISTORICO_A_MEDIAS).await;
+        let prep = preparar(&db).await;
+        assert!(prep.es_primer_cierre);
+        let h = prep.historico_pendiente.expect("el primer arqueo puede salir corto: se avisa");
+        assert_eq!((h.tablas_pendientes, h.tablas_completadas, h.filas_traidas), (1, 1, 1200));
+        assert_eq!(h.tabla_actual.as_deref(), Some("Cuentas_Gastos"));
+    }
+
+    #[tokio::test]
+    async fn con_un_cierre_anterior_no_se_avisa_porque_la_recuperacion_trae_todo_desde_el() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, HISTORICO_A_MEDIAS).await;
+        sembrar(
+            &db,
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+               VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');
+             INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial,
+               Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado)
+               VALUES ('c1', '2026-05-10 23:00:00', 'u1', '2026-05-01 00:00:00', 0, 0, 0, 0, 0, 0, 0, 0);",
+        )
+        .await;
+        let prep = preparar(&db).await;
+        assert!(!prep.es_primer_cierre);
+        assert!(prep.historico_pendiente.is_none());
+    }
+
+    #[tokio::test]
+    async fn sin_nada_por_bajar_o_sin_saberlo_no_se_avisa() {
+        let (db, _dir) = db_temporal().await;
+        assert!(preparar(&db).await.historico_pendiente.is_none(), "un equipo que nunca ha perdido su base");
+        sembrar(&db, HISTORICO_A_MEDIAS).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+        let prep = cierre_uc::preparar(&repo, Dinero::CERO, None).await.unwrap();
+        assert!(prep.historico_pendiente.is_none(), "si no se pudo leer, el arqueo sigue igual");
+    }
+}

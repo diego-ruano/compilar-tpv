@@ -345,14 +345,6 @@ diarias que lleve una semana sin cerrar caja, o a uno normal que lleve meses. Fa
 sirve: que la foto salga en trozos, o que lo anterior al cierre que no quepa baje por la fase 2 y el
 arqueo espere a que termine.
 
-**Sin ningún cierre de caja no hay periodo que proteger**, y la ventana se encoge hasta «ahora». El
-arqueo de un negocio que nunca ha cerrado suma desde el principio (`totales_entre`), así que si hace
-su primer cierre antes de que termine la fase 2, el esperado sale con lo que haya bajado hasta
-entonces. Ya le pasaba a cualquier negocio sin cierres y con más de 30 días de historia; con la
-ventana encogida le pasa también a uno más reciente cuyo mes no quepa. Las alternativas: no encoger
-sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la Main no deje hacer
-el primer cierre mientras falte histórico. Sin decidir.
-
 Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
 **el histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
 (`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que

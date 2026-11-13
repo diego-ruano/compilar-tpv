@@ -7,6 +7,7 @@ use tpv_domain::dinero::Dinero;
 use tpv_contracts::cierre_caja::{
     CierreDto, CierreResumenDto, ConfirmarCierreInput, PreparacionCierreDto,
 };
+use tpv_contracts::sync::BackfillEstado;
 use tpv_domain::cierre_caja::{
     calcular, total_recuento, validar, Denominacion, UMBRAL_DESCUADRE_POR_DEFECTO,
 };
@@ -37,11 +38,18 @@ fn umbral_o_defecto(umbral_descuadre: Dinero) -> Dinero {
 
 /// Lo que la pantalla necesita antes de que nadie cuente nada: desde cuándo está abierto el
 /// periodo, cuánto se espera encontrar y si hay mesas sin cobrar.
+///
+/// `historico` es cómo va la descarga del histórico tras una recuperación (SYNC-19), si se sabe.
+/// DO-02 («encoger y avisar»): un negocio que nunca ha cerrado la caja se recupera con lo
+/// reciente y el resto baja después, así que su primer arqueo, que suma desde el principio, sólo
+/// cuenta lo que haya bajado. No se le impide cerrar: se le avisa, con el progreso.
 pub async fn preparar(
     repo: &dyn CierreCajaRepository,
     umbral_descuadre: Dinero,
+    historico: Option<BackfillEstado>,
 ) -> AppResult<PreparacionCierreDto> {
     let ultimo = repo.ultimo_cierre().await?;
+    let historico_pendiente = historico.filter(|h| ultimo.is_none() && h.tablas_pendientes > 0);
     let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
     let fondo_inicial = ultimo.as_ref().map(|c| c.dejado).unwrap_or(Dinero::CERO);
 
@@ -72,6 +80,7 @@ pub async fn preparar(
         umbral_descuadre: umbral_o_defecto(umbral_descuadre),
         anulaciones,
         anulaciones_importe,
+        historico_pendiente,
     })
 }
 
