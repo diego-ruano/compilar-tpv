@@ -24,9 +24,9 @@ import {
 	TRANSACCIONALES,
 	esTablaDeNegocio,
 	esTransaccional,
-	limiteVentana,
 	sentenciaConteo,
 	sentenciaVolcado,
+	ventanasCandidatas,
 } from "./bootstrap.ventana";
 import {
 	Escritor,
@@ -194,48 +194,124 @@ function leerPuntoDePartida(lector: Lector): Promise<{ tablas: string[]; ultimoC
 	});
 }
 
-/** La suma de una foto de `n` sentencias `COUNT(*)`. */
-function sumarConteos(n: number): (rs: Iterator<Resultado>) => number {
-	return (rs) => {
-		let total = 0;
-		for (let i = 0; i < n; i++) total += Number(primerValor(siguiente(rs)) ?? 0);
-		return total;
-	};
-}
-
 function seqDe(r: Resultado): number {
 	return Number(primerValor(r) ?? 0);
 }
 
-/** El cuerpo de la fase 1, ya en JSON, o `null` con las filas que no cabían. */
+/* ===== La ventana que cabe ===== */
+
+/** Lo que ocupa una tabla en un volcado: lo que lleva siempre y, de media, cada una de sus filas. */
+type Peso = { fijo: number; porFila: number };
+
+/** Cuántas filas de cada tabla se miran para saber lo que ocupa una. */
+const FILAS_DE_MUESTRA = 64;
+
+/**
+ * Pesa cada tabla escribiendo sus últimas filas, que son las que se parecen a las de la ventana.
+ * Es una estimación: lo que decide de verdad si un volcado cabe es el `Escritor`, al escribirlo.
+ */
+function pesarTablas(lector: Lector, tablas: string[]): Promise<Map<string, Peso>> {
+	return lector.foto(
+		tablas.map((t) => ({
+			sql: `SELECT * FROM "${t}" ORDER BY rowid DESC LIMIT ${FILAS_DE_MUESTRA};`,
+			args: [],
+		})),
+		(rs) => {
+			const pesos = new Map<string, Peso>();
+			for (const nombre of tablas) {
+				const { columnas, filas } = siguiente(rs);
+				let n = 0;
+				let bytes = 0;
+				for (const fila of filas) {
+					// La fila y la coma que la separa de la siguiente.
+					bytes += enBytes(JSON.stringify(fila)).byteLength + 1;
+					n++;
+				}
+				const fijo = enBytes(JSON.stringify({ nombre, columnas, parcial: true, filas: [] })).byteLength + 1;
+				pesos.set(nombre, { fijo, porFila: n ? bytes / n : 0 });
+			}
+			return pesos;
+		},
+	);
+}
+
+/** Lo que mide una ventana antes de volcarla: sus filas, contadas, y sus bytes, estimados. */
+type Medida = { filas: number; bytes: number };
+
+/**
+ * Mide ventanas de una misma base: cuenta EXACTAMENTE las filas que entrarían (con las sentencias
+ * del volcado, no la tabla entera) y estima sus bytes con el peso de cada tabla. Las maestras no
+ * dependen de la ventana y se cuentan una vez.
+ */
+function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, Peso>): (desde: string) => Promise<Medida> {
+	const deMaestras = new Map<string, number>();
+	return async (desde) => {
+		const porContar = tablas.filter((t) => esTransaccional(t) || !deMaestras.has(t));
+		const contadas = await lector.foto(
+			porContar.map((t) => sentenciaConteo(t, desde)),
+			(rs) => new Map(porContar.map((t) => [t, Number(primerValor(siguiente(rs)) ?? 0)])),
+		);
+		for (const [t, n] of contadas) if (!esTransaccional(t)) deMaestras.set(t, n);
+
+		const medida: Medida = { filas: 0, bytes: 0 };
+		for (const t of tablas) {
+			const n = contadas.get(t) ?? deMaestras.get(t) ?? 0;
+			const peso = pesos.get(t) ?? { fijo: 0, porFila: 0 };
+			medida.filas += n;
+			medida.bytes += peso.fijo + n * peso.porFila;
+		}
+		return medida;
+	};
+}
+
+/**
+ * Vuelca la ventana más ancha que cabe en los topes (`bootstrap.ventana.ts`: los 30 días si caben,
+ * y si no una semana, un día o sólo lo imprescindible).
+ *
+ * Cada candidata se mide antes de volcarla: contar cuesta un agregado por tabla y evita leer un mes
+ * entero para tirarlo. La medida de los bytes es una estimación, así que `volcar` sigue pudiendo
+ * decir que no (`null`) si al escribir se pasa del tope, y entonces se prueba la siguiente.
+ *
+ * La medida va fuera de la foto a propósito: sólo decide qué ventana se intenta, no es el dato.
+ * `volcar` recibe el límite UNA vez y lo usa en todas sus sentencias, de modo que padre e hijas
+ * seleccionan el mismo conjunto; si cada una lo recalculara, dos sentencias de la misma foto podrían
+ * caer a distinto lado de un segundo y dejar una hija huérfana.
+ *
+ * Devuelve el volcado, o `null` con las filas de la ventana más estrecha si ni ésa cabe.
+ */
+async function volcarLaVentanaQueQuepa<T>(
+	lector: Lector,
+	tablas: string[],
+	candidatas: string[],
+	topes: Topes,
+	volcar: (desde: string) => Promise<T | null>,
+): Promise<{ volcado: T } | { volcado: null; filas: number }> {
+	const medir = medidorDeVentanas(lector, tablas, await pesarTablas(lector, tablas));
+	let filas = 0;
+	for (const desde of candidatas) {
+		const medida = await medir(desde);
+		filas = medida.filas;
+		if (medida.filas > topes.filas || medida.bytes > topes.bytes) continue;
+		const volcado = await volcar(desde);
+		if (volcado !== null) return { volcado };
+	}
+	return { volcado: null, filas };
+}
+
+/** El cuerpo de la fase 1, ya en JSON, o `null` con las filas de lo imprescindible, que no cabía. */
 export type Fase1 = { cuerpo: Uint8Array<ArrayBuffer> } | { cuerpo: null; totalFilas: number };
 
 /**
- * La fase 1: el volcado con el que una Main reconstruye su base. Los topes entran por parámetro
- * para poder probar el desborde sin sembrar un mes de un bar.
+ * La fase 1: el volcado con el que una Main reconstruye su base, con la ventana más ancha que cabe.
+ * Los topes entran por parámetro para poder probar el desborde sin sembrar un mes de un bar.
  */
 export async function volcarFase1(lector: Lector, clientNow: unknown, topes: Topes = TOPES): Promise<Fase1> {
 	const { tablas, ultimoCierre } = await leerPuntoDePartida(lector);
 
-	// El límite de la ventana se calcula ANTES y una sola vez: entra como argumento en todas las
-	// sentencias del volcado, de modo que padre e hijas seleccionan el mismo conjunto. Si cada una
-	// lo recalculara, dos sentencias de la misma foto podrían caer a distinto lado de un segundo y
-	// dejar una hija huérfana.
-	const desde = limiteVentana(clientNow, ultimoCierre);
-
-	// Guardia de tamaño ANTES de construir el volcado. Cuenta EXACTAMENTE el trozo que se va a
-	// construir (no la tabla entera): contar de más devolvería un 413 por algo que sí cabe, y ese
-	// 413 llega el día que un cliente ha perdido su base. Va fuera de la foto a propósito: sólo
-	// decide si cabe, no es el dato.
-	const totalFilas = await lector.foto(
-		tablas.map((t) => sentenciaConteo(t, desde)),
-		sumarConteos(tablas.length),
-	);
-	if (totalFilas > topes.filas) return { cuerpo: null, totalFilas };
-
 	// Orden de backfill, decidido AQUÍ (padres primero). La Main lo guarda tal cual: cada página
 	// de la fase 2 es su propia transacción, así que una hija insertada antes que su padre no
-	// tiene dónde apoyarse.
+	// tiene dónde apoyarse. No depende del ancho de la ventana: la fase 2 recorre cada tabla
+	// entera.
 	const backfill = TRANSACCIONALES.map((t) => t.nombre).filter((n) => tablas.includes(n));
 
 	// La foto entera de una vez, incluido el `Seq`. Es lo que hace que el checkpoint sea exacto:
@@ -251,23 +327,25 @@ export async function volcarFase1(lector: Lector, clientNow: unknown, topes: Top
 	// vigila `syncBootstrap.test.ts` («el sobre lleva EXACTAMENTE los nombres que deserializa Rust»).
 	// A serde el orden de los campos le da igual: `seq` y `total_filas` van al final porque se
 	// saben al terminar de escribir las tablas.
-	const cuerpo = await lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
-		const e = new Escritor(topes.bytes);
-		e.texto(
-			`{"ok":true,"ventana_desde":${JSON.stringify(desde)},"backfill":${JSON.stringify(backfill)},"tablas":`,
-		);
-		// `parcial` es lo que la Main usa para sembrar su cola de backfill. Se marca por
-		// clasificación y no comparando conteos: comparar exigiría un COUNT(*) de la tabla entera
-		// y además abriría una carrera con las escrituras que entran a la vez. Una tabla
-		// transaccional que resulte estar completa termina su backfill con una página vacía, que
-		// es gratis.
-		const filas = escribirTablas(e, tablas, rs, esTransaccional);
-		if (filas === null) return null;
-		e.texto(`,"seq":${seqDe(siguiente(rs))},"total_filas":${filas}}`);
-		return e.cerrar();
-	});
+	const volcar = (desde: string) =>
+		lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
+			const e = new Escritor(topes.bytes);
+			e.texto(
+				`{"ok":true,"ventana_desde":${JSON.stringify(desde)},"backfill":${JSON.stringify(backfill)},"tablas":`,
+			);
+			// `parcial` es lo que la Main usa para sembrar su cola de backfill. Se marca por
+			// clasificación y no comparando conteos: comparar exigiría un COUNT(*) de la tabla
+			// entera y además abriría una carrera con las escrituras que entran a la vez. Una tabla
+			// transaccional que resulte estar completa termina su backfill con una página vacía,
+			// que es gratis.
+			const filas = escribirTablas(e, tablas, rs, esTransaccional);
+			if (filas === null) return null;
+			e.texto(`,"seq":${seqDe(siguiente(rs))},"total_filas":${filas}}`);
+			return e.cerrar();
+		});
 
-	return cuerpo ? { cuerpo } : { cuerpo: null, totalFilas };
+	const r = await volcarLaVentanaQueQuepa(lector, tablas, ventanasCandidatas(clientNow, ultimoCierre), topes, volcar);
+	return r.volcado ? { cuerpo: r.volcado } : { cuerpo: null, totalFilas: r.filas };
 }
 
 /** Un volcado ya escrito, como respuesta. */
@@ -416,10 +494,10 @@ syncRoutes.post("/initialize-empty", async (c) => {
  *
  * - `conteos`: `COUNT(*)` de **todas** las tablas de negocio, enteras. Es baratísimo (un agregado
  *   por tabla) y es lo único que ve una fila que falta o que sobra fuera de la ventana.
- * - `ventana`: el contenido de los últimos `VENTANA_DIAS`, con las MISMAS sentencias que el
- *   bootstrap. Es lo que ve un VALOR distinto — el caso que nos mordió (un `UPDATE` de
- *   `Razon_Social` que no llegó a subir) y que ningún contador detecta, porque la fila está en los
- *   dos sitios.
+ * - `ventana`: el contenido de la ventana de la fase 1 (los últimos `VENTANA_DIAS`, o lo que quepa
+ *   de ellos), con las MISMAS sentencias que el bootstrap. Es lo que ve un VALOR distinto — el
+ *   caso que nos mordió (un `UPDATE` de `Razon_Social` que no llegó a subir) y que ningún contador
+ *   detecta, porque la fila está en los dos sitios.
  *
  * El histórico viejo se queda fuera a propósito: ya no cambia, así que volver a leerlo cada ciclo
  * es pagar lecturas de la base por comprobar datos inmutables. Si algo se descuadró ahí, se descuadró
@@ -438,7 +516,7 @@ export async function fotoDeVerificacion(
 	topes: Topes = TOPES,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const { tablas, ultimoCierre } = await leerPuntoDePartida(lector);
-	const desde = limiteVentana(clientNow, ultimoCierre);
+	const candidatas = ventanasCandidatas(clientNow, ultimoCierre);
 
 	// Conteos de tabla ENTERA (no de la ventana): es lo que delata una fila perdida en el
 	// histórico, que la ventana no mira.
@@ -446,18 +524,16 @@ export async function fotoDeVerificacion(
 		tablas.map((t) => ({ sql: `SELECT COUNT(*) AS n FROM "${t}";`, args: [] })),
 		(rs) => tablas.map((nombre) => ({ nombre, filas: Number(primerValor(siguiente(rs)) ?? 0) })),
 	);
-	const cabecera = `{"conteos":${JSON.stringify(conteos)},"desde":${JSON.stringify(desde)}`;
+	const cabecera = (desde: string) =>
+		`{"conteos":${JSON.stringify(conteos)},"desde":${JSON.stringify(desde)}`;
 
-	// Guardia de tamaño sobre lo que se va a construir de verdad, igual que en el bootstrap: por
-	// filas antes de leer, y por bytes al escribir. Si la ventana no cabe, se devuelven los conteos
-	// igualmente: media comprobación es mejor que ninguna, y es justo el caso en el que más falta
-	// hace saber que algo va mal.
-	const filasVentana = await lector.foto(
-		tablas.map((t) => sentenciaConteo(t, desde)),
-		sumarConteos(tablas.length),
-	);
-
-	// El `Seq` se lee DESPUES de todo lo demas, y eso NO es un detalle de implementacion.
+	// La ventana es la de la fase 1 de la recuperación, con sus topes y encogida igual: si los 30
+	// días no caben se contrasta lo que quepa (una semana, un día, o lo que hay desde el último
+	// cierre), que sigue viendo un valor distinto en lo reciente. Si no cabe ni eso, se devuelven
+	// los conteos igualmente: media comprobación es mejor que ninguna, y es justo el caso en el que
+	// más falta hace saber que algo va mal.
+	//
+	// El `Seq` se lee DESPUES de las filas, y eso NO es un detalle de implementacion.
 	//
 	// La Main lo usa para decidir si puede borrar arriba lo que aqui sobra: solo se atreve si su
 	// marcapaginas llega hasta aqui, porque entonces ya ha visto todo lo que hay en esta foto y
@@ -467,19 +543,19 @@ export async function fotoDeVerificacion(
 	// un Seq mayor del que se apunto: la Main se creeria al dia y borraria una comanda que
 	// acaban de abrir. Leyendolo al final, el numero es siempre >= al de cualquier fila que
 	// viaje, asi que la comparacion falla del lado que no destruye nada.
-	if (filasVentana <= topes.filas) {
-		const cuerpo = await lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
+	const r = await volcarLaVentanaQueQuepa(lector, tablas, candidatas, topes, (desde) =>
+		lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
 			const e = new Escritor(topes.bytes);
-			e.texto(`${cabecera},"ventana_omitida":false,"ventana":`);
+			e.texto(`${cabecera(desde)},"ventana_omitida":false,"ventana":`);
 			if (escribirTablas(e, tablas, rs) === null) return null;
 			e.texto(`,"hasta_seq":${seqDe(siguiente(rs))}}`);
 			return e.cerrar();
-		});
-		if (cuerpo) return cuerpo;
-	}
+		}),
+	);
+	if (r.volcado) return r.volcado;
 
 	const hastaSeq = await lector.foto([SQL_SEQ], (rs) => seqDe(siguiente(rs)));
-	return enBytes(`${cabecera},"ventana_omitida":true,"ventana":[],"hasta_seq":${hastaSeq}}`);
+	return enBytes(`${cabecera(candidatas[0])},"ventana_omitida":true,"ventana":[],"hasta_seq":${hastaSeq}}`);
 }
 
 syncRoutes.post("/verificar", async (c) => {

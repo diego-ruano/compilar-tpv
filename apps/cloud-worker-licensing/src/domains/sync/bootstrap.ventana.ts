@@ -34,6 +34,24 @@
 //    borrador o un fichaje sin cerrar.
 //
 // ──────────────────────────────────────────────────────────────────────────────
+// Si el mes no cabe, la ventana se encoge
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// La fase 1 es una sola respuesta y tiene un techo (`VOLCADO_MAX_BYTES`, `volcado.ts`). El mes de
+// un bar con mucho movimiento no cabe en él, y contestarle «no cabe» es dejarlo sin recuperación.
+// Así que los 30 días son lo que se intenta, no lo que se exige: si no caben se prueba con una
+// semana, con un día y con ninguno (`ANCHOS_DE_VENTANA`), y viaja la más ancha que cabe.
+//
+// Lo que no se encoge nunca es lo que las tres reglas hacen entrar sin mirar la ventana: los
+// maestros, lo que sigue vivo, todo lo que hay desde el último cierre de caja no reabierto y el
+// último registro de facturación. Es lo imprescindible para volver a vender, y si ni eso cabe la
+// respuesta sí es «no cabe».
+//
+// A la Main le da igual el ancho: restaura lo que llega y rellena lo demás por la fase 2, que
+// recorre cada tabla transaccional entera, desde el principio (`parcial`, `backfill`). Con una
+// ventana más estrecha baja lo mismo; sólo cambia cuánto llega en la primera respuesta.
+//
+// ──────────────────────────────────────────────────────────────────────────────
 // La unidad es la comanda, no la fila
 // ──────────────────────────────────────────────────────────────────────────────
 //
@@ -60,6 +78,16 @@ import { parseClientNow, serverNowFixed } from "../../durableObjects/tenantHub.t
  * **Es un parámetro, no una decisión de arquitectura**: cambiarlo es cambiar este número.
  */
 export const VENTANA_DIAS = 30;
+
+/**
+ * Los anchos de ventana que se prueban, en días y del más ancho al más estrecho: viaja el primero
+ * que cabe en los topes de la fase 1. El último, cero, deja sólo lo imprescindible (ver arriba).
+ *
+ * Son cuatro escalones y no una búsqueda del día exacto porque medir uno cuesta un `COUNT` por
+ * tabla transaccional sobre esa ventana, y lo que se gana afinando es poco: lo que no entra ahora
+ * lo trae la fase 2.
+ */
+export const ANCHOS_DE_VENTANA: readonly number[] = [VENTANA_DIAS, 7, 1, 0];
 
 /**
  * Tablas de control que NO forman parte del negocio y que la Main mantiene por su cuenta.
@@ -353,17 +381,29 @@ function prelude(t: Transaccional): string {
 }
 
 /**
- * Límite inferior de la ventana: `MIN(ahora - VENTANA_DIAS, último cierre no reabierto)`.
+ * Los límites inferiores de ventana que se prueban, del más ancho al imprescindible y sin
+ * repetir: `MIN(ahora - días, último cierre no reabierto)` por cada ancho de `ANCHOS_DE_VENTANA`.
+ *
+ * El primero es la ventana de siempre, los 30 días estirados hasta el último cierre. El último es
+ * el propio cierre (o «ahora», si el negocio nunca ha cerrado caja): con él sólo entra lo que no
+ * depende de la ventana. Un cierre de hace más de 30 días deja una sola candidata, porque todas
+ * se estiran hasta él.
  *
  * El reloj es el del EQUIPO (cabecera `X-Client-Now`), no el del servidor, por lo mismo que en el
  * resto del sistema: las fechas de esta base son hora local en texto, y compararlas contra un UTC
  * del edge correría la ventana lo que valga el huso. Si no llega una hora válida se cae a la del
- * servidor: para 30 días, unas horas de desfase no cambian nada.
+ * servidor: unas horas de desfase mueven el borde de la ventana, no lo que entra siempre. «Ahora»
+ * se lee una vez para todas las candidatas.
  */
-export function limiteVentana(clientNow: unknown, ultimoCierre: string | null): string {
+export function ventanasCandidatas(clientNow: unknown, ultimoCierre: string | null): string[] {
 	const ahora = parseClientNow(clientNow) ?? serverNowFixed();
-	const ms = new Date(ahora.replace(" ", "T") + "Z").getTime() - VENTANA_DIAS * 86_400_000;
-	const porFecha = new Date(ms).toISOString().slice(0, 19).replace("T", " ");
-	if (!ultimoCierre) return porFecha;
-	return ultimoCierre < porFecha ? ultimoCierre : porFecha;
+	const ahoraMs = new Date(ahora.replace(" ", "T") + "Z").getTime();
+
+	const candidatas: string[] = [];
+	for (const dias of ANCHOS_DE_VENTANA) {
+		const porFecha = new Date(ahoraMs - dias * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+		const desde = ultimoCierre && ultimoCierre < porFecha ? ultimoCierre : porFecha;
+		if (candidatas[candidatas.length - 1] !== desde) candidatas.push(desde);
+	}
+	return candidatas;
 }

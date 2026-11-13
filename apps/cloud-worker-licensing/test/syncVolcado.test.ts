@@ -202,19 +202,26 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 		);
 	});
 
-	it("el tope corta al escribir: con uno pequeño no se llega a leer la base entera", async () => {
-		const leidas = await enElHub("volcado-fase1-corta", async (hub: any) => {
+	it("el tope corta al escribir: ningún intento llega a leer la tabla entera", async () => {
+		const porFoto = await enElHub("volcado-fase1-corta", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
-			sembrarClientes(sql, 600);
+			// 1.200 clientes con una nota larga (300 KB) y, detrás, 64 sin ella. Lo que ocupa una
+			// tabla se mide con sus últimas filas, así que la medida previa da por bueno un volcado
+			// que no cabe en 128 KB: quien lo para es el tope, al escribir.
+			sembrarClientes(sql, 1_200);
+			for (let i = 0; i < 64; i++) {
+				sql.exec("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES (?, 'Ana');", `cl-corto-${i}`);
+			}
 
-			// Un lector que cuenta las filas que se le piden.
-			let n = 0;
+			// Un lector que cuenta las filas que se le piden en cada foto.
+			const porFoto: number[] = [];
 			const real = lectorDelHub(sql);
 			const contador = {
 				foto: (sentencias: any, usar: any) =>
-					real.foto(sentencias, (rs: Iterator<any>) =>
-						usar({
+					real.foto(sentencias, (rs: Iterator<any>) => {
+						let n = 0;
+						const resultado = usar({
 							next: () => {
 								const r = rs.next();
 								if (r.done) return r;
@@ -224,26 +231,29 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 									value: {
 										columnas: r.value.columnas,
 										filas: (function* () {
-											for (const f of filas) {
+											for (const fila of filas) {
 												n++;
-												yield f;
+												yield fila;
 											}
 										})(),
 									},
 								};
 							},
-						}),
-					),
+						});
+						porFoto.push(n);
+						return resultado;
+					}),
 			};
 
-			const r = await volcarFase1(contador as any, null, { filas: BOOTSTRAP_MAX_FILAS, bytes: 8 * 1024 });
+			const r = await volcarFase1(contador as any, null, { filas: BOOTSTRAP_MAX_FILAS, bytes: 128 * 1024 });
 			expect(r.cuerpo).toBeNull();
-			return n;
+			return porFoto;
 		});
 
-		// Las tablas van por orden alfabético y `Clientes` es de las primeras: se para dentro de
-		// ella, muy lejos de sus 600 filas.
-		expect(leidas).toBeLessThan(300);
+		// Se llegó a intentar el volcado (una foto con cientos de filas, no sólo conteos y muestras)…
+		expect(Math.max(...porFoto)).toBeGreaterThan(200);
+		// …y todos los intentos pararon dentro de `Clientes`, lejos de sus 1.264 filas.
+		expect(Math.max(...porFoto)).toBeLessThan(800);
 	});
 });
 

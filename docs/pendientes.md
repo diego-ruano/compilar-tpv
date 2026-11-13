@@ -332,13 +332,24 @@ Turso no hace falta.
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
-`/v1/sync/bootstrap` baja la fase 1 (catálogo, clientes y la ventana de 30 días, estirada hasta el
-último cierre de caja) en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de JSON
-([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Si no cabe contesta
-413 y ese negocio no puede recuperarse desde la nube. Con lo medido (unos 180 bytes por fila), 24 MiB
-son unas 140.000 filas: no cabe el mes de un bar de más de unas doscientas comandas diarias, ni lo de
-uno que lleve semanas sin cerrar caja. Falta decidir cómo se le sirve a ese negocio: una ventana más
-corta, o que la foto salga en trozos. El histórico ya va en páginas de 2.000 filas.
+`/v1/sync/bootstrap` baja la fase 1 en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de
+JSON. Si el mes no cabe, la ventana se encoge hasta lo imprescindible: los maestros, lo que sigue vivo
+y lo que hay desde el último cierre de caja
+([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Eso no se puede
+recortar, y si no cabe la respuesta es 413 y ese negocio no puede recuperarse desde la nube. Con lo
+medido (unos 180 bytes por fila), 24 MiB son unas 140.000 filas: le pasa a un bar de mil comandas
+diarias que lleve una semana sin cerrar caja, o a uno normal que lleve meses. Falta decidir cómo se le
+sirve: que la foto salga en trozos, o que lo anterior al cierre que no quepa baje por la fase 2 y el
+arqueo espere a que termine.
+
+Dos cosas de la Main que pesan más con una ventana estrecha, y que hoy no dependen de ella:
+
+- **El histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
+  (`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
+  recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
+  anterior.
+- **El plazo de una petición son 20 s** (`HTTP_TIMEOUT_SECS`, `tpv-infra-licensing`), contando la
+  descarga: 24 MiB sin comprimir necesitan 10 Mbit/s, además de lo que tarde el volcado.
 
 ### DO-03 · Copias de la base de cada negocio
 
