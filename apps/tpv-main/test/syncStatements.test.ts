@@ -75,14 +75,38 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
 describe("metadatos nativos y cachés de presentación", () => {
     it("deduplica las áreas y distingue ajustes de tablas desconocidas", () => {
         expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "mesas", "inventario", "proveedores"]);
-        expect(featureKeysPorTablas(["business_settings"])).toEqual([]);
+        expect(featureKeysPorTablas(["pagos", "pago_detalles", "cuentas_gastos"])).toEqual(["cuentas", "stats", "mesas"]);
+        expect(featureKeysPorTablas(["ticket_settings"])).toEqual([]);
         expect(featureKeysPorTablas(["tabla_nueva"])).toBeNull();
         expect(featureKeysPorTablas(null)).toBeNull();
     });
     it("una reserva que cambia en otro sitio refresca también el plano de mesas y los clientes", () => {
         // Una reserva web recogida o cancelada, una de la Handy o el «No vino» automático: el plano
         // pinta la de cada mesa y el resumen de Clientes cuenta las pendientes.
-        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "clientes", "stats"]);
+        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "clientes", "cuentas", "stats"]);
+    });
+    it("una tabla refresca también las pantallas que la enseñan a través de otra", () => {
+        // El nombre de una mesa o de una zona: Reservas, la última reserva de cada cliente, cada
+        // cobro de Cuentas, las estadísticas.
+        expect(featureKeysPorTablas(["mesas"])).toEqual(["mesas", "reservas", "clientes", "cuentas", "stats"]);
+        expect(featureKeysPorTablas(["zonas"])).toEqual(["mesas", "reservas", "stats"]);
+        // El nombre de un cliente: la reserva de cada mesa del plano y sus cobros.
+        for (const area of ["mesas", "cuentas"]) expect(featureKeysPorTablas(["clientes"])).toContain(area);
+        // Las estadísticas de trabajadores: tareas hechas, cuadrante, fichajes y rol.
+        for (const tabla of ["tarea_asignaciones", "asignacion_turnos", "fichajes", "roles", "usuarios"]) {
+            expect(featureKeysPorTablas([tabla])).toContain("stats");
+        }
+        // El nombre de un usuario y su rol.
+        for (const area of ["tareas", "cuentas", "notificaciones"]) expect(featureKeysPorTablas(["usuarios"])).toContain(area);
+        // Lo que hay pendiente en cocina depende de `Pasa_Cocina`, y Proveedores lista las categorías.
+        expect(featureKeysPorTablas(["categorias_producto"])).toEqual(["inventario", "proveedores", "mesas", "stats"]);
+        expect(featureKeysPorTablas(["productos"])).toContain("mesas");
+        // La reserva de cada mesa del plano depende de la duración por defecto y de la zona horaria.
+        expect(featureKeysPorTablas(["business_settings"])).toEqual(["mesas"]);
+    });
+    it("añadir líneas a una comanda no hace releer Cuentas", () => {
+        // A sabiendas: la mesa y el cliente de un cobro se fijan al cobrar, con su `pagos`.
+        for (const tabla of ["comandas", "detalle_comanda"]) expect(featureKeysPorTablas([tabla])).toEqual(["mesas", "stats"]);
     });
     it("vincular un producto o mover su stock refresca la ficha del proveedor", () => {
         // INC-20261030-013: vincular es un UPDATE de Productos, y la lista de vinculados enseña el

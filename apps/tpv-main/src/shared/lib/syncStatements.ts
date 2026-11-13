@@ -28,8 +28,15 @@ type Area =
  * `test/syncStatements.test.ts` lee `packages/database/schema.snapshot.sql` y falla si falta una.
  *
  * `[]` es «ninguna pantalla con caché la enseña», no «no se sabe»: lleva su motivo.
+ *
+ * Una tabla lleva también las pantallas que la enseñan **a través de otra**: el nombre de una mesa
+ * sale en Reservas, en Clientes, en Cuentas y en las estadísticas, así que renombrarla las refresca
+ * todas. La única que se deja fuera a sabiendas es `comandas` → Cuentas (ver su entrada).
  */
 const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
+	// Cuentas enseña la mesa y el cliente de la comanda de cada cobro, pero se fijan al cobrar, en
+	// el mismo lote que su `pagos`. Lo único que no la refresca es enlazar una reserva a una comanda
+	// que ya tiene un cobro parcial, a cambio de no releer Cuentas con cada línea que se añade.
 	comandas: ["mesas", "stats"],
 	detalle_comanda: ["mesas", "stats"],
 	// El plano enseña lo que queda por cobrar de cada mesa, y eso sale de las líneas cobradas
@@ -53,11 +60,13 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	// Lo que un cobro cambia en pantalla llega por `pagos`, que va en el mismo lote.
 	registros_facturacion: [],
 	serie_facturacion: [],
-	categorias_producto: ["inventario", "stats"],
+	// Proveedores tiene su selector de categorías. Y el plano cuenta lo que hay pendiente en cocina,
+	// que depende de `Pasa_Cocina` de la categoría de cada producto.
+	categorias_producto: ["inventario", "proveedores", "mesas", "stats"],
 	// INC-20261030-013: la ficha de un proveedor enseña sus productos vinculados, con el stock y la
 	// última entrada. Vincular es un `UPDATE Productos SET ID_Proveedor`, así que sin `proveedores`
 	// aquí los demás equipos no se enteraban hasta salir y volver a entrar.
-	productos: ["inventario", "proveedores", "stats"],
+	productos: ["inventario", "proveedores", "mesas", "stats"],
 	lotes_producto: ["inventario", "proveedores", "stats"],
 	lote_consumos: ["inventario", "stats"],
 	// El stock que enseñan las pantallas sale de `lotes_producto` y de `productos.Stock_Suelto`, que
@@ -70,27 +79,34 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	proveedores: ["proveedores", "inventario", "cuentas", "pedidos_proveedor", "stats"],
 	pedidos_proveedor: ["pedidos_proveedor", "inventario"],
 	lineas_pedido_proveedor: ["pedidos_proveedor", "inventario"],
-	zonas: ["mesas"],
-	mesas: ["mesas"],
-	clientes: ["clientes", "reservas", "stats"],
+	// El nombre de una zona y el de una mesa salen en Reservas y en las estadísticas; el de la mesa,
+	// además, en la última reserva de cada cliente y en cada cobro de Cuentas.
+	zonas: ["mesas", "reservas", "stats"],
+	mesas: ["mesas", "reservas", "clientes", "cuentas", "stats"],
+	// El nombre del cliente sale en la reserva de cada mesa del plano y en sus cobros de Cuentas.
+	clientes: ["clientes", "reservas", "mesas", "cuentas", "stats"],
 	// El plano enseña la reserva de cada mesa (`mesas_meta_all`), y el resumen de Clientes cuenta
-	// sus reservas y las pendientes.
-	reservas: ["reservas", "mesas", "clientes", "stats"],
+	// sus reservas y las pendientes. Cuentas pone a cada cobro el cliente de la reserva de su comanda.
+	reservas: ["reservas", "mesas", "clientes", "cuentas", "stats"],
 	// Qué mesas se reservan desde la web, en qué franjas y qué días se cierra: se cambia en la Main.
 	reserva_web_mesas: ["reservas"],
 	reserva_web_franjas: ["reservas"],
 	reserva_web_cierres: ["reservas"],
 	tareas: ["tareas"],
-	tarea_asignaciones: ["tareas"],
+	// Las estadísticas de trabajadores cuentan las tareas hechas, las horas del cuadrante y las
+	// fichadas, y filtran por rol.
+	tarea_asignaciones: ["tareas", "stats"],
 	trabajadores: ["trabajadores", "tareas", "stats"],
 	turnos: ["trabajadores"],
-	asignacion_turnos: ["trabajadores"],
+	asignacion_turnos: ["trabajadores", "stats"],
 	horario_predeterminado: ["trabajadores"],
-	fichajes: ["trabajadores"],
+	fichajes: ["trabajadores", "stats"],
 	fichaje_dia: ["trabajadores"],
 	roles_permisos: ["permisos"],
-	roles: ["permisos", "trabajadores"],
-	usuarios: ["permisos", "trabajadores"],
+	roles: ["permisos", "trabajadores", "stats"],
+	// El nombre de un usuario sale en las tareas, en quién anuló un cobro y en las estadísticas; y
+	// las notificaciones de cada uno dependen de su rol.
+	usuarios: ["permisos", "trabajadores", "tareas", "cuentas", "notificaciones", "stats"],
 	notificaciones: ["notificaciones"],
 	notificacion_lecturas: ["notificaciones"],
 	// El freno del PIN (LOGIN-01) es estado de cada equipo y de la nube: no se replica, y si llegara
@@ -98,7 +114,9 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	intentos_login: [],
 	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave de
 	// caché. Lo que sí hace falta es que su store se recargue — ver `ajustesPorTablas` más abajo.
-	business_settings: [],
+	// La excepción es el plano: la reserva que enseña cada mesa depende de la duración por defecto
+	// de las reservas y de la zona horaria del negocio.
+	business_settings: ["mesas"],
 	ticket_settings: [],
 	contact_settings: [],
 };
