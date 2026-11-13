@@ -74,8 +74,16 @@ const FILAS_MAX_BYTES = 4 * 1024 * 1024;
 /** Techo de una página de claves, en bytes de JSON. Sus topes de filas, en `sync.schemas.ts`. */
 const CLAVES_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Lo más que ocupa el final de una página: el cursor (hasta cuatro valores de clave) y el `Seq`. */
-const CIERRE_DE_PAGINA = 1024;
+/**
+ * Lo más que recorre de la ventana una página de filas. Cada página vuelve a ejecutar la sentencia
+ * de la ventana desde el principio y se salta lo ya visto, así que sin este tope una página de un
+ * cubo con pocas filas podría recorrer años de histórico (un `desde` que no es el del resumen). Al
+ * llegar, la página se corta con su cursor aunque no lleve ninguna fila.
+ */
+const FILAS_RECORRIDAS_POR_PAGINA = RESUMEN_MAX_FILAS;
+
+/** Lo que ocupa el final de una página, sin contar el cursor de claves: el `Seq` y la sintaxis. */
+const CIERRE_DE_PAGINA = 256;
 
 /** Quién pide el resumen, y cuándo. */
 type QuienPregunta = {
@@ -348,13 +356,17 @@ function filaEnJson(fila: unknown[]): string {
  * por eso cada página lleva su `hasta_seq`: la Main lo compara con el del resumen y, si no es el
  * mismo, tira lo que lleva.
  *
- * Se corta antes de pasar de `maxBytes`, y nunca sin al menos una fila. De una tabla sin clave
- * primaria —o que este negocio no tiene— no hay filas que dar: no tienen cubo.
+ * Se corta antes de pasar de `maxBytes`, y nunca sin al menos una fila: una fila que sola pasa del
+ * techo viaja igual, como en el histórico, porque rechazarla dejaría su cubo sin comparar para
+ * siempre. También se corta, con o sin filas, al recorrer `FILAS_RECORRIDAS_POR_PAGINA` filas de la
+ * ventana. De una tabla sin clave primaria —o que este negocio no tiene— no hay filas que dar: no
+ * tienen cubo.
  */
 export async function filasDeLosCubos(
 	lector: Lector,
 	{ tabla, desde, cubos, pedir, cursor }: PedidoDeFilas,
 	maxBytes: number = FILAS_MAX_BYTES,
+	maxRecorridas: number = FILAS_RECORRIDAS_POR_PAGINA,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const cabecera = `{"ok":true,"tabla":${JSON.stringify(tabla)}`;
 	const claves = await lector.foto([sqlClaves(tabla)], (rs) => leerClaves(siguiente(rs)));
@@ -378,7 +390,12 @@ export async function filasDeLosCubos(
 		if (posiciones) {
 			for (const fila of filas) {
 				const i = vistas++;
-				if (i < cursor || !filtro.pide(fila, posiciones)) continue;
+				if (i < cursor) continue;
+				if (i - cursor >= maxRecorridas) {
+					siguienteCursor = i;
+					break;
+				}
+				if (!filtro.pide(fila, posiciones)) continue;
 				const texto = filaEnJson(fila);
 				if (escritas > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 					siguienteCursor = i;
@@ -451,7 +468,8 @@ export async function paginaDeClaves(
 		let cortada = false;
 		for (const clave of siguiente(rs).filas) {
 			const texto = JSON.stringify(clave);
-			if (n > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+			// La clave cuenta dos veces: si es la última que entra, es también el cursor.
+			if (n > 0 && e.ocupado + 2 * bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 				cortada = true;
 				break;
 			}

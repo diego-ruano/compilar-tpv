@@ -430,6 +430,32 @@ describe("POST /v1/sync/verificar/filas", () => {
 		});
 	});
 
+	it("una página no recorre más filas de la ventana que su tope, aunque no lleve ninguna", async () => {
+		await enElHub("verificar-filas-recorridas", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			sembrarZonas(sql, 100);
+			const pedido = { tabla: "Zonas", desde: "2026-10-14 12:00:00", cubos: 4, pedir: [2] };
+			const vistas: string[] = [];
+			let cursor = 0;
+			let paginas = 0;
+			for (;;) {
+				const pagina = JSON.parse(
+					new TextDecoder().decode(await filasDeLosCubos(lectorDelHub(sql), { ...pedido, cursor }, 1_000_000, 10)),
+				);
+				vistas.push(...pagina.filas.map((f: any[]) => f[0]));
+				paginas++;
+				if (pagina.siguiente_cursor === null) break;
+				expect(pagina.siguiente_cursor).toBe(cursor + 10);
+				cursor = pagina.siguiente_cursor;
+			}
+			expect(paginas).toBe(10);
+			const r = new Resumidor();
+			const esperadas = [...sql.exec("SELECT * FROM Zonas;").raw()].filter((f: any) => r.fila(f, [0]) >>> 6 === 2);
+			expect(vistas.sort()).toEqual(esperadas.map((f: any) => f[0]).sort());
+		});
+	});
+
 	it("una fila que sola pasa del tope viaja igual: la página no puede venir vacía", async () => {
 		await enElHub("verificar-filas-gorda", async (hub: any) => {
 			const sql = hub.state.storage.sql;
@@ -477,6 +503,20 @@ describe("POST /v1/sync/verificar/filas", () => {
 });
 
 describe("POST /v1/sync/verificar/claves", () => {
+	it("una página con claves largas no pasa de sus bytes, contando el cursor que repite la última", async () => {
+		await enElHub("verificar-claves-largas", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (let i = 0; i < 20; i++) {
+				sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?, ?);", `${String(i).padStart(2, "0")}${"k".repeat(300)}`, `Zona ${i}`);
+			}
+			const bytes = await paginaDeClaves(lectorDelHub(sql), { tabla: "Zonas", cursor: null, limite: 100 }, 2_000);
+			const pagina = JSON.parse(new TextDecoder().decode(bytes!));
+			expect(bytes!.byteLength).toBeLessThanOrEqual(2_000);
+			expect(pagina.siguiente_cursor).toEqual(pagina.claves[pagina.claves.length - 1]);
+		});
+	});
+
 	it("las claves van por páginas y en orden, sin saltar ni repetir", async () => {
 		await conTenant(
 			"claves-paginas",
