@@ -25,10 +25,10 @@ import { MIGRATIONS, normalize, sha256Hex } from "../server/tenantMigrations";
 import { HubError } from "../lib/errorHttp";
 
 /** Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. */
-export type Sentencia = string | { sql: string; args?: unknown[] };
+type Sentencia = string | { sql: string; args?: unknown[] };
 
 /** Lo que viaja por RPC: columnas y valores en bruto, sin el envoltorio de libsql. */
-export type FilasEnBruto = {
+type FilasEnBruto = {
 	columns: string[];
 	rows: unknown[][];
 	rowsAffected: number;
@@ -146,7 +146,7 @@ export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 }
 
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */
-export function aResultSet(b: FilasEnBruto): ResultSet {
+function aResultSet(b: FilasEnBruto): ResultSet {
 	const rows = b.rows.map((valores) => {
 		const fila: Record<string | number, unknown> = {};
 		Object.defineProperty(fila, "length", { value: valores.length });

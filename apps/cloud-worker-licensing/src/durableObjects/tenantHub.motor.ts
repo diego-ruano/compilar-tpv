@@ -49,8 +49,6 @@ import {
 	baseAprovisionada,
 	clienteLocal,
 	migrarBaseLocal,
-	type FilasEnBruto,
-	type Sentencia,
 } from "./tenantHub.sqlite";
 import { sembrarAdminInicial } from "./tenantHub.alta";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
