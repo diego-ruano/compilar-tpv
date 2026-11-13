@@ -27,11 +27,12 @@ import type { Client } from "@libsql/client/web";
 import selectMesaDia from "../../../../../packages/database/estadisticas/mesa_dia.sql";
 import selectProductoDia from "../../../../../packages/database/estadisticas/producto_dia.sql";
 
+import { recortar } from "../../lib/texto";
 import { capturarError } from "../../observability/errors";
 
 /** Sin los comentarios: una sentencia de estado no lleva más `;` que el del final, y son texto de más. */
 function sinComentarios(sql: string): string {
-	return sql.replace(/--[^\n]*/g, "").trim();
+	return recortar(sql.replace(/--[^\n]*/g, ""));
 }
 
 /**
