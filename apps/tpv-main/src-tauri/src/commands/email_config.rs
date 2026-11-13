@@ -56,6 +56,11 @@ pub async fn email_enviar_pedido(
         })).collect::<Vec<_>>(),
     });
 
+    // El fallo sale con su código (`From<AppError> for AppErrorDto`). Convertido en texto llegaba
+    // a la interfaz como `internal`, y lo que falla aquí casi nunca es el programa: no hay red, el
+    // worker rechaza al destinatario, o el objeto del negocio no puede atender (`hub_overloaded`,
+    // `hub_unavailable`: la ruta se ejecuta dentro del TenantHub, DO-04). Su frase ya viene escrita
+    // para la persona; la pantalla le pone delante «No se pudo enviar el pedido».
     uc_pairing::tpv_server_post_json(
         &svc,
         tpv_contracts::licensing::TpvServerPostJsonArgs {
@@ -64,8 +69,25 @@ pub async fn email_enviar_pedido(
             body,
         },
     )
-    .await
-    .map_err(|e| format!("Error enviando correo: {e}"))?;
+    .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    /// El envío es una petición a la nube: su fallo es de la red, de la nube o un rechazo con su
+    /// código, y la gravedad con que se registra sale de él (`fallosDeComandos.ts`). Un `String`
+    /// se convierte en `internal` (`From<String> for AppErrorDto`), que es un fallo del programa.
+    #[test]
+    fn el_fallo_del_envio_llega_con_su_codigo_no_como_texto() {
+        let fuente = include_str!("email_config.rs");
+        let envio = fuente
+            .split("uc_pairing::tpv_server_post_json(")
+            .nth(1)
+            .and_then(|resto| resto.split("Ok(())").next())
+            .expect("el comando llama a tpv_server_post_json");
+        assert!(envio.contains(".await?"), "el error del envío se propaga tal cual: {envio}");
+        assert!(!envio.contains("map_err") && !envio.contains("format!"), "sin convertirlo en texto: {envio}");
+    }
 }
