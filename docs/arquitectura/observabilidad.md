@@ -477,6 +477,7 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
 | `cola_volcado_inicio` / `cola_volcado_fin` | La Main vuelca su atraso a la cola del DO |
 | `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, base que no contesta, fallo de una vuelta |
 | `cola_apartada` / `cola_apartada_acusada` | Una operación sale a `_Cola_Muerta` / una Main la acusa |
+| `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 
 ## Alarmas recomendadas
 
@@ -487,6 +488,7 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
   pareja en el worker es el `apply_error` de esa misma `op_id`.
 - **Main caída**: `main_offline` sin `main_online` posterior en N minutos por `tenant_id`.
 - **Errores de apply**: volumen de `apply_error` por `tenant_id`.
+- **Una base que necesita a alguien**: cualquier `base_llena`. También llega a Sentry (`tenant_db.full`).
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
   `motivo` (`device_revoked`, `bad_device_signature`, `device_ts_out_of_range`). No van a Sentry: un 401
   suelto es normal.

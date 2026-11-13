@@ -187,6 +187,15 @@ describe("límites del SQL", () => {
 				),
 				sentencia99k: error(() => sql.exec(`SELECT '${"a".repeat(99_000)}' AS x;`).toArray()),
 				sentencia101k: error(() => sql.exec(`SELECT '${"a".repeat(101_000)}' AS x;`).toArray()),
+				// Más de 100 marcas sin numerar, y un valor de varios megas en un parámetro.
+				params101SinNumerar: error(() =>
+					sql.exec(`SELECT 1 WHERE 'x' NOT IN (${Array.from({ length: 101 }, () => "?").join(", ")});`, ...valores(101)).toArray(),
+				),
+				valor1MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(1_000_000)).toArray()),
+				valor2MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(2_000_000)).toArray()),
+				valor2MiBYUnByte: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(2 * 1024 * 1024 + 1)).toArray()),
+				valor3MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(3_000_000)).toArray()),
+				valor9MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(9_000_000)).toArray()),
 				userVersion: error(() => sql.exec("PRAGMA user_version;").toArray()),
 				beginTransaction: error(() => sql.exec("BEGIN TRANSACTION;")),
 			};

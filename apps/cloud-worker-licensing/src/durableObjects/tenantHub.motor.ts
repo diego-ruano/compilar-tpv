@@ -58,6 +58,7 @@ import {
 	revocar,
 } from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
+import { esBaseLlena } from "./tenantHub.errores";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
@@ -120,6 +121,9 @@ export class MotorTenantHub {
 	private baseLocal: Client | null = null;
 	// El negocio de este DO, para las trazas: lo dice la primera petición que llega.
 	private tenantIdVisto: string | null = null;
+	// Lo que ya se ha avisado desde esta instancia (`avisarUnaVez`): una avería de la base del
+	// negocio la ve cada petición, y con un aviso basta. Se pierde al hibernar: vuelve a avisar.
+	private avisados = new Set<string>();
 
 	// AUD-18: la cola de lo que está confirmando y difundiendo ahora mismo (ver `enTurnoDelLog`). Es
 	// lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo hiberna sin nada en
@@ -823,6 +827,7 @@ export class MotorTenantHub {
 				error: String(e?.message || e).slice(0, 500),
 				latency_ms: nowMs() - createdAtMs,
 			});
+			if (esBaseLlena(e)) this.avisarBaseLlena(e);
 			throw e;
 		}
 	}
@@ -1066,6 +1071,7 @@ export class MotorTenantHub {
 			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
+			avisarBaseLlena: (error) => this.avisarBaseLlena(error),
 		};
 	}
 
@@ -1187,6 +1193,26 @@ export class MotorTenantHub {
 		} catch {
 			/* la salud de sync es best-effort; nunca afecta al sync */
 		}
+	}
+
+	/**
+	 * Una avería de la base del negocio que no se arregla sola (está llena, no ha podido migrar) y que
+	 * a partir de ahí ve cada petición: a Sentry y a Axiom, una vez por instancia y por motivo. Lo
+	 * que se recuerda es una caché: al hibernar se pierde y la instancia siguiente vuelve a avisar.
+	 */
+	private avisarUnaVez(motivo: string, error: unknown, operacion: string): void {
+		if (this.avisados.has(motivo)) return;
+		this.avisados.add(motivo);
+		capturarError(error, operacion);
+		this.emitSyncEvent(motivo, { error: String((error as any)?.message || error).slice(0, 500) });
+	}
+
+	/**
+	 * La base está llena o en sólo lectura (`esBaseLlena`). Ninguna operación tiene la culpa ni se
+	 * aparta por ello; hay que hacerle sitio, y eso lo hace una persona.
+	 */
+	private avisarBaseLlena(error: unknown): void {
+		this.avisarUnaVez("base_llena", error, "tenant_db.full");
 	}
 
 	private send(ws: WebSocket, obj: any) {

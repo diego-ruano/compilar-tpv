@@ -15,7 +15,7 @@
 
 import type { Client } from "@libsql/client/web";
 
-import { esRechazoPermanente } from "./tenantHub.errores";
+import { esBaseLlena, esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 
@@ -73,6 +73,8 @@ export interface ContextoDeCola {
 	broadcastAuthed(obj: any, exceptDeviceId?: string): void;
 	broadcastRol(rol: Role, obj: any): void;
 	emitSyncEvent(name: string, fields: Record<string, unknown>): void;
+	/** La base del negocio está llena o no se deja escribir: que se entere quien puede hacerle sitio. */
+	avisarBaseLlena(error: unknown): void;
 }
 
 /**
@@ -293,7 +295,8 @@ function anotarFallo(
  *
  * Devuelve qué ha pasado, porque de eso depende cuánto esperar:
  *  - `"ok"`: entró todo lo que podía entrar (lo apartado también cuenta: la cola avanzó).
- *  - `"base_caida"`: la base del tenant no contesta. No se le anota nada a nadie y se insiste.
+ *  - `"base_caida"`: la base del tenant no contesta, o está llena. No se le anota nada a nadie y
+ *    se insiste.
  *  - `"operacion_en_duda"`: la base contesta pero una operación falla por algo que no sabemos
  *    clasificar. Se le anota el intento y se para: lo de detrás se apoya en ella.
  *
@@ -327,13 +330,24 @@ async function aplicarLote(
 			const error = String(e?.message || e);
 
 			// Un rechazo permanente se aparta en el acto y la cola sigue por la de detrás: es la
-			// política de SYNC-20, que hasta ahora sólo aplicaba el camino en vivo.
-			const permanente = esRechazoPermanente(error);
+			// política de SYNC-20, que hasta ahora sólo aplicaba el camino en vivo. Se clasifica con
+			// el error entero, no con su texto: lo primero que se mira es su código.
+			const permanente = esRechazoPermanente(e);
+
+			// Una base llena no es culpa de la operación ni de las de detrás: cinco vueltas no le
+			// hacen sitio, y apartarlas las dejaría fuera de la nube estando bien. No se le anota nada
+			// a nadie, se avisa y se espera. La base sí contesta a una lectura (`baseResponde`), así
+			// que hay que mirarlo aquí.
+			if (esBaseLlena(e)) {
+				ctx.avisarBaseLlena(e);
+				return "base_caida";
+			}
 
 			// Y si no sabemos que sea definitivo, puede ser la base. Preguntárselo a ella es la
-			// única respuesta fiable: el texto de un error de libsql no distingue "estoy caída"
-			// de "esta sentencia no me gusta", y fiarlo al texto es lo que se pudre en silencio
-			// cuando cambia una redacción entre versiones.
+			// única respuesta fiable: fiarlo sólo al texto es lo que se pudre en silencio cuando
+			// cambia una redacción entre versiones. Lo demás que se reconoce como pasajero no se
+			// trata aparte: si la base contesta y la operación sigue fallando, se le cuenta, porque
+			// con la cola sin vaciar las Handy no trabajan y una que no entrara nunca las dejaría así.
 			if (!permanente && !(await baseResponde(db))) return "base_caida";
 
 			anotarFallo(ctx, op, error, permanente);

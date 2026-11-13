@@ -298,7 +298,22 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 - **Quien clasifica un fallo es el DO**, que tiene la excepción delante (`tenantHub.errores.ts`), y el
   veredicto viaja en el ack: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
-  El cliente no compara textos de error de libsql.
+  El cliente no compara textos de error.
+  - **Primero por el código**, si el fallo es un `HubError`: es permanente lo que dice que la
+    operación está mal escrita (`hora_no_determinista`, `missing_client_now`, sin identidad, el mismo
+    `Op_Id` con otro contenido) y pasajero lo que habla de cómo está la nube y no de la operación
+    (sin base, el esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main).
+  - **Después por el texto** de SQLite o del runtime del Durable Object. Pasajero, y se mira
+    antes: la base ocupada o sin poder leer ni escribir, y el objeto saturado o reiniciado.
+    Permanente: lo que no encaja con el esquema o con los datos, y los límites del SQLite del DO
+    (parámetros, patrón de `LIKE`, `SELECT` compuesto, tamaño de la sentencia o de un valor).
+  - Las firmas de texto llevan un espacio o son un código de SQLite (`sqlite_full`). El mensaje de
+    SQLite trae nombres de tablas y columnas, y una palabra suelta (`socket`, `timeout`, `503`)
+    casaría con uno: ese rechazo, que es permanente, saldría como pasajero y pararía el outbox. La
+    base está en el propio DO, así que no hay firmas de red.
+  - **Una base llena o en sólo lectura no aparta nada** (`esBaseLlena`): es pasajero para la
+    operación, y el DO avisa una vez por instancia (Sentry, y `base_llena` en Axiom). Hacerle sitio
+    es cosa de una persona.
 - **El transporte no cuenta nunca** como intento de la operación: `socket_not_open`, `ack_timeout` y
   `socket_soltado` (un vencimiento o cierre del canal nativo nunca se trata como rechazo de aplicación). Cuando lo roto es el cable,
   apartar la cabeza de la cola no desatasca nada.
@@ -353,6 +368,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   excepciones y se reprograma a mano, y para si una vuelta no reduce la cola.
 - **De quién es la culpa cuando falla** (`aplicarLote`):
   - un rechazo permanente se aparta en el acto y la cola sigue;
+  - una base llena no se le anota a nadie: se avisa y se espera con la misma escalera;
   - cualquier otro fallo pregunta a la base (`SELECT 1`): si no contesta, no se le anota nada a nadie
     y se espera 5 s, 30 s, 2 min, 5 min, 15 min (la escalera vive en `_Cola_Estado`); `encolar` adelanta
     la alarma si la Main vuelve a escribir;
