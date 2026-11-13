@@ -188,9 +188,10 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en Configuración → Conectividad.
   Entre sus estados están `conectando`, `conectado`, `reintentando`, `sin_identidad`, `rechazado` y
   `pausada`. Desmontar la UI no detiene la réplica nativa.
-- **Con la sesión abierta, si sigue tocando conectar se mira cada 10 s**
+- **Con la sesión abierta, si sigue tocando conectar se mira como mucho cada 10 s**
   (`COMPROBAR_DISPONIBLE_CADA`, `use_cases/replicacion.rs`), no con cada mensaje del socket: es leer
-  `device_config.json`, mirar si hay un traslado y dos consultas. Cambiar el modo
+  `device_config.json`, mirar si hay un traslado y dos consultas. Se mira al volver de cada espera
+  del socket, así que en reposo es cuando vence la espera (hasta 30 s), como antes. Cambiar el modo
   (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor, y entonces se mira
   en el momento.
 - **Palanca de emergencia sin interfaz**: `connectivity: "auto" | "off"` en `device_config.json`

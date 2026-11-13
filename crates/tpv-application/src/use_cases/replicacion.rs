@@ -8,10 +8,11 @@ use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, rep
 const MAX_PAGINAS: usize = 2000;
 const TTL_ENCOLADA: i64 = 60 * 60 * 1000;
 
-/// Cada cuánto se mira, con la sesión abierta, si este equipo sigue siendo la Main con la réplica
-/// encendida (`ContextoReplicacion::sigue_disponible`, que lee `device_config.json`, mira si hay un
-/// traslado y hace dos consultas). Antes se miraba en cada vuelta del bucle, que es cada mensaje
-/// del socket: con las Handy trabajando, varias veces por segundo. Lo que cambia el modo
+/// Lo más a menudo que se mira, con la sesión abierta, si este equipo sigue siendo la Main con la
+/// réplica encendida (`ContextoReplicacion::sigue_disponible`, que lee `device_config.json`, mira si
+/// hay un traslado y hace dos consultas). Se mira al volver de cada espera del socket, como antes:
+/// en reposo, cuando vence (hasta 30 s). Antes se miraba en cada vuelta del bucle, que es cada
+/// mensaje del socket: con las Handy trabajando, varias veces por segundo. Lo que cambia el modo
 /// (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor (`despertar`), y
 /// entonces se mira en el momento.
 pub const COMPROBAR_DISPONIBLE_CADA: Duration = Duration::from_secs(10);
