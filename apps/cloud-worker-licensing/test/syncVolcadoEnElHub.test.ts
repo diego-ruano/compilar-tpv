@@ -90,12 +90,15 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 		});
 	});
 
-	it("el contraste y una página del histórico, igual", async () => {
+	it("el contraste, sus claves y una página del histórico, igual", async () => {
 		await conNegocioFirmado(deps, "volcado-hub-resto", async (n) => {
 			await sembrar(n);
 
+			// Con la ruta en el Worker cada lectura pasa por `consultar`, que sólo deja leer: las
+			// sentencias de los volcados y la de las claves tienen que caber por esa puerta.
 			for (const [ruta, cuerpo] of [
 				["/v1/sync/verificar", {}],
+				["/v1/sync/verificar-claves", { tablas: [{ nombre: "Comandas", claves: ["ID_Comanda"] }] }],
 				["/v1/sync/historico", { tabla: "Comandas", cursor: 0, limite: 25 }],
 			] as const) {
 				const res = await pedirFirmado(deps, app, n, ruta, { cuerpo, cabeceras: AHORA });
@@ -117,5 +120,22 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 			expect(pagina.filas).toHaveLength(25);
 			expect(pagina.siguiente_cursor).toBe(25);
 		});
+	});
+
+	it("sin base, la fase 1 lo dice con su código por los dos caminos", async () => {
+		// Es lo que la pantalla de recuperación necesita para ofrecer «empezar de cero»
+		// (`tenant_db_not_provisioned`): no un 500 del lector en bruto, que pide la base al motor.
+		await conNegocioFirmado(
+			deps,
+			"volcado-hub-sin-base",
+			async (n) => {
+				for (const opciones of [{ cabeceras: AHORA }, EN_EL_WORKER]) {
+					const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", opciones);
+					expect(res.status).toBe(404);
+					expect(await res.json()).toMatchObject({ ok: false, code: "tenant_db_not_provisioned" });
+				}
+			},
+			{ sinBase: true },
+		);
 	});
 });
