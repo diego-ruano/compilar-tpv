@@ -1,5 +1,62 @@
 import { describe, it, expect } from "vitest";
-import { featureKeysPorTablas, ajustesPorTablas, shouldReloadTicket, type ComandaSyncInfo } from "../src/shared/lib/syncStatements";
+import { featureKeysPorTablas, ajustesPorTablas, shouldReloadTicket, tablasConArea, type ComandaSyncInfo } from "../src/shared/lib/syncStatements";
+// La foto del esquema, la misma que vigila `schema_snapshot` en Rust: de ahí salen las tablas.
+import esquema from "../../../packages/database/schema.snapshot.sql?raw";
+
+/**
+ * Lo que hay en el esquema y no es del negocio: el andamiaje de la réplica en la nube (el mismo
+ * `TABLAS_DE_ANDAMIAJE` del worker, `domains/sync/bootstrap.ventana.ts`). Nunca viaja en un aviso
+ * de cambio. Lo que empieza por `_` es estado local del equipo y tampoco se replica.
+ */
+const ANDAMIAJE = new Set(["sync_changes", "applied_operations", "sync_main_checkpoints"]);
+
+const tablasDelEsquema = [...esquema.matchAll(/^CREATE TABLE (\w+)/gm)].map((m) => m[1].toLowerCase());
+const tablasDeNegocio = tablasDelEsquema.filter((t) => !t.startsWith("_") && !ANDAMIAJE.has(t));
+
+describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
+    it("la foto del esquema se lee: están las tablas de siempre", () => {
+        expect(tablasDeNegocio.length).toBeGreaterThan(40);
+        for (const tabla of ["pagos", "movimientos_caja", "registros_facturacion", "reserva_web_mesas"]) {
+            expect(tablasDeNegocio).toContain(tabla);
+        }
+    });
+    it("ninguna tabla de negocio obliga a releerlo todo", () => {
+        // Una tabla sin entrada devuelve `null`, y eso es `invalidateQueries()` de todo en todos los
+        // equipos: en una Handy, un viaje al Durable Object por cada consulta abierta. Si esto
+        // falla es que el esquema tiene una tabla nueva: dale su entrada en `TABLE_TO_FEATURES`
+        // con las pantallas que la enseñan (o `[]` y por qué ninguna).
+        const sinEntrada = tablasDeNegocio.filter((t) => featureKeysPorTablas([t]) === null);
+        expect(sinEntrada).toEqual([]);
+    });
+    it("no queda ninguna entrada de una tabla que ya no existe", () => {
+        expect(tablasConArea().filter((t) => !tablasDeNegocio.includes(t))).toEqual([]);
+    });
+    it("un cobro refresca lo que cambia, no todo", () => {
+        // Lo que escribe un cobro con su stock, su apunte de caja y su registro de facturación.
+        const cobro = [
+            "comandas", "pagos", "pago_detalles", "lotes_producto", "lote_consumos", "productos",
+            "suelto_consumos", "movimientos_caja", "serie_facturacion", "registros_facturacion",
+        ];
+        const areas = featureKeysPorTablas(cobro);
+        expect(areas).not.toBeNull();
+        expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
+        expect(ajustesPorTablas(cobro)).toBe(false);
+    });
+    it("la caja, el stock y las reservas web refrescan su pantalla; lo fiscal, ninguna", () => {
+        for (const tabla of ["movimientos_caja", "aperturas_cajon", "cierres_caja", "cierre_denominaciones", "cierre_rectificaciones"]) {
+            expect(featureKeysPorTablas([tabla])).toEqual(["cuentas"]);
+        }
+        for (const tabla of ["movimientos_stock", "suelto_consumos"]) expect(featureKeysPorTablas([tabla])).toEqual(["inventario"]);
+        for (const tabla of ["reserva_web_mesas", "reserva_web_franjas", "reserva_web_cierres"]) {
+            expect(featureKeysPorTablas([tabla])).toEqual(["reservas"]);
+        }
+        for (const tabla of ["registros_facturacion", "serie_facturacion", "intentos_login"]) expect(featureKeysPorTablas([tabla])).toEqual([]);
+    });
+    it("el nombre de la tabla llega como lo escribió el SQL, y un nombre raro no es una entrada", () => {
+        expect(featureKeysPorTablas(["Movimientos_Caja"])).toEqual(["cuentas"]);
+        expect(featureKeysPorTablas(["constructor"])).toBeNull();
+    });
+});
 
 describe("metadatos nativos y cachés de presentación", () => {
     it("deduplica las áreas y distingue ajustes de tablas desconocidas", () => {

@@ -70,8 +70,14 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por lo que avisa Rust con
   `sync:cambio` (lo que llega de una Handy, las reservas web recogidas, un job que escribe). Ese
   evento trae las tablas tocadas y `shared/lib/syncStatements.ts` las traduce a las claves que
-  invalidar: una tabla nueva que se enseñe en otra pantalla va ahí (`reservas` refresca también el
-  plano de `mesas`).
+  invalidar: una tabla que se enseñe en otra pantalla lleva también su clave (`reservas` refresca
+  también el plano de `mesas`). La Handy hace lo mismo con `handy:cambio`.
+- **Toda tabla de negocio tiene su entrada en ese mapa**, aunque sea `[]` (lo fiscal, que no está en
+  ninguna caché; los ajustes, que van por sus stores). Una tabla sin entrada hace releerlo todo, y
+  en una Handy cada consulta que se relee es un viaje al `TenantHub` del negocio: cada cobro escribe
+  en `Movimientos_Caja` y en `Registros_Facturacion`. `test/syncStatements.test.ts` lee
+  `packages/database/schema.snapshot.sql` y falla si a una tabla le falta la entrada o si queda la de
+  una tabla que ya no existe.
 - Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, cada minuto en la
   Main (la reserva de una mesa sale una hora antes y se va al acabar su hueco).
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas

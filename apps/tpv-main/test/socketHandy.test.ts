@@ -56,6 +56,21 @@ describe("presentación del socket Handy nativo", () => {
         expect(vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas"], ["stats"]]);
         expect(useSyncSignal.getState().comanda).toEqual(info); socket.detener();
     });
+    it("un cobro de la Main refresca sus áreas, sin releerlo todo ni los ajustes", async () => {
+        // Cada cobro escribe en la caja, en el stock y en lo fiscal. Con una sola de esas tablas sin
+        // entrada en el mapa, cada venta es un `invalidateQueries()` de todo en cada Handy.
+        const socket = iniciarSocketHandy("handy")!; await asentar();
+        vi.mocked(queryClient.invalidateQueries).mockClear();
+        const ajustes = [useBusinessSettings, useTicketSettings, useContactSettings].map((s) => vi.mocked(s.getState().init));
+        for (const init of ajustes) init.mockClear();
+        const tablas = ["comandas", "pagos", "pago_detalles", "lotes_producto", "lote_consumos", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
+        h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas, comanda: {ids: ["c1"], touchedComanda: true, uncertain: false, touchedCatalog: true}}}});
+        const claves = vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey);
+        expect(claves).not.toContain(undefined);
+        expect(claves.map((c) => String(c)).sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
+        for (const init of ajustes) expect(init).not.toHaveBeenCalled();
+        socket.detener();
+    });
     it("ignora los avisos de una conexión que pertenece al vínculo anterior", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
         vi.mocked(queryClient.invalidateQueries).mockClear();
