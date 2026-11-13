@@ -212,6 +212,13 @@ const DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA =
 	"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND +ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)";
 
 /**
+ * El mismo predicado para los consumos, cuya clave empieza por la línea: se entra por ella y el
+ * cobro se comprueba contra su lista. El `+` está por lo mismo.
+ */
+const DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA =
+	"ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles) AND +ID_Pago IN (SELECT ID_Pago FROM sel_pagos)";
+
+/**
  * Tablas transaccionales, **en orden de backfill: padres primero**.
  *
  * El orden importa porque cada página de la fase 2 es su propia transacción y
@@ -252,14 +259,17 @@ export const TRANSACCIONALES: Transaccional[] = [
 		donde: DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA,
 	},
 	{
+		// Un consumo es de una línea y del cobro que la cobró, y los dos son FK. Como en
+		// `Pago_Detalles`, son de la misma comanda y se piden las dos: si un día no lo fueran, el
+		// consumo se queda para la fase 2 en vez de abortar la restauración.
 		nombre: "Lote_Consumos",
-		ctes: [CTE_COMANDAS, CTE_DETALLES],
-		donde: "ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
+		donde: DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA,
 	},
 	{
 		nombre: "Suelto_Consumos",
-		ctes: [CTE_COMANDAS, CTE_DETALLES],
-		donde: "ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
+		donde: DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA,
 	},
 	{
 		// CUENTA-07. Un movimiento de caja nace a la vez que su cobro, así que la fecha basta; la

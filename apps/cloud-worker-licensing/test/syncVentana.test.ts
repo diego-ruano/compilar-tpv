@@ -278,6 +278,44 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 		for (const d of ids(body, "Pago_Detalles", "ID_Detalle")) expect(detalles).toContain(d);
 	});
 
+	it("un consumo viaja con su línea y con su cobro, y no sin alguno de los dos", async () => {
+		// `Lote_Consumos` y `Suelto_Consumos` apuntan a la línea y al cobro que la cobró, y los dos
+		// son FK. Siempre son de la misma comanda; si un día no lo fueran, el consumo espera a la
+		// fase 2 en vez de abortar la restauración.
+		const { body } = await pedir("/bootstrap", "consumos", (sql) => {
+			sql.exec("INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat1', 'Bebidas');");
+			sql.exec(
+				"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('pr1', 'cat1', 'Caña', 250);",
+			);
+			sql.exec(
+				"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada) VALUES ('lo1', 'pr1', 'L-1', ?);",
+				ANTIGUO,
+			);
+			sembrarVenta(sql, "nueva", RECIENTE);
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			const consumo = (idDetalle: string, idPago: string) => {
+				sql.exec(
+					"INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES (?, 'lo1', ?, 1);",
+					idDetalle,
+					idPago,
+				);
+				sql.exec(
+					"INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES (?, 'pr1', ?, 1);",
+					idDetalle,
+					idPago,
+				);
+			};
+			consumo("d-nueva", "p-nueva"); // dentro
+			consumo("d-vieja", "p-vieja"); // fuera
+			consumo("d-nueva", "p-vieja"); // la línea dentro y el cobro fuera
+		});
+
+		for (const t of ["Lote_Consumos", "Suelto_Consumos"]) {
+			expect(ids(body, t, "ID_Detalle"), t).toEqual(["d-nueva"]);
+			expect(ids(body, t, "ID_Pago"), t).toEqual(["p-nueva"]);
+		}
+	});
+
 	it("un movimiento de caja no viaja sin el pago al que apunta", async () => {
 		// CUENTA-07. `Movimientos_Caja.ID_Pago` es una FK: una fila cuya fecha cae dentro de la
 		// ventana pero cuyo pago se quedó fuera abortaría la restauración.
