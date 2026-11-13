@@ -258,14 +258,18 @@ function resueltas(lote: OpDelOutbox[], acuse: any, historias: Record<string, st
 	return n;
 }
 
-/** Hasta 200 operaciones o 256 KB de sentencias, lo que llegue antes; una al menos. */
+/**
+ * Como `replicacion.rs::cortar`: hasta 200 operaciones y 256 KB de sentencias; la que no cabe se
+ * queda para el lote siguiente, salvo que vaya sola.
+ */
 function corteDeLaMain(pendientes: OpDelOutbox[]): OpDelOutbox[] {
 	const lote: OpDelOutbox[] = [];
 	let bytes = 0;
 	for (const op of pendientes.slice(0, MAX_OPS)) {
-		bytes += JSON.stringify(op.command.payload.steps).length;
+		const n = JSON.stringify(op.command.payload.steps.map(({ sql, args }) => ({ sql, args }))).length;
+		if (lote.length && bytes + n > MAX_BYTES) break;
+		bytes += n;
 		lote.push(op);
-		if (bytes >= MAX_BYTES) break;
 	}
 	return lote;
 }

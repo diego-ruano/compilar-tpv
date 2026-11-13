@@ -92,12 +92,6 @@ pub async fn outbox_pending(repo: &dyn SyncRepository, limit: i64) -> AppResult<
     repo.outbox_pending(limit).await
 }
 
-/// Marca una operación del outbox como enviada tras el `apply_ack` de la nube. `seq` es el cursor
-/// que la nube le asignó (0 si no lo pudo devolver); se usa para ascender el anti-eco a su Seq real.
-pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str, seq: i64) -> AppResult<()> {
-    repo.outbox_mark_sent(op_id, seq).await
-}
-
 /// SYNC-20: la nube rechazó una operación del outbox. Devuelve si se aparta (y el drenado debe
 /// seguir con la siguiente) o si se sigue reintentando.
 ///
@@ -118,19 +112,6 @@ pub async fn outbox_mark_failed(
 
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo lo ya subido a la nube). Se invoca cuando el
 /// outbox queda vacío tras drenar.
-/// SYNC-18: la nube aceptó estas operaciones en su cola (ver el puerto).
-pub async fn outbox_mark_encolada(repo: &dyn SyncRepository, op_ids: &[String]) -> AppResult<()> {
-    repo.outbox_mark_encolada(op_ids).await
-}
-
-/// SYNC-18: devuelve al outbox lo que lleva demasiado tiempo encolado sin confirmar.
-pub async fn liberar_encoladas_caducadas(
-    repo: &dyn SyncRepository,
-    antiguedad_ms: i64,
-) -> AppResult<i64> {
-    repo.liberar_encoladas_caducadas(antiguedad_ms).await
-}
-
 pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
     repo.purge_applied_ops().await
 }
@@ -430,7 +411,7 @@ mod tests {
             self.limits.lock().unwrap().push(limit);
             Ok(vec![])
         }
-        async fn outbox_mark_sent(&self, _: &str, _: i64) -> AppResult<()> {
+        async fn outbox_confirmar_lote(&self, _: &[(String, i64)]) -> AppResult<()> {
             Ok(())
         }
         async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
@@ -450,12 +431,6 @@ mod tests {
             _: bool,
         ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)> {
             Ok((Vec::new(), 0, 0, false))
-        }
-        async fn outbox_mark_encolada(&self, _: &[String]) -> AppResult<()> {
-            Ok(())
-        }
-        async fn liberar_encoladas_caducadas(&self, _: i64) -> AppResult<i64> {
-            Ok(0)
         }
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())

@@ -139,17 +139,11 @@ async fn op_already_applied(conn: &Connection, op_id: &str) -> AppResult<bool> {
     Ok(rows.next().await.map_err(db_err)?.is_some())
 }
 
-/// SYNC-18: la nube confirma (devolviéndonosla) que una operación NUESTRA está aplicada allí.
-/// Se retira del outbox y de las encoladas. Si no era nuestra, no hay nada que borrar.
+/// La nube confirma (devolviéndonosla) que una operación NUESTRA está aplicada allí: se retira del
+/// outbox. Si no era nuestra, no hay nada que borrar.
 async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
     conn.execute(
         "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
-        vec![Value::Text(op_id.to_string())],
-    )
-    .await
-    .map_err(db_err)?;
-    conn.execute(
-        "DELETE FROM _Sync_Encoladas WHERE Op_Id = ?1;",
         vec![Value::Text(op_id.to_string())],
     )
     .await
@@ -181,7 +175,7 @@ async fn pasar_el_checkpoint(conn: &Connection, ch: &SyncChange) -> AppResult<()
 
 /// Purga por cursor de `_Sync_Applied_Ops`: retira los registros cuyo `Seq` ya quedó superado por
 /// el checkpoint con holgura (`PURGE_CURSOR_MARGIN`). Solo afecta a `Seq > 0` (remotos aplicados o
-/// anti-ecos ya ascendidos a su Seq real tras el `apply_ack`); los anti-ecos sin ascender (`Seq=0`)
+/// anti-ecos ya ascendidos a su Seq real tras el acuse de su lote); los anti-ecos sin ascender (`Seq=0`)
 /// quedan intactos —los retira la purga TTL una vez subidos—. Es seguro: un `Seq` por debajo del
 /// margen ya no puede volver a llegar (el catch-up pide solo `Seq > Last_Seq`).
 async fn purge_by_cursor(conn: &Connection, last_seq: i64) -> AppResult<()> {
@@ -299,7 +293,7 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
     let nuevo_op = uuid::Uuid::now_v7().to_string();
     let ahora = now_ms();
     // Se anota de qué operación apartada viene: cuando esta reparación suba, aquélla deja de tener
-    // sentido y se retira (ver `outbox_mark_sent`). Sin el enlace, el aviso de cuarentena no se
+    // sentido y se retira (ver `outbox_confirmar_lote`). Sin el enlace, el aviso de cuarentena no se
     // apagaría nunca aunque el problema ya estuviera resuelto.
     conn.execute(
         "INSERT INTO _Sync_Outbox \
@@ -421,8 +415,8 @@ async fn anotar_fallo(conn: &Connection, ch: &SyncChange, err: &str) -> AppResul
             return Ok(Fallo::YaProcesado);
         }
 
-        // AUD-18: si era el eco de una escritura propia (su anti-eco está, sin `Seq` todavía: las
-        // que suben por la cola no reciben `apply_ack`), el anti-eco pasa a llevar el `Seq` del eco.
+        // AUD-18: si era el eco de una escritura propia (su anti-eco está, sin `Seq` todavía: el
+        // acuse de su lote se perdió), el anti-eco pasa a llevar el `Seq` del eco.
         // `confirmar_subida` acaba de sacarla del outbox, y un anti-eco con `Seq = 0` fuera del
         // outbox es lo que la purga TTL retira: el reintento volvería a aplicar la escritura.
         // Con su `Seq`, por delante del checkpoint, la purga no lo toca hasta que el eco entre.
@@ -535,10 +529,9 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
             }
         }
 
-        // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era una
-        // de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se retira del
-        // outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y cualquier
-        // `apply_ack` que se perdiera por el camino.
+        // Que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era una de las
+        // nuestras (subida, y el acuse de su lote se perdió), esta es su confirmación: se retira
+        // del outbox y deja de estar pendiente.
         confirmar_subida(conn, &ch.op_id).await?;
 
         // AUD-18: la bajada va en orden de `Seq` y el checkpoint sólo pasa por encima de lo que
@@ -754,11 +747,7 @@ impl SyncRepository for SqliteSyncRepository {
         let r = self.db.read().await;
         let conn = r.conn();
 
-        // SYNC-18: se excluyen las que la nube ya aceptó en su cola. Siguen en el outbox (su prueba
-        // de aplicación es volver por el catch-up), pero reenviarlas mientras tanto sería repetir
-        // trabajo en cada ciclo de drenado.
-        //
-        // SYNC-20: y se excluyen las APARTADAS. Una operación que la nube rechaza de forma
+        // SYNC-20: se excluyen las APARTADAS. Una operación que la nube rechaza de forma
         // permanente no vuelve a ofrecerse: si volviera, el drenado la reintentaría, fallaría otra
         // vez y pararía ahí — que es exactamente el atasco que la cuarentena existe para romper.
         // Su fila NO se borra (es lo único que queda de un dato que la nube no tiene), sólo deja
@@ -768,7 +757,6 @@ impl SyncRepository for SqliteSyncRepository {
                 "SELECT Seq, Op_Id, Command_Name, Statements_Json \
                  FROM _Sync_Outbox \
                  WHERE Cuarentena = 0 \
-                   AND Op_Id NOT IN (SELECT Op_Id FROM _Sync_Encoladas) \
                  ORDER BY Seq ASC LIMIT ?1;",
                 vec![Value::Integer(limit)],
             )
@@ -804,50 +792,56 @@ impl SyncRepository for SqliteSyncRepository {
         Ok(out)
     }
 
-    async fn outbox_mark_sent(&self, op_id: &str, seq: i64) -> AppResult<()> {
-        // Tras el `apply_ack`: (1) ascendemos el anti-eco de `_Sync_Applied_Ops` a su `Seq` real
-        // (la nube ya ordenó la op) para que la purga por cursor pueda retirarlo más tarde; y
-        // (2) borramos la fila del outbox (ya subida). Ambas tablas de control van por la conexión
-        // CRUDA de escritura (no deben capturarse como cambio de negocio) y quedan serializadas por
-        // el escritor único; las hacemos en una transacción para que el upgrade y el borrado sean
-        // atómicos (un anti-eco con Seq>0 implica invariablemente "ya no está en el outbox").
+    async fn outbox_confirmar_lote(&self, confirmadas: &[(String, i64)]) -> AppResult<()> {
+        if confirmadas.is_empty() {
+            return Ok(());
+        }
+        // Tras el acuse de un lote, por cada operación que la nube ha confirmado: (1) ascendemos el
+        // anti-eco de `_Sync_Applied_Ops` a su `Seq` real (la nube ya ordenó la op) para que la
+        // purga por cursor pueda retirarlo más tarde; y (2) borramos la fila del outbox (ya subida).
+        // Ambas tablas de control van por la conexión CRUDA de escritura (no deben capturarse como
+        // cambio de negocio) y quedan serializadas por el escritor único. Todo el lote va en UNA
+        // transacción: un anti-eco con Seq>0 implica invariablemente "ya no está en el outbox", y
+        // un corte a mitad deja el lote confirmado entero o sin confirmar (y entonces vuelve a
+        // subir, y la nube contesta «ya estaba»).
         let w = self.db.write().await;
         let conn = w.raw();
 
-        let res: AppResult<()> = conn.transaccion(async {
-            if seq > 0 {
+        conn.transaccion(async {
+            for (op_id, seq) in confirmadas {
+                if *seq > 0 {
+                    conn.execute(
+                        "UPDATE _Sync_Applied_Ops SET Seq = ?1 WHERE Op_Id = ?2 AND Seq = 0;",
+                        vec![Value::Integer(*seq), Value::Text(op_id.clone())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                }
+                // SYNC-26: si lo que acaba de subir es una REPARACIÓN, la operación apartada que la
+                // motivó ya no dice nada — la nube tiene el dato. Se retira, y con ella su aviso.
+                //
+                // Va DENTRO de la misma transacción que borra la reparación, y no después: si el
+                // proceso muriera entre las dos, quedaría una cuarentena eterna por un problema ya
+                // resuelto, que es exactamente lo que esto arregla. Y se exige `Cuarentena = 1` para
+                // no retirar por error una operación que siguiera viva.
                 conn.execute(
-                    "UPDATE _Sync_Applied_Ops SET Seq = ?1 WHERE Op_Id = ?2 AND Seq = 0;",
-                    vec![Value::Integer(seq), Value::Text(op_id.to_string())],
+                    "DELETE FROM _Sync_Outbox \
+                      WHERE Cuarentena = 1 \
+                        AND Op_Id = (SELECT Repara_Op_Id FROM _Sync_Outbox WHERE Op_Id = ?1);",
+                    vec![Value::Text(op_id.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+                conn.execute(
+                    "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
+                    vec![Value::Text(op_id.clone())],
                 )
                 .await
                 .map_err(db_err)?;
             }
-            // SYNC-26: si lo que acaba de subir es una REPARACIÓN, la operación apartada que la
-            // motivó ya no dice nada — la nube tiene el dato. Se retira, y con ella su aviso.
-            //
-            // Va DENTRO de la misma transacción que borra la reparación, y no después: si el
-            // proceso muriera entre las dos, quedaría una cuarentena eterna por un problema ya
-            // resuelto, que es exactamente lo que esto arregla. Y se exige `Cuarentena = 1` para
-            // no retirar por error una operación que siguiera viva.
-            conn.execute(
-                "DELETE FROM _Sync_Outbox \
-                  WHERE Cuarentena = 1 \
-                    AND Op_Id = (SELECT Repara_Op_Id FROM _Sync_Outbox WHERE Op_Id = ?1);",
-                vec![Value::Text(op_id.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-            conn.execute(
-                "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
-                vec![Value::Text(op_id.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
             Ok(())
-        }).await;
-
-        res
+        })
+        .await
     }
 
     async fn outbox_mark_failed(
@@ -864,10 +858,10 @@ impl SyncRepository for SqliteSyncRepository {
         let err_trunc: String = error.chars().take(500).collect();
 
         conn.transaccion(async {
-        // REV-04: anotar dos veces el mismo fallo tiene que ser inocuo. El camino en vivo no repite
-        // (una apartada deja de ofrecerse), pero el aviso de la nube SÍ: el DO reofrece lo que no se
-        // le ha acusado en cada conexión, y un acuse que se pierda traería el mismo `Op_Id` mañana.
-        // Sin esta salida, cada repetición encolaría OTRA reparación de las mismas filas.
+        // REV-04: anotar dos veces el mismo fallo tiene que ser inocuo. Una apartada deja de
+        // ofrecerse, pero el acuse de un lote puede traer el veredicto de una que se apartó
+        // mientras el lote estaba en vuelo. Sin esta salida, cada repetición encolaría OTRA
+        // reparación de las mismas filas.
         if ya_apartada(conn, op_id).await? {
             return Ok(OutboxFallo::default());
         }
@@ -911,16 +905,6 @@ impl SyncRepository for SqliteSyncRepository {
         if apartar {
             conn.execute(
                 "UPDATE _Sync_Outbox SET Cuarentena = 1 WHERE Op_Id = ?1;",
-                vec![Value::Text(op_id.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-            // REV-04: y deja de estar "encolada en la nube". Esa marca dice «está en camino, no la
-            // reenvíes», y su única forma de levantarse es que la operación vuelva por el catch-up
-            // — que es justo lo que no va a pasar con una apartada. Dejarla sería que la fila
-            // arrastrara dos estados contradictorios a la vez.
-            conn.execute(
-                "DELETE FROM _Sync_Encoladas WHERE Op_Id = ?1;",
                 vec![Value::Text(op_id.to_string())],
             )
             .await
@@ -969,51 +953,8 @@ impl SyncRepository for SqliteSyncRepository {
         SqliteSyncRepository::contrastar_claves_con(self, respuesta, hasta_seq, reparar).await
     }
 
-    async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()> {
-        if op_ids.is_empty() {
-            return Ok(());
-        }
-        // Tabla de control: conexión CRUDA (no debe capturarse como cambio de negocio).
-        let w = self.db.write().await;
-        let conn = w.raw();
-        let ahora = now_ms();
-
-        let res: AppResult<()> = conn.transaccion(async {
-            for op_id in op_ids {
-                conn.execute(
-                    "INSERT OR REPLACE INTO _Sync_Encoladas (Op_Id, Encolada_En_Ms) VALUES (?1, ?2);",
-                    vec![Value::Text(op_id.clone()), Value::Integer(ahora)],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-            Ok(())
-        }).await;
-
-        res
-    }
-
-    async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64> {
-        let w = self.db.write().await;
-        let conn = w.raw();
-        let corte = now_ms() - antiguedad_ms.max(0);
-
-        // `<=` y no `<`: con `antiguedad_ms = 0` la lectura natural es "libera todas", y con un
-        // plazo real (una hora) la diferencia en el borde es irrelevante. Con `<`, una encolada en
-        // el mismo milisegundo que la consulta se salvaba por un pelo.
-        let n = conn
-            .execute(
-                "DELETE FROM _Sync_Encoladas WHERE Encolada_En_Ms <= ?1;",
-                vec![Value::Integer(corte)],
-            )
-            .await
-            .map_err(db_err)?;
-
-        Ok(n as i64)
-    }
-
     async fn purge_applied_ops(&self) -> AppResult<()> {
-        // Red de seguridad para los anti-ecos que no se ascendieron por cursor (p. ej. `apply_ack`
+        // Red de seguridad para los anti-ecos que no se ascendieron por cursor (p. ej. un acuse
         // sin `seq` por cache-hit de idempotencia): retira los registros ANTIGUOS (TTL) cuyo
         // `Op_Id` YA NO está pendiente en el outbox (es decir, ya confirmados en la nube). El
         // filtro `NOT IN (_Sync_Outbox)` es la garantía de "solo borrar lo subido": jamás retira
@@ -1022,10 +963,10 @@ impl SyncRepository for SqliteSyncRepository {
         // AUD-18: y tampoco el de una op propia cuyo `Seq` va por delante del checkpoint. La bajada
         // no pasa por encima de un cambio que falla mientras se reintenta, así que lo que esta Main
         // subió después le volverá por el catch-up; sin su anti-eco, se aplicaría otra vez. Un
-        // `Seq = 0` fuera del outbox ya no puede volver: o su eco ya entró (lo que sube por la cola
-        // sale del outbox al volver su eco, y si ese eco falla, `anotar_fallo` le pone su `Seq`), o
-        // el `apply_ack` no trajo `Seq` porque la nube ya había purgado su log, cosa que sólo hace
-        // por debajo del checkpoint de las Main activas (el DO no contesta `Seq` 0 por un error).
+        // `Seq = 0` fuera del outbox ya no puede volver: o su eco ya entró (una operación cuyo acuse
+        // se perdió sale del outbox al volver su eco, y si ese eco falla, `anotar_fallo` le pone su
+        // `Seq`), o el acuse no trajo `Seq` porque la nube ya había purgado su log, cosa que sólo
+        // hace por debajo del checkpoint de las Main activas (el DO no contesta `Seq` 0 por un error).
         let cutoff = now_ms() - PURGE_TTL_MS;
         let w = self.db.write().await;
         w.raw()
@@ -1269,9 +1210,6 @@ impl SyncRepository for SqliteSyncRepository {
                 .await
                 .map_err(db_err)?;
             conn.execute("DELETE FROM _Sync_Failed;", ())
-                .await
-                .map_err(db_err)?;
-            conn.execute("DELETE FROM _Sync_Encoladas;", ())
                 .await
                 .map_err(db_err)?;
             if apartar_outbox {
@@ -1573,13 +1511,9 @@ impl SyncRepository for SqliteSyncRepository {
 }
 
 #[cfg(test)]
-mod tests_encoladas {
-    //! SYNC-18 · lado Main: el estado intermedio "la nube la tiene en su cola, pero aún no me
-    //! consta aplicada".
-    //!
-    //! Es el estado que permite a este TPV soltar su atraso y desconectarse. Lo delicado es que no
-    //! se dé una operación por buena antes de tiempo: mientras no vuelva por el catch-up, su copia
-    //! local se conserva.
+mod tests_subida {
+    //! El outbox visto desde quien lo sube: qué se ofrece, qué lo da por subido (el acuse de su
+    //! lote, o verlo volver de la nube) y qué pasa con lo que la nube rechaza (SYNC-20).
 
     use super::*;
     use crate::db::Db;
@@ -1618,41 +1552,100 @@ mod tests_encoladas {
             .collect()
     }
 
-    #[tokio::test]
-    async fn una_encolada_deja_de_ofrecerse_pero_no_se_borra() {
-        let (repo, db, _dir) = repo_temporal().await;
-        encolar_en_outbox(&db, "op-1").await;
-        encolar_en_outbox(&db, "op-2").await;
-
-        repo.outbox_mark_encolada(&["op-1".to_string()])
-            .await
-            .unwrap();
-
-        // Ya no se ofrece para reenviar...
-        assert_eq!(ids_pendientes(&repo).await, vec!["op-2".to_string()]);
-        // ...pero su copia sigue aquí: que la nube la tenga en la cola no prueba que la aplicara.
+    async fn numero(db: &Arc<Db>, sql: &str) -> i64 {
         let r = db.read().await;
-        let mut rows = r
-            .conn()
-            .query(
-                "SELECT COUNT(*) FROM _Sync_Outbox WHERE Op_Id = 'op-1';",
-                Vec::<Value>::new(),
+        let mut rows = r.conn().query(sql, Vec::<Value>::new()).await.unwrap();
+        let fila = rows.next().await.unwrap().unwrap();
+        v_i64(fila.get_value(0).unwrap()).unwrap_or(-1)
+    }
+
+    /// El anti-eco que deja la captura de una escritura local: sin `Seq` hasta que la nube la numera.
+    async fn anti_eco(db: &Arc<Db>, op_id: &str) {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, 0, ?2);",
+                vec![Value::Text(op_id.to_string()), Value::Integer(now_ms())],
             )
             .await
             .unwrap();
-        let fila = rows.next().await.unwrap().unwrap();
-        assert_eq!(v_i64(fila.get_value(0).unwrap()).unwrap_or(0), 1);
     }
 
     #[tokio::test]
-    async fn verla_volver_de_la_nube_es_lo_que_la_da_por_subida() {
+    async fn mientras_la_nube_no_la_confirma_se_sigue_ofreciendo_y_en_orden() {
+        // No hay estado intermedio: una operación mandada sin acuse sigue pendiente, y vuelve a
+        // salir en el lote siguiente. Reenviarla es inocuo: la nube es idempotente por `Op_Id`.
         let (repo, db, _dir) = repo_temporal().await;
-        encolar_en_outbox(&db, "op-1").await;
-        repo.outbox_mark_encolada(&["op-1".to_string()])
+        for op in ["op-1", "op-2", "op-3"] {
+            encolar_en_outbox(&db, op).await;
+        }
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-1", "op-2", "op-3"]);
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-1", "op-2", "op-3"]);
+    }
+
+    #[tokio::test]
+    async fn el_acuse_de_un_lote_saca_del_outbox_todo_lo_confirmado_y_numera_sus_anti_ecos() {
+        let (repo, db, _dir) = repo_temporal().await;
+        for op in ["op-1", "op-2", "op-3"] {
+            encolar_en_outbox(&db, op).await;
+            anti_eco(&db, op).await;
+        }
+
+        // La nube confirma las dos primeras; de la segunda ya había purgado el log (`Seq` 0).
+        repo.outbox_confirmar_lote(&[("op-1".to_string(), 41), ("op-2".to_string(), 0)])
             .await
             .unwrap();
 
-        // El catch-up la devuelve: prueba de que allí está aplicada.
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-3".to_string()]);
+        assert_eq!(numero(&db, "SELECT Seq FROM _Sync_Applied_Ops WHERE Op_Id = 'op-1';").await, 41);
+        assert_eq!(numero(&db, "SELECT Seq FROM _Sync_Applied_Ops WHERE Op_Id = 'op-2';").await, 0);
+        assert_eq!(numero(&db, "SELECT Seq FROM _Sync_Applied_Ops WHERE Op_Id = 'op-3';").await, 0);
+
+        // Repetirlo (el acuse de un lote reenviado) no cambia nada, ni confirmar algo que no está.
+        repo.outbox_confirmar_lote(&[("op-1".to_string(), 99), ("no-esta".to_string(), 7)])
+            .await
+            .unwrap();
+        assert_eq!(numero(&db, "SELECT Seq FROM _Sync_Applied_Ops WHERE Op_Id = 'op-1';").await, 41);
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-3".to_string()]);
+        repo.outbox_confirmar_lote(&[]).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn un_lote_se_confirma_entero_o_no_se_confirma() {
+        // Si la transacción no llega a cerrarse, no queda ni la primera confirmada: el lote
+        // volverá a subir entero y la nube contestará «ya estaba» a cada una.
+        let (repo, db, _dir) = repo_temporal().await;
+        for op in ["op-1", "op-2"] {
+            encolar_en_outbox(&db, op).await;
+            anti_eco(&db, op).await;
+        }
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "CREATE TRIGGER no_se_borra_la_segunda BEFORE DELETE ON _Sync_Outbox
+                     WHEN OLD.Op_Id = 'op-2'
+                     BEGIN SELECT RAISE(ABORT, 'la segunda no sale'); END;",
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = repo
+            .outbox_confirmar_lote(&[("op-1".to_string(), 5), ("op-2".to_string(), 6)])
+            .await;
+
+        assert!(r.is_err());
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string(), "op-2".to_string()]);
+        assert_eq!(numero(&db, "SELECT MAX(Seq) FROM _Sync_Applied_Ops;").await, 0);
+    }
+
+    #[tokio::test]
+    async fn verla_volver_de_la_nube_tambien_la_da_por_subida() {
+        // El acuse de su lote se perdió, pero el catch-up la devuelve: prueba de que allí está.
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+
         repo.apply_changes(vec![SyncChange {
             op_id: "op-1".to_string(),
             seq: 7,
@@ -1662,38 +1655,7 @@ mod tests_encoladas {
         .unwrap();
 
         assert!(ids_pendientes(&repo).await.is_empty());
-        let r = db.read().await;
-        let mut rows = r
-            .conn()
-            .query(
-                "SELECT (SELECT COUNT(*) FROM _Sync_Outbox) + (SELECT COUNT(*) FROM _Sync_Encoladas);",
-                Vec::<Value>::new(),
-            )
-            .await
-            .unwrap();
-        let fila = rows.next().await.unwrap().unwrap();
-        assert_eq!(v_i64(fila.get_value(0).unwrap()).unwrap_or(-1), 0);
-    }
-
-    #[tokio::test]
-    async fn una_encolada_que_nunca_se_confirma_vuelve_a_ofrecerse() {
-        // La red que impide el limbo: si la nube nunca la devuelve (se perdió el ack, o acabó
-        // apartada allí), se reenvía. Reenviar es inocuo: la nube es idempotente por `Op_Id`.
-        let (repo, db, _dir) = repo_temporal().await;
-        encolar_en_outbox(&db, "op-1").await;
-        repo.outbox_mark_encolada(&["op-1".to_string()])
-            .await
-            .unwrap();
-        assert!(ids_pendientes(&repo).await.is_empty());
-
-        // Todavía es reciente: no se toca.
-        assert_eq!(repo.liberar_encoladas_caducadas(60_000).await.unwrap(), 0);
-
-        assert!(ids_pendientes(&repo).await.is_empty());
-
-        // Con el plazo vencido, vuelve a estar disponible.
-        assert_eq!(repo.liberar_encoladas_caducadas(0).await.unwrap(), 1);
-        assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string()]);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
     }
 
     /* ===== SYNC-20: la cola no se queda parada detrás de un rechazo ===== */
@@ -2869,47 +2831,6 @@ use crate::ejecutor::Connection;
             .filter(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
             .count();
         assert_eq!(reparaciones, 1, "una sola reparación en la cola");
-    }
-
-    #[tokio::test]
-    async fn apartar_suelta_la_marca_de_encolada() {
-        // REV-04: la marca dice «está en la cola de la nube, no la reenvíes», y sólo se levanta
-        // viendo volver la operación por el catch-up — que es justo lo que no va a pasar con una
-        // apartada. Dejarla sería que la fila arrastrara dos estados que se contradicen.
-        let (repo, db, _dir) = repo_temporal().await;
-        {
-            let w = db.write().await;
-            w.raw()
-                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Barra');")
-                .await
-                .unwrap();
-        }
-        let stmt = SqlStatement {
-            sql: "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;".into(),
-            args: vec![serde_json::json!("Barra"), serde_json::json!("z1")],
-        };
-        encolar_con(&db, "op-mala", &[stmt]).await;
-        repo.outbox_mark_encolada(&["op-mala".to_string()])
-            .await
-            .unwrap();
-
-        repo.outbox_mark_failed("op-mala", "la nube la apartó de su cola", true)
-            .await
-            .unwrap();
-
-        let quedan = {
-            let r = db.read().await;
-            let mut rows = r
-                .conn()
-                .query(
-                    "SELECT COUNT(*) FROM _Sync_Encoladas WHERE Op_Id = 'op-mala';",
-                    (),
-                )
-                .await
-                .unwrap();
-            v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(-1)
-        };
-        assert_eq!(quedan, 0, "una apartada ya no está en camino");
     }
 
     #[tokio::test]
@@ -4565,7 +4486,7 @@ mod tests_cierre_del_aviso {
             .into_iter()
             .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
             .expect("la reparación está en la cola");
-        repo.outbox_mark_sent(&rep.op_id, 7).await.unwrap();
+        repo.outbox_confirmar_lote(&[(rep.op_id.clone(), 7)]).await.unwrap();
 
         // Y el aviso se apaga sin que nadie lo descarte.
         let salud = repo.health().await.unwrap();
@@ -4594,7 +4515,7 @@ mod tests_cierre_del_aviso {
                 .unwrap();
         }
 
-        repo.outbox_mark_sent("normal", 9).await.unwrap();
+        repo.outbox_confirmar_lote(&[("normal".to_string(), 9)]).await.unwrap();
 
         assert_eq!(
             repo.health().await.unwrap().subida_en_cuarentena,
@@ -5214,10 +5135,10 @@ mod tests_bajada_en_orden {
 
     #[tokio::test]
     async fn el_anti_eco_de_un_eco_propio_que_falla_no_lo_retira_la_purga() {
-        // Codex (tercera revisión ter, 1): lo subido por la cola no recibe `apply_ack`, así que su
-        // anti-eco se queda con `Seq = 0`. Si su eco no podía mover el checkpoint, `anotar_fallo` lo
-        // sacaba del outbox y la purga TTL retiraba el anti-eco durante la espera: el reintento
-        // descontaba el stock otra vez (9 → 8).
+        // Codex (tercera revisión ter, 1): una operación subida cuyo acuse se perdió tiene su
+        // anti-eco con `Seq = 0`. Si su eco no podía mover el checkpoint, `anotar_fallo` lo sacaba
+        // del outbox y la purga TTL retiraba el anti-eco durante la espera: el reintento descontaba
+        // el stock otra vez (9 → 8).
         let (repo, db, _dir) = repo_temporal().await;
         sembrar(
             &db,
@@ -5227,7 +5148,6 @@ mod tests_bajada_en_orden {
              UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
              INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms)
              VALUES ('op-venta', 'venta', '[]', 1);
-             INSERT INTO _Sync_Encoladas (Op_Id, Encolada_En_Ms) VALUES ('op-venta', 1);
              INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-venta', 0, 1);",
         )
         .await;

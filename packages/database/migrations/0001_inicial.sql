@@ -1258,9 +1258,9 @@ CREATE TABLE IF NOT EXISTS Sync_Changes (
   Created_At_Ms INTEGER NOT NULL
 );
 
--- El TenantHub busca en el log el cambio de una operacion por su Op_Id: el resultado guardado de
--- un reintento idempotente y lo ya aplicado de un lote de la cola. Sin este indice cada busqueda
--- recorria el log entero, que guarda siete dias de escrituras del negocio.
+-- El TenantHub busca en el log el cambio de una operacion por su Op_Id: el Seq de una que vuelve a
+-- llegar ya aplicada (un reintento, un lote reenviado). Sin este indice cada busqueda recorria el
+-- log entero, que guarda siete dias de escrituras del negocio.
 CREATE INDEX IF NOT EXISTS idx_sync_changes_op_id
 ON Sync_Changes(Op_Id);
 
@@ -1846,9 +1846,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
 -- Intentos / Ultimo_Error / Ultimo_Intento_Ms / Cuarentena (SYNC-20): una operacion que
 -- la nube RECHAZA no es lo mismo que una que no ha podido salir. Sin estas columnas el
 -- drenado no sabia distinguirlas y hacia lo unico que podia: parar y reintentar, en
--- silencio y para siempre, con todas las ventas de detras detenidas tambien. Es la misma
--- politica que el DO ya aplicaba a su cola de entrada (`_Cola_Muerta` en tenantHub.cola.ts),
--- traida al camino en vivo, que es por donde va un TPV al dia.
+-- silencio y para siempre, con todas las ventas de detras detenidas tambien.
 CREATE TABLE IF NOT EXISTS _Sync_Outbox (
     Seq INTEGER PRIMARY KEY AUTOINCREMENT,
     Op_Id TEXT NOT NULL UNIQUE,
@@ -1879,15 +1877,6 @@ CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
     Op_Id TEXT NOT NULL PRIMARY KEY,
     Seq INTEGER NOT NULL,
     Applied_At_Ms INTEGER NOT NULL
-);
-
--- SYNC-18: operaciones que la nube ya ha ACEPTADO en su cola pero aun no ha confirmado
--- aplicadas. Su fila sigue en `_Sync_Outbox` a proposito: mientras no vuelva por el
--- catch-up (que es la prueba de que se aplico de verdad), esta Main conserva su copia y
--- puede reenviarla. Lo que hace esta tabla es que no se reenvie MIENTRAS TANTO.
-CREATE TABLE IF NOT EXISTS _Sync_Encoladas (
-    Op_Id TEXT NOT NULL PRIMARY KEY,
-    Encolada_En_Ms INTEGER NOT NULL
 );
 
 -- Hasta donde ha leido esta Main el log de cambios de la nube.

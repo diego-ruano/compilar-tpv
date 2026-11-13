@@ -65,18 +65,23 @@ pub trait SyncRepository: Send + Sync {
     /// Operaciones pendientes de subir a la nube (outbox local), en orden, hasta `limit`.
     async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>>;
 
-    /// Marca una operación del outbox como enviada (la nube confirmó con `apply_ack`).
+    /// Da por subidas las operaciones que la nube ha confirmado en el acuse de un lote, **todas en
+    /// una transacción**: o salen todas del outbox o no sale ninguna. Si el proceso muere a mitad,
+    /// el lote vuelve a subir entero y la nube contesta «ya estaba» a cada una.
     ///
-    /// `seq` es el cursor que la nube asignó a la operación en su log (`Sync_Changes`). Sirve para
-    /// "ascender" el registro anti-eco de `_Sync_Applied_Ops` (que se insertó con `Seq=0`) a su
-    /// `Seq` real, de modo que la purga por cursor pueda retirarlo cuando el checkpoint lo supere.
-    /// Si la nube no pudo devolver un `seq` (p. ej. cache-hit de idempotencia sin log), llega `0`
-    /// y el anti-eco se queda en `Seq=0` (lo retirará la purga TTL una vez subido).
-    async fn outbox_mark_sent(&self, op_id: &str, seq: i64) -> AppResult<()>;
+    /// Cada par es `(op_id, seq)`. `seq` es el cursor que la nube asignó a la operación en su log
+    /// (`Sync_Changes`). Sirve para "ascender" el registro anti-eco de `_Sync_Applied_Ops` (que se
+    /// insertó con `Seq=0`) a su `Seq` real, de modo que la purga por cursor pueda retirarlo cuando
+    /// el checkpoint lo supere. Si la nube no pudo devolver un `seq` (ya había purgado el log de esa
+    /// operación), llega `0` y el anti-eco se queda en `Seq=0` (lo retirará la purga TTL).
+    ///
+    /// SYNC-26: si una de ellas es una reparación, la operación apartada que la motivó se retira con
+    /// ella.
+    async fn outbox_confirmar_lote(&self, confirmadas: &[(String, i64)]) -> AppResult<()>;
 
     /// SYNC-20: anota que la nube RECHAZÓ una operación del outbox y decide si se aparta.
     ///
-    /// `permanente` lo dice la nube en el `apply_ack`: un error de SQL contra el esquema del
+    /// `permanente` lo dice la nube en su acuse: un error de SQL contra el esquema del
     /// tenant no se arregla reintentando, mientras que un corte o un timeout sí. Sin esa
     /// distinción el drenado sólo podía hacer una cosa —parar y volver a intentarlo— y una
     /// operación irreparable detenía la cola entera, en silencio y para siempre.
@@ -86,17 +91,6 @@ pub trait SyncRepository: Send + Sync {
         error: &str,
         permanente: bool,
     ) -> AppResult<OutboxFallo>;
-
-    /// SYNC-18: marca operaciones como **aceptadas por la cola de la nube**. Su fila sigue en el
-    /// outbox (la prueba de que se aplicaron es verlas volver por el catch-up), pero dejan de
-    /// ofrecerse para reenviar mientras tanto.
-    async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()>;
-
-    /// Suelta las encoladas que llevan demasiado tiempo sin confirmarse: vuelven a estar
-    /// disponibles para reenviar. Devuelve cuántas se soltaron. Reenviar es inocuo (la nube es
-    /// idempotente por `Op_Id`), y es la red que impide que una operación se quede en el limbo si
-    /// la nube la descartó o el ack se perdió.
-    async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64>;
 
     /// SYNC-24: contrasta la foto de la nube contra esta base y encola la reparación de lo que no
     /// cuadre. Devuelve qué se ha encontrado, para poder informarlo.

@@ -37,7 +37,7 @@ use tpv_application::ports::licensing::{
     BaseDelEquipo, EstadoConsultado, LicensingService, PairingService, ResultadoSubidaImagen,
 };
 use tpv_application::ports::login::LoginRepository;
-use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion};
+use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_application::use_cases::{licensing as uc_licencia, replicacion, sync as uc_sync};
 use tpv_contracts::licensing::{
@@ -333,8 +333,8 @@ impl ContextoReplicacion for Ctx {
     async fn sigue_disponible(&self, _: bool) -> AppResult<bool> {
         Ok(false)
     }
-    fn volcado_permitido(&self) -> bool {
-        false
+    fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> {
+        Arc::default()
     }
 }
 
@@ -736,7 +736,7 @@ async fn la_licencia_de_otro_negocio_espera_al_arranque_que_aparta_todo_lo_del_a
     let mut socket = Socket::default();
     replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
     assert!(
-        socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "bulk_apply"),
+        socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "apply_lote"),
         "{:?}",
         socket.enviados
     );
