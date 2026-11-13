@@ -16,7 +16,7 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 | Ruta | Dominio | Quién la usa |
 |---|---|---|
 | `GET /health` | `server/salud.ts` | La sonda externa |
-| `GET /ws`, `/v1/ws` | `src/index.ts`, `domains/ws` | El WebSocket del `TenantHub` (con ticket de un solo uso) |
+| `GET /ws`, `/v1/ws` | `src/app.ts`, `domains/ws` | El WebSocket del `TenantHub` (con ticket de un solo uso, canjeado en `domains/ws/canje.ts`) |
 | `/v1/clientes`, `/configuracion`, `/cuentas`, `/inventario`, `/login`, `/mesas`, `/notificaciones`, `/proveedores`, `/reservas`, `/stats`, `/tareas`, `/trabajadores`, `/venta-rapida` | `domains/<dominio>/` | La Handy (lecturas y escrituras de negocio) |
 | `/v1/sync/*` | `domains/sync/` | La Main: catch-up, volcado, histórico, contraste ([sincronizacion.md](sincronizacion.md)) |
 | `/v1/images/*` | `domains/images/` | Subir, servir y borrar imágenes en R2 |

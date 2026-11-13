@@ -199,6 +199,13 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   ([licencias.md](licencias.md#anular-desde-la-administración)).
 - **Dentro del `TenantHub` sólo es Main la de la licencia**, y eso se vuelve a comprobar con la
   sesión abierta: ver [Quién es la Main dentro del `TenantHub`](#quién-es-la-main-dentro-del-tenanthub-aud-02).
+- **Abrir el socket es un viaje a la base central**: el Worker canjea el ticket, lee la fila del
+  dispositivo y apunta su `last_seen` en un lote (`GET /ws`, `domains/ws/canje.ts`), y le pasa al
+  `TenantHub` el negocio, el dispositivo, su rol y su clave pública en cuatro cabeceras que sólo pone
+  él: las que mande el cliente se quitan antes. Un dispositivo sin clave no abre el socket
+  (`device_pubkey_not_registered`). El `TenantHub` verifica el saludo con ese rol y esa clave, sin
+  volver a la base central (`test/abrirElSocket.test.ts`); una baja entretanto le cierra el socket
+  (`revocarDispositivo`).
 - **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al

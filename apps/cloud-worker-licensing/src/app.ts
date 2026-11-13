@@ -29,7 +29,6 @@ import { registrarPeticion } from "./observability/requestContext";
 import { cabeceraServerTiming, conMedida } from "./observability/tiempos";
 import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
-import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
 import { hubDe } from "./lib/hub";
 import { cuerpoDeErrorConStatus } from "./lib/errorHttp";
 import {
@@ -57,6 +56,7 @@ import { reservasWebWidgetRoutes } from "./domains/reservas_web/widget.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { syncRoutes } from "./domains/sync/sync.routes";
 import { wsRoutes } from "./domains/ws/ws.routes";
+import { CABECERAS_DE_IDENTIDAD, canjearTicket } from "./domains/ws/canje";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { ventaRapidaRoutes } from "./domains/venta_rapida/venta_rapida.routes";
@@ -140,43 +140,27 @@ app.get("/ws", async (c) => {
 		// nada que borrar.
 		if (!ticketQ) return unauthorized(request, "missing_ticket");
 
-		const now = Date.now();
-		const rt = await dbCentral.execute({
-			sql: `DELETE FROM Ws_Tickets WHERE ticket = ? RETURNING tenant_id, device_id, expires_at_ms;`,
-			args: [ticketQ],
-		});
-		const trow = rt.rows?.[0] as any | undefined;
-		if (!trow) return unauthorized(request, "invalid_ticket");
-		if (Number(trow.expires_at_ms) < now) return unauthorized(request, "expired_ticket");
+		// Un viaje a la base central: el canje, la fila del dispositivo y su `last_seen`, en un lote
+		// (`domains/ws/canje.ts`). El TenantHub se fía de lo que le pasan estas cabeceras y no vuelve a
+		// ella.
+		const canje = await canjearTicket(dbCentral, ticketQ, Date.now());
+		if (!canje.ok) return unauthorized(request, canje.error);
 
-		const tenantId = String(trow.tenant_id || "");
-		const deviceId = String(trow.device_id || "");
-		const roleFromToken = "unknown"; // el rol autoritativo se resuelve desde la BD central abajo
-
-		if (!tenantId || !deviceId) {
-			return unauthorized(request, "invalid_ticket");
-		}
-
-		const fila = await cargarDevice(dbCentral, tenantId, deviceId);
-		if (!fila) return unauthorized(request, "device_not_registered");
-		if (estaRevocado(fila)) return unauthorized(request, "device_revoked");
-
-		const roleFinal = String(fila.role || roleFromToken || "unknown");
-		const pubB64 = String(fila.device_pubkey_b64 || "").trim();
-
-		const stub = hubDe(env, tenantId);
+		const stub = hubDe(env, canje.tenantId);
 
 		const doUrl = new URL(request.url);
 		doUrl.pathname = "/ws";
 
-		const doReq0 = new Request(doUrl.toString(), request);
-		const h = new Headers(doReq0.headers);
-		h.set("x-tenant-id", tenantId);
-		h.set("x-device-id", deviceId);
-		h.set("x-role", roleFinal);
-		if (pubB64) h.set("x-device-pubkey-b64", pubB64);
+		// Las cabeceras de identidad las pone sólo el Worker: las que traiga el cliente se quitan antes,
+		// también la clave pública, que el TenantHub usa para verificar el saludo.
+		const h = new Headers(request.headers);
+		for (const nombre of CABECERAS_DE_IDENTIDAD) h.delete(nombre);
+		h.set("x-tenant-id", canje.tenantId);
+		h.set("x-device-id", canje.deviceId);
+		h.set("x-role", canje.rol);
+		h.set("x-device-pubkey-b64", canje.clave);
 
-		return await stub.fetch(new Request(doReq0, { headers: h }));
+		return await stub.fetch(new Request(doUrl.toString(), new Request(request, { headers: h })));
 	} catch (e: any) {
 		capturarError(e, "websocket.open");
 		// FABLE-B: la traza se queda aquí (`wrangler tail`) y en Sentry; la respuesta no la lleva.

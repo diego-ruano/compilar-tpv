@@ -59,7 +59,7 @@ function retencion() {
 // ── La base central, de mentira ───────────────────────────────────────────────
 
 /** Una respuesta de la base central que se ha quedado esperando. */
-type Retenida = { que: "licenses" | "devices"; deviceId: string | null; soltar: () => void };
+type Retenida = { que: "licenses"; deviceId: string | null; soltar: () => void };
 
 type Central = {
 	/** El `main_device_id` de la licencia viva del negocio; `null`, anulada. */
@@ -72,12 +72,8 @@ type Central = {
 	lecturas: number;
 	/** Con qué plazo se pidió el cliente de cada lectura de `licenses`. */
 	plazos: (number | undefined)[];
-	/** Las filas de `devices` con su clave pública, para los saludos firmados de verdad. */
-	dispositivos: Map<string, { role: "tpv" | "handy"; pub: string }>;
 	/** Retiene cada lectura de `licenses`, con la respuesta de cuando se hizo. */
 	retenerLicencias: boolean;
-	/** Retiene la lectura de `devices` de estos dispositivos (el principio de su saludo). */
-	retenerDispositivos: Set<string>;
 	/** Lo retenido, en el orden en que llegó. */
 	retenidas: Retenida[];
 };
@@ -106,9 +102,7 @@ function centralDeMentira(hub: any, main: string | null): Central {
 		rechaza: false,
 		lecturas: 0,
 		plazos: [],
-		dispositivos: new Map(),
 		retenerLicencias: false,
-		retenerDispositivos: new Set(),
 		retenidas: [],
 	};
 	const cliente = (plazoMs?: number) => ({
@@ -123,12 +117,8 @@ function centralDeMentira(hub: any, main: string | null): Central {
 				if (central.retenerLicencias) await retener(central, "licenses", null);
 				return { rows: valor ? [{ main_device_id: valor }] : [] };
 			}
-			if (/FROM\s+devices/i.test(sql)) {
-				const id = String(args[1]);
-				const d = central.dispositivos.get(id);
-				if (central.retenerDispositivos.has(id)) await retener(central, "devices", id);
-				return { rows: d ? [{ role: d.role, device_pubkey_b64: d.pub, revoked_at_ms: null }] : [] };
-			}
+			// Del dispositivo no se pregunta nada: el rol y la clave los pasa el Worker al abrir el
+			// socket (`abrir`), y una lectura de `devices` cae aquí abajo.
 			throw new Error(`AUD-02: la prueba no espera esta sentencia en la base central: ${sql}`);
 		},
 	});
@@ -242,12 +232,21 @@ function sinSaludar(hub: any, deviceId: string, role: "tpv" | "handy"): Conexion
 	return escuchar(deviceId, par[0], par[1]);
 }
 
-/** El upgrade de verdad (`abrirWebSocket`): el DO acepta el socket y manda su reto. */
+/**
+ * El upgrade de verdad (`abrirWebSocket`): el DO acepta el socket y manda su reto. Con las cabeceras
+ * de identidad que pone el Worker al canjear el ticket (`app.ts`): el rol y la clave del dispositivo.
+ */
 async function abrir(hub: any, deviceId: string): Promise<Conexion> {
 	const antes: WebSocket[] = hub.state.getWebSockets(deviceId);
 	const res = await hub.fetch(
 		new Request("https://hub/ws", {
-			headers: { Upgrade: "websocket", "x-tenant-id": TENANT, "x-device-id": deviceId, "x-role": "tpv" },
+			headers: {
+				Upgrade: "websocket",
+				"x-tenant-id": TENANT,
+				"x-device-id": deviceId,
+				"x-role": "tpv",
+				"x-device-pubkey-b64": PUB,
+			},
 		}),
 	);
 	const servidor = hub.state.getWebSockets(deviceId).find((ws: WebSocket) => !antes.includes(ws));
@@ -1337,7 +1336,6 @@ describe("AUD-02 · el turno del log", () => {
 		await enElHub("aud02-turno-reemplazada", async (hub: any) => {
 			const { sql, central, turno } = prepararHub(hub, "main-nueva");
 			apuntar(hub, "main-nueva");
-			central.dispositivos.set("main-nueva", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = conectar(hub, "main-nueva");
 			let segunda: Conexion | null = null;
@@ -1424,7 +1422,6 @@ describe("AUD-02 · los avisos de las rutas", () => {
 		// entonces el primer aviso: antes echaba a B sin más.
 		await enElHub("aud02-aviso-tarde", async (hub: any) => {
 			const { central, eventos } = prepararHub(hub, "equipo-b");
-			central.dispositivos.set("equipo-b", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			try {
@@ -1492,7 +1489,6 @@ describe("AUD-02 · los avisos de las rutas", () => {
 		// después, es la que vale.
 		await enElHub("aud02-releer-saludo", async (hub: any) => {
 			const { central } = prepararHub(hub, "equipo-b");
-			central.dispositivos.set("equipo-b", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			try {
@@ -1548,7 +1544,6 @@ describe("AUD-02 · el saludo", () => {
 		async (_como, cerrarlo) => {
 			await enElHub(`aud02-saludo-cerrado-${_como.replace(/\W+/g, "-")}`, async (hub: any) => {
 				const { central } = prepararHub(hub, "main-1");
-				central.dispositivos.set("main-1", { role: "tpv", pub: PUB });
 				const handy = conectar(hub, "handy-1", "handy");
 				const main = await abrir(hub, "main-1");
 				try {
@@ -1615,7 +1610,6 @@ describe("AUD-02 · el saludo", () => {
 		await enElHub("aud02-saludo-vieja", async (hub: any) => {
 			const { sql, central } = prepararHub(hub, "main-nueva");
 			apuntar(hub, "main-nueva");
-			central.dispositivos.set("main-vieja", { role: "tpv", pub: PUB });
 			const nueva = conectar(hub, "main-nueva");
 			const vieja = await abrir(hub, "main-vieja");
 			try {
@@ -1641,7 +1635,6 @@ describe("AUD-02 · el saludo", () => {
 		await enElHub("aud02-saludo-nueva", async (hub: any) => {
 			const { sql, central } = prepararHub(hub, "main-nueva");
 			apuntar(hub, "main-vieja");
-			central.dispositivos.set("main-nueva", { role: "tpv", pub: PUB });
 			const vieja = conectar(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			expect(hub.isMainReady()).toBe(true);
@@ -1679,7 +1672,6 @@ describe("AUD-02 · el saludo", () => {
 	it("la reconexión de la propia Main reemplaza su sesión anterior y no echa a nadie más", async () => {
 		await enElHub("aud02-saludo-misma", async (hub: any) => {
 			const { central, eventos } = prepararHub(hub, "main-nueva");
-			central.dispositivos.set("main-nueva", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = await abrir(hub, "main-nueva");
 			expect(await saludar(hub, primera)).toMatchObject({ type: "hello_ok", role: "tpv" });
@@ -1706,20 +1698,29 @@ describe("AUD-02 · el saludo", () => {
 	});
 
 	it("dos traslados seguidos (B→A→B) con las respuestas al revés: entra B, que es la Main", async () => {
-		// B saluda y su lectura del dispositivo tarda. Se traslada a A, que saluda; su lectura de la
-		// licencia («es A») tarda más todavía. Se traslada otra vez a B, cuyo saludo sigue y lee «es
-		// B». Llega la respuesta vieja de A: no se apunta, y A no entra.
+		// B saluda y su verificación tarda. Se traslada a A, que saluda; su lectura de la licencia
+		// («es A») tarda más todavía. Se traslada otra vez a B, cuyo saludo sigue y lee «es B». Llega
+		// la respuesta vieja de A: no se apunta, y A no entra.
 		await enElHub("aud02-saludo-bab", async (hub: any) => {
 			const { central } = prepararHub(hub, "equipo-b");
-			central.dispositivos.set("equipo-a", { role: "tpv", pub: PUB });
-			central.dispositivos.set("equipo-b", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			let a: Conexion | null = null;
+			// El saludo de B espera en la verificación de su firma hasta que se le suelte.
+			const verificar = hub.verifyHelloSigned.bind(hub);
+			let soltarB!: () => void;
+			const bSuelta = new Promise<void>((r) => (soltarB = r));
+			let bEsperando = false;
+			hub.verifyHelloSigned = async (p: any) => {
+				if (p.deviceId === "equipo-b" && !bEsperando) {
+					bEsperando = true;
+					await bSuelta;
+				}
+				return verificar(p);
+			};
 			try {
-				central.retenerDispositivos.add("equipo-b");
 				await mandarSaludo(hub, b);
-				expect(await esperarA(() => central.retenidas.some((r) => r.deviceId === "equipo-b"))).toBe(true);
+				expect(await esperarA(() => bEsperando)).toBe(true);
 
 				central.main = "equipo-a";
 				a = await abrir(hub, "equipo-a");
@@ -1730,7 +1731,7 @@ describe("AUD-02 · el saludo", () => {
 
 				central.retenerLicencias = false;
 				central.main = "equipo-b";
-				central.retenidas.find((r) => r.deviceId === "equipo-b")!.soltar();
+				soltarB();
 				expect(await respuestaAlSaludo(b)).toMatchObject({ type: "hello_ok", role: "tpv" });
 
 				respuestaDeA.soltar();
@@ -1744,6 +1745,7 @@ describe("AUD-02 · el saludo", () => {
 				expect(hub.isMainConnected()).toBe(true);
 				expect(handy.recibidos.filter((m) => m.type === "main_offline")).toEqual([]);
 			} finally {
+				soltarB();
 				soltarTodas(central);
 				await cerrar(hub, b, handy, ...(a ? [a] : []));
 			}
@@ -1755,8 +1757,6 @@ describe("AUD-02 · el saludo", () => {
 		// del cierre del equipo anterior y del saludo de la Main nueva.
 		await enElHub("aud02-saludo-retenido", async (hub: any) => {
 			const { central } = prepararHub(hub, "main-vieja");
-			central.dispositivos.set("main-vieja", { role: "tpv", pub: PUB });
-			central.dispositivos.set("main-nueva", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const vieja = await abrir(hub, "main-vieja");
 			let nueva: Conexion | null = null;
@@ -1801,7 +1801,6 @@ describe("AUD-02 · el saludo", () => {
 	it("ni el saludo que la propia Main dejó a medias al reconectar", async () => {
 		await enElHub("aud02-saludo-retenido-misma", async (hub: any) => {
 			const { central } = prepararHub(hub, "main-nueva");
-			central.dispositivos.set("main-nueva", { role: "tpv", pub: PUB });
 			const primera = await abrir(hub, "main-nueva");
 			let segunda: Conexion | null = null;
 			try {
@@ -1837,7 +1836,6 @@ describe("AUD-02 · el saludo", () => {
 			const { central } = prepararHub(hub, "main-1");
 			// El runtime no garantiza `webSocketClose` cuando cierra el propio DO: aquí no llega nunca.
 			hub.webSocketClose = async () => {};
-			central.dispositivos.set("main-1", { role: "tpv", pub: PUB });
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = await abrir(hub, "main-1");
 			let segunda: Conexion | null = null;

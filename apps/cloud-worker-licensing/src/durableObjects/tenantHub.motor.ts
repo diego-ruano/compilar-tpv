@@ -25,7 +25,7 @@ import {
 	stableStringify,
 	stringifyJsonValue,
 } from "./tenantHub.envelope";
-import { loadDeviceFromCentral, mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
+import { mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
 import { buildApplyBatch, loteDe, type EscrituraPreparada } from "./tenantHub.lote";
 import {
 	aplicarLectura,
@@ -357,19 +357,18 @@ export class MotorTenantHub {
 		this.avisados.clear();
 	}
 
-	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
+	private async touchLastSeen(tenantId: string, deviceId: string) {
 		// SYNC-08: sin throttle, cada ping (30 s) por dispositivo escribía en la BD central →
 		// amplificación de escrituras proporcional al nº de dispositivos. Guardamos en memoria del
-		// DO el último instante empujado y solo re-escribimos pasada la ventana (o si `force`, p. ej.
-		// al conectar). La precisión de `last_seen` no necesita ser al segundo.
+		// DO el último instante empujado y solo re-escribimos pasada la ventana. La precisión de
+		// `last_seen` no necesita ser al segundo.
 		// SYNC-16: el ping ya NO llega hasta aquí (lo contesta el auto-response sin despertar al DO),
-		// así que ahora esto se alimenta de: conexión (force) y actividad real (apply/event). El
+		// así que esto se alimenta de la actividad real (apply/event). Al conectar lo apunta el Worker,
+		// en el mismo lote que canjea el ticket, y el upgrade sólo marca el instante (`vistoAhora`). El
 		// throttle en memoria se pierde al hibernar → como mucho un UPDATE extra por despertar.
 		const now = nowMs();
-		if (!force) {
-			const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
-			if (now - last < LAST_SEEN_THROTTLE_MS) return;
-		}
+		const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
+		if (now - last < LAST_SEEN_THROTTLE_MS) return;
 		this.lastSeenPushedAtMs.set(deviceId, now);
 		const dbCentral = this.getCentralDb();
 		await dbCentral.execute({
@@ -1407,8 +1406,11 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata la
-	 * base central, que es lo único que la clase aporta. Sigue siendo un método porque es la
+	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata lo que
+	 * se sabe del dispositivo: el rol y la clave que el Worker leyó de la base central al canjear el
+	 * ticket y le pasó a este objeto al abrir el socket (`tenantHub.rutas.ts::abrirWebSocket`). Sin
+	 * otro viaje a la base central: una baja entre el canje y el saludo cierra el socket por su lado
+	 * (`revocarDispositivo`). Sigue siendo un método porque es la
 	 * costura por la que un test sustituye la verificación de la firma cuando lo que prueba es
 	 * otra cosa (`volcadoWs.test.ts`): sin ella habría que firmar de verdad para comprobar un
 	 * mensaje de estado.
@@ -1418,6 +1420,7 @@ export class MotorTenantHub {
 		deviceId: string;
 		msg: HelloSignedMsg;
 		challenge: { nonceB64: string; expiresAtMs: number } | null;
+		rol: Role;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }> {
 		// `return await` y no `return` a secas: `verifyHelloSigned` rechaza ANTES de su primer
@@ -1425,10 +1428,10 @@ export class MotorTenantHub {
 		// microtask tarde. workerd da la promesa por no manejada en ese hueco y cada saludo
 		// rechazado dejaba además un «unhandled rejection» en los logs, aunque quien llama sí lo
 		// captura. Mismo arreglo en `tenantHubHello.test.ts`, donde rompía el CI.
+		const { rol, ...resto } = params;
 		return await verifyHelloSigned({
-			...params,
-			cargarDispositivo: (tenantId, deviceId) =>
-				loadDeviceFromCentral(this.getCentralDb(), tenantId, deviceId),
+			...resto,
+			cargarDispositivo: async () => ({ role: rol, pubkeyB64: params.pubkeyB64Hint ?? null, revoked: false }),
 		});
 	}
 
@@ -1506,8 +1509,7 @@ export class MotorTenantHub {
 			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
 			aceptarWebSocket: (ws, tags) => this.state.acceptWebSocket(ws, tags),
 			waitUntil: (p) => this.state.waitUntil(p),
-			touchLastSeen: (tenantId, deviceId, force) =>
-				this.touchLastSeen(tenantId, deviceId, force),
+			vistoAhora: (deviceId) => void this.lastSeenPushedAtMs.set(deviceId, nowMs()),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
 		};
@@ -1542,8 +1544,7 @@ export class MotorTenantHub {
 			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
 			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
 			waitUntil: (p) => this.state.waitUntil(p),
-			touchLastSeen: (tenantId, deviceId, force) =>
-				this.touchLastSeen(tenantId, deviceId, force),
+			touchLastSeen: (tenantId, deviceId) => this.touchLastSeen(tenantId, deviceId),
 			verifyHelloSigned: (params) => this.verifyHelloSigned(params),
 			esLaMain: (a) => this.esLaMain(a),
 			mainVigente: () => this.mainVigente().deviceId,

@@ -2,14 +2,16 @@
 //
 // ARQ-04 · Quién es el que llama y qué puede hacer.
 //
-// Las reglas del handshake del WebSocket, sacadas de la clase: emitir el reto, leer de la base
-// central lo que se sabe del dispositivo, verificar la firma y decidir el rol. El CABLEADO vive
+// Las reglas del handshake del WebSocket, sacadas de la clase: emitir el reto, verificar la firma
+// con lo que se sabe del dispositivo y decidir el rol. El CABLEADO vive
 // con su transporte --el upgrade de `/ws` emite el reto, el handler de `helloSigned` lo consume--
 // pero las reglas están aquí, en un sitio, y se pueden probar sin levantar un Durable Object.
 //
 // Lo que no se puede perder de vista al tocar esto:
-//   · el rol lo dicta EXCLUSIVAMENTE la base central; la cabecera `x-role` del cliente no otorga
-//     nada (activación → 'tpv', pairing → 'handy').
+//   · el rol lo dicta EXCLUSIVAMENTE la base central (activación → 'tpv', pairing → 'handy'). El
+//     Worker lo lee de la fila del dispositivo al canjear el ticket y se lo pasa al TenantHub en
+//     `x-role`, con la clave en `x-device-pubkey-b64`; las que mande el cliente las quita antes
+//     (`app.ts`, `domains/ws/canje.ts`).
 //   · el reto es de un solo uso, y quien lo consume es el llamante ANTES de llamar aquí.
 //   · el rol `tpv` no basta para ser la Main (AUD-02): lo es el `main_device_id` de la licencia
 //     viva del negocio (`mainDeLaLicencia`), y eso puede cambiar con la sesión abierta. Quién lo
@@ -19,7 +21,6 @@ import type { Client } from "@libsql/client/web";
 
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, bytesExactos } from "../server/utils/ed25519";
-import { estaRevocado } from "../lib/deviceAuth";
 import { nowMs } from "./tenantHub.tiempo";
 
 import type { HelloSignedMsg, Role } from "./tenantHub.types";
@@ -29,31 +30,6 @@ export function roleNormalize(r: any): Role {
 	if (s === "tpv") return "tpv";
 	if (s === "handy") return "handy";
 	return "unknown";
-}
-
-export async function loadDeviceFromCentral(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<{ role: Role; pubkeyB64: string | null; revoked: boolean }> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role, device_pubkey_b64, revoked_at_ms
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			LIMIT 1
-		`,
-		args: [tenantId, deviceId],
-	});
-
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return { role: "unknown", pubkeyB64: null, revoked: true };
-
-	const role = roleNormalize(row.role);
-	const pubkeyB64 = String(row.device_pubkey_b64 || "").trim() || null;
-	const revoked = estaRevocado(row);
-
-	return { role, pubkeyB64, revoked };
 }
 
 /**
