@@ -133,10 +133,13 @@ export interface ContextoDeMensajes {
 }
 
 /**
- * Lo más que ocupa un mensaje que se llega a leer. Un lote de la Main son como mucho 256 KB de
- * sentencias; por encima de esto no se intenta ni trocear el JSON.
+ * Lo más que ocupa un mensaje que se llega a leer: por encima no se intenta ni trocear el JSON. Un
+ * lote de la Main son como mucho 256 KB de sentencias, pero una operación va sola en su lote aunque
+ * pase de ahí, y tiene que poder llegar a la base con cualquier valor que la base admita: el SQLite
+ * del DO acepta como argumento algo más de 2 MiB (`test/applyAckVeredicto.test.ts`). Con el tope en
+ * 2 MiB, una operación que la base sí aceptaría se rechazaba por grande, y la Main la apartaba.
  */
-const MAX_MENSAJE = 2 * 1024 * 1024;
+const MAX_MENSAJE = 4 * 1024 * 1024;
 
 /**
  * El orden es el contrato. Lo demás son las ramas de abajo.

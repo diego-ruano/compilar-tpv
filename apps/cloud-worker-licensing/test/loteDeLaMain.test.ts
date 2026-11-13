@@ -304,12 +304,12 @@ describe("apply_lote · el trabajo que cabe en un turno", () => {
 		});
 	});
 
-	it("un mensaje de más de 2 MiB no se llega a leer", async () => {
+	it("un mensaje de más de 4 MiB no se llega a leer", async () => {
 		await enUnHub("lote-mensaje-enorme", async (m, hub) => {
 			const respuesta = m.main.esperar((x) => x.type === "error");
 			await hub.webSocketMessage(
 				m.main.servidor,
-				JSON.stringify({ type: "apply_lote", loteId: "enorme", ops: [], relleno: "x".repeat(2 * 1024 * 1024) }),
+				JSON.stringify({ type: "apply_lote", loteId: "enorme", ops: [], relleno: "x".repeat(4 * 1024 * 1024) }),
 			);
 			expect(await respuesta).toEqual({ type: "error", error: "payload_too_large" });
 		});
