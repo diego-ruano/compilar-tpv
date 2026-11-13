@@ -61,6 +61,15 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
   o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+- **La identidad lleva el rol del dispositivo** (`IdentidadDelWorker.rol`, `tpv` o `handy`). El
+  Worker lo lee de la fila de `devices` al autenticar, en la misma consulta que la clave pública
+  (`server/middleware/auth.ts`), y lo guarda con ella: 60 s por isolate, y sólo de un dispositivo
+  vivo con su clave. Dentro del DO los vetos de rol (`soloLaMain…`) deciden con ese rol y no vuelven
+  a la base central; así, con el dispositivo y la licencia en caché, una petición no la toca. Una
+  baja se nota al caducar esa entrada, lo mismo que tarda `tenantAuth` en rechazar al dispositivo en
+  cualquier otra ruta. En un router sin `alHub` (el emparejamiento, los dispositivos, las reservas
+  web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
+  Lo cubre `test/rolEnLaIdentidad.test.ts`.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote

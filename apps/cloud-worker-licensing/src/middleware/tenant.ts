@@ -44,6 +44,11 @@ export type TenantVars = {
 	token: string;
 	/** Hash de la clave de licencia (claim del JWT). Identifica la fila de `licenses`. */
 	licHash: string;
+	/**
+	 * Rol del dispositivo según su fila de la base central (`tpv` | `handy`, normalizado). Lo lee
+	 * `tenantAuth` con la clave pública, en la misma consulta. Nunca sale del token ni de una cabecera.
+	 */
+	rol: string;
 };
 
 /**
@@ -71,10 +76,18 @@ export async function rolDelDispositivo(
  *
  * Es un MIDDLEWARE y no una comprobación dentro del handler: tiene que decidir ANTES de que se lea
  * y valide el cuerpo, que también es middleware. Lo vigila `test/anularSoloMain.test.ts`.
+ *
+ * Dentro del TenantHub (`lib/enElHub.ts`) el rol llega con la identidad: lo leyó el Worker de la
+ * fila del dispositivo al autenticar (`tenantAuth`), y volver a pedírselo a la base central desde el
+ * DO era un viaje más por petición (de 170 a 230 ms en `/v1/sync/changes`). En el Worker se sigue
+ * leyendo aquí, de la fila viva y sin caché.
  */
 export function soloLaMain(error: string, status: 401 | 403): MiddlewareHandler<any> {
 	return async (c, next) => {
-		const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
+		const dentro = hubLocal();
+		const rol = dentro
+			? dentro.identidad.rol
+			: await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
 		// El `code` sale del catálogo (ARCH-05) como en `unauthorized`/`forbidden`, pero sin pasar
 		// por ellos: sólo hace falta el identificador y el status, no la `Request`.
 		if (rol !== "tpv") return c.json({ ok: false, code: wireToCode(error, status), error }, status);
@@ -117,6 +130,7 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("deviceId", dentro.identidad.deviceId);
 		c.set("token", dentro.identidad.token);
 		c.set("licHash", dentro.identidad.licHash);
+		c.set("rol", dentro.identidad.rol);
 		await next();
 		return;
 	}
@@ -132,12 +146,13 @@ export const tenantAuth: MiddlewareHandler<{
 		const rawBody = c.req.raw.body
 			? new Uint8Array(await c.req.arrayBuffer())
 			: new Uint8Array();
-		await verifyDeviceProofOrThrow(c.req.raw, dbCentral, claims, token, rawBody);
+		const { rol } = await verifyDeviceProofOrThrow(c.req.raw, dbCentral, claims, token, rawBody);
 
 		c.set("tenantId", claims.tenantId);
 		c.set("deviceId", claims.deviceId);
 		c.set("token", token);
 		c.set("licHash", claims.licHash);
+		c.set("rol", rol);
 	} catch (e: any) {
 		const motivo = String(e?.message || e);
 

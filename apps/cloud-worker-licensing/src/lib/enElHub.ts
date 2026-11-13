@@ -45,6 +45,7 @@ export const alHub: MiddlewareHandler<{ Bindings: Env; Variables: TenantVars }> 
 		deviceId: c.get("deviceId"),
 		token: c.get("token"),
 		licHash: c.get("licHash"),
+		rol: c.get("rol"),
 	};
 	// `tenantAuth` ya leyó el cuerpo para la firma y Hono lo guarda: esto no lo vuelve a leer de la red.
 	const cuerpo = c.req.raw.body ? await c.req.arrayBuffer() : undefined;

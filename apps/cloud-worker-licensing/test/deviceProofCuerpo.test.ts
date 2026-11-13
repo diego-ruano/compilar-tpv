@@ -154,7 +154,7 @@ describe("el cuerpo firmado son los bytes que se envían", () => {
         const target = "/v1/stats?desde=2026-01-01&hasta=2026-01-31";
         const sig = await disp.firmar(await mensajeProof(ts, "GET", target, new Uint8Array()));
         const options = { headers: { "X-Device-Ts": String(ts), "X-Device-Sig": sig } };
-        await expect(verifyDeviceProofOrThrow(new Request(`https://api.test${target}`, options), bdCon(disp.pubB64), { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).resolves.toBeUndefined();
+        await expect(verifyDeviceProofOrThrow(new Request(`https://api.test${target}`, options), bdCon(disp.pubB64), { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).resolves.toEqual({ rol: "tpv" });
         await expect(verifyDeviceProofOrThrow(new Request("https://api.test/v1/stats?desde=2025-01-01&hasta=2026-01-31", options), bdCon(disp.pubB64), { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).rejects.toThrow("bad_device_signature");
     });
 
