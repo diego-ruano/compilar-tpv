@@ -189,8 +189,9 @@ mod tests {
         siguiente_ping(&mut servidor).await;
         servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
         assert!(comprobacion.await.unwrap(), "con su pong, la conexión está viva");
-        // Y no ha hecho falta que pasen los 30 s del latido.
-        assert!(cliente.latido().edad_ultimo_pong() < Duration::from_secs(1));
+        // Y no ha hecho falta que pasen los 30 s del latido. El margen es por el reloj de pared, que
+        // en una máquina cargada no se para con el del test.
+        assert!(cliente.latido().edad_ultimo_pong() < Duration::from_secs(10));
     }
 
     #[tokio::test(start_paused = true)]
@@ -219,7 +220,17 @@ mod tests {
         siguiente_ping(&mut servidor).await;
         servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
-        assert!(latido.edad_ultimo_pong() < Duration::from_secs(1));
+        assert!(latido.edad_ultimo_pong() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn un_equipo_suspendido_envejece_el_pong_aunque_su_reloj_monotono_no_avance() {
+        // Android en reposo: el reloj monótono se para y el de pared sigue.
+        let pong = Pong { en: Instant::now(), reloj: SystemTime::now() - Duration::from_secs(40) };
+        assert!(pong.edad() >= Duration::from_secs(40));
+        // Si el de pared va hacia atrás (un ajuste de hora), manda el monótono.
+        let pong = Pong { en: Instant::now(), reloj: SystemTime::now() + Duration::from_secs(3600) };
+        assert!(pong.edad() < Duration::from_secs(10));
     }
 
     #[tokio::test(start_paused = true)]
