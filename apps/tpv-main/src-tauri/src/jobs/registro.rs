@@ -403,7 +403,7 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let repo = state.reconciliacion_repo().await?;
+    let repo = state.reconciliacion_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     let r = uc_reconciliacion::ejecutar(repo.as_ref(), notifier.as_ref()).await?;
@@ -425,7 +425,7 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
 /// Las emisiones llevan `clave_dedupe`, así que repetir el escaneo no duplica nada.
 async fn avisos(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let scan = state.avisos_scan_repo().await?;
+    let scan = state.avisos_scan_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     uc_avisos::escanear(
@@ -453,7 +453,7 @@ async fn zona_horaria(app: AppHandle) -> Result<(), String> {
     };
     let desfases = desfase(1).zip(desfase(7));
 
-    let repo = app.state::<AppState>().reservas_web_repo().await?;
+    let repo = app.state::<AppState>().reservas_web_repo().await.map_err(|e| e.message)?;
     match uc_reservas_web::sincronizar_zona_horaria(repo.as_ref(), desfases).await? {
         Some(zona) => tracing::info!(target: "tpv::reservas_web", zona, "zona horaria del negocio actualizada"),
         None if desfases.is_some_and(|(i, v)| tpv_domain::reservas_web::zona_por_desfases(i, v).is_none()) => {
@@ -524,7 +524,7 @@ async fn reservas_no_vino(app: AppHandle) -> Result<(), String> {
 /// vendiéndolo en negativo no genera avisos nuevos; y cierra el de los que se recuperan.
 async fn stock_negativo(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let repo = state.stock_alertas_repo().await?;
+    let repo = state.stock_alertas_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     uc_stock_alertas::escanear(repo.as_ref(), notifier.as_ref()).await?;

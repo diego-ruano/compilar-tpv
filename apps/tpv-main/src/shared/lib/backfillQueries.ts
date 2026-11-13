@@ -32,8 +32,9 @@ export function useBackfillHistorico() {
 		queryKey: backfillKeys.estado,
 		queryFn: () => commands.syncBackfillEstado(),
 		refetchInterval: (q) => (q.state.data?.tablas_pendientes ? REFRESCO_MS : false),
-		// El comando falla en Handy (no hay BD local) y mientras la base no está abierta. No es una
-		// condición de error que haya que enseñar: es "aquí no aplica".
+		// En una Handy contesta que no hay nada pendiente (lee de la nube, que tiene el histórico
+		// entero). Falla mientras la base de la Main no está abierta, y eso no hay que enseñarlo: es
+		// "aquí no aplica todavía".
 		retry: false,
 	});
 }

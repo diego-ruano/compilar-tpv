@@ -63,7 +63,7 @@ async fn recoger(app: &AppHandle) -> AppResult<()> {
     if crate::load_config(&dir).connectivity == Some(ConnectivityMode::Off) {
         return Ok(());
     }
-    let repo = state.reservas_web_repo().await.map_err(AppError::repository)?;
+    let repo = state.reservas_web_repo().await.map_err(|e| AppError::repository(e.message))?;
     let notifier = state.notifier().await.ok();
     let nube = PairingAdapter::new(dir);
 
