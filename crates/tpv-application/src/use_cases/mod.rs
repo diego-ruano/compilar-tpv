@@ -36,6 +36,7 @@ pub mod verificacion_nube;
 pub mod replicacion;
 
 pub mod permisos;
+pub mod autorizacion_guardada;
 
 pub mod avisos_nube;
 

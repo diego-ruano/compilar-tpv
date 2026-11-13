@@ -79,9 +79,10 @@ vacío. Una capacidad desconocida se deniega incluso al administrador. Los coman
 
 `sesion()` relee el usuario activo y su rol vigente; `exigir_permiso` obtiene además las concesiones
 en la misma consulta. Desactivar una persona, cambiarle el rol o editar sus permisos afecta a las
-siguientes operaciones de su sesión abierta. Si se cierra o cambia la sesión mientras llega una
-consulta HTTP, su respuesta no autoriza al nuevo usuario. El proceso de réplica y los jobs no
-necesitan una sesión personal.
+siguientes operaciones de su sesión abierta: en la Main, en la siguiente; en la Handy, en cuanto le
+llega el aviso del cambio ([abajo](#la-autorización-guardada-en-la-handy-perm-cache)). Si se cierra o
+cambia la sesión mientras llega una consulta HTTP, su respuesta no autoriza al nuevo usuario. El
+proceso de réplica y los jobs no necesitan una sesión personal.
 
 | Grupo | Capacidades configurables |
 |---|---|
@@ -127,10 +128,13 @@ transacción replicable y rechaza una lista desconocida o duplicada. Compara las
 vieron al empezar a editar con las actuales: una pantalla antigua no pisa cambios recientes.
 No existe una ruta REST para editar permisos y `applyViaHub` veta `Roles_Permisos` desde Handy.
 
-La interfaz consulta `permisos_sesion`; rutas, menú, botones de inventario y gestión usan esas
-capacidades. Se refrescan ante cambios replicados y cada 30 segundos; el backend consulta siempre
-el estado vigente. Al cerrar sesión se limpia la caché de consultas para no mostrar a la siguiente
-persona información de la sesión anterior.
+La interfaz consulta `permisos_sesion` (`usePermisos`); rutas, menú, botones de inventario y gestión
+usan esas capacidades. No se releen por reloj: se releen cuando pueden haber cambiado, que es al
+llegar un cambio replicado de `usuarios`, `roles` o `roles_permisos` (`syncStatements.ts` invalida
+`["permisos"]`), al guardar la pantalla de permisos, en una conexión nueva del socket de la Handy (que
+lo invalida todo), al montar una pantalla que los usa y al volver a la aplicación. Quien decide es el
+backend, en cada comando. Al cerrar sesión se limpia la caché de consultas para no mostrar a la
+siguiente persona información de la sesión anterior.
 
 ### Arranque y recuperación
 
@@ -154,6 +158,41 @@ sus capacidades antes de llamar a los puertos HTTP. La consulta de concesiones d
 configuración; no demuestra una sesión personal. Esa ampliación está aplazada en
 [SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker).
 Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) siguen aplicándose.
+
+### La autorización guardada en la Handy (PERM-CACHE)
+
+Los permisos de una persona sólo se hacen cumplir en Rust (lo de arriba). En la Main cada gate lee su
+SQLite. En la Handy cada gate era un viaje a la nube (`GET /v1/trabajadores/permisos/{id}`) delante
+de cada acción, así que el `AppState` guarda la autorización de la sesión y los gates la usan
+mientras vale (`tpv-application::use_cases::autorizacion_guardada`, `AppState::autorizacion`). Lo que
+hace cumplir el Worker (licencia, dispositivo, lo que sólo hace la Main) no pasa por ahí ni cambia.
+
+Lo guardado vale, y sólo entonces:
+
+- **con el socket de avisos de la Handy conectado, y de esa conexión** (`socket_handy.rs` le dice al
+  `AppState` cuál es en cada cambio de su estado). Conectando, reintentando o rechazado no se guarda
+  nada y cada gate pregunta, como antes; al abrirse otra conexión, lo de la anterior no vale (mientras
+  el socket estuvo caído pudo perderse un aviso). En la Main no hay socket de avisos: no guarda nunca;
+- **de esta sesión**: entrar y salir lo tiran, y otra sesión de la misma persona no hereda nada;
+- **hasta que llega un cambio de `usuarios`, `roles` o `roles_permisos`**, o uno sin clasificar. El
+  aviso lo tira **antes** de que la pantalla se entere (`handy:cambio`), así que la relectura de
+  `usePermisos` ya va a la nube. Lo que escribe la propia Handy no le vuelve como aviso: editar un
+  trabajador (`trabajadores_update`) lo tira también;
+- **como mucho `EDAD_MAXIMA_MS` (5 minutos)**, contados con el mayor de los dos relojes del equipo:
+  ni suspenderlo ni atrasar la hora alargan lo guardado.
+
+Sólo se guardan respuestas buenas (a un usuario desactivado se le pregunta cada vez), y una respuesta
+que venía de camino cuando se tiró lo guardado no se guarda.
+
+**La ventana**: un permiso retirado en la Main deja de valer en la Handy cuando el cambio llega a la
+nube y la nube se lo avisa por el socket, que va casi a la vez (con la Main sin conexión, la nube
+tampoco lo sabe, como antes). Si el aviso no llega con el socket aparentemente abierto (un
+socket muerto que el latido todavía no ha detectado, o un objeto que se reinicia entre aplicar y
+difundir), lo guardado caduca a los 5 minutos. Ese plazo es más largo que lo que tarda el latido en
+notar un socket muerto y reconectar (ping cada 30 s, cierre a los 65 s sin respuesta), para no
+adelantarse a la reconexión, que ya lo tira; y más corto que el cierre de sesión por inactividad
+(10 minutos). Sin cambios ni cortes, una Handy en uso pregunta doce veces por hora, en vez de una
+por acción.
 
 ---
 

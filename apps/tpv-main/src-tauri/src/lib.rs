@@ -25,6 +25,7 @@ use tokio::sync::Mutex;
 use tpv_infra_sqlite::db::Db;
 
 use tpv_application::use_cases::pairing as uc_pairing;
+use tpv_application::use_cases::autorizacion_guardada::{self as uc_autorizacion, AutorizacionGuardada};
 
 use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
@@ -430,6 +431,9 @@ pub(crate) struct AppState {
     /// RI-29: los cobros cuyo ticket original ya ha salido en esta sesión. Volver a imprimirlo
     /// saca una COPIA, que no abre el cajón.
     tickets_impresos: Arc<printing::TicketsImpresos>,
+    /// PERM-CACHE: la autorización de la sesión, guardada entre gates. Sólo vale en la Handy y con
+    /// el socket de avisos abierto (`use_cases::autorizacion_guardada`); en la Main no se usa.
+    autorizacion: Arc<std::sync::Mutex<AutorizacionGuardada>>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -457,6 +461,18 @@ pub(crate) const ADMIN: &str = tpv_domain::permisos::ADMIN;
 
 pub(crate) fn permiso_denegado(detalle: impl Into<String>) -> AppErrorDto {
     AppErrorDto::new(tpv_contracts::errors::ErrorCode::PermisoDenegado, detalle)
+}
+
+/// Ahora, por los dos relojes del equipo: con ellos se mide la edad de la autorización guardada
+/// (PERM-CACHE). El monótono cuenta desde la primera vez que se pregunta.
+fn instante() -> uc_autorizacion::Instante {
+    static ORIGEN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    uc_autorizacion::Instante {
+        monotono_ms: ORIGEN.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64,
+        reloj_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64),
+    }
 }
 
 /// Conecta el callback local del outbox con el ciclo WebSocket. Se usa en los tres puntos donde
@@ -541,7 +557,9 @@ impl AppState {
     async fn autorizacion(&self) -> Result<(Sesion, tpv_contracts::permisos::AutorizacionUsuario), AppErrorDto> {
         let mut s = self.sesion.lock().await.clone().ok_or_else(|| permiso_denegado("Inicia sesión para hacer esto"))?;
         let repo = self.permisos_repo().await?;
-        let permisos = tpv_application::use_cases::permisos::usuario(repo.as_ref(), &s.id_usuario).await?;
+        // PERM-CACHE: en la Handy, con el socket de avisos abierto, vale lo que se leyó la última
+        // vez. En la Main (y en la Handy sin socket) se lee siempre.
+        let permisos = uc_autorizacion::usuario_de_la_sesion(repo.as_ref(), &self.autorizacion, &s.id_usuario, s.iniciada_en, instante).await?;
         // Una consulta HTTP puede terminar después de un logout o un cambio de usuario.
         if !self.sesion.lock().await.as_ref().is_some_and(|actual| actual.id_usuario == s.id_usuario && actual.iniciada_en == s.iniciada_en) {
             return Err(permiso_denegado("La sesión ha cambiado"));
@@ -596,12 +614,40 @@ impl AppState {
     /// Establece la sesión. Sólo la llama `login_user`.
     pub(crate) async fn iniciar_sesion(&self, s: Sesion) {
         *self.sesion.lock().await = Some(s);
+        self.olvidar_autorizacion();
     }
 
     /// La limpia. La llama el comando `logout` — y con él el cierre por inactividad y el
     /// arranque del frontend, que barre una sesión que hubiera quedado colgada tras un F5.
     pub(crate) async fn cerrar_sesion(&self) {
         *self.sesion.lock().await = None;
+        self.olvidar_autorizacion();
+    }
+
+    /* ── PERM-CACHE: cuándo deja de valer la autorización guardada ───────────────────────────
+       Las reglas están en `use_cases::autorizacion_guardada`. Aquí sólo llegan los tres avisos:
+       cambia la sesión o este equipo escribe en `Usuarios` (`olvidar_autorizacion`), cambia el
+       socket de avisos (`canal_de_avisos`) o llega un cambio de otro equipo (`aviso_de_cambio`). */
+
+    fn autorizacion_guardada(&self) -> std::sync::MutexGuard<'_, AutorizacionGuardada> {
+        self.autorizacion.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// La sesión cambia, o este equipo acaba de escribir algo de lo que sale la autorización: su
+    /// propio cambio no le vuelve como aviso.
+    pub(crate) fn olvidar_autorizacion(&self) {
+        self.autorizacion_guardada().olvidar();
+    }
+
+    /// El socket de avisos de la Handy ha cambiado de estado (`socket_handy.rs`).
+    pub(crate) fn canal_de_avisos(&self, canal: Option<uc_autorizacion::Canal>) {
+        self.autorizacion_guardada().canal(canal);
+    }
+
+    /// Ha llegado un cambio de otro equipo. Va antes de avisar a la pantalla, que relee sus
+    /// permisos al enterarse.
+    pub(crate) fn aviso_de_cambio(&self, cambio: &tpv_contracts::sync::CambioReplicado) {
+        self.autorizacion_guardada().aviso(cambio);
     }
 
     repo_accessor!(permisos_repo, tpv_application::ports::permisos::PermisosRepository,
@@ -2638,6 +2684,7 @@ pub fn run() {
                 // Se arranca SIN sesión: la app siempre pide PIN al abrirse.
                 sesion: Arc::new(Mutex::new(None)),
                 tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
+                autorizacion: Arc::default(),
             });
 
             // Tareas periódicas de fondo (licencia, avisos, actualizaciones): las declara
@@ -2987,6 +3034,7 @@ mod tests_sesion_y_permisos {
             mode_sync: Arc::new(std::sync::RwLock::new(Some(DeviceMode::Tpv))),
             sesion: Arc::new(Mutex::new(None)),
             tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
+            autorizacion: Arc::default(),
         }
     }
 
@@ -3156,6 +3204,157 @@ mod tests_sesion_y_permisos {
 }
 
 #[cfg(test)]
+mod tests_autorizacion_guardada {
+    //! PERM-CACHE: los gates con la autorización guardada.
+    //!
+    //! Las reglas tienen sus tests en `use_cases::autorizacion_guardada`. Aquí se comprueba el
+    //! cableado: que los gates del `AppState` usan lo guardado y que lo tiran la sesión, el socket
+    //! de avisos y los cambios que llegan. El repositorio es el SQLite de siempre; lo que hace de
+    //! Handy es el canal de avisos, abierto a mano.
+
+    use super::*;
+    use tpv_contracts::sync::{CambioReplicado, ComandaReplicada};
+    use tpv_infra_sqlite::ejecutor::Value;
+    use uc_autorizacion::Canal;
+
+    const CONEXION: Canal = Canal { generacion: 1, conexion: 1 };
+
+    async fn estado() -> AppState {
+        let dir = std::env::temp_dir().join(format!("tpv-autorizacion-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        AppState {
+            db: Arc::new(Mutex::new(Some(db))),
+            cloud: Arc::new(Mutex::new(None)),
+            mode: Arc::new(Mutex::new(Some(DeviceMode::Tpv))),
+            mode_sync: Arc::new(std::sync::RwLock::new(Some(DeviceMode::Tpv))),
+            sesion: Arc::new(Mutex::new(None)),
+            tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
+            autorizacion: Arc::default(),
+        }
+    }
+
+    async fn poner_rol(st: &AppState, rol: &str) {
+        let db = st.db.lock().await.as_ref().unwrap().clone();
+        let w = db.write().await;
+        w.raw().execute("INSERT INTO Roles (ID_Rol,Nombre_Rol) VALUES (?1,?1) ON CONFLICT(Nombre_Rol) DO NOTHING", vec![Value::Text(rol.into())]).await.unwrap();
+        w.raw().execute("INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre,Estado) VALUES ('u-1',(SELECT ID_Rol FROM Roles WHERE Nombre_Rol=?1),'gate@test','hash','Gate','Activo') ON CONFLICT(ID_Usuario) DO UPDATE SET ID_Rol=excluded.ID_Rol", vec![Value::Text(rol.into())]).await.unwrap();
+    }
+
+    async fn entrar(st: &AppState, rol: &str, iniciada_en: i64) {
+        poner_rol(st, rol).await;
+        st.iniciar_sesion(Sesion { id_usuario: "u-1".into(), id_trabajador: None, rol: rol.into(), iniciada_en }).await;
+    }
+
+    fn cambio(tablas: &[&str]) -> CambioReplicado {
+        CambioReplicado {
+            tablas: Some(tablas.iter().map(|t| t.to_string()).collect()),
+            comanda: ComandaReplicada { ids: vec![], touched_comanda: false, uncertain: false, touched_catalog: false },
+        }
+    }
+
+    /// Sin canal de avisos (la Main, o una Handy sin socket) nada se guarda: quitar el rol se nota
+    /// en el siguiente gate, como siempre.
+    #[tokio::test]
+    async fn sin_canal_de_avisos_cada_gate_lee_lo_vigente() {
+        let st = estado().await;
+        entrar(&st, ADMIN, 1).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+        poner_rol(&st, "Camarero").await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+    }
+
+    /// Con el canal abierto los gates usan lo guardado, y el aviso del cambio lo tira.
+    #[tokio::test]
+    async fn con_el_canal_abierto_el_aviso_del_cambio_retira_el_permiso() {
+        let st = estado().await;
+        st.canal_de_avisos(Some(CONEXION));
+        entrar(&st, ADMIN, 1).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+
+        // Otro equipo le quita el rol. Hasta que llega su aviso, vale lo guardado…
+        poner_rol(&st, "Camarero").await;
+        st.aviso_de_cambio(&cambio(&["comandas", "pagos"]));
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok(), "un cambio de otras tablas no hace releer");
+
+        // …y con el aviso, los tres gates ven lo de ahora.
+        st.aviso_de_cambio(&cambio(&["usuarios"]));
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+        assert_eq!(st.sesion().await.unwrap().rol, "Camarero");
+        assert!(st.exigir_permiso("stock.ajustar").await.is_err());
+    }
+
+    /// Se cae el socket, o se abre otra conexión: lo guardado con la anterior no vale.
+    #[tokio::test]
+    async fn al_cambiar_el_socket_de_avisos_se_vuelve_a_leer() {
+        let st = estado().await;
+        st.canal_de_avisos(Some(CONEXION));
+        entrar(&st, ADMIN, 1).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+
+        poner_rol(&st, "Camarero").await;
+        st.canal_de_avisos(None);
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+
+        poner_rol(&st, ADMIN).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok(), "sin socket no se guarda nada");
+        st.canal_de_avisos(Some(Canal { generacion: 1, conexion: 2 }));
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+    }
+
+    /// Entrar y salir tiran lo guardado, y lo que este equipo escribe en `Usuarios`, también.
+    #[tokio::test]
+    async fn la_sesion_y_lo_que_escribe_este_equipo_tiran_lo_guardado() {
+        let st = estado().await;
+        st.canal_de_avisos(Some(CONEXION));
+        entrar(&st, ADMIN, 1).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+
+        // Este equipo le cambia el rol: su propio cambio no le llega como aviso.
+        poner_rol(&st, "Camarero").await;
+        st.olvidar_autorizacion();
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+
+        // La misma persona vuelve a entrar con otro rol: la sesión nueva no hereda nada.
+        poner_rol(&st, ADMIN).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err(), "sigue valiendo lo guardado de esta sesión");
+        st.iniciar_sesion(Sesion { id_usuario: "u-1".into(), id_trabajador: None, rol: ADMIN.into(), iniciada_en: 2 }).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+
+        st.cerrar_sesion().await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+    }
+
+    /// El servicio del socket avisa al `AppState` donde hace falta, y el orden importa: la
+    /// autorización se tira antes de que la pantalla se entere del cambio.
+    #[test]
+    fn el_socket_de_avisos_y_la_edicion_de_trabajadores_avisan() {
+        let socket = include_str!("socket_handy.rs");
+        let antes_de_emitir = |trozo: &str, aviso: &str, evento: &str| {
+            let emite = trozo.find(&format!(r#"app.emit("{evento}""#)).expect("emite el evento");
+            trozo[..emite].contains(aviso)
+        };
+        let publicar = socket.split("fn publicar(").nth(1).unwrap();
+        assert!(antes_de_emitir(publicar, "avisar_del_canal(app, &p.foto)", "handy:estado"));
+        let contexto = socket.split("pub fn contexto_cambiado(").nth(1).unwrap();
+        assert!(antes_de_emitir(contexto, "avisar_del_canal(app, &p.foto)", "handy:estado"));
+        let avisos = socket.split("if let Some(cambio) = p.atender(m)?").nth(1).unwrap();
+        assert!(antes_de_emitir(avisos, "aviso_de_cambio(&cambio)", "handy:cambio"));
+        // La única foto que sale sin avisar del canal es la del cambio de presencia de la Main, que
+        // no cambia de conexión.
+        assert_eq!(
+            socket.matches(r#"app.emit("handy:estado""#).count(),
+            socket.matches("avisar_del_canal(app, &p.foto)").count() + 1
+        );
+
+        // Lo que este equipo escribe en el rol o el estado de un usuario no le vuelve como aviso.
+        let trabajadores = include_str!("commands/trabajadores.rs");
+        let editar = trabajadores.split("pub async fn trabajadores_update(").nth(1).unwrap().split("\n}").next().unwrap();
+        assert!(editar.contains("state.olvidar_autorizacion()"), "la edición de un trabajador tira lo guardado");
+    }
+}
+
+#[cfg(test)]
 mod tests_solo_en_la_main {
     //! Lo que sólo existe en la Main (registros de facturación, tickets, pedidos a proveedores),
     //! pedido desde una Handy: es una respuesta esperada, no un fallo del programa. El código es lo
@@ -3178,6 +3377,7 @@ mod tests_solo_en_la_main {
             mode_sync: Arc::new(std::sync::RwLock::new(modo)),
             sesion: Arc::new(Mutex::new(None)),
             tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
+            autorizacion: Arc::default(),
         }
     }
 
