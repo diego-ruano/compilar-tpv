@@ -300,10 +300,14 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   veredicto viaja en el ack: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
   El cliente no compara textos de error.
-  - **Primero por el código**, si el fallo es un `HubError`: es permanente lo que dice que la
+  - **Primero por el código**, si el fallo es nuestro: el de un `HubError`, o el identificador con
+    el que empieza el mensaje de un `Error` (`missing_ref:total`). Es permanente lo que dice que la
     operación está mal escrita (`hora_no_determinista`, `missing_client_now`, sin identidad, el mismo
-    `Op_Id` con otro contenido) y pasajero lo que habla de cómo está la nube y no de la operación
-    (sin base, el esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main).
+    `Op_Id` con otro contenido, o que no se deja montar: sin pasos, sin SQL, con una referencia a un
+    paso que no está) y pasajero lo que habla de cómo está la nube y no de la operación (sin base, el
+    esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main). Lo que un
+    fallo nuestro lleva detrás de su identificador es un trozo de la operación (el SQL de un paso),
+    y no se lee como una frase del runtime.
   - **Después, si el mensaje es de SQLite, por su código.** El SQLite del DO cierra sus mensajes
     con él (`…: SQLITE_BUSY`, `…: SQLITE_CONSTRAINT (extended: …)`). Es pasajero el que habla del
     estado de la base (`SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_IOERR`, `SQLITE_NOMEM`, `SQLITE_FULL`,

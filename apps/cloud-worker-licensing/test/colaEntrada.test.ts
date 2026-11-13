@@ -482,6 +482,25 @@ describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
 		});
 	});
 
+	it("una operación que no se deja montar se aparta a la primera, aunque su SQL hable de una base llena", async () => {
+		// El rechazo lleva detrás el SQL del paso. Leído como texto era una base llena: no se apartaba
+		// nada, se avisaba, y la cola daba la base por caída en cada vuelta, para siempre.
+		await enElHub("cola-no-se-monta", async (hub: any) => {
+			const { sql } = prepararHub(hub);
+			const avisos: string[] = [];
+			hub.emitSyncEvent = (name: string) => void avisos.push(name);
+
+			const mala = opLinea(2);
+			(mala.cmd.payload.steps as unknown[]).unshift({ kind: "value", sql: "SELECT 'database or disk is full'", saveAs: "v" });
+			hub.encolar(TENANT, [opLinea(1), mala, opLinea(3)]);
+			await hub.drenarCola();
+
+			expect(muertas(sql)).toEqual(["op-2"]);
+			expect(lineas(sql)).toEqual(["det-1", "det-3"]);
+			expect(avisos.filter((a) => a === "base_llena" || a === "cola_base_caida")).toEqual([]);
+		});
+	});
+
 	it("una hora que tendría que poner la base se rechaza también por la cola", async () => {
 		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y la base
 		// resolvía el `CURRENT_TIMESTAMP` con su reloj y en UTC: la fila de la nube decía otra hora

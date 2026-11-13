@@ -14,8 +14,10 @@
 //
 // Son tres veredictos, y se decide en este orden:
 //
-//   1. **Por el código**, si el fallo es uno nuestro (`HubError`): lo escribió quien lo lanzó y no
-//      depende de ninguna redacción.
+//   1. **Por el código**, si el fallo es uno nuestro: el de un `HubError`, o el identificador con el
+//      que empieza el mensaje de un `Error` (`missing_sql`, `missing_ref:total`). Lo escribió quien
+//      lo lanzó y no depende de ninguna redacción. Lo que lleve detrás es un trozo de la operación
+//      (su SQL, el nombre de una referencia) y no se lee como si fuera una frase del runtime.
 //   2. **Por el código de SQLite**, si el mensaje es suyo. El SQLite del DO cierra sus mensajes
 //      con el código (`…: SQLITE_BUSY`, `…: SQLITE_CONSTRAINT (extended: …)`), y es lo único que
 //      dice si el fallo es del estado de la base (pasajero). Lo que va delante lo escribe en parte
@@ -52,6 +54,20 @@ const CODIGOS_PERMANENTES: ReadonlySet<string> = new Set([
 	// El mismo `Op_Id` ya se aplicó con otro comando o con otro contenido: éste no va a entrar.
 	"idempotency_command_mismatch",
 	"idempotency_payload_mismatch",
+	// La operación no se deja montar (`tenantHub.lote.ts`, `tenantHub.sentencias.ts`): sin pasos, con
+	// un paso o un comando de una clase que no existe, sin SQL, con un argumento que no es un valor,
+	// con una referencia a un paso que no está o un paso `value` que no se sabe evaluar. Sólo depende
+	// de lo que trae la operación, que no cambia.
+	"missing_transaction_steps",
+	"invalid_transaction_step",
+	"batch_unsupported_step_kind",
+	"batch_unsupported_command_type",
+	"missing_sql",
+	"invalid_sql_args",
+	"unsupported_sql_arg",
+	"missing_ref",
+	"bad_ref_value",
+	"value_step_no_evaluable_en_batch",
 ]);
 
 /**
@@ -190,14 +206,32 @@ const FRASES_PASAJERAS = [
 	"internal error",
 ] as const;
 
-/** El código de un fallo nuestro, sin lo que algunos llevan detrás (`escritura_solo_en_main:Pagos`). */
-function codigoDe(error: unknown): string | null {
-	if (!(error instanceof HubError)) return null;
-	return String(error.code ?? "").split(":")[0].trim().toLowerCase() || null;
-}
-
 function textoDe(error: unknown): string {
 	return String((error as any)?.message ?? error ?? "").toLowerCase();
+}
+
+/**
+ * El identificador con el que empieza un fallo nuestro lanzado como `Error`, o que ha perdido su
+ * clase al cruzar un RPC: `missing_sql`, `missing_ref:total`, `value_step_no_evaluable_en_batch:
+ * SELECT …`. Con un guion bajo al menos, y seguido de `:` o del final: ningún mensaje de SQLite ni
+ * del runtime empieza así.
+ */
+const EMPIEZA_POR_IDENTIFICADOR = /^([a-z][a-z0-9]*(?:_[a-z0-9]+)+)(?=:|$)/;
+
+function identificadorDe(texto: string): string | null {
+	return EMPIEZA_POR_IDENTIFICADOR.exec(texto)?.[1] ?? null;
+}
+
+/** El código de un fallo nuestro, sin lo que algunos llevan detrás (`escritura_solo_en_main:Pagos`). */
+function codigoDe(error: unknown): string | null {
+	if (error instanceof HubError) return String(error.code ?? "").split(":")[0].trim().toLowerCase() || null;
+	return identificadorDe(textoDe(error));
+}
+
+/** ¿Tiene este fallo un código nuestro que ya dice de qué clase es? */
+function estaClasificado(error: unknown): boolean {
+	const codigo = codigoDe(error);
+	return codigo !== null && (CODIGOS_PERMANENTES.has(codigo) || CODIGOS_PASAJEROS.has(codigo));
 }
 
 /** ¿Dice este texto que la base o el objeto no estaban para atender? */
@@ -205,6 +239,8 @@ function esPasajeroPorTexto(texto: string): boolean {
 	const sqlite = codigoSqlite(texto);
 	// Un mensaje de SQLite: decide su código, no lo que lleve delante.
 	if (sqlite !== null) return esDe(sqlite, SQLITE_PASAJEROS);
+	// Un fallo nuestro con su identificador delante: lo que lleva detrás es un trozo de la operación.
+	if (identificadorDe(texto) !== null) return false;
 	return FRASES_PASAJERAS.some((f) => texto.includes(f));
 }
 
@@ -253,8 +289,11 @@ export function esFalloPasajero(error: unknown): boolean {
 
 /** ¿La base está llena o en sólo lectura? Pasajero para la operación, y hay que avisar. */
 export function esBaseLlena(error: unknown): boolean {
+	// Un fallo nuestro ya dice lo que es, y no es esto.
+	if (estaClasificado(error)) return false;
 	const texto = textoDe(error);
 	const sqlite = codigoSqlite(texto);
 	if (sqlite !== null) return esDe(sqlite, SQLITE_BASE_LLENA);
+	if (identificadorDe(texto) !== null) return false;
 	return FRASES_DE_BASE_LLENA.some((f) => texto.includes(f));
 }

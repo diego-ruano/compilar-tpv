@@ -27,6 +27,8 @@ type Preparado = {
 	romper: (error: unknown | null) => void;
 	/** Manda un `apply` por el socket de la Main y devuelve su ack. */
 	aplicar: (opId: string, sql: string, args?: unknown[]) => Promise<any>;
+	/** Lo mismo, con los pasos de la transacción tal cual. */
+	aplicarPasos: (opId: string, steps: unknown[]) => Promise<any>;
 };
 
 /** Un hub con su base, una Main conectada y lista, y la base central sin red. */
@@ -65,7 +67,7 @@ function preparar(hub: any): Preparado {
 	par[0].accept();
 	par[0].addEventListener("message", (ev: MessageEvent) => recibidos.push(JSON.parse(String(ev.data))));
 
-	const aplicar = async (opId: string, texto: string, args: unknown[] = []) => {
+	const aplicarPasos = async (opId: string, steps: unknown[]) => {
 		const desde = recibidos.length;
 		await hub.webSocketMessage(
 			par[1],
@@ -73,7 +75,7 @@ function preparar(hub: any): Preparado {
 				type: "apply",
 				opId,
 				commandName: "x",
-				command: { type: "tenantDb.transaction", payload: { steps: [{ kind: "execute", sql: texto, args }] } },
+				command: { type: "tenantDb.transaction", payload: { steps } },
 			}),
 		);
 		const limite = Date.now() + 3_000;
@@ -84,8 +86,10 @@ function preparar(hub: any): Preparado {
 		}
 		throw new Error(`no llegó el apply_ack de ${opId}`);
 	};
+	const aplicar = (opId: string, texto: string, args: unknown[] = []) =>
+		aplicarPasos(opId, [{ kind: "execute", sql: texto, args }]);
 
-	return { sql, eventos, romper: (error) => void (fallo = error), aplicar };
+	return { sql, eventos, romper: (error) => void (fallo = error), aplicar, aplicarPasos };
 }
 
 const ALTA = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);";
@@ -115,6 +119,25 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 				expect(ack, `${caso}: ${ack.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
 			}
 			// Y ninguno se ha tomado por una base llena.
+			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
+		});
+	});
+
+	it("una operación que no se deja montar es permanente, aunque su SQL lleve una frase del runtime", async () => {
+		// El rechazo lo lanza el propio hub con el SQL del paso detrás de su identificador. Leído
+		// como texto, `readonly database` lo hacía pasajero y una base llena.
+		await enElHub("ack-no-se-monta", async (hub: any) => {
+			const { aplicarPasos, eventos } = preparar(hub);
+			const CASOS: [string, unknown[]][] = [
+				["un paso value que no se sabe evaluar", [{ kind: "value", sql: "SELECT 'readonly database'", saveAs: "v" }]],
+				["una referencia a un paso que no está", [{ kind: "execute", sql: ALTA, args: ["z1", { $ref: "database is locked" }] }]],
+				["una clase de paso que no existe", [{ kind: "timed out", sql: ALTA, args: ["z1", "Sala"] }]],
+				["sin pasos", []],
+			];
+			for (const [caso, pasos] of CASOS) {
+				const ack = await aplicarPasos(`op-${caso}`, pasos);
+				expect(ack, `${caso}: ${ack.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
+			}
 			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
 		});
 	});

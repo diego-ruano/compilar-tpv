@@ -77,6 +77,59 @@ describe("por el código de un fallo nuestro, antes que por su texto", () => {
 	});
 });
 
+describe("un fallo nuestro lanzado como Error se clasifica por el identificador con el que empieza", () => {
+	it("una operación que no se deja montar es permanente, traiga lo que traiga detrás", () => {
+		// Lo de detrás es un trozo de la operación: el SQL de un paso, el nombre de una referencia,
+		// una clase de paso. Con una de las frases del runtime ahí dentro, este rechazo salía como
+		// pasajero (y como una base llena): la Main lo reintentaba sin gastar intentos, y por la
+		// cola de entrada era una base caída para siempre.
+		for (const e of [
+			new Error("value_step_no_evaluable_en_batch: SELECT 'readonly database'"),
+			new Error("value_step_no_evaluable_en_batch: SELECT 'database or disk is full'"),
+			new Error("missing_ref:database is locked"),
+			new Error("bad_ref_value:timed out"),
+			new Error("batch_unsupported_step_kind:internal error"),
+			new Error("batch_unsupported_command_type:tenantDb.ping"),
+			new Error("missing_transaction_steps"),
+			new Error("invalid_transaction_step"),
+			new Error("missing_sql"),
+			new Error("invalid_sql_args"),
+			new Error("unsupported_sql_arg"),
+		]) {
+			expect(veredicto(e), e.message).toBe("permanente");
+			expect(esBaseLlena(e), e.message).toBe(false);
+		}
+	});
+
+	it("uno que ha perdido su clase al cruzar un RPC conserva su veredicto", () => {
+		expect(veredicto(new Error("tenant_db_not_provisioned"))).toBe("pasajero");
+		expect(veredicto(new Error("main_offline"))).toBe("pasajero");
+		expect(veredicto(new Error("idempotency_payload_mismatch"))).toBe("permanente");
+	});
+
+	it("un identificador sin clasificar no se vuelve pasajero por lo que lleve detrás", () => {
+		for (const e of [
+			new Error("algo_sin_clasificar: database is locked"),
+			new Error("algo_sin_clasificar: SELECT 'readonly database'"),
+			new Error("algo_sin_clasificar:was reset"),
+		]) {
+			expect(veredicto(e), e.message).toBe("desconocido");
+			expect(esBaseLlena(e), e.message).toBe(false);
+		}
+	});
+
+	it("un fallo con un código ya clasificado no es una base llena, diga lo que diga su mensaje", () => {
+		expect(esBaseLlena(new HubError("main_offline", 400, { message: "database or disk is full" }))).toBe(false);
+		expect(esBaseLlena(new HubError("missing_client_now", 400, { message: "readonly database" }))).toBe(false);
+	});
+
+	it("una frase no es un identificador: el runtime sigue reconociéndose", () => {
+		expect(veredicto(new Error("internal error; reference = 0123abcd"))).toBe("pasajero");
+		expect(veredicto(new Error("database is locked"))).toBe("pasajero");
+		expect(esBaseLlena(new Error("database or disk is full"))).toBe(true);
+	});
+});
+
 describe("un rechazo que NO se arregla reintentando", () => {
 	const CASOS: [string, unknown][] = [
 		// El caso que motivó todo esto: la Main manda una columna que el negocio no tiene.
