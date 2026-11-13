@@ -550,7 +550,7 @@ mod tests {
             };
             let reservas: Vec<ReservaDeMesa> = reservas.collect();
             assert_eq!(
-                segundos_hasta_el_proximo_cambio(&reservas, ahora, &instante),
+                segundos_hasta_el_proximo_cambio(&reservas, ahora, instante),
                 caso["proximo_cambio_s"].as_i64(),
                 "{nombre}: próximo cambio"
             );
