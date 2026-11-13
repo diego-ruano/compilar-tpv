@@ -578,9 +578,9 @@ cambió sola y la Handy Windows siguió con el anterior hasta que se le dio el f
 es un fallo: durante la prueba su ventana estaba tapada por otra, y Windows deja de repintar una
 ventana tapada. El código que recibe el aviso es el mismo en las dos Handy.
 
-Lo que sí hay en el código y tapa el resultado: cada vez que la ventana de la Handy recibe el foco,
-`reintentar` corta el WebSocket aunque esté bien y vuelve a conectar (`src-tauri/src/lib.rs`,
-`on_window_event`), y al reconectar se relee todo. Por eso, al darle el foco, siempre cuadra.
+Dar el foco a la ventana no vuelve a leer nada: con la conexión abierta, `reintentar` sólo manda un
+ping, y si contesta no se reconecta ni se relee (`src-tauri/src/socket_handy.rs`). Si el nombre
+cambia al pulsar en la ventana es porque se repinta.
 
 **Cómo comprobarlo:**
 
@@ -597,13 +597,13 @@ Lo que sí hay en el código y tapa el resultado: cada vez que la ventana de la 
 
 **Qué hacer con el resultado:**
 
-- **Si el nombre cambió solo:** no es un fallo; borra esta entrada. Después se puede valorar que el
-  foco sólo reconecte cuando la conexión esté caída (en Android, al volver de segundo plano, sigue
-  haciendo falta), para no cortar un socket sano en cada clic.
-- **Si no cambió hasta pulsar en la ventana:** la Handy Windows no está recibiendo los avisos en
-  vivo. Busca en Axiom, a esa hora, el aviso `se interrumpió el socket de avisos` (`tpv::handy`) de
-  ese equipo, y repite con otro cambio (p. ej. el precio de un producto, mirando la carta en la
-  Handy) para ver si le pasa a todo o sólo a los ajustes del negocio. Con eso se investiga.
+- **Si el nombre cambió solo:** no es un fallo; borra esta entrada.
+- **Si no cambió, o sólo al pulsar en la ventana:** la Handy Windows no está recibiendo los avisos en
+  vivo, o no los pinta con la ventana sin foco. Busca en Axiom, a esa hora, los avisos `se
+  interrumpió el socket de avisos` y `el socket de avisos no contestó al volver a primer plano`
+  (`tpv::handy`) de ese equipo, y repite con otro cambio (p. ej. el precio de un producto, mirando la
+  carta en la Handy) para ver si le pasa a todo o sólo a los ajustes del negocio. Con eso se
+  investiga.
 
 ---
 

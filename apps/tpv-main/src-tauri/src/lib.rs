@@ -2431,7 +2431,9 @@ pub fn run() {
             #[cfg(mobile)]
             let revisar = revisar || matches!(event, tauri::WindowEvent::Resumed);
             if revisar {
-                if let Some(handy) = window.app_handle().try_state::<socket_handy::HandyNativo>() { handy.reintentar(false); }
+                // Comprueba la conexión con un ping; no la corta si contesta (INC-20261030-019).
+                let app = window.app_handle();
+                if let Some(handy) = app.try_state::<socket_handy::HandyNativo>() { handy.reintentar(app, false); }
             }
         })
         .setup(|app| {

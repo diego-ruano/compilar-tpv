@@ -1,17 +1,22 @@
 //! RI-31: servicio de avisos Handy. Su vida pertenece a la aplicación, no a React.
-use std::{future::Future, sync::{Arc, Mutex}, time::Duration};
+use std::{future::Future, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::Duration};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{sync::{watch, Notify}, time::Instant};
-use tpv_application::{error::{AppError, AppResult}, ports::{canal_nube::CanalNube, licensing::PairingService}, use_cases::{presencia_handy::{self, PresenciaHandy}, saludo_socket}};
+use tpv_application::{error::{AppError, AppResult}, ports::{canal_nube::CanalNube, licensing::PairingService}, use_cases::{presencia_handy::{self, AlVolver, PresenciaHandy, PLAZO_PONG_MS}, saludo_socket}};
 use tpv_contracts::socket_handy::{AvisoSocketHandy, ConexionHandy, EstadoSocketHandy};
-use tpv_infra_http::websocket::conectar;
+use tpv_infra_http::websocket::{conectar, Latido};
 use tpv_infra_licensing::PairingAdapter;
 use crate::{AppState, DeviceMode};
 
 pub(crate) struct HandyNativo {
     presencia: Mutex<PresenciaHandy>,
     orden: watch::Sender<u64>,
+    /// El latido de la conexión confirmada. Se guarda con el cerrojo de `presencia` cogido, en el
+    /// mismo paso que la confirma: quien ve `Conectada` ve el latido de esa conexión.
+    latido: Mutex<Option<Latido>>,
+    /// Hay un ping de comprobación esperando su `pong`: los focos que lleguen entretanto no mandan otro.
+    comprobando: AtomicBool,
 }
 
 impl HandyNativo {
@@ -36,10 +41,40 @@ impl HandyNativo {
         self.orden.send_modify(|revision| *revision += 1);
     }
 
-    pub fn reintentar(&self, forzar: bool) {
-        // Volver a primer plano no convierte una revocación en un bucle de peticiones.
-        if !forzar && self.estado().rechazo.is_some() { return; }
-        self.orden.send_modify(|revision| *revision += 1);
+    /// La aplicación vuelve a primer plano, vuelve la red o alguien pulsa «Reintentar».
+    ///
+    /// INC-20261030-019: una conexión abierta no se corta para comprobarla. Se le manda un ping, y
+    /// sólo si no contesta se reconecta. Cada reconexión es un ticket nuevo (la base central), un
+    /// saludo con el `TenantHub` y, en la interfaz, releerlo todo.
+    pub fn reintentar(&self, app: &AppHandle, forzar: bool) {
+        let (accion, generacion, conexion, latido) = {
+            let p = self.presencia.lock().unwrap_or_else(|e| e.into_inner());
+            let latido = self.latido.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let edad = latido.as_ref().map(|l| l.edad_ultimo_pong().as_millis() as u64);
+            (p.al_volver(forzar, edad), p.foto.generacion, p.foto.conexion, latido)
+        };
+        let reconectar = || self.orden.send_modify(|revision| *revision += 1);
+        match (accion, latido) {
+            (AlVolver::Nada, _) => {}
+            (AlVolver::Comprobar, Some(mut latido)) => {
+                if self.comprobando.swap(true, Ordering::AcqRel) { return; }
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let viva = latido.comprobar(Duration::from_millis(PLAZO_PONG_MS)).await;
+                    let runtime = app.state::<HandyNativo>();
+                    runtime.comprobando.store(false, Ordering::Release);
+                    if viva { return; }
+                    // Sólo se corta la conexión que se comprobaba: si entretanto se cayó o se
+                    // sustituyó, ya hay otra en marcha y cortarla sería empezar de nuevo.
+                    let la_misma = runtime.presencia.lock().unwrap_or_else(|e| e.into_inner()).es_la_conexion(generacion, conexion);
+                    if la_misma {
+                        tracing::warn!(target: "tpv::handy", "el socket de avisos no contestó al volver a primer plano");
+                        runtime.orden.send_modify(|revision| *revision += 1);
+                    }
+                });
+            }
+            (AlVolver::Comprobar, None) | (AlVolver::Reconectar, _) => reconectar(),
+        }
     }
 }
 
@@ -72,7 +107,11 @@ async fn sesion(app: &AppHandle, nube: &PairingAdapter, generacion: u64) -> AppR
         let m = canal.recibir(espera).await?.ok_or_else(|| AppError::external("La nube no confirmó la presencia de la Main"))?;
         if m.get("type").and_then(Value::as_str) == Some("main_status") {
             let (online, volcando) = presencia_handy::estado_main(&m)?;
-            app.state::<HandyNativo>().publicar(app, generacion, |p| p.confirmar(online, volcando));
+            let runtime = app.state::<HandyNativo>();
+            runtime.publicar(app, generacion, |p| {
+                p.confirmar(online, volcando);
+                *runtime.latido.lock().unwrap_or_else(|e| e.into_inner()) = Some(canal.latido());
+            });
             break;
         }
         if m.get("type").and_then(Value::as_str) == Some("error") { return Err(AppError::external("La nube rechazó la conexión")); }
@@ -94,7 +133,7 @@ async fn sesion(app: &AppHandle, nube: &PairingAdapter, generacion: u64) -> AppR
 
 pub(crate) fn arrancar(app: AppHandle) {
     let (orden, mut cambios) = watch::channel(0);
-    app.manage(HandyNativo { presencia: Mutex::new(PresenciaHandy::default()), orden });
+    app.manage(HandyNativo { presencia: Mutex::new(PresenciaHandy::default()), orden, latido: Mutex::new(None), comprobando: AtomicBool::new(false) });
     tauri::async_runtime::spawn(async move {
         let inicio = Instant::now();
         let mut retardo = 3u64;

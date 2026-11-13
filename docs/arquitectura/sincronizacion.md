@@ -72,6 +72,16 @@ Los cambios en vivo siguen invalidando sólo las áreas afectadas. Tauri avisa a
 reanudación en Android; `online` en la webview es sólo una pista para el servicio. No se requiere un
 servicio Android en segundo plano: la conexión se recupera al volver si el sistema suspendió la app.
 
+**Volver a primer plano no corta una conexión que funciona** (`HandyNativo::reintentar`,
+`PresenciaHandy::al_volver`). Con la conexión confirmada se le manda un ping a demanda
+(`Latido::comprobar`, el mismo texto del latido, que el `TenantHub` contesta sin despertarse) y sólo
+se reconecta si el `pong` no llega en 3 s. Si el último `pong` tiene más de 35 s —el latido va cada
+30, así que el anterior se quedó sin respuesta o el equipo ha estado suspendido— se reconecta sin
+esperar. Sin conexión abierta se intenta ya, sin agotar la espera; con un rechazo de licencia o de
+dispositivo no se hace nada, y el botón «Reintentar» reconecta siempre. Una reconexión cuesta un
+ticket (la base central), un saludo con el `TenantHub` y, en la interfaz, releer consultas y ajustes:
+por eso no se hace en cada foco.
+
 ---
 
 ## Las reglas
@@ -524,7 +534,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
    una variable de módulo es por **isolate**, compartido entre DO de **tenants distintos**. Lo que haya
    que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
-6. Si cambia el texto del latido en el frontend, hay que cambiar el par del auto-response: casa cadenas
+6. Si cambia el texto del latido (`PING`, en `tpv-infra-http/src/websocket.rs`; lo usan el latido de
+   cada 30 s y el ping a demanda de la Handy), hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
    `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
