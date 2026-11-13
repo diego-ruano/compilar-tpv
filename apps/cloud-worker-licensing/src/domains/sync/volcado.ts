@@ -16,8 +16,11 @@
 //   lo que ya contestaba cuando el volcado no cabía por filas.
 //
 // Con la ruta ejecutándose en el Worker (`EJECUTAR_EN_EL_HUB` apagado, o un router suelto en un
-// test), las filas llegan por `tenantQuery`, ya montadas, y se escriben igual: lo que sale es lo
-// mismo, byte a byte, y el techo es el mismo.
+// test), las filas llegan por `tenantQuery` y se escriben igual: lo que sale es lo mismo, byte a
+// byte, y el techo es el mismo. Lo que cambia es cuándo actúa: allí las filas ya han cruzado la
+// llamada al DO, enteras y como valor, antes de que nadie las escriba, así que parar de escribir
+// no evita haberlas traído. Lo que acota esa llamada es su propio tope de 32 MiB, y por eso el
+// techo queda por debajo de él.
 
 import type { Client, ResultSet } from "@libsql/client/web";
 
@@ -157,6 +160,28 @@ export function primerValor(r: Resultado): unknown {
 	return null;
 }
 
+/**
+ * Lo que ocupa un texto en UTF-8, sin codificarlo: un byte por carácter ASCII, dos hasta U+07FF,
+ * tres en el resto del plano básico y cuatro por cada par de sustitutos.
+ */
+export function bytesDe(texto: string): number {
+	let bytes = texto.length;
+	for (let i = 0; i < texto.length; i++) {
+		const c = texto.charCodeAt(i);
+		if (c < 0x80) continue;
+		if (c < 0x800) {
+			bytes += 1;
+		} else if (c >= 0xd800 && c <= 0xdbff && (texto.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+			// Un par: dos unidades de UTF-16 que son cuatro bytes.
+			bytes += 2;
+			i++;
+		} else {
+			bytes += 2;
+		}
+	}
+	return bytes;
+}
+
 /** Cuánto texto se junta antes de codificarlo. */
 const TROZO_DE_TEXTO = 64 * 1024;
 
@@ -168,43 +193,39 @@ export function enBytes(texto: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Escribe un JSON por partes y cuenta lo que ocupa.
+ * Escribe un JSON por partes y cuenta lo que ocupa, en bytes de UTF-8 y al momento.
  *
- * El texto se junta en trozos de 64 KiB y cada trozo se codifica a UTF-8 una vez: lo que queda en
- * memoria son los bytes de la respuesta, no su texto.
+ * El texto se junta en trozos de 64 KiB y cada trozo se codifica una vez: lo que queda en memoria
+ * son los bytes de la respuesta, no su texto.
  */
 export class Escritor {
 	private readonly trozos: Uint8Array[] = [];
 	private pendiente: string[] = [];
 	private caracteres = 0;
-	private codificados = 0;
+	private bytes = 0;
 
 	constructor(private readonly tope: number) {}
 
 	texto(t: string): void {
 		this.pendiente.push(t);
 		this.caracteres += t.length;
+		this.bytes += bytesDe(t);
 		if (this.caracteres >= TROZO_DE_TEXTO) this.codificar();
 	}
 
-	/**
-	 * Lo escrito hasta ahora, en bytes. De lo que todavía no se ha codificado se cuenta un byte por
-	 * carácter, que es lo mínimo que ocupa: nunca dice de más.
-	 */
+	/** Lo escrito hasta ahora, en bytes. */
 	get ocupado(): number {
-		return this.codificados + this.caracteres;
+		return this.bytes;
 	}
 
-	/** ¿Lo escrito pasa ya del tope? Si dice que sí, es que sí. */
+	/** ¿Lo escrito pasa ya del tope? */
 	get desbordado(): boolean {
-		return this.ocupado > this.tope;
+		return this.bytes > this.tope;
 	}
 
 	private codificar(): void {
 		if (!this.pendiente.length) return;
-		const bytes = CODIFICADOR.encode(this.pendiente.join(""));
-		this.trozos.push(bytes);
-		this.codificados += bytes.byteLength;
+		this.trozos.push(CODIFICADOR.encode(this.pendiente.join("")));
 		this.pendiente = [];
 		this.caracteres = 0;
 	}
@@ -212,7 +233,7 @@ export class Escritor {
 	/** Lo escrito, entero y en un bloque. No mira el tope: es para quien ya paró a tiempo. */
 	todo(): Uint8Array<ArrayBuffer> {
 		this.codificar();
-		const salida = new Uint8Array(this.codificados);
+		const salida = new Uint8Array(this.trozos.reduce((n, trozo) => n + trozo.byteLength, 0));
 		let i = 0;
 		for (const trozo of this.trozos) {
 			salida.set(trozo, i);
@@ -221,10 +242,9 @@ export class Escritor {
 		return salida;
 	}
 
-	/** Lo escrito, o `null` si pasa del tope; aquí la cuenta ya es exacta. */
+	/** Lo escrito, o `null` si pasa del tope. */
 	cerrar(): Uint8Array<ArrayBuffer> | null {
-		this.codificar();
-		return this.codificados > this.tope ? null : this.todo();
+		return this.desbordado ? null : this.todo();
 	}
 }
 
@@ -235,12 +255,15 @@ export class Escritor {
  *
  * `parcial` añade a cada tabla si lo que viaja de ella está recortado.
  *
- * Devuelve cuántas filas ha escrito, o `null` en cuanto lo escrito pasa del tope.
+ * Devuelve cuántas filas ha escrito, o `null` en cuanto pasa de `maxFilas` o lo escrito pasa del
+ * tope del `Escritor`. Las filas se contaron antes de leer, pero fuera de esta foto: aquí se
+ * cuentan las que hay de verdad.
  */
 export function escribirTablas(
 	e: Escritor,
 	tablas: string[],
 	resultados: Iterator<Resultado>,
+	maxFilas: number,
 	parcial?: (nombre: string) => boolean,
 ): number | null {
 	let total = 0;
@@ -257,7 +280,7 @@ export function escribirTablas(
 		for (const fila of filas) {
 			e.texto(n ? `,${JSON.stringify(fila)}` : JSON.stringify(fila));
 			n++;
-			if (e.desbordado) return null;
+			if (total + n > maxFilas || e.desbordado) return null;
 		}
 		e.texto("]}");
 		total += n;

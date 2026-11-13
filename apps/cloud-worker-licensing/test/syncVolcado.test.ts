@@ -40,9 +40,8 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
-const { Escritor, VOLCADO_MAX_BYTES, lectorDelCliente, lectorDelHub, siguiente } = await import(
-	"../src/domains/sync/volcado"
-);
+const { Escritor, VOLCADO_MAX_BYTES, bytesDe, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
+	await import("../src/domains/sync/volcado");
 const { syncRoutes, paginaDelHistorico, volcarFase1, fotoDeVerificacion, BOOTSTRAP_MAX_FILAS } =
 	await import("../src/domains/sync/sync.routes");
 
@@ -179,13 +178,32 @@ describe("el Escritor de un volcado", () => {
 		expect(justo.desbordado).toBe(false);
 		expect(justo.cerrar()?.byteLength).toBe(10);
 
-		// Seis ya no caben. Antes de codificar sólo se sabe que son al menos seis bytes; al cerrar,
-		// la cuenta es exacta.
+		// Seis ya no caben, y se sabe al escribirlas, sin esperar a codificar: son doce bytes.
 		const pasado = new Escritor(10);
 		pasado.texto("ññññññ");
-		expect(pasado.ocupado).toBe(6);
-		expect(pasado.desbordado).toBe(false);
+		expect(pasado.ocupado).toBe(12);
+		expect(pasado.desbordado).toBe(true);
 		expect(pasado.cerrar()).toBeNull();
+	});
+
+	it("cuenta los bytes de un texto sin codificarlo, igual que el codificador", () => {
+		const casos = [
+			"",
+			"abc",
+			"ñ", // dos bytes
+			"€", // tres
+			"🍺", // cuatro, en dos unidades de UTF-16
+			"caña 🍺 y tapa a 2,50 €",
+			"\u0000\u007f\u0080\u07ff\u0800\uffff",
+			// Lo que no puede salir de un `JSON.stringify`, pero el codificador lo cuenta igual: un
+			// sustituto suelto se codifica como U+FFFD, tres bytes.
+			"a\ud83cb",
+			"\udc00",
+			"\ud83c",
+		];
+		for (const texto of casos) {
+			expect(bytesDe(texto), JSON.stringify(texto)).toBe(new TextEncoder().encode(texto).byteLength);
+		}
 	});
 
 	it("avisa del desborde en cuanto lo escrito ya no puede caber", () => {
@@ -197,6 +215,22 @@ describe("el Escritor de un volcado", () => {
 		expect(e.cerrar()).toBeNull();
 		// `todo` no mira el tope: es de quien ya decidió dónde parar.
 		expect(e.todo().byteLength).toBe(101);
+	});
+
+	it("las tablas se dejan de escribir al pasar del tope de filas, aunque se contaran menos", () => {
+		// Las filas se cuentan antes de leer, en otra foto: si entre medias entra una escritura, lo
+		// que vale son las que hay al escribir.
+		const dosTablas = () =>
+			[
+				{ columnas: ["a"], filas: [[1], [2]] },
+				{ columnas: ["b"], filas: [[3], [4]] },
+			][Symbol.iterator]();
+		const sinTope = new Escritor(Number.MAX_SAFE_INTEGER);
+		expect(escribirTablas(sinTope, ["Uno", "Dos"], dosTablas(), 4)).toBe(4);
+		expect(leer(sinTope.cerrar())).toBe(
+			'[{"nombre":"Uno","columnas":["a"],"filas":[[1],[2]]},{"nombre":"Dos","columnas":["b"],"filas":[[3],[4]]}]',
+		);
+		expect(escribirTablas(new Escritor(Number.MAX_SAFE_INTEGER), ["Uno", "Dos"], dosTablas(), 3)).toBeNull();
 	});
 
 	it("lo escrito sale entero y en orden, también con caracteres de varios bytes entre trozos", () => {
@@ -417,6 +451,42 @@ describe("POST /v1/sync/historico · el tope en bytes", () => {
 				expect(new Set(vistas).size).toBe(1_500);
 			},
 		);
+	});
+
+	it("el corte cuenta bytes, no caracteres: con texto que no es ASCII tampoco se pasa", async () => {
+		// Un gasto con cien eñes son cien caracteres y doscientos bytes: contando caracteres, una
+		// página podía salir casi el doble de grande que el tope.
+		await enElHub("volcado-historico-bytes", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (let i = 0; i < 300; i++) {
+				sql.exec(
+					"INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto) VALUES (?, '2020-01-01', ?, 100, 'VARIOS');",
+					`g-${String(i).padStart(3, "0")}`,
+					"ñ".repeat(100),
+				);
+			}
+
+			const TOPE = 20_000;
+			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+				const vistas: string[] = [];
+				let cursor: number | null = 0;
+				let vueltas = 0;
+				do {
+					const bytes = await paginaDelHistorico(lector, { tabla: "Cuentas_Gastos", cursor, limite: 1_000 }, TOPE);
+					expect(bytes.byteLength).toBeLessThanOrEqual(TOPE);
+					const pagina: any = JSON.parse(new TextDecoder().decode(bytes));
+					// Y se aprovecha: cada página que no es la última va casi llena.
+					if (pagina.siguiente_cursor !== null) expect(bytes.byteLength).toBeGreaterThan(TOPE - 600);
+					vistas.push(...pagina.filas.map((f: any[]) => String(f[0])));
+					cursor = pagina.siguiente_cursor;
+					vueltas++;
+				} while (cursor !== null && vueltas < 50);
+
+				expect(vistas).toHaveLength(300);
+				expect(new Set(vistas).size).toBe(300);
+			}
+		});
 	});
 
 	it("una página lleva al menos una fila aunque esa fila sola pase del tope", async () => {

@@ -32,6 +32,7 @@ import {
 import {
 	Escritor,
 	VOLCADO_MAX_BYTES,
+	bytesDe,
 	enBytes,
 	escribirTablas,
 	lectorDe,
@@ -233,10 +234,10 @@ function pesarTablas(lector: Lector, tablas: string[]): Promise<Map<string, Peso
 				let bytes = 0;
 				for (const fila of filas) {
 					// La fila y la coma que la separa de la siguiente.
-					bytes += enBytes(JSON.stringify(fila)).byteLength + 1;
+					bytes += bytesDe(JSON.stringify(fila)) + 1;
 					n++;
 				}
-				const fijo = enBytes(JSON.stringify({ nombre, columnas, parcial: true, filas: [] })).byteLength + 1;
+				const fijo = bytesDe(JSON.stringify({ nombre, columnas, parcial: true, filas: [] })) + 1;
 				pesos.set(nombre, { fijo, porFila: n ? bytes / n : 0 });
 			}
 			return pesos;
@@ -347,7 +348,7 @@ export async function volcarFase1(lector: Lector, clientNow: unknown, topes: Top
 			// entera y además abriría una carrera con las escrituras que entran a la vez. Una tabla
 			// transaccional que resulte estar completa termina su backfill con una página vacía,
 			// que es gratis.
-			const filas = escribirTablas(e, tablas, rs, esTransaccional);
+			const filas = escribirTablas(e, tablas, rs, topes.filas, esTransaccional);
 			if (filas === null) return null;
 			e.texto(`,"seq":${seqDe(siguiente(rs))},"total_filas":${filas}}`);
 			return e.cerrar();
@@ -403,13 +404,17 @@ syncRoutes.post("/bootstrap", async (c) => {
 /** Alias del `rowid` en el `SELECT`. Con dos guiones bajos no colisiona con ninguna columna real. */
 const COL_CURSOR = "__rowid";
 
+/** Lo más que ocupa el final de una página: `],"siguiente_cursor":`, un `rowid` y la llave. */
+const CIERRE_DE_PAGINA = 48;
+
 /**
  * Una página del histórico de `tabla`, ya en JSON.
  *
- * La página se corta en `limite` filas o al llegar a `maxBytes`, lo que ocurra antes, y nunca sin
- * al menos una fila: una página vacía con cursor dejaría al backfill pidiendo la misma para
- * siempre. Cortada por tamaño lleva su `siguiente_cursor` igual que una completa, que es lo único
- * que la Main mira para seguir (`backfill_aplicar_pagina`).
+ * La página se corta en `limite` filas o antes de pasar de `maxBytes`, lo que ocurra antes, y
+ * nunca sin al menos una fila: una página vacía con cursor dejaría al backfill pidiendo la misma
+ * para siempre. Esa primera fila entra aunque sola pase del tope; con el de verdad no puede, porque
+ * una fila del SQLite del DO no pasa de 8 MB. Cortada por tamaño lleva su `siguiente_cursor` igual
+ * que una completa, que es lo único que la Main mira para seguir (`backfill_aplicar_pagina`).
  */
 export async function paginaDelHistorico(
 	lector: Lector,
@@ -446,7 +451,8 @@ export async function paginaDelHistorico(
 			let cortada = false;
 			for (const fila of filas) {
 				const texto = JSON.stringify(fila.slice(1));
-				if (n > 0 && e.ocupado + texto.length > maxBytes) {
+				// Lo que ocuparía la página con esta fila: lo escrito, la fila con su coma y el cierre.
+				if (n > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 					cortada = true;
 					break;
 				}
@@ -556,7 +562,7 @@ export async function fotoDeVerificacion(
 		lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
 			const e = new Escritor(topes.bytes);
 			e.texto(`${cabecera(desde)},"ventana_omitida":false,"ventana":`);
-			if (escribirTablas(e, tablas, rs) === null) return null;
+			if (escribirTablas(e, tablas, rs, topes.filas) === null) return null;
 			e.texto(`,"hasta_seq":${seqDe(siguiente(rs))}}`);
 			return e.cerrar();
 		}),

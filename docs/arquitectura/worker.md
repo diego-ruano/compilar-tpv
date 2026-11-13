@@ -106,7 +106,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
   Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
   llegan por `tenantQuery` y la respuesta es la misma, byte a byte
-  (`test/helpers/dosCaminos.ts`).
+  (`test/helpers/dosCaminos.ts`); pero allí ya han cruzado la llamada al DO, enteras, cuando se
+  escriben, así que lo que acota esa llamada es su tope de 32 MiB y no el techo, que actúa después.
+  Los bytes se cuentan al escribir, exactos (UTF-8), y las filas también.
 - **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
   sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
   un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y
