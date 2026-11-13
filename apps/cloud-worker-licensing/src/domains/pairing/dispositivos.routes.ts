@@ -10,7 +10,7 @@ import { Hono } from "hono";
 
 import type { Env } from "../../env";
 import { cuerpoConIdentificador } from "../../lib/validacion";
-import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMainVigente, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 import { listarDispositivos, revocarDispositivo } from "./dispositivos";
 import { responder } from "./pairing.resultado";
@@ -22,7 +22,7 @@ export const dispositivosRoutes = new Hono<Ctx>();
 
 // `forbidden_not_main` y no `forbidden_not_tpv`: es el identificador que estas dos rutas ya
 // devolvían, y lo que ve el cliente es contrato.
-dispositivosRoutes.use("*", tenantAuth, soloLaMain("forbidden_not_main", 401));
+dispositivosRoutes.use("*", tenantAuth, soloLaMainVigente("forbidden_not_main", 401));
 
 dispositivosRoutes.post("/list", async (c) =>
 	responder(c, await listarDispositivos(getDb(c.env), c.get("tenantId"))),

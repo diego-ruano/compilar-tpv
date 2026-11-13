@@ -77,8 +77,14 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   a la base central; así, con el dispositivo y la licencia en caché, una petición no la toca. Una
   baja se nota al caducar esa entrada, lo mismo que tarda `tenantAuth` en rechazar al dispositivo en
   cualquier otra ruta. En un router sin `alHub` (el emparejamiento, los dispositivos, las reservas
-  web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
-  Lo cubre `test/rolEnLaIdentidad.test.ts`.
+  web de la Main) el veto corre en el Worker (`soloLaMainVigente`) y lee la fila viva y la licencia,
+  sin caché (`rolDelDispositivo`, `vetoDeLicencia`). Lo cubren `test/rolEnLaIdentidad.test.ts` y
+  `test/mainDesplazadaRest.test.ts`.
+- **Una petición de un `tpv` que el hub no tiene por la Main no se ejecuta** (AUD-02,
+  `MotorTenantHub.vetoDeMain`), en ninguna ruta: es lo que rechaza el veto de licencia del Worker,
+  que guarda su respuesta un minuto por isolate. El hub lo sabe al momento por su tabla
+  ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)); la Main de
+  verdad no paga nada, y la que no cuadra pregunta a la base central antes de que se la rechace.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote

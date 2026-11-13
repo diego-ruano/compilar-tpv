@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
-import { serverError } from "../server/utils/response";
+import { forbidden, json, serverError } from "../server/utils/response";
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { getDb } from "../server/db";
@@ -695,6 +695,53 @@ export class MotorTenantHub {
 			capturarError(e, "sync.main_vigente");
 			olvidarComprobacion(this.state.storage);
 		}
+	}
+
+	/**
+	 * AUD-02 · Una ruta que llega de un `tpv` (`ejecutarRuta`): ¿sigue siendo ese equipo la Main?
+	 * Devuelve el identificador con el que se rechaza, el mismo que da el veto de licencia del Worker
+	 * (`lib/licenciaEnUso.ts`), o `null` si puede pasar.
+	 *
+	 * El Worker ya lo ha comprobado, pero guarda su respuesta un minuto por isolate: en ese minuto, el
+	 * equipo al que se le ha trasladado o anulado la licencia todavía llega hasta aquí. La tabla del
+	 * hub se pone al día en el acto con el aviso del cambio (`releerMain`), así que aquí se le para.
+	 *
+	 * - **Todas las rutas de un `tpv`, no una lista.** Es lo que rechaza el veto del Worker: una Main
+	 *   que ha dejado de serlo no escribe ni tampoco lee el negocio. Y una ruta nueva queda cubierta
+	 *   sin acordarse de nada.
+	 * - **Una Handy no pasa por aquí**: nunca es la Main, y su licencia la mira el Worker.
+	 * - **Si la tabla no se ha leído nunca, pasa**: no hay nada que contradiga al Worker, igual que
+	 *   con las sesiones (`esLaMain`).
+	 * - **Si la tabla dice que la Main es otro equipo, se pregunta a la base central antes de
+	 *   rechazar.** El Worker acaba de dar por bueno a éste, y una de las dos cosas está atrasada: su
+	 *   caché de un minuto, o la tabla, si el aviso del traslado no llegó (es best-effort). Sin esa
+	 *   lectura, el equipo NUEVO de un traslado cuyo aviso se perdió se quedaría fuera hasta saludar
+	 *   por el socket, y antes de eso tiene que traerse los datos por REST. La lectura es por índice y
+	 *   con plazo, y sólo la paga la petición que no cuadra. Como toda lectura, echa de paso a la
+	 *   sesión `tpv` que ya no sea la Main (`fijarMain`).
+	 * - **Si la base central no contesta, no se ejecuta** (`sin_comprobar`): 503
+	 *   `main_sin_comprobar`, que quien llama repite. Ni se deja pasar a quien la tabla dice que no
+	 *   es la Main, ni se le dice que ha sido sustituido sin saberlo.
+	 */
+	private async vetoDeMain(
+		identidad: IdentidadDelWorker,
+	): Promise<"device_replaced" | "license_revoked" | "sin_comprobar" | null> {
+		if (identidad.rol !== "tpv") return null;
+		const esOtro = (v: MainVigente) => v.leida && v.deviceId !== identidad.deviceId;
+		if (!esOtro(this.mainVigente())) return null;
+
+		try {
+			await this.leerMain(identidad.tenantId);
+		} catch (e) {
+			capturarError(e, "sync.main_vigente");
+			return "sin_comprobar";
+		}
+		const vigente = this.mainVigente();
+		if (!esOtro(vigente)) return null;
+
+		const motivo = vigente.deviceId ? "device_replaced" : "license_revoked";
+		this.emitSyncEvent("ruta_de_main_rechazada", { device_id: identidad.deviceId, motivo });
+		return motivo;
 	}
 
 	/**
@@ -1540,6 +1587,14 @@ export class MotorTenantHub {
 	async ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
 		const ajeno = this.negocioAjeno(identidad.tenantId, "ejecutarRuta");
 		if (ajeno) return serverError(peticion, ajeno.code);
+
+		// AUD-02: de un `tpv`, sólo la Main. Lo último antes de ejecutar la ruta: de aquí a ella no
+		// hay ninguna espera.
+		const veto = await this.vetoDeMain(identidad);
+		if (veto === "sin_comprobar") {
+			return json({ ok: false, code: "external", error: "main_sin_comprobar" }, 503, peticion);
+		}
+		if (veto) return forbidden(peticion, veto);
 
 		const ctxEjecucion = {
 			waitUntil: (p: Promise<unknown>) => this.state.waitUntil(p),

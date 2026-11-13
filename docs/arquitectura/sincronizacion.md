@@ -268,6 +268,17 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
 La baja de un dispositivo (`cerrarSocketsDelDispositivo` → `revocarDispositivo`) es otra cosa: cierra
 sus sesiones en el acto, sin condición, porque no se deshace con otro aviso.
 
+**Las rutas REST de un `tpv` miran la misma tabla** (`ejecutarRuta` → `vetoDeMain`), justo antes de
+ejecutar la ruta, en todas: es lo que rechaza el veto de licencia del Worker, que guarda su respuesta
+un minuto por isolate, y una ruta nueva queda cubierta sola. Si la tabla no se ha leído o nombra a ese
+equipo, pasa sin preguntar nada. Si nombra a otro (o a ninguno), pregunta a la base central antes de
+rechazar, porque el Worker acaba de darlo por bueno y una de las dos cosas está atrasada: su caché, o
+la tabla, si el aviso de un traslado se perdió y el que llama es la Main nueva. Esa lectura pone la
+tabla al día como cualquier otra (`fijarMain`). Si sigue sin ser la Main, `device_replaced` (o
+`license_revoked`, sin Main), lo mismo que el Worker; sin respuesta de la base central, 503
+`main_sin_comprobar`, que quien llama repite. Una Handy no pasa por aquí. Lo cubre
+`test/mainDesplazadaRest.test.ts`.
+
 **Todo cierre deja la sesión fuera**: los que inicia el DO (`cerrar`: echarla, la baja, la sesión
 anterior de un dispositivo que reconecta con 4000, el saludo que falla, un error del socket) y los que le llegan (`webSocketClose`). Le quita la autenticación y la marca `fuera`
 en su attachment, y contabiliza su salida (`sessionGone`), una vez: el cierre que llega después de

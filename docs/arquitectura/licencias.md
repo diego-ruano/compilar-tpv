@@ -259,8 +259,14 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
 y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
 
 - **REST**: `tenantAuth` lo rechaza con `device_replaced`, pero guarda la respuesta 60 s por isolate.
-  Durante ese minuto, una petición suya que caiga en un isolate que lo dio por bueno todavía pasa.
-  El ticket del socket lo comprueba sin caché: desde el traslado no recibe ninguno.
+  Una petición suya que caiga en un isolate que lo dio por bueno llega hasta el `TenantHub`, y ahí se
+  para: el hub sabe quién es la Main (su tabla, que el aviso del traslado pone al día en el acto) y
+  contesta lo mismo, `device_replaced` (`vetoDeMain`, en todas las rutas de un `tpv`). Si la tabla
+  todavía no lo sabe porque el aviso no llegó, pasa, como antes, hasta que se pone al día; si la
+  tabla dice otra Main, el hub pregunta a la base central antes de rechazar, para no dejar fuera a la
+  nueva por un aviso perdido. Las pocas rutas de la Main que se ejecutan en el Worker (emparejar,
+  dispositivos, reservas de la web) miran la licencia sin caché (`soloLaMainVigente`). El ticket del
+  socket también: desde el traslado no recibe ninguno.
 - **El socket que tenía abierto**: con la licencia ya cambiada, la ruta avisa al `TenantHub` del
   negocio (`lib/hub.ts::avisarCambioDeLicencia`), que vuelve a leer quién es la Main y le cierra el
   socket. El aviso no nombra a quién echar: si llega tarde, cuando la licencia ya ha vuelto a ese

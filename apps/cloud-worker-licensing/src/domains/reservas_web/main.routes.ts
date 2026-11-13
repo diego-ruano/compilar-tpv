@@ -19,7 +19,7 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMainVigente, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { alHub } from "../../lib/enElHub";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
@@ -43,20 +43,20 @@ reservasWebMainRoutes.use("*", tenantAuth);
 // el Worker. Las demás sólo tocan la base central y la agenda, y se quedan en el Worker.
 reservasWebMainRoutes.use("/avisos", alHub);
 
-reservasWebMainRoutes.post("/clave", soloLaMain("forbidden_not_tpv", 403), async (c) => {
+reservasWebMainRoutes.post("/clave", soloLaMainVigente("forbidden_not_tpv", 403), async (c) => {
 	const clave = await claveDelNegocio(getDb(c.env), c.get("tenantId"), Date.now());
 	const codigo = codigoParaLaWeb(origenDelWidget(c.env, c.req.url), clave);
 	return c.json({ ok: true, clave, codigo });
 });
 
-reservasWebMainRoutes.post("/pendientes", soloLaMain("forbidden_not_tpv", 403), async (c) => {
+reservasWebMainRoutes.post("/pendientes", soloLaMainVigente("forbidden_not_tpv", 403), async (c) => {
 	const tenantId = c.get("tenantId");
 	return c.json(await agendaDe(c.env, tenantId).pendientes({ tenantId }));
 });
 
 reservasWebMainRoutes.post(
 	"/recogidas",
-	soloLaMain("forbidden_not_tpv", 403),
+	soloLaMainVigente("forbidden_not_tpv", 403),
 	cuerpo(recogidasSchema),
 	async (c) => {
 		const tenantId = c.get("tenantId");

@@ -4,7 +4,7 @@
 // pendientes, aprobar una y rechazarla.
 //
 // Quién es la Main —y que lo sea— lo resuelven los middlewares de la ruta (`tenantAuth` +
-// `soloLaMain`), no estas funciones: aquí el `tenantId` ya llega comprobado. Antes cada handler
+// `soloLaMainVigente`), no estas funciones: aquí el `tenantId` ya llega comprobado. Antes cada handler
 // repetía `buildTenantContext` + claims vacíos + `tieneRol` + un `try/catch` que clasificaba el
 // error de autenticación comparando cadenas (`isAuthError`, cinco copias idénticas).
 

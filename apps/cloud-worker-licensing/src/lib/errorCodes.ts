@@ -66,6 +66,9 @@ const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// El objeto del negocio está saturado o no ha podido atender la petición (`lib/enElHub.ts`).
 	"hub_overloaded",
 	"hub_unavailable",
+	// AUD-02: el TenantHub no ha podido preguntar a la base central si este equipo sigue siendo la
+	// Main (`MotorTenantHub.vetoDeMain`).
+	"main_sin_comprobar",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -290,6 +293,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	hub_overloaded:
 		"La nube está atendiendo demasiadas peticiones de este negocio. Espera unos segundos y vuelve a intentarlo.",
 	hub_unavailable: "La nube no ha podido atender la petición. Vuelve a intentarlo en unos segundos.",
+	main_sin_comprobar:
+		"La nube no ha podido comprobar la licencia de este equipo. Vuelve a intentarlo en unos segundos.",
 	invalid_code: "El código no es correcto.",
 	code_expired: "El código ha caducado. Pide uno nuevo.",
 	correo_invalido: "Ese correo no parece válido. Revísalo.",
