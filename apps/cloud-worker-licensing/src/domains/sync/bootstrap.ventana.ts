@@ -151,6 +151,21 @@ type Transaccional = {
 };
 
 /**
+ * El predicado de las dos tablas cuya clave es `(ID_Pago, ID_Detalle)`: el pago y la línea, los dos
+ * de la ventana.
+ *
+ * ⚠️ El `+` de `+ID_Detalle` no es decorativo. Sin él, SQLite resuelve los dos `IN` contra el índice
+ * de la clave primaria a la vez (`ID_Pago=? AND ID_Detalle=?`) y prueba **cada pago con cada línea**
+ * de la ventana. Medido con tres días de un bar de mil comandas diarias: trece segundos por
+ * sentencia, y el volcado y la verificación la ejecutan cuatro veces (el conteo y el volcado de
+ * cada tabla). El `+` deja esa columna fuera del índice sin cambiar la comparación: se entra por el
+ * pago y la línea se comprueba contra su lista, una vez por fila. Lo vigila
+ * `test/syncVentanaPlan.test.ts`, que lee el plan de todas las sentencias de la ventana.
+ */
+const DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA =
+	"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND +ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)";
+
+/**
  * Tablas transaccionales, **en orden de backfill: padres primero**.
  *
  * El orden importa porque cada página de la fase 2 es su propia transacción y
@@ -179,8 +194,7 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// lado el día que dejen de serlo.
 		nombre: "Pago_Detalles",
 		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
-		donde:
-			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		donde: DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA,
 	},
 	{
 		// Lo devuelto de una devolución de parte de un cobro. Como `Pago_Detalles`: su pago (la
@@ -189,8 +203,7 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// escribieron, así que `Pagos.ID_Pago_Origen` siempre encuentra a su padre.
 		nombre: "Devolucion_Lineas",
 		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
-		donde:
-			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		donde: DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA,
 	},
 	{
 		nombre: "Lote_Consumos",

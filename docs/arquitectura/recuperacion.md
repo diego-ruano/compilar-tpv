@@ -83,6 +83,12 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.
 - El worker dice qué tablas vienen recortadas (`parcial`) y en qué orden rellenarlas: la clasificación
   vive sólo en `bootstrap.ventana.ts`.
+- **Una sentencia de la ventana no pide por lista dos columnas del mismo índice.** `Pago_Detalles` y
+  `Devolucion_Lineas` tienen la clave `(ID_Pago, ID_Detalle)` y piden las dos: escrito tal cual, SQLite
+  sondea la clave con cada pago y cada línea de la ventana (el cuadrado de lo que hay). Una de las dos
+  va con un `+` delante (`+ID_Detalle IN (…)`), que la deja fuera del índice sin cambiar la
+  comparación. `test/syncVentanaPlan.test.ts` lee el plan de todas las sentencias y cuenta las filas
+  que leen.
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
