@@ -1,15 +1,13 @@
 // test/consultarSoloLee.test.ts
 //
-// `consultar` es la puerta por la que el Worker lee la base de un negocio (`tenantQuery` fuera del
-// DO, la agenda de reservas web, las rutas públicas). Ejecutaba lo que le llegara, también una
+// `consultar` es la puerta por la que se lee la base de un negocio desde fuera de su DO (la agenda
+// de reservas web, las rutas públicas). Ejecutaba lo que le llegara, también una
 // escritura, que entraba sin pasar por el motor: sin `Applied_Operations`, sin `Sync_Changes` y sin
 // difundirse, así que la Main no la habría visto nunca. Aquí se comprueba, por el RPC de verdad:
 //
 // - que `consultar` sólo lee: lo que no es una lectura se rechaza, también detrás de una (dos
 //   sentencias en un texto: un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja
 //   cambiada la conexión), y lo que parece una lectura y escribe (`WITH … DELETE`) se deshace entero;
-// - que lo único que se escribe fuera del motor es el estado propio de la nube (el freno del PIN y
-//   el checkpoint de la purga), por su propia puerta (`anotarEstado`), tabla por tabla;
 // - que el alta del negocio siembra su administrador dentro del DO (`aprovisionar`), sin SQL que
 //   viaje, y dice si la base ya estaba;
 // - que `/v1/sync/initialize-empty`, que corre dentro del DO, no se llama a sí mismo por RPC.
@@ -33,7 +31,6 @@ const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { clienteDelHub } = await import("../src/lib/tenantClient");
 const { unaSolaSentencia } = await import("../src/durableObjects/tenantHub.sqlite");
 const { hashPin, verifyPin } = await import("../src/domains/login/login.crypto");
-const { reservarIntento, throttleReset } = await import("../src/domains/login/login.queries");
 
 const env = entorno as any;
 const deps = {
@@ -252,87 +249,6 @@ describe("consultar sólo lee", () => {
 			db.batch(["SELECT 1;", { sql: "UPDATE Zonas SET Nombre_Zona = ?1;", args: ["Otra"] }], "write"),
 		).rejects.toMatchObject({ code: "consulta_no_es_lectura" });
 		expect((await db.execute("SELECT Nombre_Zona AS n FROM Zonas;")).rows.map((f: any) => f.n)).toEqual(["Sala"]);
-	});
-});
-
-describe("el estado propio de la nube tiene su puerta, y sólo ése", () => {
-	const ESTADO_NO_ADMITIDO = { ok: false, code: "estado_local_no_admitido", status: 500 };
-
-	it("el freno del PIN y el checkpoint de la purga se escriben; lo demás no", async () => {
-		const t = "estado-local";
-		await conBase(t);
-
-		const intento = await stub(t).anotarEstado(t, {
-			sql: "INSERT INTO Intentos_Login (ID_Usuario, Intentos_Fallidos, Bloqueado_Hasta_Ms, Ultimo_Intento_Ms) VALUES (?1, 1, 0, ?2) RETURNING Intentos_Fallidos AS n;",
-			args: [ADMIN, 1000],
-		});
-		expect(intento).toMatchObject({ ok: true, resultados: [{ rows: [[1]], rowsAffected: 1 }] });
-		const checkpoint = await stub(t).anotarEstado(t, {
-			sql: "INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms) VALUES (?1, ?2, ?3);",
-			args: ["main", 7, 1000],
-		});
-		expect(checkpoint).toMatchObject({ ok: true });
-
-		for (const texto of [
-			// Tablas del negocio: eso va por el motor.
-			"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z2', 'Terraza');",
-			"UPDATE Zonas SET Nombre_Zona = 'Otra';",
-			"DELETE FROM Zonas;",
-			// Una tabla admitida delante y otra cosa detrás.
-			"DELETE FROM Intentos_Login WHERE ID_Usuario = 'nadie'; DELETE FROM Zonas;",
-			// Ni lecturas, ni lo que no dice a las claras en qué tabla escribe.
-			"SELECT 1;",
-			"WITH x AS (SELECT 1) DELETE FROM Intentos_Login;",
-			"INSERT OR REPLACE INTO Intentos_Login (ID_Usuario, Intentos_Fallidos, Bloqueado_Hasta_Ms, Ultimo_Intento_Ms) VALUES ('nadie', 0, 0, 0);",
-			"DROP TABLE Intentos_Login;",
-		]) {
-			expect(await stub(t).anotarEstado(t, texto), texto).toEqual(ESTADO_NO_ADMITIDO);
-		}
-
-		await enLaBase(t, (sql) => {
-			expect(zonas(sql)).toEqual(["Sala"]);
-			expect(Number(sql.exec("SELECT Intentos_Fallidos AS n FROM Intentos_Login WHERE ID_Usuario = ?1;", ADMIN).one().n)).toBe(1);
-			expect(Number(sql.exec("SELECT Last_Seq AS n FROM Sync_Main_Checkpoints WHERE Device_Id = 'main';").one().n)).toBe(7);
-		});
-	});
-
-	it("sin base contesta lo mismo que una lectura", async () => {
-		expect(await stub("estado-local-sin-base").anotarEstado("estado-local-sin-base", "DELETE FROM Intentos_Login;")).toEqual({
-			ok: false,
-			code: "tenant_db_not_provisioned",
-			status: 404,
-		});
-	});
-
-	it("el freno del PIN funciona igual con el cliente del Worker", async () => {
-		// Lo que hace una ruta que corre en el Worker (`EJECUTAR_EN_EL_HUB` apagado): sus sentencias
-		// salen por el cliente del hub, que manda cada una por su puerta.
-		const t = "estado-local-freno";
-		await conBase(t);
-		const db = clienteDelHub(env, t);
-
-		expect(await reservarIntento(db, ADMIN, 1_000)).toEqual({ concedido: true, intento: 1, bloqueadoHastaMs: 0 });
-		expect(await reservarIntento(db, ADMIN, 2_000)).toEqual({ concedido: true, intento: 2, bloqueadoHastaMs: 0 });
-		expect(await enLaBase(t, (sql) => sql.exec("SELECT Intentos_Fallidos AS n FROM Intentos_Login;").one().n)).toBe(2);
-		await throttleReset(db, ADMIN, 0, 3_000);
-		expect(await enLaBase(t, (sql) => sql.exec("SELECT COUNT(*) AS n FROM Intentos_Login;").one().n)).toBe(0);
-	});
-
-	it("con las rutas en el Worker, el catch-up sigue apuntando el checkpoint de la Main", async () => {
-		await conNegocioFirmado(deps, "estado-local-checkpoint", async (n) => {
-			const res = await app.request(
-				await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/changes", { cuerpo: { since: 3 } }),
-				undefined,
-				{ ...env, EJECUTAR_EN_EL_HUB: "0" },
-			);
-			expect(res.status).toBe(200);
-			expect(viajes(res, "hub-ruta")).toBe(0);
-			expect(
-				await enLaBase(n.tenantId, (sql) =>
-					sql.exec("SELECT Device_Id AS d, Last_Seq AS s FROM Sync_Main_Checkpoints;").toArray(),
-				),
-			).toEqual([{ d: MAIN, s: 3 }]);
-		});
 	});
 });
 

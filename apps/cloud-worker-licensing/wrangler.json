@@ -111,8 +111,7 @@
 		"AXIOM_DATASET_SYNC": "tpv-sync",
 		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co",
 		"JURISDICCION_DO": "",
-		"UBICACION_DO": "weur",
-		"EJECUTAR_EN_EL_HUB": "1"
+		"UBICACION_DO": "weur"
 	},
 	"assets": {
 		"directory": "../reservas-web/dist",

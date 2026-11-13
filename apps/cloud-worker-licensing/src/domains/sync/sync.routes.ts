@@ -285,8 +285,8 @@ function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, 
  * - Si se queda larga, se descarta una candidata que cabía y viaja una más estrecha. Con la última
  *   no puede pasar: detrás no hay otra, y descartarla por una estimación sería contestar «no cabe»
  *   a un negocio que sí cabe. Se intenta siempre que quepa por filas, y decide lo que se escribe.
- *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con la ruta en el Worker, intentarlo es
- *   traer todas las filas por la llamada al DO, así que allí la estimación sí descarta.)
+ *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con el lector de un cliente, intentarlo es
+ *   traer todas las filas antes de escribir, así que allí la estimación sí descarta.)
  *
  * La medida va fuera de la foto a propósito: sólo decide qué ventana se intenta, no es el dato.
  * `volcar` recibe el límite UNA vez y lo usa en todas sus sentencias, de modo que padre e hijas

@@ -30,6 +30,9 @@ import { hashPin } from "../src/domains/login/login.crypto";
 import { getLoginRecord } from "../src/domains/login/login.queries";
 import { MENSAJES } from "../src/lib/errorCodes";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 let dbDePruebas: any = null;
 
 vi.mock("../src/server/db", async (importOriginal) => {

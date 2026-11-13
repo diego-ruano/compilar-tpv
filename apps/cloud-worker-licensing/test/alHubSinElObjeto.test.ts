@@ -127,7 +127,7 @@ function montar(guion: (() => Response | Error)[]) {
 					? {}
 					: { body: JSON.stringify(cuerpo), headers: { "content-type": "application/json" } }),
 			},
-			{ EJECUTAR_EN_EL_HUB: "1", TenantHub, ...entorno },
+			{ TenantHub, ...entorno },
 		);
 
 	return { llamadas, pedir };

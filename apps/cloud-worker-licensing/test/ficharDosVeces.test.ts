@@ -249,10 +249,6 @@ async function escenario<R>(nombre: string, prueba: (c: Caso) => Promise<R>): Pr
 }
 
 describe("AUD-47 · POST /v1/login/punch con una entrada que no toca", () => {
-	it("la ruta se ejecuta dentro del TenantHub del negocio, como en producción", () => {
-		expect(env.EJECUTAR_EN_EL_HUB).toBe("1");
-	});
-
 	it("entrada, salida y otra entrada el mismo día sin turno partido: 409 con su frase", async () => {
 		await escenario("dos-veces", async ({ filas, fichar }) => {
 			expect((await fichar("entrada")).status).toBe(200);

@@ -103,9 +103,6 @@ export interface Env {
 	// Pista de región para el objeto de un negocio nuevo: «weur», Europa occidental. Sólo cuenta en
 	// la llamada que lo crea, venga de donde venga. Vacía en local y en los tests.
 	UBICACION_DO?: string;
-	// `lib/enElHub.ts`: con "1", las rutas de negocio se ejecutan dentro del TenantHub (un viaje por
-	// petición); con otro valor, o sin él, en el Worker (un viaje al TenantHub por consulta).
-	EJECUTAR_EN_EL_HUB?: string;
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.

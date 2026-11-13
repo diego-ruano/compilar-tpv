@@ -15,6 +15,9 @@ vi.mock("../src/lib/rutas", async (importOriginal) => ({
 import { mesasRoutes } from "../src/domains/mesas/mesas.routes";
 import { apply } from "../src/lib/rutas";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 it("el cierre directo devuelve 404 y no aplica ninguna escritura", async () => {
 	const app = new Hono().route("/v1/mesas", mesasRoutes);
 	const respuesta = await app.request("/v1/mesas/comandas/cerrar", {

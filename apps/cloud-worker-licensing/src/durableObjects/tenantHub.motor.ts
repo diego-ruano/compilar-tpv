@@ -41,7 +41,6 @@ import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoApl
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
-	anotarEnBruto,
 	baseAprovisionada,
 	clienteLocal,
 	leerEnBruto,
@@ -295,8 +294,8 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * Lo que contestan las dos puertas por las que el Worker llega a la base (`consultar` y
-	 * `anotarEstado`): un fallo con status decidido viaja como dato, porque el RPC no conserva las
+	 * Lo que contesta la puerta por la que se llega a la base desde fuera del DO (`consultar`): un fallo
+	 * con status decidido viaja como dato, porque el RPC no conserva las
 	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
 	 */
 	private async conLaBase(
@@ -332,16 +331,6 @@ export class MotorTenantHub {
 		return this.conLaBase(tenantId, (storage) =>
 			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
 		);
-	}
-
-	/**
-	 * Lo único que el Worker escribe en la base sin pasar por el motor: el estado propio de la nube
-	 * (el freno del PIN, el checkpoint de la purga), que no se replica. Es para la ruta que corre en
-	 * el Worker; dentro del DO lo escribe con el cliente de al lado. Qué tablas son, y que la
-	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
-	 */
-	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
 	}
 
 	/**

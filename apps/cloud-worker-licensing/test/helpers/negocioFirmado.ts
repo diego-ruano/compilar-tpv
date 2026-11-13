@@ -154,10 +154,7 @@ export async function peticionFirmada(
 	});
 }
 
-/**
- * Un POST firmado por la Main y pedido a la `app` entera. `entorno` pisa variables del de la suite
- * (p. ej. `EJECUTAR_EN_EL_HUB: "0"`, que deja la ruta ejecutándose en el Worker).
- */
+/** Un POST firmado por la Main y pedido a la `app` entera. `entorno` pisa variables del de la suite. */
 export async function pedirFirmado(
 	deps: Pick<Dependencias, "firmarSesion">,
 	app: { request: (peticion: Request, init: undefined, env: any) => Response | Promise<Response> },

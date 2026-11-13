@@ -2,9 +2,9 @@
 //
 // Un solo viaje al TenantHub por petición.
 //
-// La base de cada negocio vive en el SQLite de su TenantHub. Si la ruta se ejecuta en el Worker, cada
-// consulta es un viaje de ida y vuelta hasta el DO (`tenantClient.ts`), y una pantalla como fichar
-// hace siete seguidos. El viaje es lo caro, no el SQL: el DO se pide en Europa occidental
+// La base de cada negocio vive en el SQLite de su TenantHub. Si la ruta se ejecutara en el Worker,
+// cada consulta sería un viaje de ida y vuelta hasta el DO, y una pantalla como fichar haría siete
+// seguidos. El viaje es lo caro, no el SQL: el DO se pide en Europa occidental
 // (`lib/objetosDelNegocio.ts`) y puede quedar lejos del Worker que atiende. Por eso las rutas de
 // negocio se ejecutan DENTRO del DO: el Worker
 // comprueba quién pregunta y le pasa la petición entera al TenantHub del negocio, que ejecuta la
@@ -21,9 +21,9 @@
 //   venir del Worker porque un DO no es accesible desde fuera.
 // - Qué rutas van dentro lo decide cada router poniendo `alHub` justo detrás de `tenantAuth`. Los
 //   demás middlewares del router (vetos de rol, validación del cuerpo) corren ya dentro, una vez.
-// - Lo enciende `EJECUTAR_EN_EL_HUB = "1"` (`wrangler.json`). Con otro valor, o sin él, la ruta se
-//   ejecuta en el Worker y cada consulta vuelve a ser un viaje: sirve para medir las dos formas con el
-//   mismo código, y es lo que ven los tests que montan un router suelto con un entorno de mentira.
+// - Siempre: no hay otra forma de ejecutar una ruta de negocio. Un test que monta un router suelto,
+//   con la base y el motor de mentira, declara el doble de `alHub` como el de cualquier otra salida
+//   (`test/helpers/rutaSuelta.ts`): la ruta corre allí mismo.
 // - Si el viaje falla porque el objeto no está para atender (saturado, reiniciándose), eso no es
 //   un fallo del programa: sale como un 503 con su nombre, no como un `internal_error`. Ver
 //   `sinElObjeto`.
@@ -115,7 +115,8 @@ function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean
 
 /** Pasa la petición, ya autenticada, al TenantHub del negocio y devuelve lo que conteste. */
 export const alHub: MiddlewareHandler<{ Bindings: Env; Variables: TenantVars }> = async (c, next) => {
-	if (hubLocal() || c.env?.EJECUTAR_EN_EL_HUB !== "1") {
+	// Ya dentro: el TenantHub ejecuta la ruta con la `app` entera, y `alHub` vuelve a pasar por aquí.
+	if (hubLocal()) {
 		await next();
 		return;
 	}

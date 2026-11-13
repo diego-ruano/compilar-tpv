@@ -41,7 +41,6 @@ export const ENTORNO_DE_PRUEBAS: Record<ClaveDeTexto, string> = {
 	AXIOM_DOMAIN: "axiom.invalid",
 	// Se queda como en producción (ver `IGUAL_QUE_EN_PRODUCCION`).
 	EMAIL_FROM_NAME: "TPV",
-	EJECUTAR_EN_EL_HUB: "1",
 	// Sin jurisdicción, como en producción (`IGUAL_QUE_EN_PRODUCCION`). La pista de región sólo
 	// cuenta al nacer el objeto en Cloudflare: aquí va vacía.
 	JURISDICCION_DO: SIN_CONFIGURAR,
@@ -92,8 +91,6 @@ export function entornoDeLaSuite(textosQueCargaWrangler: readonly string[]): Rec
  */
 export const IGUAL_QUE_EN_PRODUCCION: Record<string, string> = {
 	EMAIL_FROM_NAME: "Es el nombre que se enseña como remitente: no es una dirección ni una cuenta.",
-	EJECUTAR_EN_EL_HUB:
-		"No nombra ningún servicio: dice dónde se ejecutan las rutas de negocio (`lib/enElHub.ts`), y la suite tiene que pasar por el mismo camino que producción.",
 	JURISDICCION_DO:
 		"Vacía en los dos sitios: los Durable Objects van sin jurisdicción (`lib/objetosDelNegocio.ts`), y workerd no las implementa.",
 };

@@ -20,6 +20,9 @@ import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 /** Cliente SQL del test en curso; lo lee el `tenantQuery` simulado. */
 let clienteActual: any = null;
 /** Qué contesta `isTpvDevice`: el guard del endpoint. */

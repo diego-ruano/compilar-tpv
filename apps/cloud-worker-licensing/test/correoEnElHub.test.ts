@@ -9,7 +9,6 @@
 //   · lo demás que hacen sigue funcionando desde dentro del DO: el cupo y la traza en la base
 //     central, la agenda de reservas web (otro Durable Object), la clave del widget y el envío;
 //   · un rechazo que se decide dentro llega con su código y su status;
-//   · con la ruta en el Worker contestan lo mismo;
 //   · las demás rutas de reservas web, que no leen la base del negocio, se quedan en el Worker.
 //
 // La base central de pruebas vive en el SQLite del propio TenantHub del negocio: es la única forma
@@ -43,8 +42,6 @@ const CORREO = {
 	EMAIL_FROM_ADDRESS: "pedidos@altaria.test",
 	EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test",
 };
-/** Con la ruta en el Worker: cada lectura de la base del negocio es una consulta al DO. */
-const EN_EL_WORKER = { entorno: { ...CORREO, EJECUTAR_EN_EL_HUB: "0" } };
 
 const ID_RESERVA = "0199aa00-0000-7000-8000-00000000abcd";
 /** SHA-256 de «ana@correo.es». */
@@ -153,16 +150,6 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 			expect(sql.exec("SELECT COUNT(*) AS n FROM email_sends;").one().n).toBe(0);
 		});
 	});
-
-	it("con la ruta en el Worker contesta lo mismo, consulta a consulta", async () => {
-		await conNegocio("pedido-worker", async (n) => {
-			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO, ...EN_EL_WORKER });
-			expect(await res.json()).toEqual({ ok: true });
-			expect(viajes(res, "hub-ruta")).toBe(0);
-			expect(viajes(res, "hub-lee")).toBe(1);
-			expect(enviados.map((m) => m.to)).toEqual(["pedidos@bebidas.test"]);
-		});
-	});
 });
 
 describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantHub", () => {
@@ -211,15 +198,12 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 		});
 	});
 
-	it("con la ruta en el Worker contesta lo mismo, y son dos consultas al DO", async () => {
-		await conNegocio("aviso-worker", async (n) => {
-			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", {
-				cuerpo: aviso({ tipo: "cancelada" }),
-				...EN_EL_WORKER,
-			});
+	it("el de una reserva cancelada, igual: un viaje", async () => {
+		await conNegocio("aviso-cancelada", async (n) => {
+			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", { cuerpo: aviso({ tipo: "cancelada" }) });
 			expect(await res.json()).toEqual({ ok: true, enviado: true });
-			expect(viajes(res, "hub-ruta")).toBe(0);
-			expect(viajes(res, "hub-lee")).toBe(2);
+			expect(viajes(res, "hub-ruta")).toBe(1);
+			expect(viajes(res, "hub-lee")).toBe(0);
 			expect(enviados.map((m) => m.subject)).toEqual(["Tu reserva en Bar Pepe se ha cancelado"]);
 		});
 	});

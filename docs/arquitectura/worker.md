@@ -62,7 +62,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   en una cabecera. El DO ejecuta la misma `app` (`app.ts`); dentro, `tenantAuth` se fía de esa
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
-  o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+  o el correo, no. No hay otra forma de ejecutar una ruta de negocio: un test que monta un router
+  suelto declara el doble de `alHub` (`test/helpers/rutaSuelta.ts`) y la ruta corre allí mismo.
 - **Una ruta que lee la base del negocio va dentro aunque el resto de lo que hace sea de fuera.** El
   pedido a un proveedor (`/v1/email/enviar-pedido`) y el aviso de una reserva web
   (`/v1/reservas-web/avisos`) leen la base del negocio y además reservan cupo en la base central,
@@ -81,7 +82,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Lo cubre `test/rolEnLaIdentidad.test.ts`.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
-  lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
+  lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Toda
+  ruta que lo usa se ejecuta dentro (lleva `alHub`); fuera sólo lo usan la agenda de reservas web y las
+  rutas públicas de la reserva. Un lote
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
 - **`consultar` sólo lee** (`leerEnBruto`), y no cambia la conexión. Cada texto tiene que ser **una
   sola sentencia** que empiece como una lectura (`SELECT`, `WITH`); si no, se rechaza con
@@ -94,15 +97,11 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   que empieza como una lectura y escribe (un `WITH … DELETE`) se deshace entero: va todo en una
   transacción y se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no
   pasaría por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la
-  vería nunca. Por `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y
-  las rutas públicas de la reserva.
+  vería nunca. Por `consultar` leen la agenda de reservas web y las rutas públicas de la reserva.
 - **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
   se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
-  purga (`Sync_Main_Checkpoints`). Dentro del DO lo escribe con el cliente de al lado; cuando la ruta
-  corre en el Worker (`EJECUTAR_EN_EL_HUB` apagado), el cliente lo manda por otra puerta,
-  `anotarEstado`, que sólo admite una sentencia que diga a las claras que escribe en una de esas
-  tablas (`esEscrituraDeEstado`). Una tabla nueva de ese tipo se añade ahí. Lo cubre
-  `test/consultarSoloLee.test.ts`.
+  purga (`Sync_Main_Checkpoints`). Lo escribe dentro del DO, con el cliente de al lado: las rutas que
+  lo tocan (el PIN, `/v1/sync/changes`) llevan `alHub`, y desde fuera no hay puerta que escriba.
 - **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
@@ -161,21 +160,18 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
-  pasa y lo que devuelve como valor (las filas de `consultar`). El cuerpo de la respuesta de una ruta
-  que se ejecuta dentro del DO no lo tiene: viaja como flujo.
+  pasa y lo que devuelve como valor. El cuerpo de la respuesta de una ruta que se ejecuta dentro del
+  DO no lo tiene: viaja como flujo (comprobado en local con 40 MiB).
 - **Los volcados de sync** (`/v1/sync/bootstrap`, `/verificar` e `/historico`) no leen por
   `tenantQuery`: dentro del DO recorren el cursor de su SQLite una vez y escriben cada fila una vez,
   ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
   JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
-  del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
-  Worker y es lo que la Main descarga dentro del plazo de un volcado (150 s, y lo pide en gzip:
-  [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Con la ruta en el Worker las filas
-  llegan por `tenantQuery` y, para una misma ventana, la respuesta es la misma byte a byte
-  (`test/helpers/dosCaminos.ts`); pero allí ya han cruzado la llamada al DO, enteras, cuando se
-  escriben, así que lo que acota esa llamada es su tope de 32 MiB y no el techo, que actúa después.
-  Por eso con la ruta en el Worker una ventana cuya estimación no cabe no se intenta, y dentro del
-  DO la más estrecha sí ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Los
-  bytes se cuentan al escribir, exactos (UTF-8), y las filas también.
+  del tope de filas: cabe en la memoria del objeto y es lo que la Main descarga dentro del plazo de un
+  volcado (150 s, y lo pide en gzip: [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)).
+  Como el cursor se lee según se escribe, la ventana más estrecha se intenta siempre aunque su
+  estimación no quepa, y decide lo escrito. Los bytes se cuentan al escribir, exactos (UTF-8), y las
+  filas también. Un router de sync montado suelto en un test lee por `tenantQuery`, y para una misma
+  ventana la respuesta es la misma byte a byte (`test/helpers/dosCaminos.ts`).
 - **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
   sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
   un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y
@@ -361,7 +357,7 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 ## Sincronización y firmas
 
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
-`anotarEstado`, `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
+`aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
 `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
@@ -450,8 +446,8 @@ bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.t
 - **El entorno es de pruebas** (`test/helpers/entornoDePruebas.ts`). Las `vars` que nombran un
   servicio o una cuenta —la base central, los remitentes, Turnstile, el origen de las reservas web,
   Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos que la suite necesita
-  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; `EJECUTAR_EN_EL_HUB` va como en
-  producción, para que la suite pase por el mismo camino, y la pista de región de los DO, vacía; los demás van vacíos, que el worker trata como sin configurar, y el test que
+  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; la pista de región de los DO, vacía;
+  los demás van vacíos, que el worker trata como sin configurar, y el test que
   necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
   carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
   la configuración le pregunta qué nombres va a cargar y los pone todos vacíos antes de aplicar la
@@ -498,6 +494,7 @@ no lo vigila nada.
 | Lo que se llama | Doble |
 |---|---|
 | La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
+| El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`) |
 | La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
 | La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` y, si el test hace drenar la cola, `hub.colaPausada = async () => null` (el interruptor `cola_do` se lee de la base central en cada vuelta) |

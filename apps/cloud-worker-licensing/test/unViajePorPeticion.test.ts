@@ -2,11 +2,10 @@
 //
 // Las rutas de negocio se ejecutan dentro del TenantHub del negocio (`lib/enElHub.ts`): el Worker
 // autentica y le pasa la petición entera, y el DO la ejecuta con su base al lado. Esto pasa por la
-// `app` completa y el entorno real de la suite (`EJECUTAR_EN_EL_HUB = "1"`, de `wrangler.json`):
+// `app` completa y el entorno real de la suite:
 //
 // - la respuesta es la de la base que vive en el DO, y la petición hace UN viaje (`hub-ruta`), sin
 //   ninguna consulta suelta (`hub-lee`);
-// - con el interruptor apagado, la misma ruta da lo mismo, consulta a consulta;
 // - un rechazo de negocio que se decide dentro del DO llega al cliente con su código y su status;
 // - lo que decide la base central (aquí, una licencia anulada) se queda en el Worker;
 // - las lecturas que van por POST (AUD-27) hacen el mismo viaje, con su cuerpo, y el tope de ese
@@ -135,7 +134,6 @@ function viajes(tiempos: string, tramo: string): number {
 describe("un viaje al TenantHub por petición", () => {
 	it("la lectura sale de la base del DO en un solo viaje, sin consultas sueltas", async () => {
 		await conNegocio("lectura", {}, async (n) => {
-			expect(env.EJECUTAR_EN_EL_HUB).toBe("1");
 			const r = await pedir(n, "GET", "/v1/login/users");
 			expect(r.status).toBe(200);
 			expect(r.json.map((u: any) => u.nombre).sort()).toEqual(["Admin", "Lucía"]);
@@ -143,16 +141,6 @@ describe("un viaje al TenantHub por petición", () => {
 			expect(viajes(r.tiempos, "hub-lee")).toBe(0);
 			// El DO trae su propio desglose: el trabajo hecho dentro, sin viajes.
 			expect(r.tiempos).toMatch(/en-hub-total;dur=/);
-		});
-	});
-
-	it("con el interruptor apagado da lo mismo, consulta a consulta", async () => {
-		await conNegocio("apagado", {}, async (n) => {
-			const r = await pedir(n, "GET", "/v1/login/users", { entorno: { EJECUTAR_EN_EL_HUB: "0" } });
-			expect(r.status).toBe(200);
-			expect(r.json.map((u: any) => u.nombre).sort()).toEqual(["Admin", "Lucía"]);
-			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
-			expect(viajes(r.tiempos, "hub-lee")).toBe(1);
 		});
 	});
 
@@ -228,21 +216,6 @@ describe("las lecturas por POST (AUD-27) también van enteras al TenantHub", () 
 			expect(cliente.json).toMatchObject({ id_cliente: "cli-1", coincide_por: "telefono" });
 			const productos = await pedir(n, "POST", "/v1/venta-rapida/productos/search", { cuerpo: { query: "cro", limit: 5 }, sinClave: true });
 			expect(JSON.stringify(productos.json)).toContain("Croquetas");
-		});
-	});
-
-	it("con el interruptor apagado dan lo mismo", async () => {
-		await conNegocio("lecturas-post-apagado", {}, async (n) => {
-			await conDatos(n);
-			const r = await pedir(n, "POST", "/v1/reservas/buscar-cliente", {
-				cuerpo: { email: "Prueba@EJEMPLO.invalid" },
-				sinClave: true,
-				entorno: { EJECUTAR_EN_EL_HUB: "0" },
-			});
-			expect(r.status).toBe(200);
-			expect(r.json).toMatchObject({ id_cliente: "cli-1", coincide_por: "email" });
-			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
-			expect(viajes(r.tiempos, "hub-lee")).toBeGreaterThan(0);
 		});
 	});
 

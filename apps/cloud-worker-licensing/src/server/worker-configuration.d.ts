@@ -21,7 +21,6 @@ interface __BaseEnv_Env {
 	AXIOM_DOMAIN: "eu-central-1.aws.edge.axiom.co";
 	JURISDICCION_DO: "";
 	UBICACION_DO: "weur";
-	EJECUTAR_EN_EL_HUB: "1";
 	TenantHub: DurableObjectNamespace<import("../index").TenantHub>;
 	AgendaWeb: DurableObjectNamespace<import("../index").AgendaWeb>;
 }
@@ -37,7 +36,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TURSO_DATABASE_URL" | "EMAIL_FROM_ADDRESS" | "EMAIL_FROM_NAME" | "EMAIL_RESERVAS_FROM_ADDRESS" | "TURNSTILE_SITE_KEY" | "RESERVAS_WEB_ORIGEN" | "AXIOM_DATASET" | "AXIOM_DATASET_SYNC" | "AXIOM_DOMAIN" | "JURISDICCION_DO" | "UBICACION_DO" | "EJECUTAR_EN_EL_HUB">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TURSO_DATABASE_URL" | "EMAIL_FROM_ADDRESS" | "EMAIL_FROM_NAME" | "EMAIL_RESERVAS_FROM_ADDRESS" | "TURNSTILE_SITE_KEY" | "RESERVAS_WEB_ORIGEN" | "AXIOM_DATASET" | "AXIOM_DATASET_SYNC" | "AXIOM_DOMAIN" | "JURISDICCION_DO" | "UBICACION_DO">> {}
 }
 declare module "*.sql" {
 	const value: string;
