@@ -28,6 +28,7 @@ import { enEuros, zDineroOpcional } from "../../lib/dinero";
 import * as z from "zod";
 
 import type { Env } from "../../env";
+import { alHub } from "../../lib/enElHub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb, type Sql } from "../../server/db";
@@ -39,7 +40,10 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const emailRoutes = new Hono<Ctx>();
 
-emailRoutes.use("*", tenantAuth);
+// DO-04: el pedido lee el proveedor y el contacto del negocio de la base del negocio, así que la
+// ruta se ejecuta dentro de su TenantHub (`lib/enElHub.ts`). El cupo (base central) y el envío (el
+// binding `EMAIL`) se hacen desde allí, con el mismo entorno que tiene el Worker.
+emailRoutes.use("*", tenantAuth, alHub);
 
 const lineaSchema = z.object({
 	nombre_producto: z.string().max(200),

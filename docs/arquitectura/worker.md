@@ -61,6 +61,13 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
   o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+- **Una ruta que lee la base del negocio va dentro aunque el resto de lo que hace sea de fuera.** El
+  pedido a un proveedor (`/v1/email/enviar-pedido`) y el aviso de una reserva web
+  (`/v1/reservas-web/avisos`) leen la base del negocio y además reservan cupo en la base central,
+  piden un enlace a la `AgendaWeb` y mandan el correo: todo eso se hace desde el `TenantHub`, con su
+  mismo entorno (`test/correoEnElHub.test.ts`). Mientras espera a la red, el DO atiende lo demás. En
+  un router donde sólo una ruta lee la base del negocio, `alHub` va sólo en ella:
+  `xRoutes.use("/ruta", alHub)` detrás del `use("*", tenantAuth)` (`reservas_web/main.routes.ts`).
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote

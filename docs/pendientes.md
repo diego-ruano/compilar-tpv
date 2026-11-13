@@ -358,23 +358,6 @@ fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a
 diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
 queda como opción para guardar esas copias.
 
-### DO-04 · Dos rutas leen la base del negocio sin ejecutarse dentro del `TenantHub`
-
-Las rutas de negocio llevan `alHub` detrás de `tenantAuth` y hacen un viaje al DO por petición
-([worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Dos routers leen la
-base del negocio y no lo llevan, porque el resto de lo que hacen es de la base central, de la agenda
-de reservas web o del correo:
-
-- `POST /v1/reservas-web/avisos` (`reservas_web/main.routes.ts`) lee la reserva y los datos del
-  negocio con dos consultas: dos viajes al DO en vez de uno.
-- `POST /v1/email/enviar-pedido` (`email/email.routes.ts`) lee el proveedor y el negocio en un lote:
-  un viaje, como si llevara `alHub`.
-
-Funcionan igual; es latencia. Ponerle `alHub` a `/avisos` haría que el `TenantHub` llamara a la
-`AgendaWeb` y mandara el correo desde su único hilo; la alternativa es juntar sus dos consultas en un
-lote, como el pedido. Las demás rutas de esos routers no leen la base del negocio por su cuenta. Sin
-decidir.
-
 ---
 
 ## Arquitectura

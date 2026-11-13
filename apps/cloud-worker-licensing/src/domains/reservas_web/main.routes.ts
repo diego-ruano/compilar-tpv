@@ -20,6 +20,7 @@ import { Hono } from "hono";
 
 import type { Env } from "../../env";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
 import { recortar } from "../../lib/texto";
@@ -36,6 +37,11 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 export const reservasWebMainRoutes = new Hono<Ctx>();
 
 reservasWebMainRoutes.use("*", tenantAuth);
+// DO-04: `/avisos` es la única de estas rutas que lee la base del negocio (la reserva y los datos
+// del negocio), así que se ejecuta dentro de su TenantHub: un viaje (`lib/enElHub.ts`). Desde allí
+// pide el enlace a la agenda, lee la clave en la base central y manda el correo, igual que lo hacía
+// el Worker. Las demás sólo tocan la base central y la agenda, y se quedan en el Worker.
+reservasWebMainRoutes.use("/avisos", alHub);
 
 reservasWebMainRoutes.post("/clave", soloLaMain("forbidden_not_tpv", 403), async (c) => {
 	const clave = await claveDelNegocio(getDb(c.env), c.get("tenantId"), Date.now());

@@ -33,11 +33,18 @@ export type Negocio = { tenantId: string; seed: Uint8Array };
  * Da de alta un negocio (su base en el DO `tenantId`, su licencia y su Main en una base central de
  * pruebas) y ejecuta `prueba` con él. `fijarCentral` recibe la base central: es lo que tiene que
  * devolver el `getDb` sustituido.
+ *
+ * La base central de pruebas es el SQLite de un Durable Object, y sólo se puede tocar desde él. Por
+ * defecto es uno aparte, y `prueba` corre dentro: vale para lo que lee la base central en el Worker
+ * (`tenantAuth`). Con `centralEnElNegocio`, las tablas de la central van en el SQLite del propio
+ * TenantHub del negocio y `prueba` corre dentro de él (recibe su motor): así también la puede leer
+ * una ruta que se ejecuta dentro del TenantHub.
  */
 export async function conNegocioFirmado<R>(
 	tenantId: string,
 	fijarCentral: (db: unknown) => void,
-	prueba: (n: Negocio) => Promise<R>,
+	prueba: (n: Negocio, hub: any) => Promise<R>,
+	{ centralEnElNegocio = false }: { centralEnElNegocio?: boolean } = {},
 ): Promise<R> {
 	olvidarLicenciasCacheadas();
 	await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
@@ -45,7 +52,7 @@ export async function conNegocioFirmado<R>(
 	ensureEd25519Sha512();
 	const seed = new Uint8Array(32).fill(7);
 	const pub = bytesToB64(await ed.getPublicKeyAsync(seed));
-	return enElHub(`central-de-${tenantId}`, async (hub: any) => {
+	return enElHub(centralEnElNegocio ? tenantId : `central-de-${tenantId}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		prepararPlanoDeControl(sql);
 		sql.exec("INSERT INTO tenants (tenant_id) VALUES (?);", tenantId);
@@ -67,8 +74,8 @@ export async function conNegocioFirmado<R>(
 			tenantId,
 			pub,
 		);
-		fijarCentral(clienteSobre(sql));
-		return prueba({ tenantId, seed });
+		fijarCentral(clienteSobre(sql, hub.state.storage));
+		return prueba({ tenantId, seed }, hub);
 	});
 }
 
