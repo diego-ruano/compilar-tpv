@@ -1,0 +1,14 @@
+{
+  "descripcion": "Buscador de la barra, sin acentos ni mayusculas: 'cafe' encuentra 'CAFÉ Solo' y 'Café con leche' (con la e acentuada escrita descompuesta: una e y el acento suelto detras), y nada mas. Antes el lower() de SQLite solo bajaba las letras ASCII. La tabla de lo que se pliega esta en crates/tpv-domain/src/busqueda_casos.json.",
+  "lectura": "venta_rapida.buscar_productos",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cafe', 'cat-barra', 'CAFÉ Solo', 120);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cafe-leche', 'cat-barra', 'Cafe' || char(769) || ' con leche', 150);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cana', 'cat-barra', 'Caña', 200);"
+  ],
+  "entrada": {
+    "query": "cafe",
+    "limit": 10
+  }
+}

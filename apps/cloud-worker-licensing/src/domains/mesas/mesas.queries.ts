@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { recortar } from "../../lib/texto";
 import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
@@ -360,11 +361,12 @@ export async function searchProductos(
 	db: Client,
 	query: string,
 ): Promise<ProductoVendibleOut[]> {
-	if (!recortar(query)) return [];
-	// `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50
-	// bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría la búsqueda; y en un
-	// patrón el `%` y el `_` que teclea el usuario son comodines. Igual en la Main
-	// (`search_productos_by_nombre`).
+	const texto = textoABuscar(query);
+	if (!texto) return [];
+	// Sin acentos ni mayúsculas (`lib/busqueda.ts`), igual en la Main (`search_productos_by_nombre`).
+	// Con `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de
+	// 50 bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría la búsqueda; y en un
+	// patrón el `%` y el `_` que teclea el usuario son comodines.
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -375,11 +377,11 @@ export async function searchProductos(
 				p.Ruta_Imagen AS Ruta_Imagen
 			FROM Productos p
 			JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-			WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
+			WHERE instr(${normalizada("p.Nombre")}, ?1) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
 			ORDER BY p.Nombre ASC
 			LIMIT 200;
 		`,
-		args: [query.toLowerCase()],
+		args: [texto],
 	});
 	return rows(rs) as ProductoVendibleOut[];
 }

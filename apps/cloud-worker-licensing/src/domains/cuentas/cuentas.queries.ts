@@ -1,7 +1,7 @@
 // src/domains/cuentas/cuentas.queries.ts
 
 import type { Client } from "@libsql/client/web";
-import { recortar } from "../../lib/texto";
+import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { deLaBase } from "../../lib/dinero";
 
 import type {
@@ -78,10 +78,11 @@ function cortarPagina<T extends { id: string }>(
 // Añade búsqueda de texto (sobre las columnas ya calculadas) y paginación a `args`, numerando
 // los placeholders de forma consecutiva. Paridad con `tpv-infra-sqlite::cuentas` (CUENTA-05).
 //
-// La búsqueda va con `instr` y no con `LIKE`: el SQLite del Durable Object no admite un patrón de
-// `LIKE` de más de 50 bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría el
-// listado; y en un patrón el `%` y el `_` que teclea el usuario son comodines. `expr` ya viene en
-// minúsculas.
+// La búsqueda no distingue acentos ni mayúsculas (`lib/busqueda.ts`, igual que la Main): «maria»
+// encuentra el cobro de «María». Va con `instr` y no con `LIKE`: el SQLite del Durable Object no
+// admite un patrón de `LIKE` de más de 50 bytes, así que un texto largo (o con acentos, que ocupan
+// dos) tumbaría el listado; y en un patrón el `%` y el `_` que teclea el usuario son comodines.
+// `expr` es la concatenación de las columnas, sin normalizar.
 function applyFilters(
 	args: any[],
 	q: string | null,
@@ -89,9 +90,10 @@ function applyFilters(
 	pageSize: number | null,
 ): { qClause: string; limitClause: string } {
 	let qClause = "";
-	if (q && recortar(q)) {
-		args.push(recortar(q));
-		qClause = `WHERE instr(${expr}, lower(?${args.length})) > 0`;
+	const texto = textoABuscar(q);
+	if (texto) {
+		args.push(texto);
+		qClause = `WHERE instr(${normalizada(expr)}, ?${args.length}) > 0`;
 	}
 	let limitClause = "";
 	if (pageSize && pageSize > 0) {
@@ -148,8 +150,7 @@ const entradasInner = (whereRango: string) => `
 	${whereRango}
 `;
 
-const ENTRADAS_Q_EXPR =
-	"lower(fecha_hora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT))";
+const ENTRADAS_Q_EXPR = "fecha_hora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT)";
 
 const salidasInner = (whereRango: string) => `
 	SELECT
@@ -168,7 +169,7 @@ const salidasInner = (whereRango: string) => `
 `;
 
 const SALIDAS_Q_EXPR =
-	"lower(fecha_hora || ' ' || tipo_gasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedor_id,'') || ' ' || proveedor_nombre)";
+	"fecha_hora || ' ' || tipo_gasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedor_id,'') || ' ' || proveedor_nombre";
 
 export async function entradas(
 	db: Client,

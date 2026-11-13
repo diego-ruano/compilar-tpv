@@ -1,0 +1,22 @@
+{
+  "descripcion": "La cabecera de caja con busqueda de texto sin acentos ni mayusculas: 'ñandu' suma el cobro de 'Peña Ñandú' y el gasto del proveedor 'Limonería Ñandú', y nada mas. La tabla de lo que se pliega esta en crates/tpv-domain/src/busqueda_casos.json.",
+  "lectura": "cuentas.resumen",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Peña Ñandú');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-2', 'Peña Los Andes');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', 'cli-1', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-2', 'MESA', 'mesa-1', 'cli-2', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 2450, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-2', '2026-05-10 11:00:00', 'Tarjeta', 3000, 'total');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Limonería Ñandú');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('gasto-1', '2026-05-12', 'Proveedor', 'Pedido semanal', 4000, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-2', '2026-05-12', 'Compras', 'Luz', 1050);"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "ñandu"
+  }
+}

@@ -84,19 +84,20 @@ fn where_listado(
     (where_sql, params)
 }
 
-/// Construye la cláusula de búsqueda de texto (`WHERE instr(<expr>, …) > 0`) sobre las columnas ya
-/// calculadas del subquery interno. Añade el parámetro a `params` y numera el placeholder de forma
-/// consecutiva a los ya presentes. `expr` debe ser una expresión `lower(...)` con las columnas.
+/// Construye la cláusula de búsqueda de texto (`WHERE instr(<expr normalizada>, …) > 0`) sobre las
+/// columnas ya calculadas del subquery interno. Añade el parámetro a `params` y numera el
+/// placeholder de forma consecutiva a los ya presentes. `expr` es la concatenación de las columnas.
 ///
-/// `instr` y no `LIKE`, como en el worker (`applyFilters` de `cuentas.queries.ts`): allí el SQLite
-/// del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón el `%` y el
-/// `_` que teclea el usuario son comodines. Los dos lados buscan el texto tal cual.
+/// Sin acentos ni mayúsculas (`crate::busqueda`), como en el worker (`applyFilters` de
+/// `cuentas.queries.ts`): «maria» encuentra el cobro de «María». Con `instr` y no `LIKE`: allí el
+/// SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón el
+/// `%` y el `_` que teclea el usuario son comodines.
 fn q_filter(params: &mut Vec<Value>, q: Option<String>, expr: &str) -> String {
-    match q.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    match q.as_deref().and_then(crate::busqueda::texto_a_buscar) {
         Some(qs) => {
             let idx = params.len() + 1;
-            params.push(Value::Text(qs.to_string()));
-            format!("WHERE instr({expr}, lower(?{idx})) > 0")
+            params.push(Value::Text(qs));
+            format!("WHERE instr({}, ?{idx}) > 0", crate::busqueda::normalizada(expr))
         }
         None => String::new(),
     }
@@ -195,9 +196,9 @@ fn entradas_inner(
     (sql, params)
 }
 
-/// Expresión de texto buscable de una fila de entradas (para el `LIKE`).
+/// Texto buscable de una fila de entradas; `q_filter` lo normaliza.
 const ENTRADAS_Q_EXPR: &str =
-    "lower(fechaHora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT))";
+    "fechaHora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT)";
 
 /// Subquery interno de **salidas** (gastos) con el nombre del proveedor incluido para poder
 /// buscarlo. Devuelve el SQL y los parámetros del rango de fechas.
@@ -227,8 +228,8 @@ fn salidas_inner(
     (sql, params)
 }
 
-/// Expresión de texto buscable de una fila de salidas (incluye proveedor id y nombre).
-const SALIDAS_Q_EXPR: &str = "lower(fechaHora || ' ' || tipoGasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedorId,'') || ' ' || proveedorNombre)";
+/// Texto buscable de una fila de salidas (incluye proveedor id y nombre); `q_filter` lo normaliza.
+const SALIDAS_Q_EXPR: &str = "fechaHora || ' ' || tipoGasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedorId,'') || ' ' || proveedorNombre";
 
 /// Lo que ya repusieron al stock las devoluciones parciales vigentes de un cobro, para una traza de
 /// consumo (`a` es el alias de `Lote_Consumos` o `Suelto_Consumos`): la parte devuelta de su línea,

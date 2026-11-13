@@ -152,12 +152,21 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
   `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
   [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
-- **Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`**: un
+- **Lo que teclea el usuario se busca con `instr(${normalizada(col)}, ?) > 0`, nunca con `LIKE`**: un
   patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
   patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra
   y los listados de caja, y la Main busca igual para devolver las mismas filas. Un `LIKE` con un
   patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
+- **Y sin acentos ni mayúsculas**: «café» encuentra «CAFÉ Solo» y «CAÑA», «Caña». El `lower()` de
+  SQLite sólo baja las letras ASCII y el DO no admite funciones propias, así que `normalizada(col)`
+  (`lib/busqueda.ts`) es SQL corriente: `lower()` y un `replace()` anidado por cada letra acentuada
+  y cada acento suelto (un texto escrito descompuesto). El parámetro pasa por `textoABuscar`, que
+  hace en código exactamente lo mismo y nada más: un `toLowerCase()` bajaría letras que la columna
+  deja como están. La Main fabrica la misma expresión (`tpv-infra-sqlite/src/busqueda.rs`), y las dos
+  salen de las tablas de `crates/tpv-domain/src/busqueda_casos.json`, que leen los dos lados
+  (`test/busquedaSinAcentos.test.ts`). Una columna ya normalizada al escribir no sirve aquí: los
+  listados de caja buscan en un texto que se compone al leer (mesa, cliente, método e importe).
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
   pasa y lo que devuelve como valor (las filas de `consultar`). El cuerpo de la respuesta de una ruta
   que se ejecuta dentro del DO no lo tiene: viaja como flujo.

@@ -1,5 +1,5 @@
 {
-  "descripcion": "Busqueda de texto en los ingresos de caja con un nombre largo y con acentos: 64 caracteres, 71 bytes. El SQLite del Durable Object no admite un patron de LIKE de mas de 50 bytes, asi que en la Handy esta busqueda fallaba con un error interno. Solo casa el cobro de la clienta del nombre entero. Las letras sin acento no distinguen mayusculas; las acentuadas se buscan como se escribieron.",
+  "descripcion": "Busqueda de texto en los ingresos de caja con un nombre largo y con acentos: 64 caracteres, 71 bytes. El SQLite del Durable Object no admite un patron de LIKE de mas de 50 bytes, asi que en la Handy esta busqueda fallaba con un error interno. Solo casa el cobro de la clienta del nombre entero. Sin distinguir mayusculas ni acentos (busqueda_casos.json): el nombre corto de cli-2 no casa porque le falta el resto.",
   "lectura": "cuentas.entradas",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",

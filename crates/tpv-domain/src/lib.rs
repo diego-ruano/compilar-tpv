@@ -8,6 +8,8 @@
 //! Cada módulo de negocio (mesas, venta rápida, inventario, caja…) publica sus
 //! entidades y validaciones puras.
 
+/// Lo que se teclea en un buscador, sin acentos ni mayúsculas, igual en la Main y en el worker.
+pub mod busqueda;
 pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;

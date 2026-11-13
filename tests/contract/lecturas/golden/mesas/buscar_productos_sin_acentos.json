@@ -1,0 +1,16 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-cana-grande",
+    "Nombre": "CAÑA de cerveza",
+    "Precio_Venta": 300,
+    "Ruta_Imagen": null
+  },
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-cana",
+    "Nombre": "Caña",
+    "Precio_Venta": 200,
+    "Ruta_Imagen": null
+  }
+]

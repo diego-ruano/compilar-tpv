@@ -1153,22 +1153,28 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
+        let Some(needle) = crate::busqueda::texto_a_buscar(&q) else {
+            return Ok(vec![]);
+        };
         let g = self.db.read().await;
         let db = &g;
-        let needle = q.trim().to_lowercase();
         // INC-20261030-005: el buscador tampoco ofrece productos de una categoría no vendible.
         //
-        // `instr` y no `LIKE`, como en el worker (`searchProductos` de `mesas.queries.ts`): allí el
-        // SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón
-        // el `%` y el `_` que teclea el usuario son comodines. Los dos lados buscan el texto tal cual.
-        let sql1 = r#"
+        // Sin acentos ni mayúsculas (`crate::busqueda`), como en el worker (`searchProductos` de
+        // `mesas.queries.ts`). Con `instr` y no `LIKE`: allí el SQLite del Durable Object no admite
+        // un patrón de `LIKE` de más de 50 bytes, y en un patrón el `%` y el `_` que teclea el
+        // usuario son comodines.
+        let sql1 = format!(
+            r#"
             SELECT p.ID_Producto, p.ID_Categoria, p.Nombre, COALESCE(p.Precio_Venta,0), p.Ruta_Imagen
             FROM Productos p
             JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-            WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
+            WHERE instr({}, ?1) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
             ORDER BY p.Nombre ASC LIMIT 200;
-        "#;
-        productos_query(db, sql1, vec![Value::Text(needle)]).await
+        "#,
+            crate::busqueda::normalizada("p.Nombre")
+        );
+        productos_query(db, &sql1, vec![Value::Text(needle)]).await
     }
 
     /* ===== TICKET (detalles) ===== */
