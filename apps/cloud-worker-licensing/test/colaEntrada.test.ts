@@ -70,14 +70,10 @@ function opRota(n: number) {
 }
 
 /**
- * Prepara el hub para drenar sin un Turso delante: el SQLite del propio DO hace de BD de tenant y
- * se sustituye el RESOLUTOR DE CREDENCIALES por uno que devuelve ese cliente.
- *
- * ⚠️ REV-04: lo que se sustituye es el resolutor, no `withTenantDbRetry`. Mientras se puenteaba el
- * envoltorio entero, su reintento por credenciales caducadas quedaba fuera de todo lo que se
- * probaba aquí — y resultó estar roto: el `try`/`catch` del drenado se tragaba el 401 y la rotación
- * no llegaba a dispararse nunca. Un doble que reemplaza la pieza que hay que vigilar no prueba
- * nada. `credenciales` cuenta cuántas veces se ha pedido el cliente, que es como se ve la rotación.
+ * Prepara el hub para drenar: el SQLite del propio DO, con el esquema de los tests, hace de base
+ * del negocio, y el motor la abre por donde siempre (`getTenantDb`). Se sustituye eso y no
+ * `withTenantDbRetry`: un doble que reemplaza el envoltorio entero deja fuera de la prueba lo que
+ * el envoltorio haga (REV-04).
  */
 function prepararHub(hub: any) {
 	const sql = hub.state.storage.sql;
@@ -85,18 +81,10 @@ function prepararHub(hub: any) {
 	for (const s of SEMILLA) sql.exec(s);
 
 	const db = clienteSobre(sql, hub.state.storage);
-	const credenciales = { veces: 0 };
-	hub.getTenantDb = async () => {
-		credenciales.veces++;
-		return db;
-	};
-	hub.resolveTenantDbClient = async () => {
-		credenciales.veces++;
-		return db;
-	};
+	hub.getTenantDb = async () => db;
 	// El interruptor `cola_do` se lee de la base central, que aquí no existe: nadie ha pausado la cola.
 	hub.colaPausada = async () => null;
-	return { sql, db, credenciales };
+	return { sql, db };
 }
 
 /**

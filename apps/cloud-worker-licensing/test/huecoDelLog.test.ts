@@ -77,7 +77,6 @@ function conLaBaseDelDo(hub: any) {
 	crearEsquemaTenant(sql);
 	const db = clienteSobre(sql, hub.state.storage);
 	hub.getTenantDb = async () => db;
-	hub.resolveTenantDbClient = async () => db;
 	clienteActual = db;
 	const purgar = async () => {
 		hub.lastPurgeAtMs = 0;

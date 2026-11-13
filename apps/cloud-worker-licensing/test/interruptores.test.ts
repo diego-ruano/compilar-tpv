@@ -323,7 +323,6 @@ describe("PROD-06 · la cola del DO apagada", () => {
 		for (const s of SEMILLA) sql.exec(s);
 		const db = clienteSobre(sql, hub.state.storage);
 		hub.getTenantDb = async () => db;
-		hub.resolveTenantDbClient = async () => db;
 		return sql;
 	}
 	const enCola = (sql: any) => sql.exec("SELECT COUNT(*) AS n FROM _Cola_Entrada;").toArray()[0].n;

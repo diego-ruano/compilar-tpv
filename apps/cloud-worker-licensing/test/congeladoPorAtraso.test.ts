@@ -95,15 +95,12 @@ function prepararHub(hub: any) {
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 	hub.touchLastSeen = async () => {};
-	// Ningún camino de esta prueba debe tocar la base central ni resolver credenciales de Turso.
+	// Ningún camino de esta prueba debe tocar la base central.
 	hub.getCentralDb = () => {
 		throw new Error("la prueba no tiene base central");
 	};
 	// AUD-02: la Main de estas pruebas es la de la licencia, y su saludo lo pregunta a un doble.
 	laMainEs(hub, "device-main");
-	hub.resolveTenantDbClient = async () => {
-		throw new Error("la prueba no resuelve credenciales");
-	};
 	hub.asegurarCola();
 	return { sql, db, control };
 }
