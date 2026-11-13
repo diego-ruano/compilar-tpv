@@ -84,13 +84,16 @@ describe("los datos del obligado", () => {
 		expect(useEstadoFiscal.getState().datosFiscalesCompletos).toBe(true);
 	});
 
-	it("vuelven a avisar tras un cierre de sesión", async () => {
+	it("lo reconocido vale mientras la aplicación siga abierta, y un store recién cargado vuelve a avisar", async () => {
 		respuesta.valor = estado({ datos_fiscales_completos: false });
 		await useEstadoFiscal.getState().refrescar();
 		useEstadoFiscal.getState().reconocerDatos();
+		expect(useEstadoFiscal.getState().datosReconocidos).toBe(true);
 
-		// `_resetEstadoFiscal` es lo que corre al cerrar sesión: lo que se reconoció fue «lo he
-		// visto hoy», no «no me lo enseñes nunca más».
+		// Cerrar sesión no toca este store: el aviso reconocido no vuelve hasta que se abre otra vez
+		// la aplicación, que carga el store de cero. `_resetEstadoFiscal` sólo lo usan los tests, y
+		// deja el store como recién cargado: lo que se reconoció fue «lo he visto», no «no me lo
+		// enseñes nunca más».
 		_resetEstadoFiscal();
 
 		expect(useEstadoFiscal.getState().datosReconocidos).toBe(false);

@@ -100,7 +100,10 @@ export const useEstadoFiscal = create<Estado>((set, get) => ({
     reconocerDatos: () => set({ datosReconocidos: true }),
 }));
 
-/** Para los tests y para un cierre de sesión: deja el store como recién cargado. */
+/**
+ * Para los tests: deja el store como recién cargado. Cerrar sesión no lo llama, así que el aviso
+ * reconocido sigue oculto hasta que se vuelve a abrir la aplicación.
+ */
 export function _resetEstadoFiscal(): void {
     if (timer !== null) window.clearInterval(timer);
     timer = null;
