@@ -8,7 +8,7 @@
 //   · que una ruta pública o anónima (la salud, el preflight, las actualizaciones, el widget y la
 //     API pública de las reservas web, el emparejamiento) no lo lleva, conteste lo que conteste;
 //   · que una petición firmada de un dispositivo sí, con el viaje al TenantHub;
-//   · que una firmada que `tenantAuth` rechaza no lo lleva.
+//   · que una firmada que `tenantAuth` rechaza no lo lleva, tampoco por la licencia.
 
 import { env as entorno } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
@@ -76,6 +76,15 @@ describe("a un dispositivo del negocio, sí", () => {
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Server-Timing")).toMatch(/total;dur=/);
 			expect(viajes(res, "hub-ruta")).toBe(1);
+		});
+	});
+
+	it("una firmada con la licencia anulada, tampoco: `tenantAuth` la rechaza después de saber quién es", async () => {
+		await conNegocioFirmado(deps, "server-timing-licencia-anulada", async (n) => {
+			n.enCentral("UPDATE licenses SET status = 'revoked';");
+			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			expect(res.status).toBe(403);
+			expect(res.headers.get("Server-Timing")).toBeNull();
 		});
 	});
 

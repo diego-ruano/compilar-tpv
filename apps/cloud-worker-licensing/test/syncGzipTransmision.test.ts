@@ -32,6 +32,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("token", "token");
 		c.set("licHash", "hash");
 		c.set("rol", rol);
+		c.set("autenticado", true);
 		await next();
 	},
 }));

@@ -168,7 +168,9 @@ describe("un viaje al TenantHub por petición", () => {
 			const r = await pedir(n, "GET", "/v1/login/users");
 			expect(r.status).toBe(403);
 			expect(r.json.error).toBe("license_revoked");
-			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
+			// Dentro del DO `tenantAuth` no mira la licencia: el veto es el del Worker. Y la respuesta no lleva
+			// el desglose de tiempos, que sólo sale para quien pasa `tenantAuth` entero.
+			expect(r.tiempos).toBe("");
 		});
 	});
 });

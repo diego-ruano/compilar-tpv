@@ -51,6 +51,11 @@ export type TenantVars = {
 	rol: string;
 	/** La ruta es una lectura que va por POST: la marca su declaración (`lecturaPorPost`, `lib/rutas.ts`). */
 	lecturaPorPost?: true;
+	/**
+	 * `tenantAuth` ha dejado pasar la petición: la firma, el dispositivo y la licencia. Las variables
+	 * de arriba se ponen antes de mirar la licencia; ésta, sólo si también pasa.
+	 */
+	autenticado?: true;
 };
 
 /**
@@ -120,13 +125,12 @@ export const soloLaMainCobra = soloLaMain("cobro_solo_en_main", 403);
 export const soloLaMainEscribeCaja = soloLaMain("caja_solo_en_main", 403);
 
 /**
- * ¿La petición en curso es de un dispositivo de un negocio que ha pasado `tenantAuth`? Lo que sólo se
- * le enseña a él, como el desglose de tiempos (`Server-Timing`, `app.ts`). La puerta de las reservas
- * web pone el negocio (`tenantId`) pero no un dispositivo: no cuenta.
+ * ¿La petición en curso es de un dispositivo de un negocio que ha pasado `tenantAuth` entero, licencia
+ * incluida? Lo que sólo se le enseña a él, como el desglose de tiempos (`Server-Timing`, `app.ts`). Ni
+ * la puerta de las reservas web, que pone el negocio, ni un dispositivo con la licencia vetada.
  */
 export function esDispositivoAutenticado(c: Context): boolean {
-	const deviceId: unknown = c.get("deviceId");
-	return typeof deviceId === "string" && deviceId !== "";
+	return c.get("autenticado") === true;
 }
 
 export const tenantAuth: MiddlewareHandler<{
@@ -143,6 +147,7 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("token", dentro.identidad.token);
 		c.set("licHash", dentro.identidad.licHash);
 		c.set("rol", dentro.identidad.rol);
+		c.set("autenticado", true);
 		await next();
 		return;
 	}
@@ -197,5 +202,6 @@ export const tenantAuth: MiddlewareHandler<{
 	const veto = await vetoDeLicencia(c);
 	if (veto) return forbidden(c.req.raw, veto);
 
+	c.set("autenticado", true);
 	await next();
 };
