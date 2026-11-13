@@ -42,9 +42,9 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
         expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
         expect(ajustesPorTablas(cobro)).toEqual([]);
     });
-    it("un cobro parcial, una baja o una devolución refrescan el plano aunque no toquen la comanda", () => {
-        // El plano enseña lo que queda por cobrar de cada mesa, que sale de las líneas cobradas. Estos
-        // lotes no llevan `comandas`: quien tiene que traer `mesas` es `pagos`.
+    it("un cobro parcial o la baja de un cobro refrescan el plano aunque no toquen la comanda", () => {
+        // El plano enseña lo que queda por cobrar de cada mesa, que sale de las líneas cobradas de
+        // un pago activo. Estos lotes no llevan `comandas`: quien tiene que traer `mesas` es `pagos`.
         const cobroParcial = ["pagos", "pago_detalles", "lotes_producto", "lote_consumos", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
         const devolucion = ["pagos", "devolucion_lineas", "lotes_producto", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
         const baja = ["pagos", "lotes_producto", "lote_consumos", "movimientos_caja", "registros_facturacion"];
