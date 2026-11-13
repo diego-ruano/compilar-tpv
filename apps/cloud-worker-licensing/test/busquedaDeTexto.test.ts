@@ -173,14 +173,17 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB",
 	const fuentes = import.meta.glob("../src/domains/**/*.ts", { query: "?raw", import: "default", eager: true });
 
 	/**
-	 * Un `LIKE` o un `GLOB` cuyo patrón no es un texto fijo: un parámetro, una concatenación (de SQL
-	 * o de JavaScript) o una interpolación. `GLOB` tiene el mismo tope de 50 bytes. También caza las
-	 * dos como función (`like(patron, texto)`), que nadie usa con un patrón fijo.
+	 * Un `LIKE` o un `GLOB` que no va seguido de un patrón fijo (`GLOB` tiene el mismo tope de 50
+	 * bytes). Sólo vale lo que se reconoce: la palabra, un literal de SQL entero —con sus comillas
+	 * dobladas (`'it''s'`) y sin nada que lo componga desde JavaScript— y, detrás, el final de la
+	 * condición. Todo lo demás se da por un patrón de fuera: un parámetro, una concatenación, una
+	 * interpolación, un comentario o un `COLLATE` por medio, la forma de función (`like(patron, x)`).
 	 *
-	 * El texto fijo es un literal de SQL entero, con sus comillas dobladas (`'it''s'`), al que no le
-	 * sigue un `||`.
+	 * Es conservador a propósito: un patrón fijo con `$`, `+`, comillas dobles o acento grave también
+	 * salta, y hay que escribirlo de otra forma.
 	 */
-	const PATRON_DE_FUERA = /\b(?:LIKE|GLOB)\s*\(|\b(?:LIKE|GLOB)\s+(?!'(?:[^'$"`+]|'')*'(?!')(?!\s*\|\|))/gi;
+	const PATRON_DE_FUERA =
+		/\b(?:LIKE|GLOB)\b(?!\s+'(?:[^'$"`+]|'')*'(?!')\s*(?:$|[),;]|(?:THEN|AND|OR|ESCAPE|END|ELSE|WHEN|GROUP|ORDER|LIMIT)\b))/gim;
 
 	it("lee el fuente de verdad", () => {
 		expect(Object.keys(fuentes).length).toBeGreaterThan(40);
@@ -201,10 +204,16 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB",
 		expect(caza("WHERE x LIKE 'it''s' || ?1")).toBe(1);
 		expect(caza("WHERE like(?1, x)")).toBe(1);
 		expect(caza("WHERE glob(?1, x)")).toBe(1);
+		expect(caza("WHERE x LIKE '%' /* búsqueda */ || ?1")).toBe(1);
+		expect(caza("WHERE x GLOB '*' /* búsqueda */ || ?1")).toBe(1);
+		expect(caza("WHERE x LIKE/**/?1")).toBe(1);
+		expect(caza("WHERE x LIKE '%' COLLATE NOCASE || ?1")).toBe(1);
 		expect(caza("WHERE x LIKE 'it''s%'")).toBe(0);
+		expect(caza("WHERE x LIKE 'it''s%' AND y = 1")).toBe(0);
+		expect(caza("WHERE x LIKE '%a\\_b%' ESCAPE '\\'")).toBe(0);
 		expect(caza("CASE WHEN f.Hora LIKE '%-%' THEN 1 END")).toBe(0);
 		expect(caza("lower(cg.Tipo_Gasto) LIKE '%proveedor%')")).toBe(0);
-		expect(caza("m.Numero_Mesa NOT GLOB '*[^0-9]*'")).toBe(0);
+		expect(caza("m.Numero_Mesa NOT GLOB '*[^0-9]*'\n\tAND instr(m.Numero_Mesa, char(0)) = 0")).toBe(0);
 	});
 
 	it("en los dominios sólo hay patrones fijos", () => {
