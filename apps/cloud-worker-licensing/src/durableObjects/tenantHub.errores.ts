@@ -16,17 +16,21 @@
 //
 //   1. **Por el código**, si el fallo es uno nuestro (`HubError`): lo escribió quien lo lanzó y no
 //      depende de ninguna redacción.
-//   2. **Por el texto**, si viene de SQLite o del runtime del Durable Object. Primero lo que es un
-//      estado de la base o del objeto (pasajero), después lo que es de la sentencia (permanente).
-//   3. **Desconocido** todo lo demás: ni se aparta ya ni se promete que se arregle solo. Cuenta
+//   2. **Por el código de SQLite**, si el mensaje es suyo. El SQLite del DO cierra sus mensajes
+//      con el código (`…: SQLITE_BUSY`, `…: SQLITE_CONSTRAINT (extended: …)`), y es lo único que
+//      dice si el fallo es del estado de la base (pasajero). Lo que va delante lo escribe en parte
+//      quien escribió la sentencia: lleva nombres de tablas y de columnas, y trozos del SQL.
+//   3. **Por el texto**: en un mensaje de SQLite, sólo para saber si es de la sentencia
+//      (permanente); en lo que no es de SQLite (el runtime del Durable Object), las frases con las
+//      que dice que no estaba para atender (pasajero).
+//   4. **Desconocido** todo lo demás: ni se aparta ya ni se promete que se arregle solo. Cuenta
 //      como intento y acabará apartándose si no deja de fallar.
 //
-// La base del negocio es el SQLite de este mismo DO: aquí no llega ningún fallo de red. Por eso las
-// firmas de texto son las de SQLite y las del runtime, y van con sus espacios o con su código
-// (`is full`, `sqlite_full`), no con palabras sueltas. El mensaje de SQLite lleva nombres de tablas
-// y columnas (`no such column: X`), y una firma como `socket`, `network`, `timeout` o `503`, que
-// era de cuando la base se hablaba por HTTP, podía casar con uno: ese fallo, que es permanente,
-// salía como pasajero, no gastaba intentos y paraba el outbox para siempre.
+// La base del negocio es el SQLite de este mismo DO: aquí no llega ningún fallo de red. Por eso no
+// hay firmas como `socket`, `network`, `timeout` o `503`, que eran de cuando la base se hablaba
+// por HTTP. Y por eso lo pasajero de un mensaje de SQLite no se busca en su texto: `no such column:
+// sqlite_full` o `no such table: database is locked` son fallos de la sentencia, permanentes, y
+// leídos por su texto salían como pasajeros: no gastaban intentos y paraban el outbox para siempre.
 
 import { HubError } from "../lib/errorHttp";
 
@@ -75,7 +79,7 @@ const CODIGOS_PASAJEROS: ReadonlySet<string> = new Set([
  * resultado.
  *
  * Se comparan en minúsculas y por `includes`: el runtime añade detrás el código (`: SQLITE_ERROR`)
- * y a veces delante un prefijo (`near "…"`).
+ * y a veces delante un prefijo (`near "…"`). Sólo se llega aquí con un fallo que no es pasajero.
  */
 const PERMANENTES = [
 	"no such column",
@@ -120,36 +124,56 @@ export function errorHorario(error: unknown): { error: string; status: number; m
 }
 
 /**
+ * El código con el que el SQLite del DO cierra sus mensajes, en minúsculas: `no such table: X:
+ * SQLITE_ERROR`, `UNIQUE constraint failed: T.C: SQLITE_CONSTRAINT (extended:
+ * SQLITE_CONSTRAINT_UNIQUE)`. Los textos, tal como salen, en `test/sondaSqliteDo.test.ts`.
+ */
+const CIERRE_DE_SQLITE = /: (sqlite_[a-z0-9_]+)(?: \(extended: sqlite_[a-z0-9_]+\))?\s*$/;
+
+/** El código de SQLite de un mensaje, o `null` si el mensaje no es de SQLite. */
+function codigoSqlite(texto: string): string | null {
+	return CIERRE_DE_SQLITE.exec(texto)?.[1] ?? null;
+}
+
+/** ¿Es `codigo` uno de la lista, o una variante suya (`sqlite_ioerr_write`)? */
+function esDe(codigo: string, lista: readonly string[]): boolean {
+	return lista.some((c) => codigo === c || codigo.startsWith(`${c}_`));
+}
+
+/**
  * La base está llena o no se deja escribir. No es culpa de ninguna operación ni se arregla sola:
  * hay que hacerle sitio. Mientras tanto no se aparta nada (lo apartado se quedaría fuera de la
  * nube), y quien lo ve avisa (`MotorTenantHub.avisarBaseLlena`).
  */
-const BASE_LLENA = [
-	"database or disk is full",
-	"sqlite_full",
-	"readonly database",
-	"sqlite_readonly",
+const SQLITE_BASE_LLENA = ["sqlite_full", "sqlite_readonly"] as const;
+
+/** Lo mismo, dicho por algo que no es una sentencia (el almacenamiento del objeto). */
+const FRASES_DE_BASE_LLENA = ["database or disk is full", "readonly database"] as const;
+
+/**
+ * Códigos de SQLite que NO hablan de la sentencia sino del estado de la base: llena, ocupada, sin
+ * poder leer o escribir, sin memoria.
+ */
+const SQLITE_PASAJEROS = [
+	...SQLITE_BASE_LLENA,
+	"sqlite_busy",
+	"sqlite_locked",
+	"sqlite_ioerr",
+	"sqlite_nomem",
 ] as const;
 
 /**
- * Firmas que NO hablan de la operación: la base o el objeto no estaban para atenderla en ese
- * instante. Van explícitas y se comprueban ANTES que las permanentes: entre «el objeto se ha
- * reiniciado» y «la sentencia está mal», lo primero manda, porque es lo que se puede reintentar sin
- * consecuencias.
- *
- * Todas llevan un espacio o son un código de SQLite: no pueden casar con el nombre de una tabla o
- * de una columna dentro de un mensaje de SQLite (ver la cabecera).
+ * Frases que NO hablan de la operación: la base o el objeto no estaban para atenderla en ese
+ * instante. Sólo se buscan en lo que no es un mensaje de SQLite (ver la cabecera), y se comprueban
+ * ANTES que las permanentes: entre «el objeto se ha reiniciado» y «la sentencia está mal», lo
+ * primero manda, porque es lo que se puede reintentar sin consecuencias.
  */
-const TRANSITORIOS = [
-	...BASE_LLENA,
-	// SQLite: la base está ocupada, o no ha podido leer o escribir.
+const FRASES_PASAJERAS = [
+	...FRASES_DE_BASE_LLENA,
+	// El estado de la base, cuando no lo dice una sentencia.
 	"database is locked",
-	"sqlite_busy",
-	"sqlite_locked",
 	"disk i/o error",
-	"sqlite_ioerr",
 	"out of memory",
-	"sqlite_nomem",
 	// El runtime del Durable Object: saturado, reiniciado (un despliegue, un fallo de su
 	// almacenamiento, un límite de memoria o de CPU) o con su almacenamiento sin contestar.
 	"is overloaded",
@@ -176,6 +200,14 @@ function textoDe(error: unknown): string {
 	return String((error as any)?.message ?? error ?? "").toLowerCase();
 }
 
+/** ¿Dice este texto que la base o el objeto no estaban para atender? */
+function esPasajeroPorTexto(texto: string): boolean {
+	const sqlite = codigoSqlite(texto);
+	// Un mensaje de SQLite: decide su código, no lo que lleve delante.
+	if (sqlite !== null) return esDe(sqlite, SQLITE_PASAJEROS);
+	return FRASES_PASAJERAS.some((f) => texto.includes(f));
+}
+
 /**
  * ¿Es un rechazo definitivo?
  *
@@ -192,7 +224,7 @@ export function esRechazoPermanente(error: unknown): boolean {
 	}
 	const texto = textoDe(error);
 	if (!texto) return false;
-	if (TRANSITORIOS.some((f) => texto.includes(f))) return false;
+	if (esPasajeroPorTexto(texto)) return false;
 	return PERMANENTES.some((f) => texto.includes(f));
 }
 
@@ -216,11 +248,13 @@ export function esFalloPasajero(error: unknown): boolean {
 	}
 	const texto = textoDe(error);
 	if (!texto) return false;
-	return TRANSITORIOS.some((f) => texto.includes(f));
+	return esPasajeroPorTexto(texto);
 }
 
 /** ¿La base está llena o en sólo lectura? Pasajero para la operación, y hay que avisar. */
 export function esBaseLlena(error: unknown): boolean {
 	const texto = textoDe(error);
-	return BASE_LLENA.some((f) => texto.includes(f));
+	const sqlite = codigoSqlite(texto);
+	if (sqlite !== null) return esDe(sqlite, SQLITE_BASE_LLENA);
+	return FRASES_DE_BASE_LLENA.some((f) => texto.includes(f));
 }

@@ -93,12 +93,15 @@ const ALTA = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);";
 describe("el apply_ack dice de qué clase es el fallo", () => {
 	it("lo que rechaza el SQLite del DO por la sentencia es permanente", async () => {
 		await enElHub("ack-permanente", async (hub: any) => {
-			const { aplicar } = preparar(hub);
+			const { aplicar, eventos } = preparar(hub);
 			expect(await aplicar("op-ok", ALTA, ["z1", "Sala"])).toMatchObject({ ok: true });
 
 			const CASOS: [string, string, unknown[]][] = [
 				["una columna que no existe", "UPDATE Zonas SET Columna_Que_No_Existe = 1;", []],
 				["una tabla que no existe", "INSERT INTO Tabla_Que_No_Existe (a) VALUES (1);", []],
+				// El nombre lo pone la sentencia y sale en el mensaje: no lo convierte en un fallo de la base.
+				["una columna que se llama como un código de SQLite", "UPDATE Zonas SET sqlite_full = 1;", []],
+				["una tabla que se llama como un estado de la base", `INSERT INTO "database is locked" (a) VALUES (1);`, []],
 				["la clave repetida", ALTA, ["z1", "Otra"]],
 				["una clave foránea rota", "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'NO-EXISTE', '1', 4, 0, 0, 'rect', 10, 10);", []],
 				["un valor fuera de su dominio (RI-48)", "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Estado) VALUES ('r1', '2026-11-13', '21:00', 'CENA', 'DESCONOCIDO');", []],
@@ -111,6 +114,8 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 				const ack = await aplicar(`op-${caso}`, texto, args);
 				expect(ack, `${caso}: ${ack.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
 			}
+			// Y ninguno se ha tomado por una base llena.
+			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
 		});
 	});
 

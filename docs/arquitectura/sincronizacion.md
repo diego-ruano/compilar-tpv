@@ -304,14 +304,19 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     operación está mal escrita (`hora_no_determinista`, `missing_client_now`, sin identidad, el mismo
     `Op_Id` con otro contenido) y pasajero lo que habla de cómo está la nube y no de la operación
     (sin base, el esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main).
-  - **Después por el texto** de SQLite o del runtime del Durable Object. Pasajero, y se mira
-    antes: la base ocupada o sin poder leer ni escribir, y el objeto saturado o reiniciado.
-    Permanente: lo que no encaja con el esquema o con los datos, y los límites del SQLite del DO
-    (parámetros, patrón de `LIKE`, `SELECT` compuesto, tamaño de la sentencia o de un valor).
-  - Las firmas de texto llevan un espacio o son un código de SQLite (`sqlite_full`). El mensaje de
-    SQLite trae nombres de tablas y columnas, y una palabra suelta (`socket`, `timeout`, `503`)
-    casaría con uno: ese rechazo, que es permanente, saldría como pasajero y pararía el outbox. La
-    base está en el propio DO, así que no hay firmas de red.
+  - **Después, si el mensaje es de SQLite, por su código.** El SQLite del DO cierra sus mensajes
+    con él (`…: SQLITE_BUSY`, `…: SQLITE_CONSTRAINT (extended: …)`). Es pasajero el que habla del
+    estado de la base (`SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_IOERR`, `SQLITE_NOMEM`, `SQLITE_FULL`,
+    `SQLITE_READONLY`). Lo que va delante del código no decide si es pasajero: lo escribe en parte
+    quien escribió la sentencia (`no such column: sqlite_full`, `no such table: database is
+    locked`), y leído por su texto un rechazo permanente saldría como pasajero y pararía el outbox.
+    El texto sólo dice si es de la sentencia, y entonces es permanente: lo que no encaja con el
+    esquema o con los datos, y los límites del SQLite del DO (parámetros, patrón de `LIKE`, `SELECT`
+    compuesto, tamaño de la sentencia o de un valor).
+  - **Lo que no es de SQLite, por sus frases**: las del runtime del Durable Object cuando está
+    saturado, reiniciado o sin su almacenamiento, que son pasajeras y se miran antes que las
+    permanentes. La base está en el propio DO, así que no hay firmas de red (`socket`, `timeout`,
+    `503`).
   - **Una base llena o en sólo lectura no aparta nada** (`esBaseLlena`): es pasajero para la
     operación, y el DO avisa una vez por instancia (Sentry, y `base_llena` en Axiom). Hacerle sitio
     es cosa de una persona.

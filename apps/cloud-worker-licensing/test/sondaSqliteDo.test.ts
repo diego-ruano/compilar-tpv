@@ -455,6 +455,38 @@ describe("límites del SQL", () => {
 		expect(res.restaurado).toMatch(/CHECK constraint failed/);
 		expect(res.n).toBe(1);
 	});
+
+	it("los mensajes de error acaban en su código, y llevan los nombres que traía la sentencia", async () => {
+		// De lo que depende la clasificación de `tenantHub.errores.ts`: el código va al final, y el
+		// texto de delante lo escribe en parte quien escribió la sentencia.
+		const res = await enElHub("sonda-mensajes-de-error", (hub) => {
+			const { sql } = hub.state.storage;
+			sql.exec("CREATE TABLE T (ID TEXT PRIMARY KEY, N INTEGER NOT NULL CHECK (N > 0));");
+			sql.exec("CREATE TABLE H (ID TEXT PRIMARY KEY, P TEXT REFERENCES T(ID));");
+			sql.exec("INSERT INTO T VALUES ('a', 1);");
+			return {
+				unica: error(() => sql.exec("INSERT INTO T VALUES ('a', 2);")),
+				nula: error(() => sql.exec("INSERT INTO T VALUES ('b', NULL);")),
+				check: error(() => sql.exec("INSERT INTO T VALUES ('b', 0);")),
+				foranea: error(() => sql.exec("INSERT INTO H VALUES ('h', 'no-existe');")),
+				tipo: error(() => sql.exec("INSERT INTO T (rowid, ID, N) VALUES ('no', 'z', 1);")),
+				columna: error(() => sql.exec("SELECT sqlite_full FROM T;").toArray()),
+				tabla: error(() => sql.exec("SELECT 1 FROM sqlite_busy;").toArray()),
+				entreComillas: error(() => sql.exec(`SELECT 1 FROM "database is locked";`).toArray()),
+			};
+		});
+		informe.mensajesDeError = res;
+		expect(res).toEqual({
+			unica: "UNIQUE constraint failed: T.ID: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_PRIMARYKEY)",
+			nula: "NOT NULL constraint failed: T.N: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_NOTNULL)",
+			check: "CHECK constraint failed: N > 0: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)",
+			foranea: "FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)",
+			tipo: "datatype mismatch: SQLITE_MISMATCH",
+			columna: "no such column: sqlite_full at offset 7: SQLITE_ERROR",
+			tabla: "no such table: sqlite_busy: SQLITE_ERROR",
+			entreComillas: "no such table: database is locked: SQLITE_ERROR",
+		});
+	});
 });
 
 describe("jurisdicción", () => {

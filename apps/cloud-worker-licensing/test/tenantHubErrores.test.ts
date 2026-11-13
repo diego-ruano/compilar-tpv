@@ -120,7 +120,11 @@ describe("un rechazo que NO se arregla reintentando", () => {
 describe("un fallo que no habla de la operación", () => {
 	const CASOS: [string, unknown][] = [
 		["la base está ocupada", sqlite("database is locked", "SQLITE_BUSY")],
+		["la base está ocupada, con su código extendido", sqlite("database is locked", "SQLITE_BUSY (extended: SQLITE_BUSY_SNAPSHOT)")],
+		["una tabla está ocupada", sqlite("database table is locked: Zonas", "SQLITE_LOCKED")],
 		["la base no se ha podido leer o escribir", sqlite("disk I/O error", "SQLITE_IOERR")],
+		["la base no se ha podido escribir, con su código extendido", sqlite("disk I/O error", "SQLITE_IOERR (extended: SQLITE_IOERR_WRITE)")],
+		["la base no se ha podido sincronizar, sólo con el código extendido", sqlite("disk I/O error", "SQLITE_IOERR_FSYNC")],
 		["no queda memoria", sqlite("out of memory", "SQLITE_NOMEM")],
 		// El runtime del Durable Object, con sus frases.
 		["el objeto está saturado", new Error("Durable Object is overloaded. Too many requests queued.")],
@@ -166,8 +170,10 @@ describe("un fallo que no habla de la operación", () => {
 describe("una base llena no aparta nada", () => {
 	const LLENA = [
 		sqlite("database or disk is full", "SQLITE_FULL"),
-		new Error("SQLITE_FULL"),
 		sqlite("attempt to write a readonly database", "SQLITE_READONLY"),
+		sqlite("attempt to write a readonly database", "SQLITE_READONLY (extended: SQLITE_READONLY_DBMOVED)"),
+		// Dicho por algo que no es una sentencia: sin el código detrás.
+		new Error("database or disk is full"),
 	];
 
 	it("es pasajero para la operación: ni se aparta ni se le gasta un intento", () => {
@@ -213,6 +219,40 @@ describe("ante la duda, ni se aparta ni se promete que se arregle solo", () => {
 		]) {
 			expect(veredicto(sqlite(`no such column: ${nombre}`)), nombre).toBe("permanente");
 			expect(veredicto(sqlite(`UNIQUE constraint failed: ${nombre}.ID`, "SQLITE_CONSTRAINT")), nombre).toBe("permanente");
+		}
+	});
+
+	it("en un mensaje de SQLite decide su código, no lo que la sentencia haya puesto delante", () => {
+		// El texto de un mensaje de SQLite lo escribe en parte quien escribió la sentencia: el nombre
+		// de una columna, de una tabla, o el trozo de SQL que no se entiende. Con un nombre que se
+		// llamara como un código o como una de las frases, este rechazo, que es permanente, salía
+		// como pasajero (y hasta como una base llena): no gastaba intentos y paraba el outbox. Los
+		// tres primeros son los textos que da el SQLite del DO (`test/sondaSqliteDo.test.ts`).
+		const DE_LA_SENTENCIA = [
+			sqlite("no such column: sqlite_full at offset 7"),
+			sqlite("no such table: sqlite_busy"),
+			sqlite("no such table: database is locked"),
+			sqlite("no such column: sqlite_readonly at offset 12"),
+			sqlite("table Zonas has no column named sqlite_ioerr"),
+			sqlite("no such table: database or disk is full"),
+			sqlite('near "timed out": syntax error at offset 28'),
+			sqlite("no such function: was reset"),
+			sqlite("UNIQUE constraint failed: internal error.ID", "SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)"),
+		];
+		for (const e of DE_LA_SENTENCIA) {
+			expect(veredicto(e), e.message).toBe("permanente");
+			expect(esBaseLlena(e), e.message).toBe(false);
+		}
+	});
+
+	it("un código de SQLite que no es ni de la sentencia ni del estado de la base no se inventa su veredicto", () => {
+		for (const e of [
+			sqlite("interrupted", "SQLITE_INTERRUPT"),
+			sqlite("database disk image is malformed", "SQLITE_CORRUPT"),
+			// Con una frase de las del runtime delante: sigue siendo un mensaje de SQLite.
+			sqlite("internal error", "SQLITE_INTERNAL"),
+		]) {
+			expect(veredicto(e), e.message).toBe("desconocido");
 		}
 	});
 
