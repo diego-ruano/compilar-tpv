@@ -79,9 +79,9 @@ privacidad, el ejercicio de derechos (exportar y borrar un cliente) y la políti
 La reserva web ([plan](estudios/reservas-web.md)) recoge esos datos directamente del público: su
 formulario necesita el texto informativo, con el negocio como responsable, antes del piloto.
 
-El cifrado de la PII del personal no la pone fuera de nuestro alcance: el texto cifrado está en Turso
-y la DEK en el control-plane ([arquitectura/licencias.md](arquitectura/licencias.md)). Hay que
-declararlo así.
+El cifrado de la PII del personal no la pone fuera de nuestro alcance: el texto cifrado está en la
+base del negocio en la nube y la DEK en el control-plane
+([arquitectura/licencias.md](arquitectura/licencias.md)). Hay que declararlo así.
 
 Marco de la política de retención (fuentes oficiales):
 
@@ -180,7 +180,7 @@ el nombre del negocio y recibir otra vez su DEK y un token.
 ### LOGIN-04 · El hash del PIN se puede romper offline
 
 PBKDF2-HMAC-SHA256, 100.000 iteraciones, sal de 16 bytes por usuario (`tpv-domain/src/login.rs`,
-`PBKDF2_ITERS`). `Usuarios.Password_Hash` se replica a Turso porque el worker verifica el PIN de la
+`PBKDF2_ITERS`). `Usuarios.Password_Hash` se replica a la nube porque el worker verifica el PIN de la
 Handy. Con un PIN de 4 cifras (10⁴ candidatos), probarlos todos contra un hash cuesta décimas de
 segundo en una GPU de consumo.
 
@@ -236,8 +236,8 @@ Por orden de dependencia:
 1. Un `env.staging` en `wrangler.json` con su `name` y sus `vars` (`ENVIRONMENT: "staging"`, `TURSO_*`,
    `EMAIL_*`). Su `TenantHub` sería otro namespace.
 2. Todos los secretos repetidos con `--env staging`.
-3. **Otra base de control y otras bases de tenant en Turso**: compartirlas sería escribir sobre datos
-   de clientes.
+3. **Otra base de control en Turso**: compartirla sería escribir sobre datos de clientes. Las bases
+   de los negocios van con su `TenantHub`, que ya es otro.
 4. Otro bucket de R2, y la URL de imágenes configurable (`CDN_IMAGES_BASE` en `imageUrl.ts` y la CSP).
 5. Stripe en modo test, con su webhook y sus Prices.
 6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`) y
@@ -394,7 +394,7 @@ también lo pisa al entrar.
 Le pasa a cualquier escritura de la Main, pero donde más se nota es en la reserva desde la web
 (docs/estudios/reservas-web.md): la Main cancela una reserva porque lo pide el cliente, una Handy la
 edita en ese momento con su estado de antes, y la Main se queda con la reserva viva mientras la nube
-—y la agenda, que da la cancelación por hecha al verla en Turso— la tiene cancelada. La reparación
+—y la agenda, que da la cancelación por hecha al verla en la nube— la tiene cancelada. La reparación
 diaria la volvería a subir viva.
 
 La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones: que al aplicar un
@@ -405,11 +405,12 @@ Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplic
 ### SYNC-30 · Una ruta del worker decide con una lectura fuera de su transacción
 
 La Main decide dentro de la transacción que escribe: lee la fila y escribe con el cerrojo del
-escritor, y nadie se cuela en medio. Las rutas del worker no pueden: leen Turso con `tenantQuery`,
-deciden y luego mandan el comando al `TenantHub`, que lo aplica en otro momento. Entre la lectura y
-la escritura puede llegar otra (lo que sube la Main, otra Handy). El lote del `TenantHub`
-(`tenantHub.lote.ts`) sólo sabe ejecutar escrituras y lecturas que se devuelven: no tiene un paso
-que compruebe una condición y aborte el lote sin replicarse.
+escritor, y nadie se cuela en medio. Las rutas del worker no pueden: leen la base con `tenantQuery`,
+deciden y luego mandan el comando al motor del `TenantHub`, que lo aplica cuando le llega el turno
+del log. Entre la lectura y la escritura puede llegar otra (lo que sube la Main, otra Handy), también
+con la ruta ejecutándose dentro del DO: mientras espera, el DO atiende a los demás. El lote del
+`TenantHub` (`tenantHub.lote.ts`) sólo sabe ejecutar escrituras y lecturas que se devuelven: no
+tiene un paso que compruebe una condición y aborte el lote sin replicarse.
 
 Ejemplos: cancelar una reserva desde la Handy (`POST /v1/reservas/:id/cancelar`) comprueba que está
 `PROXIMA` y, si en esos milisegundos la Main la ha sentado, la cancela igual; marcar la llegada o la
@@ -420,19 +421,18 @@ puede tener la fila de otra forma sin subir), que es la más ancha de las dos.
 
 Lo que no puede romperse ya lo para la base con un índice único, también entre dos dispositivos a la
 vez: una comanda abierta por mesa, un cierre por periodo, nombres de zona, mesa y producto, correos
-de cliente. O una condición dentro de la propia sentencia, que Turso y la Main vuelven a evaluar al
+de cliente. O una condición dentro de la propia sentencia, que la nube y la Main vuelven a evaluar al
 aplicarla: una línea en una comanda cobrada (INC-20261030-016) o borrar un ticket con cobros
 (AUD-14). Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
 identificadores o copia datos del catálogo. Lo que decide es poco más de una decena de comprobaciones.
 
-Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
-que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
-comprobaciones.
+Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico, que no se
+replique y que devuelva un error de negocio si no se cumple; y pasar a él esas comprobaciones.
 
 ### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
 
 Si una Handy borra un ticket de barra mientras su cobro va de camino a la nube —la Main ya lo ha
-confirmado y su subida aún no ha entrado en Turso—, Turso no ve ningún cobro y borra el ticket; la
+confirmado y su subida aún no ha entrado en la nube—, la nube no ve ningún cobro y borra el ticket; la
 Main lo conserva, porque la condición de `deleteComandaIfSafe` se vuelve a evaluar allí (AUD-14). La
 ventana es la de un cobro en vuelo con la sesión de la Main viva: cada vez que la Main reconecta,
 congela a las Handy hasta haberse puesto al día (AUD-15). La subida del cobro choca después con la FK de
