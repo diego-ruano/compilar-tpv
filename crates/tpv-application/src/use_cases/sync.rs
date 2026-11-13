@@ -135,6 +135,28 @@ pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
     repo.purge_applied_ops().await
 }
 
+/// Cuánto se guarda una cuarentena (una operación apartada de la subida o un cambio de la nube que
+/// no entró en esta base): 30 días desde su último intento.
+///
+/// Para entonces ya ha hecho todo su trabajo. Al apartarse se registró en la telemetría
+/// (`operación apartada de la subida`, `op de sync en CUARENTENA`, con su `op_id`) y se encoló la
+/// reparación de las filas que tocaba, cuya subida la retira (SYNC-22, SYNC-26). Y el contraste
+/// con la nube (SYNC-24) ha pasado decenas de veces —tras cada cierre de caja y cada veinte horas—
+/// comparando y reparando por estado. Lo que queda es la sentencia que no entró, con los datos
+/// que llevara (un nombre, un teléfono), sin nada que la vaya a usar, y su contador en el panel de
+/// Conectividad diciendo para siempre que hay cambios rechazados: un aviso que no se apaga nunca
+/// enseña a no mirarlo. Treinta días dan para que alguien lo vea en el panel y lo consulte, también
+/// en un equipo que pase semanas sin conexión.
+pub const RETENCION_CUARENTENAS_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Retira las cuarentenas de más de [`RETENCION_CUARENTENAS_MS`] (`purga_sync`, cada día).
+pub async fn purgar_cuarentenas(
+    repo: &dyn SyncRepository,
+    ahora_ms: i64,
+) -> AppResult<crate::ports::sync::CuarentenasPurgadas> {
+    repo.purgar_cuarentenas(ahora_ms - RETENCION_CUARENTENAS_MS).await
+}
+
 /// Foto de salud de la sincronización local (SYNC-14) para el panel de Conectividad.
 pub async fn health(repo: &dyn SyncRepository) -> AppResult<SyncHealth> {
     repo.health().await

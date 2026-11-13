@@ -21,7 +21,7 @@ use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, SyncRepository};
+use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, CuarentenasPurgadas, SyncRepository};
 use tpv_contracts::sync::{
     BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
     DescuadreTabla, OutboxEntry, OutboxFallo, ResultadoVerificacion, SqlStatement,
@@ -1039,6 +1039,42 @@ impl SyncRepository for SqliteSyncRepository {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+
+    async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<CuarentenasPurgadas> {
+        // Por `raw()`: son tablas de control locales, no escrituras de negocio que replicar.
+        //
+        // Una apartada cuya reparación sigue en el outbox sin subir no se toca: la retira esa
+        // subida (SYNC-26, `outbox_mark_sent`), que es cuando de verdad se ha resuelto. Las demás
+        // —sin reparación (no quedaba ninguna fila que reparar) o con la reparación también
+        // apartada— ya no tienen nada que las vaya a cerrar. El último intento es la hora a la
+        // que se apartó; sin él, la de su creación.
+        let w = self.db.write().await;
+        let conn = w.raw();
+        conn.transaccion(async {
+            let subida = conn
+                .execute(
+                    "DELETE FROM _Sync_Outbox \
+                      WHERE Cuarentena = 1 \
+                        AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
+                        AND Op_Id NOT IN (SELECT Repara_Op_Id FROM _Sync_Outbox \
+                                           WHERE Repara_Op_Id IS NOT NULL AND Cuarentena = 0);",
+                    vec![Value::Integer(antes_de_ms)],
+                )
+                .await
+                .map_err(db_err)?;
+            // Un cambio de la nube que no entró: el checkpoint ya pasó por encima al apartarlo, y
+            // los que siguen fallando sin apartar (`Quarantined = 0`) no se tocan nunca.
+            let bajada = conn
+                .execute(
+                    "DELETE FROM _Sync_Failed WHERE Quarantined = 1 AND Last_Failed_At_Ms < ?1;",
+                    vec![Value::Integer(antes_de_ms)],
+                )
+                .await
+                .map_err(db_err)?;
+            Ok(CuarentenasPurgadas { subida, bajada })
+        })
+        .await
     }
 
     async fn health(&self) -> AppResult<SyncHealth> {
@@ -5451,5 +5487,105 @@ mod tests_bajada_en_orden {
 
         assert_eq!((r.reparadas, r.aplazado), (0, true));
         assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests_purga_de_cuarentenas {
+    //! Las cuarentenas no se guardan para siempre: lo apartado de la subida y lo que no entró de la
+    //! bajada se retira pasada la retención (`use_cases::sync::RETENCION_CUARENTENAS_MS`), salvo
+    //! lo que todavía espera a su reparación.
+
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("purga_cuarentenas");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    async fn ids(db: &Arc<Db>, sql: &str) -> Vec<String> {
+        let r = db.read().await;
+        let mut filas = r.conn().query(sql, ()).await.unwrap();
+        let mut out = Vec::new();
+        while let Some(f) = filas.next().await.unwrap() {
+            if let Value::Text(s) = f.get_value(0).unwrap() {
+                out.push(s);
+            }
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn retira_las_cuarentenas_viejas_y_deja_las_recientes_las_vivas_y_las_que_esperan_su_reparacion() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    // Subida: (Op_Id, Cuarentena, Ultimo_Intento_Ms, Repara_Op_Id). El corte es 1000.
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena, Ultimo_Intento_Ms, Repara_Op_Id) VALUES
+                       ('apartada-vieja',      'main_op',    '[]', 10,   1, 500,  NULL),
+                       ('apartada-sin-intento','main_op',    '[]', 20,   1, NULL, NULL),
+                       ('apartada-reciente',   'main_op',    '[]', 30,   1, 5000, NULL),
+                       ('pendiente-vieja',     'main_op',    '[]', 40,   0, 500,  NULL),
+                       ('espera-reparacion',   'main_op',    '[]', 50,   1, 500,  NULL),
+                       ('su-reparacion',       'reparacion', '[]', 60,   0, NULL, 'espera-reparacion'),
+                       ('reparacion-apartada', 'reparacion', '[]', 70,   1, 600,  'apartada-vieja');
+                     INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms) VALUES
+                       ('bajada-vieja',    1, '[]', 5, 1, 'x', 100, 500),
+                       ('bajada-reciente', 2, '[]', 5, 1, 'x', 100, 5000),
+                       ('bajada-viva',     3, '[]', 2, 0, 'x', 100, 500);",
+                )
+                .await
+                .unwrap();
+        }
+
+        let purgadas = repo.purgar_cuarentenas(1000).await.unwrap();
+        assert_eq!(purgadas, CuarentenasPurgadas { subida: 3, bajada: 1 });
+
+        assert_eq!(
+            ids(&db, "SELECT Op_Id FROM _Sync_Outbox ORDER BY Seq;").await,
+            ["apartada-reciente", "pendiente-vieja", "espera-reparacion", "su-reparacion"],
+            "lo pendiente no se toca nunca, y una apartada se queda mientras su reparación no suba",
+        );
+        assert_eq!(
+            ids(&db, "SELECT Op_Id FROM _Sync_Failed ORDER BY Seq;").await,
+            ["bajada-reciente", "bajada-viva"],
+            "un cambio que aún se reintenta no es una cuarentena",
+        );
+        // El panel de Conectividad cuenta lo que queda.
+        let salud = repo.health().await.unwrap();
+        assert_eq!((salud.subida_en_cuarentena, salud.quarantined), (2, 1));
+
+        // Repetirla no retira nada más.
+        assert_eq!(repo.purgar_cuarentenas(1000).await.unwrap(), CuarentenasPurgadas::default());
+    }
+
+    #[tokio::test]
+    async fn la_retencion_la_pone_el_caso_de_uso() {
+        let (repo, db, _dir) = repo_temporal().await;
+        let ahora = now_ms();
+        let dia = 24 * 60 * 60 * 1000;
+        {
+            let w = db.write().await;
+            for (op, hace_dias) in [("hace-31-dias", 31), ("hace-29-dias", 29)] {
+                w.raw()
+                    .execute(
+                        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena, Ultimo_Intento_Ms) \
+                         VALUES (?1, 'main_op', '[]', ?2, 1, ?2);",
+                        vec![Value::Text(op.into()), Value::Integer(ahora - hace_dias * dia)],
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        let purgadas = tpv_application::use_cases::sync::purgar_cuarentenas(&repo, ahora).await.unwrap();
+        assert_eq!(purgadas.subida, 1);
+        assert_eq!(ids(&db, "SELECT Op_Id FROM _Sync_Outbox;").await, ["hace-29-dias"]);
     }
 }

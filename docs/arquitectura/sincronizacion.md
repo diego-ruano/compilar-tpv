@@ -477,6 +477,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
   detenida en uno de ellos. «En cuarentena», los que se saltaron.
+- **Una cuarentena se guarda 30 días** desde su último intento, en las dos direcciones (lo que no
+  entró de la bajada y lo apartado de la subida), y después la retira `purga_sync`
+  (`RETENCION_CUARENTENAS_MS`, `use_cases/sync.rs`). Para entonces se registró en la telemetría al
+  apartarse, se encoló la reparación por estado y el contraste con la nube ha pasado decenas de
+  veces; lo que queda es la sentencia, con los datos que llevara, y un contador en rojo que ya no se
+  apagaría. Una apartada cuya reparación sigue sin subir no se retira: la retira esa subida.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
   página de catch-up de 500 no deja a un cobro esperando a que termine entera (RI-33).

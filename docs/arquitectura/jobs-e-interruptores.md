@@ -50,7 +50,7 @@ un fallo parcial.
 | `avisos_reserva_web` | 60 s | 45 s | MainOperativa | — | Manda al worker los correos al cliente de las reservas web que el restaurante ha cambiado o cancelado (`_Reservas_Web_Avisos`, [reservas-web.md](../estudios/reservas-web.md#57-avisar-al-cliente-de-un-cambio)). Con la conectividad apagada no manda nada; se descarta el aviso de una reserva que ya ha pasado y el que lleva un día de intentos |
 | `reservas_no_vino` | 5 min | 2 min | MainOperativa | — | Marca `NO_SHOW` las reservas a las que no ha llegado nadie cuando pasan los minutos de `Business_Settings.Reserva_No_Vino_Min` desde su hora (Configuración → Reservas); con 0, nunca. Por tandas de 200, y una sentencia por reserva, sin condición. Avisa a la pantalla con `sync:cambio` |
 | `imagenes` | 15 min | 3 min | Siempre | — | Red de seguridad de la subida de imágenes a R2 (el camino normal es el evento) |
-| `purga_sync` | 24 h | 5 min | MainOperativa | — | Poda `_Sync_Applied_Ops` (TTL 72 h) |
+| `purga_sync` | 24 h | 5 min | MainOperativa | — | Poda `_Sync_Applied_Ops` (TTL 72 h) y retira las cuarentenas de más de 30 días |
 | `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |
 | `backup_local` | 24 h | 5 min | MainOperativa | — | Copia diaria y purga de restos ([recuperacion.md](recuperacion.md)) |
 | `backfill_historico` | 5 min | 3 min | MainOperativa | `backfill_historico` | Fase 2 de la recuperación |

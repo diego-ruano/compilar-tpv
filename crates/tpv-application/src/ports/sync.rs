@@ -30,6 +30,15 @@ pub struct BajadaAplicada {
     pub detenida: Option<CambioDetenido>,
 }
 
+/// Lo que ha retirado `SyncRepository::purgar_cuarentenas`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CuarentenasPurgadas {
+    /// Operaciones apartadas de la subida (`_Sync_Outbox`).
+    pub subida: u64,
+    /// Cambios de la nube que no entraron (`_Sync_Failed`).
+    pub bajada: u64,
+}
+
 /// AUD-18 · Un cambio de la nube que ha fallado al aplicarse y aún no ha agotado sus intentos.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CambioDetenido {
@@ -136,6 +145,18 @@ pub trait SyncRepository: Send + Sync {
     /// ni, AUD-18, el de una operación propia cuyo `Seq` va por delante del checkpoint: volverá por
     /// el catch-up y sin él se aplicaría otra vez.
     async fn purge_applied_ops(&self) -> AppResult<()>;
+
+    /// Retira las cuarentenas resueltas o ya viejas: las operaciones apartadas de la subida
+    /// (`_Sync_Outbox` con `Cuarentena = 1`) y los cambios de la nube que no entraron
+    /// (`_Sync_Failed` con `Quarantined = 1`) cuyo último intento es anterior a `antes_de_ms`. Una
+    /// apartada cuya reparación sigue por subir se queda: la retira esa subida (SYNC-26). La
+    /// retención la decide el caso de uso (`use_cases::sync::RETENCION_CUARENTENAS_MS`).
+    ///
+    /// Por defecto no retira nada: los dobles de los tests no tienen cuarentenas.
+    async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<CuarentenasPurgadas> {
+        let _ = antes_de_ms;
+        Ok(CuarentenasPurgadas::default())
+    }
 
     /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en
     /// cuarentena/fallando) para el panel de Configuración → Conectividad (SYNC-14).
