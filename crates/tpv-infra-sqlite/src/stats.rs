@@ -443,10 +443,15 @@ pub(crate) fn sql_mesas_servicios(range: StatsRange) -> String {
         StatsRange::Semana | StatsRange::Mes => ("strftime('%d/%m', d.dia)", "d.comandas"),
         StatsRange::Anio => ("strftime('%m/%Y', d.dia)", "d.comandas_mes"),
     };
-    // Por días, sólo los días con algún cobro: las filas sin importe son las de las comandas con un
-    // cobro fechado después de ahora, que no son de hoy (`sql_cobros_por_mesa_y_dia`). Por meses
-    // cuentan: su mes ya tiene cobros.
-    let con_cobros = if matches!(range, StatsRange::Anio) { "" } else { "WHERE d.importe IS NOT NULL" };
+    // Sólo los tramos con algún cobro. Las filas sin importe son las de las comandas con un cobro
+    // fechado después de ahora (`sql_cobros_por_mesa_y_dia`), que no son un cobro de hoy: por días
+    // no cuentan, y por meses sólo si suman al mes de hoy, que entonces ya tiene un cobro antes de
+    // hoy. Si su cobro de dentro del rango es de un mes anterior, no hacen aparecer el mes de hoy.
+    let con_cobros = if matches!(range, StatsRange::Anio) {
+        "WHERE d.importe IS NOT NULL OR d.comandas_mes > 0"
+    } else {
+        "WHERE d.importe IS NOT NULL"
+    };
     format!(
         r#"{cobros}
         SELECT {tramo} AS b, SUM({recuento}) AS n
@@ -2709,6 +2714,28 @@ mod tests_resumen_diario {
                 rehacer_todo(&db).await;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn un_cobro_futuro_no_hace_aparecer_el_mes_de_hoy_en_la_grafica_del_anio() {
+        // Revisión de Codex (segunda pasada): una comanda cobrada el último día del mes pasado y
+        // otra vez después de ahora, y nada más. Su fila sin importe de hoy suma a las comandas del
+        // rango, pero no puede sacar en la gráfica del año el mes de hoy, que no tiene cobros. (En
+        // enero el mes pasado es del año anterior y no hay nada que comparar.) La misma siembra, en
+        // `statsResumenDiario.test.ts`.
+        let (db, _dir) = db_temporal().await;
+        let siembra: Vec<serde_json::Value> = [
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Sala');",
+            "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'z', '1', 4, 0, 0, 'rect', 120, 70);",
+            "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Pagada');",
+            "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Efectivo', 500, 'parcial');",
+            "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p2', 'c1', datetime('now','localtime','+1 day'), 'Efectivo', 500, 'parcial');",
+        ]
+        .map(serde_json::Value::from)
+        .to_vec();
+        sembrar(&db, &siembra).await;
+        let repo = SqliteStatsRepository::new(db.clone());
+        da_lo_mismo_que_antes(&repo, "cobro futuro de una comanda del mes pasado").await;
     }
 
     #[tokio::test]

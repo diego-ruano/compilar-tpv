@@ -250,10 +250,12 @@ export function sqlMesasServicios(range: StatsRange): string {
 	}
 	const [tramo, recuento] =
 		range === "anio" ? ["strftime('%m/%Y', d.dia)", "d.comandas_mes"] : ["strftime('%d/%m', d.dia)", "d.comandas"];
-	// Por días, sólo los días con algún cobro: las filas sin importe son las de las comandas con un
-	// cobro fechado después de ahora, que no son de hoy (`sqlCobrosPorMesaYDia`). Por meses cuentan:
-	// su mes ya tiene cobros.
-	const conCobros = range === "anio" ? "" : "WHERE d.importe IS NOT NULL";
+	// Sólo los tramos con algún cobro. Las filas sin importe son las de las comandas con un cobro
+	// fechado después de ahora (`sqlCobrosPorMesaYDia`), que no son un cobro de hoy: por días no
+	// cuentan, y por meses sólo si suman al mes de hoy, que entonces ya tiene un cobro antes de hoy.
+	// Si su cobro de dentro del rango es de un mes anterior, no hacen aparecer el mes de hoy.
+	const conCobros =
+		range === "anio" ? "WHERE d.importe IS NOT NULL OR d.comandas_mes > 0" : "WHERE d.importe IS NOT NULL";
 	return `${sqlCobrosPorMesaYDia(range)}
 		SELECT ${tramo} AS label, SUM(${recuento}) AS value
 		FROM por_mesa_dia d

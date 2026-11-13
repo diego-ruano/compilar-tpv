@@ -149,6 +149,24 @@ describe("las estadísticas leen del resumen diario y dan lo mismo que recorrien
 		});
 	}
 
+	it("un cobro futuro no hace aparecer el mes de hoy en la gráfica del año", async () => {
+		// Revisión de Codex (segunda pasada): una comanda cobrada el último día del mes pasado y otra
+		// vez después de ahora, y nada más. Su fila sin importe de hoy suma a las comandas del rango,
+		// pero no puede sacar en la gráfica del año el mes de hoy, que no tiene cobros. (En enero el
+		// mes pasado es del año anterior y no hay nada que comparar.) La misma siembra, en
+		// `tests_resumen_diario` de `stats.rs`.
+		const siembra = [
+			"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Sala');",
+			"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'z', '1', 4, 0, 0, 'rect', 120, 70);",
+			"INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Pagada');",
+			"INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Efectivo', 500, 'parcial');",
+			"INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p2', 'c1', datetime('now','localtime','+1 day'), 'Efectivo', 500, 'parcial');",
+		];
+		await conLaSiembra("cobro-futuro-mes-pasado", siembra, (db) =>
+			daLoMismoQueAntes(db, "cobro futuro de una comanda del mes pasado"),
+		);
+	});
+
 	it("las siembras con cambios tienen días cerrados en la semana y cambios de sobra", async () => {
 		// Si dejaran de tenerlos, la comparación de arriba pasaría sin leer nada del resumen.
 		for (const [nombre, caso] of [
