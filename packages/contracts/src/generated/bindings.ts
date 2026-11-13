@@ -1051,6 +1051,11 @@ export type EnviarPedidoEmailInput = {
 	nombre_proveedor: string,
 	notas?: string | null,
 	lineas: LineaEmailInput[],
+	/**
+	 *  La clave de este envío: la misma mientras se reintenta el mismo pedido. Si el primer intento
+	 *  llegó a salir y se perdió la respuesta, la nube no lo vuelve a mandar.
+	 */
+	id_envio?: string | null,
 };
 
 /**  Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend. */

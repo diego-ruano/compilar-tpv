@@ -52,6 +52,9 @@ const lineaSchema = z.object({
 	unidad: z.string().max(50).nullable().optional(),
 });
 
+/** La clave de un envío (`id_envio`): un UUID, o algo de su estilo. */
+const CLAVE_DE_ENVIO = /^[A-Za-z0-9_-]{16,64}$/;
+
 // Un pedido se puede enviar con líneas, con notas, o con ambas — pero NO vacío: un correo sin nada
 // que pedir no le dice nada al proveedor. Antes se exigía `min(1)` línea, lo que impedía el caso
 // legítimo de "pedido solo con notas" (p. ej. "mándame lo de siempre").
@@ -61,6 +64,13 @@ const enviarPedidoSchema = z
 		nombre_proveedor: z.string().min(1).max(200),
 		notas: z.string().max(2000).nullable().optional(),
 		lineas: z.array(lineaSchema).max(500).default([]),
+		// La clave del envío: la misma mientras la Main reintenta el mismo pedido (`claveDeEnvio.ts`).
+		// Una sin la forma esperada se ignora, como la `Idempotency-Key` del widget: el pedido sale
+		// igual, sólo que sin esa protección. Una Main anterior no la manda.
+		id_envio: z
+			.string()
+			.optional()
+			.transform((v) => (v && CLAVE_DE_ENVIO.test(v) ? v : undefined)),
 	})
 	.refine((v) => v.lineas.length > 0 || (v.notas ?? "").trim().length > 0, {
 		message: "El pedido debe llevar al menos una línea o unas notas",
@@ -68,7 +78,7 @@ const enviarPedidoSchema = z
 	});
 
 emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
-	const { email_destino, notas, lineas } = c.req.valid("json");
+	const { email_destino, notas, lineas, id_envio } = c.req.valid("json");
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
 
@@ -92,15 +102,22 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	// contacto del negocio, el remitente): un 403 o un 400 no gastan cupo.
 	const db = getDb(c.env);
 	const envio: Envio = {
-		id: crypto.randomUUID(),
+		// Con la clave del envío, el id es el mismo en cada reintento: lo que ya salió no vuelve a salir
+		// (`reservarCupo`). Lleva el negocio delante: la clave la elige el dispositivo.
+		id: id_envio ? `pedido:${tenantId}:${id_envio}` : crypto.randomUUID(),
 		tenantId,
 		deviceId,
 		toEmail: email_destino,
 		proveedor: identidad.proveedor,
 	};
-	if ((await reservarCupo(db, envio)) === "tope") {
-		return c.json({ error: "email_limite_diario" }, 429);
-	}
+	const reserva = await reservarCupo(db, envio);
+	if (reserva === "tope") return c.json({ error: "email_limite_diario" }, 429);
+	// Un reintento de un pedido que ya salió: la respuesta del primero se perdió por el camino (el
+	// viaje de vuelta desde el TenantHub, la red de la Main). Se contesta lo que se habría contestado,
+	// sin mandar otro correo.
+	if (reserva === "ya_enviado") return c.json({ ok: true });
+	// El mismo pedido, saliendo ahora mismo por otra petición: ésta no lo manda otra vez.
+	if (reserva === "en_curso") return c.json({ ok: false, error: "email_en_curso" }, 409);
 
 	try {
 		await c.env.EMAIL.send({
@@ -135,14 +152,22 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 export const TOPE_DIARIO = 100;
 export const VENTANA_MS = 24 * 60 * 60 * 1000;
 
-/** Un pedido que va a salir, tal como queda en su fila de `email_sends`. El id es nuevo en cada petición. */
+/**
+ * Un pedido que va a salir, tal como queda en su fila de `email_sends`. El id es el de su clave de
+ * envío (`pedido:<negocio>:<id_envio>`), el mismo en cada reintento, o uno nuevo si no la trae.
+ */
 export type Envio = { id: string; tenantId: string; deviceId: string; toEmail: string; proveedor: string };
 
 /**
  * `reservado`: hay sitio y la fila ya está puesta, en `enviando`; se envía y se cierra con
  * `terminarEnvio`. `tope`: no hay sitio y no se envía. `sin_base`: la base central no ha contestado.
+ * `ya_enviado`: ese mismo envío ya salió (`ok = 1`); no se vuelve a mandar. `en_curso`: ese mismo
+ * envío lo está mandando otra petición ahora.
  */
-type ReservaDeCupo = "reservado" | "tope" | "sin_base";
+type ReservaDeCupo = "reservado" | "tope" | "sin_base" | "ya_enviado" | "en_curso";
+
+/** Lo que tarda como mucho un envío: una reserva más vieja sin terminar es de uno que murió a medias. */
+const ENVIANDO_MAX_MS = 5 * 60_000;
 
 /**
  * AUD-41 · Reserva el sitio de este pedido en el cupo diario del negocio, justo antes de enviarlo.
@@ -180,8 +205,14 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
 			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
 			      SELECT ?1, ?2, ?3, ?4, ?5, 0, 'enviando', ?6, 'pedido'
 			      WHERE (SELECT COUNT(*) FROM email_sends
-			             WHERE tenant_id = ?2 AND tipo = 'pedido' AND sent_at_ms > ?7
-			               AND (ok = 1 OR error_code = 'enviando')) < ?8`,
+			             WHERE tenant_id = ?2 AND tipo = 'pedido' AND id <> ?1 AND sent_at_ms > ?7
+			               AND (ok = 1 OR error_code = 'enviando')) < ?8
+			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms,
+			                                    to_email = excluded.to_email, device_id = excluded.device_id,
+			                                    proveedor = excluded.proveedor
+			      WHERE email_sends.ok = 0 AND email_sends.tipo = 'pedido'
+			        AND (email_sends.error_code IS NULL OR email_sends.error_code <> 'enviando'
+			             OR email_sends.sent_at_ms <= ?9);`,
 			args: [
 				envio.id,
 				envio.tenantId,
@@ -191,9 +222,17 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
 				ahora,
 				ahora - VENTANA_MS,
 				TOPE_DIARIO,
+				ahora - ENVIANDO_MAX_MS,
 			],
 		});
-		return Number(rs.rowsAffected) > 0 ? "reservado" : "tope";
+		if (Number(rs.rowsAffected) > 0) return "reservado";
+		// No se ha reservado: por qué. Un id nuevo no puede chocar, así que con él sólo es el tope.
+		const fila: any = (
+			await db.execute({ sql: `SELECT ok, error_code, sent_at_ms FROM email_sends WHERE id = ?1;`, args: [envio.id] })
+		).rows?.[0];
+		if (Number(fila?.ok) === 1) return "ya_enviado";
+		if (fila?.error_code === "enviando" && Number(fila.sent_at_ms) > ahora - ENVIANDO_MAX_MS) return "en_curso";
+		return "tope";
 	} catch (e: any) {
 		capturarError(e, "email.quota");
 		console.error("[email] no se pudo reservar el cupo diario:", String(e?.message || e));
@@ -220,7 +259,8 @@ async function terminarEnvio(db: Sql, envio: Envio, ok: boolean, errorCode: stri
 			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
 			      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pedido')
 			      ON CONFLICT(id) DO UPDATE SET ok = excluded.ok, error_code = excluded.error_code,
-			                                    sent_at_ms = excluded.sent_at_ms`,
+			                                    sent_at_ms = excluded.sent_at_ms
+			      WHERE email_sends.ok = 0`,
 			args: [
 				envio.id,
 				envio.tenantId,

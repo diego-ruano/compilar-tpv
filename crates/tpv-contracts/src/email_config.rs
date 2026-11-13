@@ -23,4 +23,8 @@ pub struct EnviarPedidoEmailInput {
     #[serde(default)]
     pub notas: Option<String>,
     pub lineas: Vec<LineaEmailInput>,
+    /// La clave de este envío: la misma mientras se reintenta el mismo pedido. Si el primer intento
+    /// llegó a salir y se perdió la respuesta, la nube no lo vuelve a mandar.
+    #[serde(default)]
+    pub id_envio: Option<String>,
 }

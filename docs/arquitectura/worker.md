@@ -332,6 +332,14 @@ que se reservó. Las dos dejan de contar al salir de la ventana. Si la base cent
 pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
 (`RETENCION_ENVIOS_MS`).
 
+**Un pedido no sale dos veces.** La Main manda con cada pedido su clave de envío (`id_envio`, la
+misma mientras se reintenta el mismo pedido sin cambiarlo: `claveDeEnvio.ts`), y es el id de su
+fila (`pedido:<negocio>:<id_envio>`). La reserva del cupo es también la del id, en la misma
+sentencia: un reintento de uno que ya salió (la respuesta se perdió por el camino) contesta `ok`
+sin mandar otro; uno que está saliendo ahora por otra petición, 409 `email_en_curso`; uno que
+falló, o que se quedó a medias más de cinco minutos, se vuelve a reservar y sale. Lo que ya salió no
+se pisa nunca (`ok = 1`). Sin clave (una Main anterior), cada petición es un envío.
+
 Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo
 llevan datos estructurados (nada que haya escrito el visitante), van a la dirección del alta o al

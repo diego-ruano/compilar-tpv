@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ShoppingCart, Plus, ChevronRight } from "lucide-react";
 import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
@@ -15,6 +15,7 @@ import type {
 import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
 import { configGetBusinessSettings, configGetContactSettings } from "../configuracion/api/configApis";
 import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
+import { claveDeEnvio, type EnvioEnCurso } from "./claveDeEnvio";
 import {
   usePedidosPage,
   useCrearPedido,
@@ -97,6 +98,10 @@ export default function PedidosSection({ proveedores }: Props) {
   const cancelarMutation = useCancelarPedido();
   const enviarMutation = useEnviarPedido();
 
+  // La clave del envío en curso (`claveDeEnvio`): la misma mientras se reintenta el mismo pedido sin
+  // cambiarlo. Al terminar bien se olvida: mandarlo otra vez después es otro envío.
+  const envioEnCurso = useRef<EnvioEnCurso | null>(null);
+
   const pedidos = query.data?.pages.flatMap((p) => p.pedidos) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
@@ -178,7 +183,7 @@ export default function PedidosSection({ proveedores }: Props) {
         return;
       }
       {
-        await emailEnviarPedido({
+        const correo = {
           email_destino: updated.email_destino!,
           nombre_proveedor: updated.nombre_proveedor ?? "Proveedor",
           notas: updated.notas ?? undefined,
@@ -188,7 +193,9 @@ export default function PedidosSection({ proveedores }: Props) {
             precio_unitario: l.precio_unitario ?? undefined,
             unidad: l.unidad ?? undefined,
           })),
-        });
+        };
+        envioEnCurso.current = claveDeEnvio(envioEnCurso.current, updated.id_pedido, correo);
+        await emailEnviarPedido({ ...correo, id_envio: envioEnCurso.current.id });
       }
 
       // Solo llegamos aquí si el correo salió de verdad.
@@ -200,6 +207,7 @@ export default function PedidosSection({ proveedores }: Props) {
       const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
       await enviarMutation.mutateAsync({ id_pedido: updated.id_pedido, estado: "enviado", fecha_envio: fecha });
 
+      envioEnCurso.current = null;
       toast.success("Pedido enviado", `Correo enviado a ${updated.email_destino}`);
 
       cerrarModal();

@@ -268,6 +268,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	sync_log_corrupto: "No se pueden recuperar los cambios: el registro de sincronización está dañado.",
 	email_limite_diario:
 		"Se han mandado muchos pedidos por correo hoy desde este negocio. Vuelve a intentarlo mañana.",
+	// El mismo pedido está saliendo ahora mismo por otra petición (`id_envio`).
+	email_en_curso: "El pedido se está enviando ahora mismo. Espera un momento y vuelve a intentarlo: no saldrá dos veces.",
 
 	// Licencia, base de la nube y códigos por correo
 	invalid_license_key_format: "La clave de licencia no tiene el formato correcto. Revísala.",
