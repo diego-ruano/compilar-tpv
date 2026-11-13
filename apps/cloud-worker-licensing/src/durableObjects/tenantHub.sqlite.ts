@@ -105,9 +105,15 @@ function esFkRota(e: unknown): boolean {
  *    deshace y el motor lo clasifica como rechazo permanente.
  *
  * El paso 2 recorre las tablas con FK (unos 230 ms con 250.000 líneas), pero sólo lo paga quien
- * necesita el aplazamiento o trae una FK rota de verdad.
+ * necesita el aplazamiento o trae una FK rota de verdad. Quien aplica varios lotes en un mismo turno
+ * (`MotorTenantHub.aplicarLote`) pone tope a ese trabajo con `alAplazar`: se le pregunta justo antes
+ * de repetir aplazando, y si dice que no se lanza `HaceFaltaAplazar` con la base como estaba.
  */
-export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
+export function loteEnBruto(
+	storage: DurableObjectStorage,
+	sentencias: Sentencia[],
+	opciones: { alAplazar?: () => boolean } = {},
+): FilasEnBruto[] {
 	const sql = storage.sql;
 	const pideAplazar = sentencias.some((s) => APLAZAR_FK.test(partes(s).texto));
 
@@ -140,7 +146,19 @@ export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 		return correr(false);
 	} catch (e) {
 		if (!esFkRota(e)) throw e;
+		if (opciones.alAplazar && !opciones.alAplazar()) throw new HaceFaltaAplazar();
 		return correr(true);
+	}
+}
+
+/**
+ * El lote sólo entra aplazando las claves foráneas (o trae una rota de verdad) y quien lo aplica no
+ * ha querido pagar ahora esa comprobación (`loteEnBruto`, `alAplazar`). No dice nada de la
+ * operación: no se ha aplicado nada y se puede volver a mandar.
+ */
+export class HaceFaltaAplazar extends Error {
+	constructor() {
+		super("hace_falta_aplazar");
 	}
 }
 

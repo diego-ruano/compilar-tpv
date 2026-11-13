@@ -98,11 +98,50 @@ export type BulkApplyMsg = {
  */
 export type ColaApartadaAckMsg = { type: "cola_apartada_ack"; opIds?: unknown[] };
 
+/**
+ * Lo que la Main sube de su outbox, en orden y de una vez: hasta 200 operaciones por mensaje. El DO
+ * las aplica una detrás de otra y contesta con un `apply_lote_ack` que lleva el veredicto de cada
+ * una (`VeredictoDeLote`). Cada elemento de `ops` lleva lo mismo que un `apply` suelto.
+ */
+export type ApplyLoteMsg = {
+	type: "apply_lote";
+	loteId?: string;
+	ops?: ApplyMsg[];
+	client_now?: string;
+	clientNow?: string;
+};
+
+/**
+ * Lo que fue de cada operación de un `apply_lote`, en el orden en que llegaron:
+ *
+ * - aplicada, con el `Seq` que le dio el log; `yaEstaba` si es un reenvío de algo ya confirmado;
+ * - rechazada, con su clase: `permanente` (la Main la aparta y repara por estado), `transitorio`
+ *   (no le cuenta el intento) o ninguna de las dos (se lo cuenta). Tras una rechazada que no es
+ *   permanente no se aplica nada más del lote;
+ * - `noIntentada`: iba detrás de una que paró el lote, o no cabía en el trabajo de un turno. No se
+ *   ha tocado y se vuelve a mandar tal cual.
+ */
+export type VeredictoDeLote =
+	| { opId: string; ok: true; seq: number; yaEstaba?: true }
+	| { opId: string; ok: false; error: string; permanente: boolean; transitorio: boolean }
+	| { opId: string; ok: false; noIntentada: true };
+
+/** Una operación de un `apply_lote`, con la forma ya comprobada. */
+export type OpDeLote = {
+	opId: string;
+	commandName: string;
+	cmd: InternalApplyCommand;
+	/** Cuerpo canónico que se hashea (`Request_Hash` del gate de idempotencia). */
+	requestPayloadJson: string;
+	clientNow?: string | null;
+};
+
 export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
 	| ApplyMsg
+	| ApplyLoteMsg
 	| BulkApplyMsg
 	| ColaApartadaAckMsg;
 

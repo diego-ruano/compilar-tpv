@@ -44,14 +44,17 @@ import {
 
 import type {
 	AnyMsg,
+	ApplyLoteMsg,
 	ApplyMsg,
 	BulkApplyMsg,
 	ColaApartadaAckMsg,
 	HelloSignedMsg,
 	InternalApplyCommand,
+	OpDeLote,
 	OpParaAplicar,
 	RecoveryReadyMsg,
 	Role,
+	VeredictoDeLote,
 	WsAttachment,
 } from "./tenantHub.types";
 
@@ -117,7 +120,23 @@ export interface ContextoDeMensajes {
 		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
 		alReservarTurno?: () => void;
 	}): Promise<{ result: any; seq: number }>;
+
+	/** El lote de la Main: sus operaciones en orden, en un turno, y el acuse dentro de él. */
+	aplicarLote(params: {
+		tenantId: string;
+		deviceId: string;
+		sesion: WebSocket;
+		ops: OpDeLote[];
+		alReservarTurno?: () => void;
+		alTerminar: (resultados: VeredictoDeLote[]) => void;
+	}): Promise<void>;
 }
+
+/**
+ * Lo más que ocupa un mensaje que se llega a leer. Un lote de la Main son como mucho 256 KB de
+ * sentencias; por encima de esto no se intenta ni trocear el JSON.
+ */
+const MAX_MENSAJE = 2 * 1024 * 1024;
 
 /**
  * El orden es el contrato. Lo demás son las ramas de abajo.
@@ -136,6 +155,11 @@ export async function despachar(
 	const { tenantId, deviceId } = a;
 
 	const data = typeof message === "string" ? message : "";
+	// El tamaño, antes de leerlo: trocear un JSON enorme es trabajo que se le regala a quien lo manda.
+	if (data.length > MAX_MENSAJE) {
+		ctx.send(ws, { type: "error", error: "payload_too_large" });
+		return;
+	}
 	const msg = safeJsonParse(data) as AnyMsg | null;
 
 	if (!msg || typeof msg.type !== "string") {
@@ -164,6 +188,7 @@ export async function despachar(
 	if (msg.type === "recovery_ready") return atenderRecoveryReady(ctx, ws, a, msg);
 	if (msg.type === "cola_apartada_ack") return atenderColaApartadaAck(ctx, ws, a, msg);
 	if (msg.type === "bulk_apply") return atenderBulkApply(ctx, ws, a, msg);
+	if (msg.type === "apply_lote") return atenderApplyLote(ctx, ws, a, msg);
 	if (msg.type === "apply") return atenderApply(ctx, ws, a, msg);
 
 	ctx.send(ws, { type: "error", error: "unknown_type" });
@@ -456,6 +481,112 @@ export async function atenderBulkApply(
 		}),
 	);
 	return;
+}
+
+/**
+ * El lote de la Main: lo que sube de su outbox, hasta 200 operaciones de una vez, en orden. Es un
+ * mensaje nuevo y no una variante de `apply`: quien no lo conozca contesta `unknown_type`.
+ *
+ * El acuse (`apply_lote_ack`, con el `loteId` del mensaje) lleva el veredicto de cada operación
+ * (`VeredictoDeLote`). Lo que afecta al lote entero sale con `ok: false` y su error, sin haber
+ * aplicado nada: el rol, la forma de cualquiera de sus operaciones, o que la sesión ya no sea la
+ * de la Main.
+ */
+export async function atenderApplyLote(
+	ctx: ContextoDeMensajes,
+	ws: WebSocket,
+	a: WsAttachment,
+	msg: ApplyLoteMsg,
+): Promise<void> {
+	const { tenantId, deviceId } = a;
+	const loteId = String(msg.loteId ?? "").trim();
+	const acusar = (cuerpo: Record<string, unknown>) =>
+		ctx.send(ws, { type: "apply_lote_ack", loteId, ...cuerpo });
+
+	// Sólo la Main ejecuta SQL crudo por el socket, como en `apply`.
+	if (a.role !== "tpv") {
+		acusar({ ok: false, error: "forbidden_not_tpv" });
+		return;
+	}
+
+	// AUD-02: la forma, antes que nada, y la de TODAS antes de aplicar ninguna: un lote mal hecho no
+	// cuesta una lectura de la base central ni deja la mitad aplicada.
+	if (!loteId || !Array.isArray(msg.ops)) {
+		acusar({ ok: false, error: "missing_apply_fields" });
+		return;
+	}
+	const clientNowLote = String(getFirstOwnValue(msg, ["client_now", "clientNow"]) || "");
+	const ops: OpDeLote[] = [];
+	for (const item of msg.ops) {
+		const inner = item?.command;
+		const cmdType = String(inner?.type || "").trim();
+		const opId = String(item?.opId ?? item?.op_id ?? "").trim();
+		const commandName = String(item?.commandName ?? item?.command_name ?? "").trim();
+		if (!cmdType || !opId || !commandName) {
+			acusar({ ok: false, error: "missing_apply_fields" });
+			return;
+		}
+		const cmd = { type: inner!.type, payload: inner!.payload } as InternalApplyCommand;
+		ops.push({
+			opId,
+			commandName,
+			cmd,
+			// El mismo cuerpo que hashea un `apply` suelto: la operación es la misma por los dos caminos.
+			requestPayloadJson: readRequestPayloadJson(item, buildInternalPayloadForHash(cmd)),
+			// La Main manda sus sentencias con la hora ya resuelta; si viniera, por operación o una vez
+			// para todo el lote.
+			clientNow: String(getFirstOwnValue(item, ["client_now", "clientNow"]) || "") || clientNowLote,
+		});
+	}
+	if (!ops.length) {
+		acusar({ ok: true, resultados: [] });
+		return;
+	}
+
+	// AUD-02: en fila con lo demás que manda la Main (`enTurnoDeEntrada`), en el orden en que llegó.
+	// Tras la comprobación por actividad, que es la última espera, la sesión como está ahora.
+	ctx.waitUntil(
+		ctx.enTurnoDeEntrada(async () => {
+			await ctx.comprobarMain();
+			if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
+				acusar({ ok: false, error: "not_authenticated", transitorio: true });
+				return;
+			}
+
+			// Como en `apply`: la fila no suelta al siguiente hasta que el lote tiene sitio en el turno
+			// del log, que es lo que fija el orden en que se confirma. Lo que tarde después no la retiene.
+			let conSitio!: () => void;
+			const tieneSitio = new Promise<void>((r) => (conSitio = r));
+			ctx.waitUntil(
+				(async () => {
+					try {
+						await ctx.aplicarLote({
+							tenantId,
+							deviceId,
+							sesion: ws,
+							ops,
+							alReservarTurno: conSitio,
+							alTerminar: (resultados) => acusar({ ok: true, resultados }),
+						});
+					} catch (e: any) {
+						capturarError(e, "sync.apply_lote");
+						// Nada del lote se ha aplicado. El veredicto es del lote: de cómo está la nube
+						// (`transitorio`) o de algo que no se arregla repitiéndolo.
+						acusar({
+							ok: false,
+							error: String(e?.message || e).slice(0, 500),
+							permanente: esRechazoPermanente(e),
+							transitorio: esFalloPasajero(e),
+						});
+					} finally {
+						// El que falla antes de llegar al turno también suelta la fila.
+						conSitio();
+					}
+				})(),
+			);
+			await tieneSitio;
+		}),
+	);
 }
 
 export async function atenderApply(

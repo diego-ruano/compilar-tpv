@@ -44,7 +44,9 @@ import {
 	anotarEnBruto,
 	baseAprovisionada,
 	clienteLocal,
+	HaceFaltaAplazar,
 	leerEnBruto,
+	loteEnBruto,
 	migrarBaseLocal,
 	type FilasEnBruto,
 	type Sentencia,
@@ -60,7 +62,7 @@ import {
 	revocar,
 } from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
-import { esBaseLlena } from "./tenantHub.errores";
+import { esBaseLlena, esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
@@ -73,9 +75,11 @@ import {
 import type {
 	HelloSignedMsg,
 	InternalApplyCommand,
+	OpDeLote,
 	OpParaAplicar,
 	ResolvedStmt,
 	Role,
+	VeredictoDeLote,
 	WsAttachment,
 } from "./tenantHub.types";
 
@@ -100,6 +104,20 @@ const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Main espera su `apply_ack` 10 s, y una base central colgada no puede comerse esa espera. Vencido,
 // es una lectura que no ha contestado: la tabla se queda como estaba.
 const PLAZO_LEER_MAIN_MS = 5_000;
+
+// ---- El lote de la Main (`apply_lote`) -------------------------------------
+// Un lote se aplica entero en un turno, sin ceder el control, así que lo que cabe en él se mide en
+// TRABAJO y no en tiempo: en producción el reloj no avanza mientras el objeto consume CPU, y un
+// tope en milisegundos no saltaría nunca. Lo que pasa del tope no se toca (`noIntentada`) y la Main
+// lo vuelve a mandar en el lote siguiente. La primera operación se intenta siempre.
+const LOTE_MAX_OPS = 200; // las que manda la Main de una vez (`replicacion.rs`)
+const LOTE_MAX_BYTES = 512 * 1024; // de SQL y argumentos; la Main corta a 256 KB
+// Las que sólo entran aplazando las claves foráneas (o traen una rota): cada una recorre las tablas
+// con FK antes de cerrar (`loteEnBruto`), unos 230 ms con 250.000 líneas.
+const LOTE_MAX_APLAZADAS = 3;
+
+/** Una operación de un lote, lista para aplicarse: validada, con la hora fijada y sus sentencias. */
+type LotePreparado = { escritura: EscrituraPreparada; lote: ReturnType<typeof loteDe> };
 
 
 export class MotorTenantHub {
@@ -685,6 +703,42 @@ export class MotorTenantHub {
 		if (contabilizar) this.sessionGone(ws, contabilizar);
 	}
 
+	/**
+	 * El comando con la hora fijada, o el rechazo de quien no la trae. Vale igual para una escritura
+	 * suelta y para cada operación de un lote: es el MISMO motor, y una operación no puede valer o no
+	 * según el camino por el que suba.
+	 *
+	 * El tiempo lo fija el dispositivo emisor (cabecera X-Client-Now); resolvemos los
+	 * `datetime('now')` del comando a literal ANTES de ejecutar y de registrar el cambio, para que la
+	 * fila sea idéntica en nube, Main y Handy (replicación determinista).
+	 *
+	 * SYNC-04 (guard duro): si el comando lleva una forma `datetime('now',...)` SIN resolver y el
+	 * emisor NO mandó una X-Client-Now válida, RECHAZAMOS en vez de caer en silencio a UTC (lo que
+	 * dejaba la fila con zona horaria distinta al resto). Todo escritor legítimo pasa por el proxy
+	 * Rust `tpv_server_post_json`, que siempre fija la cabecera; este guard blinda contra cualquier
+	 * caller futuro que la omitiera. Los comandos ya-literales (p. ej. de la Main) no la exigen.
+	 *
+	 * CFG-04: lo que no se ha podido fijar lo pondría la base, con su reloj y en UTC, y la fila de la
+	 * nube diría otra hora que la del dispositivo. Se rechaza antes de ejecutar nada. Ningún comando
+	 * lo hace hoy (lo vigila el scan de `*.commands.ts` en Rust): esto sólo salta con uno nuevo mal
+	 * escrito, y es mejor que salte a que deje horas distintas.
+	 */
+	private conLaHoraFijada(
+		cmd: InternalApplyCommand,
+		clientNow: string | null | undefined,
+	): InternalApplyCommand {
+		const parsedNow = parseClientNow(clientNow);
+		if (parsedNow === null && commandHasNowLiteral(cmd)) {
+			throw new HubError("missing_client_now", 400);
+		}
+		const fijado = rewriteCmdNowLiterals(cmd, parsedNow ?? serverNowFixed());
+		const sinFijar = horaSinFijar(fijado);
+		if (sinFijar) {
+			throw new HubError("hora_no_determinista", 400, { message: `hora_no_determinista: ${sinFijar}` });
+		}
+		return fijado;
+	}
+
 	private async applyInternalCommandIdempotent(params: {
 		tenantId: string;
 		cmd: InternalApplyCommand;
@@ -710,29 +764,7 @@ export class MotorTenantHub {
 			cloudPayloadJson,
 		} = params;
 
-		// El tiempo lo fija el dispositivo emisor (cabecera X-Client-Now); resolvemos los
-		// `datetime('now')` del comando a literal ANTES de ejecutar y de registrar el cambio,
-		// para que la fila sea idéntica en nube, Main y Handy (replicación determinista).
-		//
-		// SYNC-04 (guard duro): si el comando lleva una forma `datetime('now',...)` SIN resolver y el
-		// emisor NO mandó una X-Client-Now válida, RECHAZAMOS en vez de caer en silencio a UTC (lo que
-		// dejaba la fila con zona horaria distinta al resto). Todo escritor legítimo pasa por el proxy
-		// Rust `tpv_server_post_json`, que siempre fija la cabecera; este guard blinda contra cualquier
-		// caller futuro que la omitiera. Los comandos ya-literales (p. ej. de la Main) no la exigen.
-		const parsedNow = parseClientNow(params.clientNow);
-		if (parsedNow === null && commandHasNowLiteral(params.cmd)) {
-			throw new HubError("missing_client_now", 400);
-		}
-		const cmd = rewriteCmdNowLiterals(params.cmd, parsedNow ?? serverNowFixed());
-
-		// CFG-04: lo que no se ha podido fijar lo pondría la base, con su reloj y en UTC, y la fila de la
-		// nube diría otra hora que la del dispositivo. Se rechaza antes de ejecutar nada. Ningún
-		// comando lo hace hoy (lo vigila el scan de `*.commands.ts` en Rust): esto sólo salta con uno
-		// nuevo mal escrito, y es mejor que salte a que deje horas distintas.
-		const sinFijar = horaSinFijar(cmd);
-		if (sinFijar) {
-			throw new HubError("hora_no_determinista", 400, { message: `hora_no_determinista: ${sinFijar}` });
-		}
+		const cmd = this.conLaHoraFijada(params.cmd, params.clientNow);
 
 		const op = opId.trim();
 		const command = commandName.trim();
@@ -910,6 +942,218 @@ export class MotorTenantHub {
 			if (esBaseLlena(e)) this.avisarBaseLlena(e);
 			throw e;
 		}
+	}
+
+	/**
+	 * El lote de la Main (`apply_lote`): lo que sube de su outbox, en orden y de una vez.
+	 *
+	 * Cada operación se aplica como una escritura suelta de la Main (`applyInternalCommandIdempotent`)
+	 * —su propio lote atómico (`loteDe` + `loteEnBruto`), su gate de idempotencia, su línea en el
+	 * log y su difusión—, pero todas en un mismo turno del log y sin ceder el control entre una y
+	 * otra:
+	 *
+	 * - **Fuera del turno** se prepara cada una (la hora, el hash, las sentencias) y se abre la base,
+	 *   que son las esperas. Lo que falla aquí es de esa operación y sale como su veredicto.
+	 * - **Dentro del turno**, tras la comprobación por actividad (la última espera), se vuelve a mirar
+	 *   que la sesión siga siendo la de la Main (AUD-02) y se aplican en orden. El `Seq` lo da el log
+	 *   al confirmar cada una y su `change` sale en el acto: la difusión va en orden de `Seq` (AUD-18).
+	 * - **Una que ya estaba** (el mismo `Op_Id`, que viola el UNIQUE del gate) contesta con su `Seq` y
+	 *   se difunde otra vez (SYNC-03): es el reenvío de un lote del que no llegó el acuse.
+	 * - **Un rechazo permanente** se anota y el lote sigue: esa operación no va a entrar hoy ni dentro
+	 *   de un mes, y la Main la aparta y repara por estado (SYNC-22). **Cualquier otro fallo para el
+	 *   lote**: lo de detrás se apoya en ella, y sale `noIntentada`.
+	 * - **Lo que no cabe en el trabajo de un turno** (`LOTE_MAX_*`) sale también `noIntentada`.
+	 *
+	 * El acuse sale dentro del turno (`alTerminar`). Lo escrito en un turno se confirma junto al
+	 * acabar y lo que se manda por un socket no sale hasta que es duradero (comprobado en
+	 * `test/sondaSqliteDo.test.ts`): la Main no puede recibir el acuse de algo que se pierda.
+	 *
+	 * No se calcula el resultado de cada operación ni se afina su `Result_Json`: sólo lo lee el
+	 * reintento de una escritura por REST (`aplicar`), y de una operación de la Main sólo se usa el
+	 * `Seq`.
+	 *
+	 * Lanza sólo lo que afecta al lote entero (la sesión ya no es la de la Main, la base no abre):
+	 * no se ha aplicado nada.
+	 */
+	private async aplicarLote(params: {
+		tenantId: string;
+		deviceId: string;
+		/** AUD-02: el socket de la sesión que manda el lote. */
+		sesion: WebSocket;
+		ops: OpDeLote[];
+		/** AUD-02: se llama en cuanto el lote tiene sitio en el turno del log. */
+		alReservarTurno?: () => void;
+		/** El acuse, con el veredicto de cada operación en el orden en que llegaron. */
+		alTerminar: (resultados: VeredictoDeLote[]) => void;
+	}): Promise<void> {
+		const { tenantId, deviceId, sesion, ops } = params;
+
+		// AUD-02: como en una escritura suelta, la sesión que lo manda tiene que seguir abierta y ser
+		// la de la Main. Se mira aquí, para no trabajar en balde, y otra vez dentro del turno, que es
+		// lo que vale.
+		const exigirQueSeaLaMain = () => {
+			if (sesion.readyState !== 1 || !this.esLaMain(this.att(sesion))) {
+				throw new HubError("not_authenticated", 401);
+			}
+		};
+		exigirQueSeaLaMain();
+
+		const createdAtMs = nowMs();
+		const preparadas = await Promise.all(
+			ops.map(async (o): Promise<LotePreparado | { fallo: unknown }> => {
+				try {
+					const escritura: EscrituraPreparada = {
+						opId: o.opId,
+						commandName: o.commandName,
+						cmd: this.conLaHoraFijada(o.cmd, o.clientNow),
+						deviceId,
+						requestHash: await sha256Hex(o.requestPayloadJson),
+						cloudPayloadJson: "",
+					};
+					return { escritura, lote: loteDe(escritura, createdAtMs) };
+				} catch (fallo) {
+					return { fallo };
+				}
+			}),
+		);
+
+		// Abrir la base es una espera (al despertar, el DO comprueba sus migraciones): el sitio en el
+		// turno se coge después.
+		await this.withTenantDbRetry(tenantId, async (base) => base);
+
+		return this.enTurnoDelLog(async () => {
+			await this.comprobarMain();
+			// ⚠️ De aquí al final no hay ninguna espera.
+			exigirQueSeaLaMain();
+			const resultados = this.aplicarEnOrden(tenantId, deviceId, ops, preparadas);
+			params.alTerminar(resultados);
+			// SYNC-12: como una escritura suelta, lo confirmado aprovecha para purgar el log.
+			if (resultados.some((r) => r.ok && !r.yaEstaba)) {
+				this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
+			}
+		}, params.alReservarTurno);
+	}
+
+	/** El cuerpo síncrono de `aplicarLote`: las operaciones, en orden, y el veredicto de cada una. */
+	private aplicarEnOrden(
+		tenantId: string,
+		deviceId: string,
+		ops: OpDeLote[],
+		preparadas: (LotePreparado | { fallo: unknown })[],
+	): VeredictoDeLote[] {
+		const resultados: VeredictoDeLote[] = [];
+		let bytes = 0;
+		let aplazadas = 0;
+		let parado = false;
+
+		ops.forEach((o, i) => {
+			const tamano = o.requestPayloadJson.length;
+			// La primera se intenta siempre: un lote que no avanzara nada volvería igual.
+			if (!parado && i > 0 && (i >= LOTE_MAX_OPS || bytes + tamano > LOTE_MAX_BYTES)) parado = true;
+			if (parado) {
+				resultados.push({ opId: o.opId, ok: false, noIntentada: true });
+				return;
+			}
+			bytes += tamano;
+
+			const preparada = preparadas[i];
+			try {
+				if ("fallo" in preparada) throw preparada.fallo;
+				const { seq, yaEstaba } = this.aplicarPreparada(preparada, () => aplazadas++ < LOTE_MAX_APLAZADAS);
+				resultados.push(yaEstaba ? { opId: o.opId, ok: true, seq, yaEstaba } : { opId: o.opId, ok: true, seq });
+			} catch (e: any) {
+				// No cabía aplazar otra más en este turno: ni ésta ni las de detrás se han tocado.
+				if (e instanceof HaceFaltaAplazar) {
+					parado = true;
+					resultados.push({ opId: o.opId, ok: false, noIntentada: true });
+					return;
+				}
+				// SYNC-20, REV-11: el veredicto lo da el DO, que tiene la excepción delante: definitivo
+				// (apartar ya), pasajero (no cuenta) o ninguno de los dos (cuenta).
+				const permanente = esRechazoPermanente(e);
+				const error = String(e?.message || e).slice(0, 500);
+				resultados.push({ opId: o.opId, ok: false, error, permanente, transitorio: esFalloPasajero(e) });
+				capturarError(e, "sync.apply");
+				this.emitSyncEvent("apply_error", {
+					command_name: o.commandName,
+					op_id: o.opId,
+					device_id: deviceId,
+					tenant_id: tenantId,
+					error,
+				});
+				if (esBaseLlena(e)) this.avisarBaseLlena(e);
+				// El outbox de la Main está ordenado y sus operaciones se apoyan unas en otras: sólo
+				// se salta lo que no va a entrar nunca.
+				if (!permanente) parado = true;
+			}
+		});
+		return resultados;
+	}
+
+	/**
+	 * Una operación del lote: su lote atómico y su difusión. Si ya estaba aplicada (el gate viola el
+	 * UNIQUE de `Op_Id` y deshace el lote entero), su `Seq` de entonces y otra difusión (SYNC-03).
+	 */
+	private aplicarPreparada(
+		{ escritura, lote }: LotePreparado,
+		alAplazar: () => boolean,
+	): { seq: number; yaEstaba?: true } {
+		let filas: FilasEnBruto[];
+		try {
+			filas = this.loteLocal(lote.stmts, alAplazar);
+		} catch (e) {
+			if (!isUniqueOpIdViolation(e)) throw e;
+			const previa = this.aplicadaAntes(escritura);
+			if (previa.statements.length) {
+				this.broadcastChange(
+					{ opId: escritura.opId, seq: previa.seq, statements: previa.statements },
+					escritura.deviceId || undefined,
+				);
+			}
+			return { seq: previa.seq, yaEstaba: true };
+		}
+		// El `Seq` lo asigna el log al insertar, y el lote es local: siempre se puede leer.
+		const seq = Number(filas[lote.idxLog]?.lastInsertRowid ?? 0);
+		this.broadcastChange(
+			{ opId: escritura.opId, seq, statements: lote.built.replicated },
+			escritura.deviceId || undefined,
+		);
+		return { seq };
+	}
+
+	/**
+	 * El lote atómico de una operación contra la base de este DO, en el acto y sin esperas. Método, y
+	 * no una llamada directa, para que un test le ponga delante el fallo que quiera.
+	 */
+	private loteLocal(sentencias: ResolvedStmt[], alAplazar: () => boolean): FilasEnBruto[] {
+		return loteEnBruto(this.state.storage, sentencias, { alAplazar });
+	}
+
+	/**
+	 * Lo que consta de una operación ya aplicada, leído en el acto: `recoverAppliedOp` sin esperas,
+	 * para el lote. Mismo criterio: el mismo `Op_Id` con otro comando o con otro contenido es un
+	 * rechazo, y sin línea en el log (ya purgada, por debajo del checkpoint de las Main activas) el
+	 * `Seq` es 0 y no hay nada que difundir.
+	 */
+	private aplicadaAntes(e: EscrituraPreparada): { seq: number; statements: ResolvedStmt[] } {
+		const sql = this.state.storage.sql;
+		const fila = sql
+			.exec(
+				"SELECT Command_Name AS command_name, Request_Hash AS request_hash FROM Applied_Operations WHERE Op_Id = ?1 LIMIT 1;",
+				e.opId,
+			)
+			.toArray()[0] as { command_name?: unknown; request_hash?: unknown } | undefined;
+		if (!fila) throw new HubError("idempotency_operation_processing", 409);
+		if (String(fila.command_name || "") !== e.commandName) throw new HubError("idempotency_command_mismatch", 409);
+		if (String(fila.request_hash || "") !== e.requestHash) throw new HubError("idempotency_payload_mismatch", 409);
+		const cambio = sql
+			.exec(
+				"SELECT Seq AS seq, Statements_Json AS statements_json FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
+				e.opId,
+			)
+			.toArray()[0] as { seq?: unknown; statements_json?: unknown } | undefined;
+		const parsed = safeJsonParse(String(cambio?.statements_json ?? "[]"));
+		return { seq: Number(cambio?.seq ?? 0), statements: Array.isArray(parsed) ? parsed : [] };
 	}
 
 	/**
@@ -1570,6 +1814,7 @@ export class MotorTenantHub {
 			olvidarApartadas: (opIds) => this.olvidarApartadas(opIds),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
+			aplicarLote: (params) => this.aplicarLote(params),
 		};
 	}
 
