@@ -6,11 +6,10 @@
 // Como el resto del dominio, aquí sólo se decide: quién pregunta lo resuelven `tenantAuth` y
 // `soloLaMain` en la ruta.
 
-import type { Env } from "../../env";
 import type { Client } from "@libsql/client/web";
 
 import { SQL_DEVICE_ACTIVO } from "../../lib/deviceAuth";
-import { cerrarSocketsDelDispositivo } from "../../lib/hub";
+import { cerrarSocketsDelDispositivo, type EntornoDelHub } from "../../lib/hub";
 import { rowsAffected } from "../../server/db";
 import { fallo, ok, type Resultado } from "./pairing.resultado";
 
@@ -42,8 +41,7 @@ export async function listarDispositivos(db: Client, tenantId: string): Promise<
 /** Desvincula un Handy y le cierra el socket para que se entere ya. */
 export async function revocarDispositivo(
 	db: Client,
-	env: any,
-	hubNs: Env["TenantHub"],
+	env: EntornoDelHub,
 	tenantId: string,
 	quienPide: string,
 	objetivo: string,
@@ -66,11 +64,7 @@ export async function revocarDispositivo(
 	const cambiadas = rowsAffected(updateRes);
 
 	// Best-effort: si falla, el dispositivo quedará bloqueado en el próximo reconnect.
-	await cerrarSocketsDelDispositivo(
-		hubNs,
-		tenantId,
-		objetivo,
-	);
+	await cerrarSocketsDelDispositivo(env, tenantId, objetivo);
 
 	return ok({
 		revoked: cambiadas > 0,

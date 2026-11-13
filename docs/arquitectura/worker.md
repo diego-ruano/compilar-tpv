@@ -68,12 +68,20 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
-- **Jurisdicción `eu`** (`JURISDICCION_DO` en `wrangler.json`): los DO del negocio (`TenantHub` y
-  `AgendaWeb`) sólo nacen y guardan datos en la UE (`lib/hub.ts::espacioDelHub`). Cloudflare no deja
-  elegir país. El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero. En
-  local va vacía, porque workerd no implementa jurisdicciones. Dentro de `eu`, el DO nace en un centro
-  de la UE que no se elige y la pista de región (`UBICACION_DO`) no se respeta: lo mide
-  `/v1/admin/diagnostico/latencias`, que crea objetos de usar y tirar en cada ubicación.
+- **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
+  `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) nacen
+  en Europa occidental aunque quien los llame primero esté en otro sitio, como el visitante de una
+  web que reserva desde otro continente. Lo decidió el responsable, por latencia: dentro de la
+  jurisdicción `eu` el objeto nace en un centro de la UE que no se elige y la pista de región no se
+  respeta. Lo mide `/v1/admin/diagnostico/latencias`, que crea objetos de usar y tirar en cada
+  colocación. La pista sólo cuenta en la llamada que crea el objeto, y es una pista: Cloudflare la
+  sigue cuando puede.
+- **Todo el que pide el objeto de un negocio pasa por `lib/objetosDelNegocio.ts`** (`hubDe`, en
+  `lib/hub.ts`, y `agendaDe`, en `durableObjects/agendaWeb.ts`), que aplica la jurisdicción y la
+  pista del despliegue. Nadie le pide un objeto a `env.TenantHub` o a `env.AgendaWeb` por su cuenta:
+  el mismo nombre da otro objeto en otra jurisdicción, y una llamada sin la pista podría crearlo
+  lejos. Por lo mismo, cambiar `JURISDICCION_DO` con negocios dados de alta es empezar de cero. En
+  local y en los tests las dos van vacías: workerd no implementa jurisdicciones.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por fila y 10 GB por
   objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
@@ -327,8 +335,7 @@ bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.t
   servicio o una cuenta —la base central, los remitentes, Turnstile, el origen de las reservas web,
   Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos que la suite necesita
   (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; `EJECUTAR_EN_EL_HUB` va como en
-  producción, para que la suite pase por el mismo camino, y la jurisdicción y la pista de región de
-  los DO, vacías; los demás van vacíos, que el worker trata como sin configurar, y el test que
+  producción, para que la suite pase por el mismo camino, y la pista de región de los DO, vacía; los demás van vacíos, que el worker trata como sin configurar, y el test que
   necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
   carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
   la configuración le pregunta qué nombres va a cargar y los pone todos vacíos antes de aplicar la

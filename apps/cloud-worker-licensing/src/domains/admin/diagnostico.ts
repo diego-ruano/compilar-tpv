@@ -8,9 +8,14 @@
 import type { Env } from "../../env";
 import { getDb } from "../../server/db";
 import { hubDe } from "../../lib/hub";
+import { objetoEn, type Colocacion } from "../../lib/objetosDelNegocio";
 
-type Ubicacion = { nombre: string; jurisdiccion?: DurableObjectJurisdiction; pista?: DurableObjectLocationHint };
+type Ubicacion = { nombre: string } & Colocacion;
 
+/**
+ * Las colocaciones que se comparan. La del despliegue es `weur` (sin jurisdicción y con la pista
+ * de Europa occidental); las demás están para ver lo que costaría cada una.
+ */
 const UBICACIONES: Ubicacion[] = [
 	{ nombre: "eu", jurisdiccion: "eu" },
 	{ nombre: "eu+weur", jurisdiccion: "eu", pista: "weur" },
@@ -42,9 +47,7 @@ export async function medirLatencias(env: Env, coloDelWorker: string | undefined
 	const salida: Record<string, unknown> = { worker: coloDelWorker, central: resumen(central), ubicaciones: {} };
 
 	for (const u of UBICACIONES) {
-		const ns = u.jurisdiccion ? env.TenantHub.jurisdiction(u.jurisdiccion) : env.TenantHub;
-		const id = ns.idFromName(`diagnostico-${u.nombre}-${crypto.randomUUID()}`);
-		const stub = u.pista ? ns.get(id, { locationHint: u.pista }) : ns.get(id);
+		const stub = objetoEn(env.TenantHub, `diagnostico-${u.nombre}-${crypto.randomUUID()}`, u);
 		try {
 			const t0 = Date.now();
 			const donde = await stub.diagnostico({ accion: "donde" });

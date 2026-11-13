@@ -7,6 +7,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 import type { Env } from "../env";
+import { objetoDelNegocio } from "../lib/objetosDelNegocio";
 import type { PendientesReservaWebDto } from "@tpv/contracts";
 
 import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
@@ -70,11 +71,13 @@ export class AgendaWeb extends DurableObject<Env> {
 }
 
 /**
- * La agenda de un negocio, con la jurisdicción del despliegue, como el TenantHub
- * (`espacioDelHub`): guarda datos personales de quien reserva.
+ * La agenda de un negocio, colocada como su TenantHub (`lib/objetosDelNegocio.ts`): guarda datos
+ * personales de quien reserva, y quien la llama primero puede ser el visitante de una web desde
+ * cualquier sitio. Con la pista, nace en Europa occidental aunque él esté en otro continente.
  */
-export function agendaDe(env: Env, tenantId: string): DurableObjectStub<AgendaWeb> {
-	const j = env.JURISDICCION_DO;
-	const ns = j ? env.AgendaWeb.jurisdiction(j as DurableObjectJurisdiction) : env.AgendaWeb;
-	return ns.get(ns.idFromName(tenantId));
+export function agendaDe(
+	env: Pick<Env, "AgendaWeb" | "JURISDICCION_DO" | "UBICACION_DO">,
+	tenantId: string,
+): DurableObjectStub<AgendaWeb> {
+	return objetoDelNegocio(env, env.AgendaWeb, tenantId);
 }

@@ -36,7 +36,7 @@ import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 
 import type { Env } from "../../env";
-import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { topeAnonimo } from "../../lib/validacion";
 import { enTransaccion, getDb, type Sql } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
@@ -218,7 +218,7 @@ async function avisarDeLasAnuladas(
 			const lic = await getLicenseById(db, license_id);
 			if (!lic) continue;
 			// Una licencia que no llegó a activarse no tiene negocio ni Main: no hay a quién avisar.
-			await avisarCambioDeLicencia(espacioDelHub(env), String(lic.tenant_id || ""));
+			await avisarCambioDeLicencia(env, String(lic.tenant_id || ""));
 		} catch (e) {
 			capturarError(e, "stripe.notify_hub");
 		}

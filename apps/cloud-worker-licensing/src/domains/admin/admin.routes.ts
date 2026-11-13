@@ -26,7 +26,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
-import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { enTransaccion, getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
@@ -256,7 +256,7 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	// la anulación, no echa a la Main que ha vuelto a serlo. Si ya estaba revocada (una disputa, otra
 	// anulación), quién es la Main no cambia y no hay nada que avisar.
 	if (lic.status !== "revoked") {
-		await avisarCambioDeLicencia(espacioDelHub(c.env), String(lic.tenant_id || ""));
+		await avisarCambioDeLicencia(c.env, String(lic.tenant_id || ""));
 	}
 
 	return c.json({ ok: true, licenseId, status: "revoked" });

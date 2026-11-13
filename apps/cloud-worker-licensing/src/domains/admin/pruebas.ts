@@ -10,9 +10,8 @@
 
 import type { Client } from "@libsql/client/web";
 
-import type { Env } from "../../env";
 import { exec, rowsAffected } from "../../server/db";
-import { hubDe } from "../../lib/hub";
+import { hubDe, type EntornoDelHub } from "../../lib/hub";
 
 /** El correo con el que el E2E emite sus licencias (`apps/tpv-main/e2e/helpers/licencias.ts`). */
 export const CORREO_DE_PRUEBAS = "e2e@altarialights.test";
@@ -53,7 +52,7 @@ export type Retirada = {
  */
 export async function retirarNegociosDePrueba(
 	db: Client,
-	env: Pick<Env, "TenantHub" | "JURISDICCION_DO">,
+	env: EntornoDelHub,
 ): Promise<Retirada> {
 	const retirada: Retirada = { negocios: 0, bases: 0, licencias: 0, fallos: [], quedan: false };
 

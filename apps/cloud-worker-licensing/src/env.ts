@@ -96,10 +96,12 @@ export interface Env {
 	// en la base del negocio: guarda en su SQLite lo que espera a la Main.
 	AgendaWeb: DurableObjectNamespace<AgendaWeb>;
 
-	// Jurisdicción de los dos DO, que guardan los datos del negocio («eu» al desplegar). Vacía en
-	// local y en los tests: workerd no implementa jurisdicciones.
+	// Dónde nacen los dos DO de un negocio, que guardan sus datos (`lib/objetosDelNegocio.ts`).
+	// Jurisdicción: vacía, que es ninguna (decisión del responsable, por latencia). El mismo nombre da
+	// otro objeto en otra jurisdicción: cambiarla es empezar de cero.
 	JURISDICCION_DO?: string;
-	// Pista de región para el TenantHub de un negocio nuevo («weur», «eeur»…). Sólo cuenta al nacer.
+	// Pista de región para el objeto de un negocio nuevo: «weur», Europa occidental. Sólo cuenta en
+	// la llamada que lo crea, venga de donde venga. Vacía en local y en los tests.
 	UBICACION_DO?: string;
 	// `lib/enElHub.ts`: con "1", las rutas de negocio se ejecutan dentro del TenantHub (un viaje por
 	// petición); con otro valor, o sin él, en el Worker (un viaje al TenantHub por consulta).

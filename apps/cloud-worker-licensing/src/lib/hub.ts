@@ -12,6 +12,8 @@ import { HubError } from "./errorHttp";
 import { capturarError } from "../observability/errors";
 import { medirTramo } from "../observability/tiempos";
 import { hubLocal } from "./hubLocal";
+import { objetoDelNegocio } from "./objetosDelNegocio";
+import type { TenantHub } from "../durableObjects/tenantHub";
 import type { ApplyParams, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
 export type { ApplyParams } from "../durableObjects/tenantHub.rpc";
 
@@ -81,26 +83,20 @@ function escrituraVetada(command: ApplyCommand): string | null {
 	return null;
 }
 
+/** Lo que hace falta del entorno para dar con el TenantHub de un negocio. */
+export type EntornoDelHub = Pick<Env, "TenantHub" | "JURISDICCION_DO" | "UBICACION_DO">;
+
 /**
- * El espacio de los TenantHub, con la jurisdicción del despliegue.
+ * El TenantHub de un negocio, colocado como dice el despliegue (`lib/objetosDelNegocio.ts`: sin
+ * jurisdicción y con la pista de Europa occidental).
  *
  * Con la base del negocio dentro del DO, donde nace el objeto es donde viven sus datos, y nace
- * cerca de quien lo toca primero: una reserva web hecha desde fuera de Europa, por ejemplo. Con
- * `JURISDICCION_DO = "eu"` sólo puede nacer y guardarse en la UE. En local va vacía: workerd no
- * implementa jurisdicciones («Jurisdiction restrictions are not implemented in workerd»).
- *
- * El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero.
+ * cerca de quien lo toca primero. Es la única puerta: quien pidiera el objeto por su cuenta a
+ * `env.TenantHub` podría hacerlo nacer en otro sitio o, con otra jurisdicción, hablar con otro
+ * objeto.
  */
-export function espacioDelHub(env: Pick<Env, "TenantHub" | "JURISDICCION_DO">): Env["TenantHub"] {
-	const j = env.JURISDICCION_DO;
-	return j ? env.TenantHub.jurisdiction(j as DurableObjectJurisdiction) : env.TenantHub;
-}
-
-/** El TenantHub de un negocio. */
-export function hubDe(env: Pick<Env, "TenantHub" | "JURISDICCION_DO" | "UBICACION_DO">, tenantId: string) {
-	const ns = espacioDelHub(env);
-	const pista = env.UBICACION_DO as DurableObjectLocationHint | undefined;
-	return pista ? ns.get(ns.idFromName(tenantId), { locationHint: pista }) : ns.get(ns.idFromName(tenantId));
+export function hubDe(env: EntornoDelHub, tenantId: string): DurableObjectStub<TenantHub> {
+	return objetoDelNegocio(env, env.TenantHub, tenantId);
 }
 
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
@@ -140,16 +136,14 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
  * cambio de licencia (traslado, anulación, reembolso) va por `avisarCambioDeLicencia`.
  */
 export async function cerrarSocketsDelDispositivo(
-	hubNs: Env["TenantHub"],
+	env: EntornoDelHub,
 	tenantId: string,
 	deviceId: string,
 ): Promise<void> {
 	if (!tenantId || !deviceId) return;
 
 	try {
-		const stub = hubNs.get(hubNs.idFromName(tenantId));
-
-		await stub.revocarDispositivo(deviceId);
+		await hubDe(env, tenantId).revocarDispositivo(deviceId);
 	} catch (error) {
 		capturarError(error, "device.close_sockets");
 		// Ver arriba: si falla, el dispositivo se bloquea en el próximo reconnect.
@@ -171,13 +165,11 @@ export async function cerrarSocketsDelDispositivo(
  * no llega, el hub lo corrige por su cuenta en cuanto hay actividad, como mucho un minuto después
  * de su última lectura (`comprobarMain`).
  */
-export async function avisarCambioDeLicencia(hubNs: Env["TenantHub"], tenantId: string): Promise<void> {
+export async function avisarCambioDeLicencia(env: EntornoDelHub, tenantId: string): Promise<void> {
 	if (!tenantId) return;
 
 	try {
-		const stub = hubNs.get(hubNs.idFromName(tenantId));
-
-		await stub.releerMain(tenantId);
+		await hubDe(env, tenantId).releerMain(tenantId);
 	} catch (error) {
 		capturarError(error, "license.notify_hub");
 	}

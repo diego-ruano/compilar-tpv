@@ -47,7 +47,7 @@ import {
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
-import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
@@ -671,7 +671,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// anterior. No nombra a quién echar: el hub vuelve a leer quién es la Main, y un aviso que
 		// llegue tarde no echa a la que haya vuelto a serlo. Best-effort: si no llega, el hub lo
 		// corrige cuando salude este equipo o en cuanto haya actividad en el negocio.
-		await avisarCambioDeLicencia(espacioDelHub(env), tenantId);
+		await avisarCambioDeLicencia(env, tenantId);
 
 		// Aviso al titular: si el cambio no lo ha hecho él, queremos que se entere HOY.
 		// No bloquea la activación: el correo es entrega, no autorización.
