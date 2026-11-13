@@ -163,19 +163,22 @@ function sembrarBar(sql: any): void {
 		ANTIGUO,
 	);
 
-	// El último registro de facturación: el eslabón del que sigue la cadena.
-	for (const [orden, id] of [[1, "rf-primero"], [2, "rf-ultimo"]] as const) {
+	// El último registro de facturación: el eslabón del que sigue la cadena. Es de un cobro de
+	// hace cuarenta días, que no cabe en ninguna ventana y tiene que viajar con él.
+	venta(sql, "fiscal", haceDias(40));
+	for (const [orden, id, idPago] of [[1, "rf-primero", null], [2, "rf-ultimo", "p-fiscal"]] as const) {
 		sql.exec(
 			`INSERT INTO Registros_Facturacion
 			   (ID_Registro, Orden, Tipo, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Serie, Numero,
-			    Nombre_Razon_Emisor, Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url)
+			    Nombre_Razon_Emisor, Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url, ID_Pago)
 			 VALUES (?, ?, 'ALTA', 'B00000000', ?, '01-01-2026', 'A', ?, 'Bar de pruebas', 'cadena', 'huella',
-			         ?, '{}', 'https://ejemplo.invalid/qr');`,
+			         ?, '{}', 'https://ejemplo.invalid/qr', ?);`,
 			id,
 			orden,
 			`A-${orden}`,
 			orden,
 			ANTIGUO.replace(" ", "T") + "+01:00",
+			idPago,
 		);
 	}
 
@@ -226,8 +229,10 @@ function comprobarLoImprescindible(v: Volcado, donde: string): void {
 	// Y lo devuelto desde el cierre, aunque la venta sea anterior: el arqueo lo resta (REV-08).
 	expect(pagos, donde).toContain("p-devuelta");
 
-	// El último registro de facturación.
-	expect(valores(v, "Registros_Facturacion", "ID_Registro"), donde).toContain("rf-ultimo");
+	// El último registro de facturación, con el cobro al que apunta y la comanda de ese cobro.
+	expect(valores(v, "Registros_Facturacion", "ID_Registro"), donde).toEqual(["rf-ultimo"]);
+	expect(pagos, donde).toContain("p-fiscal");
+	expect(valores(v, "Comandas", "ID_Comanda"), donde).toContain("c-fiscal");
 
 	// Y lo que la Main necesita para rellenar el resto, igual con cualquier ancho.
 	const parciales = v.tablas.filter((t) => t.parcial).map((t) => t.nombre).sort();
@@ -245,6 +250,7 @@ function comprobarLoImprescindible(v: Volcado, donde: string): void {
 	for (const c of valores(v, "Pagos", "ID_Comanda")) expect(comandas, donde).toContain(c);
 	for (const p of valores(v, "Pago_Detalles", "ID_Pago")) expect(delVolcado, donde).toContain(p);
 	for (const d of valores(v, "Pago_Detalles", "ID_Detalle")) expect(detalles, donde).toContain(d);
+	for (const p of valores(v, "Registros_Facturacion", "ID_Pago")) expect(delVolcado, donde).toContain(p);
 }
 
 const ventasCon = (v: Volcado, prefijo: string) =>
@@ -456,7 +462,7 @@ describe("el contraste diario usa la ventana que cabe", () => {
 				expect(ventasCon(semana, "vieja"), camino).toBe(0);
 				expect(ventasCon(semana, "semana"), camino).toBe(DE_LA_SEMANA);
 				// Los conteos siguen siendo de la tabla entera, quepa lo que quepa.
-				const comandas = VIEJAS + DE_LA_SEMANA + DESDE_EL_CIERRE + DE_HOY + 2;
+				const comandas = VIEJAS + DE_LA_SEMANA + DESDE_EL_CIERRE + DE_HOY + 3;
 				for (const foto of [mes, semana]) {
 					expect(foto.conteos.find((c: any) => c.nombre === "Comandas").filas, camino).toBe(comandas);
 					expect(foto.hasta_seq, camino).toBe(1);

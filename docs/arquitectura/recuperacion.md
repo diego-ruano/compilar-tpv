@@ -82,7 +82,9 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en ese periodo aunque
   la venta sea anterior ([caja.md](caja.md)).
 - `Registros_Facturacion` entra en la ventana **más su última fila por `Orden`**, que es el eslabón del
-  que sigue la cadena.
+  que sigue la cadena. `ID_Pago` es una FK, así que el último registro trae siempre la comanda de su
+  cobro, y uno de la ventana sólo viaja si viaja su cobro (el resto llega por la fase 2, detrás de
+  sus cobros).
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.
 - El worker dice qué tablas vienen recortadas (`parcial`) y en qué orden rellenarlas: la clasificación
   vive sólo en `bootstrap.ventana.ts`.

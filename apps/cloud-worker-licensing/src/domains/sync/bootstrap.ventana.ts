@@ -132,6 +132,11 @@ export function esTablaDeNegocio(nombre: string): boolean {
  * de un periodo anterior (REV-08, `cierre_caja.rs::totales_entre`): un ticket de hace veinte días
  * devuelto hoy forma parte del periodo de caja abierto. Sin él, el primer arqueo tras recuperar
  * esperaría en el cajón un dinero que ya se devolvió.
+ *
+ * Y entra siempre la comanda del cobro del último registro de facturación. Ese registro viaja con
+ * cualquier ventana (ver `Registros_Facturacion`, abajo) y su `ID_Pago` es una FK: si el cobro se
+ * quedara fuera, la restauración entera abortaría. Con la ventana encogida hasta el último cierre
+ * pasa en cuanto se recupera sin haber vendido nada después de cerrar.
  */
 const CTE_COMANDAS = `sel_comandas AS (
 	SELECT ID_Comanda FROM Comandas
@@ -141,6 +146,9 @@ const CTE_COMANDAS = `sel_comandas AS (
 	    OR EXISTS (SELECT 1 FROM Pagos p
 	                WHERE p.ID_Comanda = Comandas.ID_Comanda
 	                  AND (p.Fecha_Hora >= ?1 OR COALESCE(p.Anulado_En, '') >= ?1))
+	    OR ID_Comanda = (SELECT p.ID_Comanda FROM Pagos p
+	                      WHERE p.ID_Pago = (SELECT r.ID_Pago FROM Registros_Facturacion r
+	                                          ORDER BY r.Orden DESC LIMIT 1))
 )`;
 
 const CTE_DETALLES = `sel_detalles AS (
@@ -270,15 +278,24 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// `Fecha_Expedicion`, que es `DD-MM-AAAA` porque así viaja al XML y al QR: comparar eso
 		// contra una fecha `AAAA-MM-DD` da un orden lexicográfico sin ningún sentido.
 		//
-		// El `OR` del final es el que importa de verdad: la cadena de huellas se continúa desde el
-		// ÚLTIMO eslabón, así que ese tiene que volver siempre — aunque el bar lleve dos meses
-		// cerrado y no haya emitido nada dentro de la ventana. Sin él, una Main restaurada
-		// arrancaría una cadena nueva marcándose `PrimerRegistro = "S"` con registros ya existentes
-		// para ese SIF y NIF, que es exactamente el error admisible 2007.
+		// El último eslabón es el que importa de verdad: la cadena de huellas se continúa desde el
+		// ÚLTIMO, así que ese tiene que volver siempre — aunque el bar lleve dos meses cerrado y no
+		// haya emitido nada dentro de la ventana. Sin él, una Main restaurada arrancaría una cadena
+		// nueva marcándose `PrimerRegistro = "S"` con registros ya existentes para ese SIF y NIF,
+		// que es exactamente el error admisible 2007. Su cobro viaja con él: `sel_comandas` trae
+		// siempre esa comanda.
+		//
+		// Los demás, los de la ventana, sólo viajan si viaja su cobro (o si no tienen): `ID_Pago`
+		// es una FK y una huérfana aborta la restauración ENTERA. No es un caso de laboratorio: la
+		// comparación con `Fecha_Hora_Huso` es de textos, y su `T` es mayor que el espacio del
+		// límite, así que del día en que cae el límite entran los registros de todo el día, también
+		// los de antes de esa hora, cuyos cobros no entran. Esos registros llegan por la fase 2,
+		// detrás de sus cobros.
 		nombre: "Registros_Facturacion",
-		ctes: [],
+		ctes: [CTE_COMANDAS, CTE_PAGOS],
 		donde:
-			"Fecha_Hora_Huso >= ?1 OR Orden = (SELECT MAX(Orden) FROM Registros_Facturacion)",
+			"Orden = (SELECT MAX(Orden) FROM Registros_Facturacion) " +
+			"OR (Fecha_Hora_Huso >= ?1 AND (ID_Pago IS NULL OR ID_Pago IN (SELECT ID_Pago FROM sel_pagos)))",
 	},
 	{
 		nombre: "Cierres_Caja",

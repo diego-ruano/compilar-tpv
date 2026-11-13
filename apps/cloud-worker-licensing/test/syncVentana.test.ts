@@ -300,6 +300,64 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 	});
 });
 
+describe("bootstrap acotado · los registros de facturación", () => {
+	/** Un registro de alta del cobro `idPago`, emitido en `fecha`. */
+	function registro(sql: any, orden: number, idPago: string | null, fecha: string) {
+		sql.exec(
+			`INSERT INTO Registros_Facturacion
+			   (ID_Registro, Orden, Tipo, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Serie, Numero,
+			    Nombre_Razon_Emisor, Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url, ID_Pago)
+			 VALUES (?, ?, 'ALTA', 'B00000000', ?, '01-01-2026', 'A', ?, 'Bar de pruebas', 'cadena', 'huella',
+			         ?, '{}', 'https://ejemplo.invalid/qr', ?);`,
+			`rf-${orden}`,
+			orden,
+			`A-${orden}`,
+			orden,
+			fecha.replace(" ", "T") + "+01:00",
+			idPago,
+		);
+	}
+
+	it("el último viaja siempre, y con él su cobro y la comanda de ese cobro", async () => {
+		// La cadena de huellas sigue desde el último eslabón, así que vuelve aunque el bar lleve
+		// meses cerrado. Su `ID_Pago` es una FK: si el cobro no viajara con él, la restauración
+		// entera abortaría, y el bar no podría recuperarse hasta vender algo — que es justo lo que
+		// no puede hacer sin recuperarse.
+		const { body } = await pedir("/bootstrap", "fiscal-ultimo", (sql) => {
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			sembrarVenta(sql, "ultima", ANTIGUO);
+			registro(sql, 1, "p-vieja", ANTIGUO);
+			registro(sql, 2, "p-ultima", ANTIGUO);
+		});
+
+		expect(ids(body, "Registros_Facturacion", "ID_Registro")).toEqual(["rf-2"]);
+		expect(ids(body, "Pagos", "ID_Pago")).toEqual(["p-ultima"]);
+		expect(ids(body, "Comandas", "ID_Comanda")).toEqual(["c-ultima"]);
+		expect(ids(body, "Detalle_Comanda", "ID_Detalle")).toEqual(["d-ultima"]);
+		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-ultima"]);
+	});
+
+	it("uno de la ventana sólo viaja si viaja su cobro: el resto llega por la fase 2", async () => {
+		const { body } = await pedir("/bootstrap", "fiscal-red", (sql) => {
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			sembrarVenta(sql, "nueva", RECIENTE);
+			// Dentro de la ventana por su fecha, de un cobro que queda fuera.
+			registro(sql, 1, "p-vieja", RECIENTE);
+			// Dentro, con su cobro dentro; y dentro, sin cobro.
+			registro(sql, 2, "p-nueva", RECIENTE);
+			registro(sql, 3, null, RECIENTE);
+		});
+
+		expect(ids(body, "Registros_Facturacion", "ID_Registro").sort()).toEqual(["rf-2", "rf-3"]);
+		const pagos = new Set(ids(body, "Pagos", "ID_Pago"));
+		const t = tabla(body, "Registros_Facturacion")!;
+		for (const f of t.filas) {
+			const idPago = f[t.columnas.indexOf("ID_Pago")];
+			if (idPago !== null) expect(pagos).toContain(idPago);
+		}
+	});
+});
+
 describe("bootstrap acotado · lo que sigue vivo entra entero", () => {
 	it("una comanda abierta hace meses viaja igual", async () => {
 		// Una mesa que nadie cerró es trabajo pendiente, no histórico: si no viene, el camarero
