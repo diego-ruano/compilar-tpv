@@ -32,8 +32,12 @@ type Area =
 const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	comandas: ["mesas", "stats"],
 	detalle_comanda: ["mesas", "stats"],
-	pagos: ["cuentas", "stats"],
-	pago_detalles: ["cuentas", "stats"],
+	// El plano enseña lo que queda por cobrar de cada mesa, y eso sale de las líneas cobradas
+	// (`v_lineas_cobradas`: `Pago_Detalles` de un `Pagos` activo). Un cobro parcial, una baja o una
+	// devolución no tocan `Comandas`: sin `mesas` aquí, el plano de los demás equipos seguiría con
+	// el pendiente anterior hasta su relectura de cada minuto.
+	pagos: ["cuentas", "stats", "mesas"],
+	pago_detalles: ["cuentas", "stats", "mesas"],
 	devolucion_lineas: ["cuentas"],
 	cuentas_gastos: ["cuentas", "stats"],
 	// La caja es de Cuentas. El apunte de `Movimientos_Caja` va siempre junto al `Pagos` o al

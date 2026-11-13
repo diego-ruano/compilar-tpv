@@ -42,6 +42,20 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
         expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
         expect(ajustesPorTablas(cobro)).toEqual([]);
     });
+    it("un cobro parcial, una baja o una devolución refrescan el plano aunque no toquen la comanda", () => {
+        // El plano enseña lo que queda por cobrar de cada mesa, que sale de las líneas cobradas. Estos
+        // lotes no llevan `comandas`: quien tiene que traer `mesas` es `pagos`.
+        const cobroParcial = ["pagos", "pago_detalles", "lotes_producto", "lote_consumos", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
+        const devolucion = ["pagos", "devolucion_lineas", "lotes_producto", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
+        const baja = ["pagos", "lotes_producto", "lote_consumos", "movimientos_caja", "registros_facturacion"];
+        for (const lote of [cobroParcial, devolucion, baja]) {
+            const areas = featureKeysPorTablas(lote);
+            expect(areas).toContain("mesas");
+            expect(areas).toContain("cuentas");
+            expect(areas).toContain("stats");
+        }
+        expect(featureKeysPorTablas(["pago_detalles"])).toContain("mesas");
+    });
     it("la caja, el stock y las reservas web refrescan su pantalla; lo fiscal, ninguna", () => {
         for (const tabla of ["movimientos_caja", "aperturas_cajon", "cierres_caja", "cierre_denominaciones", "cierre_rectificaciones"]) {
             expect(featureKeysPorTablas([tabla])).toEqual(["cuentas"]);
@@ -60,7 +74,7 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
 
 describe("metadatos nativos y cachés de presentación", () => {
     it("deduplica las áreas y distingue ajustes de tablas desconocidas", () => {
-        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "inventario", "proveedores"]);
+        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "mesas", "inventario", "proveedores"]);
         expect(featureKeysPorTablas(["business_settings"])).toEqual([]);
         expect(featureKeysPorTablas(["tabla_nueva"])).toBeNull();
         expect(featureKeysPorTablas(null)).toBeNull();
