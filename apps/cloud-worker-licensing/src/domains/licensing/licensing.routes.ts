@@ -397,9 +397,9 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	if (esPrimeraActivacion) {
 		if (actual) {
 			// La identidad del equipo se comprueba ANTES de gastar la clave: sin esto bastaría con
-			// saber un `device_id` ajeno —que viaja en los mensajes de presencia del WebSocket,
-			// REV-07— para sumarle meses a la licencia de otro. No es robar, pero tampoco es lo que
-			// quiere quien ha pagado.
+			// saber un `device_id` ajeno —el de la Main viaja en los avisos del WebSocket
+			// (`main_online`), REV-07— para sumarle meses a la licencia de otro. No es robar, pero
+			// tampoco es lo que quiere quien ha pagado.
 			//
 			// La clave ya se ha comparado arriba con la registrada (`exigirLaClaveDeEsteEquipo`). Lo
 			// que falta por exigir aquí es que haya con qué compararla: la Main de una licencia viva

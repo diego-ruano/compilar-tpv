@@ -41,13 +41,15 @@ import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoApl
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
+	anotarEnBruto,
 	baseAprovisionada,
 	clienteLocal,
-	ejecutarEnBruto,
-	loteEnBruto,
+	leerEnBruto,
 	migrarBaseLocal,
+	type FilasEnBruto,
 	type Sentencia,
 } from "./tenantHub.sqlite";
+import { sembrarAdminInicial } from "./tenantHub.alta";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
 import {
 	abrirWebSocket,
@@ -58,6 +60,7 @@ import {
 	revocar,
 } from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
+import { esBaseLlena } from "./tenantHub.errores";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
@@ -120,6 +123,9 @@ export class MotorTenantHub {
 	private baseLocal: Client | null = null;
 	// El negocio de este DO, para las trazas: lo dice la primera petición que llega.
 	private tenantIdVisto: string | null = null;
+	// Lo que ya se ha avisado desde esta instancia (`avisarUnaVez`): una avería de la base del
+	// negocio la ve cada petición, y con un aviso basta. Se pierde al hibernar: vuelve a avisar.
+	private avisados = new Set<string>();
 
 	// AUD-18: la cola de lo que está confirmando y difundiendo ahora mismo (ver `enTurnoDelLog`). Es
 	// lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo hiberna sin nada en
@@ -211,9 +217,55 @@ export class MotorTenantHub {
 		if (this.baseLocal) return this.baseLocal;
 		const storage = this.state.storage;
 		if (!baseAprovisionada(storage.sql)) throw new HubError("tenant_db_not_provisioned", 404);
-		await migrarBaseLocal(storage);
+		try {
+			await this.migrarEnExclusiva();
+		} catch (causa) {
+			throw this.migracionFallida(causa);
+		}
 		this.baseLocal = clienteLocal(storage);
 		return this.baseLocal;
+	}
+
+	/**
+	 * Pone al día el esquema de la base sin que nada más corra en el objeto entretanto.
+	 *
+	 * El runner apaga las claves foráneas alrededor de la tanda (`migrarBaseLocal`) y para volver a
+	 * encenderlas tiene que esperar: sin esto, otra petición podría escribir con ellas apagadas, sin
+	 * que se comprobaran y sin que sus cascadas se ejecutaran. `blockConcurrencyWhile` no entrega
+	 * ningún otro evento al objeto hasta que su cuerpo acaba; como resetea el objeto si el cuerpo
+	 * lanza, el fallo sale como dato. Tiene 30 s: una migración que reconstruya una tabla grande
+	 * tiene que caber ahí.
+	 */
+	private async migrarEnExclusiva(): Promise<void> {
+		const storage = this.state.storage;
+		const fallo = await this.state.blockConcurrencyWhile(async () => {
+			try {
+				await migrarBaseLocal(storage);
+				return null;
+			} catch (error) {
+				return { error };
+			}
+		});
+		if (!fallo) return;
+		// Si las claves foráneas se hubieran quedado apagadas, el siguiente acceso lo vuelve a mirar
+		// antes de servir nada.
+		this.baseLocal = null;
+		throw fallo.error;
+	}
+
+	/**
+	 * La base del negocio no ha podido ponerse al día. Hasta que alguien lo arregle fallará cada
+	 * petición de este negocio, así que se avisa una vez por instancia (`avisarUnaVez`) y lo que ve
+	 * quien pregunta es un 503 con nombre, no un 500 con el texto de SQLite por clasificar. Para una
+	 * operación de la Main es pasajero (`tenantHub.errores.ts`): no se aparta por ello.
+	 *
+	 * Una migración ya aplicada que ha cambiado conserva su código, que está en el catálogo
+	 * (`tenant_migration_altered`).
+	 */
+	private migracionFallida(causa: unknown): HubError {
+		this.avisarUnaVez("migracion_fallida", causa, "tenant_db.migration");
+		if (causa instanceof HubError && causa.code === "migration_altered") return causa;
+		return new HubError("tenant_db_migration_failed", 503);
 	}
 
 	private async withTenantDbRetry<T>(
@@ -223,11 +275,19 @@ export class MotorTenantHub {
 		return run(await this.getTenantDb(tenantId));
 	}
 
-	/** El alta del negocio: crea su esquema (idempotente). */
-	async aprovisionar(tenantId: string): Promise<void> {
+	/**
+	 * El alta del negocio: crea su esquema y, si la base nace vacía, su administrador inicial
+	 * (`tenantHub.alta.ts`). Es idempotente: con la base ya creada sólo aplica las migraciones
+	 * pendientes, y dice que ya estaba (`reused`).
+	 */
+	async aprovisionar(tenantId: string): Promise<{ reused: boolean }> {
 		this.tenantIdVisto ??= tenantId;
-		await migrarBaseLocal(this.state.storage);
-		this.baseLocal = clienteLocal(this.state.storage);
+		const storage = this.state.storage;
+		const reused = baseAprovisionada(storage.sql);
+		await this.migrarEnExclusiva();
+		await sembrarAdminInicial(storage);
+		this.baseLocal = clienteLocal(storage);
+		return { reused };
 	}
 
 	estaAprovisionado(): boolean {
@@ -235,8 +295,31 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta,
-	 * o un lote atómico: el lote de lectura da una foto coherente, como el `batch("read")` de libsql.
+	 * Lo que contestan las dos puertas por las que el Worker llega a la base (`consultar` y
+	 * `anotarEstado`): un fallo con status decidido viaja como dato, porque el RPC no conserva las
+	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 */
+	private async conLaBase(
+		tenantId: string,
+		trabajo: (storage: DurableObjectStorage) => FilasEnBruto[],
+	): Promise<RespuestaDeConsulta> {
+		try {
+			await this.getTenantDb(tenantId);
+			return { ok: true, resultados: trabajo(this.state.storage) };
+		} catch (e) {
+			if (e instanceof HubError) {
+				return { ok: false, code: e.code, status: e.status, details: e.details };
+			}
+			throw e;
+		}
+	}
+
+	/**
+	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta, o un lote: van en una
+	 * transacción, así que el lote da una foto coherente, como el `batch("read")` de libsql.
+	 *
+	 * **Sólo lee** (`leerEnBruto`): lo que no es una lectura se rechaza con `consulta_no_es_lectura`,
+	 * y lo que escriba se deshace. Una escritura del negocio va por el motor (`aplicar`).
 	 *
 	 * No pasan por el turno del log: el SQL del DO es síncrono, así que ven lo confirmado o lo que
 	 * otra petición acaba de escribir en este mismo DO, nunca una escritura a medias.
@@ -246,25 +329,43 @@ export class MotorTenantHub {
 		sentencias: Sentencia[],
 		enLote: boolean,
 	): Promise<RespuestaDeConsulta> {
-		try {
-			await this.getTenantDb(tenantId);
-		} catch (e) {
-			if (e instanceof HubError) {
-				return { ok: false, code: e.code, status: e.status, details: e.details };
-			}
-			throw e;
-		}
-		const storage = this.state.storage;
-		const resultados = enLote
-			? loteEnBruto(storage, sentencias)
-			: [ejecutarEnBruto(storage.sql, sentencias[0])];
-		return { ok: true, resultados };
+		return this.conLaBase(tenantId, (storage) =>
+			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
+		);
 	}
 
-	/** Retirar un negocio de pruebas: su base entera, con la cola y lo demás del DO. */
+	/**
+	 * Lo único que el Worker escribe en la base sin pasar por el motor: el estado propio de la nube
+	 * (el freno del PIN, el checkpoint de la purga), que no se replica. Es para la ruta que corre en
+	 * el Worker; dentro del DO lo escribe con el cliente de al lado. Qué tablas son, y que la
+	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
+	 */
+	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
+		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
+	}
+
+	/**
+	 * Retirar un negocio de pruebas: todo lo que este objeto guarda de él.
+	 *
+	 * - **Las sesiones vivas se cierran primero**, por `cerrar` como todo cierre que inicia el DO: quedan
+	 *   fuera y su salida se contabiliza con la tabla de quién es la Main todavía delante. Una Main o
+	 *   una Handy que siguiera conectada no puede seguir escribiendo en una base recién vaciada.
+	 * - **La alarma** de la cola se quita aparte: sin cola que drenar no tiene a qué despertar al objeto.
+	 * - **`deleteAll`** se lleva la base del negocio, la cola y la tabla de la Main.
+	 *
+	 * Después el objeto no vuelve a crear nada por su cuenta: el cierre de esos sockets, que llega
+	 * más tarde, es de sesiones que ya están fuera (`cerrar`, `webSocketClose`).
+	 */
 	async borrarTodo(): Promise<void> {
+		for (const ws of this.state.getWebSockets()) {
+			this.cerrar(ws, this.att(ws), 4001, "negocio_retirado");
+		}
+		await this.state.storage.deleteAlarm();
 		await this.state.storage.deleteAll();
 		this.baseLocal = null;
+		this.lastSeenPushedAtMs.clear();
+		this.lastPurgeAtMs = 0;
+		this.avisados.clear();
 	}
 
 	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
@@ -575,11 +676,13 @@ export class MotorTenantHub {
 	 * cierre: es el que dice si era la Main.
 	 */
 	private cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void {
-		if (a) this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });
+		// Una sesión que ya está fuera ya tiene su salida contabilizada: sólo queda cerrar el socket.
+		const contabilizar = a && !a.fuera ? a : null;
+		if (contabilizar) this.setAtt(ws, { ...contabilizar, authed: false, recovering: false, fuera: true });
 		try {
 			ws.close(code, motivo);
 		} catch { }
-		if (a) this.sessionGone(ws, a);
+		if (contabilizar) this.sessionGone(ws, contabilizar);
 	}
 
 	private async applyInternalCommandIdempotent(params: {
@@ -729,15 +832,7 @@ export class MotorTenantHub {
 					// resto de dispositivos converja. La Main secundaria lo descarta por Op_Id.
 					if (recovered.statements.length) {
 						this.broadcastChange(
-							{
-								command,
-								opId: op,
-								deviceId: deviceId || null,
-								payloadJson: cloudPayloadJson,
-								result: recovered.result,
-								seq: recovered.seq,
-								statements: recovered.statements,
-							},
+							{ opId: op, seq: recovered.seq, statements: recovered.statements },
 							deviceId || undefined,
 						);
 					}
@@ -760,21 +855,10 @@ export class MotorTenantHub {
 				});
 			}
 
-			// Tras confirmar, propagamos el cambio (payload + resultado) al resto de dispositivos
-			// autenticados. El originador queda excluido. La Main aplica el payload directo a su
-			// SQLite local (no hay refetch). AUD-18: antes que nada más en el turno.
-			this.broadcastChange(
-				{
-					command,
-					opId: op,
-					deviceId: deviceId || null,
-					payloadJson: cloudPayloadJson,
-					result,
-					seq,
-					statements: built.replicated,
-				},
-				deviceId || undefined,
-			);
+			// Tras confirmar, propagamos el cambio (sus sentencias ya resueltas y su `Seq`) al resto de
+			// dispositivos autenticados. El originador queda excluido. La Main las aplica tal cual a
+			// su SQLite local (no hay refetch). AUD-18: antes que nada más en el turno.
+			this.broadcastChange({ opId: op, seq, statements: built.replicated }, deviceId || undefined);
 
 			// SYNC-10: el gate guardó un Result_Json best-effort (solo literales; lo derivado de la
 			// DB quedó null). Si el resultado REAL difiere (incluye campos derivados de la DB), lo
@@ -823,6 +907,7 @@ export class MotorTenantHub {
 				error: String(e?.message || e).slice(0, 500),
 				latency_ms: nowMs() - createdAtMs,
 			});
+			if (esBaseLlena(e)) this.avisarBaseLlena(e);
 			throw e;
 		}
 	}
@@ -991,15 +1076,7 @@ export class MotorTenantHub {
 			}
 			aplicadas.push(t.op.opId);
 			this.broadcastChange(
-				{
-					command: t.op.commandName,
-					opId: t.op.opId,
-					deviceId: t.op.deviceId || null,
-					payloadJson: t.op.cloudPayloadJson,
-					result,
-					seq,
-					statements: t.built.replicated,
-				},
+				{ opId: t.op.opId, seq, statements: t.built.replicated },
 				t.op.deviceId || undefined,
 			);
 		}
@@ -1026,15 +1103,7 @@ export class MotorTenantHub {
 			if (!op || !(seq > 0)) continue;
 			const statements = safeJsonParse(String(fila.statements_json ?? "[]"));
 			this.broadcastChange(
-				{
-					command: op.commandName,
-					opId: op.opId,
-					deviceId: op.deviceId || null,
-					payloadJson: op.cloudPayloadJson,
-					result: null,
-					seq,
-					statements: Array.isArray(statements) ? statements : [],
-				},
+				{ opId: op.opId, seq, statements: Array.isArray(statements) ? statements : [] },
 				op.deviceId || undefined,
 			);
 		}
@@ -1066,6 +1135,7 @@ export class MotorTenantHub {
 			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
+			avisarBaseLlena: (error) => this.avisarBaseLlena(error),
 		};
 	}
 
@@ -1189,6 +1259,26 @@ export class MotorTenantHub {
 		}
 	}
 
+	/**
+	 * Una avería de la base del negocio que no se arregla sola (está llena, no ha podido migrar) y que
+	 * a partir de ahí ve cada petición: a Sentry y a Axiom, una vez por instancia y por motivo. Lo
+	 * que se recuerda es una caché: al hibernar se pierde y la instancia siguiente vuelve a avisar.
+	 */
+	private avisarUnaVez(motivo: string, error: unknown, operacion: string): void {
+		if (this.avisados.has(motivo)) return;
+		this.avisados.add(motivo);
+		capturarError(error, operacion);
+		this.emitSyncEvent(motivo, { error: String((error as any)?.message || error).slice(0, 500) });
+	}
+
+	/**
+	 * La base está llena o en sólo lectura (`esBaseLlena`). Ninguna operación tiene la culpa ni se
+	 * aparta por ello; hay que hacerle sitio, y eso lo hace una persona.
+	 */
+	private avisarBaseLlena(error: unknown): void {
+		this.avisarUnaVez("base_llena", error, "tenant_db.full");
+	}
+
 	private send(ws: WebSocket, obj: any) {
 		try {
 			ws.send(JSON.stringify(obj));
@@ -1197,8 +1287,8 @@ export class MotorTenantHub {
 
 	/**
 	 * A TODOS los sockets, también a los que aún no han saludado. Sólo para lo que no lleva datos
-	 * del negocio: la presencia y si hay Main (`main_online`, `main_offline`). Lo demás, por
-	 * `broadcastAuthed` o `broadcastRol`.
+	 * del negocio: si hay Main (`main_online`, `main_offline`). Lo demás, por `broadcastAuthed` o
+	 * `broadcastRol`.
 	 */
 	private broadcast(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
@@ -1305,38 +1395,24 @@ export class MotorTenantHub {
 		return n;
 	}
 
-	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
-	// autenticados, excluyendo al originador. Reemplaza la antigua señal
-	// `cloud_changes_available` (modelo de refetch) por el envío directo del JSON.
+	/**
+	 * Propaga un cambio aplicado a los dispositivos autenticados, excluyendo al originador.
+	 *
+	 * El mensaje lleva lo que se lee, y nada más: la Main, la operación (`opId`, su anti-eco), su
+	 * `seq` (su checkpoint) y las sentencias ya resueltas, que aplica a su SQLite; la Handy, sólo las
+	 * sentencias, de las que saca qué pantallas refrescar (`replicacion.rs::cambio`,
+	 * `presencia_handy.rs`). El comando, el dispositivo que lo mandó, su payload y su resultado
+	 * viajaban en cada cambio a cada dispositivo sin que nadie los leyera.
+	 */
 	private broadcastChange(
-		params: {
-			command: string;
-			opId: string;
-			deviceId: string | null;
-			payloadJson: string;
-			result: any;
-			seq: number;
-			statements: ResolvedStmt[];
-		},
+		params: { opId: string; seq: number; statements: ResolvedStmt[] },
 		exceptDeviceId?: string,
 	) {
 		// AUD-02: se entrega con lo que dice ahora la tabla (`broadcastAuthed`): de los `tpv`, sólo a la
 		// Main. La comprobación por actividad ya se ha hecho, si tocaba, en el mismo turno del log y
 		// antes de enviar lo que se difunde (`applyInternalCommandIdempotent`, `applyBatchIdempotent`).
 		this.broadcastAuthed(
-			{
-				type: "change",
-				command: params.command,
-				opId: params.opId,
-				deviceId: params.deviceId,
-				payload: safeJsonParse(params.payloadJson),
-				result: params.result ?? null,
-				// Opción 3: sentencias ya resueltas + cursor, para que la Main las aplique
-				// directamente a su SQLite local (y sepa su checkpoint).
-				seq: params.seq,
-				statements: params.statements,
-				ts: nowMs(),
-			},
+			{ type: "change", opId: params.opId, seq: params.seq, statements: params.statements },
 			exceptDeviceId,
 		);
 	}
@@ -1411,6 +1487,8 @@ export class MotorTenantHub {
 					return this.state.storage.sql;
 				},
 				aplicar: (params) => aplicar(this.ctxRutas(), params),
+				estaAprovisionado: () => this.estaAprovisionado(),
+				aprovisionar: () => this.aprovisionar(identidad.tenantId),
 			},
 			async () => app.fetch(peticion, this.env, ctxEjecucion),
 		);
@@ -1434,7 +1512,6 @@ export class MotorTenantHub {
 			att: (ws) => this.att(ws),
 			setAtt: (ws, att) => this.setAtt(ws, att),
 			send: (ws, obj) => this.send(ws, obj),
-			broadcast: (obj, except) => this.broadcast(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			liveSocketsFor: (deviceId, except) => this.liveSocketsFor(deviceId, except),
 			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
@@ -1493,30 +1570,28 @@ export class MotorTenantHub {
 			olvidarApartadas: (opIds) => this.olvidarApartadas(opIds),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
-			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
 		};
 	}
 
 
 	/**
-	 * Contabilidad de una sesión que se va: presencia + freeze. Se invoca desde `webSocketClose`
+	 * Contabilidad de una sesión que se va: el freeze de las Handy si era la Main. Se invoca desde `webSocketClose`
 	 * (cierre del cliente / caída de red) y TAMBIÉN de forma explícita en los cierres que inicia el
 	 * servidor, todos por `cerrar`, porque la documentación de Cloudflare no garantiza que
 	 * `webSocketClose` se dispare cuando el cierre lo provoca el propio DO. Es **idempotente y
 	 * auto-inhibida**: si queda otro socket vivo del mismo dispositivo no hace nada, y repetirla solo
-	 * reemite señales que el cliente ya trata como idempotentes.
+	 * reemite una señal que el cliente ya trata como idempotente.
 	 */
 	private sessionGone(ws: WebSocket, a: WsAttachment): void {
 		const { deviceId } = a;
 
-		// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no dispares presencia ni
-		// main_offline en falso: la sesión nueva sigue viva.
+		// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no dispares `main_offline` en
+		// falso: la sesión nueva sigue viva.
 		if (this.liveSocketsFor(deviceId, ws).length > 0) return;
 
 		const wasMain = a.role === "tpv";
 
 		this.lastSeenPushedAtMs.delete(deviceId);
-		this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
 
 		// Si se va la Main y no queda ninguna conectada, congelamos todo: las
 		// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.
@@ -1535,7 +1610,10 @@ export class MotorTenantHub {
 		_wasClean: boolean,
 	): Promise<void> {
 		const a = this.att(ws);
-		if (!a) return;
+		// Si la cerró el DO (`cerrar`), ya está fuera y su salida ya se contabilizó entonces. Esto es
+		// sólo el cierre que llega después, quizá con el negocio ya retirado (`borrarTodo`): no se
+		// vuelve a contabilizar, que sería además volver a crear tablas en un objeto vacío.
+		if (!a || a.fuera) return;
 		// AUD-02: como en `cerrar`, la sesión queda fuera antes de nada: lo que tuviera a medias (un
 		// saludo esperando a la base central, una escritura esperando turno) no sigue.
 		this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });

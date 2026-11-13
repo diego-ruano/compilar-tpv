@@ -264,7 +264,7 @@ describe("commandHasNowLiteral", () => {
 
 	it("no se inventa un 'now' donde no lo hay", () => {
 		expect(commandHasNowLiteral(tx(["UPDATE A SET x = 1;", "UPDATE B SET y = 2;"]))).toBe(false);
-		expect(commandHasNowLiteral({ type: "tenantDb.ping" })).toBe(false);
+		expect(commandHasNowLiteral({ type: "tenantDb.ping" } as any)).toBe(false);
 	});
 
 	it("aguanta payloads incompletos", () => {
@@ -362,9 +362,9 @@ describe("rewriteCmdNowLiterals", () => {
 		expect(rewriteCmdNowLiterals(cmd, DT)).toEqual(cmd);
 	});
 
-	it("un ping no lleva SQL y pasa de largo", () => {
-		const ping: InternalApplyCommand = { type: "tenantDb.ping" };
-		expect(rewriteCmdNowLiterals(ping, DT)).toEqual(ping);
+	it("un comando de un tipo que no existe no lleva SQL y pasa de largo", () => {
+		const raro = { type: "tenantDb.ping" } as unknown as InternalApplyCommand;
+		expect(rewriteCmdNowLiterals(raro, DT)).toEqual(raro);
 	});
 });
 

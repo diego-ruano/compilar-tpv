@@ -105,9 +105,9 @@ function errorDeClave(code: "device_key_mismatch" | "device_key_missing"): Error
  *
  * `exigirClaveSiEsDeOtroNegocio` no sirve para activar: aquél cubre el robo ENTRE negocios y se
  * aparta en cuanto el dispositivo es del tenant que autoriza, que es justo el caso del canje y el de
- * un cambio de equipo hacia una Handy del propio negocio. Y el `device_id` no es un secreto —viaja
- * en los mensajes de presencia del WebSocket (REV-07)—, así que sin esto bastaría con conocer el de
- * otro bar para gastar una clave sobre su licencia.
+ * un cambio de equipo hacia una Handy del propio negocio. Y el `device_id` no es un secreto —el de
+ * la Main viaja en los avisos del WebSocket (`main_online`, REV-07)—, así que sin esto bastaría con
+ * conocer el de otro bar para gastar una clave sobre su licencia.
  *
  * AUD-01: la clave pública tampoco es un secreto, y aquí sólo se comparan dos cadenas. Que quien la
  * presenta tiene su privada lo comprueba antes la ruta, con la firma de la petición

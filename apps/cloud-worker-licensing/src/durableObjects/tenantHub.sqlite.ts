@@ -5,8 +5,8 @@
 // El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
 // `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que las doscientas
 // consultas del worker no dependan de dónde vive la base. Dentro del DO se usa directamente
-// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`ejecutarEnBruto`/`loteEnBruto`
-// devuelven filas planas, y `aResultSet` las vuelve a montar al otro lado).
+// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`leerEnBruto` devuelve filas
+// planas, y `aResultSet` las vuelve a montar al otro lado) y no pueden escribir.
 //
 // Diferencias con el SQLite de libsql que este fichero absorbe:
 //
@@ -144,6 +144,137 @@ export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 	}
 }
 
+// ---------------- Lo que llega de fuera del DO ----------------
+//
+// El Worker habla con la base por dos puertas (`MotorTenantHub.consultar` y `anotarEstado`), y
+// ninguna deja escribir datos del negocio: eso va por el motor (`aplicar`), que es quien lo apunta
+// en `Applied_Operations` y en `Sync_Changes` y lo difunde. Una escritura que entrara por aquí no
+// la vería nunca la Main.
+
+/** Una lectura empieza por `SELECT` o por `WITH`, con comentarios o sin ellos delante. */
+const EMPIEZA_COMO_LECTURA = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:SELECT|WITH)\b/i;
+
+/**
+ * ¿Hay una sola sentencia en este texto?
+ *
+ * El SQLite del DO ejecuta todas las que le lleguen separadas por `;`, y lo que devuelve es de la
+ * última: detrás de un `SELECT` cabe un `PRAGMA` que no escribe ninguna fila y deja cambiada la
+ * conexión para todo lo que venga después (`ignore_check_constraints`, por ejemplo; comprobado en
+ * `test/sondaSqliteDo.test.ts`).
+ *
+ * El texto se recorre como lo trocea SQLite: un `;` dentro de un texto o de un nombre entre
+ * comillas, corchetes o acentos graves, o dentro de un comentario, no separa nada. Detrás del
+ * primero que sí separa sólo puede haber espacios, comentarios y más `;`.
+ *
+ * ⚠️ Ante la duda dice que no. Un parámetro con nombre (`$a`, `@a`, `:a`, `#a`) puede llevar
+ * detrás un paréntesis que SQLite se traga entero, comillas incluidas (`$a(')`), y lo que aquí
+ * parecería un texto entre comillas sería para él una segunda sentencia. Ninguna consulta del
+ * negocio los usa (`partes`), así que un texto que traiga uno no pasa.
+ */
+export function unaSolaSentencia(texto: string): boolean {
+	const n = texto.length;
+	let cerrada = false;
+	let i = 0;
+	while (i < n) {
+		const c = texto[i];
+		if (c === "-" && texto[i + 1] === "-") {
+			const fin = texto.indexOf("\n", i);
+			i = fin < 0 ? n : fin + 1;
+			continue;
+		}
+		if (c === "/" && texto[i + 1] === "*") {
+			const fin = texto.indexOf("*/", i + 2);
+			i = fin < 0 ? n : fin + 2;
+			continue;
+		}
+		if (c === ";") {
+			cerrada = true;
+			i++;
+			continue;
+		}
+		if (/\s/.test(c)) {
+			i++;
+			continue;
+		}
+		// Cualquier otra cosa es parte de una sentencia.
+		if (cerrada) return false;
+		if (c === "$" || c === "@" || c === ":" || c === "#") return false;
+		if (c === "'" || c === '"' || c === "`") {
+			// Hasta la comilla que cierra; dos seguidas son una comilla dentro del texto.
+			i++;
+			while (i < n) {
+				if (texto[i] === c) {
+					if (texto[i + 1] !== c) break;
+					i++;
+				}
+				i++;
+			}
+			i++;
+			continue;
+		}
+		if (c === "[") {
+			const fin = texto.indexOf("]", i + 1);
+			i = fin < 0 ? n : fin + 1;
+			continue;
+		}
+		i++;
+	}
+	return true;
+}
+
+/**
+ * Las lecturas del Worker: ni una fila escrita, ni la conexión cambiada.
+ *
+ * Se mira tres veces. Antes de ejecutar, que cada texto sea una sola sentencia y que empiece como
+ * una lectura: deja fuera lo que no escribe filas pero cambia la conexión (un `PRAGMA`, delante o
+ * detrás de un `SELECT`). Y después de ejecutar, que no haya escrito nada: un `WITH … DELETE`
+ * empieza como una lectura. Va todo en una transacción, así que lo que haya escrito se deshace.
+ */
+export function leerEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
+	const sql = storage.sql;
+	const noEsLectura = () => new HubError("consulta_no_es_lectura", 500);
+	return storage.transactionSync(() =>
+		sentencias.map((s) => {
+			const { texto, args } = partes(s);
+			if (!EMPIEZA_COMO_LECTURA.test(texto) || !unaSolaSentencia(texto)) throw noEsLectura();
+			const cursor = sql.exec(texto, ...args.map(valorParaExec));
+			const columns = [...cursor.columnNames];
+			const rows = Array.from(cursor.raw()) as unknown[][];
+			// Sólo es fiable con el cursor ya recorrido.
+			if (cursor.rowsWritten > 0) throw noEsLectura();
+			return { columns, rows, rowsAffected: 0, lastInsertRowid: null };
+		}),
+	);
+}
+
+/**
+ * Las tablas del esquema que son estado de la nube y de nadie más: el freno del PIN de las Handy
+ * (`Intentos_Login`, LOGIN-01) y el checkpoint de cada Main, que es el suelo de la purga del log
+ * (`Sync_Main_Checkpoints`, SYNC-12). No se replican, así que lo que una ruta escribe en ellas no
+ * pasa por el motor. Dentro del DO las escribe con el cliente de al lado; cuando la ruta corre en el
+ * Worker, por `anotarEstado`.
+ */
+const TABLAS_DE_ESTADO: ReadonlySet<string> = new Set(["intentos_login", "sync_main_checkpoints"]);
+
+/** Un alta, un cambio o un borrado que dice a las claras en qué tabla: nada de `WITH` ni de `OR REPLACE`. */
+const ESCRITURA_EN_TABLA = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i;
+
+/** ¿Es esta sentencia una escritura de estado de la nube, y nada más que eso? */
+export function esEscrituraDeEstado(s: Sentencia): boolean {
+	const { texto } = partes(s);
+	const tabla = ESCRITURA_EN_TABLA.exec(texto)?.[1]?.toLowerCase();
+	if (!tabla || !TABLAS_DE_ESTADO.has(tabla)) return false;
+	// Una sola sentencia: sin `;` que no sea el del final. Ninguna de las que se escriben aquí lleva
+	// uno dentro de un texto, y el SQLite del DO ejecutaría lo que viniera detrás.
+	return !texto.trimEnd().replace(/;$/, "").includes(";");
+}
+
+/** Una escritura de estado de la nube (`esEscrituraDeEstado`); cualquier otra cosa se rechaza. */
+export function anotarEnBruto(storage: DurableObjectStorage, s: Sentencia): FilasEnBruto {
+	if (!esEscrituraDeEstado(s)) throw new HubError("estado_local_no_admitido", 500);
+	return storage.transactionSync(() => ejecutarEnBruto(storage.sql, s));
+}
+
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */
 export function aResultSet(b: FilasEnBruto): ResultSet {
 	const rows = b.rows.map((valores) => {
@@ -219,15 +350,17 @@ export function baseAprovisionada(sql: SqlStorage): boolean {
 	);
 }
 
+type MigracionPendiente = { name: string; sql: string; hash: string };
+
 /**
- * Aplica las migraciones pendientes (`server/tenantMigrations.ts`), cada una con su registro en
- * `_migrations` y en su propia transacción, como el runner de la Main (mismo nombre, mismo hash).
- * Falla con `migration_altered` si una ya aplicada cambió. El DO es de un solo hilo, así que no hay
- * dos migraciones a la vez que coordinar.
+ * Las migraciones que le faltan a esta base, en orden. Lanza `migration_altered` si una ya
+ * aplicada cambió (mismo nombre, otro hash), como el runner de la Main.
  */
-export async function migrarBaseLocal(storage: DurableObjectStorage): Promise<void> {
-	const hashes = await Promise.all(MIGRATIONS.map((m) => sha256Hex(normalize(m.sql))));
-	const sql = storage.sql;
+function migracionesPendientes(
+	sql: SqlStorage,
+	migraciones: { name: string; sql: string }[],
+	hashes: string[],
+): MigracionPendiente[] {
 	// `_migrations` nace dentro de la transacción de la primera migración: si ésta falla, el negocio
 	// sigue sin base (`baseAprovisionada` = false) en vez de quedarse con una tabla de control vacía.
 	const aplicadas = new Map(
@@ -238,30 +371,120 @@ export async function migrarBaseLocal(storage: DurableObjectStorage): Promise<vo
 					.map((r: any) => [String(r.name), String(r.hash)] as const)
 			: [],
 	);
-	MIGRATIONS.forEach((mig, i) => {
+	const pendientes: MigracionPendiente[] = [];
+	migraciones.forEach((mig, i) => {
 		const hash = hashes[i];
 		const previa = aplicadas.get(mig.name);
-		if (previa !== undefined) {
-			if (previa !== hash) {
-				throw new HubError("migration_altered", 500, {
-					message:
-						`migration_altered: '${mig.name}' fue modificada tras aplicarse (hash distinto). ` +
-						`Nunca edites una migración ya publicada: crea una nueva.`,
-				});
-			}
+		if (previa === undefined) {
+			pendientes.push({ ...mig, hash });
 			return;
 		}
-		storage.transactionSync(() => {
-			sql.exec(
-				"CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, hash TEXT NOT NULL, applied_at INTEGER NOT NULL);",
-			);
-			sql.exec(sinComentarios(normalize(mig.sql)));
-			sql.exec(
-				"INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, ?3);",
-				mig.name,
-				hash,
-				Date.now(),
-			);
-		});
+		if (previa !== hash) {
+			throw new HubError("migration_altered", 500, {
+				message:
+					`migration_altered: '${mig.name}' fue modificada tras aplicarse (hash distinto). ` +
+					`Nunca edites una migración ya publicada: crea una nueva.`,
+			});
+		}
 	});
+	return pendientes;
+}
+
+/** ¿Están activas las claves foráneas en la conexión de este DO? */
+function fkActivas(sql: SqlStorage): boolean {
+	return Number((sql.exec("PRAGMA foreign_keys;").toArray()[0] as any)?.foreign_keys) === 1;
+}
+
+/**
+ * Enciende o apaga las claves foráneas de la conexión, y comprueba que ha surtido efecto.
+ *
+ * SQLite ignora este PRAGMA, sin avisar, mientras haya una transacción abierta, y el DO abre una
+ * en cuanto se escribe algo y no la cierra hasta que lo escrito está confirmado: ni al acabar un
+ * `transactionSync` ni cediendo a las microtareas. Si la orden no surte efecto se espera a esa
+ * confirmación (`storage.sync()`) y se repite. Y como es de la conexión, lo que se deja puesto lo
+ * hereda todo lo que venga detrás en este objeto. Comprobado en `test/sondaSqliteDo.test.ts`.
+ */
+async function ponerFk(storage: DurableObjectStorage, activas: boolean): Promise<void> {
+	const sql = storage.sql;
+	const orden = `PRAGMA foreign_keys = ${activas ? "ON" : "OFF"};`;
+	if (fkActivas(sql) === activas) return;
+	sql.exec(orden);
+	if (fkActivas(sql) === activas) return;
+	await storage.sync();
+	sql.exec(orden);
+	if (fkActivas(sql) !== activas) {
+		throw new Error(
+			`tenantHub.sqlite: no se han podido ${activas ? "activar" : "apagar"} las claves foráneas de la base`,
+		);
+	}
+}
+
+/** Una migración, su comprobación de integridad y su registro en `_migrations`: todo o nada. */
+function aplicarMigracion(storage: DurableObjectStorage, mig: MigracionPendiente): void {
+	const sql = storage.sql;
+	storage.transactionSync(() => {
+		sql.exec(
+			"CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, hash TEXT NOT NULL, applied_at INTEGER NOT NULL);",
+		);
+		sql.exec(sinComentarios(normalize(mig.sql)));
+		// Con las FK apagadas nadie las comprueba en caliente: se mira a mano que la migración no ha
+		// dejado huérfanas antes de confirmarla.
+		const rota = sql.exec("PRAGMA foreign_key_check;").toArray()[0] as { table?: string } | undefined;
+		if (rota) {
+			throw new Error(
+				`La migración '${mig.name}' dejó integridad referencial rota (foreign_key_check señala ` +
+					`'${rota.table ?? "?"}'). Se revierte.`,
+			);
+		}
+		sql.exec(
+			"INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, ?3);",
+			mig.name,
+			mig.hash,
+			Date.now(),
+		);
+	});
+}
+
+/**
+ * Aplica las migraciones pendientes (`server/tenantMigrations.ts`), cada una con su registro en
+ * `_migrations` y en su propia transacción, como el runner de la Main (mismo nombre, mismo hash).
+ * Falla con `migration_altered` si una ya aplicada cambió.
+ *
+ * **Con las claves foráneas apagadas alrededor de la tanda**, también como en la Main
+ * (`migrations.rs::run`). Una migración que le quita una restricción a una tabla tiene que
+ * reconstruirla: crear la nueva, copiar, borrar la vieja y renombrar. Con las FK activas, ese
+ * `DROP` borra las filas de la tabla y se lleva en cascada las de sus hijas (`ON DELETE CASCADE`),
+ * sin error y sin nada que `foreign_key_check` pueda ver después; con una hija sin acción, falla.
+ * Apagadas, cada migración pasa `foreign_key_check` antes de confirmarse.
+ *
+ * ⚠️ Mientras están apagadas no puede correr nada más contra la base: quien llama lo hace dentro
+ * de `blockConcurrencyWhile` (`MotorTenantHub.migrarEnExclusiva`). Aquí hay dos esperas con ellas
+ * apagadas, las de `ponerFk`.
+ */
+export async function migrarBaseLocal(storage: DurableObjectStorage): Promise<void> {
+	const migraciones = MIGRATIONS;
+	const hashes = await Promise.all(migraciones.map((m) => sha256Hex(normalize(m.sql))));
+	const sql = storage.sql;
+
+	if (migracionesPendientes(sql, migraciones, hashes).length === 0) {
+		// Una tanda anterior que no llegó a encenderlas las habría dejado apagadas en esta conexión.
+		await ponerFk(storage, true);
+		return;
+	}
+
+	await ponerFk(storage, false);
+	let fallo: { error: unknown } | null = null;
+	try {
+		// Lo pendiente se vuelve a mirar aquí, ya sin esperas hasta acabar la tanda.
+		for (const mig of migracionesPendientes(sql, migraciones, hashes)) aplicarMigracion(storage, mig);
+	} catch (error) {
+		fallo = { error };
+	}
+	try {
+		await ponerFk(storage, true);
+	} catch (error) {
+		// El fallo de la migración manda sobre el de volver a encenderlas.
+		if (!fallo) throw error;
+	}
+	if (fallo) throw fallo.error;
 }

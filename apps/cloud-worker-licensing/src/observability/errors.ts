@@ -4,9 +4,16 @@ import { HubError } from "../lib/errorHttp";
 
 // RI-24 (worker): los catch que conservan la operación también deben notificar el fallo técnico.
 
+/**
+ * Los 503 que no se mandan a Sentry desde donde se contestan: no hay Main, o es una avería de la que
+ * ya avisó quien la vio, una vez (`MotorTenantHub.avisarUnaVez`), y que a partir de ahí repite cada
+ * petición del negocio.
+ */
+const NO_DISPONIBLE_YA_AVISADO: ReadonlySet<string> = new Set(["main_offline", "tenant_db_migration_failed"]);
+
 export function esRechazoEsperado(error: unknown): boolean {
 	if (error instanceof HTTPException) return error.status >= 400 && error.status < 500;
-	if (error instanceof HubError) return (error.status >= 400 && error.status < 500) || (error.status === 503 && error.code === "main_offline");
+	if (error instanceof HubError) return (error.status >= 400 && error.status < 500) || (error.status === 503 && NO_DISPONIBLE_YA_AVISADO.has(error.code));
 	return false;
 }
 

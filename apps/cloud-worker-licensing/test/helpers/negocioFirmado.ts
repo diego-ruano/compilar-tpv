@@ -1,13 +1,18 @@
 // test/helpers/negocioFirmado.ts
 //
-// Un negocio de verdad para pedirle a la `app` entera, como lo hace la Main: su base en su
-// TenantHub, su licencia y su dispositivo en la base central, y peticiones firmadas con la clave del
-// dispositivo. Es lo que hace falta para probar una ruta por el camino desplegado: el Worker
-// autentica, `alHub` le pasa la petición al TenantHub por RPC y la respuesta vuelve por el mismo
-// sitio (`lib/enElHub.ts`).
+// Un negocio entero para probar por el camino de verdad: su base en su TenantHub, y en la base
+// central (el SQLite de otro Durable Object de pruebas) su licencia, su Main y una Handy, cada una
+// con su clave. Las peticiones salen firmadas como las del cliente Rust (`sign_device_proof`).
 //
-// Quien lo usa sustituye `getDb` de `src/server/db` por la base central de pruebas
-// (`vi.mock("../src/server/db", …)`) y le da aquí cómo fijarla.
+// El test pone el doble de la base central (`vi.mock("../src/server/db")` es de cada fichero) y
+// pasa aquí cómo cambiarlo, además de la firma de sesión, que tiene que cargarse después del doble.
+//
+// La base central de pruebas es el SQLite de un Durable Object, y sólo se puede tocar desde él. Por
+// defecto es uno aparte: vale para lo que lee la base central en el Worker (`tenantAuth`), y una
+// ruta que se ejecuta dentro del TenantHub del negocio no la alcanza (el rol, que es lo único que
+// necesitaba de ella, le llega con la identidad). Con `centralEnElNegocio`, las tablas de la central
+// van en el SQLite del propio TenantHub del negocio: así también la lee una ruta que corre dentro de
+// él y la necesita de verdad (el cupo y la traza de un correo, la clave del widget).
 
 import { env as entorno } from "cloudflare:test";
 import * as ed from "@noble/ed25519";
@@ -18,64 +23,92 @@ import { enElHub } from "./hub";
 import { prepararPlanoDeControl } from "./planoDeControl";
 import { bytesToB64 } from "../../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../../src/server/utils/crypto";
-import { firmarSesion } from "../../src/lib/sesion";
-import { olvidarLicenciasCacheadas } from "../../src/lib/licenciaEnUso";
 
 const env = entorno as any;
 
-/** El dispositivo que firma: la Main del negocio. */
-const MAIN = "main-firmada";
+export const MAIN = "main-firmada";
+export const HANDY = "handy-firmada";
 const LIC_HASH = "hash-negocio-firmado";
 
-export type Negocio = { tenantId: string; seed: Uint8Array };
+const SEMILLAS: Record<string, Uint8Array> = {
+	[MAIN]: new Uint8Array(32).fill(21),
+	[HANDY]: new Uint8Array(32).fill(22),
+};
+
+export type Negocio = {
+	tenantId: string;
+	/** Lo que se le ha pedido a la base central, en orden. */
+	central: string[];
+	/** Ejecuta SQL en la base central, sin que cuente como consulta del worker. */
+	enCentral: (sql: string, ...args: unknown[]) => void;
+};
+
+export type Dependencias = {
+	/** Cambia la base central que devuelve el doble de `getDb` del test. */
+	ponerCentral: (db: unknown) => void;
+	firmarSesion: (env: any, claims: { tenantId: string; deviceId: string; licHash: string }) => Promise<string>;
+	olvidarLicenciasCacheadas: () => void;
+};
 
 /**
- * Da de alta un negocio (su base en el DO `tenantId`, su licencia y su Main en una base central de
- * pruebas) y ejecuta `prueba` con él. `fijarCentral` recibe la base central: es lo que tiene que
- * devolver el `getDb` sustituido.
+ * Monta el negocio `nombre` (con licencia en vigor y, salvo `sinBase`, aprovisionado) y corre
+ * `prueba` con él.
  *
- * La base central de pruebas es el SQLite de un Durable Object, y sólo se puede tocar desde él. Por
- * defecto es uno aparte, y `prueba` corre dentro: vale para lo que lee la base central en el Worker
- * (`tenantAuth`). Con `centralEnElNegocio`, las tablas de la central van en el SQLite del propio
- * TenantHub del negocio y `prueba` corre dentro de él (recibe su motor): así también la puede leer
- * una ruta que se ejecuta dentro del TenantHub.
+ * `prueba` corre dentro del Durable Object que guarda la base central de pruebas y recibe su motor:
+ * uno aparte o, con `centralEnElNegocio`, el TenantHub del propio negocio.
  */
 export async function conNegocioFirmado<R>(
-	tenantId: string,
-	fijarCentral: (db: unknown) => void,
+	deps: Dependencias,
+	nombre: string,
 	prueba: (n: Negocio, hub: any) => Promise<R>,
-	{ centralEnElNegocio = false }: { centralEnElNegocio?: boolean } = {},
+	opciones: { sinBase?: boolean; centralEnElNegocio?: boolean } = {},
 ): Promise<R> {
-	olvidarLicenciasCacheadas();
-	await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
+	deps.olvidarLicenciasCacheadas();
+	const tenantId = `negocio-firmado-${nombre}`;
+	if (!opciones.sinBase) await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
 
 	ensureEd25519Sha512();
-	const seed = new Uint8Array(32).fill(7);
-	const pub = bytesToB64(await ed.getPublicKeyAsync(seed));
-	return enElHub(centralEnElNegocio ? tenantId : `central-de-${tenantId}`, async (hub: any) => {
+	const dondeLaCentral = opciones.centralEnElNegocio ? tenantId : `negocio-firmado-central-${nombre}`;
+	return enElHub(dondeLaCentral, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		prepararPlanoDeControl(sql);
-		sql.exec("INSERT INTO tenants (tenant_id) VALUES (?);", tenantId);
+		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, tenantId);
 		sql.exec(
 			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
 			                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
 			                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
 			 VALUES (?, ?, ?, ?, 'active', 0, 12, 'manual', 1, 1, ?, 'bar@a.test', 1, 1);`,
-			`lic-${tenantId}`,
+			`lic-${nombre}`,
 			LIC_HASH,
 			tenantId,
 			MAIN,
 			Date.now() + 30 * 24 * 60 * 60 * 1000,
 		);
-		sql.exec(
-			`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
-			 VALUES (?, ?, 'tpv', ?, 'ed25519');`,
-			MAIN,
-			tenantId,
-			pub,
-		);
-		fijarCentral(clienteSobre(sql, hub.state.storage));
-		return prueba({ tenantId, seed }, hub);
+		for (const [deviceId, rol] of [[MAIN, "tpv"], [HANDY, "handy"]] as const) {
+			sql.exec(
+				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
+				 VALUES (?, ?, ?, ?, 'ed25519');`,
+				deviceId,
+				tenantId,
+				rol,
+				bytesToB64(await ed.getPublicKeyAsync(SEMILLAS[deviceId])),
+			);
+		}
+
+		const central: string[] = [];
+		const real = clienteSobre(sql, hub.state.storage);
+		deps.ponerCentral({
+			...real,
+			execute: async (entrada: any) => {
+				central.push(String(typeof entrada === "string" ? entrada : entrada.sql).replace(/\s+/g, " ").trim());
+				return real.execute(entrada);
+			},
+		});
+		try {
+			return await prueba({ tenantId, central, enCentral: (texto, ...args) => void sql.exec(texto, ...args) }, hub);
+		} finally {
+			deps.ponerCentral(null);
+		}
 	});
 }
 
@@ -90,41 +123,59 @@ function ahora(): string {
 }
 
 /**
- * Una petición POST firmada como la del cliente Rust (`sign_device_proof`), contra la `app` entera.
- * `entorno` pisa variables del de la suite (p. ej. `EJECUTAR_EN_EL_HUB: "0"`).
+ * Una petición firmada por `deviceId` (`MAIN` o `HANDY`), lista para `app.request` o para el
+ * `fetch` del worker. `cuerpo` se manda como JSON; sin él, la petición va sin cuerpo.
+ */
+export async function peticionFirmada(
+	deps: Pick<Dependencias, "firmarSesion">,
+	n: Negocio,
+	deviceId: string,
+	metodo: string,
+	ruta: string,
+	opciones: { cuerpo?: unknown; cabeceras?: Record<string, string> } = {},
+): Promise<Request> {
+	const token = await deps.firmarSesion(env, { tenantId: n.tenantId, deviceId, licHash: LIC_HASH });
+	const cuerpo = opciones.cuerpo === undefined ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(opciones.cuerpo));
+	const ts = Date.now();
+	const mensaje = ["DEVICE_PROOF", ts, metodo, ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
+	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), SEMILLAS[deviceId]));
+	return new Request(`https://tpv-api.test${ruta}`, {
+		method: metodo,
+		headers: {
+			authorization: `Bearer ${token}`,
+			"X-Device-Ts": String(ts),
+			"X-Device-Sig": firma,
+			"X-Client-Now": ahora(),
+			...(metodo === "GET" ? {} : { "X-Idempotency-Key": crypto.randomUUID() }),
+			...(opciones.cuerpo === undefined ? {} : { "content-type": "application/json" }),
+			...opciones.cabeceras,
+		},
+		...(opciones.cuerpo === undefined ? {} : { body: cuerpo }),
+	});
+}
+
+/**
+ * Un POST firmado por la Main y pedido a la `app` entera. `entorno` pisa variables del de la suite
+ * (p. ej. `EJECUTAR_EN_EL_HUB: "0"`, que deja la ruta ejecutándose en el Worker).
  */
 export async function pedirFirmado(
-	app: { request: (ruta: string, init: RequestInit, env: any) => Response | Promise<Response> },
+	deps: Pick<Dependencias, "firmarSesion">,
+	app: { request: (peticion: Request, init: undefined, env: any) => Response | Promise<Response> },
 	n: Negocio,
 	ruta: string,
 	opciones: { cuerpo?: unknown; cabeceras?: Record<string, string>; entorno?: Record<string, unknown> } = {},
 ): Promise<Response> {
-	const token = await firmarSesion(env, { tenantId: n.tenantId, deviceId: MAIN, licHash: LIC_HASH });
-	const cuerpo = new TextEncoder().encode(JSON.stringify(opciones.cuerpo ?? {}));
-	const ts = Date.now();
-	const mensaje = ["DEVICE_PROOF", ts, "POST", ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
-	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), n.seed));
-	return app.request(
-		ruta,
-		{
-			method: "POST",
-			headers: {
-				authorization: `Bearer ${token}`,
-				"X-Device-Ts": String(ts),
-				"X-Device-Sig": firma,
-				"X-Client-Now": ahora(),
-				"content-type": "application/json",
-				...opciones.cabeceras,
-			},
-			body: cuerpo,
-		},
-		{ ...env, ...opciones.entorno },
-	);
+	const peticion = await peticionFirmada(deps, n, MAIN, "POST", ruta, {
+		// Las rutas que se piden así validan un cuerpo JSON; sin nada que mandar, uno vacío.
+		cuerpo: opciones.cuerpo ?? {},
+		cabeceras: opciones.cabeceras,
+	});
+	return app.request(peticion, undefined, { ...env, ...opciones.entorno });
 }
 
 /** Cuántos viajes de un tramo cuenta el `Server-Timing` (`hub-ruta;dur=12;desc="1"`). */
-export function viajes(res: Response, tramo: string): number {
-	const tiempos = res.headers.get("Server-Timing") ?? "";
+export function viajes(respuesta: Response, tramo: string): number {
+	const tiempos = respuesta.headers.get("Server-Timing") ?? "";
 	const m = new RegExp(`(?:^|, )${tramo};dur=[\\d.]+;desc="(\\d+)"`).exec(tiempos);
 	return m ? Number(m[1]) : 0;
 }

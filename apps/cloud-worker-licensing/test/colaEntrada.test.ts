@@ -442,6 +442,65 @@ describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
 		});
 	});
 
+	it("una base llena no aparta nada ni gasta intentos, y avisa una sola vez", async () => {
+		// Llena, la base contesta a una lectura (`SELECT 1`) y rechaza cada escritura. Sin mirarlo
+		// aparte, eso era «la culpa es de esta operación»: cinco vueltas y a la lápida, y detrás de
+		// ella todas las demás, que están bien. Hacerle sitio es cosa de una persona: se avisa y se
+		// espera, con la escalera de la base caída.
+		await enElHub("cola-base-llena", async (hub: any) => {
+			const { sql, db } = prepararHub(hub);
+			let llena = true;
+			hub.getTenantDb = async () => ({
+				...db,
+				async batch(sentencias: any[], modo?: string) {
+					if (llena && modo === "write") throw new Error("database or disk is full: SQLITE_FULL");
+					return db.batch(sentencias, modo);
+				},
+			});
+			const avisos: string[] = [];
+			hub.emitSyncEvent = (name: string) => void avisos.push(name);
+
+			hub.encolar(TENANT, [opLinea(1), opLinea(2), opLinea(3)]);
+			for (let i = 0; i < 7; i++) await hub.drenarCola();
+
+			expect(muertas(sql)).toEqual([]);
+			expect(intentosEnCola(sql)).toEqual([
+				["op-1", 0],
+				["op-2", 0],
+				["op-3", 0],
+			]);
+			expect(avisos.filter((a) => a === "base_llena")).toHaveLength(1);
+			expect(avisos.filter((a) => a === "cola_apartada")).toEqual([]);
+			expect(avisos.filter((a) => a === "cola_base_caida")).toHaveLength(7);
+			// La séptima vuelta ya espera el tope de la escalera, no los cinco segundos de un tropiezo.
+			expect(await esperaProgramada(hub)).toBeGreaterThan(60_000);
+
+			llena = false;
+			await hub.drenarCola();
+			expect(enCola(sql)).toEqual([]);
+			expect(lineas(sql)).toEqual(["det-1", "det-2", "det-3"]);
+		});
+	});
+
+	it("una operación que no se deja montar se aparta a la primera, aunque su SQL hable de una base llena", async () => {
+		// El rechazo lleva detrás el SQL del paso. Leído como texto era una base llena: no se apartaba
+		// nada, se avisaba, y la cola daba la base por caída en cada vuelta, para siempre.
+		await enElHub("cola-no-se-monta", async (hub: any) => {
+			const { sql } = prepararHub(hub);
+			const avisos: string[] = [];
+			hub.emitSyncEvent = (name: string) => void avisos.push(name);
+
+			const mala = opLinea(2);
+			(mala.cmd.payload.steps as unknown[]).unshift({ kind: "value", sql: "SELECT 'database or disk is full'", saveAs: "v" });
+			hub.encolar(TENANT, [opLinea(1), mala, opLinea(3)]);
+			await hub.drenarCola();
+
+			expect(muertas(sql)).toEqual(["op-2"]);
+			expect(lineas(sql)).toEqual(["det-1", "det-3"]);
+			expect(avisos.filter((a) => a === "base_llena" || a === "cola_base_caida")).toEqual([]);
+		});
+	});
+
 	it("una hora que tendría que poner la base se rechaza también por la cola", async () => {
 		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y la base
 		// resolvía el `CURRENT_TIMESTAMP` con su reloj y en UTC: la fila de la nube decía otra hora

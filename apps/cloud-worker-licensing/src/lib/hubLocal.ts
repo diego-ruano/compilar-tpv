@@ -25,6 +25,10 @@ export type HubLocal = {
 	sql: () => Promise<SqlStorage>;
 	/** El motor de escrituras del DO, sin pasar por RPC. */
 	aplicar: (params: ApplyParams) => Promise<ResultadoAplicacion>;
+	/** ¿Tiene ya su base este negocio? */
+	estaAprovisionado: () => boolean;
+	/** El alta: el esquema y el administrador inicial (`MotorTenantHub.aprovisionar`). */
+	aprovisionar: () => Promise<{ reused: boolean }>;
 };
 
 const enCurso = new AsyncLocalStorage<HubLocal>();

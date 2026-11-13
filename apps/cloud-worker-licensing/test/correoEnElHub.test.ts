@@ -27,6 +27,14 @@ vi.mock("../src/server/db", async (importOriginal) => {
 });
 
 const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+
+const deps = {
+	ponerCentral: (db: unknown) => void (dbCentral = db),
+	firmarSesion,
+	olvidarLicenciasCacheadas,
+};
 
 /** Lo que se ha mandado, y el binding de correo que lo apunta. */
 const enviados: any[] = [];
@@ -49,8 +57,8 @@ const HUELLA_ANA = "80ec301799f952e798d6387318dc4616444dc00c3963ed5c1845cf85c0e6
 async function conNegocio(nombre: string, prueba: (n: Negocio, sql: any) => Promise<void>): Promise<void> {
 	enviados.length = 0;
 	await conNegocioFirmado(
+		deps,
 		`correo-hub-${nombre}`,
-		(db) => (dbCentral = db),
 		async (n, hub) => {
 			hub.env = { ...hub.env, ...CORREO };
 			const sql = hub.state.storage.sql;
@@ -102,7 +110,7 @@ function aviso(extra: Record<string, unknown> = {}) {
 describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub", () => {
 	it("un viaje, sin consultas sueltas: lee el proveedor, reserva el cupo, envía y deja la traza", async () => {
 		await conNegocio("pedido", async (n, sql) => {
-			const res = await pedirFirmado(app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
+			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
 			expect(await res.json()).toEqual({ ok: true });
 			expect(res.status).toBe(200);
 			expect(viajes(res, "hub-ruta")).toBe(1);
@@ -134,7 +142,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 
 	it("un destinatario que no es un proveedor del negocio se rechaza dentro, con su código", async () => {
 		await conNegocio("pedido-ajeno", async (n, sql) => {
-			const res = await pedirFirmado(app, n, "/v1/email/enviar-pedido", {
+			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", {
 				cuerpo: { ...PEDIDO, email_destino: "cualquiera@otro.test" },
 			});
 			expect(res.status).toBe(403);
@@ -148,7 +156,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 
 	it("con la ruta en el Worker contesta lo mismo, consulta a consulta", async () => {
 		await conNegocio("pedido-worker", async (n) => {
-			const res = await pedirFirmado(app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO, ...EN_EL_WORKER });
+			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO, ...EN_EL_WORKER });
 			expect(await res.json()).toEqual({ ok: true });
 			expect(viajes(res, "hub-ruta")).toBe(0);
 			expect(viajes(res, "hub-lee")).toBe(1);
@@ -160,7 +168,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantHub", () => {
 	it("un viaje, sin consultas sueltas: lee la reserva, pide el enlace a la agenda y envía", async () => {
 		await conNegocio("aviso", async (n, sql) => {
-			const res = await pedirFirmado(app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
+			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
 			expect(await res.json()).toEqual({ ok: true, enviado: true });
 			expect(res.status).toBe(200);
 			expect(viajes(res, "hub-ruta")).toBe(1);
@@ -182,7 +190,7 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 			expect(enlace.hash).toMatch(/^#t=.{16,}$/);
 
 			// Idempotente por `id_aviso`, con su traza en la base central: repetido no manda otro.
-			const otra = await pedirFirmado(app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
+			const otra = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
 			expect(await otra.json()).toEqual({ ok: true, enviado: true });
 			expect(enviados).toHaveLength(1);
 			expect(sql.exec("SELECT id, device_id, tipo, ok FROM email_sends;").toArray()).toEqual([
@@ -193,7 +201,7 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 
 	it("una reserva que la nube aún no tiene es un 404 decidido dentro: quien lo manda lo repite", async () => {
 		await conNegocio("aviso-sin-reserva", async (n) => {
-			const res = await pedirFirmado(app, n, "/v1/reservas-web/avisos", {
+			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", {
 				cuerpo: aviso({ id_reserva: "0199aa00-0000-7000-8000-00000000ffff" }),
 			});
 			expect(res.status).toBe(404);
@@ -205,7 +213,7 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 
 	it("con la ruta en el Worker contesta lo mismo, y son dos consultas al DO", async () => {
 		await conNegocio("aviso-worker", async (n) => {
-			const res = await pedirFirmado(app, n, "/v1/reservas-web/avisos", {
+			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", {
 				cuerpo: aviso({ tipo: "cancelada" }),
 				...EN_EL_WORKER,
 			});
@@ -218,7 +226,7 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 
 	it("lo que no lee la base del negocio se queda en el Worker", async () => {
 		await conNegocio("pendientes", async (n) => {
-			const res = await pedirFirmado(app, n, "/v1/reservas-web/pendientes");
+			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/pendientes");
 			expect(res.status).toBe(200);
 			expect(await res.json()).toMatchObject({ ok: true, peticiones: [] });
 			expect(viajes(res, "hub-ruta")).toBe(0);

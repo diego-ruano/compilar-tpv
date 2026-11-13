@@ -206,11 +206,15 @@ describe("las respuestas de sync, comprimidas", () => {
 			for (const [ruta, cuerpo] of RUTAS) {
 				const res = await dentroDelHub(
 					{
-						identidad: { tenantId: "t1", deviceId: "d1", token: "", licHash: "" },
+						identidad: { tenantId: "t1", deviceId: "d1", token: "", licHash: "", rol: "tpv" },
 						base: async () => clienteActual,
 						sql: async () => sql,
 						aplicar: async () => {
 							throw new Error("estas rutas no aplican nada");
+						},
+						estaAprovisionado: () => true,
+						aprovisionar: async () => {
+							throw new Error("estas rutas no dan de alta la base");
 						},
 					},
 					() => pedir(ruta, cuerpo, { acepta: "gzip" }),

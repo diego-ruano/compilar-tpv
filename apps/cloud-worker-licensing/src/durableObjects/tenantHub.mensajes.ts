@@ -27,9 +27,11 @@
 // `apply` y `bulk_apply` esperan en fila (`enTurnoDeEntrada`): el orden en que entran es el orden
 // en que llegaron, también si al primero le toca esperar la comprobación. `recovery_ready` no la
 // espera ni la pide: decide con la tabla tal como está, y a la Main no se le rechaza nunca.
+//
+// Un dispositivo no manda nada más por aquí. No hay mensajes de un dispositivo a los demás: lo que
+// tienen que ver los otros es un cambio en la base, y eso lo difunde el motor al confirmarlo.
 
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
-import { isEventAllowed } from "./tenantHub.identidad";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 import {
@@ -40,13 +42,11 @@ import {
 	safeJsonParse,
 } from "./tenantHub.envelope";
 
-import type { Client } from "@libsql/client/web";
 import type {
 	AnyMsg,
 	ApplyMsg,
 	BulkApplyMsg,
 	ColaApartadaAckMsg,
-	EventMsg,
 	HelloSignedMsg,
 	InternalApplyCommand,
 	OpParaAplicar,
@@ -117,7 +117,6 @@ export interface ContextoDeMensajes {
 		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
 		alReservarTurno?: () => void;
 	}): Promise<{ result: any; seq: number }>;
-	withTenantDbRetry<T>(tenantId: string, run: (db: Client) => Promise<T>): Promise<T>;
 }
 
 /**
@@ -166,7 +165,6 @@ export async function despachar(
 	if (msg.type === "cola_apartada_ack") return atenderColaApartadaAck(ctx, ws, a, msg);
 	if (msg.type === "bulk_apply") return atenderBulkApply(ctx, ws, a, msg);
 	if (msg.type === "apply") return atenderApply(ctx, ws, a, msg);
-	if (msg.type === "event") return atenderEvent(ctx, ws, a, msg);
 
 	ctx.send(ws, { type: "error", error: "unknown_type" });
 }
@@ -237,17 +235,6 @@ export async function atenderHelloSigned(
 					role: roleFinal,
 					authed: true,
 				});
-
-				ctx.broadcast(
-					{
-						type: "presence",
-						action: "auth",
-						deviceId,
-						role: roleFinal,
-						authed: true,
-					},
-					deviceId,
-				);
 
 				if (roleFinal === "tpv") {
 					// REV-04: lo que la nube apartó mientras esta Main no estaba (o estaba y no
@@ -635,93 +622,6 @@ export async function atenderApply(
 		}),
 	);
 	return;
-}
-
-export async function atenderEvent(
-	ctx: ContextoDeMensajes,
-	ws: WebSocket,
-	a: WsAttachment,
-	msg: EventMsg,
-): Promise<void> {
-	const { tenantId, deviceId } = a;
-
-	// El rol para autorizar viene del helloSigned (BD central); la
-	// cabecera x-role del cliente jamás decide permisos.
-	const role = a.role ?? "unknown";
-	const name = String(msg.name || "");
-
-	if (!isEventAllowed(role, name)) {
-		ctx.send(ws, {
-			type: "error",
-			error: "forbidden_event",
-			name,
-		});
-		return;
-	}
-
-	// AUD-02: un `tpv` que ya no es la Main no manda eventos ni sondea la base del negocio.
-	if (!sigueDentro(ctx, a)) {
-		ctx.send(ws, { type: "error", error: "not_authenticated" });
-		return;
-	}
-
-	if (name === "tenantDb.ping") {
-		ctx.waitUntil(
-			(async () => {
-				try {
-					await ctx.withTenantDbRetry(tenantId, async (db) => {
-						await db.execute({ sql: "SELECT 1", args: [] });
-					});
-					ctx.send(ws, { type: "event_ack", name, ok: true });
-				} catch (e: any) {
-					capturarError(e, "sync.database_probe");
-					ctx.send(ws, {
-						type: "event_ack",
-						name,
-						ok: false,
-						error: String(e?.message || e),
-					});
-				}
-			})(),
-		);
-		return;
-	}
-
-	// AUD-02: un evento lleva datos del negocio (`payload`) a los demás dispositivos, así que es
-	// actividad: si toca preguntar quién es la Main, se pregunta antes de repartirlo. Después de esa
-	// espera, que es la última, quien lo manda tiene que seguir dentro. (Mientras se espera, el
-	// evento siguiente del mismo dispositivo podría adelantarlo; hoy ningún cliente manda eventos.)
-	await ctx.comprobarMain();
-	if (!sigueDentro(ctx, sesionAbierta(ctx, ws))) {
-		ctx.send(ws, { type: "error", error: "not_authenticated" });
-		return;
-	}
-
-	// AUD-02: sólo a sockets abiertos y autenticados, y de los `tpv`, sólo a la Main
-	// (`broadcastAuthed`). No por `broadcast`, que llega también a un socket que no ha saludado: un
-	// equipo que abrió el socket siendo la Main y se quedó sin saludar no puede recibir los eventos
-	// del negocio, ni antes ni después de perder la licencia.
-	ctx.broadcastAuthed(
-		{
-			type: "event",
-			from: deviceId,
-			role,
-			name,
-			payload: msg.payload ?? null,
-			ts: nowMs(),
-		},
-		deviceId,
-	);
-	return;
-}
-
-/**
- * AUD-02 · ¿Puede esta sesión mandar un evento? Autenticada y no echada; y si es de un `tpv`, la de
- * la Main. Síncrono: se llama con el attachment recién leído, justo antes de actuar.
- */
-function sigueDentro(ctx: ContextoDeMensajes, a: WsAttachment | null): boolean {
-	if (!a?.authed || a.fuera) return false;
-	return a.role !== "tpv" || ctx.esLaMain(a);
 }
 
 /**

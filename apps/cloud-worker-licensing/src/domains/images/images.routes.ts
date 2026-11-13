@@ -28,6 +28,15 @@ import { cuerpoConIdentificador } from "../../lib/validacion";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
+/**
+ * La carpeta de un negocio en el bucket: todas sus claves empiezan por aquí. Acaba en `/`, así que
+ * la de un negocio no es el principio de la de otro (`abc/` no casa con `abcd/…`). Es también lo
+ * que se borra al retirar un negocio de pruebas (`domains/admin/pruebas.ts`).
+ */
+export function prefijoDelNegocio(tenantId: string): string {
+	return `${tenantId}/`;
+}
+
 export const imagesRoutes = new Hono<Ctx>();
 
 // Sólo se permiten estas subcarpetas y nombres de archivo seguros (uuid + extensión).
@@ -73,7 +82,7 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	const cached = await cache.match(cacheKey);
 	if (cached) return cached;
 
-	const key = `${tenant}/${relPath}`;
+	const key = prefijoDelNegocio(tenant) + relPath;
 	const obj = await c.env.IMAGES.get(key);
 	if (!obj) {
 		// 404 SIN cachear: la imagen puede llegar en segundos (la subida va por otro canal);
@@ -120,7 +129,7 @@ imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ 
 	const contentType = tipoImagen(new Uint8Array(body));
 	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
-	const key = `${c.get("tenantId")}/${relPath}`;
+	const key = prefijoDelNegocio(c.get("tenantId")) + relPath;
 
 	await c.env.IMAGES.put(key, body, {
 		httpMetadata: { contentType, cacheControl: CACHE_CONTROL },
@@ -147,7 +156,7 @@ imagesRoutes.post(
 		}),
 	),
 	async (c) => {
-		const key = `${c.get("tenantId")}/${c.req.valid("json").rel_path}`;
+		const key = prefijoDelNegocio(c.get("tenantId")) + c.req.valid("json").rel_path;
 		const obj = await c.env.IMAGES.get(key);
 		if (!obj) {
 			// 404: el binario aún no se ha subido (la subida va por otro canal). La Main reintenta.
@@ -178,7 +187,7 @@ imagesRoutes.delete("/*", tenantAuth, async (c) => {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 	const tenantId = c.get("tenantId");
-	const key = `${tenantId}/${relPath}`;
+	const key = prefijoDelNegocio(tenantId) + relPath;
 	await c.env.IMAGES.delete(key);
 
 	// REV-20: borrarla de R2 no la quitaba de la calle. El GET público la guarda en el caché del

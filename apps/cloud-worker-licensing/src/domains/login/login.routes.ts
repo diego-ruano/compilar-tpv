@@ -62,7 +62,7 @@ function entraSinPin(record: any): boolean {
 
 /**
  * AUD-24: un usuario que en la nube aún tiene el setup inicial pendiente no entra ni ficha en la
- * Handy. Su PIN aquí es todavía el de la siembra (`ensureTenantInitialAdmin`), que es público: el
+ * Handy. Su PIN aquí es todavía el de la siembra (`sembrarAdminInicial`), que es público: el
  * que se elige en la Main sube por el outbox, con `Requiere_Setup = 0`, y puede tardar (la Main sin
  * red, o con la réplica apagada) mientras ya hay una Handy vinculada. Se mira antes que el PIN y
  * que el freno: no hay nada que verificar contra el PIN de la siembra.

@@ -27,7 +27,7 @@ import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../../server/utils/crypto";
 import { leerBearer } from "../../lib/sesion";
 import { hubDe } from "../../lib/hub";
-import { clienteDelHub } from "../../lib/tenantClient";
+import { hubLocal } from "../../lib/hubLocal";
 import { quitarComillas } from "../../lib/texto";
 
 /** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
@@ -383,138 +383,23 @@ async function comprobarFirma(
 	return { ok: true };
 }
 
-// ---------------- Bootstrap del admin inicial del tenant ----------------
-
-const PBKDF2_PREFIX = "$pbkdf2-sha256$";
-// Máximo que admite el PBKDF2 de Cloudflare Workers (100k, límite del runtime). Debe coincidir con
-// `DEFAULT_ITERS` (login.crypto.ts) y `PBKDF2_ITERS` (crates/tpv-domain/src/login.rs): el admin que
-// se siembra aquí se verifica luego con esos verificadores.
-const PBKDF2_ITERS = 100_000;
-const PBKDF2_SALT_LEN = 16;
-const PBKDF2_DK_LEN = 32;
-
-function randomBytes(len: number): Uint8Array {
-	const out = new Uint8Array(len);
-	crypto.getRandomValues(out);
-	return out;
-}
-
-async function hashPinPbkdf2(pin: string): Promise<string> {
-	const p = String(pin || "").trim();
-	if (p.length < 4) throw new Error("PIN demasiado corto");
-
-	const salt = randomBytes(PBKDF2_SALT_LEN);
-
-	const keyMaterial = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(p),
-		"PBKDF2",
-		false,
-		["deriveBits"],
-	);
-
-	const bits = await crypto.subtle.deriveBits(
-		{ name: "PBKDF2", salt, iterations: PBKDF2_ITERS, hash: "SHA-256" },
-		keyMaterial,
-		PBKDF2_DK_LEN * 8,
-	);
-
-	const dk = new Uint8Array(bits);
-	return `${PBKDF2_PREFIX}i=${PBKDF2_ITERS}$${bytesToB64(salt)}$${bytesToB64(dk)}`;
-}
-
-function rowNumber(row: any, key: string, fallback = 0): number {
-	const n = Number(row?.[key] ?? row?.[0] ?? fallback);
-	return Number.isFinite(n) ? n : fallback;
-}
-
-async function tenantQuerySingleNumber(
-	client: Client,
-	sql: string,
-	args: any[] = [],
-): Promise<number> {
-	const r = await client.execute({ sql, args });
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return 0;
-	const firstKey = Object.keys(row)[0] || "";
-	return rowNumber(row, firstKey, 0);
-}
-
-async function tenantQuerySingleString(
-	client: Client,
-	sql: string,
-	args: any[] = [],
-): Promise<string | null> {
-	const r = await client.execute({ sql, args });
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return null;
-	const firstKey = Object.keys(row)[0] || "";
-	const v = row?.[firstKey] ?? row?.[0];
-	return v == null ? null : String(v);
-}
-
-async function ensureTenantInitialAdmin(client: Client): Promise<void> {
-	// Los roles ya los siembra el esquema con sus UUIDv7 fijos; aquí sólo creamos el usuario admin
-	// inicial si la tabla Usuarios está vacía.
-	const usersCount = await tenantQuerySingleNumber(
-		client,
-		`SELECT COUNT(*) AS count FROM Usuarios;`,
-	);
-	if (usersCount > 0) return;
-
-	const adminRoleId = await tenantQuerySingleString(
-		client,
-		`
-			SELECT ID_Rol AS id
-			FROM Roles
-			WHERE Nombre_Rol = 'Administrador'
-			LIMIT 1;
-		`,
-	);
-	if (!adminRoleId) throw new Error("initial_admin_role_missing");
-
-	const hash = await hashPinPbkdf2("1234");
-
-	await client.execute({
-		sql: `
-			INSERT INTO Usuarios (
-				ID_Usuario,
-				ID_Rol,
-				Email,
-				Password_Hash,
-				Nombre,
-				Apellido,
-				Estado,
-				Requiere_Setup
-			)
-			VALUES (?, ?, ?, ?, ?, ?, 'Activo', 1);
-		`,
-		args: [
-			// UUID FIJO: debe coincidir con el admin que siembra la Main (ADMIN_USUARIO_ID en
-			// crates/tpv-infra-sqlite/src/util.rs). Si difiere, la Handy referencia un admin que la
-			// Main no tiene y los fichajes/comandas revientan con FOREIGN KEY al sincronizar.
-			"00000000-0000-7000-8000-000000000501",
-			adminRoleId,
-			"admin@local",
-			hash,
-			"Admin",
-			"TPV",
-		],
-	});
-}
-
 // ---------------- Provisión de la base del negocio ----------------
 
 /**
  * Garantiza que el negocio tiene su base con el esquema aplicado y el admin inicial.
  *
- * La base es el SQLite de su TenantHub. Aprovisionar es pedirle que cree su esquema (idempotente:
- * si ya lo tiene, sólo aplica lo pendiente) y sembrar el administrador.
+ * La base es el SQLite de su TenantHub, y aprovisionarla es cosa suya (`MotorTenantHub.aprovisionar`):
+ * crea el esquema, o aplica lo pendiente si ya lo tiene, y siembra el administrador si la base nace
+ * vacía. Desde una ruta que ya corre dentro de ese DO (`/v1/sync/initialize-empty`) se le pide al
+ * de al lado, sin RPC: un objeto no se llama a sí mismo.
  */
-export async function provisionTenantDatabase(_dbi: Client, env: Env, tenantId: string) {
-	const hub = hubDe(env, tenantId);
-	const reused = await hub.estaAprovisionado();
-	await hub.aprovisionar(tenantId);
-	await ensureTenantInitialAdmin(clienteDelHub(env, tenantId));
-	return { reused };
+export async function provisionTenantDatabase(_dbi: Client, env: Env, tenantId: string): Promise<{ reused: boolean }> {
+	const local = hubLocal(tenantId);
+	return local ? local.aprovisionar() : hubDe(env, tenantId).aprovisionar(tenantId);
+}
+
+/** ¿Tiene ya su base este negocio? Como `provisionTenantDatabase`, por el DO de al lado si lo hay. */
+export async function negocioAprovisionado(env: Env, tenantId: string): Promise<boolean> {
+	const local = hubLocal(tenantId);
+	return local ? local.estaAprovisionado() : hubDe(env, tenantId).estaAprovisionado();
 }

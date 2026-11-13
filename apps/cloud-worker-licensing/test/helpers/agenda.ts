@@ -28,6 +28,17 @@ export async function enLaAgenda<R>(
 }
 
 /**
+ * Corre `callback` dentro de la agenda `nombre`, con el objeto entero: sus llamadas tal como llegan
+ * por RPC, que es donde se ponen en fila con la retirada del negocio.
+ */
+export async function enElObjetoDeLaAgenda<R>(
+	nombre: string,
+	callback: (agenda: any, state: DurableObjectState) => R | Promise<R>,
+): Promise<R> {
+	return (await ejecutar(stubDeLaAgenda(nombre), (instancia, state) => callback(instancia, state))) as R;
+}
+
+/**
  * Un lector de Turso sobre el SQLite de la agenda, con «ahora» fijo (o el que diga `ahora()` en
  * cada lectura). `espera` hace que cada lectura ceda el turno, como una consulta de red: es lo que
  * deja que dos altas a la vez se crucen.

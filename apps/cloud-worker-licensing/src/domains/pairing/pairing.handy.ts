@@ -311,7 +311,7 @@ export async function entregarToken(
 	// `device_id` tuviera registrada. Sin este corte, el upsert de más abajo pisaba `tenant_id`
 	// **y `device_pubkey_b64`**, así que bastaba con vincular una Handy a un negocio propio
 	// usando el `device_id` de la Main de otro —que las Handy del local conocen, viaja en los
-	// mensajes de presencia del WebSocket— para dejar aquella Main firmando con una clave que
+	// avisos del WebSocket (`main_online`)— para dejar aquella Main firmando con una clave que
 	// ya no es la suya: `bad_device_signature` en todo, y sin poder reactivar, porque
 	// `/v1/license/activate` la rechaza entonces con `device_key_mismatch`.
 	//

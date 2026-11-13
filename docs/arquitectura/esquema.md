@@ -22,8 +22,45 @@ Hoy son dos: `0001_inicial.sql`, con el esquema completo, y `0002_negocio.sql`, 
 Cada base lleva `_migrations`. Una base nueva se construye desde `0001`; una existente aplica sólo lo
 que le falta. El hash es el SHA-256 del fichero entero con los finales de línea normalizados
 (**incluidos los comentarios**): si una migración ya aplicada cambia, los dos runners fallan con
-`migration_altered`. El runner de la Main aplica cada migración en su transacción con las FK apagadas
-alrededor de la tanda y comprueba `foreign_key_check` antes de confirmar.
+`migration_altered`. Los dos aplican cada migración en su transacción con las FK apagadas alrededor de
+la tanda y comprueban `foreign_key_check` antes de confirmar.
+
+### Por qué con las FK apagadas
+
+Una migración que le quita una restricción a una tabla tiene que reconstruirla: crear la nueva,
+copiar, `DROP` de la vieja y renombrar. Con las FK activas, ese `DROP` borra las filas de la tabla y
+ejecuta las acciones de las que la apuntan: las hijas con `ON DELETE CASCADE` **se borran, sin error
+y sin dejar nada que `foreign_key_check` vea después**, y una hija sin acción lo hace fallar. Con
+ellas apagadas la tabla se reconstruye sin tocar a las hijas, y `foreign_key_check` comprueba, antes
+de confirmar, que la migración no ha dejado huérfanas.
+
+En el SQLite del Durable Object eso tiene sus condiciones (`tenantHub.sqlite.ts::migrarBaseLocal`,
+comprobadas en `test/sondaSqliteDo.test.ts`):
+
+- `PRAGMA foreign_keys` **no hace nada, y no avisa, con una transacción abierta**. El DO abre una en
+  cuanto se escribe algo y no la cierra hasta que lo escrito está confirmado: ni al acabar un
+  `transactionSync` ni cediendo a las microtareas, sí tras `storage.sync()`. El runner da la orden,
+  mira si ha surtido efecto y, si no, espera a esa confirmación y la repite; sin efecto, falla.
+- **Es de la conexión**: lo que se deja apagado lo hereda todo lo que venga detrás en ese objeto.
+  Por eso el runner comprueba que quedan encendidas también cuando no hay nada que migrar.
+- **Mientras están apagadas no corre nada más en el objeto**: el motor migra dentro de
+  `blockConcurrencyWhile` (`migrarEnExclusiva`), que tiene 30 s. Una migración que reconstruya una
+  tabla grande tiene que caber ahí.
+
+**La regla para escribir una migración**: una que reconstruya una tabla o borre filas que otras
+apuntan cuenta con las FK apagadas; no las enciende ni las apaga por su cuenta (dentro de la
+transacción de la migración el `PRAGMA` no haría nada), y no puede dejar huérfanas. Una vista que
+lea la tabla reconstruida hay que quitarla antes y volver a crearla después: el `RENAME` falla si
+alguna apunta a una tabla que en ese momento no existe.
+
+### Si la migración falla en la nube
+
+El DO migra la primera vez que toca su base tras un despliegue. Si no puede, cada petición de ese
+negocio contesta 503 `tenant_db_migration_failed` (o el 500 `migration_altered` de una migración ya
+aplicada que ha cambiado) hasta que se arregle; lo que la migración hubiera hecho se deshace. Para
+una operación de la Main es un fallo pasajero: no se aparta ni gasta intentos
+([sincronizacion.md](sincronizacion.md#subir-el-outbox)). El DO avisa una vez por instancia: a Sentry
+(`tenant_db.migration`) y a Axiom (`migracion_fallida`).
 
 ## Cambiar el esquema
 

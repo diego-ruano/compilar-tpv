@@ -35,13 +35,18 @@ export async function pedirPorLosDosCaminos(
 		const enElWorker = await leer(await pedir());
 		const enElTenantHub = await dentroDelHub(
 			{
-				identidad: { tenantId, deviceId: "d1", token: "", licHash: "" },
+				// Los volcados son de la Main: dentro del TenantHub el veto de rol decide con éste.
+				identidad: { tenantId, deviceId: "d1", token: "", licHash: "", rol: "tpv" },
 				base: async () => {
 					throw new Error("dentro del TenantHub un volcado lee del cursor, no del cliente");
 				},
 				sql: async () => sql as SqlStorage,
 				aplicar: async () => {
 					throw new Error("un volcado no escribe");
+				},
+				estaAprovisionado: () => true,
+				aprovisionar: async () => {
+					throw new Error("un volcado no da de alta la base");
 				},
 			},
 			async () => leer(await pedir()),

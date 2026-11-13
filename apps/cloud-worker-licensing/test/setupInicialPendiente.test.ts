@@ -56,10 +56,10 @@ const TENANT = "tenant-aud24";
 const LIC_HASH = "hash-licencia-aud24";
 const MAIN = "aud24-main";
 const HANDY = "aud24-handy";
-/** El UUID fijo del administrador inicial, el mismo en todos los negocios (util.rs, licensing.helpers.ts). */
+/** El UUID fijo del administrador inicial, el mismo en todos los negocios (util.rs, tenantHub.alta.ts). */
 const ADMIN = "00000000-0000-7000-8000-000000000501";
 const DIA = 24 * 60 * 60 * 1000;
-/** El PIN del administrador que siembra la nube (`ensureTenantInitialAdmin`): es público. */
+/** El PIN del administrador que siembra la nube (`sembrarAdminInicial`): es público. */
 const PIN_DE_LA_SIEMBRA = "1234";
 const PIN_ELEGIDO = "2468";
 

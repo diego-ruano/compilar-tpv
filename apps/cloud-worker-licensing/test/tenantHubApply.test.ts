@@ -84,7 +84,7 @@ describe("buildApplyBatch · sólo escrituras", () => {
 
 	   Que el resto de variantes REVIENTEN es lo correcto: si un día alguien encaminara una
 	   lectura por aquí, se enteraría al instante en vez de replicar un SELECT a todos los
-	   dispositivos. Ojo con `InternalApplyCommand`: declara seis variantes pero por esta vía
+	   dispositivos. Ojo con `InternalApplyCommand`: declara cinco variantes pero por esta vía
 	   sólo dos son aplicables. */
 	it("las consultas no son aplicables y se rechazan", async () => {
 		for (const type of ["tenantDb.value", "tenantDb.row", "tenantDb.rows"] as const) {
@@ -93,9 +93,8 @@ describe("buildApplyBatch · sólo escrituras", () => {
 		}
 	});
 
-	it("un ping tampoco es aplicable", async () => {
-		// El ping se atiende en el canal del WebSocket, no por el motor de escritura.
-		expect(await buildFalla({ type: "tenantDb.ping" })).toMatch(
+	it("un tipo de comando que no existe tampoco es aplicable", async () => {
+		expect(await buildFalla({ type: "tenantDb.ping" } as any)).toMatch(
 			/batch_unsupported_command_type/,
 		);
 	});

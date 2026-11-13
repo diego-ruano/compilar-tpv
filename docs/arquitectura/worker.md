@@ -44,7 +44,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **La base de cada negocio** vive en el SQLite de su `TenantHub` y se construye con las migraciones
   de `packages/database/migrations/`, registradas a mano en `src/server/tenantMigrations.ts`
   ([esquema.md](esquema.md)). La crea el alta (`aprovisionar`) y el DO la pone al día la primera vez
-  que la toca tras un despliegue (`migrarBaseLocal`).
+  que la toca tras un despliegue (`migrarBaseLocal`), sin atender nada más mientras tanto. Si no
+  puede, el negocio contesta 503 `tenant_db_migration_failed` y el DO avisa
+  ([esquema.md](esquema.md#si-la-migración-falla-en-la-nube)).
 - **La base central** (control-plane: licencias, tenants, dispositivos, emparejamientos, interruptores,
   correo, releases…) está en Turso y **no cambia de estructura desde el código**: el worker lee y
   escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`. Su estructura se cambia **a mano en Turso,
@@ -68,10 +70,55 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   mismo entorno (`test/correoEnElHub.test.ts`). Mientras espera a la red, el DO atiende lo demás. En
   un router donde sólo una ruta lee la base del negocio, `alHub` va sólo en ella:
   `xRoutes.use("/ruta", alHub)` detrás del `use("*", tenantAuth)` (`reservas_web/main.routes.ts`).
+- **La identidad lleva el rol del dispositivo** (`IdentidadDelWorker.rol`, `tpv` o `handy`). El
+  Worker lo lee de la fila de `devices` al autenticar, en la misma consulta que la clave pública
+  (`server/middleware/auth.ts`), y lo guarda con ella: 60 s por isolate, y sólo de un dispositivo
+  vivo con su clave. Dentro del DO los vetos de rol (`soloLaMain…`) deciden con ese rol y no vuelven
+  a la base central; así, con el dispositivo y la licencia en caché, una petición no la toca. Una
+  baja se nota al caducar esa entrada, lo mismo que tarda `tenantAuth` en rechazar al dispositivo en
+  cualquier otra ruta. En un router sin `alHub` (el emparejamiento, los dispositivos, las reservas
+  web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
+  Lo cubre `test/rolEnLaIdentidad.test.ts`.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
+- **`consultar` sólo lee** (`leerEnBruto`), y no cambia la conexión. Cada texto tiene que ser **una
+  sola sentencia** que empiece como una lectura (`SELECT`, `WITH`); si no, se rechaza con
+  `consulta_no_es_lectura` sin ejecutarse. El SQLite del DO ejecuta todo lo que le llegue separado
+  por `;`, y un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja la conexión cambiada
+  para todo lo que venga después (sin comprobar los `CHECK`, por ejemplo). Las sentencias se cuentan
+  troceando el texto como SQLite (`unaSolaSentencia`: un `;` dentro de un texto, de un nombre entre
+  comillas o de un comentario no separa nada), y ante la duda es que no: un parámetro con nombre
+  (`$a`, `:a`, `@a`) no pasa, porque ninguna consulta los usa y SQLite los trocea de otra manera. Lo
+  que empieza como una lectura y escribe (un `WITH … DELETE`) se deshace entero: va todo en una
+  transacción y se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no
+  pasaría por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la
+  vería nunca. Por `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y
+  las rutas públicas de la reserva.
+- **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
+  se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
+  purga (`Sync_Main_Checkpoints`). Dentro del DO lo escribe con el cliente de al lado; cuando la ruta
+  corre en el Worker (`EJECUTAR_EN_EL_HUB` apagado), el cliente lo manda por otra puerta,
+  `anotarEstado`, que sólo admite una sentencia que diga a las claras que escribe en una de esas
+  tablas (`esEscrituraDeEstado`). Una tabla nueva de ese tipo se añade ahí. Lo cubre
+  `test/consultarSoloLee.test.ts`.
+- **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
+  `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
+  viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
+  siembra el mismo administrador, con el mismo id, en la suya.
+- **Si el viaje al DO falla, no es un fallo del programa** (`alHub`, `lib/enElHub.ts`). Lo que una
+  ruta lanza dentro del DO lo recoge allí su `onError`; una excepción de `ejecutarRuta` es que el
+  objeto no ha podido atender, y Cloudflare dice por qué en el propio error:
+  - `overloaded`: 503 `hub_overloaded` con `Retry-After`. No se repite: sería más carga.
+  - `retryable` (el objeto se reinicia tras un despliegue, su almacenamiento no contestó): si es una
+    lectura (un GET, o un POST declarado con `lecturaPorPost()`), se repite una vez con una petición
+    y un stub nuevos. Una escritura no: la repite el cliente con su misma `X-Idempotency-Key`.
+  - lo demás, o la repetición que también falla: 503 `hub_unavailable`.
+
+  Los dos salen como `external` (lo que la Main y la Handy tratan como la nube sin disponibilidad),
+  quedan en Axiom (`hub_no_disponible`) y, si la plataforma no lo da por pasajero, van también a
+  Sentry (`hub.ejecutar_ruta`). Lo cubre `test/alHubSinElObjeto.test.ts`.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
   Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
@@ -100,8 +147,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   lejos. Por lo mismo, cambiar `JURISDICCION_DO` con negocios dados de alta es empezar de cero. En
   local y en los tests las dos van vacías: workerd no implementa jurisdicciones.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
-  `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por fila y 10 GB por
-  objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, unos 2 MB por valor (uno de
+  3 MB se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
   `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
   [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
@@ -139,7 +186,21 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   eso, el runtime comprime al transmitir lo que lleva `Content-Encoding` y saldría comprimida dos
   veces (`test/syncGzipTransmision.test.ts`). Se mira lo que pidió el cliente
   (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
-- **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
+- **Retirar un negocio** (`/v1/admin/pruebas/retirar`, sólo los de pruebas:
+  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar todo lo que guarda en la nube:
+  - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas, quita la alarma de la cola y
+    borra todo lo guardado. El cierre de esos sockets llega después y no vuelve a crear nada: una
+    sesión que cerró el DO ya está fuera y su salida ya se contabilizó;
+  - su `AgendaWeb` (`borrarTodo`): lo que esperaba a la Main, con los datos de quien reservó, y su
+    alarma. Espera a que acabe lo que la agenda tenga a medias (un alta lee la base y apunta
+    después: si el borrado se colara en esa espera, el alta volvería a guardar los datos de quien
+    reservó en una agenda ya retirada), y lo que llega mientras se borra espera a que termine. Si lo
+    que está a medias no acaba en diez segundos, falla con `agenda_ocupada` y el negocio se queda
+    para el siguiente intento;
+  - sus imágenes: la carpeta del negocio en el bucket (`prefijoDelNegocio`), que acaba en `/` y por
+    eso no es el principio de la de otro. La copia que el edge tenga en caché caduca sola.
+
+  Lo cubre `test/retirarUnNegocio.test.ts`.
 
 ## Cómo se escribe una ruta
 
@@ -297,14 +358,15 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 ## Sincronización y firmas
 
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
-`revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
+`anotarEstado`, `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
 `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
 otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
 licencia) se ejecuta en el Worker antes de llamar al DO; los gates de cada ruta, dentro, antes de leer
 el cuerpo, como siempre. Sentry instrumenta también las llamadas RPC, con tracing de
-rendimiento desactivado. Los errores de negocio cruzan como un resultado tipado y los inesperados
+rendimiento desactivado, y `ejecutarRuta` corre además como una petición, con su ámbito y su cliente
+([observabilidad.md](observabilidad.md#el-flujo)). Los errores de negocio cruzan como un resultado tipado y los inesperados
 como excepciones. WebSockets, attachments, alarmas y almacenamiento conservan su funcionamiento.
 
 RI-44: `/v1/sync/changes` valida en SQLite que las sentencias guardadas sean un array JSON y

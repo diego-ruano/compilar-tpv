@@ -54,6 +54,20 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	not_found: "not_found",
 };
 
+/**
+ * Lo que sale con un 5xx y NO es un fallo del programa: la nube no puede atender a este negocio
+ * ahora mismo. Para quien lo recibe es `external` (la gravedad «entorno» del cliente), no
+ * `internal`: no hay nada que arreglar en el equipo, y quien tiene que enterarse ya se entera en la
+ * nube. En Rust caen en `External` por la misma vía, la de lo que `from_wire` no conoce.
+ */
+const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
+	// La base del negocio no ha podido ponerse al día tras un despliegue (`MotorTenantHub.getTenantDb`).
+	"tenant_db_migration_failed",
+	// El objeto del negocio está saturado o no ha podido atender la petición (`lib/enElHub.ts`).
+	"hub_overloaded",
+	"hub_unavailable",
+]);
+
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
 function porEstado(status: number): ErrorCode {
 	if (status === 404) return "not_found";
@@ -79,7 +93,7 @@ export function wireToCode(error: string, status: number): ErrorCode {
 		.trim()
 		.toLowerCase();
 
-	return propia(NEGOCIO, clave) ?? porEstado(status);
+	return propia(NEGOCIO, clave) ?? (NUBE_NO_DISPONIBLE.has(clave) ? "external" : porEstado(status));
 }
 
 /** Busca sólo claves propias: `NEGOCIO["constructor"]` no puede devolver lo del prototipo. */
@@ -271,6 +285,11 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tenant_db_provision_failed:
 		"No se ha podido preparar la base de datos en la nube. Inténtalo de nuevo en unos minutos.",
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
+	tenant_db_migration_failed:
+		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
+	hub_overloaded:
+		"La nube está atendiendo demasiadas peticiones de este negocio. Espera unos segundos y vuelve a intentarlo.",
+	hub_unavailable: "La nube no ha podido atender la petición. Vuelve a intentarlo en unos segundos.",
 	invalid_code: "El código no es correcto.",
 	code_expired: "El código ha caducado. Pide uno nuevo.",
 	correo_invalido: "Ese correo no parece válido. Revísalo.",
@@ -369,9 +388,12 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",
+	// Una ruta ha mandado por la puerta de las lecturas del DO algo que no es una lectura, o por la
+	// del estado de la nube algo que no lo es.
+	"consulta_no_es_lectura",
+	"estado_local_no_admitido",
 	"expired_ticket",
 	"field_dek_no_persistida",
-	"forbidden_event",
 	"fulfillment_failed",
 	"hello_failed",
 	"idempotency_command_mismatch",
@@ -419,6 +441,10 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"reversal_failed",
 	"signature_timestamp_out_of_range",
 	"tabla_no_paginable",
+	// Retirar un negocio de pruebas: un id que no nombra la carpeta de imágenes de un negocio, y una
+	// agenda de reservas web que no ha acabado a tiempo lo que tenía a medias.
+	"tenant_id_invalido",
+	"agenda_ocupada",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",

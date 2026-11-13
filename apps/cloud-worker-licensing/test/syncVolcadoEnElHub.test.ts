@@ -7,6 +7,10 @@
 // (`domains/sync/volcado.ts`). Lo que se fija aquí es que eso llega entero a quien pregunta
 // cruzando el RPC, en un solo viaje y sin ninguna consulta suelta, y que con la ruta ejecutándose
 // en el Worker la respuesta es la misma.
+//
+// El veto de rol (`soloLaMain`) es el de verdad. Dentro del TenantHub decide con el rol que llega
+// con la identidad: la base central de pruebas es el SQLite de otro Durable Object, que desde el del
+// negocio no se puede tocar, así que un volcado que volviera a ella a por el rol fallaría aquí.
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,15 +23,18 @@ vi.mock("../src/server/db", async (importOriginal) => {
 	return { ...original, getDb: () => dbCentral };
 });
 
-// El veto de rol (`soloLaMain`) lee la base central ya dentro del TenantHub, y el doble de la base
-// central es el SQLite de otro Durable Object, que desde el del negocio no se puede tocar. No es lo
-// que se prueba aquí: `tenantAuth`, que sí corre en el Worker, es el de verdad.
-vi.mock("../src/middleware/tenant", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/middleware/tenant")>();
-	return { ...original, soloLaMain: () => async (_c: unknown, next: () => Promise<void>) => next() };
-});
-
 const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+
+const deps = {
+	ponerCentral: (db: unknown) => void (dbCentral = db),
+	firmarSesion,
+	olvidarLicenciasCacheadas,
+};
+
+/** La consulta con la que `soloLaMain` le pide el rol a la base central cuando corre en el Worker. */
+const PIDE_EL_ROL = /SELECT role FROM devices WHERE tenant_id=\? AND device_id=\? AND revoked_at_ms IS NULL/;
 
 function sembrar(n: Negocio): Promise<void> {
 	return enLaBaseDe(n, (sql) => {
@@ -56,11 +63,13 @@ const EN_EL_WORKER = { entorno: { EJECUTAR_EN_EL_HUB: "0" }, cabeceras: AHORA };
 
 describe("los volcados de sync, dentro del TenantHub", () => {
 	it("la fase 1 llega entera en un viaje, y es la misma que con la ruta en el Worker", async () => {
-		await conNegocioFirmado("volcado-hub-fase1", (db) => (dbCentral = db), async (n) => {
+		await conNegocioFirmado(deps, "volcado-hub-fase1", async (n) => {
 			await sembrar(n);
 
-			const res = await pedirFirmado(app, n, "/v1/sync/bootstrap", { cabeceras: AHORA });
+			const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", { cabeceras: AHORA });
 			expect(res.status).toBe(200);
+			// El rol ha viajado con la identidad: nadie se lo ha pedido a la base central.
+			expect(n.central.filter((q) => PIDE_EL_ROL.test(q))).toEqual([]);
 			expect(res.headers.get("content-type")).toContain("application/json");
 			expect(viajes(res, "hub-ruta")).toBe(1);
 			expect(viajes(res, "hub-lee")).toBe(0);
@@ -72,7 +81,9 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 			expect(tabla("Comandas").filas).toHaveLength(40);
 			expect(tabla("Zonas").filas[0]).toContain("Terraza de la ría");
 
-			const fuera = await pedirFirmado(app, n, "/v1/sync/bootstrap", EN_EL_WORKER);
+			const fuera = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", EN_EL_WORKER);
+			// Con la ruta en el Worker el veto lee la fila viva, como siempre.
+			expect(n.central.filter((q) => PIDE_EL_ROL.test(q))).toHaveLength(1);
 			expect(viajes(fuera, "hub-ruta")).toBe(0);
 			expect(viajes(fuera, "hub-lee")).toBeGreaterThan(0);
 			expect(await fuera.text()).toBe(texto);
@@ -80,26 +91,26 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 	});
 
 	it("el contraste y una página del histórico, igual", async () => {
-		await conNegocioFirmado("volcado-hub-resto", (db) => (dbCentral = db), async (n) => {
+		await conNegocioFirmado(deps, "volcado-hub-resto", async (n) => {
 			await sembrar(n);
 
 			for (const [ruta, cuerpo] of [
 				["/v1/sync/verificar", {}],
 				["/v1/sync/historico", { tabla: "Comandas", cursor: 0, limite: 25 }],
 			] as const) {
-				const res = await pedirFirmado(app, n, ruta, { cuerpo, cabeceras: AHORA });
+				const res = await pedirFirmado(deps, app, n, ruta, { cuerpo, cabeceras: AHORA });
 				expect(res.status, ruta).toBe(200);
 				expect(viajes(res, "hub-ruta"), ruta).toBe(1);
 				expect(viajes(res, "hub-lee"), ruta).toBe(0);
 				const texto = await res.text();
 
-				const fuera = await pedirFirmado(app, n, ruta, { cuerpo, ...EN_EL_WORKER });
+				const fuera = await pedirFirmado(deps, app, n, ruta, { cuerpo, ...EN_EL_WORKER });
 				expect(viajes(fuera, "hub-ruta"), ruta).toBe(0);
 				expect(await fuera.text(), ruta).toBe(texto);
 			}
 
 			const pagina = await (
-				await pedirFirmado(app, n, "/v1/sync/historico", {
+				await pedirFirmado(deps, app, n, "/v1/sync/historico", {
 					cuerpo: { tabla: "Comandas", cursor: 0, limite: 25 },
 				})
 			).json<any>();

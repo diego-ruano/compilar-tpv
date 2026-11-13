@@ -12,6 +12,13 @@ export type IdentidadDelWorker = {
 	deviceId: string;
 	token: string;
 	licHash: string;
+	/**
+	 * Rol del dispositivo (`tpv` | `handy`) según su fila de la base central, leído por el Worker al
+	 * autenticar. Con él deciden los vetos de rol que corren dentro del DO (`soloLaMain…`), sin volver
+	 * a la base central. Que un `tpv` siga siendo la Main de su licencia lo comprueba el Worker antes
+	 * de pasar la petición (`vetoDeLicencia`: `device_replaced`).
+	 */
+	rol: string;
 };
 
 export type ApplyParams = {

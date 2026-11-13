@@ -223,8 +223,8 @@ otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su 
 ### 2. Primera activación
 
 Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
-aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase`: el esquema y el
-administrador inicial) y guarda los datos del negocio. Después
+aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase` → `aprovisionar`: el
+DO crea el esquema y el administrador inicial) y guarda los datos del negocio. Después
 `activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
 `main_device_id`, condicionado a que siga sin activar **y sin estrenar** (`main_device_id IS NULL
 AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_replaced`; si lo que pasó
@@ -502,8 +502,8 @@ el hub lo corrige por su cuenta en cuanto hay actividad: como mucho un minuto de
 vez vuelve a leer quién es la Main de la licencia sin anular, y echa a la sesión `tpv` que ya no lo
 sea ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)). La baja
 de un dispositivo, en cambio, le cierra sus sockets sin condición (`cerrarSocketsDelDispositivo`).
-Retirar los negocios del E2E anula sus licencias sin avisar al `TenantHub`: esa Main se queda fuera
-así.
+Retirar los negocios del E2E no pasa por ese aviso: al borrar su `TenantHub` se cierran las sesiones
+que siguieran vivas.
 
 | Operación | Ruta | CLI |
 |---|---|---|
@@ -516,9 +516,23 @@ así.
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
 | Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |
 
-Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar borra la base
-(todo el `TenantHub`) de cada negocio cuyas licencias sean todas de pruebas, lo da por borrado
-(`status = 'deleted'`) y anula sus licencias. Un negocio con cualquier otra licencia no se toca.
+Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar anula las
+licencias de pruebas, borra lo que guarda en la nube cada negocio de pruebas (su `TenantHub`, su
+agenda de reservas web y sus imágenes:
+[worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)) y lo da por borrado
+(`status = 'deleted'`).
+
+Un negocio es de pruebas si todas sus licencias lo son **y** ninguna clave que no lo sea se ha
+canjeado sobre una de ellas: una clave canjeada no lleva negocio (suma su tiempo a la licencia que
+apunta), así que se sigue hasta el negocio de ésa. Un negocio con cualquier otra licencia, o con
+tiempo de una clave de verdad, no se toca. Se vuelve a mirar negocio a negocio, justo antes de
+borrar: lo que se borra no se deshace. **Las licencias se anulan antes de borrar nada**, en una
+sentencia que sólo toca las de los negocios que en ese instante son de pruebas: el canje comprueba
+dentro de su transacción que la licencia sigue viva, así que una clave de verdad que llegue mientras
+se retira o entró antes (y el negocio ya no es de pruebas: ni se anula ni se borra) o ya no encuentra
+licencia y no se gasta. Y un negocio sólo se borra si todas sus licencias siguen anuladas cuando le
+llega el turno: si alguien desanula una mientras tanto, se deja como está. Cada llamada retira siete como mucho (son varias peticiones salientes por
+negocio) y dice si quedan más.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
 y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.

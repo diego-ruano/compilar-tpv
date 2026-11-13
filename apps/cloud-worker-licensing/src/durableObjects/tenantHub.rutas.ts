@@ -12,7 +12,6 @@ export interface ContextoDeRutas {
 	att(ws: WebSocket): WsAttachment | null;
 	setAtt(ws: WebSocket, att: WsAttachment): void;
 	send(ws: WebSocket, obj: any): void;
-	broadcast(obj: any, exceptDeviceId?: string): void;
 	broadcastRol(rol: "tpv" | "handy" | "unknown", obj: any): void;
 	liveSocketsFor(deviceId: string, except?: WebSocket): WebSocket[];
 	/** AUD-02: cierra una sesión (deja de estar autenticada, queda fuera y se contabiliza su salida). */
@@ -166,17 +165,6 @@ export function abrirWebSocket(
 		nonceB64: ch.nonceB64,
 		expiresAtMs: ch.expiresAtMs,
 	});
-
-	ctx.broadcast(
-		{
-			type: "presence",
-			action: "join",
-			deviceId,
-			role: roleHeader,
-			authed: false,
-		},
-		deviceId,
-	);
 
 	return new Response(null, { status: 101, webSocket: client });
 }

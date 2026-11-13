@@ -45,7 +45,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
-| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`) |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`, que sólo lee) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 
@@ -219,8 +219,8 @@ no cierra el socket).
 **Quién es la Main lo dice una tabla del propio DO** (`_Main_Vigente`, `tenantHub.main.ts`), y lo
 que depende de ello la mira sin esperar a nadie (`esLaMain`). Sólo la sesión `tpv` autenticada, no
 echada y del dispositivo que nombra la tabla escribe (`apply`), encola (`bulk_apply`), acusa las
-apartadas, suelta a las Handy (`recovery_ready`) y manda eventos; recibe lo del negocio (cambios,
-eventos, `pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
+apartadas y suelta a las Handy (`recovery_ready`); recibe lo del negocio (cambios,
+`pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
 `isMainReady`, `isMainRecovering`). Si la tabla dice que no hay Main (la licencia está anulada),
 ninguna lo es. Se mira justo antes de actuar, después de la última espera de cada rama y con el
 attachment releído: entre la pregunta y el acto no cabe nada.
@@ -248,7 +248,7 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
     adelantaría. Lo que tarde la escritura después no retiene la fila;
   - una escritura que entra en el turno del log (de una Handy, del drenado de la cola, o la de la
     Main en vivo), dentro del turno y justo antes de aplicarse: lo que va detrás espera su turno;
-  - `cola_apartada_ack` con algo que acusar y `event`, que no dependen del orden de los demás;
+  - `cola_apartada_ack` con algo que acusar, que no depende del orden de los demás;
   - el saludo de una Handy, a la que se le dice si hay Main, y los avisos para la Main, que salen
     después de la respuesta.
 
@@ -270,8 +270,9 @@ sus sesiones en el acto, sin condición, porque no se deshace con otro aviso.
 
 **Todo cierre deja la sesión fuera**: los que inicia el DO (`cerrar`: echarla, la baja, la sesión
 anterior de un dispositivo que reconecta con 4000, el saludo que falla, un error del socket) y los que le llegan (`webSocketClose`). Le quita la autenticación y la marca `fuera`
-en su attachment, y contabiliza su salida (`sessionGone`). Sin autenticar no se le atiende ningún
-mensaje ni se le difunde nada, y no cuenta como Main, aunque el cliente no conteste al cierre. Lo que
+en su attachment, y contabiliza su salida (`sessionGone`), una vez: el cierre que llega después de
+uno que inició el DO es de una sesión que ya está fuera, y no se vuelve a contabilizar. Sin autenticar
+no se le atiende ningún mensaje ni se le difunde nada, y no cuenta como Main, aunque el cliente no conteste al cierre. Lo que
 estuviera esperando tampoco sigue: cada rama mira, después de su última espera, que el socket siga
 abierto y la sesión no esté fuera (`sesionAbierta`); una escritura lleva la sesión que la mandó y se
 vuelve a mirar dentro del turno, antes de aplicarla; y **un saludo cuyo socket se cierra,
@@ -299,7 +300,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 - **Mientras una lectura está en vuelo, lo que no va detrás de quien la pidió se decide con la tabla
   de antes**: sólo esperan la respuesta quien la pidió y lo que va detrás de él, en la fila de
   entrada o en el turno del log. Lo que va por otro camino (una escritura de la Handy si la lectura
-  la pidió la fila de entrada, un acuse, un evento, un saludo) no espera.
+  la pidió la fila de entrada, un acuse, un saludo) no espera.
 - **Un aviso de cambio de licencia cuya lectura no contesta** no echa a nadie: es como un aviso
   perdido, salvo que la siguiente actividad pregunta sin esperar al minuto.
 - **La numeración ordena las lecturas por cuándo salieron, no por cuándo las atendió la base
@@ -307,8 +308,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   y quedar descartada; lo corrige la lectura siguiente (otro saludo, o la siguiente comprobación).
 - **Lo que el equipo anterior dejó en la cola del DO** antes de salir se aplica: se aceptó cuando era
   la Main.
-- **Lo que no lleva datos del negocio** (la presencia, `main_online`, `main_offline`) va a todos los
-  sockets, también a los que no han saludado.
+- **Lo que no lleva datos del negocio** (`main_online`, `main_offline`) va a todos los sockets,
+  también a los que no han saludado.
 - **Una tabla que no se ha leído nunca** da por Main a cualquier sesión `tpv` autenticada, como antes
   de que existiera. Sólo puede pasar con una sesión que saludó antes (el saludo de un `tpv` siempre
   la lee), y dura hasta la primera comprobación por actividad, que la lee y echa a la que no lo sea.
@@ -320,7 +321,31 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 - **Quien clasifica un fallo es el DO**, que tiene la excepción delante (`tenantHub.errores.ts`), y el
   veredicto viaja en el ack: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
-  El cliente no compara textos de error de libsql.
+  El cliente no compara textos de error.
+  - **Primero por el código**, si el fallo es nuestro: el de un `HubError`, o el identificador con
+    el que empieza el mensaje de un `Error` (`missing_ref:total`). Es permanente lo que dice que la
+    operación está mal escrita (`hora_no_determinista`, `missing_client_now`, sin identidad, el mismo
+    `Op_Id` con otro contenido, o que no se deja montar: sin pasos, sin SQL, con una referencia a un
+    paso que no está) y pasajero lo que habla de cómo está la nube y no de la operación (sin base, el
+    esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main). Lo que un
+    fallo nuestro lleva detrás de su identificador es un trozo de la operación (el SQL de un paso),
+    y no se lee como una frase del runtime.
+  - **Después, si el mensaje es de SQLite, por su código.** El SQLite del DO cierra sus mensajes
+    con él (`…: SQLITE_BUSY`, `…: SQLITE_CONSTRAINT (extended: …)`). Es pasajero el que habla del
+    estado de la base (`SQLITE_BUSY`, `SQLITE_LOCKED`, `SQLITE_IOERR`, `SQLITE_NOMEM`, `SQLITE_FULL`,
+    `SQLITE_READONLY`). Lo que va delante del código no decide si es pasajero: lo escribe en parte
+    quien escribió la sentencia (`no such column: sqlite_full`, `no such table: database is
+    locked`), y leído por su texto un rechazo permanente saldría como pasajero y pararía el outbox.
+    El texto sólo dice si es de la sentencia, y entonces es permanente: lo que no encaja con el
+    esquema o con los datos, y los límites del SQLite del DO (parámetros, patrón de `LIKE`, `SELECT`
+    compuesto, tamaño de la sentencia o de un valor).
+  - **Lo que no es de SQLite, por sus frases**: las del runtime del Durable Object cuando está
+    saturado, reiniciado o sin su almacenamiento, que son pasajeras y se miran antes que las
+    permanentes. La base está en el propio DO, así que no hay firmas de red (`socket`, `timeout`,
+    `503`).
+  - **Una base llena o en sólo lectura no aparta nada** (`esBaseLlena`): es pasajero para la
+    operación, y el DO avisa una vez por instancia (Sentry, y `base_llena` en Axiom). Hacerle sitio
+    es cosa de una persona.
 - **El transporte no cuenta nunca** como intento de la operación: `socket_not_open`, `ack_timeout` y
   `socket_soltado` (un vencimiento o cierre del canal nativo nunca se trata como rechazo de aplicación). Cuando lo roto es el cable,
   apartar la cabeza de la cola no desatasca nada.
@@ -375,6 +400,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   excepciones y se reprograma a mano, y para si una vuelta no reduce la cola.
 - **De quién es la culpa cuando falla** (`aplicarLote`):
   - un rechazo permanente se aparta en el acto y la cola sigue;
+  - una base llena no se le anota a nadie: se avisa y se espera con la misma escalera;
   - cualquier otro fallo pregunta a la base (`SELECT 1`): si no contesta, no se le anota nada a nadie
     y se espera 5 s, 30 s, 2 min, 5 min, 15 min (la escalera vive en `_Cola_Estado`); `encolar` adelanta
     la alarma si la Main vuelve a escribir;
@@ -389,6 +415,16 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
+- **Un `change` lleva lo que se lee**: `opId`, `seq` y `statements` (las sentencias ya resueltas). La
+  Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
+  refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
+- **Por el socket no hay más mensajes que los del protocolo**: el saludo (`connected`, `challenge`,
+  `helloSigned`, `hello_ok`), lo que sube la Main (`apply`, `bulk_apply`, `recovery_ready`,
+  `cola_apartada_ack` y sus acuses), lo que baja (`change`, `cola_apartada`) y los avisos
+  (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`).
+  Un dispositivo no manda mensajes a los demás, y no se difunde quién entra o sale: lo que hay que
+  saber de los otros es si hay Main. Un tipo que no está en la lista se contesta `unknown_type`.
+  Lo cubre `test/difusionAjustada.test.ts`.
 - **Antes de aplicar una página, la Main comprueba que no le falte nada** (AUD-19). La ruta devuelve
   también el mayor `Seq` que se ha purgado (`purgadoHasta`), leído en la misma lectura que los
   cambios, y si pasa del `since`, lo de en medio ya no está. Es exacto: no depende de que `Seq` sea
@@ -560,7 +596,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    petición: se quita al leer la respuesta entera, al fallar o al cancelarse.
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
    negocio (`baseLocal`, que al volver comprueba otra vez las migraciones), `lastSeenPushedAtMs`,
-   `lastPurgeAtMs`. Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`) y la
+   `lastPurgeAtMs` y lo que ya se ha avisado de una avería de la base (`avisados`: al despertar se
+   avisa otra vez). Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`) y la
    fila de entrada de la Main (`turnoDeEntrada`): son lo que está en vuelo, y el DO sólo hiberna sin
    nada en vuelo. Lo que sí tiene que sobrevivir va al SQL del DO: quién es la Main (`_Main_Vigente`).
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
@@ -569,10 +606,11 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 6. Si cambia el texto del latido (`PING`, en `tpv-infra-http/src/websocket.rs`; lo usan el latido de
    cada 30 s y el ping a demanda de la Handy), hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
-7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
-   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
+7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la salida de una sesión (si se
+   va la Main, las Handy tienen que saberlo) se contabiliza en `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
    cierre que inicia el DO: la baja, la sesión que ya no es la Main, la anterior de un dispositivo que
-   reconecta, el saludo que falla y `webSocketError`. Los dos dejan la sesión fuera antes de nada.
+   reconecta, el saludo que falla, `webSocketError` y retirar el negocio (`borrarTodo`). Los dos
+   dejan la sesión fuera antes de nada, y a una que ya está fuera no le vuelven a contar la salida.
    Todo cierre nuevo iniciado por el DO va por `cerrar`.
 
 `instrumentDurableObjectWithSentry` envuelve los tres handlers del WebSocket.

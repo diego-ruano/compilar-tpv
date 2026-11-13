@@ -58,8 +58,6 @@ export type HelloSignedMsg = {
 
 export type RecoveryReadyMsg = { type: "recovery_ready" };
 
-export type EventMsg = { type: "event"; name: string; payload?: any };
-
 // Escritura de la Main por WS: lleva el comando interno (mismo envelope que
 // `/internal/apply`) para aplicarse en el motor idempotente del DO.
 export type ApplyMsg = {
@@ -104,7 +102,6 @@ export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
-	| EventMsg
 	| ApplyMsg
 	| BulkApplyMsg
 	| ColaApartadaAckMsg;
@@ -163,7 +160,6 @@ export type TransactionPayload = {
 };
 
 export type InternalApplyCommand =
-	| { type: "tenantDb.ping" }
 	| { type: "tenantDb.exec"; payload: ExecPayload }
 	| { type: "tenantDb.value"; payload: QueryPayload }
 	| { type: "tenantDb.row"; payload: QueryPayload }
@@ -183,7 +179,7 @@ export type OpParaAplicar = {
 	deviceId?: string | null;
 	/** Cuerpo canónico que se firma/hashea (`Request_Hash` del gate de idempotencia). */
 	requestPayloadJson: string;
-	/** Payload de negocio que viaja en el broadcast a los demás dispositivos. */
+	/** El payload de negocio de la operación. Se guarda con ella en la cola; ya no se difunde. */
 	cloudPayloadJson: string;
 	/** Hora del dispositivo emisor: resuelve los `datetime('now')` a literal (replicación determinista). */
 	clientNow?: string | null;

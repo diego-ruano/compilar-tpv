@@ -1,7 +1,7 @@
 // src/server/middleware/auth.ts
 import type { Client } from "@libsql/client/web";
 
-import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
+import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
 import { quitarComillas } from "../../lib/texto";
 import { b64ToBytes } from "../utils/base64";
@@ -14,7 +14,12 @@ export type AuthClaims = ClaimsSesion;
 // La pubkey no cambia tras el pairing, así que 60 s de TTL es suficiente para
 // eliminar el round-trip a la central DB en cada petición sin riesgo real
 // (la revocación puede tardar hasta 60 s en hacer efecto, aceptable en un TPV).
-type DeviceCacheEntry = { pubB64: string; expiresAtMs: number };
+//
+// Con la pubkey se guarda el rol de la misma fila (`tpv` | `handy`), que tampoco cambia tras el
+// alta: es el que viaja al TenantHub con la identidad (`lib/enElHub.ts`) para que los vetos de rol
+// que corren dentro no vuelvan a la base central. Vive lo que la entrada, ni un segundo más: una
+// baja se nota en los dos a la vez, y lo que no es un dispositivo vivo con su clave no se guarda.
+type DeviceCacheEntry = { pubB64: string; rol: string; expiresAtMs: number };
 const devicePubkeyCache = new Map<string, DeviceCacheEntry>();
 const DEVICE_CACHE_TTL_MS = 60_000;
 
@@ -44,7 +49,7 @@ export async function verifyJwt(env: any, req: Request): Promise<{ token: string
  * ramificar: la sync deja de reintentar en bucle y la UI enseña un texto que se entiende.
  */
 type EstadoDevice =
-	| { ok: true; pubB64: string }
+	| { ok: true; pubB64: string; rol: string }
 	| { ok: false; error: "device_not_registered" | "device_revoked" | "device_pubkey_not_registered" };
 
 async function resolverDevice(
@@ -54,7 +59,7 @@ async function resolverDevice(
 ): Promise<EstadoDevice> {
 	const key = deviceCacheKey(tenantId, deviceId);
 	const hit = devicePubkeyCache.get(key);
-	if (hit && hit.expiresAtMs > Date.now()) return { ok: true, pubB64: hit.pubB64 };
+	if (hit && hit.expiresAtMs > Date.now()) return { ok: true, pubB64: hit.pubB64, rol: hit.rol };
 
 	const fila = await cargarDevice(dbCentral, tenantId, deviceId);
 
@@ -75,8 +80,9 @@ async function resolverDevice(
 		return { ok: false, error: "device_pubkey_not_registered" };
 	}
 
-	devicePubkeyCache.set(key, { pubB64, expiresAtMs: Date.now() + DEVICE_CACHE_TTL_MS });
-	return { ok: true, pubB64 };
+	const rol = normalizarRol(fila.role);
+	devicePubkeyCache.set(key, { pubB64, rol, expiresAtMs: Date.now() + DEVICE_CACHE_TTL_MS });
+	return { ok: true, pubB64, rol };
 }
 
 /**
@@ -94,6 +100,9 @@ async function resolverDevice(
  * `c.req.arrayBuffer()` queda cacheado y el handler puede seguir usando `c.req.json()` después.
  *
  * ⚠️ El formato debe ser idéntico al de `sign_device_proof` (`tpv-infra-licensing/src/device.rs`).
+ *
+ * Devuelve el rol de la fila del dispositivo (`tpv` | `handy`, normalizado), que sale de la misma
+ * consulta que su clave pública: quien autentica ya lo tiene y no hace falta volver a por él.
  */
 export async function verifyDeviceProofOrThrow(
 	req: Request,
@@ -101,7 +110,7 @@ export async function verifyDeviceProofOrThrow(
 	claims: { tenantId: string; deviceId: string },
 	bearerToken: string,
 	rawBody: Uint8Array
-): Promise<void> {
+): Promise<{ rol: string }> {
 	const tsStr = (req.headers.get("X-Device-Ts") || "").trim();
 	const sigCabecera = req.headers.get("X-Device-Sig") || "";
 	// AUD-33: una firma son 88 caracteres. Más larga se rechaza antes de tocarla y de leer la base.
@@ -140,4 +149,5 @@ export async function verifyDeviceProofOrThrow(
 		// error de la cripto llegan indistinguibles al log).
 		throw new Error(`verify_failed: ${String(e?.message || e)}`, { cause: e });
 	}
+	return { rol: dev.rol };
 }
