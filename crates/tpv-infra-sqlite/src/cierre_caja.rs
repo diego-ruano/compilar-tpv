@@ -447,6 +447,24 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         })
     }
 
+    async fn caja_por_bajar(&self) -> AppResult<bool> {
+        // Las dos tablas de las que suman `totales_entre` y `anulaciones_desde`. La comanda de un
+        // cobro baja antes que él (es su clave foránea), así que con `Pagos` completo también está.
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                "SELECT COUNT(*) FROM _Backfill_Historico \
+                  WHERE Completada = 0 AND Tabla IN ('Pagos', 'Cuentas_Gastos');",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(match rows.next().await.map_err(db_err)? {
+            Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0) > 0,
+            None => false,
+        })
+    }
+
     async fn comandas_abiertas(&self) -> AppResult<i64> {
         let db = self.db.read().await;
         let mut rows = db
@@ -1461,5 +1479,19 @@ mod tests_historico_pendiente {
         let repo = SqliteCierreCajaRepository::new(db.clone());
         let prep = cierre_uc::preparar(&repo, Dinero::CERO, None).await.unwrap();
         assert!(prep.historico_pendiente.is_none(), "si no se pudo leer, el arqueo sigue igual");
+    }
+
+    #[tokio::test]
+    async fn con_los_cobros_y_los_gastos_ya_bajados_el_recuento_esta_completo_y_no_se_avisa() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada, Filas_Traidas) VALUES
+               ('Pagos', 1, 1, 1200), ('Cuentas_Gastos', 2, 1, 40), ('Fichajes', 3, 0, 0), ('Notificaciones', 4, 0, 0);",
+        )
+        .await;
+        let prep = preparar(&db).await;
+        assert!(prep.es_primer_cierre);
+        assert!(prep.historico_pendiente.is_none(), "lo que falta no entra en el arqueo");
     }
 }

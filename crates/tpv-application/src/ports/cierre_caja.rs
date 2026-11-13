@@ -107,6 +107,11 @@ pub trait CierreCajaRepository: Send + Sync {
     /// Cuántas comandas siguen abiertas. No impide cerrar: sólo se avisa.
     async fn comandas_abiertas(&self) -> AppResult<i64>;
 
+    /// DO-02 · ¿Falta por bajar, del histórico de una recuperación, algo de lo que suma el arqueo
+    /// (los cobros y los gastos)? Lo sabe quien hace la suma. Con el resto del histórico aún
+    /// bajando, el recuento ya está completo y no hay nada que avisar.
+    async fn caja_por_bajar(&self) -> AppResult<bool>;
+
     /// Cierra el periodo **en una sola transacción del escritor** (RI-58): lee el último cierre y
     /// los totales hasta la hora del cierre, deja que `armar` calcule y valide, y guarda el cierre
     /// con su doble recuento.
