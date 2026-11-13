@@ -404,7 +404,7 @@ function Tarjeta({
  * está bajando: lo cobrado en efectivo puede salir corto. Con el progreso, para que se pueda decidir
  * si esperar.
  */
-export function AvisoHistoricoPendiente({ historico }: { historico: BackfillEstado }) {
+function AvisoHistoricoPendiente({ historico }: { historico: BackfillEstado }) {
     const total = historico.tablas_pendientes + historico.tablas_completadas;
     const pct = total > 0 ? Math.round((historico.tablas_completadas / total) * 100) : 0;
     return (
