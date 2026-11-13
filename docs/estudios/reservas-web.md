@@ -455,7 +455,7 @@ hace que salga la local.
 ### 4.7 Interruptor remoto `reservas_web`
 
 Una variante nueva en `Interruptor` (`tpv-contracts/src/interruptores.rs`) y en `INTERRUPTORES`
-(`lib/interruptores.ts`). Sólo lo mira el worker, como `cola_do`. Apagado para un negocio o para
+(`lib/interruptores.ts`). Sólo lo mira el worker. Apagado para un negocio o para
 todos, cierra las rutas públicas sin desplegar; la entrega a la Main y el TPV siguen igual.
 
 ### 4.8 Correos

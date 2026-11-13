@@ -7,10 +7,10 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 
 ```
 ┌──────────────────────┐        WebSocket /ws          ┌────────────────────────────┐
-│ MAIN (Tauri + Rust)  │── apply / bulk_apply ────────►│ Durable Object TenantHub   │
+│ MAIN (Tauri + Rust)  │── apply_lote ────────────────►│ Durable Object TenantHub   │
 │ SQLite (rusqlite)    │◄── change (en vivo) ──────────│ · aplica idempotente       │
 │ _Sync_Outbox         │                               │   (Applied_Operations)     │
-│ _Sync_Applied_Ops    │   REST /v1/sync/changes       │ · cola de entrada          │
+│ _Sync_Applied_Ops    │   REST /v1/sync/changes       │ · numera (Sync_Changes)    │
 │ _Sync_State          │◄── catch-up ──────────────────│ · difunde a los demás      │
 └──────────────────────┘                               │ · la base del negocio      │
 ┌──────────────────────┐   REST /v1/<dominio>          │   (su SQLite)              │
@@ -39,9 +39,9 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …lo que llega por WS | `tenantHub.mensajes.ts` | Una rama por mensaje |
 | …el transporte | `tenantHub.rutas.ts`, `tenantHub.rpc.ts` | Upgrade WebSocket y contratos de aplicar, revocar y avisar |
 | …el saludo | `tenantHub.identidad.ts` | Quién llama y qué puede hacer |
-| …la cola | `tenantHub.cola.ts` | `_Cola_Entrada`, `_Cola_Estado`, `_Cola_Muerta` |
+| …el lote de la Main | `tenantHub.motor.ts` (`aplicarLote`) | Lo que sube del outbox, hasta 200 operaciones por mensaje, aplicado en un turno |
 | …la base del negocio | `tenantHub.sqlite.ts` | El `Client` de libsql sobre el SQLite del DO, el lote atómico (`loteEnBruto`) y las migraciones (`migrarBaseLocal`) |
-| …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias (`loteDe`); el sobre que se guarda en `Sync_Changes` |
+| …el lote atómico | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias (`loteDe`); el cuerpo que identifica la operación (`Request_Hash`) |
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
@@ -162,7 +162,8 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **El esquema no tiene `DEFAULT` de hora** (lo vigila un test): quien inserta, la informa.
 - En la nube sólo se puede fijar la hora **local** del emisor (`X-Client-Now`). Un `'now'` en UTC o un
   `CURRENT_*` en una escritura de la Handy se rechaza (`hora_no_determinista`), y lo mismo si falta
-  `X-Client-Now` o no vale (`missing_client_now`), **por los dos caminos**: en vivo y en la cola. Los
+  `X-Client-Now` o no vale (`missing_client_now`), **sea cual sea el camino**: un `apply` suelto o
+  cada operación de un lote. Los
   dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
   (`lib/fechas.ts::diaDeInstante`: ni las 24:30 ni un 29 de febrero que no existe, AUD-21) a menos de
   14 h 05 min del reloj del worker (`tenantHub.tiempo.ts::parseClientNow`).
@@ -218,8 +219,8 @@ no cierra el socket).
 
 **Quién es la Main lo dice una tabla del propio DO** (`_Main_Vigente`, `tenantHub.main.ts`), y lo
 que depende de ello la mira sin esperar a nadie (`esLaMain`). Sólo la sesión `tpv` autenticada, no
-echada y del dispositivo que nombra la tabla escribe (`apply`), encola (`bulk_apply`), acusa las
-apartadas y suelta a las Handy (`recovery_ready`); recibe lo del negocio (cambios,
+echada y del dispositivo que nombra la tabla escribe (`apply`, `apply_lote`) y suelta a las Handy
+(`recovery_ready`); recibe lo del negocio (cambios,
 `pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
 `isMainReady`, `isMainRecovering`). Si la tabla dice que no hay Main (la licencia está anulada),
 ninguna lo es. Se mira justo antes de actuar, después de la última espera de cada rama y con el
@@ -239,16 +240,15 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
   sesión `tpv` dentro. Quien pregunta se queda la marca de la tabla antes de esperar
   (`tocaComprobar`) y los demás siguen con lo que dice la tabla: veinte mensajes a la vez son una
   lectura, sin promesas compartidas ni campos de instancia. Esperan la respuesta antes de decidir:
-  - lo que la Main manda y entra en el acto (`apply` y `bulk_apply`), **en fila**
+  - lo que la Main manda y entra en el acto (`apply` y `apply_lote`), **en fila**
     (`enTurnoDeEntrada`): si al primero le toca esperar, los de detrás esperan con él y entran en el
-    orden en que llegaron. En la cola, porque se encola dentro de la fila; en vivo, porque la fila no
-    suelta al siguiente hasta que el anterior tiene sitio en el turno del log (`alReservarTurno`), que
-    es lo que fija el orden en que se confirman: antes de eso cada escritura calcula su hash y abre
-    la base del negocio (al despertar, el DO comprueba sus migraciones), y una que acabara antes se
-    adelantaría. Lo que tarde la escritura después no retiene la fila;
-  - una escritura que entra en el turno del log (de una Handy, del drenado de la cola, o la de la
-    Main en vivo), dentro del turno y justo antes de aplicarse: lo que va detrás espera su turno;
-  - `cola_apartada_ack` con algo que acusar, que no depende del orden de los demás;
+    orden en que llegaron, porque la fila no suelta al siguiente hasta que el anterior tiene sitio en
+    el turno del log (`alReservarTurno`), que es lo que fija el orden en que se confirman: antes de
+    eso cada escritura calcula su hash y abre la base del negocio (al despertar, el DO comprueba sus
+    migraciones), y una que acabara antes se adelantaría. Lo que tarde la escritura después no
+    retiene la fila;
+  - una escritura que entra en el turno del log (de una Handy, o lo que manda la Main), dentro del
+    turno y justo antes de aplicarse: lo que va detrás espera su turno;
   - el saludo de una Handy, a la que se le dice si hay Main, y los avisos para la Main, que salen
     después de la respuesta.
 
@@ -300,14 +300,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 - **Mientras una lectura está en vuelo, lo que no va detrás de quien la pidió se decide con la tabla
   de antes**: sólo esperan la respuesta quien la pidió y lo que va detrás de él, en la fila de
   entrada o en el turno del log. Lo que va por otro camino (una escritura de la Handy si la lectura
-  la pidió la fila de entrada, un acuse, un saludo) no espera.
+  la pidió la fila de entrada, un saludo) no espera.
 - **Un aviso de cambio de licencia cuya lectura no contesta** no echa a nadie: es como un aviso
   perdido, salvo que la siguiente actividad pregunta sin esperar al minuto.
 - **La numeración ordena las lecturas por cuándo salieron, no por cuándo las atendió la base
   central.** Una petición que tarda en llegar puede ver un estado más nuevo que otra que salió después
   y quedar descartada; lo corrige la lectura siguiente (otro saludo, o la siguiente comprobación).
-- **Lo que el equipo anterior dejó en la cola del DO** antes de salir se aplica: se aceptó cuando era
-  la Main.
 - **Lo que no lleva datos del negocio** (`main_online`, `main_offline`) va a todos los sockets,
   también a los que no han saludado.
 - **Una tabla que no se ha leído nunca** da por Main a cualquier sesión `tpv` autenticada, como antes
@@ -316,10 +314,36 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 ### Subir el outbox
 
-- El outbox está **ordenado**: se sube una operación (en tandas de 50) y no se pasa a la siguiente hasta
-  que llega su `apply_ack` (10 s de espera).
+- El outbox está **ordenado** y sube **por lotes** (`use_cases/replicacion.rs::subir_pendientes`): el
+  principio de lo pendiente, hasta 200 operaciones y 256 KB de sentencias (una operación mayor va
+  sola), en un `apply_lote`. **Sólo hay un lote en vuelo**: el siguiente no se lee del outbox hasta que
+  llega el acuse de éste (`apply_lote_ack`, con su `loteId`; 30 s de espera) y lo aplicado está
+  confirmado aquí. Es el único camino, con atraso o sin él: con una venta pendiente, el lote lleva una.
+- **El acuse trae el veredicto de cada operación**, por `opId`, y la Main lo lee en el orden del lote:
+  - **aplicada**, con el `Seq` que le dio el log, o **«ya estaba»** (`yaEstaba`), con el de entonces:
+    era el reenvío de un lote cuyo acuse se perdió;
+  - **rechazo permanente**: se aparta y se repara por estado (SYNC-22), y se sigue leyendo, porque la
+    nube ha seguido aplicando lo de detrás;
+  - **rechazo pasajero** (`transitorio`) o **sin intentar** (`noIntentada`, o una de la que el acuse no
+    dice nada): no se le cuenta nada a nadie y se deja de leer; lo que queda sale en el lote siguiente;
+  - **rechazo sin clasificar**: un intento más para esa operación, y se deja de leer.
+
+  Todo lo aplicado se confirma **en una transacción** (`outbox_confirmar_lote`): el anti-eco pasa a
+  llevar su `Seq`, la fila sale del outbox y, si era una reparación, sale con ella la apartada que
+  reparaba (SYNC-26). Un corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar
+  vuelve a subir: la nube contesta «ya estaba» a lo que ya tenía (idempotencia por `Op_Id`).
+- **Sin acuse no hay veredicto**: es el transporte, no le cuenta nada a nadie y la sesión acaba. Dos
+  lotes seguidos sin respuesta pueden ser uno que la nube no consigue atender, así que el siguiente va
+  de una operación, y cada lote aplicado dobla el siguiente hasta volver a 200 (`RitmoDeSubida`, que
+  vive lo que el proceso: un lote sin respuesta acaba con su sesión).
+- **Un lote que la nube rechaza entero** (`ok: false`: la sesión ya no es la de la Main, la forma de una
+  de sus operaciones) no ha aplicado nada. Si el rechazo habla de cómo está ella (`transitorio`), no
+  cuenta; si no, no dice por cuál, y se repite de una en una. Un mensaje que no le cabe
+  (`payload_too_large`) sólo puede ser de una operación enorme, que sola se aparta.
+- **Contra una nube que no conoce los lotes** (`unknown_type`), el resto de la sesión sube con `apply`
+  suelto y su `apply_ack` (10 s de espera), con las mismas reglas.
 - **Quien clasifica un fallo es el DO**, que tiene la excepción delante (`tenantHub.errores.ts`), y el
-  veredicto viaja en el ack: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
+  veredicto viaja en el acuse: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
   El cliente no compara textos de error.
   - **Primero por el código**, si el fallo es nuestro: el de un `HubError`, o el identificador con
@@ -346,9 +370,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   - **Una base llena o en sólo lectura no aparta nada** (`esBaseLlena`): es pasajero para la
     operación, y el DO avisa una vez por instancia (Sentry, y `base_llena` en Axiom). Hacerle sitio
     es cosa de una persona.
-- **El transporte no cuenta nunca** como intento de la operación: `socket_not_open`, `ack_timeout` y
-  `socket_soltado` (un vencimiento o cierre del canal nativo nunca se trata como rechazo de aplicación). Cuando lo roto es el cable,
-  apartar la cabeza de la cola no desatasca nada.
+- **El transporte no cuenta nunca** como intento de la operación: un acuse que no llega, un socket que
+  se cae o un mensaje que no sale acaban la sesión sin anotar nada (un vencimiento o cierre del canal
+  nativo nunca se trata como rechazo de aplicación). Cuando lo roto es el cable, apartar la cabeza de
+  la cola no desatasca nada.
 - Una operación con **20 intentos** contados (`MAX_SUBIDA_ATTEMPTS`) o un rechazo permanente se
   **aparta** (`outbox_mark_failed`, SYNC-20): sale de la cola, se cuenta aparte de lo pendiente
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
@@ -358,58 +383,53 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   hay un sondeo de seguridad, para los reintentos: cada 3 s mientras queda algo pendiente, y cada 30 s
   con el outbox vacío (RI-33).
 
-### Volcar el atraso (SYNC-18)
+### El lote en el `TenantHub` (`aplicarLote`)
 
-- Si al conectar hay **más de 100** operaciones pendientes, la Main no las sube una a una: las manda por
-  trozos (`bulk_apply`, hasta 200 operaciones o 256 KB por trozo) a la **cola durable del DO**
-  (`_Cola_Entrada`, en el SQLite del propio DO) y termina en cuanto sube la última. A partir de ahí el
-  TPV puede volver a quedarse sin red. El umbral sólo se mira al conectar.
-- **Encolada no es aplicada.** La fila sigue en el outbox marcada en `_Sync_Encoladas`, y lo que la da
-  por buena es **verla volver por el catch-up**. Una encolada sin confirmar en 1 h vuelve a ofrecerse.
-- **Las Handy esperan a que la Main se ponga al día** (AUD-15), suba su atraso en vivo o por la cola:
-  si no, decidirían sobre una nube a la que le falta lo hecho sin conexión. Toda sesión de la Main
-  saluda con `recovering` (`replicacion.rs::saludar`), haya atraso o no: mirarlo antes dejaría fuera
-  lo que se confirme mientras se autentica. En el DO eso sólo congela a las Handy (`main_volcando`) y
-  deja pasar lo que suba la Main; el modo recuperación es otra cosa ([recuperacion.md](recuperacion.md)).
-  La Main manda `recovery_ready` una vez por sesión, cuando se cumplen tres cosas:
-  - el saludo está cerrado: el DO manda lo que apartó para esta Main (`cola_apartada`) y después
-    `main_status`, que lo cierra;
-  - la cola del DO está vacía: `main_status` y cada `main_volcando` llevan lo que queda (`cola`), y al
-    vaciarla el DO avisa de lo que apartó antes de mandar `cola: 0`;
-  - `subir_pendientes` encuentra el outbox vacío, con las reparaciones de lo apartado ya subidas. Esa
-    subida es la frontera: lo que se confirme después es trabajo en vivo.
+- **Antes de aplicar nada**: el tamaño del mensaje se mira antes de leerlo (4 MiB: una operación tiene
+  que poder llevar cualquier valor que admita el SQLite del DO), sólo la Main manda lotes
+  (`forbidden_not_tpv`), y la forma de **todas** sus operaciones se comprueba antes de aplicar
+  ninguna: una mal hecha rechaza el lote entero (`missing_apply_fields`). El lote entra en la fila de
+  entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su hash,
+  sus sentencias): lo que falla ahí es el veredicto de esa operación, como un rechazo permanente.
+- **Dentro del turno del log no hay ninguna espera.** Tras la comprobación por actividad se vuelve a
+  mirar que la sesión siga siendo la de la Main y se aplican en orden. **Cada operación es una
+  escritura suelta**: su lote atómico (`loteDe` + `loteEnBruto`) en su propio `transactionSync`, su
+  gate de idempotencia, su línea en el log y su `change`, que sale en el acto (AUD-18). La que ya
+  estaba viola el UNIQUE del gate: contesta con su `Seq` y se difunde otra vez (SYNC-03).
+- **Un rechazo permanente se anota y el lote sigue**: esa operación no va a entrar nunca. **Cualquier
+  otro fallo lo para**: lo de detrás se apoya en ella y sale `noIntentada`.
+- **El acuse sale dentro del turno.** Lo escrito en un turno se confirma junto al acabarlo, y lo que se
+  manda por un socket no sale hasta que es duradero (`test/sondaSqliteDo.test.ts`): la Main no puede
+  recibir el acuse de algo que se pierda. Si el objeto se cae a mitad, no queda nada del turno y no
+  hay acuse; la Main reenvía el lote.
+- **El tope es de trabajo, no de tiempo**: en producción el reloj no avanza mientras el objeto consume
+  CPU. Como mucho 200 operaciones, 512 KB de sentencias y 3 que necesiten aplazar las claves foráneas
+  (cada una recorre las tablas con FK antes de cerrar); lo que pasa del tope sale `noIntentada`, y la
+  primera se intenta siempre. Con el outbox de un servicio real (`test/outboxRepetido.test.ts`: de
+  una en una, en lotes y con lotes reenviados o cortados, que dejan lo mismo), un lote de 200 son unos
+  150 ms y ninguna operación necesita aplazar.
+- **No se calcula el resultado de cada operación**: el gate guarda el que se puede saber sin ejecutar,
+  y de lo que sube la Main sólo se usa el `Seq`.
 
-  Una reparación que la nube tampoco acepta queda en cuarentena, fuera de lo pendiente, y no las
+### Ponerse al día (AUD-15)
+
+- **Las Handy esperan a que la Main se ponga al día**: si no, decidirían sobre una nube a la que le
+  falta lo hecho sin conexión. Toda sesión de la Main saluda con `recovering`
+  (`replicacion.rs::saludar`), haya atraso o no: mirarlo antes dejaría fuera lo que se confirme
+  mientras se autentica. En el DO eso sólo congela a las Handy (`main_volcando`) y deja pasar lo que
+  suba la Main; el modo recuperación es otra cosa ([recuperacion.md](recuperacion.md)). La Main manda
+  `recovery_ready` una vez por sesión, cuando `subir_pendientes` encuentra el outbox vacío, con las
+  reparaciones de lo apartado ya subidas. Esa subida es la frontera: lo que se confirme después es
+  trabajo en vivo.
+- Una reparación que la nube tampoco acepta queda en cuarentena, fuera de lo pendiente, y no las
   retiene, a propósito: congelarlas sin fin por algo irreparable bloquearía al personal, y lo
-  apartado ya queda con su aviso y lo repara el contraste diario. Un DO que no dice su cola
-  (anterior a AUD-15) no las retiene por ella. `recovery_ready` limpia también el congelado que
-  dejara una sesión anterior cortada a medias.
-
-  En el DO, lo que cuenta es la Main de ahora: sólo las sesiones autenticadas con el socket abierto
+  apartado ya queda con su aviso y lo repara el contraste diario. `recovery_ready` limpia también el
+  congelado que dejara una sesión anterior cortada a medias.
+- En el DO, lo que cuenta es la Main de ahora: sólo las sesiones autenticadas con el socket abierto
   (`getWebSockets()` devuelve también los que se están cerrando), y la sesión que se reemplaza al
   reconectar pierde la autenticación en su attachment antes de cerrarse. Las guardias de una
-  escritura de la Handy (Main conectada, Main lista, cola vacía) se vuelven a mirar dentro del turno
-  del log, justo antes de enviarla: la Main pudo dejar de estar lista mientras esperaba. Y la cola
-  avisa de que está vacía también cuando la vacía el quinto fallo de su última operación, y cada
-  vez que una alarma la encuentra vacía, por si un aviso se perdió.
-- **Con cola pendiente todo va a la cola**, también un `apply` en vivo: colarse por delante sería
-  aplicar el futuro antes que el pasado. Las Handy esperan (`main_volcando`) también mientras la cola
-  no esté vacía, aunque la Main ya haya mandado su `recovery_ready`.
-- El DO la drena por `alarm` en lotes de 50 (`applyBatchIdempotent`, que filtra antes las ya
-  aplicadas). **Se aplica en la base primero y se borra de la cola después.** El `alarm` captura sus
-  excepciones y se reprograma a mano, y para si una vuelta no reduce la cola.
-- **De quién es la culpa cuando falla** (`aplicarLote`):
-  - un rechazo permanente se aparta en el acto y la cola sigue;
-  - una base llena no se le anota a nadie: se avisa y se espera con la misma escalera;
-  - cualquier otro fallo pregunta a la base (`SELECT 1`): si no contesta, no se le anota nada a nadie
-    y se espera 5 s, 30 s, 2 min, 5 min, 15 min (la escalera vive en `_Cola_Estado`); `encolar` adelanta
-    la alarma si la Main vuelve a escribir;
-  - si contesta, la culpa es de esa operación: un intento más (cinco y se aparta) y el lote se para ahí.
-- **`_Cola_Muerta` es una bandeja de salida.** Cada fila espera hasta que una Main la acuse
-  (`cola_apartada` → `cola_apartada_ack`; sólo al rol `tpv`, en cada conexión). Al acusarla, la Main la
-  pone en cuarentena (`outbox_mark_failed`, repetible: `ya_apartada`), suelta su marca de encolada y
-  encola la reparación por estado. El TTL de 30 días es para un equipo que no vuelve nunca.
-- El interruptor `cola_do` pausa el drenado; con él apagado se vuelve a mirar cada 5 minutos.
+  escritura de la Handy (Main conectada, Main lista) se vuelven a mirar dentro del turno del log,
+  justo antes de enviarla: la Main pudo dejar de estar lista mientras esperaba.
 
 ### Recibir
 
@@ -419,8 +439,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
   refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
 - **Por el socket no hay más mensajes que los del protocolo**: el saludo (`connected`, `challenge`,
-  `helloSigned`, `hello_ok`), lo que sube la Main (`apply`, `bulk_apply`, `recovery_ready`,
-  `cola_apartada_ack` y sus acuses), lo que baja (`change`, `cola_apartada`) y los avisos
+  `helloSigned`, `hello_ok`), lo que sube la Main (`apply_lote`, `apply`, `recovery_ready` y sus
+  acuses), lo que baja (`change`) y los avisos
   (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`).
   Un dispositivo no manda mensajes a los demás, y no se difunde quién entra o sale: lo que hay que
   saber de los otros es si hay Main. Un tipo que no está en la lista se contesta `unknown_type`.
@@ -482,10 +502,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   antes de AUD-18), pasa a cuarentena.
 - El anti-eco de una operación propia (`_Sync_Applied_Ops`) no se retira por antigüedad mientras su
   `Seq` vaya por delante del checkpoint: volverá por el catch-up, y sin él se aplicaría otra vez.
-  Uno con `Seq = 0` fuera del outbox sí, porque ya no puede volver: lo que sube por la cola no recibe
-  `apply_ack` y sale del outbox al volver su eco; si ese eco falla, `anotar_fallo` le pone su `Seq`
-  en la misma transacción. Y la nube sólo contesta un `apply_ack` con `Seq` 0 si ya purgó el log de
-  la operación, por debajo del checkpoint de las Main activas; un error al leerlo sale como error.
+  Uno con `Seq = 0` fuera del outbox sí, porque ya no puede volver: una operación cuyo acuse se perdió
+  sale del outbox al volver su eco, y si ese eco falla, `anotar_fallo` le pone su `Seq` en la misma
+  transacción. Y la nube sólo contesta `Seq` 0 si ya purgó el log de la operación, por debajo del
+  checkpoint de las Main activas; un error al leerlo sale como error.
 - La Handy no aplica nada: refresca las claves de React Query de las tablas tocadas.
 - **Freeze**: si no hay ninguna Main conectada al DO, las Handy reciben `main_offline` y bloquean su
   interfaz.
@@ -499,14 +519,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   que existiera la marca (el porqué, en `sync.routes.ts`). Una Main que sólo ha estado sin conexión no
   queda por debajo: mientras reporta, el suelo no pasa de su checkpoint, y cuando deja de contar, sin
   otra Main activa no se purga nada. Quien sí puede quedar debajo es una base anterior (una copia
-  restaurada). `Applied_Operations`, por antigüedad (7 días) y nunca con la cola sin vaciar: si el DO
-  se apagó entre aplicar un lote y sacarlo de la cola, su gate es lo que impide que el drenado
-  siguiente lo aplique otra vez.
+  restaurada). `Applied_Operations`, por antigüedad (7 días): un reenvío nunca llega tan tarde.
 
 ### El orden de la difusión (AUD-18)
 
 - El DO confirma y difunde **de una escritura en una** (el turno del log, `enTurnoDelLog`), también
-  el lote de la cola. La base numera al confirmar y la difusión va justo después, antes de soltar el
+  dentro de un lote de la Main. La base numera al confirmar y la difusión va justo después, antes de soltar el
   turno: sale en orden de `Seq`, sin suponer que sea contiguo. El WebSocket entrega en orden, y el
   catch-up de cada conexión de la Main va después de autenticarse: lo confirmado antes le llega por
   REST y lo posterior por el socket.
@@ -517,7 +535,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   perderse es la difusión de algo ya confirmado, si el DO se apaga justo después. Las Main lo traen
   por el catch-up al reconectar (el apagado cierra todos los sockets); las Handy vuelven a pedir lo que
   ven al reconectar; y el emisor que reintenta recibe el resultado guardado y provoca otra difusión
-  (SYNC-03). El drenado de la cola difunde otra vez, en orden y antes que lo nuevo, lo que encuentra
+  (SYNC-03). Un lote reenviado difunde otra vez, en su sitio y antes que lo nuevo, lo que encuentra
   ya aplicado.
 
 ### Reparar una divergencia (SYNC-22, SYNC-24, SYNC-25)
@@ -590,8 +608,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 2. **El censo es `state.getWebSockets()`**, con la etiqueta `deviceId`. Puede devolver sockets ya
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
    está cerrando.
-3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`. El único `alarm` es el de la cola
-   de entrada, y sólo mientras hay cola o está en pausa. El único temporizador es el plazo de la
+3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`, y no tiene `alarm`. El único
+   temporizador es el plazo de la
    lectura de la base central que pone al día quién es la Main (`fetchConPlazo`), y vive lo que su
    petición: se quita al leer la respuesta entera, al fallar o al cancelarse.
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
@@ -602,7 +620,7 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    nada en vuelo. Lo que sí tiene que sobrevivir va al SQL del DO: quién es la Main (`_Main_Vigente`).
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
    una variable de módulo es por **isolate**, compartido entre DO de **tenants distintos**. Lo que haya
-   que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
+   que recordar entre invocaciones va al SQL del DO (como `_Main_Vigente`).
 6. Si cambia el texto del latido (`PING`, en `tpv-infra-http/src/websocket.rs`; lo usan el latido de
    cada 30 s y el ping a demanda de la Handy), hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
@@ -665,8 +683,8 @@ nube puede tener ya ese id (dos equipos que vuelven a crear a la vez un producto
 ### Frontera con la webview (RI-31/RI-57)
 
 El motor se inicia en el shell y sigue vivo al desmontar React. La webview sólo consulta
-`sync_estado`, pide un reintento o consulta salud/progreso. Aplicar SQL, confirmar el outbox,
-liberar encoladas y desbloquear la reconciliación son capacidades internas. El proxy HTTP
+`sync_estado`, pide un reintento o consulta salud/progreso. Aplicar SQL, confirmar el outbox y
+desbloquear la reconciliación son capacidades internas. El proxy HTTP
 admite sólo rutas concretas de emparejamiento/administración; los tickets y saludos de ambos
 modos permanecen en Rust y no permite usar las rutas de réplica. El saludo Handy lleva `WS_HANDY_HELLO` y
 no sirve para autenticar una Main, incluso si cambia el modo local.

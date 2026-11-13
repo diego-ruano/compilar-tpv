@@ -476,7 +476,7 @@ Lo que viene detrás no lo devuelve entero:
     (`Pago_Detalles`, `Lote_Consumos`, `Suelto_Consumos`): falla por FK, y con ella todo lo demás que
     reparaba, cada día. No hay cursor para pedir una tabla por partes.
   - Sus reparaciones no llevan `Repara_Op_Id` (`encolar_op_de_reparacion`), y es lo único que retira
-    una cuarentena al subir (`outbox_mark_sent`): la del cobro y la de la reparación inmediata que
+    una cuarentena al subir (`outbox_confirmar_lote`): la del cobro y la de la reparación inmediata que
     falló se quedan.
 
 Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
@@ -541,9 +541,9 @@ cuadrado de su longitud, la misma forma que tenía AUD-33 (`/^"+|"+$/`):
   aplica el motor.
 
 Sólo los alcanza una Main autenticada (el `helloSigned` firmado con su clave y el rol `tpv` de su
-fila), con el SQL de sus propias operaciones, en vivo o por la cola, y en el Durable Object de su
-propio negocio: no comparte el isolate del worker con otros negocios. Lo que escribe la Handy lleva el SQL
-de los `*.commands.ts` del worker. Ninguno corre antes de autenticar.
+fila), con el SQL de sus propias operaciones, y en el Durable Object de su propio negocio: no
+comparte el isolate del worker con otros negocios. Lo que escribe la Handy lleva el SQL de los
+`*.commands.ts` del worker. Ninguno corre antes de autenticar.
 
 Arreglo propuesto: recorridos lineales escritos a mano, como `recortar` y `quitarComillas`
 (`lib/texto.ts`). En `evalValueStep`, quitar los `;` y los espacios finales recorriendo desde el

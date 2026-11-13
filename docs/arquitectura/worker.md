@@ -189,9 +189,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
 - **Retirar un negocio** (`/v1/admin/pruebas/retirar`, sólo los de pruebas:
   [licencias.md](licencias.md#anular-desde-la-administración)) es borrar todo lo que guarda en la nube:
-  - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas, quita la alarma de la cola y
-    borra todo lo guardado. El cierre de esos sockets llega después y no vuelve a crear nada: una
-    sesión que cerró el DO ya está fuera y su salida ya se contabilizó;
+  - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas y borra todo lo guardado. El
+    cierre de esos sockets llega después y no vuelve a crear nada: una sesión que cerró el DO ya está
+    fuera y su salida ya se contabilizó;
   - su `AgendaWeb` (`borrarTodo`): lo que esperaba a la Main, con los datos de quien reservó, y su
     alarma. Espera a que acabe lo que la agenda tenga a medias (un alta lee la base y apunta
     después: si el borrado se colara en esa espera, el alta volvería a guardar los datos de quien
@@ -498,7 +498,7 @@ no lo vigila nada.
 | La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
 | La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
-| La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` y, si el test hace drenar la cola, `hub.colaPausada = async () => null` (el interruptor `cola_do` se lee de la base central en cada vuelta) |
+| La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` |
 | Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |
 
 ## Secretos

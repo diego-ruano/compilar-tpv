@@ -26,6 +26,12 @@ crean sin jurisdicción y con una pista de región de Europa occidental
 - Una escritura no sale del objeto: entra o no entra, y se sabe en el acto. Desaparecen el token por
   negocio, su rotación, el plazo de red y la resolución de confirmaciones inciertas. Queda el turno del
   log, que ordena la difusión ([sincronizacion.md](../arquitectura/sincronizacion.md)).
+- **Sobra la cola de entrada** (SYNC-18): existía porque cada operación costaba un viaje a Turso, y el
+  DO guardaba el atraso de la Main para aplicarlo por su cuenta. Con la base dentro, la Main sube su
+  outbox **por lotes síncronos** (`apply_lote`, hasta 200 operaciones por mensaje): el DO las aplica en
+  un turno, cada una con su lote atómico, y el acuse lleva el veredicto de cada una. No hay estado
+  intermedio («encolada, todavía no aplicada»), ni alarma, ni operaciones apartadas en la nube que la
+  Main tenga que acusar.
 - Los tests corren sobre el mismo motor que producción.
 - El coste de una petición lo marca el viaje entre el Worker que atiende y el DO, no el SQL. Con la
   jurisdicción `eu`, el DO nace en un centro de la UE que no se elige (Frankfurt, Milán, Viena,
