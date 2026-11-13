@@ -335,11 +335,32 @@ lecturas de la Main que todavía ponen un `?` por elemento (`venta_rapida.rs`,
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
-`/v1/sync/bootstrap` baja la fase 1 (catálogo, clientes y lo que hay desde el último cierre de caja) en
-una sola llamada al DO, con un tope de 300.000 filas. Una llamada entre el worker y el DO no puede
-pasar de 32 MiB, y 300.000 filas no caben. Un negocio normal no se acerca; uno que lleve semanas sin
-cerrar caja, sí. Falta comprobar con qué tamaño falla de verdad y decidir: un tope por tamaño, o que la
-foto salga del DO en trozos o como flujo. El histórico ya va en páginas de 2.000 filas.
+`/v1/sync/bootstrap` baja la fase 1 en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de
+JSON. Si el mes no cabe, la ventana se encoge hasta lo imprescindible: los maestros, lo que sigue vivo
+y lo que hay desde el último cierre de caja
+([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Eso no se puede
+recortar, y si no cabe la respuesta es 413 y ese negocio no puede recuperarse desde la nube. Con lo
+medido (unos 180 bytes por fila), 24 MiB son unas 140.000 filas: le pasa a un bar de mil comandas
+diarias que lleve una semana sin cerrar caja, o a uno normal que lleve meses. Falta decidir cómo se le
+sirve: que la foto salga en trozos, o que lo anterior al cierre que no quepa baje por la fase 2 y el
+arqueo espere a que termine.
+
+**Sin ningún cierre de caja no hay periodo que proteger**, y la ventana se encoge hasta «ahora». El
+arqueo de un negocio que nunca ha cerrado suma desde el principio (`totales_entre`), así que si hace
+su primer cierre antes de que termine la fase 2, el esperado sale con lo que haya bajado hasta
+entonces. Ya le pasaba a cualquier negocio sin cierres y con más de 30 días de historia; con la
+ventana encogida le pasa también a uno más reciente cuyo mes no quepa. Las alternativas: no encoger
+sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la Main no deje hacer
+el primer cierre mientras falte histórico. Sin decidir.
+
+Dos cosas de la Main que pesan más con una ventana estrecha, y que hoy no dependen de ella:
+
+- **El histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
+  (`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
+  recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
+  anterior.
+- **El plazo de una petición son 20 s** (`HTTP_TIMEOUT_SECS`, `tpv-infra-licensing`), contando la
+  descarga: 24 MiB sin comprimir necesitan 10 Mbit/s, además de lo que tarde el volcado.
 
 ### DO-03 · Copias de la base de cada negocio
 
@@ -347,23 +368,6 @@ El DO trae la vuelta a cualquier punto de los últimos 30 días, pero no hay for
 fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a un instante, y una copia
 diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
 queda como opción para guardar esas copias.
-
-### DO-04 · Dos rutas leen la base del negocio sin ejecutarse dentro del `TenantHub`
-
-Las rutas de negocio llevan `alHub` detrás de `tenantAuth` y hacen un viaje al DO por petición
-([worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Dos routers leen la
-base del negocio y no lo llevan, porque el resto de lo que hacen es de la base central, de la agenda
-de reservas web o del correo:
-
-- `POST /v1/reservas-web/avisos` (`reservas_web/main.routes.ts`) lee la reserva y los datos del
-  negocio con dos consultas: dos viajes al DO en vez de uno.
-- `POST /v1/email/enviar-pedido` (`email/email.routes.ts`) lee el proveedor y el negocio en un lote:
-  un viaje, como si llevara `alHub`.
-
-Funcionan igual; es latencia. Ponerle `alHub` a `/avisos` haría que el `TenantHub` llamara a la
-`AgendaWeb` y mandara el correo desde su único hilo; la alternativa es juntar sus dos consultas en un
-lote, como el pedido. Las demás rutas de esos routers no leen la base del negocio por su cuenta. Sin
-decidir.
 
 ---
 

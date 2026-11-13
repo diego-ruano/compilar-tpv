@@ -34,6 +34,24 @@
 //    borrador o un fichaje sin cerrar.
 //
 // ──────────────────────────────────────────────────────────────────────────────
+// Si el mes no cabe, la ventana se encoge
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// La fase 1 es una sola respuesta y tiene un techo (`VOLCADO_MAX_BYTES`, `volcado.ts`). El mes de
+// un bar con mucho movimiento no cabe en él, y contestarle «no cabe» es dejarlo sin recuperación.
+// Así que los 30 días son lo que se intenta, no lo que se exige: si no caben se prueba con una
+// semana, con un día y con ninguno (`ANCHOS_DE_VENTANA`), y viaja la más ancha que cabe.
+//
+// Lo que no se encoge nunca es lo que las tres reglas hacen entrar sin mirar la ventana: los
+// maestros, lo que sigue vivo, todo lo que hay desde el último cierre de caja no reabierto y el
+// último registro de facturación. Es lo imprescindible para volver a vender, y si ni eso cabe la
+// respuesta sí es «no cabe».
+//
+// A la Main le da igual el ancho: restaura lo que llega y rellena lo demás por la fase 2, que
+// recorre cada tabla transaccional entera, desde el principio (`parcial`, `backfill`). Con una
+// ventana más estrecha baja lo mismo; sólo cambia cuánto llega en la primera respuesta.
+//
+// ──────────────────────────────────────────────────────────────────────────────
 // La unidad es la comanda, no la fila
 // ──────────────────────────────────────────────────────────────────────────────
 //
@@ -42,7 +60,8 @@
 // FK. La restauración corre con `defer_foreign_keys`, así que eso no da un aviso: aborta la
 // transacción entera y la recuperación falla. Por eso una comanda entra o no entra CON TODO lo
 // suyo —líneas, pagos, detalles del pago, consumos de lote y de suelto—, y lo que decide es la
-// comanda: abierta, abierta o cerrada dentro de la ventana, o con algún cobro dentro de ella.
+// comanda: abierta, abierta o cerrada dentro de la ventana, o con algún cobro —o la baja de alguno—
+// dentro de ella.
 //
 // De paso arregla algo que no es de integridad: partir una comanda por la mitad dejaría su
 // "pendiente" mintiendo.
@@ -60,6 +79,16 @@ import { parseClientNow, serverNowFixed } from "../../durableObjects/tenantHub.t
  * **Es un parámetro, no una decisión de arquitectura**: cambiarlo es cambiar este número.
  */
 export const VENTANA_DIAS = 30;
+
+/**
+ * Los anchos de ventana que se prueban, en días y del más ancho al más estrecho: viaja el primero
+ * que cabe en los topes de la fase 1. El último, cero, deja sólo lo imprescindible (ver arriba).
+ *
+ * Son cuatro escalones y no una búsqueda del día exacto porque medir uno cuesta un `COUNT` por
+ * tabla transaccional sobre esa ventana, y lo que se gana afinando es poco: lo que no entra ahora
+ * lo trae la fase 2.
+ */
+export const ANCHOS_DE_VENTANA: readonly number[] = [VENTANA_DIAS, 7, 1, 0];
 
 /**
  * Tablas de control que NO forman parte del negocio y que la Main mantiene por su cuenta.
@@ -95,14 +124,31 @@ export function esTablaDeNegocio(nombre: string): boolean {
 // de "qué comandas entran" viviera copiada en seis sitios, el día que cambie entrarían hijas
 // huérfanas y la restauración fallaría entera.
 
-/** `?1` = límite inferior de la ventana, `YYYY-MM-DD HH:MM:SS` en hora local del equipo. */
+/**
+ * `?1` = límite inferior de la ventana, `YYYY-MM-DD HH:MM:SS` en hora local del equipo.
+ *
+ * La baja de un cobro cuenta como el cobro (`Anulado_En`). El dinero de una devolución sale del
+ * cajón el día que se devuelve, y el arqueo lo resta en el periodo en que salió aunque la venta sea
+ * de un periodo anterior (REV-08, `cierre_caja.rs::totales_entre`): un ticket de hace veinte días
+ * devuelto hoy forma parte del periodo de caja abierto. Sin él, el primer arqueo tras recuperar
+ * esperaría en el cajón un dinero que ya se devolvió.
+ *
+ * Y entra siempre la comanda del cobro del último registro de facturación. Ese registro viaja con
+ * cualquier ventana (ver `Registros_Facturacion`, abajo) y su `ID_Pago` es una FK: si el cobro se
+ * quedara fuera, la restauración entera abortaría. Con la ventana encogida hasta el último cierre
+ * pasa en cuanto se recupera sin haber vendido nada después de cerrar.
+ */
 const CTE_COMANDAS = `sel_comandas AS (
 	SELECT ID_Comanda FROM Comandas
 	 WHERE Estado = 'Abierta'
 	    OR Fecha_Hora_Apertura >= ?1
 	    OR COALESCE(Fecha_Hora_Cierre, '') >= ?1
 	    OR EXISTS (SELECT 1 FROM Pagos p
-	                WHERE p.ID_Comanda = Comandas.ID_Comanda AND p.Fecha_Hora >= ?1)
+	                WHERE p.ID_Comanda = Comandas.ID_Comanda
+	                  AND (p.Fecha_Hora >= ?1 OR COALESCE(p.Anulado_En, '') >= ?1))
+	    OR ID_Comanda = (SELECT p.ID_Comanda FROM Pagos p
+	                      WHERE p.ID_Pago = (SELECT r.ID_Pago FROM Registros_Facturacion r
+	                                          ORDER BY r.Orden DESC LIMIT 1))
 )`;
 
 const CTE_DETALLES = `sel_detalles AS (
@@ -151,6 +197,28 @@ type Transaccional = {
 };
 
 /**
+ * El predicado de las dos tablas cuya clave es `(ID_Pago, ID_Detalle)`: el pago y la línea, los dos
+ * de la ventana.
+ *
+ * ⚠️ El `+` de `+ID_Detalle` no es decorativo. Sin él, SQLite resuelve los dos `IN` contra el índice
+ * de la clave primaria a la vez (`ID_Pago=? AND ID_Detalle=?`) y prueba **cada pago con cada línea**
+ * de la ventana. Medido con tres días de un bar de mil comandas diarias: trece segundos por
+ * sentencia, y el volcado y la verificación la ejecutan cuatro veces (el conteo y el volcado de
+ * cada tabla). El `+` deja esa columna fuera del índice sin cambiar la comparación: se entra por el
+ * pago y la línea se comprueba contra su lista, una vez por fila. Lo vigila
+ * `test/syncVentanaPlan.test.ts`, que lee el plan de todas las sentencias de la ventana.
+ */
+const DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA =
+	"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND +ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)";
+
+/**
+ * El mismo predicado para los consumos, cuya clave empieza por la línea: se entra por ella y el
+ * cobro se comprueba contra su lista. El `+` está por lo mismo.
+ */
+const DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA =
+	"ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles) AND +ID_Pago IN (SELECT ID_Pago FROM sel_pagos)";
+
+/**
  * Tablas transaccionales, **en orden de backfill: padres primero**.
  *
  * El orden importa porque cada página de la fase 2 es su propia transacción y
@@ -179,8 +247,7 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// lado el día que dejen de serlo.
 		nombre: "Pago_Detalles",
 		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
-		donde:
-			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		donde: DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA,
 	},
 	{
 		// Lo devuelto de una devolución de parte de un cobro. Como `Pago_Detalles`: su pago (la
@@ -189,18 +256,20 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// escribieron, así que `Pagos.ID_Pago_Origen` siempre encuentra a su padre.
 		nombre: "Devolucion_Lineas",
 		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
-		donde:
-			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		donde: DE_UN_PAGO_Y_UNA_LINEA_DE_LA_VENTANA,
 	},
 	{
+		// Un consumo es de una línea y del cobro que la cobró, y los dos son FK. Como en
+		// `Pago_Detalles`, son de la misma comanda y se piden las dos: si un día no lo fueran, el
+		// consumo se queda para la fase 2 en vez de abortar la restauración.
 		nombre: "Lote_Consumos",
-		ctes: [CTE_COMANDAS, CTE_DETALLES],
-		donde: "ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
+		donde: DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA,
 	},
 	{
 		nombre: "Suelto_Consumos",
-		ctes: [CTE_COMANDAS, CTE_DETALLES],
-		donde: "ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
+		donde: DE_UNA_LINEA_Y_UN_PAGO_DE_LA_VENTANA,
 	},
 	{
 		// CUENTA-07. Un movimiento de caja nace a la vez que su cobro, así que la fecha basta; la
@@ -219,15 +288,24 @@ export const TRANSACCIONALES: Transaccional[] = [
 		// `Fecha_Expedicion`, que es `DD-MM-AAAA` porque así viaja al XML y al QR: comparar eso
 		// contra una fecha `AAAA-MM-DD` da un orden lexicográfico sin ningún sentido.
 		//
-		// El `OR` del final es el que importa de verdad: la cadena de huellas se continúa desde el
-		// ÚLTIMO eslabón, así que ese tiene que volver siempre — aunque el bar lleve dos meses
-		// cerrado y no haya emitido nada dentro de la ventana. Sin él, una Main restaurada
-		// arrancaría una cadena nueva marcándose `PrimerRegistro = "S"` con registros ya existentes
-		// para ese SIF y NIF, que es exactamente el error admisible 2007.
+		// El último eslabón es el que importa de verdad: la cadena de huellas se continúa desde el
+		// ÚLTIMO, así que ese tiene que volver siempre — aunque el bar lleve dos meses cerrado y no
+		// haya emitido nada dentro de la ventana. Sin él, una Main restaurada arrancaría una cadena
+		// nueva marcándose `PrimerRegistro = "S"` con registros ya existentes para ese SIF y NIF,
+		// que es exactamente el error admisible 2007. Su cobro viaja con él: `sel_comandas` trae
+		// siempre esa comanda.
+		//
+		// Los demás, los de la ventana, sólo viajan si viaja su cobro (o si no tienen): `ID_Pago`
+		// es una FK y una huérfana aborta la restauración ENTERA. No es un caso de laboratorio: la
+		// comparación con `Fecha_Hora_Huso` es de textos, y su `T` es mayor que el espacio del
+		// límite, así que del día en que cae el límite entran los registros de todo el día, también
+		// los de antes de esa hora, cuyos cobros no entran. Esos registros llegan por la fase 2,
+		// detrás de sus cobros.
 		nombre: "Registros_Facturacion",
-		ctes: [],
+		ctes: [CTE_COMANDAS, CTE_PAGOS],
 		donde:
-			"Fecha_Hora_Huso >= ?1 OR Orden = (SELECT MAX(Orden) FROM Registros_Facturacion)",
+			"Orden = (SELECT MAX(Orden) FROM Registros_Facturacion) " +
+			"OR (Fecha_Hora_Huso >= ?1 AND (ID_Pago IS NULL OR ID_Pago IN (SELECT ID_Pago FROM sel_pagos)))",
 	},
 	{
 		nombre: "Cierres_Caja",
@@ -340,17 +418,29 @@ function prelude(t: Transaccional): string {
 }
 
 /**
- * Límite inferior de la ventana: `MIN(ahora - VENTANA_DIAS, último cierre no reabierto)`.
+ * Los límites inferiores de ventana que se prueban, del más ancho al imprescindible y sin
+ * repetir: `MIN(ahora - días, último cierre no reabierto)` por cada ancho de `ANCHOS_DE_VENTANA`.
+ *
+ * El primero es la ventana de siempre, los 30 días estirados hasta el último cierre. El último es
+ * el propio cierre (o «ahora», si el negocio nunca ha cerrado caja): con él sólo entra lo que no
+ * depende de la ventana. Un cierre de hace más de 30 días deja una sola candidata, porque todas
+ * se estiran hasta él.
  *
  * El reloj es el del EQUIPO (cabecera `X-Client-Now`), no el del servidor, por lo mismo que en el
  * resto del sistema: las fechas de esta base son hora local en texto, y compararlas contra un UTC
  * del edge correría la ventana lo que valga el huso. Si no llega una hora válida se cae a la del
- * servidor: para 30 días, unas horas de desfase no cambian nada.
+ * servidor: unas horas de desfase mueven el borde de la ventana, no lo que entra siempre. «Ahora»
+ * se lee una vez para todas las candidatas.
  */
-export function limiteVentana(clientNow: unknown, ultimoCierre: string | null): string {
+export function ventanasCandidatas(clientNow: unknown, ultimoCierre: string | null): string[] {
 	const ahora = parseClientNow(clientNow) ?? serverNowFixed();
-	const ms = new Date(ahora.replace(" ", "T") + "Z").getTime() - VENTANA_DIAS * 86_400_000;
-	const porFecha = new Date(ms).toISOString().slice(0, 19).replace("T", " ");
-	if (!ultimoCierre) return porFecha;
-	return ultimoCierre < porFecha ? ultimoCierre : porFecha;
+	const ahoraMs = new Date(ahora.replace(" ", "T") + "Z").getTime();
+
+	const candidatas: string[] = [];
+	for (const dias of ANCHOS_DE_VENTANA) {
+		const porFecha = new Date(ahoraMs - dias * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+		const desde = ultimoCierre && ultimoCierre < porFecha ? ultimoCierre : porFecha;
+		if (candidatas[candidatas.length - 1] !== desde) candidatas.push(desde);
+	}
+	return candidatas;
 }

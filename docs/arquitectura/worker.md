@@ -61,6 +61,13 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
   o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+- **Una ruta que lee la base del negocio va dentro aunque el resto de lo que hace sea de fuera.** El
+  pedido a un proveedor (`/v1/email/enviar-pedido`) y el aviso de una reserva web
+  (`/v1/reservas-web/avisos`) leen la base del negocio y además reservan cupo en la base central,
+  piden un enlace a la `AgendaWeb` y mandan el correo: todo eso se hace desde el `TenantHub`, con su
+  mismo entorno (`test/correoEnElHub.test.ts`). Mientras espera a la red, el DO atiende lo demás. En
+  un router donde sólo una ruta lee la base del negocio, `alHub` va sólo en ella:
+  `xRoutes.use("/ruta", alHub)` detrás del `use("*", tenantAuth)` (`reservas_web/main.routes.ts`).
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
@@ -104,7 +111,34 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   y los listados de caja, y la Main busca igual para devolver las mismas filas. Un `LIKE` con un
   patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
-- **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos.
+- **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
+  pasa y lo que devuelve como valor (las filas de `consultar`). El cuerpo de la respuesta de una ruta
+  que se ejecuta dentro del DO no lo tiene: viaja como flujo.
+- **Los volcados de sync** (`/v1/sync/bootstrap`, `/verificar` e `/historico`) no leen por
+  `tenantQuery`: dentro del DO recorren el cursor de su SQLite una vez y escriben cada fila una vez,
+  ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
+  JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
+  del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
+  Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
+  llegan por `tenantQuery` y, para una misma ventana, la respuesta es la misma byte a byte
+  (`test/helpers/dosCaminos.ts`); pero allí ya han cruzado la llamada al DO, enteras, cuando se
+  escriben, así que lo que acota esa llamada es su tope de 32 MiB y no el techo, que actúa después.
+  Por eso con la ruta en el Worker una ventana cuya estimación no cabe no se intenta, y dentro del
+  DO la más estrecha sí ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Los
+  bytes se cuentan al escribir, exactos (UTF-8), y las filas también.
+- **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
+  sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
+  un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y
+  `Array.from(cursor.raw())` lo agotan; quien lo recorra a mano y pueda parar antes tiene que
+  terminarlo, como hace el lector de los volcados.
+- **Las respuestas de sync que crecen con el negocio salen en gzip si quien pregunta lo acepta**
+  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico`, `/verificar` y
+  `/verificar-claves`. Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
+  `tenantAuth` y `alHub`: el `TenantHub` contesta sin comprimir y comprime el Worker lo que vuelve,
+  para no gastar el hilo del negocio. La respuesta comprimida lleva `encodeBody: "manual"`; sin
+  eso, el runtime comprime al transmitir lo que lleva `Content-Encoding` y saldría comprimida dos
+  veces (`test/syncGzipTransmision.test.ts`). Se mira lo que pidió el cliente
+  (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
 - **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
 
 ## Cómo se escribe una ruta
@@ -192,7 +226,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   como fallo de validación sino como un 500.
 - **El techo va en la respuesta, no en cada pieza**: una ruta que devuelve listas reparte un presupuesto
   común (como `leerClaves` en `/verificar-claves`, que marca `truncada` lo que no cabe). Un isolate
-  tiene 128 MB.
+  tiene 128 MB. Lo que crece con el negocio se acota además en bytes, mientras se escribe
+  (`VOLCADO_MAX_BYTES`): un tope de filas no dice lo que ocupan.
 - **Un importe que llega por la API viene en céntimos enteros** (`zDinero`); un `12.5` se rechaza.
   Uno que no puede ser negativo (un precio de venta, el coste de un lote) va con
   `zDineroNoNegativoCon(mensaje)` y el texto de la Main.

@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 import { clienteSobre } from "./helpers/clienteSql";
+import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import {
@@ -82,12 +83,16 @@ async function pedir(
 		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
-		const res = await app.request(
-			ruta,
-			{ ...init, headers: { "x-client-now": AHORA, ...(init.headers ?? {}) } },
-			{} as any,
+		// Con la ruta en el Worker y dentro del TenantHub: las dos contestan lo mismo.
+		return pedirPorLosDosCaminos(
+			() =>
+				app.request(
+					ruta,
+					{ ...init, headers: { "x-client-now": AHORA, ...(init.headers ?? {}) } },
+					{} as any,
+				),
+			sql,
 		);
-		return { status: res.status, body: await res.json() };
 	});
 }
 
@@ -230,6 +235,31 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-tardia"]);
 	});
 
+	it("un cobro antiguo dado de baja dentro de la ventana trae su comanda entera", async () => {
+		// El dinero de una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en
+		// ese periodo aunque la venta sea de otro anterior (REV-08). Si el cobro no viaja, el primer
+		// arqueo tras recuperar espera en el cajón un dinero que ya se devolvió.
+		const { body } = await pedir("/bootstrap", "baja-reciente", (sql) => {
+			sql.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 VALUES ('u1', (SELECT ID_Rol FROM Roles LIMIT 1), 'a@b.c', 'x', 'Ana');`,
+			);
+			sembrarVenta(sql, "devuelta", ANTIGUO);
+			sql.exec(
+				`UPDATE Pagos SET Estado = 'ANULADO', Motivo_Baja = 'DEVOLUCION', Anulado_En = ?, Anulado_Por = 'u1'
+				  WHERE ID_Pago = 'p-devuelta';`,
+				RECIENTE,
+			);
+			// Y una igual de antigua que nadie ha tocado: ésa sí es histórico.
+			sembrarVenta(sql, "intacta", ANTIGUO);
+		});
+
+		expect(ids(body, "Comandas", "ID_Comanda")).toEqual(["c-devuelta"]);
+		expect(ids(body, "Detalle_Comanda", "ID_Detalle")).toEqual(["d-devuelta"]);
+		expect(ids(body, "Pagos", "ID_Pago")).toEqual(["p-devuelta"]);
+		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-devuelta"]);
+	});
+
 	it("ninguna hija sale huérfana de su padre", async () => {
 		// La comprobación general: para cada hija del volcado, su padre tiene que venir también.
 		const { body } = await pedir("/bootstrap", "huerfanas", (sql) => {
@@ -246,6 +276,44 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 		for (const c of ids(body, "Pagos", "ID_Comanda")) expect(comandas).toContain(c);
 		for (const p of ids(body, "Pago_Detalles", "ID_Pago")) expect(pagos).toContain(p);
 		for (const d of ids(body, "Pago_Detalles", "ID_Detalle")) expect(detalles).toContain(d);
+	});
+
+	it("un consumo viaja con su línea y con su cobro, y no sin alguno de los dos", async () => {
+		// `Lote_Consumos` y `Suelto_Consumos` apuntan a la línea y al cobro que la cobró, y los dos
+		// son FK. Siempre son de la misma comanda; si un día no lo fueran, el consumo espera a la
+		// fase 2 en vez de abortar la restauración.
+		const { body } = await pedir("/bootstrap", "consumos", (sql) => {
+			sql.exec("INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat1', 'Bebidas');");
+			sql.exec(
+				"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('pr1', 'cat1', 'Caña', 250);",
+			);
+			sql.exec(
+				"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada) VALUES ('lo1', 'pr1', 'L-1', ?);",
+				ANTIGUO,
+			);
+			sembrarVenta(sql, "nueva", RECIENTE);
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			const consumo = (idDetalle: string, idPago: string) => {
+				sql.exec(
+					"INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES (?, 'lo1', ?, 1);",
+					idDetalle,
+					idPago,
+				);
+				sql.exec(
+					"INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES (?, 'pr1', ?, 1);",
+					idDetalle,
+					idPago,
+				);
+			};
+			consumo("d-nueva", "p-nueva"); // dentro
+			consumo("d-vieja", "p-vieja"); // fuera
+			consumo("d-nueva", "p-vieja"); // la línea dentro y el cobro fuera
+		});
+
+		for (const t of ["Lote_Consumos", "Suelto_Consumos"]) {
+			expect(ids(body, t, "ID_Detalle"), t).toEqual(["d-nueva"]);
+			expect(ids(body, t, "ID_Pago"), t).toEqual(["p-nueva"]);
+		}
 	});
 
 	it("un movimiento de caja no viaja sin el pago al que apunta", async () => {
@@ -267,6 +335,64 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 
 		// El gasto sí (no apunta a ningún pago); el cobro huérfano no.
 		expect(ids(body, "Movimientos_Caja", "ID_Movimiento")).toEqual(["m2"]);
+	});
+});
+
+describe("bootstrap acotado · los registros de facturación", () => {
+	/** Un registro de alta del cobro `idPago`, emitido en `fecha`. */
+	function registro(sql: any, orden: number, idPago: string | null, fecha: string) {
+		sql.exec(
+			`INSERT INTO Registros_Facturacion
+			   (ID_Registro, Orden, Tipo, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Serie, Numero,
+			    Nombre_Razon_Emisor, Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url, ID_Pago)
+			 VALUES (?, ?, 'ALTA', 'B00000000', ?, '01-01-2026', 'A', ?, 'Bar de pruebas', 'cadena', 'huella',
+			         ?, '{}', 'https://ejemplo.invalid/qr', ?);`,
+			`rf-${orden}`,
+			orden,
+			`A-${orden}`,
+			orden,
+			fecha.replace(" ", "T") + "+01:00",
+			idPago,
+		);
+	}
+
+	it("el último viaja siempre, y con él su cobro y la comanda de ese cobro", async () => {
+		// La cadena de huellas sigue desde el último eslabón, así que vuelve aunque el bar lleve
+		// meses cerrado. Su `ID_Pago` es una FK: si el cobro no viajara con él, la restauración
+		// entera abortaría, y el bar no podría recuperarse hasta vender algo — que es justo lo que
+		// no puede hacer sin recuperarse.
+		const { body } = await pedir("/bootstrap", "fiscal-ultimo", (sql) => {
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			sembrarVenta(sql, "ultima", ANTIGUO);
+			registro(sql, 1, "p-vieja", ANTIGUO);
+			registro(sql, 2, "p-ultima", ANTIGUO);
+		});
+
+		expect(ids(body, "Registros_Facturacion", "ID_Registro")).toEqual(["rf-2"]);
+		expect(ids(body, "Pagos", "ID_Pago")).toEqual(["p-ultima"]);
+		expect(ids(body, "Comandas", "ID_Comanda")).toEqual(["c-ultima"]);
+		expect(ids(body, "Detalle_Comanda", "ID_Detalle")).toEqual(["d-ultima"]);
+		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-ultima"]);
+	});
+
+	it("uno de la ventana sólo viaja si viaja su cobro: el resto llega por la fase 2", async () => {
+		const { body } = await pedir("/bootstrap", "fiscal-red", (sql) => {
+			sembrarVenta(sql, "vieja", ANTIGUO);
+			sembrarVenta(sql, "nueva", RECIENTE);
+			// Dentro de la ventana por su fecha, de un cobro que queda fuera.
+			registro(sql, 1, "p-vieja", RECIENTE);
+			// Dentro, con su cobro dentro; y dentro, sin cobro.
+			registro(sql, 2, "p-nueva", RECIENTE);
+			registro(sql, 3, null, RECIENTE);
+		});
+
+		expect(ids(body, "Registros_Facturacion", "ID_Registro").sort()).toEqual(["rf-2", "rf-3"]);
+		const pagos = new Set(ids(body, "Pagos", "ID_Pago"));
+		const t = tabla(body, "Registros_Facturacion")!;
+		for (const f of t.filas) {
+			const idPago = f[t.columnas.indexOf("ID_Pago")];
+			if (idPago !== null) expect(pagos).toContain(idPago);
+		}
 	});
 });
 

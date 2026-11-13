@@ -17,6 +17,12 @@ export type HubLocal = {
 	identidad: IdentidadDelWorker;
 	/** La base del negocio: el SQLite de este mismo DO. */
 	base: () => Promise<Client>;
+	/**
+	 * La misma base, en bruto: el `SqlStorage` del DO, ya aprovisionado y con el esquema al día. Es
+	 * para lo que no puede pagar un objeto por fila: los volcados de sync recorren su cursor una vez
+	 * (`domains/sync/volcado.ts`). Todo lo demás lee por `base`.
+	 */
+	sql: () => Promise<SqlStorage>;
 	/** El motor de escrituras del DO, sin pasar por RPC. */
 	aplicar: (params: ApplyParams) => Promise<ResultadoAplicacion>;
 };

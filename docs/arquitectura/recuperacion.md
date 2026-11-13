@@ -19,7 +19,7 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Señal de equipo aprovisionado | `apps/tpv-main/src-tauri/src/lib.rs::dispositivo_aprovisionado` | `license_state.json` con `tenant_id`, fuera de `data.db` |
 | Tercer estado del arranque | `crates/tpv-infra-sqlite/src/login.rs::setup_pendiente` | `requiere_recuperacion` = cero usuarios |
 | Fase 1 | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado acotado + `Seq` de la foto |
-| Qué entra en la fase 1 | `domains/sync/bootstrap.ventana.ts` | Maestros enteros, transaccionales de 30 días, y el orden de relleno |
+| Qué entra en la fase 1 | `domains/sync/bootstrap.ventana.ts` | Maestros enteros, transaccionales de 30 días (o de lo que quepa), y el orden de relleno |
 | Fase 2 | `/v1/sync/historico` + job `backfill_historico` + `use_cases/sync.rs::backfill_paso` | El resto del histórico, por páginas, con el bar ya vendiendo |
 | Cola del backfill | `_Backfill_Historico` (`0001_inicial.sql`, §16) | Progreso reanudable, local |
 | Restaurar desde la nube | `crates/tpv-infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción y siembra la cola de la fase 2 |
@@ -68,21 +68,51 @@ Mientras dure:
 ## Desde la nube: dos fases (SYNC-19)
 
 **Fase 1** (`/v1/sync/bootstrap`): lo imprescindible para volver a vender, en una petición y una
-transacción de lectura, con el `Seq` leído **dentro** de esa transacción (leído aparte, una escritura
+sola foto de la base, con el `Seq` leído **dentro** de esa foto (leído aparte, una escritura
 podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a trozos no es una foto.
 
-- **Maestros enteros; transaccionales, 30 días** (`VENTANA_DIAS`).
+- **Maestros enteros; transaccionales, 30 días** (`VENTANA_DIAS`), si caben.
 - La ventana **se estira hasta el último cierre de caja**: el arqueo suma desde ahí
   ([caja.md](caja.md)).
 - **Lo que sigue vivo entra entero**, caiga donde caiga: comandas abiertas, notificaciones activas,
   pedidos en borrador, fichajes sin cerrar.
 - **La unidad es la comanda**: entra con sus líneas, pagos, detalles de pago y consumos, o no entra
-  (una FK colgante abortaría la restauración entera).
+  (una FK colgante abortaría la restauración entera). Lo que apunta a una línea y a un cobro
+  (detalles de pago, devoluciones, consumos) sólo viaja si viajan los dos. Entra si está abierta, si se abrió o se cerró
+  dentro de la ventana, o si dentro de ella tiene un cobro **o la baja de un cobro**: el dinero de
+  una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en ese periodo aunque
+  la venta sea anterior ([caja.md](caja.md)).
 - `Registros_Facturacion` entra en la ventana **más su última fila por `Orden`**, que es el eslabón del
-  que sigue la cadena.
+  que sigue la cadena. `ID_Pago` es una FK, así que el último registro trae siempre la comanda de su
+  cobro, y uno de la ventana sólo viaja si viaja su cobro (el resto llega por la fase 2, detrás de
+  sus cobros).
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.
 - El worker dice qué tablas vienen recortadas (`parcial`) y en qué orden rellenarlas: la clasificación
   vive sólo en `bootstrap.ventana.ts`.
+- **Una sentencia de la ventana no pide por lista dos columnas del mismo índice.** `Pago_Detalles` y
+  `Devolucion_Lineas` tienen la clave `(ID_Pago, ID_Detalle)` y piden las dos: escrito tal cual, SQLite
+  sondea la clave con cada pago y cada línea de la ventana (el cuadrado de lo que hay). Una de las dos
+  va con un `+` delante (`+ID_Detalle IN (…)`), que la deja fuera del índice sin cambiar la
+  comparación. `test/syncVentanaPlan.test.ts` lee el plan de todas las sentencias y cuenta las filas
+  que leen.
+- **Dos topes: 300.000 filas y 24 MiB de JSON** (`BOOTSTRAP_MAX_FILAS`, `VOLCADO_MAX_BYTES`). Las
+  filas se cuentan antes de leer; los bytes, mientras se escribe la respuesta
+  ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
+- **Si el mes no cabe, la ventana se encoge**: se prueban 30 días, 7, 1 y ninguno
+  (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre de caja, y viaja la más ancha que
+  cabe en los dos topes. Cada candidata se mide antes de leerla: sus filas, contadas, y sus bytes,
+  estimados con lo que ocupan las últimas 64 filas de cada tabla; si aun así no cabe al escribirla,
+  se pasa a la siguiente. Dentro del `TenantHub`, que es como corre desplegado, la estimación sólo
+  puede estrechar la ventana, nunca negar la recuperación: la más estrecha se intenta aunque la
+  estimación diga que no cabe, y decide lo que se escribe. La respuesta dice cuál fue
+  (`ventana_desde`).
+- **Lo imprescindible no se encoge**: los maestros, lo que sigue vivo, lo que hay desde el último
+  cierre de caja no reabierto y el último registro de facturación viajan con cualquier ancho. Si ni
+  eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación lo dice
+  ([DO-02](../pendientes.md#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre)).
+- **A la Main le da igual el ancho**: no mira `ventana_desde`. Restaura lo que llega y la fase 2
+  recorre cada tabla transaccional entera, así que con una ventana estrecha acaba con lo mismo;
+  lo que cambia es que los días que no entraron llegan después, con el histórico.
 - **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
   la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
   bajan un volcado (`/bootstrap`, `/historico`, `/verificar` y `/verificar-claves`) tienen 150 s de
@@ -110,6 +140,9 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - ⚠️ **Por `WriteGuard::raw()`**: por `execute()` devolvería a la nube, fila a fila, el histórico que
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
+- Una página lleva hasta 2.000 filas y hasta 24 MiB: si se corta por tamaño trae su
+  `siguiente_cursor` igual, y nunca viene sin al menos una fila (una fila que sola pase del tope
+  viaja igual: rechazarla dejaría al backfill atascado en ella).
 - Es `Requiere::MainOperativa`, así que no compite con el desbloqueo del login. Se pausa con el
   interruptor `backfill_historico`.
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros

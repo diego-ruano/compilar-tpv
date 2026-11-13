@@ -499,8 +499,9 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
 - Un `DELETE` apartado no se puede reparar por estado (la ausencia de una fila no es una fila): se
   cuenta y se informa (SYNC-23).
 - **El contraste diario** (job `verificar_nube`, `/v1/sync/verificar` y `/verificar-claves`) compara la
-  ventana de 30 días de la nube con la base local, repara e informa a Axiom (`tenant_salud_sync`), no al
-  usuario. La comparación tolera las dos formas de escribir un número (`2.5` y `"2.50"`).
+  ventana de la fase 1 de la nube (30 días, o lo que quepa de ellos) con la base local, repara e informa
+  a Axiom (`tenant_salud_sync`), no al usuario. La comparación tolera las dos formas de escribir un número
+  (`2.5` y `"2.50"`).
 - **Corre tras un cierre de caja o a las veinte horas de la última pasada, y sólo en un momento
   tranquilo** (VERIF-02): sin nada pendiente de subir ni un cambio de la nube detenido, y con un
   cuarto de hora sin escrituras. La regla y sus plazos están en
@@ -528,7 +529,11 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.
 
 `/verificar-claves` reparte un presupuesto común entre las tablas: lo que no cabe sale `truncada` y se
-vuelve a pedir. El techo va en la respuesta, no en cada pieza.
+vuelve a pedir. El techo va en la respuesta, no en cada pieza. La ventana de `/verificar` es la de
+la fase 1 de la recuperación, con sus dos topes (filas y bytes) y encogida igual
+([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)): si los 30 días no caben se
+contrasta una más estrecha, y sólo si no cabe ni lo imprescindible viajan los conteos solos, con
+`ventana_omitida`.
 
 ---
 
