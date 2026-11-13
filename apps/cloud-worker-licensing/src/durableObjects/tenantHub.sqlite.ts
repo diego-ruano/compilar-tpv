@@ -391,7 +391,7 @@ function migracionesPendientes(
 }
 
 /** ¿Están activas las claves foráneas en la conexión de este DO? */
-export function fkActivas(sql: SqlStorage): boolean {
+function fkActivas(sql: SqlStorage): boolean {
 	return Number((sql.exec("PRAGMA foreign_keys;").toArray()[0] as any)?.foreign_keys) === 1;
 }
 
