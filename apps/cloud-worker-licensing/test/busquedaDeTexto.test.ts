@@ -180,10 +180,11 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB",
 	 * interpolación, un comentario o un `COLLATE` por medio, la forma de función (`like(patron, x)`).
 	 *
 	 * Es conservador a propósito: un patrón fijo con `$`, `+`, comillas dobles o acento grave también
-	 * salta, y hay que escribirlo de otra forma.
+	 * salta, y hay que escribirlo de otra forma. El `$` es el final del texto, no el de la línea: un
+	 * `||` en la línea siguiente sigue siendo una concatenación.
 	 */
 	const PATRON_DE_FUERA =
-		/\b(?:LIKE|GLOB)\b(?!\s+'(?:[^'$"`+]|'')*'(?!')\s*(?:$|[),;]|(?:THEN|AND|OR|ESCAPE|END|ELSE|WHEN|GROUP|ORDER|LIMIT)\b))/gim;
+		/\b(?:LIKE|GLOB)\b(?!\s+'(?:[^'$"`+]|'')*'(?!')\s*(?:$|[),;]|(?:THEN|AND|OR|ESCAPE|END|ELSE|WHEN|GROUP|ORDER|LIMIT)\b))/gi;
 
 	it("lee el fuente de verdad", () => {
 		expect(Object.keys(fuentes).length).toBeGreaterThan(40);
@@ -208,6 +209,8 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB",
 		expect(caza("WHERE x GLOB '*' /* búsqueda */ || ?1")).toBe(1);
 		expect(caza("WHERE x LIKE/**/?1")).toBe(1);
 		expect(caza("WHERE x LIKE '%' COLLATE NOCASE || ?1")).toBe(1);
+		expect(caza("WHERE x LIKE '%'\n || ?1")).toBe(1);
+		expect(caza("WHERE x GLOB '*'\n || ?1")).toBe(1);
 		expect(caza("WHERE x LIKE 'it''s%'")).toBe(0);
 		expect(caza("WHERE x LIKE 'it''s%' AND y = 1")).toBe(0);
 		expect(caza("WHERE x LIKE '%a\\_b%' ESCAPE '\\'")).toBe(0);
