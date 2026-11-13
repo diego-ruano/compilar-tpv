@@ -2075,8 +2075,10 @@ CREATE TABLE IF NOT EXISTS _Jobs_State (
 
 -- Lo vendido de un día, ya sumado: una fila por producto y nombre de línea. `ID_Producto` y
 -- `Nombre_Producto` son los de la línea de comanda (el segundo, su copia del nombre al vender), y
--- una línea sin producto va con `ID_Producto` NULL. `Unidades` es la suma de sus cantidades. El
--- nombre del catálogo, la categoría y si es vendible se miran al leer.
+-- una línea sin producto va con `ID_Producto` NULL. `Milesimas` es la suma de sus cantidades en
+-- milésimas enteras: las cantidades se guardan redondeadas a milésimas (RI-26), así que la suma de
+-- los días es exacta y no depende del orden en que se sume, como pasaría sumando REAL. El nombre
+-- del catálogo, la categoría y si es vendible se miran al leer.
 --
 -- Una línea cobrada en varias veces cuenta UNA vez, el día de su ÚLTIMO cobro activo: los rangos
 -- de las estadísticas acaban ahora, así que una línea entra en uno si tiene un cobro dentro, que es
@@ -2088,7 +2090,7 @@ CREATE TABLE IF NOT EXISTS _Estad_Producto_Dia (
     Dia TEXT NOT NULL,
     ID_Producto TEXT,
     Nombre_Producto TEXT,
-    Unidades REAL NOT NULL
+    Milesimas INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_estad_producto_dia

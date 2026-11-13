@@ -43,7 +43,7 @@ pub(crate) const SELECT_MESA_DIA: &str =
 const UN_DIA: &str = "WITH dias(Dia) AS (SELECT ?1)";
 
 /// Las columnas de cada tabla, en el orden en que las devuelve su sentencia.
-const COLUMNAS_PRODUCTO: &str = "Dia, ID_Producto, Nombre_Producto, Unidades";
+const COLUMNAS_PRODUCTO: &str = "Dia, ID_Producto, Nombre_Producto, Milesimas";
 const COLUMNAS_MESA: &str = "Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo";
 
 static INSERTAR_PRODUCTO_DIA: LazyLock<String> = LazyLock::new(|| {
@@ -55,8 +55,7 @@ static INSERTAR_MESA_DIA: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// Cuántas filas distinguen lo guardado de un día de lo que sale de los cobros: las que sobran,
-/// las que faltan y las repetidas. Las unidades se comparan a la millonésima: son sumas de
-/// cantidades con decimales, y el mismo dato sumado en otro orden difiere en el último bit.
+/// las que faltan y las repetidas. Todo es exacto: las unidades van en milésimas enteras.
 fn sql_diferencias(tabla: &str, columnas: &str, calculado: &str) -> String {
     // Las dos van materializadas: lo que sale de los cobros se calcula una vez y se lee tres.
     format!(
@@ -74,7 +73,7 @@ fn sql_diferencias(tabla: &str, columnas: &str, calculado: &str) -> String {
 static DIFERENCIAS_PRODUCTO: LazyLock<String> = LazyLock::new(|| {
     sql_diferencias(
         "_Estad_Producto_Dia",
-        "ID_Producto, Nombre_Producto, ROUND(Unidades, 6)",
+        "ID_Producto, Nombre_Producto, Milesimas",
         SELECT_PRODUCTO_DIA,
     )
 });
@@ -655,13 +654,13 @@ mod tests {
         }
         assert!(sucios(&db).await.is_empty(), "rehacer un día le quita la marca");
 
-        let productos = "SELECT Dia, ID_Producto, Unidades FROM _Estad_Producto_Dia ORDER BY Dia, ID_Producto;";
+        let productos = "SELECT Dia, ID_Producto, Milesimas FROM _Estad_Producto_Dia ORDER BY Dia, ID_Producto;";
         let t = |s: &str| Value::Text(s.to_string());
         assert_eq!(
             filas(&db, productos).await,
             [
-                vec![t("2026-03-02"), t("vino"), Value::Real(1.0)],
-                vec![t("2026-03-05"), t("agua"), Value::Real(2.0)],
+                vec![t("2026-03-02"), t("vino"), Value::Integer(1000)],
+                vec![t("2026-03-05"), t("agua"), Value::Integer(2000)],
             ]
         );
         // La comanda cuenta en los dos días, y sólo en el último para el mes y para el rango.
@@ -685,8 +684,8 @@ mod tests {
         assert_eq!(
             filas(&db, productos).await,
             [
-                vec![t("2026-03-02"), t("agua"), Value::Real(2.0)],
-                vec![t("2026-03-02"), t("vino"), Value::Real(1.0)],
+                vec![t("2026-03-02"), t("agua"), Value::Integer(2000)],
+                vec![t("2026-03-02"), t("vino"), Value::Integer(1000)],
             ]
         );
         assert_eq!(filas(&db, mesas).await, [vec![t("2026-03-02"), t("m1"), n(300), n(1), n(1), n(1)]]);
@@ -788,7 +787,7 @@ mod tests {
 
         // Un cambio que no deja marca (lo que haría un trigger que faltara): cada uno estropea
         // una cosa distinta del resumen.
-        ejecutar(&db, "UPDATE _Estad_Producto_Dia SET Unidades = Unidades + 1 WHERE Dia = date('now','localtime','-1 day');").await;
+        ejecutar(&db, "UPDATE _Estad_Producto_Dia SET Milesimas = Milesimas + 1 WHERE Dia = date('now','localtime','-1 day');").await;
         ejecutar(&db, "DELETE FROM _Estad_Mesa_Dia WHERE Dia = date('now','localtime','-3 days');").await;
         ejecutar(&db, "INSERT INTO _Estad_Producto_Dia VALUES ('2020-05-05', 'agua', 'Agua', 3);").await;
 

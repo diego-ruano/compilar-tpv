@@ -412,16 +412,16 @@ export function sqlProductos(range: StatsRange): string {
 			-- las lineas de un producto con un mismo nombre, y cada linea esta en el dia de su ultimo
 			-- cobro, asi que la que se cobro ayer y otra vez hoy no sale aqui sino abajo. Los sucios,
 			-- de los cobros.
-			SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Unidades AS Cantidad
+			SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Milesimas AS Milesimas
 			FROM _Estad_Producto_Dia e
 			JOIN rng ON 1=1
 			WHERE e.Dia >= date(rng.start_dt)
 				AND e.Dia <  date(rng.hoy_dt)
 				AND e.Dia NOT IN (SELECT Dia FROM dias)
 			UNION ALL
-			SELECT ID_Producto, Nombre_Producto, Unidades FROM sucios
+			SELECT ID_Producto, Nombre_Producto, Milesimas FROM sucios
 			UNION ALL
-			SELECT dc.ID_Producto, dc.Nombre_Producto, COALESCE(dc.Cantidad,1)
+			SELECT dc.ID_Producto, dc.Nombre_Producto, CAST(ROUND(COALESCE(dc.Cantidad,1) * 1000) AS INTEGER)
 			FROM paid_det cobrada
 			JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
 		),
@@ -432,13 +432,14 @@ export function sqlProductos(range: StatsRange): string {
 			-- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
 			-- producto y la de las que no. Si hay lineas con producto, su ID es la clave.
 			-- nombre_linea es el de la linea que elige SQLite al agrupar, sin MIN ni MAX que se lo
-			-- cambien: el que se ensena cuando el producto ya no esta en el catalogo.
+			-- cambien: el que se ensena cuando el producto ya no esta en el catalogo. Las cantidades
+			-- se suman en milesimas enteras, exactas, y vuelven a unidades al final.
 			SELECT
 				COALESCE(l.ID_Producto, l.Nombre_Producto) AS clave,
 				l.Nombre_Producto AS nombre_linea,
-				SUM(l.Cantidad) AS suma,
-				SUM(CASE WHEN l.ID_Producto IS NOT NULL THEN l.Cantidad END) AS suma_con_producto,
-				SUM(CASE WHEN l.ID_Producto IS NULL THEN l.Cantidad END) AS suma_sin_producto
+				SUM(l.Milesimas) / 1000.0 AS suma,
+				SUM(CASE WHEN l.ID_Producto IS NOT NULL THEN l.Milesimas END) / 1000.0 AS suma_con_producto,
+				SUM(CASE WHEN l.ID_Producto IS NULL THEN l.Milesimas END) / 1000.0 AS suma_sin_producto
 			FROM lineas l
 			GROUP BY COALESCE(l.ID_Producto, l.Nombre_Producto)
 		)

@@ -120,7 +120,7 @@ CREATE TABLE _Backfill_Historico ( Tabla TEXT NOT NULL PRIMARY KEY, Orden INTEGE
 CREATE TABLE _Cobros_Pendientes ( ID_Pago TEXT PRIMARY KEY NOT NULL, Datos_Json TEXT NOT NULL CHECK (json_valid(Datos_Json)) );
 CREATE TABLE _Estad_Dias_Sucios ( Dia TEXT NOT NULL PRIMARY KEY ) WITHOUT ROWID;
 CREATE TABLE _Estad_Mesa_Dia ( Dia TEXT NOT NULL, ID_Mesa TEXT NOT NULL, Importe INTEGER NOT NULL CHECK (typeof(Importe) IN ('integer','null')), Comandas INTEGER NOT NULL, Comandas_Ultimo_Mes INTEGER NOT NULL, Comandas_Ultimo INTEGER NOT NULL, PRIMARY KEY (Dia, ID_Mesa) ) WITHOUT ROWID;
-CREATE TABLE _Estad_Producto_Dia ( Dia TEXT NOT NULL, ID_Producto TEXT, Nombre_Producto TEXT, Unidades REAL NOT NULL );
+CREATE TABLE _Estad_Producto_Dia ( Dia TEXT NOT NULL, ID_Producto TEXT, Nombre_Producto TEXT, Milesimas INTEGER NOT NULL );
 CREATE TABLE _Jobs_State ( Nombre TEXT NOT NULL PRIMARY KEY, Last_Run_Ms INTEGER, Last_Ok_Ms INTEGER, Last_Error TEXT, Fallos INTEGER NOT NULL DEFAULT 0 );
 CREATE TABLE _Negocio ( Id INTEGER PRIMARY KEY CHECK (Id = 1), ID_Negocio TEXT NOT NULL CHECK (length(ID_Negocio) > 0) );
 CREATE TABLE _Recovery_State ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Reconciliation_Pending INTEGER NOT NULL DEFAULT 0 );

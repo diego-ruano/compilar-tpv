@@ -177,7 +177,7 @@ describe("las estadísticas leen del resumen diario y dan lo mismo que recorrien
 			expect(await contrastarUnDia(db, ayer)).toBeNull();
 
 			// Lo que haría un cambio sin su trigger: el resumen de ayer deja de valer sin que nadie lo apunte.
-			sql.exec(`UPDATE _Estad_Producto_Dia SET Unidades = Unidades + 1 WHERE Dia = ${ayer};`);
+			sql.exec(`UPDATE _Estad_Producto_Dia SET Milesimas = Milesimas + 1 WHERE Dia = ${ayer};`);
 			const dia = sql.exec(`SELECT ${ayer} AS d;`).one().d;
 			expect(await coincideElDia(db, dia)).toBe(false);
 			expect(await contrastarUnDia(db, ayer)).toBe(dia);

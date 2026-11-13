@@ -48,7 +48,7 @@ export const SELECT_MESA_DIA = sinComentarios(selectMesaDia);
 const UN_DIA = "WITH dias(Dia) AS (SELECT ?1)";
 
 /** Las columnas de cada tabla, en el orden en que las devuelve su sentencia. */
-const COLUMNAS_PRODUCTO = "Dia, ID_Producto, Nombre_Producto, Unidades";
+const COLUMNAS_PRODUCTO = "Dia, ID_Producto, Nombre_Producto, Milesimas";
 const COLUMNAS_MESA = "Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo";
 
 type Sentencia = { sql: string; args: unknown[] };
@@ -76,8 +76,7 @@ export async function recalcularDia(db: Client, dia: string): Promise<void> {
 
 /**
  * Cuántas filas distinguen lo guardado de un día de lo que sale de los cobros: las que sobran, las
- * que faltan y las repetidas. Las unidades se comparan a la millonésima: son sumas de cantidades
- * con decimales, y el mismo dato sumado en otro orden difiere en el último bit.
+ * que faltan y las repetidas. Todo es exacto: las unidades van en milésimas enteras.
  */
 function sqlDiferencias(tabla: string, columnas: string, calculado: string): string {
 	// Las dos van materializadas: lo que sale de los cobros se calcula una vez y se lee tres.
@@ -92,7 +91,7 @@ function sqlDiferencias(tabla: string, columnas: string, calculado: string): str
 
 const DIFERENCIAS_PRODUCTO = sqlDiferencias(
 	"_Estad_Producto_Dia",
-	"ID_Producto, Nombre_Producto, ROUND(Unidades, 6)",
+	"ID_Producto, Nombre_Producto, Milesimas",
 	SELECT_PRODUCTO_DIA,
 );
 

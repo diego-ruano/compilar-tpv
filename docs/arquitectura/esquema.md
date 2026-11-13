@@ -186,6 +186,10 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
   contar si tiene otro cobro dentro del rango: la lectura de hoy mira las líneas y las comandas con
   un cobro desde el principio de hoy, también los posteriores a ahora, y cuenta las que tienen uno
   dentro del rango.
+- **Las unidades van en milésimas enteras** (`_Estad_Producto_Dia.Milesimas`; las cantidades se
+  guardan redondeadas a milésimas, RI-26), también lo de hoy y lo que se lee de los cobros: sumadas
+  por días y después por rango dan lo mismo que de una vez. Sumando `REAL` no pasa: el mismo 1,5
+  sale 1,4999999999999998 según cómo se agrupe, y redondea a una unidad menos.
 - **Tras restaurar la base se vacía**: `bootstrap_restaurar` y la copia que se va a instalar
   (`prepare_restore`) borran el resumen y apuntan como sucios todos los días con cobros
   (`estadisticas_diarias::reiniciar`).

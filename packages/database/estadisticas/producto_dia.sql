@@ -9,7 +9,8 @@
 -- Una línea cuenta el día de su ÚLTIMO cobro activo: tiene un cobro activo ese día y ninguno en un
 -- día posterior. Cobrada dos veces el mismo día, entra una vez (GROUP BY). Sólo cobros ACTIVOS: un
 -- ticket anulado no es una venta (CUENTA-07). Una devolución de parte de un cobro no resta
--- unidades: no pasa por Pago_Detalles.
+-- unidades: no pasa por Pago_Detalles. Las cantidades se suman en milésimas enteras: sumando
+-- REAL, el mismo 1,5 sale 1,4999999999999998 según cómo se agrupe, y redondea a otra unidad.
 --
 -- El `+` de `+p2.Estado` es el de `v_lineas_cobradas` (RI-02): que los demás cobros de la línea se
 -- busquen por la línea y no recorriendo todos los cobros activos.
@@ -17,7 +18,7 @@ SELECT
   cobrada.Dia AS Dia,
   dc.ID_Producto AS ID_Producto,
   dc.Nombre_Producto AS Nombre_Producto,
-  SUM(COALESCE(dc.Cantidad, 1)) AS Unidades
+  SUM(CAST(ROUND(COALESCE(dc.Cantidad, 1) * 1000) AS INTEGER)) AS Milesimas
 FROM (
   SELECT d.Dia AS Dia, pd.ID_Detalle AS ID_Detalle
   FROM dias d
