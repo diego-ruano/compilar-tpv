@@ -1,0 +1,11 @@
+{
+  "Tarea_Asignaciones": [
+    {
+      "Estado": "PENDIENTE",
+      "ID_Tarea": "tarea-1",
+      "N": 120,
+      "Primero": "trab-001",
+      "Ultimo": "trab-120"
+    }
+  ]
+}

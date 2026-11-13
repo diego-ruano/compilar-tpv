@@ -149,9 +149,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, unos 2 MB por valor (uno de
   3 MB se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
-  `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
-  `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
-  [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
+  `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
+  de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
+  más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo
+  comprueban `test/sondaSqliteDo.test.ts` (el límite), los casos de contrato de 120 elementos
+  (`*_120_*`) y `test/listasEnUnParametro.test.ts`, que lee el fuente y falla si una sentencia
+  vuelve a componer un `?` por elemento.
 - **Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`**: un
   patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
   patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra

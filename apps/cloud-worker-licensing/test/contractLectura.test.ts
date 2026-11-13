@@ -176,6 +176,8 @@ import goldenVrBuscar from "../../../tests/contract/lecturas/golden/venta_rapida
 import casoVrVerTicket from "../../../tests/contract/lecturas/casos/venta_rapida/detalles_ver_ticket.json";
 import goldenVrVerTicket from "../../../tests/contract/lecturas/golden/venta_rapida/detalles_ver_ticket.json";
 import casoVrIndexRows from "../../../tests/contract/lecturas/casos/venta_rapida/index_rows.json";
+import casoVrIndexRows120 from "../../../tests/contract/lecturas/casos/venta_rapida/index_rows_120_tickets.json";
+import goldenVrIndexRows120 from "../../../tests/contract/lecturas/golden/venta_rapida/index_rows_120_tickets.json";
 import goldenVrIndexRows from "../../../tests/contract/lecturas/golden/venta_rapida/index_rows.json";
 
 import casoCfgBusiness from "../../../tests/contract/lecturas/casos/configuracion/business.json";
@@ -346,6 +348,7 @@ const CASOS = [
 		golden: goldenVrVerTicket,
 	},
 	{ nombre: "venta_rapida_index_rows", caso: casoVrIndexRows, golden: goldenVrIndexRows },
+	{ nombre: "venta_rapida_index_rows_120_tickets", caso: casoVrIndexRows120, golden: goldenVrIndexRows120 },
 	{ nombre: "configuracion_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
 	{ nombre: "configuracion_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
 	{ nombre: "configuracion_contact", caso: casoCfgContact, golden: goldenCfgContact },

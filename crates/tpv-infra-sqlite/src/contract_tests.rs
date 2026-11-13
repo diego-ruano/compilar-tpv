@@ -282,6 +282,7 @@ macro_rules! casos_de_contrato {
 casos_de_contrato! {
     venta_rapida__cobro_fraccionado_un_lote,
     venta_rapida__cobro_fraccionado_fefo_multilote,
+    venta_rapida__cobro_fraccionado_120_lineas,
     mesas__cobrar_detalles_un_lote,
     mesas__cobrar_detalles_con_cliente,
     mesas__cobrar_detalles_lote_y_suelto,
@@ -292,6 +293,7 @@ casos_de_contrato! {
     tareas__crear,
     tareas__actualizar,
     tareas__set_asignaciones,
+    tareas__set_asignaciones_120,
     tareas__eliminar,
     tareas__restaurar,
     tareas__vaciar_papelera,
@@ -334,6 +336,7 @@ casos_de_contrato! {
     venta_rapida__delete_comanda_if_safe,
     mesas__save_layout,
     mesas__save_layout_archiva,
+    mesas__save_layout_120_mesas,
     mesas__set_reserva_estado,
     mesas__abrir_comanda,
     mesas__set_trabajador_if_null,

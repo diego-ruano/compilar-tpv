@@ -47,15 +47,17 @@ function assignmentSteps(idTarea: string | typeof REF_ID_TAREA, idsRaw: string[]
 		return steps;
 	}
 
-	const placeholders = ids.map((_, i) => `?${i + 2}`).join(", ");
+	// DO-01: los asignados que se quedan, en un solo parámetro (un array JSON): esta sentencia se
+	// replica y el SQLite del DO admite 100 parámetros por sentencia. Igual que la Main
+	// (`apply_set_asignaciones_core`).
 	steps.push({
 		kind: "execute",
 		sql: `
 			DELETE FROM Tarea_Asignaciones
 			WHERE ID_Tarea = ?1
-				AND ID_Trabajador NOT IN (${placeholders});
+				AND ID_Trabajador NOT IN (SELECT value FROM json_each(?2));
 		`,
-		args: [idTarea, ...ids],
+		args: [idTarea, JSON.stringify(ids)],
 	});
 
 	// TAR-02 (semántica decidida): `INSERT OR IGNORE` es intencional. Un trabajador que ya finalizó

@@ -1,0 +1,43 @@
+{
+  "descripcion": "DO-01: una tarea asignada a 120 trabajadores. El DELETE de los que dejan de estar asignados ponía un parámetro por asignado, y con más de 99 la nube rechazaba la sentencia. La lista va en un solo parámetro (un array JSON). Parte de trab-121 asignado: se borra y entran los 120 nuevos, PENDIENTE.",
+  "comando": "tareas.set_asignaciones",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 121) INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) SELECT 'user-' || substr('000' || i, -3), 'rol-1', 'u' || i || '@x.com', 'h', 'U' || i FROM n;",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 121) INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) SELECT 'trab-' || substr('000' || i, -3), 'user-' || substr('000' || i, -3) FROM n;",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea-1', 'T', '2026-01-01 00:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-1', 'trab-121', '2026-01-01 00:00:00', 'PENDIENTE');"
+  ],
+  "entrada": {
+    "id_tarea": "tarea-1",
+    "ids_trabajadores": [
+      "trab-001", "trab-002", "trab-003", "trab-004", "trab-005",
+      "trab-006", "trab-007", "trab-008", "trab-009", "trab-010",
+      "trab-011", "trab-012", "trab-013", "trab-014", "trab-015",
+      "trab-016", "trab-017", "trab-018", "trab-019", "trab-020",
+      "trab-021", "trab-022", "trab-023", "trab-024", "trab-025",
+      "trab-026", "trab-027", "trab-028", "trab-029", "trab-030",
+      "trab-031", "trab-032", "trab-033", "trab-034", "trab-035",
+      "trab-036", "trab-037", "trab-038", "trab-039", "trab-040",
+      "trab-041", "trab-042", "trab-043", "trab-044", "trab-045",
+      "trab-046", "trab-047", "trab-048", "trab-049", "trab-050",
+      "trab-051", "trab-052", "trab-053", "trab-054", "trab-055",
+      "trab-056", "trab-057", "trab-058", "trab-059", "trab-060",
+      "trab-061", "trab-062", "trab-063", "trab-064", "trab-065",
+      "trab-066", "trab-067", "trab-068", "trab-069", "trab-070",
+      "trab-071", "trab-072", "trab-073", "trab-074", "trab-075",
+      "trab-076", "trab-077", "trab-078", "trab-079", "trab-080",
+      "trab-081", "trab-082", "trab-083", "trab-084", "trab-085",
+      "trab-086", "trab-087", "trab-088", "trab-089", "trab-090",
+      "trab-091", "trab-092", "trab-093", "trab-094", "trab-095",
+      "trab-096", "trab-097", "trab-098", "trab-099", "trab-100",
+      "trab-101", "trab-102", "trab-103", "trab-104", "trab-105",
+      "trab-106", "trab-107", "trab-108", "trab-109", "trab-110",
+      "trab-111", "trab-112", "trab-113", "trab-114", "trab-115",
+      "trab-116", "trab-117", "trab-118", "trab-119", "trab-120"
+    ]
+  },
+  "snapshot": {
+    "Tarea_Asignaciones": "SELECT ID_Tarea, Estado, COUNT(*) AS N, MIN(ID_Trabajador) AS Primero, MAX(ID_Trabajador) AS Ultimo FROM Tarea_Asignaciones GROUP BY ID_Tarea"
+  }
+}

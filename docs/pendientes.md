@@ -312,27 +312,6 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
 
-### DO-01 · Listas de IDs con un parámetro por elemento
-
-El SQLite del DO admite 100 parámetros por sentencia ([worker.md](arquitectura/worker.md)). En el
-worker quedan sentencias que ponen un `?` por elemento de una lista:
-
-- «Ver tickets» de la venta rápida (`venta_rapida.queries.ts::indexRows`) manda **todos los tickets
-  del día**, así que un bar con más de 100 se queda sin esa pantalla en la Handy.
-- El plan del cobro de barra (`venta_rapida.queries.ts::cobrarPlan`): un ticket de más de 99 líneas.
-- Guardar el plano desde la Handy (`mesas.commands.ts::saveLayout`, el `NOT IN` de zonas y de mesas
-  y el `IN` de zonas): un plano con más de 100 zonas o una zona con más de 98 mesas.
-- Las asignaciones de una tarea (`tareas.commands.ts`, `tareas.queries.ts`): más de 99 asignados.
-
-Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, con su
-caso en el arnés de contrato, como el cobro de mesa (`mesas/cobrar_detalles_120_lineas`). Así no hace
-falta ningún tope de mesas.
-
-Lo que sube la Main ya va así, y `WriteGuard` revienta en desarrollo ante una sentencia que la nube
-no admitiría ([sincronizacion.md](arquitectura/sincronizacion.md#escritor-único-y-captura)). Las
-lecturas de la Main que todavía ponen un `?` por elemento (`venta_rapida.rs`,
-`pedidos_proveedor.rs`) van contra su SQLite local y no se replican: no les afecta.
-
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
 `/v1/sync/bootstrap` baja la fase 1 en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de
