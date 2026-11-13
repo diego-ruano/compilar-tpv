@@ -1,5 +1,5 @@
 {
-  "descripcion": "Lo mas y lo menos vendido de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer la cuenta: una linea cobrada en dos dias (cuenta una vez), otra cobrada fuera de la semana y otra vez dentro (cuenta), otra cobrada dentro y otra vez hoy (cuenta una vez), una linea en dos cobros del mismo dia, un cobro anulado y una linea anulada y vuelta a cobrar, cantidades con decimales repartidas en varios dias (0,5 + 0,25 + 0,25 = 1; 2 + 1,5 + 1 = 4,5, que redondea a 5), una linea a 0, un producto archivado, una categoria no vendible, lineas sin producto (salen con su nombre), una linea sin producto cuyo nombre es el ID de un producto (comparte clave con el sin ser suya), un producto sin ventas (el peor) y empates que desempata el nombre del catalogo. Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
+  "descripcion": "Lo mas y lo menos vendido de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer la cuenta: una linea cobrada en dos dias (cuenta una vez), otra cobrada fuera de la semana y otra vez dentro (cuenta), otra cobrada dentro y otra vez hoy (cuenta una vez), una linea en dos cobros del mismo dia, un cobro anulado y una linea anulada y vuelta a cobrar, cantidades con decimales repartidas en varios dias (0,5 + 0,25 + 0,25 = 1; 2 + 1,5 + 1 = 4,5, que redondea a 5), una linea a 0, un producto archivado, una categoria no vendible, lineas sin producto (salen con su nombre), una linea sin producto cuyo nombre es el ID de un producto (comparte clave con el sin ser suya), un producto sin ventas (el peor) y empates que desempata el nombre del catalogo. Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. La ultima tanda de `cambios` cobra con fecha posterior a ahora (un reloj adelantado) lineas que tienen otro cobro dentro del rango: siguen contando, y una sola vez. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
   "lectura": "stats.productos",
   "seed": [
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-enc', '00000000-0000-7000-8000-000000000002', 'enc@bar.com', 'h', 'Eva');",
@@ -154,6 +154,13 @@
     [
       "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-29', 'com-7', 'p-vino', 'Vino', 8, 100);",
       "UPDATE Detalle_Comanda SET Cantidad = 9 WHERE ID_Detalle = 'det-29';"
+    ],
+    [
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-futuro', 'com-8', datetime('now','localtime','+1 day'), 'Efectivo', 100, 'parcial');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-futuro', 'det-20');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-futuro-2', 'com-12', datetime('now','localtime','+2 hours'), 'Efectivo', 10, 'parcial');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-futuro-2', 'det-28');",
+      "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-futuro-2', 'det-27');"
     ]
   ]
 }

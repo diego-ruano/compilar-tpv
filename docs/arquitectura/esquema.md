@@ -181,9 +181,11 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
 - **Un día por línea, el de su último cobro activo**: los rangos acaban ahora, así que una línea (o
   una comanda) entra en uno si tiene un cobro dentro, que es lo mismo que su último cobro caiga
   dentro. Por eso cobrar otra parte de una línea, o anular un cobro, apunta también los días de los
-  demás cobros de la línea y de la comanda. La única diferencia con recorrer los cobros es un cobro
-  fechado después de «ahora» (el de un reloj adelantado): su línea o su comanda no entra en el rango
-  aunque tenga otro cobro dentro, y vuelve a entrar en cuanto la hora de quien lee lo alcanza.
+  demás cobros de la línea y de la comanda. Un cobro fechado después de «ahora» (el de un reloj
+  adelantado) saca a su línea o a su comanda del día que era su último, y lo de hoy la vuelve a
+  contar si tiene otro cobro dentro del rango: la lectura de hoy mira las líneas y las comandas con
+  un cobro desde el principio de hoy, también los posteriores a ahora, y cuenta las que tienen uno
+  dentro del rango.
 - **Tras restaurar la base se vacía**: `bootstrap_restaurar` y la copia que se va a instalar
   (`prepare_restore`) borran el resumen y apuntan como sucios todos los días con cobros
   (`estadisticas_diarias::reiniciar`).

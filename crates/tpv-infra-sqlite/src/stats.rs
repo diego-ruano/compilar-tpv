@@ -133,7 +133,10 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
 {select_producto_dia}
         ),
         paid_det AS (
-          -- Las líneas cobradas HOY, hasta ahora.
+          -- Las líneas cuyo último cobro es de hoy o posterior, que el resumen no tiene en ningún
+          -- día: entran si tienen un cobro dentro del rango, hoy hasta ahora o antes de hoy. Uno
+          -- fechado después de ahora (un reloj adelantado) no cuenta, pero tampoco saca del rango a
+          -- la línea que tiene otro dentro.
           -- STAT-07: cada línea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una línea
           -- cobrada en dos veces saldría dos veces y sus unidades se contarían dobles.
           -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
@@ -144,8 +147,18 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           JOIN rng ON 1=1
           WHERE p.Estado = 'ACTIVO'
             AND p.Fecha_Hora >= rng.hoy_dt
-            AND p.Fecha_Hora <  rng.end_dt
           GROUP BY pd.ID_Detalle
+          HAVING MIN(p.Fecha_Hora) < MIN(rng.end_dt)
+            OR EXISTS (
+              SELECT 1
+              FROM Pago_Detalles pd2
+              JOIN Pagos p2 ON p2.ID_Pago = pd2.ID_Pago
+              JOIN rng r2 ON 1=1
+              WHERE pd2.ID_Detalle = pd.ID_Detalle
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.Fecha_Hora >= r2.start_dt
+                AND p2.Fecha_Hora <  r2.hoy_dt
+            )
         ),
         lineas AS (
           -- Los días del rango anteriores a hoy, del resumen: cada fila es lo que sumaron ese día
@@ -260,7 +273,9 @@ const DIAS_SUCIOS_DEL_RANGO: &str = "dias AS (
 /// y tres recuentos de comandas, porque una comanda cobrada en dos días no puede contarse dos
 /// veces: `comandas` son las de ese día, `comandas_mes` las que tienen ese día su último cobro del
 /// mes y `comandas_rango` las que lo tienen de siempre (ver la tabla en `0001_inicial.sql`). Hoy
-/// las tres son lo mismo: es el último día del rango y de su mes.
+/// las tres son lo mismo: es el último día del rango y de su mes. Y va una fila más por mesa, sin
+/// importe, con las comandas que el resumen ya no cuenta en su día porque tienen un cobro fechado
+/// después de ahora: sólo suman a los dos recuentos de comandas distintas.
 ///
 /// Una devolución de parte de un cobro (`ID_Pago_Origen`) resta de lo cobrado el día que se
 /// devuelve, pero no cuenta como comanda: no es un cobro. La venta rápida no tiene mesa.
@@ -304,6 +319,50 @@ fn sql_cobros_por_mesa_y_dia(range: StatsRange) -> String {
             AND p.Fecha_Hora <  rng.end_dt
             AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
             AND c.ID_Mesa IS NOT NULL
+          GROUP BY c.ID_Mesa
+          UNION ALL
+          -- Las comandas con un cobro dentro del rango antes de hoy, ninguno hoy hasta ahora y otro
+          -- fechado después de ahora (un reloj adelantado): el resumen no las cuenta en el que era
+          -- su último día, porque ya no lo es, y lo de hoy tampoco. Sólo suman a los recuentos de
+          -- comandas distintas: no son un cobro de hoy (sin importe ni comandas del día).
+          SELECT
+            date(rng.hoy_dt),
+            c.ID_Mesa,
+            NULL,
+            0,
+            COUNT(DISTINCT CASE
+              WHEN p.Fecha_Hora < datetime(rng.hoy_dt, 'start of month', '+1 month') AND EXISTS (
+                SELECT 1 FROM Pagos p2
+                WHERE p2.ID_Comanda = p.ID_Comanda
+                  AND +p2.Estado = 'ACTIVO'
+                  AND p2.ID_Pago_Origen IS NULL
+                  AND p2.Fecha_Hora >= MAX(rng.start_dt, datetime(rng.hoy_dt, 'start of month'))
+                  AND p2.Fecha_Hora <  rng.hoy_dt
+              ) THEN p.ID_Comanda END),
+            COUNT(DISTINCT p.ID_Comanda)
+          FROM Pagos p
+          JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+          JOIN rng ON 1=1
+          WHERE p.Fecha_Hora >= rng.end_dt
+            AND p.Estado = 'ACTIVO'
+            AND p.ID_Pago_Origen IS NULL
+            AND c.ID_Mesa IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM Pagos p2
+              WHERE p2.ID_Comanda = p.ID_Comanda
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.ID_Pago_Origen IS NULL
+                AND p2.Fecha_Hora >= rng.start_dt
+                AND p2.Fecha_Hora <  rng.hoy_dt
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM Pagos p2
+              WHERE p2.ID_Comanda = p.ID_Comanda
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.ID_Pago_Origen IS NULL
+                AND p2.Fecha_Hora >= rng.hoy_dt
+                AND p2.Fecha_Hora <  rng.end_dt
+            )
           GROUP BY c.ID_Mesa
         )
         "#,
@@ -383,11 +442,16 @@ pub(crate) fn sql_mesas_servicios(range: StatsRange) -> String {
         StatsRange::Semana | StatsRange::Mes => ("strftime('%d/%m', d.dia)", "d.comandas"),
         StatsRange::Anio => ("strftime('%m/%Y', d.dia)", "d.comandas_mes"),
     };
+    // Por días, sólo los días con algún cobro: las filas sin importe son las de las comandas con un
+    // cobro fechado después de ahora, que no son de hoy (`sql_cobros_por_mesa_y_dia`). Por meses
+    // cuentan: su mes ya tiene cobros.
+    let con_cobros = if matches!(range, StatsRange::Anio) { "" } else { "WHERE d.importe IS NOT NULL" };
     format!(
         r#"{cobros}
         SELECT {tramo} AS b, SUM({recuento}) AS n
         FROM por_mesa_dia d
         JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+        {con_cobros}
         GROUP BY b
         ORDER BY b ASC;
         "#,

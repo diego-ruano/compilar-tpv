@@ -1,5 +1,5 @@
 {
-  "descripcion": "El resumen de mesas de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer el recuento: una comanda cobrada en dos dias (cuenta una vez en el rango), dos cobros de una comanda el mismo dia, una devolucion de parte de un cobro otro dia (resta y no es un cobro), un cobro anulado y otro anulado y vuelto a cobrar, una mesa archivada (sigue contando), la venta rapida (sin mesa, no cuenta), un cobro de hace ocho dias (fuera de la semana), un cobro de hoy, y empates: dos mesas con las mismas comandas (gana la de numero menor) y dos con los mismos ingresos (va antes la de numero menor). Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. `servicios` se omite: sus etiquetas son los dias del mes. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
+  "descripcion": "El resumen de mesas de la SEMANA, que lee del resumen diario los dias ya cerrados y de los cobros lo de hoy. La siembra lleva lo que puede torcer el recuento: una comanda cobrada en dos dias (cuenta una vez en el rango), dos cobros de una comanda el mismo dia, una devolucion de parte de un cobro otro dia (resta y no es un cobro), un cobro anulado y otro anulado y vuelto a cobrar, una mesa archivada (sigue contando), la venta rapida (sin mesa, no cuenta), un cobro de hace ocho dias (fuera de la semana), un cobro de hoy, y empates: dos mesas con las mismas comandas (gana la de numero menor) y dos con los mismos ingresos (va antes la de numero menor). Las fechas son relativas a hoy y todas caen dentro de la semana o claramente fuera, asi que el golden vale cualquier dia. `servicios` se omite: sus etiquetas son los dias del mes. La ultima tanda de `cambios` cobra con fecha posterior a ahora (un reloj adelantado) comandas que tienen otro cobro dentro del rango: siguen contando, y una sola vez. `cambios` no es del arnes de contrato: son las escrituras que aplican, una tanda detras de otra, los tests de equivalencia de cada lado (`tests_resumen_diario` en stats.rs, `statsResumenDiario.test.ts`), que comparan tras cada una la estadistica con la que recorre los cobros.",
   "lectura": "stats.mesas",
   "seed": [
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-enc', '00000000-0000-7000-8000-000000000002', 'enc@bar.com', 'h', 'Eva');",
@@ -90,6 +90,12 @@
     ],
     [
       "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = datetime('now','localtime'), Anulado_Por = 'u-enc', Motivo_Baja = 'ERROR' WHERE ID_Pago = 'p-c3-dev';"
+    ],
+    [
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c4-futuro', 'c4', datetime('now','localtime','+1 day'), 'Efectivo', 500, 'parcial');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c15-futuro', 'c15', datetime('now','localtime','+2 hours'), 'Efectivo', 500, 'parcial');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p-c11-futuro', 'c11', datetime('now','localtime','+1 day'), 'Efectivo', 300, 'parcial');",
+      "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('p-c5-futuro-dev', 'c5', datetime('now','localtime','+1 day'), 'Efectivo', -100, 'DEVOLUCION', 'p-c5', 'Plato frio');"
     ]
   ]
 }
