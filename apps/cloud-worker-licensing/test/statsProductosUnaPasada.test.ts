@@ -13,7 +13,9 @@
 // sobre la siembra del caso de contrato `stats/productos_vendidos`, que lleva lo que puede torcer
 // el resultado (empates, archivados, una categoría no vendible, cobros anulados y partidos,
 // productos borrados del catálogo, decimales) y ventas de otros días, para que la semana, el mes y
-// el año no sean lo mismo que hoy. La Main hace la misma comparación con su propia copia
+// el año no sean lo mismo que hoy. Y sobre la del caso `stats/productos_nombre_que_es_un_id`: una
+// línea sin producto cuyo nombre es el ID de un producto, que comparte clave con las de ese
+// producto sin ser suya. La Main hace la misma comparación con su propia copia
 // (`tests_productos_en_una_pasada` en `tpv-infra-sqlite/src/stats.rs`), y el arnés de lectura fija
 // que los dos lados dan lo mismo.
 
@@ -23,6 +25,7 @@ import { describe, expect, it } from "vitest";
 import type { ProductosStatsResponse } from "@tpv/contracts";
 
 import caso from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
+import casoNombreId from "../../../tests/contract/lecturas/casos/stats/productos_nombre_que_es_un_id.json";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
@@ -196,29 +199,54 @@ const RANGOS: StatsRange[] = ["hoy", "semana", "mes", "anio"];
 /** Sin filtro, en blanco (que es sin filtro), cada categoría, la no vendible y una que no existe. */
 const CATEGORIAS = [null, "  ", "cat-platos", "cat-bebidas", "cat-postres", "cat-materia", "cat-que-no-existe"];
 
-/** La base de un negocio en el SQLite de un Durable Object, con la siembra del caso de contrato. */
-async function conLaSiembra<R>(nombre: string, prueba: (db: Client, sql: any) => Promise<R>): Promise<R> {
+/** La base de un negocio en el SQLite de un Durable Object, con la siembra de un caso de contrato. */
+async function conLaSiembra<R>(
+	nombre: string,
+	prueba: (db: Client, sql: any) => Promise<R>,
+	siembra: string[] = caso.seed,
+): Promise<R> {
 	return enElHub(`stats-productos-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
-		for (const sentencia of caso.seed) sql.exec(sentencia);
+		for (const sentencia of siembra) sql.exec(sentencia);
 		return prueba(clienteSobre(sql) as unknown as Client, sql);
 	});
 }
 
+/** Lo de antes y lo de ahora, en los cuatro rangos y con cada pareja de filtros. */
+async function comparar(db: Client, siembra: string) {
+	for (const range of RANGOS) {
+		for (const top of CATEGORIAS) {
+			for (const worst of CATEGORIAS) {
+				const antes = await productosAntes(db, range, top, worst);
+				const ahora = await productos(db, range, top, worst);
+				expect(ahora, `${siembra}: ${range}, top ${top}, peores ${worst}`).toEqual(antes);
+			}
+		}
+	}
+}
+
 describe("la estadística de productos en una pasada", () => {
 	it("da lo mismo que las cuatro sentencias de antes, en todos los rangos y con cada filtro", async () => {
-		await conLaSiembra("equivalencia", async (db) => {
-			for (const range of RANGOS) {
-				for (const top of CATEGORIAS) {
-					for (const worst of CATEGORIAS) {
-						const antes = await productosAntes(db, range, top, worst);
-						const ahora = await productos(db, range, top, worst);
-						expect(ahora, `${range}, top ${top}, peores ${worst}`).toEqual(antes);
-					}
-				}
-			}
-		});
+		await conLaSiembra("equivalencia", (db) => comparar(db, "ventas"));
+		await conLaSiembra("equivalencia-nombre-id", (db) => comparar(db, "nombre que es un ID"), casoNombreId.seed);
+	});
+
+	it("una línea sin producto no es del producto cuyo ID lleva por nombre", async () => {
+		await conLaSiembra(
+			"nombre-id",
+			async (db) => {
+				// Sin filtro, lo de la clave va junto: P-7 son 2 del producto y 3 de la línea suelta.
+				// M-1 no es vendible: sólo queda su línea suelta.
+				const todo = await productos(db, "hoy", null, null);
+				expect(todo.top10_mejores).toEqual({ labels: ["M-1", "P-7", "Agua"], values: [6, 5, 1] });
+				// En «los peores» y en una categoría sólo cuentan las líneas del producto.
+				expect(todo.top10_peores).toEqual({ labels: ["Agua", "P-7"], values: [1, 2] });
+				const bebidas = await productos(db, "hoy", "cat-bebidas", "cat-bebidas");
+				expect(bebidas.top10_mejores).toEqual({ labels: ["P-7", "Agua"], values: [2, 1] });
+			},
+			casoNombreId.seed,
+		);
 	});
 
 	it("la siembra ejercita los empates, el corte y el orden de SQLite", async () => {

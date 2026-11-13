@@ -1,0 +1,26 @@
+{
+  "mejor_producto": "M-1",
+  "peor_producto_vendible": "Agua",
+  "top10_mejores": {
+    "labels": [
+      "M-1",
+      "P-7",
+      "Agua"
+    ],
+    "values": [
+      6,
+      5,
+      1
+    ]
+  },
+  "top10_peores": {
+    "labels": [
+      "Agua",
+      "P-7"
+    ],
+    "values": [
+      1,
+      2
+    ]
+  }
+}

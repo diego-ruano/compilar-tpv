@@ -327,6 +327,7 @@ lecturas_de_contrato! {
     stats__productos,
     stats__productos_vendidos,
     stats__productos_vendidos_por_categoria,
+    stats__productos_nombre_que_es_un_id,
     stats__reservas,
     stats__trabajadores,
     stats__clientes,

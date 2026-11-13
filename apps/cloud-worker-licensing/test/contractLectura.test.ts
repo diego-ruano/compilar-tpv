@@ -252,6 +252,8 @@ import casoStatsVendidos from "../../../tests/contract/lecturas/casos/stats/prod
 import goldenStatsVendidos from "../../../tests/contract/lecturas/golden/stats/productos_vendidos.json";
 import casoStatsVendidosCat from "../../../tests/contract/lecturas/casos/stats/productos_vendidos_por_categoria.json";
 import goldenStatsVendidosCat from "../../../tests/contract/lecturas/golden/stats/productos_vendidos_por_categoria.json";
+import casoStatsNombreId from "../../../tests/contract/lecturas/casos/stats/productos_nombre_que_es_un_id.json";
+import goldenStatsNombreId from "../../../tests/contract/lecturas/golden/stats/productos_nombre_que_es_un_id.json";
 import casoCtaEntradasComodines from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_comodines.json";
 import goldenCtaEntradasComodines from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_comodines.json";
 import casoCtaEntradasLargo from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_texto_largo.json";
@@ -385,6 +387,11 @@ const CASOS = [
 		nombre: "stats_productos_vendidos_por_categoria",
 		caso: casoStatsVendidosCat,
 		golden: goldenStatsVendidosCat,
+	},
+	{
+		nombre: "stats_productos_nombre_que_es_un_id",
+		caso: casoStatsNombreId,
+		golden: goldenStatsNombreId,
 	},
 	{ nombre: "stats_clientes", caso: casoStatsClientes, golden: goldenStatsClientes },
 	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },

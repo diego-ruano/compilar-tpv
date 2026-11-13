@@ -106,13 +106,14 @@ fn bucket_sql_reservas(range: StatsRange) -> &'static str {
 /// La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
 ///
 /// Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
-/// (`de_venta = 1`, una por producto, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
+/// (`de_venta = 1`, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
 /// mejor, el peor y los dos top 10 los saca `productos_impl` de ahí.
 ///
-/// Eran cuatro sentencias y cada una volvía a calcular `paid_det`; las dos de «el peor», además,
-/// partían del catálogo y recorrían todas las líneas de la historia de cada producto. La misma
-/// sentencia, en el worker: `sqlProductos` de `domains/stats/stats.queries.ts`, donde corre en el
-/// SQLite del Durable Object, que atiende a todo el negocio en un solo hilo.
+/// Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y
+/// las de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada
+/// producto. Así lo que tarda depende del rango pedido y no del histórico. La misma sentencia, en
+/// el worker: `sqlProductos` de `domains/stats/stats.queries.ts`, donde corre en el SQLite del
+/// Durable Object, que atiende a todo el negocio en un solo hilo.
 pub(crate) fn sql_productos(range: StatsRange) -> String {
     let (start_expr, end_expr) = range_bounds_sql(range);
     format!(
@@ -137,6 +138,9 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
         vendido AS (
           -- Se agrupa ANTES de mirar el catálogo: así el catálogo se consulta una vez por producto
           -- y no una por línea. La clave es el producto o, si la línea ya no lo tiene, su nombre.
+          -- Las líneas con producto y las que no lo tienen van en grupos distintos aunque la clave
+          -- coincida (un nombre que es justo el ID de un producto): sólo las primeras son de ese
+          -- producto del catálogo.
           SELECT
             COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
             dc.ID_Producto AS id_producto,
@@ -144,7 +148,7 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
             SUM(COALESCE(dc.Cantidad,1)) AS suma
           FROM paid_det cobrada
           JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
-          GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+          GROUP BY dc.ID_Producto IS NULL, COALESCE(dc.ID_Producto, dc.Nombre_Producto)
         )
         -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende (INV-05), y
         -- su venta del año pasado sigue siendo una venta. Con un INNER, esas líneas desaparecerían
@@ -159,7 +163,9 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           pr.ID_Producto AS id_producto,
           pr.ID_Categoria AS id_categoria,
           CAST(ROUND(v.suma,0) AS INTEGER) AS unidades,
-          v.suma > 0 AS con_ventas
+          v.suma > 0 AS con_ventas,
+          v.suma AS suma,
+          v.id_producto IS NOT NULL AS con_producto
         FROM vendido v
         LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
         LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
@@ -167,7 +173,7 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
         UNION ALL
         -- El catálogo vendible entero, a cero: el peor producto es justo el que no compra nadie, y
         -- ése no aparece en ninguna línea de comanda. Sus unidades se le ponen al leer el resultado.
-        SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0
+        SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 1
         FROM Productos pr
         JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
         WHERE COALESCE(cat.Vendible,1)=1
@@ -247,11 +253,18 @@ pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
     )
 }
 
-/// Una fila de `sql_productos`: un producto vendido en el rango o uno del catálogo vendible.
+/// Una fila de `sql_productos`: lo vendido de una clave en el rango, o un producto del catálogo
+/// vendible.
+#[derive(Clone)]
 struct FilaProducto {
+    clave: Option<String>,
     label: Option<String>,
+    /// El producto del catálogo, si la línea lo tiene y sigue ahí.
     id_producto: Option<String>,
     id_categoria: Option<String>,
+    /// Las líneas del grupo tienen producto (`ID_Producto`), esté o no en el catálogo.
+    con_producto: bool,
+    suma: f64,
     unidades: i64,
     con_ventas: bool,
 }
@@ -265,6 +278,43 @@ impl FilaProducto {
             Some(id) => self.id_categoria.as_deref() == Some(id),
         }
     }
+}
+
+/// `CAST(ROUND(x, 0) AS INTEGER)` de SQLite: la mitad, lejos del cero.
+fn redondeo_de_sqlite(x: f64) -> i64 {
+    (x + if x < 0.0 { -0.5 } else { 0.5 }) as i64
+}
+
+/// Lo vendido por clave, sin mirar si la línea tiene producto: así cuentan «los mejores» cuando no
+/// se filtra por categoría. Sólo cambia algo si el nombre de una línea sin producto es justo el ID
+/// de un producto vendido: las dos filas de esa clave se juntan en una, con el nombre y el sitio de
+/// la del producto. Conserva el orden por nombre que trae la sentencia.
+fn juntar_por_clave(vendidos: &[FilaProducto]) -> Vec<FilaProducto> {
+    let mut por_clave: HashMap<Option<&str>, Vec<&FilaProducto>> = HashMap::new();
+    for v in vendidos {
+        por_clave.entry(v.clave.as_deref()).or_default().push(v);
+    }
+    vendidos
+        .iter()
+        .filter_map(|v| {
+            let grupo = &por_clave[&v.clave.as_deref()];
+            if grupo.len() == 1 {
+                return Some(v.clone());
+            }
+            // De las dos filas se queda la del producto (o la primera, si ninguna lo es).
+            let elegida = grupo.iter().find(|g| g.con_producto).unwrap_or(&grupo[0]);
+            if !std::ptr::eq(*elegida, v) {
+                return None;
+            }
+            let suma: f64 = grupo.iter().map(|g| g.suma).sum();
+            Some(FilaProducto {
+                suma,
+                unidades: redondeo_de_sqlite(suma),
+                con_ventas: suma > 0.0,
+                ..v.clone()
+            })
+        })
+        .collect()
 }
 
 /// La categoría por la que se filtra una lista: ninguna si no llega o llega en blanco.
@@ -539,11 +589,14 @@ impl SqliteStatsRepository {
         while let Some(r) = rows.next().await.map_err(|e| e.to_string())? {
             let de_venta = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0) == 1;
             let fila = FilaProducto {
+                clave: v_string(r.get_value(1).map_err(|e| e.to_string())?),
                 label: v_string(r.get_value(2).map_err(|e| e.to_string())?),
                 id_producto: v_string(r.get_value(4).map_err(|e| e.to_string())?),
                 id_categoria: v_string(r.get_value(5).map_err(|e| e.to_string())?),
                 unidades: v_i64(r.get_value(6).map_err(|e| e.to_string())?).unwrap_or(0),
                 con_ventas: v_i64(r.get_value(7).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
+                suma: v_f64(r.get_value(8).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                con_producto: v_i64(r.get_value(9).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
             };
             if de_venta {
                 vendidos.push(fila);
@@ -552,25 +605,34 @@ impl SqliteStatsRepository {
             }
         }
 
-        // Las unidades de cada producto del catálogo; el que no se ha vendido no está y vale 0.
+        // Las unidades de cada producto del catálogo: las de sus líneas. El que no se ha vendido no
+        // está y vale 0.
         let unidades_de: HashMap<&str, i64> = vendidos
             .iter()
             .filter_map(|v| v.id_producto.as_deref().map(|id| (id, v.unidades)))
             .collect();
+        let por_clave = juntar_por_clave(&vendidos);
 
-        // «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin redondear); «los peores»
-        // salen del catálogo, con 0 lo que no ha comprado nadie. `sort_by_key` es estable: entre dos
-        // con las mismas unidades queda el orden por nombre que trae la sentencia.
+        // `sort_by_key` es estable: entre dos con las mismas unidades queda el orden por nombre que
+        // trae la sentencia. «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin
+        // redondear). Con un filtro de categoría entran las líneas de los productos de esa
+        // categoría; un producto que ya no está en el catálogo no tiene categoría y no entra en
+        // ninguna. Sin filtro entra todo lo vendido, junto por su clave.
         let mejores = |categoria: Option<&str>, limite: usize| -> Vec<(Option<String>, i64)> {
-            let mut out: Vec<(Option<String>, i64)> = vendidos
-                .iter()
-                .filter(|f| f.con_ventas && f.es_de(categoria))
+            let lista: Vec<&FilaProducto> = match categoria {
+                Some(_) => vendidos.iter().filter(|f| f.es_de(categoria)).collect(),
+                None => por_clave.iter().collect(),
+            };
+            let mut out: Vec<(Option<String>, i64)> = lista
+                .into_iter()
+                .filter(|f| f.con_ventas)
                 .map(|f| (f.label.clone(), f.unidades))
                 .collect();
             out.sort_by_key(|(_, unidades)| std::cmp::Reverse(*unidades));
             out.truncate(limite);
             out
         };
+        // «Los peores» salen del catálogo, con 0 lo que no ha comprado nadie.
         let peores = |categoria: Option<&str>, limite: usize| -> Vec<(Option<String>, i64)> {
             let mut out: Vec<(Option<String>, i64)> = catalogo
                 .iter()
@@ -1769,9 +1831,11 @@ mod tests_productos_en_una_pasada {
     //! La siembra es la del caso de contrato `stats/productos_vendidos`, que lleva lo que puede
     //! torcer el resultado (empates, archivados, una categoría no vendible, cobros anulados y
     //! partidos, productos borrados del catálogo, decimales) y ventas de otros días, para que la
-    //! semana, el mes y el año no sean lo mismo que hoy. El worker hace la misma comparación con
-    //! su propia copia (`test/statsProductosUnaPasada.test.ts`), y el arnés de lectura fija que los
-    //! dos lados dan lo mismo.
+    //! semana, el mes y el año no sean lo mismo que hoy. Y la del caso
+    //! `stats/productos_nombre_que_es_un_id`: una línea sin producto cuyo nombre es el ID de un
+    //! producto, que comparte clave con las de ese producto sin ser suya. El worker hace la misma
+    //! comparación con su propia copia (`test/statsProductosUnaPasada.test.ts`), y el arnés de
+    //! lectura fija que los dos lados dan lo mismo.
 
     use super::*;
     use crate::contract_comun::{contract_dir, db_temporal, sembrar};
@@ -2024,8 +2088,11 @@ mod tests_productos_en_una_pasada {
         Some("cat-que-no-existe"),
     ];
 
-    async fn repositorio_sembrado() -> SqliteStatsRepository {
-        let ruta = contract_dir().join("lecturas/casos/stats/productos_vendidos.json");
+    /// Las siembras: la de las ventas de verdad y la del nombre que es un ID.
+    const SIEMBRAS: [&str; 2] = ["productos_vendidos", "productos_nombre_que_es_un_id"];
+
+    async fn repositorio_sembrado(siembra: &str) -> SqliteStatsRepository {
+        let ruta = contract_dir().join(format!("lecturas/casos/stats/{siembra}.json"));
         let caso: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&ruta).unwrap()).unwrap();
         let (db, _dir) = db_temporal().await;
@@ -2035,31 +2102,54 @@ mod tests_productos_en_una_pasada {
 
     #[tokio::test]
     async fn da_lo_mismo_que_las_cuatro_sentencias_de_antes() {
-        let repo = repositorio_sembrado().await;
-        for range in RANGOS {
-            for top in CATEGORIAS {
-                for worst in CATEGORIAS {
-                    let args = ProductosStatsArgs {
-                        range,
-                        categoria_top_id: top.map(str::to_string),
-                        categoria_worst_id: worst.map(str::to_string),
-                    };
-                    let antes = repo.productos_antes(args.clone()).await.unwrap();
-                    let ahora = repo.productos_impl(args).await.unwrap();
-                    assert_eq!(
-                        serde_json::to_value(&ahora).unwrap(),
-                        serde_json::to_value(&antes).unwrap(),
-                        "{range:?}, top {top:?}, peores {worst:?}"
-                    );
+        for siembra in SIEMBRAS {
+            let repo = repositorio_sembrado(siembra).await;
+            for range in RANGOS {
+                for top in CATEGORIAS {
+                    for worst in CATEGORIAS {
+                        let args = ProductosStatsArgs {
+                            range,
+                            categoria_top_id: top.map(str::to_string),
+                            categoria_worst_id: worst.map(str::to_string),
+                        };
+                        let antes = repo.productos_antes(args.clone()).await.unwrap();
+                        let ahora = repo.productos_impl(args).await.unwrap();
+                        assert_eq!(
+                            serde_json::to_value(&ahora).unwrap(),
+                            serde_json::to_value(&antes).unwrap(),
+                            "{siembra}: {range:?}, top {top:?}, peores {worst:?}"
+                        );
+                    }
                 }
             }
         }
     }
 
     #[tokio::test]
+    async fn una_linea_sin_producto_no_es_del_producto_cuyo_id_lleva_por_nombre() {
+        let repo = repositorio_sembrado("productos_nombre_que_es_un_id").await;
+        let hoy = |top: Option<&str>, worst: Option<&str>| ProductosStatsArgs {
+            range: StatsRange::Hoy,
+            categoria_top_id: top.map(str::to_string),
+            categoria_worst_id: worst.map(str::to_string),
+        };
+        // Sin filtro, lo de la clave va junto: P-7 son 2 del producto y 3 de la línea suelta. M-1
+        // no es vendible: sólo queda su línea suelta.
+        let todo = repo.productos_impl(hoy(None, None)).await.unwrap();
+        assert_eq!(todo.top10_mejores.labels, ["M-1", "P-7", "Agua"]);
+        assert_eq!(todo.top10_mejores.values, [6, 5, 1]);
+        // En «los peores» y en una categoría sólo cuentan las líneas del producto.
+        assert_eq!(todo.top10_peores.labels, ["Agua", "P-7"]);
+        assert_eq!(todo.top10_peores.values, [1, 2]);
+        let bebidas = repo.productos_impl(hoy(Some("cat-bebidas"), Some("cat-bebidas"))).await.unwrap();
+        assert_eq!(bebidas.top10_mejores.labels, ["P-7", "Agua"]);
+        assert_eq!(bebidas.top10_mejores.values, [2, 1]);
+    }
+
+    #[tokio::test]
     async fn la_siembra_ejercita_los_empates_y_el_corte() {
         // Si la siembra dejara de vender nada hoy, la comparación de arriba pasaría en vacío.
-        let repo = repositorio_sembrado().await;
+        let repo = repositorio_sembrado("productos_vendidos").await;
         let hoy = |top: Option<&str>, worst: Option<&str>| ProductosStatsArgs {
             range: StatsRange::Hoy,
             categoria_top_id: top.map(str::to_string),
