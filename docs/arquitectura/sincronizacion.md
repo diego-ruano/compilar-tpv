@@ -47,7 +47,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
 | Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`, que sólo lee) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
-| REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar/resumen`, `/verificar/filas`, `/verificar/claves`, `/salud` |
+| REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar/resumen`, `/verificar/filas`, `/verificar/por-clave`, `/verificar/claves`, `/salud` |
 | El contraste con la nube | `domains/sync/verificar.ts` · `resumenCubos.ts` · `tpv-infra-sqlite/src/contraste.rs` · `tpv-domain/src/contraste.rs` | El resumen por cubos de cada lado y lo que se baja cuando no cuadra |
 
 ### Servicio de avisos de la Handy
@@ -564,13 +564,19 @@ respuesta. Cada lado **resume** sus filas y sólo se comparan los resúmenes:
    es UNA sentencia que empieza por `SELECT` o `WITH` y que SQLite da por de sólo lectura. Una que no
    sabe ejecutar (una columna que aquí no existe) deja esa tabla sin comparar, y lo dice.
 3. **De los cubos que no cuadran se bajan sus filas** (`/v1/sync/verificar/filas`, por páginas de
-   hasta 4 MiB) y se comparan una a una con la tolerancia de siempre (`sync_reparacion::fila_difiere`:
-   `4` y `4.0` son el mismo número, y un número y su texto también). Lo que llega de cada cubo tiene
-   que sumar lo que el resumen decía de él; si no, esas filas no son las de la foto y de esa tabla no
-   se repara nada.
-4. **Fuera de la ventana sólo hay conteos.** Si los de una tabla no cuadran, sus claves primarias se
+   hasta 4 MiB, y que no recorren más de un millón de filas de la ventana) y se comparan una a una
+   con la tolerancia de siempre (`sync_reparacion::fila_difiere`: `4` y `4.0` son el mismo número, y
+   un número y su texto también). Lo que llega de cada cubo tiene que sumar lo que el resumen decía
+   de él; si no, esas filas no son las de la foto y de esa tabla no se repara nada.
+4. **Lo de aquí que no ha venido en su cubo se busca por su clave** (`/v1/sync/verificar/por-clave`,
+   de 500 en 500): o falta arriba, o está arriba fuera de la ventana (la de una línea depende de su
+   comanda), y sólo comparándola se sabe si además es distinta. Una fila igual que sólo ha cambiado
+   de ventana no se repara.
+5. **Fuera de la ventana sólo hay conteos.** Si los de una tabla no cuadran, sus claves primarias se
    recorren **por páginas y en orden de clave** (`/v1/sync/verificar/claves`, hasta 20.000 por
-   página y 2 MiB), y de cada tramo se restan las de aquí: lo que falta arriba y lo que sobra.
+   página y 2 MiB), y de cada tramo se restan las de aquí, que también se cargan de 20.000 en 20.000
+   (si aquí hay más, el tramo se corta en la última). Una pasada no ve más de dos millones de
+   claves; la siguiente sigue donde lo dejó (en memoria: un reinicio vuelve a empezar).
 
 **El resumen.** Cada fila va a un **cubo** que sale del hash de su clave primaria, así que cae en el
 mismo cubo en los dos lados aunque cambie su contenido; de cada cubo se guarda cuántas filas tiene y
@@ -608,20 +614,32 @@ aquí, una que **falta arriba** se sube por estado y una que **sobra arriba** se
 dos fotos del mismo instante lo que la nube tiene y aquí no está no puede ser algo de camino. Nada se
 toca si hay **alguna fila en `_Sync_Failed`** (AUD-18; en cuarentena o pendiente de reintentar), si
 queda histórico por bajar (VERIF-01) o con el interruptor `reparacion_nube` apagado: se compara y se
-informa como `aplazado`. Lo que se sube va padres primero y lo que se borra, hijas primero, en
-operaciones de 500 sentencias que entran juntas en el outbox. Una tabla que no se ha podido mirar
-entera (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de claves, o una tabla sin comparar)
-no deja borrar nada en ninguna, y lo que falta arriba en sus hijas no se sube (podría apuntar a una
-fila suya que falta arriba sin saberse); queda para la pasada siguiente, que ya no encuentra lo
-reparado.
+informa como `aplazado`.
+
+- **Un borrado sólo borra si la nube no ha cambiado desde la foto**: el `DELETE` lleva la condición
+  de que en `Sync_Changes` no haya nada por encima del `hasta_seq` del resumen salvo las reparaciones
+  de esa pasada. Entre la última página y el momento en que el `TenantHub` aplica la reparación, una
+  Handy puede haber escrito algo que cuelga de esa fila, y el borrado se lo llevaría con sus
+  cascadas. El `TenantHub` aplica las operaciones de la Main en el turno del log, así que la condición
+  y el borrado son del mismo instante; si algo ha cambiado no borra, y la pasada siguiente lo mira.
+- Lo que se sube va padres primero (las tablas por sus foráneas y, en una que se apunta a sí misma
+  como `Pagos` con su `ID_Pago_Origen`, sus filas) y lo que se borra, hijas primero, en operaciones de
+  500 sentencias que entran juntas en el outbox; los borrados de una tabla que se apunta a sí misma
+  van en una sola.
+- Lo que no se ha podido mirar entero (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de
+  claves, o una tabla sin comparar) se informa como `aplazado`, y lo que falta arriba en las hijas
+  de una tabla así no se sube: podría apuntar a una fila suya que falta arriba sin saberse. Lo que
+  sí se ha visto se repara, borrados incluidos: cada fila que sobra se sabe que sobra.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el
 mes de un bar de mil comandas diarias (unas 690.000 filas) son unos segundos de CPU del objeto
-(`test/verificarVolumen.test.ts`), y por eso sólo se resume con el negocio quieto. Un resumen no lee
-más de un millón de filas (`RESUMEN_MAX_FILAS`): si el mes no cabe, la ventana se encoge por los
-mismos escalones que la de la recuperación, y si no cabe ni lo imprescindible van los conteos solos
-(`ventana_omitida`), que se comparan con sus claves.
+(`test/verificarVolumen.test.ts`), y por eso sólo se resume con el negocio quieto. En la Main, resumir
+600.000 filas cuesta menos de dos segundos en una conexión de lectura. Un resumen no lee más de un
+millón de filas (`RESUMEN_MAX_FILAS`): si el mes no cabe, la ventana se encoge por los mismos
+escalones que la de la recuperación, y si no cabe ni lo imprescindible van los conteos solos
+(`ventana_omitida`), que se comparan con sus claves. Las páginas tienen su techo en bytes; una fila
+que sola pasa de él viaja igual, como en el histórico.
 
 ---
 

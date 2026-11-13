@@ -5,14 +5,15 @@ use serde_json::json;
 
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
-    ClavesPagina, FilasDeCubos, HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion,
-    ResumenNube, SyncHealth,
+    ClavesPagina, FilasDeCubos, FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo,
+    ResultadoVerificacion, ResumenNube, SyncHealth,
 };
 
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
 use crate::ports::sync::{
-    ContrasteLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, SyncRepository,
+    ContrasteLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave,
+    SyncRepository,
 };
 
 /// Pide `ruta` a la nube (modo `tpv`) y lee la respuesta **directamente en su tipo**.
@@ -379,6 +380,17 @@ impl PaginasDelContraste for PaginasPorRest<'_> {
                 "cursor": pedido.cursor,
             }),
             "respuesta de /v1/sync/verificar/filas",
+            AppError::Internal,
+        )
+        .await
+    }
+
+    async fn por_clave(&self, pedido: PedidoPorClave) -> AppResult<FilasPorClave> {
+        pedir(
+            self.nube,
+            "/v1/sync/verificar/por-clave",
+            json!({ "tabla": pedido.tabla, "claves": pedido.claves }),
+            "respuesta de /v1/sync/verificar/por-clave",
             AppError::Internal,
         )
         .await

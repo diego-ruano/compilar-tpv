@@ -53,6 +53,7 @@ const RUTAS: Array<[string, unknown]> = [
 	["/verificar/resumen", {}],
 	["/verificar/filas", { tabla: "Comandas", desde: "2020-01-01 00:00:00", cubos: 16, pedir: [0, 1, 2, 3, 4, 5, 6, 7] }],
 	["/verificar/claves", { tabla: "Comandas", limite: 1_000 }],
+	["/verificar/por-clave", { tabla: "Comandas", claves: [["c-1"]] }],
 ];
 
 function sembrar(sql: any): void {

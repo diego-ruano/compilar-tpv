@@ -180,7 +180,7 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `Array.from(cursor.raw())` lo agotan; quien lo recorra a mano y pueda parar antes tiene que
   terminarlo, como hace el lector de los volcados.
 - **Las respuestas de sync que crecen con el negocio salen en gzip si quien pregunta lo acepta**
-  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico` y las tres del
+  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico` y las del
   contraste (`/verificar/*`). Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
   `tenantAuth` y `alHub`: el `TenantHub` contesta sin comprimir y comprime el Worker lo que vuelve,
   para no gastar el hilo del negocio. La respuesta comprimida lleva `encodeBody: "manual"`; sin
@@ -252,8 +252,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `soloLaMainEscribeCaja` (`caja_solo_en_main`), y `lib/hub.ts::TABLAS_SOLO_MAIN` para las tablas
   fiscales.
 - `cuerpoConIdentificador` es sólo para el emparejamiento. Los cuerpos permisivos de `sync`
-  (`/changes`, `/historico`, `/salud` y las tres del contraste, `/verificar/resumen`, `/filas` y
-  `/claves`) usan `cuerpoTolerante` con schemas que coercen y ponen valores por defecto: están en el
+  (`/changes`, `/historico`, `/salud` y las del contraste, `/verificar/resumen`, `/filas`,
+  `/por-clave` y `/claves`) usan `cuerpoTolerante` con schemas que coercen y ponen valores por defecto: están en el
   camino de la recuperación y de la comprobación, donde se falla hacia «sigue trabajando».
 - **Un schema con contrapartida en Rust lleva drift-guard**:
   `Assert<SameKeys<z.infer<typeof xSchema>, XInput>>` (`lib/typeGuards.ts`) compara las claves en las

@@ -10,6 +10,8 @@
 //                                resumen por cubos de esa ventana (`resumenCubos.ts`). La Main
 //                                ejecuta la misma sentencia en su base y compara los resúmenes.
 //   /v1/sync/verificar/filas     las filas de los cubos que no cuadran, por páginas.
+//   /v1/sync/verificar/por-clave unas filas por su clave, dentro o fuera de la ventana: las que la
+//                                Main tiene en un cubo que no cuadra y no le han llegado con él.
 //   /v1/sync/verificar/claves    las claves de una tabla, por páginas y en orden de clave: para lo
 //                                que no cuadra fuera de la ventana, donde sólo hay conteos.
 //
@@ -480,6 +482,70 @@ export async function paginaDeClaves(
 		// Una página que se llena, o que se corta por tamaño, puede tener más detrás.
 		const siguienteCursor = cortada || n === limite ? ultima : null;
 		e.texto(`],"siguiente_cursor":${JSON.stringify(siguienteCursor)},"hasta_seq":${hastaSeq}}`);
+		return e.todo();
+	});
+}
+
+/* ===== Unas filas por su clave ===== */
+
+type PedidoPorClave = {
+	tabla: string;
+	/** Las claves primarias de las filas que se piden, cada una con sus valores en el orden de la clave. */
+	claves: readonly unknown[][];
+};
+
+/**
+ * Las filas de `tabla` con esas claves primarias, estén o no en la ventana, ya en JSON. `null` si
+ * alguna no es una clave de esa tabla.
+ *
+ * Es para lo que la Main tiene en la ventana y no ha venido en su cubo: o falta arriba, o está
+ * arriba fuera de la ventana (la de una comanda depende de sus cobros, por ejemplo), y sólo
+ * comparándola se sabe si además es distinta. Una fila que no viene no está.
+ *
+ * Se corta antes de pasar de `maxBytes`, nunca sin al menos una fila, y lo dice (`cortada`): las que
+ * no han cabido se vuelven a pedir.
+ */
+export async function filasPorClave(
+	lector: Lector,
+	{ tabla, claves: pedidas }: PedidoPorClave,
+	maxBytes: number = FILAS_MAX_BYTES,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+	const claves = await lector.foto([sqlClaves(tabla)], (rs) => leerClaves(siguiente(rs)));
+	const cabecera = `{"ok":true,"tabla":${JSON.stringify(tabla)}`;
+	if (pedidas.some((k) => !Array.isArray(k) || k.length !== claves.length || !k.every(valorDeCursor))) return null;
+	if (!claves.length || !pedidas.length) {
+		const hastaSeq = await lector.foto([SQL_SEQ], (rs) => seqDe(siguiente(rs)));
+		return enBytes(`${cabecera},"columnas":[],"filas":[],"cortada":false,"hasta_seq":${hastaSeq}}`);
+	}
+
+	const columnas = claves.map(comillas).join(", ");
+	let n = 0;
+	const marcas = pedidas.map((k) => `(${k.map(() => `?${++n}`).join(", ")})`).join(", ");
+	const buscar: Sentencia = {
+		sql:
+			claves.length === 1
+				? `SELECT * FROM "${tabla}" WHERE ${columnas} IN (${pedidas.map((_, i) => `?${i + 1}`).join(", ")});`
+				: `SELECT * FROM "${tabla}" WHERE (${columnas}) IN (VALUES ${marcas});`,
+		args: pedidas.flat(),
+	};
+
+	return lector.foto([SQL_SEQ, buscar], (rs) => {
+		const hastaSeq = seqDe(siguiente(rs));
+		const { columnas: nombres, filas } = siguiente(rs);
+		const e = new Escritor(maxBytes);
+		e.texto(`${cabecera},"columnas":${JSON.stringify(nombres)},"filas":[`);
+		let escritas = 0;
+		let cortada = false;
+		for (const fila of filas) {
+			const texto = filaEnJson(fila);
+			if (escritas > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+				cortada = true;
+				break;
+			}
+			e.texto(escritas ? `,${texto}` : texto);
+			escritas++;
+		}
+		e.texto(`],"cortada":${cortada},"hasta_seq":${hastaSeq}}`);
 		return e.todo();
 	});
 }

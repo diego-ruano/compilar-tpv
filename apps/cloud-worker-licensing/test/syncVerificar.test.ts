@@ -43,7 +43,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 const { lectorDelCliente, lectorDelHub } = await import("../src/domains/sync/volcado");
 const { syncRoutes } = await import("../src/domains/sync/sync.routes");
 const { Resumidor, cubosPara } = await import("../src/domains/sync/resumenCubos");
-const { CALMA_PARA_RESUMIR_MS, filasDeLosCubos, paginaDeClaves, resumenDeVerificacion } = await import(
+const { CALMA_PARA_RESUMIR_MS, filasDeLosCubos, filasPorClave, paginaDeClaves, resumenDeVerificacion } = await import(
 	"../src/domains/sync/verificar"
 );
 const { CLAVES_POR_PAGINA_MAX } = await import("../src/domains/sync/sync.schemas");
@@ -499,6 +499,61 @@ describe("POST /v1/sync/verificar/filas", () => {
 				expect((await pedir("/verificar/filas", {})).status).toBe(400);
 			},
 		);
+	});
+});
+
+describe("POST /v1/sync/verificar/por-clave", () => {
+	it("trae las filas de esas claves, estén o no en la ventana, y la que no está no viene", async () => {
+		await conTenant(
+			"por-clave",
+			(sql) => {
+				sembrarComandas(sql, 3, 3);
+				sembrarLog(sql, 2);
+			},
+			async (pedir) => {
+				const { status, body } = await pedir("/verificar/por-clave", {
+					tabla: "Comandas",
+					claves: [["c-nueva-0001"], ["c-vieja-0002"], ["c-que-no-esta"]],
+				});
+				expect(status).toBe(200);
+				expect(Object.keys(body).sort()).toEqual(["columnas", "cortada", "filas", "hasta_seq", "ok", "tabla"].sort());
+				expect(body).toMatchObject({ ok: true, tabla: "Comandas", cortada: false, hasta_seq: 2 });
+				expect(body.filas.map((f: any[]) => f[0]).sort()).toEqual(["c-nueva-0001", "c-vieja-0002"]);
+				expect(body.columnas[0]).toBe("ID_Comanda");
+
+				// Sin claves, nada; con una que no es de la tabla, 400.
+				expect((await pedir("/verificar/por-clave", { tabla: "Comandas", claves: [] })).body).toMatchObject({ filas: [] });
+				for (const claves of [[["a", "b"]], [[null]], [[{}]], ["c-nueva-0001"]]) {
+					const r = await pedir("/verificar/por-clave", { tabla: "Comandas", claves });
+					expect(r.status, JSON.stringify(claves)).toBe(400);
+					expect(r.body.error).toBe("claves_no_validas");
+				}
+				expect((await pedir("/verificar/por-clave", { tabla: "_Sync_Outbox", claves: [["x"]] })).status).toBe(400);
+			},
+		);
+	});
+
+	it("una clave compuesta, y una respuesta que no cabe se corta y lo dice", async () => {
+		await enElHub("verificar-por-clave-compuesta", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			sql.exec("CREATE TABLE Prueba_Compuesta (A TEXT NOT NULL, B INTEGER NOT NULL, C TEXT, PRIMARY KEY (A, B));");
+			for (let b = 1; b <= 30; b++) sql.exec("INSERT INTO Prueba_Compuesta VALUES ('x', ?, ?);", b, "c".repeat(100));
+			const leer = async (claves: unknown[][], maxBytes?: number) =>
+				JSON.parse(new TextDecoder().decode((await filasPorClave(lectorDelHub(sql), { tabla: "Prueba_Compuesta", claves }, maxBytes))!));
+
+			const dos = await leer([["x", 3], ["x", 7], ["y", 3]]);
+			expect(dos.filas.map((f: any[]) => f[1]).sort()).toEqual([3, 7]);
+			expect(dos.cortada).toBe(false);
+
+			const todas = Array.from({ length: 30 }, (_, i) => ["x", i + 1]);
+			const bytes = await filasPorClave(lectorDelHub(sql), { tabla: "Prueba_Compuesta", claves: todas }, 1_500);
+			const cortada = JSON.parse(new TextDecoder().decode(bytes!));
+			expect(bytes!.byteLength).toBeLessThanOrEqual(1_500);
+			expect(cortada.cortada).toBe(true);
+			expect(cortada.filas.length).toBeGreaterThan(0);
+			expect(cortada.filas.length).toBeLessThan(30);
+		});
 	});
 });
 

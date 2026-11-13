@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use tpv_contracts::sync::{
     BackfillEstado, BootstrapResultado, BootstrapSnapshot, ClavesPagina, FilasDeCubos,
-    HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, ResumenNube, SyncChange,
-    SyncHealth,
+    FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, ResumenNube,
+    SyncChange, SyncHealth,
 };
 
 use crate::error::AppResult;
@@ -80,12 +80,22 @@ pub struct PedidoDeClaves {
     pub cursor: Option<Vec<serde_json::Value>>,
 }
 
+/// Unas filas que se piden a la nube por su clave primaria.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoPorClave {
+    pub tabla: String,
+    /// Cada clave, con sus valores en el orden de la clave.
+    pub claves: Vec<Vec<serde_json::Value>>,
+}
+
 /// Por dónde el contraste pide a la nube lo que le hace falta además del resumen. Lo implementa el
 /// caso de uso sobre el cliente REST; el repositorio sólo sabe que puede pedir páginas.
 #[async_trait]
 pub trait PaginasDelContraste: Send + Sync {
     /// `/v1/sync/verificar/filas`.
     async fn filas(&self, pedido: PedidoDeFilas) -> AppResult<FilasDeCubos>;
+    /// `/v1/sync/verificar/por-clave`.
+    async fn por_clave(&self, pedido: PedidoPorClave) -> AppResult<FilasPorClave>;
     /// `/v1/sync/verificar/claves`.
     async fn claves(&self, pedido: PedidoDeClaves) -> AppResult<ClavesPagina>;
 }

@@ -195,6 +195,7 @@ const SOLO_CONSULTAN_Y_NO_SON_LECTURAS: Record<string, string> = {
 	"domains/sync/sync.routes.ts → /verificar/resumen": "réplica de la Main",
 	"domains/sync/sync.routes.ts → /verificar/filas": "réplica de la Main",
 	"domains/sync/sync.routes.ts → /verificar/claves": "réplica de la Main",
+	"domains/sync/sync.routes.ts → /verificar/por-clave": "réplica de la Main",
 };
 
 // ── El barrido ────────────────────────────────────────────────────────────────────────────────

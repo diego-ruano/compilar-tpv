@@ -19,6 +19,9 @@ const HISTORICO_FILAS_DEFECTO = 1_000;
 export const CLAVES_POR_PAGINA = 10_000;
 export const CLAVES_POR_PAGINA_MAX = 20_000;
 
+/** Claves por petición de `/v1/sync/verificar/por-clave`: lo que se enlaza en una sentencia. */
+export const CLAVES_POR_PETICION_MAX = 1_000;
+
 function objeto(valor: unknown): Record<string, any> {
 	return valor !== null && typeof valor === "object" ? (valor as Record<string, any>) : {};
 }
@@ -69,6 +72,18 @@ export const verificarFilasSchema = z.unknown().transform((entrada) => {
 		cubos: typeof body.cubos === "number" ? body.cubos : Number.NaN,
 		pedir,
 		cursor: Math.max(0, Math.floor(numero(body.cursor, 0))),
+	};
+});
+
+/**
+ * Unas filas por su clave. Lo que pasa del tope se descarta (la Main pide de menos en menos); que
+ * cada clave lo sea de esa tabla lo comprueba la ruta.
+ */
+export const verificarPorClaveSchema = z.unknown().transform((entrada) => {
+	const body = objeto(entrada);
+	return {
+		tabla: typeof body.tabla === "string" ? body.tabla : "",
+		claves: (Array.isArray(body.claves) ? body.claves.slice(0, CLAVES_POR_PETICION_MAX) : []) as unknown[][],
 	};
 });
 

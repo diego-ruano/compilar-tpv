@@ -292,8 +292,9 @@ async fn un_valor_distinto_una_fila_que_falta_y_una_que_sobra_se_encuentran_se_r
     assert!(sube[0].sql.starts_with("INSERT INTO \"Zonas\"") && sube[0].sql.contains("ON CONFLICT"), "{}", sube[0].sql);
     assert!(sube[0].args.contains(&json!("Salón de la ría")));
     assert!(sube[1].sql.starts_with("INSERT INTO \"Mesas\"") && sube[1].args.contains(&json!("m3")), "{}", sube[1].sql);
-    assert_eq!(sube[2].sql, "DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1;");
-    assert_eq!(sube[2].args, vec![json!("z9")]);
+    // El borrado, sólo si la nube no ha cambiado desde la foto (`hasta_seq` 45).
+    assert!(sube[2].sql.starts_with("DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND NOT EXISTS"), "{}", sube[2].sql);
+    assert_eq!(sube[2].args, vec![json!("z9"), json!(45), json!("main_reparacion")]);
     // Esta base no se ha tocado.
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 3);
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 3);
@@ -363,12 +364,88 @@ async fn fuera_de_la_ventana_se_recorren_las_claves_por_paginas() {
     assert_eq!(paginas, 15, "101 comandas de 7 en 7");
     let sube = reparaciones(&repo).await;
     assert!(sube[0].args.contains(&json!("c-vieja-0013")));
-    assert_eq!(sube[1].args, vec![json!("c-vieja-9998")]);
-    assert_eq!(sube[2].args, vec![json!("c-vieja-9999")]);
+    assert_eq!(sube[1].args[0], json!("c-vieja-9998"));
+    assert_eq!(sube[2].args[0], json!("c-vieja-9999"));
 
     subir_reparaciones(&repo, &nube).await;
     let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
     assert_eq!(r.descuadres, vec![]);
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn una_fila_igual_que_solo_cambia_de_ventana_por_su_padre_no_se_repara() {
+    // La ventana de las líneas depende de su comanda, como en la de verdad. En la nube, una comanda
+    // tiene otra fecha de apertura y sus tres líneas, iguales, quedan fuera de la ventana de allí y
+    // dentro de la de aquí: no han venido en su cubo. Se buscan por su clave, son iguales y no se
+    // reparan; la que se repara es la comanda.
+    let (repo, db, dir, nube) = negocio_igual("cambia-de-ventana").await;
+    nube.contraste.ventanas.lock().unwrap().extend([
+        (
+            "Comandas".to_string(),
+            ("SELECT * FROM \"Comandas\" WHERE Fecha_Hora_Apertura >= ?1;".to_string(), vec![json!(DESDE)]),
+        ),
+        (
+            "Detalle_Comanda".to_string(),
+            (
+                "SELECT * FROM \"Detalle_Comanda\" WHERE ID_Comanda IN \
+                 (SELECT ID_Comanda FROM Comandas WHERE Fecha_Hora_Apertura >= ?1);"
+                    .to_string(),
+                vec![json!(DESDE)],
+            ),
+        ),
+    ]);
+    nube.contraste.sembrar("UPDATE Comandas SET Fecha_Hora_Apertura = '2020-01-01 12:00:00' WHERE ID_Comanda = 'c-nueva-0005';").await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    assert_eq!(r.descuadres, vec![descuadre("Comandas", 0, 0, 1)], "las líneas no son un descuadre");
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (1, 0, false));
+    let sube = reparaciones(&repo).await;
+    assert_eq!(sube.len(), 1);
+    assert!(sube[0].sql.starts_with("INSERT INTO \"Comandas\"") && sube[0].args.contains(&json!("c-nueva-0005")));
+    assert!(nube.pedidas().contains(&"/v1/sync/verificar/por-clave".to_string()));
+
+    subir_reparaciones(&repo, &nube).await;
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!((r.descuadres.len(), r.reparadas), (0, 0));
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn lo_que_sobra_no_se_borra_si_la_nube_ha_cambiado_antes_de_aplicarlo() {
+    // Entre la foto y el momento en que la nube aplica la reparación, una Handy escribe (aquí, en
+    // el log de la nube, por encima del `hasta_seq` 45). El borrado sube igual, pero no borra
+    // nada: lo nuevo podría colgar de esa fila. La pasada siguiente lo vuelve a mirar.
+    let (repo, db, dir, nube) = negocio_igual("borrado-condicionado").await;
+    tres_diferencias(&nube).await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!(r.borradas, 1);
+
+    nube.contraste
+        .sembrar(
+            "INSERT INTO Sync_Changes (Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
+             VALUES (46, 'op-handy', 'mesas.abrir', '[]', 'handy-1', 1);",
+        )
+        .await;
+    subir_reparaciones(&repo, &nube).await;
+    let quedan = {
+        let r = nube.contraste.db.read().await;
+        let mut f = r.conn().query("SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z9';", ()).await.unwrap();
+        f.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    };
+    assert_eq!(quedan, 1, "la zona que sobra sigue arriba");
+    let nombre_z2 = {
+        let r = nube.contraste.db.read().await;
+        let mut f = r.conn().query("SELECT Nombre_Zona FROM Zonas WHERE ID_Zona = 'z2';", ()).await.unwrap();
+        f.next().await.unwrap().unwrap().get::<String>(0).unwrap()
+    };
+    assert_eq!(nombre_z2, "Salón de la ría", "lo que se sube por estado se sube");
 
     nube.cerrar().await;
     cerrar(db, dir).await;

@@ -104,13 +104,14 @@ const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 const HTTP_TIMEOUT_VOLCADO_SECS: u64 = 150;
 
 /// Las rutas que contestan con un volcado o que pueden tardar en hacerlo: la fase 1 de la
-/// recuperación, las páginas de la fase 2 y las tres del contraste con la nube (el resumen, que
-/// recorre la ventana entera en el TenantHub, y las páginas de filas y de claves, de varios MB).
-const RUTAS_DE_VOLCADO: [&str; 5] = [
+/// recuperación, las páginas de la fase 2 y las del contraste con la nube (el resumen, que recorre
+/// la ventana entera en el TenantHub, y las páginas de filas y de claves, de varios MB).
+const RUTAS_DE_VOLCADO: [&str; 6] = [
     "/v1/sync/bootstrap",
     "/v1/sync/historico",
     "/v1/sync/verificar/resumen",
     "/v1/sync/verificar/filas",
+    "/v1/sync/verificar/por-clave",
     "/v1/sync/verificar/claves",
 ];
 
@@ -2889,6 +2890,7 @@ mod tests_transporte_de_volcados {
             "/v1/sync/historico",
             "/v1/sync/verificar/resumen",
             "/v1/sync/verificar/filas",
+            "/v1/sync/verificar/por-clave",
             "/v1/sync/verificar/claves",
         ] {
             assert_eq!(plazo_de(ruta), volcado, "{ruta}");

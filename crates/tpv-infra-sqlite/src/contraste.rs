@@ -48,7 +48,7 @@ use std::sync::Arc;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::{
-    ContrasteLocal, MarcaLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas,
+    ContrasteLocal, MarcaLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave,
 };
 use tpv_contracts::sync::{
     DescuadreTabla, ResultadoVerificacion, ResumenNube, ResumenTabla, SqlStatement,
@@ -514,18 +514,26 @@ fn cubos_que_caben(v: &Ventana, quedan: i64) -> (Vec<u32>, i64) {
     (elegidos, filas)
 }
 
+/// Lo que comparten los pasos de una pasada: las dos bases, el resumen de la nube y la marca de
+/// esta base al pedirlo.
+#[derive(Clone, Copy)]
+struct Pasada<'a> {
+    db: &'a Db,
+    nube: &'a dyn PaginasDelContraste,
+    resumen: &'a ResumenNube,
+    marca: MarcaLocal,
+}
+
 /// Baja las filas de `pedir` (cubos de `tabla` que no cuadran), compara cada una con la de aquí y
 /// busca las de aquí que no han venido.
 async fn examinar_cubos(
-    db: &Db,
-    nube: &dyn PaginasDelContraste,
-    resumen: &ResumenNube,
-    marca: MarcaLocal,
+    p: Pasada<'_>,
     tabla: &str,
     v: &Ventana,
     pedir: &[u32],
     examinadas: &mut i64,
 ) -> AppResult<Examen> {
+    let Pasada { db, nube, resumen, marca } = p;
     let n_cubos = v.nube.cubos();
     let pedidos: HashSet<u32> = pedir.iter().copied().collect();
     let mut recibido = ResumenCubos::nuevo(n_cubos).ok_or_else(|| AppError::repository("contraste: cubos no válidos"))?;
@@ -594,18 +602,18 @@ async fn examinar_cubos(
         }
     }
 
-    // Las de aquí que caen en esos cubos y no han venido: faltan arriba. Otra foto, así que se
-    // vuelve a mirar la marca: tiene que ser la misma base que se resumió.
+    // Las de aquí que caen en esos cubos y no han venido. Otra foto, así que se vuelve a mirar la
+    // marca: tiene que ser la misma base que se resumió.
     let (sql, args, claves, posiciones) = (v.sql.clone(), v.args.clone(), v.claves.clone(), v.posiciones.clone());
     let nombre = tabla.to_string();
-    let faltan = {
+    let no_han_venido = {
         let r = db.read().await;
         r.conn()
             .foto(move |foto| {
                 if leer_marca(foto)? != marca {
                     return Ok(None);
                 }
-                let mut faltan = Vec::new();
+                let mut no_han_venido = Vec::new();
                 let mut bytes = Vec::with_capacity(64);
                 foto.recorrer(&sql, &args, |valores| {
                     bytes.clear();
@@ -618,20 +626,113 @@ async fn examinar_cubos(
                     let hash = cubos::fnv1a64(&bytes);
                     if pedidos.contains(&cubos::cubo_de(hash, n_cubos)) && !claves_de_la_nube.contains(&hash) {
                         if let Some(f) = clave_local(&nombre, &claves, &posiciones, valores) {
-                            faltan.push(f);
+                            no_han_venido.push((f, clave_local_en_json(&posiciones, valores)));
                         }
                     }
                     Ok(())
                 })?;
-                Ok(Some(faltan))
+                Ok(Some(no_han_venido))
             })
             .await
             .map_err(db_err)?
     };
-    let Some(faltan) = faltan else {
+    let Some(no_han_venido) = no_han_venido else {
         return Ok(Examen::SeHaMovido);
     };
-    hallazgo.faltan = faltan;
+
+    // Una que no ha venido en su cubo puede faltar arriba, o estar arriba fuera de la ventana (la de
+    // una línea depende de su comanda): se busca por su clave y sólo es distinta si lo es.
+    match comprobar_por_clave(p, tabla, v, no_han_venido, examinadas).await? {
+        Examen::Hecho(h) => {
+            hallazgo.distintas.extend(h.distintas);
+            hallazgo.faltan = h.faltan;
+            Ok(Examen::Hecho(hallazgo))
+        }
+        otro => Ok(otro),
+    }
+}
+
+/// Claves por petición a `/v1/sync/verificar/por-clave`.
+const CLAVES_POR_PETICION: usize = 500;
+
+/// Los valores de la clave primaria de una fila local, como viajan en JSON.
+fn clave_local_en_json(posiciones: &[usize], fila: &[ValorPrestado<'_>]) -> Vec<serde_json::Value> {
+    posiciones
+        .iter()
+        .map(|i| match fila.get(*i) {
+            Some(ValorPrestado::Text(t)) => serde_json::Value::String(String::from_utf8_lossy(t).into_owned()),
+            Some(ValorPrestado::Integer(n)) => serde_json::Value::from(*n),
+            Some(ValorPrestado::Real(x)) => serde_json::Value::from(*x),
+            _ => serde_json::Value::Null,
+        })
+        .collect()
+}
+
+/// Busca arriba, por su clave, las filas de aquí que no han venido en su cubo. Las que no están
+/// arriba faltan; las que están se comparan con la tolerancia de siempre, y sólo si son distintas se
+/// reparan. Devuelve lo que falta y lo que es distinto.
+async fn comprobar_por_clave(
+    p: Pasada<'_>,
+    tabla: &str,
+    v: &Ventana,
+    candidatas: Vec<(FilaAfectada, Vec<serde_json::Value>)>,
+    examinadas: &mut i64,
+) -> AppResult<Examen> {
+    let Pasada { db, nube, resumen, .. } = p;
+    let mut hallazgo = Hallazgo::default();
+    for tanda in candidatas.chunks(CLAVES_POR_PETICION) {
+        let mut pendientes: Vec<&(FilaAfectada, Vec<serde_json::Value>)> = tanda.iter().collect();
+        let mut arriba: HashSet<String> = HashSet::new();
+        while !pendientes.is_empty() {
+            let pagina = nube
+                .por_clave(PedidoPorClave {
+                    tabla: tabla.to_string(),
+                    claves: pendientes.iter().map(|(_, k)| k.clone()).collect(),
+                })
+                .await?;
+            if pagina.hasta_seq != resumen.hasta_seq {
+                return Ok(Examen::SeHaMovido);
+            }
+            if pagina.tabla != tabla || pagina.columnas != v.columnas {
+                return Ok(Examen::SinComparar);
+            }
+            let r = db.read().await;
+            for fila in &pagina.filas {
+                let clave: Vec<serde_json::Value> = v.posiciones.iter().filter_map(|i| fila.get(*i).cloned()).collect();
+                let Some(canonica) = clave_canonica(&clave) else {
+                    return Ok(Examen::SinComparar);
+                };
+                if !arriba.insert(canonica) {
+                    continue;
+                }
+                *examinadas += 1;
+                match rep::fila_difiere(r.conn(), tabla, &v.columnas, fila, &v.claves).await.map_err(db_err)? {
+                    Some(true) => match clave_de_json(tabla, &v.claves, &v.posiciones, fila) {
+                        Some(f) => hallazgo.distintas.push(f),
+                        None => return Ok(Examen::SinComparar),
+                    },
+                    Some(false) => {}
+                    // Aquí ya no está: la base se ha movido, y lo dirá la marca antes de encolar.
+                    None => return Ok(Examen::SeHaMovido),
+                }
+            }
+            drop(r);
+            if !pagina.cortada {
+                break;
+            }
+            // Lo que no ha cabido se vuelve a pedir; una página cortada trae al menos una fila.
+            let antes = pendientes.len();
+            pendientes.retain(|(_, k)| clave_canonica(k).is_some_and(|c| !arriba.contains(&c)));
+            if pendientes.len() == antes {
+                return Err(AppError::external("las filas por clave del contraste no avanzan"));
+            }
+        }
+        for (f, k) in tanda {
+            if clave_canonica(k).is_none_or(|c| !arriba.contains(&c)) {
+                hallazgo.faltan.push(f.clone());
+            }
+        }
+    }
     Ok(Examen::Hecho(hallazgo))
 }
 
@@ -661,6 +762,36 @@ fn clave_canonica(valores: &[serde_json::Value]) -> Option<String> {
     Some(partes.join("\u{1f}"))
 }
 
+/// El orden de SQLite entre dos claves de una misma tabla, valor a valor: un número va antes que
+/// un texto, los números por su valor y los textos por sus bytes (la intercalación `BINARY`, la de
+/// todas las claves del esquema). Es el que da el `ORDER BY` de las páginas de claves.
+fn orden_sqlite(a: &[serde_json::Value], b: &[serde_json::Value]) -> std::cmp::Ordering {
+    use serde_json::Value as J;
+    use std::cmp::Ordering;
+    fn rango(v: &J) -> u8 {
+        match v {
+            J::Null => 0,
+            J::Number(_) => 1,
+            J::String(_) => 2,
+            _ => 3,
+        }
+    }
+    for (x, y) in a.iter().zip(b) {
+        let orden = match (x, y) {
+            (J::Number(p), J::Number(q)) => match (p.as_i64(), q.as_i64()) {
+                (Some(p), Some(q)) => p.cmp(&q),
+                _ => p.as_f64().partial_cmp(&q.as_f64()).unwrap_or(Ordering::Equal),
+            },
+            (J::String(p), J::String(q)) => p.as_bytes().cmp(q.as_bytes()),
+            _ => rango(x).cmp(&rango(y)),
+        };
+        if orden != Ordering::Equal {
+            return orden;
+        }
+    }
+    a.len().cmp(&b.len())
+}
+
 /// El valor de una clave como se enlaza en una consulta.
 fn valor_de_clave(v: &serde_json::Value) -> Option<Value> {
     match v {
@@ -685,26 +816,32 @@ fn fila_de_clave(tabla: &str, claves: &[String], valores: &[serde_json::Value]) 
     (clave.len() == claves.len()).then(|| FilaAfectada { tabla: tabla.to_string(), clave })
 }
 
+/// Lo más que se carga de claves de aquí en un tramo. Un tramo de la nube puede abarcar muchas más
+/// de aquí (si a la nube le falta medio histórico, la última página es «hasta el final»): entonces el
+/// tramo se corta en la última de éstas y lo de la nube que pasa de ella se vuelve a pedir.
+const CLAVES_LOCALES_POR_TRAMO: usize = 20_000;
+
 /// Las claves de `tabla` que hay aquí en el tramo `(desde, hasta]`, en orden de clave y con su forma
-/// canónica. Sin `desde` empieza por el principio; sin `hasta`, llega al final. El orden y los
-/// límites los pone SQLite con la clave de la tabla, igual que en la nube.
+/// canónica, hasta `limite`. Sin `desde` empieza por el principio; sin `hasta`, llega al final. El
+/// orden y los límites los pone SQLite con la clave de la tabla, igual que en la nube.
 async fn claves_locales_del_tramo(
     conn: &Connection,
     tabla: &str,
     claves: &[String],
     desde: Option<&[serde_json::Value]>,
     hasta: Option<&[serde_json::Value]>,
+    limite: usize,
 ) -> AppResult<Option<Vec<(String, Vec<serde_json::Value>)>>> {
     let columnas = claves.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
     let mut args: Vec<Value> = Vec::new();
     let mut condiciones: Vec<String> = Vec::new();
-    for (limite, operador) in [(desde, ">"), (hasta, "<=")] {
-        let Some(limite) = limite else { continue };
-        if limite.len() != claves.len() {
+    for (tope, operador) in [(desde, ">"), (hasta, "<=")] {
+        let Some(tope) = tope else { continue };
+        if tope.len() != claves.len() {
             return Ok(None);
         }
-        let mut marcas = Vec::with_capacity(limite.len());
-        for v in limite {
+        let mut marcas = Vec::with_capacity(tope.len());
+        for v in tope {
             let Some(valor) = valor_de_clave(v) else {
                 return Ok(None);
             };
@@ -714,8 +851,9 @@ async fn claves_locales_del_tramo(
         condiciones.push(format!("({columnas}) {operador} ({})", marcas.join(", ")));
     }
     let donde = if condiciones.is_empty() { String::new() } else { format!(" WHERE {}", condiciones.join(" AND ")) };
+    args.push(Value::Integer(limite as i64));
     let mut filas = conn
-        .query(&format!("SELECT {columnas} FROM \"{tabla}\"{donde} ORDER BY {columnas};"), args)
+        .query(&format!("SELECT {columnas} FROM \"{tabla}\"{donde} ORDER BY {columnas} LIMIT ?{};", args.len()), args)
         .await
         .map_err(db_err)?;
 
@@ -732,18 +870,44 @@ async fn claves_locales_del_tramo(
     Ok(Some(salida))
 }
 
+/// Por dónde sigue, en la pasada siguiente, el recorrido de las claves de cada tabla que no cupo en
+/// una pasada (`MAX_CLAVES_POR_PASADA`). Sin esto, una tabla de más claves que el tope empezaría
+/// siempre por el principio y no llegaría nunca a lo que hay detrás. Vive en memoria: si la
+/// aplicación se reinicia, se vuelve a empezar por el principio, que sólo cuesta tiempo. Cada tramo
+/// se compara por su cuenta, con las dos fotos de su pasada, así que empezar por la mitad no cambia
+/// lo que se encuentra.
+static REANUDAR_CLAVES: std::sync::Mutex<Option<HashMap<String, Vec<serde_json::Value>>>> =
+    std::sync::Mutex::new(None);
+
+fn por_donde_seguir(tabla: &str) -> Option<Vec<serde_json::Value>> {
+    let guardado = REANUDAR_CLAVES.lock().unwrap_or_else(|p| p.into_inner());
+    guardado.as_ref().and_then(|m| m.get(tabla).cloned())
+}
+
+fn seguir_por(tabla: &str, cursor: Option<Vec<serde_json::Value>>) {
+    let mut guardado = REANUDAR_CLAVES.lock().unwrap_or_else(|p| p.into_inner());
+    let mapa = guardado.get_or_insert_with(HashMap::new);
+    match cursor {
+        Some(c) => mapa.insert(tabla.to_string(), c),
+        None => mapa.remove(tabla),
+    };
+}
+
 /// Recorre las claves de `tabla` en la nube, por páginas, y de cada tramo resta las de aquí.
-/// Devuelve lo que falta y lo que sobra arriba, y si se ha recorrido entera.
+/// Devuelve lo que falta y lo que sobra arriba, y si se ha recorrido la tabla entera en esta pasada.
+///
+/// Empieza donde lo dejó la pasada anterior si no llegó al final ([`por_donde_seguir`]), y se para
+/// al pasar de `MAX_CLAVES_POR_PASADA` claves vistas, de aquí y de allí.
 async fn examinar_claves(
-    db: &Db,
-    nube: &dyn PaginasDelContraste,
-    resumen: &ResumenNube,
+    p: Pasada<'_>,
     tabla: &str,
     claves: &[String],
     vistas: &mut i64,
 ) -> AppResult<(Examen, bool)> {
+    let Pasada { db, nube, resumen, .. } = p;
     let mut hallazgo = Hallazgo::default();
-    let mut cursor: Option<Vec<serde_json::Value>> = None;
+    let inicio = por_donde_seguir(tabla);
+    let mut cursor = inicio.clone();
     loop {
         let pagina = nube.claves(PedidoDeClaves { tabla: tabla.to_string(), cursor: cursor.clone() }).await?;
         if pagina.hasta_seq != resumen.hasta_seq {
@@ -760,15 +924,34 @@ async fn examinar_claves(
                 _ => return Ok((Examen::SinComparar, false)),
             }
         }
-        *vistas += pagina.claves.len() as i64;
 
         let locales = {
             let r = db.read().await;
-            claves_locales_del_tramo(r.conn(), tabla, claves, cursor.as_deref(), pagina.siguiente_cursor.as_deref()).await?
+            claves_locales_del_tramo(
+                r.conn(),
+                tabla,
+                claves,
+                cursor.as_deref(),
+                pagina.siguiente_cursor.as_deref(),
+                CLAVES_LOCALES_POR_TRAMO + 1,
+            )
+            .await?
         };
-        let Some(locales) = locales else {
+        let Some(mut locales) = locales else {
             return Ok((Examen::SinComparar, false));
         };
+        // Si aquí hay más de las que se cargan, el tramo acaba en la última que se carga, y de la
+        // nube sólo cuenta lo que no pasa de ella.
+        let corte = if locales.len() > CLAVES_LOCALES_POR_TRAMO {
+            locales.truncate(CLAVES_LOCALES_POR_TRAMO);
+            locales.last().map(|(_, valores)| valores.clone())
+        } else {
+            None
+        };
+        if let Some(corte) = &corte {
+            de_la_nube.retain(|(_, k)| orden_sqlite(k, corte) != std::cmp::Ordering::Greater);
+        }
+        *vistas += (de_la_nube.len() + locales.len()) as i64;
 
         // En orden de clave, para que lo que se encola salga siempre igual.
         let arriba: HashSet<&str> = de_la_nube.iter().map(|(c, _)| c.as_str()).collect();
@@ -788,13 +971,17 @@ async fn examinar_claves(
             }
         }
 
-        match pagina.siguiente_cursor {
-            None => return Ok((Examen::Hecho(hallazgo), true)),
+        match corte.or(pagina.siguiente_cursor) {
+            None => {
+                seguir_por(tabla, None);
+                return Ok((Examen::Hecho(hallazgo), inicio.is_none()));
+            }
             Some(siguiente) => {
                 if cursor.as_ref() == Some(&siguiente) {
                     return Err(AppError::external("el cursor de las claves del contraste no avanza"));
                 }
                 if *vistas >= MAX_CLAVES_POR_PASADA {
+                    seguir_por(tabla, Some(siguiente));
                     return Ok((Examen::Hecho(hallazgo), false));
                 }
                 cursor = Some(siguiente);
@@ -837,16 +1024,139 @@ struct Encolado {
     borradas: i64,
 }
 
+/// El borrado arriba de una fila que sobra, **sólo si la nube no ha cambiado desde la foto**.
+///
+/// Entre la última página que se comparó y el momento en que el TenantHub aplica la reparación pasa
+/// un rato, y en él una Handy puede haber escrito algo que cuelga de esa fila (una línea en una
+/// comanda que aquí no existe): borrarla se llevaría lo nuevo con sus cascadas, y la Main, que no
+/// tiene la fila, no lo podría aplicar. Así que el `DELETE` lleva la condición: que en el log no
+/// haya nada por encima del `hasta_seq` de la foto salvo las reparaciones de esta misma pasada
+/// (que lo que la Main ha escrito después sube detrás de ellas). El TenantHub aplica las
+/// operaciones de la Main en el turno del log, así que la condición y el borrado son del mismo
+/// instante. Si algo ha cambiado no borra nada, y la pasada siguiente lo vuelve a mirar.
+fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Option<SqlStatement> {
+    let base = rep::sentencia_de_borrado(fila)?;
+    let mut args = base.args;
+    args.push(serde_json::Value::from(hasta_seq));
+    let n_seq = args.len();
+    args.push(serde_json::Value::from(rep::COMANDO_REPARACION));
+    let sql = format!(
+        "{} AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n_seq} AND Command_Name IS NOT ?{});",
+        base.sql.trim_end().trim_end_matches(';'),
+        n_seq + 1,
+    );
+    Some(SqlStatement { sql, args })
+}
+
+/// Las claves foráneas de `tabla` que apuntan a ella misma (un cobro que devuelve otro cobro): de
+/// cada una, las posiciones de sus columnas y las de las columnas a las que apunta, en el orden de
+/// las columnas de la tabla, que es el de los argumentos de `sentencia_de_reparacion`.
+async fn autorreferencias(conn: &Connection, tabla: &str) -> AppResult<Vec<(Vec<usize>, Vec<usize>)>> {
+    let leer = |sql: &'static str| async move {
+        let mut filas = conn.query(sql, vec![Value::Text(tabla.to_string())]).await.map_err(db_err)?;
+        let mut salida: Vec<Vec<Value>> = Vec::new();
+        while let Some(f) = filas.next().await.map_err(db_err)? {
+            salida.push((0..4).map(|i| f.get_value(i).unwrap_or(Value::Null)).collect());
+        }
+        AppResult::Ok(salida)
+    };
+    let texto = |v: &Value| match v {
+        Value::Text(t) => Some(t.clone()),
+        _ => None,
+    };
+    let columnas: Vec<String> = leer("SELECT name, pk, 0, 0 FROM pragma_table_info(?1) ORDER BY cid;")
+        .await?
+        .iter()
+        .filter_map(|f| texto(&f[0]))
+        .collect();
+    let mut clave: Vec<(i64, String)> = leer("SELECT name, pk, 0, 0 FROM pragma_table_info(?1) WHERE pk > 0;")
+        .await?
+        .iter()
+        .filter_map(|f| Some((match f[1] { Value::Integer(n) => n, _ => 0 }, texto(&f[0])?)))
+        .collect();
+    clave.sort();
+    let posicion = |c: &str| columnas.iter().position(|x| x == c);
+
+    let mut por_id: Vec<(i64, Vec<usize>, Vec<usize>)> = Vec::new();
+    for f in leer("SELECT id, seq, \"from\", \"to\" FROM pragma_foreign_key_list(?1) WHERE \"table\" = ?1 ORDER BY id, seq;").await? {
+        let (Value::Integer(id), Value::Integer(seq)) = (&f[0], &f[1]) else { continue };
+        let Some(desde) = texto(&f[2]).and_then(|c| posicion(&c)) else { continue };
+        // Sin columna destino, la foránea apunta a la clave primaria.
+        let destino = texto(&f[3]).or_else(|| clave.get(*seq as usize).map(|(_, c)| c.clone()));
+        let Some(hasta) = destino.and_then(|c| posicion(&c)) else { continue };
+        match por_id.last_mut() {
+            Some((ultimo, d, h)) if *ultimo == *id => {
+                d.push(desde);
+                h.push(hasta);
+            }
+            _ => por_id.push((*id, vec![desde], vec![hasta])),
+        }
+    }
+    Ok(por_id.into_iter().map(|(_, d, h)| (d, h)).collect())
+}
+
+/// Ordena las reparaciones de una tabla que se apunta a sí misma para que una fila vaya siempre
+/// detrás de aquélla a la que apunta, si las dos suben. Las operaciones se aplican una a una y cada
+/// una en su transacción: partidas en tandas sin este orden, la devolución de un cobro podría subir
+/// en una operación anterior a la del cobro, y las dos fallarían por la foránea. Lo que forme un
+/// ciclo se queda como estaba, al final.
+fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, Vec<usize>)]) -> Vec<SqlStatement> {
+    if refs.is_empty() || sentencias.len() < 2 {
+        return sentencias;
+    }
+    let valores = |st: &SqlStatement, idx: &[usize]| -> Option<String> {
+        let v: Vec<&serde_json::Value> = idx.iter().map(|i| st.args.get(*i)).collect::<Option<_>>()?;
+        if v.iter().any(|x| x.is_null()) {
+            return None;
+        }
+        serde_json::to_string(&v).ok()
+    };
+    let mut depende: Vec<HashSet<usize>> = vec![HashSet::new(); sentencias.len()];
+    for (desde, hasta) in refs {
+        let por_destino: HashMap<String, usize> =
+            sentencias.iter().enumerate().filter_map(|(i, st)| Some((valores(st, hasta)?, i))).collect();
+        for (i, st) in sentencias.iter().enumerate() {
+            if let Some(j) = valores(st, desde).and_then(|k| por_destino.get(&k).copied()) {
+                if j != i {
+                    depende[i].insert(j);
+                }
+            }
+        }
+    }
+    let mut puesta = vec![false; sentencias.len()];
+    let mut orden: Vec<usize> = Vec::with_capacity(sentencias.len());
+    loop {
+        let listas: Vec<usize> = (0..sentencias.len())
+            .filter(|i| !puesta[*i] && depende[*i].iter().all(|j| puesta[*j]))
+            .collect();
+        if listas.is_empty() {
+            break;
+        }
+        for i in listas {
+            puesta[i] = true;
+            orden.push(i);
+        }
+    }
+    orden.extend((0..sentencias.len()).filter(|i| !puesta[*i]));
+    let mut sentencias: Vec<Option<SqlStatement>> = sentencias.into_iter().map(Some).collect();
+    orden.into_iter().filter_map(|i| sentencias[i].take()).collect()
+}
+
 /// Encola el plan, con el escritor cogido y la guarda vista otra vez. `None` si ya no se puede:
 /// entre comparar y escribir la base se ha movido, ha fallado un cambio de la nube o una
 /// recuperación ha sembrado la cola del histórico.
 ///
-/// Lo que se sube va **padres primero** y lo que se borra, hijos primero, partido en operaciones de
-/// `SENTENCIAS_POR_OPERACION`: el outbox sube en orden, así que ninguna operación lleva una fila
-/// cuyo padre viaja en una posterior. Todas entran en el outbox juntas o ninguna.
+/// Lo que se sube va **padres primero** (las tablas por sus foráneas y, dentro de una que se apunta
+/// a sí misma, sus filas: [`padres_antes`]) y lo que se borra, hijas primero, partido en operaciones
+/// de `SENTENCIAS_POR_OPERACION`: el outbox sube en orden, así que ninguna operación lleva una fila
+/// cuyo padre viaja en una posterior. Los borrados de una tabla que se apunta a sí misma van juntos
+/// en una operación. Lo que se borra sólo se borra si la nube no ha cambiado desde la foto
+/// ([`borrado_si_la_nube_no_ha_cambiado`]). Todas las operaciones entran en el outbox juntas o
+/// ninguna.
 async fn encolar_plan(
     db: &Db,
     marca: MarcaLocal,
+    hasta_seq: i64,
     hallazgos: &[(String, Hallazgo)],
     borrar: bool,
 ) -> AppResult<Option<Encolado>> {
@@ -857,36 +1167,59 @@ async fn encolar_plan(
         return Ok(None);
     }
 
-    let mut subir: Vec<SqlStatement> = Vec::new();
-    for (_, h) in hallazgos {
+    // Tandas que no se parten: cada sentencia la suya, salvo los borrados de una tabla que se
+    // apunta a sí misma.
+    let mut subir: Vec<Vec<SqlStatement>> = Vec::new();
+    let mut reparadas = 0i64;
+    for (tabla, h) in hallazgos {
         let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
+        let mut de_la_tabla = Vec::new();
         for f in h.distintas.iter().chain(&h.faltan) {
             if !vistas.insert(f) {
                 continue;
             }
             // `None`: la fila tiene algo que no se replica (un blob). No se manda a medias.
             if let Some(st) = rep::sentencia_de_reparacion(conn, f).await.map_err(db_err)? {
-                subir.push(st);
+                de_la_tabla.push(st);
             }
         }
+        reparadas += de_la_tabla.len() as i64;
+        let refs = autorreferencias(conn, tabla).await?;
+        subir.extend(padres_antes(de_la_tabla, &refs).into_iter().map(|st| vec![st]));
     }
-    let mut quitar: Vec<SqlStatement> = Vec::new();
+    let mut quitar: Vec<Vec<SqlStatement>> = Vec::new();
+    let mut borradas = 0i64;
     if borrar {
-        for (_, h) in hallazgos.iter().rev() {
+        for (tabla, h) in hallazgos.iter().rev() {
             let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
-            for f in &h.sobran {
-                if vistas.insert(f) {
-                    quitar.extend(rep::sentencia_de_borrado(f));
-                }
+            let de_la_tabla: Vec<SqlStatement> = h
+                .sobran
+                .iter()
+                .filter(|f| vistas.insert(f))
+                .filter_map(|f| borrado_si_la_nube_no_ha_cambiado(f, hasta_seq))
+                .collect();
+            borradas += de_la_tabla.len() as i64;
+            if de_la_tabla.is_empty() {
+                continue;
+            }
+            if autorreferencias(conn, tabla).await?.is_empty() {
+                quitar.extend(de_la_tabla.into_iter().map(|st| vec![st]));
+            } else {
+                quitar.push(de_la_tabla);
             }
         }
     }
 
-    let (reparadas, borradas) = (subir.len() as i64, quitar.len() as i64);
     if reparadas + borradas > 0 {
-        let sentencias: Vec<SqlStatement> = subir.into_iter().chain(quitar).collect();
+        let mut operaciones: Vec<Vec<SqlStatement>> = Vec::new();
+        for tanda in subir.into_iter().chain(quitar) {
+            match operaciones.last_mut() {
+                Some(op) if op.len() + tanda.len() <= SENTENCIAS_POR_OPERACION => op.extend(tanda),
+                _ => operaciones.push(tanda),
+            }
+        }
         conn.transaccion(async {
-            for operacion in sentencias.chunks(SENTENCIAS_POR_OPERACION) {
+            for operacion in &operaciones {
                 encolar_operacion(conn, operacion).await?;
             }
             Ok(())
@@ -925,6 +1258,7 @@ pub(crate) async fn contrastar(
         return Ok(ContrasteLocal::SeHaMovido);
     };
     let puede_reparar = reparar && guarda.deja_reparar(&marca);
+    let pasada = Pasada { db, nube, resumen: &resumen, marca };
 
     let mut hallazgos: Vec<(String, Hallazgo)> = Vec::new();
     let mut descuadres: Vec<DescuadreTabla> = Vec::new();
@@ -960,7 +1294,7 @@ pub(crate) async fn contrastar(
                 if pedir.len() < v.distintos.len() {
                     entera = false;
                 }
-                match examinar_cubos(db, nube, &resumen, marca, &t.nombre, v, &pedir, &mut examinadas).await? {
+                match examinar_cubos(pasada, &t.nombre, v, &pedir, &mut examinadas).await? {
                     Examen::Hecho(h) => hallazgo = h,
                     Examen::SinComparar => comparable = false,
                     Examen::SeHaMovido => return Ok(ContrasteLocal::SeHaMovido),
@@ -975,9 +1309,9 @@ pub(crate) async fn contrastar(
         if comparable && fuera_local != fuera_nube {
             if puede_reparar && !t.claves.is_empty() && claves_vistas < MAX_CLAVES_POR_PASADA {
                 let (examen, completa) =
-                    examinar_claves(db, nube, &resumen, &t.nombre, &t.claves, &mut claves_vistas).await?;
+                    examinar_claves(pasada, &t.nombre, &t.claves, &mut claves_vistas).await?;
                 match examen {
-                    Examen::Hecho(h) => juntar_claves(&mut hallazgo, h, completa),
+                    Examen::Hecho(h) => juntar_claves(&mut hallazgo, h),
                     Examen::SinComparar => comparable = false,
                     Examen::SeHaMovido => return Ok(ContrasteLocal::SeHaMovido),
                 }
@@ -1038,7 +1372,9 @@ pub(crate) async fn contrastar(
     };
 
     if hay_que_reparar && puede_reparar {
-        match encolar_plan(db, marca, &hallazgos, !a_medias).await? {
+        // Lo que sobra arriba y se ha visto se borra aunque algo se haya quedado sin mirar: cada
+        // fila que sobra se sabe que sobra. Lo que no se ha mirado queda para otra pasada.
+        match encolar_plan(db, marca, resumen.hasta_seq, &hallazgos, true).await? {
             Some(encolado) => {
                 resultado.reparadas = encolado.reparadas;
                 resultado.borradas = encolado.borradas;
@@ -1059,31 +1395,15 @@ pub(crate) async fn contrastar(
     Ok(ContrasteLocal::Hecho(resultado))
 }
 
-/// Junta a lo que encontró la ventana de una tabla lo que dicen las claves de la tabla entera.
-///
-/// Las claves mandan sobre lo que falta y lo que sobra: lo ven en toda la tabla. Pero una fila que
-/// aquí cae en la ventana y arriba no, la ventana la da por que falta, y las claves la ven arriba:
-/// está, fuera de su ventana, así que algo de ella (o de una fila de la que depende su ventana) es
-/// distinto. Se sube igual, por estado, y se cuenta como distinta.
-///
-/// Si el recorrido de las claves no ha sido completo, sólo se suma: lo que la ventana encontró sigue
-/// valiendo, y lo que las claves no llegaron a ver no se sabe.
-fn juntar_claves(hallazgo: &mut Hallazgo, claves: Hallazgo, completa: bool) {
+/// Junta a lo que encontró la ventana de una tabla lo que dicen sus claves: lo que falta y lo que
+/// sobra, sin repetir. Lo de la ventana ya está comprobado fila a fila (lo que no vino en su cubo se
+/// buscó por su clave), y las claves ven lo de fuera; una fila puede salir en las dos.
+fn juntar_claves(hallazgo: &mut Hallazgo, claves: Hallazgo) {
     let Hallazgo { faltan, sobran, .. } = claves;
-    if completa {
-        let faltan_de_verdad: HashSet<&FilaAfectada> = faltan.iter().collect();
-        let estan_arriba: Vec<FilaAfectada> =
-            std::mem::take(&mut hallazgo.faltan).into_iter().filter(|f| !faltan_de_verdad.contains(f)).collect();
-        hallazgo.distintas.extend(estan_arriba);
-        hallazgo.faltan = faltan;
-    } else {
-        let mut vistas: HashSet<FilaAfectada> = hallazgo.faltan.iter().cloned().collect();
-        hallazgo.faltan.extend(faltan.into_iter().filter(|f| vistas.insert(f.clone())));
+    for (destino, nuevas) in [(&mut hallazgo.faltan, faltan), (&mut hallazgo.sobran, sobran)] {
+        let mut vistas: HashSet<FilaAfectada> = destino.iter().cloned().collect();
+        destino.extend(nuevas.into_iter().filter(|f| vistas.insert(f.clone())));
     }
-    // Lo que sobra según la ventana lo ven también las claves si han llegado a su tramo: se juntan
-    // sin repetir.
-    let mut vistas: HashSet<FilaAfectada> = hallazgo.sobran.iter().cloned().collect();
-    hallazgo.sobran.extend(sobran.into_iter().filter(|f| vistas.insert(f.clone())));
 }
 
 async fn marca_de(db: &Db) -> AppResult<MarcaLocal> {
@@ -1148,20 +1468,20 @@ mod tests {
                First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-x', 101, '[]', 1, 0, 1, 1);",
         )
         .await;
-        assert!(encolar_plan(&db, marca_antes, &plan, true).await.unwrap().is_none(), "un fallo de bajada");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "un fallo de bajada");
         sembrar(&db, "DELETE FROM _Sync_Failed;").await;
 
         sembrar(&db, "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Zonas', 0, 0);").await;
-        assert!(encolar_plan(&db, marca_antes, &plan, true).await.unwrap().is_none(), "el histórico a medias");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "el histórico a medias");
         sembrar(&db, "DELETE FROM _Backfill_Historico;").await;
 
         sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 101 WHERE Id = 1;").await;
-        assert!(encolar_plan(&db, marca_antes, &plan, true).await.unwrap().is_none(), "la base se ha movido");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "la base se ha movido");
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
 
         // Con la marca de ahora, sí: la distinta y la que falta suben, la que sobra se borra.
         let marca_ahora = marca(&db).await.unwrap();
-        let e = encolar_plan(&db, marca_ahora, &plan, true).await.unwrap().expect("se encola");
+        let e = encolar_plan(&db, marca_ahora, 101, &plan, true).await.unwrap().expect("se encola");
         assert_eq!((e.reparadas, e.borradas), (2, 1));
         // Y lo encolado cambia la marca: la pasada siguiente parte de otra base.
         assert_ne!(marca(&db).await.unwrap(), marca_ahora);
@@ -1171,7 +1491,7 @@ mod tests {
 
         // Sin permiso para borrar, sólo sube.
         let marca_ahora = marca(&db).await.unwrap();
-        let e = encolar_plan(&db, marca_ahora, &plan, false).await.unwrap().expect("se encola");
+        let e = encolar_plan(&db, marca_ahora, 101, &plan, false).await.unwrap().expect("se encola");
         assert_eq!((e.reparadas, e.borradas), (2, 0));
     }
 
@@ -1353,20 +1673,62 @@ mod tests {
     }
 
     #[test]
-    fn las_claves_mandan_sobre_lo_que_falta_y_lo_que_sobra() {
-        // La ventana: `a` y `b` faltan arriba y `x` sobra. Las claves de la tabla entera ven `a`
-        // arriba (fuera de su ventana: algo suyo es distinto), confirman `b` y `x`, y ven `y`.
+    fn lo_de_la_ventana_y_lo_de_las_claves_se_juntan_sin_repetir() {
         let mut h = hallazgo(&["d"], &["a", "b"], &["x"]);
-        juntar_claves(&mut h, hallazgo(&[], &["b"], &["x", "y"]), true);
-        assert_eq!(h.distintas, vec![zona("d"), zona("a")]);
-        assert_eq!(h.faltan, vec![zona("b")]);
-        assert_eq!(h.sobran, vec![zona("x"), zona("y")]);
-
-        // Con un recorrido a medias no se quita nada de lo que vio la ventana: sólo se suma.
-        let mut h = hallazgo(&[], &["a", "b"], &["x"]);
-        juntar_claves(&mut h, hallazgo(&[], &["b", "c"], &["y"]), false);
+        juntar_claves(&mut h, hallazgo(&[], &["b", "c"], &["x", "y"]));
+        assert_eq!(h.distintas, vec![zona("d")]);
         assert_eq!(h.faltan, vec![zona("a"), zona("b"), zona("c")]);
         assert_eq!(h.sobran, vec![zona("x"), zona("y")]);
+    }
+
+    #[test]
+    fn el_orden_de_las_claves_es_el_de_sqlite() {
+        use serde_json::json;
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        assert_eq!(orden_sqlite(&[json!(2)], &[json!(10)]), Less);
+        assert_eq!(orden_sqlite(&[json!("10")], &[json!("2")]), Less, "un texto, por sus bytes");
+        assert_eq!(orden_sqlite(&[json!(99)], &[json!("1")]), Less, "un número va antes que un texto");
+        assert_eq!(orden_sqlite(&[json!("ñ")], &[json!("z")]), Greater, "por bytes, no por letras");
+        assert_eq!(orden_sqlite(&[json!("x"), json!(3)], &[json!("x"), json!(3)]), Equal);
+        assert_eq!(orden_sqlite(&[json!("x"), json!(3)], &[json!("x"), json!(4)]), Less);
+        assert_eq!(orden_sqlite(&[json!(1.5)], &[json!(1)]), Greater);
+    }
+
+    #[test]
+    fn un_cobro_sube_antes_que_su_devolucion_aunque_venga_detras() {
+        // `Pagos(ID_Pago, ID_Pago_Origen)`: la devolución `d1` apunta a `p1`, y `d2` a `d1`.
+        let st = |id: &str, origen: Option<&str>| SqlStatement {
+            sql: format!("-- {id}"),
+            args: vec![serde_json::json!(id), origen.map_or(serde_json::Value::Null, |o| serde_json::json!(o))],
+        };
+        let refs = vec![(vec![1usize], vec![0usize])];
+        let orden: Vec<String> = padres_antes(vec![st("d2", Some("d1")), st("d1", Some("p1")), st("x", None), st("p1", None)], &refs)
+            .into_iter()
+            .map(|s| s.sql)
+            .collect();
+        assert_eq!(orden, ["-- x", "-- p1", "-- d1", "-- d2"]);
+        // Sin autorreferencias, como venían.
+        assert_eq!(padres_antes(vec![st("b", None), st("a", None)], &[]).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn las_autorreferencias_de_pagos_son_su_origen() {
+        let (db, _dir) = base("contraste_autorreferencias").await;
+        let w = db.write().await;
+        let refs = autorreferencias(w.raw(), "Pagos").await.unwrap();
+        assert_eq!(refs.len(), 1, "{refs:?}");
+        assert!(autorreferencias(w.raw(), "Zonas").await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn un_borrado_solo_se_aplica_si_la_nube_no_ha_cambiado_desde_la_foto() {
+        let st = borrado_si_la_nube_no_ha_cambiado(&zona("z9"), 45).unwrap();
+        assert_eq!(
+            st.sql,
+            "DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND NOT EXISTS \
+             (SELECT 1 FROM Sync_Changes WHERE Seq > ?2 AND Command_Name IS NOT ?3);"
+        );
+        assert_eq!(st.args, vec![serde_json::json!("z9"), serde_json::json!(45), serde_json::json!("main_reparacion")]);
     }
 
     #[test]

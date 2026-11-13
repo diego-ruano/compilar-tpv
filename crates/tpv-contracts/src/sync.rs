@@ -262,6 +262,23 @@ pub struct FilasDeCubos {
     pub hasta_seq: i64,
 }
 
+/// Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
+/// Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
+/// ha venido se vuelve a pedir.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct FilasPorClave {
+    pub tabla: String,
+    #[serde(default)]
+    pub columnas: Vec<String>,
+    #[serde(default)]
+    #[specta(type = Vec<Vec<specta_typescript::Unknown>>)]
+    pub filas: Vec<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub cortada: bool,
+    #[serde(default)]
+    pub hasta_seq: i64,
+}
+
 /// Una página de `/v1/sync/verificar/claves`: claves primarias de una tabla, en orden de clave.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct ClavesPagina {

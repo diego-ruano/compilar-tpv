@@ -2289,6 +2289,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         .typ::<tpv_contracts::sync::ResumenNube>()
         .typ::<tpv_contracts::sync::ResumenTabla>()
         .typ::<tpv_contracts::sync::FilasDeCubos>()
+        .typ::<tpv_contracts::sync::FilasPorClave>()
         .typ::<tpv_contracts::sync::ClavesPagina>()
         .typ::<tpv_contracts::sync::DescuadreTabla>()
         .typ::<tpv_contracts::sync::ResultadoVerificacion>()

@@ -1200,6 +1200,19 @@ export type FilasDeCubos = {
 	hasta_seq?: number,
 };
 
+/**
+ *  Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
+ *  Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
+ *  ha venido se vuelve a pedir.
+ */
+export type FilasPorClave = {
+	tabla: string,
+	columnas?: string[],
+	filas?: unknown[][],
+	cortada?: boolean,
+	hasta_seq?: number,
+};
+
 export type FinalizarTareaInput = {
 	id_tarea: string,
 	id_trabajador: string,

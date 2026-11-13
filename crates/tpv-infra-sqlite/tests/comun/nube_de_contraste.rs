@@ -216,6 +216,7 @@ impl NubeDeContraste {
         Some(Ok(match ruta {
             "/v1/sync/verificar/resumen" => self.resumen(cuerpo).await,
             "/v1/sync/verificar/filas" => self.pagina_de_filas(cuerpo).await,
+            "/v1/sync/verificar/por-clave" => self.filas_por_clave(cuerpo).await,
             "/v1/sync/verificar/claves" => self.pagina_de_claves(cuerpo).await,
             "/v1/sync/salud" => {
                 self.informes.lock().unwrap().push(cuerpo.clone());
@@ -299,6 +300,24 @@ impl NubeDeContraste {
         })
     }
 
+    async fn filas_por_clave(&self, cuerpo: &JsonValue) -> JsonValue {
+        let tabla = cuerpo["tabla"].as_str().unwrap().to_string();
+        let (columnas, claves) = self.columnas(&tabla).await;
+        let donde = claves.iter().enumerate().map(|(i, c)| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+        let mut filas = Vec::new();
+        for clave in cuerpo["claves"].as_array().unwrap() {
+            let args: Vec<Value> = clave.as_array().unwrap().iter().map(argumento).collect();
+            let sql = format!("SELECT * FROM \"{tabla}\" WHERE {donde};");
+            for f in self.filas(&sql, args, columnas.len()).await {
+                filas.push(f.iter().map(json_de).collect::<Vec<_>>());
+            }
+        }
+        json!({
+            "ok": true, "tabla": tabla, "columnas": columnas, "filas": filas, "cortada": false,
+            "hasta_seq": self.hasta_seq_pagina(),
+        })
+    }
+
     async fn pagina_de_claves(&self, cuerpo: &JsonValue) -> JsonValue {
         let tabla = cuerpo["tabla"].as_str().unwrap().to_string();
         let limite = *self.claves_por_pagina.lock().unwrap();
@@ -331,6 +350,11 @@ impl tpv_application::ports::sync::PaginasDelContraste for Paginas<'_> {
     async fn filas(&self, p: tpv_application::ports::sync::PedidoDeFilas) -> AppResult<tpv_contracts::sync::FilasDeCubos> {
         let cuerpo = json!({ "tabla": p.tabla, "desde": p.desde, "cubos": p.cubos, "pedir": p.pedir, "cursor": p.cursor });
         let r = self.0.contestar("/v1/sync/verificar/filas", &cuerpo).await.unwrap()?;
+        Ok(serde_json::from_value(r).unwrap())
+    }
+    async fn por_clave(&self, p: tpv_application::ports::sync::PedidoPorClave) -> AppResult<tpv_contracts::sync::FilasPorClave> {
+        let cuerpo = json!({ "tabla": p.tabla, "claves": p.claves });
+        let r = self.0.contestar("/v1/sync/verificar/por-clave", &cuerpo).await.unwrap()?;
         Ok(serde_json::from_value(r).unwrap())
     }
     async fn claves(&self, p: tpv_application::ports::sync::PedidoDeClaves) -> AppResult<tpv_contracts::sync::ClavesPagina> {

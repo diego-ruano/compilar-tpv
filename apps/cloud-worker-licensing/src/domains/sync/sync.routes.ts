@@ -28,7 +28,13 @@ import {
 } from "./bootstrap.ventana";
 import { SQL_SEQ, contadorDeVentanas, leerPuntoDePartida, seqDe } from "./puntoDePartida";
 import { cubosValidos } from "./resumenCubos";
-import { esTablaVerificable, filasDeLosCubos, paginaDeClaves, resumenDeVerificacion } from "./verificar";
+import {
+	esTablaVerificable,
+	filasDeLosCubos,
+	filasPorClave,
+	paginaDeClaves,
+	resumenDeVerificacion,
+} from "./verificar";
 import {
 	Escritor,
 	VOLCADO_MAX_BYTES,
@@ -46,6 +52,7 @@ import {
 	saludSyncSchema,
 	verificarClavesPorPaginasSchema,
 	verificarFilasSchema,
+	verificarPorClaveSchema,
 	verificarResumenSchema,
 } from "./sync.schemas";
 
@@ -510,6 +517,18 @@ syncRoutes.post("/verificar/filas", cuerpoTolerante(verificarFilasSchema), async
 		return c.json({ ok: false, code: "validation", error: "cubos_no_validos" }, 400);
 	}
 	return enJson(await filasDeLosCubos(lectorDe(c), pedido));
+});
+
+// POST /v1/sync/verificar/por-clave  { tabla, claves: unknown[][] }
+// Unas filas por su clave primaria, estén o no en la ventana.
+syncRoutes.post("/verificar/por-clave", cuerpoTolerante(verificarPorClaveSchema), async (c) => {
+	const pedido = c.req.valid("json");
+	if (!esTablaVerificable(pedido.tabla)) {
+		return c.json({ ok: false, code: "validation", error: "tabla_no_verificable" }, 400);
+	}
+	const filas = await filasPorClave(lectorDe(c), pedido);
+	if (!filas) return c.json({ ok: false, code: "validation", error: "claves_no_validas" }, 400);
+	return enJson(filas);
 });
 
 // POST /v1/sync/verificar/claves  { tabla, cursor?: unknown[], limite?: number }
