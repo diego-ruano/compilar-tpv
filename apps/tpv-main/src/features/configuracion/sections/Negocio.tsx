@@ -63,13 +63,18 @@ export function Negocio({
     // Lo GUARDADO: si faltan los datos fiscales, no se puede cobrar.
     const [estado, setEstado] = useState<EstadoFiscal | null>(null);
     const refrescarEstado = useCallback(() => {
+        // Sólo la Main guarda registros de facturación: en una Handy no hay qué preguntar.
+        if (!esMain) {
+            setEstado(null);
+            return;
+        }
         commands.verifactuEstado()
             .then(setEstado)
             .catch(() => setEstado(null));
         // Y el store que usa el RESTO de la aplicación: sin esto, el aviso de «este TPV todavía no
         // puede cobrar» (FIS-01) seguiría en pantalla hasta su siguiente consulta, a los dos minutos.
         void useEstadoFiscal.getState().refrescar();
-    }, []);
+    }, [esMain]);
     useEffect(() => {
         refrescarEstado();
     }, [refrescarEstado]);

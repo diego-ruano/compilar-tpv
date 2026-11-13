@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ModalShell } from "../ui/ModalShell";
 import { useEstadoFiscal } from "../stores/useEstadoFiscal";
+import { useMode } from "../stores/useMode";
 import { useAuth } from "../stores/useAuth";
 import { esAdmin } from "../lib/permisos";
 
@@ -88,8 +89,12 @@ function AvisoDatosFiscalesModal({ onClose }: { onClose: () => void }) {
  *
  * Se monta en el layout y no en cada pantalla por lo de siempre: una regla que hay que acordarse de
  * repetir en cada sitio nuevo es una regla que se rompe al añadir la siguiente pantalla.
+ *
+ * Sólo en la Main: una Handy no cobra ni guarda registros de facturación, así que ni pregunta ni
+ * avisa. Va por el modo del equipo y no por la plataforma, porque un escritorio puede ser una Handy.
  */
 export function AvisoFiscalMontado() {
+    const esMain = useMode((s) => s.mode === "tpv");
     const listo = useEstadoFiscal((s) => s.listo);
     const datosFiscalesCompletos = useEstadoFiscal((s) => s.datosFiscalesCompletos);
     const datosReconocidos = useEstadoFiscal((s) => s.datosReconocidos);
@@ -97,10 +102,10 @@ export function AvisoFiscalMontado() {
     const init = useEstadoFiscal((s) => s.init);
 
     React.useEffect(() => {
-        init();
-    }, [init]);
+        if (esMain) init();
+    }, [init, esMain]);
 
-    if (!listo) return null;
+    if (!esMain || !listo) return null;
 
     if (!datosFiscalesCompletos && !datosReconocidos) {
         return <AvisoDatosFiscalesModal onClose={reconocerDatos} />;

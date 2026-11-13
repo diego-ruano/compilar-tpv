@@ -6,22 +6,24 @@
 // en **`true`**. En casi todo lo demás de este repo se falla del lado pesimista, pero un aviso
 // bloqueante que se enseña por no saber todavía la respuesta es peor que no enseñarlo — y hay dos
 // situaciones normales en las que no se sabe: el arranque, antes de la primera respuesta, y una
-// **Handy**, donde `verifactu_estado` falla porque allí no hay registros de facturación.
+// **Handy**, que ni lo pregunta porque allí no hay registros de facturación.
 //
 // Lo pesimista ya está donde importa: sin el NIF y la razón social, `emitir_cobro` corta la
 // transacción del cobro pase lo que pase en la interfaz. Este store sólo adelanta el aviso.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { useEstadoFiscal, _resetEstadoFiscal } from "../src/shared/stores/useEstadoFiscal";
+import { useEstadoFiscal, _resetEstadoFiscal, REFRESCO_MS } from "../src/shared/stores/useEstadoFiscal";
+import { useMode } from "../src/shared/stores/useMode";
 
 // El store llama a `verifactuEstado()`, que por debajo es un `invoke` de Tauri. Se sustituye por un
-// doble para poder decidir qué contesta cada caso.
-const respuesta = vi.hoisted(() => ({ valor: null as unknown, falla: false }));
+// doble para poder decidir qué contesta cada caso y contar las veces que se pregunta.
+const respuesta = vi.hoisted(() => ({ valor: null as unknown, falla: false, preguntas: 0 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
 	invoke: async () => {
-		if (respuesta.falla) throw new Error("una Handy no tiene registros de facturación");
+		respuesta.preguntas += 1;
+		if (respuesta.falla) throw new Error("la base está ocupada");
 		return respuesta.valor;
 	},
 }));
@@ -38,6 +40,9 @@ beforeEach(() => {
 	_resetEstadoFiscal();
 	respuesta.falla = false;
 	respuesta.valor = estado();
+	respuesta.preguntas = 0;
+	// Lo normal de estos tests es la Main, que es la que pregunta.
+	useMode.setState({ mode: "tpv" });
 });
 
 describe("los datos del obligado", () => {
@@ -58,10 +63,9 @@ describe("los datos del obligado", () => {
 		expect(useEstadoFiscal.getState().listo).toBe(true);
 	});
 
-	it("en una Handy el comando falla y NO se traduce en «faltan los datos»", async () => {
-		// Una Handy no tiene registros de facturación: `verifactu_estado` revienta ahí. Tratar ese
-		// fallo como «faltan los datos» sacaría un modal que dice que el equipo no puede cobrar en
-		// un dispositivo que, efectivamente, no cobra — pero por otro motivo y sin nada que hacer.
+	it("si la pregunta falla, NO se traduce en «faltan los datos»", async () => {
+		// No haber podido leerlo no es saber que faltan: tratar el fallo como «faltan los datos»
+		// sacaría un modal que dice que el equipo no puede cobrar sin que nadie lo haya comprobado.
 		respuesta.falla = true;
 
 		await useEstadoFiscal.getState().refrescar();
@@ -90,5 +94,77 @@ describe("los datos del obligado", () => {
 		_resetEstadoFiscal();
 
 		expect(useEstadoFiscal.getState().datosReconocidos).toBe(false);
+	});
+});
+
+describe("quién pregunta: sólo la Main", () => {
+	// El modo del equipo, no la plataforma: un escritorio en modo Handy tampoco pregunta. Los
+	// temporizadores del store son los de `window`, que en estos tests (entorno node) no existe.
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.stubGlobal("window", globalThis);
+	});
+	afterEach(() => {
+		_resetEstadoFiscal();
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+	});
+
+	it("la Main pregunta al arrancar y después cada dos minutos", async () => {
+		useEstadoFiscal.getState().init();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(respuesta.preguntas).toBe(1);
+		expect(useEstadoFiscal.getState().listo).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(2 * REFRESCO_MS);
+		expect(respuesta.preguntas).toBe(3);
+	});
+
+	it("una Handy no pregunta nunca: ni al arrancar, ni cada dos minutos, ni desde Configuración", async () => {
+		// Cada pregunta de una Handy sería un comando que falla —allí no hay registros de
+		// facturación— y que `invocar` registra: una cada dos minutos en cada equipo.
+		useMode.setState({ mode: "handy" });
+
+		useEstadoFiscal.getState().init();
+		await vi.advanceTimersByTimeAsync(3 * REFRESCO_MS);
+		await useEstadoFiscal.getState().refrescar();
+
+		expect(respuesta.preguntas).toBe(0);
+		// Sin respuesta no hay aviso: `listo` sigue en `false` y los datos, dados por buenos.
+		expect(useEstadoFiscal.getState().listo).toBe(false);
+		expect(useEstadoFiscal.getState().datosFiscalesCompletos).toBe(true);
+	});
+
+	it("mientras no se sabe el modo tampoco se pregunta", async () => {
+		for (const modo of ["loading", null] as const) {
+			useMode.setState({ mode: modo });
+			useEstadoFiscal.getState().init();
+			await vi.advanceTimersByTimeAsync(REFRESCO_MS);
+		}
+		expect(respuesta.preguntas).toBe(0);
+	});
+
+	it("un equipo que deja de ser la Main deja de preguntar, aunque el temporizador siga armado", async () => {
+		useEstadoFiscal.getState().init();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(respuesta.preguntas).toBe(1);
+
+		useMode.setState({ mode: "handy" });
+		await vi.advanceTimersByTimeAsync(3 * REFRESCO_MS);
+
+		expect(respuesta.preguntas).toBe(1);
+	});
+
+	it("un equipo que pasa a ser la Main empieza a preguntar", async () => {
+		useMode.setState({ mode: "handy" });
+		useEstadoFiscal.getState().init();
+		await vi.advanceTimersByTimeAsync(REFRESCO_MS);
+		expect(respuesta.preguntas).toBe(0);
+
+		useMode.setState({ mode: "tpv" });
+		useEstadoFiscal.getState().init();
+		await vi.advanceTimersByTimeAsync(REFRESCO_MS);
+
+		expect(respuesta.preguntas).toBe(2);
 	});
 });

@@ -61,6 +61,14 @@ describe("el registro de los fallos de comandos", () => {
         expect(aSentry).toHaveLength(0);
     });
 
+    it("lo que una Handy no tiene porque es de la Main no es un fallo del programa", () => {
+        // Rust lo contesta como `conflict`, no como `internal`: el equipo no admite la operación.
+        registrar(fallo("verifactu_estado", "conflict", "Los registros de facturación sólo existen en el TPV principal"));
+
+        expect(contados[0]).toMatchObject({ gravedad: "normal", mensaje: null });
+        expect(aSentry).toHaveLength(0);
+    });
+
     it("la espera de la aprobación de una Handy no es un fallo", () => {
         registrar(fallo("pair_status", "not_approved"));
 
