@@ -166,7 +166,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
   JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
   del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
-  Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
+  Worker y es lo que la Main descarga dentro del plazo de un volcado (150 s, y lo pide en gzip:
+  [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Con la ruta en el Worker las filas
   llegan por `tenantQuery` y, para una misma ventana, la respuesta es la misma byte a byte
   (`test/helpers/dosCaminos.ts`); pero allí ya han cruzado la llamada al DO, enteras, cuando se
   escriben, así que lo que acota esa llamada es su tope de 32 MiB y no el techo, que actúa después.

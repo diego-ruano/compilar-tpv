@@ -41,9 +41,10 @@ import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
  *   ruta que se ejecuta dentro del DO viaja como flujo y no lo tiene (comprobado en local con
  *   40 MiB), pero con la ruta en el Worker las filas vuelven como valor de `consultar`, que sí.
  *   Por debajo de 32 MiB valen las dos formas.
- * - **La Main**, que descarga la respuesta entera con un plazo total de 20 s (`HTTP_TIMEOUT_SECS`,
- *   `tpv-infra-licensing`) y la monta en memoria antes de restaurarla. 24 MiB en 20 s son 10 Mbit/s
- *   sin comprimir.
+ * - **La Main**, que descarga la respuesta entera dentro del plazo de un volcado, 150 s
+ *   (`HTTP_TIMEOUT_VOLCADO_SECS`, `tpv-infra-licensing`), y la monta en memoria antes de
+ *   restaurarla. 24 MiB en 150 s son 1,3 Mbit/s sin comprimir, y la Main la pide en gzip
+ *   (`lib/gzip.ts`).
  * - **Lo que cabe.** Medido con un bar de mil comandas diarias (unas 22.500 filas y 4 MB al día),
  *   una fila ocupa unos 180 bytes: son unas 140.000 filas, seis días de ese bar o un mes de uno
  *   con la sexta parte de movimiento.

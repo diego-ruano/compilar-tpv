@@ -353,14 +353,11 @@ ventana encogida le pasa también a uno más reciente cuyo mes no quepa. Las alt
 sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la Main no deje hacer
 el primer cierre mientras falte histórico. Sin decidir.
 
-Dos cosas de la Main que pesan más con una ventana estrecha, y que hoy no dependen de ella:
-
-- **El histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
-  (`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
-  recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
-  anterior.
-- **El plazo de una petición son 20 s** (`HTTP_TIMEOUT_SECS`, `tpv-infra-licensing`), contando la
-  descarga: 24 MiB sin comprimir necesitan 10 Mbit/s, además de lo que tarde el volcado.
+Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
+**el histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
+(`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
+recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
+anterior.
 
 ### DO-03 · Copias de la base de cada negocio
 
