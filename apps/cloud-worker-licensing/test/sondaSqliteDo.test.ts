@@ -428,6 +428,33 @@ describe("límites del SQL", () => {
 		expect(res.params101).not.toBeNull();
 		expect(res.jsonEach1000).toBeNull();
 	});
+
+	it("un texto con varias sentencias las ejecuta todas, y un PRAGMA de las de detrás cambia la conexión", async () => {
+		// Lo que obliga a `leerEnBruto` a contar sentencias: el `SELECT` de delante hace que el texto
+		// parezca una lectura, el `PRAGMA` no escribe ninguna fila, y la conexión se queda sin comprobar
+		// los `CHECK` para todo lo que venga después en este objeto.
+		const res = await enElHub("sonda-varias-sentencias", (hub) => {
+			const { sql } = hub.state.storage;
+			sql.exec("CREATE TABLE T (ID TEXT PRIMARY KEY, N INTEGER NOT NULL CHECK (N > 0));");
+			const antes = error(() => sql.exec("INSERT INTO T VALUES ('a', 0);"));
+			const cursor = sql.exec("SELECT 1 AS uno; PRAGMA ignore_check_constraints = ON;");
+			const filas = cursor.toArray();
+			const escritas = cursor.rowsWritten;
+			const despues = error(() => sql.exec("INSERT INTO T VALUES ('b', 0);"));
+			sql.exec("PRAGMA ignore_check_constraints = OFF;");
+			const restaurado = error(() => sql.exec("INSERT INTO T VALUES ('c', 0);"));
+			return { antes, filas, escritas, despues, restaurado, n: contar(sql, "T") };
+		});
+		informe.variasSentencias = res;
+		expect(res.antes).toMatch(/CHECK constraint failed/);
+		// Lo que devuelve es de la última sentencia, que no da filas ni escribe ninguna.
+		expect(res.filas).toEqual([]);
+		expect(res.escritas).toBe(0);
+		// Y el `CHECK` ha dejado de comprobarse.
+		expect(res.despues).toBeNull();
+		expect(res.restaurado).toMatch(/CHECK constraint failed/);
+		expect(res.n).toBe(1);
+	});
 });
 
 describe("jurisdicción", () => {

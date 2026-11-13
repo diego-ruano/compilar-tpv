@@ -5,8 +5,9 @@
 // escritura, que entraba sin pasar por el motor: sin `Applied_Operations`, sin `Sync_Changes` y sin
 // difundirse, así que la Main no la habría visto nunca. Aquí se comprueba, por el RPC de verdad:
 //
-// - que `consultar` sólo lee: lo que no es una lectura se rechaza, y lo que parece una lectura y
-//   escribe (`WITH … DELETE`, dos sentencias en un texto) se deshace entero;
+// - que `consultar` sólo lee: lo que no es una lectura se rechaza, también detrás de una (dos
+//   sentencias en un texto: un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja
+//   cambiada la conexión), y lo que parece una lectura y escribe (`WITH … DELETE`) se deshace entero;
 // - que lo único que se escribe fuera del motor es el estado propio de la nube (el freno del PIN y
 //   el checkpoint de la purga), por su propia puerta (`anotarEstado`), tabla por tabla;
 // - que el alta del negocio siembra su administrador dentro del DO (`aprovisionar`), sin SQL que
@@ -30,6 +31,7 @@ const { app } = await import("../src/app");
 const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { clienteDelHub } = await import("../src/lib/tenantClient");
+const { unaSolaSentencia } = await import("../src/durableObjects/tenantHub.sqlite");
 const { hashPin, verifyPin } = await import("../src/domains/login/login.crypto");
 const { reservarIntento, throttleReset } = await import("../src/domains/login/login.queries");
 
@@ -82,6 +84,95 @@ describe("consultar sólo lee", () => {
 		expect((lote as any).resultados.map((r: any) => r.rows[0][0])).toEqual([1, 1, 1]);
 	});
 
+	it("un `;` dentro de un texto, de un nombre o de un comentario no hace dos sentencias", async () => {
+		const t = "consultar-punto-y-coma";
+		await conBase(t);
+
+		const lote = await stub(t).consultar(
+			t,
+			[
+				"SELECT ';' AS x;",
+				"SELECT 'it''s; así' AS x",
+				`SELECT 'a' AS "x;y";`,
+				"SELECT 'b' AS [x;y];",
+				// Como las consultas de `cuentas.queries.ts`: el comentario explica, y lleva su punto y coma.
+				"SELECT\n\t-- la mesa va con su nombre; sólo a un número se le antepone «Mesa»\n\t'c' AS x\nFROM Zonas;",
+				"SELECT /* uno; dos */ 'd' AS x -- y nada más; de verdad\n;",
+			],
+			true,
+		);
+		expect(lote).toMatchObject({ ok: true });
+		expect((lote as any).resultados.map((r: any) => r.rows[0][0])).toEqual([";", "it's; así", "a", "b", "c", "d"]);
+	});
+
+	it("un texto con más de una sentencia se rechaza sin ejecutar ninguna", async () => {
+		const t = "consultar-varias-sentencias";
+		await conBase(t);
+		await enLaBase(t, (sql) => {
+			sql.exec("CREATE TABLE Con_Check (N INTEGER NOT NULL CHECK (N > 0));");
+		});
+
+		for (const texto of [
+			"SELECT 1; DELETE FROM Zonas;",
+			"SELECT 1; UPDATE Zonas SET Nombre_Zona = 'Otra';",
+			// Dos lecturas tampoco: una sentencia por texto.
+			"SELECT 1; SELECT 2;",
+			// Lo que no escribe ninguna fila y deja la conexión sin comprobar los `CHECK`
+			// (`test/sondaSqliteDo.test.ts`), se esconda donde se esconda.
+			"SELECT 1; PRAGMA ignore_check_constraints = ON;",
+			"SELECT 1;PRAGMA ignore_check_constraints=ON",
+			"SELECT ';' AS x; PRAGMA ignore_check_constraints = ON;",
+			"SELECT 1 /* ; */; PRAGMA ignore_check_constraints = ON;",
+			"SELECT 1 -- un comentario\n; PRAGMA ignore_check_constraints = ON;",
+			"WITH x AS (SELECT 1) SELECT * FROM x; PRAGMA ignore_check_constraints = ON;",
+			// Un parámetro con nombre se traga el paréntesis con su comilla: para SQLite son dos sentencias.
+			"SELECT $a('); PRAGMA ignore_check_constraints = ON; --'",
+		]) {
+			expect(await stub(t).consultar(t, [texto], false), texto).toEqual(NO_ES_LECTURA);
+		}
+
+		await enLaBase(t, (sql) => {
+			expect(zonas(sql)).toEqual(["Sala"]);
+			// Los `CHECK` se siguen comprobando.
+			expect(() => sql.exec("INSERT INTO Con_Check (N) VALUES (0);")).toThrow(/CHECK constraint failed/);
+		});
+	});
+
+	it("contar sentencias: ante la duda, no es una", () => {
+		const UNA = [
+			"SELECT 1",
+			"SELECT 1;",
+			"  SELECT 1 ;  \n",
+			"SELECT 1;;",
+			"SELECT ';'",
+			"SELECT 'a''b;c'",
+			`SELECT "a;b" FROM t`,
+			"SELECT `a;b` FROM t",
+			"SELECT [a;b] FROM t",
+			"SELECT 1 -- fin; de verdad",
+			"SELECT 1 /* a; b */ FROM t; /* c; d */ -- e; f",
+			"SELECT x ->> '$.a' FROM t WHERE y = ?1;",
+			"",
+		];
+		const MAS_DE_UNA = [
+			"SELECT 1; SELECT 2",
+			"SELECT 1;PRAGMA x=1",
+			"SELECT ';'; PRAGMA x = 1;",
+			"SELECT 1 -- ;\n; PRAGMA x = 1",
+			"SELECT 1 /* ' */; PRAGMA x = 1 /* ' */",
+			"SELECT '--'; PRAGMA x = 1",
+			`SELECT "a"";b"; PRAGMA x = 1`,
+			"SELECT [a]; PRAGMA x = 1 --]",
+			// Lo que no se sabe trocear igual que SQLite: parámetros con nombre.
+			"SELECT $a('); PRAGMA x = 1; --'",
+			"SELECT :a",
+			"SELECT @a",
+			"SELECT #a",
+		];
+		for (const texto of UNA) expect(unaSolaSentencia(texto), texto).toBe(true);
+		for (const texto of MAS_DE_UNA) expect(unaSolaSentencia(texto), texto).toBe(false);
+	});
+
 	it("lo que no empieza como una lectura se rechaza sin ejecutarse", async () => {
 		const t = "consultar-no-escribe";
 		await conBase(t);
@@ -117,9 +208,7 @@ describe("consultar sólo lee", () => {
 		for (const texto of [
 			"WITH victimas AS (SELECT ID_Zona FROM Zonas) DELETE FROM Zonas WHERE ID_Zona IN (SELECT ID_Zona FROM victimas);",
 			"WITH nueva(id, nombre) AS (VALUES ('z2', 'Terraza')) INSERT INTO Zonas (ID_Zona, Nombre_Zona) SELECT id, nombre FROM nueva;",
-			// Dos sentencias en un texto: el SQLite del DO las ejecuta las dos.
-			"SELECT 1; DELETE FROM Zonas;",
-			"SELECT 1; UPDATE Zonas SET Nombre_Zona = 'Otra';",
+			"WITH x AS (SELECT 1) UPDATE Zonas SET Nombre_Zona = 'Otra' RETURNING Nombre_Zona;",
 		]) {
 			expect(await stub(t).consultar(t, [texto], false), texto).toEqual(NO_ES_LECTURA);
 			expect(await enLaBase(t, zonas), texto).toEqual(["Sala"]);

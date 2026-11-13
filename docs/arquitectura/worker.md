@@ -76,13 +76,19 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
-- **`consultar` sólo lee** (`leerEnBruto`). Lo que no empieza como una lectura (`SELECT`, `WITH`) se
-  rechaza con `consulta_no_es_lectura`, y lo que empieza como una lectura y escribe (un `WITH …
-  DELETE`, una segunda sentencia detrás de un `;`) se deshace entero: va todo en una transacción y
-  se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no pasaría por el
-  motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la vería nunca. Por
-  `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y las rutas
-  públicas de la reserva.
+- **`consultar` sólo lee** (`leerEnBruto`), y no cambia la conexión. Cada texto tiene que ser **una
+  sola sentencia** que empiece como una lectura (`SELECT`, `WITH`); si no, se rechaza con
+  `consulta_no_es_lectura` sin ejecutarse. El SQLite del DO ejecuta todo lo que le llegue separado
+  por `;`, y un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja la conexión cambiada
+  para todo lo que venga después (sin comprobar los `CHECK`, por ejemplo). Las sentencias se cuentan
+  troceando el texto como SQLite (`unaSolaSentencia`: un `;` dentro de un texto, de un nombre entre
+  comillas o de un comentario no separa nada), y ante la duda es que no: un parámetro con nombre
+  (`$a`, `:a`, `@a`) no pasa, porque ninguna consulta los usa y SQLite los trocea de otra manera. Lo
+  que empieza como una lectura y escribe (un `WITH … DELETE`) se deshace entero: va todo en una
+  transacción y se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no
+  pasaría por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la
+  vería nunca. Por `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y
+  las rutas públicas de la reserva.
 - **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
   se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
   purga (`Sync_Main_Checkpoints`). Dentro del DO lo escribe con el cliente de al lado; cuando la ruta
