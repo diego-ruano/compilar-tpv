@@ -462,7 +462,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>> {
         let g = self.db.read().await;
         let db = &g;
-        let like = format!("%{}%", query);
+        // `instr` y no `LIKE`, como en el worker (`searchProductos` de `venta_rapida.queries.ts`): allí
+        // el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un
+        // patrón el `%` y el `_` que teclea el usuario son comodines. Los dos lados buscan el texto
+        // tal cual, sin distinguir mayúsculas, como `LIKE`.
         let mut rows = db
             .query(
                 r#"
@@ -479,13 +482,13 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 FROM Productos p
                 JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
                 LEFT JOIN v_inventario_producto_stock v ON v.ID_Producto = p.ID_Producto
-                WHERE p.Nombre LIKE ?1
+                WHERE instr(lower(p.Nombre), lower(?1)) > 0
                   AND COALESCE(c.Vendible,1)=1
                   AND p.Archivado_En IS NULL
                 ORDER BY p.Nombre ASC
                 LIMIT ?2;
                 "#,
-                vec![Value::Text(like), Value::Integer(limit)],
+                vec![Value::Text(query), Value::Integer(limit)],
             )
             .await
             .map_err(db_err)?;

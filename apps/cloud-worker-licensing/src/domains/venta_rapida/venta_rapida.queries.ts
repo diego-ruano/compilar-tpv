@@ -103,9 +103,13 @@ export async function searchProductos(
 	limit: number,
 ): Promise<ProductoRow[]> {
 	if (!recortar(query)) return [];
+	// `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50
+	// bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaba la búsqueda; y en un
+	// patrón el `%` y el `_` que teclea el usuario son comodines. Sin distinguir mayúsculas, como
+	// `LIKE`. Igual en la Main (`search_productos`).
 	const rs = await db.execute({
-		sql: productosSql("p.Nombre LIKE ?1", "LIMIT ?2"),
-		args: [`%${query}%`, limit],
+		sql: productosSql("instr(lower(p.Nombre), lower(?1)) > 0", "LIMIT ?2"),
+		args: [query, limit],
 	});
 	return rows(rs) as ProductoRow[];
 }

@@ -1,0 +1,16 @@
+{
+  "descripcion": "Busqueda de texto en los gastos. El % y el _ que teclea el usuario se buscan tal cual: '10%_' solo esta en 'Rappel 10%_anual'. Como patron de LIKE casaba con los tres gastos (basta con que haya un 10 y algo detras).",
+  "lectura": "cuentas.salidas",
+  "seed": [
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-12', 'Compras', 'Rappel 10%_anual', 15000);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-2', '2026-05-12', 'Compras', 'Rappel 1000 anual', 4000);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-3', '2026-05-12', 'Compras', 'Luz', 1050);"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "10%_",
+    "page": null,
+    "page_size": null
+  }
+}

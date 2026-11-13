@@ -1,0 +1,9 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-vale",
+    "Nombre": "Vale_50% barra",
+    "Precio_Venta": 100,
+    "Ruta_Imagen": null
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "filas": [
+    {
+      "concepto": "Rappel 10%_anual",
+      "fecha_hora": "2026-05-12",
+      "id": "gasto-1",
+      "importe": 15000,
+      "pagado_con_caja": false,
+      "proveedor_id": null,
+      "tipo_gasto": "Compras"
+    }
+  ],
+  "siguiente": null
+}

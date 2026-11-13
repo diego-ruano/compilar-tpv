@@ -1,0 +1,13 @@
+[
+  {
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-otono",
+    "Nombre": "Menú degustación de otoño con maridaje de vinos de la tierra y postre casero",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 100,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  }
+]

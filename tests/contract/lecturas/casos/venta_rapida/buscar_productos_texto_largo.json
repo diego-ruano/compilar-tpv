@@ -1,0 +1,15 @@
+{
+  "descripcion": "Buscador de la barra. Una busqueda larga y con acentos: 71 caracteres, 73 bytes. El SQLite del Durable Object no admite un patron de LIKE de mas de 50 bytes, asi que en la Handy esta busqueda fallaba con un error interno. Solo casa el menu de otoño entero: el de verano difiere en una palabra y el corto no contiene el texto. Este buscador no distingue mayusculas en las letras sin acento, como LIKE.",
+  "lectura": "venta_rapida.buscar_productos",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-otono', 'cat-cocina', 'Menú degustación de otoño con maridaje de vinos de la tierra y postre casero', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-verano', 'cat-cocina', 'Menú degustación de verano con maridaje de vinos de la tierra y postre casero', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-corto', 'cat-cocina', 'Menú degustación de otoño', 100);"
+  ],
+  "entrada": {
+    "query": "degustación DE otoño CON maridaje de vinos de la tierra y postre CASERO",
+    "limit": 10
+  }
+}

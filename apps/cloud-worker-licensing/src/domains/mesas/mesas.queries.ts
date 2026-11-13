@@ -361,6 +361,10 @@ export async function searchProductos(
 	query: string,
 ): Promise<ProductoVendibleOut[]> {
 	if (!recortar(query)) return [];
+	// `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50
+	// bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaba la búsqueda; y en un
+	// patrón el `%` y el `_` que teclea el usuario son comodines. Igual en la Main
+	// (`search_productos_by_nombre`).
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -371,11 +375,11 @@ export async function searchProductos(
 				p.Ruta_Imagen AS Ruta_Imagen
 			FROM Productos p
 			JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-			WHERE LOWER(p.Nombre) LIKE ?1 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
+			WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
 			ORDER BY p.Nombre ASC
 			LIMIT 200;
 		`,
-		args: [`%${query.toLowerCase()}%`],
+		args: [query.toLowerCase()],
 	});
 	return rows(rs) as ProductoVendibleOut[];
 }
