@@ -67,9 +67,9 @@ vi.mock("../src/domains/reservas_web/puerta", async (importOriginal) => {
 	return { ...original, puertaPublica: pasa, limitadorAltas: pasa, verificacionHumana: pasa };
 });
 
-vi.mock("../src/lib/tenantClient", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/lib/tenantClient")>();
-	return { ...original, lecturaConHora: (_env: any, t: string, _hora: any, fn: any) => enCurso!.leer(t, fn) };
+vi.mock("../src/domains/reservas_web/lecturasDeLaWeb", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/domains/reservas_web/lecturasDeLaWeb")>();
+	return { ...original, leerParaLaWeb: (_env: any, t: string, lectura: any) => enCurso!.leer(t, lectura) };
 });
 
 vi.mock("../src/observability/axiom", async (importOriginal) => {

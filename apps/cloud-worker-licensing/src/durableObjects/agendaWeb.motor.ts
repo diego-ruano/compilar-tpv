@@ -12,12 +12,10 @@
 //     (`estado`), como en el `TenantHub` (SYNC-16). `leer` es una costura para los tests, no estado.
 //   · Las respuestas no llevan datos personales de ninguna reserva.
 
-import type { Client } from "@libsql/client/web";
 import type { PendientesReservaWebDto, PeticionReservaWebDto } from "@tpv/contracts";
 
 import type { Env } from "../env";
 import { nuevoId } from "../lib/ids";
-import { lecturaConHora } from "../lib/tenantClient";
 import { hubDe } from "../lib/hub";
 import { sha256HexStr } from "../server/utils/crypto";
 import { reportarReservaWeb } from "../observability/axiom";
@@ -35,23 +33,15 @@ import {
 	type MesaWeb,
 	type Ocupacion,
 } from "../domains/reservas_web/disponibilidad";
-import { horaDelNegocio } from "../domains/reservas_web/horaDelNegocio";
 import {
-	ajustesWeb,
-	cierresEntre,
-	mesasYFranjas,
-	nombresDeLasReservables,
-	numeroDeMesa,
-	ocupacionAlrededorDe,
-	reservasVivasDelCorreo,
-} from "../domains/reservas_web/lecturas";
+	leerParaLaWeb,
+	type LecturaWeb,
+	type NombreDeLectura,
+	type ReservaEnLaBase,
+	type ResultadoDe,
+} from "../domains/reservas_web/lecturasDeLaWeb";
 import { MESA_AUTOMATICA, type AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
-import {
-	enviarCorreoReservaWeb,
-	negocioDelCorreo,
-	type Correo,
-	type ResultadoCorreo,
-} from "../domains/reservas_web/correos";
+import { enviarCorreoReservaWeb, type Correo, type ResultadoCorreo } from "../domains/reservas_web/correos";
 import {
 	altasDesde,
 	cancelacionesHechas,
@@ -95,13 +85,6 @@ const CADA_ALARMA_MS = 60 * 60_000;
 const REOFRECER_TRAS_MS = 60 * 60_000;
 /** Una petición que sigue sin recoger tanto tiempo es una anomalía que mirar (§9). */
 const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
-// Lo que se pregunta a la base para dar por hecho lo que espera: un alta, si la reserva está; una
-// cancelación, si está y ya no está por llegar (cancelada, sentada, terminada o no presentada). La
-// Main sólo cancela una que aún no ha llegado (`cancelar_desde_la_web`): con el cliente ya sentado la
-// deja, y esperar a verla cancelada sería volver a ofrecérsela cada hora.
-const SQL_ESTAN_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`;
-const SQL_CANCELADAS_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas
-	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado <> 'PROXIMA';`;
 /**
  * Cuántos correos de «no se pudo registrar» se mandan de una vez, y entre cuántas fallidas se
  * buscan: las que no salen (un buzón en el tope, un correo que el binding rechaza) no pueden tapar a
@@ -241,10 +224,11 @@ type DiaLeido = {
 	idsEnLaBase: Set<string>;
 };
 
-/** El estado de una reserva en la base, para el enlace de cancelar, con el correo de su cliente. */
-type ReservaEnLaBase = { dia: string; hora: string; personas: number; id_mesa: string | null; estado: string; email: string | null };
-
-export type Lector = <T>(tenantId: string, fn: (db: Client, ahora: string) => Promise<T>) => Promise<T>;
+/**
+ * Cómo se lee la base del negocio: una lectura entera, por su nombre, en un viaje a su TenantHub
+ * (`domains/reservas_web/lecturasDeLaWeb.ts`). Lo que espera aquí se le pasa en sus datos.
+ */
+export type Lector = <N extends NombreDeLectura>(tenantId: string, lectura: LecturaWeb<N>) => Promise<ResultadoDe<N>>;
 
 export type EnviarCorreo = (correo: Correo) => Promise<ResultadoCorreo>;
 
@@ -265,7 +249,7 @@ export class MotorAgendaWeb {
 		private readonly env: Env,
 	) {
 		void this.sql;
-		this.leer = (tenantId, fn) => lecturaConHora(env, tenantId, horaDelNegocio, fn);
+		this.leer = (tenantId, lectura) => leerParaLaWeb(env, tenantId, lectura);
 		this.enviarCorreo = (correo) => enviarCorreoReservaWeb(env, correo);
 	}
 
@@ -309,15 +293,7 @@ export class MotorAgendaWeb {
 
 	private async leerDia(tenantId: string, dia: string): Promise<DiaLeido> {
 		const leidaMs = Date.now();
-		return this.leer(tenantId, async (db, ahora) => {
-			const ajustes = await ajustesWeb(db);
-			const [cierres, { mesas, franjas }, ocupacion] = await Promise.all([
-				cierresEntre(db, dia, dia),
-				mesasYFranjas(db),
-				ocupacionAlrededorDe(db, dia, ajustes.duracion),
-			]);
-			return { leidaMs, ahora, ajustes, cierres, mesas, franjas, ocupaciones: ocupacion.ocupaciones, idsEnLaBase: ocupacion.ids };
-		});
+		return { leidaMs, ...(await this.leer(tenantId, { que: "diaDeLaAgenda", dia })) };
 	}
 
 	/** Si el día o la hora no valen, el rechazo. */
@@ -374,32 +350,16 @@ export class MotorAgendaWeb {
 		const token = nuevoToken();
 		const [tokenHash, emailHash] = await Promise.all([sha256HexStr(token), sha256HexStr(alta.email)]);
 		const leidaMs = Date.now();
-		const leido = await this.leer(p.tenantId, async (db, ahora) => {
-			const ajustes = await ajustesWeb(db);
-			const hoy = ahora.slice(0, 10);
-			const [cierres, { mesas, franjas }, ocupacion, delCorreo, nombres] = await Promise.all([
-				cierresEntre(db, alta.dia_ymd, alta.dia_ymd),
-				mesasYFranjas(db),
-				ocupacionAlrededorDe(db, alta.dia_ymd, ajustes.duracion),
-				reservasVivasDelCorreo(db, alta.email, hoy),
-				// El nombre que lleva la respuesta: de la mesa pedida o, sin ella, de todas las que puede tocar.
-				automatica
-					? nombresDeLasReservables(db)
-					: numeroDeMesa(db, alta.id_mesa).then((n) => new Map(n === null ? [] : [[alta.id_mesa, n]])),
-			]);
-			const dia: DiaLeido = {
-				leidaMs,
-				ahora,
-				ajustes,
-				cierres,
-				mesas,
-				franjas,
-				ocupaciones: ocupacion.ocupaciones,
-				idsEnLaBase: ocupacion.ids,
-			};
-			return { dia, delCorreo, nombres };
+		// Lo del día, las reservas vivas del correo y el nombre que lleva la respuesta: de la mesa pedida
+		// o, sin ella, de todas las que puede tocar. Un viaje.
+		const leido = await this.leer(p.tenantId, {
+			que: "alta",
+			dia: alta.dia_ymd,
+			email: alta.email,
+			idMesa: alta.id_mesa,
+			automatica,
 		});
-		const d = leido.dia;
+		const d: DiaLeido = { leidaMs, ...leido.dia };
 
 		// ── Desde aquí, síncrono hasta apuntarla ──
 		// Otra vez: el mismo intento pudo apuntarse mientras éste leía la base.
@@ -627,14 +587,8 @@ export class MotorAgendaWeb {
 	async avisarFallidas(tenantId: string): Promise<number> {
 		const pendientes = fallidasPorAvisar(this.sql, MAX_FALLIDAS_MIRADAS);
 		if (!pendientes.length) return 0;
-		const { ahora, negocio, mesas } = await this.leer(tenantId, async (db, ahora) => {
-			const ids = [...new Set(pendientes.map((f) => f.id_mesa).filter((m): m is string => !!m))];
-			const [negocio, nombres] = await Promise.all([
-				negocioDelCorreo(db),
-				Promise.all(ids.map(async (id) => [id, await numeroDeMesa(db, id)] as const)),
-			]);
-			return { ahora, negocio, mesas: new Map(nombres) };
-		});
+		const idsMesas = [...new Set(pendientes.map((f) => f.id_mesa).filter((m): m is string => !!m))];
+		const { ahora, negocio, mesas } = await this.leer(tenantId, { que: "fallidas", idsMesas });
 		let enviados = 0;
 		for (const f of pendientes) {
 			if (enviados >= MAX_AVISOS_FALLIDAS) break;
@@ -709,29 +663,9 @@ export class MotorAgendaWeb {
 		idReserva: string,
 	): Promise<{ leidaMs: number; ahora: string; enLaBase: ReservaEnLaBase | null; numero: string | null }> {
 		const leidaMs = Date.now();
-		return this.leer(tenantId, async (db, ahora) => {
-			const rs = await db.execute({
-				sql: `SELECT R.Dia_YMD AS dia, R.Hora AS hora, R.Comensales AS personas, R.ID_Mesa AS id_mesa,
-				             R.Estado AS estado, NULLIF(TRIM(C.Email), '') AS email
-				      FROM Reservas R LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
-				      WHERE R.ID_Reserva = ?1;`,
-				args: [idReserva],
-			});
-			const r: any = rs.rows?.[0];
-			const enLaBase: ReservaEnLaBase | null = r
-				? {
-						dia: String(r.dia),
-						hora: String(r.hora),
-						personas: Number(r.personas),
-						id_mesa: r.id_mesa ?? null,
-						estado: String(r.estado),
-						email: typeof r.email === "string" ? r.email : null,
-					}
-				: null;
-			const idMesa = enLaBase?.id_mesa ?? peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
-			const numero = idMesa ? await numeroDeMesa(db, idMesa) : null;
-			return { leidaMs, ahora, enLaBase, numero };
-		});
+		// Si la reserva aún no está en la base, el nombre de su mesa sale de la del alta que espera aquí.
+		const idMesaDelAlta = peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
+		return { leidaMs, ...(await this.leer(tenantId, { que: "reserva", idReserva, idMesaDelAlta })) };
 	}
 
 	/** Una sola alarma, reprogramada mientras haya algo guardado. */
@@ -784,19 +718,23 @@ export class MotorAgendaWeb {
 	private async reconciliarConLaBase(): Promise<void> {
 		const tenantId = negocioRecordado(this.sql);
 		if (!tenantId) return;
-		const vistas = await this.reconciliarTipo(tenantId, "alta", SQL_ESTAN_EN_TURSO, darPorVistas);
+		const vistas = await this.reconciliarTipo(tenantId, "alta", darPorVistas);
 		if (vistas > 0) this.anotar({ event: "reserva_web_vista", tenant_id: tenantId, cuantas: vistas });
-		await this.reconciliarTipo(tenantId, "cancelacion", SQL_CANCELADAS_EN_TURSO, cancelacionesHechas);
+		await this.reconciliarTipo(tenantId, "cancelacion", cancelacionesHechas);
 	}
 
 	/**
 	 * Por lotes y avanzando aunque un lote no encuentre nada: si las más viejas no llegan nunca a
 	 * la base, no pueden tapar a las de detrás. Lo que no da tiempo sigue en la siguiente vez.
+	 *
+	 * Lo que se pregunta a la base para dar por hecho lo que espera: un alta, si la reserva está; una
+	 * cancelación, si está y ya no está por llegar (la lectura `enLaBase`). La Main sólo cancela una que
+	 * aún no ha llegado (`cancelar_desde_la_web`): con el cliente ya sentado la deja, y esperar a verla
+	 * cancelada sería volver a ofrecérsela cada hora.
 	 */
 	private async reconciliarTipo(
 		tenantId: string,
 		tipo: "alta" | "cancelacion",
-		sqlDeLaBase: string,
 		cerrar: (sql: SqlStorage, ids: string[], ahoraMs: number) => number,
 	): Promise<number> {
 		let cerradas = 0;
@@ -808,10 +746,7 @@ export class MotorAgendaWeb {
 				break;
 			}
 			const ids = grupo.map((a) => a.id_reserva);
-			const enLaBase = await this.leer(tenantId, async (db) => {
-				const rs = await db.execute({ sql: sqlDeLaBase, args: [JSON.stringify(ids)] });
-				return (rs.rows ?? []).map((r: any) => String(r.id));
-			});
+			const enLaBase = await this.leer(tenantId, { que: "enLaBase", tipo, ids });
 			cerradas += cerrar(this.sql, enLaBase, Date.now());
 			// Un lote incompleto es el último: la siguiente vez se empieza otra vez por lo más viejo.
 			cursor = grupo.length < MAX_RECONCILIAR ? null : grupo[grupo.length - 1];

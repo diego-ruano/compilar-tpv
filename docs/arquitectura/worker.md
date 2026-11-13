@@ -81,23 +81,19 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
   Lo cubre `test/rolEnLaIdentidad.test.ts`.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
-  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
-  lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Toda
-  ruta que lo usa se ejecuta dentro (lleva `alHub`); fuera sólo lo usan la agenda de reservas web y las
-  rutas públicas de la reserva. Un lote
-  de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
-- **`consultar` sólo lee** (`leerEnBruto`), y no cambia la conexión. Cada texto tiene que ser **una
-  sola sentencia** que empiece como una lectura (`SELECT`, `WITH`); si no, se rechaza con
-  `consulta_no_es_lectura` sin ejecutarse. El SQLite del DO ejecuta todo lo que le llegue separado
-  por `;`, y un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja la conexión cambiada
-  para todo lo que venga después (sin comprobar los `CHECK`, por ejemplo). Las sentencias se cuentan
-  troceando el texto como SQLite (`unaSolaSentencia`: un `;` dentro de un texto, de un nombre entre
-  comillas o de un comentario no separa nada), y ante la duda es que no: un parámetro con nombre
-  (`$a`, `:a`, `@a`) no pasa, porque ninguna consulta los usa y SQLite los trocea de otra manera. Lo
-  que empieza como una lectura y escribe (un `WITH … DELETE`) se deshace entero: va todo en una
-  transacción y se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no
-  pasaría por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la
-  vería nunca. Por `consultar` leen la agenda de reservas web y las rutas públicas de la reserva.
+  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql sobre el SQLite
+  del DO (`tenantHub.sqlite.ts`). Sólo dentro del DO: toda ruta que lo usa lleva `alHub`, y fuera
+  lanza (un router sin `alHub` que lee la base del negocio es un fallo). Un lote de lectura da una
+  foto coherente: el SQL del DO es síncrono y nada se intercala.
+- **Desde fuera del DO no se lee consulta a consulta, ni hay una puerta que acepte SQL.** La agenda
+  de reservas web (otro DO) y las rutas públicas de la reserva (sin dispositivo, no van por `alHub`)
+  piden **una lectura entera, por su nombre** (`leerParaLaWeb`, RPC `TenantHub.leerParaLaWeb`,
+  `domains/reservas_web/lecturasDeLaWeb.ts`): el TenantHub la ejecuta con su base al lado, con «ahora»
+  fijado a la hora del negocio, y devuelve lo que la agenda o la ruta necesitan. Un viaje por lectura:
+  el día de la agenda eran cinco consultas y tres viajes seguidos. Lo que la lectura necesita del
+  estado de la agenda se le pasa en sus datos, y lo que devuelve cruza el RPC por copia estructurada
+  (`Map` y `Set` incluidos, `test/baseEnElDo.test.ts`). Sólo leen: la reserva web no escribe en la base
+  del negocio (ADR 0007).
 - **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
   se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
   purga (`Sync_Main_Checkpoints`). Lo escribe dentro del DO, con el cliente de al lado: las rutas que
@@ -364,7 +360,7 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 
 ## Sincronización y firmas
 
-El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
+El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `leerParaLaWeb`,
 `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
 `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
@@ -503,7 +499,7 @@ no lo vigila nada.
 |---|---|
 | La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
 | El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`) |
-| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
+| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
 | La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` y, si el test hace drenar la cola, `hub.colaPausada = async () => null` (el interruptor `cola_do` se lee de la base central en cada vuelta) |
 | Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |

@@ -390,8 +390,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",
-	// Se ha mandado por la puerta de las lecturas del DO algo que no es una lectura.
-	"consulta_no_es_lectura",
 	"expired_ticket",
 	"field_dek_no_persistida",
 	"fulfillment_failed",

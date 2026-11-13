@@ -37,13 +37,17 @@ import {
 import type { MainVigente } from "./tenantHub.main";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
-import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
+import {
+	leerConLaHoraDelNegocio,
+	type LecturaWeb,
+	type RespuestaDeLecturaWeb,
+} from "../domains/reservas_web/lecturasDeLaWeb";
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
 	baseAprovisionada,
 	clienteLocal,
-	leerEnBruto,
 	migrarBaseLocal,
 	type FilasEnBruto,
 	type Sentencia,
@@ -294,43 +298,23 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * Lo que contesta la puerta por la que se llega a la base desde fuera del DO (`consultar`): un fallo
-	 * con status decidido viaja como dato, porque el RPC no conserva las
-	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 * Una lectura de la agenda de reservas web o de la API pública de la reserva, entera, con la base al
+	 * lado (`domains/reservas_web/lecturasDeLaWeb.ts`): un viaje por lectura, no uno por consulta. Sólo
+	 * lee. Un fallo con status decidido (la base sin aprovisionar) viaja como dato, porque el RPC no
+	 * conserva las propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 *
+	 * No pasa por el turno del log: el SQL del DO es síncrono, así que ve lo confirmado o lo que otra
+	 * petición acaba de escribir en este mismo DO, nunca una escritura a medias.
 	 */
-	private async conLaBase(
-		tenantId: string,
-		trabajo: (storage: DurableObjectStorage) => FilasEnBruto[],
-	): Promise<RespuestaDeConsulta> {
+	async leerParaLaWeb(tenantId: string, lectura: LecturaWeb): Promise<RespuestaDeLecturaWeb> {
 		try {
-			await this.getTenantDb(tenantId);
-			return { ok: true, resultados: trabajo(this.state.storage) };
+			return { ok: true, valor: await leerConLaHoraDelNegocio(await this.getTenantDb(tenantId), lectura) };
 		} catch (e) {
 			if (e instanceof HubError) {
 				return { ok: false, code: e.code, status: e.status, details: e.details };
 			}
 			throw e;
 		}
-	}
-
-	/**
-	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta, o un lote: van en una
-	 * transacción, así que el lote da una foto coherente, como el `batch("read")` de libsql.
-	 *
-	 * **Sólo lee** (`leerEnBruto`): lo que no es una lectura se rechaza con `consulta_no_es_lectura`,
-	 * y lo que escriba se deshace. Una escritura del negocio va por el motor (`aplicar`).
-	 *
-	 * No pasan por el turno del log: el SQL del DO es síncrono, así que ven lo confirmado o lo que
-	 * otra petición acaba de escribir en este mismo DO, nunca una escritura a medias.
-	 */
-	async consultar(
-		tenantId: string,
-		sentencias: Sentencia[],
-		enLote: boolean,
-	): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) =>
-			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
-		);
 	}
 
 	/**

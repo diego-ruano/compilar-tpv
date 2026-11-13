@@ -101,7 +101,7 @@ describe("TenantHub.borrarTodo", () => {
 		});
 
 		expect(await stub.estaAprovisionado()).toBe(false);
-		expect(await stub.consultar(tenantId, ["SELECT 1;"], false)).toMatchObject({
+		expect(await stub.leerParaLaWeb(tenantId, { que: "plano" })).toMatchObject({
 			ok: false,
 			code: "tenant_db_not_provisioned",
 		});
@@ -125,8 +125,8 @@ describe("TenantHub.borrarTodo", () => {
 		await stub.borrarTodo();
 
 		expect(await stub.aprovisionar(tenantId)).toEqual({ reused: false });
-		const r = await stub.consultar(tenantId, ["SELECT COUNT(*) AS n FROM Zonas;"], false);
-		expect(r).toMatchObject({ ok: true, resultados: [{ rows: [[0]] }] });
+		const r = await stub.leerParaLaWeb(tenantId, { que: "plano" });
+		expect(r).toMatchObject({ ok: true, valor: { salones: [] } });
 	});
 });
 

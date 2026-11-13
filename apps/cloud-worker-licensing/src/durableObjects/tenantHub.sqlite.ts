@@ -4,9 +4,10 @@
 //
 // El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
 // `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que las doscientas
-// consultas del worker no dependan de dónde vive la base. Dentro del DO se usa directamente
-// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`leerEnBruto` devuelve filas
-// planas, y `aResultSet` las vuelve a montar al otro lado) y no pueden escribir.
+// consultas del worker no dependan de dónde vive la base: es `clienteLocal`, que usan las rutas
+// (que se ejecutan dentro del DO, `lib/enElHub.ts`) y el motor. Desde fuera del DO no se lee por
+// aquí: la agenda y la API pública de la reserva piden una lectura entera
+// (`domains/reservas_web/lecturasDeLaWeb.ts`).
 //
 // Diferencias con el SQLite de libsql que este fichero absorbe:
 //
@@ -142,109 +143,6 @@ export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 		if (!esFkRota(e)) throw e;
 		return correr(true);
 	}
-}
-
-// ---------------- Lo que llega de fuera del DO ----------------
-//
-// Lo que lee la base desde fuera del DO entra por una puerta (`MotorTenantHub.consultar`), y no deja
-// escribir: una escritura del negocio va por el motor (`aplicar`), que es quien la apunta en
-// `Applied_Operations` y en `Sync_Changes` y la difunde. Una escritura que entrara por aquí no la
-// vería nunca la Main.
-
-/** Una lectura empieza por `SELECT` o por `WITH`, con comentarios o sin ellos delante. */
-const EMPIEZA_COMO_LECTURA = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:SELECT|WITH)\b/i;
-
-/**
- * ¿Hay una sola sentencia en este texto?
- *
- * El SQLite del DO ejecuta todas las que le lleguen separadas por `;`, y lo que devuelve es de la
- * última: detrás de un `SELECT` cabe un `PRAGMA` que no escribe ninguna fila y deja cambiada la
- * conexión para todo lo que venga después (`ignore_check_constraints`, por ejemplo; comprobado en
- * `test/sondaSqliteDo.test.ts`).
- *
- * El texto se recorre como lo trocea SQLite: un `;` dentro de un texto o de un nombre entre
- * comillas, corchetes o acentos graves, o dentro de un comentario, no separa nada. Detrás del
- * primero que sí separa sólo puede haber espacios, comentarios y más `;`.
- *
- * ⚠️ Ante la duda dice que no. Un parámetro con nombre (`$a`, `@a`, `:a`, `#a`) puede llevar
- * detrás un paréntesis que SQLite se traga entero, comillas incluidas (`$a(')`), y lo que aquí
- * parecería un texto entre comillas sería para él una segunda sentencia. Ninguna consulta del
- * negocio los usa (`partes`), así que un texto que traiga uno no pasa.
- */
-export function unaSolaSentencia(texto: string): boolean {
-	const n = texto.length;
-	let cerrada = false;
-	let i = 0;
-	while (i < n) {
-		const c = texto[i];
-		if (c === "-" && texto[i + 1] === "-") {
-			const fin = texto.indexOf("\n", i);
-			i = fin < 0 ? n : fin + 1;
-			continue;
-		}
-		if (c === "/" && texto[i + 1] === "*") {
-			const fin = texto.indexOf("*/", i + 2);
-			i = fin < 0 ? n : fin + 2;
-			continue;
-		}
-		if (c === ";") {
-			cerrada = true;
-			i++;
-			continue;
-		}
-		if (/\s/.test(c)) {
-			i++;
-			continue;
-		}
-		// Cualquier otra cosa es parte de una sentencia.
-		if (cerrada) return false;
-		if (c === "$" || c === "@" || c === ":" || c === "#") return false;
-		if (c === "'" || c === '"' || c === "`") {
-			// Hasta la comilla que cierra; dos seguidas son una comilla dentro del texto.
-			i++;
-			while (i < n) {
-				if (texto[i] === c) {
-					if (texto[i + 1] !== c) break;
-					i++;
-				}
-				i++;
-			}
-			i++;
-			continue;
-		}
-		if (c === "[") {
-			const fin = texto.indexOf("]", i + 1);
-			i = fin < 0 ? n : fin + 1;
-			continue;
-		}
-		i++;
-	}
-	return true;
-}
-
-/**
- * Las lecturas del Worker: ni una fila escrita, ni la conexión cambiada.
- *
- * Se mira tres veces. Antes de ejecutar, que cada texto sea una sola sentencia y que empiece como
- * una lectura: deja fuera lo que no escribe filas pero cambia la conexión (un `PRAGMA`, delante o
- * detrás de un `SELECT`). Y después de ejecutar, que no haya escrito nada: un `WITH … DELETE`
- * empieza como una lectura. Va todo en una transacción, así que lo que haya escrito se deshace.
- */
-export function leerEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
-	const sql = storage.sql;
-	const noEsLectura = () => new HubError("consulta_no_es_lectura", 500);
-	return storage.transactionSync(() =>
-		sentencias.map((s) => {
-			const { texto, args } = partes(s);
-			if (!EMPIEZA_COMO_LECTURA.test(texto) || !unaSolaSentencia(texto)) throw noEsLectura();
-			const cursor = sql.exec(texto, ...args.map(valorParaExec));
-			const columns = [...cursor.columnNames];
-			const rows = Array.from(cursor.raw()) as unknown[][];
-			// Sólo es fiable con el cursor ya recorrido.
-			if (cursor.rowsWritten > 0) throw noEsLectura();
-			return { columns, rows, rowsAffected: 0, lastInsertRowid: null };
-		}),
-	);
 }
 
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */

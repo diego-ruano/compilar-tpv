@@ -24,7 +24,7 @@ describe("TenantHub RPC", () => {
 			"constructor", "aplicar", "revocarDispositivo", "releerMain", "avisarEmparejamiento", "avisarReservasWeb", "fetch", "alarm",
 			"webSocketMessage", "webSocketClose", "webSocketError",
 			// La base del negocio vive en el DO.
-			"consultar", "aprovisionar", "estaAprovisionado", "borrarTodo",
+			"leerParaLaWeb", "aprovisionar", "estaAprovisionado", "borrarTodo",
 			// Una ruta de negocio entera, ejecutada junto a la base (`lib/enElHub.ts`).
 			"ejecutarRuta",
 		].sort());
