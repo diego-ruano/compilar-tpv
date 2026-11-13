@@ -346,8 +346,9 @@ arqueo espere a que termine.
 arqueo de un negocio que nunca ha cerrado suma desde el principio (`totales_entre`), así que si hace
 su primer cierre antes de que termine la fase 2, el esperado sale con lo que haya bajado hasta
 entonces. Ya le pasaba a cualquier negocio sin cierres y con más de 30 días de historia; con la
-ventana encogida le pasa también a uno más reciente cuyo mes no quepa. La alternativa es no encoger
-sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse. Sin decidir.
+ventana encogida le pasa también a uno más reciente cuyo mes no quepa. Las alternativas: no encoger
+sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la Main no deje hacer
+el primer cierre mientras falte histórico. Sin decidir.
 
 Dos cosas de la Main que pesan más con una ventana estrecha, y que hoy no dependen de ella:
 

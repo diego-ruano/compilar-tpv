@@ -77,7 +77,8 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 - **Lo que sigue vivo entra entero**, caiga donde caiga: comandas abiertas, notificaciones activas,
   pedidos en borrador, fichajes sin cerrar.
 - **La unidad es la comanda**: entra con sus líneas, pagos, detalles de pago y consumos, o no entra
-  (una FK colgante abortaría la restauración entera). Entra si está abierta, si se abrió o se cerró
+  (una FK colgante abortaría la restauración entera). Lo que apunta a una línea y a un cobro
+  (detalles de pago, devoluciones, consumos) sólo viaja si viajan los dos. Entra si está abierta, si se abrió o se cerró
   dentro de la ventana, o si dentro de ella tiene un cobro **o la baja de un cobro**: el dinero de
   una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en ese periodo aunque
   la venta sea anterior ([caja.md](caja.md)).
@@ -101,9 +102,10 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre de caja, y viaja la más ancha que
   cabe en los dos topes. Cada candidata se mide antes de leerla: sus filas, contadas, y sus bytes,
   estimados con lo que ocupan las últimas 64 filas de cada tabla; si aun así no cabe al escribirla,
-  se pasa a la siguiente. La estimación sólo puede estrechar la ventana, nunca negar la
-  recuperación: la más estrecha se intenta aunque la estimación diga que no cabe, y decide lo que se
-  escribe. La respuesta dice cuál fue (`ventana_desde`).
+  se pasa a la siguiente. Dentro del `TenantHub`, que es como corre desplegado, la estimación sólo
+  puede estrechar la ventana, nunca negar la recuperación: la más estrecha se intenta aunque la
+  estimación diga que no cabe, y decide lo que se escribe. La respuesta dice cuál fue
+  (`ventana_desde`).
 - **Lo imprescindible no se encoge**: los maestros, lo que sigue vivo, lo que hay desde el último
   cierre de caja no reabierto y el último registro de facturación viajan con cualquier ancho. Si ni
   eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación lo dice
@@ -132,7 +134,8 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
 - Una página lleva hasta 2.000 filas y hasta 24 MiB: si se corta por tamaño trae su
-  `siguiente_cursor` igual, y nunca viene sin al menos una fila.
+  `siguiente_cursor` igual, y nunca viene sin al menos una fila (una fila que sola pase del tope
+  viaja igual: rechazarla dejaría al backfill atascado en ella).
 - Es `Requiere::MainOperativa`, así que no compite con el desbloqueo del login. Se pausa con el
   interruptor `backfill_historico`.
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros

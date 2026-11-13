@@ -208,6 +208,9 @@ export function enBytes(texto: string): Uint8Array<ArrayBuffer> {
  *
  * El texto se junta en trozos de 64 KiB y cada trozo se codifica una vez: lo que queda en memoria
  * son los bytes de la respuesta, no su texto.
+ *
+ * Cada parte que se le da es un texto completo, como el que devuelve `JSON.stringify`: los bytes se
+ * cuentan parte a parte, y un carácter partido entre dos (un par de sustitutos) se contaría de más.
  */
 export class Escritor {
 	private readonly trozos: Uint8Array[] = [];

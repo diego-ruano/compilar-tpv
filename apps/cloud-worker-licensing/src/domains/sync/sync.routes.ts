@@ -421,9 +421,13 @@ const CIERRE_DE_PAGINA = 48;
  *
  * La página se corta en `limite` filas o antes de pasar de `maxBytes`, lo que ocurra antes, y
  * nunca sin al menos una fila: una página vacía con cursor dejaría al backfill pidiendo la misma
- * para siempre. Esa primera fila entra aunque sola pase del tope; con el de verdad no puede, porque
- * una fila del SQLite del DO no pasa de 8 MB. Cortada por tamaño lleva su `siguiente_cursor` igual
- * que una completa, que es lo único que la Main mira para seguir (`backfill_aplicar_pagina`).
+ * para siempre. Cortada por tamaño lleva su `siguiente_cursor` igual que una completa, que es lo
+ * único que la Main mira para seguir (`backfill_aplicar_pagina`).
+ *
+ * Esa primera fila entra aunque sola pase del tope, y entonces la página también lo pasa. Hace
+ * falta una fila de megas (el SQLite del DO admite hasta 8 MB) que además se ensanche al escribirla
+ * en JSON, como un texto lleno de caracteres de control; partirla no se puede, y rechazarla
+ * dejaría al backfill atascado en ella para siempre.
  */
 export async function paginaDelHistorico(
 	lector: Lector,
