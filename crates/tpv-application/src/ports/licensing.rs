@@ -15,7 +15,7 @@ use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity,  LicenseLocalState, PairCreateResult, FirmaDispositivo, DeviceFirmarEmparejamientoArgs,
 };
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 /// Un rechazo del contenido se aparta; fallos de red, credenciales y servidor siguen siendo Err.
 pub enum ResultadoSubidaImagen {
@@ -188,6 +188,26 @@ pub trait PairingService: Send + Sync {
         path: &str,
         body: JsonValue,
     ) -> AppResult<JsonValue>;
+    /// El mismo POST, con el cuerpo de la respuesta tal cual. Es para lo que contesta con un
+    /// volcado de la base del negocio (`/v1/sync/bootstrap`, `/historico`, `/verificar`…): quien
+    /// lo pide lo lee directamente en su tipo (`use_cases::sync`), sin montar antes un
+    /// `serde_json::Value` con todo dentro.
+    ///
+    /// Un estado que no es 2xx sale como en `tpv_server_post_json`. Un 200 con `ok:false` no se
+    /// mira aquí: lo ve quien lee el cuerpo.
+    ///
+    /// Por defecto pasa por `tpv_server_post_json`, que es lo que tienen los dobles de los tests;
+    /// el adaptador de verdad lo sustituye para no pasar por el árbol.
+    async fn tpv_server_post_bytes(
+        &self,
+        mode: &str,
+        path: &str,
+        body: JsonValue,
+    ) -> AppResult<Vec<u8>> {
+        let valor = self.tpv_server_post_json(mode, path, body).await?;
+        serde_json::to_vec(&valor)
+            .map_err(|e| AppError::internal(format!("respuesta no serializable ({:?})", e.classify())))
+    }
     /// Solicita al worker un nuevo código de emparejamiento (modo `tpv`, firmado).
     /// Lo expone tipado a la UI para que el Main lo muestre (QR + código).
     async fn pair_create(&self) -> AppResult<PairCreateResult>;

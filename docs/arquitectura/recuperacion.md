@@ -83,6 +83,13 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.
 - El worker dice qué tablas vienen recortadas (`parcial`) y en qué orden rellenarlas: la clasificación
   vive sólo en `bootstrap.ventana.ts`.
+- **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
+  la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
+  bajan un volcado (`/bootstrap`, `/historico`, `/verificar` y `/verificar-claves`) tienen 150 s de
+  plazo, de conectar a terminar el cuerpo, frente a los 20 s del resto; conectar tiene 10 s en
+  todas. La respuesta va de los bytes a su tipo (`use_cases::sync::pedir`), sin un
+  `serde_json::Value` intermedio que la tenga dos veces en memoria. Una respuesta que no llega
+  entera es un fallo de conexión, no un volcado vacío.
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
