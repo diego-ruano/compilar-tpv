@@ -413,8 +413,10 @@ impl SqliteStatsRepository {
                 None => (0, Dinero::CERO),
             };
 
+        // Un promedio se divide (`entre`), no se multiplica por el recíproco: 1,47 € entre 98 mesas
+        // son 2 céntimos dividiendo y 1 por el otro camino, y el worker divide.
         let ticket_medio_por_mesa: Dinero = if ocupadas > 0 {
-            total_ingresos.escala(1.0 / ocupadas as f64)
+            total_ingresos.entre(ocupadas as f64)
         } else {
             Dinero::CERO
         };
@@ -1487,10 +1489,10 @@ impl SqliteStatsRepository {
                 clientes_rango = v_i64(r.get_value(3).map_err(|e| e.to_string())?).unwrap_or(0);
             }
 
-            // Un promedio de importes sigue siendo fraccionario, asi que se reparte con
-            // `escala` y vuelve a centimo entero de una sola vez.
+            // Un promedio de importes sigue siendo fraccionario: vuelve a céntimo entero de una
+            // sola vez, dividiendo (`entre`) como el worker y no por el recíproco.
             ticket_medio_cliente = if clientes_rango > 0 {
-                ventas_total.escala(1.0 / clientes_rango as f64)
+                ventas_total.entre(clientes_rango as f64)
             } else {
                 Dinero::CERO
             };
@@ -1609,8 +1611,10 @@ impl SqliteStatsRepository {
             None => (Dinero::CERO, 0),
         };
 
+        // Dividiendo (`entre`), como el worker: por el recíproco, 1,47 € entre 98 gastos dan 1
+        // céntimo y no 2.
         let gasto_medio = if num_gastos > 0 {
-            total_gasto.escala(1.0 / num_gastos as f64)
+            total_gasto.entre(num_gastos as f64)
         } else {
             Dinero::CERO
         };

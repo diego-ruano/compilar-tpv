@@ -1,0 +1,13 @@
+{
+  "descripcion": "El gasto medio es una division, no una multiplicacion por el reciproco: 98 gastos de proveedor que suman 1,47 EUR dan 2 centimos de media (1,5 redondea a 2); por el reciproco, 147 x (1/98) se queda en 1,4999... y sale 1. Los dos lados dividen con la misma regla (`Dinero::entre`, `entre`). La fecha de cada gasto se omite, como en `stats/proveedores`.",
+  "lectura": "stats.proveedores",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Bebidas SL');",
+    "WITH RECURSIVE serie(n) AS (VALUES (1) UNION ALL SELECT n + 1 FROM serie WHERE n < 98) INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) SELECT printf('g-%03d', n), date('now','localtime'), 'Compras', printf('Gasto %03d', n), CASE WHEN n = 1 THEN 50 ELSE 1 END, 'prov-1' FROM serie;"
+  ],
+  "entrada": {},
+  "omitir": [
+    "fecha",
+    "ultimos_gastos"
+  ]
+}
