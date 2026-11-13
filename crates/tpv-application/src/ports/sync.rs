@@ -186,4 +186,10 @@ pub trait SyncRepository: Send + Sync {
 
     /// Progreso del backfill, para el panel de Conectividad y el aviso de las estadísticas.
     async fn backfill_estado(&self) -> AppResult<BackfillEstado>;
+
+    /// La última escritura en la base, en milisegundos de época: una operación de aquí o un cambio
+    /// aplicado de la nube. Una marca más allá de `ahora_ms` y su margen es de un reloj que estuvo
+    /// adelantado y no se cree (la misma regla que el contraste, VERIF-02). Con ella el backfill
+    /// decide su ritmo: más deprisa con el equipo en calma.
+    async fn ultima_escritura_ms(&self, ahora_ms: i64) -> AppResult<Option<i64>>;
 }

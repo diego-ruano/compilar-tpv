@@ -26,6 +26,7 @@ let clienteActual: any = null;
 vi.mock("../src/domains/sync/volcado", async (original) => ({
 	...(await (original as any)()),
 	VOLCADO_MAX_BYTES: 64 * 1024,
+	HISTORICO_MAX_BYTES: 64 * 1024,
 }));
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
@@ -43,7 +44,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
-const { Escritor, VOLCADO_MAX_BYTES, bytesDe, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
+const { Escritor, VOLCADO_MAX_BYTES, HISTORICO_MAX_BYTES, bytesDe, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
 	await import("../src/domains/sync/volcado");
 const { syncRoutes, paginaDelHistorico, volcarFase1, fotoDeVerificacion, BOOTSTRAP_MAX_FILAS } =
 	await import("../src/domains/sync/sync.routes");
@@ -448,7 +449,7 @@ describe("POST /v1/sync/historico · el tope en bytes", () => {
 				// Más de una página, ninguna por encima del tope, y la tabla entera en su orden.
 				expect(vueltas).toBeGreaterThan(1);
 				expect(vueltas).toBeLessThan(20);
-				for (const t of tamanos) expect(t).toBeLessThanOrEqual(VOLCADO_MAX_BYTES);
+				for (const t of tamanos) expect(t).toBeLessThanOrEqual(HISTORICO_MAX_BYTES);
 				expect(vistas).toHaveLength(1_500);
 				expect(vistas).toEqual([...vistas].sort());
 				expect(new Set(vistas).size).toBe(1_500);

@@ -152,6 +152,9 @@ struct FakeRepo {
         async fn backfill_estado(&self) -> AppResult<BackfillEstado> {
             panic!("no usado")
         }
+        async fn ultima_escritura_ms(&self, _: i64) -> AppResult<Option<i64>> {
+            panic!("no usado")
+        }
     }
 
 

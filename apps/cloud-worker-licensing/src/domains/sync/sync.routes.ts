@@ -31,6 +31,7 @@ import {
 } from "./bootstrap.ventana";
 import {
 	Escritor,
+	HISTORICO_MAX_BYTES,
 	VOLCADO_MAX_BYTES,
 	bytesDe,
 	enBytes,
@@ -474,7 +475,7 @@ const CIERRE_DE_PAGINA = 48;
 export async function paginaDelHistorico(
 	lector: Lector,
 	{ tabla, cursor, limite }: { tabla: string; cursor: number; limite: number },
-	maxBytes: number = VOLCADO_MAX_BYTES,
+	maxBytes: number = HISTORICO_MAX_BYTES,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const cabecera = `{"ok":true,"tabla":${JSON.stringify(tabla)}`;
 

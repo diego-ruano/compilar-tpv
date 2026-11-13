@@ -46,6 +46,16 @@ import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
  */
 export const VOLCADO_MAX_BYTES = 24 * 1024 * 1024;
 
+/**
+ * Techo de una página del histórico, en bytes de JSON sin comprimir. Más bajo que el de los volcados
+ * (`VOLCADO_MAX_BYTES`): el histórico baja en muchas páginas, cada una ocupa el hilo del TenantHub
+ * mientras se recorre y se escribe, y entre una y otra el negocio sigue atendiendo a la Main y a las
+ * Handy. 4 MiB son unas 20.000 filas de las normales (unos 180 bytes cada una): por encima del tope
+ * de filas (`HISTORICO_MAX_FILAS`, `sync.schemas.ts`), que es el que corta casi siempre, y por debajo de lo que tarda en
+ * notarse.
+ */
+export const HISTORICO_MAX_BYTES = 4 * 1024 * 1024;
+
 /** Una sentencia de lectura con sus argumentos posicionales. */
 export type Sentencia = { sql: string; args: unknown[] };
 

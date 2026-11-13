@@ -39,6 +39,8 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 }));
 
 const { syncRoutes } = await import("../src/domains/sync/sync.routes");
+const { HISTORICO_MAX_BYTES } = await import("../src/domains/sync/volcado");
+const { HISTORICO_MAX_FILAS } = await import("../src/domains/sync/sync.schemas");
 
 type Pagina = {
 	ok: boolean;
@@ -94,7 +96,7 @@ function sembrarComandas(sql: any, n: number) {
 		sql.exec(
 			`INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
 			 VALUES (?, 'BARRA', '2020-01-01 12:00:00', 'Pagada');`,
-			`c-${String(i).padStart(4, "0")}`,
+			`c-${String(i).padStart(5, "0")}`,
 		);
 	}
 }
@@ -139,8 +141,8 @@ describe("POST /v1/sync/historico", () => {
 
 		expect(vistas).toHaveLength(25);
 		expect(new Set(vistas).size).toBe(25);
-		expect(vistas[0]).toBe("c-0000");
-		expect(vistas[24]).toBe("c-0024");
+		expect(vistas[0]).toBe("c-00000");
+		expect(vistas[24]).toBe("c-00024");
 	});
 
 	it("el cursor se cierra en la última página, no en la vacía", async () => {
@@ -178,7 +180,7 @@ describe("POST /v1/sync/historico", () => {
 				expect(body.columnas).not.toContain("__rowid");
 				expect(body.columnas[0]).toBe("ID_Comanda");
 				expect(body.filas[0]).toHaveLength(body.columnas.length);
-				expect(body.filas[0][0]).toBe("c-0000");
+				expect(body.filas[0][0]).toBe("c-00000");
 			},
 		);
 	});
@@ -214,16 +216,24 @@ describe("POST /v1/sync/historico", () => {
 
 	it("el tamaño de página lo impone el servidor", async () => {
 		// El cliente pide, no manda: una página sin techo es una respuesta que no cabe en el
-		// isolate, que es exactamente el problema del que viene todo esto.
+		// isolate, y que ocupa el hilo del TenantHub mientras se escribe.
 		await conTenant(
 			"limite",
-			(sql) => sembrarComandas(sql, 30),
+			(sql) => sembrarComandas(sql, HISTORICO_MAX_FILAS + 5),
 			async (pedir) => {
 				const alto = await pedir({ tabla: "Comandas", limite: 999_999 });
-				expect(alto.body.filas.length).toBeLessThanOrEqual(2_000);
+				expect(alto.body.filas.length).toBe(HISTORICO_MAX_FILAS);
+				expect(alto.body.siguiente_cursor).toBe(HISTORICO_MAX_FILAS);
+				// Lo que pide la Main ahora cabe, con holgura, en el techo de bytes de una página.
+				expect(JSON.stringify(alto.body).length).toBeLessThan(HISTORICO_MAX_BYTES);
 
+				const resto = await pedir({ tabla: "Comandas", cursor: alto.body.siguiente_cursor, limite: 999_999 });
+				expect(resto.body.filas.length).toBe(5);
+				expect(resto.body.siguiente_cursor).toBeNull();
+
+				// Sin `limite` (o una Main anterior, que pide 1.000), lo de siempre.
 				const cero = await pedir({ tabla: "Comandas", limite: 0 });
-				expect(cero.body.filas.length).toBe(30);
+				expect(cero.body.filas.length).toBe(1_000);
 			},
 		);
 	});

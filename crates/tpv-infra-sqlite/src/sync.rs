@@ -1570,6 +1570,11 @@ impl SyncRepository for SqliteSyncRepository {
             ultimo_error,
         })
     }
+
+    async fn ultima_escritura_ms(&self, ahora_ms: i64) -> AppResult<Option<i64>> {
+        let r = self.db.read().await;
+        crate::verificacion_nube::ultima_escritura_creible(&r, ahora_ms).await
+    }
 }
 
 #[cfg(test)]

@@ -333,10 +333,15 @@ sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la
 el primer cierre mientras falte histórico. Sin decidir.
 
 Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
-**el histórico baja de lo más antiguo a lo más nuevo** y a 20.000 filas cada cinco minutos
-(`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
-recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
-anterior.
+**el histórico baja tabla a tabla, padres primero, y cada una de lo más antiguo a lo más nuevo**.
+Va deprisa con el equipo en calma (hasta 400.000 filas cada cinco minutos) y a 20.000 con el bar
+trabajando ([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)), pero a un
+bar grande que recupere con la ventana de un día la semana pasada le llega la última. Bajar cada
+tabla de lo más nuevo a lo más antiguo no lo arregla: las líneas de una comanda van en otra tabla,
+que llega después de todas las comandas; `Pagos` se apunta a sí misma (una devolución, al cobro
+original) y una hija llegaría antes que su padre; y una Main nueva con un worker anterior, que no
+conoce el sentido, tomaría el cursor al revés y saltaría filas. Haría falta bajar por tramos de
+fechas, todas las tablas de cada tramo. Sin decidir.
 
 ### DO-03 · Copias de la base de cada negocio
 
