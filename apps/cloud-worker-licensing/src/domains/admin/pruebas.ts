@@ -145,10 +145,17 @@ export async function retirarNegociosDePrueba(
 			// la anulación pudo canjearse sobre él una clave que no es de pruebas, o emitirse para él
 			// una licencia de verdad. Con sus licencias ya anuladas, lo que se ve aquí no lo cambia
 			// un canje.
+			//
+			// Y sólo se borra si TODAS sus licencias siguen anuladas. Desanular una desde
+			// administración (`/unrevoke`) mientras se retira le devuelve una licencia viva sobre la
+			// que sí cabe un canje: ese negocio se deja como está, y la siguiente llamada vuelve a
+			// anular y a mirar. Entre esta lectura y el borrado de abajo no queda nada que lo sujete:
+			// desanular una licencia de pruebas justo ahí es cosa de quien administra.
 			const sigue = await exec(
 				db,
 				`SELECT 1 AS si WHERE EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = ?2 AND ${dePruebas("l")})
-				    AND ${soloDePruebas("?2")};`,
+				    AND ${soloDePruebas("?2")}
+				    AND NOT EXISTS (SELECT 1 FROM licenses v WHERE v.tenant_id = ?2 AND v.status <> 'revoked');`,
 				[CORREO_DE_PRUEBAS, tenantId],
 			);
 			if (!sigue.rows.length) continue;

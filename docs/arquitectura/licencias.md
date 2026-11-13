@@ -530,7 +530,8 @@ borrar: lo que se borra no se deshace. **Las licencias se anulan antes de borrar
 sentencia que sólo toca las de los negocios que en ese instante son de pruebas: el canje comprueba
 dentro de su transacción que la licencia sigue viva, así que una clave de verdad que llegue mientras
 se retira o entró antes (y el negocio ya no es de pruebas: ni se anula ni se borra) o ya no encuentra
-licencia y no se gasta. Cada llamada retira siete como mucho (son varias peticiones salientes por
+licencia y no se gasta. Y un negocio sólo se borra si todas sus licencias siguen anuladas cuando le
+llega el turno: si alguien desanula una mientras tanto, se deja como está. Cada llamada retira siete como mucho (son varias peticiones salientes por
 negocio) y dice si quedan más.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)

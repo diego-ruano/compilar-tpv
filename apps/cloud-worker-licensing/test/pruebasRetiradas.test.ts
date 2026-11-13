@@ -21,6 +21,7 @@ import {
 	activateLicenseFirstTime,
 	getLicenseById,
 	issueLicense,
+	reactivateLicense,
 	sigueSiendoLaLicenciaDelEquipo,
 } from "../src/server/licenseStore";
 import type { LicenseOrigin } from "../src/shared";
@@ -56,6 +57,10 @@ type Escenario = {
 	canjear: (claveId: string, sobreLicenciaId: string) => void;
 	/** Algo que pasa justo después de que la ruta liste los negocios que va a retirar. */
 	trasListar: (fn: () => Promise<void>) => void;
+	/** Algo que pasa justo después de que la ruta anule las licencias de pruebas. */
+	trasAnular: (fn: () => Promise<void>) => void;
+	/** Desanula una licencia, como `/unrevoke` de la administración. */
+	desanular: (licenseId: string) => Promise<void>;
 	/** Algo que pasa cuando la ruta va a borrar la base de un negocio: lo último antes de lo que no se deshace. */
 	alBorrarLaBase: (fn: (tenantId: string) => Promise<void>) => void;
 	/**
@@ -70,13 +75,20 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		const sql = hub.state.storage.sql;
 		const db = clienteSobre(sql);
 		let alListar: (() => Promise<void>) | null = null;
+		let alAnular: (() => Promise<void>) | null = null;
 		dbDePruebas = {
 			...db,
 			async execute(entrada: any) {
 				const r = await db.execute(entrada);
-				if (alListar && /SELECT DISTINCT l\.tenant_id/.test(String(entrada?.sql ?? entrada))) {
+				const texto = String(entrada?.sql ?? entrada);
+				if (alListar && /SELECT DISTINCT l\.tenant_id/.test(texto)) {
 					const fn = alListar;
 					alListar = null;
+					await fn();
+				}
+				if (alAnular && /UPDATE licenses SET status = 'revoked'/.test(texto)) {
+					const fn = alAnular;
+					alAnular = null;
 					await fn();
 				}
 				return r;
@@ -151,6 +163,10 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			trasListar: (fn) => {
 				alListar = fn;
 			},
+			trasAnular: (fn) => {
+				alAnular = fn;
+			},
+			desanular: (licenseId) => reactivateLicense(db, licenseId),
 			alBorrarLaBase: (fn) => {
 				alBorrar = fn;
 			},
@@ -324,6 +340,30 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(alBorrar).toEqual([{ tenantId: "t-carrera", licencia: "revoked", admiteUnCanje: false }]);
 			// La clave de verdad sigue sin gastar.
 			expect(await e.estadoDeLicencia(comprada)).toBe("issued");
+		});
+	});
+
+	it("si alguien desanula su licencia entre la anulación y su turno, no se borra; la siguiente llamada lo retira", async () => {
+		// Con una licencia viva otra vez, sobre el negocio cabe un canje: no es momento de borrarlo.
+		await escenario(async (e) => {
+			const licencia = await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-desanulado");
+			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-otro");
+			e.imagenes.add("t-desanulado/images/logo/logo.png");
+			e.trasAnular(() => e.desanular(licencia));
+
+			const primero = await (await e.post("/pruebas/retirar")).json();
+			expect(primero).toMatchObject({ negocios: 1, bases: 1, licencias: 2, fallos: [] });
+			expect(e.borradas).toEqual(["t-otro"]);
+			expect(e.estadoDelNegocio("t-desanulado")).toBe("active");
+			expect(e.tieneBase("t-desanulado")).toBe(true);
+			expect(e.imagenes.size).toBe(1);
+			expect(await e.estadoDeLicencia(licencia)).toBe("active");
+
+			const segundo = await (await e.post("/pruebas/retirar")).json();
+			expect(segundo).toMatchObject({ negocios: 1, bases: 1, licencias: 1, fallos: [] });
+			expect(e.borradas).toEqual(["t-otro", "t-desanulado"]);
+			expect(e.estadoDelNegocio("t-desanulado")).toBe("deleted");
+			expect(await e.estadoDeLicencia(licencia)).toBe("revoked");
 		});
 	});
 
