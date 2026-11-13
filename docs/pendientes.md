@@ -333,7 +333,7 @@ sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la
 el primer cierre mientras falte histórico. Sin decidir.
 
 Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
-**el histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
+**el histórico baja de lo más antiguo a lo más nuevo** y a 20.000 filas cada cinco minutos
 (`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
 recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
 anterior.

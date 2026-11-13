@@ -186,12 +186,14 @@ fn negocio_de_la_licencia(nube: &dyn PairingService) -> AppResult<String> {
 
 /* ===== SYNC-19 · fase 2: el histórico, en segundo plano ===== */
 
-/// Filas por página. El servidor tiene su propio techo (más bajo manda); esto es lo que se pide.
-pub const BACKFILL_FILAS_POR_PAGINA: i64 = 1_000;
+/// Filas por página: las que admite el worker (`historicoSchema`, 2.000). Lo que cuesta una página en
+/// el DO es recorrer esas filas por `rowid` y escribirlas, con el hilo del negocio ocupado mientras
+/// tanto, y el worker la corta además por bytes; pedir menos sólo multiplica los viajes. Un worker
+/// que admita menos lo recorta sin más.
+pub const BACKFILL_FILAS_POR_PAGINA: i64 = 2_000;
 
-/// Páginas por vencimiento del job. Con el intervalo del job son ~10.000 filas cada cinco minutos:
-/// un histórico de tres meses converge en unas horas sin que nadie lo note ni en el equipo ni en la
-/// factura de Turso.
+/// Páginas por vencimiento del job. Con el intervalo del job son ~20.000 filas cada cinco minutos.
+/// Entre página y página el DO atiende lo demás del negocio: ninguna lo ocupa mucho rato.
 ///
 /// **No es el bucle entero a propósito.** El motor de jobs tiene que conservar el control: un
 /// backfill que se lleva el equipo por delante durante media hora lo hace en hora punta, y eso es

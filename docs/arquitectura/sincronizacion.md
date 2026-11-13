@@ -476,7 +476,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   detenida en uno de ellos. «En cuarentena», los que se saltaron.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
-  página de catch-up de 500 no deja a un cobro esperando a que termine entera (RI-33).
+  página de catch-up de mil cambios (los que pide la Main, `CAMBIOS_POR_PAGINA`) no deja a un cobro
+  esperando a que termine entera (RI-33).
 - **El checkpoint no deja atrás un fallo sin resolver** (AUD-18): lo único que lo mueve
   (`pasar_el_checkpoint`) borra a la vez el fallo de ese cambio si no está en cuarentena, entre o
   salga por el anti-eco al reintentarlo (el eco propio que no pudo mover el checkpoint). Fuera de

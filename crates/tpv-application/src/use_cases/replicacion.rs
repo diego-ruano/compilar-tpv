@@ -6,6 +6,12 @@ use tpv_contracts::{licensing::FirmaDispositivo, sync::{OutboxEntry, SyncChange}
 use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion}, sync::{BajadaAplicada, CambioDetenido}}};
 
 const MAX_PAGINAS: usize = 2000;
+
+/// Cambios que se piden por página de `/v1/sync/changes`: los que admite el worker (`changesSchema`,
+/// 1.000). Lo que cuesta una página en el DO es leer el log por su clave y escribirla; el worker la
+/// corta además por bytes (`CAMBIOS_MAX_BYTES`), así que pedir más sólo ahorra viajes. Sin `limit`
+/// el worker daba 500, y un worker anterior que admita menos lo recorta sin más.
+pub(crate) const CAMBIOS_POR_PAGINA: i64 = 1_000;
 const TTL_ENCOLADA: i64 = 60 * 60 * 1000;
 
 /// AUD-18 · Cuánto se espera antes de volver a intentar un cambio de la nube que ha fallado al
@@ -149,7 +155,7 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
     let mut since = ctx.repositorio().await?.get_checkpoint().await?;
     let mut high_water = 0;
     for _ in 0..MAX_PAGINAS {
-        let respuesta = nube.tpv_server_post_json("tpv", "/v1/sync/changes", json!({"since":since})).await?;
+        let respuesta = nube.tpv_server_post_json("tpv", "/v1/sync/changes", json!({"since":since,"limit":CAMBIOS_POR_PAGINA})).await?;
         match respuesta.get("highWater").or_else(|| respuesta.get("high_water")).and_then(Value::as_i64) {
             Some(hw) if hw >= 0 => high_water = hw,
             _ if estricto => return Err(AppError::external("La nube no informa del punto de sincronización")),

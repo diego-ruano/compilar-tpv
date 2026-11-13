@@ -311,7 +311,12 @@ fn socket(entrantes:Vec<Option<Value>>)->Socket {Socket{entrantes:entrantes.into
 fn item(op:&str,seq:i64)->Value {json!({"opId":op,"seq":seq,"statements":[{"sql":"UPDATE Zonas SET Nombre_Zona=?1","args":[op]}]})}
 fn vivo(op:&str,seq:i64)->Value {let mut m=item(op,seq);m["type"]=json!("change");m}
 fn pagina_hasta(items:Vec<Value>,next:i64,high:i64)->Value {json!({"items":items,"nextSince":next,"highWater":high,"purgadoHasta":0})}
-fn since_pedidos(n:&Nube)->Vec<i64> {n.cuerpos.lock().unwrap().iter().map(|c|c["since"].as_i64().unwrap()).collect()}
+fn since_pedidos(n:&Nube)->Vec<i64> {
+    let cuerpos=n.cuerpos.lock().unwrap();
+    // Cada página pide lo que admite el worker: sin `limit` daba 500.
+    assert!(cuerpos.iter().all(|c|c["limit"].as_i64()==Some(CAMBIOS_POR_PAGINA)),"cada página pide {CAMBIOS_POR_PAGINA}: {cuerpos:?}");
+    cuerpos.iter().map(|c|c["since"].as_i64().unwrap()).collect()
+}
 
 #[tokio::test]
 async fn el_catch_up_no_pide_la_pagina_siguiente_si_el_checkpoint_no_llego_al_final() {
