@@ -3283,18 +3283,22 @@ struct Guarda {
     al_dia: bool,
     /// No hay ningún fallo de bajada (`hay_fallos_de_bajada`).
     sin_fallos: bool,
+    /// VERIF-01 · No queda histórico por bajar (`historico_pendiente`).
+    historico_completo: bool,
 }
 
 impl Guarda {
     /// Borrar lo que sobra arriba o pisar lo que es distinto.
     fn deja_tocar_lo_que_hay_arriba(&self) -> bool {
-        self.al_dia && self.sin_fallos
+        self.al_dia && self.sin_fallos && self.historico_completo
     }
 }
 
 /// AUD-18 · La guarda otra vez, justo antes de encolar. La comparación se hace con lecturas y sin
 /// el escritor, y la bajada registra sus fallos con él: lo que se decidió con la guarda de antes
-/// puede no valer ya. Con el escritor en la mano, lo que se ve aquí vale hasta encolar.
+/// puede no valer ya. Con el escritor en la mano, lo que se ve aquí vale hasta encolar. Lo mismo
+/// con el histórico (VERIF-01): la cola de la fase 2 la siembra una recuperación desde la nube, que
+/// también toma el escritor.
 async fn guarda_con_el_escritor(conn: &Connection, hasta_seq: i64) -> AppResult<Guarda> {
     let al_dia = hasta_seq > 0 && checkpoint(conn).await? >= hasta_seq;
     let mut filas = conn
@@ -3308,7 +3312,25 @@ async fn guarda_con_el_escritor(conn: &Connection, hasta_seq: i64) -> AppResult<
     Ok(Guarda {
         al_dia,
         sin_fallos: fallos == 0,
+        historico_completo: !historico_pendiente(conn).await?,
     })
+}
+
+/// VERIF-01 · ¿Queda histórico por bajar? Tras recuperar desde la nube, la fase 1 deja en local los
+/// transaccionales de la ventana y la fase 2 (`_Backfill_Historico`) va trayendo el resto. Hasta
+/// que termina, una fila que la nube tiene y aquí no está no es un borrado que no subió: es
+/// histórico que todavía no ha llegado. Borrarla arriba se llevaría, con sus cascadas, lo que el
+/// backfill iba a traer.
+async fn historico_pendiente(conn: &Connection) -> AppResult<bool> {
+    let mut filas = conn
+        .query("SELECT COUNT(*) FROM _Backfill_Historico WHERE Completada = 0;", ())
+        .await
+        .map_err(db_err)?;
+    let pendientes = match filas.next().await.map_err(db_err)? {
+        Some(f) => v_i64(f.get_value(0).map_err(db_err)?).unwrap_or(0),
+        None => 0,
+    };
+    Ok(pendientes > 0)
 }
 
 /// `COUNT(*)` local. `None` = la tabla no existe aquí (una versión con menos tablas), que no es un
@@ -3789,13 +3811,16 @@ impl SqliteSyncRepository {
 
     /// ¿Puede esta Main afirmar que una fila que la nube tiene y ella no es basura?
     ///
-    /// Sólo si se cumplen las dos:
+    /// Sólo si se cumplen las tres:
     ///
     /// 1. **Su checkpoint alcanza el final de la foto.** Todo lo que escribe la Handy pasa por el
     ///    DO y recibe un `Seq`; si el marcapáginas local llega hasta el `Seq` de la foto, esta Main
     ///    ya ha pasado por todo lo que hay en ella. Una fila que le falte no puede ser algo que
     ///    todavía esté de camino.
-    /// 2. **No hay ningún fallo de BAJADA** (`hay_fallos_de_bajada`).
+    /// 2. **No queda histórico por bajar** (VERIF-01, `historico_pendiente`). El checkpoint de una
+    ///    base recién recuperada es el `Seq` de la foto de la fase 1, así que parece al día con
+    ///    medio histórico sin llegar: todo lo que le falta saldría como sobrante de la nube.
+    /// 3. **No hay ningún fallo de BAJADA** (`hay_fallos_de_bajada`).
     async fn puede_borrar_arriba(&self, hasta_seq: i64) -> AppResult<bool> {
         if hasta_seq <= 0 {
             // Un worker anterior no manda el `Seq`. Sin él no hay forma de saberlo: no se borra.
@@ -3804,6 +3829,9 @@ impl SqliteSyncRepository {
         {
             let r = self.db.read().await;
             if checkpoint(r.conn()).await? < hasta_seq {
+                return Ok(false);
+            }
+            if historico_pendiente(r.conn()).await? {
                 return Ok(false);
             }
         }
@@ -4142,6 +4170,86 @@ mod tests_claves {
 
         assert_eq!(borradas, 0);
         assert!(aplazado);
+    }
+
+    /// Los cierres que la nube tiene de antes de la ventana de la fase 1.
+    fn claves_cierres(ids: &[&str]) -> VerificacionClaves {
+        VerificacionClaves {
+            tablas: vec![ClavesTabla {
+                nombre: "Cierres_Caja".into(),
+                columnas: vec!["ID_Cierre".into()],
+                claves: ids.iter().map(|i| vec![serde_json::json!(i)]).collect(),
+                truncada: false,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn NO_se_borra_arriba_lo_que_el_historico_aun_no_ha_traido() {
+        // VERIF-01. Una Main recién recuperada de la nube: la fase 1 trajo la ventana y dejó el
+        // checkpoint en el `Seq` de la foto, así que por el marcapáginas está al día; la fase 2
+        // todavía no ha bajado los cierres antiguos. Para el contraste, esos cierres «sobran»
+        // arriba. Borrarlos se llevaría de la nube, con sus cascadas, justo lo que el backfill iba
+        // a traer.
+        let (repo, db, _dir) = repo_temporal().await;
+        checkpoint_en(&db, 100).await;
+        sembrar(
+            &db,
+            "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Cierres_Caja', 0, 0);",
+        )
+        .await;
+
+        let (desc, reparadas, borradas, aplazado) = repo
+            .contrastar_claves(claves_cierres(&["cierre-de-marzo", "cierre-de-abril"]), 100)
+            .await
+            .unwrap();
+
+        assert_eq!(desc[0].sobran, 2, "se ve y se informa...");
+        assert_eq!((reparadas, borradas), (0, 0), "...pero NO se toca");
+        assert!(aplazado);
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty(), "nada sale hacia la nube");
+
+        // El control: con el histórico completo, lo que la nube tiene de más sí es un borrado que
+        // no llegó a subir. Lo único que cambia entre las dos pasadas es la cola del backfill.
+        sembrar(&db, "UPDATE _Backfill_Historico SET Completada = 1;").await;
+        let (_d, _r, borradas, aplazado) = repo
+            .contrastar_claves(claves_cierres(&["cierre-de-marzo", "cierre-de-abril"]), 100)
+            .await
+            .unwrap();
+        assert_eq!(borradas, 2);
+        assert!(!aplazado);
+    }
+
+    #[tokio::test]
+    async fn con_el_historico_a_medias_tampoco_se_pisa_lo_distinto() {
+        // VERIF-01: la misma guarda decide las actualizaciones (SYNC-26). Con el histórico a medias
+        // no se afirma nada sobre lo que hay arriba.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Terraza');
+             INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Comandas', 0, 0);",
+        )
+        .await;
+        checkpoint_en(&db, 100).await;
+
+        let foto = VerificacionNube {
+            conteos: vec![],
+            ventana: vec![tpv_contracts::sync::BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![vec![serde_json::json!("z1"), serde_json::json!("Salón")]],
+                parcial: false,
+            }],
+            ventana_omitida: false,
+            desde: String::new(),
+            hasta_seq: 100,
+        };
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        assert_eq!(r.descuadres.iter().map(|d| d.distintas).sum::<i64>(), 1);
+        assert_eq!(r.reparadas, 0);
+        assert!(r.aplazado);
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -5246,6 +5354,36 @@ mod tests_bajada_en_orden {
         let (_d, reparadas, borradas, aplazado) = repo.ejecutar_plan_de_claves(plan, 100).await.unwrap();
 
         assert_eq!((reparadas, borradas, aplazado), (0, 0, true));
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn NO_se_borra_arriba_si_el_historico_queda_a_medias_entre_la_comparacion_y_la_escritura() {
+        // VERIF-01: la cola del backfill la siembra una recuperación desde la nube, con el escritor.
+        // Si llega entre la comparación y la escritura, lo que el plan iba a borrar ya no es
+        // sobrante: es lo que la fase 2 va a traer.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A');
+             UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;",
+        )
+        .await;
+
+        let plan = repo
+            .plan_de_claves(claves_zonas(&["z1", "z-solo-arriba"]), 100, true)
+            .await
+            .unwrap();
+        assert_eq!((plan.a_borrar.len(), plan.aplazado), (1, false));
+
+        sembrar(
+            &db,
+            "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Zonas', 0, 0);",
+        )
+        .await;
+        let (_d, _reparadas, borradas, aplazado) = repo.ejecutar_plan_de_claves(plan, 100).await.unwrap();
+
+        assert_eq!((borradas, aplazado), (0, true));
         assert!(repo.outbox_pending(100).await.unwrap().is_empty());
     }
 

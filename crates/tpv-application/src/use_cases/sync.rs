@@ -231,11 +231,23 @@ pub async fn inicializar_tenant_vacio(
 ///
 /// `reparar = false` es el interruptor `reparacion_nube` apagado (PROD-06): se compara y se
 /// informa igual —es lo que permite ver si el problema sigue ahí—, pero no se escribe nada.
+///
+/// VERIF-01 · **Con el histórico a medias no se contrasta.** Tras recuperar desde la nube, la
+/// fase 2 va trayendo lo que la ventana de la fase 1 dejó fuera; hasta que termina, todo lo que
+/// falta por bajar saldría como «la nube tiene filas que aquí no están», y el checkpoint —que es
+/// el `Seq` de la foto de la fase 1— dice que esta Main está al día. Con eso se pedían las claves
+/// y cada fila pendiente de bajar se convertía en un `DELETE` arriba: los cierres de caja con sus
+/// cascadas, los fichajes… borrados de la nube antes de que el backfill los trajera. No se pide
+/// nada ni se informa: comparar maestros enteros con transaccionales a medias no dice nada.
 pub async fn verificar_contra_la_nube(
     nube: &dyn PairingService,
     repo: &dyn SyncRepository,
     reparar: bool,
-) -> AppResult<ResultadoVerificacion> {
+) -> AppResult<Contraste> {
+    if repo.backfill_estado().await?.tablas_pendientes > 0 {
+        return Ok(Contraste::HistoricoPendiente);
+    }
+
     let bruto = nube
         .tpv_server_post_json("tpv", "/v1/sync/verificar", json!({}))
         .await?;
@@ -298,7 +310,26 @@ pub async fn verificar_contra_la_nube(
         .tpv_server_post_json("tpv", "/v1/sync/salud", informe)
         .await;
 
-    Ok(resultado)
+    Ok(Contraste::Hecho(resultado))
+}
+
+/// Lo que ha hecho una pasada de [`verificar_contra_la_nube`].
+#[derive(Debug)]
+pub enum Contraste {
+    /// Se ha comparado, reparado lo que se pudiera e informado.
+    Hecho(ResultadoVerificacion),
+    /// VERIF-01 · No se ha pedido nada a la nube: el histórico todavía se está descargando.
+    HistoricoPendiente,
+}
+
+impl Contraste {
+    /// El resultado de la comparación, si la hubo.
+    pub fn hecho(self) -> Option<ResultadoVerificacion> {
+        match self {
+            Contraste::Hecho(r) => Some(r),
+            Contraste::HistoricoPendiente => None,
+        }
+    }
 }
 
 #[cfg(test)]

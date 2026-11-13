@@ -54,7 +54,7 @@ un fallo parcial.
 | `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |
 | `backup_local` | 24 h | 5 min | MainOperativa | — | Copia diaria y purga de restos ([recuperacion.md](recuperacion.md)) |
 | `backfill_historico` | 5 min | 3 min | MainOperativa | `backfill_historico` | Fase 2 de la recuperación |
-| `verificar_nube` | 24 h | 10 min | MainOperativa | (`reparacion_nube` dentro) | Contraste con la nube y reparación ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)) |
+| `verificar_nube` | 24 h | 10 min | MainOperativa | (`reparacion_nube` dentro) | Contraste con la nube y reparación ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)); no corre con el histórico a medias |
 | `cifrado_pii` | 6 h | 60 s | MainOperativa | `cifrado_pii` | Cifra la PII del personal que siga en claro |
 | `updater` (sólo escritorio) | 6 h | 30 s | Siempre | — | Comprueba el feed de actualizaciones y avisa |
 

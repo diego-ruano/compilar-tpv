@@ -108,6 +108,9 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros
   completos con transaccionales a medias), y Conectividad y Estadísticas dicen que el histórico se está
   descargando.
+- **El contraste con la nube tampoco corre mientras falte histórico** (VERIF-01): lo que queda por
+  bajar le parecería sobrante de la nube y lo borraría arriba, con sus cascadas, antes de que la
+  fase 2 lo trajera ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)).
 
 ## Desde una copia local
 

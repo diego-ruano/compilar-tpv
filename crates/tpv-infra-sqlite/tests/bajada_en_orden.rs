@@ -321,7 +321,7 @@ async fn un_fallo_en_mitad_de_una_pagina_detiene_la_bajada_y_nada_se_pierde_ni_s
         }] }),
     );
     nube.responde("/v1/sync/salud", json!({ "ok": true }));
-    let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap();
+    let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap().hecho().expect("sin histórico pendiente se compara");
     assert_eq!((r.borradas, r.aplazado), (0, true));
     assert!(reparaciones(&repo).await.is_empty(), "nada sube a la nube");
 
@@ -442,7 +442,7 @@ async fn en_vivo_lo_que_llega_detras_de_un_fallo_no_se_aplica_antes_y_nada_se_bo
 
     // `verificar_nube`: la nube tiene r-1 y r-3 y aquí no están. Con las cuarentenas, no se borran.
     verificacion_escenario_b(&nube);
-    let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap();
+    let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap().hecho().expect("sin histórico pendiente se compara");
     assert_eq!((r.borradas, r.aplazado), (0, true));
     assert!(
         !reparaciones(&repo).await.iter().any(|s| s.sql.starts_with("DELETE")),

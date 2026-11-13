@@ -480,12 +480,19 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   ventana de 30 días de la nube con la base local, repara e informa a Axiom (`tenant_salud_sync`), no al
   usuario. La comparación tolera las dos formas de escribir un número (`2.5` y `"2.50"`).
 - **Nada se toca si esta Main no puede afirmar que está al día**: su checkpoint tiene que alcanzar el
-  `Seq` de la foto (leído después de las filas) y no puede haber **ninguna fila en `_Sync_Failed`**,
-  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`). Vale para actualizar y para
-  borrar. Una fila que la nube tiene y aquí no, sólo se borra arriba en ese caso; con una lista de
-  claves truncada no se borra nada. La guarda se mira al comparar y **otra vez con el escritor cogido,
-  justo antes de encolar** (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor,
-  así que uno registrado entre la comparación y la escritura aplaza lo que se iba a encolar.
+  `Seq` de la foto (leído después de las filas), no puede haber **ninguna fila en `_Sync_Failed`**,
+  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`), y no puede quedar histórico
+  por bajar (abajo). Vale para actualizar y para borrar. Una fila que la nube tiene y aquí no, sólo
+  se borra arriba en ese caso; con una lista de claves truncada no se borra nada. La guarda se mira
+  al comparar y **otra vez con el escritor cogido, justo antes de encolar**
+  (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor, así que uno registrado
+  entre la comparación y la escritura aplaza lo que se iba a encolar.
+- **Con el histórico a medias no se contrasta** (VERIF-01). Una Main recién recuperada de la nube
+  tiene el checkpoint en el `Seq` de la foto de la fase 1, así que por el marcapáginas está al día,
+  y le falta todo lo que la fase 2 no ha bajado todavía: para el contraste, filas que la nube tiene
+  de más. Mientras quede una tabla sin completar en `_Backfill_Historico`, el caso de uso no pide
+  la foto ni las claves, y el repositorio, por su cuenta, no da permiso para borrar ni para pisar
+  nada arriba (`puede_borrar_arriba`, y otra vez con el escritor cogido).
 - Con un fallo de bajada tampoco se sube lo que aquí está y arriba no: puede ser lo que la nube borró
   con el cambio que aquí no ha entrado, y subirlo lo resucitaría.
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.

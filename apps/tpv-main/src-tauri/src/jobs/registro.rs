@@ -644,8 +644,20 @@ async fn verificar_nube(app: AppHandle) -> Result<(), String> {
 
     // PROD-06: con `reparacion_nube` apagado se compara e informa igual, pero no se escribe nada.
     let reparar = crate::interruptores::apagado(&app, Interruptor::ReparacionNube).is_none();
-    let r = uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref(), reparar)
-        .await?;
+    let r = match uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref(), reparar)
+        .await?
+    {
+        uc_sync::Contraste::Hecho(r) => r,
+        // VERIF-01: como `reconciliacion`, se calla mientras falte histórico. Aquí no es por el
+        // ruido: lo que falta por bajar saldría como sobrante de la nube y se borraría arriba.
+        uc_sync::Contraste::HistoricoPendiente => {
+            tracing::info!(
+                target: "tpv::jobs",
+                "verificación: saltada, el histórico todavía se está descargando"
+            );
+            return Ok(());
+        }
+    };
 
     if r.descuadres.is_empty() {
         tracing::debug!(target: "tpv::jobs", "verificación: la nube y la base local coinciden");
