@@ -181,8 +181,10 @@ Lo guardado vale, y sólo entonces:
 - **como mucho `EDAD_MAXIMA_MS` (5 minutos)**, contados con el mayor de los dos relojes del equipo:
   ni suspenderlo ni atrasar la hora alargan lo guardado.
 
-Sólo se guardan respuestas buenas (a un usuario desactivado se le pregunta cada vez), y una respuesta
-que venía de camino cuando se tiró lo guardado no se guarda.
+Sólo se guardan respuestas buenas (a un usuario desactivado se le pregunta cada vez). Una respuesta
+que venía de camino cuando se tiró lo guardado ni se guarda ni se usa: el gate que la esperaba vuelve
+a preguntar, y como la nube avisa después de aplicar el cambio, la pregunta siguiente ya lo ve (como
+mucho tres preguntas por gate, si los avisos no paran).
 
 **La ventana**: un permiso retirado en la Main deja de valer en la Handy cuando el cambio llega a la
 nube y la nube se lo avisa por el socket, que va casi a la vez (con la Main sin conexión, la nube

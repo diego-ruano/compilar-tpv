@@ -21,7 +21,9 @@
 //! - **De esta sesión.** Otra sesión, aunque sea de la misma persona, no hereda nada.
 //! - **Como mucho [`EDAD_MAXIMA_MS`].** Es la red por si un aviso no llega con el socket abierto.
 //!
-//! Sólo se guardan respuestas buenas: un usuario desactivado se deniega preguntando cada vez.
+//! Sólo se guardan respuestas buenas: un usuario desactivado se deniega preguntando cada vez. Y una
+//! respuesta que venía de camino cuando se tiró lo guardado ni se guarda ni se usa: se vuelve a
+//! preguntar (`usuario_de_la_sesion`).
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -142,9 +144,18 @@ fn abrir(guardada: &Mutex<AutorizacionGuardada>) -> MutexGuard<'_, AutorizacionG
     guardada.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Cuántas veces, como mucho, se pregunta en una comprobación cuando lo guardado se tira mientras la
+/// pregunta viaja.
+pub const PREGUNTAS_MAX: usize = 3;
+
 /// La autorización vigente del usuario de la sesión: la guardada si vale y, si no, la del
 /// repositorio, que se guarda para la siguiente. La edad cuenta desde que se pidió, no desde que
 /// llegó.
+///
+/// Si mientras la pregunta viajaba se tiró lo guardado (llegó un aviso, cambió el socket o la
+/// sesión), su respuesta puede ser la de antes del cambio: ni se guarda ni se usa, y se vuelve a
+/// preguntar. La nube avisa después de aplicar el cambio, así que la pregunta siguiente ya lo ve.
+/// Si los avisos no paran, a la [`PREGUNTAS_MAX`] se usa la última respuesta, sin guardarla.
 pub async fn usuario_de_la_sesion(
     repo: &dyn PermisosRepository,
     guardada: &Mutex<AutorizacionGuardada>,
@@ -152,20 +163,27 @@ pub async fn usuario_de_la_sesion(
     iniciada_en: i64,
     ahora: impl Fn() -> Instante,
 ) -> AppResult<AutorizacionUsuario> {
-    let pedida = ahora();
-    let turno = {
-        let g = abrir(guardada);
-        if let Some(autorizacion) = g.vigente(id_usuario, iniciada_en, pedida) {
+    let mut preguntas = 0;
+    loop {
+        let pedida = ahora();
+        let turno = {
+            let g = abrir(guardada);
+            if let Some(autorizacion) = g.vigente(id_usuario, iniciada_en, pedida) {
+                return Ok(autorizacion);
+            }
+            g.turno
+        };
+        let autorizacion = permisos::usuario(repo, id_usuario).await?;
+        preguntas += 1;
+        let mut g = abrir(guardada);
+        if g.turno == turno || preguntas >= PREGUNTAS_MAX {
+            g.guardar(
+                turno,
+                Entrada { id_usuario: id_usuario.to_string(), iniciada_en, autorizacion: autorizacion.clone(), pedida },
+            );
             return Ok(autorizacion);
         }
-        g.turno
-    };
-    let autorizacion = permisos::usuario(repo, id_usuario).await?;
-    abrir(guardada).guardar(
-        turno,
-        Entrada { id_usuario: id_usuario.to_string(), iniciada_en, autorizacion: autorizacion.clone(), pedida },
-    );
-    Ok(autorizacion)
+    }
 }
 
 #[cfg(test)]
@@ -411,7 +429,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn una_respuesta_que_venia_de_camino_cuando_llego_el_aviso_no_se_guarda() {
+    async fn una_respuesta_que_venia_de_camino_cuando_llego_el_aviso_no_se_usa_y_se_vuelve_a_preguntar() {
         let lenta = NubeLenta { nube: Nube::con("Encargado", &["stock.ajustar"]), salida: tokio::sync::Notify::new(), llegada: tokio::sync::Notify::new() };
         let (guardada, relojes) = (conectada(), Relojes::en(1_000));
 
@@ -422,15 +440,48 @@ mod tests {
             lenta.nube.poner("Encargado", &[]);
             guardada.lock().unwrap().aviso(&cambio(Some(&["roles_permisos"])));
             lenta.llegada.notify_one();
+            // La segunda pregunta sale después del aviso.
+            lenta.salida.notified().await;
+            lenta.llegada.notify_one();
         };
-        let (vieja, ()) = tokio::join!(en_vuelo, aviso);
-        // La que venía de camino dice lo de antes, pero no se queda guardada.
-        assert!(puede(&vieja.unwrap(), "stock.ajustar"));
-
-        lenta.llegada.notify_one();
-        let nueva = usuario_de_la_sesion(&lenta, &guardada, "u-1", 100, || relojes.ahora()).await.unwrap();
-        assert!(!puede(&nueva, "stock.ajustar"));
+        let (respuesta, ()) = tokio::join!(en_vuelo, aviso);
+        // La que venía de camino decía lo de antes: el gate que la esperaba ve lo de ahora.
+        assert!(!puede(&respuesta.unwrap(), "stock.ajustar"));
         assert_eq!(lenta.nube.viajes(), 2);
+
+        // Y lo de ahora queda guardado: la siguiente no pregunta.
+        let siguiente = usuario_de_la_sesion(&lenta, &guardada, "u-1", 100, || relojes.ahora()).await.unwrap();
+        assert!(!puede(&siguiente, "stock.ajustar"));
+        assert_eq!(lenta.nube.viajes(), 2);
+    }
+
+    /// Una nube que, cada vez que contesta, hace llegar un aviso que lo tira todo.
+    struct NubeConAvisos<'a> {
+        nube: Nube,
+        guardada: &'a Mutex<AutorizacionGuardada>,
+    }
+
+    #[async_trait]
+    impl PermisosRepository for NubeConAvisos<'_> {
+        async fn usuario(&self, id: &str) -> AppResult<Option<AutorizacionUsuario>> {
+            let respuesta = self.nube.usuario(id).await;
+            self.guardada.lock().unwrap().aviso(&cambio(None));
+            respuesta
+        }
+        async fn roles(&self) -> AppResult<Vec<RolPermisos>> {
+            Err(AppError::validation("no se usa"))
+        }
+    }
+
+    #[tokio::test]
+    async fn si_los_avisos_no_paran_se_pregunta_como_mucho_tres_veces_y_no_se_guarda() {
+        let (guardada, relojes) = (conectada(), Relojes::en(1_000));
+        let nube = NubeConAvisos { nube: Nube::con("Camarero", &["servicio.vender"]), guardada: &guardada };
+
+        let respuesta = usuario_de_la_sesion(&nube, &guardada, "u-1", 100, || relojes.ahora()).await.unwrap();
+        assert!(puede(&respuesta, "servicio.vender"));
+        assert_eq!(nube.nube.viajes(), PREGUNTAS_MAX);
+        assert!(guardada.lock().unwrap().entrada.is_none());
     }
 
     #[test]
