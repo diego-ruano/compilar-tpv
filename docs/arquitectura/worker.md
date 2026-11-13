@@ -135,10 +135,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
   piden en Europa occidental, para que nazcan ahí aunque quien los llame primero esté en otro sitio,
   como el visitante de una web que reserva desde otro continente. Lo decidió el responsable, por
-  latencia: dentro de la
-  jurisdicción `eu` el objeto nace en un centro de la UE que no se elige y la pista de región no se
-  respeta. Lo mide `/v1/admin/diagnostico/latencias`, que crea objetos de usar y tirar en cada
-  colocación. La pista sólo cuenta en la llamada que crea el objeto, y es una preferencia, no una
+  latencia: dentro de la jurisdicción `eu` el objeto nace en un centro de la UE que no se elige y la
+  pista de región no se respeta (medido el 2026-11-12 con objetos de usar y tirar en cada
+  colocación). La pista sólo cuenta en la llamada que crea el objeto, y es una preferencia, no una
   garantía: Cloudflare la sigue cuando puede, y hoy un objeto no se muda después de creado.
 - **Todo el que pide el objeto de un negocio pasa por `lib/objetosDelNegocio.ts`** (`hubDe`, en
   `lib/hub.ts`, y `agendaDe`, en `durableObjects/agendaWeb.ts`), que aplica la jurisdicción y la

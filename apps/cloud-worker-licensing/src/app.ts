@@ -69,14 +69,18 @@ import { stripeRoutes } from "./domains/stripe/stripe.routes";
 import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
 import { interruptoresRoutes } from "./domains/interruptores/interruptores.routes";
 import { completarErrores } from "./middleware/completarErrores";
+import { esDispositivoAutenticado } from "./middleware/tenant";
 
 export const app = new Hono<{ Bindings: Env }>();
 
-// El desglose del tiempo de cada petición (`observability/tiempos.ts`). Va antes que nada para que
-// el total lo cubra todo; el upgrade del WebSocket (101) no se toca.
+// El desglose del tiempo de cada petición (`observability/tiempos.ts`), que lee el generador de carga.
+// Sólo se le enseña a un dispositivo de un negocio, ya autenticado (`tenantAuth`): una ruta pública
+// o anónima (el widget de las reservas, `/health`, las actualizaciones, el emparejamiento, las
+// licencias) no cuenta cuánto tardan la base central y el TenantHub ni en qué centro de datos se la
+// atiende. Va antes que nada para que el total lo cubra todo; el upgrade del WebSocket (101) no se toca.
 app.use("*", async (c, next) => {
 	const { medida } = await conMedida(() => next());
-	if (c.res.status === 101) return;
+	if (c.res.status === 101 || !esDispositivoAutenticado(c)) return;
 	const valor = cabeceraServerTiming(medida, (c.req.raw.cf as { colo?: string } | undefined)?.colo);
 	try {
 		c.res.headers.set("Server-Timing", valor);

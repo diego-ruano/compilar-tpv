@@ -11,9 +11,7 @@
 // se exige:
 //
 //   · un espacio de nombres (`algo.TenantHub`, `algo["AgendaWeb"]`) sólo aparece como argumento de
-//     `objetoDelNegocio(env, espacio, tenantId)` o de `objetoEn(espacio, nombre, colocación)`;
-//   · `objetoEn`, que deja elegir la colocación, sólo lo llaman el propio ayudante y la ruta de
-//     diagnóstico, que compara colocaciones con objetos de usar y tirar;
+//     `objetoDelNegocio(env, espacio, tenantId)`;
 //   · los métodos que convierten un nombre en un objeto (`idFromName`, `idFromString`,
 //     `newUniqueId`, `getByName`, `jurisdiction`) sólo se llaman en el ayudante;
 //   · y nadie saca el espacio de nombres desestructurando el entorno.
@@ -40,7 +38,6 @@ const todoElWorker: Record<string, string> = Object.fromEntries(
 delete todoElWorker["server/worker-configuration.d.ts"];
 
 const AYUDANTE = "lib/objetosDelNegocio.ts";
-const DIAGNOSTICO = "domains/admin/diagnostico.ts";
 
 /** Los espacios de nombres de los DO de un negocio, por el nombre de su binding. */
 const ESPACIOS = new Set(["TenantHub", "AgendaWeb"]);
@@ -93,7 +90,7 @@ function analizar(fichero: string, texto: string): string[] {
 
 		const nombre = miembro(n);
 		if (nombre !== null && ESPACIOS.has(nombre)) {
-			if (!esArgumentoDe(n, "objetoDelNegocio", 1) && !esArgumentoDe(n, "objetoEn", 0)) {
+			if (!esArgumentoDe(n, "objetoDelNegocio", 1)) {
 				raro(`usa el espacio de nombres \`${nombre}\` por su cuenta: pide el objeto con \`hubDe\` o \`agendaDe\``, n);
 			}
 		}
@@ -106,15 +103,6 @@ function analizar(fichero: string, texto: string): string[] {
 				raro(`saca el espacio de nombres \`${clave.text}\` desestructurando`, n);
 			}
 		}
-		if (
-			ts.isCallExpression(n) &&
-			ts.isIdentifier(n.expression) &&
-			n.expression.text === "objetoEn" &&
-			fichero !== AYUDANTE &&
-			fichero !== DIAGNOSTICO
-		) {
-			raro("elige la colocación con `objetoEn`: fuera del diagnóstico, `objetoDelNegocio`", n);
-		}
 		ts.forEachChild(n, ver);
 	};
 	ver(sf);
@@ -125,7 +113,7 @@ describe("nadie pide el objeto de un negocio por su cuenta", () => {
 	it("el barrido ha leído el worker", () => {
 		// Si el glob no encontrara nada, lo de abajo pasaría sin mirar nada.
 		expect(Object.keys(todoElWorker).length).toBeGreaterThan(100);
-		for (const fichero of [AYUDANTE, DIAGNOSTICO, "lib/hub.ts", "durableObjects/agendaWeb.ts"]) {
+		for (const fichero of [AYUDANTE, "lib/hub.ts", "durableObjects/agendaWeb.ts"]) {
 			expect(todoElWorker[fichero], fichero).toBeTypeOf("string");
 		}
 	});
@@ -156,7 +144,6 @@ describe("el barrido caza lo que tiene que cazar", () => {
 		["desestructurarlo con otro nombre", "const { AgendaWeb: agenda } = c.env;"],
 		["cambiar de jurisdicción", 'const ns = espacio.jurisdiction("eu");'],
 		["detrás de un texto con dos barras", 'const u = "https://ejemplo.invalid"; const s = env.TenantHub.get(id);'],
-		["elegir la colocación", "const stub = objetoEn(env.TenantHub, tenantId, {});"],
 		["como segundo argumento de otra cosa", "const stub = otraCosa(env, env.TenantHub, tenantId);"],
 	])("%s", (_que, codigo) => {
 		expect(enUnaRuta(codigo), codigo).not.toEqual([]);
@@ -172,12 +159,5 @@ describe("el barrido caza lo que tiene que cazar", () => {
 		["la clase del DO", "export class TenantHub extends DurableObject<Env> {}"],
 	])("no molesta: %s", (_que, codigo) => {
 		expect(enUnaRuta(codigo), codigo).toEqual([]);
-	});
-
-	it("`objetoEn` sólo vale en el ayudante y en el diagnóstico", () => {
-		const codigo = "const stub = objetoEn(env.TenantHub, nombre, donde);";
-		expect(analizar(DIAGNOSTICO, codigo)).toEqual([]);
-		expect(analizar(AYUDANTE, codigo)).toEqual([]);
-		expect(analizar("lib/hub.ts", codigo)).toHaveLength(1);
 	});
 });

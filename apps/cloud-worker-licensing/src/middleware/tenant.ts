@@ -7,7 +7,7 @@
 // los handlers solo tengan que pedir el cliente Turso (lecturas) o aplicar comandos
 // vía el DO (escrituras).
 
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 
 import type { Env } from "../env";
 import { getDb } from "../server/db";
@@ -118,6 +118,16 @@ export const soloLaMainCobra = soloLaMain("cobro_solo_en_main", 403);
  * puerta abierta a cualquiera con el token de un Handy.
  */
 export const soloLaMainEscribeCaja = soloLaMain("caja_solo_en_main", 403);
+
+/**
+ * ¿La petición en curso es de un dispositivo de un negocio que ha pasado `tenantAuth`? Lo que sólo se
+ * le enseña a él, como el desglose de tiempos (`Server-Timing`, `app.ts`). La puerta de las reservas
+ * web pone el negocio (`tenantId`) pero no un dispositivo: no cuenta.
+ */
+export function esDispositivoAutenticado(c: Context): boolean {
+	const deviceId: unknown = c.get("deviceId");
+	return typeof deviceId === "string" && deviceId !== "";
+}
 
 export const tenantAuth: MiddlewareHandler<{
 	Bindings: Env;

@@ -348,6 +348,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Eventos de sync | `durableObjects/tenantHub.ts` (`emitSyncEvent`), `tenantHub.cola.ts`, `tenantHub.mensajes.ts` |
 | Latidos | `apps/cloud-worker-licensing/src/observability/latido.ts` |
 | Salud | `apps/cloud-worker-licensing/src/server/salud.ts` |
+| Desglose de tiempos (`Server-Timing`: base central y viajes al `TenantHub`; lo lee el generador de carga, y sólo lo recibe un dispositivo autenticado por `tenantAuth`, nunca una ruta pública o anónima) | `apps/cloud-worker-licensing/src/observability/tiempos.ts`, `src/app.ts` |
 | Esquema de evento | `crates/tpv-telemetry/src/event.rs` → `packages/contracts/src/generated/telemetry.ts` (ts-rs) |
 
 ## Release de Sentry y source maps
