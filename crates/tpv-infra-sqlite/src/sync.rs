@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use crate::ejecutor::Value;
-use crate::ejecutor::Connection;
+use crate::ejecutor::{Connection, ErrorSql};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, SyncRepository};
@@ -105,6 +105,66 @@ async fn tablas_locales(conn: &Connection) -> AppResult<std::collections::HashSe
         }
     }
     Ok(out)
+}
+
+/// Dónde está cada cosa en las filas de una página del histórico.
+struct Fila<'a> {
+    columnas: &'a [String],
+    clave_primaria: &'a [String],
+}
+
+impl Fila<'_> {
+    /// Los valores de la clave primaria de una fila, para nombrarla en un error. Son
+    /// identificadores (UUID, fechas, números), nunca un dato de nadie.
+    fn clave(&self, fila: &[serde_json::Value]) -> String {
+        self.clave_primaria
+            .iter()
+            .filter_map(|k| self.columnas.iter().position(|c| c == k).and_then(|i| fila.get(i)))
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                otro => otro.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// El error de una página del histórico que no entra, con la fila que no entra y por qué.
+///
+/// Una fila del histórico que choca con OTRA de esta base por un índice único (dos cierres de caja
+/// vigentes del mismo periodo, `idx_cierres_un_periodo`) o que no cumple una restricción no se puede
+/// saltar: el backfill acabaría sin ella, y el contraste con la nube la vería después como una fila
+/// que sobra arriba y la borraría también allí. Tampoco se puede pisar la de aquí. Así que la
+/// página no se aplica (la transacción se deshace y el cursor no se mueve), el error dice qué fila
+/// y qué restricción, y el siguiente intento la repite: lo normal es que la fila de aquí vaya por
+/// detrás de la nube (un cambio suyo todavía en el catch-up) y para entonces ya no choque. Si
+/// choca siempre, el histórico se queda sin completar, con el error a la vista, y el contraste no
+/// corre (VERIF-01): no se pierde nada mientras alguien lo mira.
+///
+/// Para nombrar la fila se vuelve a intentar el lote de una en una, dentro de la misma transacción,
+/// que se deshará entera.
+async fn choque_del_historico(
+    conn: &Connection,
+    tabla: &str,
+    de_una_en_una: &str,
+    fila: Fila<'_>,
+    lote: &[Vec<serde_json::Value>],
+    error: ErrorSql,
+) -> AppError {
+    if matches!(&error, ErrorSql::SqliteFailure(codigo, _) if codigo & 0xff == 19) {
+        for valores in lote {
+            if let Err(ErrorSql::SqliteFailure(_, motivo)) =
+                conn.execute(de_una_en_una, valores.iter().map(json_to_value).collect::<Vec<_>>()).await
+            {
+                return AppError::repository(format!(
+                    "histórico {tabla}: la fila ({}) choca con otra de esta base o no cumple una restricción \
+                     ({motivo}); la página no se aplica y se reintentará",
+                    fila.clave(valores)
+                ));
+            }
+        }
+    }
+    AppError::repository(format!("histórico {tabla}: {error}"))
 }
 
 /// ¿Es un identificador SQL simple? El volcado llega de la red, y sus nombres de tabla y de columna
@@ -1426,6 +1486,19 @@ impl SyncRepository for SqliteSyncRepository {
             return Ok(0);
         }
 
+        // La única fila que se da por buena sin insertarla es la que ya está: la de la misma clave
+        // primaria. Ver `choque_del_historico`.
+        let clave_primaria =
+            crate::sync_reparacion::claves_primarias(conn, &pagina.tabla).await.map_err(db_err)?;
+        let si_ya_esta = if clave_primaria.is_empty() {
+            // Todas las tablas del esquema tienen clave primaria (lo comprueba
+            // `tests_backfill::todas_las_tablas_del_negocio_tienen_clave_primaria`).
+            "ON CONFLICT DO NOTHING".to_string()
+        } else {
+            let objetivo = clave_primaria.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+            format!("ON CONFLICT({objetivo}) DO NOTHING")
+        };
+
         let res: AppResult<i64> = conn.transaccion(async {
             let n_cols = pagina.columnas.len();
             let mut insertadas = 0i64;
@@ -1453,17 +1526,24 @@ impl SyncRepository for SqliteSyncRepository {
                         args.extend(fila.iter().map(json_to_value));
                     }
                     let valores = vec![marcas_fila.as_str(); lote.len()].join(", ");
-                    // `INSERT OR IGNORE` y no `INSERT`: la fase 2 NUNCA pisa una fila que ya esté.
-                    // Lo que ya está llegó por el catch-up y por tanto es más nuevo que esta foto
-                    // del histórico. Y la fase 2 re-descarga a propósito la ventana que ya trajo la
-                    // fase 1: sin `IGNORE`, la primera página de cada tabla reventaría por PK.
+                    // La fase 2 NUNCA pisa una fila que ya esté: lo que ya está llegó por el
+                    // catch-up y es más nuevo que esta foto del histórico. Y la fase 2 re-descarga
+                    // a propósito la ventana que ya trajo la fase 1. Así que la que ya está por su
+                    // clave primaria se deja como está, y nada más: no `INSERT OR IGNORE`, que se
+                    // salta también la fila que choca con OTRA por un índice único (o que no
+                    // cumple un NOT NULL o un CHECK), en silencio y para siempre.
                     let sql = format!(
-                        "INSERT OR IGNORE INTO \"{}\" ({cols}) VALUES {valores};",
+                        "INSERT INTO \"{}\" ({cols}) VALUES {valores} {si_ya_esta};",
                         pagina.tabla
                     );
-                    conn.execute(&sql, args).await.map_err(|e| {
-                        AppError::repository(format!("histórico {}: {e}", pagina.tabla))
-                    })?;
+                    if let Err(e) = conn.execute(&sql, args).await {
+                        let de_una_en_una = format!(
+                            "INSERT INTO \"{}\" ({cols}) VALUES {marcas_fila} {si_ya_esta};",
+                            pagina.tabla
+                        );
+                        let fila = Fila { columnas: &pagina.columnas, clave_primaria: &clave_primaria };
+                        return Err(choque_del_historico(conn, &pagina.tabla, &de_una_en_una, fila, lote, e).await);
+                    }
                     insertadas += lote.len() as i64;
                 }
             }
@@ -2630,6 +2710,122 @@ mod tests_backfill {
             Some(("Zonas".to_string(), 0)),
             "el cursor se queda donde estaba"
         );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Tras recuperar con la ventana de los cierres: el de la fase 1 (`cierre-y`, que empieza en `A`)
+    /// y el histórico de esa tabla pendiente.
+    async fn tras_recuperar_los_cierres(repo: &SqliteSyncRepository) {
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 10,
+            total_filas: 1,
+            tablas: vec![BootstrapTabla {
+                nombre: "Cierres_Caja".into(),
+                columnas: vec!["ID_Cierre".into(), "Fecha_Hora".into(), "Periodo_Desde".into()],
+                filas: vec![vec![json!("cierre-y"), json!("2026-11-12 02:00:00"), json!("2026-04-30 02:00:00")]],
+                parcial: true,
+            }],
+            backfill: vec!["Cierres_Caja".into()],
+        }, "negocio-de-prueba")
+        .await
+        .unwrap();
+    }
+
+    fn pagina_de_cierres(filas: Vec<Vec<serde_json::Value>>) -> HistoricoPagina {
+        HistoricoPagina {
+            tabla: "Cierres_Caja".into(),
+            columnas: vec!["ID_Cierre".into(), "Fecha_Hora".into(), "Periodo_Desde".into()],
+            filas,
+            siguiente_cursor: None,
+        }
+    }
+
+    /// Una fila del histórico que choca con OTRA de aquí por un índice único no se salta.
+    ///
+    /// Con `INSERT OR IGNORE` se saltaba en silencio: el cursor avanzaba, la tabla quedaba
+    /// completada sin ella, y el contraste con la nube la veía después como una fila que sobra
+    /// arriba y la borraba también allí. Aquí `cierre-x` y `cierre-y` empiezan en el mismo sitio y
+    /// los dos están vigentes (`idx_cierres_un_periodo`): en la nube no pueden estarlo a la vez, así
+    /// que el de aquí va por detrás (la reapertura de `cierre-y` todavía no ha bajado).
+    #[tokio::test]
+    async fn una_fila_que_choca_con_otra_por_un_indice_unico_no_se_salta() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar_los_cierres(&repo).await;
+        let pagina = || {
+            pagina_de_cierres(vec![
+                vec![json!("cierre-v"), json!("2026-03-31 02:00:00"), serde_json::Value::Null],
+                vec![json!("cierre-x"), json!("2026-05-31 02:00:00"), json!("2026-04-30 02:00:00")],
+                vec![json!("cierre-y"), json!("2026-11-12 02:00:00"), json!("2026-04-30 02:00:00")],
+            ])
+        };
+
+        let e = repo.backfill_aplicar_pagina(pagina()).await.unwrap_err().to_string();
+        assert!(e.contains("cierre-x") && e.contains("idx_cierres_un_periodo"), "dice qué fila y por qué: {e}");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 1, "la página no entra a medias");
+        let estado = repo.backfill_estado().await.unwrap();
+        assert_eq!((estado.tablas_pendientes, estado.filas_traidas), (1, 0), "ni se da por completada");
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), Some(("Cierres_Caja".to_string(), 0)));
+
+        // Baja la reapertura de `cierre-y` y la página, repetida, entra entera; el de aquí se queda
+        // como está.
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("UPDATE Cierres_Caja SET Reabierto_En = '2026-06-01 10:00:00' WHERE ID_Cierre = 'cierre-y';")
+                .await
+                .unwrap();
+        }
+        assert_eq!(repo.backfill_aplicar_pagina(pagina()).await.unwrap(), 3);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 3);
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Cierres_Caja WHERE ID_Cierre = 'cierre-y' AND Reabierto_En IS NOT NULL;").await,
+            1
+        );
+        assert_eq!(repo.backfill_estado().await.unwrap().tablas_pendientes, 0);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo mismo con una fila que no cumple una restricción de la tabla: `INSERT OR IGNORE` también
+    /// se la saltaba.
+    #[tokio::test]
+    async fn una_fila_que_no_cumple_una_restriccion_tampoco_se_salta() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        let mala = pagina(vec![vec![json!("z1"), json!("Terraza")], vec![json!("z2"), serde_json::Value::Null]], None);
+        let e = repo.backfill_aplicar_pagina(mala).await.unwrap_err().to_string();
+        assert!(e.contains("z2") && e.contains("NOT NULL"), "{e}");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 0);
+        assert_eq!(repo.backfill_estado().await.unwrap().tablas_pendientes, 1);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo único que la fase 2 da por bueno sin insertarlo es lo que ya está por su clave primaria,
+    /// así que cada tabla del negocio tiene que tener una.
+    #[tokio::test]
+    async fn todas_las_tablas_del_negocio_tienen_clave_primaria() {
+        let (_repo, db, dir) = repo_temporal().await;
+        let r = db.read().await;
+        let mut filas = r
+            .conn()
+            .query(
+                "SELECT m.name FROM sqlite_master m WHERE m.type = 'table' \
+                   AND substr(m.name, 1, 7) <> 'sqlite_' AND substr(m.name, 1, 1) <> '_' \
+                   AND NOT EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE pk > 0);",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut sin_clave = Vec::new();
+        while let Some(f) = filas.next().await.unwrap() {
+            sin_clave.push(f.get::<String>(0).unwrap());
+        }
+        assert!(sin_clave.is_empty(), "{sin_clave:?}");
+        drop(filas);
+        drop(r);
 
         let _ = std::fs::remove_dir_all(dir);
     }

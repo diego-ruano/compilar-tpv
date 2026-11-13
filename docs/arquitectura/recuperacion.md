@@ -135,8 +135,15 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 **Fase 2** (`/v1/sync/historico` + job `backfill_historico`, cada 5 minutos): el resto, por páginas de
 `rowid`, sin transacción ni `Seq` (son datos que ya no cambian).
 
-- **`INSERT OR IGNORE` siempre**: lo que ya está en local llegó por el catch-up y es más nuevo; la
-  fase 2 vuelve a bajar a propósito la ventana de la fase 1.
+- **Lo que ya está por su clave primaria se deja como está** (`ON CONFLICT(<clave>) DO NOTHING`): llegó
+  por el catch-up y es más nuevo, y la fase 2 vuelve a bajar a propósito la ventana de la fase 1.
+  **Nada más se salta**: una fila que choca con OTRA de aquí por un índice único (dos cierres vigentes
+  del mismo periodo) o que no cumple una restricción hace que la página no se aplique, con un error que
+  dice qué fila y qué restricción, y se reintenta. Con `INSERT OR IGNORE` se saltaba en silencio, la
+  tabla quedaba completada sin ella y el contraste la borraba después en la nube por sobrante. Lo
+  normal es que la fila de aquí vaya por detrás (un cambio suyo todavía en el catch-up) y en el
+  reintento ya no choque; si choca siempre, el histórico se queda sin completar con el error a la
+  vista, y el contraste no corre.
 - ⚠️ **Por `WriteGuard::raw()`**: por `execute()` devolvería a la nube, fila a fila, el histórico que
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
