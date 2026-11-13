@@ -1258,6 +1258,12 @@ CREATE TABLE IF NOT EXISTS Sync_Changes (
   Created_At_Ms INTEGER NOT NULL
 );
 
+-- El TenantHub busca en el log el cambio de una operacion por su Op_Id: el resultado guardado de
+-- un reintento idempotente y lo ya aplicado de un lote de la cola. Sin este indice cada busqueda
+-- recorria el log entero, que guarda siete dias de escrituras del negocio.
+CREATE INDEX IF NOT EXISTS idx_sync_changes_op_id
+ON Sync_Changes(Op_Id);
+
 CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
   Device_Id TEXT NOT NULL PRIMARY KEY,
   Last_Seq INTEGER NOT NULL,

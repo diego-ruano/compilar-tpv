@@ -95,4 +95,7 @@ también, vacías, en la base del tenant es deliberado: hay un único esquema, y
 recuperación descarta todo lo que empieza por `_`.
 
 Al revés, `Applied_Operations`, `Sync_Changes` y `Sync_Main_Checkpoints` sólo las usa la nube y existen
-vacías en la Main. Un volcado o una comparación que recorra tablas se las salta.
+vacías en la Main. Un volcado o una comparación que recorra tablas se las salta. `Sync_Changes` lleva
+un índice por `Op_Id` (`idx_sync_changes_op_id`): el `TenantHub` busca por él el cambio de una
+operación (el resultado guardado de un reintento, lo ya aplicado de un lote de la cola), y sin el
+índice cada búsqueda recorrería el log entero.

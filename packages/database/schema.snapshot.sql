@@ -54,6 +54,7 @@ CREATE INDEX idx_reservas_cliente ON Reservas(ID_Cliente);
 CREATE INDEX idx_reservas_mesa_dia_hora ON Reservas(ID_Mesa, Dia_YMD, Hora);
 CREATE INDEX idx_suelto_consumos_pago ON Suelto_Consumos(ID_Pago);
 CREATE INDEX idx_suelto_consumos_producto ON Suelto_Consumos(ID_Producto);
+CREATE INDEX idx_sync_changes_op_id ON Sync_Changes(Op_Id);
 CREATE INDEX idx_sync_outbox_pendientes ON _Sync_Outbox(Cuarentena, Seq);
 CREATE INDEX idx_tarea_asig_trab ON Tarea_Asignaciones(ID_Trabajador, Estado);
 CREATE INDEX idx_verifactu_anomalias_pend ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
