@@ -78,7 +78,6 @@ describe("AUD-21 · el motor no escribe con una hora imposible", () => {
 					commandName: b.commandName,
 					deviceId: "handy-1",
 					requestPayloadJson: JSON.stringify({ opId }),
-					cloudPayloadJson: "{}",
 					clientNow,
 				});
 			};

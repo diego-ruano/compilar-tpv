@@ -489,7 +489,7 @@ describe("límites del SQL", () => {
 	});
 });
 
-// Lo que da por hecho el lote síncrono de la Main (`apply_lote`, `MotorTenantHub.atenderLote`): que
+// Lo que da por hecho el lote síncrono de la Main (`apply_lote`, `MotorTenantHub.aplicarLote`): que
 // cada operación puede ir en su propio `transactionSync` dentro de un mismo turno, que lo escrito en
 // un turno se confirma junto al acabar, y que lo que el objeto manda por un socket no sale hasta
 // que lo escrito antes es duradero.

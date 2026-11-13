@@ -141,7 +141,6 @@ export type EscrituraPreparada = {
 	cmd: InternalApplyCommand;
 	deviceId: string | null;
 	requestHash: string;
-	cloudPayloadJson: string;
 };
 
 /**

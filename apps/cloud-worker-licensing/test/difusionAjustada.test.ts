@@ -45,7 +45,6 @@ function preparar(hub: any): any {
 	const db = clienteLocal(hub.state.storage);
 	hub.getTenantDb = async () => db;
 	hub.touchLastSeen = async () => {};
-	hub.colaPausada = async () => null;
 	hub.emitSyncEvent = () => {};
 	laMainEs(hub, MAIN);
 	return sql;

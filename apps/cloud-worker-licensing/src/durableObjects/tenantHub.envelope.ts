@@ -1,8 +1,7 @@
 // src/durableObjects/tenantHub.envelope.ts
 //
 // El "sobre" de un comando: los metadatos que lo identifican (`opId`, `commandName`,
-// `deviceId`) y la carga de dominio que se guarda en `Sync_Changes` para que la Main pueda
-// reconstruir lo ocurrido.
+// `deviceId`) y el cuerpo canónico que se hashea para el gate de idempotencia (`Request_Hash`).
 //
 // Casi todo aquí existe por una razón concreta: el sobre llega en **muchas formas**. La Main
 // y la Handy han ido usando snake_case y camelCase, el payload a veces viene ya serializado y
@@ -99,14 +98,6 @@ export function buildInternalPayloadForHash(cmd: InternalApplyCommand): any {
 	};
 }
 
-export function buildCommandEnvelope(opId: string, commandName: string, args: any): any {
-	return {
-		op_id: opId,
-		command_name: commandName,
-		args: args ?? {},
-	};
-}
-
 export function readRequestPayloadJson(
 	body: any,
 	fallbackPayloadForHash: any,
@@ -151,45 +142,6 @@ export function readRequestPayloadJson(
 
 	if (cloudPayload !== undefined) {
 		return stableStringify(toPlainValue(cloudPayload));
-	}
-
-	return stableStringify(fallbackPayloadForHash);
-}
-
-export function readCloudPayloadJson(params: {
-	body: any;
-	opId: string;
-	commandName: string;
-	fallbackPayloadForHash: any;
-}): string {
-	const { body, opId, commandName, fallbackPayloadForHash } = params;
-
-	const cloudPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["cloud_payload_json", "cloudPayloadJson"]),
-		"cloud_payload_json",
-	);
-
-	if (cloudPayloadJson) {
-		return cloudPayloadJson;
-	}
-
-	const cloudPayload = getFirstOwnValue(body, [
-		"cloud_payload",
-		"cloudPayload",
-		"sync_payload",
-		"syncPayload",
-		"domain_payload",
-		"domainPayload",
-	]);
-
-	if (cloudPayload !== undefined) {
-		return stableStringify(toPlainValue(cloudPayload));
-	}
-
-	const domainArgs = getFirstOwnValue(body, ["args", "input", "params"]);
-
-	if (domainArgs !== undefined) {
-		return stableStringify(buildCommandEnvelope(opId, commandName, domainArgs));
 	}
 
 	return stableStringify(fallbackPayloadForHash);

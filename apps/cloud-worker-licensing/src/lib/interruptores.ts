@@ -3,7 +3,7 @@
 // PROD-06 · Interruptores remotos de emergencia.
 //
 // Si una tarea automática se pone a hacer daño en los equipos de los clientes —la reparación por
-// estado pisa filas buenas, el volcado satura la base—, la
+// estado pisa filas buenas, la descarga del histórico satura la base—, la
 // única forma de pararla era publicar una versión y esperar a que cada TPV se actualizara. Esto
 // deja apagarla desde aquí, en minutos, con una fila en la tabla `interruptores` de la base
 // central (su estructura está en `docs/sql/control-plane/esquema-actual.sql`).
@@ -18,7 +18,7 @@
 //   · **Si no se puede leer, todo está encendido.** Esto es un freno de mano, no una dependencia:
 //     una caída de la base central no puede convertirse en «el TPV deja de sincronizar».
 //   · **Se cachea por isolate y poco tiempo**, como la licencia (`licenciaEnUso.ts`): el TPV
-//     pregunta cada pocos minutos y el DO en cada vuelta de su cola.
+//     pregunta cada pocos minutos.
 
 import * as z from "zod";
 import type { Interruptor, InterruptorApagado } from "@tpv/contracts";
@@ -29,8 +29,6 @@ import type { Assert } from "./typeGuards";
 
 export const INTERRUPTORES = [
 	"reparacion_nube",
-	"volcado_atraso",
-	"cola_do",
 	"backfill_historico",
 	"cifrado_pii",
 	"imagenes",

@@ -47,7 +47,6 @@ function preparar(hub: any): Preparado {
 	};
 	hub.getTenantDb = async () => db;
 	hub.touchLastSeen = async () => {};
-	hub.colaPausada = async () => null;
 	const eventos: Preparado["eventos"] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
 	laMainEs(hub, MAIN);

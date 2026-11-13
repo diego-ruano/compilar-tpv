@@ -4,7 +4,7 @@ import { HubError } from "../lib/errorHttp";
 import { errorHorario } from "./tenantHub.errores";
 import type { ApplyParams, ResultadoAplicacion } from "./tenantHub.rpc";
 import { issueChallenge, roleNormalize } from "./tenantHub.identidad";
-import { buildInternalPayloadForHash, readCloudPayloadJson, readRequestPayloadJson } from "./tenantHub.envelope";
+import { buildInternalPayloadForHash, readRequestPayloadJson } from "./tenantHub.envelope";
 import type { InternalApplyCommand, WsAttachment } from "./tenantHub.types";
 
 /** Lo que las rutas necesitan del hub. */
@@ -29,7 +29,6 @@ export interface ContextoDeRutas {
 		commandName: string;
 		deviceId?: string | null;
 		requestPayloadJson: string;
-		cloudPayloadJson: string;
 		clientNow?: string | null;
 		allowWhileRecovering?: boolean;
 	}): Promise<{ result: any; seq: number }>;
@@ -75,14 +74,12 @@ export async function aplicar(ctx: ContextoDeRutas, params: ApplyParams): Promis
 	if (!tenantId) return { ok: false, error: "missing_tenant_id", status: 400 };
 	if (!opId) return { ok: false, error: "missing_op_id", status: 400 };
 	if (!commandName) return { ok: false, error: "missing_command_name", status: 400 };
-	// Conserva exactamente el hash y el sobre anteriores: los reintentos siguen siendo idempotentes.
+	// Conserva exactamente el hash anterior: los reintentos siguen siendo idempotentes.
 	const body = { cloud_payload: cloudPayload ?? null };
-	const fallbackPayloadForHash = buildInternalPayloadForHash(command);
 	try {
 		const { result } = await ctx.applyInternalCommandIdempotent({
 			tenantId, cmd: command, opId, commandName, deviceId,
-			requestPayloadJson: readRequestPayloadJson(body, fallbackPayloadForHash),
-			cloudPayloadJson: readCloudPayloadJson({ body, opId, commandName, fallbackPayloadForHash }),
+			requestPayloadJson: readRequestPayloadJson(body, buildInternalPayloadForHash(command)),
 			clientNow: clientNow ?? "",
 		});
 		return { ok: true, data: result };

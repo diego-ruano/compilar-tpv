@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn sin_saber_nada_de_la_nube_todo_esta_encendido() {
         let foto = Instantanea::default();
-        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::BackfillHistorico, AHORA).is_none());
     }
 
     #[test]
@@ -118,7 +118,7 @@ mod tests {
             apagados: vec![apagado_hasta(Interruptor::ReparacionNube, AHORA + 60 * MIN)],
         };
         assert!(apagado(&foto, Interruptor::ReparacionNube, AHORA).is_some());
-        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::BackfillHistorico, AHORA).is_none());
     }
 
     #[test]
@@ -136,15 +136,15 @@ mod tests {
         // 24 h, pero no se ha podido confirmar en la última hora.
         let foto = Instantanea {
             consultado_ms: AHORA - VIGENCIA_CONSULTA_MS - 1,
-            apagados: vec![apagado_hasta(Interruptor::VolcadoAtraso, AHORA + 20 * 60 * MIN)],
+            apagados: vec![apagado_hasta(Interruptor::BackfillHistorico, AHORA + 20 * 60 * MIN)],
         };
-        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::BackfillHistorico, AHORA).is_none());
 
         let justo = Instantanea {
             consultado_ms: AHORA - VIGENCIA_CONSULTA_MS,
             ..foto
         };
-        assert!(apagado(&justo, Interruptor::VolcadoAtraso, AHORA).is_some());
+        assert!(apagado(&justo, Interruptor::BackfillHistorico, AHORA).is_some());
     }
 
     #[test]

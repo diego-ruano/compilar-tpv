@@ -9,8 +9,8 @@
 // para las Handy. Aquí se fija lo que hace ahora el DO:
 //
 //   · quién es la Main está apuntado en su SQL (`_Main_Vigente`), y todo lo que depende de ello lo
-//     mira ahí sin esperar (`esLaMain`): escribir, encolar, acusar, soltar a las Handy, recibir lo
-//     del negocio y contar como Main;
+//     mira ahí sin esperar (`esLaMain`): escribir, soltar a las Handy, recibir lo del negocio y
+//     contar como Main;
 //   · la tabla la pone al día el saludo de un `tpv` y, cuando hay trabajo, una lectura de la base
 //     central como mucho por minuto; quien la pide se queda la marca antes de esperar, y una
 //     respuesta vieja no deshace una nueva;
@@ -18,7 +18,7 @@
 //     que estaba esperando a que la comprobaran no entra;
 //   · si la base central no contesta o rechaza la consulta, la tabla se queda como está y no se
 //     rechaza nada; un mensaje mal formado no gasta la lectura;
-//   · lo que la Main manda y entra en el acto (`apply`, `bulk_apply`) entra en el orden en que
+//   · lo que la Main manda y entra en el acto (`apply`, `apply_lote`) entra en el orden en que
 //     llegó, aunque al primero le toque esperar la comprobación;
 //   · un cambio de licencia (`releerMain`) hace releer, no echa por su cuenta: un aviso que llega
 //     tarde no echa a la Main que ha vuelto a serlo. La baja de un dispositivo
@@ -154,11 +154,9 @@ function prepararHub(hub: any, main: string | null) {
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 	hub.touchLastSeen = async () => {};
-	hub.colaPausada = async () => null;
 	const eventos: { name: string; [campo: string]: unknown }[] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => eventos.push({ name, ...campos });
 	const central = centralDeMentira(hub, main);
-	hub.asegurarCola();
 	return { sql, db, central, eventos, turno };
 }
 
@@ -279,13 +277,12 @@ async function esperarCierre(c: Conexion, ms = ESPERA_MS): Promise<{ code: numbe
 /** Deja pasar lo que hubiera quedado en vuelo: una difusión, un ack que no debería llegar. */
 const unMomento = () => new Promise((r) => setTimeout(r, 150));
 
-async function cerrar(hub: any, ...conexiones: Conexion[]) {
+async function cerrar(_hub: any, ...conexiones: Conexion[]) {
 	for (const c of conexiones) {
 		try {
 			c.cliente.close(1000, "fin");
 		} catch {}
 	}
-	await hub.state.storage.deleteAlarm();
 }
 
 const att = (c: Conexion) => c.servidor.deserializeAttachment() as any;
@@ -313,10 +310,13 @@ function operacion(opId: string, steps: any[], resultKey?: string) {
 const apply = (opId: string, steps: any[], resultKey?: string) =>
 	JSON.stringify({ type: "apply", ...operacion(opId, steps, resultKey) });
 
-const bulkApply = (opId: string, steps: any[]) =>
-	JSON.stringify({ type: "bulk_apply", clientNow: "2026-11-08 12:00:00", ops: [operacion(opId, steps)] });
-
-const acuse = (...opIds: string[]) => JSON.stringify({ type: "cola_apartada_ack", opIds });
+/** Un `apply_lote` de una operación: el lote se llama como ella. */
+const applyLote = (opId: string, steps: any[]) =>
+	JSON.stringify({ type: "apply_lote", loteId: `lote-${opId}`, clientNow: "2026-11-08 12:00:00", ops: [operacion(opId, steps)] });
+const acusesDeLote = (c: Conexion) => c.recibidos.filter((m) => m.type === "apply_lote_ack");
+/** Los acuses de los lotes que han entrado enteros. */
+const lotesAplicados = (c: Conexion) =>
+	acusesDeLote(c).filter((m) => m.ok && m.resultados?.every((r: any) => r.ok));
 
 /**
  * Pasos que dependen unos de otros: el primero da de alta la zona y cada uno de los siguientes le
@@ -331,19 +331,10 @@ const nombreEncadenado = (zona: string, cuantos: number) =>
 	`Zona ${zona}` + Array.from({ length: cuantos - 1 }, (_, i) => `-${i + 1}`).join("");
 const nombreDe = (sql: any, zona: string) =>
 	(sql.exec("SELECT Nombre_Zona AS nombre FROM Zonas WHERE ID_Zona = ?;", zona).toArray()[0] as any)?.nombre;
-const enLaCola = (sql: any) =>
-	sql.exec("SELECT Op_Id FROM _Cola_Entrada ORDER BY Seq;").toArray().map((fila: any) => fila.Op_Id);
+const elLog = (sql: any) =>
+	sql.exec("SELECT Op_Id FROM Sync_Changes ORDER BY Seq;").toArray().map((fila: any) => fila.Op_Id);
 
 const recoveryReady = JSON.stringify({ type: "recovery_ready" });
-
-
-function apartada(sql: any, opId: string) {
-	sql.exec(
-		"INSERT INTO _Cola_Muerta (Op_Id, Command_Name, Device_Id, Error, Intentos, Apartada_En_Ms) VALUES (?,'x','main-nueva','e',20,?);",
-		opId,
-		Date.now(),
-	);
-}
 
 /** Lo que escribe una Handy por REST: el RPC `aplicar` del DO. */
 function escribeLaHandy(hub: any, opId: string, zona: string) {
@@ -597,46 +588,20 @@ describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main
 		});
 	});
 
-	it("su `bulk_apply` no entra en la cola", async () => {
-		await enElHub("aud02-bulk", async (hub: any) => {
+	it("su `apply_lote` no escribe", async () => {
+		await enElHub("aud02-lote", async (hub: any) => {
 			const { sql } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			const nueva = conectar(hub, "main-nueva");
 			try {
-				await hub.webSocketMessage(vieja.servidor, bulkApply("op-b1", [altaDeZona("z-bulk")]));
+				await hub.webSocketMessage(vieja.servidor, applyLote("op-b1", [altaDeZona("z-lote")]));
 
 				expect(await esperarCierre(vieja)).toEqual({ code: 4001, reason: "device_replaced" });
 				await unMomento();
-				expect(acksOk(vieja, "bulk_ack")).toEqual([]);
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Entrada;")).toBe(0);
-
-				await hub.drenarCola();
-				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas WHERE ID_Zona = 'z-bulk';")).toBe(0);
+				expect(lotesAplicados(vieja)).toEqual([]);
+				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas WHERE ID_Zona = 'z-lote';")).toBe(0);
+				expect(elLog(sql)).toEqual([]);
 				expect(cambios(nueva)).toEqual([]);
-			} finally {
-				await cerrar(hub, vieja, nueva);
-			}
-		});
-	});
-
-	it("su acuse no borra lo que la nube apartó para la Main nueva", async () => {
-		await enElHub("aud02-acuse", async (hub: any) => {
-			const { sql } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
-			apartada(sql, "ap-1");
-			const vieja = conectar(hub, "main-vieja");
-			const nueva = conectar(hub, "main-nueva");
-			try {
-				await hub.webSocketMessage(vieja.servidor, acuse("ap-1"));
-
-				expect(await esperarCierre(vieja)).toEqual({ code: 4001, reason: "device_replaced" });
-				await unMomento();
-				expect(vieja.recibidos.filter((m) => m.type === "cola_apartada_ack_ok")).toEqual([]);
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Muerta WHERE Op_Id = 'ap-1';")).toBe(1);
-
-				// La Main nueva sí puede acusarla.
-				await hub.webSocketMessage(nueva.servidor, acuse("ap-1"));
-				expect(await esperar(nueva, (m) => m.type === "cola_apartada_ack_ok")).toMatchObject({ n: 1 });
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Muerta WHERE Op_Id = 'ap-1';")).toBe(0);
 			} finally {
 				await cerrar(hub, vieja, nueva);
 			}
@@ -843,7 +808,6 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 	it("todo lo que sube se atiende, con una lectura de la base central por minuto", async () => {
 		await enElHub("aud02-legitima", async (hub: any) => {
 			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
-			apartada(sql, "ap-1");
 			const main = conectar(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -851,16 +815,16 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 					await hub.webSocketMessage(main.servidor, apply(`op-${i}`, [altaDeZona(`z-${i}`)]));
 					expect(await esperar(main, (m) => m.type === "apply_ack" && m.opId === `op-${i}`)).toMatchObject({ ok: true });
 				}
-				await hub.webSocketMessage(main.servidor, acuse("ap-1"));
-				expect(await esperar(main, (m) => m.type === "cola_apartada_ack_ok")).toMatchObject({ n: 1 });
+				await hub.webSocketMessage(main.servidor, applyLote("op-b1", [altaDeZona("z-lote")]));
+				expect(await esperar(main, (m) => m.type === "apply_lote_ack")).toMatchObject({
+					ok: true,
+					resultados: [{ opId: "op-b1", ok: true }],
+				});
 				await hub.webSocketMessage(main.servidor, recoveryReady);
 				expect(await esperar(main, (m) => m.type === "recovery_ready_ack")).toBeTruthy();
 				// Lo de las Handy también depende de ella, y tampoco cuesta otra lectura.
 				expect(await escribeLaHandy(hub, "op-handy", "z-handy")).toMatchObject({ ok: true });
-				await hub.webSocketMessage(main.servidor, bulkApply("op-b1", [altaDeZona("z-bulk")]));
-				expect(await esperar(main, (m) => m.type === "bulk_ack")).toMatchObject({ ok: true, opIds: ["op-b1"] });
-				await hub.state.storage.deleteAlarm();
-				await hub.drenarCola();
+				expect(await esperar(main, (m) => m.type === "change" && m.opId === "op-handy")).toBeTruthy();
 
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(5);
 				expect(cambios(main).map((m) => m.opId)).toEqual(["op-handy"]);
@@ -954,8 +918,6 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 	});
 
 	it("veinte mensajes de varias clases a la vez: una sola lectura, y se atienden todos", async () => {
-		// Sin volcados: un `apply` en vivo y un `bulk_apply` a la vez se congelan entre sí (SYNC-18),
-		// y no es lo que se prueba aquí. Los volcados, en el caso siguiente.
 		await enElHub("aud02-veinte-mezcla", async (hub: any) => {
 			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			const main = conectar(hub, "main-nueva", "tpv", true);
@@ -963,7 +925,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 			try {
 				central.retenerLicencias = true;
 				const mensajes = Array.from({ length: 20 }, (_, i) => {
-					if (i % 3 === 1) return acuse(`ap-${i}`);
+					if (i % 3 === 1) return applyLote(`op-${i}`, [altaDeZona(`z-${i}`)]);
 					if (i % 3 === 2) return recoveryReady;
 					return apply(`op-${i}`, [altaDeZona(`z-${i}`)]);
 				});
@@ -976,12 +938,15 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				soltarTodas(central);
 				await enviados;
 				expect(await esperarA(() => acksOk(main, "apply_ack").length === 7)).toBe(true);
-				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok").length === 7)).toBe(true);
+				expect(await esperarA(() => lotesAplicados(main).length === 7)).toBe(true);
 				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "recovery_ready_ack").length === 6)).toBe(true);
 
 				expect(central.lecturas).toBe(1);
 				expect(main.cierre).toBeNull();
-				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(7);
+				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(14);
+				// `apply` y `apply_lote` van en la misma fila: entran en el orden en que llegaron.
+				const escrituras = Array.from({ length: 20 }, (_, i) => i).filter((i) => i % 3 !== 2);
+				expect(elLog(sql)).toEqual(escrituras.map((i) => `op-${i}`));
 			} finally {
 				soltarTodas(central);
 				await cerrar(hub, main, handy);
@@ -989,73 +954,30 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 		});
 	});
 
-	it("veinte volcados a la vez con la lectura en vuelo: una sola, y entran en el orden en que llegaron", async () => {
+	it("veinte lotes a la vez con la lectura en vuelo: una sola, y entran en el orden en que llegaron", async () => {
 		// El primero se queda esperando la comprobación; el segundo ya no tendría que preguntar, y antes
 		// entraba por delante. Las operaciones dependen unas de otras: el orden se ve en el resultado.
-		await enElHub("aud02-veinte-volcado", async (hub: any) => {
+		await enElHub("aud02-veinte-lotes", async (hub: any) => {
 			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
-			// Que no drene mientras: lo que se mira primero es el orden de la cola.
-			hub.colaPausada = async () => ({ hasta_ms: Date.now() + 60_000 });
 			const main = conectar(hub, "main-nueva");
 			try {
 				central.retenerLicencias = true;
 				const ids = Array.from({ length: 20 }, (_, i) => `op-${String(i).padStart(2, "0")}`);
-				await Promise.all(ids.map((id, i) => hub.webSocketMessage(main.servidor, bulkApply(id, encadenado("z-orden", i)))));
+				await Promise.all(ids.map((id, i) => hub.webSocketMessage(main.servidor, applyLote(id, encadenado("z-orden", i)))));
 				expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
 				await unMomento();
 				expect(central.lecturas).toBe(1);
 				// Ninguno ha entrado por delante del que espera.
-				expect(enLaCola(sql)).toEqual([]);
-				expect(acksOk(main, "bulk_ack")).toEqual([]);
+				expect(elLog(sql)).toEqual([]);
+				expect(acusesDeLote(main)).toEqual([]);
 
 				central.retenerLicencias = false;
 				soltarTodas(central);
-				expect(await esperarA(() => acksOk(main, "bulk_ack").length === 20)).toBe(true);
-				expect(enLaCola(sql)).toEqual(ids);
-				expect(central.lecturas).toBe(1);
-
-				hub.colaPausada = async () => null;
-				await hub.state.storage.deleteAlarm();
-				await hub.drenarCola();
+				expect(await esperarA(() => lotesAplicados(main).length === 20)).toBe(true);
+				expect(acusesDeLote(main).map((m) => m.loteId)).toEqual(ids.map((id) => `lote-${id}`));
+				expect(elLog(sql)).toEqual(ids);
 				expect(nombreDe(sql, "z-orden")).toBe(nombreEncadenado("z-orden", 20));
 				expect(central.lecturas).toBe(1);
-			} finally {
-				soltarTodas(central);
-				await cerrar(hub, main);
-			}
-		});
-	});
-
-	it("con atraso, veinte `apply` a la vez van a la cola en el orden en que llegaron", async () => {
-		await enElHub("aud02-veinte-atraso", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
-			hub.colaPausada = async () => ({ hasta_ms: Date.now() + 60_000 });
-			const main = conectar(hub, "main-nueva");
-			try {
-				// El atraso: un volcado que sigue en la cola.
-				await hub.webSocketMessage(main.servidor, bulkApply("op-00", encadenado("z-atraso", 0)));
-				expect(await esperar(main, (m) => m.type === "bulk_ack")).toMatchObject({ ok: true, opIds: ["op-00"] });
-				expect(central.lecturas).toBe(1);
-
-				pasaUnMinuto(hub);
-				central.retenerLicencias = true;
-				const ids = Array.from({ length: 19 }, (_, i) => `op-${String(i + 1).padStart(2, "0")}`);
-				await Promise.all(ids.map((id, i) => hub.webSocketMessage(main.servidor, apply(id, encadenado("z-atraso", i + 1)))));
-				expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
-				await unMomento();
-				expect(enLaCola(sql)).toEqual(["op-00"]);
-
-				central.retenerLicencias = false;
-				soltarTodas(central);
-				expect(await esperarA(() => acksOk(main, "apply_ack").length === 19)).toBe(true);
-				expect(acksOk(main, "apply_ack").every((m) => m.encolada === true)).toBe(true);
-				expect(enLaCola(sql)).toEqual(["op-00", ...ids]);
-
-				hub.colaPausada = async () => null;
-				await hub.state.storage.deleteAlarm();
-				await hub.drenarCola();
-				expect(nombreDe(sql, "z-atraso")).toBe(nombreEncadenado("z-atraso", 20));
-				expect(central.lecturas).toBe(2);
 			} finally {
 				soltarTodas(central);
 				await cerrar(hub, main);
@@ -1075,37 +997,40 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply", opId: "sin-comando" }));
 				await hub.webSocketMessage(
 					main.servidor,
-					JSON.stringify({ type: "bulk_apply", ops: [{ opId: "sin-nombre", command: { type: "tenantDb.transaction" } }] }),
+					JSON.stringify({
+						type: "apply_lote",
+						loteId: "mal",
+						ops: [{ opId: "sin-nombre", command: { type: "tenantDb.transaction" } }],
+					}),
 				);
-				// Vacíos o de un tipo que no es el suyo: no hay trabajo, y se contesta como antes.
-				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "bulk_apply", ops: {} }));
-				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "cola_apartada_ack" }));
-				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "cola_apartada_ack", opIds: "ap-1" }));
-				// Un mensaje de los que ya no existen: un tipo desconocido más.
+				// Sin operaciones o vacío: no hay trabajo, y se contesta en el acto.
+				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply_lote", loteId: "raro", ops: {} }));
+				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply_lote", loteId: "vacio", ops: [] }));
+				// Mensajes de los que ya no existen: un tipo desconocido más.
 				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "event", name: "mesa.abierta" }));
+				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "bulk_apply", ops: [] }));
+				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "cola_apartada_ack", opIds: [] }));
 				// Soltar a las Handy no pregunta nada: decide la tabla.
 				await hub.webSocketMessage(main.servidor, recoveryReady);
 				// Una Handy que lo intenta se rechaza por su rol, sin preguntar por ninguna licencia.
 				await hub.webSocketMessage(handy.servidor, apply("op-h", [altaDeZona("z-h")]));
-				await hub.webSocketMessage(handy.servidor, bulkApply("op-hb", [altaDeZona("z-hb")]));
-				await hub.webSocketMessage(handy.servidor, acuse("ap-1"));
+				await hub.webSocketMessage(handy.servidor, applyLote("op-hb", [altaDeZona("z-hb")]));
 				await hub.webSocketMessage(handy.servidor, recoveryReady);
 				await unMomento();
 
 				expect(main.recibidos.filter((m) => m.type === "apply_ack")).toMatchObject([{ ok: false, error: "missing_apply_fields" }]);
-				expect(main.recibidos.filter((m) => m.type === "bulk_ack")).toMatchObject([
-					{ ok: false, error: "missing_apply_fields" },
-					{ ok: true, opIds: [] },
+				expect(acusesDeLote(main)).toMatchObject([
+					{ loteId: "mal", ok: false, error: "missing_apply_fields" },
+					{ loteId: "raro", ok: false, error: "missing_apply_fields" },
+					{ loteId: "vacio", ok: true, resultados: [] },
 				]);
-				expect(main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok")).toMatchObject([{ n: 0 }, { n: 0 }]);
-				expect(main.recibidos.filter((m) => m.type === "error" && m.error === "unknown_type")).toHaveLength(2);
+				expect(main.recibidos.filter((m) => m.type === "error" && m.error === "unknown_type")).toHaveLength(4);
 				expect(handy.recibidos.filter((m) => m.type === "event")).toEqual([]);
 				expect(main.recibidos.filter((m) => m.type === "recovery_ready_ack")).toHaveLength(1);
 				expect(handy.recibidos.filter((m) => m.type === "apply_ack")).toMatchObject([{ ok: false, error: "forbidden_not_tpv" }]);
-				expect(handy.recibidos.filter((m) => m.type === "bulk_ack")).toMatchObject([{ ok: false, error: "forbidden_not_tpv" }]);
+				expect(acusesDeLote(handy)).toMatchObject([{ ok: false, error: "forbidden_not_tpv" }]);
 				expect(central.lecturas).toBe(0);
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(0);
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Entrada;")).toBe(0);
 				expect(main.cierre).toBeNull();
 			} finally {
 				await cerrar(hub, main, handy);
@@ -1117,7 +1042,6 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 		await enElHub("aud02-central-caida", async (hub: any) => {
 			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			central.caida = true;
-			apartada(sql, "ap-1");
 			// La Main saludó poniéndose al día: las Handy esperan a que las suelte.
 			const main = conectar(hub, "main-nueva", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
@@ -1126,12 +1050,11 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				await hub.webSocketMessage(main.servidor, apply("op-1", [altaDeZona("z-1")]));
 				expect(await esperar(main, (m) => m.type === "apply_ack" && m.opId === "op-1")).toMatchObject({ ok: true });
 				expect(central.lecturas).toBe(1);
-				await hub.webSocketMessage(main.servidor, bulkApply("op-b1", [altaDeZona("z-b1")]));
-				expect(await esperar(main, (m) => m.type === "bulk_ack")).toMatchObject({ ok: true, opIds: ["op-b1"] });
-				await hub.state.storage.deleteAlarm();
-				await hub.drenarCola();
-				await hub.webSocketMessage(main.servidor, acuse("ap-1"));
-				expect(await esperar(main, (m) => m.type === "cola_apartada_ack_ok")).toMatchObject({ n: 1 });
+				await hub.webSocketMessage(main.servidor, applyLote("op-b1", [altaDeZona("z-b1")]));
+				expect(await esperar(main, (m) => m.type === "apply_lote_ack")).toMatchObject({
+					ok: true,
+					resultados: [{ opId: "op-b1", ok: true }],
+				});
 
 				// `recovery_ready` no lee nada: suelta a las Handy con la base central caída.
 				await hub.webSocketMessage(main.servidor, recoveryReady);
@@ -1173,9 +1096,8 @@ describe("AUD-02 · una expulsión entre la última espera y lo que se iba a hac
 	// las rutas). La respuesta, cuando llega, dice que sigue siendo la Main: lo que decide es la
 	// sesión como está después de esperar, no como estaba antes.
 
-	async function conLaLecturaRetenida(hub: any, mensaje: string, antes?: (sql: any) => void) {
+	async function conLaLecturaRetenida(hub: any, mensaje: string) {
 		const preparado = trasladoSinAviso(hub, "main-1", "main-1");
-		antes?.(preparado.sql);
 		const main = conectar(hub, "main-1");
 		const handy = conectar(hub, "handy-1", "handy");
 		preparado.central.retenerLicencias = true;
@@ -1194,32 +1116,17 @@ describe("AUD-02 · una expulsión entre la última espera y lo que se iba a hac
 		return { ...preparado, main, handy };
 	}
 
-	it("`bulk_apply`: no encola", async () => {
-		await enElHub("aud02-espera-bulk", async (hub: any) => {
-			const { sql, main, handy, central } = await conLaLecturaRetenida(hub, bulkApply("op-b1", [altaDeZona("z-b1")]));
+	it("`apply_lote`, que espera la lectura en la fila de entrada: no escribe", async () => {
+		await enElHub("aud02-espera-lote", async (hub: any) => {
+			const { sql, main, handy, central } = await conLaLecturaRetenida(hub, applyLote("op-b1", [altaDeZona("z-b1")]));
 			try {
-				expect(acksOk(main, "bulk_ack")).toEqual([]);
-				// Lo encolado se drenaría por la alarma, así que lo que cuenta es lo que llega a la base.
-				await hub.drenarCola();
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Entrada;")).toBe(0);
+				expect(lotesAplicados(main)).toEqual([]);
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Applied_Operations;")).toBe(0);
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(0);
+				expect(cambios(handy)).toEqual([]);
 			} finally {
 				soltarTodas(central);
 				await cerrar(hub, main, handy);
-			}
-		});
-	});
-
-	it("`cola_apartada_ack`: no borra la apartada", async () => {
-		await enElHub("aud02-espera-acuse", async (hub: any) => {
-			const r = await conLaLecturaRetenida(hub, acuse("ap-1"), (sql) => apartada(sql, "ap-1"));
-			try {
-				expect(r.main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok")).toEqual([]);
-				expect(n(r.sql, "SELECT COUNT(*) AS n FROM _Cola_Muerta WHERE Op_Id = 'ap-1';")).toBe(1);
-			} finally {
-				soltarTodas(r.central);
-				await cerrar(hub, r.main, r.handy);
 			}
 		});
 	});
@@ -1388,10 +1295,10 @@ describe("AUD-02 · los avisos de las rutas", () => {
 
 				// Un cliente que no conteste al cierre podría seguir mandando por ese socket.
 				await hub.webSocketMessage(main.servidor, apply("op-tardia", [altaDeZona("z-tardia")]));
-				await hub.webSocketMessage(main.servidor, bulkApply("op-tardia-b", [altaDeZona("z-tardia-b")]));
+				await hub.webSocketMessage(main.servidor, applyLote("op-tardia-b", [altaDeZona("z-tardia-b")]));
 				await unMomento();
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(0);
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Entrada;")).toBe(0);
+				expect(elLog(sql)).toEqual([]);
 				expect(central.lecturas).toBe(0);
 			} finally {
 				await cerrar(hub, main, handy);
@@ -1590,7 +1497,7 @@ describe("AUD-02 · el saludo", () => {
 			const main = conectar(hub, "main-1");
 			try {
 				central.retenerLicencias = true;
-				await hub.webSocketMessage(main.servidor, bulkApply("op-b1", [altaDeZona("z-b1")]));
+				await hub.webSocketMessage(main.servidor, applyLote("op-b1", [altaDeZona("z-b1")]));
 				expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
 
 				main.cliente.close(1000, "se va");
@@ -1600,8 +1507,7 @@ describe("AUD-02 · el saludo", () => {
 				central.retenerLicencias = false;
 				soltarTodas(central);
 				await unMomento();
-				await hub.drenarCola();
-				expect(n(sql, "SELECT COUNT(*) AS n FROM _Cola_Entrada;")).toBe(0);
+				expect(elLog(sql)).toEqual([]);
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(0);
 			} finally {
 				soltarTodas(central);

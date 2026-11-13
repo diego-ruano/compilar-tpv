@@ -2,31 +2,13 @@ import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
-import { getDb } from "../server/db";
-import { estaApagado } from "../lib/interruptores";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
-import type { ContextoDeCola } from "./tenantHub.cola";
-import {
-	apartadasPendientes,
-	asegurarCola,
-	ciclo,
-	cuantasEnCola,
-	drenarCola,
-	encolar,
-	olvidarApartadas,
-	sacarDeLaCola,
-} from "./tenantHub.cola";
-import {
-	safeJsonParse,
-	sha256Hex,
-	stableStringify,
-	stringifyJsonValue,
-} from "./tenantHub.envelope";
+import { safeJsonParse, sha256Hex, stringifyJsonValue } from "./tenantHub.envelope";
 import { loadDeviceFromCentral, mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
-import { buildApplyBatch, loteDe, type EscrituraPreparada } from "./tenantHub.lote";
+import { loteDe, type EscrituraPreparada } from "./tenantHub.lote";
 import {
 	aplicarLectura,
 	empezarLectura,
@@ -76,7 +58,6 @@ import type {
 	HelloSignedMsg,
 	InternalApplyCommand,
 	OpDeLote,
-	OpParaAplicar,
 	ResolvedStmt,
 	Role,
 	VeredictoDeLote,
@@ -127,6 +108,7 @@ export class MotorTenantHub {
 	//   · lo que describe a un socket        → su attachment (`WsAttachment`)
 	//   · el censo de conexiones             → `state.getWebSockets()` (etiquetadas por deviceId)
 	// Lo único que queda abajo son cachés best-effort que pueden perderse sin consecuencias.
+	// Tampoco hay `alarm`: nada se deja para después, y un negocio parado no despierta al objeto.
 
 	// SYNC-08: último `last_seen` empujado a la BD central por dispositivo (throttle en memoria).
 	// Se pierde al hibernar: como mucho provoca un UPDATE extra tras despertar. Aceptable.
@@ -151,7 +133,7 @@ export class MotorTenantHub {
 	private turnoDelLog: Promise<void> = Promise.resolve();
 
 	// AUD-02: la cola de lo que la Main manda por el socket y entra en el acto (`apply` y
-	// `bulk_apply`, ver `enTurnoDeEntrada`). Como el turno del log, es lo que está en vuelo y nada
+	// `apply_lote`, ver `enTurnoDeEntrada`). Como el turno del log, es lo que está en vuelo y nada
 	// más: lo que se pierda al descartar la instancia no tenía respuesta todavía, y la Main lo vuelve
 	// a mandar.
 	private turnoDeEntrada: Promise<void> = Promise.resolve();
@@ -368,17 +350,18 @@ export class MotorTenantHub {
 	 * - **Las sesiones vivas se cierran primero**, por `cerrar` como todo cierre que inicia el DO: quedan
 	 *   fuera y su salida se contabiliza con la tabla de quién es la Main todavía delante. Una Main o
 	 *   una Handy que siguiera conectada no puede seguir escribiendo en una base recién vaciada.
-	 * - **La alarma** de la cola se quita aparte: sin cola que drenar no tiene a qué despertar al objeto.
-	 * - **`deleteAll`** se lleva la base del negocio, la cola y la tabla de la Main.
+	 * - **`deleteAll`** se lleva la base del negocio y la tabla de la Main.
 	 *
-	 * Después el objeto no vuelve a crear nada por su cuenta: el cierre de esos sockets, que llega
-	 * más tarde, es de sesiones que ya están fuera (`cerrar`, `webSocketClose`).
+	 * Después el objeto no vuelve a hacer nada por su cuenta (no tiene temporizadores ni alarma), y el
+	 * cierre de esos sockets, que llega más tarde, es de sesiones que ya están fuera (`cerrar`,
+	 * `webSocketClose`). Lo que estuviera esperando su turno tampoco escribe: toda escritura vuelve
+	 * a mirar, justo antes de aplicarse, que haya una Main conectada (un lote, que su sesión siga
+	 * siendo la de la Main), y ya no la hay.
 	 */
 	async borrarTodo(): Promise<void> {
 		for (const ws of this.state.getWebSockets()) {
 			this.cerrar(ws, this.att(ws), 4001, "negocio_retirado");
 		}
-		await this.state.storage.deleteAlarm();
 		await this.state.storage.deleteAll();
 		this.baseLocal = null;
 		this.lastSeenPushedAtMs.clear();
@@ -457,15 +440,11 @@ export class MotorTenantHub {
 				}
 
 				// Applied_Operations es dedup por Op_Id: un reintento idempotente nunca llega días
-				// después, así que basta un TTL (independiente del checkpoint) para acotarla. Con la
-				// cola sin vaciar, no: si el DO se apagó entre aplicar un lote y sacarlo de la cola,
-				// el gate es lo que impide que el drenado siguiente lo aplique otra vez.
-				if (this.cuantasEnCola() === 0) {
-					await db.execute({
-						sql: `DELETE FROM Applied_Operations WHERE Created_At_Ms < ?1;`,
-						args: [now - APPLIED_OPS_TTL_MS],
-					});
-				}
+				// después, así que basta un TTL (independiente del checkpoint) para acotarla.
+				await db.execute({
+					sql: `DELETE FROM Applied_Operations WHERE Created_At_Ms < ?1;`,
+					args: [now - APPLIED_OPS_TTL_MS],
+				});
 			}));
 		} catch {
 			/* la purga es best-effort: nunca debe afectar al camino de escritura del sync */
@@ -483,7 +462,7 @@ export class MotorTenantHub {
 	 *
 	 * Con el turno la difusión sale en orden de `Seq`, sin suponer que sea contiguo: (1) sólo este
 	 * DO escribe `Sync_Changes`, y las dos inserciones (`applyInternalCommandIdempotent` y
-	 * `applyBatchIdempotent`) van dentro; (2) el `Seq` lo asigna el commit, que acaba antes de soltar
+	 * `aplicarLote`) van dentro; (2) el `Seq` lo asigna el commit, que acaba antes de soltar
 	 * el turno, y la difusión va justo después; (3) un WebSocket entrega en orden, y el catch-up de
 	 * cada conexión de la Main va después de autenticarse, así que lo confirmado antes le llega por
 	 * REST y lo posterior por el socket.
@@ -493,7 +472,7 @@ export class MotorTenantHub {
 	 *
 	 * AUD-02: `alReservar` se llama en cuanto el trabajo tiene sitio en la cadena, antes de que
 	 * empiece. Es lo que espera la fila de entrada de la Main (`enTurnoDeEntrada`) para soltar al
-	 * siguiente `apply`: a partir de ahí el orden en que se confirman ya está fijado.
+	 * siguiente `apply` o `apply_lote`: a partir de ahí el orden en que se confirman ya está fijado.
 	 */
 	private enTurnoDelLog<T>(trabajo: () => Promise<T>, alReservar?: () => void): Promise<T> {
 		const resultado = this.turnoDelLog.then(trabajo);
@@ -660,15 +639,14 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * AUD-02 · Lo que la Main manda por el socket y entra en el acto (`apply`, `bulk_apply`), en fila:
+	 * AUD-02 · Lo que la Main manda por el socket y entra en el acto (`apply`, `apply_lote`), en fila:
 	 * cada uno empieza cuando ha acabado el anterior. Si al primero le toca esperar la comprobación por
 	 * actividad, los de detrás esperan con él y salen en el orden en que llegaron; si no, la fila no
 	 * espera a nada. El outbox de la Main está ordenado (una línea necesita su comanda), y esperar
 	 * cada uno por su cuenta dejaría que el segundo, que ya no tiene que preguntar, entrara antes.
 	 *
 	 * Como `enTurnoDelLog`, es una cadena de promesas de lo que está en vuelo, y un fallo no la rompe
-	 * para el siguiente. No toca la base del negocio: lo que entra en la cola sigue confirmándose sin
-	 * esperarlo.
+	 * para el siguiente. No toca la base del negocio.
 	 */
 	private enTurnoDeEntrada(trabajo: () => Promise<void> | void): Promise<void> {
 		const resultado = this.turnoDeEntrada.then(trabajo);
@@ -746,9 +724,8 @@ export class MotorTenantHub {
 		commandName: string;
 		deviceId?: string | null;
 		requestPayloadJson: string;
-		cloudPayloadJson: string;
 		clientNow?: string | null;
-		/** Sólo el outbox de la Main que está ejecutando la propia recuperación puede escribir. */
+		/** Lo que sube la Main entra aunque todavía tenga congeladas a las Handy (AUD-15). */
 		allowWhileRecovering?: boolean;
 		/** AUD-02: el socket de la sesión que manda la escritura (el `apply` de la Main). */
 		sesion?: WebSocket;
@@ -761,7 +738,6 @@ export class MotorTenantHub {
 			commandName,
 			deviceId,
 			requestPayloadJson,
-			cloudPayloadJson,
 		} = params;
 
 		const cmd = this.conLaHoraFijada(params.cmd, params.clientNow);
@@ -781,13 +757,14 @@ export class MotorTenantHub {
 		// aplica nada. Vale tanto para escrituras REST de la Handy como para el
 		// WS-write de la propia Main (que cuenta como presente al estar conectada).
 		//
-		// SYNC-18: y si la Main tiene atraso sin aplicar, la nube está a medio construir. Dejar
-		// escribir a una Handy sobre ese estado es pedir un choque (dos comandas abiertas para la
-		// misma mesa, por ejemplo). Se congela igual que sin Main, con otro motivo.
+		// AUD-15: y si la Main todavía no se ha puesto al día (saluda con `recovering` y no lo
+		// suelta hasta que su outbox está vacío), la nube está a medio construir. Dejar escribir a
+		// una Handy sobre ese estado es pedir un choque (dos comandas abiertas para la misma mesa,
+		// por ejemplo). Se congela igual que sin Main, con otro motivo.
 		//
-		// Solo afecta a las escrituras que NO son el propio atraso: las de la cola no pasan por
-		// aquí, van por `applyBatchIdempotent`. Se mira aquí, para no esperar en balde, y otra vez
-		// dentro del turno, que es lo que vale.
+		// Solo afecta a las escrituras que NO son el propio atraso: lo que sube la Main entra
+		// (`allowWhileRecovering`). Se mira aquí, para no esperar en balde, y otra vez dentro del
+		// turno, que es lo que vale.
 		const exigirQueSePuedaEscribir = () => {
 			// AUD-02: la escritura de una Main lleva la sesión que la mandó, y esa sesión tiene que
 			// seguir siendo la de la Main también cuando le llega el turno. Mientras esperaba pudo
@@ -805,9 +782,6 @@ export class MotorTenantHub {
 				throw new HubError("main_offline", 400);
 			}
 			if (!params.allowWhileRecovering && !this.isMainReady()) {
-				throw new HubError("main_volcando", 400);
-			}
-			if (this.cuantasEnCola() > 0) {
 				throw new HubError("main_volcando", 400);
 			}
 		};
@@ -829,7 +803,6 @@ export class MotorTenantHub {
 			cmd,
 			deviceId: deviceId || null,
 			requestHash,
-			cloudPayloadJson,
 		};
 		const { stmts: batchStmts, built, offsetTrabajo: MIDDLE_OFFSET } = loteDe(escritura, createdAtMs);
 
@@ -840,10 +813,9 @@ export class MotorTenantHub {
 		// SQLite de este DO, así que no hay credenciales que renovar a mitad del turno: la escritura
 		// entra o no entra, sin salir de él.
 		const enElTurno = async (db: Client): Promise<{ result: any; seq: number }> => {
-			// AUD-18: otra vez dentro del turno, el congelado de la cola (SYNC-18): mientras se esperaba
-			// el turno pudo llegar un volcado, y nada puede confirmarse por delante de él. AUD-15: y el
-			// de la Main, por lo mismo: la que estaba lista pudo irse, o reconectar y saludar
-			// congelando, y lo que la Handy decidió con ella lista no puede entrar después.
+			// AUD-15: otra vez dentro del turno, el congelado de la Main: mientras se esperaba el
+			// turno, la que estaba lista pudo irse, o reconectar y saludar congelando, y lo que la
+			// Handy decidió con ella lista no puede entrar después.
 			//
 			// AUD-02: y quién es la Main, que pudo cambiar esperando el turno. Si entretanto se ha
 			// cumplido el minuto, se pregunta a la base central; después de esa espera, que es la
@@ -1008,7 +980,6 @@ export class MotorTenantHub {
 						cmd: this.conLaHoraFijada(o.cmd, o.clientNow),
 						deviceId,
 						requestHash: await sha256Hex(o.requestPayloadJson),
-						cloudPayloadJson: "",
 					};
 					return { escritura, lote: loteDe(escritura, createdAtMs) };
 				} catch (fallo) {
@@ -1155,282 +1126,6 @@ export class MotorTenantHub {
 		const parsed = safeJsonParse(String(cambio?.statements_json ?? "[]"));
 		return { seq: Number(cambio?.seq ?? 0), statements: Array.isArray(parsed) ? parsed : [] };
 	}
-
-	/**
-	 * SYNC-18: aplica **N operaciones en un único batch** contra la base del negocio.
-	 *
-	 * El atraso de una Main que estuvo días sin conexión son miles de operaciones. Aquí el trabajo de
-	 * todas va junto: una sola transacción con el PRAGMA, los gates, el trabajo y el log de sync de
-	 * cada una.
-	 *
-	 * Tres diferencias deliberadas con el camino de una en una:
-	 *
-	 * 1. **Se filtran antes las ya aplicadas.** El gate de idempotencia funciona porque un `Op_Id`
-	 *    repetido viola el UNIQUE y tira la transacción; agrupadas, esa repetida se llevaría por
-	 *    delante a todas sus compañeras y el reintento volvería a chocar — atascada para siempre.
-	 *    Así que una lectura previa las descarta. Es el precio de agrupar, y es una lectura.
-	 * 2. **No exige que haya una Main conectada.** El freeze existe para que una Handy no escriba
-	 *    sin Main; estas operaciones YA son de la Main, que las dejó encoladas antes de irse.
-	 *    Aplicarlas sin ella delante es justo el objetivo.
-	 * 3. **No refina el `Result_Json`.** Ese refinamiento existe para que el reintento de una Handy
-	 *    devuelva el mismo `data`; de una operación de la Main sólo se usa el `seq`. Nos ahorra una
-	 *    escritura extra por operación.
-	 *
-	 * Si el batch falla no sabemos cuál lo rompió: **lanza**, y quien llama reintenta de una en una
-	 * (que es este mismo método con una sola operación) para aislar a la culpable.
-	 *
-	 * Recibe el `db` ya resuelto en vez de resolverlo dentro: quien drena la cola lo resuelve una vez
-	 * para todo su ciclo, y los tests pueden ponerle delante la base que quieran.
-	 */
-	private async applyBatchIdempotent(
-		db: Client,
-		ops: OpParaAplicar[],
-	): Promise<{ aplicadas: string[]; yaEstaban: string[] }> {
-		if (!ops.length) return { aplicadas: [], yaEstaban: [] };
-
-		// 1) Normalizar: mismo trato que el camino de una en una (validación + `now` a literal).
-		const preparadas = ops.map((o) => {
-			const op = o.opId.trim();
-			const command = o.commandName.trim();
-			if (!op) throw new HubError("missing_op_id", 400);
-			if (!command) throw new HubError("missing_command_name", 400);
-
-			const parsedNow = parseClientNow(o.clientNow);
-			if (parsedNow === null && commandHasNowLiteral(o.cmd)) {
-				throw new HubError("missing_client_now", 400);
-			}
-			const cmd = rewriteCmdNowLiterals(o.cmd, parsedNow ?? serverNowFixed());
-
-			// REV-22: y el guard duro de CFG-04, que aquí faltaba. Sin él, lo que llegara con una
-			// hora sin fijar —un `CURRENT_TIMESTAMP`, un `'now'` en UTC— lo resolvía la base con su
-			// reloj, y la fila de la nube decía otra hora que la de la Main. Por el camino en vivo
-			// eso se rechaza desde SYNC-04; por la cola entraba, y es el MISMO motor: una operación
-			// no puede valer o no según haya atraso por delante cuando se subió.
-			const sinFijar = horaSinFijar(cmd);
-			if (sinFijar) {
-				throw new HubError("hora_no_determinista", 400, { message: `hora_no_determinista: ${sinFijar}` });
-			}
-
-			return { ...o, opId: op, commandName: command, cmd };
-		});
-
-		// AUD-18: lo que toca `Sync_Changes` va en el turno del log (`enTurnoDelLog`), igual que una
-		// escritura suelta: si no, una de una Handy podría confirmarse entre medias y difundirse
-		// fuera de orden.
-		return this.enTurnoDelLog(async () => {
-			// AUD-02: lo que se confirme se va a difundir, y a una sesión `tpv` sólo si es la de la
-			// Main. Si toca preguntar a la base central quién lo es, se pregunta antes. Va dentro del
-			// turno para que ponerse a la cola siga siendo inmediato. Lo que ya está en la cola entra
-			// igualmente: se aceptó cuando quien lo mandó era la Main.
-			await this.comprobarMain();
-			return this.aplicarPreparadas(db, preparadas);
-		});
-	}
-
-	/** SYNC-18 · pasos 2 a 4 de `applyBatchIdempotent`, ya dentro del turno del log (AUD-18). */
-	private async aplicarPreparadas(
-		db: Client,
-		preparadas: OpParaAplicar[],
-	): Promise<{ aplicadas: string[]; yaEstaban: string[] }> {
-		// 2) Fuera las ya aplicadas (ver punto 1 del comentario de arriba).
-		const yaAplicadas = new Set<string>();
-		const r = await db.execute({
-			sql: `SELECT Op_Id FROM Applied_Operations WHERE Op_Id IN (SELECT value FROM json_each(?1));`,
-			args: [JSON.stringify(preparadas.map((p) => p.opId))],
-		});
-		for (const fila of r.rows ?? []) {
-			const v = String((fila as any).Op_Id ?? "");
-			if (v) yaAplicadas.add(v);
-		}
-
-		// Lo ya confirmado se difunde otra vez, en orden de `Seq` y antes que lo nuevo. Sólo pasa si
-		// el DO se apagó entre aplicar un lote y sacarlo de la cola, y entonces la difusión pudo
-		// perderse con él. Repetirla es inocuo: la Main la descarta por estar por debajo de su
-		// checkpoint, o por ser suya.
-		if (yaAplicadas.size) {
-			await this.difundirYaConfirmadas(
-				db,
-				preparadas.filter((p) => yaAplicadas.has(p.opId)),
-			);
-		}
-
-		const pendientes = preparadas.filter((p) => !yaAplicadas.has(p.opId));
-		if (!pendientes.length) {
-			return { aplicadas: [], yaEstaban: [...yaAplicadas] };
-		}
-		// 3) Un solo array de sentencias: [PRAGMA] + por operación [gate, ...trabajo, syncLog].
-		const createdAtMs = nowMs();
-		const stmts: ResolvedStmt[] = [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }];
-		const tramos: {
-			op: (typeof pendientes)[number];
-			built: ReturnType<typeof buildApplyBatch>;
-			offsetMiddle: number;
-			idxSyncLog: number;
-		}[] = [];
-
-		for (const p of pendientes) {
-			const built = buildApplyBatch(p.cmd);
-			const requestHash = await sha256Hex(p.requestPayloadJson);
-
-			stmts.push({
-				sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
-				args: [
-					p.opId,
-					p.commandName,
-					requestHash,
-					p.deviceId || null,
-					stringifyJsonValue(built.storageResult),
-					createdAtMs,
-				],
-			});
-			const offsetMiddle = stmts.length;
-			stmts.push(...built.middle);
-			const idxSyncLog = stmts.length;
-			stmts.push({
-				sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
-				args: [
-					p.opId,
-					p.commandName,
-					stableStringify(built.replicated),
-					p.deviceId || null,
-					createdAtMs,
-				],
-			});
-
-			tramos.push({ op: p, built, offsetMiddle, idxSyncLog });
-		}
-
-		const batchResults = await db.batch(stmts as any, "write");
-
-		// 4) Ya confirmado: cada operación recupera su `seq` y se difunde por separado, para que el
-		//    anti-eco por `Op_Id` de la Main y el refetch de las Handy sigan funcionando igual.
-		//    TODAS se difunden, aunque el resultado de alguna no se deje leer: de una operación de
-		//    la cola sólo se usa el `seq` (un resultado ilegible viaja como `null`).
-		const aplicadas: string[] = [];
-		for (const t of tramos) {
-			const seq = Number(batchResults[t.idxSyncLog]?.lastInsertRowid ?? 0);
-			let result: any = null;
-			try {
-				result = t.built.resolveResult(batchResults, t.offsetMiddle);
-			} catch (e) {
-				this.emitSyncEvent("resultado_ilegible", {
-					op_id: t.op.opId,
-					error: String((e as any)?.message || e).slice(0, 200),
-				});
-			}
-			aplicadas.push(t.op.opId);
-			this.broadcastChange(
-				{ opId: t.op.opId, seq, statements: t.built.replicated },
-				t.op.deviceId || undefined,
-			);
-		}
-
-		return { aplicadas, yaEstaban: [...yaAplicadas] };
-	}
-
-	/**
-	 * Difunde, en orden de `Seq`, operaciones de la cola que ya estaban confirmadas. Una que no tenga
-	 * línea en el log es una cuyo log ya se purgó, por debajo del checkpoint de todas las Main
-	 * (SYNC-12): nada que difundir.
-	 */
-	private async difundirYaConfirmadas(db: Client, ops: OpParaAplicar[]): Promise<void> {
-		const porId = new Map(ops.map((o) => [o.opId, o]));
-		const r = await db.execute({
-			sql: `SELECT Op_Id AS op_id, Seq AS seq, Statements_Json AS statements_json
-			        FROM Sync_Changes WHERE Op_Id IN (SELECT value FROM json_each(?1))
-			       ORDER BY Seq;`,
-			args: [JSON.stringify(ops.map((o) => o.opId))],
-		});
-		for (const fila of (r.rows ?? []) as any[]) {
-			const op = porId.get(String(fila.op_id ?? ""));
-			const seq = Number(fila.seq ?? 0);
-			if (!op || !(seq > 0)) continue;
-			const statements = safeJsonParse(String(fila.statements_json ?? "[]"));
-			this.broadcastChange(
-				{ opId: op.opId, seq, statements: Array.isArray(statements) ? statements : [] },
-				op.deviceId || undefined,
-			);
-		}
-	}
-
-	// ---- SYNC-18: cola de entrada -----------------------------------------------------------
-	//
-	// ARQ-04: la maquinaria vive en `tenantHub.cola.ts`. Aquí sólo queda atarle el contexto y la
-	// fachada por la que entra el resto de la clase. Lo que la cola necesita saber está escrito en
-	// `ContextoDeCola`, y esa lista es justamente lo que impide que crezca sin que nadie lo vea.
-
-	/**
-	 * ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Varios tests sustituyen un
-	 * método de la instancia --qué base del tenant se usa, si hay Main conectada-- y con la
-	 * referencia atada aquí esa sustitución dejaría de verse.
-	 *
-	 * Y no se guarda en un campo: no habría nada que ganar (esto no tiene estado) y sí un sitio
-	 * donde alguien acabara metiéndolo, que es lo que el módulo de la cola no quiere tener.
-	 */
-	private ctxCola(): ContextoDeCola {
-		return {
-			storage: this.state.storage,
-			waitUntil: (p) => this.state.waitUntil(p),
-			applyBatchIdempotent: (db, ops) => this.applyBatchIdempotent(db, ops),
-			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
-			maybePurgeSyncLog: (tenantId) => this.maybePurgeSyncLog(tenantId),
-			colaPausada: (tenantId) => this.colaPausada(tenantId),
-			isMainRecovering: () => this.isMainRecovering(),
-			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
-			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
-			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
-			avisarBaseLlena: (error) => this.avisarBaseLlena(error),
-		};
-	}
-
-	/**
-	 * PROD-06: el interruptor `cola_do` de este tenant. Método y no lambda para que los tests
-	 * puedan sustituirlo, como hacen con la base del tenant. No lanza: si la base central no
-	 * contesta, la cola sigue drenando.
-	 */
-	private colaPausada(tenantId: string): Promise<{ hasta_ms: number } | null> {
-		return estaApagado(() => getDb(this.env), tenantId, "cola_do");
-	}
-
-	private asegurarCola(): void {
-		asegurarCola(this.ctxCola());
-	}
-
-	/** Cuántas operaciones esperan en la cola. Es el estado del que cuelga todo lo demás. */
-	private cuantasEnCola(): number {
-		return cuantasEnCola(this.ctxCola());
-	}
-
-	private encolar(tenantId: string, ops: OpParaAplicar[]): string[] {
-		return encolar(this.ctxCola(), tenantId, ops);
-	}
-
-	private sacarDeLaCola(opIds: string[]): void {
-		sacarDeLaCola(this.ctxCola(), opIds);
-	}
-
-	/** REV-04: las apartadas que ninguna Main ha acusado todavía. */
-	private apartadasPendientes(): { opId: string; commandName: string; error: string }[] {
-		return apartadasPendientes(this.ctxCola());
-	}
-
-	/** La Main ya lo ha anotado: la carta está entregada y la lápida sobra. */
-	private olvidarApartadas(opIds: string[]): number {
-		return olvidarApartadas(this.ctxCola(), opIds);
-	}
-
-	private async drenarCola(): Promise<void> {
-		return drenarCola(this.ctxCola());
-	}
-
-	/**
-	 * Único punto de entrada del drenado, y punto de entrada del runtime: por eso se queda en la
-	 * clase. Lo que hace está en `cola.ciclo`, incluida la razón de que capture todo.
-	 */
-	async alarm(): Promise<void> {
-		return ciclo(this.ctxCola());
-	}
-
 
 	// Reintento idempotente: la op ya existe (violación UNIQUE en el gate). Recuperamos el
 	// resultado cacheado y el `seq` del log, validando que no haya mismatch de comando/payload.
@@ -1654,7 +1349,7 @@ export class MotorTenantHub {
 	) {
 		// AUD-02: se entrega con lo que dice ahora la tabla (`broadcastAuthed`): de los `tpv`, sólo a la
 		// Main. La comprobación por actividad ya se ha hecho, si tocaba, en el mismo turno del log y
-		// antes de enviar lo que se difunde (`applyInternalCommandIdempotent`, `applyBatchIdempotent`).
+		// antes de enviar lo que se difunde (`applyInternalCommandIdempotent`, `aplicarLote`).
 		this.broadcastAuthed(
 			{ type: "change", opId: params.opId, seq: params.seq, statements: params.statements },
 			exceptDeviceId,
@@ -1665,7 +1360,7 @@ export class MotorTenantHub {
 	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata la
 	 * base central, que es lo único que la clase aporta. Sigue siendo un método porque es la
 	 * costura por la que un test sustituye la verificación de la firma cuando lo que prueba es
-	 * otra cosa (`volcadoWs.test.ts`): sin ella habría que firmar de verdad para comprobar un
+	 * otra cosa (`congeladoPorAtraso.test.ts`): sin ella habría que firmar de verdad para comprobar un
 	 * mensaje de estado.
 	 */
 	private async verifyHelloSigned(params: {
@@ -1750,7 +1445,7 @@ export class MotorTenantHub {
 		this.trasComprobarMain(() => avisoDeReservasWeb(this.ctxRutas()));
 	}
 
-	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxCola`. */
+	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxMensajes`. */
 	private ctxRutas(): ContextoDeRutas {
 		return {
 			att: (ws) => this.att(ws),
@@ -1783,10 +1478,12 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Es lo mismo que en
-	 * `ctxCola`, y por lo mismo: varios tests sustituyen un método de la instancia --la
-	 * verificación de la firma, si hay Main conectada-- y con la referencia atada aquí esa
-	 * sustitución dejaría de verse.
+	 * ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`: varios tests sustituyen un
+	 * método de la instancia --la verificación de la firma, si hay Main conectada-- y con la
+	 * referencia atada aquí esa sustitución dejaría de verse.
+	 *
+	 * Y no se guarda en un campo: no habría nada que ganar (esto no tiene estado) y sí un sitio
+	 * donde alguien acabara metiéndolo.
 	 */
 	private ctxMensajes(): ContextoDeMensajes {
 		return {
@@ -1808,10 +1505,6 @@ export class MotorTenantHub {
 			enTurnoDeEntrada: (trabajo) => this.enTurnoDeEntrada(trabajo),
 			isMainConnected: (except) => this.isMainConnected(except),
 			isMainRecovering: () => this.isMainRecovering(),
-			cuantasEnCola: () => this.cuantasEnCola(),
-			encolar: (tenantId, ops) => this.encolar(tenantId, ops),
-			apartadasPendientes: () => this.apartadasPendientes(),
-			olvidarApartadas: (opIds) => this.olvidarApartadas(opIds),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
 			aplicarLote: (params) => this.aplicarLote(params),
