@@ -62,7 +62,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   en una cabecera. El DO ejecuta la misma `app` (`app.ts`); dentro, `tenantAuth` se fía de esa
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
-  o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+  o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir, no para producción): con él
+  apagado, una Main desplazada no pasa por el veto del hub (AUD-02, abajo) y entra mientras dure la
+  caché de licencia del Worker, como antes de él.
 - **Una ruta que lee la base del negocio va dentro aunque el resto de lo que hace sea de fuera.** El
   pedido a un proveedor (`/v1/email/enviar-pedido`) y el aviso de una reserva web
   (`/v1/reservas-web/avisos`) leen la base del negocio y además reservan cupo en la base central,

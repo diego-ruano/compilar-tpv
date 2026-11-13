@@ -271,7 +271,8 @@ y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la v
   Una petición suya que caiga en un isolate que lo dio por bueno llega hasta el `TenantHub`, y ahí se
   para: el hub sabe quién es la Main (su tabla, que el aviso del traslado pone al día en el acto) y
   contesta lo mismo, `device_replaced` (`vetoDeMain`, en todas las rutas de un `tpv`). Si la tabla
-  todavía no lo sabe porque el aviso no llegó, pasa, como antes, hasta que se pone al día; si la
+  todavía no lo sabe porque el aviso no llegó, pasa, como antes: como mucho el minuto que el Worker
+  guarda su respuesta, o hasta que algo hace que el hub vuelva a leer quién es la Main; si la
   tabla dice otra Main, el hub pregunta a la base central antes de rechazar, para no dejar fuera a la
   nueva por un aviso perdido. Las pocas rutas de la Main que se ejecutan en el Worker (emparejar,
   dispositivos, reservas de la web) miran la licencia sin caché (`soloLaMainVigente`). El ticket del
