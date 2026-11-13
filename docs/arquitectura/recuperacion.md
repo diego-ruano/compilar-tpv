@@ -68,7 +68,7 @@ Mientras dure:
 ## Desde la nube: dos fases (SYNC-19)
 
 **Fase 1** (`/v1/sync/bootstrap`): lo imprescindible para volver a vender, en una petición y una
-transacción de lectura, con el `Seq` leído **dentro** de esa transacción (leído aparte, una escritura
+sola foto de la base, con el `Seq` leído **dentro** de esa foto (leído aparte, una escritura
 podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a trozos no es una foto.
 
 - **Maestros enteros; transaccionales, 30 días** (`VENTANA_DIAS`).
@@ -89,6 +89,10 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   va con un `+` delante (`+ID_Detalle IN (…)`), que la deja fuera del índice sin cambiar la
   comparación. `test/syncVentanaPlan.test.ts` lee el plan de todas las sentencias y cuenta las filas
   que leen.
+- **Dos topes: 300.000 filas y 24 MiB de JSON** (`BOOTSTRAP_MAX_FILAS`, `VOLCADO_MAX_BYTES`). Las
+  filas se cuentan antes de leer; los bytes, mientras se escribe la respuesta
+  ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Lo que no cabe contesta 413
+  `bootstrap_too_large`, y la pantalla de recuperación lo dice.
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
@@ -109,6 +113,8 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - ⚠️ **Por `WriteGuard::raw()`**: por `execute()` devolvería a la nube, fila a fila, el histórico que
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
+- Una página lleva hasta 2.000 filas y hasta 24 MiB: si se corta por tamaño trae su
+  `siguiente_cursor` igual, y nunca viene sin al menos una fila.
 - Es `Requiere::MainOperativa`, así que no compite con el desbloqueo del login. Se pausa con el
   interruptor `backfill_historico`.
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros

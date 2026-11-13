@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 import { clienteSobre } from "./helpers/clienteSql";
+import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import {
@@ -82,12 +83,16 @@ async function pedir(
 		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
-		const res = await app.request(
-			ruta,
-			{ ...init, headers: { "x-client-now": AHORA, ...(init.headers ?? {}) } },
-			{} as any,
+		// Con la ruta en el Worker y dentro del TenantHub: las dos contestan lo mismo.
+		return pedirPorLosDosCaminos(
+			() =>
+				app.request(
+					ruta,
+					{ ...init, headers: { "x-client-now": AHORA, ...(init.headers ?? {}) } },
+					{} as any,
+				),
+			sql,
 		);
-		return { status: res.status, body: await res.json() };
 	});
 }
 

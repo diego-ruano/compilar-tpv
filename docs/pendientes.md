@@ -332,11 +332,13 @@ Turso no hace falta.
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
-`/v1/sync/bootstrap` baja la fase 1 (catálogo, clientes y lo que hay desde el último cierre de caja) en
-una sola llamada al DO, con un tope de 300.000 filas. Una llamada entre el worker y el DO no puede
-pasar de 32 MiB, y 300.000 filas no caben. Un negocio normal no se acerca; uno que lleve semanas sin
-cerrar caja, sí. Falta comprobar con qué tamaño falla de verdad y decidir: un tope por tamaño, o que la
-foto salga del DO en trozos o como flujo. El histórico ya va en páginas de 2.000 filas.
+`/v1/sync/bootstrap` baja la fase 1 (catálogo, clientes y la ventana de 30 días, estirada hasta el
+último cierre de caja) en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de JSON
+([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Si no cabe contesta
+413 y ese negocio no puede recuperarse desde la nube. Con lo medido (unos 180 bytes por fila), 24 MiB
+son unas 140.000 filas: no cabe el mes de un bar de más de unas doscientas comandas diarias, ni lo de
+uno que lleve semanas sin cerrar caja. Falta decidir cómo se le sirve a ese negocio: una ventana más
+corta, o que la foto salga en trozos. El histórico ya va en páginas de 2.000 filas.
 
 ### DO-03 · Copias de la base de cada negocio
 

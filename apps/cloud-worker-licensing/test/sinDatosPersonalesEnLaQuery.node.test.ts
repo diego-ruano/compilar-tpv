@@ -508,10 +508,14 @@ function analizar(proyecto: Fuentes, schemas: Modulos): Analisis {
 	return a;
 }
 
-/** Lo que no es un GET y consulta la base del negocio sin aplicar nada. */
+/**
+ * Lo que no es un GET y consulta la base del negocio sin aplicar nada. Las tres puertas por las que
+ * una ruta lee esa base: `tenantQuery`, `lecturaConHora` y el `lectorDe` de los volcados de sync
+ * (`domains/sync/volcado.ts`).
+ */
 const soloConsulta = (r: Registro) =>
 	["post", "put", "patch", "delete", "all"].includes(r.verbo) &&
-	(r.llamadas.has("tenantQuery") || r.llamadas.has("lecturaConHora")) &&
+	(r.llamadas.has("tenantQuery") || r.llamadas.has("lecturaConHora") || r.llamadas.has("lectorDe")) &&
 	!r.llamadas.has("apply") &&
 	!r.llamadas.has("applyViaHub");
 

@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 import { clienteSobre } from "./helpers/clienteSql";
+import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -52,7 +53,10 @@ type Volcado = {
 	tablas: Array<{ nombre: string; columnas: string[]; filas: any[][] }>;
 };
 
-/** Levanta un tenant real sobre el SqlStorage del DO, lo siembra y pide el volcado. */
+/**
+ * Levanta un tenant real sobre el SqlStorage del DO, lo siembra y pide el volcado, con la ruta en el
+ * Worker y dentro del TenantHub: las dos contestan lo mismo.
+ */
 async function pedirVolcado(
 	nombre: string,
 	sembrar: (sql: any) => void,
@@ -67,8 +71,7 @@ async function pedirVolcado(
 		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
-		const res = await app.request("/bootstrap", { method: "POST" }, {} as any);
-		return { status: res.status, body: await res.json() };
+		return pedirPorLosDosCaminos(() => app.request("/bootstrap", { method: "POST" }, {} as any), sql);
 	});
 }
 

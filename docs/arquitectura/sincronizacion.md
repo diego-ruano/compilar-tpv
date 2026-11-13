@@ -491,7 +491,10 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.
 
 `/verificar-claves` reparte un presupuesto común entre las tablas: lo que no cabe sale `truncada` y se
-vuelve a pedir. El techo va en la respuesta, no en cada pieza.
+vuelve a pedir. El techo va en la respuesta, no en cada pieza. La ventana de `/verificar` tiene los
+dos topes de la fase 1 de la recuperación (filas y bytes,
+[recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)): si no cabe, viajan los conteos y
+`ventana_omitida`.
 
 ---
 

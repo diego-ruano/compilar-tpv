@@ -89,7 +89,17 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
   `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
   [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
-- **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos.
+- **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
+  pasa y lo que devuelve como valor (las filas de `consultar`). El cuerpo de la respuesta de una ruta
+  que se ejecuta dentro del DO no lo tiene: viaja como flujo.
+- **Los volcados de sync** (`/v1/sync/bootstrap`, `/verificar` e `/historico`) no leen por
+  `tenantQuery`: dentro del DO recorren el cursor de su SQLite una vez y escriben cada fila una vez,
+  ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
+  JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
+  del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
+  Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
+  llegan por `tenantQuery` y la respuesta es la misma, byte a byte
+  (`test/helpers/dosCaminos.ts`).
 - **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
 
 ## Cómo se escribe una ruta
@@ -177,7 +187,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   como fallo de validación sino como un 500.
 - **El techo va en la respuesta, no en cada pieza**: una ruta que devuelve listas reparte un presupuesto
   común (como `leerClaves` en `/verificar-claves`, que marca `truncada` lo que no cabe). Un isolate
-  tiene 128 MB.
+  tiene 128 MB. Lo que crece con el negocio se acota además en bytes, mientras se escribe
+  (`VOLCADO_MAX_BYTES`): un tope de filas no dice lo que ocupan.
 - **Un importe que llega por la API viene en céntimos enteros** (`zDinero`); un `12.5` se rechaza.
   Uno que no puede ser negativo (un precio de venta, el coste de un lote) va con
   `zDineroNoNegativoCon(mensaje)` y el texto de la Main.

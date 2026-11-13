@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
 import { clienteSobre } from "./helpers/clienteSql";
+import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -46,7 +47,8 @@ type Pagina = {
 
 /**
  * Levanta un tenant, lo siembra y deja pedir varias páginas seguidas sobre el MISMO estado. El
- * recorrido completo es lo que se prueba: una página suelta no dice si el cursor avanza bien.
+ * recorrido completo es lo que se prueba: una página suelta no dice si el cursor avanza bien. Cada
+ * página se pide con la ruta en el Worker y dentro del TenantHub: las dos contestan lo mismo.
  */
 async function conTenant<R>(
 	nombre: string,
@@ -64,18 +66,20 @@ async function conTenant<R>(
 		const app = new Hono();
 		app.route("/", syncRoutes);
 
-		const pedir = async (cuerpo: any) => {
-			const res = await app.request(
-				"/historico",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify(cuerpo),
-				},
-				{} as any,
+		const pedir = (cuerpo: any): Promise<{ status: number; body: Pagina }> =>
+			pedirPorLosDosCaminos(
+				() =>
+					app.request(
+						"/historico",
+						{
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify(cuerpo),
+						},
+						{} as any,
+					),
+				sql,
 			);
-			return { status: res.status, body: (await res.json()) as Pagina };
-		};
 
 		return usar(pedir);
 	});

@@ -1406,6 +1406,10 @@ export class MotorTenantHub {
 			{
 				identidad,
 				base: () => this.getTenantDb(identidad.tenantId),
+				sql: async () => {
+					await this.getTenantDb(identidad.tenantId);
+					return this.state.storage.sql;
+				},
 				aplicar: (params) => aplicar(this.ctxRutas(), params),
 			},
 			async () => app.fetch(peticion, this.env, ctxEjecucion),
