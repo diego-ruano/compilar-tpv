@@ -79,8 +79,12 @@ servicio Android en segundo plano: la conexión se recupera al volver si el sist
 (`Latido::comprobar`, el mismo texto del latido, que el `TenantHub` contesta sin despertarse) y sólo
 se reconecta si el `pong` no llega en 3 s. Si el último `pong` tiene más de 35 s —el latido va cada
 30, así que el anterior se quedó sin respuesta o el equipo ha estado suspendido— se reconecta sin
-esperar. Sin conexión abierta se intenta ya, sin agotar la espera; con un rechazo de licencia o de
-dispositivo no se hace nada, y el botón «Reintentar» reconecta siempre. Una reconexión cuesta un
+esperar. Sin conexión abierta se intenta ya, sin agotar la espera; con un intento ya en marcha
+(`Conectando`) no se hace nada, porque en Android volver y recuperar el foco llegan juntos y el
+segundo aviso cancelaba el intento del primero y pedía otro ticket: si ese intento se quedó colgado
+al suspenderse, se espera el plazo del paso en que estaba (20 s: el ticket, abrir el socket, el
+saludo). Con un rechazo de licencia o de dispositivo tampoco se
+hace nada, y el botón «Reintentar» reconecta siempre, también a mitad de un intento. Una reconexión cuesta un
 ticket (la base central), un saludo con el `TenantHub` y, en la interfaz, releer consultas y ajustes:
 por eso no se hace en cada foco.
 

@@ -95,10 +95,17 @@ impl PresenciaHandy {
 
     /// Qué hacer al volver a primer plano. `edad_ultimo_pong_ms` es lo que hace del último `pong`
     /// de la conexión abierta, si la hay.
+    ///
+    /// Un intento que ya está en marcha (`Conectando`) no se corta por un aviso automático: en
+    /// Android, volver de segundo plano y recuperar el foco llegan juntos, y cada uno cancelaba el
+    /// intento del otro y pedía otro ticket. Si ese intento se quedó colgado al suspenderse el
+    /// equipo, se espera el plazo del paso en que estaba (20 s: el ticket, abrir el socket, el
+    /// saludo) y lo siguiente es reintentar. «Reintentar» (`forzar`) sí lo corta y empieza de nuevo.
     pub fn al_volver(&self, forzar: bool, edad_ultimo_pong_ms: Option<u64>) -> AlVolver {
         if forzar { return AlVolver::Reconectar; }
         // Volver a primer plano no convierte una revocación en un bucle de peticiones.
         if self.foto.rechazo.is_some() { return AlVolver::Nada; }
+        if self.foto.estado == ConexionHandy::Conectando { return AlVolver::Nada; }
         if self.foto.estado != ConexionHandy::Conectada { return AlVolver::Reconectar; }
         match edad_ultimo_pong_ms {
             Some(edad) if edad <= PONG_CADUCADO_MS => AlVolver::Comprobar,
@@ -205,9 +212,24 @@ mod tests {
     }
     #[test]
     fn sin_conexion_volver_a_primer_plano_reconecta_ya() {
+        // Esperando para reintentar: volver despierta la espera y se intenta ya.
         let mut p = conectada(); p.desconectar(0);
         assert_eq!(p.al_volver(false, Some(0)), AlVolver::Reconectar);
+        let mut p = PresenciaHandy::default(); p.activar(None, true);
+        assert_eq!(p.foto.estado, ConexionHandy::SinIdentidad);
+        assert_eq!(p.al_volver(false, None), AlVolver::Reconectar);
+    }
+    #[test]
+    fn un_intento_en_marcha_no_lo_corta_un_aviso_automatico_pero_si_el_boton() {
+        // Android avisa a la vez de que la aplicación vuelve y de que recupera el foco: el segundo
+        // aviso no cancela el intento que abrió el primero ni pide otro ticket.
         let mut p = PresenciaHandy::default(); p.activar(Some("negocio-a".into()), true);
+        assert_eq!(p.foto.estado, ConexionHandy::Conectando);
+        assert_eq!(p.al_volver(false, None), AlVolver::Nada);
+        assert_eq!(p.al_volver(false, Some(0)), AlVolver::Nada);
+        assert_eq!(p.al_volver(true, None), AlVolver::Reconectar);
+        // Y al caer ese intento, el siguiente aviso ya reconecta.
+        p.desconectar(0);
         assert_eq!(p.al_volver(false, None), AlVolver::Reconectar);
     }
     #[test]
