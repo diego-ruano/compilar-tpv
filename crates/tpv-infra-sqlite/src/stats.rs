@@ -141,11 +141,11 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           -- no una por línea. La clave es el producto o, si la línea ya no lo tiene, su nombre.
           -- Una línea sin producto cuyo nombre es justo el ID de un producto comparte clave con las
           -- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
-          -- producto y la de las que no. El MAX deja en nombre_linea el de una línea con producto,
-          -- si la hay.
+          -- producto y la de las que no. Si hay líneas con producto, su ID es la clave.
+          -- nombre_linea es el de la línea que elige SQLite al agrupar, sin MIN ni MAX que se lo
+          -- cambien: el que se enseña cuando el producto ya no está en el catálogo.
           SELECT
             COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
-            MAX(dc.ID_Producto) AS id_producto,
             dc.Nombre_Producto AS nombre_linea,
             SUM(COALESCE(dc.Cantidad,1)) AS suma,
             SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
@@ -177,7 +177,7 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           -- las líneas del producto, que es lo suyo en «los peores» y dentro de su categoría.
           SELECT
             v.clave AS clave,
-            CASE WHEN v.id_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
+            CASE WHEN v.suma_con_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
                  THEN COALESCE(pr.Nombre, v.nombre_linea, 'Producto')
                  ELSE COALESCE(v.clave, 'Producto')
             END AS label,
@@ -187,7 +187,7 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
             CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma ELSE v.suma_sin_producto END AS general,
             CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma_con_producto END AS del_producto
           FROM vendido v
-          LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
+          LEFT JOIN Productos pr ON v.suma_con_producto IS NOT NULL AND pr.ID_Producto = v.clave
           LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
           WHERE COALESCE(cat.Vendible,1)=1 OR v.suma_sin_producto IS NOT NULL
         )
