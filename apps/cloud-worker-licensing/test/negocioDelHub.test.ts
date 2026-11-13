@@ -216,6 +216,13 @@ describe("un objeto sin base", () => {
 		});
 		const res: Response = await stub(negocio).ejecutarRuta(peticionDeLectura(), identidad(negocio));
 		expect(res.status).toBe(404);
+		// Tampoco la de un `tpv`, que antes mira si es la Main (`vetoDeMain`): sin tabla, no se ha leído.
+		const deLaMain: Response = await stub(negocio).ejecutarRuta(peticionDeLectura(), {
+			...identidad(negocio),
+			deviceId: "la-main",
+			rol: "tpv",
+		});
+		expect(deLaMain.status).toBe(404);
 
 		await enElHub(negocio, (hub: any) => {
 			expect(negocioApuntado(hub.state.storage)).toBeNull();
