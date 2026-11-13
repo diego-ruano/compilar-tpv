@@ -77,10 +77,10 @@ const FILAS_MAX_BYTES = 4 * 1024 * 1024;
 const CLAVES_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
- * Lo más que recorre de la ventana una página de filas. Cada página vuelve a ejecutar la sentencia
- * de la ventana desde el principio y se salta lo ya visto, así que sin este tope una página de un
- * cubo con pocas filas podría recorrer años de histórico (un `desde` que no es el del resumen). Al
- * llegar, la página se corta con su cursor aunque no lleve ninguna fila.
+ * Lo más que recorre de la ventana una página de filas. La sentencia de la ventana lleva su
+ * `LIMIT … OFFSET …`: lo que se salta lo salta SQLite, sin cruzar a JavaScript, y lo que viene detrás
+ * no se lee (un `desde` que no es el del resumen no recorre años de histórico). Al llegar, la página
+ * se corta con su cursor aunque no lleve ninguna fila.
  */
 const FILAS_RECORRIDAS_POR_PAGINA = RESUMEN_MAX_FILAS;
 
@@ -352,11 +352,11 @@ function filaEnJson(fila: unknown[]): string {
 /**
  * Una página de las filas de `tabla` que caen en los cubos pedidos, ya en JSON.
  *
- * Recorre la ventana con la MISMA sentencia que el resumen, en su mismo orden, y se queda con las
- * filas cuyo cubo se pide. El cursor es cuántas filas de la ventana lleva recorridas: la página
- * siguiente vuelve a ejecutar la sentencia y se salta ésas. Sólo vale mientras la base no cambie, y
- * por eso cada página lleva su `hasta_seq`: la Main lo compara con el del resumen y, si no es el
- * mismo, tira lo que lleva.
+ * Recorre la ventana con la MISMA sentencia que el resumen, con su `LIMIT … OFFSET …`, y se queda con
+ * las filas cuyo cubo se pide. El cursor es cuántas filas de la ventana lleva recorridas: la página
+ * siguiente vuelve a ejecutar la sentencia desde ahí, con el mismo plan y por tanto el mismo orden.
+ * Sólo vale mientras la base no cambie, y por eso cada página lleva su `hasta_seq`: la Main lo compara
+ * con el del resumen y, si no es el mismo, tira lo que lleva.
  *
  * Se corta antes de pasar de `maxBytes`, y nunca sin al menos una fila: una fila que sola pasa del
  * techo viaja igual, como en el histórico, porque rechazarla dejaría su cubo sin comparar para
@@ -377,8 +377,16 @@ export async function filasDeLosCubos(
 		return enBytes(`${cabecera},"columnas":[],"filas":[],"siguiente_cursor":null,"hasta_seq":${hastaSeq}}`);
 	}
 
+	// La ventana, desde el cursor y con una fila más que el tope: si llega, hay más detrás.
+	const ventana = sentenciaVolcado(tabla, desde);
+	const n = ventana.args.length;
+	const tramo: Sentencia = {
+		sql: `${ventana.sql.replace(/;\s*$/, "")} LIMIT ?${n + 1} OFFSET ?${n + 2};`,
+		args: [...ventana.args, maxRecorridas + 1, cursor],
+	};
+
 	// El `Seq` va delante de la ventana: así se lee aunque la página se corte a mitad de ella.
-	return lector.foto([SQL_SEQ, sentenciaVolcado(tabla, desde)], (rs) => {
+	return lector.foto([SQL_SEQ, tramo], (rs) => {
 		const hastaSeq = seqDe(siguiente(rs));
 		const { columnas, filas } = siguiente(rs);
 		const posiciones = posicionesDeLaClave(columnas, claves);
@@ -386,13 +394,12 @@ export async function filasDeLosCubos(
 
 		const e = new Escritor(maxBytes);
 		e.texto(`${cabecera},"columnas":${JSON.stringify(columnas)},"filas":[`);
-		let vistas = 0;
+		let vistas = cursor;
 		let escritas = 0;
 		let siguienteCursor: number | null = null;
 		if (posiciones) {
 			for (const fila of filas) {
 				const i = vistas++;
-				if (i < cursor) continue;
 				if (i - cursor >= maxRecorridas) {
 					siguienteCursor = i;
 					break;
@@ -518,15 +525,16 @@ export async function filasPorClave(
 		return enBytes(`${cabecera},"columnas":[],"filas":[],"cortada":false,"hasta_seq":${hastaSeq}}`);
 	}
 
+	// Las claves van en UN parámetro, como JSON: el SQLite del DO no admite más de cien por
+	// sentencia, y una tanda de la Main son quinientas.
 	const columnas = claves.map(comillas).join(", ");
-	let n = 0;
-	const marcas = pedidas.map((k) => `(${k.map(() => `?${++n}`).join(", ")})`).join(", ");
+	const valores = claves.map((_, i) => `json_extract(value, '$[${i}]')`).join(", ");
 	const buscar: Sentencia = {
 		sql:
 			claves.length === 1
-				? `SELECT * FROM "${tabla}" WHERE ${columnas} IN (${pedidas.map((_, i) => `?${i + 1}`).join(", ")});`
-				: `SELECT * FROM "${tabla}" WHERE (${columnas}) IN (VALUES ${marcas});`,
-		args: pedidas.flat(),
+				? `SELECT * FROM "${tabla}" WHERE ${columnas} IN (SELECT json_extract(value, '$[0]') FROM json_each(?1));`
+				: `SELECT * FROM "${tabla}" WHERE (${columnas}) IN (SELECT ${valores} FROM json_each(?1));`,
+		args: [JSON.stringify(pedidas)],
 	};
 
 	return lector.foto([SQL_SEQ, buscar], (rs) => {

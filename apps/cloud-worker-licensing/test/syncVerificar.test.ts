@@ -520,6 +520,12 @@ describe("POST /v1/sync/verificar/por-clave", () => {
 				expect(body).toMatchObject({ ok: true, tabla: "Comandas", cortada: false, hasta_seq: 2 });
 				expect(body.filas.map((f: any[]) => f[0]).sort()).toEqual(["c-nueva-0001", "c-vieja-0002"]);
 				expect(body.columnas[0]).toBe("ID_Comanda");
+				const muchas = await pedir("/verificar/por-clave", {
+					tabla: "Comandas",
+					claves: Array.from({ length: 500 }, (_, i) => [`c-vieja-${String(i).padStart(4, "0")}`]),
+				});
+				expect(muchas).toMatchObject({ status: 200, body: { cortada: false } });
+				expect(muchas.body.filas).toHaveLength(3);
 
 				// Sin claves, nada; con una que no es de la tabla, 400.
 				expect((await pedir("/verificar/por-clave", { tabla: "Comandas", claves: [] })).body).toMatchObject({ filas: [] });
@@ -545,6 +551,10 @@ describe("POST /v1/sync/verificar/por-clave", () => {
 			const dos = await leer([["x", 3], ["x", 7], ["y", 3]]);
 			expect(dos.filas.map((f: any[]) => f[1]).sort()).toEqual([3, 7]);
 			expect(dos.cortada).toBe(false);
+
+			// Una tanda de la Main son 500 claves; el SQLite del DO no admite más de cien parámetros.
+			const muchas = await leer(Array.from({ length: 500 }, (_, i) => ["x", i + 1]));
+			expect(muchas.filas).toHaveLength(30);
 
 			const todas = Array.from({ length: 30 }, (_, i) => ["x", i + 1]);
 			const bytes = await filasPorClave(lectorDelHub(sql), { tabla: "Prueba_Compuesta", claves: todas }, 1_500);
