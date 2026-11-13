@@ -18,7 +18,12 @@ import { enElHub } from "./helpers/hub";
 
 const NEGOCIO = "gzip-transmision";
 
-// Quién pregunta no es lo que se prueba: la autenticación y el veto de rol leen la base central.
+/** El rol con el que el Worker da por autenticado a quien pregunta. */
+let rol = "tpv";
+
+// Quién pregunta no es lo que se prueba: la autenticación lee la base central, y aquí se da por
+// hecha. El veto de rol sí es el de verdad: se decide dentro del TenantHub con el rol que el Worker
+// manda en la identidad (`alHub`), sin volver a la base central.
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
 	tenantAuth: async (c: any, next: any) => {
@@ -26,9 +31,9 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("deviceId", "main-1");
 		c.set("token", "token");
 		c.set("licHash", "hash");
+		c.set("rol", rol);
 		await next();
 	},
-	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
 const env = entorno as any;
@@ -89,6 +94,21 @@ describe("una respuesta de sync comprimida, ya transmitida", () => {
 			expect(viajes(comprimida, "hub-ruta"), ruta).toBe(1);
 			// El cliente descomprime una vez y lee JSON: el mismo.
 			expect(await comprimida.json(), ruta).toEqual(esperado);
+		}
+	});
+
+	it("una Handy se queda fuera dentro del TenantHub, y el rechazo no sale comprimido", async () => {
+		await env.TenantHub.get(env.TenantHub.idFromName(NEGOCIO)).aprovisionar(NEGOCIO);
+		rol = "handy";
+		try {
+			const vetada = await pedir("/v1/sync/bootstrap", {}, "gzip");
+			expect(vetada.status).toBe(403);
+			expect(vetada.headers.get("Content-Encoding")).toBeNull();
+			expect((await vetada.json<any>()).error).toBe("forbidden_not_tpv");
+			// Lo decidió el veto de rol de la ruta, ya dentro del DO, con el rol de la identidad.
+			expect(viajes(vetada, "hub-ruta")).toBe(1);
+		} finally {
+			rol = "tpv";
 		}
 	});
 });
