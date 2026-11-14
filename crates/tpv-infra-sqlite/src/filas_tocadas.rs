@@ -34,8 +34,10 @@
 //!   (actualiza la fila que ya tiene ese valor, y sólo el `RETURNING` dice cuál) o más filas de las
 //!   que caben.
 //! - **Lo que sale de esta base y no de la sentencia** (un `WHERE` por una foránea, un `INSERT …
-//!   SELECT`, ese `ON CONFLICT`) se dice por tabla (`por_filtro`): son las filas de la nube sólo si
-//!   aquí no había nada distinto en esa tabla.
+//!   SELECT`, ese `ON CONFLICT`) se dice por tabla (`por_filtro`, con las tablas que lee para
+//!   decidirlo): son las filas de la nube sólo si aquí no había nada distinto en esas tablas. Si al
+//!   apuntarlo hay algo apartado de la subida en alguna, queda `dudosa` para siempre
+//!   (`cuarentenas_bajada::marcar_si_dudosa`).
 //!
 //! Las filas que una sentencia **borra** se marcan (`borrada`): si la nube ya no las tiene, aquí
 //! tampoco tienen que estar. De las demás, que la nube no las tenga no dice nada de esta base.

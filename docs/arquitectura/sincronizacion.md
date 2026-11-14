@@ -554,7 +554,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   su error en su clase (`sentencia #2: unique (Clientes.Email)`; lo que no es de una clase conocida,
   `otro`). Queda lo que no es de nadie: su operación, su `Seq`, sus intentos, sus fechas y las filas
   que tocó, por su clave, que se miran por última vez antes de vaciarla si no se sabían. Va por
-  tandas de 20, soltando el escritor entre una y otra. Como el job es diario, una puede llegar a
+  tandas de 20, soltando el escritor entre una y otra, hasta que no queda ninguna caducada. Como el
+  job es diario, una puede llegar a
   vaciarse hasta un día después de cumplir los 30, y nada se vacía mientras el equipo no está
   operativo (apagado o recuperando sus datos).
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,

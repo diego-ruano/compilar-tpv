@@ -96,9 +96,11 @@ const VACIADAS_POR_TANDA: usize = 20;
 /// `antes_de_ms`, y devuelve cuántas. Ver el encabezado.
 pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
     let mut total = 0u64;
-    // Lo vaciado no se vuelve a leer, así que cada tanda va más allá. Una tanda que no llega a su
-    // tope es la última; el tope de vueltas es por si algo no se dejara vaciar.
-    for _ in 0..(MAX_CUARENTENAS_LEIDAS / VACIADAS_POR_TANDA) {
+    // Hasta vaciarlas todas, sin tope de vueltas (Codex: con uno, una acumulación grande esperaba a
+    // otro día). Lo vaciado no se vuelve a leer, así que cada tanda va más allá y esto acaba: una
+    // tanda que no llega a su tope es la última, y una que no vacía nada (lo leído ya no está en
+    // cuarentena) también.
+    loop {
         let (leidas, vaciadas) = vaciar_una_tanda(db, antes_de_ms).await?;
         total += vaciadas;
         if leidas < VACIADAS_POR_TANDA || vaciadas == 0 {
@@ -414,7 +416,6 @@ pub(crate) async fn resolver(
 
     // Se han elegido empezando por las que hace más que no se miran; se aplican en orden de `Seq`,
     // que es el de la nube: la del padre antes que la de la hija.
-    let mut intentadas = intentadas;
     intentadas.sort_by_key(|c| c.seq);
     let mut resueltas = 0usize;
     for c in &intentadas {
