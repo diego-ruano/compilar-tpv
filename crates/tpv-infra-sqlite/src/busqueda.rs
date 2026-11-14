@@ -82,10 +82,13 @@ mod tests {
         }
     }
 
+    /// Lo tecleado se recorta y se normaliza como dicen los casos: lo vacío, o hecho sólo de
+    /// acentos sueltos, no es una búsqueda.
     #[test]
-    fn un_texto_vacio_o_de_acentos_sueltos_no_es_una_busqueda() {
-        assert_eq!(texto_a_buscar("  "), None);
-        assert_eq!(texto_a_buscar("\u{301}\u{303}"), None);
-        assert_eq!(texto_a_buscar("  Café "), Some("cafe".into()));
+    fn lo_tecleado_se_busca_como_dicen_los_casos() {
+        for caso in casos()["a_buscar"].as_array().unwrap() {
+            let texto = caso["texto"].as_str().unwrap();
+            assert_eq!(texto_a_buscar(texto).as_deref(), caso["queda"].as_str(), "{texto:?}");
+        }
     }
 }

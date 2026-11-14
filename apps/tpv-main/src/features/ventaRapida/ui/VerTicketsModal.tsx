@@ -56,7 +56,8 @@ export default function VerTicketsModal({
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const s = debouncedSearch.trim();
+  // Lo tecleado, ya como se busca (`null` si no hay nada que buscar).
+  const s = textoABuscar(debouncedSearch);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search), 250);
@@ -213,7 +214,7 @@ export default function VerTicketsModal({
       return true;
     });
 
-    const needle = textoABuscar(s);
+    const needle = s;
     if (needle) {
       out = out.filter((r) => {
         const id = String(r.c.ID_Comanda ?? "");

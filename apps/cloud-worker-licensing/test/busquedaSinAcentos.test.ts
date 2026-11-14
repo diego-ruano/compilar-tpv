@@ -40,11 +40,12 @@ describe("la tabla compartida con la Main", () => {
 		expect(normalizarBusqueda(nombre).includes(normalizarBusqueda(busca))).toBe(encuentra);
 	});
 
-	it("un texto vacío o hecho sólo de acentos sueltos no es una búsqueda", () => {
-		expect(textoABuscar("  ")).toBeNull();
+	it.each(casos.a_buscar)("lo tecleado $texto se busca como $queda", ({ texto, queda }) => {
+		expect(textoABuscar(texto)).toBe(queda);
+	});
+
+	it("sin texto no es una búsqueda", () => {
 		expect(textoABuscar(null)).toBeNull();
-		expect(textoABuscar("́̃")).toBeNull();
-		expect(textoABuscar("  Café ")).toBe("cafe");
 	});
 });
 

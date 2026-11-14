@@ -1,5 +1,5 @@
 {
-  "//": "Lo que teclea el usuario en un buscador se compara sin acentos y sin distinguir mayúsculas, igual en la Main (`tpv_domain::busqueda` y su expresión SQL en `tpv-infra-sqlite/src/busqueda.rs`), en el worker (`apps/cloud-worker-licensing/src/lib/busqueda.ts`) y en las listas que filtra la propia pantalla (`apps/tpv-main/src/shared/lib/busqueda.ts`). La leen `crates/tpv-domain/src/busqueda.rs`, `crates/tpv-infra-sqlite/src/busqueda.rs` (la expresión SQL, contra SQLite), `apps/cloud-worker-licensing/test/busquedaSinAcentos.test.ts` (código y SQL del Durable Object) y `apps/tpv-main/test/busqueda.test.ts`. «pliegues» es la tabla entera: cada letra base con las que se le pliegan (mayúsculas incluidas, porque `lower()` de SQLite sólo baja las ASCII). «se_quitan» son las marcas combinantes de esos acentos, por si el texto llega descompuesto (una «e» seguida de un acento suelto). Lo demás se queda como está: sólo las letras ASCII pasan a minúscula, como hace `lower()` de SQLite, para que el texto que se busca y la columna digan lo mismo. Un criterio nuevo es un caso nuevo aquí.",
+  "//": "Lo que teclea el usuario en un buscador se compara sin acentos y sin distinguir mayúsculas, igual en la Main (`tpv_domain::busqueda` y su expresión SQL en `tpv-infra-sqlite/src/busqueda.rs`), en el worker (`apps/cloud-worker-licensing/src/lib/busqueda.ts`) y en las listas que filtra la propia pantalla (`apps/tpv-main/src/shared/lib/busqueda.ts`). La leen `crates/tpv-domain/src/busqueda.rs`, `crates/tpv-infra-sqlite/src/busqueda.rs` (la expresión SQL, contra SQLite), `apps/cloud-worker-licensing/test/busquedaSinAcentos.test.ts` (código y SQL del Durable Object) y `apps/tpv-main/test/busqueda.test.ts`. «pliegues» es la tabla entera: cada letra base con las que se le pliegan (mayúsculas incluidas, porque `lower()` de SQLite sólo baja las ASCII). «se_quitan» son las marcas combinantes de esos acentos, por si el texto llega descompuesto (una «e» seguida de un acento suelto). «a_buscar» es lo tecleado tal como se busca: recortado como `str::trim` (lo que Unicode marca como espacio, ni más ni menos: U+0085 sí, U+FEFF no) y normalizado; `null` es que no se busca. Lo demás se queda como está: sólo las letras ASCII pasan a minúscula, como hace `lower()` de SQLite, para que el texto que se busca y la columna digan lo mismo. Un criterio nuevo es un caso nuevo aquí.",
   "pliegues": {
     "a": "áàâäãÁÀÂÄÃ",
     "e": "éèêëÉÈÊË",
@@ -24,6 +24,14 @@
     { "texto": "Øl, ß y Œuf", "queda": "Øl, ß y Œuf" },
     { "texto": "2026-05-10 12:30 Efectivo 2450", "queda": "2026-05-10 12:30 efectivo 2450" },
     { "texto": "", "queda": "" }
+  ],
+  "a_buscar": [
+    { "texto": "  Café ", "queda": "cafe" },
+    { "texto": "\u0085Café\u0085", "queda": "cafe" },
+    { "texto": "\u3000CAÑA\u2003", "queda": "cana" },
+    { "texto": "\ufeffCafé", "queda": "\ufeffcafe", "por_que": "U+FEFF no es un espacio para Unicode: str::trim no lo quita, aunque el .trim() de JavaScript sí." },
+    { "texto": "  ", "queda": null },
+    { "texto": "\u0301\u0303", "queda": null, "por_que": "Sólo acentos sueltos: no queda nada que buscar." }
   ],
   "buscar": [
     { "nombre": "CAFÉ Solo", "busca": "café", "encuentra": true },

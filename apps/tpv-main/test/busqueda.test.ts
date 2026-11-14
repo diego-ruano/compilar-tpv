@@ -13,6 +13,7 @@ const casos = JSON.parse(casosJson) as {
 	pliegues: Record<string, string>;
 	se_quitan: string[];
 	normalizar: { texto: string; queda: string }[];
+	a_buscar: { texto: string; queda: string | null }[];
 	buscar: { nombre: string; busca: string; encuentra: boolean }[];
 };
 
@@ -33,11 +34,13 @@ describe("la búsqueda de las pantallas cuadra con la tabla compartida", () => {
 		expect(contiene(buscado!, nombre)).toBe(encuentra);
 	});
 
-	it("un texto vacío o hecho sólo de acentos sueltos no filtra", () => {
-		expect(textoABuscar("  ")).toBeNull();
+	it.each(casos.a_buscar)("lo tecleado $texto se busca como $queda", ({ texto, queda }) => {
+		expect(textoABuscar(texto)).toBe(queda);
+	});
+
+	it("sin texto no filtra", () => {
 		expect(textoABuscar(null)).toBeNull();
-		expect(textoABuscar("́̃")).toBeNull();
-		expect(textoABuscar("  Café ")).toBe("cafe");
+		expect(textoABuscar(undefined)).toBeNull();
 	});
 
 	it("busca en cualquiera de los textos y se salta los que faltan", () => {

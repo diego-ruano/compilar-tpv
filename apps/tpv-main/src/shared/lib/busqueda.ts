@@ -24,6 +24,20 @@ export const SE_QUITAN: readonly string[] = ["̀", "́", "̂", "̃", "̈", "̧"]
 
 const BASE = new Map<string, string>(PLIEGUES.flatMap(([base, de]) => [...de].map((letra) => [letra, base] as const)));
 const QUITAR = new Set(SE_QUITAN);
+const ESPACIO = /^\p{White_Space}$/u;
+
+/**
+ * Quita de los extremos lo que Unicode marca como espacio, como `str::trim` en la Main y `recortar`
+ * en el worker. El `.trim()` de JavaScript quita además U+FEFF y deja U+0085, y lo tecleado se
+ * buscaría distinto en la pantalla que en la base.
+ */
+function recortar(texto: string): string {
+	let inicio = 0;
+	let fin = texto.length;
+	while (inicio < fin && ESPACIO.test(texto[inicio])) inicio++;
+	while (fin > inicio && ESPACIO.test(texto[fin - 1])) fin--;
+	return texto.slice(inicio, fin);
+}
 
 /** El texto como se compara. Lo que no está en las tablas, tal cual. */
 export function normalizarBusqueda(texto: string): string {
@@ -41,7 +55,7 @@ export function normalizarBusqueda(texto: string): string {
  * igual que con el buscador vacío (también con sólo acentos sueltos).
  */
 export function textoABuscar(texto: string | null | undefined): string | null {
-	return normalizarBusqueda((texto ?? "").trim()) || null;
+	return normalizarBusqueda(recortar(texto ?? "")) || null;
 }
 
 /** ¿Aparece lo buscado (ya pasado por `textoABuscar`) en alguno de los textos? */
