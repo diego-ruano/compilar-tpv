@@ -52,11 +52,17 @@ pub struct CambioDetenido {
 /// - `escrituras`: cuántas operaciones ha generado esta base en toda su vida (el contador del
 ///   outbox, que no vuelve atrás). Se mueve con cada escritura de negocio de aquí.
 /// - `pendientes`: las que quedan por subir. Con alguna, la nube no tiene todavía lo de aquí.
+/// - `apuntadas`: las filas que esperan a traerse de la nube (SYNC-29, `_Sync_Por_Contrastar`). La
+///   convergencia escribe aquí por `raw()`, sin mover el checkpoint ni el outbox, y desapunta lo que
+///   escribe en la misma transacción: esto es lo que la delata. Apuntar sólo pasa al aplicar un
+///   cambio de la nube, que mueve el checkpoint. Sin ella, un contraste que viera una fila que falta
+///   aquí podía borrarla arriba después de que la convergencia la hubiera traído (Codex).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MarcaLocal {
     pub checkpoint: i64,
     pub escrituras: i64,
     pub pendientes: i64,
+    pub apuntadas: i64,
 }
 
 /// Las filas de unos cubos de una tabla que se piden a la nube.

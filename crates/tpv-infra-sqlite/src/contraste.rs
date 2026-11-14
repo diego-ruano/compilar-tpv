@@ -24,7 +24,8 @@
 //! ese minuto. Así que sólo se compara si esta Main puede afirmar que no hay nada de aquí por subir
 //! ni nada de allí por bajar, y que sigue siendo así en cada paso:
 //!
-//! - **De aquí**: la [`MarcaLocal`] (checkpoint, contador de escrituras, pendientes de subir) se lee
+//! - **De aquí**: la [`MarcaLocal`] (checkpoint, contador de escrituras, pendientes de subir, filas
+//!   apuntadas para la convergencia) se lee
 //!   antes de pedir el resumen, otra vez dentro de la foto que resume la base, otra vez antes de
 //!   mirar las filas que faltan arriba y, con el escritor cogido, justo antes de encolar. Si en
 //!   algún momento no es la misma, la pasada se deja sin tocar nada ([`ContrasteLocal::SeHaMovido`]).
@@ -107,6 +108,8 @@ pub(crate) fn leer_marca(foto: &Foto<'_>) -> Result<MarcaLocal, ErrorSql> {
             .unwrap_or(0),
         // Lo apartado no cuenta: no va a subir solo, y repararlo es cosa de este contraste.
         pendientes: foto.entero("SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0;", &[])?.unwrap_or(0),
+        // SYNC-29: lo que la convergencia escribe aquí no pasa por el outbox ni mueve el checkpoint.
+        apuntadas: foto.entero("SELECT COUNT(*) FROM _Sync_Por_Contrastar;", &[])?.unwrap_or(0),
     })
 }
 

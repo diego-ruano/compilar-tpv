@@ -660,7 +660,9 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   vacía lo apuntado.
 - **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
   sobre (salvo que la escribiera algo apartado de la subida); la trae la convergencia, y la pasada se
-  informa como `aplazado` (abajo).
+  informa como `aplazado` (abajo). Y lo que la convergencia escribe aquí mueve la marca del
+  contraste (`MarcaLocal::apuntadas`, el recuento de lo apuntado, que baja al escribirlo): una pasada
+  que vio la fila como estaba antes se deja sin reparar nada con lo que vio.
 
 Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir otra
 (un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.

@@ -172,11 +172,18 @@ async fn la_cancelacion_de_la_main_se_queda_aunque_una_handy_la_sentara_a_la_vez
     assert!(repo.outbox_pending(10).await.unwrap().is_empty());
 
     // Con todo subido y la bajada al día, se trae de la nube como está.
+    let antes = repo.contraste_marca().await.unwrap();
     let (escritas, quedan) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
     assert_eq!((escritas.len(), quedan), (1, false));
     assert!(escritas[0].sql.starts_with("INSERT INTO \"Reservas\"") && escritas[0].sql.contains("ON CONFLICT"), "{}", escritas[0].sql);
     assert_eq!(estado(&db).await, "CANCELADA");
     assert_eq!(marcas(&db).await, "0");
+    // Lo que escribe la convergencia mueve la marca del contraste aunque no pase por el outbox ni
+    // mueva el checkpoint: una pasada que hubiera visto la fila como estaba antes ya no repara nada
+    // con lo que vio (Codex).
+    let despues = repo.contraste_marca().await.unwrap();
+    assert_eq!((despues.checkpoint, despues.escrituras, despues.pendientes), (antes.checkpoint, antes.escrituras, antes.pendientes));
+    assert_ne!(despues, antes);
     // Sólo aquí: ni el outbox ni el checkpoint se mueven.
     assert!(repo.outbox_pending(10).await.unwrap().is_empty());
     assert_eq!(repo.get_checkpoint().await.unwrap(), 41);
