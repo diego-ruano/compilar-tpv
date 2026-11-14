@@ -747,9 +747,11 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   reparar y el contraste repara en esa misma pasada.
 - **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
   filas son inciertas; toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta Main
-  escribió ahí, y traerla lo desharía aquí); sigue sin entrar (el `UNIQUE` con el que chocaba sigue
-  ahí: `no_entra: …`, con la clase del error); o la tabla tiene columnas que esta versión no tiene. Se
-  vuelve a intentar en la pasada siguiente.
+  escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta base y no de la
+  sentencia (`por_filtro`: un `WHERE` por una foránea, un `INSERT … SELECT`) y en esa tabla hay algo
+  apartado (aquí pudo cumplir el filtro otra fila que arriba); sigue sin entrar (el `UNIQUE` con el
+  que chocaba sigue ahí: `no_entra: …`, con la clase del error); o la tabla tiene columnas que esta
+  versión no tiene. Se vuelve a intentar en la pasada siguiente.
 - **Trabajo acotado**: hasta 50 cuarentenas y 5.000 filas por pasada (la primera se intenta siempre),
   en peticiones de 500 claves.
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.

@@ -40,9 +40,10 @@
 //!   porque su padre estaba en otra cuarentena entra en cuanto entra la del padre.
 //! - **Lo que no se puede traer, se queda** y se informa: un cambio cuyas filas no se saben
 //!   (`incierto`), uno que toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta
-//!   Main escribió ahí, y traerla lo desharía aquí), una fila que sigue sin entrar (el `UNIQUE` con el
-//!   que chocaba sigue ahí) o una tabla con columnas que esta versión no tiene. Se vuelve a intentar
-//!   en la pasada siguiente, y cada pasada tiene su tope de trabajo.
+//!   Main escribió ahí, y traerla lo desharía aquí) o cuyas filas de una tabla salieron de un filtro
+//!   sobre esta base y en esa tabla hay algo apartado (`por_filtro`), una fila que sigue sin entrar
+//!   (el `UNIQUE` con el que chocaba sigue ahí) o una tabla con columnas que esta versión no tiene. Se
+//!   vuelve a intentar en la pasada siguiente, y cada pasada tiene su tope de trabajo.
 //!
 //! **Reintentar sus sentencias** no sirve de salida: para cuando entraran, lo de detrás ya habría
 //! pasado por esas filas, y aplicarlas encima devolvería una fila a un valor viejo o repetiría un
@@ -451,7 +452,7 @@ async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>
         .query("SELECT Statements_Json FROM _Sync_Outbox WHERE Cuarentena = 1;", ())
         .await
         .map_err(db_err)?;
-    let mut todas = tocadas::Estaticas { claves: HashSet::new(), tablas: HashSet::new() };
+    let mut todas = tocadas::Estaticas { claves: HashSet::new(), tablas: HashSet::new(), todas: HashSet::new() };
     let clave_de = |t: &str| claves.get(t).cloned().unwrap_or_default();
     while let Some(f) = filas.next().await.map_err(db_err)? {
         let sentencias: Vec<SqlStatement> = match f.get_value(0) {
@@ -461,13 +462,20 @@ async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>
         let e = tocadas::estaticas(&sentencias, &clave_de);
         todas.claves.extend(e.claves);
         todas.tablas.extend(e.tablas);
+        todas.todas.extend(e.todas);
     }
     Ok(todas)
 }
 
+/// ¿Toca la cuarentena algo que esta Main escribió y la nube no tiene? Una fila apuntada que es de lo
+/// apartado, o una tabla en la que lo apartado no se sabe por su clave. Y si sus filas de una tabla
+/// salieron de esta base y no de la sentencia (`por_filtro`), cualquier cosa apartada en esa tabla:
+/// lo apartado es lo que aquí es distinto de arriba, y con ello aquí pudo cumplir el filtro otra
+/// fila que la de la nube (Codex, SYNC-36).
 fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas) -> bool {
     subida.tablas.contains("*")
         || t.tablas.iter().any(|x| subida.tablas.contains(x))
+        || t.por_filtro.iter().any(|x| subida.todas.contains(x))
         || t.filas.iter().any(|f| subida.tablas.contains(&f.tabla) || tocadas::canonica_de(f).is_some_and(|k| subida.claves.contains(&k)))
 }
 
@@ -786,6 +794,27 @@ mod tests {
 
         // Una vez.
         assert_eq!(vaciar(&db, 1000).await.unwrap(), 0);
+    }
+
+    fn mesa(id: &str) -> FilaTocada {
+        FilaTocada { tabla: "Mesas".into(), clave: vec![serde_json::json!(id)], borrada: false }
+    }
+
+    #[test]
+    fn lo_que_sale_de_un_filtro_no_se_trae_si_lo_apartado_de_la_subida_toca_su_tabla() {
+        // Codex: con una fila apartada en la tabla, el filtro de aquí pudo dejar fuera otra que
+        // arriba sí lo cumplía. Una fila nombrada por su clave, en cambio, es la que es.
+        let subida = tocadas::Estaticas {
+            claves: ["Mesas\u{1f}tm-main".to_string()].into_iter().collect(),
+            tablas: HashSet::new(),
+            todas: ["Mesas".to_string()].into_iter().collect(),
+        };
+        let por_clave = Tocadas { tablas: vec!["Mesas".into()], filas: vec![mesa("m2")], incierto: false, por_filtro: vec![] };
+        assert!(!choca_con_la_subida(&por_clave, &subida), "otra fila de la tabla, nombrada por su clave");
+        let por_filtro = Tocadas { por_filtro: vec!["Mesas".into()], ..por_clave.clone() };
+        assert!(choca_con_la_subida(&por_filtro, &subida));
+        let la_misma = Tocadas { filas: vec![mesa("m-main")], ..por_clave.clone() };
+        assert!(choca_con_la_subida(&la_misma, &subida));
     }
 
     #[test]

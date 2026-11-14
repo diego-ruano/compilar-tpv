@@ -55,6 +55,11 @@ pub(crate) struct Tocadas {
     pub filas: Vec<FilaTocada>,
     /// Alguna sentencia toca filas que no se saben localizar: no se puede traer de la nube por estado.
     pub incierto: bool,
+    /// Las tablas en las que alguna sentencia no nombra sus filas por su clave (un `WHERE` por una
+    /// foránea, un `INSERT … SELECT`, un `ON CONFLICT` sobre otra columna): sus filas se han sacado de
+    /// esta base, y son las de la nube sólo si esta base no tenía nada distinto en esa tabla. Lo
+    /// apartado de la subida es justo eso, y la salida no trae nada que las cruce.
+    pub por_filtro: Vec<String>,
 }
 
 /// Una fila que toca un cambio.
@@ -69,7 +74,7 @@ pub(crate) struct FilaTocada {
 
 impl Tocadas {
     pub(crate) fn incierta(tablas: Vec<String>) -> Self {
-        Tocadas { tablas, filas: Vec::new(), incierto: true }
+        Tocadas { por_filtro: tablas.clone(), tablas, filas: Vec::new(), incierto: true }
     }
 
     /// Como se guarda en `_Sync_Failed.Filas_Json`.
@@ -77,6 +82,7 @@ impl Tocadas {
         json!({
             "tablas": self.tablas,
             "incierto": self.incierto,
+            "por_filtro": self.por_filtro,
             "filas": self.filas.iter().map(|f| json!({ "tabla": f.tabla, "clave": f.clave, "borrada": f.borrada })).collect::<Vec<_>>(),
         })
         .to_string()
@@ -100,7 +106,12 @@ impl Tocadas {
                 _ => return Tocadas::incierta(tablas),
             }
         }
-        Tocadas { incierto: v["incierto"].as_bool().unwrap_or(true), tablas, filas }
+        // Sin decirlo, cualquiera de sus tablas pudo salir de un filtro.
+        let por_filtro = match v["por_filtro"].as_array() {
+            Some(t) => t.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
+            None => tablas.clone(),
+        };
+        Tocadas { incierto: v["incierto"].as_bool().unwrap_or(true), tablas, filas, por_filtro }
     }
 }
 
@@ -139,6 +150,7 @@ fn tablas_escritas(sentencias: &[SqlStatement]) -> Vec<String> {
 struct Junta {
     filas: Vec<FilaTocada>,
     vistas: HashMap<String, usize>,
+    por_filtro: Vec<String>,
 }
 
 impl Junta {
@@ -282,7 +294,10 @@ fn simular(sim: &Simulacro<'_>, sentencias: &[SqlStatement], tablas: Vec<String>
             Err(()) => return Tocadas::incierta(tablas),
         }
     }
-    Tocadas { tablas, filas: junta.filas, incierto: false }
+    let mut por_filtro = junta.por_filtro;
+    por_filtro.sort();
+    por_filtro.dedup();
+    Tocadas { tablas, filas: junta.filas, incierto: false, por_filtro }
 }
 
 /// Lo que toca una sentencia. `Err` si no se sabe.
@@ -380,6 +395,15 @@ fn una_sentencia(
     // Lo que se salta al chocar no sale en el `RETURNING`: sin haberlo mirado antes, no se sabe.
     if forma.puede_saltarse && previa.is_none() {
         return Err(());
+    }
+    // Sus filas sólo las nombra la sentencia si es un `VALUES` (leído antes) o un `WHERE` por la
+    // clave entera; las demás se han sacado de esta base.
+    let nombra_sus_filas = match forma.tipo {
+        Tipo::Insertar => forma.origen_valores && previa.is_some(),
+        Tipo::Actualizar | Tipo::Borrar => nombrada,
+    };
+    if !nombra_sus_filas {
+        junta.por_filtro.push(esquema.nombre.clone());
     }
     Ok(())
 }
@@ -655,6 +679,8 @@ struct Forma {
     columnas: Option<Vec<String>>,
     /// Lo que inserta (su `VALUES` o su `SELECT`), en bytes del texto.
     origen: Option<(usize, usize)>,
+    /// Su origen es un `VALUES`: lo que inserta no depende de nada de la base.
+    origen_valores: bool,
     donde: Donde,
     /// Las igualdades de su `WHERE` que se pueden usar solas: `columna = valor`.
     igualdades: Vec<(String, String)>,
@@ -733,6 +759,7 @@ impl Forma {
             fin,
             columnas: None,
             origen: None,
+            origen_valores: false,
             donde: Donde::NoSe,
             igualdades: Vec::new(),
         };
@@ -761,6 +788,7 @@ impl Forma {
                         .unwrap_or(n);
                     if corte > i {
                         forma.origen = Some((t.piezas[i].ini, t.piezas[corte - 1].fin));
+                        forma.origen_valores = t.es(i, "VALUES");
                     }
                     // Un `ON CONFLICT … DO NOTHING`, en cualquiera de sus cláusulas.
                     forma.puede_saltarse |= t.buscar(corte, n, |j| t.es(j, "DO") && t.es(j + 1, "NOTHING")).is_some();
@@ -921,10 +949,12 @@ fn igualdad(t: &Troceada<'_>, a: usize, b: usize, tabla: &str, alias: Option<&st
 pub(crate) struct Estaticas {
     pub claves: HashSet<String>,
     pub tablas: HashSet<String>,
+    /// Todas las tablas que tocan, con clave o sin ella.
+    pub todas: HashSet<String>,
 }
 
 pub(crate) fn estaticas(sentencias: &[SqlStatement], clave_de: &dyn Fn(&str) -> Vec<String>) -> Estaticas {
-    let mut salida = Estaticas { claves: HashSet::new(), tablas: HashSet::new() };
+    let mut salida = Estaticas { claves: HashSet::new(), tablas: HashSet::new(), todas: HashSet::new() };
     for st in sentencias {
         let Some(forma) = Forma::leer(&st.sql) else {
             if !empieza_por_pragma(&st.sql) {
@@ -936,6 +966,7 @@ pub(crate) fn estaticas(sentencias: &[SqlStatement], clave_de: &dyn Fn(&str) -> 
         if crate::sync::no_es_tabla_de_negocio(&forma.tabla) {
             continue;
         }
+        salida.todas.insert(forma.tabla.clone());
         let clave = clave_de(&forma.tabla);
         let claves = if clave.is_empty() || forma.reemplaza { None } else { claves_estaticas(&st.sql, &st.args, &forma, &clave) };
         match claves {
@@ -1093,6 +1124,7 @@ mod tests {
         assert!(!t.incierto, "{t:?}");
         assert_eq!(t.tablas, vec!["Mesas", "Zonas"]);
         assert_eq!(t.filas, vec![fila("Zonas", &["z8"], false), fila("Zonas", &["z9"], false), fila("Mesas", &["m2"], false)]);
+        assert!(t.por_filtro.is_empty(), "las dos nombran sus filas: {:?}", t.por_filtro);
         // Un simulacro: no ha quedado nada.
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 2);
         assert_eq!(numero(&db, "SELECT Capacidad FROM Mesas WHERE ID_Mesa = 'm2';").await, 2);
@@ -1122,6 +1154,8 @@ mod tests {
                 fila("Proveedores", &["pr1"], true),
             ]
         );
+        // Las de una foránea salen de esta base; la del proveedor, de la sentencia.
+        assert_eq!(t.por_filtro, vec!["Mesas", "Productos"]);
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 3);
     }
 
@@ -1288,11 +1322,15 @@ mod tests {
             tablas: vec!["Mesas".into(), "Pago_Detalles".into()],
             filas: vec![fila("Mesas", &["m1"], true), FilaTocada { tabla: "Pago_Detalles".into(), clave: vec![json!("p1"), json!(3)], borrada: false }],
             incierto: false,
+            por_filtro: vec!["Mesas".into()],
         };
         assert_eq!(Tocadas::de_json(&t.a_json()), t);
         assert!(Tocadas::de_json("no es json").incierto);
         assert!(Tocadas::de_json(r#"{"tablas":[],"filas":[{"tabla":"Mesas"}],"incierto":false}"#).incierto);
         assert!(Tocadas::de_json(r#"{"tablas":[],"filas":[]}"#).incierto, "sin decirlo, no se sabe");
+        // Sin decir cuáles salieron de un filtro, cualquiera de sus tablas.
+        let sin = Tocadas::de_json(r#"{"tablas":["Mesas","Zonas"],"filas":[],"incierto":false}"#);
+        assert_eq!(sin.por_filtro, vec!["Mesas", "Zonas"]);
     }
 
     #[test]
@@ -1337,5 +1375,8 @@ mod tests {
         let mut tablas: Vec<&String> = e.tablas.iter().collect();
         tablas.sort();
         assert_eq!(tablas, vec!["Pagos", "Zonas"]);
+        let mut todas: Vec<&String> = e.todas.iter().collect();
+        todas.sort();
+        assert_eq!(todas, vec!["Mesas", "Pago_Detalles", "Pagos", "Zonas"]);
     }
 }
