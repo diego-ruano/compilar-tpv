@@ -37,7 +37,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
 | [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
-| [SYNC-37](#sync-37--una-página-del-histórico-de-10000-cobros-toma-el-escritor-unos-03-s) | 🔵 | Una página del histórico de 10.000 cobros toma el escritor de la Main unos 0,3 s | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -390,16 +389,12 @@ Un negocio que ya nació (alguna licencia suya se activó) y cuyo `TenantHub` es
 `tenant_db_perdida`, y nadie le crea una base vacía en su lugar
 ([worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Es lo que tiene
 que pasar si su base está en otro objeto (el despliegue apunta a otro espacio de nombres o a otra
-jurisdicción), pero deja dos casos sin salida:
-
-- **La base se ha perdido de verdad** (un `borrarTodo` por error). Antes, una Main sin datos podía
-  empezar de cero desde la recuperación; ahora no puede. Una Main que conserva sus datos tampoco
-  tiene cómo subirlos enteros a una nube vacía: su outbox sólo lleva lo que no ha subido. Y soporte
-  no tiene herramienta, ni para devolver el objeto a un instante anterior
-  ([DO-03](#do-03--copias-de-la-base-de-cada-negocio)) ni para crear la base a sabiendas.
-- **Los negocios dados de alta cuando su base estaba en Turso**: al desplegar la base en el DO, su
-  objeto está vacío y su licencia, activada. Hoy son todos de prueba: se dan de alta otra vez, o se
-  traen sus datos al DO antes de desplegar.
+jurisdicción), pero deja sin salida el caso en que **la base se ha perdido de verdad** (un
+`borrarTodo` por error). Antes, una Main sin datos podía empezar de cero desde la recuperación; ahora
+no puede. Una Main que conserva sus datos tampoco tiene cómo subirlos enteros a una nube vacía: su
+outbox sólo lleva lo que no ha subido. Y soporte no tiene herramienta, ni para devolver el objeto a un
+instante anterior ([DO-03](#do-03--copias-de-la-base-de-cada-negocio)) ni para crear la base a
+sabiendas.
 
 Propuesta: una ruta de administración, con el token de administración y su rastro en Axiom, que con
 un negocio que ya nació haga una de dos cosas: devolver su objeto a un instante (DO-03) o crear su
@@ -605,15 +600,6 @@ una sentencia condicional no toca ninguna fila. Las rutas que deciden por el rec
 Arreglo propuesto: `decidirPorEstado` en las tres, como en `horarios/guardar`, con una lectura de lo
 pedido (el trabajador o la asignación tal como se pidió; el producto, que ya no exista o esté
 archivado).
-
-### SYNC-37 · Una página del histórico de 10.000 cobros toma el escritor unos 0,3 s
-
-Al bajar el histórico, cada página toma el escritor de la Main mientras se aplica, y los triggers del
-resumen diario de las estadísticas apuntan sus días: medido en local, una de 10.000 cobros tarda unos
-280 ms (110 ms sin los triggers), y es lo más que espera una venta que llega a mitad
-([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Las páginas de 10.000
-sólo van con tres minutos sin escrituras; con el equipo trabajando son de 2.000. Sin decidir si se
-acepta o se bajan las páginas de cobros.
 
 ---
 
