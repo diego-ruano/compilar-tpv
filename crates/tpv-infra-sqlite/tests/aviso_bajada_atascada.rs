@@ -97,6 +97,18 @@ async fn una_cuarentena_que_no_puede_salir_sola_avisa_a_la_semana_una_vez_y_se_c
     assert!(uc_sync::avisar_bajada_atascada(&repo, &notif).await.unwrap());
     assert!(uc_sync::avisar_bajada_atascada(&repo, &notif).await.unwrap());
     assert_eq!(avisos(&db).await, vec![("activa".to_string(), "ver_conectividad".to_string())]);
+    // El texto se parte en el fuente; en la notificación no quedan los espacios del sangrado.
+    let cuerpo = {
+        let r = db.read().await;
+        let mut filas = r
+            .conn()
+            .query("SELECT Cuerpo FROM Notificaciones WHERE Clave_Dedupe = 'bajada_atascada';", ())
+            .await
+            .unwrap();
+        filas.next().await.unwrap().unwrap().get::<String>(0).unwrap()
+    };
+    assert!(!cuerpo.contains("  "), "{cuerpo}");
+    assert!(cuerpo.contains("principal, y mientras"), "{cuerpo}");
 
     // Recuperar el estado de la nube vacía las cuarentenas: el aviso se cierra solo.
     {

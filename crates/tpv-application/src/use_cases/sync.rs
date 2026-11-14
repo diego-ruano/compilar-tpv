@@ -182,7 +182,9 @@ pub async fn avisar_bajada_atascada(repo: &dyn SyncRepository, notifier: &dyn No
             severidad: Severidad::Aviso,
             titulo: "Un cambio hecho desde una Handy no se ha podido aplicar en el TPV".into(),
             cuerpo: Some(
-                "Hace más de una semana que un cambio hecho desde una Handy no se puede aplicar en el TPV principal,                  y mientras tanto las comprobaciones diarias con la nube están en pausa. Se arregla trayendo el estado                  actual de la nube: en el TPV principal, Configuración → Conectividad → «Recuperar el estado actual de la nube»."
+                "Hace más de una semana que un cambio hecho desde una Handy no se puede aplicar en el TPV principal, \
+                 y mientras tanto las comprobaciones diarias con la nube están en pausa. Se arregla trayendo el estado \
+                 actual de la nube: en el TPV principal, Configuración → Conectividad → «Recuperar el estado actual de la nube»."
                     .into(),
             ),
             destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
