@@ -28,6 +28,7 @@
                 { "path": "$APPDATA/device_config.json" },
                 { "path": "$APPDATA/license_state.json" },
                 { "path": "$APPDATA/traslado-pendiente" },
+                { "path": "$APPDATA/anterior-a-la-nube" },
                 { "path": "$APPDATA/cambio-de-negocio" },
                 { "path": "$APPDATA/cambio-de-negocio.tmp" },
                 { "path": "$APPDATA/license_state.pending.json" },

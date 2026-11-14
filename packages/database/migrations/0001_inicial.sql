@@ -1933,6 +1933,11 @@ CREATE TABLE IF NOT EXISTS _Cobros_Pendientes (
 -- `Orden` conserva el que dio el worker: padres primero. Cada pagina es su propia
 -- transaccion, asi que `defer_foreign_keys` no cubre a una hija insertada antes que su
 -- padre; sin ese orden la fase 2 fallaria fila a fila y no terminaria nunca.
+--
+-- DO-02: `Ventana_Desde` es desde donde trajo la fase 1 la tabla entera (`ventana_desde` del
+-- volcado, hora del equipo); lo anterior es lo que baja. Con el, el cierre de caja sabe si lo del
+-- periodo abierto ya esta aqui aunque la tabla no este completa (`caja_por_bajar`). NULL: no se
+-- sabe, y se avisa.
 CREATE TABLE IF NOT EXISTS _Backfill_Historico (
     Tabla TEXT NOT NULL PRIMARY KEY,
     Orden INTEGER NOT NULL DEFAULT 0,
@@ -1940,7 +1945,8 @@ CREATE TABLE IF NOT EXISTS _Backfill_Historico (
     Filas_Traidas INTEGER NOT NULL DEFAULT 0,
     Completada INTEGER NOT NULL DEFAULT 0,
     Ultimo_Intento_Ms INTEGER,
-    Ultimo_Error TEXT
+    Ultimo_Error TEXT,
+    Ventana_Desde TEXT
 );
 
 -- VERIF-02: lo que el contraste con la nube (job `verificar_nube`) recuerda de sus pasadas. Con

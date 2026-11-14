@@ -119,7 +119,8 @@ impl ErrorCode {
             ErrorCode::InvalidPin => "PIN incorrecto",
             ErrorCode::TenantDbNotProvisioned => "No existe una base de datos en la nube",
             ErrorCode::BootstrapTooLarge => {
-                "La copia de la nube es demasiado grande para restaurarla automáticamente"
+                // DO-02: sólo llega si ni lo imprescindible para trabajar cabe en una descarga.
+                "Lo imprescindible para volver a trabajar no cabe en una sola descarga desde la nube"
             }
             ErrorCode::TenantMigrationAltered => {
                 "La versión de la base de datos de la nube es incompatible"

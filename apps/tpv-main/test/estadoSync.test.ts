@@ -100,10 +100,24 @@ describe("useEstadoSync", () => {
 		expect(s().reconciliacionPendiente).toBe(true);
 	});
 
+	it("una base anterior a lo que guarda la nube no se sincroniza y sólo vale la nube (SYNC-32)", () => {
+		s().configurarRecuperacion("older_than_cloud");
+		expect(s().datosPerdidos).toBe(true);
+		expect(s().anteriorALaNube).toBe(true);
+		expect(s().trasladoPendiente).toBe(false);
+
+		// Traída la nube, se reconcilia como cualquier otra restauración.
+		s().iniciarReconciliacion();
+		expect(s().anteriorALaNube).toBe(false);
+		expect(s().datosPerdidos).toBe(false);
+		expect(s().reconciliacionPendiente).toBe(true);
+	});
+
 	it("una base normal no queda marcada como traslado", () => {
 		for (const estado of ["ready", "data_missing", "reconciliation_pending"] as const) {
 			s().configurarRecuperacion(estado);
 			expect(s().trasladoPendiente, estado).toBe(false);
+			expect(s().anteriorALaNube, estado).toBe(false);
 		}
 		s().configurarRecuperacion("data_missing");
 		expect(s().datosPerdidos).toBe(true);

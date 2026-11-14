@@ -90,14 +90,25 @@ pub enum FinDeSesion {
     /// checkpoint mientras lo reporta, y si lleva más de 7 días sin hacerlo no se purga nada. Llega
     /// una base cambiada por fuera de la aplicación (una imagen de disco, una `data.db` copiada a
     /// mano). Se para antes de aplicar, de subir y de mover el checkpoint, así que `verificar_nube`
-    /// tampoco toca la nube; los datos y el outbox se quedan como están y se sigue vendiendo.
-    /// Reconectar no lo arregla: el motor espera a que se pida reintentar o al siguiente arranque, y
-    /// Conectividad enseña `MOTIVO_ANTERIOR_AL_LOG`.
+    /// tampoco toca la nube.
+    ///
+    /// SYNC-32: y se trata como un traslado de licencia (`SyncRepository::marcar_anterior_a_la_nube`):
+    /// se cierran las escrituras de negocio y el equipo pasa a la pantalla de recuperación, que sólo
+    /// ofrece traer el estado actual de la nube; al traerlo, lo que tenía pendiente se guarda aparte
+    /// con la base entera y no se sube. Reconectar no lo arregla: el motor espera a que se pida
+    /// reintentar, y Conectividad enseña `MOTIVO_ANTERIOR_AL_LOG`.
     AnteriorAlLog,
 }
 
 /// AUD-19 · Lo que enseña Conectividad cuando la sesión normal acaba en `FinDeSesion::AnteriorAlLog`.
-pub const MOTIVO_ANTERIOR_AL_LOG: &str = "Los datos de este equipo son anteriores a lo que guarda la nube: no se sincronizan para no mezclarlos, y lo que se venda se sigue guardando aquí. Contacta con soporte para recuperar el estado actual de la nube.";
+pub const MOTIVO_ANTERIOR_AL_LOG: &str = "Los datos de este equipo son anteriores a lo que guarda la nube: la base se ha cambiado por fuera del programa. Para seguir, recupera el estado actual de la nube; lo que este equipo tenía sin subir se guarda aparte.";
+
+/// SYNC-32 · La sesión normal ha visto que a esta base le falta lo que la nube ya purgó: pasa a
+/// recuperarse de la nube, como tras un traslado, sin haber aplicado ni subido nada.
+async fn anterior_al_log(ctx: &dyn ContextoReplicacion) -> AppResult<FinDeSesion> {
+    ctx.repositorio().await?.marcar_anterior_a_la_nube().await?;
+    Ok(FinDeSesion::AnteriorAlLog)
+}
 
 pub fn cambio(m: Value) -> AppResult<SyncChange> {
     let op_id = m.get("opId").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Cambio sin operación"))?.to_string();
@@ -397,7 +408,7 @@ where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
 pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<FinDeSesion> {
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
     let mut sesion = Sesion::default();
-    if ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
+    if ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?.anterior_al_log { return anterior_al_log(ctx).await; }
     let mut vacio = true;
     if recuperando {
         ctx.fase_recuperacion("subiendo");
@@ -452,7 +463,7 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         // AUD-18: un cambio en vivo ha fallado. Se reintenta con su espera y la bajada se pone al
         // día por catch-up antes de volver a escuchar; después, una vuelta de subida.
         if sesion.bajada.detenida() {
-            if ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
+            if ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?.anterior_al_log { return anterior_al_log(ctx).await; }
             vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
             ultimo_sondeo = Instant::now();
             continue;

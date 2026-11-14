@@ -105,3 +105,44 @@ it("una copia anterior al log acaba ofreciendo la nube, con el motivo a la vista
     expect(screen.getByText(/Esta copia es anterior a lo que guarda la nube/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recuperar el estado actual de la nube" })).toBeEnabled();
 });
+
+it("si ni lo imprescindible para trabajar cabe en la descarga, lo dice y señala las copias", async () => {
+    // DO-02: la nube se encoge hasta lo imprescindible antes de contestar que no cabe.
+    invoke.mockImplementation(async (comando: string) => {
+        if (comando === "recovery_list_backups") return [];
+        if (comando === "sync_bootstrap_desde_nube") {
+            throw { code: "bootstrap_too_large", message: "Lo imprescindible para volver a trabajar no cabe en una sola descarga desde la nube" };
+        }
+        return undefined;
+    });
+
+    render(<RecuperarDatos />);
+
+    (await screen.findByRole("button", { name: "Recuperar el estado actual de la nube" })).click();
+
+    expect(
+        await screen.findByText(/lo imprescindible para volver a trabajar \(la carta, el personal, los clientes, las reservas y lo que sigue abierto\)/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Restaura una copia de este ordenador \(arriba\)/)).toBeInTheDocument();
+    expect(screen.queryByText("Recuperación en curso")).not.toBeInTheDocument();
+});
+
+it("con la base anterior a lo que guarda la nube lo explica y sólo ofrece la nube (SYNC-32)", async () => {
+    useEstadoSync.setState({ anteriorALaNube: true, datosPerdidos: true });
+    invoke.mockImplementation(async (comando: string) =>
+        comando === "recovery_list_backups"
+            ? [{ id: "data-1.db.gz", created_at_ms: Date.now() - DIA, size_bytes: 1024, importada: false }]
+            : undefined,
+    );
+
+    render(<RecuperarDatos />);
+
+    expect(
+        await screen.findByText(/se han cambiado por fuera del programa .* son anteriores a lo que guarda la nube/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Lo que este ordenador tenía sin subir se guarda aparte, sin borrarlo/)).toBeInTheDocument();
+    // Sólo la nube: ni las copias de este ordenador ni traer una de fuera.
+    expect(screen.getByRole("button", { name: "Recuperar el estado actual de la nube" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /copia/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Restaurar desde un archivo/ })).not.toBeInTheDocument();
+});

@@ -20,6 +20,8 @@ struct FakeRepo {
     // apartadas (`Cuarentena = 1`: siguen en el outbox, fuera de lo pendiente) y los rechazos
     // contados de cada operación.
     confirmaciones: Mutex<Vec<Vec<(String, i64)>>>, apartadas: Mutex<Vec<String>>, rechazos: Mutex<HashMap<String, i64>>,
+    // SYNC-32: si se ha marcado la base como anterior a la nube.
+    anterior_a_la_nube: Mutex<bool>,
 }
     #[async_trait]
     impl SyncRepository for FakeRepo {
@@ -113,9 +115,13 @@ struct FakeRepo {
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())
         }
+        async fn marcar_anterior_a_la_nube(&self) -> AppResult<()> {
+            *self.anterior_a_la_nube.lock().unwrap() = true;
+            Ok(())
+        }
         async fn health(&self) -> AppResult<SyncHealth> {
             let apartadas = self.apartadas.lock().unwrap().len() as i64;
-            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64 - apartadas,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:apartadas})
+            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64 - apartadas,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:apartadas,bajada_atascada:0})
         }
         async fn bootstrap_restaurar(
             &self,
@@ -719,6 +725,8 @@ async fn una_copia_anterior_a_lo_purgado_no_se_da_por_reconciliada() {
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);
     assert!(ctx.completa.lock().unwrap().is_none());
     assert_eq!(ctx.fases.lock().unwrap().as_slice(),["descargando"]);
+    // Ya está recuperándose: la salida la ofrece su pantalla, no hace falta marcar nada (SYNC-32).
+    assert!(!*ctx.repo.anterior_a_la_nube.lock().unwrap());
 }
 
 #[tokio::test]
@@ -732,7 +740,9 @@ async fn en_la_sesion_normal_se_detiene_sin_error_y_sin_tocar_nada() {
     assert_eq!(*ctx.repo.cursor.lock().unwrap(),10);
     assert!(c.enviados.is_empty(),"ni sube nada ni suelta a las Handy");
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),1,"lo vendido se queda en el outbox");
-    assert!(MOTIVO_ANTERIOR_AL_LOG.contains("Contacta con soporte"));
+    // SYNC-32: y la base pasa a recuperarse de la nube, como tras un traslado.
+    assert!(*ctx.repo.anterior_a_la_nube.lock().unwrap());
+    assert!(MOTIVO_ANTERIOR_AL_LOG.contains("recupera el estado actual de la nube"));
 }
 
 #[tokio::test]

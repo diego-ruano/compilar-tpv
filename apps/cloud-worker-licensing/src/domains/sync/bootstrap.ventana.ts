@@ -40,12 +40,28 @@
 // La fase 1 es una sola respuesta y tiene un techo (`VOLCADO_MAX_BYTES`, `volcado.ts`). El mes de
 // un bar con mucho movimiento no cabe en él, y contestarle «no cabe» es dejarlo sin recuperación.
 // Así que los 30 días son lo que se intenta, no lo que se exige: si no caben se prueba con una
-// semana, con un día y con ninguno (`ANCHOS_DE_VENTANA`), y viaja la más ancha que cabe.
+// semana, con un día y con ninguno (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre
+// de caja, y viaja la más ancha que cabe.
 //
-// Lo que no se encoge nunca es lo que las tres reglas hacen entrar sin mirar la ventana: los
-// maestros, lo que sigue vivo, todo lo que hay desde el último cierre de caja no reabierto y el
-// último registro de facturación. Es lo imprescindible para volver a vender, y si ni eso cabe la
-// respuesta sí es «no cabe».
+// DO-02 · Y si ni lo que hay desde el último cierre cabe (un bar grande que lleva una semana sin
+// cerrar caja, o uno normal que lleva meses), se renuncia también a eso: la última candidata es
+// «ahora», sin estirar (`ventanasCandidatas`), y con ella viaja sólo lo imprescindible para
+// TRABAJAR, lo que las reglas hacen entrar sin mirar la ventana:
+//
+//   · los maestros enteros: la carta, el personal y sus roles, las mesas, los clientes, las
+//     reservas (todas: son maestros), los proveedores, los ajustes y las series de facturación;
+//   · lo que sigue vivo, con todo lo suyo: las comandas abiertas (sus líneas, sus cobros a cuenta,
+//     los detalles y los consumos), las notificaciones activas con sus lecturas, los pedidos en
+//     borrador con sus líneas y los fichajes sin cerrar con su día;
+//   · el último cierre de caja no reabierto, con su recuento: su hora es donde empieza el periodo
+//     abierto y su `Dejado` el fondo del arqueo siguiente;
+//   · el último registro de facturación, con su cobro y la comanda de ese cobro: el eslabón del
+//     que sigue la cadena.
+//
+// Lo demás, también lo que hay desde el último cierre, baja por la fase 2. El arqueo no se impide
+// mientras tanto: la Main sabe desde dónde llegó entero (`ventana_desde`) y, al cerrar la caja,
+// avisa si lo del periodo abierto aún no ha bajado (`caja_por_bajar`, `caja.md`). Si ni lo
+// imprescindible cabe, la respuesta sí es «no cabe».
 //
 // A la Main le da igual el ancho: restaura lo que llega y rellena lo demás por la fase 2, que
 // recorre cada tabla transaccional entera, desde el principio (`parcial`, `backfill`). Con una
@@ -82,7 +98,9 @@ export const VENTANA_DIAS = 30;
 
 /**
  * Los anchos de ventana que se prueban, en días y del más ancho al más estrecho: viaja el primero
- * que cabe en los topes de la fase 1. El último, cero, deja sólo lo imprescindible (ver arriba).
+ * que cabe en los topes de la fase 1. Todos se estiran hasta el último cierre de caja, así que el
+ * último, cero, deja lo que hay desde él. Detrás va «ahora» sin estirar, que deja sólo lo
+ * imprescindible para trabajar (`ventanasCandidatas`, DO-02).
  *
  * Son cuatro escalones y no una búsqueda del día exacto porque medir uno cuesta un `COUNT` por
  * tabla transaccional sobre esa ventana, y lo que se gana afinando es poco: lo que no entra ahora
@@ -419,12 +437,15 @@ function prelude(t: Transaccional): string {
 
 /**
  * Los límites inferiores de ventana que se prueban, del más ancho al imprescindible y sin
- * repetir: `MIN(ahora - días, último cierre no reabierto)` por cada ancho de `ANCHOS_DE_VENTANA`.
+ * repetir: `MIN(ahora - días, último cierre no reabierto)` por cada ancho de `ANCHOS_DE_VENTANA`,
+ * y detrás «ahora».
  *
- * El primero es la ventana de siempre, los 30 días estirados hasta el último cierre. El último es
- * el propio cierre (o «ahora», si el negocio nunca ha cerrado caja): con él sólo entra lo que no
- * depende de la ventana. Un cierre de hace más de 30 días deja una sola candidata, porque todas
- * se estiran hasta él.
+ * El primero es la ventana de siempre, los 30 días estirados hasta el último cierre. La de cero
+ * días es el propio cierre: con ella entra todo lo que hay desde él. La última es «ahora» sin
+ * estirar (DO-02): con ella sólo entra lo que no depende de la ventana, lo imprescindible para
+ * trabajar, y lo que hay desde el cierre baja por la fase 2. Sin ningún cierre, la de cero días ya
+ * es «ahora». Un cierre de hace más de 30 días deja dos candidatas: él, porque todas las demás se
+ * estiran hasta él, y «ahora».
  *
  * El reloj es el del EQUIPO (cabecera `X-Client-Now`), no el del servidor, por lo mismo que en el
  * resto del sistema: las fechas de esta base son hora local en texto, y compararlas contra un UTC
@@ -436,11 +457,18 @@ export function ventanasCandidatas(clientNow: unknown, ultimoCierre: string | nu
 	const ahora = parseClientNow(clientNow) ?? serverNowFixed();
 	const ahoraMs = new Date(ahora.replace(" ", "T") + "Z").getTime();
 
+	const haceDias = (dias: number) =>
+		new Date(ahoraMs - dias * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+
 	const candidatas: string[] = [];
-	for (const dias of ANCHOS_DE_VENTANA) {
-		const porFecha = new Date(ahoraMs - dias * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
-		const desde = ultimoCierre && ultimoCierre < porFecha ? ultimoCierre : porFecha;
+	const anadir = (desde: string) => {
 		if (candidatas[candidatas.length - 1] !== desde) candidatas.push(desde);
+	};
+	for (const dias of ANCHOS_DE_VENTANA) {
+		const porFecha = haceDias(dias);
+		anadir(ultimoCierre && ultimoCierre < porFecha ? ultimoCierre : porFecha);
 	}
+	// DO-02: si ni lo que hay desde el último cierre cabe, lo imprescindible para trabajar.
+	anadir(haceDias(0));
 	return candidatas;
 }

@@ -1,8 +1,12 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 // src/features/configuracion/sections/Conectividad.tsx
 import React from "react";
 
 import type { JobStatus, SyncHealth } from "@tpv/contracts";
+
+import { Button } from "../../../shared/ui";
+import { useToast } from "../../../shared/toast";
+import { useAuth } from "../../../shared/stores/useAuth";
 
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
@@ -57,9 +61,10 @@ const ESTADO_TEXTO: Record<
 		tono: "neutro",
 	},
 	// AUD-19: la base de este equipo es anterior a lo que guarda la nube. No se arregla reconectando.
+	// SYNC-32: el TPV pasa a la pantalla de recuperación, que trae el estado actual de la nube.
 	detenida: {
 		titulo: "Sincronización detenida",
-		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Este TPV sigue funcionando y guarda todo lo que hagas, pero no lo sube ni recibe nada; los Handy no pueden trabajar. Esto no se arregla solo.",
+		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Hay que recuperar el estado actual de la nube desde la pantalla de recuperación; lo que este equipo tenía sin subir se guarda aparte.",
 		tono: "malo",
 	},
 };
@@ -175,7 +180,7 @@ function HealthStat({
 
 // SYNC-14: panel de salud de la sincronización (profundidad de outbox, checkpoint y ops en
 // cuarentena/fallando). Hace un fallo de convergencia VISIBLE en vez de invisible.
-function SaludSync({ darkMode }: { darkMode: boolean }) {
+export function SaludSync({ darkMode }: { darkMode: boolean }) {
 	const [health, setHealth] = React.useState<SyncHealth | null>(null);
 	const [err, setErr] = React.useState<string | null>(null);
 
@@ -241,11 +246,15 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 
 			{health && health.quarantined > 0 && (
 				<div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-					Hay {health.quarantined} operación(es) que no se pudieron aplicar tras varios
-					intentos y se han saltado para no bloquear la sincronización del resto. Los datos de
-					este dispositivo pueden diferir en esos registros; contacta con soporte.
+					Hay {health.quarantined} cambio(s) de la nube que no se pudieron aplicar en este TPV
+					tras varios intentos y se han apartado para no frenar al resto. Los datos de este TPV
+					pueden diferir en esos registros. Normalmente se arreglan solos en la comprobación
+					diaria con la nube; si alguno no puede, aquí se ofrece traer el estado de la nube.
 				</div>
 			)}
+
+			{/* SYNC-36: lo que lleva una semana sin poder salir solo, con la salida. */}
+			{health && health.bajada_atascada > 0 && <RecuperarDeLaNube health={health} />}
 
 			{/*
 			  SYNC-20 · el mismo aviso para la dirección contraria, que hasta ahora no tenía ninguno.
@@ -266,6 +275,91 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 	);
 }
 
+/**
+ * SYNC-36 · Un cambio hecho desde una Handy que este TPV no ha podido aplicar y que no puede salir
+ * solo de su cuarentena: lleva una semana así, y mientras tanto el contraste diario con la nube no
+ * repara nada. Lo arregla traer el estado actual de la nube, que sustituye la base de este TPV.
+ *
+ * Sólo se ofrece cuando es seguro: sin nada de este TPV por subir (ni pendiente ni rechazado por la
+ * nube), que se perdería al sustituir la base; el backend lo vuelve a comprobar dentro de la misma
+ * transacción que sustituye. Pide confirmación, porque mientras se trae no se puede vender. Al
+ * terminar se cierra la sesión y la pantalla de recuperación enseña cómo va, como cualquier otra
+ * recuperación.
+ */
+function RecuperarDeLaNube({ health }: { health: SyncHealth }) {
+	const toast = useToast();
+	const [confirmando, setConfirmando] = React.useState(false);
+	const [trayendo, setTrayendo] = React.useState(false);
+	const porSubir = health.outbox_pending;
+	const rechazados = health.subida_en_cuarentena;
+
+	async function traer() {
+		setTrayendo(true);
+		try {
+			await commands.syncBootstrapDesdeNube();
+		} catch (e) {
+			// Se queda como estaba (la base no se ha tocado): se dice por qué y se puede reintentar.
+			toast.error("No se pudo traer el estado de la nube", toAppError(e).message);
+			setTrayendo(false);
+			setConfirmando(false);
+			return;
+		}
+		// La base ya es la de la nube y queda por comprobar contra ella: lo hace la pantalla de
+		// recuperación, sin sesión, como tras cualquier otra recuperación.
+		useEstadoSync.getState().iniciarReconciliacion();
+		useAuth.getState().logout();
+	}
+
+	return (
+		<div className="mt-3 grid gap-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-fg">
+			<div>
+				<p className="font-semibold text-danger">
+					Un cambio hecho desde una Handy no se ha podido aplicar en este TPV
+				</p>
+				<p className="mt-1">
+					Hace más de una semana que no se puede aplicar, y mientras tanto las comprobaciones
+					diarias con la nube están en pausa. Se arregla trayendo el estado actual de la nube:
+					los datos de este TPV se sustituyen por los de la nube, que ya tiene ese cambio.
+				</p>
+			</div>
+
+			{porSubir > 0 ? (
+				<p>
+					Antes tiene que subir a la nube lo que este TPV tiene pendiente ({porSubir}). Espera a
+					que se sincronice y vuelve aquí.
+				</p>
+			) : rechazados > 0 ? (
+				<p>
+					Este TPV tiene {rechazados} cambio(s) que la nube no ha aceptado y que sólo están aquí:
+					traer la nube los borraría. Contacta con soporte.
+				</p>
+			) : confirmando ? (
+				<div className="grid gap-2">
+					<p>
+						Durante unos minutos no se podrá vender en este TPV ni en las Handy: se cierra la
+						sesión, se traen los datos de la nube y se comprueban. No se pierde nada, porque
+						este TPV no tiene nada pendiente de subir. Hace falta conexión a internet.
+					</p>
+					<div className="flex flex-wrap gap-2">
+						<Button variant="danger" disabled={trayendo} onClick={() => void traer()}>
+							{trayendo ? "Trayendo los datos…" : "Sí, recuperar ahora"}
+						</Button>
+						<Button variant="secondary" disabled={trayendo} onClick={() => setConfirmando(false)}>
+							Cancelar
+						</Button>
+					</div>
+				</div>
+			) : (
+				<div>
+					<Button variant="secondary" onClick={() => setConfirmando(true)}>
+						Recuperar el estado actual de la nube
+					</Button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 /** Nombre legible de cada job (el `nombre` que llega de Rust es el identificador estable). */
 const JOB_ETIQUETA: Record<string, string> = {
 	licencia: "Comprobación de licencia",
@@ -282,6 +376,7 @@ const JOB_ETIQUETA: Record<string, string> = {
 	backfill_historico: "Descarga del histórico pendiente",
 	interruptores: "Pausas de emergencia de soporte",
 	verificar_nube: "Contraste con la nube",
+	bajada_atascada: "Aviso de cambios de la nube sin aplicar",
 };
 
 function cadaTexto(secs: number): string {

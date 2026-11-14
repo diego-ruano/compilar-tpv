@@ -487,14 +487,17 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   cambios, y si pasa del `since`, lo de en medio ya no está. Es exacto: no depende de que `Seq` sea
   contiguo ni de que la purga quite un prefijo (no siempre lo hace: ver la purga, abajo). La Main
   se para entonces sin aplicar ni subir nada ni mover el checkpoint, así que `verificar_nube`
-  tampoco toca la nube, y el cobro local sigue.
+  tampoco toca la nube.
   - En la recuperación es un error, «Esta copia es anterior a lo que guarda la nube»
     ([recuperacion.md](recuperacion.md#reconciliar-y-desbloquear)).
   - En la sesión normal, a la que sólo se llega así con una base cambiada por fuera de la
-    aplicación, la sesión acaba en `FinDeSesion::AnteriorAlLog`: el motor publica `detenida`, que
-    Conectividad explica, y no vuelve a conectar hasta que se pida reintentar (lo pide la interfaz
-    al volver la red o el foco) o hasta el siguiente arranque. Los datos y el outbox se quedan como
-    están. Volver a la nube desde ahí está pendiente ([SYNC-32](../pendientes.md#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube)).
+    aplicación, la sesión acaba en `FinDeSesion::AnteriorAlLog` y se trata como un traslado de
+    licencia (SYNC-32): el caso de uso deja la marca `AppData/anterior-a-la-nube` y cierra las
+    escrituras de negocio, el motor publica `detenida`, y la interfaz relee el estado de la
+    recuperación (`OlderThanCloud`), cierra la sesión y lleva a la pantalla de recuperación, que
+    sólo ofrece traer el estado actual de la nube. Lo que el outbox tuviera no sube: al traer la
+    nube se guarda aparte con la base entera
+    ([recuperacion.md](recuperacion.md#una-base-anterior-a-lo-que-guarda-la-nube-sync-32)).
   - Sin `purgadoHasta` (un worker anterior), toda recuperación falla cerrada, también la que sigue a
     traer la nube, y la sesión normal sigue: el worker se despliega antes.
 - **La bajada va estrictamente en orden de `Seq` (AUD-18)**: nunca se aplica un cambio posterior antes
@@ -776,6 +779,22 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   vuelven a mirar 20 por pasada, y las que no caben tampoco se marcan; de las cuarentenas se leen
   10.000, y de lo apartado de la subida, 1.000 operaciones (con más se da todo por chocado).
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
+- **Lo que no puede salir solo se avisa.** Una cuarentena de filas inciertas o dudosas (o sin
+  `Filas_Json`) no la trae nunca la salida, y mientras esté ahí el contraste no repara. Si lleva una
+  semana apartada (`BAJADA_ATASCADA_TRAS_MS`, desde su primer fallo), cuenta en el panel de salud
+  (`SyncHealth::bajada_atascada`, `cuarentenas_bajada::atascadas`) y el job `bajada_atascada` avisa
+  a los administradores (`use_cases::sync::avisar_bajada_atascada`): una notificación con clave, que
+  no se repite mientras siga activa y se cierra sola cuando ya no queda ninguna, y que no bloquea
+  nada. Su acción lleva a Configuración → Conectividad, que lo explica y ofrece «Recuperar el
+  estado actual de la nube» sólo si es seguro: sin nada de este equipo por subir ni apartado de la
+  subida (se perdería al sustituir la base; la guardia de `bootstrap_restaurar` lo vuelve a
+  comprobar dentro de su transacción). Pide confirmación (durante unos minutos no se vende ni en el
+  TPV ni en las Handy), sólo la puede pedir un administrador, y después cierra la sesión y sigue
+  como cualquier otra recuperación desde la nube, que vacía las cuarentenas
+  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Mientras se trae, el motor
+  de réplica está parado (`SyncNativo::pausar_hasta_sin_sesion`, que espera a que acabe la sesión
+  en marcha, también la que empezó recuperando y sigue en vivo; y de una en una): una sesión viva que aplicara un cambio después de restaurar llevaría el checkpoint
+  más allá de los cambios que la foto no trae y esa sesión había aplicado sobre la base de antes.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el

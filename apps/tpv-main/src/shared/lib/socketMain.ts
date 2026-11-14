@@ -33,6 +33,15 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
         revision = foto.revision;
         const store = useEstadoSync.getState();
         store.marcar(foto.estado as EstadoSync, foto.detalle);
+        // SYNC-32: la sesión se ha detenido porque esta base es anterior a lo que guarda la nube, y
+        // el backend la ha pasado a recuperarse de la nube. La pantalla lo sabe releyendo el estado.
+        if (foto.estado === "detenida") {
+            commands.recoveryStatus()
+                .then((r) => {
+                    if (!detenido) useEstadoSync.getState().configurarRecuperacion(r.state);
+                })
+                .catch((e: unknown) => captureException(e, { fase: "releer_recuperacion" }));
+        }
         if (foto.fase_recuperacion === "completada") store.finalizarRecuperacion();
         else if (foto.fase_recuperacion !== "inactiva") {
             useEstadoSync.setState({ faseRecuperacion: foto.fase_recuperacion as FaseRecuperacion, fallosRecuperacion: foto.fallos_recuperacion, errorRecuperacion: foto.detalle });

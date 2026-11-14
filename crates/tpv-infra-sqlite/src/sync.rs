@@ -1196,6 +1196,10 @@ impl SyncRepository for SqliteSyncRepository {
         crate::cuarentenas_bajada::vaciar(&self.db, antes_de_ms).await
     }
 
+    async fn marcar_anterior_a_la_nube(&self) -> AppResult<()> {
+        crate::recovery::marcar_anterior_a_la_nube(&self.db)
+    }
+
     async fn health(&self) -> AppResult<SyncHealth> {
         let r = self.db.read().await;
         let conn = r.conn();
@@ -1234,6 +1238,12 @@ impl SyncRepository for SqliteSyncRepository {
             "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0 AND Intentos > 0;",
         )
         .await?;
+        // SYNC-36: las de la bajada que no pueden salir solas y llevan una semana apartadas.
+        let bajada_atascada = crate::cuarentenas_bajada::atascadas(
+            conn,
+            now_ms() - tpv_application::use_cases::sync::BAJADA_ATASCADA_TRAS_MS,
+        )
+        .await?;
 
         Ok(SyncHealth {
             outbox_pending,
@@ -1242,6 +1252,7 @@ impl SyncRepository for SqliteSyncRepository {
             failing,
             subida_fallando,
             subida_en_cuarentena,
+            bajada_atascada,
         })
     }
 
@@ -1254,21 +1265,33 @@ impl SyncRepository for SqliteSyncRepository {
         // tener operaciones que nunca subieron) y se reemplaza por la de la nube, outbox incluido.
         // La copia va ANTES de tomar el escritor: `VACUUM INTO` usa el pool de lectura.
         let traslado = crate::recovery::hay_traslado_pendiente(self.db.carpeta());
-        if traslado {
-            let copia = crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?;
-            tracing::info!(target: "tpv::sync", copia = %copia.display(), "base de antes del traslado guardada");
-        }
         // AUD-19: lo mismo con una copia restaurada que todavía no se ha reconciliado (la que se
         // rechaza por anterior a lo que guarda la nube, o cualquier otra que no converge). Su outbox
         // es de antes: lo que el equipo de entonces ya subió volvería a aplicarse en cuanto caducara
         // su `Applied_Operations`, y un `UPDATE` viejo devolvería un PIN o un rol ya cambiados. Se
         // guarda la base entera, con ese outbox, y no se sube.
-        let copia_sin_reconciliar = !traslado && reconciliacion_pendiente(&self.db).await?;
-        if copia_sin_reconciliar {
-            let copia = crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?;
-            tracing::info!(target: "tpv::sync", copia = %copia.display(), "copia sin reconciliar guardada antes de traer la nube");
+        //
+        // SYNC-32: y con una base que se cambió por fuera del programa y es anterior a lo que la nube
+        // ya purgó. Su outbox mezcla lo vendido desde el cambio de base con lo que la base vieja
+        // tenía pendiente, que el equipo de entonces ya subió: como en un traslado, se guarda aparte
+        // con la base entera y no se sube.
+        let anterior_a_la_nube = !traslado && crate::recovery::hay_base_anterior_a_la_nube(self.db.carpeta());
+        let copia_sin_reconciliar =
+            !traslado && !anterior_a_la_nube && reconciliacion_pendiente(&self.db).await?;
+        let apartar_outbox = traslado || anterior_a_la_nube || copia_sin_reconciliar;
+        if apartar_outbox {
+            // Codex: en los tres casos las escrituras de negocio ya están cerradas, pero una que pasó
+            // el cerrojo antes de cerrarlo puede seguir en su transacción. Tomar el escritor y
+            // soltarlo la deja terminar antes de la copia: si no, la copia no la tendría y la
+            // transacción de abajo la borraría del outbox. Después no entra ninguna.
+            drop(self.db.write().await);
+            let copia = if traslado {
+                crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?
+            } else {
+                crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?
+            };
+            tracing::info!(target: "tpv::sync", copia = %copia.display(), traslado, anterior_a_la_nube, "base de antes guardada antes de traer la nube");
         }
-        let apartar_outbox = traslado || copia_sin_reconciliar;
 
         let w = self.db.write().await;
         let conn = w.raw();
@@ -1358,7 +1381,7 @@ impl SyncRepository for SqliteSyncRepository {
                     None => 0,
                 }
             };
-            if pendientes > 0 && !reconciliando && !sin_usuarios && !traslado {
+            if pendientes > 0 && !reconciliando && !sin_usuarios && !apartar_outbox {
                 return Err(AppError::conflict(format!(
                     "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
@@ -1474,13 +1497,21 @@ impl SyncRepository for SqliteSyncRepository {
             } else {
                 snapshot.backfill.clone()
             };
+            // DO-02: desde dónde llegó entera cada una. El cierre de caja lo compara con su periodo
+            // (`caja_por_bajar`), así que sólo se guarda un instante de verdad; otra cosa es «no se
+            // sabe», que avisa.
+            let ventana_desde = snapshot
+                .ventana_desde
+                .as_deref()
+                .filter(|d| tpv_domain::fechas::fecha_de_instante(d).is_some())
+                .map_or(Value::Null, |d| Value::Text(d.to_string()));
             for (i, nombre) in orden_backfill.iter().enumerate() {
                 if !identificador_simple(nombre) || no_es_tabla_de_negocio(nombre) {
                     continue;
                 }
                 conn.execute(
-                    "INSERT OR REPLACE INTO _Backfill_Historico (Tabla, Orden) VALUES (?1, ?2);",
-                    vec![Value::Text(nombre.clone()), Value::Integer(i as i64)],
+                    "INSERT OR REPLACE INTO _Backfill_Historico (Tabla, Orden, Ventana_Desde) VALUES (?1, ?2, ?3);",
+                    vec![Value::Text(nombre.clone()), Value::Integer(i as i64), ventana_desde.clone()],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1513,6 +1544,12 @@ impl SyncRepository for SqliteSyncRepository {
                     if let Err(e) = crate::recovery::quitar_marca_traslado(self.db.carpeta()) {
                         tracing::warn!(target: "tpv::sync", error = %e, "no se pudo quitar la marca de traslado");
                     }
+                }
+                // SYNC-32: lo mismo, y por lo mismo, con la de una base anterior a la nube. Se quita
+                // aunque esta reconstrucción no la viera (una marca puesta mientras bajaba el
+                // volcado): la base que queda es la de la nube.
+                if let Err(e) = crate::recovery::quitar_marca_anterior_a_la_nube(self.db.carpeta()) {
+                    tracing::warn!(target: "tpv::sync", error = %e, "no se pudo quitar la marca de base anterior a la nube");
                 }
                 Ok(BootstrapResultado {
                     seq: snapshot.seq,
@@ -2211,6 +2248,7 @@ mod tests_bootstrap {
                 total_filas: 1,
                 tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2262,6 +2300,7 @@ mod tests_bootstrap {
                 },
             ],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2291,6 +2330,7 @@ mod tests_bootstrap {
             total_filas: 0,
             tablas: vec![tabla("Zonas", vec![])],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2327,6 +2367,7 @@ mod tests_bootstrap {
                     ],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2351,6 +2392,7 @@ mod tests_bootstrap {
                     tabla("Tabla_Del_Futuro", vec![vec![json!("x"), json!("y")]]),
                 ],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2375,6 +2417,7 @@ mod tests_bootstrap {
                     tabla("Zonas\"; DROP TABLE Zonas; --", vec![]),
                 ],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2402,6 +2445,7 @@ mod tests_bootstrap {
                 total_filas: n as i64,
                 tablas: vec![tabla("Zonas", filas)],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2448,6 +2492,7 @@ mod tests_bootstrap {
                 total_filas: 0,
                 tablas: vec![tabla("Zonas", vec![])],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2486,6 +2531,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("Terraza")]],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2546,6 +2592,7 @@ mod tests_bootstrap {
             total_filas: 1,
             tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Terraza")]])],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2595,6 +2642,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("A")], vec![json!("z1"), json!("B")]],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2616,6 +2664,7 @@ mod tests_bootstrap {
             total_filas: 1,
             tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
             backfill: vec![],
+            ventana_desde: None,
         };
 
         repo.bootstrap_restaurar(volcado(), "negocio-a").await.unwrap();
@@ -2675,6 +2724,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Zonas".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2742,6 +2792,7 @@ mod tests_backfill {
             // Padres primero: es lo único que hace viable la fase 2, porque cada página es su
             // propia transacción y `defer_foreign_keys` no cubre entre transacciones.
             backfill: vec!["Comandas".into(), "Detalle_Comanda".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2759,6 +2810,54 @@ mod tests_backfill {
         assert_eq!(e.tabla_actual.as_deref(), Some("Comandas"));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// DO-02: la cola guarda desde dónde trajo entera cada tabla la fase 1 (lo mira el cierre de
+    /// caja), y sólo si es un instante de verdad: otra cosa queda como «no se sabe».
+    #[tokio::test]
+    async fn la_cola_guarda_desde_donde_llego_entera_cada_tabla() {
+        for (ventana, guardada) in [
+            (Some("2026-05-14 12:00:00"), Some("2026-05-14 12:00:00")),
+            (Some("2026-05-14 12:00:00 OR 1"), None),
+            (None, None),
+        ] {
+            let (repo, db, dir) = repo_temporal().await;
+            repo.bootstrap_restaurar(BootstrapSnapshot {
+                seq: 1,
+                total_filas: 0,
+                tablas: vec![BootstrapTabla {
+                    nombre: "Comandas".into(),
+                    columnas: vec!["ID_Comanda".into()],
+                    filas: vec![],
+                    parcial: true,
+                }],
+                backfill: vec!["Comandas".into(), "Pagos".into()],
+                ventana_desde: ventana.map(str::to_string),
+            }, "negocio-de-prueba")
+            .await
+            .unwrap();
+
+            let r = db.read().await;
+            let mut filas = r
+                .conn()
+                .query("SELECT Tabla, Ventana_Desde FROM _Backfill_Historico ORDER BY Orden;", ())
+                .await
+                .unwrap();
+            let mut vistas = Vec::new();
+            while let Some(f) = filas.next().await.unwrap() {
+                let tabla = match f.get_value(0).unwrap() { Value::Text(t) => t, otro => panic!("{otro:?}") };
+                let desde = match f.get_value(1).unwrap() { Value::Text(t) => Some(t), _ => None };
+                vistas.push((tabla, desde));
+            }
+            let esperado = guardada.map(str::to_string);
+            assert_eq!(
+                vistas,
+                vec![("Comandas".to_string(), esperado.clone()), ("Pagos".to_string(), esperado)],
+                "ventana {ventana:?}"
+            );
+            drop(r);
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// Lo que no es de negocio no viaja: lo que empieza por `_` es estado de este equipo (aquí, el
@@ -2793,6 +2892,7 @@ mod tests_backfill {
                     BootstrapTabla { nombre: "Sync_Changes".into(), columnas: columnas_del_log(), filas: vec![cambio(1)], parcial: true },
                 ],
                 backfill: vec!["_Estad_Dias_Sucios".into(), "Sync_Changes".into()],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2989,6 +3089,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Cierres_Caja".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -3064,6 +3165,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Detalle_Comanda".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -3144,6 +3246,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Tabla_Del_Futuro".into(), "Zonas".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();

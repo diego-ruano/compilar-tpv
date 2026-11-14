@@ -54,7 +54,8 @@ export const MAX_FALLOS_RECUPERACION = 5;
  * - `rechazado`: el worker dice que no (licencia caducada/anulada, dispositivo desplazado).
  *   Reintentar cada pocos segundos no lo arregla, así que se espacia mucho.
  * - `detenida` (AUD-19): a los datos de este equipo les falta un tramo que la nube ya no guarda.
- *   No se reintenta sola: espera a que se pida o al siguiente arranque. Se sigue vendiendo.
+ *   No se reintenta sola. SYNC-32: la base pasa a recuperarse de la nube (`anteriorALaNube`), y al
+ *   verlo la pantalla relee el estado de la recuperación (`socketMain.ts`).
  */
 export type EstadoSync =
 	| "pausada"
@@ -89,6 +90,12 @@ type EstadoSyncStore = {
 	 * es de antes), así que la pantalla de recuperación sólo ofrece la nube.
 	 */
 	trasladoPendiente: boolean;
+	/**
+	 * SYNC-32: la base de este equipo se cambió por fuera del programa y es anterior a lo que guarda
+	 * la nube. Como en un traslado, sólo se puede traer el estado actual de la nube; lo que tuviera
+	 * pendiente se guarda aparte al traerlo.
+	 */
+	anteriorALaNube: boolean;
 	reconciliacionPendiente: boolean;
 	faseRecuperacion: FaseRecuperacion;
 	errorRecuperacion: string | null;
@@ -123,8 +130,10 @@ type EstadoSyncStore = {
 /** Lo que el estado de recuperación de la base dice sobre el socket y la pantalla. */
 function segunRecuperacion(state: RecoveryState) {
 	return {
-		datosPerdidos: state === "data_missing" || state === "transfer_pending",
+		datosPerdidos:
+			state === "data_missing" || state === "transfer_pending" || state === "older_than_cloud",
 		trasladoPendiente: state === "transfer_pending",
+		anteriorALaNube: state === "older_than_cloud",
 		reconciliacionPendiente: state === "reconciliation_pending",
 		faseRecuperacion: (state === "reconciliation_pending"
 			? "esperando_conexion"
@@ -138,6 +147,7 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	hidratada: false,
 	datosPerdidos: false,
 	trasladoPendiente: false,
+	anteriorALaNube: false,
 	reconciliacionPendiente: false,
 	faseRecuperacion: "inactiva",
 	errorRecuperacion: null,
@@ -199,8 +209,9 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	iniciarReconciliacion: () =>
 		set((s) => ({
 			datosPerdidos: false,
-			// La base ya es la de la nube: el traslado está resuelto.
+			// La base ya es la de la nube: el traslado está resuelto, y la base anterior, sustituida.
 			trasladoPendiente: false,
+			anteriorALaNube: false,
 			reconciliacionPendiente: true,
 			faseRecuperacion: "esperando_conexion",
 			errorRecuperacion: null,

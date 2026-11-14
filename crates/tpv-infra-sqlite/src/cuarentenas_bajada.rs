@@ -86,6 +86,36 @@ pub(crate) const MAX_FILAS_POR_PASADA: usize = 5_000;
 /// Claves por petición a `/v1/sync/verificar/por-clave`, como el contraste.
 const CLAVES_POR_PETICION: usize = 500;
 
+/* ===== Las que no pueden salir solas ===== */
+
+/// Cuántas cuarentenas de bajada no pueden salir solas y llevan apartadas desde antes de
+/// `antes_de_ms`: las de filas inciertas o dudosas (o sin `Filas_Json`, que se lee como incierta),
+/// que [`resolver`] no trae nunca por estado. Las demás salen en la pasada del contraste en que
+/// desaparece lo que las frena. Lo cuenta el panel de salud (`SyncHealth::bajada_atascada`), y con
+/// ello se avisa al administrador y se le ofrece traer el estado actual de la nube.
+///
+/// Se leen como mucho las `MAX_CUARENTENAS_LEIDAS` más antiguas, como en la salida.
+pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<i64> {
+    let mut filas = conn
+        .query(
+            "SELECT Filas_Json FROM _Sync_Failed WHERE Quarantined = 1 AND First_Failed_At_Ms <= ?1 ORDER BY First_Failed_At_Ms LIMIT ?2;",
+            vec![Value::Integer(antes_de_ms), Value::Integer(MAX_CUARENTENAS_LEIDAS as i64)],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut n = 0;
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        let tocadas = match f.get_value(0).map_err(db_err)? {
+            Value::Text(t) => Tocadas::de_json(&t),
+            _ => Tocadas::incierta_de_todo(Vec::new()),
+        };
+        if tocadas.incierto || tocadas.dudosa {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /* ===== Los datos caducan ===== */
 
 /// Cuántas se vacían de una vez, con el escritor cogido. Entre tanda y tanda se suelta: de una que se

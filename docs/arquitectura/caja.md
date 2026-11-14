@@ -88,13 +88,17 @@ retirado  = contado − dejado
 - **Motivo obligatorio** si `|descuadre|` supera `Business_Settings.Umbral_Descuadre` (céntimos, 500
   por defecto); un umbral ≤ 0 lo pide siempre que haya descuadre. No se puede dejar más de lo contado.
 - **Las comandas abiertas se avisan y no bloquean.**
-- **El histórico que aún baja tras una recuperación se avisa en el primer cierre y no bloquea**
-  (DO-02, `historico_pendiente`). Un negocio que nunca ha cerrado la caja no tiene periodo que
-  proteger, así que la recuperación se le encoge hasta lo reciente y el resto baja por la fase 2
-  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)); su primer arqueo suma desde
-  el principio y sólo cuenta lo que haya bajado. El cierre lo dice con el progreso de la descarga y
-  deja cerrar igual. Con un cierre anterior no se avisa: la recuperación trae siempre todo lo que hay
-  desde el último cierre no reabierto.
+- **Lo del periodo que aún baja tras una recuperación se avisa y no bloquea** (DO-02,
+  `historico_pendiente`). Una recuperación desde la nube trae lo que hay desde el último cierre no
+  reabierto si cabe en la primera descarga; si no cabe, sólo lo imprescindible para trabajar, y lo
+  del periodo abierto baja después por la fase 2
+  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Mientras falte algo de lo
+  que suma el arqueo (los cobros y los gastos desde el último cierre o, en el primero, desde el
+  principio), sólo cuenta lo que haya bajado: el cierre lo dice con el progreso de la descarga y deja
+  cerrar igual. Lo decide `caja_por_bajar`: `Pagos` o `Cuentas_Gastos` sin completar en
+  `_Backfill_Historico` y un periodo que empieza antes de lo que trajo entero la primera descarga
+  (`Ventana_Desde`), o sin saberlo. Con lo del periodo ya aquí no se avisa, aunque siga bajando lo
+  anterior; tampoco en un cierre hecho después de recuperar.
 - Las **anulaciones del periodo** (por `Anulado_En`, de las dos clases) se enseñan al lado, como dato
   informativo fuera del cálculo: «3 anulaciones por 40 €» junto a un descuadre de 40 € se explica solo.
 

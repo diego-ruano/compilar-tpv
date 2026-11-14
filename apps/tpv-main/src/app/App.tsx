@@ -31,6 +31,13 @@ function AppInner() {
     const navegacion = useNavigation();
     const marcarDatosPerdidos = useEstadoSync((s) => s.marcarDatosPerdidos);
     const configurarRecuperacion = useEstadoSync((s) => s.configurarRecuperacion);
+    // SYNC-32: la réplica ha visto que esta base es anterior a lo que guarda la nube y la ha pasado
+    // a recuperarse de ella; ya no admite escrituras. Se cierra la sesión y se va a la pantalla de
+    // recuperación, que lo explica (el efecto de abajo la elige al quedar sin sesión, o al cambiar).
+    const anteriorALaNube = useEstadoSync((s) => s.anteriorALaNube);
+    useEffect(() => {
+        if (anteriorALaNube && role) useAuth.getState().logout();
+    }, [anteriorALaNube, role]);
 
     // Auto-logout por inactividad (solo actúa con sesión iniciada).
     useInactivityLogout();
@@ -74,7 +81,7 @@ function AppInner() {
         return () => {
             vivo = false;
         };
-    }, [role, configurarRecuperacion, marcarDatosPerdidos]);
+    }, [role, anteriorALaNube, configurarRecuperacion, marcarDatosPerdidos]);
 
     if (!role) {
         if (primeraPantalla === null) return null;

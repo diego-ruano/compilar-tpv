@@ -76,6 +76,11 @@ pub struct SyncHealth {
     /// SYNC-20 · dirección SUBIDA: operaciones APARTADAS. La nube no las tiene y no va a tenerlas
     /// sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
     pub subida_en_cuarentena: i64,
+    /// SYNC-36 · De las de `quarantined`, las que no pueden salir solas (las filas que tocan son
+    /// inciertas o dudosas) y llevan una semana apartadas (`BAJADA_ATASCADA_TRAS_MS`). Mientras haya
+    /// alguna, el contraste diario no repara; lo arregla traer el estado actual de la nube, y se
+    /// avisa al administrador.
+    pub bajada_atascada: i64,
 }
 
 /// Lo que el drenado necesita saber tras un `apply_ack` fallido (SYNC-20): si esta operación se
@@ -123,6 +128,11 @@ pub struct BootstrapSnapshot {
     /// decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
     /// así que una hija insertada antes que su padre no tiene dónde apoyarse.
     pub backfill: Vec<String>,
+    /// DO-02: desde dónde llega entera cada tabla recortada (`AAAA-MM-DD HH:MM:SS`, hora del
+    /// equipo). Lo anterior baja por la fase 2. Se guarda con la cola del backfill: con él, el cierre
+    /// de caja sabe si lo del periodo abierto ya está aquí. `None` si el worker no lo dice.
+    #[serde(default)]
+    pub ventana_desde: Option<String>,
 }
 
 /* ===== Fase 2 (SYNC-19): el histórico que la ventana dejó fuera ===== */

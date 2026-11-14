@@ -108,9 +108,10 @@ pub trait CierreCajaRepository: Send + Sync {
     async fn comandas_abiertas(&self) -> AppResult<i64>;
 
     /// DO-02 · ¿Falta por bajar, del histórico de una recuperación, algo de lo que suma el arqueo
-    /// (los cobros y los gastos)? Lo sabe quien hace la suma. Con el resto del histórico aún
-    /// bajando, el recuento ya está completo y no hay nada que avisar.
-    async fn caja_por_bajar(&self) -> AppResult<bool>;
+    /// desde `desde` (los cobros y los gastos del periodo abierto; `None` = desde el principio)? Lo
+    /// sabe quien hace la suma. Con lo del periodo ya aquí, aunque el resto siga bajando, el recuento
+    /// está completo y no hay nada que avisar.
+    async fn caja_por_bajar(&self, desde: Option<&str>) -> AppResult<bool>;
 
     /// Cierra el periodo **en una sola transacción del escritor** (RI-58): lee el último cierre y
     /// los totales hasta la hora del cierre, deja que `armar` calcule y valide, y guarda el cierre

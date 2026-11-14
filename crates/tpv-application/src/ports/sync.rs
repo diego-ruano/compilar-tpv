@@ -238,6 +238,12 @@ pub trait SyncRepository: Send + Sync {
     /// cuarentena/fallando) para el panel de Configuración → Conectividad (SYNC-14).
     async fn health(&self) -> AppResult<SyncHealth>;
 
+    /// SYNC-32 · Esta base es anterior a lo que la nube ya ha purgado (`FinDeSesion::AnteriorAlLog`
+    /// en una sesión normal): se cambió por fuera del programa. Se trata como un traslado de
+    /// licencia: queda anotado fuera de la base, se cierran las escrituras de negocio y el equipo
+    /// pasa a recuperarse de la nube, que guarda antes aparte lo que hubiera pendiente.
+    async fn marcar_anterior_a_la_nube(&self) -> AppResult<()>;
+
     /// **Reconstruye** la BD local a partir de un volcado de la nube: vacía las tablas de negocio
     /// y las rellena con el estado recibido, dejando el checkpoint en el `seq` de la foto.
     ///

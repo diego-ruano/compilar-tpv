@@ -252,6 +252,12 @@ export type BootstrapSnapshot = {
 	 *  así que una hija insertada antes que su padre no tiene dónde apoyarse.
 	 */
 	backfill: string[],
+	/**
+	 *  DO-02: desde dónde llega entera cada tabla recortada (`AAAA-MM-DD HH:MM:SS`, hora del
+	 *  equipo). Lo anterior baja por la fase 2. Se guarda con la cola del backfill: con él, el cierre
+	 *  de caja sabe si lo del periodo abierto ya está aquí. `None` si el worker no lo dice.
+	 */
+	ventana_desde?: string | null,
 };
 
 /**
@@ -2602,7 +2608,13 @@ export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending" 
  *  del traslado, así que no se puede trabajar con ella: se reconstruye desde la nube, igual que
  *  un equipo nuevo. Sólo con la nube — una copia local también sería de antes.
  */
-"transfer_pending";
+"transfer_pending" |
+/**
+ *  SYNC-32 · La base de este equipo se cambió por fuera del programa y es anterior a lo que la
+ *  nube ya ha purgado: no se puede poner al día con ella. Como en un traslado, lo que tenía
+ *  pendiente se guarda aparte y se reconstruye desde la nube. Sólo con la nube.
+ */
+"older_than_cloud";
 
 export type RecoveryStatus = {
 	state: RecoveryState,
@@ -3120,6 +3132,13 @@ export type SyncHealth = {
 	 *  sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
 	 */
 	subida_en_cuarentena: number,
+	/**
+	 *  SYNC-36 · De las de `quarantined`, las que no pueden salir solas (las filas que tocan son
+	 *  inciertas o dudosas) y llevan una semana apartadas (`BAJADA_ATASCADA_TRAS_MS`). Mientras haya
+	 *  alguna, el contraste diario no repara; lo arregla traer el estado actual de la nube, y se
+	 *  avisa al administrador.
+	 */
+	bajada_atascada: number,
 };
 
 export type TableInput = {

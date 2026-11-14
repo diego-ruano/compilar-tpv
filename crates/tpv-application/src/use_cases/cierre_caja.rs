@@ -40,24 +40,25 @@ fn umbral_o_defecto(umbral_descuadre: Dinero) -> Dinero {
 /// periodo, cuánto se espera encontrar y si hay mesas sin cobrar.
 ///
 /// `historico` es cómo va la descarga del histórico tras una recuperación (SYNC-19), si se sabe.
-/// DO-02 («encoger y avisar»): un negocio que nunca ha cerrado la caja se recupera con lo
-/// reciente y el resto baja después, así que su primer arqueo, que suma desde el principio, sólo
-/// cuenta lo que haya bajado. No se le impide cerrar: se le avisa, con el progreso. Sólo mientras
-/// falten los cobros o los gastos (`caja_por_bajar`): con eso ya bajado, el recuento está completo
-/// aunque siga bajando el resto. Si no se puede saber, no se avisa: el arqueo no depende de esto.
+/// DO-02 («encoger y avisar»): una recuperación que no cabe entera trae primero lo imprescindible
+/// para trabajar y el resto baja después, también lo que hay desde el último cierre si no cabía.
+/// Mientras falte algo de lo que suma este arqueo (los cobros y los gastos del periodo abierto,
+/// `caja_por_bajar`), sólo cuenta lo que haya bajado. No se impide cerrar: se avisa, con el
+/// progreso. Con lo del periodo ya aquí, el recuento está completo aunque siga bajando el resto. Si
+/// no se puede saber, no se avisa: el arqueo no depende de esto.
 pub async fn preparar(
     repo: &dyn CierreCajaRepository,
     umbral_descuadre: Dinero,
     historico: Option<BackfillEstado>,
 ) -> AppResult<PreparacionCierreDto> {
     let ultimo = repo.ultimo_cierre().await?;
+    let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
     let historico_pendiente = match historico {
-        Some(h) if ultimo.is_none() && h.tablas_pendientes > 0 => {
-            repo.caja_por_bajar().await.unwrap_or(false).then_some(h)
+        Some(h) if h.tablas_pendientes > 0 => {
+            repo.caja_por_bajar(desde.as_deref()).await.unwrap_or(false).then_some(h)
         }
         _ => None,
     };
-    let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
     let fondo_inicial = ultimo.as_ref().map(|c| c.dejado).unwrap_or(Dinero::CERO);
 
     let totales = repo.totales_desde(desde.as_deref()).await?;

@@ -293,7 +293,8 @@ function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, 
 
 /**
  * Vuelca la ventana más ancha que cabe en los topes (`bootstrap.ventana.ts`: los 30 días si caben,
- * y si no una semana, un día o sólo lo imprescindible).
+ * y si no una semana, un día, lo que hay desde el último cierre de caja o sólo lo imprescindible
+ * para trabajar).
  *
  * Cada candidata se mide antes de volcarla: contar cuesta un agregado por tabla y evita leer un mes
  * entero para tirarlo. La medida de los bytes es una estimación, y puede fallar hacia los dos lados:
@@ -362,6 +363,9 @@ export async function volcarFase1(lector: Lector, clientNow: unknown, topes: Top
 	// vigila `syncBootstrap.test.ts` («el sobre lleva EXACTAMENTE los nombres que deserializa Rust»).
 	// A serde el orden de los campos le da igual: `seq` y `total_filas` van al final porque se
 	// saben al terminar de escribir las tablas.
+	//
+	// `ventana_desde` es desde dónde llega entera cada tabla recortada: la Main lo guarda con su cola
+	// de backfill y con él sabe si el arqueo del periodo abierto puede salir corto (DO-02).
 	const volcar = (desde: string) =>
 		lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
 			const e = new Escritor(topes.bytes);

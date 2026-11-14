@@ -246,10 +246,13 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 </Aviso>
                             ) : null}
 
-                            {/* DO-02: tras recuperar los datos de un negocio que nunca había cerrado
-                                la caja, lo antiguo baja después. Se avisa; no se impide cerrar. */}
+                            {/* DO-02: tras una recuperación que no cabía entera, lo de este periodo
+                                puede estar bajando todavía. Se avisa; no se impide cerrar. */}
                             {prep.historico_pendiente ? (
-                                <AvisoHistoricoPendiente historico={prep.historico_pendiente} />
+                                <AvisoHistoricoPendiente
+                                    historico={prep.historico_pendiente}
+                                    esPrimerCierre={prep.es_primer_cierre}
+                                />
                             ) : null}
 
                             <Aviso tono="info">
@@ -400,19 +403,26 @@ function Tarjeta({
 }
 
 /**
- * El primer cierre suma desde el principio, y tras una recuperación el histórico antiguo todavía
- * está bajando: lo cobrado en efectivo puede salir corto. Con el progreso, para que se pueda decidir
- * si esperar.
+ * DO-02: tras una recuperación, lo que suma este arqueo (desde el último cierre o, en el primero,
+ * desde el principio) puede estar todavía bajando: lo cobrado en efectivo puede salir corto. Con el
+ * progreso, para que se pueda decidir si esperar.
  */
-function AvisoHistoricoPendiente({ historico }: { historico: BackfillEstado }) {
+function AvisoHistoricoPendiente({
+    historico,
+    esPrimerCierre,
+}: {
+    historico: BackfillEstado;
+    esPrimerCierre: boolean;
+}) {
     const total = historico.tablas_pendientes + historico.tablas_completadas;
     const pct = total > 0 ? Math.round((historico.tablas_completadas / total) * 100) : 0;
     return (
         <Aviso>
             <strong>Todavía se está descargando el histórico de antes de recuperar los datos</strong> (
-            {historico.tablas_completadas} de {total} apartados · {pct} %). Como es el primer cierre,
-            «Cobrado en efectivo» suma desde el principio y sólo cuenta lo que ya ha bajado: el recuento
-            puede salir incompleto hasta que termine. Puedes cerrar igualmente o esperar a que acabe.
+            {historico.tablas_completadas} de {total} apartados · {pct} %). «Cobrado en efectivo» suma
+            desde {esPrimerCierre ? "el principio" : "el último cierre"} y sólo cuenta lo que ya ha
+            bajado: el recuento puede salir incompleto hasta que termine. Puedes cerrar igualmente o
+            esperar a que acabe.
         </Aviso>
     );
 }
