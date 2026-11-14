@@ -126,8 +126,8 @@ function sembrar(hub: any): void {
 type Medidas = { lotes: number; ops: number; msTotal: number; msMax: number; opsDelMasLento: number; aplazadas: number };
 
 /**
- * Pone delante de los dos caminos el fallo de `DESCONOCIDA`, la primera vez que se intenta, y cuenta
- * las operaciones de un lote que han necesitado aplazar las claves foráneas.
+ * Pone delante del lote atómico de cada operación el fallo de `DESCONOCIDA`, la primera vez que se
+ * intenta, y cuenta las operaciones de un lote que han necesitado aplazar las claves foráneas.
  */
 function conFallos(hub: any, medidas: Medidas): void {
 	let quedan = 1;
@@ -142,17 +142,6 @@ function conFallos(hub: any, medidas: Medidas): void {
 			return alAplazar();
 		});
 	};
-	const abrir = hub.withTenantDbRetry.bind(hub);
-	hub.withTenantDbRetry = (tenantId: string, run: (db: any) => Promise<unknown>) =>
-		abrir(tenantId, (base: any) =>
-			run({
-				...base,
-				async batch(sentencias: any[], modo?: string) {
-					if (falla(sentencias)) throw raro();
-					return base.batch(sentencias, modo);
-				},
-			}),
-		);
 }
 
 // ---- Lo que queda ------------------------------------------------------------------------------
