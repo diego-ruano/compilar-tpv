@@ -247,12 +247,15 @@ pub trait SyncRepository: Send + Sync {
     ///
     /// Dos cosas que no son negociables aquí, y que si se pierden no dan error sino datos malos:
     ///
-    /// - **`INSERT OR IGNORE`**: lo que ya está en local llegó por el catch-up y es más nuevo que
-    ///   esta foto del histórico. Además la fase 2 re-descarga a propósito la ventana que ya trajo
-    ///   la fase 1, así que sin `IGNORE` la primera página de cada tabla reventaría por PK.
+    /// - **`ON CONFLICT(<clave primaria>) DO NOTHING`**: lo que ya está en local llegó por el
+    ///   catch-up y es más nuevo que esta foto del histórico. Además la fase 2 re-descarga a
+    ///   propósito la ventana que ya trajo la fase 1, así que sin eso la primera página de cada
+    ///   tabla reventaría por PK. Sólo la fila de la misma clave primaria se da por buena: una que
+    ///   choca por otro índice único, un `NOT NULL` o un `CHECK` deshace la página y el error dice
+    ///   cuál (un `INSERT OR IGNORE` se la saltaría en silencio y para siempre).
     /// - **Por la conexión CRUDA**: por `execute()` cada fila del histórico se capturaría en
-    ///   `_Sync_Outbox` y el equipo devolvería a la nube, operación a operación y facturado como
-    ///   escrituras en Turso, el histórico entero que acaba de bajarse de ella.
+    ///   `_Sync_Outbox` y el equipo devolvería a la nube, operación a operación, el histórico entero
+    ///   que acaba de bajarse de ella.
     async fn backfill_aplicar_pagina(&self, pagina: HistoricoPagina) -> AppResult<i64>;
 
     /// Deja constancia de por qué falló el último intento sobre una tabla. No mueve el cursor: lo

@@ -247,8 +247,9 @@ fn en_calma(ultima_escritura_ms: Option<i64>, ahora_ms: i64) -> bool {
 /// una detrás de otra, en el orden que da el worker (padres primero), y cada una de lo más antiguo a
 /// lo más nuevo: al bajar una tabla ya están todas las filas de las que cuelga.
 ///
-/// Idempotente, como exige el motor: repetir una página no cambia nada (`INSERT OR IGNORE` en la
-/// persistencia) y el cursor sólo avanza cuando la página entra de verdad.
+/// Idempotente, como exige el motor: repetir una página no cambia nada (`ON CONFLICT(<clave
+/// primaria>) DO NOTHING` en la persistencia) y el cursor sólo avanza cuando la página entra de
+/// verdad.
 ///
 /// Devuelve cuántas filas se procesaron. Cero significa que no queda backfill pendiente, que es el
 /// caso normal de un equipo que nunca ha perdido su base: una lectura y se acabó.

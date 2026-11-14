@@ -53,12 +53,12 @@ import {
 export const RESUMEN_MAX_FILAS = 1_000_000;
 
 /**
- * Lo mismo con la ruta ejecutándose en el Worker (`EJECUTAR_EN_EL_HUB` apagado): allí las filas no
- * se leen del cursor del DO, cruzan la llamada a `consultar` como un valor entero, y esa llamada no
- * pasa de 32 MiB. A unos 180 bytes por fila, cien mil quedan por debajo con holgura. Las páginas de
- * filas tienen el mismo límite por ese camino: sirve para medir, no para un negocio grande.
+ * Lo mismo con el lector de un cliente, que sólo usa un router montado suelto en un test
+ * (`tenantQuery` de mentira, `volcado.ts`): allí las filas no se leen del cursor del DO, sino que
+ * llegan enteras en memoria antes de escribir nada. A unos 180 bytes por fila, cien mil quedan muy
+ * por debajo de lo que eso aguanta.
  */
-const RESUMEN_MAX_FILAS_EN_EL_WORKER = 100_000;
+const RESUMEN_MAX_FILAS_CON_UN_CLIENTE = 100_000;
 
 /**
  * Lo que tiene que llevar quieta la base para resumirla. Con una escritura reciente el negocio está
@@ -252,7 +252,7 @@ type TablaResumida = {
 export async function resumenDeVerificacion(
 	lector: Lector,
 	quien: QuienPregunta,
-	maxFilas: number = lector.paraAlEscribir ? RESUMEN_MAX_FILAS : RESUMEN_MAX_FILAS_EN_EL_WORKER,
+	maxFilas: number = lector.paraAlEscribir ? RESUMEN_MAX_FILAS : RESUMEN_MAX_FILAS_CON_UN_CLIENTE,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	// Antes de medir nada: si no es el momento, la respuesta cuesta cuatro lecturas de una fila.
 	const antes = await lector.foto(sentenciasDelMomento(quien), (rs) => mirarElMomento(rs, quien));

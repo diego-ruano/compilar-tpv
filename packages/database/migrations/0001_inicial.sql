@@ -1919,7 +1919,8 @@ CREATE TABLE IF NOT EXISTS _Cobros_Pendientes (
 -- `bootstrap_restaurar` (una fila por tabla que el worker marco `parcial`) y la va
 -- avanzando el job `backfill_historico`. Con esto el backfill es reanudable por
 -- construccion: apagar el TPV a media descarga no pierde nada, y volver a pedir una
--- pagina ya aplicada es inocuo (`INSERT OR IGNORE`).
+-- pagina ya aplicada es inocuo (`ON CONFLICT(<clave primaria>) DO NOTHING`; otro choque
+-- deshace la pagina y dice que fila).
 --
 -- `Orden` conserva el que dio el worker: padres primero. Cada pagina es su propia
 -- transaccion, asi que `defer_foreign_keys` no cubre a una hija insertada antes que su

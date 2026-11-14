@@ -2,9 +2,8 @@
 //
 // Con qué nace la base de un negocio además de su esquema: su administrador inicial.
 //
-// Lo siembra el propio DO al aprovisionar (`MotorTenantHub.aprovisionar`), con su SQLite al lado.
-// Antes lo escribía el Worker después de crear el esquema, mandando el SQL por la puerta de las
-// lecturas (`consultar`), que ya no escribe.
+// Lo siembra el propio DO al aprovisionar (`MotorTenantHub.aprovisionar`), con su SQLite al lado:
+// desde fuera del DO no hay ninguna puerta que acepte SQL.
 //
 // No pasa por el motor de escrituras, y es a propósito: la Main siembra el mismo administrador en
 // su base, con el mismo id, así que no es un cambio que replicar. Lo que sí se replica es el PIN que

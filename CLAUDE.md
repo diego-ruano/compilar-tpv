@@ -200,8 +200,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 ### Worker ([worker.md](docs/arquitectura/worker.md))
 
 - **Una ruta no lee su propio cuerpo**: `cuerpo(schema)` / `consulta(schema)` de `lib/validacion.ts`, y el
-  handler usa `c.req.valid("json")`. Los cuatro cuerpos tolerantes de `sync` se quedan con
-  `cuerpoTolerante`.
+  handler usa `c.req.valid("json")`. Los cuerpos tolerantes de `sync` (la recuperación y el
+  contraste: [worker.md](docs/arquitectura/worker.md)) se quedan con `cuerpoTolerante`.
 - **Lo que decide antes de leer el cuerpo es middleware y va delante** (veto de rol, tope de tamaño, token de
   administración, filtro por IP). **Un `*.routes.ts` no resuelve roles.**
 - **Toda ruta autenticada pasa por `tenantAuth`** (que comprueba también la licencia). Tenant y dispositivo

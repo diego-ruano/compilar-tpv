@@ -1,8 +1,8 @@
 // test/syncVerificar.test.ts
 //
 // El contraste por resúmenes (`domains/sync/verificar.ts`): `/v1/sync/verificar/resumen`, `/filas`
-// y `/claves`, contra el SQLite de un TenantHub de verdad y por los dos caminos (la ruta dentro del
-// TenantHub, que es como corre desplegada, y en el Worker).
+// y `/claves`, contra el SQLite de un TenantHub de verdad y por los dos lectores (el cursor del DO,
+// que es como corre desplegada, y el de un cliente, el de un router suelto: `helpers/dosCaminos.ts`).
 //
 // Lo que se fija:
 //
