@@ -106,7 +106,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   se rehace desde los cobros: [esquema.md](esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)).
   Lo escribe dentro del DO, con el cliente de al lado: las rutas que lo tocan (el PIN,
   `/v1/sync/changes`, las estadísticas de productos y de mesas) llevan `alHub`, y desde fuera no hay
-  puerta que escriba.
+  puerta que escriba. El resumen de un día entra en un lote todo o nada, y sólo si todas sus
+  sentencias escriben en sus tablas (`resumenDiario.ts::anotarResumen`).
 - **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main

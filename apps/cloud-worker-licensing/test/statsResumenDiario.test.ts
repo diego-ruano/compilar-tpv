@@ -31,7 +31,15 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { mesasDeAntes, productosDeAntes } from "./helpers/estadisticasDeAntes";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { coincideElDia, contrastarUnDia, recalcularDia } from "../src/domains/stats/resumenDiario";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
+import {
+	anotarResumen,
+	coincideElDia,
+	contrastarUnDia,
+	esEscrituraDelResumen,
+	recalcularDia,
+	sentenciasDeRecalculo,
+} from "../src/domains/stats/resumenDiario";
 import {
 	mesas,
 	mesasCon,
@@ -241,5 +249,57 @@ describe("las estadísticas leen del resumen diario y dan lo mismo que recorrien
 				expect(pasos.filter((l: string) => l.endsWith("(Estado=?)")), nombre).toEqual([]);
 			}
 		});
+	});
+});
+
+describe("el resumen sólo escribe en sus propias tablas", () => {
+	// Se escribe sin pasar por el motor (ni log, ni difusión), dentro del TenantHub y con el cliente de
+	// al lado. No hay una puerta que mire qué se escribe por ahí, así que lo mira quien escribe
+	// (`anotarResumen`): una sentencia del negocio que se colara cambiaría la nube sin que la Main lo
+	// viera nunca.
+	const DIA = "2026-03-02";
+	const SIEMBRA = [
+		"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');",
+		"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 10, 10);",
+		"INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', '2026-03-02 12:00:00', 'Pagada');",
+		"INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', '2026-03-02 13:00:00', 'Efectivo', 900, 'total');",
+	];
+
+	it("un día se rehace con el cliente del TenantHub, todo o nada, y un lote con algo del negocio no entra", async () => {
+		await enElHub("stats-resumen-solo-sus-tablas", async (hub: any) => {
+			const storage = hub.state.storage;
+			crearEsquemaTenant(storage.sql);
+			for (const sentencia of SIEMBRA) storage.sql.exec(sentencia);
+			const db = clienteLocal(storage);
+
+			await recalcularDia(db, DIA);
+			expect(Number(storage.sql.exec("SELECT COUNT(*) AS n FROM _Estad_Dias_Sucios;").one().n)).toBe(0);
+			expect(storage.sql.exec("SELECT ID_Mesa, Importe, Comandas FROM _Estad_Mesa_Dia;").toArray()).toEqual([
+				{ ID_Mesa: "m1", Importe: 900, Comandas: 1 },
+			]);
+
+			// Con una sentencia del negocio detrás no se ejecuta ninguna: ni se rehace el día (su
+			// trigger lo ha apuntado) ni se toca Zonas.
+			storage.sql.exec("UPDATE Pagos SET Importe_Total = 1000 WHERE ID_Pago = 'p1';");
+			const conIntrusa = [...sentenciasDeRecalculo(DIA), { sql: "DELETE FROM Zonas;", args: [] }];
+			await expect(anotarResumen(db, conIntrusa)).rejects.toThrow(/sólo escribe en sus propias tablas/);
+			expect(storage.sql.exec("SELECT Nombre_Zona AS z FROM Zonas;").toArray()).toEqual([{ z: "Sala" }]);
+			expect(storage.sql.exec("SELECT Importe FROM _Estad_Mesa_Dia;").one().Importe).toBe(900);
+			expect(storage.sql.exec("SELECT Dia FROM _Estad_Dias_Sucios;").toArray()).toEqual([{ Dia: DIA }]);
+		});
+	});
+
+	it("reconoce lo que escribe en el resumen, y nada más", () => {
+		for (const { sql } of sentenciasDeRecalculo(DIA)) expect(esEscrituraDelResumen(sql), sql).toBe(true);
+		for (const ajena of [
+			"DELETE FROM Zonas;",
+			"INSERT INTO Pagos (ID_Pago) VALUES ('x');",
+			"DELETE FROM _Estad_Dias_Sucios; DELETE FROM Zonas;",
+			"WITH x AS (SELECT 1) DELETE FROM Zonas;",
+			"INSERT OR REPLACE INTO _Estad_Dias_Sucios (Dia) VALUES ('2026-03-02');",
+			"DELETE FROM _Estad_Producto_Dia_De_Otro WHERE 1;",
+		]) {
+			expect(esEscrituraDelResumen(ajena), ajena).toBe(false);
+		}
 	});
 });

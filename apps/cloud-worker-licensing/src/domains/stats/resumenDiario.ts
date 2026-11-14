@@ -12,7 +12,8 @@
 // replica ni viaja en un volcado, y la Main mantiene la suya con las mismas sentencias
 // (`crates/tpv-infra-sqlite/src/estadisticas_diarias.rs`). Por eso estas tablas son estado propio
 // de la nube: se escriben sin pasar por el motor (ni log, ni difusión), dentro del TenantHub con el
-// cliente de al lado (las rutas de las estadísticas llevan `alHub`).
+// cliente de al lado (las rutas de las estadísticas llevan `alHub`), y sólo con sentencias que
+// escriben en ellas (`anotarResumen`).
 //
 // Quién hace qué:
 //
@@ -65,6 +66,32 @@ export function sentenciasDeRecalculo(dia: string): Sentencia[] {
 	].map((sql) => ({ sql, args: [dia] }));
 }
 
+/** Un alta o un borrado en una de las tablas del resumen, dicho al empezar la sentencia. */
+const ESCRITURA_DEL_RESUMEN = /^\s*(?:INSERT\s+INTO|DELETE\s+FROM)\s+_Estad_(?:Producto_Dia|Mesa_Dia|Dias_Sucios)\b/i;
+
+/**
+ * ¿Escribe esta sentencia en el resumen, y sólo en él? Tiene que decirlo a las claras al empezar y
+ * ser una sola: sin `;` que no sea el del final (el SQLite del DO ejecutaría lo que viniera detrás).
+ */
+export function esEscrituraDelResumen(sql: string): boolean {
+	return ESCRITURA_DEL_RESUMEN.test(sql) && !sql.trimEnd().replace(/;$/, "").includes(";");
+}
+
+/**
+ * Escribe en el resumen un lote de sentencias, todo o nada, y sólo si todas son escrituras del
+ * resumen (`esEscrituraDelResumen`): si alguna no lo es, no se ejecuta ninguna.
+ *
+ * Lo que se escribe por aquí no pasa por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni
+ * difusión. Es lo que se quiere para una caché local, y lo que haría invisible para la Main una
+ * escritura en una tabla del negocio que se colara en el lote.
+ */
+export async function anotarResumen(db: Client, sentencias: Sentencia[]): Promise<void> {
+	if (sentencias.length === 0 || !sentencias.every((s) => esEscrituraDelResumen(s.sql))) {
+		throw new Error("El resumen diario de las estadísticas sólo escribe en sus propias tablas");
+	}
+	await db.batch(sentencias as any, "write");
+}
+
 /**
  * Rehace el resumen de un día y le quita la marca, todo o nada.
  *
@@ -72,7 +99,7 @@ export function sentenciasDeRecalculo(dia: string): Sentencia[] {
  * que se quita es la de lo que se acaba de calcular. Un cambio posterior la vuelve a poner.
  */
 export async function recalcularDia(db: Client, dia: string): Promise<void> {
-	await db.batch(sentenciasDeRecalculo(dia) as any, "write");
+	await anotarResumen(db, sentenciasDeRecalculo(dia));
 }
 
 /**

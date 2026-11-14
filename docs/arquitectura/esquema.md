@@ -154,7 +154,8 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
   el `TenantHub` mantienen cada uno el suyo con las mismas sentencias
   (`packages/database/estadisticas/`, que leen `tpv-infra-sqlite/src/estadisticas_diarias.rs` y
   `domains/stats/resumenDiario.ts`). La Main lo escribe por `raw()`; el `TenantHub`, fuera del motor,
-  como el resto de su estado propio ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
+  como el resto de su estado propio ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)),
+  y sólo con sentencias que escriben en estas tablas (`anotarResumen`).
 - **Los triggers sólo apuntan días.** Cada cambio en `Pagos`, `Pago_Detalles`, `Detalle_Comanda` o
   `Comandas` que mueve una cifra apunta en `_Estad_Dias_Sucios` el día de los cobros afectados, con
   un `INSERT OR IGNORE … SELECT DISTINCT … WHERE … NOT IN (SELECT Dia FROM _Estad_Dias_Sucios)`: días
