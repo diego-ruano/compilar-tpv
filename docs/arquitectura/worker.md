@@ -101,9 +101,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   (`Map` y `Set` incluidos, `test/baseEnElDo.test.ts`). Sólo leen: la reserva web no escribe en la base
   del negocio (ADR 0007).
 - **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
-  se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
-  purga (`Sync_Main_Checkpoints`). Lo escribe dentro del DO, con el cliente de al lado: las rutas que
-  lo tocan (el PIN, `/v1/sync/changes`) llevan `alHub`, y desde fuera no hay puerta que escriba.
+  se replica: el freno del PIN (`Intentos_Login`), el checkpoint de cada Main, que es el suelo de la
+  purga (`Sync_Main_Checkpoints`), y el resumen diario de las estadísticas (`_Estad_*`, una caché que
+  se rehace desde los cobros: [esquema.md](esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)).
+  Lo escribe dentro del DO, con el cliente de al lado: las rutas que lo tocan (el PIN,
+  `/v1/sync/changes`, las estadísticas de productos y de mesas) llevan `alHub`, y desde fuera no hay
+  puerta que escriba.
 - **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
@@ -136,7 +139,11 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
   productos es una sola sentencia (`sqlProductos`, en `domains/stats/stats.queries.ts`) que devuelve
   las unidades por producto y el catálogo, y el mejor, el peor y los dos top 10 se sacan de ahí en
-  código. Un CTE repetido en varias sentencias se vuelve a calcular en cada una. Dentro de una misma
+  código. Y las de productos y de mesas no recorren los cobros de los días ya cerrados: los leen del
+  resumen diario ([esquema.md](esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)), y
+  antes rehacen los días sucios del rango de uno en uno, cediendo el paso entre uno y otro
+  (`resumenAlDia`, en `domains/stats/resumenDiario.ts`). Un CTE repetido en varias sentencias se
+  vuelve a calcular en cada una. Dentro de una misma
   sentencia lo decide el planificador: el de los clientes recurrentes, que tiene que mirar los
   cobros de toda la historia y lo leen tres partes de la sentencia, va `AS MATERIALIZED` porque sin
   esa marca SQLite lo deshace dentro de cada una. La Main hace lo mismo (`sql_productos` y `sql_clientes_recurrentes`,

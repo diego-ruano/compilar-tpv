@@ -31,7 +31,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { recortar } from "../src/lib/texto";
-import { productos, sqlProductos } from "../src/domains/stats/stats.queries";
+import { productos, productosCon, sqlProductos } from "../src/domains/stats/stats.queries";
 import type { StatsRange } from "../src/domains/stats/stats.schemas";
 
 // ── Las cuatro sentencias de antes, tal cual estaban ─────────────────────────────────────────────
@@ -287,11 +287,14 @@ describe("la estadística de productos en una pasada", () => {
 					return db.execute(entrada);
 				},
 			} as unknown as Client;
-			await productos(espia, "anio", "cat-platos", "cat-bebidas");
+			// La lectura, sin lo que hace antes para dejar al día el resumen diario
+			// (`statsResumenDiario.test.ts`).
+			await productosCon(espia, sqlProductos("anio"), "cat-platos", "cat-bebidas");
 			expect(sentencias).toHaveLength(1);
 
-			// El plan en el SQLite del DO, sin estadísticas: los cobros entran por su fecha, las
-			// líneas por su clave, y nada recorre el histórico de cobros ni de líneas.
+			// El plan en el SQLite del DO, sin estadísticas: los cobros de hoy entran por su fecha,
+			// las líneas por su clave, y nada recorre el histórico de cobros ni de líneas: los días
+			// anteriores salen del resumen diario.
 			const plan = sql
 				.exec(`EXPLAIN QUERY PLAN ${sqlProductos("anio")}`)
 				.toArray()
@@ -302,7 +305,8 @@ describe("la estadística de productos en una pasada", () => {
 			expect(plan).toContain("SEARCH pd USING COVERING INDEX sqlite_autoindex_Pago_Detalles_1 (ID_Pago=?)");
 			expect(plan).toContain("SEARCH dc USING INDEX sqlite_autoindex_Detalle_Comanda_1 (ID_Detalle=?)");
 			expect(plan.filter((l: string) => /^SCAN (p|pd|dc)( |$)/.test(l))).toEqual([]);
-			expect(plan.filter((l: string) => l.startsWith("SEARCH p "))).toHaveLength(1);
+			// Una vez por los días sucios del rango (los que se leen de los cobros) y otra por hoy.
+			expect(plan.filter((l: string) => l.startsWith("SEARCH p "))).toHaveLength(2);
 		});
 	});
 });

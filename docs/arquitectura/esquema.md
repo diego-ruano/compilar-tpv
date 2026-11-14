@@ -139,3 +139,58 @@ vacías en la Main. Un volcado o una comparación que recorra tablas se las salt
 un índice por `Op_Id` (`idx_sync_changes_op_id`): el `TenantHub` busca por él el cambio de una
 operación (el resultado guardado de un reintento, lo ya aplicado de un lote de la cola), y sin el
 índice cada búsqueda recorrería el log entero.
+
+## El resumen diario de las estadísticas (§17 de `0001`)
+
+Las estadísticas de productos y de mesas de una semana, un mes o un año leen los días ya cerrados de
+`_Estad_Producto_Dia` (lo vendido de cada día por producto y nombre de línea) y `_Estad_Mesa_Dia` (lo
+cobrado de cada día por mesa, con tres recuentos de comandas), y de los cobros sólo lo de hoy. Con un
+año de un bar de mucho movimiento, recorrer los cobros tardaba segundos por lectura, y en la nube la
+base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
+
+- **Es una caché local, no un agregado replicado.** La regla de los agregados (`Total_Comanda` y
+  compañía se re-derivan en el SQL de cada escritura, nunca se escriben como literal) es para lo que
+  se replica. Esto no se replica, no viaja en un volcado ni en una copia que se restaura, y la Main y
+  el `TenantHub` mantienen cada uno el suyo con las mismas sentencias
+  (`packages/database/estadisticas/`, que leen `tpv-infra-sqlite/src/estadisticas_diarias.rs` y
+  `domains/stats/resumenDiario.ts`). La Main lo escribe por `raw()`; el `TenantHub`, fuera del motor,
+  como el resto de su estado propio ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
+- **Los triggers sólo apuntan días.** Cada cambio en `Pagos`, `Pago_Detalles`, `Detalle_Comanda` o
+  `Comandas` que mueve una cifra apunta en `_Estad_Dias_Sucios` el día de los cobros afectados, con
+  un `INSERT OR IGNORE … SELECT DISTINCT … WHERE … NOT IN (SELECT Dia FROM _Estad_Dias_Sucios)`: días
+  que no son NULL, una vez cada uno y sólo los que no están, así que no hay restricción que pueda
+  violar aunque la sentencia que lo dispara lleve otra cláusula de conflicto (que manda sobre la del
+  trigger). No calculan nada: corren dentro del cobro, y nada de lo que lo rodea puede impedirlo.
+  Todos van detrás de la escritura salvo `estad_pagos_reemplazo` y `estad_pagos_reemplazo_clave`,
+  que van delante del alta de un cobro y del cambio de su clave: un `INSERT OR REPLACE` o un `UPDATE
+  OR REPLACE` (prohibidos en el programa, pero la base no los impide) borrarían la fila que ocupa esa
+  clave sin disparar el de borrado, que con `recursive_triggers` apagado no salta en un reemplazo, y
+  su día se quedaría limpio. Son
+  iguales en la Main y en la nube, y también saltan al aplicar lo que llega de la otra parte, en una
+  restauración y en el histórico de la fase 2. Lo vigila
+  `estadisticas_diarias::tests::los_triggers_solo_apuntan_dias`.
+- **Un día se rehace entero**: se borran sus filas y se insertan con las dos sentencias compartidas, y
+  se le quita la marca, todo en una transacción. Quien lee una estadística rehace antes los días
+  sucios de su rango (hoy no, que se lee de los cobros), y la sentencia que lee no se fía de eso: el
+  día que siga sucio (un cobro que ha entrado entre rehacerlo y leer) lo lee de los cobros, con la
+  misma sentencia compartida y en la misma instantánea, así que nunca mezcla un día viejo con lo
+  nuevo. En la Main lo adelanta el job
+  `resumen_estadisticas`, y la reconciliación diaria contrasta los siete últimos días y siete más al
+  azar con lo que sale de los cobros ([jobs-e-interruptores.md](jobs-e-interruptores.md)). En la nube
+  cada lectura contrasta un día al azar de su rango. Un día que no cuadra se rehace y se avisa: es un
+  cambio sin su trigger.
+- **Un día por línea, el de su último cobro activo**: los rangos acaban ahora, así que una línea (o
+  una comanda) entra en uno si tiene un cobro dentro, que es lo mismo que su último cobro caiga
+  dentro. Por eso cobrar otra parte de una línea, o anular un cobro, apunta también los días de los
+  demás cobros de la línea y de la comanda. Un cobro fechado después de «ahora» (el de un reloj
+  adelantado) saca a su línea o a su comanda del día que era su último, y lo de hoy la vuelve a
+  contar si tiene otro cobro dentro del rango: la lectura de hoy mira las líneas y las comandas con
+  un cobro desde el principio de hoy, también los posteriores a ahora, y cuenta las que tienen uno
+  dentro del rango.
+- **Las unidades van en milésimas enteras** (`_Estad_Producto_Dia.Milesimas`; las cantidades se
+  guardan redondeadas a milésimas, RI-26), también lo de hoy y lo que se lee de los cobros: sumadas
+  por días y después por rango dan lo mismo que de una vez. Sumando `REAL` no pasa: el mismo 1,5
+  sale 1,4999999999999998 según cómo se agrupe, y redondea a una unidad menos.
+- **Tras restaurar la base se vacía**: `bootstrap_restaurar` y la copia que se va a instalar
+  (`prepare_restore`) borran el resumen y apuntan como sucios todos los días con cobros
+  (`estadisticas_diarias::reiniciar`).

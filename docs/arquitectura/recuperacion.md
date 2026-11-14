@@ -404,3 +404,7 @@ Lo que no hace:
 - Vuelve todo lo que llegó a la nube, incluida la **PII del personal**: viaja cifrada por el outbox, el
   volcado la devuelve tal cual y la DEK se recupera al activar.
 - No vuelve lo que se quedó en el outbox del equipo perdido.
+- No vuelve el resumen diario de las estadísticas, que es una caché: tras restaurar de la nube o de
+  una copia se vacía y quedan por rehacer todos los días con cobros
+  ([esquema.md](esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)). Se rehacen al leerlos
+  o, en un momento tranquilo, desde el job `resumen_estadisticas`.

@@ -2029,3 +2029,323 @@ CREATE TABLE IF NOT EXISTS _Jobs_State (
     Last_Error TEXT,
     Fallos INTEGER NOT NULL DEFAULT 0
 );
+
+
+/* =========================================================
+   17. Resumen diario de las estadísticas (derivado y LOCAL, prefijo `_`)
+
+   Las estadísticas de productos y de mesas de una semana, un mes o un año leen de aquí los días
+   ya cerrados y de los cobros sólo lo de hoy: lo vendido de cada día ya sumado, por producto o
+   por mesa. Con un año de un bar de mucho movimiento, recorrer los cobros tardaba segundos en
+   cada lectura, y en la nube la base de un negocio es un solo hilo.
+
+   Es una CACHÉ y no un agregado replicado (los de `Total_Comanda` y compañía se re-derivan en el
+   SQL de cada escritura): todo lo que guarda se vuelve a calcular a partir de Pagos,
+   Pago_Detalles, Detalle_Comanda y Comandas. No se replica, no viaja en un volcado ni en una copia
+   que se restaura, y la Main y la nube mantienen cada una la suya, como el resto del andamiaje
+   local (§16).
+
+   Cómo se mantiene:
+   - Los triggers de abajo SÓLO apuntan en `_Estad_Dias_Sucios` los días que cambian. No calculan:
+     corren dentro de la escritura que los dispara (un cobro, una anulación), y nada de lo que
+     rodea a un cobro puede impedirlo. Cada sentencia suya inserta días que no son NULL
+     (`Pagos.Fecha_Hora` es NOT NULL), una vez cada uno y sólo los que no están ya, así que no hay
+     restricción que pueda violar, sea cual sea la cláusula de conflicto de la sentencia que lo
+     dispara (que manda sobre la del trigger).
+   - Quien lee una estadística rehace antes los días sucios de su rango: borra las filas del día y
+     las vuelve a insertar con las sentencias de `packages/database/estadisticas/`, que comparten
+     la Main y el worker. Ver `docs/arquitectura/esquema.md`.
+   - Tras restaurar la base (desde la nube o desde una copia) se vacía y quedan por calcular todos
+     los días con cobros.
+
+   El día de un cobro son los diez primeros caracteres de su `Fecha_Hora` (la hora local de quien
+   cobró, CFG-04). Hoy está casi siempre sucio, porque lo apunta cada cobro, y no se lee de aquí.
+========================================================= */
+
+-- Lo vendido de un día, ya sumado: una fila por producto y nombre de línea. `ID_Producto` y
+-- `Nombre_Producto` son los de la línea de comanda (el segundo, su copia del nombre al vender), y
+-- una línea sin producto va con `ID_Producto` NULL. `Milesimas` es la suma de sus cantidades en
+-- milésimas enteras: las cantidades se guardan redondeadas a milésimas (RI-26), así que la suma de
+-- los días es exacta y no depende del orden en que se sume, como pasaría sumando REAL. El nombre
+-- del catálogo, la categoría y si es vendible se miran al leer.
+--
+-- Una línea cobrada en varias veces cuenta UNA vez, el día de su ÚLTIMO cobro activo: los rangos
+-- de las estadísticas acaban ahora, así que una línea entra en uno si tiene un cobro dentro, que es
+-- lo mismo que su último cobro caiga dentro. Anular un cobro, o cobrar otra parte de la línea, la
+-- cambia de día.
+--
+-- Sin clave primaria: las dos columnas que identifican la fila admiten NULL. Se lee por días.
+CREATE TABLE IF NOT EXISTS _Estad_Producto_Dia (
+    Dia TEXT NOT NULL,
+    ID_Producto TEXT,
+    Nombre_Producto TEXT,
+    Milesimas INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_estad_producto_dia
+ON _Estad_Producto_Dia(Dia);
+
+-- Los cobros de un día de las comandas de cada mesa (la mesa que tiene la comanda; el número y la
+-- zona se miran al leer).
+--   Importe              lo cobrado ese día; una devolución de parte de un cobro resta.
+--   Comandas             comandas con algún cobro ese día (una devolución no es un cobro).
+--   Comandas_Ultimo_Mes  de ésas, las que no tienen otro cobro más tarde en el mismo mes: sumadas
+--                        por meses dan las comandas distintas de cada mes.
+--   Comandas_Ultimo      de ésas, las que no tienen otro cobro en un día posterior: sumadas en un
+--                        rango que acaba hoy dan las comandas distintas del rango.
+-- Una comanda cobrada en dos días cuenta en los dos por separado y una sola vez en el mes o en el
+-- rango, que es lo que contaban las consultas sobre los cobros.
+CREATE TABLE IF NOT EXISTS _Estad_Mesa_Dia (
+    Dia TEXT NOT NULL,
+    ID_Mesa TEXT NOT NULL,
+    Importe INTEGER NOT NULL CHECK (typeof(Importe) IN ('integer','null')),
+    Comandas INTEGER NOT NULL,
+    Comandas_Ultimo_Mes INTEGER NOT NULL,
+    Comandas_Ultimo INTEGER NOT NULL,
+    PRIMARY KEY (Dia, ID_Mesa)
+) WITHOUT ROWID;
+
+-- Los días cuyo resumen ya no vale.
+CREATE TABLE IF NOT EXISTS _Estad_Dias_Sucios (
+    Dia TEXT NOT NULL PRIMARY KEY
+) WITHOUT ROWID;
+
+-- Los triggers. Cada uno apunta los días de los cobros cuyas cifras pueden haber cambiado, con
+-- tres búsquedas por índice que se repiten:
+--   - los cobros de una comanda (idx_pagos_comanda_fecha): para las mesas, una comanda cuenta el
+--     día de su último cobro, así que un cobro nuevo o anulado mueve los demás;
+--   - los cobros de una línea (idx_pago_detalles_detalle): para los productos, una línea cuenta el
+--     día de su último cobro activo;
+--   - los cobros que comparten alguna línea con uno dado (la PK de Pago_Detalles y el mismo índice).
+-- Las altas de una comanda o de una línea, lo normal, no encuentran ningún cobro y no apuntan nada:
+-- están para la que llega después que sus cobros (una reparación, un histórico que se descarga).
+
+-- Un cobro que llega con la clave de otro que ya está: un `INSERT OR REPLACE` (prohibido en el
+-- programa, pero la base no lo impide) lo borraría sin pasar por `estad_pagos_delete`, que con
+-- `recursive_triggers` apagado no salta en un reemplazo, y su día se quedaría limpio. Éste mira la
+-- fila de antes, ANTES de que se borre: su día y los de los cobros de su comanda. Un alta normal no
+-- encuentra nada; un `INSERT OR IGNORE` o un upsert de una fila que ya estaba apuntan de más, que
+-- no estropea nada.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_reemplazo
+BEFORE INSERT ON Pagos
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos viejo
+  JOIN Pagos p ON p.ID_Comanda = viejo.ID_Comanda
+  WHERE viejo.ID_Pago = NEW.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Lo mismo con un cobro que cambia su clave a la de otro que ya está: un `UPDATE OR REPLACE`
+-- borraría ese otro sin pasar por `estad_pagos_delete`. Éste mira, antes, el que ocupa la clave
+-- nueva: su día y los de los cobros de su comanda. Lo del cobro que cambia lo apunta
+-- `estad_pagos_update`.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_reemplazo_clave
+BEFORE UPDATE OF ID_Pago ON Pagos
+WHEN OLD.ID_Pago IS NOT NEW.ID_Pago
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos desplazado
+  JOIN Pagos p ON p.ID_Comanda = desplazado.ID_Comanda
+  WHERE desplazado.ID_Pago = NEW.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Un cobro nuevo: los días de los cobros de su comanda (el suyo incluido) y los de los que
+-- comparten alguna línea con él.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_insert
+AFTER INSERT ON Pagos
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda = NEW.ID_Comanda
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pago_Detalles otro ON otro.ID_Detalle = pd.ID_Detalle
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE pd.ID_Pago = NEW.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Un cobro que cambia en algo que el resumen cuenta: anularlo (`Estado`), su fecha, su importe, su
+-- comanda, si es una devolución o su clave. El día de antes, y los de ahora como en el alta.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_update
+AFTER UPDATE OF ID_Pago, ID_Comanda, Fecha_Hora, Importe_Total, Estado, ID_Pago_Origen ON Pagos
+WHEN OLD.ID_Pago IS NOT NEW.ID_Pago
+  OR OLD.ID_Comanda IS NOT NEW.ID_Comanda
+  OR OLD.Fecha_Hora IS NOT NEW.Fecha_Hora
+  OR OLD.Importe_Total IS NOT NEW.Importe_Total
+  OR OLD.Estado IS NOT NEW.Estado
+  OR OLD.ID_Pago_Origen IS NOT NEW.ID_Pago_Origen
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT substr(OLD.Fecha_Hora, 1, 10)
+  WHERE substr(OLD.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda IN (OLD.ID_Comanda, NEW.ID_Comanda)
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pago_Detalles otro ON otro.ID_Detalle = pd.ID_Detalle
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE pd.ID_Pago IN (OLD.ID_Pago, NEW.ID_Pago)
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Un cobro que se borra (una reparación, o el borrado en cascada de su comanda): su día, y los de
+-- los cobros de su comanda y de sus líneas.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_delete
+AFTER DELETE ON Pagos
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT substr(OLD.Fecha_Hora, 1, 10)
+  WHERE substr(OLD.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda = OLD.ID_Comanda
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pago_Detalles otro ON otro.ID_Detalle = pd.ID_Detalle
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE pd.ID_Pago = OLD.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una línea que entra en un cobro: los días de todos los cobros de esa línea, el suyo incluido (la
+-- línea pasa a contar el día del último).
+CREATE TRIGGER IF NOT EXISTS estad_pago_detalles_insert
+AFTER INSERT ON Pago_Detalles
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles otro
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE otro.ID_Detalle = NEW.ID_Detalle
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una línea que sale de un cobro (o que se borra, y su `ON DELETE CASCADE` se lleva esta fila): el
+-- día de ese cobro y los de los demás cobros de la línea.
+CREATE TRIGGER IF NOT EXISTS estad_pago_detalles_delete
+AFTER DELETE ON Pago_Detalles
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Pago = OLD.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles otro
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE otro.ID_Detalle = OLD.ID_Detalle
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Ninguna escritura del programa cambia de cobro o de línea una fila de Pago_Detalles; si alguna
+-- lo hiciera, cuenta como sacarla de un sitio y meterla en otro.
+CREATE TRIGGER IF NOT EXISTS estad_pago_detalles_update
+AFTER UPDATE OF ID_Pago, ID_Detalle ON Pago_Detalles
+WHEN OLD.ID_Pago IS NOT NEW.ID_Pago OR OLD.ID_Detalle IS NOT NEW.ID_Detalle
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Pago = OLD.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles otro
+  JOIN Pagos p ON p.ID_Pago = otro.ID_Pago
+  WHERE otro.ID_Detalle IN (OLD.ID_Detalle, NEW.ID_Detalle)
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una línea que llega cuando ya tiene cobros: los días de sus cobros.
+CREATE TRIGGER IF NOT EXISTS estad_detalle_comanda_insert
+AFTER INSERT ON Detalle_Comanda
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+  WHERE pd.ID_Detalle = NEW.ID_Detalle
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una línea ya cobrada que cambia de cantidad, de producto o de nombre (o cuyo producto se borra
+-- del catálogo, y su `ON DELETE SET NULL` la deja sin él): los días de sus cobros. En una línea
+-- sin cobrar, que es lo normal, no apunta nada.
+CREATE TRIGGER IF NOT EXISTS estad_detalle_comanda_update
+AFTER UPDATE OF ID_Detalle, ID_Producto, Nombre_Producto, Cantidad ON Detalle_Comanda
+WHEN OLD.ID_Detalle IS NOT NEW.ID_Detalle
+  OR OLD.ID_Producto IS NOT NEW.ID_Producto
+  OR OLD.Nombre_Producto IS NOT NEW.Nombre_Producto
+  OR OLD.Cantidad IS NOT NEW.Cantidad
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+  WHERE pd.ID_Detalle IN (OLD.ID_Detalle, NEW.ID_Detalle)
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una línea que se borra: los días de sus cobros. Con las claves foráneas encendidas, su cascada
+-- borra sus filas de Pago_Detalles y los apunta también el trigger de esa tabla.
+CREATE TRIGGER IF NOT EXISTS estad_detalle_comanda_delete
+AFTER DELETE ON Detalle_Comanda
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pago_Detalles pd
+  JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+  WHERE pd.ID_Detalle = OLD.ID_Detalle
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una comanda que llega cuando ya tiene cobros: los días de sus cobros.
+CREATE TRIGGER IF NOT EXISTS estad_comandas_insert
+AFTER INSERT ON Comandas
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda = NEW.ID_Comanda
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una comanda que cambia de mesa se lleva sus cobros a la mesa nueva: los días de sus cobros.
+CREATE TRIGGER IF NOT EXISTS estad_comandas_update
+AFTER UPDATE OF ID_Comanda, ID_Mesa ON Comandas
+WHEN OLD.ID_Comanda IS NOT NEW.ID_Comanda OR OLD.ID_Mesa IS NOT NEW.ID_Mesa
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda IN (OLD.ID_Comanda, NEW.ID_Comanda)
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
+-- Una comanda que se borra: los días de sus cobros. Con las claves foráneas encendidas, su
+-- cascada borra los cobros y los apunta también el trigger de Pagos.
+CREATE TRIGGER IF NOT EXISTS estad_comandas_delete
+AFTER DELETE ON Comandas
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos p
+  WHERE p.ID_Comanda = OLD.ID_Comanda
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;

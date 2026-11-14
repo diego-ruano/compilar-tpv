@@ -1,0 +1,32 @@
+{
+  "mesa_top_comandas": {
+    "comandas": 3,
+    "mesa": "1",
+    "zona": "Salon"
+  },
+  "ocupadas": 4,
+  "ticket_medio_por_mesa": 3600,
+  "top_mesas_ingresos": [
+    {
+      "mesa": "1",
+      "total": 5500,
+      "zona": "Salon"
+    },
+    {
+      "mesa": "2",
+      "total": 4100,
+      "zona": "Salon"
+    },
+    {
+      "mesa": "3",
+      "total": 4100,
+      "zona": "Terraza"
+    },
+    {
+      "mesa": "4",
+      "total": 700,
+      "zona": "Terraza"
+    }
+  ],
+  "total_mesas": 4
+}

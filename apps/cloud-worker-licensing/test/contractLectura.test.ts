@@ -278,8 +278,14 @@ import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/rese
 import goldenStatsReservas from "../../../tests/contract/lecturas/golden/stats/reservas.json";
 import casoStatsProveedores from "../../../tests/contract/lecturas/casos/stats/proveedores.json";
 import goldenStatsProveedores from "../../../tests/contract/lecturas/golden/stats/proveedores.json";
+import casoStatsGastoMedio from "../../../tests/contract/lecturas/casos/stats/proveedores_gasto_medio.json";
+import goldenStatsGastoMedio from "../../../tests/contract/lecturas/golden/stats/proveedores_gasto_medio.json";
 import casoStatsMesas from "../../../tests/contract/lecturas/casos/stats/mesas.json";
 import goldenStatsMesas from "../../../tests/contract/lecturas/golden/stats/mesas.json";
+import casoStatsMesasSemana from "../../../tests/contract/lecturas/casos/stats/mesas_semana.json";
+import goldenStatsMesasSemana from "../../../tests/contract/lecturas/golden/stats/mesas_semana.json";
+import casoStatsProductosSemana from "../../../tests/contract/lecturas/casos/stats/productos_semana.json";
+import goldenStatsProductosSemana from "../../../tests/contract/lecturas/golden/stats/productos_semana.json";
 
 const CASOS = [
 	{ nombre: "clientes_overview_reciente", caso: casoCliReciente, golden: goldenCliReciente },
@@ -383,7 +389,10 @@ const CASOS = [
 	{ nombre: "trabajadores_turnos", caso: casoTrabTurnos, golden: goldenTrabTurnos },
 	{ nombre: "stats_categorias", caso: casoStatsCategorias, golden: goldenStatsCategorias },
 	{ nombre: "stats_mesas", caso: casoStatsMesas, golden: goldenStatsMesas },
+	{ nombre: "stats_mesas_semana", caso: casoStatsMesasSemana, golden: goldenStatsMesasSemana },
+	{ nombre: "stats_productos_semana", caso: casoStatsProductosSemana, golden: goldenStatsProductosSemana },
 	{ nombre: "stats_proveedores", caso: casoStatsProveedores, golden: goldenStatsProveedores },
+	{ nombre: "stats_proveedores_gasto_medio", caso: casoStatsGastoMedio, golden: goldenStatsGastoMedio },
 	{ nombre: "stats_productos", caso: casoStatsProductos, golden: goldenStatsProductos },
 	{ nombre: "stats_productos_vendidos", caso: casoStatsVendidos, golden: goldenStatsVendidos },
 	{
@@ -622,7 +631,7 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 		case "stats.categorias":
 			return statsCategorias(db);
 		case "stats.mesas":
-			return statsMesas(db, "hoy");
+			return statsMesas(db, e.range ?? "hoy");
 		case "stats.proveedores":
 			return statsProveedores(db, "hoy");
 		case "stats.trabajadores":
@@ -632,7 +641,7 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 		case "stats.clientes":
 			return statsClientes(db, "hoy");
 		case "stats.productos":
-			return statsProductos(db, "hoy", e.categoria_top_id ?? null, e.categoria_worst_id ?? null);
+			return statsProductos(db, e.range ?? "hoy", e.categoria_top_id ?? null, e.categoria_worst_id ?? null);
 		default:
 			throw new Error(`lectura sin soporte en el harness de contrato: ${caso.lectura}`);
 	}

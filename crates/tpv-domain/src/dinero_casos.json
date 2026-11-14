@@ -36,7 +36,7 @@
     [100000000000, "1000000000.00"]
   ],
 
-  "_entre": "Division por un divisor fraccionario, redondeando al centimo. NO es multiplicar por el reciproco: la base de 0,91 EUR al 4 % sale 87 por ese camino y 88 dividiendo, y lo que imprime el papel es 88. Tambien es como se calcula un promedio (el ticket medio). Ternas [centimos, divisor, centimos_esperados].",
+  "_entre": "Division por un divisor fraccionario, redondeando al centimo. NO es multiplicar por el reciproco: la base de 0,91 EUR al 4 % sale 87 por ese camino y 88 dividiendo, y lo que imprime el papel es 88. Tambien es como se calcula un promedio (el ticket medio, el gasto medio): 1,47 EUR entre 98 son 2 centimos dividiendo y 1 por el reciproco. Ternas [centimos, divisor, centimos_esperados].",
   "entre": [
     [91, 1.04, 88],
     [1210, 1.21, 1000],
@@ -47,6 +47,8 @@
     [247, 1.04, 238],
     [1000, 3, 333],
     [3000, 2, 1500],
+    [147, 98, 2],
+    [49, 98, 1],
     [100, 0, 0],
     [-91, 1.04, -88]
   ],

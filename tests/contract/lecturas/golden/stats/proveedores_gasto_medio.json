@@ -1,0 +1,26 @@
+{
+  "gasto_medio": 2,
+  "gasto_por_proveedor": {
+    "labels": [
+      "Bebidas SL"
+    ],
+    "values": [
+      147
+    ]
+  },
+  "gastos_evolucion": {
+    "labels": [
+      "00"
+    ],
+    "values": [
+      147
+    ]
+  },
+  "num_gastos": 98,
+  "porcentaje_sobre_total_gastos": 100.0,
+  "proveedor_top": {
+    "nombre": "Bebidas SL",
+    "total": 147
+  },
+  "total_gasto": 147
+}

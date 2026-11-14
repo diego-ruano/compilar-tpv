@@ -103,38 +103,80 @@ fn bucket_sql_reservas(range: StatsRange) -> &'static str {
     }
 }
 
-/// La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
+/// El inicio de hoy. Las estadísticas de productos y de mesas leen del resumen diario
+/// (`estadisticas_diarias.rs`) los días del rango anteriores a éste, y de los cobros lo de hoy.
+const HOY_SQL: &str = "datetime('now','localtime','start of day')";
+
+/// La sentencia de la estadística de productos: lo vendido en el rango, sin recorrer sus cobros.
 ///
 /// Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
 /// (`de_venta = 1`, una por clave, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
 /// mejor, el peor y los dos top 10 los saca `productos_impl` de ahí sin hacer cuentas: todas las
 /// sumas y los redondeos son de SQLite.
 ///
-/// Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y
-/// las de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada
-/// producto. Así lo que tarda depende del rango pedido y no del histórico. La misma sentencia, en
-/// el worker: `sqlProductos` de `domains/stats/stats.queries.ts`, donde corre en el SQLite del
-/// Durable Object, que atiende a todo el negocio en un solo hilo.
+/// Los días ya cerrados del rango salen de `_Estad_Producto_Dia`, que los tiene sumados por
+/// producto, y sólo lo de hoy se lee de los cobros: lo que tarda no crece con el rango ni con el
+/// histórico. Antes de leer, `productos_impl` rehace los días sucios; el que se haya ensuciado
+/// después (un cobro que ha entrado entre medias) no se lee del resumen sino de los cobros, con la
+/// misma sentencia que lo rehace (`dias_sucios`), así que la lectura nunca mezcla un día viejo con
+/// lo nuevo. Es una sola sentencia a propósito: con una por lista, cada una volvería a leer lo
+/// mismo. La misma sentencia, en el worker: `sqlProductos` de `domains/stats/stats.queries.ts`,
+/// donde corre en el SQLite del Durable Object, que atiende a todo el negocio en un solo hilo.
 pub(crate) fn sql_productos(range: StatsRange) -> String {
     let (start_expr, end_expr) = range_bounds_sql(range);
     format!(
         r#"
         WITH
-        rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+        rng AS (SELECT {start} AS start_dt, {hoy} AS hoy_dt, {end} AS end_dt),
+        {dias_sucios},
+        sucios AS (
+{select_producto_dia}
+        ),
         paid_det AS (
+          -- Las líneas cuyo último cobro es de hoy o posterior, que el resumen no tiene en ningún
+          -- día: entran si tienen un cobro dentro del rango, hoy hasta ahora o antes de hoy. Uno
+          -- fechado después de ahora (un reloj adelantado) no cuenta, pero tampoco saca del rango a
+          -- la línea que tiene otro dentro.
           -- STAT-07: cada línea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una línea
           -- cobrada en dos veces saldría dos veces y sus unidades se contarían dobles.
           -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
           -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
-          -- El rango va AQUÍ (RI-18): se agrupan los cobros del rango, no los de toda la historia.
           SELECT pd.ID_Detalle AS ID_Detalle
           FROM Pago_Detalles pd
           JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
           JOIN rng ON 1=1
           WHERE p.Estado = 'ACTIVO'
-            AND p.Fecha_Hora >= rng.start_dt
-            AND p.Fecha_Hora <  rng.end_dt
+            AND p.Fecha_Hora >= rng.hoy_dt
           GROUP BY pd.ID_Detalle
+          HAVING MIN(p.Fecha_Hora) < MIN(rng.end_dt)
+            OR EXISTS (
+              SELECT 1
+              FROM Pago_Detalles pd2
+              JOIN Pagos p2 ON p2.ID_Pago = pd2.ID_Pago
+              JOIN rng r2 ON 1=1
+              WHERE pd2.ID_Detalle = pd.ID_Detalle
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.Fecha_Hora >= r2.start_dt
+                AND p2.Fecha_Hora <  r2.hoy_dt
+            )
+        ),
+        lineas AS (
+          -- Los días del rango anteriores a hoy, del resumen: cada fila es lo que sumaron ese día
+          -- las líneas de un producto con un mismo nombre, y cada línea está en el día de su último
+          -- cobro, así que la que se cobró ayer y otra vez hoy no sale aquí sino abajo. Los sucios,
+          -- de los cobros.
+          SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Milesimas AS Milesimas
+          FROM _Estad_Producto_Dia e
+          JOIN rng ON 1=1
+          WHERE e.Dia >= date(rng.start_dt)
+            AND e.Dia <  date(rng.hoy_dt)
+            AND e.Dia NOT IN (SELECT Dia FROM dias)
+          UNION ALL
+          SELECT ID_Producto, Nombre_Producto, Milesimas FROM sucios
+          UNION ALL
+          SELECT dc.ID_Producto, dc.Nombre_Producto, CAST(ROUND(COALESCE(dc.Cantidad,1) * 1000) AS INTEGER)
+          FROM paid_det cobrada
+          JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
         ),
         vendido AS (
           -- Se agrupa ANTES de mirar el catálogo: así el catálogo se consulta una vez por clave y
@@ -143,16 +185,16 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           -- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
           -- producto y la de las que no. Si hay líneas con producto, su ID es la clave.
           -- nombre_linea es el de la línea que elige SQLite al agrupar, sin MIN ni MAX que se lo
-          -- cambien: el que se enseña cuando el producto ya no está en el catálogo.
+          -- cambien: el que se enseña cuando el producto ya no está en el catálogo. Las cantidades
+          -- se suman en milésimas enteras, exactas, y vuelven a unidades al final.
           SELECT
-            COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
-            dc.Nombre_Producto AS nombre_linea,
-            SUM(COALESCE(dc.Cantidad,1)) AS suma,
-            SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
-            SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
-          FROM paid_det cobrada
-          JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
-          GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+            COALESCE(l.ID_Producto, l.Nombre_Producto) AS clave,
+            l.Nombre_Producto AS nombre_linea,
+            SUM(l.Milesimas) / 1000.0 AS suma,
+            SUM(CASE WHEN l.ID_Producto IS NOT NULL THEN l.Milesimas END) / 1000.0 AS suma_con_producto,
+            SUM(CASE WHEN l.ID_Producto IS NULL THEN l.Milesimas END) / 1000.0 AS suma_sin_producto
+          FROM lineas l
+          GROUP BY COALESCE(l.ID_Producto, l.Nombre_Producto)
         )
         SELECT
           1 AS de_venta,
@@ -205,7 +247,243 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
         ORDER BY nombre ASC, clave ASC;
         "#,
         start = start_expr,
-        end = end_expr
+        hoy = HOY_SQL,
+        end = end_expr,
+        dias_sucios = DIAS_SUCIOS_DEL_RANGO,
+        select_producto_dia = crate::estadisticas_diarias::SELECT_PRODUCTO_DIA,
+    )
+}
+
+/// Los días cerrados del rango que el resumen diario tiene por rehacer, como `dias(Dia)` de las
+/// sentencias compartidas (`packages/database/estadisticas/`): esos días se leen de los cobros y
+/// no del resumen. Va detrás de `rng`. Materializada: si no, SQLite la deshace dentro de la
+/// sentencia compartida y recorre los cobros de todos los días sucios, también los de fuera del
+/// rango (un histórico recién descargado), antes de mirar el rango.
+const DIAS_SUCIOS_DEL_RANGO: &str = "dias AS MATERIALIZED (
+          SELECT s.Dia AS Dia
+          FROM _Estad_Dias_Sucios s
+          JOIN rng ON 1=1
+          WHERE s.Dia >= date(rng.start_dt)
+            AND s.Dia <  date(rng.hoy_dt)
+        )";
+
+/// Los cobros de mesa del rango, por día y mesa (`por_mesa_dia`): la cabecera que comparten las
+/// sentencias de la estadística de mesas.
+///
+/// Los días del rango anteriores a hoy salen de `_Estad_Mesa_Dia` (antes de leer, `mesas_impl`
+/// rehace los que estén sucios; el que se ensucie después se lee de los cobros, con la misma
+/// sentencia que lo rehace) y lo de hoy, de los cobros hasta ahora. Cada fila trae lo cobrado
+/// y tres recuentos de comandas, porque una comanda cobrada en dos días no puede contarse dos
+/// veces: `comandas` son las de ese día, `comandas_mes` las que tienen ese día su último cobro del
+/// mes y `comandas_rango` las que lo tienen de siempre (ver la tabla en `0001_inicial.sql`). Hoy
+/// las tres son lo mismo: es el último día del rango y de su mes. Y va una fila más por mesa, sin
+/// importe, con las comandas que el resumen ya no cuenta en su día porque tienen un cobro fechado
+/// después de ahora: sólo suman a los dos recuentos de comandas distintas.
+///
+/// Una devolución de parte de un cobro (`ID_Pago_Origen`) resta de lo cobrado el día que se
+/// devuelve, pero no cuenta como comanda: no es un cobro. La venta rápida no tiene mesa.
+fn sql_cobros_por_mesa_y_dia(range: StatsRange) -> String {
+    let (start_expr, end_expr) = range_bounds_sql(range);
+    format!(
+        r#"
+        WITH
+        rng AS (SELECT {start} AS start_dt, {hoy} AS hoy_dt, {end} AS end_dt),
+        {dias_sucios},
+        sucios AS (
+{select_mesa_dia}
+        ),
+        por_mesa_dia AS (
+          SELECT
+            e.Dia AS dia,
+            e.ID_Mesa AS id_mesa,
+            e.Importe AS importe,
+            e.Comandas AS comandas,
+            e.Comandas_Ultimo_Mes AS comandas_mes,
+            e.Comandas_Ultimo AS comandas_rango
+          FROM _Estad_Mesa_Dia e
+          JOIN rng ON 1=1
+          WHERE e.Dia >= date(rng.start_dt)
+            AND e.Dia <  date(rng.hoy_dt)
+            AND e.Dia NOT IN (SELECT Dia FROM dias)
+          UNION ALL
+          SELECT Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo FROM sucios
+          UNION ALL
+          SELECT
+            date(rng.hoy_dt),
+            c.ID_Mesa,
+            SUM(p.Importe_Total),
+            COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END),
+            COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END),
+            COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END)
+          FROM Pagos p
+          JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+          JOIN rng ON 1=1
+          WHERE p.Fecha_Hora >= rng.hoy_dt
+            AND p.Fecha_Hora <  rng.end_dt
+            AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+            AND c.ID_Mesa IS NOT NULL
+          GROUP BY c.ID_Mesa
+          UNION ALL
+          -- Las comandas con un cobro dentro del rango antes de hoy, ninguno hoy hasta ahora y otro
+          -- fechado después de ahora (un reloj adelantado): el resumen no las cuenta en el que era
+          -- su último día, porque ya no lo es, y lo de hoy tampoco. Sólo suman a los recuentos de
+          -- comandas distintas: no son un cobro de hoy (sin importe ni comandas del día).
+          SELECT
+            date(rng.hoy_dt),
+            c.ID_Mesa,
+            NULL,
+            0,
+            COUNT(DISTINCT CASE
+              WHEN p.Fecha_Hora < datetime(rng.hoy_dt, 'start of month', '+1 month') AND EXISTS (
+                SELECT 1 FROM Pagos p2
+                WHERE p2.ID_Comanda = p.ID_Comanda
+                  AND +p2.Estado = 'ACTIVO'
+                  AND p2.ID_Pago_Origen IS NULL
+                  AND p2.Fecha_Hora >= MAX(rng.start_dt, datetime(rng.hoy_dt, 'start of month'))
+                  AND p2.Fecha_Hora <  rng.hoy_dt
+              ) THEN p.ID_Comanda END),
+            COUNT(DISTINCT p.ID_Comanda)
+          FROM Pagos p
+          JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+          JOIN rng ON 1=1
+          WHERE p.Fecha_Hora >= rng.end_dt
+            AND p.Estado = 'ACTIVO'
+            AND p.ID_Pago_Origen IS NULL
+            AND c.ID_Mesa IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM Pagos p2
+              WHERE p2.ID_Comanda = p.ID_Comanda
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.ID_Pago_Origen IS NULL
+                AND p2.Fecha_Hora >= rng.start_dt
+                AND p2.Fecha_Hora <  rng.hoy_dt
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM Pagos p2
+              WHERE p2.ID_Comanda = p.ID_Comanda
+                AND +p2.Estado = 'ACTIVO'
+                AND p2.ID_Pago_Origen IS NULL
+                AND p2.Fecha_Hora >= rng.hoy_dt
+                AND p2.Fecha_Hora <  rng.end_dt
+            )
+          GROUP BY c.ID_Mesa
+        )
+        "#,
+        start = start_expr,
+        hoy = HOY_SQL,
+        end = end_expr,
+        dias_sucios = DIAS_SUCIOS_DEL_RANGO,
+        select_mesa_dia = crate::estadisticas_diarias::SELECT_MESA_DIA,
+    )
+}
+
+/// Las cuatro sentencias de la estadística de mesas: ingresos y mesas servidas (`ocupadas`,
+/// `ingresos`), la mesa con más comandas (número, zona, comandas), las comandas de cada tramo de la
+/// gráfica (tramo, comandas) y las diez mesas que más han ingresado (número, zona, total).
+pub(crate) struct SentenciasMesas {
+    pub ingresos: String,
+    pub top_comandas: String,
+    pub servicios: String,
+    pub top_ingresos: String,
+}
+
+/// Ingresos y mesas servidas del rango. Una mesa cuenta si tiene algún cobro (no una devolución).
+pub(crate) fn sql_mesas_ingresos(range: StatsRange) -> String {
+    format!(
+        r#"{cobros}
+        SELECT
+          COUNT(DISTINCT CASE WHEN d.comandas > 0 THEN d.id_mesa END) AS ocupadas,
+          COALESCE(SUM(d.importe),0) AS ingresos
+        FROM por_mesa_dia d
+        JOIN Mesas m ON m.ID_Mesa = d.id_mesa;
+        "#,
+        cobros = sql_cobros_por_mesa_y_dia(range)
+    )
+}
+
+/// La mesa con más comandas cobradas en el rango.
+pub(crate) fn sql_mesa_top_comandas(range: StatsRange) -> String {
+    format!(
+        r#"{cobros}
+        SELECT
+          m.Numero_Mesa,
+          z.Nombre_Zona,
+          SUM(d.comandas_rango) AS comandas
+        FROM por_mesa_dia d
+        JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+        JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+        GROUP BY m.ID_Mesa
+        ORDER BY comandas DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+        LIMIT 1;
+        "#,
+        cobros = sql_cobros_por_mesa_y_dia(range)
+    )
+}
+
+/// Las comandas cobradas de cada tramo de la gráfica. Por horas (hoy) se leen de los cobros; por
+/// días, del recuento de cada día; por meses, del que cuenta cada comanda una vez en su mes.
+pub(crate) fn sql_mesas_servicios(range: StatsRange) -> String {
+    let (tramo, recuento) = match range {
+        StatsRange::Hoy => {
+            let (start_expr, end_expr) = range_bounds_sql(range);
+            return format!(
+                r#"
+                SELECT {bucket} AS b, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS n
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+                  AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+                GROUP BY b
+                ORDER BY b ASC;
+                "#,
+                start = start_expr,
+                end = end_expr,
+                bucket = bucket_sql_datetime(range, "p.Fecha_Hora")
+            );
+        }
+        StatsRange::Semana | StatsRange::Mes => ("strftime('%d/%m', d.dia)", "d.comandas"),
+        StatsRange::Anio => ("strftime('%m/%Y', d.dia)", "d.comandas_mes"),
+    };
+    // Sólo los tramos con algún cobro. Las filas sin importe son las de las comandas con un cobro
+    // fechado después de ahora (`sql_cobros_por_mesa_y_dia`), que no son un cobro de hoy: por días
+    // no cuentan, y por meses sólo si suman al mes de hoy, que entonces ya tiene un cobro antes de
+    // hoy. Si su cobro de dentro del rango es de un mes anterior, no hacen aparecer el mes de hoy.
+    let con_cobros = if matches!(range, StatsRange::Anio) {
+        "WHERE d.importe IS NOT NULL OR d.comandas_mes > 0"
+    } else {
+        "WHERE d.importe IS NOT NULL"
+    };
+    format!(
+        r#"{cobros}
+        SELECT {tramo} AS b, SUM({recuento}) AS n
+        FROM por_mesa_dia d
+        JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+        {con_cobros}
+        GROUP BY b
+        ORDER BY b ASC;
+        "#,
+        cobros = sql_cobros_por_mesa_y_dia(range)
+    )
+}
+
+/// Las diez mesas que más han ingresado en el rango. Entre dos con lo mismo, primero la de número
+/// menor (y, con el mismo número en dos zonas, la de ID menor).
+pub(crate) fn sql_mesas_top_ingresos(range: StatsRange) -> String {
+    format!(
+        r#"{cobros}
+        SELECT
+          m.Numero_Mesa,
+          z.Nombre_Zona,
+          COALESCE(SUM(d.importe),0) AS total
+        FROM por_mesa_dia d
+        JOIN Mesas m ON m.ID_Mesa = d.id_mesa
+        JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+        GROUP BY m.ID_Mesa
+        ORDER BY total DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+        LIMIT 10;
+        "#,
+        cobros = sql_cobros_por_mesa_y_dia(range)
     )
 }
 
@@ -358,9 +636,20 @@ impl StatsRepository for SqliteStatsRepository {
 
 impl SqliteStatsRepository {
     async fn mesas_impl(&self, range: StatsRange) -> Result<MesasStatsResponse, String> {
-        let (start_expr, end_expr) = range_bounds_sql(range);
-        let bucket_expr = bucket_sql_datetime(range, "p.Fecha_Hora");
+        // Los días cerrados del rango se leen del resumen diario: primero, que esté al día.
+        self.resumen_al_dia(range).await?;
+        self.mesas_con(SentenciasMesas {
+            ingresos: sql_mesas_ingresos(range),
+            top_comandas: sql_mesa_top_comandas(range),
+            servicios: sql_mesas_servicios(range),
+            top_ingresos: sql_mesas_top_ingresos(range),
+        })
+        .await
+    }
 
+    /// La estadística de mesas a partir de sus cuatro sentencias. Los tests de equivalencia le pasan
+    /// las de antes del resumen diario, que recorren los cobros.
+    async fn mesas_con(&self, sql: SentenciasMesas) -> Result<MesasStatsResponse, String> {
         let g = self.db.read().await;
         let db = &g;
 
@@ -387,23 +676,12 @@ impl SqliteStatsRepository {
         // parte de un cobro (`ID_Pago_Origen`) resta de los ingresos el día que se devuelve, pero no
         // cuenta como mesa servida ni como cobro: no lo es. La venta rápida
         // queda fuera del tablero de mesas sin filtro extra: sus comandas no tienen mesa
-        // (Canal='BARRA', ID_Mesa NULL), así que el JOIN con Mesas ya no las incluye.
-        let sql_occ_ing = format!(
-            r#"
-            SELECT
-              COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN c.ID_Mesa END) AS ocupadas,
-              COALESCE(SUM(p.Importe_Total),0) AS ingresos
-            FROM Pagos p
-            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';
-            "#,
-            start = start_expr,
-            end = end_expr
-        );
-
-        let mut rows_occ = db.query(&sql_occ_ing, ()).await.map_err(|e| e.to_string())?;
+        // (Canal='BARRA', ID_Mesa NULL). Las cuatro sentencias leen lo mismo: `por_mesa_dia`
+        // (`sql_cobros_por_mesa_y_dia`).
+        let mut rows_occ = db
+            .query(&sql.ingresos, ())
+            .await
+            .map_err(|e| e.to_string())?;
         let (ocupadas, total_ingresos): (i64, Dinero) =
             match rows_occ.next().await.map_err(|e| e.to_string())? {
                 Some(r) => (
@@ -413,33 +691,18 @@ impl SqliteStatsRepository {
                 None => (0, Dinero::CERO),
             };
 
+        // Un promedio se divide (`entre`), no se multiplica por el recíproco: 1,47 € entre 98 mesas
+        // son 2 céntimos dividiendo y 1 por el otro camino, y el worker divide.
         let ticket_medio_por_mesa: Dinero = if ocupadas > 0 {
-            total_ingresos.escala(1.0 / ocupadas as f64)
+            total_ingresos.entre(ocupadas as f64)
         } else {
             Dinero::CERO
         };
 
-        let sql_top = format!(
-            r#"
-            SELECT
-              m.Numero_Mesa,
-              z.Nombre_Zona,
-              COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS comandas
-            FROM Pagos p
-            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-            GROUP BY m.ID_Mesa
-            ORDER BY comandas DESC, m.Numero_Mesa ASC
-            LIMIT 1;
-            "#,
-            start = start_expr,
-            end = end_expr
-        );
-
-        let mut rows_top = db.query(&sql_top, ()).await.map_err(|e| e.to_string())?;
+        let mut rows_top = db
+            .query(&sql.top_comandas, ())
+            .await
+            .map_err(|e| e.to_string())?;
         let mesa_top_comandas: Option<MesasTopComandas> =
             match rows_top.next().await.map_err(|e| e.to_string())? {
                 Some(r) => Some(MesasTopComandas {
@@ -450,23 +713,10 @@ impl SqliteStatsRepository {
                 None => None,
             };
 
-        let sql_serv = format!(
-            r#"
-            SELECT {bucket} AS b, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS n
-            FROM Pagos p
-            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-            GROUP BY b
-            ORDER BY b ASC;
-            "#,
-            start = start_expr,
-            end = end_expr,
-            bucket = bucket_expr
-        );
-
-        let mut rows_serv = db.query(&sql_serv, ()).await.map_err(|e| e.to_string())?;
+        let mut rows_serv = db
+            .query(&sql.servicios, ())
+            .await
+            .map_err(|e| e.to_string())?;
 
         let mut labels: Vec<String> = Vec::new();
         let mut values: Vec<i64> = Vec::new();
@@ -481,28 +731,8 @@ impl SqliteStatsRepository {
 
         let servicios = ChartSeriesI64 { labels, values };
 
-        let sql_top_mesas = format!(
-            r#"
-            SELECT
-              m.Numero_Mesa,
-              z.Nombre_Zona,
-              COALESCE(SUM(p.Importe_Total),0) AS total
-            FROM Pagos p
-            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-            GROUP BY m.ID_Mesa
-            ORDER BY total DESC
-            LIMIT 10;
-            "#,
-            start = start_expr,
-            end = end_expr
-        );
-
         let mut rows_tm = db
-            .query(&sql_top_mesas, ())
+            .query(&sql.top_ingresos, ())
             .await
             .map_err(|e| e.to_string())?;
         let mut top_mesas_ingresos: Vec<MesaIngresoRow> = Vec::new();
@@ -523,6 +753,18 @@ impl SqliteStatsRepository {
             servicios,
             top_mesas_ingresos,
         })
+    }
+
+    /// Antes de leer del resumen diario los días cerrados de un rango, rehace los que estén sucios
+    /// (`estadisticas_diarias::poner_al_dia`). El rango de hoy no lee del resumen.
+    async fn resumen_al_dia(&self, range: StatsRange) -> Result<(), String> {
+        if matches!(range, StatsRange::Hoy) {
+            return Ok(());
+        }
+        let (inicio, _) = range_bounds_sql(range);
+        crate::estadisticas_diarias::poner_al_dia(&self.db, inicio)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn list_categorias_impl(&self) -> Result<Vec<StatsCategoriaRow>, String> {
@@ -558,11 +800,23 @@ impl SqliteStatsRepository {
         &self,
         args: ProductosStatsArgs,
     ) -> Result<ProductosStatsResponse, String> {
+        // Los días cerrados del rango se leen del resumen diario: primero, que esté al día.
+        self.resumen_al_dia(args.range).await?;
+        self.productos_con(&sql_productos(args.range), args).await
+    }
+
+    /// La estadística de productos a partir de su sentencia (`sql_productos`). Los tests de
+    /// equivalencia le pasan la de antes del resumen diario, que recorre los cobros.
+    async fn productos_con(
+        &self,
+        sql: &str,
+        args: ProductosStatsArgs,
+    ) -> Result<ProductosStatsResponse, String> {
         let g = self.db.read().await;
         let db = &g;
 
         let mut rows = db
-            .query(&sql_productos(args.range), ())
+            .query(sql, ())
             .await
             .map_err(|e| e.to_string())?;
 
@@ -1487,10 +1741,10 @@ impl SqliteStatsRepository {
                 clientes_rango = v_i64(r.get_value(3).map_err(|e| e.to_string())?).unwrap_or(0);
             }
 
-            // Un promedio de importes sigue siendo fraccionario, asi que se reparte con
-            // `escala` y vuelve a centimo entero de una sola vez.
+            // Un promedio de importes sigue siendo fraccionario: vuelve a céntimo entero de una
+            // sola vez, dividiendo (`entre`) como el worker y no por el recíproco.
             ticket_medio_cliente = if clientes_rango > 0 {
-                ventas_total.escala(1.0 / clientes_rango as f64)
+                ventas_total.entre(clientes_rango as f64)
             } else {
                 Dinero::CERO
             };
@@ -1609,8 +1863,10 @@ impl SqliteStatsRepository {
             None => (Dinero::CERO, 0),
         };
 
+        // Dividiendo (`entre`), como el worker: por el recíproco, 1,47 € entre 98 gastos dan 1
+        // céntimo y no 2.
         let gasto_medio = if num_gastos > 0 {
-            total_gasto.escala(1.0 / num_gastos as f64)
+            total_gasto.entre(num_gastos as f64)
         } else {
             Dinero::CERO
         };
@@ -2159,5 +2415,354 @@ mod tests_productos_en_una_pasada {
         let bebidas = repo.productos_impl(hoy(Some("cat-bebidas"), None)).await.unwrap();
         let pos = |nombre: &str| bebidas.top10_mejores.labels.iter().position(|l| l == nombre).unwrap();
         assert!(pos("ｆ Fanta") < pos("🍺 Jarra"), "{:?}", bebidas.top10_mejores.labels);
+    }
+}
+
+#[cfg(test)]
+mod tests_resumen_diario {
+    //! Las estadísticas de productos y de mesas leen del resumen diario los días ya cerrados
+    //! (`estadisticas_diarias.rs`) y tienen que dar EXACTAMENTE lo que daban las sentencias que
+    //! recorrían los cobros, que se conservan aquí como referencia: la de productos en una pasada
+    //! y las cuatro de mesas.
+    //!
+    //! Las siembras son las de los casos de contrato. Las de `stats/productos_semana` y
+    //! `stats/mesas_semana` traen además `cambios`: tandas de escrituras que se aplican una detrás
+    //! de otra (anular, cambiar la fecha de un cobro, cobrar otra parte de una línea, borrar un
+    //! producto o una comanda, cambiar una comanda de mesa…). Tras cada tanda:
+    //!
+    //! 1. todo día del resumen que no esté apuntado como sucio tiene que coincidir con lo que sale
+    //!    de los cobros: si no, a un cambio le falta su trigger;
+    //! 2. las dos estadísticas, en los cuatro rangos, dan lo mismo que las de antes;
+    //! 3. se rehace todo lo sucio, para que la tanda siguiente vuelva a mirar todos los días.
+    //!
+    //! El worker hace lo mismo con su propia copia (`test/statsResumenDiario.test.ts`).
+
+    use super::*;
+    use crate::contract_comun::{contract_dir, db_temporal, sembrar};
+    use crate::estadisticas_diarias::{coincide, recalcular_pendientes};
+    use std::time::Duration;
+
+    /// La sentencia de la estadística de productos de antes del resumen diario, tal cual estaba:
+    /// una pasada por las líneas cobradas del rango.
+    fn productos_de_antes(range: StatsRange) -> String {
+        let (start_expr, end_expr) = range_bounds_sql(range);
+        format!(
+            r#"
+            WITH
+            rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+            paid_det AS (
+              SELECT pd.ID_Detalle AS ID_Detalle
+              FROM Pago_Detalles pd
+              JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+              JOIN rng ON 1=1
+              WHERE p.Estado = 'ACTIVO'
+                AND p.Fecha_Hora >= rng.start_dt
+                AND p.Fecha_Hora <  rng.end_dt
+              GROUP BY pd.ID_Detalle
+            ),
+            vendido AS (
+              SELECT
+                COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
+                dc.Nombre_Producto AS nombre_linea,
+                SUM(COALESCE(dc.Cantidad,1)) AS suma,
+                SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
+                SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
+              FROM paid_det cobrada
+              JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
+              GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+            )
+            SELECT
+              1 AS de_venta,
+              clave,
+              label,
+              nombre,
+              id_producto,
+              id_categoria,
+              CAST(ROUND(general,0) AS INTEGER) AS unidades,
+              general > 0 AS con_ventas,
+              CAST(ROUND(del_producto,0) AS INTEGER) AS unidades_producto,
+              del_producto > 0 AS con_ventas_producto
+            FROM (
+              SELECT
+                v.clave AS clave,
+                CASE WHEN v.suma_con_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
+                     THEN COALESCE(pr.Nombre, v.nombre_linea, 'Producto')
+                     ELSE COALESCE(v.clave, 'Producto')
+                END AS label,
+                CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.Nombre END AS nombre,
+                pr.ID_Producto AS id_producto,
+                CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.ID_Categoria END AS id_categoria,
+                CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma ELSE v.suma_sin_producto END AS general,
+                CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma_con_producto END AS del_producto
+              FROM vendido v
+              LEFT JOIN Productos pr ON v.suma_con_producto IS NOT NULL AND pr.ID_Producto = v.clave
+              LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+              WHERE COALESCE(cat.Vendible,1)=1 OR v.suma_sin_producto IS NOT NULL
+            )
+            UNION ALL
+            SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 0
+            FROM Productos pr
+            JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+            WHERE COALESCE(cat.Vendible,1)=1
+            ORDER BY nombre ASC, clave ASC;
+            "#,
+            start = start_expr,
+            end = end_expr
+        )
+    }
+
+    /// Las cuatro sentencias de la estadística de mesas de antes del resumen diario, tal cual
+    /// estaban salvo en el desempate de las dos listas de mesas, que no lo tenían entero: dos
+    /// mesas con lo mismo salían en el orden en que las dejara SQLite (en la siembra de
+    /// `mesas_semana`, la 3 antes que la 2). Ahora va primero la de número menor y, con el mismo
+    /// número, la de ID menor (`sql_mesa_top_comandas`, `sql_mesas_top_ingresos`).
+    fn mesas_de_antes(range: StatsRange) -> SentenciasMesas {
+        let (start, end) = range_bounds_sql(range);
+        let bucket = bucket_sql_datetime(range, "p.Fecha_Hora");
+        SentenciasMesas {
+            ingresos: format!(
+                r#"
+                SELECT
+                  COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN c.ID_Mesa END) AS ocupadas,
+                  COALESCE(SUM(p.Importe_Total),0) AS ingresos
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+                  AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';
+                "#
+            ),
+            top_comandas: format!(
+                r#"
+                SELECT
+                  m.Numero_Mesa,
+                  z.Nombre_Zona,
+                  COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS comandas
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+                WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+                  AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+                GROUP BY m.ID_Mesa
+                ORDER BY comandas DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+                LIMIT 1;
+                "#
+            ),
+            servicios: format!(
+                r#"
+                SELECT {bucket} AS b, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS n
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+                  AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+                GROUP BY b
+                ORDER BY b ASC;
+                "#
+            ),
+            top_ingresos: format!(
+                r#"
+                SELECT
+                  m.Numero_Mesa,
+                  z.Nombre_Zona,
+                  COALESCE(SUM(p.Importe_Total),0) AS total
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                JOIN Zonas z ON z.ID_Zona = m.ID_Zona
+                WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+                  AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+                GROUP BY m.ID_Mesa
+                ORDER BY total DESC, m.Numero_Mesa ASC, m.ID_Mesa ASC
+                LIMIT 10;
+                "#
+            ),
+        }
+    }
+
+    const RANGOS: [StatsRange; 4] =
+        [StatsRange::Hoy, StatsRange::Semana, StatsRange::Mes, StatsRange::Anio];
+
+    /// Sin filtro, y con filtros que dejan dentro y fuera productos vendidos.
+    const FILTROS: [(Option<&str>, Option<&str>); 4] = [
+        (None, None),
+        (Some("cat-platos"), Some("cat-bebidas")),
+        (Some("cat-bebidas"), Some("cat-platos")),
+        (Some("cat-materia"), Some("cat-que-no-existe")),
+    ];
+
+    /// Las siembras: las dos con cambios y las demás de productos y mesas.
+    const CASOS: [&str; 5] = [
+        "productos_semana",
+        "mesas_semana",
+        "productos_vendidos",
+        "productos_nombre_que_es_un_id",
+        "mesas",
+    ];
+
+    fn leer_caso(nombre: &str) -> serde_json::Value {
+        let ruta = contract_dir().join(format!("lecturas/casos/stats/{nombre}.json"));
+        serde_json::from_str(&std::fs::read_to_string(&ruta).unwrap()).unwrap()
+    }
+
+    /// Las dos estadísticas, en los cuatro rangos, dan lo mismo que las de antes.
+    async fn da_lo_mismo_que_antes(repo: &SqliteStatsRepository, etiqueta: &str) {
+        for range in RANGOS {
+            let antes = repo.mesas_con(mesas_de_antes(range)).await.unwrap();
+            // Primero sin rehacer los días sucios: lo que lee alguien a quien se le ha colado un
+            // cobro entre rehacerlos y leer. Esos días se leen de los cobros, no del resumen.
+            let sin_rehacer = repo
+                .mesas_con(SentenciasMesas {
+                    ingresos: sql_mesas_ingresos(range),
+                    top_comandas: sql_mesa_top_comandas(range),
+                    servicios: sql_mesas_servicios(range),
+                    top_ingresos: sql_mesas_top_ingresos(range),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&sin_rehacer).unwrap(),
+                serde_json::to_value(&antes).unwrap(),
+                "{etiqueta}: mesas sin rehacer los días sucios, {range:?}"
+            );
+            for (top, worst) in FILTROS {
+                let args = ProductosStatsArgs {
+                    range,
+                    categoria_top_id: top.map(str::to_string),
+                    categoria_worst_id: worst.map(str::to_string),
+                };
+                let antes = repo.productos_con(&productos_de_antes(range), args.clone()).await.unwrap();
+                let sin_rehacer = repo.productos_con(&sql_productos(range), args).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(&sin_rehacer).unwrap(),
+                    serde_json::to_value(&antes).unwrap(),
+                    "{etiqueta}: productos sin rehacer los días sucios, {range:?}, top {top:?}, peores {worst:?}"
+                );
+            }
+            let ahora = repo.mesas_impl(range).await.unwrap();
+            assert_eq!(
+                serde_json::to_value(&ahora).unwrap(),
+                serde_json::to_value(&antes).unwrap(),
+                "{etiqueta}: mesas, {range:?}"
+            );
+            for (top, worst) in FILTROS {
+                let args = ProductosStatsArgs {
+                    range,
+                    categoria_top_id: top.map(str::to_string),
+                    categoria_worst_id: worst.map(str::to_string),
+                };
+                let antes = repo.productos_con(&productos_de_antes(range), args.clone()).await.unwrap();
+                let ahora = repo.productos_impl(args).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(&ahora).unwrap(),
+                    serde_json::to_value(&antes).unwrap(),
+                    "{etiqueta}: productos, {range:?}, top {top:?}, peores {worst:?}"
+                );
+            }
+        }
+    }
+
+    /// Todo día resumido que no esté apuntado como sucio coincide con lo que sale de los cobros.
+    async fn lo_no_apuntado_sigue_valiendo(db: &Arc<Db>, etiqueta: &str) {
+        let w = db.write().await;
+        let conn = w.raw();
+        let mut filas = conn
+            .query(
+                "SELECT dia FROM ( \
+                   SELECT substr(Fecha_Hora, 1, 10) AS dia FROM Pagos \
+                   UNION SELECT Dia FROM _Estad_Producto_Dia \
+                   UNION SELECT Dia FROM _Estad_Mesa_Dia \
+                 ) WHERE dia NOT IN (SELECT Dia FROM _Estad_Dias_Sucios) ORDER BY dia;",
+                (),
+            )
+            .await
+            .unwrap();
+        let mut dias = Vec::new();
+        while let Some(f) = filas.next().await.unwrap() {
+            dias.extend(v_string(f.get_value(0).unwrap()));
+        }
+        for dia in dias {
+            assert!(
+                coincide(conn, &dia).await.unwrap(),
+                "{etiqueta}: el resumen del {dia} ya no vale y nadie lo apuntó"
+            );
+        }
+    }
+
+    async fn rehacer_todo(db: &Arc<Db>) {
+        let pasada = recalcular_pendientes(db, Duration::from_secs(60)).await.unwrap();
+        assert_eq!(pasada.quedan, 0);
+    }
+
+    #[tokio::test]
+    async fn da_lo_mismo_que_recorrer_los_cobros_tras_cada_cambio() {
+        for nombre in CASOS {
+            let caso = leer_caso(nombre);
+            let (db, _dir) = db_temporal().await;
+            sembrar(&db, caso["seed"].as_array().unwrap()).await;
+            let repo = SqliteStatsRepository::new(db.clone());
+
+            da_lo_mismo_que_antes(&repo, &format!("{nombre}, siembra")).await;
+            rehacer_todo(&db).await;
+            lo_no_apuntado_sigue_valiendo(&db, &format!("{nombre}, siembra")).await;
+
+            let cambios = caso["cambios"].as_array().cloned().unwrap_or_default();
+            for (i, tanda) in cambios.iter().enumerate() {
+                let etiqueta = format!("{nombre}, tanda {}", i + 1);
+                sembrar(&db, tanda.as_array().unwrap()).await;
+                lo_no_apuntado_sigue_valiendo(&db, &etiqueta).await;
+                da_lo_mismo_que_antes(&repo, &etiqueta).await;
+                rehacer_todo(&db).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn un_cobro_futuro_no_hace_aparecer_el_mes_de_hoy_en_la_grafica_del_anio() {
+        // Revisión de Codex (segunda pasada): una comanda cobrada el último día del mes pasado y
+        // otra vez después de ahora, y nada más. Su fila sin importe de hoy suma a las comandas del
+        // rango, pero no puede sacar en la gráfica del año el mes de hoy, que no tiene cobros. (En
+        // enero el mes pasado es del año anterior y no hay nada que comparar.) La misma siembra, en
+        // `statsResumenDiario.test.ts`.
+        let (db, _dir) = db_temporal().await;
+        let siembra: Vec<serde_json::Value> = [
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Sala');",
+            "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1', 'z', '1', 4, 0, 0, 'rect', 120, 70);",
+            "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'MESA', 'm1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Pagada');",
+            "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'c1', datetime('now','localtime','start of month','-1 day','+12 hours'), 'Efectivo', 500, 'parcial');",
+            "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p2', 'c1', datetime('now','localtime','+1 day'), 'Efectivo', 500, 'parcial');",
+        ]
+        .map(serde_json::Value::from)
+        .to_vec();
+        sembrar(&db, &siembra).await;
+        let repo = SqliteStatsRepository::new(db.clone());
+        da_lo_mismo_que_antes(&repo, "cobro futuro de una comanda del mes pasado").await;
+    }
+
+    #[tokio::test]
+    async fn las_siembras_con_cambios_ejercitan_el_resumen() {
+        // Si las siembras dejaran de tener días cerrados dentro de la semana, la comparación de
+        // arriba pasaría sin leer nada del resumen.
+        for nombre in ["productos_semana", "mesas_semana"] {
+            let caso = leer_caso(nombre);
+            let (db, _dir) = db_temporal().await;
+            sembrar(&db, caso["seed"].as_array().unwrap()).await;
+            let repo = SqliteStatsRepository::new(db.clone());
+            repo.mesas_impl(StatsRange::Semana).await.unwrap();
+            let r = db.read().await;
+            let mut filas = r
+                .query(
+                    "SELECT (SELECT COUNT(DISTINCT Dia) FROM _Estad_Producto_Dia WHERE Dia >= date('now','localtime','-6 days')), \
+                            (SELECT COUNT(DISTINCT Dia) FROM _Estad_Mesa_Dia WHERE Dia >= date('now','localtime','-6 days'));",
+                    (),
+                )
+                .await
+                .unwrap();
+            let f = filas.next().await.unwrap().unwrap();
+            let dias = v_i64(f.get_value(0).unwrap()).unwrap() + v_i64(f.get_value(1).unwrap()).unwrap();
+            assert!(dias >= 4, "{nombre}: sólo {dias} días resumidos en la semana");
+            assert!(caso["cambios"].as_array().is_some_and(|c| c.len() >= 8), "{nombre}: sin cambios");
+        }
     }
 }

@@ -11,7 +11,7 @@
 //
 // - Una escritura del negocio va por el motor del DO (`lib/hub.ts`), que es quien la apunta y la
 //   difunde. Lo único que una ruta escribe por aquí es el estado propio de la nube (el freno del PIN,
-//   el checkpoint de la purga), que no se replica.
+//   el checkpoint de la purga, el resumen diario de las estadísticas), que no se replica.
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
 // ── REV-03: «hoy» es el de quien pregunta, no el de la base ──────────────────────────────────────
