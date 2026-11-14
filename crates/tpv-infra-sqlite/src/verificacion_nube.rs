@@ -124,7 +124,7 @@ impl VerificacionNubeRepository for SqliteVerificacionNube {
                 .unwrap_or(0);
 
         // Un cambio en cuarentena tampoco: no se resuelve esperando, y con él la pasada sólo
-        // compara e informa (`hay_fallos_de_bajada`).
+        // compara e informa (`contraste.rs::Guarda::sin_fallos`).
         let bajada_detenida =
             un_entero(&r, "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 0;")
                 .await?

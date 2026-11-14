@@ -1,5 +1,6 @@
 // src/domains/venta_rapida/venta_rapida.queries.ts
 
+import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { nuevoId } from "../../lib/ids";
 import { recortar } from "../../lib/texto";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
@@ -102,14 +103,15 @@ export async function searchProductos(
 	query: string,
 	limit: number,
 ): Promise<ProductoRow[]> {
-	if (!recortar(query)) return [];
+	const texto = textoABuscar(query);
+	if (!texto) return [];
+	// Sin acentos ni mayúsculas (`lib/busqueda.ts`), igual en la Main (`search_productos`). Con
 	// `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50
 	// bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría la búsqueda; y en un
-	// patrón el `%` y el `_` que teclea el usuario son comodines. Sin distinguir mayúsculas, como
-	// `LIKE`. Igual en la Main (`search_productos`).
+	// patrón el `%` y el `_` que teclea el usuario son comodines.
 	const rs = await db.execute({
-		sql: productosSql("instr(lower(p.Nombre), lower(?1)) > 0", "LIMIT ?2"),
-		args: [query, limit],
+		sql: productosSql(`instr(${normalizada("p.Nombre")}, ?1) > 0`, "LIMIT ?2"),
+		args: [texto, limit],
 	});
 	return rows(rs) as ProductoRow[];
 }

@@ -1,5 +1,4 @@
 //! Adaptador HTTP del repositorio de mesas/comandas/cocina (dominio `/v1/mesas` del worker).
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,8 +7,8 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
+    CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    MesasMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
@@ -69,6 +68,19 @@ impl MesasRepository for HttpMesasRepository {
         self.client.post_json("/v1/mesas/comandas", &body).await
     }
 
+    async fn abrir_o_retomar_comanda(
+        &self,
+        data: AbrirComandaData,
+    ) -> AppResult<Option<ComandaConLineasOut>> {
+        // Un viaje: antes eran la abierta, abrirla o ponerle el trabajador, y las líneas.
+        let body = json!({
+            "id_mesa": data.id_mesa,
+            "id_trabajador": data.id_trabajador_o_usuario,
+            "id_reserva": data.id_reserva,
+        });
+        self.client.post_json("/v1/mesas/comandas/abrir-o-retomar", &body).await
+    }
+
     async fn comanda_set_trabajador_if_null(
         &self,
         id_comanda: &str,
@@ -112,7 +124,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Meta + catálogo */
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<MesasMetaOut> {
         self.client.get_json("/v1/mesas/meta").await
     }
 

@@ -55,7 +55,7 @@ describe("presentación del socket Handy nativo", () => {
         vi.mocked(queryClient.invalidateQueries).mockClear();
         const info = {ids: ["c1"], touchedComanda: true, uncertain: false, touchedCatalog: false};
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas: ["detalle_comanda"], comanda: info}}});
-        expect(vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas"], ["stats"]]);
+        expect(vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas", "meta"], ["stats"]]);
         expect(useSyncSignal.getState().comanda).toEqual(info); socket.detener();
     });
     it("un cobro de la Main refresca sus áreas, sin releerlo todo ni los ajustes", async () => {
@@ -68,7 +68,7 @@ describe("presentación del socket Handy nativo", () => {
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas, comanda: {ids: ["c1"], touchedComanda: true, uncertain: false, touchedCatalog: true}}}});
         const claves = vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey);
         expect(claves).not.toContain(undefined);
-        expect(claves.map((c) => String(c)).sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
+        expect(claves.map((c) => String(c)).sort()).toEqual(["cuentas", "inventario", "mesas,meta", "proveedores", "stats"]);
         for (const init of inits()) expect(init).not.toHaveBeenCalled();
         socket.detener();
     });

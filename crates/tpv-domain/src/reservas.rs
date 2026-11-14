@@ -422,6 +422,52 @@ pub fn reserva_de_cada_mesa(
     por_mesa
 }
 
+/// MESAS-02 · Cuántos segundos faltan para que el plano cambie solo, con la hora: `None` si nada de
+/// lo que hay va a cambiar. Con esto la pantalla relee la meta entonces y no cada minuto (en la
+/// Handy, cada relectura es una petición al worker). Espejo de `segundosHastaElProximoCambio` en
+/// el worker, con sus casos en `plano_reservas_casos.json`.
+///
+/// Cambia con la hora una reserva por llegar: la que ya sale en el plano cambia sus minutos (y se va
+/// al acabar su hueco), y la que aún no sale aparece cuando le falta una hora. Una sentada no
+/// cambia con la hora, y una mesa con una sentada no enseña ninguna otra, así que las por llegar de
+/// esa mesa no cuentan. `ahora` e `instante`, como en [`reserva_de_cada_mesa`].
+pub fn segundos_hasta_el_proximo_cambio(
+    reservas: &[ReservaDeMesa],
+    ahora: i64,
+    instante: impl Fn(chrono::NaiveDateTime) -> Option<i64>,
+) -> Option<i64> {
+    let instante_de = |r: &ReservaDeMesa| -> Option<i64> {
+        if r.id_mesa.is_empty() || r.id_reserva.is_empty() {
+            return None;
+        }
+        let dia = crate::fechas::fecha_ymd(r.dia_ymd.trim())?;
+        instante(dia.and_time(hora_del_dia(r.hora.trim())?))
+    };
+    let con_sentada: std::collections::HashSet<&str> = reservas
+        .iter()
+        .filter(|r| r.estado.trim().eq_ignore_ascii_case("ACTIVA") && instante_de(r).is_some())
+        .map(|r| r.id_mesa.as_str())
+        .collect();
+    reservas
+        .iter()
+        .filter(|r| r.estado.trim().eq_ignore_ascii_case("PROXIMA") && !con_sentada.contains(r.id_mesa.as_str()))
+        .filter_map(|r| {
+            let d = instante_de(r)? - ahora;
+            let minutos = d / 60;
+            let duracion = r.duracion_min.filter(|m| *m > 0).unwrap_or(DURACION_POR_DEFECTO_MIN);
+            if minutos > PLANO_ANTELACION_MIN {
+                // Sale cuando los minutos que faltan, truncados, llegan a la hora de antelación.
+                Some(d - ((PLANO_ANTELACION_MIN + 1) * 60 - 1))
+            } else if minutos > -duracion {
+                // Sale ya: cambia en cuanto cambian sus minutos, hacia cero o lejos de él.
+                Some(if d > 0 { d % 60 + 1 } else { 60 - (-d) % 60 })
+            } else {
+                None
+            }
+        })
+        .min()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,7 +548,14 @@ mod tests {
                 Some(utc) => local(utc).and_utc().timestamp(),
                 None => instante(local(caso["ahora"].as_str().unwrap())).unwrap(),
             };
-            let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas.collect(), ahora, instante)
+            let reservas: Vec<ReservaDeMesa> = reservas.collect();
+            assert_eq!(
+                segundos_hasta_el_proximo_cambio(&reservas, ahora, instante),
+                caso["proximo_cambio_s"].as_i64(),
+                "{nombre}: próximo cambio"
+            );
+            assert!(caso.get("proximo_cambio_s").is_some(), "{nombre}: falta «proximo_cambio_s» (null si nada cambia)");
+            let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas, ahora, instante)
                 .into_iter()
                 .map(|(mesa, r)| {
                     (mesa, serde_json::json!({ "id_reserva": r.reserva.id_reserva, "estado": r.estado, "minutos_para": r.minutos_para }))

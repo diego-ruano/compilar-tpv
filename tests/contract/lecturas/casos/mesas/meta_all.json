@@ -1,5 +1,5 @@
 {
-  "descripcion": "El estado de cada mesa ocupada: lo que queda por cobrar, cuantas lineas faltan de pagar y cuantas de preparar en cocina. Es lo que pinta el color de cada mesa en el plano, asi que una divergencia aqui se ve a simple vista. El seed deja una comanda a medio cobrar (una linea pagada y otra no) con un plato de cocina pendiente y otro ya PREPARADO, que no debe contar. Y la reserva de cada mesa (MESAS-02): sentadas del ano 2000, que salen siempre (una en la mesa de la comanda abierta y otra, con cliente, en la de la comanda cerrada), dos sentadas en la misma mesa (sale la mas cercana a hoy), y por llegar del 2000 y del 2099 y una cancelada, que no salen nunca. Los minutos que faltan dependen del reloj y no se comparan; su regla esta en plano_reservas_casos.json.",
+  "descripcion": "El estado de cada mesa ocupada: lo que queda por cobrar, cuantas lineas faltan de pagar y cuantas de preparar en cocina. Es lo que pinta el color de cada mesa en el plano, asi que una divergencia aqui se ve a simple vista. El seed deja una comanda a medio cobrar (una linea pagada y otra no) con un plato de cocina pendiente y otro ya PREPARADO, que no debe contar. Y la reserva de cada mesa (MESAS-02): sentadas del ano 2000, que salen siempre (una en la mesa de la comanda abierta y otra, con cliente, en la de la comanda cerrada), dos sentadas en la misma mesa (sale la mas cercana a hoy), y por llegar del 2000 y del 2099 y una cancelada, que no salen nunca. Los minutos que faltan y cuando cambiara el plano dependen del reloj y no se comparan; su regla esta en plano_reservas_casos.json.",
   "lectura": "mesas.meta_all",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-1', 'Salon', '[0,0,400,0,400,300,0,300]');",
@@ -32,6 +32,6 @@
     "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-futura', 'mesa-3', '2099-01-01', '20:00', 'CENA', 2, 'PROXIMA');",
     "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-cancelada', 'mesa-2', '2000-01-01', '13:00', 'COMIDA', 2, 'CANCELADA');"
   ],
-  "omitir": ["minutosPara"],
+  "omitir": ["minutosPara", "proximo_cambio_s"],
   "entrada": {}
 }

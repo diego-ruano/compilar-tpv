@@ -1,0 +1,10 @@
+{
+  "Comandas": [
+    {
+      "Estado": "Abierta",
+      "ID_Comanda": "comanda-1",
+      "ID_Mesa": "mesa-1",
+      "ID_Trabajador": "trab-1"
+    }
+  ]
+}

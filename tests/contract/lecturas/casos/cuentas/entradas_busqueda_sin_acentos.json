@@ -1,0 +1,21 @@
+{
+  "descripcion": "Busqueda de texto en los ingresos de caja, sin acentos ni mayusculas: 'maria nunez' encuentra el cobro de 'MARÍA Núñez' y no el de 'Mario Nuño'. La tabla de lo que se pliega esta en crates/tpv-domain/src/busqueda_casos.json.",
+  "lectura": "cuentas.entradas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'MARÍA Núñez');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-2', 'Mario Nuño');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', 'cli-1', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-2', 'MESA', 'mesa-1', 'cli-2', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 2450, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-2', '2026-05-10 11:00:00', 'Tarjeta', 3000, 'total');"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "maria nunez",
+    "page": null,
+    "page_size": null
+  }
+}

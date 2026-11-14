@@ -673,6 +673,15 @@ export type ComandaBarraRow = {
 	Pendientes_Pago: number,
 };
 
+/**
+ *  La comanda abierta de una mesa con sus líneas: lo que devuelve abrir o retomar la mesa, en un
+ *  solo viaje para la Handy (`mesas_abrir_o_retomar`, `/v1/mesas/comandas/abrir-o-retomar`).
+ */
+export type ComandaConLineasOut = {
+	comanda: ComandaRow,
+	lineas: MesaLineaComandaRow[],
+};
+
 export type ComandaReplicada = {
 	ids: string[],
 	touchedComanda: boolean,
@@ -1831,6 +1840,31 @@ export type MesasKitchenSetLineStateInput = {
 	estado: string,
 };
 
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut = MesasMetaOut_Serialize | MesasMetaOut_Deserialize;
+
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut_Deserialize = {
+	mesas: { [key in string]: MesaMetaOut_Deserialize },
+	/**
+	 *  MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+	 *  que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+	 *  y no cada minuto: en la Handy, cada relectura es una petición al worker.
+	 */
+	proximo_cambio_s: number | null,
+};
+
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut_Serialize = {
+	mesas: { [key in string]: MesaMetaOut_Serialize },
+	/**
+	 *  MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+	 *  que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+	 *  y no cada minuto: en la Handy, cada relectura es una petición al worker.
+	 */
+	proximo_cambio_s: number | null,
+};
+
 export type MesasRemoveOnePendingDetalleInput = {
 	id_comanda: string,
 	id_producto: string,
@@ -2086,6 +2120,13 @@ export type PreparacionCierreDto = {
 	 */
 	anulaciones: number,
 	anulaciones_importe: Dinero,
+	/**
+	 *  DO-02 · El histórico de una recuperación que todavía se está descargando, cuando por eso el
+	 *  esperado puede salir corto: en el primer cierre, que suma desde el principio, y la
+	 *  recuperación sólo trajo lo reciente. Con un cierre anterior no pasa: la recuperación trae
+	 *  siempre todo lo que hay desde él. `None` = nada que avisar. **No impide cerrar.**
+	 */
+	historico_pendiente: BackfillEstado | null,
 };
 
 /**  Lo que hace falta para imprimir un arqueo. CUENTA-06. */

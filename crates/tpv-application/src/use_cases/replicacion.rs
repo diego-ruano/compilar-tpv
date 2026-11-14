@@ -23,6 +23,15 @@ const RECHAZO_DE_LA_NUBE: &str = "Rechazo de aplicación recibido de la nube";
 /// el worker daba 500, y un worker anterior que admita menos lo recorta sin más.
 pub(crate) const CAMBIOS_POR_PAGINA: i64 = 1_000;
 
+/// Lo más a menudo que se mira, con la sesión abierta, si este equipo sigue siendo la Main con la
+/// réplica encendida (`ContextoReplicacion::sigue_disponible`, que lee `device_config.json`, mira si
+/// hay un traslado y hace dos consultas). Se mira al volver de cada espera del socket, como antes:
+/// en reposo, cuando vence (hasta 30 s). Antes se miraba en cada vuelta del bucle, que es cada
+/// mensaje del socket: con las Handy trabajando, varias veces por segundo. Lo que cambia el modo
+/// (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor (`despertar`), y
+/// entonces se mira en el momento.
+pub const COMPROBAR_DISPONIBLE_CADA: Duration = Duration::from_secs(10);
+
 /// AUD-18 · Cuánto se espera antes de volver a intentar un cambio de la nube que ha fallado al
 /// aplicarse, según los intentos que lleva: 1, 2, 4 y 8 s. Son cinco intentos
 /// (`MAX_APPLY_ATTEMPTS`, en el repositorio) y cuatro esperas, unos 15 s antes de la cuarentena.
@@ -484,6 +493,8 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
     // con la sesión ya abierta. En la recuperación las suelta su desbloqueo.
     let mut handy_por_soltar = !recuperando;
     let mut ultimo_sondeo = Instant::now();
+    // `None`: toca mirar si sigue disponible. La primera vuelta mira siempre.
+    let mut disponible_comprobado: Option<Instant> = None;
     loop {
         if handy_por_soltar && vacio {
             vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
@@ -493,7 +504,10 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             }
             ultimo_sondeo = Instant::now();
         }
-        if !ctx.sigue_disponible(false).await? { return Ok(FinDeSesion::NoDisponible); }
+        if disponible_comprobado.is_none_or(|t| t.elapsed() >= COMPROBAR_DISPONIBLE_CADA) {
+            if !ctx.sigue_disponible(false).await? { return Ok(FinDeSesion::NoDisponible); }
+            disponible_comprobado = Some(Instant::now());
+        }
         // AUD-18: un cambio en vivo ha fallado. Se reintenta con su espera y la bajada se pone al
         // día por catch-up antes de volver a escuchar; después, una vuelta de subida.
         if sesion.bajada.detenida() {
@@ -504,6 +518,8 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         }
         let msg = canal.recibir(Duration::from_secs(if vacio {30} else {3})).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
+        // Un cambio de modo o de la palanca despierta al motor (`contexto_cambiado`): se mira ya.
+        if despertar { disponible_comprobado = None; }
         if let Some(m) = msg { atender(ctx, &mut sesion, m).await?; }
         if despertar || ultimo_sondeo.elapsed() >= Duration::from_secs(if vacio {30} else {3}) {
             vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;

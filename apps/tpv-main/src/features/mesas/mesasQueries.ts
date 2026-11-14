@@ -8,7 +8,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { mesasLoadLayout, mesasLoadMesaMeta } from "./mesasApi";
+import { mesasLoadLayout, mesasLoadPlano, type PlanoDeMesas } from "./mesasApi";
 
 export const mesasKeys = {
   all: ["mesas"] as const,
@@ -17,12 +17,23 @@ export const mesasKeys = {
 };
 
 /**
- * Cada cuánto se relee la meta con el plano a la vista. La reserva de una mesa depende de la hora
- * (sale una hora antes, «en N min», y se va al acabar su hueco), y eso no lo avisa nadie: con el
- * plano abierto, una reserva no aparecía hasta que algo lo recargaba. En la Main es una lectura
- * local; en la Handy, una petición al worker por minuto (MESAS-02).
+ * Lo más que se espera para releer la meta con el plano a la vista, aunque nada vaya a cambiar con
+ * la hora: por si cambia algo que no avisa nadie (el reloj del equipo).
  */
-const REFRESCO_META_MS = 60_000;
+export const RELECTURA_MAXIMA_META_MS = 15 * 60_000;
+
+/**
+ * Cuándo se relee la meta con el plano a la vista. La reserva de una mesa depende de la hora (sale
+ * una hora antes, «en N min», y se va al acabar su hueco), y eso no lo avisa nadie: se relee cuando
+ * la propia lectura dice que cambiará (`proximo_cambio_s`, MESAS-02), y no cada minuto. En la Main
+ * es una lectura local; en la Handy, una petición al worker. Lo que cambia porque alguien escribe
+ * llega por el aviso de cambios (`syncStatements.ts`).
+ */
+export function cuandoReleerLaMeta(plano: PlanoDeMesas | undefined): number {
+  const s = plano?.proximoCambioS;
+  if (s === null || s === undefined) return RELECTURA_MAXIMA_META_MS;
+  return Math.min(Math.max(s, 1) * 1000, RELECTURA_MAXIMA_META_MS);
+}
 
 /** Layout de salones/mesas (cacheado; refetch manual para los botones de recarga). */
 export function useMesasLayout(options?: { enabled?: boolean }) {
@@ -33,12 +44,13 @@ export function useMesasLayout(options?: { enabled?: boolean }) {
   });
 }
 
-/** Metadatos por mesa (estado de comanda, reserva); cacheado, y se relee cada minuto. */
+/** Metadatos por mesa (estado de comanda, reserva); cacheado, y se relee cuando cambiará solo. */
 export function useMesasMesaMeta(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: mesasKeys.meta(),
-    queryFn: mesasLoadMesaMeta,
+    queryFn: mesasLoadPlano,
+    select: (plano) => plano.porMesa,
     enabled: options?.enabled ?? true,
-    refetchInterval: REFRESCO_META_MS,
+    refetchInterval: (q) => cuandoReleerLaMeta(q.state.data),
   });
 }

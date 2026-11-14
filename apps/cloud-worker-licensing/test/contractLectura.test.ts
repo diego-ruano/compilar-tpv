@@ -272,6 +272,16 @@ import casoVrBuscarComodines from "../../../tests/contract/lecturas/casos/venta_
 import goldenVrBuscarComodines from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_comodines.json";
 import casoVrBuscarLargo from "../../../tests/contract/lecturas/casos/venta_rapida/buscar_productos_texto_largo.json";
 import goldenVrBuscarLargo from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_texto_largo.json";
+import casoCtaEntradasSinAcentos from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_sin_acentos.json";
+import goldenCtaEntradasSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_sin_acentos.json";
+import casoCtaSalidasSinAcentos from "../../../tests/contract/lecturas/casos/cuentas/salidas_busqueda_sin_acentos.json";
+import goldenCtaSalidasSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/salidas_busqueda_sin_acentos.json";
+import casoCtaResumenSinAcentos from "../../../tests/contract/lecturas/casos/cuentas/resumen_busqueda_sin_acentos.json";
+import goldenCtaResumenSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/resumen_busqueda_sin_acentos.json";
+import casoMesaBuscarSinAcentos from "../../../tests/contract/lecturas/casos/mesas/buscar_productos_sin_acentos.json";
+import goldenMesaBuscarSinAcentos from "../../../tests/contract/lecturas/golden/mesas/buscar_productos_sin_acentos.json";
+import casoVrBuscarSinAcentos from "../../../tests/contract/lecturas/casos/venta_rapida/buscar_productos_sin_acentos.json";
+import goldenVrBuscarSinAcentos from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_sin_acentos.json";
 import casoStatsTrabajadores from "../../../tests/contract/lecturas/casos/stats/trabajadores.json";
 import goldenStatsTrabajadores from "../../../tests/contract/lecturas/golden/stats/trabajadores.json";
 import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/reservas.json";
@@ -417,6 +427,11 @@ const CASOS = [
 	{ nombre: "mesas_buscar_productos_texto_largo", caso: casoMesaBuscarLargo, golden: goldenMesaBuscarLargo },
 	{ nombre: "venta_rapida_buscar_productos_comodines", caso: casoVrBuscarComodines, golden: goldenVrBuscarComodines },
 	{ nombre: "venta_rapida_buscar_productos_texto_largo", caso: casoVrBuscarLargo, golden: goldenVrBuscarLargo },
+	{ nombre: "cuentas_entradas_busqueda_sin_acentos", caso: casoCtaEntradasSinAcentos, golden: goldenCtaEntradasSinAcentos },
+	{ nombre: "cuentas_salidas_busqueda_sin_acentos", caso: casoCtaSalidasSinAcentos, golden: goldenCtaSalidasSinAcentos },
+	{ nombre: "cuentas_resumen_busqueda_sin_acentos", caso: casoCtaResumenSinAcentos, golden: goldenCtaResumenSinAcentos },
+	{ nombre: "mesas_buscar_productos_sin_acentos", caso: casoMesaBuscarSinAcentos, golden: goldenMesaBuscarSinAcentos },
+	{ nombre: "venta_rapida_buscar_productos_sin_acentos", caso: casoVrBuscarSinAcentos, golden: goldenVrBuscarSinAcentos },
 ];
 
 // ── Comparación estructural ORDENADA (misma spec que el lado Rust) ───────────────────

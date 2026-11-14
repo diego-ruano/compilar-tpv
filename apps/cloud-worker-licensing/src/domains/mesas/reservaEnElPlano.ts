@@ -137,3 +137,49 @@ export function reservaDeCadaMesa(
 	}
 	return porMesa;
 }
+
+/**
+ * Cuántos segundos faltan para que el plano cambie solo, con la hora: `null` si nada de lo que hay
+ * va a cambiar. Así la Handy relee la meta entonces y no cada minuto. Espejo de
+ * `segundos_hasta_el_proximo_cambio` en la Main, con sus casos en `plano_reservas_casos.json`.
+ *
+ * Cambia con la hora una reserva por llegar: la que ya sale en el plano cambia sus minutos (y puede
+ * irse al acabar su hueco), y la que aún no sale aparece cuando le falta una hora. Una sentada no
+ * cambia con la hora, y una mesa con una sentada no enseña ninguna otra, así que las por llegar de
+ * esa mesa no cuentan. Se cuenta en milisegundos y se redondea hacia arriba a segundos: releer un
+ * instante tarde está bien, uno pronto no.
+ */
+export function segundosHastaElProximoCambio(
+	reservas: ReservaDeMesa[],
+	ahora: number,
+	instante: Instante,
+): number | null {
+	const instantes = reservas.map((r) => {
+		if (!r.id_mesa || !r.id_reserva) return null;
+		const local = horaLocal(recortar(r.dia_ymd), recortar(r.hora));
+		return local === null ? null : instante(local);
+	});
+	const conSentada = new Set(
+		reservas.filter((r, i) => instantes[i] !== null && recortar(r.estado).toUpperCase() === "ACTIVA").map((r) => r.id_mesa),
+	);
+	let espera: number | null = null;
+	reservas.forEach((r, i) => {
+		const t = instantes[i];
+		if (t === null || recortar(r.estado).toUpperCase() !== "PROXIMA" || conSentada.has(r.id_mesa)) return;
+		const d = t - ahora;
+		const minutos = Math.trunc(d / 60_000) || 0;
+		const duracion = r.duracion_min !== null && r.duracion_min > 0 ? r.duracion_min : DURACION_POR_DEFECTO_MIN;
+		let ms: number;
+		if (minutos > ANTELACION_MIN) {
+			// Sale cuando los minutos que faltan, truncados, llegan a la hora de antelación.
+			ms = d - ((ANTELACION_MIN + 1) * 60_000 - 1);
+		} else if (minutos > -duracion) {
+			// Sale ya: cambia en cuanto cambian sus minutos, hacia cero o lejos de él.
+			ms = d > 0 ? (d % 60_000) + 1 : (Math.floor(-d / 60_000) + 1) * 60_000 + d;
+		} else {
+			return;
+		}
+		if (espera === null || ms < espera) espera = ms;
+	});
+	return espera === null ? null : Math.ceil(espera / 1000);
+}

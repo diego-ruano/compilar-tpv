@@ -1,0 +1,42 @@
+{
+  "//": "Lo que teclea el usuario en un buscador se compara sin acentos y sin distinguir mayúsculas, igual en la Main (`tpv_domain::busqueda` y su expresión SQL en `tpv-infra-sqlite/src/busqueda.rs`), en el worker (`apps/cloud-worker-licensing/src/lib/busqueda.ts`) y en las listas que filtra la propia pantalla (`apps/tpv-main/src/shared/lib/busqueda.ts`). La leen `crates/tpv-domain/src/busqueda.rs`, `crates/tpv-infra-sqlite/src/busqueda.rs` (la expresión SQL, contra SQLite), `apps/cloud-worker-licensing/test/busquedaSinAcentos.test.ts` (código y SQL del Durable Object) y `apps/tpv-main/test/busqueda.test.ts`. «pliegues» es la tabla entera: cada letra base con las que se le pliegan (mayúsculas incluidas, porque `lower()` de SQLite sólo baja las ASCII). «se_quitan» son las marcas combinantes de esos acentos, por si el texto llega descompuesto (una «e» seguida de un acento suelto). Lo demás se queda como está: sólo las letras ASCII pasan a minúscula, como hace `lower()` de SQLite, para que el texto que se busca y la columna digan lo mismo. Un criterio nuevo es un caso nuevo aquí.",
+  "pliegues": {
+    "a": "áàâäãÁÀÂÄÃ",
+    "e": "éèêëÉÈÊË",
+    "i": "íìîïÍÌÎÏ",
+    "o": "óòôöõÓÒÔÖÕ",
+    "u": "úùûüÚÙÛÜ",
+    "n": "ñÑ",
+    "c": "çÇ"
+  },
+  "se_quitan": ["̀", "́", "̂", "̃", "̈", "̧"],
+  "normalizar": [
+    { "texto": "CAFÉ Solo", "queda": "cafe solo" },
+    { "texto": "Caña", "queda": "cana" },
+    { "texto": "CAÑA", "queda": "cana" },
+    { "texto": "Pingüino ÜBER", "queda": "pinguino uber" },
+    { "texto": "Crème brûlée à la française", "queda": "creme brulee a la francaise" },
+    { "texto": "Açaí, Ñoquis y Pão", "queda": "acai, noquis y pao" },
+    { "texto": "Café con lechẽ", "queda": "cafe con leche" },
+    { "texto": "María Ángeles Fernández-Núñez", "queda": "maria angeles fernandez-nunez" },
+    { "texto": "Vale_50% barra", "queda": "vale_50% barra" },
+    { "texto": "Corte 3\\4", "queda": "corte 3\\4" },
+    { "texto": "Øl, ß y Œuf", "queda": "Øl, ß y Œuf" },
+    { "texto": "2026-05-10 12:30 Efectivo 2450", "queda": "2026-05-10 12:30 efectivo 2450" },
+    { "texto": "", "queda": "" }
+  ],
+  "buscar": [
+    { "nombre": "CAFÉ Solo", "busca": "café", "encuentra": true },
+    { "nombre": "Café solo", "busca": "CAFE", "encuentra": true },
+    { "nombre": "Caña", "busca": "CAÑA", "encuentra": true },
+    { "nombre": "CAÑA de cerveza", "busca": "caña", "encuentra": true },
+    { "nombre": "Caña", "busca": "cana", "encuentra": true },
+    { "nombre": "Pingüino", "busca": "PINGUINO", "encuentra": true },
+    { "nombre": "Crème brûlée", "busca": "creme BRULEE", "encuentra": true },
+    { "nombre": "Café solo", "busca": "café", "encuentra": true },
+    { "nombre": "Vale_50% barra", "busca": "_50%", "encuentra": true },
+    { "nombre": "Vale 500 barra", "busca": "_50%", "encuentra": false },
+    { "nombre": "Cerveza", "busca": "cervezas", "encuentra": false },
+    { "nombre": "Øl artesana", "busca": "øl", "encuentra": false, "por_que": "Ø no está en la tabla: no se pliega ni baja a minúscula, ni en la columna ni en lo que se busca." }
+  ]
+}

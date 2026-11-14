@@ -78,6 +78,14 @@ pub struct ComandaRow {
     pub estado: String,
 }
 
+/// La comanda abierta de una mesa con sus líneas: lo que devuelve abrir o retomar la mesa, en un
+/// solo viaje para la Handy (`mesas_abrir_o_retomar`, `/v1/mesas/comandas/abrir-o-retomar`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ComandaConLineasOut {
+    pub comanda: ComandaRow,
+    pub lineas: Vec<MesaLineaComandaRow>,
+}
+
 /// Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
@@ -139,6 +147,16 @@ pub struct MesaMetaOut {
     pub estado: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reserva: Option<ReservaMesaOut>,
+}
+
+/// El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct MesasMetaOut {
+    pub mesas: std::collections::HashMap<String, MesaMetaOut>,
+    /// MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+    /// que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+    /// y no cada minuto: en la Handy, cada relectura es una petición al worker.
+    pub proximo_cambio_s: Option<i64>,
 }
 
 /* =========================================================

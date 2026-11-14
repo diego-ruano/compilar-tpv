@@ -13,6 +13,7 @@ import { commands } from "@tpv/client";
 
 import type {
     CategoriaVendibleOut,
+    ComandaConLineasOut,
     ComandaRow,
     DestinatarioInput,
     KitchenRow,
@@ -72,21 +73,34 @@ export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
     await commands.saveLayout({ salons: safe });
 }
 
+/** El estado del plano: lo de cada mesa y en cuántos segundos cambiará solo, con la hora. */
+export type PlanoDeMesas = {
+    porMesa: Record<string, MesaMetaOut>;
+    /** `null`: nada va a cambiar con la hora (MESAS-02). */
+    proximoCambioS: number | null;
+};
+
 /**
- * Estado de cada mesa del plano, indexado por el id de la mesa. Si falla, falla: antes caía a
- * `get_mesas_ocupadas`, una compatibilidad de antes de que existiera el detalle, y era lo único
- * que mantenía vivo ese comando (RI-52). React Query reintenta y la pantalla enseña el error.
+ * Estado de cada mesa del plano, indexado por el id de la mesa, y cuándo cambiará solo. Si falla,
+ * falla: antes caía a `get_mesas_ocupadas`, una compatibilidad de antes de que existiera el
+ * detalle, y era lo único que mantenía vivo ese comando (RI-52). React Query reintenta y la
+ * pantalla enseña el error.
  */
-export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
-    const out: Record<string, MesaMetaOut> = {};
+export async function mesasLoadPlano(): Promise<PlanoDeMesas> {
+    const porMesa: Record<string, MesaMetaOut> = {};
     const raw = await commands.mesasMetaAll();
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [k, v] of Object.entries(raw.mesas)) {
         const idMesa = parseAnyMesaId(k);
         // `parseAnyMesaId` normaliza la clave a UUID puro, que es la que usan los lookups
         // (TableNode/Mesas vía `parseMesaId`). Una sola clave.
-        if (idMesa) out[idMesa] = v;
+        if (idMesa && v) porMesa[idMesa] = v;
     }
-    return out;
+    return { porMesa, proximoCambioS: raw.proximo_cambio_s };
+}
+
+/** Sólo lo de cada mesa (`mesasLoadPlano`). */
+export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
+    return (await mesasLoadPlano()).porMesa;
 }
 
 /* =========================
@@ -122,6 +136,20 @@ export async function mesasComandaAbierta(idMesa: string) {
     return await commands.getComandaAbiertaByMesa({ id_mesa: idMesa.trim() });
 }
 
+/**
+ * Abrir o retomar la mesa en un paso: su comanda abierta (creada si no hay ninguna, con el
+ * trabajador de la sesión si le faltaba) y sus líneas. Es lo que se pide al abrir la mesa; en la
+ * Handy, un viaje en vez de cuatro.
+ */
+export async function mesasAbrirORetomar(params: {
+    idMesa: string;
+    idReserva: string | null;
+}): Promise<ComandaConLineasOut> {
+    const idMesa = params.idMesa.trim();
+    if (!idMesa) throw new Error("Falta la mesa.");
+    return commands.mesasAbrirORetomar({ id_mesa: idMesa, id_reserva: params.idReserva?.trim() || undefined });
+}
+
 /** INC-20261030-007: la reserva pasa a la comanda abierta, si aún no tiene ninguna. */
 export async function mesasComandaSetReservaIfNull(idComanda: string, idReserva: string): Promise<boolean> {
     return await commands.comandaSetReservaIfNull({ id_comanda: idComanda, id_reserva: idReserva });
@@ -139,7 +167,9 @@ export async function mesasEnsureOpenComanda(params: {
     const abierta = await commands.getComandaAbiertaByMesa({ id_mesa: idMesa });
 
     if (abierta?.id_comanda) {
-        if (idUsuario) {
+        // Sólo si le falta: con trabajador no cambiaría nada, y aun así sería un viaje más (y en la
+        // Main, una escritura que se replica).
+        if (idUsuario && !abierta.id_trabajador) {
             try {
                 await commands.comandaSetTrabajadorIfNull({ id_comanda: abierta.id_comanda, id_usuario: idUsuario });
             } catch {

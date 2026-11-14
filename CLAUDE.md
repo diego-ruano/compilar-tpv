@@ -214,9 +214,11 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   con una expresión regular suelta.
 - Un texto que llega se recorta con `recortar` (`lib/texto.ts`), que quita lo mismo que `str::trim`;
   nunca con `.trim()`, que quita además U+FEFF y deja U+0085 (en un schema, `.overwrite(recortar)`).
-- Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`: el
-  SQLite del DO no admite un patrón de más de 50 bytes y el `%` y el `_` serían comodines. Igual en
-  la Main, para que las dos devuelvan las mismas filas.
+- Lo que teclea el usuario se busca sin acentos ni mayúsculas con `instr(${normalizada(col)}, ?) > 0`
+  y el texto pasado por `textoABuscar` (`lib/busqueda.ts`; en la Main, `busqueda.rs`), nunca con
+  `LIKE`: el SQLite del DO no admite un patrón de más de 50 bytes y el `%` y el `_` serían comodines.
+  Las dos expresiones salen de la misma tabla (`busqueda_casos.json`), para que las dos devuelvan las
+  mismas filas.
 - Una ruta que devuelve listas pone **el techo en la respuesta**, no en cada pieza.
 - Un identificador de error nuevo va a `MENSAJES` o a `SIN_MENSAJE_PROPIO` (`lib/errorCodes.ts`).
 - Toda ruta que verifique un PIN lleva el freno de LOGIN-01 (`test/pinSiempreConFreno.test.ts`).
@@ -313,10 +315,10 @@ lo que hay que revisar es el cambio, no el test:
   uso es un nombre de campo o está en inglés.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,
   `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`,
-  `mensajesEnEspanol`, `busquedaDeTexto`.
+  `mensajesEnEspanol`, `busquedaDeTexto`, `busquedaSinAcentos`.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,
   `horarios_casos.json`, `plano_reservas_casos.json` (la reserva de cada mesa, que depende de la
-  hora) y `validacion_casos.json` (la validación de entrada y lo que dice al rechazar, que los arneses de
+  hora), `busqueda_casos.json` (qué letras se pliegan al buscar) y `validacion_casos.json` (la validación de entrada y lo que dice al rechazar, que los arneses de
   contrato no ven).

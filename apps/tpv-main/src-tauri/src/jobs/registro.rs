@@ -109,8 +109,9 @@ const RESUMEN_ESTADISTICAS_CALMA_MS: i64 = 2 * 60 * 1000;
 /// Lo que puede durar una pasada. Lo que no quepa queda apuntado para la siguiente.
 const RESUMEN_ESTADISTICAS_PRESUPUESTO: Duration = Duration::from_secs(3);
 
-/// Cada cuánto se poda `_Sync_Applied_Ops`. Los registros solo son purgables tras un TTL de 72 h,
-/// así que una pasada al día va sobrada.
+/// Cada cuánto se poda `_Sync_Applied_Ops` y se retira lo apartado de la subida. Los registros solo
+/// son purgables tras un TTL de 72 h, y lo apartado tras 30 días, así que una pasada al día va
+/// sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Cada cuánto se traen unas páginas del histórico pendiente (SYNC-19, fase 2).
@@ -445,7 +446,7 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let repo = state.reconciliacion_repo().await?;
+    let repo = state.reconciliacion_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     let r = uc_reconciliacion::ejecutar(repo.as_ref(), notifier.as_ref()).await?;
@@ -491,7 +492,7 @@ async fn resumen_estadisticas(app: AppHandle) -> Result<(), String> {
 /// Las emisiones llevan `clave_dedupe`, así que repetir el escaneo no duplica nada.
 async fn avisos(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let scan = state.avisos_scan_repo().await?;
+    let scan = state.avisos_scan_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     uc_avisos::escanear(
@@ -519,7 +520,7 @@ async fn zona_horaria(app: AppHandle) -> Result<(), String> {
     };
     let desfases = desfase(1).zip(desfase(7));
 
-    let repo = app.state::<AppState>().reservas_web_repo().await?;
+    let repo = app.state::<AppState>().reservas_web_repo().await.map_err(|e| e.message)?;
     match uc_reservas_web::sincronizar_zona_horaria(repo.as_ref(), desfases).await? {
         Some(zona) => tracing::info!(target: "tpv::reservas_web", zona, "zona horaria del negocio actualizada"),
         None if desfases.is_some_and(|(i, v)| tpv_domain::reservas_web::zona_por_desfases(i, v).is_none()) => {
@@ -590,7 +591,7 @@ async fn reservas_no_vino(app: AppHandle) -> Result<(), String> {
 /// vendiéndolo en negativo no genera avisos nuevos; y cierra el de los que se recuperan.
 async fn stock_negativo(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let repo = state.stock_alertas_repo().await?;
+    let repo = state.stock_alertas_repo().await.map_err(|e| e.message)?;
     let notifier = state.notifier().await?;
 
     uc_stock_alertas::escanear(repo.as_ref(), notifier.as_ref()).await?;
@@ -652,14 +653,22 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 }
 
 /// Poda de `_Sync_Applied_Ops`, la tabla anti-eco: una fila por escritura local, que solo se puede
-/// retirar cuando la op ya está confirmada en la nube y ha pasado su TTL. (El outbox no entra aquí:
-/// se vacía solo, cada op se borra al recibir su `apply_ack`.)
+/// retirar cuando la op ya está confirmada en la nube y ha pasado su TTL. (Lo pendiente del outbox
+/// no entra aquí: se vacía solo, cada op se borra al recibir su `apply_ack`.)
+///
+/// Y lo apartado de la subida, que no se vaciaba nunca: se retira a los 30 días de su último
+/// intento, salvo lo que espera a su reparación (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por
+/// qué 30). Lo que no entró de la bajada se queda: es la barrera del contraste con la nube.
 ///
 /// Antes iba colgada del drenado del outbox y solo se ejecutaba si esa pasada había subido algo;
 /// como job tiene disparador propio y corre también en un equipo online y ocioso.
 async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
+    let purgadas = uc_sync::purgar_cuarentenas(repo.as_ref(), tpv_infra_sqlite::util::now_ms()).await?;
+    if purgadas > 0 {
+        tracing::info!(target: "tpv::sync", purgadas, "operaciones apartadas de más de 30 días retiradas");
+    }
     Ok(())
 }
 

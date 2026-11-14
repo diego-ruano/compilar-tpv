@@ -38,7 +38,10 @@ pub async fn cierre_preparar(
     state.exigir_permiso("caja.cerrar").await?;
     let u = umbral(&state).await;
     let repo = state.cierre_caja_repo().await?;
-    Ok(uc::preparar(repo.as_ref(), u).await?)
+    // DO-02: cómo va el histórico de una recuperación, para avisar si el primer arqueo puede salir
+    // corto. Si no se puede leer, no se avisa: el arqueo no puede depender de esto.
+    let historico = crate::commands::sync::estado_del_historico(&state).await.ok();
+    Ok(uc::preparar(repo.as_ref(), u, historico).await?)
 }
 
 #[tauri::command]

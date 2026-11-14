@@ -110,6 +110,8 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   cierre de caja no reabierto y el último registro de facturación viajan con cualquier ancho. Si ni
   eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación lo dice
   ([DO-02](../pendientes.md#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre)).
+  Sin ningún cierre de caja no hay periodo que proteger y la ventana puede encogerse hasta «ahora»:
+  mientras baja el resto, el primer arqueo lo avisa y deja cerrar igual ([caja.md](caja.md)).
 - **A la Main le da igual el ancho**: no mira `ventana_desde`. Restaura lo que llega y la fase 2
   recorre cada tabla transaccional entera, así que con una ventana estrecha acaba con lo mismo;
   lo que cambia es que los días que no entraron llegan después, con el histórico.

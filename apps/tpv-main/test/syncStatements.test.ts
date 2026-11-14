@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { featureKeysPorTablas, ajustesPorTablas, shouldReloadTicket, tablasConArea, type ComandaSyncInfo } from "../src/shared/lib/syncStatements";
+import { claveDeConsulta, featureKeysPorTablas, ajustesPorTablas, shouldReloadTicket, tablasConArea, type ComandaSyncInfo } from "../src/shared/lib/syncStatements";
 // La foto del esquema, la misma que vigila `schema_snapshot` en Rust: de ahí salen las tablas.
 import esquema from "../../../packages/database/schema.snapshot.sql?raw";
+// El layout del plano, en la Main y en el worker: de qué tablas lee.
+import mesasMain from "../../../crates/tpv-infra-sqlite/src/mesas.rs?raw";
+import mesasWorker from "../../cloud-worker-licensing/src/domains/mesas/mesas.queries.ts?raw";
 
 /**
  * Lo que hay en el esquema y no es del negocio: el andamiaje de la réplica en la nube (el mismo
@@ -39,7 +42,7 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
         ];
         const areas = featureKeysPorTablas(cobro);
         expect(areas).not.toBeNull();
-        expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
+        expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas.meta", "proveedores", "stats"]);
         expect(ajustesPorTablas(cobro)).toEqual([]);
     });
     it("un cobro parcial o la baja de un cobro refrescan el plano aunque no toquen la comanda", () => {
@@ -50,11 +53,11 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
         const baja = ["pagos", "lotes_producto", "lote_consumos", "movimientos_caja", "registros_facturacion"];
         for (const lote of [cobroParcial, devolucion, baja]) {
             const areas = featureKeysPorTablas(lote);
-            expect(areas).toContain("mesas");
+            expect(areas).toContain("mesas.meta");
             expect(areas).toContain("cuentas");
             expect(areas).toContain("stats");
         }
-        expect(featureKeysPorTablas(["pago_detalles"])).toContain("mesas");
+        expect(featureKeysPorTablas(["pago_detalles"])).toContain("mesas.meta");
     });
     it("la caja, el stock y las reservas web refrescan su pantalla; lo fiscal, ninguna", () => {
         for (const tabla of ["movimientos_caja", "aperturas_cajon", "cierres_caja", "cierre_denominaciones", "cierre_rectificaciones"]) {
@@ -74,8 +77,8 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
 
 describe("metadatos nativos y cachés de presentación", () => {
     it("deduplica las áreas y distingue ajustes de tablas desconocidas", () => {
-        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "mesas", "inventario", "proveedores"]);
-        expect(featureKeysPorTablas(["pagos", "pago_detalles", "cuentas_gastos"])).toEqual(["cuentas", "stats", "mesas"]);
+        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "mesas.meta", "inventario", "proveedores"]);
+        expect(featureKeysPorTablas(["pagos", "pago_detalles", "cuentas_gastos"])).toEqual(["cuentas", "stats", "mesas.meta"]);
         expect(featureKeysPorTablas(["ticket_settings"])).toEqual([]);
         expect(featureKeysPorTablas(["tabla_nueva"])).toBeNull();
         expect(featureKeysPorTablas(null)).toBeNull();
@@ -83,7 +86,7 @@ describe("metadatos nativos y cachés de presentación", () => {
     it("una reserva que cambia en otro sitio refresca también el plano de mesas y los clientes", () => {
         // Una reserva web recogida o cancelada, una de la Handy o el «No vino» automático: el plano
         // pinta la de cada mesa y el resumen de Clientes cuenta las pendientes.
-        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "clientes", "cuentas", "stats"]);
+        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas.meta", "clientes", "cuentas", "stats"]);
     });
     it("una tabla refresca también las pantallas que la enseñan a través de otra", () => {
         // El nombre de una mesa o de una zona: Reservas, la última reserva de cada cliente, cada
@@ -91,7 +94,7 @@ describe("metadatos nativos y cachés de presentación", () => {
         expect(featureKeysPorTablas(["mesas"])).toEqual(["mesas", "reservas", "clientes", "cuentas", "stats"]);
         expect(featureKeysPorTablas(["zonas"])).toEqual(["mesas", "reservas", "stats"]);
         // El nombre de un cliente: la reserva de cada mesa del plano y sus cobros.
-        for (const area of ["mesas", "cuentas"]) expect(featureKeysPorTablas(["clientes"])).toContain(area);
+        for (const area of ["mesas.meta", "cuentas"]) expect(featureKeysPorTablas(["clientes"])).toContain(area);
         // Las estadísticas de trabajadores: tareas hechas, cuadrante, fichajes y rol.
         for (const tabla of ["tarea_asignaciones", "asignacion_turnos", "fichajes", "roles", "usuarios"]) {
             expect(featureKeysPorTablas([tabla])).toContain("stats");
@@ -99,14 +102,14 @@ describe("metadatos nativos y cachés de presentación", () => {
         // El nombre de un usuario y su rol.
         for (const area of ["tareas", "cuentas", "notificaciones"]) expect(featureKeysPorTablas(["usuarios"])).toContain(area);
         // Lo que hay pendiente en cocina depende de `Pasa_Cocina`, y Proveedores lista las categorías.
-        expect(featureKeysPorTablas(["categorias_producto"])).toEqual(["inventario", "proveedores", "mesas", "stats"]);
-        expect(featureKeysPorTablas(["productos"])).toContain("mesas");
+        expect(featureKeysPorTablas(["categorias_producto"])).toEqual(["inventario", "proveedores", "mesas.meta", "stats"]);
+        expect(featureKeysPorTablas(["productos"])).toContain("mesas.meta");
         // La reserva de cada mesa del plano depende de la duración por defecto y de la zona horaria.
-        expect(featureKeysPorTablas(["business_settings"])).toEqual(["mesas"]);
+        expect(featureKeysPorTablas(["business_settings"])).toEqual(["mesas.meta"]);
     });
     it("añadir líneas a una comanda no hace releer Cuentas", () => {
         // A sabiendas: la mesa y el cliente de un cobro se fijan al cobrar, con su `pagos`.
-        for (const tabla of ["comandas", "detalle_comanda"]) expect(featureKeysPorTablas([tabla])).toEqual(["mesas", "stats"]);
+        for (const tabla of ["comandas", "detalle_comanda"]) expect(featureKeysPorTablas([tabla])).toEqual(["mesas.meta", "stats"]);
     });
     it("vincular un producto o mover su stock refresca la ficha del proveedor", () => {
         // INC-20261030-013: vincular es un UPDATE de Productos, y la lista de vinculados enseña el
@@ -122,6 +125,37 @@ describe("metadatos nativos y cachés de presentación", () => {
         expect(ajustesPorTablas(["pagos"])).toEqual([]);
         // Una tabla sin entrada obliga a releer las consultas, pero no dice nada de los ajustes.
         expect(ajustesPorTablas(["tabla_nueva"])).toEqual([]);
+    });
+});
+
+describe("el dibujo del plano sólo se relee cuando cambia lo que dibuja", () => {
+    // El layout del plano (`load_layout` en la Main, `loadLayout` en el worker) sólo lee zonas y
+    // mesas. Lo que cambia con el servicio (una comanda, una línea, un cobro, una reserva, un
+    // cliente, los ajustes) sólo cambia la meta de cada mesa: invalidar `mesas` entero releía
+    // también el dibujo, y en una Handy eso es otra petición al worker con cada línea.
+    const tablasDe = (fuente: string, desde: string, hasta: RegExp) => {
+        // Desde la función hasta la siguiente: el primer trozo.
+        const cuerpo = fuente.slice(fuente.indexOf(desde)).split(hasta)[0];
+        return new Set([...cuerpo.matchAll(/\b(?:FROM|JOIN)\s+(\w+)/gi)].map((m) => m[1].toLowerCase()));
+    };
+    it("el layout lee sólo zonas y mesas, en la Main y en el worker", () => {
+        const main = tablasDe(mesasMain, "async fn load_layout", /async fn (?!load_layout)/);
+        const worker = tablasDe(mesasWorker, "export async function loadLayout", /export async function (?!loadLayout)/);
+        expect([...main].sort()).toEqual(["mesas", "zonas"]);
+        expect([...worker].sort()).toEqual(["mesas", "zonas"]);
+    });
+    it("lo del servicio relee sólo la meta; zonas y mesas, el plano entero", () => {
+        for (const tabla of ["comandas", "detalle_comanda", "pagos", "pago_detalles", "reservas", "clientes", "productos", "categorias_producto", "business_settings"]) {
+            const claves = featureKeysPorTablas([tabla])!;
+            expect(claves, tabla).toContain("mesas.meta");
+            expect(claves, tabla).not.toContain("mesas");
+        }
+        for (const tabla of ["zonas", "mesas"]) expect(featureKeysPorTablas([tabla])).toContain("mesas");
+        expect(claveDeConsulta("mesas.meta")).toEqual(["mesas", "meta"]);
+        expect(claveDeConsulta("cuentas")).toEqual(["cuentas"]);
+    });
+    it("con el plano entero en el mismo aviso, la meta no se pide aparte", () => {
+        expect(featureKeysPorTablas(["pagos", "mesas"])).toEqual(["cuentas", "stats", "mesas", "reservas", "clientes"]);
     });
 });
 

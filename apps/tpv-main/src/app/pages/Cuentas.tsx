@@ -29,7 +29,8 @@ import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
 import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
-import { cierreImprimir,cierreListar,cierreReabrir,type CierreResumenDto } from "../../features/cuentas/cierreApis";
+import { useQueryClient } from "@tanstack/react-query";
+import { cierreImprimir,cierreReabrir,type CierreResumenDto } from "../../features/cuentas/cierreApis";
 import {
 cuentasGetEntradas,
 cuentasGetSalidas,
@@ -40,7 +41,9 @@ type EntradaDto,
 type SalidaDto,
 } from "../../features/cuentas/cuentasApis";
 import {
+cuentasKeys,
 useAnularPago,
+useCierresCaja,
 useCuentasEntradas,
 useCuentasProveedoresMini,
 useCuentasResumen,
@@ -349,8 +352,15 @@ export default function Cuentas() {
     const [errEditPago, setErrEditPago] = useState<string | null>(null);
 
     const [openCierre, setOpenCierre] = useState(false);
-    const [cierres, setCierres] = useState<CierreResumenDto[]>([]);
-    const [cierresError, setCierresError] = useState<string | null>(null);
+    // El histórico de cierres es del administrador: el camarero ni lo pide. Va por React Query con
+    // la clave de Cuentas, así que un cierre hecho en otro equipo lo refresca solo.
+    const qc = useQueryClient();
+    const cierresQuery = useCierresCaja(cierresPermitidos);
+    const cierres: CierreResumenDto[] = useMemo(
+        () => (cierresPermitidos ? (cierresQuery.data ?? []) : []),
+        [cierresPermitidos, cierresQuery.data],
+    );
+    const cierresError = cierresPermitidos && cierresQuery.error ? toAppError(cierresQuery.error).message : null;
 
     /**
      * CAJA-01: un cambio que toca un cierre de caja ya hecho se enseña antes de hacerlo. No se
@@ -365,20 +375,12 @@ export default function Cuentas() {
     const [avisoGuardando, setAvisoGuardando] = useState(false);
     const [avisoError, setAvisoError] = useState<string | null>(null);
 
-    const recargarCierres = React.useCallback(async () => {
-        // El histórico de cierres es del administrador: el camarero ni lo pide.
-        if (!cierresPermitidos) { setCierres([]); setCierresError(null); return; }
-        try {
-            setCierres(await cierreListar(50));
-            setCierresError(null);
-        } catch (e) {
-            setCierresError(toAppError(e).message);
-        }
-    }, [cierresPermitidos]);
-
-    useEffect(() => {
-        void recargarCierres();
-    }, [recargarCierres]);
+    // Lo que cambia en esta pantalla y toca un cierre (un gasto, un cobro, deshacer un cierre) lo
+    // vuelve a pedir; si no se puede ver, no hay nada que pedir.
+    const recargarCierres = React.useCallback(
+        () => qc.invalidateQueries({ queryKey: cuentasKeys.cierres() }),
+        [qc],
+    );
 
     // INC-20261031-024: un fallo al imprimir (sin impresora, sin papel) se avisa con `conAviso` en
     // el botón. Antes se guardaba en `cierresError`, que es el de CARGAR el historial, y la tabla

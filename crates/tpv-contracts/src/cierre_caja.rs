@@ -107,6 +107,11 @@ pub struct PreparacionCierreDto {
     /// antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
     pub anulaciones: i64,
     pub anulaciones_importe: Dinero,
+    /// DO-02 · El histórico de una recuperación que todavía se está descargando, cuando por eso el
+    /// esperado puede salir corto: en el primer cierre, que suma desde el principio, y la
+    /// recuperación sólo trajo lo reciente. Con un cierre anterior no pasa: la recuperación trae
+    /// siempre todo lo que hay desde él. `None` = nada que avisar. **No impide cerrar.**
+    pub historico_pendiente: Option<crate::sync::BackfillEstado>,
 }
 
 /// Cómo quedaría un cierre ya hecho si se hace un cambio (CAJA-01).

@@ -69,6 +69,11 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Preparar un cierre"))
     }
 
+    /// Nada: la Handy lee de la nube, que tiene el histórico entero.
+    async fn caja_por_bajar(&self) -> AppResult<bool> {
+        Ok(false)
+    }
+
     async fn anulaciones_desde(&self, _desde: Option<&str>) -> AppResult<(i64, Dinero)> {
         Err(solo_main("Preparar un cierre"))
     }

@@ -1,0 +1,14 @@
+{
+  "descripcion": "Buscador de productos de las mesas, sin acentos ni mayusculas: 'CAÑA' encuentra 'Caña' y 'CAÑA de cerveza', y nada mas. Antes el lower() de SQLite solo bajaba las letras ASCII: 'CAÑA' no encontraba 'Caña' y 'café' no encontraba 'CAFÉ Solo'. La tabla de lo que se pliega esta en crates/tpv-domain/src/busqueda_casos.json.",
+  "lectura": "mesas.buscar_productos",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cana', 'cat-barra', 'Caña', 200);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cana-grande', 'cat-barra', 'CAÑA de cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cafe', 'cat-barra', 'CAFÉ Solo', 120);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'Cerveza', 250);"
+  ],
+  "entrada": {
+    "query": "CAÑA"
+  }
+}

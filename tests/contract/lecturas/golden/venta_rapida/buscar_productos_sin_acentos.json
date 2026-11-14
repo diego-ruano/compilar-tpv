@@ -1,0 +1,24 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-cafe",
+    "Nombre": "CAFÉ Solo",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 120,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  },
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-cafe-leche",
+    "Nombre": "Café con leche",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 150,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  }
+]

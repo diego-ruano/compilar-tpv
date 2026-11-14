@@ -1,11 +1,9 @@
 //! Casos de uso de mesas / salón / comandas / cocina. Local-First: validan/normalizan
 //! e invocan el puerto. Las escrituras "OK" devuelven `()` (el comando mapea a "OK").
 
-use std::collections::HashMap;
-
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
+    CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    MesasMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
@@ -62,19 +60,34 @@ pub async fn get_comanda_abierta_by_mesa(
     repo.get_comanda_abierta_by_mesa(&args.id_mesa).await
 }
 
+fn datos_para_abrir(input: MesasAbrirComandaInput) -> AppResult<AbrirComandaData> {
+    if input.id_mesa.trim().is_empty() {
+        return Err(AppError::validation("Falta la mesa."));
+    }
+    Ok(AbrirComandaData {
+        id_mesa: input.id_mesa,
+        id_trabajador_o_usuario: opt_id(input.id_usuario.or(input.id_trabajador)),
+        id_reserva: opt_id(input.id_reserva),
+    })
+}
+
 pub async fn abrir_comanda(
     repo: &dyn MesasRepository,
     input: MesasAbrirComandaInput,
 ) -> AppResult<Option<ComandaRow>> {
-    if input.id_mesa.trim().is_empty() {
-        return Err(AppError::validation("Falta la mesa."));
-    }
-    let data = AbrirComandaData {
-        id_mesa: input.id_mesa,
-        id_trabajador_o_usuario: opt_id(input.id_usuario.or(input.id_trabajador)),
-        id_reserva: opt_id(input.id_reserva),
-    };
-    repo.abrir_comanda(data).await
+    repo.abrir_comanda(datos_para_abrir(input)?).await
+}
+
+/// Abrir o retomar la mesa en un paso: la comanda abierta (creada si no hay ninguna, con el
+/// trabajador puesto si le faltaba) y sus líneas. Es lo que hace la pantalla de la mesa al abrirse;
+/// en la Handy, un viaje en vez de cuatro.
+pub async fn abrir_o_retomar(
+    repo: &dyn MesasRepository,
+    input: MesasAbrirComandaInput,
+) -> AppResult<ComandaConLineasOut> {
+    repo.abrir_o_retomar_comanda(datos_para_abrir(input)?)
+        .await?
+        .ok_or_else(|| AppError::conflict("La mesa ya no tiene la cuenta abierta: vuelve a abrirla."))
 }
 
 pub async fn comanda_set_trabajador_if_null(
@@ -137,7 +150,7 @@ pub async fn add_linea_comanda(
 
 /* Meta + catálogo */
 
-pub async fn mesas_meta_all(repo: &dyn MesasRepository) -> AppResult<HashMap<String, MesaMetaOut>> {
+pub async fn mesas_meta_all(repo: &dyn MesasRepository) -> AppResult<MesasMetaOut> {
     repo.mesas_meta_all().await
 }
 

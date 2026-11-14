@@ -840,6 +840,18 @@ impl AppState {
         Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
     }
 
+    /// El mismo repositorio de sincronización, para los comandos que se pueden pedir desde una
+    /// Handy (el panel de salud de Conectividad): ahí no hay base que sincronizar, y decirlo no es
+    /// un fallo del programa (`base_de_la_main`). La réplica, la recuperación y los jobs siguen
+    /// con `sync_repo`, que sólo corren en la Main.
+    pub(crate) async fn sync_repo_de_la_main(
+        &self,
+        solo_en_la_main: &str,
+    ) -> Result<Arc<dyn SyncRepository>, AppErrorDto> {
+        let conn = self.base_de_la_main(solo_en_la_main).await?;
+        Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
+    }
+
     /// Pedidos a proveedores: Local-First, solo disponible en modo Main (SQLite).
     pub(crate) async fn pedidos_proveedor_repo(
         &self,
@@ -871,54 +883,50 @@ impl AppState {
 
     /// Estado de los jobs periódicos (`_Jobs_State`). NO es mode-switched: es una tabla de control
     /// LOCAL del dispositivo, siempre SQLite, que no viaja a la nube.
-    pub(crate) async fn jobs_state_repo(&self) -> Result<Arc<dyn JobsStateRepository>, String> {
-        let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "DB no inicializada (jobs requieren modo Main)".to_string())?;
+    ///
+    /// Los repositorios de aquí abajo son sólo de la Main. Los jobs que los usan no corren en una
+    /// Handy (`Requiere::MainOperativa`), pero algunos comandos que se pueden pedir desde ella sí
+    /// (recalcular el gasto de un cliente, la reserva web): allí contestan `conflict` con la frase
+    /// que se enseña (`base_de_la_main`), no un error interno que iría a Sentry como un fallo del
+    /// programa.
+    pub(crate) async fn jobs_state_repo(&self) -> Result<Arc<dyn JobsStateRepository>, AppErrorDto> {
+        let conn = self.base_de_la_main("Las tareas periódicas sólo corren en el TPV principal").await?;
         Ok(Arc::new(SqliteJobsStateRepository::new(conn)) as Arc<dyn JobsStateRepository>)
     }
 
-    /// Escáner de avisos (tareas vencidas / reservas próximas): solo Main (SQLite). En Handy no hay
-    /// BD local → devuelve error y el job lo salta por su `Requiere`.
+    /// Reconciliación de los valores derivados (DB-14): el job y el botón de recalcular el gasto
+    /// de un cliente.
     pub(crate) async fn reconciliacion_repo(
         &self,
-    ) -> Result<Arc<dyn ReconciliacionRepository>, String> {
-        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
-            "DB no inicializada (la reconciliación requiere modo Main)".to_string()
-        })?;
+    ) -> Result<Arc<dyn ReconciliacionRepository>, AppErrorDto> {
+        let conn = self
+            .base_de_la_main("El gasto de un cliente se recalcula desde el TPV principal")
+            .await?;
         Ok(Arc::new(SqliteReconciliacionRepository::new(conn))
             as Arc<dyn ReconciliacionRepository>)
     }
 
-    pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, String> {
-        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
-            "DB no inicializada (escáner de avisos requiere modo Main)".to_string()
-        })?;
+    /// Escáner de avisos (tareas vencidas / reservas próximas).
+    pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, AppErrorDto> {
+        let conn = self.base_de_la_main("Los avisos se buscan en el TPV principal").await?;
         Ok(Arc::new(SqliteAvisosScanRepository::new(conn)) as Arc<dyn AvisosScanRepository>)
     }
 
-    /// Escáner de stock negativo (sobreventa): solo Main (SQLite). En Handy no hay BD local → error
-    /// y el job lo salta por su `Requiere`.
+    /// Escáner de stock negativo (sobreventa).
     pub(crate) async fn stock_alertas_repo(
         &self,
-    ) -> Result<Arc<dyn StockAlertasRepository>, String> {
-        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
-            "DB no inicializada (alertas de stock requieren modo Main)".to_string()
-        })?;
+    ) -> Result<Arc<dyn StockAlertasRepository>, AppErrorDto> {
+        let conn = self.base_de_la_main("Las alertas de stock se buscan en el TPV principal").await?;
         Ok(Arc::new(SqliteStockAlertasRepository::new(conn)) as Arc<dyn StockAlertasRepository>)
     }
 
     /// La reserva desde la web (docs/estudios/reservas-web.md): su configuración es de la Main.
     pub(crate) async fn reservas_web_repo(
         &self,
-    ) -> Result<Arc<dyn tpv_application::ports::reservas_web::ReservasWebRepository>, String> {
-        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
-            "DB no inicializada (la reserva web se configura en el TPV principal)".to_string()
-        })?;
+    ) -> Result<Arc<dyn tpv_application::ports::reservas_web::ReservasWebRepository>, AppErrorDto> {
+        let conn = self
+            .base_de_la_main("La reserva desde la web se configura en el TPV principal")
+            .await?;
         Ok(Arc::new(tpv_infra_sqlite::reservas_web::SqliteReservasWebRepository::new(conn)))
     }
 }
@@ -974,6 +982,11 @@ fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<St
     let mut cfg = load_config(&app_data_dir);
     cfg.connectivity = Some(args.mode);
     save_config(&app_data_dir, &cfg)?;
+    // El motor de la réplica no relee la palanca en cada mensaje (`COMPROBAR_DISPONIBLE_CADA`):
+    // se le avisa para que la mire ya, y para que conecte sin esperar si se ha vuelto a encender.
+    if let Some(sync) = app.try_state::<replicacion::SyncNativo>() {
+        sync.reintentar();
+    }
 
     Ok("OK".into())
 }
@@ -2112,6 +2125,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mesas::set_reserva_estado,
             commands::mesas::get_comanda_abierta_by_mesa,
             commands::mesas::abrir_comanda,
+            commands::mesas::mesas_abrir_o_retomar,
             commands::mesas::comanda_set_trabajador_if_null,
             commands::mesas::comanda_set_reserva_if_null,
             commands::mesas::get_lineas_comanda,
@@ -3381,13 +3395,33 @@ mod tests_solo_en_la_main {
         }
     }
 
-    /// Los tres accesos, con el nombre de cada uno para el mensaje del test.
+    /// Los accesos, con el nombre de cada uno para el mensaje del test. Los de los jobs no se
+    /// llegan a pedir en una Handy, pero contestan igual: lo que manda es que no es un fallo.
     async fn errores(st: &AppState) -> Vec<(&'static str, Option<AppErrorDto>)> {
         vec![
             ("verifactu_repo", st.verifactu_repo().await.err()),
             ("tickets_repo", st.tickets_repo().await.err()),
             ("pedidos_proveedor_repo", st.pedidos_proveedor_repo().await.err()),
+            ("reservas_web_repo", st.reservas_web_repo().await.err()),
+            ("reconciliacion_repo", st.reconciliacion_repo().await.err()),
+            ("sync_repo_de_la_main", st.sync_repo_de_la_main("Sólo en el TPV principal").await.err()),
+            ("jobs_state_repo", st.jobs_state_repo().await.err()),
+            ("avisos_scan_repo", st.avisos_scan_repo().await.err()),
+            ("stock_alertas_repo", st.stock_alertas_repo().await.err()),
         ]
+    }
+
+    /// Estadísticas pregunta por el histórico también en una Handy: allí no hay nada que bajar.
+    #[tokio::test]
+    async fn en_una_handy_el_historico_no_tiene_nada_pendiente_y_no_es_un_error() {
+        for db in [None, Some(base().await)] {
+            let st = estado(Some(DeviceMode::Handy), db);
+            let h = crate::commands::sync::estado_del_historico(&st).await.expect("una Handy contesta");
+            assert_eq!((h.tablas_pendientes, h.tablas_completadas, h.filas_traidas), (0, 0, 0));
+        }
+        // En la Main, el de su base.
+        let st = estado(Some(DeviceMode::Tpv), Some(base().await));
+        assert_eq!(crate::commands::sync::estado_del_historico(&st).await.unwrap().tablas_pendientes, 0);
     }
 
     #[tokio::test]
@@ -3507,7 +3541,7 @@ mod tests_exenciones_del_gate {
     #[test]
     fn atribuciones_de_servicio_salen_de_la_sesion() {
         for (fuente, comandos) in [
-            (include_str!("commands/mesas.rs"), vec!["abrir_comanda", "add_linea_comanda", "comanda_set_trabajador_if_null", "kitchen_set_line_state"]),
+            (include_str!("commands/mesas.rs"), vec!["abrir_comanda", "mesas_abrir_o_retomar", "add_linea_comanda", "comanda_set_trabajador_if_null", "kitchen_set_line_state"]),
             (include_str!("commands/tareas.rs"), vec!["tareas_marcar_tarea_finalizada"]),
             (include_str!("commands/venta_rapida.rs"), vec!["vr_create_comanda_barra"]),
             (include_str!("commands/inventario.rs"), vec!["inventario_upsert_producto", "inventario_create_lote", "inventario_ajustar_lote", "inventario_ajustar_stock_suelto"]),

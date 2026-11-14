@@ -14,6 +14,7 @@ import {
 	horaLocalDeTexto,
 	instanteEnZona,
 	reservaDeCadaMesa,
+	segundosHastaElProximoCambio,
 	type Instante,
 	type ReservaDeMesa,
 } from "../src/domains/mesas/reservaEnElPlano";
@@ -44,6 +45,8 @@ describe("la reserva de cada mesa cuadra con la tabla compartida", () => {
 		const { cambio_de_hora, ahora_utc } = caso as { cambio_de_hora?: Cambio; ahora_utc?: string };
 		const instante = zonaDelCaso(cambio_de_hora);
 		const ahora = ahora_utc ? horaLocalDeTexto(ahora_utc)! : instante(horaLocalDeTexto(caso.ahora!)!)!;
+		expect(caso).toHaveProperty("proximo_cambio_s");
+		expect(segundosHastaElProximoCambio(reservas, ahora, instante)).toBe(caso.proximo_cambio_s);
 		const ensena = Object.fromEntries(
 			[...reservaDeCadaMesa(reservas, ahora, instante)].map(([mesa, r]) => [
 				mesa,
@@ -120,9 +123,12 @@ describe("el plano de la Handy trae las reservas", () => {
 			// Las 20:00 en Madrid, que son las 18:00 UTC.
 			const reloj = Date.UTC(2026, 9, 21, 18, 0, 0);
 
-			const meta = await mesasMetaAll(db, "2026-10-21 20:00:00", reloj);
+			const plano = await mesasMetaAll(db, "2026-10-21 20:00:00", reloj);
+			const meta = plano.mesas;
 			// Sin la hora de la Handy, la del worker: lo mismo, y no la de Turso leída como de Madrid.
-			expect(await mesasMetaAll(db, null, reloj)).toEqual(meta);
+			expect(await mesasMetaAll(db, null, reloj)).toEqual(plano);
+			// La que llega a las 20:30 enseña «en 30 min», que pasa a 29 en un segundo.
+			expect(plano.proximo_cambio_s).toBe(1);
 
 			expect(meta.m1?.reserva).toEqual({
 				idReserva: "tarde", clienteNombre: "", diaYMD: "2026-10-21", hora: "19:30", estado: "PROXIMA", minutosPara: -30,

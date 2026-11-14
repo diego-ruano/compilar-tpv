@@ -14,6 +14,8 @@ import { commands } from "@tpv/client";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Coins, Wallet, X } from "lucide-react";
 
+import type { BackfillEstado } from "@tpv/contracts";
+
 import { ModalShell } from "../../shared/ui";
 import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 import { cn } from "../../shared/lib/cn";
@@ -244,6 +246,12 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 </Aviso>
                             ) : null}
 
+                            {/* DO-02: tras recuperar los datos de un negocio que nunca había cerrado
+                                la caja, lo antiguo baja después. Se avisa; no se impide cerrar. */}
+                            {prep.historico_pendiente ? (
+                                <AvisoHistoricoPendiente historico={prep.historico_pendiente} />
+                            ) : null}
+
                             <Aviso tono="info">
                                 Esta caja cuenta las <strong>ventas en efectivo</strong> y los <strong>gastos pagados con
                                 dinero del cajón</strong>. Si has sacado dinero para otra cosa, apúntalo como gasto pagado
@@ -388,6 +396,24 @@ function Tarjeta({
             <p className="mt-1 text-2xl font-extrabold text-fg">{valor}</p>
             {children ? <p className="mt-2 text-xs text-fg-muted">{children}</p> : null}
         </div>
+    );
+}
+
+/**
+ * El primer cierre suma desde el principio, y tras una recuperación el histórico antiguo todavía
+ * está bajando: lo cobrado en efectivo puede salir corto. Con el progreso, para que se pueda decidir
+ * si esperar.
+ */
+function AvisoHistoricoPendiente({ historico }: { historico: BackfillEstado }) {
+    const total = historico.tablas_pendientes + historico.tablas_completadas;
+    const pct = total > 0 ? Math.round((historico.tablas_completadas / total) * 100) : 0;
+    return (
+        <Aviso>
+            <strong>Todavía se está descargando el histórico de antes de recuperar los datos</strong> (
+            {historico.tablas_completadas} de {total} apartados · {pct} %). Como es el primer cierre,
+            «Cobrado en efectivo» suma desde el principio y sólo cuenta lo que ya ha bajado: el recuento
+            puede salir incompleto hasta que termine. Puedes cerrar igualmente o esperar a que acabe.
+        </Aviso>
     );
 }
 

@@ -33,7 +33,7 @@ describe("presentación de la réplica nativa", () => {
         const invalidar = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
         const info = {ids:["c1"],touchedComanda:true,uncertain:false,touchedCatalog:false};
         h.listeners.get("sync:cambio")!({payload:{tablas:["detalle_comanda"],comanda:info}});
-        expect(invalidar.mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas"],["stats"]]);
+        expect(invalidar.mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas","meta"],["stats"]]);
         expect(useSyncSignal.getState().comanda).toEqual(info); socket.detener();
     });
     it("un cambio de ajustes que llega de una Handy relee sólo su store, también el de contacto", async () => {

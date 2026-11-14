@@ -1,6 +1,7 @@
 // test/busquedaDeTexto.test.ts
 //
-// Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`.
+// Lo que teclea el usuario se busca con `instr(<columna normalizada>, ?) > 0` (`lib/busqueda.ts`, sin
+// acentos ni mayúsculas: `test/busquedaSinAcentos.test.ts`), nunca con `LIKE`.
 //
 // El SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes
 // (`sondaSqliteDo.test.ts`): buscar un producto con 49 letras, o con 25 acentuadas, tumbaba la
@@ -75,7 +76,7 @@ describe("buscar productos con lo que teclea el usuario", () => {
 			await conProductos(`${donde}-largo`, async (db) => {
 				expect(await buscar(db, LARGO)).toEqual(["p-largo"]);
 				expect(await buscar(db, ACENTOS)).toEqual(["p-acentos"]);
-				// Las letras sin acento no distinguen mayúsculas.
+				// Sin distinguir mayúsculas ni acentos.
 				expect(await buscar(db, LARGO.replace("maridaje", "MARIDAJE"))).toEqual(["p-largo"]);
 				// Con una letra cambiada al final ya no está.
 				expect(await buscar(db, `${LARGO}s`)).toEqual([]);
@@ -231,6 +232,6 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB",
 				hallazgos.push(`${ruta}: ${sinComentarios.slice(m.index, m.index + 60).split("\n")[0]}`);
 			}
 		}
-		expect(hallazgos, "usa instr(lower(col), lower(?)) > 0").toEqual([]);
+		expect(hallazgos, "usa instr(normalizada(col), ?) > 0 (lib/busqueda.ts)").toEqual([]);
 	});
 });

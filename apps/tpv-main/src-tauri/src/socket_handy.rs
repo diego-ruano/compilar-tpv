@@ -292,4 +292,18 @@ mod tests {
         assert!(servicio.decidir_al_volver(true).is_none());
         assert!(ordenado(&mut ordenes));
     }
+
+    #[test]
+    fn volver_y_recuperar_el_foco_a_la_vez_no_cortan_el_intento_en_marcha() {
+        let (servicio, mut ordenes) = servicio();
+        servicio.presencia.lock().unwrap().activar(Some("negocio-a".into()), true);
+        // Android manda los dos avisos juntos: ninguno de los dos corta el intento que hay.
+        for _ in 0..2 {
+            assert!(servicio.decidir_al_volver(false).is_none());
+            assert!(!ordenado(&mut ordenes), "un aviso automático no cancela el intento en marcha");
+        }
+        // «Reintentar» sí: lo corta y empieza otro.
+        assert!(servicio.decidir_al_volver(true).is_none());
+        assert!(ordenado(&mut ordenes));
+    }
 }

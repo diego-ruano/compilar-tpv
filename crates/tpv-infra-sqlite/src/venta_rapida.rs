@@ -460,15 +460,19 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>> {
+        let Some(query) = crate::busqueda::texto_a_buscar(&query) else {
+            return Ok(vec![]);
+        };
         let g = self.db.read().await;
         let db = &g;
-        // `instr` y no `LIKE`, como en el worker (`searchProductos` de `venta_rapida.queries.ts`): allí
-        // el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un
-        // patrón el `%` y el `_` que teclea el usuario son comodines. Los dos lados buscan el texto
-        // tal cual, sin distinguir mayúsculas, como `LIKE`.
+        // Sin acentos ni mayúsculas (`crate::busqueda`), como en el worker (`searchProductos` de
+        // `venta_rapida.queries.ts`). Con `instr` y no `LIKE`: allí el SQLite del Durable Object no
+        // admite un patrón de `LIKE` de más de 50 bytes, y en un patrón el `%` y el `_` que teclea
+        // el usuario son comodines.
         let mut rows = db
             .query(
-                r#"
+                &format!(
+                    r#"
                 SELECT
                   p.ID_Producto,
                   p.ID_Categoria,
@@ -482,12 +486,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 FROM Productos p
                 JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
                 LEFT JOIN v_inventario_producto_stock v ON v.ID_Producto = p.ID_Producto
-                WHERE instr(lower(p.Nombre), lower(?1)) > 0
+                WHERE instr({}, ?1) > 0
                   AND COALESCE(c.Vendible,1)=1
                   AND p.Archivado_En IS NULL
                 ORDER BY p.Nombre ASC
                 LIMIT ?2;
                 "#,
+                    crate::busqueda::normalizada("p.Nombre")
+                ),
                 vec![Value::Text(query), Value::Integer(limit)],
             )
             .await

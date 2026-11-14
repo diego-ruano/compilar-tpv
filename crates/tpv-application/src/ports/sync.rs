@@ -197,6 +197,21 @@ pub trait SyncRepository: Send + Sync {
     /// el catch-up y sin él se aplicaría otra vez.
     async fn purge_applied_ops(&self) -> AppResult<()>;
 
+    /// Retira las operaciones apartadas de la subida (`_Sync_Outbox` con `Cuarentena = 1`) cuyo
+    /// último intento es anterior a `antes_de_ms`, y devuelve cuántas. Una apartada cuya reparación
+    /// sigue por subir se queda: la retira esa subida (SYNC-26). La retención la decide el caso de
+    /// uso (`use_cases::sync::RETENCION_CUARENTENAS_MS`).
+    ///
+    /// Las de la bajada (`_Sync_Failed`) no se retiran nunca: un cambio de la nube que no entró en
+    /// esta base es lo que le impide al contraste borrar arriba lo que aquí falta o subir lo que la
+    /// nube borró (`contraste.rs::Guarda::sin_fallos`). Sin él, esta Main parecería al día sin estarlo.
+    ///
+    /// Por defecto no retira nada: los dobles de los tests no tienen cuarentenas.
+    async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<u64> {
+        let _ = antes_de_ms;
+        Ok(0)
+    }
+
     /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en
     /// cuarentena/fallando) para el panel de Configuración → Conectividad (SYNC-14).
     async fn health(&self) -> AppResult<SyncHealth>;

@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { recortar } from "../../lib/texto";
 import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
@@ -11,15 +12,18 @@ import {
 	horaLocalDeTexto,
 	instanteEnZona,
 	reservaDeCadaMesa,
+	segundosHastaElProximoCambio,
 	type ReservaDeMesa,
 } from "./reservaEnElPlano";
 
 import type {
 	CategoriaVendibleOut,
+	ComandaConLineasOut,
 	ComandaRow,
 	KitchenRow,
 	MesaLineaComandaRow,
 	MesaMetaOut,
+	MesasMetaOut,
 	ProductoVendibleOut,
 	SalonOut,
 } from "@tpv/contracts";
@@ -204,6 +208,33 @@ export async function lineas(
 	return rows(rs) as MesaLineaComandaRow[];
 }
 
+/**
+ * ¿Le falta el trabajador a esta comanda y todavía se le puede poner? Es lo que exige
+ * `setTrabajadorIfNull` en su `WHERE`: abierta, sin trabajador y sin líneas. Se mira antes de
+ * escribir porque una sentencia que no cambia nada también se replica: su `Applied_Operations`,
+ * su `Sync_Changes`, el aviso a los demás equipos y lo que releen. Espejo de `trabajador_por_poner`
+ * en la Main.
+ */
+export async function trabajadorPorPoner(db: Client, idComanda: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `
+			SELECT 1 AS si FROM Comandas
+			WHERE ID_Comanda = ?1 AND Estado = 'Abierta' AND ID_Trabajador IS NULL
+				AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1)
+			LIMIT 1;
+		`,
+		args: [idComanda],
+	});
+	return rows(rs).length > 0;
+}
+
+/** La comanda abierta de la mesa con sus líneas (`/comandas/abrir-o-retomar`); `null` sin ninguna. */
+export async function comandaConLineas(db: Client, idMesa: string): Promise<ComandaConLineasOut | null> {
+	const comanda = await comandaAbiertaByMesa(db, idMesa);
+	if (!comanda) return null;
+	return { comanda, lineas: await lineas(db, comanda.id_comanda) };
+}
+
 // MESAS-02: el mismo texto que `SQL_RESERVAS_DEL_PLANO` en la Main (`tpv-infra-sqlite/src/mesas.rs`).
 const SQL_RESERVAS_DEL_PLANO = `
 	SELECT
@@ -227,7 +258,7 @@ export async function mesasMetaAll(
 	db: Client,
 	ahoraLocal: string | null,
 	reloj = Date.now(),
-): Promise<Record<string, MesaMetaOut>> {
+): Promise<MesasMetaOut> {
 	const [rs, rsReservas, rsZona] = await db.batch(
 		[
 			`
@@ -295,7 +326,8 @@ export async function mesasMetaAll(
 	const zona = texto(rows(rsZona)[0]?.zona);
 	const local = ahoraLocal === null ? null : horaLocalDeTexto(ahoraLocal);
 	const ahora = local === null ? reloj : ahoraEnZona(zona, local, reloj);
-	for (const [idMesa, r] of reservaDeCadaMesa(reservas, ahora, instanteEnZona(zona))) {
+	const instante = instanteEnZona(zona);
+	for (const [idMesa, r] of reservaDeCadaMesa(reservas, ahora, instante)) {
 		const reserva = {
 			idReserva: r.reserva.id_reserva,
 			clienteNombre: r.reserva.cliente,
@@ -317,7 +349,8 @@ export async function mesasMetaAll(
 					reserva,
 				};
 	}
-	return out;
+	// Cuándo cambiará solo, con la hora: la Handy relee entonces y no cada minuto.
+	return { mesas: out, proximo_cambio_s: segundosHastaElProximoCambio(reservas, ahora, instante) };
 }
 
 // INC-20261030-005: la categoría no vendible no sale en la venta. Espejo de la Main.
@@ -360,11 +393,12 @@ export async function searchProductos(
 	db: Client,
 	query: string,
 ): Promise<ProductoVendibleOut[]> {
-	if (!recortar(query)) return [];
-	// `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de 50
-	// bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría la búsqueda; y en un
-	// patrón el `%` y el `_` que teclea el usuario son comodines. Igual en la Main
-	// (`search_productos_by_nombre`).
+	const texto = textoABuscar(query);
+	if (!texto) return [];
+	// Sin acentos ni mayúsculas (`lib/busqueda.ts`), igual en la Main (`search_productos_by_nombre`).
+	// Con `instr` y no `LIKE`: el SQLite del Durable Object no admite un patrón de `LIKE` de más de
+	// 50 bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría la búsqueda; y en un
+	// patrón el `%` y el `_` que teclea el usuario son comodines.
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -375,11 +409,11 @@ export async function searchProductos(
 				p.Ruta_Imagen AS Ruta_Imagen
 			FROM Productos p
 			JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-			WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
+			WHERE instr(${normalizada("p.Nombre")}, ?1) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
 			ORDER BY p.Nombre ASC
 			LIMIT 200;
 		`,
-		args: [query.toLowerCase()],
+		args: [texto],
 	});
 	return rows(rs) as ProductoVendibleOut[];
 }

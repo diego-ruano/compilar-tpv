@@ -80,8 +80,12 @@ servicio Android en segundo plano: la conexión se recupera al volver si el sist
 (`Latido::comprobar`, el mismo texto del latido, que el `TenantHub` contesta sin despertarse) y sólo
 se reconecta si el `pong` no llega en 3 s. Si el último `pong` tiene más de 35 s —el latido va cada
 30, así que el anterior se quedó sin respuesta o el equipo ha estado suspendido— se reconecta sin
-esperar. Sin conexión abierta se intenta ya, sin agotar la espera; con un rechazo de licencia o de
-dispositivo no se hace nada, y el botón «Reintentar» reconecta siempre. Una reconexión cuesta un
+esperar. Sin conexión abierta se intenta ya, sin agotar la espera; con un intento ya en marcha
+(`Conectando`) no se hace nada, porque en Android volver y recuperar el foco llegan juntos y el
+segundo aviso cancelaba el intento del primero y pedía otro ticket: si ese intento se quedó colgado
+al suspenderse, se espera el plazo del paso en que estaba (20 s: el ticket, abrir el socket, el
+saludo). Con un rechazo de licencia o de dispositivo tampoco se
+hace nada, y el botón «Reintentar» reconecta siempre, también a mitad de un intento. Una reconexión cuesta un
 ticket (la base central), un saludo con el `TenantHub` y, en la interfaz, releer consultas y ajustes:
 por eso no se hace en cada foco.
 
@@ -186,6 +190,12 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en Configuración → Conectividad.
   Entre sus estados están `conectando`, `conectado`, `reintentando`, `sin_identidad`, `rechazado` y
   `pausada`. Desmontar la UI no detiene la réplica nativa.
+- **Con la sesión abierta, si sigue tocando conectar se mira como mucho cada 10 s**
+  (`COMPROBAR_DISPONIBLE_CADA`, `use_cases/replicacion.rs`), no con cada mensaje del socket: es leer
+  `device_config.json`, mirar si hay un traslado y dos consultas. Se mira al volver de cada espera
+  del socket, así que en reposo es cuando vence la espera (hasta 30 s), como antes. Cambiar el modo
+  (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor, y entonces se mira
+  en el momento.
 - **Palanca de emergencia sin interfaz**: `connectivity: "auto" | "off"` en `device_config.json`
   (`get/set_connection_mode`), con `auto` por defecto. Los antiguos valores `online`/`offline` y
   cualquier valor desconocido se leen como ausencia del campo, que también implica `auto`.
@@ -518,6 +528,14 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
   detenida en uno de ellos. «En cuarentena», los que se saltaron.
+- **Lo apartado de la subida se guarda 30 días** desde su último intento, y después lo retira
+  `purga_sync` (`RETENCION_CUARENTENAS_MS`, `use_cases/sync.rs`). Para entonces se registró en la
+  telemetría al apartarse, se encoló la reparación por estado y el contraste con la nube ha pasado
+  decenas de veces; lo que queda es la sentencia, con los datos que llevara, y un contador en rojo
+  que ya no se apagaría. Una apartada cuya reparación sigue sin subir no se retira: la retira esa
+  subida. **Lo que no entró de la bajada no caduca**: es la barrera del contraste
+  (`_Sync_Failed` vacía es una de las condiciones para reparar), que sin ella daría esta base por al
+  día y borraría arriba lo que la Handy escribió y aquí falta.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
   página de catch-up de mil cambios (los que pide la Main, `CAMBIOS_POR_PAGINA`) no deja a un cobro

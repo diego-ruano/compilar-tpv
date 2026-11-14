@@ -265,13 +265,13 @@ export async function cobrarTodoEnEfectivo(billete: string, b: WebdriverIO.Brows
 /**
  * Cómo ve la app el estado de una mesa, en la Main o en la Handy.
  *
- * `mesas_meta_all` sólo devuelve las mesas con una comanda ABIERTA: una mesa libre no sale en el
+ * `mesas_meta_all` (su `mesas`) sólo devuelve las mesas con una comanda ABIERTA: una mesa libre no sale en el
  * mapa, y así es justamente como la pinta el plano (sin meta = libre). Por eso "no está" se traduce
  * aquí a LIBRE en vez de a un fallo.
  */
 export async function estadoDeMesa(idMesa: string, b: WebdriverIO.Browser = browser): Promise<string> {
     try {
-        const mapa = await gestosEn(b).leerDeLaApp("mesas_meta_all");
+        const mapa = (await gestosEn(b).leerDeLaApp("mesas_meta_all")).mesas;
         // La clave puede venir como UUID o como `db-mesa-<uuid>`: `mesasLoadMesaMeta` normaliza las
         // dos, así que aquí se aceptan las dos también.
         const meta = mapa[idMesa] ?? mapa[`db-mesa-${idMesa}`];

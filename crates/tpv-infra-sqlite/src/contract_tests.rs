@@ -340,6 +340,9 @@ casos_de_contrato! {
     mesas__set_reserva_estado,
     mesas__abrir_comanda,
     mesas__set_trabajador_if_null,
+    mesas__abrir_o_retomar,
+    mesas__abrir_o_retomar_sin_abierta,
+    mesas__abrir_o_retomar_con_trabajador,
     mesas__set_reserva_if_null,
     mesas__add_linea,
     mesas__add_linea_sin_precio,
@@ -811,6 +814,16 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("set trabajador if null");
+        }
+        "mesas.abrir_o_retomar" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.abrir_o_retomar_comanda(AbrirComandaData {
+                id_mesa: s(&e["id_mesa"]),
+                id_trabajador_o_usuario: opt_str(&e["id_trabajador_o_usuario"]),
+                id_reserva: opt_str(&e["id_reserva"]),
+            })
+            .await
+            .expect("abrir o retomar la mesa");
         }
         "mesas.set_reserva_if_null" => {
             let repo = SqliteMesasRepository::new(db.clone());

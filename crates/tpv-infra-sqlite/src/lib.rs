@@ -50,6 +50,8 @@ pub mod migrations;
 // `Reader`/`Writer` de `db.rs`.
 pub mod auth;
 pub mod avisos;
+// Lo que se teclea en un buscador, sin acentos ni mayúsculas: la expresión SQL de la columna.
+pub(crate) mod busqueda;
 // El historial de caja (`Movimientos_Caja`, CUENTA-07): lo escriben el cobro, el gasto y la
 // anulación, así que la sentencia vive en un sitio y no copiada en cada uno.
 pub mod caja_movimientos;

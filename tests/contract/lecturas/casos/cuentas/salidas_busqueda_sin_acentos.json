@@ -1,0 +1,17 @@
+{
+  "descripcion": "Busqueda de texto en los gastos, sin acentos ni mayusculas: 'LIMON' encuentra 'Limón y azúcar' y el gasto del proveedor 'Limonería Ñandú', y no el de 'Luz'. La tabla de lo que se pliega esta en crates/tpv-domain/src/busqueda_casos.json.",
+  "lectura": "cuentas.salidas",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Limonería Ñandú');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-12', 'Compras', 'Limón y azúcar', 1500);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('gasto-2', '2026-05-13', 'Proveedor', 'Pedido semanal', 4000, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-3', '2026-05-14', 'Suministros', 'Luz', 1050);"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "LIMON",
+    "page": null,
+    "page_size": null
+  }
+}

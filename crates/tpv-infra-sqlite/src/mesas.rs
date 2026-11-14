@@ -19,8 +19,8 @@ use crate::db::{Db, Reader, Writer};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
+    CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    MesaMetaOut, MesasMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
@@ -203,6 +203,109 @@ fn sql_quitar_mesas(filtro: &str) -> [String; 2] {
         ),
         format!("DELETE FROM Mesas WHERE {filtro} AND NOT {historia};"),
     ]
+}
+
+/// La comanda abierta de la mesa (`bare_id_mesa`, sin el prefijo de la pantalla), si la hay.
+async fn comanda_abierta_de<C: Reader>(db: &C, bare_id_mesa: &str) -> AppResult<Option<String>> {
+    select_one_string(
+        db,
+        r#"
+        SELECT ID_Comanda FROM Comandas
+        WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
+        ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
+        "#,
+        vec![Value::Text(bare_id_mesa.to_string())],
+    )
+    .await
+}
+
+/// Abre la comanda de la mesa. Quien llama ya ha mirado que no hay una abierta.
+///
+/// El INSERT lleva un guard WHERE NOT EXISTS como red de seguridad ante una carrera (idempotente
+/// también al replicarse): si entre la comprobación y aquí apareció una comanda abierta para la
+/// mesa, no se inserta una duplicada. El índice único parcial idx_comandas_una_abierta_por_mesa lo
+/// garantiza además a nivel de esquema. MESA-10: sin autoenlace de reserva; si no viene una
+/// explícita, `ID_Reserva` queda NULL.
+async fn insertar_comanda<W: Writer>(
+    db: &W,
+    bare_id_mesa: &str,
+    id_trab_o_usuario: Option<String>,
+    id_reserva: Option<String>,
+) -> AppResult<()> {
+    let id_trabajador = resolve_trabajador_id_input(db, id_trab_o_usuario).await?;
+    let id_reserva = id_reserva.filter(|s| !s.trim().is_empty());
+    db.execute(
+        r#"
+        INSERT INTO Comandas (
+          ID_Comanda, ID_Mesa, ID_Trabajador, ID_Reserva, Fecha_Hora_Apertura, Total_Comanda, Estado
+        )
+        SELECT ?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM Comandas WHERE ID_Mesa = ?2 AND Estado = 'Abierta'
+        );
+        "#,
+        vec![
+            Value::Text(new_id()),
+            Value::Text(bare_id_mesa.to_string()),
+            id_trabajador.map(Value::Text).unwrap_or(Value::Null),
+            id_reserva.map(Value::Text).unwrap_or(Value::Null),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// ¿Le falta el trabajador a la comanda y todavía se le puede poner? Lo que exige el `WHERE` de
+/// `poner_trabajador_si_falta`: abierta, sin trabajador y sin líneas. Espejo de
+/// `trabajadorPorPoner` en el worker.
+async fn trabajador_por_poner<C: Reader>(db: &C, id_comanda: &str) -> AppResult<bool> {
+    Ok(select_one_i64(
+        db,
+        r#"
+        SELECT 1 FROM Comandas
+        WHERE ID_Comanda = ?1 AND Estado = 'Abierta' AND ID_Trabajador IS NULL
+          AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1)
+        LIMIT 1;
+        "#,
+        vec![Value::Text(id_comanda.to_string())],
+    )
+    .await?
+    .is_some())
+}
+
+/// Pone el trabajador a una comanda abierta que no lo tiene y aún no tiene líneas. Si ya lo tiene
+/// (lo normal al volver a una mesa), no escribe: el `UPDATE` no cambiaría nada, pero pasaría por
+/// el outbox y se replicaría igual (su operación aplicada, su cambio en el log, el aviso a las Handy
+/// y lo que releen). Con el escritor cogido entre mirar y escribir, nada se cuela entre medias.
+async fn poner_trabajador_si_falta<W: Writer>(
+    db: &W,
+    id_comanda: &str,
+    id_trab_o_usuario: Option<String>,
+) -> AppResult<bool> {
+    let Some(idt) = resolve_trabajador_id_input(db, id_trab_o_usuario).await? else {
+        return Ok(false);
+    };
+    if !trabajador_por_poner(db, id_comanda).await? {
+        return Ok(false);
+    }
+    let changed = db
+        .execute(
+            r#"
+            UPDATE Comandas
+            SET ID_Trabajador = ?2
+            WHERE ID_Comanda = ?1
+              AND Estado = 'Abierta'
+              AND ID_Trabajador IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1
+              );
+            "#,
+            vec![Value::Text(id_comanda.to_string()), Value::Text(idt)],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(changed > 0)
 }
 
 async fn read_comanda_by_id<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<ComandaRow>> {
@@ -784,74 +887,56 @@ impl MesasRepository for SqliteMesasRepository {
     async fn abrir_comanda(&self, data: AbrirComandaData) -> AppResult<Option<ComandaRow>> {
         let g = self.db.write().await;
         let db = &g;
-        let id_trabajador_real =
-            resolve_trabajador_id_input(db, data.id_trabajador_o_usuario).await?;
-        let id_reserva = data.id_reserva.filter(|s| !s.trim().is_empty());
         let bare_id_mesa =
             parse_db_id(&data.id_mesa, "db-mesa-").unwrap_or_else(|| data.id_mesa.clone());
 
         // MESA-03: apertura idempotente por mesa. Si ya hay una comanda Abierta en la mesa,
         // la devolvemos en vez de crear una segunda (evita comandas duplicadas por doble
         // toque o apertura concurrente Main+Handy).
-        if let Some(existing) = select_one_string(
-            db,
-            r#"
-            SELECT ID_Comanda FROM Comandas
-            WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
-            "#,
-            vec![Value::Text(bare_id_mesa.clone())],
-        )
-        .await?
-        {
+        if let Some(existing) = comanda_abierta_de(db, &bare_id_mesa).await? {
             return read_comanda_by_id(db, &existing).await;
         }
-
-        // MESA-10: sin autoenlace de reserva. Si no viene una reserva explícita, ID_Reserva
-        // queda NULL (no forzamos que cada mesa vaya asociada a una reserva).
-        let id_reserva_final = id_reserva;
-
-        let id_comanda_new = new_id();
-        // El INSERT lleva un guard WHERE NOT EXISTS como red de seguridad ante una carrera
-        // (idempotente también al replicarse): si entre la comprobación y aquí apareció una
-        // comanda abierta para la mesa, no se inserta una duplicada. El índice único parcial
-        // idx_comandas_una_abierta_por_mesa lo garantiza además a nivel de esquema.
-        db.execute(
-            r#"
-            INSERT INTO Comandas (
-              ID_Comanda, ID_Mesa, ID_Trabajador, ID_Reserva, Fecha_Hora_Apertura, Total_Comanda, Estado
-            )
-            SELECT ?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta'
-            WHERE NOT EXISTS (
-              SELECT 1 FROM Comandas WHERE ID_Mesa = ?2 AND Estado = 'Abierta'
-            );
-            "#,
-            vec![
-                Value::Text(id_comanda_new.clone()),
-                Value::Text(bare_id_mesa.clone()),
-                id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
-                id_reserva_final.map(Value::Text).unwrap_or(Value::Null),
-            ],
-        )
-        .await
-        .map_err(db_err)?;
+        insertar_comanda(db, &bare_id_mesa, data.id_trabajador_o_usuario, data.id_reserva).await?;
 
         // Devolvemos la comanda abierta de la mesa: la recién creada o, si hubo carrera, la
         // que ya existía.
-        match select_one_string(
-            db,
-            r#"
-            SELECT ID_Comanda FROM Comandas
-            WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
-            "#,
-            vec![Value::Text(bare_id_mesa)],
-        )
-        .await?
-        {
+        match comanda_abierta_de(db, &bare_id_mesa).await? {
             Some(id) => read_comanda_by_id(db, &id).await,
             None => Ok(None),
         }
+    }
+
+    async fn abrir_o_retomar_comanda(
+        &self,
+        data: AbrirComandaData,
+    ) -> AppResult<Option<ComandaConLineasOut>> {
+        let bare_id_mesa =
+            parse_db_id(&data.id_mesa, "db-mesa-").unwrap_or_else(|| data.id_mesa.clone());
+        // Lo mismo que `get_comanda_abierta_by_mesa` + `comanda_set_trabajador_if_null` o
+        // `abrir_comanda` + `get_lineas_comanda`, que es lo que hacía la pantalla, con el escritor
+        // cogido una vez. Espejo de `/v1/mesas/comandas/abrir-o-retomar` en el worker.
+        let comanda = {
+            let g = self.db.write().await;
+            let db = &g;
+            let id = match comanda_abierta_de(db, &bare_id_mesa).await? {
+                Some(id) => {
+                    poner_trabajador_si_falta(db, &id, data.id_trabajador_o_usuario).await?;
+                    Some(id)
+                }
+                None => {
+                    insertar_comanda(db, &bare_id_mesa, data.id_trabajador_o_usuario, data.id_reserva)
+                        .await?;
+                    comanda_abierta_de(db, &bare_id_mesa).await?
+                }
+            };
+            match id {
+                Some(id) => read_comanda_by_id(db, &id).await?,
+                None => None,
+            }
+        };
+        let Some(comanda) = comanda else { return Ok(None) };
+        let lineas = self.get_lineas_comanda(&comanda.id_comanda).await?;
+        Ok(Some(ComandaConLineasOut { comanda, lineas }))
     }
 
     async fn comanda_set_trabajador_if_null(
@@ -860,29 +945,7 @@ impl MesasRepository for SqliteMesasRepository {
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool> {
         let g = self.db.write().await;
-        let db = &g;
-        let Some(idt) = resolve_trabajador_id_input(db, id_trab_o_usuario).await? else {
-            return Ok(false);
-        };
-
-        let changed = db
-            .execute(
-                r#"
-                UPDATE Comandas
-                SET ID_Trabajador = ?2
-                WHERE ID_Comanda = ?1
-                  AND Estado = 'Abierta'
-                  AND ID_Trabajador IS NULL
-                  AND NOT EXISTS (
-                    SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1
-                  );
-                "#,
-                vec![Value::Text(id_comanda.to_string()), Value::Text(idt)],
-            )
-            .await
-            .map_err(db_err)?;
-
-        Ok(changed > 0)
+        poner_trabajador_si_falta(&g, id_comanda, id_trab_o_usuario).await
     }
 
     async fn comanda_set_reserva_if_null(&self, id_comanda: &str, id_reserva: &str) -> AppResult<bool> {
@@ -1025,7 +1088,7 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== META + CATÁLOGO ===== */
 
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<MesasMetaOut> {
         let g = self.db.read().await;
         let db = &g;
 
@@ -1088,7 +1151,10 @@ impl MesasRepository for SqliteMesasRepository {
 
         // MESAS-02: la misma regla que el plano de la Handy, con la zona de este equipo.
         let instante = |local: chrono::NaiveDateTime| Local.from_local_datetime(&local).earliest().map(|d| d.timestamp());
-        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, Local::now().timestamp(), instante) {
+        let ahora = Local::now().timestamp();
+        // Cuándo cambiará solo, con la hora: la pantalla relee entonces y no cada minuto.
+        let proximo_cambio_s = tpv_domain::reservas::segundos_hasta_el_proximo_cambio(&reservas, ahora, instante);
+        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, ahora, instante) {
             let reserva = ReservaMesaOut {
                 id_reserva: r.reserva.id_reserva,
                 cliente_nombre: r.reserva.cliente,
@@ -1111,7 +1177,7 @@ impl MesasRepository for SqliteMesasRepository {
                 });
         }
 
-        Ok(map)
+        Ok(MesasMetaOut { mesas: map, proximo_cambio_s })
     }
 
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaVendibleOut>> {
@@ -1153,22 +1219,28 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
+        let Some(needle) = crate::busqueda::texto_a_buscar(&q) else {
+            return Ok(vec![]);
+        };
         let g = self.db.read().await;
         let db = &g;
-        let needle = q.trim().to_lowercase();
         // INC-20261030-005: el buscador tampoco ofrece productos de una categoría no vendible.
         //
-        // `instr` y no `LIKE`, como en el worker (`searchProductos` de `mesas.queries.ts`): allí el
-        // SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón
-        // el `%` y el `_` que teclea el usuario son comodines. Los dos lados buscan el texto tal cual.
-        let sql1 = r#"
+        // Sin acentos ni mayúsculas (`crate::busqueda`), como en el worker (`searchProductos` de
+        // `mesas.queries.ts`). Con `instr` y no `LIKE`: allí el SQLite del Durable Object no admite
+        // un patrón de `LIKE` de más de 50 bytes, y en un patrón el `%` y el `_` que teclea el
+        // usuario son comodines.
+        let sql1 = format!(
+            r#"
             SELECT p.ID_Producto, p.ID_Categoria, p.Nombre, COALESCE(p.Precio_Venta,0), p.Ruta_Imagen
             FROM Productos p
             JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-            WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
+            WHERE instr({}, ?1) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
             ORDER BY p.Nombre ASC LIMIT 200;
-        "#;
-        productos_query(db, sql1, vec![Value::Text(needle)]).await
+        "#,
+            crate::busqueda::normalizada("p.Nombre")
+        );
+        productos_query(db, &sql1, vec![Value::Text(needle)]).await
     }
 
     /* ===== TICKET (detalles) ===== */
@@ -2092,7 +2164,10 @@ mod tests_reservas_en_el_plano {
             );
             w.raw().execute_batch(&sql).await.unwrap();
         }
-        let meta = SqliteMesasRepository::new(db).mesas_meta_all().await.unwrap();
+        let plano = SqliteMesasRepository::new(db).mesas_meta_all().await.unwrap();
+        // Hay reservas por llegar en el plano: cambia en menos de un minuto (sus minutos).
+        assert!(matches!(plano.proximo_cambio_s, Some(1..=60)), "{:?}", plano.proximo_cambio_s);
+        let meta = plano.mesas;
         let reserva_de = |m: &str| meta.get(m).and_then(|x| x.reserva.as_ref()).map(|r| (r.id_reserva.as_str(), r.estado.as_str()));
 
         assert_eq!(reserva_de("m1"), Some(("tarde", "PROXIMA")));
@@ -2168,5 +2243,107 @@ mod tests_estado_desde_la_mesa {
 
         repo.set_reserva_estado("por-llegar", Finalizada).await.unwrap();
         assert_eq!(estado(&db, "por-llegar").await.as_deref(), Some("FINALIZADA"));
+    }
+}
+
+#[cfg(test)]
+mod tests_abrir_o_retomar {
+    //! Abrir la mesa en un paso deja lo mismo que los pasos de antes (la abierta, ponerle el
+    //! trabajador o abrirla, y las líneas), y lo que no cambia nada no se escribe: una sentencia
+    //! que no toca ninguna fila también pasaría por el outbox y se replicaría.
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn base() -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal("abrir_o_retomar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salon');
+                 INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                   VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 80, 80), ('m2', 'z1', '2', 4, 0, 0, 'rect', 80, 80);
+                 INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+                   VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'ana@bar.example', 'x', 'Ana'),
+                          ('u2', '00000000-0000-7000-8000-000000000001', 'luis@bar.example', 'x', 'Luis');
+                 INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('t1', 'u1'), ('t2', 'u2');
+                 INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');
+                 INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('cana', 'cat', 'Caña', 200);",
+            )
+            .await
+            .unwrap();
+        db
+    }
+
+    async fn en_el_outbox(db: &Arc<Db>) -> i64 {
+        let g = db.read().await;
+        let mut rows = g.query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap()
+    }
+
+    fn abrir(mesa: &str, quien: &str) -> AbrirComandaData {
+        AbrirComandaData { id_mesa: mesa.into(), id_trabajador_o_usuario: Some(quien.into()), id_reserva: None }
+    }
+
+    #[tokio::test]
+    async fn sin_comanda_la_abre_con_el_trabajador_y_sin_lineas() {
+        let db = base().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+        let r = repo.abrir_o_retomar_comanda(abrir("db-mesa-m1", "u1")).await.unwrap().unwrap();
+        assert_eq!((r.comanda.id_mesa.as_str(), r.comanda.id_trabajador.as_deref()), ("m1", Some("t1")));
+        assert_eq!(r.comanda.estado, "Abierta");
+        assert!(r.lineas.is_empty());
+        assert_eq!(en_el_outbox(&db).await, 1, "la apertura, y nada más");
+        // Otra vez: la retoma, la misma, sin escribir nada.
+        let otra = repo.abrir_o_retomar_comanda(abrir("m1", "u2")).await.unwrap().unwrap();
+        assert_eq!(otra.comanda.id_comanda, r.comanda.id_comanda);
+        assert_eq!(otra.comanda.id_trabajador.as_deref(), Some("t1"), "ya tenía trabajador");
+        assert_eq!(en_el_outbox(&db).await, 1, "retomar una mesa con trabajador no escribe");
+    }
+
+    #[tokio::test]
+    async fn retoma_la_abierta_con_sus_lineas_y_le_pone_el_trabajador_solo_si_le_faltaba() {
+        let db = base().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+        // Abierta desde otro sitio sin trabajador (una Handy sin sesión de trabajador).
+        let abierta = repo
+            .abrir_comanda(AbrirComandaData { id_mesa: "m2".into(), id_trabajador_o_usuario: None, id_reserva: None })
+            .await
+            .unwrap()
+            .unwrap();
+        let antes = en_el_outbox(&db).await;
+        let r = repo.abrir_o_retomar_comanda(abrir("m2", "u2")).await.unwrap().unwrap();
+        assert_eq!(r.comanda.id_comanda, abierta.id_comanda);
+        assert_eq!(r.comanda.id_trabajador.as_deref(), Some("t2"), "le faltaba: se pone");
+        assert_eq!(en_el_outbox(&db).await, antes + 1);
+
+        // Con una línea ya no se le cambia nada, y tampoco se escribe.
+        repo.add_linea_comanda(&abierta.id_comanda, "cana", 1.0, None).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute("UPDATE Comandas SET ID_Trabajador = NULL WHERE ID_Comanda = ?1;", vec![Value::Text(abierta.id_comanda.clone())])
+            .await
+            .unwrap();
+        let antes = en_el_outbox(&db).await;
+        let r = repo.abrir_o_retomar_comanda(abrir("m2", "u1")).await.unwrap().unwrap();
+        assert_eq!(r.comanda.id_trabajador, None);
+        assert_eq!(r.lineas.len(), 1, "las líneas vienen en el mismo paso");
+        assert_eq!(r.lineas[0].id_producto, "cana");
+        assert_eq!(en_el_outbox(&db).await, antes, "una comanda con líneas no cambia de trabajador");
+    }
+
+    #[tokio::test]
+    async fn poner_el_trabajador_a_una_comanda_que_ya_lo_tiene_no_escribe() {
+        let db = base().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+        let c = repo.abrir_comanda(abrir("m1", "u1")).await.unwrap().unwrap();
+        let antes = en_el_outbox(&db).await;
+        assert!(!repo.comanda_set_trabajador_if_null(&c.id_comanda, Some("u2".into())).await.unwrap());
+        assert_eq!(en_el_outbox(&db).await, antes, "un UPDATE que no cambia nada también se replicaría");
+        assert_eq!(read_comanda_by_id(&db.read().await, &c.id_comanda).await.unwrap().unwrap().id_trabajador.as_deref(), Some("t1"));
     }
 }
