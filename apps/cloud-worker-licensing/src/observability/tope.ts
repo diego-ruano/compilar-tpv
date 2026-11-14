@@ -19,6 +19,8 @@
 //      cortar un texto ya filtrado no puede dejar a la vista nada que el filtro hubiera tapado. Al
 //      revés sí: un JWT o un correo partidos por la mitad ya no se reconocen.
 
+import { bytesUtf8 } from "../lib/texto";
+
 /** Lo más que ocupa en UTF-8 una cadena que sale a telemetría, con la marca. */
 export const MAX_BYTES = 16 * 1024;
 
@@ -87,19 +89,6 @@ function ajustarABytes(texto: string, maximo: number, recortado: boolean): strin
 	}
 	if (!recortado && bytes <= maximo) return texto;
 	return texto.slice(0, corte < 0 ? texto.length : corte) + MARCA_DE_RECORTE;
-}
-
-/** Bytes que ocupa un texto en UTF-8 (un sustituto suelto, como U+FFFD: 3). */
-export function bytesUtf8(texto: string): number {
-	let bytes = 0;
-	for (let i = 0; i < texto.length; i++) {
-		const c = texto.charCodeAt(i);
-		if (esSustitutoAlto(c) && i + 1 < texto.length && esSustitutoBajo(texto.charCodeAt(i + 1))) {
-			bytes += 4;
-			i++;
-		} else bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
-	}
-	return bytes;
 }
 
 const esSustitutoAlto = (c: number) => c >= 0xd800 && c <= 0xdbff;

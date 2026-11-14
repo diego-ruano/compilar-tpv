@@ -5,7 +5,7 @@ import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
-import { bytesUtf8 } from "../observability/tope";
+import { bytesUtf8 } from "../lib/texto";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
 import { safeJsonParse, sha256Hex, stringifyJsonValue } from "./tenantHub.envelope";

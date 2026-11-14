@@ -39,3 +39,20 @@ export function quitarComillas(texto: string): string {
 	while (fin > inicio && texto.charCodeAt(fin - 1) === COMILLA) fin--;
 	return texto.slice(inicio, fin);
 }
+
+/**
+ * Lo que ocupa un texto en UTF-8, sin codificarlo: uno por carácter ASCII, dos hasta U+07FF, tres en
+ * el resto del plano básico (también un sustituto suelto, que se codifica como U+FFFD) y cuatro por
+ * cada par de sustitutos. Lo mismo que `new TextEncoder().encode(texto).byteLength`, sin la copia.
+ */
+export function bytesUtf8(texto: string): number {
+	let bytes = 0;
+	for (let i = 0; i < texto.length; i++) {
+		const c = texto.charCodeAt(i);
+		if (c >= 0xd800 && c <= 0xdbff && i + 1 < texto.length && (texto.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+			bytes += 4;
+			i++;
+		} else bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+	}
+	return bytes;
+}

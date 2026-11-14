@@ -44,7 +44,8 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
-const { Escritor, VOLCADO_MAX_BYTES, HISTORICO_MAX_BYTES, bytesDe, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
+const { bytesUtf8 } = await import("../src/lib/texto");
+const { Escritor, VOLCADO_MAX_BYTES, HISTORICO_MAX_BYTES, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
 	await import("../src/domains/sync/volcado");
 const { syncRoutes, paginaDelHistorico, volcarFase1, BOOTSTRAP_MAX_FILAS } =
 	await import("../src/domains/sync/sync.routes");
@@ -206,7 +207,7 @@ describe("el Escritor de un volcado", () => {
 			"\ud83c",
 		];
 		for (const texto of casos) {
-			expect(bytesDe(texto), JSON.stringify(texto)).toBe(new TextEncoder().encode(texto).byteLength);
+			expect(bytesUtf8(texto), JSON.stringify(texto)).toBe(new TextEncoder().encode(texto).byteLength);
 		}
 	});
 

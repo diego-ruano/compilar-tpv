@@ -25,6 +25,7 @@ import type { Client, ResultSet } from "@libsql/client/web";
 
 import { parseClientNow, rewriteNowInSql } from "../../durableObjects/tenantHub.tiempo";
 import { hubLocal } from "../../lib/hubLocal";
+import { bytesUtf8 } from "../../lib/texto";
 import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
 
 /**
@@ -177,28 +178,6 @@ export function primerValor(r: Resultado): unknown {
 	return null;
 }
 
-/**
- * Lo que ocupa un texto en UTF-8, sin codificarlo: un byte por carácter ASCII, dos hasta U+07FF,
- * tres en el resto del plano básico y cuatro por cada par de sustitutos.
- */
-export function bytesDe(texto: string): number {
-	let bytes = texto.length;
-	for (let i = 0; i < texto.length; i++) {
-		const c = texto.charCodeAt(i);
-		if (c < 0x80) continue;
-		if (c < 0x800) {
-			bytes += 1;
-		} else if (c >= 0xd800 && c <= 0xdbff && (texto.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
-			// Un par: dos unidades de UTF-16 que son cuatro bytes.
-			bytes += 2;
-			i++;
-		} else {
-			bytes += 2;
-		}
-	}
-	return bytes;
-}
-
 /** Cuánto texto se junta antes de codificarlo. */
 const TROZO_DE_TEXTO = 64 * 1024;
 
@@ -229,7 +208,7 @@ export class Escritor {
 	texto(t: string): void {
 		this.pendiente.push(t);
 		this.caracteres += t.length;
-		this.bytes += bytesDe(t);
+		this.bytes += bytesUtf8(t);
 		if (this.caracteres >= TROZO_DE_TEXTO) this.codificar();
 	}
 

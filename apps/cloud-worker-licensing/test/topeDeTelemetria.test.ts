@@ -18,7 +18,8 @@ import type { Env } from "../src/env";
 import { ingestToAxiom } from "../src/observability/axiom";
 import { scrub } from "../src/observability/scrub";
 import { sentryOptions } from "../src/observability/sentry";
-import { acotar, bytesUtf8, colaSegura, MARCA_DE_RECORTE, MAX_BYTES, MAX_FILTRADO } from "../src/observability/tope";
+import { acotar, colaSegura, MARCA_DE_RECORTE, MAX_BYTES, MAX_FILTRADO } from "../src/observability/tope";
+import { bytesUtf8 } from "../src/lib/texto";
 import { enElHub } from "./helpers/hub";
 
 const ENORME = 5 * 1024 * 1024;

@@ -10,6 +10,7 @@
 import type { Client } from "@libsql/client/web";
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
+import { bytesUtf8 } from "../../lib/texto";
 import { PURGADO_HASTA, serializarCambios, type CambioGuardado } from "./cambiosJson";
 
 import type { Env } from "../../env";
@@ -40,7 +41,6 @@ import {
 	Escritor,
 	HISTORICO_MAX_BYTES,
 	VOLCADO_MAX_BYTES,
-	bytesDe,
 	enBytes,
 	escribirTablas,
 	lectorDe,
@@ -260,10 +260,10 @@ function pesarTablas(lector: Lector, tablas: string[]): Promise<Map<string, Peso
 				let bytes = 0;
 				for (const fila of filas) {
 					// La fila y la coma que la separa de la siguiente.
-					bytes += bytesDe(JSON.stringify(fila)) + 1;
+					bytes += bytesUtf8(JSON.stringify(fila)) + 1;
 					n++;
 				}
-				const fijo = bytesDe(JSON.stringify({ nombre, columnas, parcial: true, filas: [] })) + 1;
+				const fijo = bytesUtf8(JSON.stringify({ nombre, columnas, parcial: true, filas: [] })) + 1;
 				pesos.set(nombre, { fijo, porFila: n ? bytes / n : 0 });
 			}
 			return pesos;
@@ -482,7 +482,7 @@ export async function paginaDelHistorico(
 			for (const fila of filas) {
 				const texto = JSON.stringify(fila.slice(1));
 				// Lo que ocuparía la página con esta fila: lo escrito, la fila con su coma y el cierre.
-				if (n > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+				if (n > 0 && e.ocupado + bytesUtf8(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 					cortada = true;
 					break;
 				}

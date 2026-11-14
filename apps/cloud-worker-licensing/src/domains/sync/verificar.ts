@@ -26,13 +26,13 @@
 //   leídas (si el mes no cabe, la ventana se encoge como en la recuperación) y ocupa del orden de
 //   100 KB; una página de filas o de claves, sus bytes.
 
+import { bytesUtf8 } from "../../lib/texto";
 import { PURGADO_HASTA } from "./cambiosJson";
 import { esTablaDeNegocio, sentenciaVolcado, ventanasCandidatas } from "./bootstrap.ventana";
 import { SQL_SEQ, contadorDeVentanas, leerPuntoDePartida, seqDe } from "./puntoDePartida";
 import { FiltroDeCubos, Resumidor, cubosPara, type ResumenCubos } from "./resumenCubos";
 import {
 	Escritor,
-	bytesDe,
 	enBytes,
 	primerValor,
 	siguiente,
@@ -406,7 +406,7 @@ export async function filasDeLosCubos(
 				}
 				if (!filtro.pide(fila, posiciones)) continue;
 				const texto = filaEnJson(fila);
-				if (escritas > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+				if (escritas > 0 && e.ocupado + bytesUtf8(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 					siguienteCursor = i;
 					break;
 				}
@@ -478,7 +478,7 @@ export async function paginaDeClaves(
 		for (const clave of siguiente(rs).filas) {
 			const texto = JSON.stringify(clave);
 			// La clave cuenta dos veces: si es la última que entra, es también el cursor.
-			if (n > 0 && e.ocupado + 2 * bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+			if (n > 0 && e.ocupado + 2 * bytesUtf8(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 				cortada = true;
 				break;
 			}
@@ -546,7 +546,7 @@ export async function filasPorClave(
 		let cortada = false;
 		for (const fila of filas) {
 			const texto = filaEnJson(fila);
-			if (escritas > 0 && e.ocupado + bytesDe(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
+			if (escritas > 0 && e.ocupado + bytesUtf8(texto) + 1 + CIERRE_DE_PAGINA > maxBytes) {
 				cortada = true;
 				break;
 			}

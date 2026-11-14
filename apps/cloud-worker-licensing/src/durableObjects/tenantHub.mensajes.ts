@@ -34,7 +34,7 @@
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
-import { bytesUtf8 } from "../observability/tope";
+import { bytesUtf8 } from "../lib/texto";
 import {
 	buildInternalPayloadForHash,
 	getFirstOwnValue,
