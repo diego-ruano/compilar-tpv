@@ -3385,6 +3385,34 @@ use crate::ejecutor::Connection;
     }
 
     #[tokio::test]
+    async fn la_comanda_entera_no_lee_mas_de_lo_que_cabe() {
+        // SYNC-31 (Codex): con más filas de las que caben, la reparación se queda en lo que tocaba la
+        // operación, y eso se sabe sin haber leído todas.
+        let (_repo, db, _dir) = repo_temporal().await;
+        let max = crate::sync_reparacion::MAX_FILAS_DE_LAS_COMANDAS;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(&format!(
+                    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES
+                       ('chica', 'BARRA', '2026-11-14 12:00:00', 'Abierta'), ('grande', 'BARRA', '2026-11-14 12:00:00', 'Abierta');
+                     INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Cantidad, Precio_Unitario) VALUES ('l1', 'chica', 1, 100);
+                     WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < {max})
+                     INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Cantidad, Precio_Unitario)
+                     SELECT 'g' || i, 'grande', 1, 100 FROM s;"
+                ))
+                .await
+                .unwrap();
+        }
+        let w = db.write().await;
+        let fks = crate::sync_reparacion::foraneas(w.raw()).await.unwrap();
+        let chica = crate::sync_reparacion::filas_de_las_comandas(w.raw(), &fks, &["chica".to_string()]).await.unwrap();
+        assert_eq!(chica.map(|f| f.len()), Some(2), "la comanda y su línea");
+        let grande = crate::sync_reparacion::filas_de_las_comandas(w.raw(), &fks, &["grande".to_string()]).await.unwrap();
+        assert!(grande.is_none(), "la comanda y {max} líneas no caben");
+    }
+
+    #[tokio::test]
     async fn una_op_apartada_encola_el_estado_ACTUAL_de_la_fila() {
         // El corazón del asunto. La nube rechazó el UPDATE que ponía el nombre a "Terraza". Lo que
         // NO se hace es reintentar aquel UPDATE: para cuando alguien arregle la causa, esa fila

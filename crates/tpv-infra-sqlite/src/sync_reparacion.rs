@@ -450,13 +450,14 @@ pub(crate) async fn comandas_de(
     Ok(comandas)
 }
 
-/// Las filas de `tabla` cuya `columna` es uno de `valores`, por su clave primaria.
+/// Las filas de `tabla` cuya `columna` es uno de `valores`, por su clave primaria, hasta `tope`.
 async fn filas_donde(
     conn: &Connection,
     tabla: &str,
     clave: &[String],
     columna: &str,
     valores: &[String],
+    tope: usize,
 ) -> Result<Vec<FilaAfectada>, ErrorSql> {
     if clave.is_empty() || !nombre_aceptable(tabla) || !nombre_aceptable(columna) || clave.iter().any(|c| !nombre_aceptable(c)) {
         return Ok(Vec::new());
@@ -465,8 +466,8 @@ async fn filas_donde(
     // La lista va en un solo parámetro, como en todo lo que tiene un tamaño que no se sabe.
     let mut filas = conn
         .query(
-            &format!("SELECT {lista} FROM \"{tabla}\" WHERE \"{columna}\" IN (SELECT value FROM json_each(?1)) ORDER BY {lista};"),
-            vec![Value::Text(serde_json::to_string(valores).unwrap_or_else(|_| "[]".into()))],
+            &format!("SELECT {lista} FROM \"{tabla}\" WHERE \"{columna}\" IN (SELECT value FROM json_each(?1)) ORDER BY {lista} LIMIT ?2;"),
+            vec![Value::Text(serde_json::to_string(valores).unwrap_or_else(|_| "[]".into())), Value::Integer(tope as i64)],
         )
         .await?;
     let mut salida = Vec::new();
@@ -512,8 +513,12 @@ pub(crate) async fn filas_de_las_comandas(
             claves.insert(tabla.clone(), claves_primarias(conn, &tabla).await?);
         }
         let clave = claves[&tabla].clone();
-        let nuevas: Vec<FilaAfectada> =
-            filas_donde(conn, &tabla, &clave, &columna, &valores).await?.into_iter().filter(|f| vistas.insert(f.clone())).collect();
+        // No se lee más de lo que cabe: una que pasa del tope ya dice que no cabe.
+        let leidas = filas_donde(conn, &tabla, &clave, &columna, &valores, MAX_FILAS_DE_LAS_COMANDAS + 1).await?;
+        if leidas.len() > MAX_FILAS_DE_LAS_COMANDAS {
+            return Ok(None);
+        }
+        let nuevas: Vec<FilaAfectada> = leidas.into_iter().filter(|f| vistas.insert(f.clone())).collect();
         if salida.len() + nuevas.len() > MAX_FILAS_DE_LAS_COMANDAS {
             return Ok(None);
         }
