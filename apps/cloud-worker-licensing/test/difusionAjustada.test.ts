@@ -79,7 +79,7 @@ describe("un cambio lleva lo que se lee, y nada más", () => {
 				JSON.stringify({
 					type: "apply_lote",
 					loteId: "lote-1",
-					ops: [{ opId: "op-main", commandName: "zona_alta", command: altaDeZona("z1"), cloud_payload: { nombre: "Zona z1" } }],
+					ops: [{ opId: "op-main", commandName: "zona_alta", command: altaDeZona("z1") }],
 				}),
 			);
 			expect(await esperar(main, (m) => m.type === "apply_lote_ack")).toMatchObject({

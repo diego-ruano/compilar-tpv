@@ -366,6 +366,19 @@ describe("apply_lote · lo que rechaza el lote entero", () => {
 		});
 	});
 
+	it("los nombres son los de la Main: una operación con `op_id` o `command_name` está mal formada", async () => {
+		await enUnHub("lote-nombres", async (m) => {
+			for (const [i, op] of [
+				{ op_id: "op-1", commandName: "main_op", command: zona(1).command },
+				{ opId: "op-1", command_name: "main_op", command: zona(1).command },
+			].entries()) {
+				const acuse = await m.mandarLote([op as any]);
+				expect(acuse, `forma ${i}`).toMatchObject({ ok: false, error: "missing_apply_fields" });
+			}
+			expect(zonas(m.sql)).toEqual([]);
+		});
+	});
+
 	it("sin identificador de lote, o sin lista de operaciones, tampoco", async () => {
 		await enUnHub("lote-sin-id", async (m, hub) => {
 			for (const cuerpo of [{ ops: [zona(1)] }, { loteId: "sin-ops" }, { loteId: "ops-raras", ops: "x" }]) {

@@ -35,12 +35,7 @@ import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 import { bytesUtf8 } from "../lib/texto";
-import {
-	buildInternalPayloadForHash,
-	getFirstOwnValue,
-	readRequestPayloadJson,
-	safeJsonParse,
-} from "./tenantHub.envelope";
+import { buildInternalPayloadForHash, safeJsonParse, stableStringify } from "./tenantHub.envelope";
 
 import type {
 	AnyMsg,
@@ -338,13 +333,13 @@ async function atenderApplyLote(
 		acusar({ ok: false, error: "missing_apply_fields" });
 		return;
 	}
-	const clientNowLote = String(getFirstOwnValue(msg, ["client_now", "clientNow"]) || "");
+	const clientNowLote = String(msg.clientNow || "");
 	const ops: OpDeLote[] = [];
 	for (const item of msg.ops) {
 		const inner = item?.command;
 		const cmdType = String(inner?.type || "").trim();
-		const opId = String(item?.opId ?? item?.op_id ?? "").trim();
-		const commandName = String(item?.commandName ?? item?.command_name ?? "").trim();
+		const opId = String(item?.opId ?? "").trim();
+		const commandName = String(item?.commandName ?? "").trim();
 		if (!cmdType || !opId || !commandName) {
 			acusar({ ok: false, error: "missing_apply_fields" });
 			return;
@@ -355,10 +350,10 @@ async function atenderApplyLote(
 			commandName,
 			cmd,
 			// El cuerpo canónico que se hashea (`Request_Hash`): el reenvío de una operación casa con él.
-			requestPayloadJson: readRequestPayloadJson(item, buildInternalPayloadForHash(cmd)),
+			requestPayloadJson: stableStringify(buildInternalPayloadForHash(cmd)),
 			// La Main manda sus sentencias con la hora ya resuelta; si viniera, por operación o una vez
 			// para todo el lote.
-			clientNow: String(getFirstOwnValue(item, ["client_now", "clientNow"]) || "") || clientNowLote,
+			clientNow: String(item?.clientNow || "") || clientNowLote,
 		});
 	}
 	if (!ops.length) {
