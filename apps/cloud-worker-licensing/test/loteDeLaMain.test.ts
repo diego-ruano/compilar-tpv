@@ -46,6 +46,12 @@ const zonas = (sql: any): string[] =>
 const contar = (sql: any, tabla: string): number => Number(sql.exec(`SELECT COUNT(*) AS n FROM ${tabla};`).one().n);
 const ids = (xs: { opId: string }[]) => xs.map((x) => x.opId);
 
+/** SHA-256 en hexadecimal, sin pasar por el código que se prueba. */
+async function sha256Hex(texto: string): Promise<string> {
+	const resumen = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto));
+	return Array.from(new Uint8Array(resumen), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Hace que el lote atómico de `opId` falle con `error` las primeras `veces`. */
 function romper(hub: any, opId: string, error: unknown, veces = 1) {
 	const real = hub.loteLocal.bind(hub);
@@ -376,6 +382,65 @@ describe("apply_lote · lo que rechaza el lote entero", () => {
 				expect(acuse, `forma ${i}`).toMatchObject({ ok: false, error: "missing_apply_fields" });
 			}
 			expect(zonas(m.sql)).toEqual([]);
+		});
+	});
+
+	it("`client_now` no fija la hora, ni en la operación ni en el lote: sólo `clientNow`", async () => {
+		await enUnHub("lote-client-now", async (m) => {
+			const ahora = "2026-11-14 12:00:00";
+			const conAhora = (n: number) =>
+				opDelOutbox(`op-${n}`, [
+					{
+						sql: "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura) VALUES (?1, 'BARRA', datetime('now','localtime'));",
+						args: [`c-${n}`],
+					},
+				]);
+			const porOperacion = await m.mandarLote([{ ...conAhora(1), client_now: ahora } as any]);
+			const porLote = await m.mandarLote([conAhora(2)], { client_now: ahora });
+			for (const acuse of [porOperacion, porLote]) {
+				expect(acuse.resultados[0]).toMatchObject({ ok: false, permanente: true });
+				expect(acuse.resultados[0].error).toContain("missing_client_now");
+			}
+			expect(contar(m.sql, "Comandas")).toBe(0);
+		});
+	});
+
+	it("el hash de una operación es su comando, con las claves ordenadas: lo de más alrededor no lo cambia", async () => {
+		await enUnHub("lote-hash", async (m) => {
+			// Las claves con las que antes se podía sustituir el cuerpo del hash ya no cuentan.
+			const conAdornos = {
+				...zona(1),
+				cloud_payload: { otra: "cosa" },
+				cloudPayload: { otra: "cosa" },
+				request_payload_json: '{"otra":"cosa"}',
+				requestPayload: { otra: "cosa" },
+			};
+			expect((await m.mandarLote([conAdornos as any])).resultados[0]).toMatchObject({ opId: "op-1", ok: true });
+			// El reenvío sin ellas es la misma operación.
+			expect((await m.mandarLote([zona(1)])).resultados[0]).toMatchObject({ opId: "op-1", ok: true, yaEstaba: true });
+
+			const canonico =
+				'{"payload":{"steps":[{"args":["z-1","Zona 1"],"kind":"execute","sql":"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);"}]},"type":"tenantDb.transaction"}';
+			const fila = m.sql.exec("SELECT Request_Hash AS h FROM Applied_Operations WHERE Op_Id = 'op-1';").one();
+			expect(fila.h).toBe(await sha256Hex(canonico));
+		});
+	});
+
+	it("el de una escritura de la Handy es su `cloudPayload`, con las claves ordenadas", async () => {
+		await enUnHub("rpc-hash", async (m, hub) => {
+			m.main.servidor.serializeAttachment({ ...m.main.servidor.deserializeAttachment(), recovering: false });
+			const r = await hub.aplicar({
+				tenantId: TENANT,
+				deviceId: "handy-lote",
+				opId: "op-handy-hash",
+				commandName: "crear_zona",
+				command: { type: "tenantDb.exec", payload: { sql: ALTA, args: ["z-h", "De la Handy"] } },
+				cloudPayload: { b: 1, a: { d: null, c: [2, { f: "á", e: 0 }] } },
+				clientNow: "",
+			});
+			expect(r).toMatchObject({ ok: true });
+			const fila = m.sql.exec("SELECT Request_Hash AS h FROM Applied_Operations WHERE Op_Id = 'op-handy-hash';").one();
+			expect(fila.h).toBe(await sha256Hex('{"a":{"c":[2,{"e":0,"f":"á"}],"d":null},"b":1}'));
 		});
 	});
 
