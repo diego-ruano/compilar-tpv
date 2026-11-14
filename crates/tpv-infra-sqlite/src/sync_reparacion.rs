@@ -9,8 +9,19 @@
 //!
 //! Lo que sí se puede afirmar en cualquier momento es **cómo está la fila AHORA** en la Main, que es
 //! el escritor único y por tanto la autoridad. Una reparación es eso: leer la fila tal como está y
-//! mandar un `INSERT OR REPLACE` con su contenido actual. No depende del orden, se puede repetir sin
-//! consecuencias y converge — da igual cuántas operaciones se perdieran por el camino.
+//! mandar un `INSERT … ON CONFLICT(clave) DO UPDATE` con su contenido actual. No depende del orden,
+//! se puede repetir sin consecuencias y converge — da igual cuántas operaciones se perdieran por el
+//! camino.
+//!
+//! # Y la comanda, entera (SYNC-31)
+//!
+//! Las filas que se reparan son las que la operación apartada escribió y su analizador sabe
+//! localizar ([`analizar`]), y además, si alguna cuelga de una comanda, **la comanda entera**: ella,
+//! sus líneas, sus cobros y lo que cuelga de ellos (las líneas de cada cobro, sus consumos de stock,
+//! su movimiento de caja, su registro fiscal…), por sus claves foráneas ([`comandas_de`],
+//! [`filas_de_las_comandas`]). Un cobro que la nube rechaza porque una Handy borró el ticket mientras
+//! subía no se arregla con su pago suelto: hace falta lo que el borrado se llevó y lo que el cobro
+//! escribió con un `INSERT … SELECT`, que el analizador no sabe leer.
 //!
 //! # Y por qué no hace falta transporte nuevo
 //!
@@ -22,6 +33,8 @@
 //! ⚠️ **Una reparación no se repara.** Las operaciones de reparación llevan su propio
 //! `Command_Name`; si una acaba apartada, no se genera otra. Sin eso, una fila que la nube se niega
 //! a aceptar produciría una reparación nueva por cada intento, para siempre.
+
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ejecutor::{ErrorSql, Value};
 use crate::ejecutor::Connection;
@@ -287,6 +300,233 @@ pub async fn claves_primarias(conn: &Connection, tabla: &str) -> Result<Vec<Stri
     }
     con_orden.sort_by_key(|(o, _)| *o);
     Ok(con_orden.into_iter().map(|(_, n)| n).collect())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SYNC-31: la comanda afectada, entera
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// La tabla de la que cuelga lo que se repara entero.
+const COMANDAS: &str = "Comandas";
+
+/// Lo más que se repara de las comandas afectadas en una operación. Una comanda con sus líneas, sus
+/// cobros y lo que cuelga de ellos son decenas o cientos de filas; con más, la reparación se queda
+/// en lo que tocaba la operación, y lo demás lo sube el contraste con la nube.
+pub(crate) const MAX_FILAS_DE_LAS_COMANDAS: usize = 2_000;
+
+/// Una clave foránea de una columna entre dos tablas de negocio: `hija.desde` → `padre.hasta`.
+#[derive(Debug, Clone)]
+pub(crate) struct Foranea {
+    pub hija: String,
+    pub desde: String,
+    pub padre: String,
+    pub hasta: String,
+}
+
+/// Las claves foráneas de una sola columna entre las tablas de negocio de esta base. Las compuestas
+/// no se siguen: ninguna lleva a una comanda.
+pub(crate) async fn foraneas(conn: &Connection) -> Result<Vec<Foranea>, ErrorSql> {
+    let mut filas = conn
+        .query(
+            "SELECT m.name, f.id, f.\"from\", f.\"table\", f.\"to\" FROM sqlite_master m \
+               JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table' ORDER BY m.name, f.id, f.seq;",
+            (),
+        )
+        .await?;
+    // (hija, id) → sus columnas: (desde, padre, hasta).
+    type Columnas = Vec<(String, String, Option<String>)>;
+    let mut por_id: Vec<((String, i64), Columnas)> = Vec::new();
+    while let Some(f) = filas.next().await? {
+        let (Value::Text(hija), Value::Integer(id), Value::Text(desde), Value::Text(padre)) =
+            (f.get_value(0)?, f.get_value(1)?, f.get_value(2)?, f.get_value(3)?)
+        else {
+            continue;
+        };
+        let hasta = match f.get_value(4)? {
+            Value::Text(t) => Some(t),
+            _ => None,
+        };
+        match por_id.last_mut() {
+            Some(((h, i), columnas)) if *h == hija && *i == id => columnas.push((desde, padre, hasta)),
+            _ => por_id.push(((hija, id), vec![(desde, padre, hasta)])),
+        }
+    }
+    drop(filas);
+
+    let mut salida = Vec::new();
+    for ((hija, _), columnas) in por_id {
+        let [(desde, padre, hasta)] = columnas.as_slice() else { continue };
+        if crate::sync::no_es_tabla_de_negocio(&hija) || crate::sync::no_es_tabla_de_negocio(padre) {
+            continue;
+        }
+        // Sin columna destino, la foránea apunta a la clave primaria del padre.
+        let hasta = match hasta {
+            Some(h) => h.clone(),
+            None => match claves_primarias(conn, padre).await?.as_slice() {
+                [clave] => clave.clone(),
+                _ => continue,
+            },
+        };
+        salida.push(Foranea { hija, desde: desde.clone(), padre: padre.clone(), hasta });
+    }
+    Ok(salida)
+}
+
+/// El valor de `columna` en la fila de `tabla` que cumple las igualdades de `donde`, como texto.
+/// `None` si la fila no está o la columna es nula.
+async fn columna_de(
+    conn: &Connection,
+    tabla: &str,
+    columna: &str,
+    donde: &[(String, String)],
+) -> Result<Option<String>, ErrorSql> {
+    if !nombre_aceptable(tabla) || !nombre_aceptable(columna) || donde.is_empty() || donde.iter().any(|(c, _)| !nombre_aceptable(c)) {
+        return Ok(None);
+    }
+    let condiciones = donde.iter().enumerate().map(|(i, (c, _))| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+    let args: Vec<Value> = donde.iter().map(|(_, v)| Value::Text(v.clone())).collect();
+    let mut filas = conn.query(&format!("SELECT \"{columna}\" FROM \"{tabla}\" WHERE {condiciones} LIMIT 1;"), args).await?;
+    Ok(match filas.next().await? {
+        Some(f) => match f.get_value(0)? {
+            Value::Text(t) => Some(t),
+            Value::Integer(n) => Some(n.to_string()),
+            _ => None,
+        },
+        None => None,
+    })
+}
+
+/// SYNC-31 · Las comandas de las que cuelgan estas filas: la propia, si es una comanda, o la que se
+/// alcanza subiendo por sus claves foráneas (la línea de un cobro → el cobro → su comanda). Sólo
+/// las que están en esta base.
+pub(crate) async fn comandas_de(
+    conn: &Connection,
+    foraneas: &[Foranea],
+    filas: &[FilaAfectada],
+) -> Result<Vec<String>, ErrorSql> {
+    let Some(clave_comanda) = claves_primarias(conn, COMANDAS).await?.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+    // Las tablas desde las que se llega a una comanda subiendo por sus foráneas.
+    let mut llegan: HashSet<&str> = HashSet::from([COMANDAS]);
+    loop {
+        let antes = llegan.len();
+        for f in foraneas {
+            if llegan.contains(f.padre.as_str()) {
+                llegan.insert(f.hija.as_str());
+            }
+        }
+        if llegan.len() == antes {
+            break;
+        }
+    }
+
+    let mut comandas: Vec<String> = Vec::new();
+    let mut vistas: HashSet<(String, String, String)> = HashSet::new();
+    // Una fila por mirar: su tabla, las igualdades que la nombran y cuántos saltos lleva.
+    type PorMirar = (String, Vec<(String, String)>, usize);
+    let mut pila: Vec<PorMirar> =
+        filas.iter().filter(|f| llegan.contains(f.tabla.as_str())).map(|f| (f.tabla.clone(), f.clave.clone(), 0)).collect();
+    while let Some((tabla, donde, saltos)) = pila.pop() {
+        if tabla == COMANDAS {
+            if let Some(id) = columna_de(conn, COMANDAS, &clave_comanda, &donde).await? {
+                if !comandas.contains(&id) {
+                    comandas.push(id);
+                }
+            }
+            continue;
+        }
+        if saltos == 4 {
+            continue;
+        }
+        for f in foraneas.iter().filter(|f| f.hija == tabla && llegan.contains(f.padre.as_str())) {
+            if let Some(valor) = columna_de(conn, &tabla, &f.desde, &donde).await? {
+                if vistas.insert((f.padre.clone(), f.hasta.clone(), valor.clone())) {
+                    pila.push((f.padre.clone(), vec![(f.hasta.clone(), valor)], saltos + 1));
+                }
+            }
+        }
+    }
+    Ok(comandas)
+}
+
+/// Las filas de `tabla` cuya `columna` es uno de `valores`, por su clave primaria.
+async fn filas_donde(
+    conn: &Connection,
+    tabla: &str,
+    clave: &[String],
+    columna: &str,
+    valores: &[String],
+) -> Result<Vec<FilaAfectada>, ErrorSql> {
+    if clave.is_empty() || !nombre_aceptable(tabla) || !nombre_aceptable(columna) || clave.iter().any(|c| !nombre_aceptable(c)) {
+        return Ok(Vec::new());
+    }
+    let lista = clave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+    // La lista va en un solo parámetro, como en todo lo que tiene un tamaño que no se sabe.
+    let mut filas = conn
+        .query(
+            &format!("SELECT {lista} FROM \"{tabla}\" WHERE \"{columna}\" IN (SELECT value FROM json_each(?1)) ORDER BY {lista};"),
+            vec![Value::Text(serde_json::to_string(valores).unwrap_or_else(|_| "[]".into()))],
+        )
+        .await?;
+    let mut salida = Vec::new();
+    'filas: while let Some(f) = filas.next().await? {
+        let mut valores = Vec::with_capacity(clave.len());
+        for (i, c) in clave.iter().enumerate() {
+            match f.get_value(i as i32)? {
+                Value::Text(t) => valores.push((c.clone(), t)),
+                Value::Integer(n) => valores.push((c.clone(), n.to_string())),
+                _ => continue 'filas,
+            }
+        }
+        salida.push(FilaAfectada { tabla: tabla.to_string(), clave: valores });
+    }
+    Ok(salida)
+}
+
+/// SYNC-31 · Lo que hay de unas comandas en esta base, ellas incluidas: bajando por las claves
+/// foráneas, sus líneas y sus cobros, y de éstos lo que cuelga de ellos (las líneas de cada cobro,
+/// sus devoluciones, sus consumos de stock, su movimiento de caja, su registro fiscal). Sólo se baja
+/// por una foránea que apunta a la clave de una columna de su padre, que en este esquema son todas.
+///
+/// `None` si pasa de [`MAX_FILAS_DE_LAS_COMANDAS`].
+pub(crate) async fn filas_de_las_comandas(
+    conn: &Connection,
+    foraneas: &[Foranea],
+    comandas: &[String],
+) -> Result<Option<Vec<FilaAfectada>>, ErrorSql> {
+    let mut claves: HashMap<String, Vec<String>> = HashMap::new();
+    let mut salida: Vec<FilaAfectada> = Vec::new();
+    let mut vistas: HashSet<FilaAfectada> = HashSet::new();
+    let Some(clave_comanda) = claves_primarias(conn, COMANDAS).await?.into_iter().next() else {
+        return Ok(Some(Vec::new()));
+    };
+    // Lo que queda por bajar: de qué tabla, por qué columna y qué valores.
+    let mut cola: VecDeque<(String, String, Vec<String>)> =
+        VecDeque::from([(COMANDAS.to_string(), clave_comanda, comandas.to_vec())]);
+    while let Some((tabla, columna, valores)) = cola.pop_front() {
+        if valores.is_empty() {
+            continue;
+        }
+        if !claves.contains_key(&tabla) {
+            claves.insert(tabla.clone(), claves_primarias(conn, &tabla).await?);
+        }
+        let clave = claves[&tabla].clone();
+        let nuevas: Vec<FilaAfectada> =
+            filas_donde(conn, &tabla, &clave, &columna, &valores).await?.into_iter().filter(|f| vistas.insert(f.clone())).collect();
+        if salida.len() + nuevas.len() > MAX_FILAS_DE_LAS_COMANDAS {
+            return Ok(None);
+        }
+        // De las nuevas se baja a sus hijas, por su clave si es de una columna.
+        if let [columna_clave] = clave.as_slice() {
+            let suyas: Vec<String> = nuevas.iter().filter_map(|f| f.clave.first().map(|(_, v)| v.clone())).collect();
+            for f in foraneas.iter().filter(|f| f.padre == tabla && f.hasta == *columna_clave) {
+                cola.push_back((f.hija.clone(), f.desde.clone(), suyas.clone()));
+            }
+        }
+        salida.extend(nuevas);
+    }
+    Ok(Some(salida))
 }
 
 /// Construye la sentencia que vuelve a igualar una fila: su contenido ACTUAL en la Main.

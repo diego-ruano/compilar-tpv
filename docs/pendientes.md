@@ -30,7 +30,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
-| [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
@@ -463,34 +462,6 @@ identificadores o copia datos del catálogo. Lo que decide es poco más de una d
 
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico, que no se
 replique y que devuelva un error de negocio si no se cumple; y pasar a él esas comprobaciones.
-
-### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
-
-Si una Handy borra un ticket de barra mientras su cobro va de camino a la nube —la Main ya lo ha
-confirmado y su subida aún no ha entrado en la nube—, la nube no ve ningún cobro y borra el ticket; la
-Main lo conserva, porque la condición de `deleteComandaIfSafe` se vuelve a evaluar allí (AUD-14). La
-ventana es la de un cobro en vuelo con la sesión de la Main viva: cada vez que la Main reconecta,
-congela a las Handy hasta haberse puesto al día (AUD-15). La subida del cobro choca después con la FK de
-`Pagos.ID_Comanda` y se aparta (`outbox_mark_failed`).
-
-Lo que viene detrás no lo devuelve entero:
-
-- **La reparación inmediata** repara las filas que escribió la operación apartada y que su analizador
-  sabe localizar (`sync_reparacion::analizar`), que sólo lee `INSERT … VALUES` y `UPDATE … WHERE
-  <clave>`. Se salta los `INSERT … SELECT` del cobro (`Pago_Detalles`, `Movimientos_Caja`,
-  `Suelto_Consumos`), y el cobro no escribe `Detalle_Comanda`. Si lleva `Lote_Consumos`, su FK a la
-  línea que falta revierte la reparación entera. Si no, puede entrar a medias: la comanda y el pago
-  sin líneas, con el cobro en Cuentas y el ticket fuera de la lista de la Handy, que sólo enseña
-  tickets con líneas.
-- **El contraste con la nube** (`verificar_nube`) sube lo que falta arriba por estado, padres primero,
-  y recorre las claves de una tabla entera por páginas; lo de una tabla cuyo padre no se ha podido
-  mirar entero no lo sube. Pero sus reparaciones no llevan `Repara_Op_Id`
-  (`contraste.rs::encolar_operacion`), y es lo único que retira una cuarentena al subir
-  (`outbox_confirmar_lote`): la del cobro y la de la reparación inmediata que falló se quedan.
-
-Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
-comanda afectada (la comanda, sus líneas, sus cobros y lo que cuelga de ellos); y que el contraste
-quede enlazado a las cuarentenas que resuelve.
 
 ### SYNC-32 · Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube
 

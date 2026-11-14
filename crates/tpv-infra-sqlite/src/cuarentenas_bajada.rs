@@ -523,7 +523,7 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
 }
 
 /// Las columnas de la clave primaria de cada tabla de aquí.
-async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
+pub(crate) async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
     let r = db.read().await;
     r.conn()
         .foto(|foto| {

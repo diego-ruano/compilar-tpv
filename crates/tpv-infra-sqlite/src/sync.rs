@@ -67,6 +67,12 @@ pub(crate) const MAX_APPLY_ATTEMPTS: i64 = 5;
 /// vez por ciclo de catch-up. Con 5 se apartaría una operación por un bache de red de segundos.
 const MAX_SUBIDA_ATTEMPTS: i64 = 20;
 
+/// SYNC-26 · Las apartadas que retira una reparación cuando sube, como tabla (`json_each`) de la
+/// columna `Repara_Op_Id` de la reparación `r`: el `Op_Id` de la apartada que la motivó o, en una
+/// del contraste con la nube, la lista JSON de las que resuelve (SYNC-31, `contraste::encolar_plan`).
+const APARTADAS_QUE_REPARA: &str = "json_each(CASE WHEN json_valid(r.Repara_Op_Id) AND substr(r.Repara_Op_Id, 1, 1) = '[' \
+     THEN r.Repara_Op_Id ELSE json_array(r.Repara_Op_Id) END)";
+
 /// Convierte un escalar JSON al `Value` de la base para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
     use serde_json::Value as J;
@@ -287,10 +293,30 @@ async fn op_already_applied(conn: &Connection, op_id: &str) -> AppResult<bool> {
 }
 
 /// La nube confirma (devolviéndonosla) que una operación NUESTRA está aplicada allí: se retira del
-/// outbox. Si no era nuestra, no hay nada que borrar.
+/// outbox. Si no era nuestra, no hay nada que borrar. Si era una reparación, con ella sale lo
+/// apartado que reparaba, como al llegar su acuse: el eco puede adelantarse a un acuse perdido.
 async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
+    retirar_lo_que_repara(conn, op_id).await?;
     conn.execute(
         "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
+        vec![Value::Text(op_id.to_string())],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// SYNC-26 · Si `op_id` es una reparación, retira las operaciones apartadas que repara (la que la
+/// motivó o, SYNC-31, las que resuelve una del contraste), en la transacción de quien la da por
+/// subida. Sólo las apartadas (`Cuarentena = 1`): una que siguiera viva no se toca.
+async fn retirar_lo_que_repara(conn: &Connection, op_id: &str) -> AppResult<()> {
+    conn.execute(
+        &format!(
+            "DELETE FROM _Sync_Outbox \
+              WHERE Cuarentena = 1 \
+                AND Op_Id IN (SELECT j.value FROM _Sync_Outbox r, {APARTADAS_QUE_REPARA} j \
+                               WHERE r.Op_Id = ?1 AND r.Repara_Op_Id IS NOT NULL);"
+        ),
         vec![Value::Text(op_id.to_string())],
     )
     .await
@@ -373,9 +399,12 @@ async fn reconciliacion_pendiente(db: &Db) -> AppResult<bool> {
 }
 
 /// No reintenta la sentencia rechazada: lee cómo está **ahora** cada fila en la Main —que es el
-/// escritor único, o sea la autoridad— y encola un `INSERT OR REPLACE` con su contenido actual. Eso
-/// no depende del orden, se puede repetir sin daño y converge; reaplicar la sentencia vieja, en
-/// cambio, devolvería la fila a un valor que ya no es cierto.
+/// escritor único, o sea la autoridad— y encola un `INSERT … ON CONFLICT DO UPDATE` con su contenido
+/// actual. Eso no depende del orden, se puede repetir sin daño y converge; reaplicar la sentencia
+/// vieja, en cambio, devolvería la fila a un valor que ya no es cierto.
+///
+/// SYNC-31: todo en UNA operación, padres primero, y con la comanda entera si lo que tocaba cuelga
+/// de una (`sync_reparacion::filas_de_las_comandas`).
 ///
 /// Va por `raw()` y escribe directamente en `_Sync_Outbox`: esta sentencia se fabrica **para**
 /// replicarse, no es una escritura de negocio que haya que capturar. Y NO se aplica en local: la
@@ -426,12 +455,23 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
         tracing::warn!("op {op_id}: borrado en {t} sin reparación posible por estado (SYNC-23)");
     }
 
-    let mut sentencias: Vec<SqlStatement> = Vec::new();
-    for f in &analisis.filas {
-        if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
-            sentencias.push(st);
+    // SYNC-31: si algo de lo que tocaba cuelga de una comanda, la comanda va entera. Un cobro que la
+    // nube rechaza porque una Handy borró el ticket mientras subía necesita lo que el borrado se
+    // llevó (la comanda y sus líneas) y lo que el cobro escribió con un `INSERT … SELECT` (las
+    // líneas del cobro, sus consumos), que el analizador no sabe leer.
+    let foraneas = rep::foraneas(conn).await.map_err(db_err)?;
+    let mut filas = analisis.filas.clone();
+    let comandas = rep::comandas_de(conn, &foraneas, &analisis.filas).await.map_err(db_err)?;
+    if !comandas.is_empty() {
+        match rep::filas_de_las_comandas(conn, &foraneas, &comandas).await.map_err(db_err)? {
+            Some(enteras) => filas.extend(enteras),
+            None => tracing::warn!(
+                "op {op_id}: la comanda afectada pasa de {} filas; se repara sólo lo que tocaba la operación",
+                rep::MAX_FILAS_DE_LAS_COMANDAS
+            ),
         }
     }
+    let sentencias = sentencias_padres_primero(conn, &foraneas, filas).await?;
     if sentencias.is_empty() {
         return Ok(0);
     }
@@ -467,6 +507,42 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
 
     tracing::info!("op {op_id} apartada: encoladas {n} fila(s) de reparación");
     Ok(n)
+}
+
+/// SYNC-31 · Las sentencias que dejan arriba estas filas como están aquí, en UNA operación y en el
+/// orden en que pueden entrar: las tablas por sus claves foráneas, padres primero, y dentro de una
+/// que se apunta a sí misma (`Pagos`, con sus devoluciones), cada fila detrás de aquélla a la que
+/// apunta. Una fila repetida va una vez; una que aquí ya no está o que lleva un blob, ninguna.
+async fn sentencias_padres_primero(
+    conn: &Connection,
+    foraneas: &[crate::sync_reparacion::Foranea],
+    filas: Vec<crate::sync_reparacion::FilaAfectada>,
+) -> AppResult<Vec<SqlStatement>> {
+    use crate::sync_reparacion as rep;
+    let mut vistas = std::collections::HashSet::new();
+    let mut por_tabla: std::collections::HashMap<String, Vec<rep::FilaAfectada>> = std::collections::HashMap::new();
+    for f in filas {
+        if vistas.insert(f.clone()) {
+            por_tabla.entry(f.tabla.clone()).or_default().push(f);
+        }
+    }
+    let nombres: Vec<String> = por_tabla.keys().cloned().collect();
+    let mut padres: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    for f in foraneas {
+        padres.entry(f.hija.clone()).or_default().insert(f.padre.clone());
+    }
+    let mut sentencias = Vec::new();
+    for (tabla, _) in crate::contraste::ordenar_padres_primero(&nombres, &padres) {
+        let mut de_la_tabla = Vec::new();
+        for f in &por_tabla[&tabla] {
+            if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
+                de_la_tabla.push(st);
+            }
+        }
+        let refs = crate::contraste::autorreferencias(conn, &tabla).await?;
+        sentencias.extend(crate::contraste::padres_antes(de_la_tabla, &refs));
+    }
+    Ok(sentencias)
 }
 
 /// SYNC-36 · Lo que se sabe ya de las filas que toca este cambio, de un intento anterior.
@@ -1008,16 +1084,8 @@ impl SyncRepository for SqliteSyncRepository {
                 //
                 // Va DENTRO de la misma transacción que borra la reparación, y no después: si el
                 // proceso muriera entre las dos, quedaría una cuarentena eterna por un problema ya
-                // resuelto, que es exactamente lo que esto arregla. Y se exige `Cuarentena = 1` para
-                // no retirar por error una operación que siguiera viva.
-                conn.execute(
-                    "DELETE FROM _Sync_Outbox \
-                      WHERE Cuarentena = 1 \
-                        AND Op_Id = (SELECT Repara_Op_Id FROM _Sync_Outbox WHERE Op_Id = ?1);",
-                    vec![Value::Text(op_id.clone())],
-                )
-                .await
-                .map_err(db_err)?;
+                // resuelto, que es exactamente lo que esto arregla.
+                retirar_lo_que_repara(conn, op_id).await?;
                 conn.execute(
                     "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
                     vec![Value::Text(op_id.clone())],
@@ -1180,11 +1248,13 @@ impl SyncRepository for SqliteSyncRepository {
         let w = self.db.write().await;
         w.raw()
             .execute(
-                "DELETE FROM _Sync_Outbox \
-                  WHERE Cuarentena = 1 \
-                    AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
-                    AND Op_Id NOT IN (SELECT Repara_Op_Id FROM _Sync_Outbox \
-                                       WHERE Repara_Op_Id IS NOT NULL AND Cuarentena = 0);",
+                &format!(
+                    "DELETE FROM _Sync_Outbox \
+                      WHERE Cuarentena = 1 \
+                        AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
+                        AND Op_Id NOT IN (SELECT j.value FROM _Sync_Outbox r, {APARTADAS_QUE_REPARA} j \
+                                           WHERE r.Repara_Op_Id IS NOT NULL AND r.Cuarentena = 0);"
+                ),
                 vec![Value::Integer(antes_de_ms)],
             )
             .await
@@ -3742,6 +3812,57 @@ mod tests_cierre_del_aviso {
             1,
             "la apartada sigue ahí: nadie ha reparado nada",
         );
+    }
+
+    #[tokio::test]
+    async fn una_reparacion_del_contraste_retira_al_subir_todas_las_que_resuelve() {
+        // SYNC-31: el contraste enlaza su reparación a una LISTA de apartadas (el cobro y la
+        // reparación inmediata que tampoco entró). Mientras no sube, la purga no se las lleva.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena) VALUES
+                       ('cobro', 'main_op', '[]', 1, 1), ('otra', 'main_op', '[]', 1, 1);
+                     INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena, Repara_Op_Id) VALUES
+                       ('inmediata', 'main_reparacion', '[]', 2, 1, 'cobro');
+                     INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) VALUES
+                       ('contraste', 'main_reparacion', '[]', 3, '[\"cobro\",\"inmediata\"]');",
+                )
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(repo.purgar_cuarentenas(i64::MAX).await.unwrap(), 1, "sólo la que nadie va a reparar");
+        assert_eq!(repo.health().await.unwrap().subida_en_cuarentena, 2);
+
+        repo.outbox_confirmar_lote(&[("contraste".to_string(), 11)]).await.unwrap();
+        let salud = repo.health().await.unwrap();
+        assert_eq!((salud.subida_en_cuarentena, salud.outbox_pending), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn si_el_eco_de_la_reparacion_llega_antes_que_su_acuse_tambien_retira_lo_que_reparaba() {
+        // El acuse de su lote se perdió y la reparación vuelve por el catch-up: es la prueba de que
+        // está arriba, y sacarla del outbox sin retirar la apartada la dejaría para siempre.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena) VALUES
+                       ('cobro', 'main_op', '[]', 1, 1);
+                     INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) VALUES
+                       ('inmediata', 'main_reparacion', '[]', 2, 'cobro');
+                     INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('inmediata', 0, 1);",
+                )
+                .await
+                .unwrap();
+        }
+        repo.apply_changes(vec![SyncChange { op_id: "inmediata".into(), seq: 1, statements: vec![] }]).await.unwrap();
+        let salud = repo.health().await.unwrap();
+        assert_eq!((salud.subida_en_cuarentena, salud.outbox_pending), (0, 0));
     }
 }
 

@@ -293,8 +293,7 @@ fn resumir_ventana(
 /// Ordena las tablas **padres primero**, siguiendo sus claves foráneas, y dice de cada una a qué
 /// tablas apunta. Lo que no se puede ordenar (un ciclo) va detrás, por nombre.
 pub(crate) fn padres_primero(foto: &Foto<'_>, nombres: &[String]) -> Result<Vec<(String, HashSet<String>)>, ErrorSql> {
-    let presentes: HashSet<&str> = nombres.iter().map(String::as_str).collect();
-    let mut padres: HashMap<&str, HashSet<String>> = HashMap::new();
+    let mut padres: HashMap<String, HashSet<String>> = HashMap::new();
     for nombre in nombres {
         let de = foto
             .filas("SELECT \"table\" FROM pragma_foreign_key_list(?1);", &[Value::Text(nombre.clone())])?
@@ -303,15 +302,31 @@ pub(crate) fn padres_primero(foto: &Foto<'_>, nombres: &[String]) -> Result<Vec<
                 Some(Value::Text(padre)) => Some(padre),
                 _ => None,
             })
-            // Una tabla que se apunta a sí misma no espera a nadie.
-            .filter(|padre| padre != nombre && presentes.contains(padre.as_str()))
             .collect();
-        padres.insert(nombre.as_str(), de);
+        padres.insert(nombre.clone(), de);
     }
+    Ok(ordenar_padres_primero(nombres, &padres))
+}
 
-    let mut pendientes: Vec<&str> = nombres.iter().map(String::as_str).collect();
+/// Lo de [`padres_primero`] con las foráneas ya leídas: `padres` dice a qué tablas apunta cada una.
+/// Sólo cuentan los padres que están en `nombres`, y una tabla que se apunta a sí misma no espera a
+/// nadie. Lo que no se puede ordenar (un ciclo) va detrás, por nombre.
+pub(crate) fn ordenar_padres_primero(
+    nombres: &[String],
+    padres: &HashMap<String, HashSet<String>>,
+) -> Vec<(String, HashSet<String>)> {
+    let presentes: HashSet<&str> = nombres.iter().map(String::as_str).collect();
+    let de = |t: &str| -> HashSet<String> {
+        padres
+            .get(t)
+            .map(|ps| ps.iter().filter(|p| p.as_str() != t && presentes.contains(p.as_str())).cloned().collect())
+            .unwrap_or_default()
+    };
+    let padres: HashMap<&str, HashSet<String>> = presentes.iter().map(|t| (*t, de(t))).collect();
+
+    let mut pendientes: Vec<&str> = presentes.iter().copied().collect();
     pendientes.sort_unstable();
-    let mut orden: Vec<(String, HashSet<String>)> = Vec::with_capacity(nombres.len());
+    let mut orden: Vec<(String, HashSet<String>)> = Vec::with_capacity(pendientes.len());
     let mut puestas: HashSet<&str> = HashSet::new();
     while !pendientes.is_empty() {
         let listas: Vec<&str> = pendientes
@@ -327,7 +342,7 @@ pub(crate) fn padres_primero(foto: &Foto<'_>, nombres: &[String]) -> Result<Vec<
         }
         pendientes.retain(|t| !puestas.contains(t));
     }
-    Ok(orden)
+    orden
 }
 
 /// La foto local: la marca, y de cada tabla del resumen sus filas y el resumen de su ventana.
@@ -1000,16 +1015,20 @@ async fn examinar_claves(
 
 /// Encola una operación de reparación. Va por la conexión cruda: estas sentencias se fabrican para
 /// replicarse y no se aplican aquí (esta base ya está bien; la que no, es la de la nube).
-async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement]) -> AppResult<()> {
+///
+/// SYNC-31: `repara` es la lista JSON de las operaciones apartadas que retira al subir
+/// (`Repara_Op_Id`, `outbox_confirmar_lote`).
+async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement], repara: Option<&str>) -> AppResult<()> {
     let op = uuid::Uuid::now_v7().to_string();
     let ahora = now_ms();
     conn.execute(
-        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES (?1, ?2, ?3, ?4);",
+        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) VALUES (?1, ?2, ?3, ?4, ?5);",
         vec![
             Value::Text(op.clone()),
             Value::Text(rep::COMANDO_REPARACION.to_string()),
             Value::Text(serde_json::to_string(sentencias).map_err(db_err)?),
             Value::Integer(ahora),
+            repara.map_or(Value::Null, |r| Value::Text(r.to_string())),
         ],
     )
     .await
@@ -1065,7 +1084,7 @@ fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Opt
 /// Las claves foráneas de `tabla` que apuntan a ella misma (un cobro que devuelve otro cobro): de
 /// cada una, las posiciones de sus columnas y las de las columnas a las que apunta, en el orden de
 /// las columnas de la tabla, que es el de los argumentos de `sentencia_de_reparacion`.
-async fn autorreferencias(conn: &Connection, tabla: &str) -> AppResult<Vec<(Vec<usize>, Vec<usize>)>> {
+pub(crate) async fn autorreferencias(conn: &Connection, tabla: &str) -> AppResult<Vec<(Vec<usize>, Vec<usize>)>> {
     let leer = |sql: &'static str| async move {
         let mut filas = conn.query(sql, vec![Value::Text(tabla.to_string())]).await.map_err(db_err)?;
         let mut salida: Vec<Vec<Value>> = Vec::new();
@@ -1114,7 +1133,7 @@ async fn autorreferencias(conn: &Connection, tabla: &str) -> AppResult<Vec<(Vec<
 /// una en su transacción: partidas en tandas sin este orden, la devolución de un cobro podría subir
 /// en una operación anterior a la del cobro, y las dos fallarían por la foránea. Lo que forme un
 /// ciclo se queda como estaba, al final.
-fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, Vec<usize>)]) -> Vec<SqlStatement> {
+pub(crate) fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, Vec<usize>)]) -> Vec<SqlStatement> {
     if refs.is_empty() || sentencias.len() < 2 {
         return sentencias;
     }
@@ -1168,12 +1187,18 @@ fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, Vec<usize>)]
 /// que el cobro al que apunta. Lo que se borra sólo se borra si la nube no ha cambiado desde la foto
 /// ([`borrado_si_la_nube_no_ha_cambiado`]). Todas las operaciones entran en el outbox juntas o
 /// ninguna.
+///
+/// SYNC-31 · La última lleva en `Repara_Op_Id` las operaciones apartadas de la subida que el plan
+/// resuelve ([`apartadas_que_resuelve`]): cuando sube, el outbox las retira, como retira la apartada
+/// que motivó una reparación inmediata. `completas` son las tablas que esta pasada ha comparado
+/// enteras.
 async fn encolar_plan(
     db: &Db,
     marca: MarcaLocal,
     hasta_seq: i64,
     hallazgos: &[(String, Hallazgo)],
     borrar: bool,
+    completas: &HashSet<String>,
 ) -> AppResult<Option<Encolado>> {
     let w = db.write().await;
     let conn: &Connection = w.raw();
@@ -1215,16 +1240,106 @@ async fn encolar_plan(
 
     let (reparadas, borradas) = (subir.len() as i64, quitar.len() as i64);
     if reparadas + borradas > 0 {
+        let plan: Vec<&FilaAfectada> = hallazgos
+            .iter()
+            .flat_map(|(_, h)| h.distintas.iter().chain(&h.faltan).chain(h.sobran.iter().filter(|_| borrar)))
+            .collect();
+        let resueltas = apartadas_que_resuelve(db, conn, &plan, completas).await?;
+        let repara = match resueltas.is_empty() {
+            true => None,
+            false => Some(serde_json::to_string(&resueltas).map_err(db_err)?),
+        };
         let sentencias: Vec<SqlStatement> = subir.into_iter().chain(quitar).collect();
+        let operaciones: Vec<&[SqlStatement]> = sentencias.chunks(SENTENCIAS_POR_OPERACION).collect();
         conn.transaccion(async {
-            for operacion in sentencias.chunks(SENTENCIAS_POR_OPERACION) {
-                encolar_operacion(conn, operacion).await?;
+            for (i, operacion) in operaciones.iter().enumerate() {
+                let ultima = i + 1 == operaciones.len();
+                encolar_operacion(conn, operacion, repara.as_deref().filter(|_| ultima)).await?;
             }
             Ok(())
         })
         .await?;
+        if !resueltas.is_empty() {
+            tracing::info!(
+                target: "tpv::sync",
+                apartadas = resueltas.len(),
+                "contraste: la reparación encolada resuelve operaciones apartadas de la subida (SYNC-31)"
+            );
+        }
     }
     Ok(Some(Encolado { reparadas, borradas }))
+}
+
+/// Lo más que se lee de lo apartado de la subida para enlazarlo a un plan. Lo que no quepa se
+/// enlaza en otra pasada, o lo retira la purga a los 30 días.
+const MAX_APARTADAS_A_ENLAZAR: i64 = 1_000;
+
+/// SYNC-31 · Las operaciones apartadas de la subida que resuelve un plan del contraste, por orden.
+///
+/// Una apartada es algo que esta Main escribió y la nube no aceptó. La resuelve el plan si escribió
+/// alguna de las filas que el plan sube o borra (por su clave o, si su sentencia no la nombra, en la
+/// misma tabla) y si todas las tablas en las que escribió se han comparado enteras en esta pasada:
+/// con el plan arriba, esas tablas dicen lo mismo aquí que en la nube, sea porque el plan lo repara
+/// o porque ya estaba igual. Una cuyas sentencias no se saben leer ni para eso no se enlaza: la
+/// retira la purga.
+async fn apartadas_que_resuelve(
+    db: &Db,
+    conn: &Connection,
+    plan: &[&FilaAfectada],
+    completas: &HashSet<String>,
+) -> AppResult<Vec<String>> {
+    use crate::filas_tocadas::{canonica_de, estaticas, FilaTocada};
+
+    let mut filas = conn
+        .query(
+            "SELECT Op_Id, Statements_Json FROM _Sync_Outbox WHERE Cuarentena = 1 ORDER BY Seq LIMIT ?1;",
+            vec![Value::Integer(MAX_APARTADAS_A_ENLAZAR)],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut apartadas: Vec<(String, Vec<SqlStatement>)> = Vec::new();
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        if let (Ok(Value::Text(op)), Ok(Value::Text(json))) = (f.get_value(0), f.get_value(1)) {
+            apartadas.push((op, serde_json::from_str(&json).unwrap_or_default()));
+        }
+    }
+    drop(filas);
+    if apartadas.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Las filas del plan como las dice `estaticas`: una clave de texto y, si parece un número, como
+    // número (`WHERE ID = 7`), que es otra forma canónica.
+    let mut claves_del_plan: HashSet<String> = HashSet::new();
+    let mut tablas_del_plan: HashSet<&str> = HashSet::new();
+    for f in plan {
+        tablas_del_plan.insert(f.tabla.as_str());
+        let texto = f.clave.iter().map(|(_, v)| serde_json::Value::String(v.clone())).collect();
+        let numero = f
+            .clave
+            .iter()
+            .map(|(_, v)| v.parse::<i64>().map_or_else(|_| serde_json::Value::String(v.clone()), serde_json::Value::from))
+            .collect();
+        for clave in [texto, numero] {
+            if let Some(c) = canonica_de(&FilaTocada { tabla: f.tabla.clone(), clave, borrada: false }) {
+                claves_del_plan.insert(c);
+            }
+        }
+    }
+
+    let claves = crate::cuarentenas_bajada::claves_primarias(db).await?;
+    let clave_de = |t: &str| claves.get(t).cloned().unwrap_or_default();
+    Ok(apartadas
+        .into_iter()
+        .filter(|(_, sentencias)| {
+            let e = estaticas(sentencias, &clave_de);
+            !e.tablas.contains("*")
+                && !e.todas.is_empty()
+                && e.todas.iter().all(|t| completas.contains(t))
+                && (e.claves.iter().any(|c| claves_del_plan.contains(c)) || e.tablas.iter().any(|t| tablas_del_plan.contains(t.as_str())))
+        })
+        .map(|(op, _)| op)
+        .collect())
 }
 
 /// El contraste entero. Ver el puerto (`SyncRepository::contrastar_con_la_nube`).
@@ -1377,9 +1492,13 @@ pub(crate) async fn contrastar(
     };
 
     if hay_que_reparar && puede_reparar {
+        // SYNC-31: las tablas que esta pasada ha comparado enteras, con las que se sabe qué
+        // operaciones apartadas resuelve el plan.
+        let completas: HashSet<String> =
+            tablas.iter().map(|t| t.nombre.clone()).filter(|n| !incompletas.contains(n)).collect();
         // Lo que sobra arriba y se ha visto se borra aunque algo se haya quedado sin mirar: cada
         // fila que sobra se sabe que sobra. Lo que no se ha mirado queda para otra pasada.
-        match encolar_plan(db, marca, resumen.hasta_seq, &hallazgos, true).await? {
+        match encolar_plan(db, marca, resumen.hasta_seq, &hallazgos, true, &completas).await? {
             Some(encolado) => {
                 resultado.reparadas = encolado.reparadas;
                 resultado.borradas = encolado.borradas;
@@ -1473,20 +1592,20 @@ mod tests {
                First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-x', 101, '[]', 1, 0, 1, 1);",
         )
         .await;
-        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "un fallo de bajada");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true, &HashSet::new()).await.unwrap().is_none(), "un fallo de bajada");
         sembrar(&db, "DELETE FROM _Sync_Failed;").await;
 
         sembrar(&db, "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Zonas', 0, 0);").await;
-        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "el histórico a medias");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true, &HashSet::new()).await.unwrap().is_none(), "el histórico a medias");
         sembrar(&db, "DELETE FROM _Backfill_Historico;").await;
 
         sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 101 WHERE Id = 1;").await;
-        assert!(encolar_plan(&db, marca_antes, 100, &plan, true).await.unwrap().is_none(), "la base se ha movido");
+        assert!(encolar_plan(&db, marca_antes, 100, &plan, true, &HashSet::new()).await.unwrap().is_none(), "la base se ha movido");
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
 
         // Con la marca de ahora, sí: la distinta y la que falta suben, la que sobra se borra.
         let marca_ahora = marca(&db).await.unwrap();
-        let e = encolar_plan(&db, marca_ahora, 101, &plan, true).await.unwrap().expect("se encola");
+        let e = encolar_plan(&db, marca_ahora, 101, &plan, true, &HashSet::new()).await.unwrap().expect("se encola");
         assert_eq!((e.reparadas, e.borradas), (2, 1));
         // Y lo encolado cambia la marca: la pasada siguiente parte de otra base.
         assert_ne!(marca(&db).await.unwrap(), marca_ahora);
@@ -1496,8 +1615,39 @@ mod tests {
 
         // Sin permiso para borrar, sólo sube.
         let marca_ahora = marca(&db).await.unwrap();
-        let e = encolar_plan(&db, marca_ahora, 101, &plan, false).await.unwrap().expect("se encola");
+        let e = encolar_plan(&db, marca_ahora, 101, &plan, false, &HashSet::new()).await.unwrap().expect("se encola");
         assert_eq!((e.reparadas, e.borradas), (2, 0));
+    }
+
+    #[tokio::test]
+    async fn una_apartada_se_enlaza_al_plan_que_toca_lo_suyo_si_sus_tablas_se_han_comparado_enteras() {
+        // SYNC-31. La apartada cambió el nombre de `z1` (por su clave) y las mesas de esa zona (sin
+        // nombrarlas): la resuelve un plan que toca `z1` o alguna mesa, con las dos tablas vistas.
+        let (db, _dir) = base("contraste_apartadas").await;
+        let sentencias = serde_json::json!([
+            { "sql": "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;", "args": ["Terraza", "z1"] },
+            { "sql": "UPDATE Mesas SET Capacidad = 2 WHERE ID_Zona = ?1;", "args": ["z1"] },
+        ]);
+        sembrar(
+            &db,
+            &format!(
+                "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena) VALUES ('apartada', 'main_op', '{sentencias}', 1, 1);"
+            ),
+        )
+        .await;
+        let w = db.write().await;
+        let conn = w.raw();
+        let tablas = |t: &[&str]| t.iter().map(|x| x.to_string()).collect::<HashSet<String>>();
+        let mesa = FilaAfectada { tabla: "Mesas".into(), clave: vec![("ID_Mesa".into(), "m7".into())] };
+
+        let enteras = tablas(&["Zonas", "Mesas"]);
+        assert_eq!(apartadas_que_resuelve(&db, conn, &[&zona("z1")], &enteras).await.unwrap(), ["apartada"]);
+        assert_eq!(apartadas_que_resuelve(&db, conn, &[&mesa], &enteras).await.unwrap(), ["apartada"], "no se sabe qué mesas tocó");
+        assert!(apartadas_que_resuelve(&db, conn, &[&zona("z2")], &enteras).await.unwrap().is_empty(), "otra zona no es lo suyo");
+        assert!(
+            apartadas_que_resuelve(&db, conn, &[&zona("z1")], &tablas(&["Zonas"])).await.unwrap().is_empty(),
+            "las mesas no se han comparado enteras"
+        );
     }
 
     #[tokio::test]
@@ -1768,7 +1918,7 @@ mod tests {
             Hallazgo { sobran: vec![pago("0193-a-cobro"), pago("0193-c-devolucion"), pago("0193-b-cobro")], ..Default::default() },
         )];
         let marca_ahora = marca(&db).await.unwrap();
-        encolar_plan(&db, marca_ahora, 100, &plan, true).await.unwrap().expect("se encola");
+        encolar_plan(&db, marca_ahora, 100, &plan, true, &HashSet::new()).await.unwrap().expect("se encola");
         let r = db.read().await;
         let mut f = r.conn().query("SELECT Statements_Json FROM _Sync_Outbox;", ()).await.unwrap();
         let json: String = f.next().await.unwrap().unwrap().get(0).unwrap();

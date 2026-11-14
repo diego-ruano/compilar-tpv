@@ -360,8 +360,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   - **rechazo sin clasificar**: un intento más para esa operación, y se deja de leer.
 
   Todo lo aplicado se confirma **en una transacción** (`outbox_confirmar_lote`): el anti-eco pasa a
-  llevar su `Seq`, la fila sale del outbox y, si era una reparación, sale con ella la apartada que
-  reparaba (SYNC-26). Un corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar
+  llevar su `Seq`, la fila sale del outbox y, si era una reparación, salen con ella las apartadas que
+  reparaba (SYNC-26, SYNC-31). Un corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar
   vuelve a subir: la nube contesta «ya estaba» a lo que ya tenía (idempotencia por `Op_Id`).
 - **Sin acuse no hay veredicto**: es el transporte, no le cuenta nada a nadie y la sesión acaba. Dos
   lotes seguidos sin respuesta pueden ser uno que la nube no consigue atender, así que el siguiente va
@@ -622,8 +622,19 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   `Zona` se llevaría sus `Mesas`).
 - Una reparación es **una escritura más**: entra en el outbox y sube por el camino de siempre. Lleva su
   propio `Command_Name` y una reparación no se repara.
+- **Va en una operación, padres primero, y con la comanda entera** (SYNC-31): las filas que la
+  operación apartada escribió y su analizador sabe localizar (`sync_reparacion::analizar`: `INSERT …
+  VALUES` y `UPDATE … WHERE <clave>`) y, si alguna cuelga de una comanda (un cobro, una línea), la
+  comanda y todo lo que cuelga de ella por sus claves foráneas: sus líneas, sus cobros y, de éstos, las
+  líneas cobradas, las devoluciones, los consumos de stock, el movimiento de caja y el registro fiscal
+  (`filas_de_las_comandas`). Las tablas van por sus foráneas y, dentro de `Pagos`, cada devolución
+  detrás de su cobro. Hasta 2.000 filas; con más, sólo lo que tocaba la operación. Es lo que devuelve
+  a la nube un ticket que una Handy borró con su cobro en camino: allí no veía ningún cobro y lo
+  borró, aquí la condición del borrado no borró nada (AUD-14), y el cobro chocó después con la clave
+  foránea de `Pagos.ID_Comanda`. Lo que el cobro escribió con un `INSERT … SELECT` (las líneas
+  cobradas, los consumos) el analizador no lo ve; la comanda entera, sí.
 - Al subir, retira en la misma transacción la operación apartada que la motivó (`Repara_Op_Id`): el
-  aviso se apaga solo.
+  aviso se apaga solo. También si la reparación vuelve por el catch-up antes que su acuse.
 - Un `DELETE` apartado no se puede reparar por estado (la ausencia de una fila no es una fila): se
   cuenta y se informa (SYNC-23).
 - **El contraste con la nube** (job `verificar_nube`) compara la base de la Main con la de la nube,
@@ -727,6 +738,14 @@ informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la
   sobra sí se borra). Lo que sí se ha visto se repara, borrados incluidos: cada fila que sobra se
   sabe que sobra. Un recorrido de claves que sigue donde lo dejó la pasada anterior y llega al final
   cuenta como completo.
+- **El plan retira lo apartado que resuelve** (SYNC-31): su última operación lleva en
+  `Repara_Op_Id` la lista JSON de las operaciones apartadas de la subida que escribieron alguna fila
+  del plan (por su clave o, si su sentencia no la nombra, en la misma tabla) y cuyas tablas se han
+  comparado enteras en esa pasada: con el plan arriba, esas tablas dicen lo mismo aquí y en la nube.
+  Cuando sube, el outbox las retira como retira la apartada de una reparación inmediata, y mientras no
+  sube la purga no se las lleva. Es lo que cierra un cobro apartado cuya reparación inmediata tampoco
+  entró: el contraste sube el ticket que falta arriba y, con él, se apagan las dos cuarentenas. Una
+  apartada que el plan no toca se queda hasta la purga, a los 30 días.
 
 #### La salida de una cuarentena de bajada (SYNC-36)
 
@@ -848,7 +867,9 @@ aplicarla: una línea sólo entra en una comanda abierta (INC-20261030-016) y bo
 nada si tiene algún cobro o alguna línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo
 antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya
 borrado: no tocó ninguna fila, o es el reintento de una operación ya aplicada y el resultado guardado
-lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
+lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino se borra
+en la nube; el cobro choca después con su clave foránea, se aparta, y su reparación devuelve a la
+nube el ticket entero ([arriba](#reparar-una-divergencia-sync-22-sync-24-sync-25), SYNC-31).
 
 Toda escritura de la Handy lleva su `X-Idempotency-Key`, que es el `Op_Id` de la operación: un UUIDv7.
 El worker exige que tenga de 16 a 64 letras, cifras, guiones o guiones bajos (`lib/rutas.ts`) y
