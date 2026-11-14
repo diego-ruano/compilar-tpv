@@ -61,6 +61,15 @@ describe("ningún fuente pone un parámetro por elemento", () => {
 		/["'`]\?\s*,?\s*["'`]\s*\.repeat\(/, // "?,".repeat(n)
 	];
 	const caza = (texto: string) => PATRONES.some((p) => p.test(texto));
+	/** Cuántas veces aparece en `texto` alguna de esas formas. */
+	const cuantas = (texto: string) =>
+		PATRONES.reduce((n, p) => n + (texto.match(new RegExp(p.source, "g"))?.length ?? 0), 0);
+
+	// Lo que tiene esa forma y no es una lista, contado por fuente: si aparece otra, salta igual.
+	// - El cursor de una página de claves del contraste (`verificar.ts::paginaDeClaves`) es UNA clave
+	//   primaria, `(cols) > (?1, ?2…)`: un `?` por columna de la clave (dos o tres como mucho), no
+	//   uno por elemento de una lista que crece con el negocio.
+	const QUE_NO_SON_LISTAS: Record<string, number> = { "../src/domains/sync/verificar.ts": 1 };
 
 	it("lee el fuente de verdad", () => {
 		expect(Object.keys(fuentes).length).toBeGreaterThan(100);
@@ -78,8 +87,10 @@ describe("ningún fuente pone un parámetro por elemento", () => {
 
 	it("ninguna sentencia del worker compone esa lista", () => {
 		const culpables = Object.entries(fuentes)
-			.filter(([, texto]) => caza(texto as string))
+			.filter(([ruta, texto]) => cuantas(texto as string) > (QUE_NO_SON_LISTAS[ruta] ?? 0))
 			.map(([ruta]) => ruta);
 		expect(culpables).toEqual([]);
+		// Y lo que se da por bueno sigue ahí: si se va, sobra la excepción.
+		for (const [ruta, n] of Object.entries(QUE_NO_SON_LISTAS)) expect(cuantas(fuentes[ruta] as string), ruta).toBe(n);
 	});
 });
