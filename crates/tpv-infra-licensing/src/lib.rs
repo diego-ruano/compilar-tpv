@@ -2600,11 +2600,14 @@ mod tests_mensajes_sin_datos {
 
         for cuerpo in [
             // La DEK con otro tipo: el texto de serde la citaría.
-            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":987654321}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":987654321,"cambioDeEquipo":false}}"#),
             // El token con otro tipo.
-            format!(r#"{{"ok":true,"tenantId":"t1","token":987654321,"status":"active","fieldDek":"{DEK}"}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":987654321,"status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#),
             // Le falta un campo.
-            format!(r#"{{"ok":true,"token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#),
+            format!(r#"{{"ok":true,"token":"{TOKEN}","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#),
+            // Sin la DEK, o nula: viene en cada activación, y sin ella no se activa a medias.
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","cambioDeEquipo":false}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":null,"cambioDeEquipo":false}}"#),
         ] {
             let mensaje = leer_activacion(&cuerpo).expect_err("no encaja").to_string();
             sin_secretos(&mensaje);
