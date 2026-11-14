@@ -1474,13 +1474,21 @@ impl SyncRepository for SqliteSyncRepository {
             } else {
                 snapshot.backfill.clone()
             };
+            // DO-02: desde dónde llegó entera cada una. El cierre de caja lo compara con su periodo
+            // (`caja_por_bajar`), así que sólo se guarda un instante de verdad; otra cosa es «no se
+            // sabe», que avisa.
+            let ventana_desde = snapshot
+                .ventana_desde
+                .as_deref()
+                .filter(|d| tpv_domain::fechas::fecha_de_instante(d).is_some())
+                .map_or(Value::Null, |d| Value::Text(d.to_string()));
             for (i, nombre) in orden_backfill.iter().enumerate() {
                 if !identificador_simple(nombre) || no_es_tabla_de_negocio(nombre) {
                     continue;
                 }
                 conn.execute(
-                    "INSERT OR REPLACE INTO _Backfill_Historico (Tabla, Orden) VALUES (?1, ?2);",
-                    vec![Value::Text(nombre.clone()), Value::Integer(i as i64)],
+                    "INSERT OR REPLACE INTO _Backfill_Historico (Tabla, Orden, Ventana_Desde) VALUES (?1, ?2, ?3);",
+                    vec![Value::Text(nombre.clone()), Value::Integer(i as i64), ventana_desde.clone()],
                 )
                 .await
                 .map_err(db_err)?;
@@ -2211,6 +2219,7 @@ mod tests_bootstrap {
                 total_filas: 1,
                 tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2262,6 +2271,7 @@ mod tests_bootstrap {
                 },
             ],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2291,6 +2301,7 @@ mod tests_bootstrap {
             total_filas: 0,
             tablas: vec![tabla("Zonas", vec![])],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2327,6 +2338,7 @@ mod tests_bootstrap {
                     ],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2351,6 +2363,7 @@ mod tests_bootstrap {
                     tabla("Tabla_Del_Futuro", vec![vec![json!("x"), json!("y")]]),
                 ],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2375,6 +2388,7 @@ mod tests_bootstrap {
                     tabla("Zonas\"; DROP TABLE Zonas; --", vec![]),
                 ],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2402,6 +2416,7 @@ mod tests_bootstrap {
                 total_filas: n as i64,
                 tablas: vec![tabla("Zonas", filas)],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2448,6 +2463,7 @@ mod tests_bootstrap {
                 total_filas: 0,
                 tablas: vec![tabla("Zonas", vec![])],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2486,6 +2502,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("Terraza")]],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2546,6 +2563,7 @@ mod tests_bootstrap {
             total_filas: 1,
             tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Terraza")]])],
             backfill: vec![],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2595,6 +2613,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("A")], vec![json!("z1"), json!("B")]],
                 )],
                 backfill: vec![],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await;
 
@@ -2616,6 +2635,7 @@ mod tests_bootstrap {
             total_filas: 1,
             tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
             backfill: vec![],
+            ventana_desde: None,
         };
 
         repo.bootstrap_restaurar(volcado(), "negocio-a").await.unwrap();
@@ -2675,6 +2695,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Zonas".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2742,6 +2763,7 @@ mod tests_backfill {
             // Padres primero: es lo único que hace viable la fase 2, porque cada página es su
             // propia transacción y `defer_foreign_keys` no cubre entre transacciones.
             backfill: vec!["Comandas".into(), "Detalle_Comanda".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -2759,6 +2781,54 @@ mod tests_backfill {
         assert_eq!(e.tabla_actual.as_deref(), Some("Comandas"));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// DO-02: la cola guarda desde dónde trajo entera cada tabla la fase 1 (lo mira el cierre de
+    /// caja), y sólo si es un instante de verdad: otra cosa queda como «no se sabe».
+    #[tokio::test]
+    async fn la_cola_guarda_desde_donde_llego_entera_cada_tabla() {
+        for (ventana, guardada) in [
+            (Some("2026-05-14 12:00:00"), Some("2026-05-14 12:00:00")),
+            (Some("2026-05-14 12:00:00 OR 1"), None),
+            (None, None),
+        ] {
+            let (repo, db, dir) = repo_temporal().await;
+            repo.bootstrap_restaurar(BootstrapSnapshot {
+                seq: 1,
+                total_filas: 0,
+                tablas: vec![BootstrapTabla {
+                    nombre: "Comandas".into(),
+                    columnas: vec!["ID_Comanda".into()],
+                    filas: vec![],
+                    parcial: true,
+                }],
+                backfill: vec!["Comandas".into(), "Pagos".into()],
+                ventana_desde: ventana.map(str::to_string),
+            }, "negocio-de-prueba")
+            .await
+            .unwrap();
+
+            let r = db.read().await;
+            let mut filas = r
+                .conn()
+                .query("SELECT Tabla, Ventana_Desde FROM _Backfill_Historico ORDER BY Orden;", ())
+                .await
+                .unwrap();
+            let mut vistas = Vec::new();
+            while let Some(f) = filas.next().await.unwrap() {
+                let tabla = match f.get_value(0).unwrap() { Value::Text(t) => t, otro => panic!("{otro:?}") };
+                let desde = match f.get_value(1).unwrap() { Value::Text(t) => Some(t), _ => None };
+                vistas.push((tabla, desde));
+            }
+            let esperado = guardada.map(str::to_string);
+            assert_eq!(
+                vistas,
+                vec![("Comandas".to_string(), esperado.clone()), ("Pagos".to_string(), esperado)],
+                "ventana {ventana:?}"
+            );
+            drop(r);
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// Lo que no es de negocio no viaja: lo que empieza por `_` es estado de este equipo (aquí, el
@@ -2793,6 +2863,7 @@ mod tests_backfill {
                     BootstrapTabla { nombre: "Sync_Changes".into(), columnas: columnas_del_log(), filas: vec![cambio(1)], parcial: true },
                 ],
                 backfill: vec!["_Estad_Dias_Sucios".into(), "Sync_Changes".into()],
+                ventana_desde: None,
             }, "negocio-de-prueba")
             .await
             .unwrap();
@@ -2989,6 +3060,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Cierres_Caja".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -3064,6 +3136,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Detalle_Comanda".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();
@@ -3144,6 +3217,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Tabla_Del_Futuro".into(), "Zonas".into()],
+            ventana_desde: None,
         }, "negocio-de-prueba")
         .await
         .unwrap();

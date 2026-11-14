@@ -67,12 +67,12 @@ Mientras dure:
 
 ## Desde la nube: dos fases (SYNC-19)
 
-**Fase 1** (`/v1/sync/bootstrap`): lo imprescindible para volver a vender, en una petición y una
+**Fase 1** (`/v1/sync/bootstrap`): lo que hace falta para volver a vender, en una petición y una
 sola foto de la base, con el `Seq` leído **dentro** de esa foto (leído aparte, una escritura
 podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a trozos no es una foto.
 
 - **Maestros enteros; transaccionales, 30 días** (`VENTANA_DIAS`), si caben.
-- La ventana **se estira hasta el último cierre de caja**: el arqueo suma desde ahí
+- La ventana **se estira hasta el último cierre de caja**, si cabe: el arqueo suma desde ahí
   ([caja.md](caja.md)).
 - **Lo que sigue vivo entra entero**, caiga donde caiga: comandas abiertas, notificaciones activas,
   pedidos en borrador, fichajes sin cerrar.
@@ -99,22 +99,34 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   filas se cuentan antes de leer; los bytes, mientras se escribe la respuesta
   ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
 - **Si el mes no cabe, la ventana se encoge**: se prueban 30 días, 7, 1 y ninguno
-  (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre de caja, y viaja la más ancha que
-  cabe en los dos topes. Cada candidata se mide antes de leerla: sus filas, contadas, y sus bytes,
+  (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre de caja, y detrás «ahora» sin
+  estirar; viaja la más ancha que cabe en los dos topes. Cada candidata se mide antes de leerla: sus filas, contadas, y sus bytes,
   estimados con lo que ocupan las últimas 64 filas de cada tabla; si aun así no cabe al escribirla,
   se pasa a la siguiente. Dentro del `TenantHub`, que es como corre desplegado, la estimación sólo
   puede estrechar la ventana, nunca negar la recuperación: la más estrecha se intenta aunque la
   estimación diga que no cabe, y decide lo que se escribe. La respuesta dice cuál fue
   (`ventana_desde`).
-- **Lo imprescindible no se encoge**: los maestros, lo que sigue vivo, lo que hay desde el último
-  cierre de caja no reabierto y el último registro de facturación viajan con cualquier ancho. Si ni
-  eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación lo dice
-  ([DO-02](../pendientes.md#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre)).
-  Sin ningún cierre de caja no hay periodo que proteger y la ventana puede encogerse hasta «ahora»:
-  mientras baja el resto, el primer arqueo lo avisa y deja cerrar igual ([caja.md](caja.md)).
-- **A la Main le da igual el ancho**: no mira `ventana_desde`. Restaura lo que llega y la fase 2
-  recorre cada tabla transaccional entera, así que con una ventana estrecha acaba con lo mismo;
-  lo que cambia es que los días que no entraron llegan después, con el histórico.
+- **Lo imprescindible para trabajar no se encoge** (DO-02): viaja con cualquier ancho, también con
+  «ahora». Son los maestros enteros (la carta, el personal y sus roles, las mesas, los clientes, las
+  reservas, los proveedores, los ajustes, las series de facturación); lo que sigue vivo con todo lo
+  suyo (las comandas abiertas con sus líneas, sus cobros a cuenta, sus detalles y sus consumos; las
+  notificaciones activas con sus lecturas; los pedidos en borrador con sus líneas; los fichajes sin
+  cerrar con su día); el último cierre de caja no reabierto con su recuento, que es el fondo y el
+  principio del periodo abierto; y el último registro de facturación con su cobro y la comanda de
+  ese cobro. Es lo que hace falta para entrar, vender, cobrar lo que estaba abierto y seguir la
+  cadena. Si ni eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación
+  dice que no se puede traer de la nube y señala las copias de este ordenador.
+- **Lo que hay desde el último cierre se intenta, pero no se exige.** Si no cabe (un bar grande con
+  una semana sin cerrar caja, uno normal con meses), viaja «ahora» y lo del periodo abierto baja por
+  la fase 2. El arqueo no espera: avisa mientras falte algo suyo y deja cerrar igual
+  ([caja.md](caja.md)).
+- **La Main guarda el ancho** (`ventana_desde`) con su cola del backfill
+  (`_Backfill_Historico.Ventana_Desde`): desde ahí cada tabla recortada está entera. Es lo que mira
+  el cierre de caja para avisar (`caja_por_bajar`). Por lo demás le da igual: restaura lo que llega
+  y la fase 2 recorre cada tabla transaccional entera, así que con una ventana estrecha acaba con lo
+  mismo; lo que cambia es que los días que no entraron llegan después, con el histórico, tabla a
+  tabla y de lo más antiguo a lo más nuevo (lo que hay desde el último cierre, lo último:
+  [DO-04](../pendientes.md#do-04--el-histórico-baja-tabla-a-tabla-y-lo-más-reciente-llega-lo-último)).
 - **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
   la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
   bajan un volcado (`/bootstrap`, `/historico` y las del contraste, `/verificar/*`) tienen 150 s de
@@ -132,7 +144,8 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
 esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_Failed` y siembra
-`_Backfill_Historico`.
+`_Backfill_Historico` con su `Ventana_Desde` (sólo si es un instante de verdad; si no, `NULL`, que
+el cierre de caja trata como «no se sabe» y avisa).
 
 Si lo que se reemplaza es una copia restaurada que no llegó a reconciliarse (AUD-19), su outbox no
 pasa a la base nueva, como en el traslado: es de antes, y lo que el equipo de entonces ya subió se

@@ -4,13 +4,17 @@
 //
 // La fase 1 es una sola respuesta con dos topes, filas y bytes. El mes de un bar con mucho
 // movimiento no cabe, y antes eso era un 413: ese bar no podía recuperarse desde la nube. Ahora
-// viaja la ventana más ancha que cabe —30 días, 7, 1 o sólo lo imprescindible— y lo demás lo trae la
-// fase 2, que ya recorría cada tabla entera.
+// viaja la ventana más ancha que cabe —30 días, 7, 1, lo que hay desde el último cierre de caja o
+// sólo lo imprescindible para trabajar (DO-02)— y lo demás lo trae la fase 2, que ya recorría cada
+// tabla entera.
 //
 // Lo que se fija aquí:
 //   · con menos sitio, la ventana es más estrecha, y es la más ancha que cabe;
-//   · lo imprescindible viaja SIEMPRE: los maestros, lo que sigue vivo, lo que hay desde el último
-//     cierre de caja y el último registro de facturación. Si ni eso cabe, entonces sí es un 413;
+//   · lo que hay desde el último cierre de caja viaja mientras quepa; si no cabe, se queda para la
+//     fase 2 (la Main avisa al cerrar la caja: `ventana_desde`);
+//   · lo imprescindible para trabajar viaja SIEMPRE: los maestros, lo que sigue vivo, el último
+//     cierre de caja con su recuento y el último registro de facturación. Si ni eso cabe, entonces sí
+//     es un 413;
 //   · `parcial` y `backfill` no dependen del ancho: la Main rellena lo mismo;
 //   · la medida previa es una estimación, y quien manda es lo que se escribe.
 //
@@ -196,7 +200,17 @@ function filasDe(v: Volcado): number {
 	return v.tablas.reduce((n, t) => n + t.filas.length, 0);
 }
 
-/** Lo que viaja con cualquier ancho de ventana. */
+/** Lo que hay desde el último cierre: viaja con todas las ventanas menos con la imprescindible. */
+function comprobarDesdeElCierre(v: Volcado, donde: string): void {
+	const pagos = valores(v, "Pagos", "ID_Pago");
+	for (let i = 0; i < DESDE_EL_CIERRE; i++) expect(pagos, donde).toContain(`p-periodo-${i}`);
+	for (let i = 0; i < DE_HOY; i++) expect(pagos, donde).toContain(`p-hoy-${i}`);
+	// Y lo devuelto desde el cierre, aunque la venta sea anterior: el arqueo lo resta (REV-08).
+	expect(pagos, donde).toContain("p-devuelta");
+	comprobarLoImprescindible(v, donde);
+}
+
+/** Lo que viaja con cualquier ancho de ventana: lo imprescindible para trabajar (DO-02). */
 function comprobarLoImprescindible(v: Volcado, donde: string): void {
 	// Maestros enteros.
 	expect(tabla(v, "Clientes").filas, donde).toHaveLength(5);
@@ -212,15 +226,11 @@ function comprobarLoImprescindible(v: Volcado, donde: string): void {
 	expect(valores(v, "Lineas_Pedido_Proveedor", "ID_Linea"), donde).toEqual(["l-borrador"]);
 	expect(valores(v, "Fichajes", "ID_Fichaje"), donde).toEqual(["f-abierto"]);
 
-	// El último cierre no reabierto con su recuento, y todo lo cobrado desde él: de ahí sale el
-	// arqueo siguiente.
+	// El último cierre no reabierto con su recuento: su hora es donde empieza el periodo abierto y
+	// su `Dejado`, el fondo del arqueo siguiente.
 	expect(valores(v, "Cierres_Caja", "ID_Cierre"), donde).toContain("ci-ultimo");
 	expect(valores(v, "Cierre_Denominaciones", "ID_Cierre"), donde).toEqual(["ci-ultimo"]);
 	const pagos = valores(v, "Pagos", "ID_Pago");
-	for (let i = 0; i < DESDE_EL_CIERRE; i++) expect(pagos, donde).toContain(`p-periodo-${i}`);
-	for (let i = 0; i < DE_HOY; i++) expect(pagos, donde).toContain(`p-hoy-${i}`);
-	// Y lo devuelto desde el cierre, aunque la venta sea anterior: el arqueo lo resta (REV-08).
-	expect(pagos, donde).toContain("p-devuelta");
 
 	// El último registro de facturación, con el cobro al que apunta y la comanda de ese cobro.
 	expect(valores(v, "Registros_Facturacion", "ID_Registro"), donde).toEqual(["rf-ultimo"]);
@@ -262,15 +272,16 @@ describe("las ventanas que se prueban", () => {
 		expect(ventanasCandidatas(AHORA, null)).toEqual([dias(30), dias(7), dias(1), AHORA]);
 	});
 
-	it("la más estrecha llega hasta el último cierre no reabierto", () => {
+	it("se estiran hasta el último cierre no reabierto, y detrás va ahora", () => {
 		// Un cierre de hace tres días: la de un día y la de ninguno se estiran hasta él y son la misma.
-		expect(ventanasCandidatas(AHORA, dias(3))).toEqual([dias(30), dias(7), dias(3)]);
+		// Detrás, lo imprescindible para trabajar (DO-02).
+		expect(ventanasCandidatas(AHORA, dias(3))).toEqual([dias(30), dias(7), dias(3), AHORA]);
 		// Uno de hace doce horas: sólo la de ninguno se estira.
-		expect(ventanasCandidatas(AHORA, dias(0.5))).toEqual([dias(30), dias(7), dias(1), dias(0.5)]);
+		expect(ventanasCandidatas(AHORA, dias(0.5))).toEqual([dias(30), dias(7), dias(1), dias(0.5), AHORA]);
 	});
 
-	it("con un cierre de hace más de 30 días sólo hay una: todo lo que hay desde él entra siempre", () => {
-		expect(ventanasCandidatas(AHORA, dias(40))).toEqual([dias(40)]);
+	it("con un cierre de hace más de 30 días hay dos: todo lo que hay desde él, y ahora", () => {
+		expect(ventanasCandidatas(AHORA, dias(40))).toEqual([dias(40), AHORA]);
 	});
 });
 
@@ -288,7 +299,7 @@ describe("la fase 1 se encoge hasta caber", () => {
 			expect(mes.volcado.ventana_desde).toBe(haceDias(30));
 			expect(ventasCon(mes.volcado, "vieja")).toBe(VIEJAS);
 			expect(ventasCon(mes.volcado, "semana")).toBe(DE_LA_SEMANA);
-			comprobarLoImprescindible(mes.volcado, "30 días");
+			comprobarDesdeElCierre(mes.volcado, "30 días");
 
 			// Con una fila menos de sitio que el mes: la semana. El tope de filas es exacto (se
 			// cuenta antes de leer), así que sirve para medir cada escalón.
@@ -297,16 +308,31 @@ describe("la fase 1 se encoge hasta caber", () => {
 			expect(semana.volcado.ventana_desde).toBe(haceDias(7));
 			expect(ventasCon(semana.volcado, "vieja")).toBe(0);
 			expect(ventasCon(semana.volcado, "semana")).toBe(DE_LA_SEMANA);
-			comprobarLoImprescindible(semana.volcado, "7 días");
+			comprobarDesdeElCierre(semana.volcado, "7 días");
 
-			// Y con una menos que la semana: sólo lo imprescindible, desde el último cierre.
-			const minimo = await fase1(lector, { ...SIN_TOPE, filas: filasDe(semana.volcado) - 1 });
-			if (!minimo.volcado) throw new Error("lo imprescindible no cabe");
-			expect(minimo.volcado.ventana_desde).toBe(CIERRE);
-			expect(ventasCon(minimo.volcado, "vieja")).toBe(0);
-			expect(ventasCon(minimo.volcado, "semana")).toBe(0);
-			expect(ventasCon(minimo.volcado, "periodo")).toBe(DESDE_EL_CIERRE);
+			// Con una menos que la semana: lo que hay desde el último cierre.
+			const cierre = await fase1(lector, { ...SIN_TOPE, filas: filasDe(semana.volcado) - 1 });
+			if (!cierre.volcado) throw new Error("lo que hay desde el cierre no cabe");
+			expect(cierre.volcado.ventana_desde).toBe(CIERRE);
+			expect(ventasCon(cierre.volcado, "vieja")).toBe(0);
+			expect(ventasCon(cierre.volcado, "semana")).toBe(0);
+			expect(ventasCon(cierre.volcado, "periodo")).toBe(DESDE_EL_CIERRE);
 			// El cierre anterior al último ya no entra: es histórico.
+			expect(valores(cierre.volcado, "Cierres_Caja", "ID_Cierre")).toEqual(["ci-ultimo"]);
+			comprobarDesdeElCierre(cierre.volcado, "desde el cierre");
+
+			// DO-02: y con una menos que eso, sólo lo imprescindible para trabajar. Lo que hay desde
+			// el cierre se queda para la fase 2: ni las ventas del periodo, ni las de hoy, ni la
+			// devolución de ayer.
+			const minimo = await fase1(lector, { ...SIN_TOPE, filas: filasDe(cierre.volcado) - 1 });
+			if (!minimo.volcado) throw new Error("lo imprescindible no cabe");
+			expect(minimo.volcado.ventana_desde).toBe(AHORA);
+			for (const prefijo of ["vieja", "semana", "periodo", "hoy"]) {
+				expect(ventasCon(minimo.volcado, prefijo), prefijo).toBe(0);
+			}
+			// Ni la devolución de ayer: de cobros, sólo el del último registro de facturación.
+			expect(valores(minimo.volcado, "Pagos", "ID_Pago")).toEqual(["p-fiscal"]);
+			expect(valores(minimo.volcado, "Comandas", "ID_Comanda")).toEqual(["c-abierta", "c-fiscal"]);
 			expect(valores(minimo.volcado, "Cierres_Caja", "ID_Cierre")).toEqual(["ci-ultimo"]);
 			comprobarLoImprescindible(minimo.volcado, "lo imprescindible");
 
@@ -326,8 +352,12 @@ describe("la fase 1 se encoge hasta caber", () => {
 			expect(comoLaSemana.volcado?.ventana_desde).toBe(haceDias(7));
 			expect(comoLaSemana.volcado).toEqual(semana.volcado);
 
-			const comoElMinimo = await porBytes(entre(semana.bytes, minimo.bytes));
-			expect(comoElMinimo.volcado?.ventana_desde).toBe(CIERRE);
+			const comoElCierre = await porBytes(entre(semana.bytes, cierre.bytes));
+			expect(comoElCierre.volcado?.ventana_desde).toBe(CIERRE);
+			expect(comoElCierre.volcado).toEqual(cierre.volcado);
+
+			const comoElMinimo = await porBytes(entre(cierre.bytes, minimo.bytes));
+			expect(comoElMinimo.volcado?.ventana_desde).toBe(AHORA);
 			expect(comoElMinimo.volcado).toEqual(minimo.volcado);
 
 			const sinSitio = await porBytes(Math.round(minimo.bytes / 2));

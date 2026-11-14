@@ -252,6 +252,12 @@ export type BootstrapSnapshot = {
 	 *  así que una hija insertada antes que su padre no tiene dónde apoyarse.
 	 */
 	backfill: string[],
+	/**
+	 *  DO-02: desde dónde llega entera cada tabla recortada (`AAAA-MM-DD HH:MM:SS`, hora del
+	 *  equipo). Lo anterior baja por la fase 2. Se guarda con la cola del backfill: con él, el cierre
+	 *  de caja sabe si lo del periodo abierto ya está aquí. `None` si el worker no lo dice.
+	 */
+	ventana_desde?: string | null,
 };
 
 /**

@@ -1,21 +1,22 @@
 /** @vitest-environment jsdom */
-// DO-02 («encoger y avisar»): tras recuperar los datos de un negocio que nunca había cerrado la caja,
-// lo antiguo baja después, y el primer arqueo sólo suma lo que haya bajado. El cierre lo avisa, con
-// el progreso, y deja cerrar igual. Corre el modal de verdad; sólo se sustituye el IPC (`invoke`).
+// DO-02 («encoger y avisar»): tras una recuperación que no cabía entera, lo que suma el arqueo (desde
+// el último cierre o, en el primero, desde el principio) puede bajar después, y el arqueo sólo suma
+// lo que haya bajado. El cierre lo avisa, con el progreso, y deja cerrar igual. Corre el modal de
+// verdad; sólo se sustituye el IPC (`invoke`).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import CierreCajaModal from "../../src/features/cuentas/CierreCajaModal";
 
-const backend = vi.hoisted(() => ({ historico: null as unknown }));
+const backend = vi.hoisted(() => ({ historico: null as unknown, desde: null as string | null }));
 
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
 	invoke: async (comando: string) => {
 		if (comando !== "cierre_preparar") throw new Error(`comando inesperado: ${comando}`);
 		return {
-			desde: null,
-			es_primer_cierre: true,
+			desde: backend.desde,
+			es_primer_cierre: backend.desde === null,
 			fondo_inicial: 0,
 			ventas_efectivo: 0,
 			gastos_caja: 0,
@@ -32,6 +33,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 afterEach(() => {
 	cleanup();
 	backend.historico = null;
+	backend.desde = null;
 });
 
 it("avisa de que el histórico todavía baja, con el progreso, y deja cerrar igual", async () => {
@@ -45,7 +47,24 @@ it("avisa de que el histórico todavía baja, con el progreso, y deja cerrar igu
 	render(<CierreCajaModal open onClose={() => {}} />);
 	expect(await screen.findByText(/Todavía se está descargando el histórico/)).toBeTruthy();
 	expect(screen.getByText(/1 de 4 apartados · 25 %/)).toBeTruthy();
+	expect(screen.getByText(/suma desde el principio/)).toBeTruthy();
 	// No bloquea: con el recuento cuadrado, se puede cerrar.
+	expect(screen.getByRole("button", { name: "Cerrar caja" })).toBeEnabled();
+});
+
+it("con un cierre anterior dice que suma desde él, y deja cerrar igual", async () => {
+	// Lo que había desde el último cierre no cupo en la recuperación y aún baja.
+	backend.desde = "2026-11-13 23:30:00";
+	backend.historico = {
+		tablas_pendientes: 2,
+		tablas_completadas: 2,
+		filas_traidas: 5000,
+		tabla_actual: "Pagos",
+		ultimo_error: null,
+	};
+	render(<CierreCajaModal open onClose={() => {}} />);
+	expect(await screen.findByText(/Todavía se está descargando el histórico/)).toBeTruthy();
+	expect(screen.getByText(/suma desde el último cierre/)).toBeTruthy();
 	expect(screen.getByRole("button", { name: "Cerrar caja" })).toBeEnabled();
 });
 

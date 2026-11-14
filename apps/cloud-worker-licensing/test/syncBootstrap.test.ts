@@ -126,10 +126,12 @@ describe("POST /v1/sync/bootstrap", () => {
 			sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');");
 		});
 
-		for (const campo of ["seq", "total_filas", "tablas", "backfill"]) {
+		for (const campo of ["seq", "total_filas", "tablas", "backfill", "ventana_desde"]) {
 			expect(Object.keys(body), `falta "${campo}" en la respuesta`).toContain(campo);
 		}
 		expect(typeof body.total_filas).toBe("number");
+		// DO-02: con él sabe la Main si el arqueo del periodo abierto puede salir corto.
+		expect(body.ventana_desde).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
 		expect(Array.isArray(body.backfill)).toBe(true);
 
 		// Y cada tabla, igual: son los campos de `BootstrapTabla`.

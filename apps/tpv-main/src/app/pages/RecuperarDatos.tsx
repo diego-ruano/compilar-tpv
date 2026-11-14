@@ -149,9 +149,11 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const trabajando = operacion !== null || (reconciliacionPendiente && !bloqueada);
     const completada = fase === "completada";
     const puedeCrearVacia = error?.code === "tenant_db_not_provisioned";
-    // El volcado de la nube tiene un tope de filas, y este es el único momento en que alguien lo
-    // descubre: el día que ha perdido su base. Un "ha fallado" genérico deja al dueño sin saber
-    // que la salida está justo encima, en la lista de copias de este ordenador.
+    // DO-02: la descarga de la nube tiene un tope, y la nube se encoge hasta lo imprescindible para
+    // trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) antes de
+    // decir que no cabe. Si ni eso cabe, éste es el único momento en que alguien lo descubre: el día
+    // que ha perdido su base. Un "ha fallado" genérico deja al dueño sin saber que la salida está
+    // justo encima, en la lista de copias de este ordenador.
     const volcadoDemasiadoGrande = error?.code === "bootstrap_too_large";
 
     return (
@@ -344,8 +346,8 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                             <span>
                                                 {volcadoDemasiadoGrande
                                                     ? trasladoPendiente
-                                                        ? "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Actualiza el TPV a la última versión antes de reintentarlo."
-                                                        : "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, actualiza el TPV a la última versión antes de reintentarlo."
+                                                        ? "No se pueden traer los datos de la nube: lo imprescindible para volver a trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) ocupa más de lo que se puede descargar de una vez. Contacta con soporte."
+                                                        : "No se pueden traer los datos de la nube: lo imprescindible para volver a trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) ocupa más de lo que se puede descargar de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, contacta con soporte."
                                                     : error.message}
                                             </span>
                                         </div>

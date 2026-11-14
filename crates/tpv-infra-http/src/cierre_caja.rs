@@ -70,7 +70,7 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
     }
 
     /// Nada: la Handy lee de la nube, que tiene el histórico entero.
-    async fn caja_por_bajar(&self) -> AppResult<bool> {
+    async fn caja_por_bajar(&self, _desde: Option<&str>) -> AppResult<bool> {
         Ok(false)
     }
 

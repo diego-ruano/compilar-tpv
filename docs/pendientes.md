@@ -18,7 +18,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
 | [DO-TURSO](#do-turso--lo-que-queda-en-turso-de-las-bases-de-los-negocios) | 🟡 | Quedan en Turso la tabla `tenant_databases`, dos secretos y las bases de los negocios | A mano, tras desplegar y sin vuelta atrás |
-| [DO-02](#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre) | 🟡 | Una Main con mucho desde el último cierre no cabe en la fase 1 de la recuperación | Sin decidir |
+| [DO-04](#do-04--el-histórico-baja-tabla-a-tabla-y-lo-más-reciente-llega-lo-último) | 🔵 | Tras recuperar, el histórico baja tabla a tabla y lo más reciente llega lo último | Sin decidir |
 | [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
@@ -331,28 +331,20 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
 
-### DO-02 · La recuperación de una Main con mucho desde el último cierre
+### DO-04 · El histórico baja tabla a tabla, y lo más reciente llega lo último
 
-`/v1/sync/bootstrap` baja la fase 1 en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de
-JSON. Si el mes no cabe, la ventana se encoge hasta lo imprescindible: los maestros, lo que sigue vivo
-y lo que hay desde el último cierre de caja
-([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Eso no se puede
-recortar, y si no cabe la respuesta es 413 y ese negocio no puede recuperarse desde la nube. Con lo
-medido (unos 180 bytes por fila), 24 MiB son unas 140.000 filas: le pasa a un bar de mil comandas
-diarias que lleve una semana sin cerrar caja, o a uno normal que lleve meses. Falta decidir cómo se le
-sirve: que la foto salga en trozos, o que lo anterior al cierre que no quepa baje por la fase 2 y el
-arqueo espere a que termine.
-
-Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
-**el histórico baja tabla a tabla, padres primero, y cada una de lo más antiguo a lo más nuevo**.
-Va deprisa con el equipo en calma (hasta 400.000 filas cada cinco minutos) y a 20.000 con el bar
-trabajando ([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)), pero a un
-bar grande que recupere con la ventana de un día la semana pasada le llega la última. Bajar cada
-tabla de lo más nuevo a lo más antiguo no lo arregla: las líneas de una comanda van en otra tabla,
-que llega después de todas las comandas; `Pagos` se apunta a sí misma (una devolución, al cobro
-original) y una hija llegaría antes que su padre; y una Main nueva con un worker anterior, que no
-conoce el sentido, tomaría el cursor al revés y saltaría filas. Haría falta bajar por tramos de
-fechas, todas las tablas de cada tramo. Sin decidir.
+Tras una recuperación desde la nube, lo que no cupo en la primera descarga baja por la fase 2
+**tabla a tabla, padres primero, y cada una de lo más antiguo a lo más nuevo**. Va deprisa con el
+equipo en calma (hasta 400.000 filas cada cinco minutos) y a 20.000 con el bar trabajando
+([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)), pero a un bar
+grande lo más reciente le llega lo último. Cuando la primera descarga se queda en lo imprescindible
+para trabajar (lo que hay desde el último cierre no cabía, DO-02), los cobros del periodo de caja
+abierto llegan detrás de todas las comandas y todas sus líneas, y hasta entonces el arqueo avisa de
+que puede salir corto. Bajar cada tabla de lo más nuevo a lo más antiguo no lo arregla: las líneas
+de una comanda van en otra tabla, que llega después de todas las comandas; `Pagos` se apunta a sí
+misma (una devolución, al cobro original) y una hija llegaría antes que su padre; y una Main nueva
+con un worker anterior, que no conoce el sentido, tomaría el cursor al revés y saltaría filas. Haría
+falta bajar por tramos de fechas, todas las tablas de cada tramo. Sin decidir.
 
 ### DO-03 · Copias de la base de cada negocio
 

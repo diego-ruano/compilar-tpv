@@ -105,3 +105,24 @@ it("una copia anterior al log acaba ofreciendo la nube, con el motivo a la vista
     expect(screen.getByText(/Esta copia es anterior a lo que guarda la nube/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recuperar el estado actual de la nube" })).toBeEnabled();
 });
+
+it("si ni lo imprescindible para trabajar cabe en la descarga, lo dice y señala las copias", async () => {
+    // DO-02: la nube se encoge hasta lo imprescindible antes de contestar que no cabe.
+    invoke.mockImplementation(async (comando: string) => {
+        if (comando === "recovery_list_backups") return [];
+        if (comando === "sync_bootstrap_desde_nube") {
+            throw { code: "bootstrap_too_large", message: "Lo imprescindible para volver a trabajar no cabe en una sola descarga desde la nube" };
+        }
+        return undefined;
+    });
+
+    render(<RecuperarDatos />);
+
+    (await screen.findByRole("button", { name: "Recuperar el estado actual de la nube" })).click();
+
+    expect(
+        await screen.findByText(/lo imprescindible para volver a trabajar \(la carta, el personal, los clientes, las reservas y lo que sigue abierto\)/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Restaura una copia de este ordenador \(arriba\)/)).toBeInTheDocument();
+    expect(screen.queryByText("Recuperación en curso")).not.toBeInTheDocument();
+});

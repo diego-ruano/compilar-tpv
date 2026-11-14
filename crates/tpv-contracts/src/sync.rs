@@ -123,6 +123,11 @@ pub struct BootstrapSnapshot {
     /// decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
     /// así que una hija insertada antes que su padre no tiene dónde apoyarse.
     pub backfill: Vec<String>,
+    /// DO-02: desde dónde llega entera cada tabla recortada (`AAAA-MM-DD HH:MM:SS`, hora del
+    /// equipo). Lo anterior baja por la fase 2. Se guarda con la cola del backfill: con él, el cierre
+    /// de caja sabe si lo del periodo abierto ya está aquí. `None` si el worker no lo dice.
+    #[serde(default)]
+    pub ventana_desde: Option<String>,
 }
 
 /* ===== Fase 2 (SYNC-19): el histórico que la ventana dejó fuera ===== */
