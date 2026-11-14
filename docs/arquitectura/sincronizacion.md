@@ -799,8 +799,9 @@ informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la
   su clave o, si su sentencia no la nombra, en la misma tabla) y cuyas tablas se han comparado
   enteras en esa pasada: con el plan arriba, esas tablas dicen lo mismo aquí y en la nube. El outbox
   las retira cuando sube la última que las lleva, como retira la apartada de una reparación
-  inmediata; si una del plan no entra y se queda apartada, siguen ahí. Mientras alguna está por
-  subir, la purga no se las lleva. Es lo que cierra un cobro apartado cuya reparación inmediata tampoco
+  inmediata; si una del plan no entra y se queda apartada, siguen ahí, y se retiran con ella cuando
+  un contraste siguiente sube lo que no entró. Mientras alguna del plan está por subir, la purga no se
+  lleva ni lo que resuelve ni la que no entró. Es lo que cierra un cobro apartado cuya reparación inmediata tampoco
   entró: el contraste sube el ticket que falta arriba y, con él, se apagan las dos cuarentenas. Una
   apartada que el plan no toca se queda hasta la purga, a los 30 días.
 
