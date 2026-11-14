@@ -62,6 +62,8 @@ pub mod cuentas;
 pub(crate) mod consumo_stock;
 // El resumen diario de las estadísticas (`_Estad_*`): una caché local que se rehace desde los cobros.
 pub mod estadisticas_diarias;
+// OBS-06: las referencias de imagen de la base, para renombrar las heredadas.
+pub mod imagenes;
 pub mod inventario;
 pub mod jobs;
 pub mod login;

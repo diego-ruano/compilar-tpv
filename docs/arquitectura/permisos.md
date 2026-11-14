@@ -329,7 +329,8 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
 - **SQL siempre parametrizado.** Lo único interpolado son nombres de tabla o columna de listas
   cerradas o placeholders `?N` generados.
 - **Tenant y dispositivo salen del token**, nunca del cuerpo: imágenes (prefijo por tenant y
-  `REL_PATH_RE` contra rutas con `..`), telemetría, sincronización y negocio.
+  `RUTA_DE_IMAGEN`, que sólo admite una carpeta de la lista y un UUID con su extensión), telemetría,
+  sincronización y negocio.
 - **JWT** verificado con `jose` y `algorithms: ["HS256"]` (`lib/sesion.ts`).
 - **WebSocket** abierto con un ticket de un solo uso, consumido con `DELETE … RETURNING`: el token no
   viaja en la URL.

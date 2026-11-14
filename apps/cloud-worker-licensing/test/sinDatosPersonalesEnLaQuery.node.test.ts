@@ -34,6 +34,8 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import * as z from "zod";
 
+import { RUTA_DE_IMAGEN } from "../src/domains/images/rutaDeImagen";
+
 type Fuentes = Record<string, string>;
 type Modulos = Record<string, Record<string, unknown>>;
 type Hallazgo = { donde: string; nombre: string };
@@ -147,13 +149,19 @@ const EN_EL_CAMINO = new Set([
  * nueva se apunta aquí después de mirar qué puede venir en él.
  */
 const COMODINES = new Set([
-	// La ruta de una imagen: carpeta de una lista cerrada y nombre de fichero. Las nuevas llevan un
-	// UUID; las heredadas conservan el nombre que tenían (OBS-06 en docs/pendientes.md).
-	"domains/images/images.routes.ts: /:tenant/*",
-	"domains/images/images.routes.ts: /*",
 	// Los ficheros del widget compilado, y el 404 de todo lo demás.
 	"domains/reservas_web/widget.routes.ts: /assets/*",
 	"domains/reservas_web/widget.routes.ts: *",
+]);
+
+/**
+ * OBS-06: las rutas de una imagen reciben en el resto del camino la ruta del fichero. No son una
+ * excepción: cada una la valida con `RUTA_DE_IMAGEN`, que sólo admite una carpeta de la lista y un
+ * UUID con su extensión. Lo comprueba el bloque «OBS-06» de abajo.
+ */
+const COMODINES_DE_IMAGEN = new Set([
+	"domains/images/images.routes.ts: /:tenant/*",
+	"domains/images/images.routes.ts: /*",
 ]);
 
 /**
@@ -569,7 +577,7 @@ describe("AUD-27: ningún dato personal ni texto libre en la URL", () => {
 	});
 
 	it("las rutas que reciben el resto del camino son las que ya se han mirado", () => {
-		expect([...new Set(delWorker.comodines)].sort()).toEqual([...COMODINES].sort());
+		expect([...new Set(delWorker.comodines)].sort()).toEqual([...COMODINES, ...COMODINES_DE_IMAGEN].sort());
 	});
 
 	it("lo apuntado como URL ajena se usa: la lista no se queda vieja", () => {
@@ -589,6 +597,41 @@ describe("AUD-27: ningún dato personal ni texto libre en la URL", () => {
 		// Y lee los schemas de los que salió el hallazgo.
 		expect(clavesDe(modulos["domains/reservas/reservas.schemas.ts"].buscarClienteSchema)).toEqual(["telefono", "email"]);
 		expect(clavesDe(modulos["domains/cuentas/cuentas.schemas.ts"].listadoSchema)).toContain("q");
+	});
+});
+
+describe("OBS-06: en la ruta de una imagen no viaja ningún nombre", () => {
+	const UUID = "0190f3a1-7b2c-4d4e-8f00-123456789abc";
+
+	it("cada ruta de imagen que recibe el resto del camino lo valida con RUTA_DE_IMAGEN", () => {
+		const deImagen = delWorker.registros.filter(
+			(r) => r.ruta !== null && r.verbo !== "use" && COMODINES_DE_IMAGEN.has(`${r.fichero}: ${r.ruta}`),
+		);
+		expect(deImagen.map((r) => `${r.verbo} ${r.ruta}`).sort()).toEqual(["delete /*", "get /:tenant/*", "put /*"]);
+		for (const r of deImagen) expect(r.nombres.has("RUTA_DE_IMAGEN"), `${r.verbo} ${r.ruta}`).toBe(true);
+	});
+
+	it("RUTA_DE_IMAGEN sólo admite una carpeta de la lista y un UUID con su extensión", () => {
+		for (const carpeta of ["productos", "categorias", "proveedores", "alergenos", "logo"]) {
+			for (const ext of ["jpg", "jpeg", "png", "webp", "JPG"]) {
+				expect(RUTA_DE_IMAGEN.test(`images/${carpeta}/${UUID}.${ext}`), `${carpeta} ${ext}`).toBe(true);
+			}
+		}
+		expect(RUTA_DE_IMAGEN.test(`images/productos/${UUID.toUpperCase()}.jpg`)).toBe(true);
+		for (const mala of [
+			"images/proveedores/Juan-Perez.jpg",
+			"images/productos/tarta_de_ana.png",
+			`images/productos/${UUID.replaceAll("-", "")}.jpg`,
+			`images/productos/${UUID}x.jpg`,
+			`images/productos/x${UUID}.jpg`,
+			`images/productos/${UUID}.jpg.jpg`,
+			`images/productos/${UUID}.svg`,
+			`images/otra/${UUID}.jpg`,
+			`images/productos/../${UUID}.jpg`,
+			`images/productos/${UUID}`,
+		]) {
+			expect(RUTA_DE_IMAGEN.test(mala), mala).toBe(false);
+		}
 	});
 });
 

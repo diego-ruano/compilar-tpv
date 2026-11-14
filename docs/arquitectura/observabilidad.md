@@ -323,8 +323,10 @@ filtro de datos personales no llega ahí**.
 
 Por eso **ningún dato personal ni texto libre viaja en la URL** (AUD-27): va en el cuerpo de un POST,
 y en la query sólo quedan identificadores, fechas, filtros cerrados y paginación. La regla y los tests
-que la vigilan, en [worker.md](worker.md#cómo-se-escribe-una-ruta). Lo que queda fuera de ella, el
-nombre de una imagen heredada, es [OBS-06](../pendientes.md#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url).
+que la vigilan, en [worker.md](worker.md#cómo-se-escribe-una-ruta). La ruta de una imagen va en el
+camino, y su nombre es siempre el UUID que le pone la app: las heredadas, guardadas antes con el
+nombre que alguien les dio, se renombran antes de subir nada (OBS-06,
+[worker.md](worker.md#imágenes)).
 
 Cloudflare puede además quitar la query de las URL que registra, con el ajuste
 `observability.redact_query_string` del worker. **No sale de `wrangler.json`**: el Wrangler con el que

@@ -461,7 +461,18 @@ Noble sólo sirve de referencia independiente en tests. Placement sigue desactiv
 
 ## Imágenes
 
-Se guardan en R2 con prefijo por tenant y una expresión contra rutas con `..` (`REL_PATH_RE`). El GET
+Se guardan en R2 con prefijo por tenant, y su ruta es siempre `images/{carpeta}/{uuid}.{ext}`: una
+carpeta de la lista y por nombre el UUID que le pone la app al guardarla (`RUTA_DE_IMAGEN`,
+`domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`). Esa ruta va en el camino de
+`/v1/images/…` y en la dirección pública de `r2.dev`, y Cloudflare guarda la URL de cada petición: un
+nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
+guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada
+(`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, cambia las filas
+que la usan (productos, categorías, proveedores y alérgenos) en una transacción por `WriteGuard`, que
+sube a la nube, borra el fichero de antes y encola el nuevo. Una que no usa ninguna fila se queda
+como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
+pide a `r2.dev` (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
+`test/sinDatosPersonalesEnLaQuery.node.test.ts`. El GET
 público las sirve con `max-age=31536000, immutable`; borrar una la quita también del caché del edge,
 pero **sólo del centro de datos que atiende la petición** (barrer los demás pediría el API de purga). La
 Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl.ts`,

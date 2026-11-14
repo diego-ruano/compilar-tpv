@@ -1163,7 +1163,8 @@ async fn save_image(app: AppHandle, state: State<'_, AppState>, args: SaveImageA
     }
 
     let subfolder = normalize_required(&args.subfolder, "Falta la carpeta de la imagen.")?;
-    if !is_safe_image_rel_path(&format!("images/{subfolder}/validacion.jpg")) {
+    // La carpeta, con un nombre de los que pone la app (OBS-06: sólo se admite un UUID).
+    if !is_safe_image_rel_path(&format!("images/{subfolder}/{}.jpg", uuid::Uuid::nil())) {
         return Err("Carpeta de imagen no válida".into());
     }
     // Base64 añade un tercio: limitar antes de decodificar o copiar la entrada.
@@ -1406,9 +1407,75 @@ async fn images_ensure_local(
     }
 }
 
-/// Backfill único: encola todas las imágenes existentes en disco que aún no estén en el bucket.
-/// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
-/// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
+/// Las carpetas de las imágenes que usan las filas del negocio (`Ruta_Imagen`): las que repasa el
+/// backfill.
+const CARPETAS_DEL_BACKFILL: [&str; 4] = ["productos", "categorias", "proveedores", "alergenos"];
+
+/// OBS-06 · Las imágenes heredadas (guardadas antes de que la app les pusiera un UUID, con el nombre
+/// que alguien le dio al fichero) pasan a un nombre opaco antes de que ese nombre salga en ninguna
+/// petición: la ruta de una imagen viaja en la URL con la que se sube, se sirve y se borra.
+///
+/// Por cada una que usa alguna fila: se copia con su nombre nuevo, se cambian las filas que la usan
+/// (`tpv_infra_sqlite::imagenes::renombrar_imagen`, por `WriteGuard`, así que sube a la nube), se
+/// borra el fichero de antes y se encola el nuevo, quitando de la cola el viejo si estaba. En ese
+/// orden, si algo falla a medias las filas siguen apuntando a un fichero que existe. Una que no usa
+/// nadie se queda como está: ni se renombra ni se sube. Devuelve cuántas ha renombrado.
+async fn renombrar_imagenes_heredadas(app_data_dir: &Path, db: &Db) -> Result<u32, String> {
+    let cola = ColaImagenes::new(app_data_dir);
+    let mut renombradas = 0u32;
+    for sub in CARPETAS_DEL_BACKFILL {
+        let Ok(entradas) = fs::read_dir(app_data_dir.join("images").join(sub)) else {
+            continue;
+        };
+        for entrada in entradas.flatten() {
+            let origen = entrada.path();
+            if !origen.is_file() {
+                continue;
+            }
+            let Some(nombre) = entrada.file_name().to_str().map(String::from) else {
+                continue;
+            };
+            let antes = format!("images/{sub}/{nombre}");
+            let Some(despues) = imagenes::nombre_opaco(&antes) else {
+                continue;
+            };
+            if !tpv_infra_sqlite::imagenes::imagen_en_uso(db, &antes).await.map_err(|e| e.to_string())? {
+                continue;
+            }
+            let destino = imagenes::destino(app_data_dir, &despues, false)?;
+            fs::copy(&origen, &destino).map_err(|e| format!("No se pudo copiar una imagen heredada: {e}"))?;
+            match tpv_infra_sqlite::imagenes::renombrar_imagen(db, &antes, &despues).await {
+                Ok(0) => {
+                    // Entretanto ha dejado de usarla nadie.
+                    let _ = fs::remove_file(&destino);
+                    continue;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = fs::remove_file(&destino);
+                    return Err(e.to_string());
+                }
+            }
+            if let Err(e) = fs::remove_file(&origen) {
+                // Ya no la usa nadie: el repaso siguiente la deja como está.
+                tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudo borrar una imagen heredada ya renombrada");
+            }
+            cola.descartar(&antes)?;
+            enqueue_image(app_data_dir, &despues, content_type_for(&despues))?;
+            renombradas += 1;
+        }
+    }
+    Ok(renombradas)
+}
+
+/// Backfill: encola una vez las imágenes que ya había en disco, para Mains que las tenían antes de
+/// existir R2. Un marcador evita volver a encolarlas en cada arranque. La subida real la hace
+/// `images_drain_pending`.
+///
+/// OBS-06: antes, en cada arranque de la Main, las heredadas pasan a un nombre opaco
+/// (`renombrar_imagenes_heredadas`). Lo que se encola, se sube, se baja o se borra es siempre una
+/// imagen con un UUID por nombre (`imagenes::ruta_segura`): una heredada que no se ha podido
+/// renombrar no sale del equipo.
 #[tauri::command]
 #[specta::specta]
 async fn images_backfill(
@@ -1421,25 +1488,39 @@ async fn images_backfill(
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
     let marker = app_data_dir.join("image_backfill_done");
-    if marker.exists() {
-        return Ok("ya_hecho".into());
-    }
 
     // Sólo la Main tiene imágenes locales pre-existentes; en Handy marcamos y salimos.
     let is_main = matches!(*state.mode.lock().await, Some(DeviceMode::Tpv));
     if !is_main {
-        let _ = fs::write(&marker, b"handy");
+        if !marker.exists() {
+            let _ = fs::write(&marker, b"handy");
+        }
         return Ok("no_aplica".into());
     }
 
-    // AUD-06: las imágenes que hay son del negocio de la base. Sólo se encolan si es el de la
+    // AUD-06: las imágenes que hay son del negocio de la base. Sólo se tocan si es el de la
     // licencia y se está usando; si no, se espera (sin dar el repaso por hecho).
     if negocio_de_la_base_en_uso(&state, &app_data_dir).await.is_none() {
         return Ok("base_de_otro_negocio".into());
     }
+    let Some(db) = state.db.lock().await.as_ref().cloned() else {
+        return Ok("base_de_otro_negocio".into());
+    };
+
+    let renombradas = match renombrar_imagenes_heredadas(&app_data_dir, &db).await {
+        Ok(n) => n,
+        Err(e) => {
+            // El arranque siguiente lo vuelve a intentar; mientras tanto, la heredada no sale.
+            tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudieron renombrar las imágenes heredadas");
+            0
+        }
+    };
+    if marker.exists() {
+        return Ok(format!("ya_hecho renombradas={renombradas}"));
+    }
 
     let mut encoladas = 0u32;
-    for sub in ["productos", "categorias", "proveedores", "alergenos"] {
+    for sub in CARPETAS_DEL_BACKFILL {
         let dir = app_data_dir.join("images").join(sub);
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
@@ -1462,7 +1543,7 @@ async fn images_backfill(
     }
 
     let _ = fs::write(&marker, b"done");
-    Ok(format!("encoladas={encoladas}"))
+    Ok(format!("encoladas={encoladas} renombradas={renombradas}"))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2950,11 +3031,16 @@ mod tests_ruta_del_logo {
     // AUD-30: el valor llega replicado, así que sólo se lee una imagen guardada, y no más de lo
     // que pesa una admitida, venga como fichero o como data URL.
 
+    /// El logo de las pruebas, con el nombre que le pone `save_image` (un UUID, OBS-06).
+    const LOGO: &str = "images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.png";
+    /// Otro nombre de los que pone la app, en la misma carpeta.
+    const GRANDE: &str = "images/logo/0190f3a1-7b2c-4d4e-8f00-0000000000ff.png";
+
     /// `temporal()` con un logo donde lo deja `save_image`.
     fn con_logo() -> std::path::PathBuf {
         let dir = temporal();
         std::fs::create_dir_all(dir.join("images/logo")).unwrap();
-        std::fs::write(dir.join("images/logo/logo.png"), b"logo").unwrap();
+        std::fs::write(dir.join(LOGO), b"logo").unwrap();
         dir
     }
 
@@ -2962,10 +3048,10 @@ mod tests_ruta_del_logo {
     fn un_logo_se_lee_del_disco_o_de_un_data_url() {
         let dir = con_logo();
 
-        assert_eq!(leer_imagen_local(Some(&dir), "images/logo/logo.png").as_deref(), Some(&b"logo"[..]));
+        assert_eq!(leer_imagen_local(Some(&dir), LOGO).as_deref(), Some(&b"logo"[..]));
         // «logo» en base64.
         assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw==").as_deref(), Some(&b"logo"[..]));
-        assert_eq!(leer_imagen_local(Some(&dir), "images/logo/no_esta.png"), None);
+        assert_eq!(leer_imagen_local(Some(&dir), GRANDE), None);
     }
 
     #[test]
@@ -2975,7 +3061,9 @@ mod tests_ruta_del_logo {
         // igual que `COM1` se abriría como un puerto serie del que no se acaba de leer.
         let dir = con_logo();
 
-        for ruta in ["images/logo.png", "NUL", "../../secreto.png", "C:/Windows/win.ini"] {
+        std::fs::write(dir.join("images/logo/logo.png"), b"logo").unwrap();
+        // OBS-06: ni una heredada, con el nombre que alguien le dio.
+        for ruta in ["images/logo.png", "images/logo/logo.png", "NUL", "../../secreto.png", "C:/Windows/win.ini"] {
             assert_eq!(leer_imagen_local(Some(&dir), ruta), None, "{ruta}");
         }
     }
@@ -2993,10 +3081,10 @@ mod tests_ruta_del_logo {
     #[test]
     fn un_fichero_mas_grande_que_una_imagen_admitida_no_se_lee() {
         let dir = con_logo();
-        let grande = dir.join("images/logo/grande.png");
+        let grande = dir.join(GRANDE);
         std::fs::File::create(&grande).unwrap().set_len((imagenes::MAX_BYTES + 1) as u64).unwrap();
 
-        let leido = leer_imagen_local(Some(&dir), "images/logo/grande.png");
+        let leido = leer_imagen_local(Some(&dir), GRANDE);
         std::fs::remove_file(&grande).unwrap();
 
         assert!(leido.is_none(), "se han leído {} bytes", leido.map_or(0, |b| b.len()));
@@ -3462,6 +3550,68 @@ mod tests_solo_en_la_main {
         for (acceso, error) in errores(&st).await {
             assert!(error.is_none(), "{acceso}: {:?}", error.map(|e| e.message));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_imagenes_heredadas {
+    //! OBS-06: una imagen heredada que usa alguna fila pasa a un UUID antes de que su nombre salga
+    //! en ninguna petición: el fichero, las filas (por `WriteGuard`, al outbox) y la cola de subida.
+
+    use super::*;
+    use tpv_infra_sqlite::db::Reader;
+    use tpv_infra_sqlite::ejecutor::Value;
+
+    const HEREDADA: &str = "images/proveedores/Juan-Perez.jpg";
+    const SIN_USO: &str = "images/proveedores/sin-uso.png";
+    const YA_OPACA: &str = "images/proveedores/0190f3a1-7b2c-4d4e-8f00-123456789abc.jpg";
+
+    async fn texto(db: &Db, sql: &str) -> Vec<String> {
+        let r = db.read().await;
+        let mut filas = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let mut salida = Vec::new();
+        while let Some(fila) = filas.next().await.unwrap() {
+            salida.push(tpv_infra_sqlite::mapping::v_string(fila.get_value(0).unwrap()).unwrap_or_default());
+        }
+        salida
+    }
+
+    #[tokio::test]
+    async fn la_heredada_en_uso_pasa_a_un_uuid_con_sus_filas_y_su_entrada_en_la_cola() {
+        let dir = std::env::temp_dir().join(format!("tpv-heredadas-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("images/proveedores")).unwrap();
+        for (rel, bytes) in [(HEREDADA, &b"jpg"[..]), (SIN_USO, b"png"), (YA_OPACA, b"otra")] {
+            std::fs::write(dir.join(rel), bytes).unwrap();
+        }
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute(
+                "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Nombre_Imagen, Ruta_Imagen) VALUES ('p', 'Juan', 'Juan-Perez.jpg', ?1);",
+                vec![Value::Text(HEREDADA.into())],
+            )
+            .await
+            .unwrap();
+        // Como la dejaba encolada el backfill de antes, con su nombre.
+        enqueue_image(&dir, HEREDADA, "image/jpeg").unwrap();
+
+        assert_eq!(renombrar_imagenes_heredadas(&dir, &db).await.unwrap(), 1);
+
+        let ruta = texto(&db, "SELECT Ruta_Imagen FROM Proveedores;").await.remove(0);
+        assert!(imagenes::ruta_segura(&ruta) && ruta.starts_with("images/proveedores/") && ruta.ends_with(".jpg"), "{ruta}");
+        assert_eq!(std::fs::read(dir.join(&ruta)).unwrap(), b"jpg");
+        assert!(!dir.join(HEREDADA).exists());
+        assert_eq!(texto(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, vec!["1".to_string()]);
+        let cola: Vec<String> = ColaImagenes::new(&dir).pendientes().unwrap().into_iter().map(|i| i.rel_path).collect();
+        assert_eq!(cola, vec![ruta.clone()]);
+        // La que no usa nadie se queda como estaba, sin subir; la que ya era opaca, también.
+        assert!(dir.join(SIN_USO).exists() && dir.join(YA_OPACA).exists());
+
+        // El repaso siguiente no encuentra nada que hacer.
+        assert_eq!(renombrar_imagenes_heredadas(&dir, &db).await.unwrap(), 0);
+        assert_eq!(texto(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, vec!["1".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

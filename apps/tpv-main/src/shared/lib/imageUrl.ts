@@ -66,6 +66,15 @@ function isAbsoluteUrl(u: string): boolean {
 }
 
 /**
+ * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en la URL
+ * pública de `r2.dev`, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el UUID que le
+ * pone la app (una heredada que la Main no ha podido renombrar, con el nombre que alguien le dio).
+ * Lo mismo que piden la Main (`imagenes::ruta_segura`) y el worker (`RUTA_DE_IMAGEN`).
+ */
+const RUTA_DE_IMAGEN =
+  /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp)$/i;
+
+/**
  * Resuelve una `Ruta_Imagen` (relativa) a una URL utilizable para `<img src>`.
  * Si ya viene como URL absoluta, la devuelve tal cual. Cadena vacía → "".
  * Una ruta que empieza por «/» es de la propia aplicación (`public/`, como los iconos de los
@@ -83,6 +92,7 @@ export async function resolveImageUrl(
   if (cached) return cached;
 
   if (useMode.getState().mode === "handy") {
+    if (!RUTA_DE_IMAGEN.test(r)) return "";
     const tenant = await getHandyTenant();
     if (!tenant || vigente !== contexto) return "";
     const url = `${CDN_IMAGES_BASE}/${tenant}/${r}`;

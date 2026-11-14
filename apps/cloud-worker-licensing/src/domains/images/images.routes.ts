@@ -25,6 +25,8 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { cuerpoConIdentificador } from "../../lib/validacion";
+// Lo que viaja en el camino: una carpeta de la lista y un UUID con su extensión (OBS-06).
+import { RUTA_DE_IMAGEN } from "./rutaDeImagen";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -38,11 +40,6 @@ export function prefijoDelNegocio(tenantId: string): string {
 }
 
 export const imagesRoutes = new Hono<Ctx>();
-
-// Sólo se permiten estas subcarpetas y nombres de archivo seguros (uuid + extensión).
-// Evita path traversal y claves arbitrarias en el bucket.
-const REL_PATH_RE =
-	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png|webp)$/i;
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB (la Main ya comprime antes de subir)
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -73,7 +70,7 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	const tenant = (c.req.param("tenant") || "").trim();
 	// Hono no registra `*` como parámetro con nombre. Derivar la ruta del pathname montado.
 	const relPath = relPathFromUrl(c.req.url).split("/").slice(1).join("/");
-	if (!tenant || !REL_PATH_RE.test(relPath)) {
+	if (!tenant || !RUTA_DE_IMAGEN.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 
@@ -118,7 +115,7 @@ function relPathFromUrl(url: string): string {
 
 imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ error: "image_too_large" }, 413) }), tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
-	if (!REL_PATH_RE.test(relPath)) {
+	if (!RUTA_DE_IMAGEN.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 
@@ -152,7 +149,7 @@ imagesRoutes.post(
 			rel_path: z
 				.string({ message: "bad_image_path" })
 				.trim()
-				.regex(REL_PATH_RE, { message: "bad_image_path" }),
+				.regex(RUTA_DE_IMAGEN, { message: "bad_image_path" }),
 		}),
 	),
 	async (c) => {
@@ -183,7 +180,7 @@ function urlPublica(reqUrl: string, tenantId: string, relPath: string): string {
 
 imagesRoutes.delete("/*", tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
-	if (!REL_PATH_RE.test(relPath)) {
+	if (!RUTA_DE_IMAGEN.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 	const tenantId = c.get("tenantId");
