@@ -467,10 +467,11 @@ carpeta de la lista y por nombre el UUID que le pone la app al guardarla (`RUTA_
 `/v1/images/…` y en la dirección pública de `r2.dev`, y Cloudflare guarda la URL de cada petición: un
 nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
 guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada
-(`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, cambia las filas
-que la usan (productos, categorías, proveedores y alérgenos) en una transacción por `WriteGuard`, que
-sube a la nube, borra el fichero de antes y encola el nuevo. Una que no usa ninguna fila se queda
-como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
+(`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, encola la copia,
+cambia las filas que la usan (productos, categorías, proveedores y alérgenos) en una transacción por
+`WriteGuard`, que sube a la nube, y borra el fichero de antes. Encolada antes de cambiar las filas,
+un corte a medias no deja ninguna fila apuntando a una imagen que no va a subir. Una que no usa
+ninguna fila se queda como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
 pide a `r2.dev` (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
 `test/sinDatosPersonalesEnLaQuery.node.test.ts`. El GET
 público las sirve con `max-age=31536000, immutable`; borrar una la quita también del caché del edge,

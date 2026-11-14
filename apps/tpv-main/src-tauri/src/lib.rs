@@ -1415,10 +1415,13 @@ const CARPETAS_DEL_BACKFILL: [&str; 4] = ["productos", "categorias", "proveedore
 /// que alguien le dio al fichero) pasan a un nombre opaco antes de que ese nombre salga en ninguna
 /// petición: la ruta de una imagen viaja en la URL con la que se sube, se sirve y se borra.
 ///
-/// Por cada una que usa alguna fila: se copia con su nombre nuevo, se cambian las filas que la usan
-/// (`tpv_infra_sqlite::imagenes::renombrar_imagen`, por `WriteGuard`, así que sube a la nube), se
-/// borra el fichero de antes y se encola el nuevo, quitando de la cola el viejo si estaba. En ese
-/// orden, si algo falla a medias las filas siguen apuntando a un fichero que existe. Una que no usa
+/// Por cada una que usa alguna fila: se copia con su nombre nuevo, se encola la copia, se cambian
+/// las filas que la usan (`tpv_infra_sqlite::imagenes::renombrar_imagen`, por `WriteGuard`, así que
+/// sube a la nube), se borra el fichero de antes y se quita de la cola el viejo si estaba. En ese
+/// orden, si algo se corta a medias las filas apuntan a un fichero que existe y está en la cola: la
+/// copia se encola antes de cambiar las filas porque, cambiadas, ya no es heredada y el marcador del
+/// backfill no la volvería a encolar. Una copia que se queda sin filas (el cambio falla o se corta
+/// antes) sale de la cola si se puede, y si no, se sube sin que la use nadie. Una heredada que no usa
 /// nadie se queda como está: ni se renombra ni se sube. Devuelve cuántas ha renombrado.
 async fn renombrar_imagenes_heredadas(app_data_dir: &Path, db: &Db) -> Result<u32, String> {
     let cola = ColaImagenes::new(app_data_dir);
@@ -1444,25 +1447,35 @@ async fn renombrar_imagenes_heredadas(app_data_dir: &Path, db: &Db) -> Result<u3
             }
             let destino = imagenes::destino(app_data_dir, &despues, false)?;
             fs::copy(&origen, &destino).map_err(|e| format!("No se pudo copiar una imagen heredada: {e}"))?;
+            let deshacer_la_copia = || {
+                let _ = cola.descartar(&despues);
+                let _ = fs::remove_file(&destino);
+            };
+            if let Err(e) = enqueue_image(app_data_dir, &despues, content_type_for(&despues)) {
+                deshacer_la_copia();
+                return Err(e);
+            }
             match tpv_infra_sqlite::imagenes::renombrar_imagen(db, &antes, &despues).await {
                 Ok(0) => {
                     // Entretanto ha dejado de usarla nadie.
-                    let _ = fs::remove_file(&destino);
+                    deshacer_la_copia();
                     continue;
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = fs::remove_file(&destino);
+                    deshacer_la_copia();
                     return Err(e.to_string());
                 }
             }
+            renombradas += 1;
+            // Ya no la usa nadie. Si no se puede borrar, el repaso siguiente la deja como está; y si
+            // no sale de la cola, el drenaje la aparta sin subirla (`imagenes::ruta_segura`).
             if let Err(e) = fs::remove_file(&origen) {
-                // Ya no la usa nadie: el repaso siguiente la deja como está.
                 tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudo borrar una imagen heredada ya renombrada");
             }
-            cola.descartar(&antes)?;
-            enqueue_image(app_data_dir, &despues, content_type_for(&despues))?;
-            renombradas += 1;
+            if let Err(e) = cola.descartar(&antes) {
+                tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudo quitar de la cola una imagen heredada ya renombrada");
+            }
         }
     }
     Ok(renombradas)
@@ -3611,6 +3624,37 @@ mod tests_imagenes_heredadas {
         // El repaso siguiente no encuentra nada que hacer.
         assert_eq!(renombrar_imagenes_heredadas(&dir, &db).await.unwrap(), 0);
         assert_eq!(texto(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, vec!["1".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Si no se pueden cambiar las filas, no queda nada a medias: ni la copia, ni su entrada en la cola.
+    #[tokio::test]
+    async fn si_no_se_pueden_cambiar_las_filas_no_queda_la_copia_ni_su_entrada_en_la_cola() {
+        let dir = std::env::temp_dir().join(format!("tpv-heredadas-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("images/proveedores")).unwrap();
+        std::fs::write(dir.join(HEREDADA), b"jpg").unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute(
+                "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Ruta_Imagen) VALUES ('p', 'Juan', ?1);",
+                vec![Value::Text(HEREDADA.into())],
+            )
+            .await
+            .unwrap();
+        // Como durante una recuperación: no entra ninguna escritura de negocio.
+        db.bloquear_escrituras_de_negocio(true);
+
+        assert!(renombrar_imagenes_heredadas(&dir, &db).await.is_err());
+
+        assert_eq!(texto(&db, "SELECT Ruta_Imagen FROM Proveedores;").await, vec![HEREDADA.to_string()]);
+        let ficheros: Vec<String> = std::fs::read_dir(dir.join("images/proveedores"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(ficheros, vec!["Juan-Perez.jpg".to_string()]);
+        assert!(ColaImagenes::new(&dir).pendientes().unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
