@@ -471,11 +471,11 @@ su actividad, no con el latido (que no despierta al DO): la presencia real la da
 
 ## Eventos de `tpv-sync`
 
-Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
+Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 
 | `event` | Cuándo |
 |---|---|
-| `apply_error` | Una escritura falla en el DO: una suelta o una operación de un lote de la Main. `command_name`, `op_id`, `device_id` y error recortado (en una suelta, también `latency_ms`), sin el comando ni sus args |
+| `apply_error` | Una escritura falla en el DO: una de la Handy o una operación de un lote de la Main. `command_name`, `op_id`, `device_id` y error recortado (en una de la Handy, también `latency_ms`), sin el comando ni sus args |
 | `main_online` / `main_offline` | Una Main se autentica / se va la última (freeze de las Handy) |
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |

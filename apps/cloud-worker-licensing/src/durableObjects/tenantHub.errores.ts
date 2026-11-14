@@ -9,7 +9,7 @@
 // detrás detenidas, y sin decírselo a nadie.
 //
 // Quien tiene la excepción delante es el DO, así que la clasificación vive aquí y viaja en el acuse
-// (`apply_lote_ack`, operación a operación, y `apply_ack`).
+// (`apply_lote_ack`, operación a operación).
 // El cliente NO debe mirar el texto: un mensaje cambia de redacción entre versiones y esa clase de
 // comparación se pudre sin que nada falle de forma visible.
 //

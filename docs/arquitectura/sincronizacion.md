@@ -167,9 +167,8 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **El esquema no tiene `DEFAULT` de hora** (lo vigila un test): quien inserta, la informa.
 - En la nube sólo se puede fijar la hora **local** del emisor (`X-Client-Now`). Un `'now'` en UTC o un
   `CURRENT_*` en una escritura de la Handy se rechaza (`hora_no_determinista`), y lo mismo si falta
-  `X-Client-Now` o no vale (`missing_client_now`), **sea cual sea el camino**: un `apply` suelto o
-  cada operación de un lote. Los
-  dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
+  `X-Client-Now` o no vale (`missing_client_now`), **sea cual sea el camino**: una escritura de la
+  Handy o cada operación de un lote de la Main. Los dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
   (`lib/fechas.ts::diaDeInstante`: ni las 24:30 ni un 29 de febrero que no existe, AUD-21) a menos de
   14 h 05 min del reloj del worker (`tenantHub.tiempo.ts::parseClientNow`).
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
@@ -239,7 +238,7 @@ no cierra el socket).
 
 **Quién es la Main lo dice una tabla del propio DO** (`_Main_Vigente`, `tenantHub.main.ts`), y lo
 que depende de ello la mira sin esperar a nadie (`esLaMain`). Sólo la sesión `tpv` autenticada, no
-echada y del dispositivo que nombra la tabla escribe (`apply`, `apply_lote`) y suelta a las Handy
+echada y del dispositivo que nombra la tabla escribe (`apply_lote`) y suelta a las Handy
 (`recovery_ready`); recibe lo del negocio (cambios,
 `pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
 `isMainReady`, `isMainRecovering`). Si la tabla dice que no hay Main (la licencia está anulada),
@@ -260,7 +259,7 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
   sesión `tpv` dentro. Quien pregunta se queda la marca de la tabla antes de esperar
   (`tocaComprobar`) y los demás siguen con lo que dice la tabla: veinte mensajes a la vez son una
   lectura, sin promesas compartidas ni campos de instancia. Esperan la respuesta antes de decidir:
-  - lo que la Main manda y entra en el acto (`apply` y `apply_lote`), **en fila**
+  - lo que la Main manda y entra en el acto (`apply_lote`), **en fila**
     (`enTurnoDeEntrada`): si al primero le toca esperar, los de detrás esperan con él y entran en el
     orden en que llegaron, porque la fila no suelta al siguiente hasta que el anterior tiene sitio en
     el turno del log (`alReservarTurno`), que es lo que fija el orden en que se confirman: antes de
@@ -371,8 +370,6 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   de sus operaciones) no ha aplicado nada. Si el rechazo habla de cómo está ella (`transitorio`), no
   cuenta; si no, no dice por cuál, y se repite de una en una. Un mensaje que no le cabe
   (`payload_too_large`) sólo puede ser de una operación enorme, que sola se aparta.
-- **Contra una nube que no conoce los lotes** (`unknown_type`), el resto de la sesión sube con `apply`
-  suelto y su `apply_ack` (10 s de espera), con las mismas reglas.
 - **Quien clasifica un fallo es el DO**, que tiene la excepción delante (`tenantHub.errores.ts`), y el
   veredicto viaja en el acuse: `permanente` (apartar ya), `transitorio` (`esFalloPasajero`, no cuenta) o
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
@@ -479,8 +476,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
   refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
 - **Por el socket no hay más mensajes que los del protocolo**: el saludo (`connected`, `challenge`,
-  `helloSigned`, `hello_ok`), lo que sube la Main (`apply_lote`, `apply`, `recovery_ready` y sus
-  acuses), lo que baja (`change`) y los avisos
+  `helloSigned`, `hello_ok`), lo que sube la Main (`apply_lote`, `recovery_ready` y sus acuses), lo que baja (`change`) y los avisos
   (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`).
   Un dispositivo no manda mensajes a los demás, y no se difunde quién entra o sale: lo que hay que
   saber de los otros es si hay Main. Un tipo que no está en la lista se contesta `unknown_type`.

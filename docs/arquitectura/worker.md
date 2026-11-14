@@ -166,7 +166,7 @@ y los tipos se regeneran con `pnpm cf-typegen`.
     equipo que vuelve o el nuevo de un traslado) mira que su base esté antes de gastar el código y de
     tocar la fila del equipo, y no crea una vacía en su lugar;
   - si la base central no contesta, no se sabe: 500, y no se crea ni se ofrece nada;
-  - el socket de la Main no pasa por aquí: su `apply` sigue recibiendo `tenant_db_not_provisioned`,
+  - el socket de la Main no pasa por aquí: su `apply_lote` sigue recibiendo `tenant_db_not_provisioned`,
     que para su outbox es pasajero.
 
   Otro camino que activara una licencia tendría que crear antes la base. Lo cubre

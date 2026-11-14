@@ -24,8 +24,8 @@
 // `async` intermedia: mientras se espera pueden echar a la sesión, o cerrarse su socket, y el
 // attachment que se leyó antes ya no vale (`sesionAbierta`).
 //
-// `apply` y `apply_lote` esperan en fila (`enTurnoDeEntrada`): el orden en que entran es el orden
-// en que llegaron, también si al primero le toca esperar la comprobación. `recovery_ready` no la
+// Los `apply_lote` esperan en fila (`enTurnoDeEntrada`): el orden en que entran es el orden en que
+// llegaron, también si al primero le toca esperar la comprobación. `recovery_ready` no la
 // espera ni la pide: decide con la tabla tal como está, y a la Main no se le rechaza nunca.
 //
 // Un dispositivo no manda nada más por aquí. No hay mensajes de un dispositivo a los demás: lo que
@@ -45,7 +45,6 @@ import {
 import type {
 	AnyMsg,
 	ApplyLoteMsg,
-	ApplyMsg,
 	HelloSignedMsg,
 	InternalApplyCommand,
 	OpDeLote,
@@ -93,26 +92,11 @@ export interface ContextoDeMensajes {
 	comprobarMain(): Promise<void> | null;
 	/** Todo cierre que inicia el DO: la sesión queda fuera, se cierra y se contabiliza su salida. */
 	cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void;
-	/** AUD-02: en fila con lo demás que la Main manda y entra en el acto (`apply`, `apply_lote`). */
+	/** AUD-02: en fila con lo demás que la Main manda y entra en el acto (`apply_lote`). */
 	enTurnoDeEntrada(trabajo: () => Promise<void> | void): Promise<void>;
 
 	isMainConnected(except?: WebSocket): boolean;
 	isMainRecovering(): boolean;
-
-	applyInternalCommandIdempotent(params: {
-		tenantId: string;
-		cmd: InternalApplyCommand;
-		opId: string;
-		commandName: string;
-		deviceId?: string | null;
-		requestPayloadJson: string;
-		clientNow?: string | null;
-		allowWhileRecovering?: boolean;
-		/** AUD-02: el socket de la sesión que manda la escritura. */
-		sesion?: WebSocket;
-		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
-		alReservarTurno?: () => void;
-	}): Promise<{ result: any; seq: number }>;
 
 	/** El lote de la Main: sus operaciones en orden, en un turno, y el acuse dentro de él. */
 	aplicarLote(params: {
@@ -129,7 +113,7 @@ export interface ContextoDeMensajes {
  * Lo más que ocupa un mensaje que se llega a leer: por encima no se intenta ni trocear el JSON. Un
  * lote de la Main son como mucho 256 KB de sentencias, pero una operación va sola en su lote aunque
  * pase de ahí, y tiene que poder llegar a la base con cualquier valor que la base admita: el SQLite
- * del DO acepta como argumento algo más de 2 MiB (`test/applyAckVeredicto.test.ts`). Con el tope en
+ * del DO acepta como argumento algo más de 2 MiB (`test/veredictoDelAcuse.test.ts`). Con el tope en
  * 2 MiB, una operación que la base sí aceptaría se rechazaba por grande, y la Main la apartaba.
  */
 const MAX_MENSAJE = 4 * 1024 * 1024;
@@ -184,7 +168,6 @@ export async function despachar(
 
 	if (msg.type === "recovery_ready") return atenderRecoveryReady(ctx, ws, a, msg);
 	if (msg.type === "apply_lote") return atenderApplyLote(ctx, ws, a, msg);
-	if (msg.type === "apply") return atenderApply(ctx, ws, a, msg);
 
 	ctx.send(ws, { type: "error", error: "unknown_type" });
 }
@@ -322,8 +305,8 @@ export function atenderRecoveryReady(
 }
 
 /**
- * El lote de la Main: lo que sube de su outbox, hasta 200 operaciones de una vez, en orden. Es un
- * mensaje nuevo y no una variante de `apply`: quien no lo conozca contesta `unknown_type`.
+ * El lote de la Main: lo que sube de su outbox, hasta 200 operaciones de una vez, en orden. Es lo
+ * único que la Main escribe por aquí.
  *
  * El acuse (`apply_lote_ack`, con el `loteId` del mensaje) lleva el veredicto de cada operación
  * (`VeredictoDeLote`). Lo que afecta al lote entero sale con `ok: false` y su error, sin haber
@@ -341,7 +324,9 @@ async function atenderApplyLote(
 	const acusar = (cuerpo: Record<string, unknown>) =>
 		ctx.send(ws, { type: "apply_lote_ack", loteId, ...cuerpo });
 
-	// Sólo la Main ejecuta SQL crudo por el socket, como en `apply`.
+	// Autorización por rol: sólo la Main (`tpv`) ejecuta SQL crudo por el socket. El rol viene del
+	// saludo (la fila del dispositivo en la base central), nunca del cliente. Las escrituras de la
+	// Handy van por REST, como comandos de dominio acotados (`lib/hub.ts` → RPC `aplicar`).
 	if (a.role !== "tpv") {
 		acusar({ ok: false, error: "forbidden_not_tpv" });
 		return;
@@ -369,7 +354,7 @@ async function atenderApplyLote(
 			opId,
 			commandName,
 			cmd,
-			// El mismo cuerpo que hashea un `apply` suelto: la operación es la misma por los dos caminos.
+			// El cuerpo canónico que se hashea (`Request_Hash`): el reenvío de una operación casa con él.
 			requestPayloadJson: readRequestPayloadJson(item, buildInternalPayloadForHash(cmd)),
 			// La Main manda sus sentencias con la hora ya resuelta; si viniera, por operación o una vez
 			// para todo el lote.
@@ -391,8 +376,11 @@ async function atenderApplyLote(
 				return;
 			}
 
-			// Como en `apply`: la fila no suelta al siguiente hasta que el lote tiene sitio en el turno
-			// del log, que es lo que fija el orden en que se confirma. Lo que tarde después no la retiene.
+			// La fila no suelta al siguiente hasta que el lote tiene sitio en el turno del log
+			// (`alReservarTurno`), que es lo que fija el orden en que se confirman. Antes de eso el motor
+			// prepara cada operación (su hash) y abre la base del negocio (al despertar, el DO comprueba
+			// sus migraciones): son esperas, y un lote cuyas esperas acabaran antes se adelantaría al
+			// anterior. Lo que tarde después ya no retiene la fila.
 			let conSitio!: () => void;
 			const tieneSitio = new Promise<void>((r) => (conSitio = r));
 			ctx.waitUntil(
@@ -425,138 +413,6 @@ async function atenderApplyLote(
 			await tieneSitio;
 		}),
 	);
-}
-
-// Una escritura suelta de la Main por WS: se aplica al MISMO motor idempotente que las escrituras
-// REST de la Handy (commit en la base + broadcast del cambio al resto) y se contesta con su
-// `apply_ack`. La Main sube por lotes (`apply_lote`); esto es lo que entiende de ella una versión
-// que todavía no los manda.
-export async function atenderApply(
-	ctx: ContextoDeMensajes,
-	ws: WebSocket,
-	a: WsAttachment,
-	msg: ApplyMsg,
-): Promise<void> {
-	const { tenantId, deviceId } = a;
-
-	const m = msg as ApplyMsg;
-
-	// Autorización por rol: solo la Main (`tpv`) puede ejecutar SQL crudo
-	// por WS. El rol viene del helloSigned (BD central), nunca de la
-	// cabecera x-role del cliente. Las escrituras de la Handy van por
-	// REST → comandos de dominio acotados (hub.ts → /internal/apply).
-	if (a.role !== "tpv") {
-		ctx.send(ws, {
-			type: "apply_ack",
-			opId: String(m.opId ?? m.op_id ?? "").trim(),
-			ok: false,
-			error: "forbidden_not_tpv",
-		});
-		return;
-	}
-
-	const inner = m.command;
-	const cmdType = String(inner?.type || "").trim();
-	const opId = String(m.opId ?? m.op_id ?? "").trim();
-	const commandName = String(m.commandName ?? m.command_name ?? "").trim();
-
-	if (!cmdType || !opId || !commandName) {
-		ctx.send(ws, {
-			type: "apply_ack",
-			opId,
-			ok: false,
-			error: "missing_apply_fields",
-		});
-		return;
-	}
-
-	const cmd = {
-		type: inner!.type,
-		payload: inner!.payload,
-	} as InternalApplyCommand;
-
-	const requestPayloadJson = readRequestPayloadJson(m, buildInternalPayloadForHash(cmd));
-	// La Main ya manda sus sentencias con el tiempo resuelto a literal; aun así
-	// honramos un X-Client-Now si viniera (no hace daño: el rewrite es no-op).
-	const clientNow = String(
-		getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
-	);
-
-	// AUD-02: el rol `tpv` no basta: tiene que ser la sesión de la Main. Y lo que manda entra en
-	// fila (`enTurnoDeEntrada`), con sus lotes, en el orden en que llegó: si al primero le toca
-	// esperar la comprobación por actividad, los de detrás esperan con él. Tras esa espera, que es la
-	// última, la sesión como está ahora.
-	ctx.waitUntil(
-		ctx.enTurnoDeEntrada(async () => {
-			await ctx.comprobarMain();
-			if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
-				ctx.send(ws, { type: "apply_ack", opId, ok: false, error: "not_authenticated" });
-				return;
-			}
-
-			// La fila no suelta al siguiente hasta que éste tiene sitio en el turno del log
-			// (`alReservarTurno`), que es lo que fija el orden en que se confirman. Antes de eso el motor
-			// calcula el hash y abre la base del negocio (que al despertar el DO comprueba sus
-			// migraciones): son esperas, y el segundo, si las suyas acababan antes, se le adelantaba. Lo
-			// que tarde la escritura después ya no retiene la fila. La escritura lleva su socket
-			// (`sesion`) para que el motor vuelva a mirar la sesión dentro del turno, justo antes de
-			// aplicarla.
-			let conSitio!: () => void;
-			const tieneSitio = new Promise<void>((r) => (conSitio = r));
-			ctx.waitUntil(
-				(async () => {
-					try {
-						const { result, seq } = await ctx.applyInternalCommandIdempotent({
-							tenantId,
-							cmd,
-							opId,
-							commandName,
-							deviceId,
-							requestPayloadJson,
-							clientNow,
-							allowWhileRecovering: true,
-							sesion: ws,
-							alReservarTurno: conSitio,
-						});
-						ctx.send(ws, {
-							type: "apply_ack",
-							opId,
-							ok: true,
-							result,
-							// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
-							seq,
-						});
-					} catch (e: any) {
-						capturarError(e, "sync.apply");
-						// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
-						// delante es este DO; el cliente no puede deducirlo del texto sin acabar
-						// comparando mensajes, que cambian de redacción entre versiones. Sin esto,
-						// la subida trataba todo como transitorio y una sentencia que el esquema del
-						// tenant no admite paraba el outbox entero para siempre.
-						//
-						// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de la base —que
-						// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
-						// cuatro baches bastaban para apartar una venta perfectamente buena. Son
-						// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y
-						// desconocido (cuenta, y acabará apartándose si no deja de fallar).
-						ctx.send(ws, {
-							type: "apply_ack",
-							opId,
-							ok: false,
-							error: String(e?.message || e),
-							permanente: esRechazoPermanente(e),
-							transitorio: esFalloPasajero(e),
-						});
-					} finally {
-						// La que falla antes de llegar al turno (sin Main, por ejemplo) también suelta la fila.
-						conSitio();
-					}
-				})(),
-			);
-			await tieneSitio;
-		}),
-	);
-	return;
 }
 
 /**

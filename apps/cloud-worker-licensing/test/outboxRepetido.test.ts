@@ -10,7 +10,8 @@
 // nadie sabe clasificar, el alta de un lote (cuyo movimiento va delante y sólo entra aplazando las
 // claves foráneas, AUD-20), una línea de una comanda que no existe y una sin la hora fijada.
 //
-//   (A) de una en una, con `apply`: es la referencia;
+//   (A) de una en una, en lotes de una operación (el ritmo de la Main tras dos lotes sin
+//       respuesta): es la referencia;
 //   (B) en lotes cortados como los corta la Main (200 operaciones o 256 KB de sentencias);
 //   (C) en lotes de tamaño al azar, con acuses que se pierden (el lote se reenvía entero) y lotes
 //       cortados a medias que se reenvían enteros.
@@ -235,14 +236,16 @@ async function recoger(m: MainEnElHub, historias: Record<string, string[]>, medi
 
 // ---- Las tres formas de subir ------------------------------------------------------------------
 
-/** (A) De una en una, como el `apply` suelto: se insiste en la que falla sin ser permanente. */
+/** (A) De una en una, cada una en su lote: se insiste en la que falla sin ser permanente. */
 async function deUnaEnUna(m: MainEnElHub, ops: OpDelOutbox[], historias: Record<string, string[]>): Promise<void> {
 	for (const op of ops) {
 		for (let intento = 0; ; intento++) {
 			if (intento > 3) throw new Error(`${op.opId} no entra`);
-			const acuse = await m.mandarApply(op);
-			anotar(historias, { ...acuse, opId: op.opId });
-			if (acuse.ok || acuse.permanente) break;
+			const acuse = await m.mandarLote([op]);
+			expect(acuse.ok, JSON.stringify(acuse).slice(0, 300)).toBe(true);
+			const v = acuse.resultados[0];
+			anotar(historias, v);
+			if (v.ok || v.permanente) break;
 		}
 	}
 }

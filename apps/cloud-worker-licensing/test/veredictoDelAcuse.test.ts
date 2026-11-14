@@ -1,12 +1,13 @@
-// test/applyAckVeredicto.test.ts
+// test/veredictoDelAcuse.test.ts
 //
-// SYNC-20, REV-11 · El veredicto que viaja en el `apply_ack` de una escritura de la Main.
+// SYNC-20, REV-11 · El veredicto que viaja en el acuse de lo que sube la Main (`apply_lote_ack`).
 //
-// La Main no mira el texto del error: aparta la operación si el ack dice `permanente`, no le gasta
+// La Main no mira el texto del error: aparta la operación si el acuse dice `permanente`, no le gasta
 // ningún intento si dice `transitorio`, y se lo cuenta si no dice ninguna de las dos cosas. Quien
-// clasifica es el DO (`tenantHub.errores.ts`), y aquí se comprueba con el motor de verdad: la
-// sentencia la rechaza el SQLite del Durable Object, o el fallo lo lanza el propio hub con su
-// código.
+// clasifica es el DO (`tenantHub.errores.ts`), y aquí se comprueba con el motor de verdad, cada
+// operación en un lote para ella: la sentencia la rechaza el SQLite del Durable Object, o el fallo lo
+// lanza el propio hub con su código. Lo que afecta al lote entero (un negocio sin base) sale en el
+// acuse del lote, con la misma clasificación.
 
 import { describe, expect, it } from "vitest";
 
@@ -25,7 +26,7 @@ type Preparado = {
 	eventos: { name: string; [campo: string]: unknown }[];
 	/** Hace que la base falle al escribir con este error; `null` la deja como está. */
 	romper: (error: unknown | null) => void;
-	/** Manda un `apply` por el socket de la Main y devuelve su ack. */
+	/** Manda la operación sola en un `apply_lote` y devuelve su veredicto (o el del lote, si lo rechaza entero). */
 	aplicar: (opId: string, sql: string, args?: unknown[]) => Promise<any>;
 	/** Lo mismo, con los pasos de la transacción tal cual. */
 	aplicarPasos: (opId: string, steps: unknown[]) => Promise<any>;
@@ -35,21 +36,20 @@ type Preparado = {
 function preparar(hub: any): Preparado {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
-	// El cliente de producción: el lote atómico y las claves foráneas aplazadas de `loteEnBruto`.
-	const base = clienteLocal(hub.state.storage);
-	let fallo: unknown | null = null;
-	const db = {
-		...base,
-		async batch(sentencias: any[], modo?: string) {
-			if (fallo && modo === "write") throw fallo;
-			return base.batch(sentencias, modo as any);
-		},
-	};
-	hub.getTenantDb = async () => db;
+	hub.getTenantDb = async () => clienteLocal(hub.state.storage);
 	hub.touchLastSeen = async () => {};
 	const eventos: Preparado["eventos"] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
 	laMainEs(hub, MAIN);
+
+	// El lote atómico de cada operación (`loteEnBruto`, con las claves foráneas aplazadas si hace
+	// falta), con un fallo delante si se pide.
+	let fallo: unknown | null = null;
+	const real = hub.loteLocal.bind(hub);
+	hub.loteLocal = (sentencias: any[], alAplazar: () => boolean) => {
+		if (fallo) throw fallo;
+		return real(sentencias, alAplazar);
+	};
 
 	const par = new WebSocketPair();
 	hub.state.acceptWebSocket(par[1], [MAIN]);
@@ -66,24 +66,28 @@ function preparar(hub: any): Preparado {
 	par[0].accept();
 	par[0].addEventListener("message", (ev: MessageEvent) => recibidos.push(JSON.parse(String(ev.data))));
 
+	let lotes = 0;
 	const aplicarPasos = async (opId: string, steps: unknown[]) => {
-		const desde = recibidos.length;
+		const loteId = `lote-${++lotes}`;
 		await hub.webSocketMessage(
 			par[1],
 			JSON.stringify({
-				type: "apply",
-				opId,
-				commandName: "x",
-				command: { type: "tenantDb.transaction", payload: { steps } },
+				type: "apply_lote",
+				loteId,
+				ops: [{ opId, commandName: "x", command: { type: "tenantDb.transaction", payload: { steps } } }],
 			}),
 		);
 		const limite = Date.now() + 3_000;
 		while (Date.now() < limite) {
-			const ack = recibidos.slice(desde).find((m) => m.type === "apply_ack" && m.opId === opId);
-			if (ack) return ack;
+			const acuse = recibidos.find((m) => m.type === "apply_lote_ack" && m.loteId === loteId);
+			if (acuse) {
+				if (!acuse.ok) return acuse;
+				expect(acuse.resultados).toHaveLength(1);
+				return acuse.resultados[0];
+			}
 			await new Promise((r) => setTimeout(r, 10));
 		}
-		throw new Error(`no llegó el apply_ack de ${opId}`);
+		throw new Error(`no llegó el acuse de ${opId}`);
 	};
 	const aplicar = (opId: string, texto: string, args: unknown[] = []) =>
 		aplicarPasos(opId, [{ kind: "execute", sql: texto, args }]);
@@ -93,7 +97,7 @@ function preparar(hub: any): Preparado {
 
 const ALTA = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);";
 
-describe("el apply_ack dice de qué clase es el fallo", () => {
+describe("el acuse dice de qué clase es el fallo", () => {
 	it("lo que rechaza el SQLite del DO por la sentencia es permanente", async () => {
 		await enElHub("ack-permanente", async (hub: any) => {
 			const { aplicar, eventos } = preparar(hub);
@@ -115,8 +119,8 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 				["un valor que no cabe en una fila", ALTA, ["z-grande", "a".repeat(3_000_000)]],
 			];
 			for (const [caso, texto, args] of CASOS) {
-				const ack = await aplicar(`op-${caso}`, texto, args);
-				expect(ack, `${caso}: ${ack.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
+				const v = await aplicar(`op-${caso}`, texto, args);
+				expect(v, `${caso}: ${v.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
 			}
 			// Y ninguno se ha tomado por una base llena.
 			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
@@ -135,8 +139,8 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 				["sin pasos", []],
 			];
 			for (const [caso, pasos] of CASOS) {
-				const ack = await aplicarPasos(`op-${caso}`, pasos);
-				expect(ack, `${caso}: ${ack.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
+				const v = await aplicarPasos(`op-${caso}`, pasos);
+				expect(v, `${caso}: ${v.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
 			}
 			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
 		});
@@ -145,19 +149,21 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 	it("una hora que tendría que poner la nube es permanente por su código", async () => {
 		await enElHub("ack-codigo-permanente", async (hub: any) => {
 			const { aplicar } = preparar(hub);
-			const ack = await aplicar("op-hora", "UPDATE Zonas SET Updated_At = CURRENT_TIMESTAMP;");
-			expect(ack).toMatchObject({ ok: false, permanente: true, transitorio: false });
-			expect(ack.error).toContain("hora_no_determinista");
+			const v = await aplicar("op-hora", "UPDATE Zonas SET Updated_At = CURRENT_TIMESTAMP;");
+			expect(v).toMatchObject({ ok: false, permanente: true, transitorio: false });
+			expect(v.error).toContain("hora_no_determinista");
 		});
 	});
 
-	it("un negocio sin base no le gasta intentos a la operación", async () => {
+	it("un negocio sin base no le gasta intentos a ninguna operación del lote", async () => {
 		await enElHub("ack-sin-base", async (hub: any) => {
 			const { aplicar } = preparar(hub);
 			hub.getTenantDb = async () => {
 				throw new HubError("tenant_db_not_provisioned", 404);
 			};
+			// No se ha aplicado nada: el acuse es del lote entero.
 			expect(await aplicar("op-sin-base", ALTA, ["z1", "Sala"])).toMatchObject({
+				type: "apply_lote_ack",
 				ok: false,
 				error: "tenant_db_not_provisioned",
 				permanente: false,

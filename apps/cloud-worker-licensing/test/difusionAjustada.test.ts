@@ -76,9 +76,16 @@ describe("un cambio lleva lo que se lee, y nada más", () => {
 
 			await hub.webSocketMessage(
 				main.servidor,
-				JSON.stringify({ type: "apply", opId: "op-main", commandName: "zona_alta", command: altaDeZona("z1"), cloud_payload: { nombre: "Zona z1" } }),
+				JSON.stringify({
+					type: "apply_lote",
+					loteId: "lote-1",
+					ops: [{ opId: "op-main", commandName: "zona_alta", command: altaDeZona("z1"), cloud_payload: { nombre: "Zona z1" } }],
+				}),
 			);
-			expect(await esperar(main, (m) => m.type === "apply_ack")).toMatchObject({ ok: true, seq: 1 });
+			expect(await esperar(main, (m) => m.type === "apply_lote_ack")).toMatchObject({
+				ok: true,
+				resultados: [{ opId: "op-main", ok: true, seq: 1 }],
+			});
 
 			const cambio = await esperar(handy, (m) => m.type === "change");
 			expect(cambio).toEqual({

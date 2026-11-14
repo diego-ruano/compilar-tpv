@@ -27,7 +27,7 @@
 //   (`app.onError`).
 // - **Se avisa** (Sentry y Axiom): es una avería que no se arregla sola ni desde el equipo.
 //
-// El socket de la Main no pasa por aquí: su `apply` sigue recibiendo `tenant_db_not_provisioned`,
+// El socket de la Main no pasa por aquí: su `apply_lote` sigue recibiendo `tenant_db_not_provisioned`,
 // que para su outbox es pasajero (`tenantHub.errores.ts`) y no ofrece nada a nadie.
 
 import type { Env } from "../env";

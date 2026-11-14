@@ -34,7 +34,6 @@ export interface ContextoDeRutas {
 		deviceId?: string | null;
 		requestPayloadJson: string;
 		clientNow?: string | null;
-		allowWhileRecovering?: boolean;
 	}): Promise<{ result: any; seq: number }>;
 }
 

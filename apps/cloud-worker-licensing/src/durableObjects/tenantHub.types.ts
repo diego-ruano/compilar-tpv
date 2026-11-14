@@ -7,7 +7,7 @@
 // Se agrupan en tres bloques:
 //   1. Sesión           — lo que describe a un socket conectado (`WsAttachment`).
 //   2. Mensajes del WS  — lo que un dispositivo puede mandar (`AnyMsg` y sus variantes).
-//   3. Comando interno  — el SQL replicable que llega por `/internal/apply` o por `apply`.
+//   3. Comando interno  — el SQL replicable que llega por el RPC `aplicar` o por `apply_lote`.
 
 export type Role = "tpv" | "handy" | "unknown";
 
@@ -58,10 +58,8 @@ export type HelloSignedMsg = {
 
 export type RecoveryReadyMsg = { type: "recovery_ready" };
 
-// Escritura de la Main por WS: lleva el comando interno (mismo envelope que
-// `/internal/apply`) para aplicarse en el motor idempotente del DO.
-export type ApplyMsg = {
-	type: "apply";
+/** Una operación de un `apply_lote`, tal como llega: el comando interno, para el motor idempotente. */
+export type OpDeLoteMsg = {
 	opId?: string;
 	op_id?: string;
 	commandName?: string;
@@ -78,12 +76,12 @@ export type ApplyMsg = {
 /**
  * Lo que la Main sube de su outbox, en orden y de una vez: hasta 200 operaciones por mensaje. El DO
  * las aplica una detrás de otra y contesta con un `apply_lote_ack` que lleva el veredicto de cada
- * una (`VeredictoDeLote`). Cada elemento de `ops` lleva lo mismo que un `apply` suelto.
+ * una (`VeredictoDeLote`).
  */
 export type ApplyLoteMsg = {
 	type: "apply_lote";
 	loteId?: string;
-	ops?: ApplyMsg[];
+	ops?: OpDeLoteMsg[];
 	client_now?: string;
 	clientNow?: string;
 };
@@ -117,7 +115,6 @@ export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
-	| ApplyMsg
 	| ApplyLoteMsg;
 
 /* =========================================================

@@ -737,7 +737,7 @@ async fn la_licencia_de_otro_negocio_espera_al_arranque_que_aparta_todo_lo_del_a
     let mut socket = Socket::default();
     replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
     assert!(
-        socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "apply_lote"),
+        socket.enviados.iter().all(|m| m["type"] != "apply_lote"),
         "{:?}",
         socket.enviados
     );

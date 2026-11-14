@@ -87,8 +87,8 @@ const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // AUD-02: plazo de la lectura que pone al día quién es la Main (`mainEnCentral`). Es una consulta
 // por índice, de milisegundos; puede ir delante de una escritura o dentro del turno del log, la
-// Main espera su `apply_ack` 10 s, y una base central colgada no puede comerse esa espera. Vencido,
-// es una lectura que no ha contestado: la tabla se queda como estaba.
+// Main espera el acuse de su lote 30 s, y una base central colgada no puede comerse esa espera.
+// Vencido, es una lectura que no ha contestado: la tabla se queda como estaba.
 const PLAZO_LEER_MAIN_MS = 5_000;
 
 // ---- El lote de la Main (`apply_lote`) -------------------------------------
@@ -143,8 +143,8 @@ export class MotorTenantHub {
 	// vuelo, así que al despertar vacía es lo correcto (SYNC-16, regla 4).
 	private turnoDelLog: Promise<void> = Promise.resolve();
 
-	// AUD-02: la cola de lo que la Main manda por el socket y entra en el acto (`apply` y
-	// `apply_lote`, ver `enTurnoDeEntrada`). Como el turno del log, es lo que está en vuelo y nada
+	// AUD-02: la cola de lo que la Main manda por el socket y entra en el acto (`apply_lote`, ver
+	// `enTurnoDeEntrada`). Como el turno del log, es lo que está en vuelo y nada
 	// más: lo que se pierda al descartar la instancia no tenía respuesta todavía, y la Main lo vuelve
 	// a mandar.
 	private turnoDeEntrada: Promise<void> = Promise.resolve();
@@ -502,7 +502,7 @@ export class MotorTenantHub {
 	 *
 	 * AUD-02: `alReservar` se llama en cuanto el trabajo tiene sitio en la cadena, antes de que
 	 * empiece. Es lo que espera la fila de entrada de la Main (`enTurnoDeEntrada`) para soltar al
-	 * siguiente `apply` o `apply_lote`: a partir de ahí el orden en que se confirman ya está fijado.
+	 * siguiente `apply_lote`: a partir de ahí el orden en que se confirman ya está fijado.
 	 */
 	private enTurnoDelLog<T>(trabajo: () => Promise<T>, alReservar?: () => void): Promise<T> {
 		const resultado = this.turnoDelLog.then(trabajo);
@@ -718,7 +718,7 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * AUD-02 · Lo que la Main manda por el socket y entra en el acto (`apply`, `apply_lote`), en fila:
+	 * AUD-02 · Lo que la Main manda por el socket y entra en el acto (`apply_lote`), en fila:
 	 * cada uno empieza cuando ha acabado el anterior. Si al primero le toca esperar la comprobación por
 	 * actividad, los de detrás esperan con él y salen en el orden en que llegaron; si no, la fila no
 	 * espera a nada. El outbox de la Main está ordenado (una línea necesita su comanda), y esperar
@@ -804,12 +804,6 @@ export class MotorTenantHub {
 		deviceId?: string | null;
 		requestPayloadJson: string;
 		clientNow?: string | null;
-		/** Lo que sube la Main entra aunque todavía tenga congeladas a las Handy (AUD-15). */
-		allowWhileRecovering?: boolean;
-		/** AUD-02: el socket de la sesión que manda la escritura (el `apply` de la Main). */
-		sesion?: WebSocket;
-		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
-		alReservarTurno?: () => void;
 	}): Promise<{ result: any; seq: number }> {
 		const {
 			tenantId,
@@ -832,35 +826,19 @@ export class MotorTenantHub {
 			throw new HubError("missing_command_name", 400);
 		}
 
-		// Freeze global: si no hay una Main (tpv) autenticada conectada, NO se
-		// aplica nada. Vale tanto para escrituras REST de la Handy como para el
-		// WS-write de la propia Main (que cuenta como presente al estar conectada).
+		// Freeze global: si no hay una Main (tpv) autenticada conectada, NO se aplica nada de lo que
+		// escribe la Handy por REST (lo que sube la Main va por `aplicarLote`).
 		//
 		// AUD-15: y si la Main todavía no se ha puesto al día (saluda con `recovering` y no lo
 		// suelta hasta que su outbox está vacío), la nube está a medio construir. Dejar escribir a
 		// una Handy sobre ese estado es pedir un choque (dos comandas abiertas para la misma mesa,
-		// por ejemplo). Se congela igual que sin Main, con otro motivo.
-		//
-		// Solo afecta a las escrituras que NO son el propio atraso: lo que sube la Main entra
-		// (`allowWhileRecovering`). Se mira aquí, para no esperar en balde, y otra vez dentro del
-		// turno, que es lo que vale.
+		// por ejemplo). Se congela igual que sin Main, con otro motivo. Se mira aquí, para no esperar
+		// en balde, y otra vez dentro del turno, que es lo que vale.
 		const exigirQueSePuedaEscribir = () => {
-			// AUD-02: la escritura de una Main lleva la sesión que la mandó, y esa sesión tiene que
-			// seguir siendo la de la Main también cuando le llega el turno. Mientras esperaba pudo
-			// trasladarse la licencia y echarse su socket; con la Main nueva ya conectada, las
-			// guardias de abajo pasaban y la operación del equipo anterior entraba
-			// (`allowWhileRecovering`). Lo mismo con la sesión que reemplaza una reconexión: la nueva
-			// vuelve a mandarla. Va antes de aplicar nada, así que lo que se rechaza aquí no ha tocado
-			// la base.
-			// Con el socket ya cerrado tampoco: nadie recibiría la respuesta, y la Main la vuelve a
-			// mandar al reconectar.
-			if (params.sesion && (params.sesion.readyState !== 1 || !this.esLaMain(this.att(params.sesion)))) {
-				throw new HubError("not_authenticated", 401);
-			}
 			if (!this.isMainConnected()) {
 				throw new HubError("main_offline", 400);
 			}
-			if (!params.allowWhileRecovering && !this.isMainReady()) {
+			if (!this.isMainReady()) {
 				throw new HubError("main_volcando", 400);
 			}
 		};
@@ -885,10 +863,7 @@ export class MotorTenantHub {
 		};
 		const { stmts: batchStmts, built, offsetTrabajo: MIDDLE_OFFSET } = loteDe(escritura, createdAtMs);
 
-		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`).
-		//
-		// AUD-02: quien la manda se entera de cuándo ha cogido sitio (`alReservarTurno`): es la fila
-		// de entrada de la Main, que no suelta al siguiente `apply` hasta entonces. La base es el
+		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`). La base es el
 		// SQLite de este DO, así que no hay credenciales que renovar a mitad del turno: la escritura
 		// entra o no entra, sin salir de él.
 		const enElTurno = async (db: Client): Promise<{ result: any; seq: number }> => {
@@ -965,15 +940,15 @@ export class MotorTenantHub {
 			this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
 
 			// OBS-04: en el ÉXITO no emitimos nada a Axiom. El coste que disparaba el volumen era
-			// justo este evento por cada `apply`; el detalle de un apply correcto no se necesita.
+			// justo este evento por cada escritura; el detalle de una correcta no se necesita.
 			return { result, seq };
 		};
 		const runApply = async () => {
 			// La base del negocio, por donde la sacan también los tests (`withTenantDbRetry`). Abrirla
 			// es una espera (al despertar el DO comprueba sus migraciones): el sitio en el turno se
-			// coge después, y quien manda la escritura se entera entonces.
+			// coge después.
 			const db = await this.withTenantDbRetry(tenantId, async (base) => base);
-			return this.enTurnoDelLog(() => enElTurno(db), params.alReservarTurno);
+			return this.enTurnoDelLog(() => enElTurno(db));
 		};
 
 		try {
@@ -998,7 +973,7 @@ export class MotorTenantHub {
 	/**
 	 * El lote de la Main (`apply_lote`): lo que sube de su outbox, en orden y de una vez.
 	 *
-	 * Cada operación se aplica como una escritura suelta de la Main (`applyInternalCommandIdempotent`)
+	 * Cada operación se aplica como una escritura suelta de la Handy (`applyInternalCommandIdempotent`)
 	 * —su propio lote atómico (`loteDe` + `loteEnBruto`), su gate de idempotencia, su línea en el
 	 * log y su difusión—, pero todas en un mismo turno del log y sin ceder el control entre una y
 	 * otra:
@@ -1039,9 +1014,10 @@ export class MotorTenantHub {
 	}): Promise<void> {
 		const { tenantId, deviceId, sesion, ops } = params;
 
-		// AUD-02: como en una escritura suelta, la sesión que lo manda tiene que seguir abierta y ser
-		// la de la Main. Se mira aquí, para no trabajar en balde, y otra vez dentro del turno, que es
-		// lo que vale.
+		// AUD-02: la sesión que lo manda tiene que seguir abierta y ser la de la Main: mientras esperaba
+		// pudo trasladarse la licencia y echarse su socket, o reemplazarlo una reconexión, que vuelve a
+		// mandar el lote. Se mira aquí, para no trabajar en balde, y otra vez dentro del turno, que es
+		// lo que vale; las dos, antes de aplicar nada.
 		const exigirQueSeaLaMain = () => {
 			if (sesion.readyState !== 1 || !this.esLaMain(this.att(sesion))) {
 				throw new HubError("not_authenticated", 401);
@@ -1077,7 +1053,7 @@ export class MotorTenantHub {
 			exigirQueSeaLaMain();
 			const resultados = this.aplicarEnOrden(tenantId, deviceId, ops, preparadas);
 			params.alTerminar(resultados);
-			// SYNC-12: como una escritura suelta, lo confirmado aprovecha para purgar el log.
+			// SYNC-12: como una escritura de la Handy, lo confirmado aprovecha para purgar el log.
 			if (resultados.some((r) => r.ok && !r.yaEstaba)) {
 				this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
 			}
@@ -1635,8 +1611,6 @@ export class MotorTenantHub {
 			enTurnoDeEntrada: (trabajo) => this.enTurnoDeEntrada(trabajo),
 			isMainConnected: (except) => this.isMainConnected(except),
 			isMainRecovering: () => this.isMainRecovering(),
-			applyInternalCommandIdempotent: (params) =>
-				this.applyInternalCommandIdempotent(params),
 			aplicarLote: (params) => this.aplicarLote(params),
 		};
 	}

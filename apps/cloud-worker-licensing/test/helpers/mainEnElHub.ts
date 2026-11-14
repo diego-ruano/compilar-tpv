@@ -1,7 +1,7 @@
 // test/helpers/mainEnElHub.ts
 //
 // Una Main y una Handy conectadas a un TenantHub de verdad, para probar lo que la Main sube por el
-// socket (`apply`, `apply_lote`) contra el motor real: la base del negocio aprovisionada como en
+// socket (`apply_lote`) contra el motor real: la base del negocio aprovisionada como en
 // producción (sus migraciones, sus claves foráneas), la sesión de la Main en su attachment y la
 // tabla de quién es la Main puesta al día. La base central no existe: lo que la toca se sustituye.
 //
@@ -49,8 +49,6 @@ export type MainEnElHub = {
 	eventos: { name: string; [campo: string]: unknown }[];
 	/** Manda un `apply_lote` por el socket de la Main y devuelve su acuse. */
 	mandarLote: (ops: OpDelOutbox[], extra?: Record<string, unknown>) => Promise<any>;
-	/** Manda un `apply` suelto y devuelve su acuse. */
-	mandarApply: (op: OpDelOutbox) => Promise<any>;
 	/** Los `change` que el hub ha difundido, en orden. */
 	difundidos: () => { opId: string; seq: number }[];
 	/** El log de la nube, en orden de `Seq`. */
@@ -130,11 +128,6 @@ export async function montarMainEnElHub(
 		await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply_lote", loteId, ops, ...extra }));
 		return acuse;
 	};
-	const mandarApply = async (op: OpDelOutbox) => {
-		const acuse = main.esperar((m) => m.type === "apply_ack" && m.opId === op.opId);
-		await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply", ...op }));
-		return acuse;
-	};
 
 	return {
 		sql,
@@ -142,7 +135,6 @@ export async function montarMainEnElHub(
 		handy,
 		eventos,
 		mandarLote,
-		mandarApply,
 		difundidos: () => [...difundidos],
 		log: () =>
 			sql

@@ -413,11 +413,12 @@ describe("apply_lote · lo que rechaza el lote entero", () => {
 describe("apply_lote · el orden con lo demás", () => {
 	it("AUD-02: lo que la Main manda detrás de un lote se confirma detrás", async () => {
 		await enUnHub("lote-fila", async (m) => {
-			// Sin esperar al acuse del lote: el `apply` suelto llega con él todavía en la fila.
+			// Sin esperar al acuse de cada lote: el segundo y el tercero llegan con el primero todavía en
+			// la fila.
 			const lote = m.mandarLote([zona(1), zona(2), zona(3)]);
-			const suelto = m.mandarApply(zona(4));
+			const deUna = m.mandarLote([zona(4)]);
 			const otro = m.mandarLote([zona(5)]);
-			await Promise.all([lote, suelto, otro]);
+			await Promise.all([lote, deUna, otro]);
 
 			expect(ids(m.log())).toEqual(["op-1", "op-2", "op-3", "op-4", "op-5"]);
 			expect(m.difundidos()).toEqual(m.log());

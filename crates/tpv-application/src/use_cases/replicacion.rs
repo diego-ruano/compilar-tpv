@@ -12,8 +12,6 @@ const LOTE_MAX_BYTES: usize = 256 * 1024;
 /// Lo que se espera el acuse de un lote. Sin acuse no hay veredicto: es el transporte, y no cuenta
 /// como intento de ninguna de sus operaciones.
 const ESPERA_DEL_LOTE: Duration = Duration::from_secs(30);
-/// Lo mismo para un `apply` suelto, el camino de una nube que no conoce los lotes.
-const ESPERA_DEL_APPLY: Duration = Duration::from_secs(10);
 /// Lo que se anota en una operación que la nube rechaza. Sin su SQL ni sus datos (OBS-02).
 const RECHAZO_DE_LA_NUBE: &str = "Rechazo de aplicación recibido de la nube";
 
@@ -71,8 +69,6 @@ pub struct Sesion {
     bajada: Bajada,
     /// Los lotes que ha mandado esta sesión: con él se nombra cada uno.
     lotes: u64,
-    /// La nube de esta sesión no conoce `apply_lote` (un worker anterior): se sube con `apply`.
-    sin_lotes: bool,
 }
 
 /// Lo que deja un catch-up: el final del log que ha visto, si se ha detenido, en qué cambio, y si a
@@ -105,7 +101,7 @@ pub enum FinDeSesion {
 pub const MOTIVO_ANTERIOR_AL_LOG: &str = "Los datos de este equipo son anteriores a lo que guarda la nube: no se sincronizan para no mezclarlos, y lo que se venda se sigue guardando aquí. Contacta con soporte para recuperar el estado actual de la nube.";
 
 pub fn cambio(m: Value) -> AppResult<SyncChange> {
-    let op_id = m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Cambio sin operación"))?.to_string();
+    let op_id = m.get("opId").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Cambio sin operación"))?.to_string();
     let seq = m.get("seq").and_then(Value::as_i64).filter(|s| *s > 0).ok_or_else(|| AppError::external("Cambio sin secuencia válida"))?;
     let statements = serde_json::from_value(m.get("statements").cloned().ok_or_else(|| AppError::external("Cambio sin sentencias"))?).map_err(|_| AppError::external("Sentencias de réplica inválidas"))?;
     Ok(SyncChange { op_id, seq, statements })
@@ -149,7 +145,7 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
     let mut high_water = 0;
     for _ in 0..MAX_PAGINAS {
         let respuesta = nube.tpv_server_post_json("tpv", "/v1/sync/changes", json!({"since":since,"limit":CAMBIOS_POR_PAGINA})).await?;
-        match respuesta.get("highWater").or_else(|| respuesta.get("high_water")).and_then(Value::as_i64) {
+        match respuesta.get("highWater").and_then(Value::as_i64) {
             Some(hw) if hw >= 0 => high_water = hw,
             _ if estricto => return Err(AppError::external("La nube no informa del punto de sincronización")),
             _ => {}
@@ -214,11 +210,6 @@ pub fn operacion(entry: &OutboxEntry) -> Value {
     json!({"opId":entry.op_id,"commandName":entry.command_name,"command":{"type":"tenantDb.transaction","payload":{"steps":entry.statements.iter().map(|s| json!({"kind":"execute","sql":s.sql,"args":s.args})).collect::<Vec<_>>()}}})
 }
 
-/// Los fallos de red nunca consumen intentos; sólo cuenta un rechazo recibido de la nube.
-pub fn rechazo_contabilizable(ack: &Value) -> bool {
-    ack.get("ok") == Some(&Value::Bool(false)) && ack.get("transitorio") != Some(&Value::Bool(true))
-}
-
 async fn atender(ctx: &dyn ContextoReplicacion, sesion: &mut Sesion, mensaje: Value) -> AppResult<()> {
     match mensaje.get("type").and_then(Value::as_str) {
         Some("change") => {
@@ -241,15 +232,13 @@ fn cierto(v: &Value, campo: &str) -> bool {
 enum RespuestaAlLote {
     /// Su `apply_lote_ack`.
     Acuse(Value),
-    /// No conoce el mensaje (`unknown_type`): es un worker anterior a los lotes.
-    SinLotes,
     /// El mensaje no le cabe y no lo ha leído (`payload_too_large`).
     NoCabe,
 }
 
 /// Espera el acuse del lote `lote_id` atendiendo entretanto lo demás que llegue. Sólo hay un lote en
-/// vuelo, y de lo que manda la Main sólo él puede provocar un `unknown_type` o un
-/// `payload_too_large`: esos dos errores sueltos son también su respuesta.
+/// vuelo, y de lo que manda la Main sólo él puede provocar un `payload_too_large`: ese error suelto
+/// es también su respuesta. Cualquier otro mensaje se atiende como siempre y no responde al lote.
 async fn esperar_acuse_del_lote(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, lote_id: &str) -> AppResult<RespuestaAlLote> {
     let fin = Instant::now() + ESPERA_DEL_LOTE;
     while Instant::now() < fin {
@@ -257,21 +246,8 @@ async fn esperar_acuse_del_lote(ctx: &dyn ContextoReplicacion, canal: &mut dyn C
         let Some(m) = canal.recibir(restante).await? else { continue };
         match (m.get("type").and_then(Value::as_str), m.get("error").and_then(Value::as_str)) {
             (Some("apply_lote_ack"), _) if m.get("loteId").and_then(Value::as_str) == Some(lote_id) => return Ok(RespuestaAlLote::Acuse(m)),
-            (Some("error"), Some("unknown_type")) => return Ok(RespuestaAlLote::SinLotes),
             (Some("error"), Some("payload_too_large")) => return Ok(RespuestaAlLote::NoCabe),
             _ => atender(ctx, sesion, m).await?,
-        }
-    }
-    Err(AppError::external("No llegó la confirmación de la nube"))
-}
-
-async fn esperar_ack_del_apply(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, op_id: &str) -> AppResult<Value> {
-    let fin = Instant::now() + ESPERA_DEL_APPLY;
-    while Instant::now() < fin {
-        let restante = fin.saturating_duration_since(Instant::now());
-        if let Some(m) = canal.recibir(restante).await? {
-            if m.get("type").and_then(Value::as_str) == Some("apply_ack") && m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str) == Some(op_id) { return Ok(m); }
-            atender(ctx, sesion, m).await?;
         }
     }
     Err(AppError::external("No llegó la confirmación de la nube"))
@@ -303,14 +279,10 @@ fn cortar(pendientes: Vec<OutboxEntry>) -> AppResult<Vec<OutboxEntry>> {
 ///   contesta «ya estaba» con su `Seq`.
 /// - Con acuse, `tras_el_acuse`.
 /// - `estricto` (la recuperación): cualquier rechazo es un error.
-///
-/// Contra una nube que no conoce los lotes (`unknown_type`), el resto de la sesión sube con
-/// `apply`, de una en una.
 pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<bool> {
     let ritmo = ctx.ritmo_de_subida();
     // Finito para no dejar al receptor sin turno ante una importación continua.
     for _ in 0..10000 {
-        if sesion.sin_lotes { return subir_de_una_en_una(ctx, canal, sesion, estricto).await; }
         let pendientes = ctx.repositorio().await?.outbox_pending(ritmo.tamano_del_lote() as i64).await?;
         if pendientes.is_empty() { return Ok(true); }
         let lote = cortar(pendientes)?;
@@ -322,7 +294,6 @@ pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn Can
         ritmo.lote_respondido();
         let seguir = match respuesta {
             RespuestaAlLote::Acuse(acuse) => tras_el_acuse(ctx, &ritmo, &lote, &acuse, estricto).await?,
-            RespuestaAlLote::SinLotes => { sesion.sin_lotes = true; true }
             RespuestaAlLote::NoCabe => no_cabe(ctx, &ritmo, &lote, estricto).await?,
         };
         if !seguir { return Ok(false); }
@@ -410,35 +381,6 @@ async fn no_cabe(ctx: &dyn ContextoReplicacion, ritmo: &RitmoDeSubida, lote: &[O
     let fallo = ctx.repositorio().await?.outbox_mark_failed(&sola.op_id, "La operación no cabe en un mensaje de la nube", true).await?;
     ctx.fallo_subida(&sola.op_id, &fallo);
     Ok(fallo.apartada)
-}
-
-/// La subida con `apply`, una operación por mensaje y su `apply_ack`: lo que entiende una nube
-/// anterior a los lotes. Mismas reglas: el orden, el transporte no cuenta y el veredicto lo da ella.
-async fn subir_de_una_en_una(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<bool> {
-    for _ in 0..10000 {
-        let pendientes = ctx.repositorio().await?.outbox_pending(50).await?;
-        if pendientes.is_empty() { return Ok(true); }
-        for entry in pendientes {
-            let mut msg = operacion(&entry);
-            msg["type"] = json!("apply");
-            canal.enviar(msg).await?;
-            let ack = esperar_ack_del_apply(ctx, canal, sesion, &entry.op_id).await?;
-            if !cierto(&ack, "ok") {
-                if estricto { return Err(AppError::external(format!("La nube rechazó la operación {}", entry.op_id))); }
-                if rechazo_contabilizable(&ack) {
-                    let fallo = ctx.repositorio().await?.outbox_mark_failed(&entry.op_id, RECHAZO_DE_LA_NUBE, cierto(&ack, "permanente")).await?;
-                    ctx.fallo_subida(&entry.op_id, &fallo);
-                    if fallo.apartada { continue; }
-                }
-                return Ok(false);
-            }
-            // Esa nube tenía una cola de entrada, y con ella sin vaciar no aplica: guarda la operación
-            // para después. No está aplicada, así que sigue pendiente y se vuelve a ofrecer.
-            if cierto(&ack, "encolada") { return Ok(false); }
-            ctx.repositorio().await?.outbox_confirmar_lote(&[(entry.op_id, ack.get("seq").and_then(Value::as_i64).unwrap_or(0))]).await?;
-        }
-    }
-    Ok(false)
 }
 
 /// AUD-15 · El saludo de la Main, siempre con `recovering`: el DO congela a las Handy
@@ -535,13 +477,6 @@ mod tests {
     fn un_cambio_mal_formado_no_avanza_el_cursor() {
         for m in [json!({}), json!({"opId":"x","seq":-1,"statements":[]}), json!({"opId":"x","seq":1,"statements":"SQL"})] { assert!(cambio(m).is_err()); }
         assert_eq!(cambio(json!({"opId":"x","seq":2,"statements":[]})).unwrap().seq, 2);
-    }
-    #[test]
-    fn un_rechazo_transitorio_no_gasta_intentos() {
-        assert!(!rechazo_contabilizable(&json!({"ok":false,"transitorio":true})));
-        assert!(!rechazo_contabilizable(&json!({"ok":true})));
-        assert!(rechazo_contabilizable(&json!({"ok":false,"permanente":true})));
-        assert!(rechazo_contabilizable(&json!({"ok":false})));
     }
     // AUD-18: cuatro esperas crecientes y cortas entre los cinco intentos de un cambio.
     #[test]

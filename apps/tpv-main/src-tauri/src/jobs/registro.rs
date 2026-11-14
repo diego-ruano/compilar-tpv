@@ -654,7 +654,7 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 
 /// Poda de `_Sync_Applied_Ops`, la tabla anti-eco: una fila por escritura local, que solo se puede
 /// retirar cuando la op ya está confirmada en la nube y ha pasado su TTL. (Lo pendiente del outbox
-/// no entra aquí: se vacía solo, cada op se borra al recibir su `apply_ack`.)
+/// no entra aquí: se vacía solo, cada op se borra al confirmarse con el acuse de su lote.)
 ///
 /// Y lo apartado de la subida, que no se vaciaba nunca: se retira a los 30 días de su último
 /// intento, salvo lo que espera a su reparación (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por

@@ -230,10 +230,8 @@ fn pasajera(op:&str)->Value {json!({"opId":op,"ok":false,"error":"database is lo
 fn rara(op:&str)->Value {json!({"opId":op,"ok":false,"error":"algo que nadie ha visto","permanente":false,"transitorio":false})}
 fn sin_intentar(op:&str)->Value {json!({"opId":op,"ok":false,"noIntentada":true})}
 fn acuse(resultados:Vec<Value>)->Value {json!({"type":"apply_lote_ack","ok":true,"resultados":resultados})}
-fn ack_suelto(op:&str,seq:i64)->Value {json!({"type":"apply_ack","opId":op,"ok":true,"seq":seq})}
 fn ids_del_lote(m:&Value)->Vec<String> {m["ops"].as_array().unwrap().iter().map(|o|o["opId"].as_str().unwrap().to_string()).collect()}
 fn lotes(enviados:&[Value])->Vec<Vec<String>> {enviados.iter().filter(|m|m["type"]=="apply_lote").map(ids_del_lote).collect()}
-fn tipos(enviados:&[Value])->Vec<&str> {enviados.iter().map(|m|m["type"].as_str().unwrap()).collect()}
 fn pendientes(ctx:&Contexto)->Vec<String> {ctx.repo.pending.lock().unwrap().iter().map(|e|e.op_id.clone()).collect()}
 fn confirmadas(ctx:&Contexto)->Vec<Vec<(String,i64)>> {ctx.repo.confirmaciones.lock().unwrap().clone()}
 fn par(op:&str,seq:i64)->(String,i64) {(op.to_string(),seq)}
@@ -250,7 +248,7 @@ async fn el_lote_lleva_las_operaciones_en_orden_y_su_acuse_las_confirma_en_una_t
     assert_eq!(c.enviados[0]["type"],"apply_lote");
     assert!(c.enviados[0]["loteId"].as_str().is_some_and(|id|!id.is_empty()));
     assert_eq!(ids_del_lote(&c.enviados[0]),["a","b","c"]);
-    // Cada operación viaja como un `apply` suelto: su comando y su identidad.
+    // Cada operación viaja con su comando y su identidad.
     assert_eq!(c.enviados[0]["ops"][0],operacion(&op("a")));
     assert_eq!(confirmadas(&ctx),vec![vec![par("a",11),par("b",7),par("c",12)]]);
     assert!(pendientes(&ctx).is_empty());
@@ -406,40 +404,16 @@ async fn una_operacion_que_no_cabe_en_un_mensaje_se_aparta_y_se_repara() {
     assert_eq!(lotes(&c.enviados),vec![vec!["a"],vec!["b"],vec!["repara-a"]]);
 }
 #[tokio::test]
-async fn con_una_nube_que_no_conoce_los_lotes_la_sesion_sube_de_una_en_una() {
+async fn un_error_suelto_que_no_responde_al_lote_no_lo_confirma_ni_le_cuenta_nada() {
+    // La nube sube por `apply_lote` y sólo por ahí: un `unknown_type` (u otro error suelto) no es el
+    // acuse del lote. Sin acuse es el transporte: la sesión acaba sin confirmar ni contar nada, y lo
+    // que vuelve a salir es el mismo lote.
     let ctx=contexto(vec![op("a"),op("b")]);
-    let mut c=canal(vec![json!({"type":"error","error":"unknown_type"}),ack_suelto("a",1),ack_suelto("b",2)]);
-    let mut sesion=Sesion::default();
-    assert!(subir_pendientes(&ctx,&mut c,&mut sesion,false).await.unwrap());
-    assert_eq!(tipos(&c.enviados),["apply_lote","apply","apply"]);
-    assert_eq!(c.enviados[1]["opId"],"a");
-    assert_eq!(confirmadas(&ctx),vec![vec![par("a",1)],vec![par("b",2)]]);
-    // Lo que queda de sesión ya no prueba con lotes.
-    ctx.repo.pending.lock().unwrap().push(op("c"));
-    let mut c=canal(vec![ack_suelto("c",3)]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut sesion,false).await.unwrap());
-    assert_eq!(tipos(&c.enviados),["apply"]);
-}
-#[tokio::test]
-async fn de_una_en_una_solo_el_ack_de_la_operacion_enviada_la_confirma_y_el_veredicto_lo_da_la_nube() {
-    let sin_lotes=||Sesion{sin_lotes:true,..Sesion::default()};
-    let ctx=contexto(vec![op("a")]);let mut c=canal(vec![ack_suelto("otra",1)]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut sin_lotes(),false).await.is_err());
-    assert_eq!(pendientes(&ctx),["a"]);
-    // Pasajero: no cuenta. Permanente: se aparta y sigue.
-    let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"apply_ack","opId":"a","ok":false,"transitorio":true})]);
-    assert!(!subir_pendientes(&ctx,&mut c,&mut sin_lotes(),false).await.unwrap());
-    assert!(ctx.repo.rechazos.lock().unwrap().is_empty());
-    let ctx=contexto(vec![op("a"),op("b")]);
-    let mut c=canal(vec![json!({"type":"apply_ack","opId":"a","ok":false,"permanente":true}),ack_suelto("b",1),ack_suelto("repara-a",2)]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut sin_lotes(),false).await.unwrap());
-    assert_eq!(*ctx.repo.apartadas.lock().unwrap(),vec!["a".to_string()]);
-}
-#[tokio::test]
-async fn una_nube_anterior_que_la_guarda_en_su_cola_no_la_da_por_subida() {
-    let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"apply_ack","opId":"a","ok":true,"encolada":true})]);
-    assert!(!subir_pendientes(&ctx,&mut c,&mut Sesion{sin_lotes:true,..Sesion::default()},false).await.unwrap());
-    assert_eq!(pendientes(&ctx),["a"]);assert!(confirmadas(&ctx).is_empty());
+    let mut c=canal(vec![json!({"type":"error","error":"unknown_type"})]);
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false).await.is_err());
+    assert_eq!(c.enviados.iter().map(|m|m["type"].as_str().unwrap()).collect::<Vec<_>>(),["apply_lote"]);
+    assert_eq!(pendientes(&ctx),["a","b"]);
+    assert!(confirmadas(&ctx).is_empty()&&ctx.repo.rechazos.lock().unwrap().is_empty());
 }
 #[tokio::test]
 async fn un_eco_confirmado_no_refresca_la_interfaz() {

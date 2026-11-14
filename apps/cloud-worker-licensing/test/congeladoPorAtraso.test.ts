@@ -3,8 +3,7 @@
 // AUD-15 · La Main saluda siempre con `recovering` (`use_cases/replicacion.rs::saludar`) y manda
 // `recovery_ready` cuando se ha puesto al día: con su outbox vacío, lo que la nube rechazó ya
 // reparado. Aquí se fija la mitad del DO: con ese saludo congela a las Handy (`main_volcando`)
-// mientras deja pasar la subida de la Main (`apply_lote`, y `apply` suelto) y `recovery_ready` las
-// suelta.
+// mientras deja pasar la subida de la Main (`apply_lote`) y `recovery_ready` las suelta.
 //
 // Sin sustituir `isMainConnected` ni `isMainReady`: la Main y la Handy son sockets reales aceptados
 // con `state.acceptWebSocket`, así que decide el censo de producción. Se sustituye sólo lo que
@@ -170,13 +169,6 @@ async function subeEnUnLote(hub: any, main: ReturnType<typeof socketReal>, ops: 
 	return main.recibidos.find((m) => m.type === "apply_lote_ack" && m.loteId === loteId);
 }
 
-/** La Main sube una operación suelta (`apply`) y espera su `apply_ack`. */
-async function subeSuelta(hub: any, main: ReturnType<typeof socketReal>, op: any) {
-	await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply", ...op, clientNow: "2026-01-01 12:30:00" }));
-	expect(await esperar(() => main.recibidos.some((m) => m.type === "apply_ack" && m.opId === op.opId))).toBe(true);
-	return main.recibidos.find((m) => m.type === "apply_ack" && m.opId === op.opId);
-}
-
 /** Lo que manda `venta_rapida.routes.ts` para `POST /comandas/delete-if-safe`, por el RPC `aplicar`. */
 function borradoDeLaHandy(opId: string) {
 	const built = deleteComandaIfSafe("ticket-barra");
@@ -208,10 +200,10 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 				await esperar(() => handy.recibidos.some((m) => m.type === "main_volcando" && m.volcando === true)),
 			).toBe(true);
 
-			// El atraso de la Main sube, en lotes o suelto...
+			// El atraso de la Main sube, en un lote o en varios...
 			const acuse = await subeEnUnLote(hub, main, [opDelAtraso(1), opDelAtraso(2)]);
 			expect(acuse).toMatchObject({ ok: true, resultados: [{ opId: "op-1", ok: true }, { opId: "op-2", ok: true }] });
-			expect(await subeSuelta(hub, main, opDelAtraso(3))).toMatchObject({ ok: true });
+			expect(await subeEnUnLote(hub, main, [opDelAtraso(3)])).toMatchObject({ ok: true, resultados: [{ opId: "op-3", ok: true }] });
 			expect(Number(sql.exec("SELECT COUNT(*) AS n FROM Detalle_Comanda WHERE ID_Comanda = 'comanda-1';").one().n)).toBe(3);
 
 			// ...y lo que escribe la Handy mientras tanto espera, sin tocar la nube.

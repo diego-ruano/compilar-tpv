@@ -296,7 +296,7 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
     *nube.cambios.lock().unwrap() = json!({"ok": true, "items": [], "nextSince": 1700, "highWater": 1700, "purgadoHasta": 700});
     let mut socket = Socket::default();
     replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
-    assert!(socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "apply_lote"), "{:?}", socket.enviados);
+    assert!(socket.enviados.iter().all(|m| m["type"] != "apply_lote"), "{:?}", socket.enviados);
     assert_eq!(socket.enviados.last().unwrap()["type"], "recovery_ready");
     assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::Ready);
     assert_eq!(texto(&db, "SELECT Estado FROM Usuarios WHERE ID_Usuario = 'u-baja';").await, "Inactivo");
