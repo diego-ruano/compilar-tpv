@@ -752,9 +752,13 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   filas son inciertas; toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta Main
   escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta base y no de la
   sentencia (`por_filtro`: un `WHERE` por una foránea, un `INSERT … SELECT`) y en esa tabla hay algo
-  apartado (aquí pudo cumplir el filtro otra fila que arriba); sigue sin entrar (el `UNIQUE` con el
-  que chocaba sigue ahí: `no_entra: …`, con la clase del error); o la tabla tiene columnas que esta
-  versión no tiene. Se vuelve a intentar en la pasada siguiente.
+  apartado (aquí pudo cumplir el filtro otra fila que arriba), o borra una fila cuyas cascadas
+  (`ON DELETE CASCADE`, `SET NULL`) llegan a una tabla con algo apartado (se lo llevarían aquí);
+  sigue sin entrar (el `UNIQUE` con el que chocaba sigue ahí: `no_entra: …`, con la clase del
+  error); o la tabla tiene columnas que esta versión no tiene. Se vuelve a intentar en la pasada
+  siguiente. Lo apartado de la subida se retira a los 30 días, y con ello esta protección: para
+  entonces lo que la Main escribió y la nube rechazó ya no va a subir, y lo que queda es lo de la
+  nube.
 - **Trabajo acotado**: hasta 50 cuarentenas y 5.000 filas por pasada (la primera se intenta siempre),
   en peticiones de 500 claves.
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.

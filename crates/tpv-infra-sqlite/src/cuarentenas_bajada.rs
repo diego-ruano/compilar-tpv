@@ -41,9 +41,10 @@
 //! - **Lo que no se puede traer, se queda** y se informa: un cambio cuyas filas no se saben
 //!   (`incierto`), uno que toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta
 //!   Main escribió ahí, y traerla lo desharía aquí) o cuyas filas de una tabla salieron de un filtro
-//!   sobre esta base y en esa tabla hay algo apartado (`por_filtro`), una fila que sigue sin entrar
-//!   (el `UNIQUE` con el que chocaba sigue ahí) o una tabla con columnas que esta versión no tiene. Se
-//!   vuelve a intentar en la pasada siguiente, y cada pasada tiene su tope de trabajo.
+//!   sobre esta base y en esa tabla hay algo apartado (`por_filtro`), o cuyo borrado llegaría por
+//!   sus cascadas a algo apartado; una fila que sigue sin entrar (el `UNIQUE` con el que chocaba
+//!   sigue ahí) o una tabla con columnas que esta versión no tiene. Se vuelve a intentar en la pasada
+//!   siguiente, y cada pasada tiene su tope de trabajo.
 //!
 //! **Reintentar sus sentencias** no sirve de salida: para cuando entraran, lo de detrás ya habría
 //! pasado por esas filas, y aplicarlas encima devolvería una fila a un valor viejo o repetiría un
@@ -277,6 +278,7 @@ pub(crate) async fn resolver(
 
     let claves = claves_primarias(db).await?;
     let subida = lo_apartado_de_la_subida(db, &claves).await?;
+    let cascadas = cascadas(db).await?;
 
     // Las que se intentan en esta pasada, y lo que hay que pedir de cada tabla.
     let mut intentadas: Vec<&Cuarentena> = Vec::new();
@@ -293,7 +295,7 @@ pub(crate) async fn resolver(
             quedan.push((c, "filas_inciertas".into()));
             continue;
         }
-        if choca_con_la_subida(&c.tocadas, &subida) {
+        if choca_con_la_subida(&c.tocadas, &subida, &cascadas) {
             quedan.push((c, "choca_con_lo_apartado_de_la_subida".into()));
             continue;
         }
@@ -471,12 +473,61 @@ async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>
 /// apartado, o una tabla en la que lo apartado no se sabe por su clave. Y si sus filas de una tabla
 /// salieron de esta base y no de la sentencia (`por_filtro`), cualquier cosa apartada en esa tabla:
 /// lo apartado es lo que aquí es distinto de arriba, y con ello aquí pudo cumplir el filtro otra
-/// fila que la de la nube (Codex, SYNC-36).
-fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas) -> bool {
+/// fila que la de la nube (Codex, SYNC-36). Y si borra una fila, cualquier cosa apartada en las
+/// tablas a las que llega su borrado por las cascadas (`cascadas`): borrar aquí se llevaría con
+/// ellas lo que esta Main escribió debajo y la nube no tiene.
+fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas, cascadas: &Cascadas) -> bool {
     subida.tablas.contains("*")
         || t.tablas.iter().any(|x| subida.tablas.contains(x))
         || t.por_filtro.iter().any(|x| subida.todas.contains(x))
         || t.filas.iter().any(|f| subida.tablas.contains(&f.tabla) || tocadas::canonica_de(f).is_some_and(|k| subida.claves.contains(&k)))
+        || t.filas.iter().filter(|f| f.borrada).any(|f| cascadas.alcanza(&f.tabla).any(|x| subida.todas.contains(x)))
+}
+
+/// Las tablas a las que llega el borrado de una fila de cada tabla: sus hijas por una foránea con
+/// `ON DELETE CASCADE`, `SET NULL` o `SET DEFAULT`, y las de éstas.
+#[derive(Debug, Default)]
+struct Cascadas {
+    hijas: HashMap<String, Vec<String>>,
+}
+
+impl Cascadas {
+    /// `tabla` y todas a las que llega su borrado.
+    fn alcanza<'a>(&'a self, tabla: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        let mut vistas: Vec<&'a str> = vec![tabla];
+        let mut i = 0;
+        while i < vistas.len() {
+            for h in self.hijas.get(vistas[i]).map(Vec::as_slice).unwrap_or_default() {
+                if !vistas.contains(&h.as_str()) {
+                    vistas.push(h);
+                }
+            }
+            i += 1;
+        }
+        vistas.into_iter()
+    }
+}
+
+async fn cascadas(db: &Db) -> AppResult<Cascadas> {
+    let r = db.read().await;
+    r.conn()
+        .foto(|foto| {
+            let mut c = Cascadas::default();
+            for f in foto.filas(
+                "SELECT m.name, f.\"table\", upper(f.on_delete) FROM sqlite_master m \
+                   JOIN pragma_foreign_key_list(m.name) f WHERE m.type = 'table';",
+                &[],
+            )? {
+                if let (Some(Value::Text(hija)), Some(Value::Text(padre)), Some(Value::Text(al_borrar))) = (f.first(), f.get(1), f.get(2)) {
+                    if ["CASCADE", "SET NULL", "SET DEFAULT"].contains(&al_borrar.as_str()) {
+                        c.hijas.entry(padre.clone()).or_default().push(hija.clone());
+                    }
+                }
+            }
+            Ok(c)
+        })
+        .await
+        .map_err(db_err)
 }
 
 /// Lo que se ha traído de una tabla.
@@ -809,12 +860,38 @@ mod tests {
             tablas: HashSet::new(),
             todas: ["Mesas".to_string()].into_iter().collect(),
         };
+        let sin_cascadas = Cascadas::default();
         let por_clave = Tocadas { tablas: vec!["Mesas".into()], filas: vec![mesa("m2")], incierto: false, por_filtro: vec![] };
-        assert!(!choca_con_la_subida(&por_clave, &subida), "otra fila de la tabla, nombrada por su clave");
+        assert!(!choca_con_la_subida(&por_clave, &subida, &sin_cascadas), "otra fila de la tabla, nombrada por su clave");
         let por_filtro = Tocadas { por_filtro: vec!["Mesas".into()], ..por_clave.clone() };
-        assert!(choca_con_la_subida(&por_filtro, &subida));
+        assert!(choca_con_la_subida(&por_filtro, &subida, &sin_cascadas));
         let la_misma = Tocadas { filas: vec![mesa("m-main")], ..por_clave.clone() };
-        assert!(choca_con_la_subida(&la_misma, &subida));
+        assert!(choca_con_la_subida(&la_misma, &subida, &sin_cascadas));
+    }
+
+    #[tokio::test]
+    async fn un_borrado_no_se_trae_si_sus_cascadas_llegan_a_lo_apartado_de_la_subida() {
+        // Codex: borrar aquí una zona que la Handy borró se llevaría por su `ON DELETE CASCADE` las
+        // mesas que esta Main le puso y la nube rechazó.
+        let db = base("cascadas").await;
+        let cascadas = cascadas(&db).await.unwrap();
+        let mut de_zonas: Vec<&str> = cascadas.alcanza("Zonas").collect();
+        de_zonas.sort_unstable();
+        assert!(de_zonas.contains(&"Zonas") && de_zonas.contains(&"Mesas"), "{de_zonas:?}");
+
+        let subida = tocadas::Estaticas {
+            claves: ["Mesas\u{1f}tm-main".to_string()].into_iter().collect(),
+            tablas: HashSet::new(),
+            todas: ["Mesas".to_string()].into_iter().collect(),
+        };
+        let zona = |borrada| Tocadas {
+            tablas: vec!["Zonas".into()],
+            filas: vec![FilaTocada { tabla: "Zonas".into(), clave: vec![serde_json::json!("z1")], borrada }],
+            incierto: false,
+            por_filtro: vec![],
+        };
+        assert!(choca_con_la_subida(&zona(true), &subida, &cascadas), "su borrado llega a las mesas");
+        assert!(!choca_con_la_subida(&zona(false), &subida, &cascadas), "escribirla no borra nada");
     }
 
     #[test]
