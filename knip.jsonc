@@ -8,11 +8,13 @@
   "ignoreBinaries": ["cargo", "python"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "eslint.config.mjs"],
+      // El test del generador de carga lo lanza quien lo toca (`node --test`), no CI.
+      "entry": ["scripts/*.mjs", "scripts/carga/*.test.mjs", "eslint.config.mjs"],
       "project": ["scripts/**/*.mjs", "eslint.config.mjs"],
       // RI-25 y AUD-44: los workflows ejecutan el firmante y Wrangler desde su lockfile aislado
       // (.github/tools/*), fuera del workspace; no son dependencias que falten en la raíz.
-      "ignoreBinaries": ["tauri", "wrangler"]
+      // wsl.exe: el generador de carga arranca sqld y la CLI de Turso en el WSL de Windows.
+      "ignoreBinaries": ["tauri", "wrangler", "wsl.exe"]
     },
     "apps/tpv-main": {
       "entry": ["src/app/main.tsx", "test/**/*.test.{ts,tsx}", "test/react/setup.ts", "test/**/*.types.ts", "e2e/wdio.conf.ts", "e2e/construir.ts", "e2e/specs/**/*.ts"],

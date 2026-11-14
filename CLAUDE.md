@@ -48,7 +48,8 @@ docs/                            arquitectura, decisiones, guías, estudios, pen
 tests/contract/                  arneses de contrato Rust ↔ worker
 scripts/                         generate-types, check-migration-registry, check-contract-coverage,
                                  check-dead-code,
-                                 tpv-license (CLI de administración), generate-license-keypair
+                                 tpv-license (CLI de administración), generate-license-keypair,
+                                 carga/ (generador de carga: docs/guias/pruebas-de-carga.md)
 ```
 
 ## Antes de tocar…
@@ -93,6 +94,8 @@ pnpm --filter @tpv/main test         # vitest del frontend;  pnpm --filter tpv-a
 pnpm --filter @tpv/main typecheck    # pnpm --filter tpv-api typecheck
 
 pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, antes de cada versión
+pnpm carga --local            # generador de carga en este equipo
+node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (docs/guias/pruebas-de-carga.md)
 ```
 
 - **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: nextest corre cada test en

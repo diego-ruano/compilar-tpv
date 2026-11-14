@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --fix",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "check:dead-code": "node scripts/check-dead-code.mjs",
+    "carga": "node scripts/carga/carga.mjs",
     "generate-types": "turbo run generate-types",
     "generate-types:check": "node scripts/generate-types.mjs --check",
     "tauri": "pnpm --filter @tpv/main tauri",
