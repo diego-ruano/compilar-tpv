@@ -221,8 +221,9 @@ cupo en la misma sentencia ([worker.md](arquitectura/worker.md#correo)). Quedan 
   reintento lo vuelve a mandar. Entre no mandarlo y mandarlo dos veces se ha elegido lo segundo.
 - **Uno que salió y se quedó en `enviando`** (el worker se cortó a medias, o fallaron los tres intentos
   de apuntar que salió) se vuelve a reservar pasados cinco minutos, y un reintento lo repite.
-- **La clave vive en el `localStorage` de la Main** (`claveDeEnvio.ts`): sin almacenamiento, con el de
-  la aplicación borrado o pasada una semana, el reintento lleva otra clave y es otro envío.
+- **La clave vive en el `localStorage` de la Main** (`claveDeEnvio.ts`): con el de la aplicación borrado
+  o pasada una semana, el reintento lleva otra clave y es otro envío; sin almacenamiento la clave dura lo
+  que la aplicación esté abierta, y un reintento después de reiniciarla es otro envío.
 
 Sin decidir si alguno pide algo más.
 

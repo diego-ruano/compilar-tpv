@@ -2,7 +2,9 @@
 
 **Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 hechas y en producción; faltan el piloto (fase 6)
 y el plugin de WordPress (fase 7). La fase 8 (dirección propia, API abierta a las webs del negocio y
-SDK) está hecha en código, sin desplegar. Lo que queda por comprobar de cada fase, en el §11.
+SDK) está hecha en código, sin desplegar. Lo que queda por comprobar de cada fase, en el §11. Donde
+el plan dice Turso, hoy es la base del negocio en el SQLite de su `TenantHub`
+([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)); las reglas no cambian.
 
 > Un widget de reservas que cualquier web incrusta con una línea, conectado al TPV, y que acepta
 > reservas aunque la Main esté apagada. La decisión de arquitectura y su porqué están en

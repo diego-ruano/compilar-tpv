@@ -184,9 +184,10 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   que no se replica y cuyos triggers sólo apuntan días ([esquema.md](docs/arquitectura/esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)).
 - **Una divergencia se repara por estado** con `ON CONFLICT(pk) DO UPDATE`. ⚠️ **Nunca `INSERT OR
   REPLACE`**: borra y reinserta, y dispara las cascadas.
-- **En el `TenantHub` no hay estado en campos de instancia** (se pierde al hibernar) **ni variables de
-  módulo con estado** (se comparten entre tenants): lo que hay que recordar va en el *attachment* del socket
-  o en el SQL del DO. Nada de `setInterval`; todo cierre iniciado por el DO llama a `sessionGone`.
+- **En el `TenantHub` lo que hay que recordar no va en campos de instancia** (se pierde al hibernar; sólo
+  cachés y lo que está en vuelo) **ni en variables de módulo** (se comparten entre tenants): va en el
+  *attachment* del socket o en el SQL del DO. Nada de `setInterval`; todo cierre iniciado por el DO
+  llama a `sessionGone`.
 - **Quien clasifica un fallo de subida es el DO**; el cliente no compara textos de error. El transporte no
   cuenta como intento.
 - **Mientras se recupera, ninguna escritura de negocio entra** (cerrojo de `Db`). Si una escritura choca con
@@ -332,9 +333,10 @@ lo que hay que revisar es el cambio, no el test:
 - `error.rs::tests_mensajes_en_espanol` (tpv-application): ningún mensaje del dominio ni de los casos de
   uso es un nombre de campo o está en inglés.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,
-  `pinSiempreConFreno` (además de leer el fuente, prueban el veto por la `app` entera, dentro del
-  TenantHub), `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`,
-  `mensajesEnEspanol`, `busquedaDeTexto`, `busquedaSinAcentos`, `listasEnUnParametro` (DO-01),
+  `pinSiempreConFreno` (todas menos `fiscalSoloMain` prueban además el veto por la `app` entera,
+  dentro del TenantHub; ésa, la escritura dentro de él, porque ninguna ruta escribe en esas tablas),
+  `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`, `mensajesEnEspanol`,
+  `busquedaDeTexto`, `busquedaSinAcentos`, `listasEnUnParametro` (DO-01),
   `mainDesplazadaRest` (`soloLaMain` sólo en routers con `alHub`), `objetosDelNegocio.node` y
   `sinDatosPersonalesEnLaQuery.node` (AUD-27); en la Handy, `tests_sin_datos_en_la_url`
   (`tpv-infra-http`).
