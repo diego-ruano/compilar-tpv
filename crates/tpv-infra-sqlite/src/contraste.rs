@@ -1190,9 +1190,9 @@ pub(crate) fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, V
 /// ([`borrado_si_la_nube_no_ha_cambiado`]). Todas las operaciones entran en el outbox juntas o
 /// ninguna.
 ///
-/// SYNC-31 · La última lleva en `Repara_Op_Id` las operaciones apartadas de la subida que el plan
-/// resuelve ([`apartadas_que_resuelve`]): cuando sube, el outbox las retira, como retira la apartada
-/// que motivó una reparación inmediata. `completas` son las tablas que esta pasada ha comparado
+/// SYNC-31 · Todas llevan en `Repara_Op_Id` las operaciones apartadas de la subida que el plan
+/// resuelve ([`apartadas_que_resuelve`]): el outbox las retira cuando sube la última que las lleva, y
+/// no si alguna de ellas se queda apartada (`sync::retirar_lo_que_repara`). `completas` son las tablas que esta pasada ha comparado
 /// enteras.
 async fn encolar_plan(
     db: &Db,
@@ -1262,9 +1262,8 @@ async fn encolar_plan(
         let sentencias: Vec<SqlStatement> = subir.into_iter().chain(quitar).collect();
         let operaciones: Vec<&[SqlStatement]> = sentencias.chunks(SENTENCIAS_POR_OPERACION).collect();
         conn.transaccion(async {
-            for (i, operacion) in operaciones.iter().enumerate() {
-                let ultima = i + 1 == operaciones.len();
-                encolar_operacion(conn, operacion, repara.as_deref().filter(|_| ultima)).await?;
+            for operacion in &operaciones {
+                encolar_operacion(conn, operacion, repara.as_deref()).await?;
             }
             Ok(())
         })

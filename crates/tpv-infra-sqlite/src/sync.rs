@@ -67,11 +67,15 @@ pub(crate) const MAX_APPLY_ATTEMPTS: i64 = 5;
 /// vez por ciclo de catch-up. Con 5 se apartaría una operación por un bache de red de segundos.
 const MAX_SUBIDA_ATTEMPTS: i64 = 20;
 
-/// SYNC-26 · Las apartadas que retira una reparación cuando sube, como tabla (`json_each`) de la
-/// columna `Repara_Op_Id` de la reparación `r`: el `Op_Id` de la apartada que la motivó o, en una
-/// del contraste con la nube, la lista JSON de las que resuelve (SYNC-31, `contraste::encolar_plan`).
-const APARTADAS_QUE_REPARA: &str = "json_each(CASE WHEN json_valid(r.Repara_Op_Id) AND substr(r.Repara_Op_Id, 1, 1) = '[' \
-     THEN r.Repara_Op_Id ELSE json_array(r.Repara_Op_Id) END)";
+/// SYNC-26 · Las apartadas que repara la fila `alias` de `_Sync_Outbox`, como tabla (`json_each`) de
+/// su `Repara_Op_Id`: el `Op_Id` de la apartada que motivó una reparación inmediata o, en las del
+/// contraste con la nube, la lista JSON de las que resuelve su plan (SYNC-31, `contraste::encolar_plan`).
+fn apartadas_que_repara(alias: &str) -> String {
+    format!(
+        "json_each(CASE WHEN json_valid({alias}.Repara_Op_Id) AND substr({alias}.Repara_Op_Id, 1, 1) = '[' \
+         THEN {alias}.Repara_Op_Id ELSE json_array({alias}.Repara_Op_Id) END)"
+    )
+}
 
 /// Convierte un escalar JSON al `Value` de la base para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
@@ -309,13 +313,25 @@ async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
 /// SYNC-26 · Si `op_id` es una reparación, retira las operaciones apartadas que repara (la que la
 /// motivó o, SYNC-31, las que resuelve una del contraste), en la transacción de quien la da por
 /// subida. Sólo las apartadas (`Cuarentena = 1`): una que siguiera viva no se toca.
+///
+/// SYNC-31: y sólo si ninguna otra fila del outbox las repara todavía. Un plan del contraste de más
+/// de una operación las lleva en todas, así que se retiran con la última que sube; y si una de ellas
+/// no entró y se quedó apartada, siguen ahí, porque lo suyo no está arriba. Lo que se retira a la vez
+/// no cuenta (el contraste resuelve a la vez un cobro y su reparación inmediata).
 async fn retirar_lo_que_repara(conn: &Connection, op_id: &str) -> AppResult<()> {
+    let r = apartadas_que_repara("r");
+    let o = apartadas_que_repara("o");
     conn.execute(
         &format!(
             "DELETE FROM _Sync_Outbox \
               WHERE Cuarentena = 1 \
-                AND Op_Id IN (SELECT j.value FROM _Sync_Outbox r, {APARTADAS_QUE_REPARA} j \
-                               WHERE r.Op_Id = ?1 AND r.Repara_Op_Id IS NOT NULL);"
+                AND Op_Id IN (SELECT j.value FROM _Sync_Outbox r, {r} j \
+                               WHERE r.Op_Id = ?1 AND r.Repara_Op_Id IS NOT NULL) \
+                AND NOT EXISTS (SELECT 1 FROM _Sync_Outbox o, {o} k \
+                                 WHERE o.Repara_Op_Id IS NOT NULL AND k.value = _Sync_Outbox.Op_Id \
+                                   AND o.Op_Id <> ?1 \
+                                   AND o.Op_Id NOT IN (SELECT j.value FROM _Sync_Outbox r, {r} j \
+                                                        WHERE r.Op_Id = ?1 AND r.Repara_Op_Id IS NOT NULL));"
         ),
         vec![Value::Text(op_id.to_string())],
     )
@@ -1273,13 +1289,14 @@ impl SyncRepository for SqliteSyncRepository {
         // escribió y aquí no entró, o subir lo que la nube ya había borrado. Sólo se vacían sus
         // datos (`vaciar_cuarentenas_de_bajada`), y lo cierra el contraste (SYNC-36).
         let w = self.db.write().await;
+        let r = apartadas_que_repara("r");
         w.raw()
             .execute(
                 &format!(
                     "DELETE FROM _Sync_Outbox \
                       WHERE Cuarentena = 1 \
                         AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
-                        AND Op_Id NOT IN (SELECT j.value FROM _Sync_Outbox r, {APARTADAS_QUE_REPARA} j \
+                        AND Op_Id NOT IN (SELECT j.value FROM _Sync_Outbox r, {r} j \
                                            WHERE r.Repara_Op_Id IS NOT NULL AND r.Cuarentena = 0);"
                 ),
                 vec![Value::Integer(antes_de_ms)],
@@ -3871,6 +3888,46 @@ mod tests_cierre_del_aviso {
         repo.outbox_confirmar_lote(&[("contraste".to_string(), 11)]).await.unwrap();
         let salud = repo.health().await.unwrap();
         assert_eq!((salud.subida_en_cuarentena, salud.outbox_pending), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn un_plan_de_varias_operaciones_retira_lo_que_resuelve_con_la_ultima_y_no_si_una_se_aparta() {
+        // SYNC-31 (Codex): todas las del plan llevan la lista. Con la primera subida no basta, y si
+        // una se queda apartada lo suyo no está arriba: la apartada que resolvía sigue.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena) VALUES
+                       ('cobro', 'main_op', '[]', 1, 1), ('otro', 'main_op', '[]', 1, 1);
+                     INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) VALUES
+                       ('plan-1', 'main_reparacion', '[]', 2, '[\"cobro\"]'), ('plan-2', 'main_reparacion', '[]', 2, '[\"cobro\"]'),
+                       ('otro-1', 'main_reparacion', '[]', 3, '[\"otro\"]'), ('otro-2', 'main_reparacion', '[]', 3, '[\"otro\"]');",
+                )
+                .await
+                .unwrap();
+        }
+        let apartadas = |db: Arc<Db>| async move {
+            let r = db.read().await;
+            let mut f = r.conn().query("SELECT group_concat(Op_Id, ',') FROM (SELECT Op_Id FROM _Sync_Outbox WHERE Cuarentena = 1 ORDER BY Op_Id);", ()).await.unwrap();
+            match f.next().await.unwrap().unwrap().get_value(0).unwrap() {
+                Value::Text(t) => t,
+                _ => String::new(),
+            }
+        };
+
+        // Sube la primera del plan: la otra todavía lo repara.
+        repo.outbox_confirmar_lote(&[("plan-1".to_string(), 11)]).await.unwrap();
+        assert_eq!(apartadas(db.clone()).await, "cobro,otro");
+        // Sube la segunda: ya está todo arriba.
+        repo.outbox_confirmar_lote(&[("plan-2".to_string(), 12)]).await.unwrap();
+        assert_eq!(apartadas(db.clone()).await, "otro");
+
+        // La primera del otro plan no entra y se aparta: con la segunda arriba, «otro» se queda.
+        repo.outbox_mark_failed("otro-1", "rechazada", true).await.unwrap();
+        repo.outbox_confirmar_lote(&[("otro-2".to_string(), 13)]).await.unwrap();
+        assert_eq!(apartadas(db.clone()).await, "otro,otro-1");
     }
 
     #[tokio::test]
