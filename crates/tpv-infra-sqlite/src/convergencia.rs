@@ -215,23 +215,35 @@ pub(crate) async fn marcar(conn: &Connection, filas: &[FilaTocada], seq: i64) ->
         .iter()
         .map(|f| serde_json::json!({ "t": f.tabla, "k": serde_json::to_string(&f.clave).unwrap_or_default() }))
         .collect();
-    let n = conn
+    let lista = Value::Text(serde_json::to_string(&lista).map_err(db_err)?);
+    // Las que ya estaban apuntadas, con el cambio de ahora; las nuevas, en lo que quede de sitio.
+    let ya = conn
         .execute(
-            "INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms) \
-             SELECT json_extract(value, '$.t'), json_extract(value, '$.k'), ?2, ?3 FROM json_each(?1) \
-              WHERE (SELECT COUNT(*) FROM _Sync_Por_Contrastar) < ?4 \
-             ON CONFLICT(Tabla, Clave_Json) DO UPDATE SET Seq = excluded.Seq, Intentos = 0;",
-            vec![
-                Value::Text(serde_json::to_string(&lista).map_err(db_err)?),
-                Value::Integer(seq),
-                Value::Integer(now_ms()),
-                Value::Integer(MAX_MARCAS),
-            ],
+            "UPDATE _Sync_Por_Contrastar SET Seq = ?2, Intentos = 0 \
+              WHERE (Tabla, Clave_Json) IN (SELECT json_extract(value, '$.t'), json_extract(value, '$.k') FROM json_each(?1));",
+            vec![lista.clone(), Value::Integer(seq)],
         )
         .await
         .map_err(db_err)?;
-    if n == 0 {
-        tracing::warn!(target: "tpv::sync", seq, filas = filas.len(), "SYNC-29: no caben más filas por traer de la nube; éstas no se apuntan");
+    let mut filas_ocupadas = conn.query("SELECT COUNT(*) FROM _Sync_Por_Contrastar;", ()).await.map_err(db_err)?;
+    let ocupadas = match filas_ocupadas.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+        Some(Ok(Value::Integer(n))) => n,
+        _ => MAX_MARCAS,
+    };
+    drop(filas_ocupadas);
+    let nuevas = conn
+        .execute(
+            "INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms) \
+             SELECT json_extract(value, '$.t'), json_extract(value, '$.k'), ?2, ?3 FROM json_each(?1) \
+              WHERE NOT EXISTS (SELECT 1 FROM _Sync_Por_Contrastar m \
+                                 WHERE m.Tabla = json_extract(value, '$.t') AND m.Clave_Json = json_extract(value, '$.k')) \
+              LIMIT ?4;",
+            vec![lista, Value::Integer(seq), Value::Integer(now_ms()), Value::Integer((MAX_MARCAS - ocupadas).max(0))],
+        )
+        .await
+        .map_err(db_err)?;
+    if (ya + nuevas) < filas.len() as u64 {
+        tracing::warn!(target: "tpv::sync", seq, filas = filas.len(), "SYNC-29: no caben más filas por traer de la nube; algunas no se apuntan");
     }
     Ok(())
 }
@@ -576,4 +588,47 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
         tracing::info!(target: "tpv::sync", filas = escritas.len(), "SYNC-29: filas traídas de la nube, que las ordenó de otra forma");
     }
     Ok(Convergencia::Hecha { escritas, quedan })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    async fn base(nombre: &str) -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal(&format!("convergencia-{nombre}"));
+        Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap()
+    }
+
+    async fn numero(db: &Db, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut f = r.conn().query(sql, ()).await.unwrap();
+        f.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    fn fila(id: &str) -> FilaTocada {
+        FilaTocada { tabla: "Reservas".into(), clave: vec![serde_json::json!(id)], borrada: false }
+    }
+
+    #[tokio::test]
+    async fn no_se_apuntan_mas_de_las_que_caben_y_las_ya_apuntadas_se_ponen_al_dia() {
+        // Codex: el tope se miraba una vez por sentencia, y un cambio grande lo pasaba de largo.
+        let db = base("tope").await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(&format!(
+                    "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < {})
+                     INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms, Intentos)
+                     SELECT 'Reservas', json_array('r' || i), 1, 1, 3 FROM s;",
+                    MAX_MARCAS - 1
+                ))
+                .await
+                .unwrap();
+            marcar(w.raw(), &[fila("r1"), fila("nueva-1"), fila("nueva-2")], 7).await.unwrap();
+        }
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Por_Contrastar;").await, MAX_MARCAS);
+        assert_eq!(numero(&db, "SELECT Seq * 10 + Intentos FROM _Sync_Por_Contrastar WHERE Clave_Json = '[\"r1\"]';").await, 70);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Por_Contrastar WHERE Clave_Json LIKE '%nueva%';").await, 1);
+    }
 }
