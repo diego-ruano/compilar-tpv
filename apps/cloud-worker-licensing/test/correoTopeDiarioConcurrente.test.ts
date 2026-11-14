@@ -97,7 +97,7 @@ function pedir(env: any, destino = "prov@prueba.test"): Promise<Response> {
 			{
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ email_destino: destino, nombre_proveedor: "Prov", notas: "prueba" }),
+				body: JSON.stringify({ email_destino: destino, nombre_proveedor: "Prov", notas: "prueba", id_envio: crypto.randomUUID() }),
 			},
 			env,
 		),

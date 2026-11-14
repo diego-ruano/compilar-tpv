@@ -98,6 +98,7 @@ const PEDIDO = {
 	nombre_proveedor: "Bebidas del Sur",
 	notas: "Lo de siempre",
 	lineas: [{ nombre_producto: "Cerveza", cantidad: 3, precio_unitario: 1250, unidad: "caja" }],
+	id_envio: "0199aa00-0000-7000-8000-0000000e0000",
 };
 
 function aviso(extra: Record<string, unknown> = {}) {
@@ -244,14 +245,16 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 		});
 	});
 
-	it("sin clave (una Main anterior), cada petición es un envío, como siempre", async () => {
+	it("sin clave, o con una que no tiene su forma, no hay pedido: ni sale ni gasta cupo", async () => {
 		await conNegocio("pedido-sin-clave", async (n, sql) => {
-			for (let i = 0; i < 2; i++) {
-				const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
-				expect(await res.json()).toEqual({ ok: true });
+			const { id_envio: _, ...sinClave } = PEDIDO;
+			for (const cuerpo of [sinClave, { ...PEDIDO, id_envio: "" }, { ...PEDIDO, id_envio: "corta" }, { ...PEDIDO, id_envio: "con espacios y más de dieciséis" }]) {
+				const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo });
+				expect(res.status).toBe(400);
+				expect(await res.json()).toMatchObject({ ok: false, error: "validation_error" });
 			}
-			expect(enviados).toHaveLength(2);
-			expect(filas(sql)).toHaveLength(2);
+			expect(enviados).toEqual([]);
+			expect(filas(sql)).toEqual([]);
 		});
 	});
 

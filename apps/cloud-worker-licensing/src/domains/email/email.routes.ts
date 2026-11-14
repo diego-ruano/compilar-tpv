@@ -65,12 +65,8 @@ const enviarPedidoSchema = z
 		notas: z.string().max(2000).nullable().optional(),
 		lineas: z.array(lineaSchema).max(500).default([]),
 		// La clave del envío: la misma mientras la Main reintenta el mismo pedido (`claveDeEnvio.ts`).
-		// Una sin la forma esperada se ignora, como la `Idempotency-Key` del widget: el pedido sale
-		// igual, sólo que sin esa protección. Una Main anterior no la manda.
-		id_envio: z
-			.string()
-			.optional()
-			.transform((v) => (v && CLAVE_DE_ENVIO.test(v) ? v : undefined)),
+		// Siempre viene; sin ella, o sin su forma, no hay pedido que mandar.
+		id_envio: z.string().regex(CLAVE_DE_ENVIO),
 	})
 	.refine((v) => v.lineas.length > 0 || (v.notas ?? "").trim().length > 0, {
 		message: "El pedido debe llevar al menos una línea o unas notas",
@@ -104,7 +100,7 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	const envio: Envio = {
 		// Con la clave del envío, el id es el mismo en cada reintento: lo que ya salió no vuelve a salir
 		// (`reservarCupo`). Lleva el negocio delante: la clave la elige el dispositivo.
-		id: id_envio ? `pedido:${tenantId}:${id_envio}` : crypto.randomUUID(),
+		id: `pedido:${tenantId}:${id_envio}`,
 		tenantId,
 		deviceId,
 		toEmail: email_destino,
@@ -154,7 +150,7 @@ export const VENTANA_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Un pedido que va a salir, tal como queda en su fila de `email_sends`. El id es el de su clave de
- * envío (`pedido:<negocio>:<id_envio>`), el mismo en cada reintento, o uno nuevo si no la trae.
+ * envío (`pedido:<negocio>:<id_envio>`), el mismo en cada reintento.
  */
 export type Envio = { id: string; tenantId: string; deviceId: string; toEmail: string; proveedor: string };
 
@@ -201,9 +197,9 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  * **Si la base central no contesta, se envía igual** (`sin_base`), y `terminarEnvio` apunta el envío
  * si para entonces puede. Turso caído no puede impedir que un bar mande su pedido: un tope que
  * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Ese hueco no lo
- * abre quien llama: no puede tirar la base central a voluntad. También con `id_envio`: sin la base
- * no se sabe si ese envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de
- * Turso se queda lo segundo (los correos de las reservas web, al revés, no salen).
+ * abre quien llama: no puede tirar la base central a voluntad. Sin la base no se sabe tampoco si ese
+ * envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de Turso se queda lo
+ * segundo (los correos de las reservas web, al revés, no salen).
  */
 export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
 	const ahora = Date.now();
