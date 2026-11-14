@@ -166,7 +166,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   escritura en tres minutos (ni de aquí ni de la nube: `_Sync_Applied_Ops`), hasta cuarenta de 10.000
   (más de cuatro millones a la hora). Si entra una venta a mitad, lo que queda va al ritmo de
   trabajo. Un worker anterior recorta las páginas a las suyas y el histórico baja igual
-  (`tests/historico_al_ritmo.rs`).
+  (`tests/historico_al_ritmo.rs`). Cada página toma el escritor mientras se aplica, con los
+  triggers del resumen de las estadísticas apuntando días: medido en local, una de 10.000 cobros
+  tarda unos 280 ms (110 ms sin los triggers), una de líneas unos 95 ms y una de comandas 120 ms; lo
+  más que espera una venta que llega a mitad.
 - Es `Requiere::MainOperativa`, así que no compite con el desbloqueo del login. Se pausa con el
   interruptor `backfill_historico`.
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros
