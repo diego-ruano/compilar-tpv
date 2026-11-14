@@ -536,7 +536,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     en una de ésas, lo sacado de aquí pudo no ser lo de arriba, y queda `dudosa` para siempre: no se
     trae nunca, tampoco cuando lo apartado se retire. Lo que no se sabe (una tabla que esta versión
     no tiene, un `REPLACE`, ese `ON CONFLICT` sin poder ejecutarse, más de 5.000 filas) queda como
-    incierto, y se vuelve a mirar en cada intento y en cada pasada mientras quedan sentencias.
+    incierto, con todo lo que nombran sus sentencias como `por_filtro`, y se vuelve a mirar en cada
+    intento y en cada pasada mientras quedan sentencias. Mientras siga incierto, cada pasada lo
+    cruza con lo apartado de la subida: si lo apartado se retirase antes de saberse qué toca, ya no
+    se vería.
   - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
@@ -770,8 +773,8 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   miran (`Ultima_Salida_Ms`) y las aplica en orden de `Seq`; las que no caben se dejan para otra
   pasada, que empieza por ellas, y las que ni se intentan (inciertas, dudosas o que chocan con lo
   apartado) no cuentan: unas atascadas no dejan sin intentar a las demás. De las inciertas se
-  vuelven a mirar 20 por pasada; de las cuarentenas se leen 10.000, y de lo apartado de la subida,
-  1.000 operaciones (con más se da todo por chocado).
+  vuelven a mirar 20 por pasada, y las que no caben tampoco se marcan; de las cuarentenas se leen
+  10.000, y de lo apartado de la subida, 1.000 operaciones (con más se da todo por chocado).
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,

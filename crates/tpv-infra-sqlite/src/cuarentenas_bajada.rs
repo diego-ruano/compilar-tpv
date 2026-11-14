@@ -156,12 +156,16 @@ async fn vaciar_una_tanda(db: &Db, antes_de_ms: i64) -> AppResult<(usize, u64)> 
                         Some(t)
                     }
                 };
-                match (ahora, antes) {
+                // Si sigue incierta se queda la de antes, pero sin perder una duda recién vista.
+                let dudosa = ahora.as_ref().is_some_and(|t| t.dudosa);
+                let mut elegida = match (ahora, antes) {
                     (Some(t), _) if !t.incierto => t,
                     (_, Some(t)) => t,
                     (Some(t), None) => t,
-                    (None, None) => Tocadas::incierta(Vec::new()),
-                }
+                    (None, None) => Tocadas::incierta_de_todo(Vec::new()),
+                };
+                elegida.dudosa |= dudosa;
+                elegida
             }
         };
         vaciadas.push((op, filas.a_json(), clase_de_error(error.as_deref())));
@@ -297,35 +301,55 @@ pub(crate) async fn resolver(
         return Ok(Some(Salida::default()));
     }
 
-    // Las que no saben qué tocan y aún tienen sus sentencias se miran otra vez: la tabla que esta
-    // versión no tenía puede tenerla ya. Unas pocas por pasada.
+    // Las que no saben qué tocan. Todas, en cada pasada, se cruzan con lo apartado de ahora: si lo
+    // apartado se retirara antes de que se supiera qué tocan, ya no se vería (`dudosa`, Codex). Y de
+    // las que aún tienen sus sentencias se vuelve a mirar qué tocan (la tabla que esta versión no
+    // tenía puede tenerla ya), unas pocas por pasada; las que no caben no se marcan como miradas, y
+    // la pasada siguiente empieza por ellas.
+    let mut sin_recalcular: HashSet<String> = HashSet::new();
     {
         let w = db.write().await;
         let conn: &Connection = w.raw();
-        for c in cuarentenas.iter_mut().filter(|c| c.tocadas.incierto && c.con_sentencias).take(MAX_RECALCULOS_POR_PASADA) {
-            let mut filas = conn
-                .query("SELECT Statements_Json FROM _Sync_Failed WHERE Op_Id = ?1;", vec![Value::Text(c.op_id.clone())])
-                .await
-                .map_err(db_err)?;
-            let sentencias: Vec<SqlStatement> = match filas.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
-                Some(Ok(Value::Text(t))) => serde_json::from_str(&t).unwrap_or_default(),
-                _ => Vec::new(),
-            };
-            drop(filas);
-            if sentencias.is_empty() {
-                continue;
+        let apartado = lo_apartado_de_la_subida(db, &HashMap::new()).await?;
+        let mut recalculos = 0usize;
+        for c in cuarentenas.iter_mut().filter(|c| c.tocadas.incierto) {
+            let dudosa_antes = c.tocadas.dudosa;
+            c.tocadas.dudosa |= es_dudosa(&c.tocadas, &apartado);
+            let mut sentencias: Vec<SqlStatement> = Vec::new();
+            if c.con_sentencias {
+                if recalculos == MAX_RECALCULOS_POR_PASADA {
+                    sin_recalcular.insert(c.op_id.clone());
+                } else {
+                    recalculos += 1;
+                    let mut filas = conn
+                        .query("SELECT Statements_Json FROM _Sync_Failed WHERE Op_Id = ?1;", vec![Value::Text(c.op_id.clone())])
+                        .await
+                        .map_err(db_err)?;
+                    if let Some(Ok(Value::Text(t))) = filas.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+                        sentencias = serde_json::from_str(&t).unwrap_or_default();
+                    }
+                }
             }
-            let mut ahora = tocadas::de_un_cambio(conn, &sentencias).await;
-            ahora.dudosa |= c.tocadas.dudosa;
-            marcar_si_dudosa(db, &mut ahora).await?;
-            if !ahora.incierto || !c.sabidas {
+            let mut cambiada = c.tocadas.dudosa != dudosa_antes;
+            if !sentencias.is_empty() {
+                let mut ahora = tocadas::de_un_cambio(conn, &sentencias).await;
+                ahora.dudosa |= c.tocadas.dudosa || es_dudosa(&ahora, &apartado);
+                if !ahora.incierto || !c.sabidas {
+                    c.tocadas = ahora;
+                    cambiada = true;
+                } else if ahora.dudosa && !c.tocadas.dudosa {
+                    // Sigue incierta: se queda la de antes, pero no la duda recién vista.
+                    c.tocadas.dudosa = true;
+                    cambiada = true;
+                }
+            }
+            if cambiada {
                 conn.execute(
                     "UPDATE _Sync_Failed SET Filas_Json = ?2 WHERE Op_Id = ?1 AND Quarantined = 1;",
-                    vec![Value::Text(c.op_id.clone()), Value::Text(ahora.a_json())],
+                    vec![Value::Text(c.op_id.clone()), Value::Text(c.tocadas.a_json())],
                 )
                 .await
                 .map_err(db_err)?;
-                c.tocadas = ahora;
             }
         }
     }
@@ -449,7 +473,11 @@ pub(crate) async fn resolver(
     }
     // Las que se han mirado van detrás en la pasada siguiente; las que no cabían, no: así ni unas
     // atascadas al principio ni el tope de lectura dejan a ninguna sin intentar para siempre.
-    let miradas: Vec<&str> = cuarentenas.iter().map(|c| c.op_id.as_str()).filter(|op| !saltadas.contains(op)).collect();
+    let miradas: Vec<&str> = cuarentenas
+        .iter()
+        .map(|c| c.op_id.as_str())
+        .filter(|op| !saltadas.contains(op) && !sin_recalcular.contains(*op))
+        .collect();
     conn.execute(
         "UPDATE _Sync_Failed SET Ultima_Salida_Ms = ?1 WHERE Quarantined = 1 AND Op_Id IN (SELECT value FROM json_each(?2));",
         vec![Value::Integer(now_ms()), Value::Text(serde_json::to_string(&miradas).map_err(db_err)?)],
@@ -487,7 +515,7 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
         let con_sentencias = matches!(f.get_value(2), Ok(Value::Integer(1)));
         let (tocadas, sabidas) = match f.get_value(3) {
             Ok(Value::Text(t)) => (Tocadas::de_json(&t), true),
-            _ => (Tocadas::incierta(Vec::new()), false),
+            _ => (Tocadas::incierta_de_todo(Vec::new()), false),
         };
         salida.push(Cuarentena { op_id, seq, con_sentencias, tocadas, sabidas });
     }
@@ -531,8 +559,16 @@ pub(crate) async fn marcar_si_dudosa(db: &Db, t: &mut Tocadas) -> AppResult<()> 
         return Ok(());
     }
     let apartado = lo_apartado_de_la_subida(db, &HashMap::new()).await?;
-    t.dudosa = apartado.tablas.contains("*") || t.por_filtro.iter().any(|x| apartado.todas.contains(x));
+    t.dudosa = es_dudosa(t, &apartado);
     Ok(())
+}
+
+/// Lo de [`marcar_si_dudosa`], con lo apartado ya leído. Un `*` en `por_filtro` (no se sabe ni qué
+/// tablas lee) es dudosa con cualquier cosa apartada.
+fn es_dudosa(t: &Tocadas, apartado: &tocadas::Estaticas) -> bool {
+    !t.por_filtro.is_empty()
+        && (apartado.tablas.contains("*")
+            || t.por_filtro.iter().any(|x| (x == tocadas::TODAS && !apartado.todas.is_empty()) || apartado.todas.contains(x)))
 }
 
 /// Lo que toca lo apartado de la subida: lo que esta Main escribió y la nube no tiene.

@@ -53,6 +53,9 @@ use crate::ejecutor::{Connection, Simulacro, Value};
 /// trae por estado: sería bajar media base para cerrar una cuarentena.
 pub(crate) const MAX_FILAS_TOCADAS: usize = 5_000;
 
+/// En `por_filtro`, cualquier tabla.
+pub(crate) const TODAS: &str = "*";
+
 /// Lo que se sabe de las filas que toca un cambio.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Tocadas {
@@ -89,6 +92,14 @@ impl Tocadas {
         Tocadas { por_filtro: tablas.clone(), tablas, filas: Vec::new(), incierto: true, dudosa: false }
     }
 
+    /// Incierta sin saber ni qué tablas lee: cualquier cosa apartada de la subida la hace dudosa
+    /// (`por_filtro` con `*`).
+    pub(crate) fn incierta_de_todo(tablas: Vec<String>) -> Self {
+        let mut t = Tocadas::incierta(tablas);
+        t.por_filtro.push(TODAS.into());
+        t
+    }
+
     /// Como se guarda en `_Sync_Failed.Filas_Json`.
     pub(crate) fn a_json(&self) -> String {
         json!({
@@ -104,7 +115,7 @@ impl Tocadas {
     /// Lo guardado en `Filas_Json`. Lo que no se sabe leer es incierto: no se trae nada.
     pub(crate) fn de_json(texto: &str) -> Tocadas {
         let Ok(v) = serde_json::from_str::<Json>(texto) else {
-            return Tocadas::incierta(Vec::new());
+            return Tocadas::incierta_de_todo(Vec::new());
         };
         let tablas: Vec<String> =
             v["tablas"].as_array().map(|t| t.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
@@ -141,7 +152,7 @@ pub(crate) async fn de_un_cambio(conn: &Connection, sentencias: &[SqlStatement])
         Ok(t) => t,
         Err(e) => {
             tracing::warn!(target: "tpv::sync", error = %e, "no se ha podido saber qué filas toca un cambio de la nube");
-            Tocadas::incierta(de_reserva)
+            Tocadas::incierta_de_todo(de_reserva)
         }
     }
 }
@@ -302,13 +313,21 @@ fn simular(sim: &Simulacro<'_>, sentencias: &[SqlStatement], tablas: Vec<String>
     let mut junta = Junta::default();
     let mut esquemas: HashMap<String, Option<Esquema>> = HashMap::new();
     let Some(catalogo) = Catalogo::de(sim) else {
-        return Tocadas::incierta(tablas);
+        return Tocadas::incierta_de_todo(tablas);
     };
     for st in sentencias {
         let args: Vec<Value> = st.args.iter().map(argumento).collect();
         match una_sentencia(sim, st, &args, &mut esquemas, &catalogo, &mut junta) {
             Ok(()) => {}
-            Err(()) => return Tocadas::incierta(tablas),
+            Err(()) => {
+                // Incierta: cuando se vuelva a mirar, lo que salga de esta base dependerá de todo
+                // lo que nombran sus sentencias, así que todo cuenta como sacado de un filtro (Codex).
+                let mut todo = Tocadas::incierta(tablas);
+                todo.por_filtro.extend(sentencias.iter().flat_map(|s| catalogo.leidas(&s.sql)));
+                todo.por_filtro.sort();
+                todo.por_filtro.dedup();
+                return todo;
+            }
         }
     }
     let mut por_filtro = junta.por_filtro;
@@ -1325,6 +1344,18 @@ mod tests {
         .await;
         assert!(!t.incierto, "{t:?}");
         assert_eq!(t.por_filtro, vec!["Detalle_Comanda", "Mesas", "Pago_Detalles", "Pagos", "Productos", "Zonas"]);
+
+        // Incierta (una tabla que aquí no está): cuenta todo lo que nombran sus sentencias (Codex).
+        let t = tocadas(
+            &db,
+            &[
+                st("UPDATE Mesas SET Capacidad = 1 WHERE ID_Zona IN (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?1);", vec![json!("Terraza")]),
+                st("INSERT INTO Tabla_Nueva (ID) VALUES ('x');", vec![]),
+            ],
+        )
+        .await;
+        assert!(t.incierto, "{t:?}");
+        assert_eq!(t.por_filtro, vec!["Mesas", "Tabla_Nueva", "Zonas"]);
     }
 
     #[tokio::test]

@@ -406,6 +406,72 @@ async fn lo_apuntado_con_algo_apartado_en_su_tabla_no_se_trae_ni_cuando_lo_apart
 }
 
 #[tokio::test]
+async fn una_incierta_que_ve_algo_apartado_queda_dudosa_aunque_lo_apartado_se_retire_antes_de_saberse() {
+    // Codex (tercera pasada): una incierta (una tabla que esta versión aún no tiene) que filtra las
+    // mesas. Mientras sigue incierta, la Main aparta un cambio de mesa: cada pasada lo cruza y la
+    // marca dudosa. Lo apartado se retira, la versión nueva trae la tabla y ya se sabe qué toca: no
+    // se trae, porque lo sacado de aquí pudo no ser lo de arriba.
+    let (repo, db, dir) = base("incierta-dudosa").await;
+    sembrar(&db, NEGOCIO).await;
+    sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 30 WHERE Id = 1;").await;
+    let ch = cambio(
+        "op-31",
+        31,
+        vec![
+            ("UPDATE Mesas SET Capacidad = 9 WHERE ID_Zona = ?1;", vec![json!("z1")]),
+            ("INSERT INTO Tabla_Nueva (ID) VALUES (?1);", vec![json!("x")]),
+        ],
+    );
+    bajar(&repo, &ch).await;
+    let nube = NubeDeContraste::nueva("incierta-dudosa").await;
+    nube.sembrar(NEGOCIO).await;
+    nube.sembrar("CREATE TABLE Tabla_Nueva (ID TEXT NOT NULL PRIMARY KEY);").await;
+    nube.aplicar(&ch.statements).await;
+    *nube.hasta_seq.lock().unwrap() = 31;
+    *nube.ultimo_ajeno.lock().unwrap() = 31;
+
+    sembrar(
+        &db,
+        r#"INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena)
+           VALUES ('op-main', 'main_op', '[{"sql":"UPDATE Mesas SET ID_Zona = ?1 WHERE ID_Mesa = ?2;","args":["z2","m2"]}]', 1, 1);"#,
+    )
+    .await;
+    hecha(pasada(&repo, &nube, true).await);
+    assert!(textos(&db, "SELECT Filas_Json FROM _Sync_Failed;").await[0].contains("\"dudosa\":true"));
+
+    sembrar(&db, "DELETE FROM _Sync_Outbox; CREATE TABLE Tabla_Nueva (ID TEXT NOT NULL PRIMARY KEY);").await;
+    hecha(pasada(&repo, &nube, true).await);
+    let filas = textos(&db, "SELECT Filas_Json FROM _Sync_Failed;").await;
+    assert!(filas[0].contains("\"incierto\":false") && filas[0].contains("\"dudosa\":true"), "{}", filas[0]);
+    assert_eq!(en_cuarentena(&db).await, vec!["op-31"]);
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn los_recalculos_de_las_inciertas_tambien_rotan() {
+    // Codex (tercera pasada): de 22 inciertas se recalculaban siempre las mismas 20. Las que no
+    // caben no se marcan como miradas, y la pasada siguiente empieza por ellas.
+    let (repo, db, dir) = base("recalculos").await;
+    sembrar(&db, NEGOCIO).await;
+    sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 30 WHERE Id = 1;").await;
+    for i in 0..22 {
+        bajar(&repo, &cambio(&format!("op-{i:02}"), 31 + i, vec![("INSERT INTO Tabla_Nueva (ID) VALUES (?1);", vec![json!(i)])])).await;
+    }
+    let nube = NubeDeContraste::nueva("recalculos").await;
+    nube.sembrar(NEGOCIO).await;
+    *nube.hasta_seq.lock().unwrap() = 52;
+    *nube.ultimo_ajeno.lock().unwrap() = 52;
+
+    hecha(pasada(&repo, &nube, true).await);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed WHERE Ultima_Salida_Ms IS NULL;").await, 2, "dos no han cabido");
+    hecha(pasada(&repo, &nube, true).await);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed WHERE Ultima_Salida_Ms IS NULL;").await, 0, "y en la siguiente, sí");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn las_que_no_se_pueden_traer_no_dejan_sin_intentar_a_las_de_detras() {
     // Codex: sólo se leían las 50 primeras por `Seq`, y 60 sin filas sabidas delante dejaban fuera
     // para siempre a las de detrás, que sí se podían traer.
