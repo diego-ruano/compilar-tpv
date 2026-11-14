@@ -1381,7 +1381,7 @@ mod tests_alta_del_suelto {
     //! de su transacción, pero lo que replica lo aplica otra base que puede tener ya ese producto:
     //! un producto sin ventas que otro equipo borra, con su ficha abierta en la Main y en una Handy;
     //! las dos lo guardan y lo vuelven a crear con el mismo id antes de recibir lo del otro. Si el de
-    //! la Handy entra antes en Turso, el upsert de la Main conserva ese stock, y sin la condición su
+    //! la Handy entra antes en la nube, el upsert de la Main conserva ese stock, y sin la condición su
     //! ALTA quedaba encima. El movimiento va delante del alta y sólo si el producto no existe, como
     //! en `upsertProducto` del worker.
 

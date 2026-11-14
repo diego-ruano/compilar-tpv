@@ -51,3 +51,6 @@ crean sin jurisdicción y con una pista de región de Europa occidental
   pista sólo cuenta al crear el objeto: uno que ya existe se queda donde nació.
 - Una base se administra a través del worker, no con la CLI de Turso. Las copias propias de cada
   negocio están por hacer ([DO-03](../pendientes.md#do-03--copias-de-la-base-de-cada-negocio)).
+- Lo que quedó en Turso de las bases de los negocios (su tabla en la base central, dos secretos y
+  las propias bases) se retira a mano, tras desplegar
+  ([DO-TURSO](../pendientes.md#do-turso--lo-que-queda-en-turso-de-las-bases-de-los-negocios)).

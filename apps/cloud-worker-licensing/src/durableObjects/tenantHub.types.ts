@@ -58,19 +58,15 @@ export type HelloSignedMsg = {
 
 export type RecoveryReadyMsg = { type: "recovery_ready" };
 
-/** Una operación de un `apply_lote`, tal como llega: el comando interno, para el motor idempotente. */
+/**
+ * Una operación de un `apply_lote`, tal como la manda la Main (`replicacion.rs::operacion`): el
+ * comando interno, para el motor idempotente.
+ */
 type OpDeLoteMsg = {
 	opId?: string;
-	op_id?: string;
 	commandName?: string;
-	command_name?: string;
 	command?: { type: string; payload?: any };
-	cloud_payload?: any;
-	cloudPayload?: any;
-	cloud_payload_json?: string;
-	cloudPayloadJson?: string;
-	request_payload?: any;
-	requestPayload?: any;
+	clientNow?: string;
 };
 
 /**
@@ -82,7 +78,6 @@ export type ApplyLoteMsg = {
 	type: "apply_lote";
 	loteId?: string;
 	ops?: OpDeLoteMsg[];
-	client_now?: string;
 	clientNow?: string;
 };
 

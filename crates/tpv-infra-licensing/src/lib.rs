@@ -539,8 +539,8 @@ async fn enviar_activacion(intento: ActivacionFirmada<'_>) -> AppResult<(u16, St
 #[derive(Debug, Deserialize)]
 struct ApiErr {
     error: String,
-    /// ARCH-05: código ya resuelto por el worker. `Option` porque un worker anterior no lo
-    /// manda; en ese caso se traduce el `error` con `ErrorCode::from_wire`.
+    /// ARCH-05: código ya resuelto por el worker. Si no viene, se traduce el `error` con
+    /// `ErrorCode::from_wire`.
     code: Option<String>,
     /// La frase para quien está delante, si el worker la tiene (`lib/errorCodes.ts`).
     message: Option<String>,
@@ -585,17 +585,12 @@ struct ActivateOk {
     status: String,
     expires_at: Option<String>,
     device_id: Option<String>,
-    /// TRAB-03: DEK del tenant para cifrar la PII del personal. `Option` porque un worker
-    /// anterior a este cambio no la manda; en ese caso el cifrado queda inactivo y las
-    /// columnas se leen/escriben en claro, como antes.
-    field_dek: Option<String>,
-    /// Si la activación ha trasladado la licencia desde otro equipo. `default` para un worker
-    /// anterior que no lo manda: sin él no se sabe, y se sigue como hasta ahora.
-    #[serde(default)]
+    /// TRAB-03: DEK del tenant para cifrar la PII del personal. Viene en cada activación.
+    field_dek: String,
+    /// Si la activación ha trasladado la licencia desde otro equipo.
     cambio_de_equipo: bool,
-    /// REV-13: la clave ha sumado su tiempo a la licencia que ya había en este equipo. `default`
-    /// para un worker anterior que no lo manda — ahí no existía el canje, así que `false` es lo
-    /// que era verdad.
+    /// REV-13: la clave ha sumado su tiempo a la licencia que ya había en este equipo. El worker
+    /// sólo lo manda cuando suma (el canje); si no viene, no ha sumado.
     #[serde(default)]
     tiempo_sumado: bool,
 }
@@ -1117,7 +1112,7 @@ impl LicensingService for LicensingAdapter {
         *self.concedido.lock().unwrap_or_else(|e| e.into_inner()) = Some(CredencialesConcedidas {
             negocio: ok.tenant_id.trim().to_string(),
             token: ok.token.trim().to_string(),
-            field_dek: ok.field_dek.as_deref().map(str::trim).filter(|d| !d.is_empty()).map(str::to_string),
+            field_dek: Some(ok.field_dek.trim()).filter(|d| !d.is_empty()).map(str::to_string),
         });
 
         Ok(ResultadoActivacion::Activada(Concesion {
@@ -1878,11 +1873,12 @@ mod tests_respuesta_de_activar {
         assert!(ok.cambio_de_equipo);
     }
 
-    /// Un worker anterior no lo manda: sin él no se sabe, y no se toca la base del equipo.
     #[test]
-    fn sin_el_campo_no_es_un_traslado() {
-        let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA}}}")).unwrap();
-        assert!(!ok.cambio_de_equipo);
+    fn sin_el_campo_la_respuesta_no_encaja() {
+        // Lo manda siempre: una respuesta sin él no es la de la activación, y no se adivina.
+        assert!(serde_json::from_str::<ActivateOk>(&format!("{RESPUESTA}}}")).is_err());
+        let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA},\"cambioDeEquipo\":false}}")).unwrap();
+        assert!(!ok.cambio_de_equipo && !ok.tiempo_sumado);
     }
 }
 
@@ -2599,16 +2595,19 @@ mod tests_mensajes_sin_datos {
     #[test]
     fn una_activacion_que_no_encaja_no_cita_el_token_ni_la_dek() {
         // El control: con todo en su sitio, se lee.
-        let buena = format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#);
+        let buena = format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#);
         assert_eq!(leer_activacion(&buena).unwrap().token, TOKEN);
 
         for cuerpo in [
             // La DEK con otro tipo: el texto de serde la citaría.
-            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":987654321}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":987654321,"cambioDeEquipo":false}}"#),
             // El token con otro tipo.
-            format!(r#"{{"ok":true,"tenantId":"t1","token":987654321,"status":"active","fieldDek":"{DEK}"}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":987654321,"status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#),
             // Le falta un campo.
-            format!(r#"{{"ok":true,"token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#),
+            format!(r#"{{"ok":true,"token":"{TOKEN}","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#),
+            // Sin la DEK, o nula: viene en cada activación, y sin ella no se activa a medias.
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","cambioDeEquipo":false}}"#),
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":null,"cambioDeEquipo":false}}"#),
         ] {
             let mensaje = leer_activacion(&cuerpo).expect_err("no encaja").to_string();
             sin_secretos(&mensaje);
@@ -2620,9 +2619,9 @@ mod tests_mensajes_sin_datos {
     #[test]
     fn una_activacion_sin_la_licencia_dice_que_le_falta() {
         for (cuerpo, falta) in [
-            (format!(r#"{{"ok":false,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#), "ok=false"),
-            (format!(r#"{{"ok":true,"tenantId":"t1","token":"  ","status":"active","fieldDek":"{DEK}"}}"#), "sin token"),
-            (format!(r#"{{"ok":true,"tenantId":" ","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#), "sin negocio"),
+            (format!(r#"{{"ok":false,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#), "ok=false"),
+            (format!(r#"{{"ok":true,"tenantId":"t1","token":"  ","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#), "sin token"),
+            (format!(r#"{{"ok":true,"tenantId":" ","token":"{TOKEN}","status":"active","fieldDek":"{DEK}","cambioDeEquipo":false}}"#), "sin negocio"),
         ] {
             let mensaje = leer_activacion(&cuerpo).expect_err("le falta algo").to_string();
             sin_secretos(&mensaje);
@@ -2806,7 +2805,7 @@ mod tests_transporte_de_volcados {
         let filas: Vec<serde_json::Value> =
             (0..500).map(|i| serde_json::json!([format!("zona-{i}"), "Salón de la planta baja"])).collect();
         serde_json::to_vec(&serde_json::json!({
-            "ok": true, "seq": 77, "totalFilas": 500,
+            "ok": true, "seq": 77, "total_filas": 500,
             "tablas": [{ "nombre": "Zonas", "columnas": ["ID_Zona", "Nombre_Zona"], "filas": filas, "parcial": false }],
             "backfill": [],
         }))
@@ -2838,7 +2837,7 @@ mod tests_transporte_de_volcados {
 
     #[tokio::test]
     async fn una_respuesta_sin_comprimir_se_lee_igual() {
-        // Un worker que no comprime (uno anterior, o una respuesta pequeña).
+        // Una respuesta que llega sin comprimir (una pequeña).
         let original = volcado();
         let (respuesta, servidor) = pedir(Contesta::Plano(original.clone()), LARGO, LARGO).await;
         servidor.await.unwrap();

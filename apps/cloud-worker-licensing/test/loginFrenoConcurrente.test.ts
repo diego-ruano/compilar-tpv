@@ -10,8 +10,8 @@
 //
 // Aquí corre la ruta de verdad (Hono, handler y consultas) contra el esquema real del negocio,
 // servido por el SQLite del Durable Object. Sólo se sustituyen `tenantAuth` (la identidad del
-// dispositivo no es lo que se prueba) y la parte de `tenantQuery` que busca la base del negocio en
-// Turso: cada sentencia espera 2 ms antes de ejecutarse, como la ida y vuelta de cada consulta.
+// dispositivo no es lo que se prueba) y la parte de `tenantQuery` que busca la base del negocio:
+// cada sentencia espera 2 ms antes de ejecutarse, para que las peticiones se crucen entre consultas.
 //
 // Datos ficticios. Cada caso usa su propia instancia del DO y borra lo que crea.
 
@@ -43,7 +43,7 @@ vi.mock("../src/lib/tenantClient", async (original) => {
 	return {
 		...real,
 		// Lo mismo que hace la de verdad con la hora de quien pregunta (`X-Client-Now`), sobre la
-		// base del caso en vez de la de Turso.
+		// base del caso en vez de la del negocio.
 		tenantQuery: (c: any, fn: any) => {
 			const ahoraLocal = parseClientNow(c.req.header("X-Client-Now"));
 			return fn(ahoraLocal ? real.conLaHoraDeQuienPregunta(dbActual, ahoraLocal) : dbActual);

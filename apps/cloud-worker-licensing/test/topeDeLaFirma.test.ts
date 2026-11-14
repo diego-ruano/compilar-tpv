@@ -72,8 +72,6 @@ const ENV = {
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
 	TURSO_DATABASE_URL: "libsql://ficticia.invalid",
 	TURSO_AUTH_TOKEN: "ficticio",
-	TURSO_PLATFORM_TOKEN: "ficticio",
-	TURSO_ORG_SLUG: "ficticia",
 } as any;
 
 const C = '"';

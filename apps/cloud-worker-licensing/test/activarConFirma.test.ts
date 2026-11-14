@@ -13,7 +13,7 @@
 // Cada caso reproduce lo que haría ese dueño —sin firma, o firmando con una clave suya— y fija que
 // sale con un 401 antes de que la ruta lea una sola fila. Y que el equipo de verdad, que firma con
 // la suya, sigue entrando. Los emparejamientos de la víctima van por el camino real, con sus firmas.
-// Turso (el aprovisionamiento) y el correo se sustituyen.
+// El aprovisionamiento de la base del negocio y el correo se sustituyen.
 //
 // La firma sólo prueba la clave que se presenta, así que aquí se fija también lo que la rodea: una
 // fila sin clave registrada no se da por buena con la que llegue, un rechazo por la clave no deja
@@ -33,13 +33,13 @@ import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 
 /** La conexión del test en curso; la lee el `getDb` simulado. */
 let clienteActual: any = null;
-/** Bases de tenant que se han llegado a aprovisionar (en producción, una base nueva en Turso). */
+/** Bases de tenant que se han llegado a aprovisionar (en producción, la de su TenantHub). */
 let basesCreadas: string[] = [];
 /** Correos que habría mandado el worker. */
 let correos: Array<{ to: string; subject: string; text: string }> = [];
 /** Lo que la ruta deja en `waitUntil` (los correos). */
 let pendientes: Promise<unknown>[] = [];
-/** Turso no contesta: la activación se corta al aprovisionar la base, después de dar de alta el equipo. */
+/** El TenantHub no contesta: la activación se corta al aprovisionar la base, después de dar de alta el equipo. */
 let fallaElAprovisionamiento = false;
 
 vi.mock("../src/server/db", async (original) => ({
@@ -50,7 +50,7 @@ vi.mock("../src/server/db", async (original) => ({
 vi.mock("../src/domains/licensing/licensing.helpers", async (original) => ({
 	...(await (original as any)()),
 	provisionTenantDatabase: async (_db: any, _env: any, tenantId: string) => {
-		if (fallaElAprovisionamiento) throw new Error("turso_no_contesta");
+		if (fallaElAprovisionamiento) throw new Error("hub_no_contesta");
 		basesCreadas.push(tenantId);
 	},
 }));
@@ -111,7 +111,6 @@ const TABLAS = [
 	"device_challenges",
 	"pair_claim_fallos",
 	"devices",
-	"tenant_databases",
 	"tenants",
 ];
 

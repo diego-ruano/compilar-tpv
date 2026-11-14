@@ -17,6 +17,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
+| [DO-TURSO](#do-turso--lo-que-queda-en-turso-de-las-bases-de-los-negocios) | 🟡 | Quedan en Turso la tabla `tenant_databases`, dos secretos y las bases de los negocios | A mano, tras desplegar y sin vuelta atrás |
 | [DO-02](#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre) | 🟡 | Una Main con mucho desde el último cierre no cabe en la fase 1 de la recuperación | Sin decidir |
 | [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
@@ -281,6 +282,21 @@ quedaría sin ellas en hora de partido. Hace falta otra salida o volver a decidi
 Conectividad dice «contacta con soporte» sin decir cuál
 (`features/configuracion/sections/Conectividad.tsx`), y no hay ningún botón para sacar un paquete de
 diagnóstico, que es lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
+
+### DO-TURSO · Lo que queda en Turso de las bases de los negocios
+
+La base de cada negocio vive en su `TenantHub`
+([0008](decisiones/0008-la-base-del-negocio-en-su-durable-object.md)) y el código ya no usa nada de
+cuando estaba en Turso. Queda lo que no se cambia desde el código. Se hace a mano, **cuando el worker
+que no lo usa esté desplegado y `main` ya no pueda volver a la versión de Turso**, y en este orden:
+
+1. Borrar la tabla `tenant_databases` de la base central (`tpv-control`), con sus índices
+   `idx_tenantdb_status` e `idx_tenantdb_tokenexp`, y quitarla de
+   [esquema-actual.sql](sql/control-plane/esquema-actual.sql), que los tests del worker cargan tal cual.
+2. Borrar del worker los secretos `TURSO_PLATFORM_TOKEN` y `TURSO_ORG_SLUG` (`pnpm exec wrangler
+   secret delete <NOMBRE>`, desde `apps/cloud-worker-licensing/`).
+3. Borrar las bases de los negocios del grupo `tpv` de Turso. **No el grupo**: en él vive también
+   `tpv-control`, la base central.
 
 ---
 

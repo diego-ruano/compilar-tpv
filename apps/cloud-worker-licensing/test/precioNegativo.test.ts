@@ -11,7 +11,7 @@
 // `validacion_casos.json`, que también lee la Main.
 //
 // Lo único que se sustituye es lo que no se puede levantar aquí: la autenticación del dispositivo
-// (`tenantAuth`, que deja pasar a una Handy emparejada), el cliente de Turso (se sirve con el SQLite
+// (`tenantAuth`, que deja pasar a una Handy emparejada), la base del negocio (se sirve con el SQLite
 // del DO y el esquema de producción) y el stub del DO, que en vez de esperar a una Main conectada
 // ejecuta el lote igual que `applyInternalCommandIdempotent`.
 
@@ -26,7 +26,7 @@ import { enElHub } from "./helpers/hub";
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-/** El cliente «Turso» de la prueba: el SQLite del DO con el esquema real. */
+/** La base del negocio de la prueba: el SQLite del DO con el esquema real. */
 let dbActual: any = null;
 /** Lo que la ruta pide aplicar al DO, tal como llega a `aplicar`. */
 const aplicados: any[] = [];

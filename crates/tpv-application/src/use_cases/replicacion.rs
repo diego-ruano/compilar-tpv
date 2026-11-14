@@ -17,8 +17,7 @@ const RECHAZO_DE_LA_NUBE: &str = "Rechazo de aplicación recibido de la nube";
 
 /// Cambios que se piden por página de `/v1/sync/changes`: los que admite el worker (`changesSchema`,
 /// 1.000). Lo que cuesta una página en el DO es leer el log por su clave y escribirla; el worker la
-/// corta además por bytes (`CAMBIOS_MAX_BYTES`), así que pedir más sólo ahorra viajes. Sin `limit`
-/// el worker daba 500, y un worker anterior que admita menos lo recorta sin más.
+/// corta además por bytes (`CAMBIOS_MAX_BYTES`), así que pedir más sólo ahorra viajes.
 pub(crate) const CAMBIOS_POR_PAGINA: i64 = 1_000;
 
 /// Lo más a menudo que se mira, con la sesión abierta, si este equipo sigue siendo la Main con la

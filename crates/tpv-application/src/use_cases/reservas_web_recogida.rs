@@ -228,7 +228,7 @@ async fn registrar(
             }
             Ok(CancelacionWeb::YaNoEstabaViva) => Ok(contestar(id, ResultadoRecogidaWeb::Registrada, None)),
             // Sin la reserva en la Main no hay nada que cancelar, y la agenda no la verá nunca
-            // cancelada en Turso: se cierra, para que no se le vuelva a ofrecer cada hora.
+            // cancelada en la base del negocio: se cierra, para que no se le vuelva a ofrecer cada hora.
             Ok(CancelacionWeb::NoExiste) => {
                 Ok(contestar(id, ResultadoRecogidaWeb::Fallida, Some("reserva_inexistente")))
             }

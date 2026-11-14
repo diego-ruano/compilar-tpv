@@ -1,12 +1,7 @@
 // src/durableObjects/tenantHub.envelope.ts
 //
-// El "sobre" de un comando: los metadatos que lo identifican (`opId`, `commandName`,
-// `deviceId`) y el cuerpo canónico que se hashea para el gate de idempotencia (`Request_Hash`).
-//
-// Casi todo aquí existe por una razón concreta: el sobre llega en **muchas formas**. La Main
-// y la Handy han ido usando snake_case y camelCase, el payload a veces viene ya serializado y
-// a veces como objeto, y el nombre del campo cambia según el dominio. En vez de repartir esa
-// tolerancia por el motor, se concentra en estas funciones.
+// El cuerpo canónico de una operación, el que se hashea para el gate de idempotencia
+// (`Request_Hash`), y el JSON de lo que llega de fuera.
 //
 // La serialización es **estable** (claves ordenadas) porque el JSON resultante se usa para
 // hashear e identificar operaciones: si el orden de las claves cambiara entre dos ejecuciones,
@@ -16,20 +11,12 @@ import { bytesToB64 } from "../server/utils/base64";
 import { toPlainValue } from "./tenantHub.sentencias";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
-/** Su pareja tolerante: para lo que llega de fuera y cuyo fallo NO es una excepción. */
+/** Para lo que llega de fuera y cuyo fallo NO es una excepción. */
 export function safeJsonParse(s: string): any | null {
 	try {
 		return JSON.parse(s);
 	} catch {
 		return null;
-	}
-}
-
-export function parseJsonStrict(s: string, fieldName: string): any {
-	try {
-		return JSON.parse(s);
-	} catch {
-		throw new Error(`invalid_${fieldName}`);
 	}
 }
 
@@ -61,118 +48,19 @@ export function stringifyJsonValue(v: any): string {
 	return s === undefined ? "null" : s;
 }
 
-export function optionalJsonFieldToStableString(
-	value: unknown,
-	fieldName: string,
-): string | null {
-	if (value === undefined || value === null) return null;
-
-	const raw = String(value).trim();
-	if (!raw) return null;
-
-	return stableStringify(parseJsonStrict(raw, fieldName));
-}
-
 /* =========================================================
-   Lectura tolerante del sobre
+   El cuerpo que se hashea
 ========================================================= */
 
-export function hasOwn(obj: any, key: string): boolean {
-	return !!obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-export function getFirstOwnValue(obj: any, keys: string[]): any {
-	if (!obj || typeof obj !== "object") return undefined;
-
-	for (const key of keys) {
-		if (hasOwn(obj, key)) return obj[key];
-	}
-
-	return undefined;
-}
-
+/**
+ * El `Request_Hash` de una operación es su cuerpo canónico (`stableStringify`): el de una escritura
+ * de la Handy, el cuerpo del dominio (`cloudPayload`, `lib/rutas.ts`); el de una operación de la
+ * Main (`apply_lote`), su comando interno, que es esto.
+ */
 export function buildInternalPayloadForHash(cmd: InternalApplyCommand): any {
 	return {
 		type: cmd.type,
 		payload: (cmd as any).payload ?? null,
-	};
-}
-
-export function readRequestPayloadJson(
-	body: any,
-	fallbackPayloadForHash: any,
-): string {
-	const requestPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["request_payload_json", "requestPayloadJson"]),
-		"request_payload_json",
-	);
-
-	if (requestPayloadJson) {
-		return requestPayloadJson;
-	}
-
-	const requestPayload = getFirstOwnValue(body, [
-		"request_payload",
-		"requestPayload",
-		"request_args",
-		"requestArgs",
-	]);
-
-	if (requestPayload !== undefined) {
-		return stableStringify(toPlainValue(requestPayload));
-	}
-
-	const cloudPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["cloud_payload_json", "cloudPayloadJson"]),
-		"cloud_payload_json",
-	);
-
-	if (cloudPayloadJson) {
-		return cloudPayloadJson;
-	}
-
-	const cloudPayload = getFirstOwnValue(body, [
-		"cloud_payload",
-		"cloudPayload",
-		"sync_payload",
-		"syncPayload",
-		"domain_payload",
-		"domainPayload",
-	]);
-
-	if (cloudPayload !== undefined) {
-		return stableStringify(toPlainValue(cloudPayload));
-	}
-
-	return stableStringify(fallbackPayloadForHash);
-}
-
-export function readEnvelopeMetadata(body: any, req: Request) {
-	const opId = String(
-		body?.opId ??
-		body?.op_id ??
-		req.headers.get("x-idempotency-key") ??
-		"",
-	).trim();
-
-	const commandName = String(
-		body?.commandName ??
-		body?.command_name ??
-		req.headers.get("x-command-name") ??
-		"",
-	).trim();
-
-	const deviceId = String(
-		body?.deviceId ??
-		body?.device_id ??
-		req.headers.get("x-device-id") ??
-		"",
-	).trim();
-
-	return {
-		opId,
-		commandName,
-		deviceId: deviceId || null,
 	};
 }
 

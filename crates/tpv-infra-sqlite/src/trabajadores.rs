@@ -117,7 +117,7 @@ impl SqliteTrabajadoresRepository {
     ///
     /// El UPDATE va por el camino normal de escritura (`execute`), no por `raw()`, **a
     /// propósito**: así lo captura el outbox y la nube recibe también el texto cifrado. Si
-    /// fuera por `raw()`, el dato quedaría cifrado en local y seguiría legible en Turso, que
+    /// fuera por `raw()`, el dato quedaría cifrado en local y seguiría legible en la nube, que
     /// es justo lo que se quiere evitar.
     ///
     /// Es idempotente: una fila ya cifrada no entra en la selección, y aunque entrase, cifrar

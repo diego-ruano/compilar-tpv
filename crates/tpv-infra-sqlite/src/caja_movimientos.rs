@@ -54,7 +54,7 @@ fn texto(v: Option<String>) -> Value {
 }
 
 /// La sentencia de [`registrar`]. Se replica tal cual, así que su `NOT EXISTS` se ejecuta también en
-/// Turso en cada cobro: `planes::tests` vigila que vaya por `ux_movcaja_pago`/`ux_movcaja_gasto` y
+/// la nube en cada cobro: `planes::tests` vigila que vaya por `ux_movcaja_pago`/`ux_movcaja_gasto` y
 /// no recorra el historial (RI-04).
 pub(crate) const SQL_REGISTRAR: &str = r#"
     INSERT INTO Movimientos_Caja (

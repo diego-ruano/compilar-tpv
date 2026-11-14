@@ -635,7 +635,7 @@ const COLUMNAS_CIERRE: [&str; 3] = ["ID_Cierre", "Fecha_Hora", "Periodo_Desde"];
 /// `/v1/sync/bootstrap`: la fase 1 trae el cierre de ayer y dice que la tabla viene recortada.
 fn volcado_de_la_fase_1() -> JsonValue {
     json!({
-        "ok": true, "seq": 40, "totalFilas": 1,
+        "ok": true, "seq": 40, "total_filas": 1,
         "tablas": [{
             "nombre": "Cierres_Caja", "columnas": COLUMNAS_CIERRE,
             "filas": [["cierre-de-ayer", "2026-11-12 02:00:00", "2026-04-30 02:00:00"]],

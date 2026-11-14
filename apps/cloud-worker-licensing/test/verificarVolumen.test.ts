@@ -17,12 +17,15 @@ import { describe, expect, it } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { ahoraDelCliente, antesDe } from "./helpers/horaDelCliente";
 import { esTablaDeNegocio, sentenciaVolcado } from "../src/domains/sync/bootstrap.ventana";
 import { RESUMEN_MAX_FILAS, filasDeLosCubos, resumenDeVerificacion } from "../src/domains/sync/verificar";
 import { lectorDelHub } from "../src/domains/sync/volcado";
 
-const AHORA = "2026-11-13 12:00:00";
-const DESDE = "2026-10-14 12:00:00";
+// «Ahora» del dispositivo, sacado del reloj (una fecha fija caduca por la deriva admisible), y el
+// comienzo de la ventana de 30 días.
+const AHORA = ahoraDelCliente();
+const DESDE = antesDe(AHORA, 30 * 24);
 
 const COMANDAS = 30_000;
 const LINEAS_POR_COMANDA = 9;
@@ -40,7 +43,7 @@ function sembrarUnMes(sql: any): void {
 	sql.exec(
 		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-1', 'cat-1', 'Caña', 250, 10);",
 	);
-	const cuando = "datetime('2026-11-13 11:00:00', '-' || (i % 43000) || ' minutes')";
+	const cuando = `datetime('${AHORA}', '-1 hours', '-' || (i % 43000) || ' minutes')`;
 	sql.exec(
 		`INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Total_Comanda, Estado)
 		 ${serie(COMANDAS)} SELECT ${id("c", "i")}, 'BARRA', ${cuando}, ${cuando}, 2250, 'Pagada' FROM serie;`,

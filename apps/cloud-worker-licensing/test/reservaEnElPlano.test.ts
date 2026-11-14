@@ -125,7 +125,7 @@ describe("el plano de la Handy trae las reservas", () => {
 
 			const plano = await mesasMetaAll(db, "2026-10-21 20:00:00", reloj);
 			const meta = plano.mesas;
-			// Sin la hora de la Handy, la del worker: lo mismo, y no la de Turso leída como de Madrid.
+			// Sin la hora de la Handy, la del worker: lo mismo, y no la del servidor (UTC) leída como de Madrid.
 			expect(await mesasMetaAll(db, null, reloj)).toEqual(plano);
 			// La que llega a las 20:30 enseña «en 30 min», que pasa a 29 en un segundo.
 			expect(plano.proximo_cambio_s).toBe(1);

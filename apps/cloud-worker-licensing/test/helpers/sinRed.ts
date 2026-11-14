@@ -5,7 +5,7 @@
 // `fetch`.
 //
 // Ningún test puede hablar con un servicio de verdad. Lo que el código llama fuera —la base
-// central, la base de un negocio, la API de plataforma de Turso, Stripe, Axiom, un latido— se
+// central, Stripe, Axiom, un latido— se
 // sustituye en el test por un doble (cómo: docs/arquitectura/worker.md, «Los tests no salen a la
 // red»). Lo que llegue aquí es una salida que nadie ha declarado:
 //

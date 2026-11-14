@@ -258,8 +258,8 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
         let g = self.db.write().await;
         let conn = &g;
         conn.transaccion(async {
-            // Recibirla dos veces (la agenda la vuelve a ofrecer si no la ve en Turso) no la duplica
-            // ni vuelve a avisar.
+            // Recibirla dos veces (la agenda la vuelve a ofrecer si no la ve en la base del negocio)
+            // no la duplica ni vuelve a avisar.
             let ya = select_one_i64(
                 conn,
                 "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1;",

@@ -418,7 +418,7 @@ describe("horaSinFijar", () => {
 		expect(horaSinFijar(cmd)).toBeNull();
 	});
 
-	it("rechaza la hora que tendría que elegir Turso", () => {
+	it("rechaza la hora que tendría que elegir la base", () => {
 		const casos: Array<[string, string]> = [
 			["INSERT INTO A VALUES (datetime('now'));", "'now'"],
 			["UPDATE A SET f = CURRENT_TIMESTAMP;", "CURRENT_*"],

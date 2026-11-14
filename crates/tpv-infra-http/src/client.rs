@@ -182,7 +182,7 @@ impl CloudClient {
     ///
     /// REV-03 — en un GET ya NO es inocua, que es lo que decía esta nota. Con ella, el worker
     /// resuelve el `'now','localtime'` de una LECTURA a la hora local de este equipo; sin ella lo
-    /// resuelve Turso, que corre en UTC, y «hoy» pasa a ser el día del servidor: de madrugada, el
+    /// resuelve la nube, que corre en UTC, y «hoy» pasa a ser el día del servidor: de madrugada, el
     /// de ayer. Quitarla de los GET no daría ningún error, sólo respuestas de otro día.
     ///
     /// `cuerpo` son los bytes que se envían (vacío en GET/DELETE): entran en la firma y se adjuntan

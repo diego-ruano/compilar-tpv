@@ -11,8 +11,8 @@ import { MAX_CUBOS } from "./resumenCubos";
 /**
  * Tope de filas por página del histórico. Lo impone el servidor: el cliente pide, no manda. Lo que
  * acota de verdad el rato que una página ocupa el hilo del TenantHub es su techo en bytes
- * (`HISTORICO_MAX_BYTES`, `volcado.ts`): unas 10.000 filas de las normales caben en él. Una Main
- * que lo pide sin `limite` (o una anterior, que pide 1.000) recibe lo de siempre.
+ * (`HISTORICO_MAX_BYTES`, `volcado.ts`): unas 10.000 filas de las normales caben en él. Sin
+ * `limite`, la página es de 1.000.
  */
 export const HISTORICO_MAX_FILAS = 10_000;
 const HISTORICO_FILAS_DEFECTO = 1_000;

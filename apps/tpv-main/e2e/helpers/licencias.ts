@@ -8,8 +8,8 @@
 // por eso va el último.
 //
 // Se emite como de pruebas, y al terminar la tanda (`onComplete`) se retira su negocio con la base
-// Turso que creó su activación: no se acumulan en el panel. Retirar se lleva también lo que dejara
-// una tanda que no llegó al final.
+// que creó su activación en su TenantHub: no se acumulan en el panel. Retirar se lleva también lo
+// que dejara una tanda que no llegó al final.
 
 const BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
 
@@ -70,7 +70,7 @@ type Retirada = {
 };
 
 /**
- * Borra los negocios de pruebas que queden, con su base de Turso, y anula sus licencias. El worker
+ * Borra los negocios de pruebas que queden, con su base, y anula sus licencias. El worker
  * retira unos pocos por llamada, así que se repite mientras queden y la llamada anterior avance.
  */
 export async function retirarLasDePrueba(): Promise<Retirada> {

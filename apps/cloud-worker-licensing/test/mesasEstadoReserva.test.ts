@@ -11,7 +11,7 @@ import { Hono } from "hono";
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-/** El estado de cada reserva de la prueba: lo que leería la ruta en Turso. */
+/** El estado de cada reserva de la prueba: lo que leería la ruta en la base del negocio. */
 let estados: Record<string, string> = {};
 /** Los comandos que la ruta manda aplicar. */
 const aplicados: any[] = [];

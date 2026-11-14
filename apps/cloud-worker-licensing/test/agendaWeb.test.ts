@@ -457,7 +457,7 @@ describe("la agenda de reservas web", () => {
 	});
 
 	it("cancelar una que ya está en la base avisa al correo de su cliente allí, aunque la agenda ya no guarde el del alta", async () => {
-		await conAgenda("agenda-cancelar-correo-turso", async (motor, sql) => {
+		await conAgenda("agenda-cancelar-correo-base", async (motor, sql) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
 			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c1', 'Ana', 'ana.nueva@correo.es');`);
 			sql.exec(
@@ -571,7 +571,7 @@ describe("la agenda de reservas web", () => {
 	});
 
 	it("la alarma da por vistas las que ya están en la base aunque nadie pregunte por su día", async () => {
-		await conAgenda("agenda-alarma-turso", async (motor, sql, state) => {
+		await conAgenda("agenda-alarma-base", async (motor, sql, state) => {
 			const llega = await motor.reservar({ tenantId: T, alta: alta() });
 			const espera = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4" }) });
 			sql.exec(
@@ -738,7 +738,7 @@ describe("la entrega a la Main", () => {
 	});
 
 	it("no entrega lo que ya está en la base", async () => {
-		await conAgenda("entrega-ya-en-turso", async (motor, sql) => {
+		await conAgenda("entrega-ya-en-la-base", async (motor, sql) => {
 			espiar(motor);
 			const a = await motor.reservar({ tenantId: T, alta: alta() });
 			enLaBase(sql, a.id_reserva, "m2");
@@ -983,7 +983,7 @@ describe("la entrega a la Main", () => {
 	});
 
 	it("sin la base la alarma no vuelve a ofrecer nada: no sabría qué ha llegado", async () => {
-		await conAgenda("entrega-reoferta-sin-turso", async (motor, sql, state) => {
+		await conAgenda("entrega-reoferta-sin-base", async (motor, sql, state) => {
 			const { avisos } = espiar(motor);
 			await motor.reservar({ tenantId: T, alta: alta() });
 			await motor.pendientes({ tenantId: T });
