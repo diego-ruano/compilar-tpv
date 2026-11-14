@@ -314,6 +314,49 @@ async fn lo_que_choca_con_lo_apartado_de_la_subida_se_queda() {
 }
 
 #[tokio::test]
+async fn lo_apuntado_con_algo_apartado_en_su_tabla_no_se_trae_ni_cuando_lo_apartado_se_retira() {
+    // Codex: aquí la mesa m2 es de la zona 2 por una escritura de la Main que la nube rechazó; arriba
+    // sigue en la 1. La Handy cambia las mesas de la zona 1 por su zona, y aquí el filtro no ve la m2.
+    // Cuando lo apartado se retire, nada dirá que faltaba: la cuarentena se queda para siempre, y el
+    // contraste no sube la m2 de la Main encima de lo que hizo la Handy.
+    let (repo, db, dir) = base("dudosa").await;
+    sembrar(&db, NEGOCIO).await;
+    sembrar(&db, "UPDATE Mesas SET ID_Zona = 'z2' WHERE ID_Mesa = 'm2';").await;
+    sembrar(
+        &db,
+        r#"INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena)
+           VALUES ('op-main', 'main_op', '[{"sql":"UPDATE Mesas SET ID_Zona = ?1 WHERE ID_Mesa = ?2;","args":["z2","m2"]}]', 1, 1);"#,
+    )
+    .await;
+    sembrar(
+        &db,
+        "CREATE TRIGGER anterior_capacidad BEFORE UPDATE ON Mesas WHEN NEW.Capacidad = 9
+           BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;
+         UPDATE _Sync_State SET Last_Seq = 30 WHERE Id = 1;",
+    )
+    .await;
+    let ch = cambio("op-31", 31, vec![("UPDATE Mesas SET Capacidad = 9 WHERE ID_Zona = ?1;", vec![json!("z1")])]);
+    bajar(&repo, &ch).await;
+    let filas = textos(&db, "SELECT Filas_Json FROM _Sync_Failed;").await;
+    assert!(filas[0].contains("\"dudosa\":true"), "{}", filas[0]);
+
+    let nube = NubeDeContraste::nueva("dudosa").await;
+    nube.sembrar(NEGOCIO).await;
+    nube.aplicar(&ch.statements).await;
+    *nube.hasta_seq.lock().unwrap() = 31;
+    *nube.ultimo_ajeno.lock().unwrap() = 31;
+
+    // Lo apartado se retira y la versión nueva ya lo sabe guardar.
+    sembrar(&db, "DELETE FROM _Sync_Outbox; DROP TRIGGER anterior_capacidad;").await;
+    let r = hecha(pasada(&repo, &nube, true).await);
+    assert_eq!(en_cuarentena(&db).await, vec!["op-31"]);
+    assert!(r.aplazado, "{:?}", r.descuadres);
+    assert_eq!(reparaciones(&repo).await, 0, "nada sube encima de lo de la Handy");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn las_que_no_se_pueden_traer_no_dejan_sin_intentar_a_las_de_detras() {
     // Codex: sólo se leían las 50 primeras por `Seq`, y 60 sin filas sabidas delante dejaban fuera
     // para siempre a las de detrás, que sí se podían traer.

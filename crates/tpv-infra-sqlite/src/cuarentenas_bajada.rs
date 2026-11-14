@@ -145,7 +145,15 @@ async fn vaciar_una_tanda(db: &Db, antes_de_ms: i64) -> AppResult<(usize, u64)> 
             Some(t) if !t.incierto => t,
             antes => {
                 let sentencias: Vec<SqlStatement> = serde_json::from_str(&sentencias).unwrap_or_default();
-                let ahora = if sentencias.is_empty() { None } else { Some(tocadas::de_un_cambio(conn, &sentencias).await) };
+                let ahora = match sentencias.is_empty() {
+                    true => None,
+                    false => {
+                        let mut t = tocadas::de_un_cambio(conn, &sentencias).await;
+                        t.dudosa |= antes.as_ref().is_some_and(|a| a.dudosa);
+                        marcar_si_dudosa(db, &mut t).await?;
+                        Some(t)
+                    }
+                };
                 match (ahora, antes) {
                     (Some(t), _) if !t.incierto => t,
                     (_, Some(t)) => t,
@@ -305,7 +313,9 @@ pub(crate) async fn resolver(
             if sentencias.is_empty() {
                 continue;
             }
-            let ahora = tocadas::de_un_cambio(conn, &sentencias).await;
+            let mut ahora = tocadas::de_un_cambio(conn, &sentencias).await;
+            ahora.dudosa |= c.tocadas.dudosa;
+            marcar_si_dudosa(db, &mut ahora).await?;
             if !ahora.incierto || !c.sabidas {
                 conn.execute(
                     "UPDATE _Sync_Failed SET Filas_Json = ?2 WHERE Op_Id = ?1 AND Quarantined = 1;",
@@ -337,6 +347,10 @@ pub(crate) async fn resolver(
         }
         if c.tocadas.incierto {
             quedan.push((c, "filas_inciertas".into()));
+            continue;
+        }
+        if c.tocadas.dudosa {
+            quedan.push((c, "apuntada_con_lo_apartado_de_la_subida".into()));
             continue;
         }
         if choca_con_la_subida(&c.tocadas, &subida, &cascadas) {
@@ -491,6 +505,20 @@ async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
         })
         .await
         .map_err(db_err)
+}
+
+/// ¿Se apuntan estas filas con algo apartado de la subida en una de las tablas de las que salieron
+/// por un filtro (`por_filtro`)? Entonces lo que se sacó de esta base pudo no ser lo de la nube, y
+/// queda `dudosa` para siempre: cuando lo apartado se retire, a los 30 días, lo de aquí seguirá siendo
+/// otra cosa que lo de arriba y nada lo dirá (Codex, SYNC-36). Unas inciertas también se marcan: si
+/// se vuelven a mirar más tarde, ya no se vería.
+pub(crate) async fn marcar_si_dudosa(db: &Db, t: &mut Tocadas) -> AppResult<()> {
+    if t.dudosa || t.por_filtro.is_empty() {
+        return Ok(());
+    }
+    let apartado = lo_apartado_de_la_subida(db, &HashMap::new()).await?;
+    t.dudosa = apartado.tablas.contains("*") || t.por_filtro.iter().any(|x| apartado.todas.contains(x));
+    Ok(())
 }
 
 /// Lo que toca lo apartado de la subida: lo que esta Main escribió y la nube no tiene.
@@ -942,7 +970,7 @@ mod tests {
             todas: ["Mesas".to_string()].into_iter().collect(),
         };
         let sin_cascadas = Cascadas::default();
-        let por_clave = Tocadas { tablas: vec!["Mesas".into()], filas: vec![mesa("m2")], incierto: false, por_filtro: vec![] };
+        let por_clave = Tocadas { tablas: vec!["Mesas".into()], filas: vec![mesa("m2")], incierto: false, por_filtro: vec![], dudosa: false };
         assert!(!choca_con_la_subida(&por_clave, &subida, &sin_cascadas), "otra fila de la tabla, nombrada por su clave");
         let por_filtro = Tocadas { por_filtro: vec!["Mesas".into()], ..por_clave.clone() };
         assert!(choca_con_la_subida(&por_filtro, &subida, &sin_cascadas));
@@ -970,6 +998,7 @@ mod tests {
             filas: vec![FilaTocada { tabla: "Zonas".into(), clave: vec![serde_json::json!("z1")], borrada }],
             incierto: false,
             por_filtro: vec![],
+            dudosa: false,
         };
         assert!(choca_con_la_subida(&zona(true), &subida, &cascadas), "su borrado llega a las mesas");
         assert!(!choca_con_la_subida(&zona(false), &subida, &cascadas), "escribirla no borra nada");

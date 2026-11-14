@@ -469,18 +469,30 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
     Ok(n)
 }
 
-/// SYNC-36 · ¿Falta saber qué filas toca este cambio? Sí si no tiene fallo anotado, o lo tiene sin
-/// ellas o con unas inciertas.
-async fn hay_que_mirar_lo_que_toca(conn: &Connection, op_id: &str) -> AppResult<bool> {
+/// SYNC-36 · Lo que se sabe ya de las filas que toca este cambio, de un intento anterior.
+async fn filas_ya_sabidas(conn: &Connection, op_id: &str) -> AppResult<Option<crate::filas_tocadas::Tocadas>> {
     let mut rows = conn
-        .query(
-            "SELECT 1 FROM _Sync_Failed \
-              WHERE Op_Id = ?1 AND Filas_Json IS NOT NULL AND NOT json_extract(Filas_Json, '$.incierto') LIMIT 1;",
-            vec![Value::Text(op_id.to_string())],
-        )
+        .query("SELECT Filas_Json FROM _Sync_Failed WHERE Op_Id = ?1 LIMIT 1;", vec![Value::Text(op_id.to_string())])
         .await
         .map_err(db_err)?;
-    Ok(rows.next().await.map_err(db_err)?.is_none())
+    Ok(match rows.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+        Some(Ok(Value::Text(t))) => Some(crate::filas_tocadas::Tocadas::de_json(&t)),
+        _ => None,
+    })
+}
+
+/// SYNC-36 · Las filas que toca un cambio que acaba de fallar, si no se sabían ya: se miran con la
+/// base de justo antes del cambio y con lo apartado de la subida de ahora (`dudosa`), que se arrastra
+/// de un intento a otro.
+async fn mirar_lo_que_toca(db: &Db, conn: &Connection, ch: &SyncChange) -> AppResult<Option<String>> {
+    let antes = filas_ya_sabidas(conn, &ch.op_id).await?;
+    if antes.as_ref().is_some_and(|t| !t.incierto) {
+        return Ok(None);
+    }
+    let mut ahora = crate::filas_tocadas::de_un_cambio(conn, &ch.statements).await;
+    ahora.dudosa |= antes.is_some_and(|t| t.dudosa);
+    crate::cuarentenas_bajada::marcar_si_dudosa(db, &mut ahora).await?;
+    Ok(Some(ahora.a_json()))
 }
 
 /// Registra (o incrementa) el fallo de una op en `_Sync_Failed` y devuelve el nº de intentos
@@ -812,11 +824,7 @@ impl SyncRepository for SqliteSyncRepository {
                 // SYNC-36: con el fallo se guardan las filas que toca, para poder traerlas de la nube
                 // si acaba en cuarentena. Se miran ahora, con la base de justo antes del cambio, y
                 // sólo si no se saben ya de un intento anterior.
-                let tocadas = if hay_que_mirar_lo_que_toca(conn, &ch.op_id).await? {
-                    Some(crate::filas_tocadas::de_un_cambio(conn, &ch.statements).await.a_json())
-                } else {
-                    None
-                };
+                let tocadas = mirar_lo_que_toca(&self.db, conn, ch).await?;
                 let (attempts, cuarentena) = match anotar_fallo(conn, ch, &e.to_string(), tocadas.as_deref()).await? {
                     // AUD-18: un duplicado de algo ya procesado: no se anota ni detiene nada.
                     Fallo::YaProcesado => {

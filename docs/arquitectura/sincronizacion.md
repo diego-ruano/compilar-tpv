@@ -531,10 +531,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     chocar, se miran antes las claves de lo que inserta o las de las filas que cumplen las igualdades
     de su `WHERE` sobre la clave o una foránea; de un `ON CONFLICT` sobre otra columna que la clave
     (actualiza la fila que ya tiene ese valor), sólo el `RETURNING`. Lo que borra se marca, y las
-    tablas cuyas filas salen de esta base y no de la sentencia, también (`por_filtro`). Lo que no se
-    sabe (una tabla que esta versión no tiene, un `REPLACE`, ese `ON CONFLICT` sin poder ejecutarse,
-    más de 5.000 filas) queda como incierto, y se vuelve a mirar en cada intento y en cada pasada
-    mientras quedan sentencias.
+    tablas cuyas filas salen de esta base y no de la sentencia, también (`por_filtro`, con las que
+    lee para decidirlo, las de sus vistas incluidas). Si al apuntarlo hay algo apartado de la subida
+    en una de ésas, lo sacado de aquí pudo no ser lo de arriba, y queda `dudosa` para siempre: no se
+    trae nunca, tampoco cuando lo apartado se retire. Lo que no se sabe (una tabla que esta versión
+    no tiene, un `REPLACE`, ese `ON CONFLICT` sin poder ejecutarse, más de 5.000 filas) queda como
+    incierto, y se vuelve a mirar en cada intento y en cada pasada mientras quedan sentencias.
   - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
@@ -752,16 +754,16 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   padre estaba en otra cuarentena entra en cuanto entra la del padre. Sin ninguna, la guarda deja
   reparar y el contraste repara en esa misma pasada.
 - **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
-  filas son inciertas; toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta Main
-  escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta base y no de la
-  sentencia (`por_filtro`: un `WHERE` por una foránea, un `INSERT … SELECT`) y en esa tabla hay algo
-  apartado (aquí pudo cumplir el filtro otra fila que arriba), o borra una fila cuyas cascadas
-  (`ON DELETE CASCADE`, `SET NULL`) llegan a una tabla con algo apartado (se lo llevarían aquí);
-  sigue sin entrar (el `UNIQUE` con el que chocaba sigue ahí: `no_entra: …`, con la clase del
+  filas son inciertas o dudosas; toca lo mismo que algo apartado de la subida (la nube no tiene lo
+  que esta Main escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta
+  base y no de la sentencia (`por_filtro`: un `WHERE` por una foránea, un `INSERT … SELECT`) y en esa
+  tabla hay algo apartado (aquí pudo cumplir el filtro otra fila que arriba), o borra una fila cuyas
+  cascadas (`ON DELETE CASCADE`, `SET NULL`) llegan a una tabla con algo apartado (se lo llevarían
+  aquí); sigue sin entrar (el `UNIQUE` con el que chocaba sigue ahí: `no_entra: …`, con la clase del
   error); o la tabla tiene columnas que esta versión no tiene. Se vuelve a intentar en la pasada
-  siguiente. Lo apartado de la subida se retira a los 30 días, y con ello esta protección: para
-  entonces lo que la Main escribió y la nube rechazó ya no va a subir, y lo que queda es lo de la
-  nube.
+  siguiente. Lo apartado de la subida se retira a los 30 días, y con ello esta protección (salvo la
+  de `dudosa`, que no caduca): para entonces lo que la Main escribió y la nube rechazó ya no va a
+  subir, y lo que se trae es lo de la nube.
 - **Trabajo acotado**: se intentan hasta 50 cuarentenas y 5.000 filas por pasada (la primera se
   intenta siempre), en peticiones de 500 claves. Las que no caben se dejan para otra pasada y se sigue
   con las de detrás, y las que ni se intentan (inciertas, o que chocan con lo apartado) no cuentan:

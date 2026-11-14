@@ -61,10 +61,15 @@ pub(crate) struct Tocadas {
     /// Alguna sentencia toca filas que no se saben localizar: no se puede traer de la nube por estado.
     pub incierto: bool,
     /// Las tablas en las que alguna sentencia no nombra sus filas por su clave (un `WHERE` por una
-    /// foránea, un `INSERT … SELECT`, un `ON CONFLICT` sobre otra columna): sus filas se han sacado de
-    /// esta base, y son las de la nube sólo si esta base no tenía nada distinto en esa tabla. Lo
-    /// apartado de la subida es justo eso, y la salida no trae nada que las cruce.
+    /// foránea, un `INSERT … SELECT`, un `ON CONFLICT` sobre otra columna), y las que lee para
+    /// decidirlo: sus filas se han sacado de esta base, y son las de la nube sólo si esta base no
+    /// tenía nada distinto en esas tablas. Lo apartado de la subida es justo eso, y la salida no trae
+    /// nada que las cruce.
     pub por_filtro: Vec<String>,
+    /// Se apuntó con algo apartado de la subida en alguna de las tablas `por_filtro`: lo que se sacó
+    /// de esta base pudo no ser lo de la nube, y eso no se arregla cuando lo apartado se retira. No se
+    /// trae nunca por estado.
+    pub dudosa: bool,
 }
 
 /// Una fila que toca un cambio.
@@ -79,7 +84,7 @@ pub(crate) struct FilaTocada {
 
 impl Tocadas {
     pub(crate) fn incierta(tablas: Vec<String>) -> Self {
-        Tocadas { por_filtro: tablas.clone(), tablas, filas: Vec::new(), incierto: true }
+        Tocadas { por_filtro: tablas.clone(), tablas, filas: Vec::new(), incierto: true, dudosa: false }
     }
 
     /// Como se guarda en `_Sync_Failed.Filas_Json`.
@@ -88,6 +93,7 @@ impl Tocadas {
             "tablas": self.tablas,
             "incierto": self.incierto,
             "por_filtro": self.por_filtro,
+            "dudosa": self.dudosa,
             "filas": self.filas.iter().map(|f| json!({ "tabla": f.tabla, "clave": f.clave, "borrada": f.borrada })).collect::<Vec<_>>(),
         })
         .to_string()
@@ -116,7 +122,8 @@ impl Tocadas {
             Some(t) => t.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
             None => tablas.clone(),
         };
-        Tocadas { incierto: v["incierto"].as_bool().unwrap_or(true), tablas, filas, por_filtro }
+        let dudosa = v["dudosa"].as_bool().unwrap_or(false);
+        Tocadas { incierto: v["incierto"].as_bool().unwrap_or(true), tablas, filas, por_filtro, dudosa }
     }
 }
 
@@ -292,9 +299,12 @@ fn esquema_de(sim: &Simulacro<'_>, tabla: &str) -> Option<Esquema> {
 fn simular(sim: &Simulacro<'_>, sentencias: &[SqlStatement], tablas: Vec<String>) -> Tocadas {
     let mut junta = Junta::default();
     let mut esquemas: HashMap<String, Option<Esquema>> = HashMap::new();
+    let Some(catalogo) = Catalogo::de(sim) else {
+        return Tocadas::incierta(tablas);
+    };
     for st in sentencias {
         let args: Vec<Value> = st.args.iter().map(argumento).collect();
-        match una_sentencia(sim, st, &args, &mut esquemas, &mut junta) {
+        match una_sentencia(sim, st, &args, &mut esquemas, &catalogo, &mut junta) {
             Ok(()) => {}
             Err(()) => return Tocadas::incierta(tablas),
         }
@@ -302,7 +312,7 @@ fn simular(sim: &Simulacro<'_>, sentencias: &[SqlStatement], tablas: Vec<String>
     let mut por_filtro = junta.por_filtro;
     por_filtro.sort();
     por_filtro.dedup();
-    Tocadas { tablas, filas: junta.filas, incierto: false, por_filtro }
+    Tocadas { tablas, filas: junta.filas, incierto: false, por_filtro, dudosa: false }
 }
 
 /// Lo que toca una sentencia. `Err` si no se sabe.
@@ -311,6 +321,7 @@ fn una_sentencia(
     st: &SqlStatement,
     args: &[Value],
     esquemas: &mut HashMap<String, Option<Esquema>>,
+    catalogo: &Catalogo,
     junta: &mut Junta,
 ) -> Result<(), ()> {
     let Some(forma) = Forma::leer(&st.sql) else {
@@ -423,9 +434,57 @@ fn una_sentencia(
         Tipo::Actualizar | Tipo::Borrar => nombrada,
     };
     if !nombra_sus_filas {
+        // Y lo que lee para decidirlo (un `NOT EXISTS (… Fichajes …)`, una vista): si aquí es otra
+        // cosa que arriba, también sale otra cosa.
         junta.por_filtro.push(esquema.nombre.clone());
+        junta.por_filtro.extend(catalogo.leidas(&st.sql));
     }
     Ok(())
+}
+
+/// Las tablas y vistas de esta base, para saber qué lee una sentencia.
+struct Catalogo {
+    /// Por su nombre en minúsculas: su nombre como está y, si es una vista, su SQL.
+    objetos: HashMap<String, (String, Option<String>)>,
+}
+
+impl Catalogo {
+    fn de(sim: &Simulacro<'_>) -> Option<Catalogo> {
+        let mut objetos = HashMap::new();
+        for f in sim.filas("SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view');", &[], 10_000).ok()? {
+            let (Some(Value::Text(nombre)), Some(Value::Text(tipo))) = (f.first(), f.get(1)) else { continue };
+            let sql = match (tipo.as_str(), f.get(2)) {
+                ("view", Some(Value::Text(sql))) => Some(sql.clone()),
+                _ => None,
+            };
+            objetos.insert(nombre.to_ascii_lowercase(), (nombre.clone(), sql));
+        }
+        Some(Catalogo { objetos })
+    }
+
+    /// Las tablas de negocio que nombra `sql`, y las que leen las vistas que nombra.
+    fn leidas(&self, sql: &str) -> Vec<String> {
+        let mut salida = Vec::new();
+        let mut por_mirar = vec![sql.to_owned()];
+        let mut vistas_vistas: HashSet<String> = HashSet::new();
+        while let Some(texto) = por_mirar.pop() {
+            let Some(t) = Troceada::de(&texto) else { continue };
+            for i in 0..t.piezas.len() {
+                let Some(nombre) = t.nombre(i) else { continue };
+                let Some((como_esta, vista)) = self.objetos.get(&nombre.to_ascii_lowercase()) else { continue };
+                match vista {
+                    Some(sql) => {
+                        if vistas_vistas.insert(como_esta.clone()) {
+                            por_mirar.push(sql.clone());
+                        }
+                    }
+                    None if !crate::sync::no_es_tabla_de_negocio(como_esta) => salida.push(como_esta.clone()),
+                    None => {}
+                }
+            }
+        }
+        salida
+    }
 }
 
 fn empieza_por_pragma(sql: &str) -> bool {
@@ -1244,6 +1303,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lo_que_sale_de_un_filtro_cuenta_tambien_las_tablas_que_lee() {
+        // Codex: un `NOT EXISTS (… Fichajes …)` decide aquí con lo de aquí; si en esa tabla esta
+        // base es otra cosa que la nube, el filtro también. Las vistas, por las tablas que leen.
+        let db = base("leidas").await;
+        sembrar(&db, NEGOCIO).await;
+        let t = tocadas(
+            &db,
+            &[
+                st("UPDATE Mesas SET Capacidad = 1 WHERE ID_Zona IN (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?1);", vec![json!("Terraza")]),
+                st(
+                    "UPDATE Productos SET Stock_Minimo = 1 WHERE ID_Categoria = ?1 AND NOT EXISTS (\
+                       SELECT 1 FROM v_lineas_cobradas v JOIN Detalle_Comanda d ON d.ID_Detalle = v.ID_Detalle \
+                        WHERE d.ID_Producto = Productos.ID_Producto);",
+                    vec![json!("cat-1")],
+                ),
+            ],
+        )
+        .await;
+        assert!(!t.incierto, "{t:?}");
+        assert_eq!(t.por_filtro, vec!["Detalle_Comanda", "Mesas", "Pago_Detalles", "Pagos", "Productos", "Zonas"]);
+    }
+
+    #[tokio::test]
     async fn un_upsert_por_otra_columna_toca_la_fila_que_ya_tiene_ese_valor() {
         // Codex: `ON CONFLICT(Nombre_Zona)` (el de `mesas.commands.ts`) actualiza la zona que ya se
         // llama así, con su clave, y no la que la sentencia proponía. Sólo lo dice el `RETURNING`.
@@ -1390,6 +1472,7 @@ mod tests {
             filas: vec![fila("Mesas", &["m1"], true), FilaTocada { tabla: "Pago_Detalles".into(), clave: vec![json!("p1"), json!(3)], borrada: false }],
             incierto: false,
             por_filtro: vec!["Mesas".into()],
+            dudosa: true,
         };
         assert_eq!(Tocadas::de_json(&t.a_json()), t);
         assert!(Tocadas::de_json("no es json").incierto);
