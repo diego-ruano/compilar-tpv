@@ -9,6 +9,10 @@
 //   · comprimida dice lo mismo: descomprimida es, byte a byte, la respuesta sin comprimir;
 //   · un error no se comprime;
 //   · se comprime una vez y en el Worker: dentro del TenantHub la ruta contesta sin comprimir.
+//
+// El router va suelto, pero como desplegado: el middleware de gzip corre en el Worker y lo que va
+// detrás de `alHub` corre dentro del TenantHub del negocio, con el SQLite del DO del test (los
+// volcados sólo leen ahí). El doble de `alHub` hace eso sin el viaje: `dentroDelHub` y la ruta.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -16,19 +20,22 @@ import { Hono } from "hono";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { dentroDelHub } from "../src/lib/hubLocal";
+import { dentroDelHub, type HubLocal } from "../src/lib/hubLocal";
 import { aceptaGzip } from "../src/lib/gzip";
 
-// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
-vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
-
-let clienteActual: any = null;
+/** El TenantHub del test en curso: su base y su SQLite. */
+let hubDelTest: HubLocal | null = null;
 let esTpv = true;
 
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
-}));
+vi.mock("../src/lib/enElHub", async () => {
+	const { dentroDelHub } = await import("../src/lib/hubLocal");
+	return {
+		alHub: async (_c: any, next: () => Promise<void>) => {
+			if (!hubDelTest) throw new Error("el test no ha preparado su TenantHub");
+			await dentroDelHub(hubDelTest, next);
+		},
+	};
+});
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -100,7 +107,18 @@ async function conBase<R>(nombre: string, prueba: (sql: any) => Promise<R>): Pro
 	return enElHub(`gzip-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		sembrar(sql);
-		clienteActual = clienteSobre(sql);
+		hubDelTest = {
+			identidad: { tenantId: "t1", deviceId: "d1", token: "", licHash: "", rol: "tpv" },
+			base: async () => clienteSobre(sql),
+			sql: async () => sql,
+			aplicar: async () => {
+				throw new Error("estas rutas no aplican nada");
+			},
+			estaAprovisionado: () => true,
+			aprovisionar: async () => {
+				throw new Error("estas rutas no dan de alta la base");
+			},
+		};
 		vi.useFakeTimers({ toFake: ["Date"] });
 		try {
 			return await prueba(sql);
@@ -111,7 +129,7 @@ async function conBase<R>(nombre: string, prueba: (sql: any) => Promise<R>): Pro
 }
 
 beforeEach(() => {
-	clienteActual = null;
+	hubDelTest = null;
 	esTpv = true;
 });
 
@@ -207,23 +225,10 @@ describe("las respuestas de sync, comprimidas", () => {
 	});
 
 	it("dentro del TenantHub la ruta contesta sin comprimir: comprime el Worker, una vez", async () => {
-		await conBase("en-el-hub", async (sql) => {
+		await conBase("en-el-hub", async () => {
 			for (const [ruta, cuerpo] of RUTAS) {
-				const res = await dentroDelHub(
-					{
-						identidad: { tenantId: "t1", deviceId: "d1", token: "", licHash: "", rol: "tpv" },
-						base: async () => clienteActual,
-						sql: async () => sql,
-						aplicar: async () => {
-							throw new Error("estas rutas no aplican nada");
-						},
-						estaAprovisionado: () => true,
-						aprovisionar: async () => {
-							throw new Error("estas rutas no dan de alta la base");
-						},
-					},
-					() => pedir(ruta, cuerpo, { acepta: "gzip" }),
-				);
+				// La petición entera dentro del TenantHub, como la ejecuta `ejecutarRuta`.
+				const res = await dentroDelHub(hubDelTest!, () => pedir(ruta, cuerpo, { acepta: "gzip" }));
 				expect(res.status, ruta).toBe(200);
 				expect(res.headers.get("Content-Encoding"), ruta).toBeNull();
 				expect(typeof (await res.json()), ruta).toBe("object");
