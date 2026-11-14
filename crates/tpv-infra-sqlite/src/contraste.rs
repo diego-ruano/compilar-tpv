@@ -1047,7 +1047,7 @@ async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement], repar
 struct Encolado {
     reparadas: i64,
     borradas: i64,
-    /// SYNC-29: filas distintas que no se suben porque las trae la convergencia.
+    /// SYNC-29: filas que no se tocan arriba porque las trae la convergencia.
     por_converger: i64,
 }
 
@@ -1209,10 +1209,11 @@ async fn encolar_plan(
         return Ok(None);
     }
 
-    // SYNC-29: una fila distinta que un cambio de la nube tocó con algo de aquí sin ordenar no se
-    // sube: la nube la ordenó de otra forma, y la trae la convergencia. Salvo que la escribiera algo
-    // apartado de la subida: eso es lo de aquí que la nube no aceptó, y se repara subiéndolo.
-    let por_converger = distintas_por_converger(db, conn, hallazgos).await?;
+    // SYNC-29: una fila que un cambio de la nube tocó con algo de aquí sin ordenar no se sube ni se
+    // borra arriba, sea distinta, falte o sobre: la nube la ordenó de otra forma, y la trae la
+    // convergencia. Salvo que la escribiera algo apartado de la subida: eso es lo de aquí que la nube
+    // no aceptó, y se repara como siempre.
+    let por_converger = apuntadas_por_converger(db, conn, hallazgos).await?;
 
     let mut subir: Vec<SqlStatement> = Vec::new();
     for (tabla, h) in hallazgos {
@@ -1234,7 +1235,8 @@ async fn encolar_plan(
     if borrar {
         for (tabla, h) in hallazgos.iter().rev() {
             let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
-            let mut sobran: Vec<&FilaAfectada> = h.sobran.iter().filter(|f| vistas.insert(f)).collect();
+            let mut sobran: Vec<&FilaAfectada> =
+                h.sobran.iter().filter(|f| !por_converger.contains(*f) && vistas.insert(f)).collect();
             if !autorreferencias(conn, tabla).await?.is_empty() {
                 let valores = |f: &FilaAfectada| -> Vec<serde_json::Value> {
                     f.clave.iter().map(|(_, v)| serde_json::Value::String(v.clone())).collect()
@@ -1295,9 +1297,10 @@ fn formas_canonicas(f: &FilaAfectada) -> Vec<String> {
         .collect()
 }
 
-/// SYNC-29 · Las filas distintas de lo hallado que la convergencia tiene apuntadas
-/// (`_Sync_Por_Contrastar`) y que no escribió nada apartado de la subida: no se suben.
-async fn distintas_por_converger<'h>(
+/// SYNC-29 · Las filas de lo hallado (distintas, que faltan o que sobran arriba) que la convergencia
+/// tiene apuntadas (`_Sync_Por_Contrastar`) y que no escribió nada apartado de la subida: el
+/// contraste no las toca.
+async fn apuntadas_por_converger<'h>(
     db: &Db,
     conn: &Connection,
     hallazgos: &'h [(String, Hallazgo)],
@@ -1310,7 +1313,7 @@ async fn distintas_por_converger<'h>(
     let apartado = crate::cuarentenas_bajada::lo_apartado_de_la_subida(db, &claves).await?;
     Ok(hallazgos
         .iter()
-        .flat_map(|(_, h)| h.distintas.iter())
+        .flat_map(|(_, h)| h.distintas.iter().chain(&h.faltan).chain(&h.sobran))
         .filter(|f| {
             let formas = formas_canonicas(f);
             formas.iter().any(|c| marcadas.contains(c))

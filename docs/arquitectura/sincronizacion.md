@@ -655,8 +655,9 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   foránea, un `UNIQUE`) se intenta en cinco vueltas y se deja.
 - **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
   vacía lo apuntado.
-- **El contraste diario no lo deshace**: una fila distinta que está apuntada no se sube; la trae la
-  convergencia, y la pasada se informa como `aplazado` (abajo).
+- **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
+  sobre (salvo que la escribiera algo apartado de la subida); la trae la convergencia, y la pasada se
+  informa como `aplazado` (abajo).
 
 Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir otra
 (un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.
@@ -762,9 +763,10 @@ fija que los dos SQLite resumen igual las mismas filas.
 - Si algo se mueve, la pasada se deja sin tocar nada y sin informar (`Contraste::Aplazado`): no es un
   fallo, y el job vuelve a los diez minutos.
 
-**Qué se repara.** Una fila **distinta** se repara mandando cómo está aquí, salvo que esté apuntada
-para traerla de la nube ([SYNC-29](#el-orden-de-la-nube-manda-sync-29)): ésa la ordenó la nube de
-otra forma, la trae la convergencia y la pasada queda `aplazado`. Lo que se compara es una base con
+**Qué se repara.** Una fila apuntada para traerla de la nube ([SYNC-29](#el-orden-de-la-nube-manda-sync-29))
+no se toca arriba, sea distinta, falte o sobre: ésa la ordenó la nube de otra forma, la trae la
+convergencia y la pasada queda `aplazado` (salvo que la escribiera algo apartado de la subida, que se
+repara como siempre). Una fila **distinta** se repara mandando cómo está aquí. Lo que se compara es una base con
 todo subido y la bajada al día, así que una diferencia que nadie ha apuntado no es de orden: es algo
 que la Main escribió y la nube no aceptó, o algo que no se sabe explicar, y se conserva lo de la Main,
 que es la autoridad de lo suyo (los cobros, la caja, lo fiscal sólo los escribe ella) y la base de la

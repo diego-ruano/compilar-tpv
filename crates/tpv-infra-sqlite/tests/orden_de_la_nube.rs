@@ -203,6 +203,12 @@ async fn una_reserva_que_la_main_borro_y_una_handy_edito_a_la_vez_se_queda_borra
     assert_eq!(estado(&db).await, "PROXIMA");
     assert_eq!(estado(&nube.db).await, "-");
 
+    // El contraste no la vuelve a subir: aquí está y arriba no, pero la nube la borró después y la
+    // trae la convergencia.
+    let r = pasada(&repo, &nube).await;
+    assert_eq!((r.reparadas, r.aplazado), (0, true), "{r:?}");
+    assert!(repo.outbox_pending(10).await.unwrap().is_empty());
+
     let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
     assert_eq!(escritas.len(), 1);
     assert!(escritas[0].sql.starts_with("DELETE FROM \"Reservas\""), "{}", escritas[0].sql);
