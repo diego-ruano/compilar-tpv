@@ -64,8 +64,20 @@ use crate::ejecutor::{Connection, Value};
 use crate::filas_tocadas::{self as tocadas, cita, FilaTocada, Tocadas};
 use crate::util::now_ms;
 
-/// Lo más que se intenta cerrar en una pasada. Lo que no quepa, en la siguiente.
+/// Lo más que se intenta cerrar en una pasada (traerlo de la nube y aplicarlo). Lo que no quepa, en
+/// la siguiente. Las que ni se intentan (inciertas, o que chocan con lo apartado de la subida) no
+/// cuentan: así unas cuantas atascadas al principio no dejan sin intentar a las de detrás.
 pub(crate) const MAX_CUARENTENAS_POR_PASADA: usize = 50;
+
+/// Lo más que se lee de las cuarentenas en una pasada: sin sus sentencias, sólo lo que dice qué
+/// tocan.
+const MAX_CUARENTENAS_LEIDAS: usize = 10_000;
+
+/// De cuántas inciertas se vuelve a mirar qué tocan en una pasada (un simulacro cada una).
+const MAX_RECALCULOS_POR_PASADA: usize = 20;
+
+/// Lo más que se lee de lo apartado de la subida para cruzarlo. Con más, se da por chocado todo.
+const MAX_APARTADAS_LEIDAS: usize = 1_000;
 
 /// Lo más que se trae de la nube en una pasada, en filas. La primera cuarentena se intenta siempre,
 /// aunque toque más (hasta `MAX_FILAS_TOCADAS`).
@@ -214,7 +226,8 @@ pub(crate) struct Salida {
 struct Cuarentena {
     op_id: String,
     seq: i64,
-    sentencias: String,
+    /// Aún tiene sus sentencias (no se han vaciado).
+    con_sentencias: bool,
     tocadas: Tocadas,
     sabidas: bool,
 }
@@ -254,12 +267,20 @@ pub(crate) async fn resolver(
     }
 
     // Las que no saben qué tocan y aún tienen sus sentencias se miran otra vez: la tabla que esta
-    // versión no tenía puede tenerla ya.
+    // versión no tenía puede tenerla ya. Unas pocas por pasada.
     {
         let w = db.write().await;
         let conn: &Connection = w.raw();
-        for c in cuarentenas.iter_mut().filter(|c| c.tocadas.incierto) {
-            let sentencias: Vec<SqlStatement> = serde_json::from_str(&c.sentencias).unwrap_or_default();
+        for c in cuarentenas.iter_mut().filter(|c| c.tocadas.incierto && c.con_sentencias).take(MAX_RECALCULOS_POR_PASADA) {
+            let mut filas = conn
+                .query("SELECT Statements_Json FROM _Sync_Failed WHERE Op_Id = ?1;", vec![Value::Text(c.op_id.clone())])
+                .await
+                .map_err(db_err)?;
+            let sentencias: Vec<SqlStatement> = match filas.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+                Some(Ok(Value::Text(t))) => serde_json::from_str(&t).unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            drop(filas);
             if sentencias.is_empty() {
                 continue;
             }
@@ -280,9 +301,11 @@ pub(crate) async fn resolver(
     let subida = lo_apartado_de_la_subida(db, &claves).await?;
     let cascadas = cascadas(db).await?;
 
-    // Las que se intentan en esta pasada, y lo que hay que pedir de cada tabla.
+    // Las que se intentan en esta pasada, y lo que hay que pedir de cada tabla. Las que no caben (por
+    // número o por filas) se dejan para otra pasada, y se sigue mirando las de detrás.
     let mut intentadas: Vec<&Cuarentena> = Vec::new();
     let mut quedan: Vec<(&Cuarentena, String)> = Vec::new();
+    let mut sin_intentar = 0usize;
     let mut pedir: BTreeMap<String, Vec<Vec<Json>>> = BTreeMap::new();
     let mut pedidas: HashSet<String> = HashSet::new();
     for c in &cuarentenas {
@@ -306,8 +329,11 @@ pub(crate) async fn resolver(
             .filter(|f| !crate::sync::no_es_tabla_de_negocio(&f.tabla))
             .filter(|f| tocadas::canonica_de(f).is_some_and(|k| !pedidas.contains(&k)))
             .collect();
-        if !intentadas.is_empty() && pedidas.len() + nuevas.len() > MAX_FILAS_POR_PASADA {
-            break;
+        if intentadas.len() == MAX_CUARENTENAS_POR_PASADA
+            || (!intentadas.is_empty() && pedidas.len() + nuevas.len() > MAX_FILAS_POR_PASADA)
+        {
+            sin_intentar += 1;
+            continue;
         }
         for f in nuevas {
             if let Some(k) = tocadas::canonica_de(f) {
@@ -378,10 +404,13 @@ pub(crate) async fn resolver(
             "cuarentena de bajada que no se puede cerrar todavía (SYNC-36)"
         );
     }
+    if sin_intentar > 0 {
+        tracing::info!(target: "tpv::sync", sin_intentar, "cuarentenas de bajada que no caben en esta pasada (SYNC-36)");
+    }
     Ok(Some(Salida { resueltas, quedan: total - resueltas }))
 }
 
-/// Las primeras cuarentenas de bajada, por orden, y cuántas hay.
+/// Las cuarentenas de bajada, por orden, sin sus sentencias, y cuántas hay.
 async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
     let r = db.read().await;
     let total = r
@@ -393,9 +422,9 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
     let mut filas = r
         .conn()
         .query(
-            "SELECT Op_Id, Seq, Statements_Json, Filas_Json FROM _Sync_Failed \
+            "SELECT Op_Id, Seq, Statements_Json <> '[]', Filas_Json FROM _Sync_Failed \
               WHERE Quarantined = 1 ORDER BY Seq LIMIT ?1;",
-            vec![Value::Integer(MAX_CUARENTENAS_POR_PASADA as i64)],
+            vec![Value::Integer(MAX_CUARENTENAS_LEIDAS as i64)],
         )
         .await
         .map_err(db_err)?;
@@ -406,15 +435,12 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
             Ok(Value::Integer(n)) => n,
             _ => continue,
         };
-        let sentencias = match f.get_value(2) {
-            Ok(Value::Text(t)) => t,
-            _ => String::new(),
-        };
+        let con_sentencias = matches!(f.get_value(2), Ok(Value::Integer(1)));
         let (tocadas, sabidas) = match f.get_value(3) {
             Ok(Value::Text(t)) => (Tocadas::de_json(&t), true),
             _ => (Tocadas::incierta(Vec::new()), false),
         };
-        salida.push(Cuarentena { op_id, seq, sentencias, tocadas, sabidas });
+        salida.push(Cuarentena { op_id, seq, con_sentencias, tocadas, sabidas });
     }
     Ok((salida, total))
 }
@@ -451,12 +477,22 @@ async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>
     let r = db.read().await;
     let mut filas = r
         .conn()
-        .query("SELECT Statements_Json FROM _Sync_Outbox WHERE Cuarentena = 1;", ())
+        .query(
+            "SELECT Statements_Json FROM _Sync_Outbox WHERE Cuarentena = 1 LIMIT ?1;",
+            vec![Value::Integer(MAX_APARTADAS_LEIDAS as i64 + 1)],
+        )
         .await
         .map_err(db_err)?;
     let mut todas = tocadas::Estaticas { claves: HashSet::new(), tablas: HashSet::new(), todas: HashSet::new() };
     let clave_de = |t: &str| claves.get(t).cloned().unwrap_or_default();
+    let mut leidas = 0usize;
     while let Some(f) = filas.next().await.map_err(db_err)? {
+        leidas += 1;
+        if leidas > MAX_APARTADAS_LEIDAS {
+            // Más de las que se miran: se da por chocado todo.
+            todas.tablas.insert("*".into());
+            break;
+        }
         let sentencias: Vec<SqlStatement> = match f.get_value(0) {
             Ok(Value::Text(t)) => serde_json::from_str(&t).unwrap_or_default(),
             _ => Vec::new(),

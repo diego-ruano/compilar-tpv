@@ -313,6 +313,31 @@ async fn lo_que_choca_con_lo_apartado_de_la_subida_se_queda() {
     cerrar(db, dir, nube).await;
 }
 
+#[tokio::test]
+async fn las_que_no_se_pueden_traer_no_dejan_sin_intentar_a_las_de_detras() {
+    // Codex: sólo se leían las 50 primeras por `Seq`, y 60 sin filas sabidas delante dejaban fuera
+    // para siempre a las de detrás, que sí se podían traer.
+    let (repo, db, dir, nube) = escenario("muchas").await;
+    sembrar(
+        &db,
+        "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 60)
+         INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, First_Failed_At_Ms, Last_Failed_At_Ms)
+         SELECT printf('vieja-%02d', i), i % 30, '[]', 5, 1, 1, 1 FROM s;",
+    )
+    .await;
+    sembrar(&db, "DROP TRIGGER anterior_alta; DROP TRIGGER anterior_nombre; DROP TRIGGER anterior_borrado;").await;
+
+    let r = hecha(pasada(&repo, &nube, true).await);
+
+    let quedan = en_cuarentena(&db).await;
+    assert_eq!(quedan.len(), 60, "{quedan:?}");
+    assert!(quedan.iter().all(|op| op.starts_with("vieja-")), "las cinco han salido: {quedan:?}");
+    assert_eq!(r.descuadres, vec![], "lo de las cinco ya está aquí");
+    como_la_nube(&db, &nube).await;
+
+    cerrar(db, dir, nube).await;
+}
+
 // ── Los datos caducan ─────────────────────────────────────────────────────────
 
 #[tokio::test]
