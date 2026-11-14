@@ -1167,9 +1167,9 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 });
 
 // AUD-14: borrar un ticket desde la Handy (`delete-if-safe`). La ruta decide con `hasPaidLines`, que
-// lee Turso, pero lo que llega a la Main son los `DELETE`, y la Main los aplica con lo suyo: puede
+// lee la nube, pero lo que llega a la Main son los `DELETE`, y la Main los aplica con lo suyo: puede
 // tener ese ticket cobrado y sin subir. Sin la condición dentro de la sentencia, la cascada de
-// `Pagos.ID_Comanda` se llevaba allí el cobro, sus líneas cobradas y sus consumos; y en Turso pasaba
+// `Pagos.ID_Comanda` se llevaba allí el cobro, sus líneas cobradas y sus consumos; y en la nube pasaba
 // lo mismo si el cobro subía entre la lectura y el lote (SYNC-30).
 describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 	const SIEMBRA = [
@@ -1244,8 +1244,8 @@ describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 			aplicarComoLaMain(hub, sql, buildApplyBatch(deleteComandaIfSafe("ticket").command as any).replicated);
 			expect(estado(sql)).toEqual(COBRADO);
 		});
-		// Donde no hay cobro (Turso cuando la Handy pulsa), se borra el ticket entero, como antes.
-		await enElHub("aud14-turso", async (hub: any) => {
+		// Donde no hay cobro (la nube cuando la Handy pulsa), se borra el ticket entero, como antes.
+		await enElHub("aud14-nube", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
@@ -1298,12 +1298,12 @@ describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 		});
 	});
 
-	it("si el cobro sube a Turso entre `hasPaidLines` y el lote, tampoco se pierde allí", async () => {
+	it("si el cobro sube a la nube entre `hasPaidLines` y el lote, tampoco se pierde allí", async () => {
 		await enElHub("aud14-carrera", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
-			// El motor real del TenantHub, con el SQLite del DO haciendo de Turso.
+			// El motor real del TenantHub, sobre su SQLite.
 			const db = clienteSobre(sql, hub.state.storage);
 			hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 			hub.touchLastSeen = async () => {};

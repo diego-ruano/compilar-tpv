@@ -1,6 +1,6 @@
 // test/sondaSqliteDo.test.ts
 //
-// Sondas de la rama prueba/sqlite-do: qué hace el SQLite del Durable Object con lo que hoy hace
+// Sondas de la rama prueba/sqlite-do: qué hace el SQLite del Durable Object con lo que hacía
 // Turso. No prueba código del worker, prueba el sustrato: claves foráneas, límites, jurisdicción y
 // tiempos con un volumen de restaurante. Cada sonda deja su resultado en el informe que se imprime
 // al final.

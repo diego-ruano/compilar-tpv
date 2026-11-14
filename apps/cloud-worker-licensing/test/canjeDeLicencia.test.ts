@@ -87,7 +87,7 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 		const sql = hub.state.storage.sql;
 		const db = clienteSobre(sql, hub.state.storage);
 		prepararPlanoDeControl(sql);
-		for (const t of ["licenses", "license_payments", "tenants", "devices", "tenant_databases"]) {
+		for (const t of ["licenses", "license_payments", "tenants", "devices"]) {
 			sql.exec(`DELETE FROM ${t};`);
 		}
 		clienteActual = db;

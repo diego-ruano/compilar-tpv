@@ -331,8 +331,7 @@ fn cabeza_de_la_sentencia(sql: &str) -> String {
 /// llegaba nunca a la nube. Le pasaba al alta de un lote, así que su movimiento de stock y el primer
 /// cobro que gastaba de él se rechazaban arriba por la clave foránea (SYNC-27).
 ///
-/// Lo que sube es también la sentencia recortada: en local se ejecuta la misma que sube (CFG-04), y
-/// el parser de Turso rechaza los comentarios de bloque (ver `tenantMigrations.ts`).
+/// Lo que sube es también la sentencia recortada: en local se ejecuta la misma que sube (CFG-04).
 fn sin_comentarios_iniciales(sql: &str) -> &str {
     let mut resto = sql.trim_start();
     loop {
@@ -1262,8 +1261,7 @@ mod tests {
     }
 
     /// Lo que fallaba de verdad: la escritura comentada se guardaba en el TPV y no entraba en el
-    /// outbox, así que no llegaba a la nube. Y lo que sube va sin el comentario, que Turso no
-    /// siempre acepta.
+    /// outbox, así que no llegaba a la nube. Y lo que sube va sin el comentario.
     #[tokio::test]
     async fn una_escritura_comentada_sube_a_la_nube_sin_el_comentario() {
         let (db, _dir) = crate::contract_comun::db_temporal().await;

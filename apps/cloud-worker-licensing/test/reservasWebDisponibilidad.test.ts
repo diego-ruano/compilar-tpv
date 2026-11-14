@@ -1,8 +1,9 @@
 // test/reservasWebDisponibilidad.test.ts
 //
 // Reservas desde la web (docs/estudios/reservas-web.md §4.3): qué días, horas y mesas se pueden
-// reservar. La lógica es pura (`disponibilidad.ts`); lo único que sale de Turso son los intervalos
-// ocupados, y aquí se fija que dan lo mismo que el SQL de choque de la Main (`choqueEnLaMesa`).
+// reservar. La lógica es pura (`disponibilidad.ts`); lo único que sale de la base del negocio son
+// los intervalos ocupados, y aquí se fija que dan lo mismo que el SQL de choque de la Main
+// (`choqueEnLaMesa`).
 
 import { describe, expect, it } from "vitest";
 
@@ -188,7 +189,7 @@ describe("la hora del negocio", () => {
 	});
 });
 
-describe("los intervalos de Turso dan lo mismo que el SQL de choque de la Main", () => {
+describe("los intervalos de la base del negocio dan lo mismo que el SQL de choque de la Main", () => {
 	// Para cada hora pedida, ¿choca? Por `choqueEnLaMesa` (el SQL de la Main) y por
 	// `ocupacionAlrededorDe` + `seCruzan` (lo que usa la agenda). Tienen que coincidir siempre.
 	const SEMILLA = [

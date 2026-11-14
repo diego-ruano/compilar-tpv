@@ -3,7 +3,7 @@
 //! # Qué protege y qué no
 //!
 //! Protege el **dato en reposo en la nube**: quien consiga un volcado de la base de datos
-//! del tenant en Turso ve texto cifrado, no DNIs ni IBANes. La clave (DEK) no vive en esa
+//! del tenant en la nube ve texto cifrado, no DNIs ni IBANes. La clave (DEK) no vive en esa
 //! base de datos: la genera el worker al aprovisionar, se la entrega **una vez** a la Main
 //! y ésta la guarda en el almacén de secretos del sistema (keyring / Android Keystore).
 //!

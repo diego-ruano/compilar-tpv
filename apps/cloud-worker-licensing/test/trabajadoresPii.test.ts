@@ -2,7 +2,7 @@
 //
 // TRAB-03: la Handy escribe por REST contra el worker, y el worker NO tiene la clave de
 // cifrado. Si sus sentencias tocaran DNI, IBAN o el nº de la Seguridad Social, esos valores
-// acabarían en claro en Turso — justo lo que el cifrado de la Main evita.
+// acabarían en claro en la nube — justo lo que el cifrado de la Main evita.
 //
 // Estos tests fijan esa frontera. Son de construcción de comandos (funciones puras): no hace
 // falta ni base de datos ni red.

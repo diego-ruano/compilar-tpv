@@ -93,6 +93,6 @@ fn avisar_de_lo_recogido(app: &AppHandle, resumen: &uc::ResumenRecogida) {
             comanda: ComandaReplicada { ids: vec![], touched_comanda: false, uncertain: false, touched_catalog: false },
         },
     );
-    // …y que el motor suba ya lo registrado: hasta que llega a Turso, la agenda no lo da por visto.
+    // …y que el motor suba ya lo registrado: hasta que llega a la nube, la agenda no lo da por visto.
     app.state::<crate::replicacion::SyncNativo>().despertar.notify_one();
 }

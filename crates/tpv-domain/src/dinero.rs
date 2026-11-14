@@ -14,7 +14,7 @@
 //! `(x * 100.0).round() / 100.0` repetido en 35 sitios y tres lenguajes, con **tres modos de
 //! redondeo distintos** conviviendo (el de Rust aleja la mitad del cero, el de JavaScript la lleva
 //! hacia +∞, y `ROUND()` de SQLite hace lo suyo). Con enteros no hay nada que redondear al sumar:
-//! `SUM` en SQLite es exacto y **asociativo**, o sea que la Main y Turso obtienen el mismo número
+//! `SUM` en SQLite es exacto y **asociativo**, o sea que la Main y la nube obtienen el mismo número
 //! sin importar el orden de las filas ni el motor. Eso es lo que permite dejar los agregados
 //! derivados dentro del SQL —donde tienen que estar, porque `Total_Comanda` tiene dos escritores
 //! (la Main por el outbox y la Handy por el Durable Object) y sólo converge si se re-deriva del

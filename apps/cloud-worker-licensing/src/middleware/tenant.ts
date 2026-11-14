@@ -4,8 +4,8 @@
 //
 // Verifica el JWT HS256 + el "device proof" ed25519 (mismas comprobaciones que el
 // resto del worker) y deja en el contexto de Hono el tenant/dispositivo, para que
-// los handlers solo tengan que pedir el cliente Turso (lecturas) o aplicar comandos
-// vía el DO (escrituras).
+// los handlers solo tengan que leer la base del negocio o aplicar comandos, las dos
+// cosas en su TenantHub.
 
 import type { Context, MiddlewareHandler } from "hono";
 

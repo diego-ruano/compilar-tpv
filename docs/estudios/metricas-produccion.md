@@ -18,7 +18,8 @@
 Hay decisiones de arquitectura tomadas a ojo **por falta de un solo número**: nadie ha contado
 cuántas filas al día genera un bar. La ventana de 30 días de la recuperación
 ([recuperacion.md](../arquitectura/recuperacion.md)), la retención
-([DB-14](../pendientes.md#db-14--retención-y-archivado)) y el plan de Turso dependen de él.
+([DB-14](../pendientes.md#db-14--retención-y-archivado)) y lo que cuesta cada bar en Durable Objects
+dependen de él.
 
 La regla al leer esto: no se trata de montar un observatorio. Se trata de salir del piloto con una
 docena de números que hoy no tenemos.
@@ -37,8 +38,8 @@ docena de números que hoy no tenemos.
 | **Cloudflare** → Workers Analytics / GraphQL API | Peticiones, CPU, errores, subpeticiones | ✅ Disponible, sin usar |
 | **Cloudflare** → Durable Objects Analytics | Peticiones, duración GB-s, filas SQLite | ✅ Disponible, sin usar |
 | **Cloudflare** → R2 metrics | Almacenamiento, operaciones Clase A/B | ✅ Disponible, sin usar |
-| **Turso** → panel de uso | Filas leídas/escritas, almacenamiento, bases activas | ✅ Disponible, sin usar |
-| **SQL directo contra el tenant** | Filas por tabla, crecimiento diario | ⚠️ A mano (§2) |
+| **Turso** → panel de uso | La base central: filas leídas/escritas, almacenamiento | ✅ Disponible, sin usar |
+| **SQL contra la `data.db` de la Main** | Filas por tabla, crecimiento diario | ⚠️ A mano (§2) |
 | **Tamaño de `data.db` y de las copias** | Crecimiento en disco del equipo | ⚠️ No instrumentado |
 
 **Lo único que hay que instrumentar de cero** es §2. Todo lo demás ya está o se consulta en un panel.
@@ -49,12 +50,14 @@ docena de números que hoy no tenemos.
 
 **El más importante y el que nadie ha medido.** De aquí salen el afinado de la ventana de
 recuperación (SYNC-19: hoy 30 días elegidos a ojo, y si el volumen resulta pequeño se puede subir —o
-bajarlo todo de una vez y quitar la fase 2 entera), DB-14 (retención) y el dimensionado del plan de
-Turso.
+bajarlo todo de una vez y quitar la fase 2 entera), DB-14 (retención) y lo que cuesta cada bar en
+Durable Objects.
 
 ### 2.1 Fotografía semanal por tabla
 
-Contra la BD del tenant, una vez por semana durante el piloto:
+Contra la `data.db` de la Main (con `sqlite3`), una vez por semana durante el piloto. Tiene lo mismo
+que la base del negocio en la nube, que vive en su `TenantHub` y no se consulta desde fuera
+([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)):
 
 ```sql
 SELECT 'Comandas', COUNT(*) FROM Comandas
@@ -146,6 +149,11 @@ Tres cosas concretas que comprobar:
    SQLite del DO añade una fila escrita por cada inserción. Antes de añadir un índice ahí, mirar esto.
 3. **Peticiones al DO por servicio.** Sale de dividir entre las operaciones del día; dice cuánto
    cuesta *de verdad* un bar al mes.
+4. **El multiplicador de filas escritas.** Una operación del TPV **no** es una fila escrita: es la
+   fila de negocio, más su línea en `Sync_Changes`, más la de `Applied_Operations`, más lo que toquen
+   los índices. Se calcula dividiendo las filas escritas que da Durable Objects Analytics entre las
+   operaciones del outbox del mismo periodo, y es el factor que responde *"¿cuánto cuesta un
+   restaurante más?"*.
 
 ### 3.3 R2
 
@@ -160,30 +168,16 @@ R2 **no cobra egreso**, que es justo lo que hace viable servir imágenes desde a
 
 ---
 
-## 4. Turso
+## 4. Turso: la base central
 
-**El recurso escaso no es el almacenamiento: son las filas escritas.**
+Turso guarda sólo la base central (`tpv-control`): licencias, negocios, equipos, emparejamientos y
+correos. La de cada negocio vive en su `TenantHub` (§3.2). La central crece con los clientes, no con
+lo que venden. Vigilar:
 
-| Métrica | Plan Free | Developer (~$5) | Scaler (~$25) |
-|---|---|---|---|
-| Filas escritas/mes | 10 M | 25 M | 100 M |
-| Filas leídas/mes | 500 M | 2.500 M | 100.000 M |
-| Almacenamiento | 5 GB | 9 GB | 24 GB |
-| Bases activas/mes | 100 | 500 | 2.500 |
-
-**Qué medir, y por qué es más de lo que parece:** una operación del TPV **no** es una fila escrita.
-Es la fila de negocio, más su entrada en `Sync_Changes`, más la de `Applied_Operations`, más lo que
-toquen los índices. **Calcula el multiplicador real** dividiendo las filas escritas que reporta Turso
-entre las operaciones del outbox de ese periodo. Ese factor es el que permite responder *"¿cuántos
-restaurantes caben en el plan X?"*.
-
-Vigilar también:
-
-- **Bases activas por mes**: con una base por tenant, este número *es* tu número de clientes. Marca
-  el salto de plan antes que ninguna otra métrica.
-- **Almacenamiento por tenant**: el input de DB-14.
-- **Latencia p95 de consulta desde el worker**: la región es `aws-eu-central-1` (Frankfurt); si la Handy va lenta,
-  aquí se ve si es la BD o el camino.
+- **Filas leídas y escritas al mes** contra las del plan contratado: las escriben las activaciones,
+  los emparejamientos, el `last_seen` de los equipos y los correos; cada petición autenticada la lee.
+- **Latencia p95 de consulta desde el worker**: la región es `aws-eu-central-1` (Frankfurt); si la
+  Handy va lenta, aquí se ve si es la base central o el camino.
 
 ---
 
@@ -250,7 +244,7 @@ del DO y las reconexiones.
 **Mes 1**
 - Filas/día estabilizadas → cuántos días de histórico caben de golpe (**afina la ventana de SYNC-19**).
 - Coste real en Cloudflare y Turso desglosado → extrapolación a 10 y 50 clientes.
-- Multiplicador de filas escritas por operación (§4).
+- Multiplicador de filas escritas por operación (§3.2).
 - ¿Hiberna el DO? (§3.2).
 - Crecimiento de `data.db` en MB/mes (**decide DB-14**).
 
@@ -278,7 +272,7 @@ medirlo todo.
 |---|---|
 | Filas/día totales | Afinar la ventana de la recuperación (SYNC-19, hoy 30 días en `bootstrap.ventana.ts`): subirla si sale barato, o bajarlo todo de una vez y quitar la fase 2 |
 | Crecimiento de `data.db` | DB-14: si hace falta retención y con qué corte |
-| Multiplicador de filas escritas | Plan de Turso y precio por cliente |
+| Multiplicador de filas escritas | Precio por cliente |
 | Duración del DO | Si SYNC-16 cumple su función o hay que perseguir lo que lo despierta |
 | Peticiones a `r2.dev` | Cuánta urgencia tiene INFRA-03 |
 | Crash-free rate | Si el producto está listo para un segundo cliente |

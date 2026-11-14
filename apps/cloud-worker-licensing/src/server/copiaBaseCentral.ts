@@ -25,7 +25,7 @@
 //   · El formato es el de `sqlite3 .dump`, para poder restaurarlo sin nuestro código:
 //     `turso db create <nombre> --from-dump copia.sql`, o `sqlite3 local.db < copia.sql` para mirarla.
 //   · El bucket es PRIVADO y propio. Nunca `tpv-images`, que es público por `r2.dev`: esto lleva los
-//     correos de los clientes, y las DEK y los tokens de Turso (cifrados con `LICENSE_STORE_KEY`,
+//     correos de los clientes, y las DEK de los negocios (cifradas con `LICENSE_STORE_KEY`,
 //     que por eso tiene que estar guardada fuera de Cloudflare: sin ella la copia no los devuelve).
 //   · Cuánto se guardan las copias lo decide la regla de ciclo de vida del bucket, no este código.
 //     Tiene que ser menor que los 90 días de `RETENCION_ENVIOS_MS` (purga.ts), o los correos que la

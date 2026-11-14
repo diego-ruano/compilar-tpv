@@ -1376,7 +1376,7 @@ mod tests_cobro_repetido {
 
 #[cfg(test)]
 mod tests_borrado_desde_la_handy {
-    //! AUD-14: borrar un ticket desde la Handy. El worker decide con lo que ve en Turso
+    //! AUD-14: borrar un ticket desde la Handy. El worker decide con lo que ve en la nube
     //! (`hasPaidLines`) y lo que llega aquí son sus `DELETE`, por la réplica y no por
     //! `delete_comanda_if_safe`. La Main puede tener ese ticket cobrado con el cobro todavía en el
     //! outbox: la condición viaja dentro de las sentencias y se vuelve a evaluar aquí. Sin ella, la

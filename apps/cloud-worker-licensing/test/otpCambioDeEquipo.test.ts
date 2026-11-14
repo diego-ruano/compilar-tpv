@@ -8,8 +8,7 @@
 // cada uno. Lo que se fija aquí es que los topes de verdad van por LICENCIA, y que un dueño que
 // cambia de PC de verdad no los roza.
 //
-// El aprovisionamiento en Turso y los correos se sustituyen: salen a internet y no son lo que se
-// prueba.
+// El aprovisionamiento de la base del negocio y los correos se sustituyen: no son lo que se prueba.
 
 import { describe, expect, it, vi } from "vitest";
 

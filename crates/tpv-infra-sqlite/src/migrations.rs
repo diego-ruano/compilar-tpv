@@ -645,7 +645,7 @@ mod tests {
 
     /// RI-65: qué deja pasar el CHECK. Mira el valor ya convertido por la afinidad de la columna,
     /// así que lo que es un entero entra aunque llegue escrito de otra forma, y lo que no lo es se
-    /// rechaza. En la Main y en Turso, igual.
+    /// rechaza. En la Main y en la nube, igual.
     #[test]
     fn el_dinero_solo_admite_enteros() {
         let (conn, dir) = open_temp();

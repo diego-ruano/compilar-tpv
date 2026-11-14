@@ -7,7 +7,7 @@
 //! La nube simulada sirve `/v1/sync/changes` como la ruta real (`sync.routes.ts`,
 //! `cambiosJson.ts`): `Seq > since`, en orden, con tope por página, `nextSince` = el último `Seq`
 //! servido, `highWater` = el mayor y `purgadoHasta` = 0 (nada purgado). Lo que llega en vivo se
-//! anota en su log al entregarse, que es lo que hace el DO: confirmar en Turso y después difundir,
+//! anota en su log al entregarse, que es lo que hace el DO: confirmar en su base y después difundir,
 //! en orden de `Seq`.
 //!
 //! Los escenarios son los de la investigación de AUD-18 (un fallo en mitad de una página del
@@ -280,7 +280,7 @@ fn sql(op: &str, seq: i64, sql: &str) -> JsonValue {
     item(op, seq, vec![(sql, vec![])])
 }
 
-/// Las sentencias de las reparaciones encoladas (`main_reparacion`), que es lo que sube a Turso.
+/// Las sentencias de las reparaciones encoladas (`main_reparacion`), que es lo que sube a la nube.
 async fn reparaciones(repo: &SqliteSyncRepository) -> Vec<SqlStatement> {
     repo.outbox_pending(100)
         .await
@@ -481,7 +481,7 @@ async fn en_vivo_un_fallo_que_se_resuelve_al_reintentar_entra_y_lo_de_detras_le_
 
 #[tokio::test]
 async fn con_la_difusion_en_orden_una_caida_no_pierde_lo_que_aun_no_habia_llegado() {
-    // El DO confirma y difunde en orden: si el 11 ya está en Turso pero el socket se cae antes de
+    // El DO confirma y difunde en orden: si el 11 ya está en la nube pero el socket se cae antes de
     // que llegue, la Main lo pide al reconectar, porque su checkpoint se quedó en el 10.
     let (repo, db, dir) = base("caida-en-orden").await;
     let ctx = Ctx { repo: repo.clone() };

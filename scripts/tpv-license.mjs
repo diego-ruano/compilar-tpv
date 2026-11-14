@@ -305,7 +305,7 @@ async function interruptorLista(args) {
  * mano. Procedimiento: docs/arquitectura/licencias.md («Rotar LICENSE_STORE_KEY»).
  */
 async function recifrar() {
-	const total = { licencias: 0, deks: 0, tokensTurso: 0 };
+	const total = { licencias: 0, deks: 0 };
 	const ilegibles = new Map();
 	for (;;) {
 		const r = await api("POST", "/v1/admin/store-key/recifrar");
@@ -316,8 +316,7 @@ async function recifrar() {
 		if (!r.quedanMas || !avanzo) break;
 	}
 	console.log(
-		`\n  ✔ Recifrado con la clave actual: ${total.licencias} claves de licencia, ${total.deks} DEK, ` +
-			`${total.tokensTurso} tokens de Turso.`,
+		`\n  ✔ Recifrado con la clave actual: ${total.licencias} claves de licencia y ${total.deks} DEK.`,
 	);
 	if (ilegibles.size) {
 		console.log(`\n  ✖ ${ilegibles.size} no se dejan descifrar con ninguna clave configurada:`);

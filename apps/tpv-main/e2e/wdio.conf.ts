@@ -52,7 +52,7 @@ let appium: ChildProcess | null = null;
  * La tanda estrena UN equipo y lo va pasando de recorrido en recorrido, en el orden de `specs`: la
  * venta lo estrena, los tres tramos de copias le rompen la base y lo recuperan, y el de la licencia
  * se la anula y la caduca al final. Antes cada recorrido estrenaba el suyo, con su licencia y por
- * tanto con su base de Turso: eran cuatro bases por tanda, que no se borran solas, para probar
+ * tanto con su base en la nube: eran cuatro bases por tanda, que no se borran solas, para probar
  * cosas que podían compartir equipo (TEST-03).
  *
  * Lo que sigue siendo de cada recorrido es lo que hay que hacerle al equipo con la app CERRADA
@@ -287,7 +287,7 @@ export const config: WebdriverIO.Config = {
     },
 
     /**
-     * Al terminar se retira el negocio de la tanda, con su base de Turso, y se anula su licencia.
+     * Al terminar se retira el negocio de la tanda, con su base, y se anula su licencia.
      * Best-effort — que falle esto no puede tumbar una tanda que ha pasado: lo que quede lo retira
      * la siguiente.
      */
@@ -296,7 +296,7 @@ export const config: WebdriverIO.Config = {
         if (!emitida) return;
         try {
             const r = await retirarLasDePrueba();
-            console.log(`[e2e] retirados ${r.negocios} negocio(s) de pruebas y ${r.bases} base(s) de Turso`);
+            console.log(`[e2e] retirados ${r.negocios} negocio(s) de pruebas y ${r.bases} base(s)`);
             for (const f of r.fallos) console.log(`[e2e] no se pudo retirar ${f.tenantId}: ${f.error}`);
         } catch (e) {
             console.log(`[e2e] no se pudieron retirar los negocios de pruebas: ${e}`);

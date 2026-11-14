@@ -7,10 +7,10 @@
 //!
 //! La misma consulta está escrita dos veces: en Rust (`crates/tpv-infra-sqlite`, que sirve a la Main
 //! contra el SQLite local) y en TypeScript (`domains/*/*.queries.ts`, que sirve a la Handy contra
-//! Turso). Los **datos** convergen —de eso se encarga la replicación—, pero el SQL que los lee no es
-//! el mismo código, así que las mismas filas pueden acabar presentadas distinto: un JOIN de más, un
-//! filtro de borrados que sólo está en un lado, un `ORDER BY` distinto, un `NULL` que uno normaliza
-//! y el otro no. El fallo que produce no es corrupción de datos: es que **el camarero mire la Handy
+//! la base de la nube). Los **datos** convergen —de eso se encarga la replicación—, pero el SQL que
+//! los lee no es el mismo código, así que las mismas filas pueden acabar presentadas distinto: un
+//! JOIN de más, un filtro de borrados que sólo está en un lado, un `ORDER BY` distinto, un `NULL` que
+//! uno normaliza y el otro no. El fallo que produce no es corrupción de datos: es que **el camarero mire la Handy
 //! y la Main y vea cosas distintas**, y nadie sepa cuál creer.
 //!
 //! ## Qué se compara: el VALOR DEVUELTO, y en orden

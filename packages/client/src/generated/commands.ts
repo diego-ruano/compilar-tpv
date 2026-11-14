@@ -204,7 +204,7 @@ export const commands = {
 	 *
 	 *  REV-19: lo que decía aquí de la PII del personal era **al revés**. `DNI`, `IBAN` y el nº de la
 	 *  Seguridad Social se cifran antes de construir la sentencia, así que lo que sale por el outbox
-	 *  —y lo que acaba en Turso— es el texto cifrado, no un hueco; y la DEK no se queda en el equipo:
+	 *  —y lo que acaba en la nube— es el texto cifrado, no un hueco; y la DEK no se queda en el equipo:
 	 *  el worker la guarda en el control-plane y la reentrega en cada activación (TRAB-03). De modo
 	 *  que esa PII **sí vuelve** de la nube, y esta copia no es lo único que la conserva. Lo que no
 	 *  vuelve es cualquier fila que nunca llegara a subir, que es el motivo de sacar copias.

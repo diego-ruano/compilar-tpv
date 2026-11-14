@@ -13,8 +13,8 @@
 // que ese orden se reproduce con una barrera: cada petición se queda parada justo después de su
 // primera sentencia sobre la tabla del tope hasta que todas han hecho la suya.
 //
-// El aprovisionamiento en Turso y los correos se sustituyen: salen a internet y no son lo que se
-// prueba. Datos ficticios.
+// El aprovisionamiento de la base del negocio y los correos se sustituyen: no son lo que se prueba.
+// Datos ficticios.
 
 import { describe, expect, it, vi } from "vitest";
 

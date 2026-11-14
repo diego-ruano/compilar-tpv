@@ -7,8 +7,7 @@
 // otro equipo hizo mientras tanto. Por eso lo tiene que decir el servidor, que sabe a qué equipo
 // estaba ligada la licencia, y no el cliente por haber escrito un código.
 //
-// El aprovisionamiento de la base del tenant en Turso y los correos se sustituyen: no son lo que se
-// prueba y los dos salen a internet.
+// El aprovisionamiento de la base del negocio y los correos se sustituyen: no son lo que se prueba.
 
 import { describe, expect, it, vi } from "vitest";
 

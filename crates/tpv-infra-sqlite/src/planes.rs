@@ -4,7 +4,7 @@
 //! y crecen con el histórico: un plan que recorre una tabla va bien el primer mes y tarda segundos
 //! al año. Ningún test de resultados lo ve —el resultado es el mismo—, así que se vigila el plan.
 //!
-//! Se mira **sin estadísticas** (`ANALYZE`) a propósito: así corren en Turso las lecturas de la Handy
+//! Se mira **sin estadísticas** (`ANALYZE`) a propósito: así corren en la nube las lecturas de la Handy
 //! y las sentencias replicadas. Un plan que sólo es bueno con estadísticas es malo justo allí.
 
 #[cfg(test)]

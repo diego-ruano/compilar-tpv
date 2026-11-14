@@ -387,7 +387,7 @@ fn minutos_para(
 /// MESAS-02: qué reserva enseña cada mesa del plano. Una mesa enseña una: la sentada antes que
 /// ninguna y, si no, la más cercana a ahora (la que llega tarde, o la siguiente), de las que salen
 /// en el plano (`estado_en_el_plano`). A la misma distancia, la de identificador menor: el orden
-/// en que llegan de la base no es el mismo en la Main que en Turso. Espejo de
+/// en que llegan de la base no es el mismo en la Main que en la nube. Espejo de
 /// `domains/mesas/reservaEnElPlano.ts` en el worker, con sus casos en `plano_reservas_casos.json`.
 ///
 /// `ahora` es un instante, en segundos desde 1970, e `instante` convierte a uno la hora local de una

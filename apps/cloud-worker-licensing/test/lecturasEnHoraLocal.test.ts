@@ -2,7 +2,7 @@
 //
 // REV-03: «hoy» es el del bar, no el de Turso.
 //
-// Las lecturas de la Handy se ejecutan en Turso, que corre en UTC, así que un `date('now','localtime')`
+// Las lecturas de la Handy se ejecutan en la nube, que corre en UTC, así que un `date('now','localtime')`
 // dentro de la consulta devolvía el día del servidor. Entre medianoche y las dos de la mañana (verano
 // en España) todavía era ayer, y eso salía en las tareas «de hoy», en las estadísticas, en las
 // reservas próximas — y en la fecha con la que se guardaba un fichaje, que es un registro de jornada
@@ -87,7 +87,7 @@ describe("la hora de quien pregunta se fija antes de ejecutar", () => {
 
 	it("prohibe abrir una transaccion, porque su SQL se escaparía sin fijar", () => {
 		// La tercera puerta por la que sale SQL. Si una lectura la usara, su `'now'` lo resolvería
-		// Turso y el resultado sería de otro día: sin error, sin síntoma, sin nadie que lo note. Vale
+		// la base y el resultado sería de otro día: sin error, sin síntoma, sin nadie que lo note. Vale
 		// más que reviente aquí, delante de quien lo está escribiendo.
 		const db = conLaHoraDeQuienPregunta({ execute: async () => ({}) } as any, MADRUGADA) as any;
 		expect(() => db.transaction("write")).toThrow(/no abre transacciones/);
@@ -113,7 +113,7 @@ describe("la hora de quien pregunta se fija antes de ejecutar", () => {
 describe("el fichaje de madrugada", () => {
 	/**
 	 * El caso que motiva todo esto. A las 00:30 del día 2, `punchStatus` preguntaba por los fichajes
-	 * del día 1 (el de Turso) y la ruta escribía ESA fecha en `Fichajes.Fecha`, mientras la
+	 * del día 1 (el del servidor) y la ruta escribía ESA fecha en `Fichajes.Fecha`, mientras la
 	 * `Hora_Entrada` del mismo INSERT se resolvía con la hora del emisor: el día 2. La fila se
 	 * contradecía a sí misma y viajaba así a la Main.
 	 */

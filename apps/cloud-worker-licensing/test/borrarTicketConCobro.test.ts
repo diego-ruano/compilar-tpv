@@ -23,7 +23,7 @@ import { enElHub } from "./helpers/hub";
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
 /** La base del tenant del caso en curso: la que lee la ruta antes de mandar el lote. */
-let turso: any = null;
+let nube: any = null;
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -36,7 +36,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
 	...(await (original as any)()),
-	tenantQuery: (_c: any, fn: any) => fn(turso),
+	tenantQuery: (_c: any, fn: any) => fn(nube),
 }));
 
 const { ventaRapidaRoutes } = await import("../src/domains/venta_rapida/venta_rapida.routes");
@@ -92,7 +92,7 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 				return base.batch(sentencias, modo);
 			},
 		};
-		turso = base;
+		nube = base;
 		hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 		hub.touchLastSeen = async () => {};
 		hub.isMainConnected = () => true;
@@ -131,7 +131,7 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 			status: res.status,
 			json: (await res.json()) as any,
 			devuelto,
-			turso: {
+			nube: {
 				ticket: n("SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='ticket'"),
 				lineas: n("SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='ticket'"),
 				pagos: n("SELECT COUNT(*) FROM Pagos WHERE ID_Pago='pago'"),
@@ -153,21 +153,21 @@ describe("borrar un ticket desde la Handy (AUD-14)", () => {
 		const r = await borrar("aud14-ruta-cobrado", [...SIEMBRA, ...COBRO], {});
 		expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
 		expect(r.devuelto).toEqual([]);
-		expect(r.turso).toEqual(COBRADO);
+		expect(r.nube).toEqual(COBRADO);
 	});
 
 	it("sin cobro, se borra", async () => {
 		const r = await borrar("aud14-ruta-libre", SIEMBRA, {});
 		expect(r.devuelto).toEqual([{ ok: true, data: 1 }]);
 		expect([r.status, r.json]).toEqual([200, { ok: true }]);
-		expect(r.turso).toEqual(BORRADO);
+		expect(r.nube).toEqual(BORRADO);
 	});
 
 	it("si el cobro sube entre la lectura y el lote, el lote no borra nada y la Handy oye que tiene cobros", async () => {
 		const r = await borrar("aud14-ruta-carrera", SIEMBRA, { antesDelLote: COBRO });
 		expect(r.devuelto).toEqual([{ ok: true, data: 0 }]);
 		expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
-		expect(r.turso).toEqual(COBRADO);
+		expect(r.nube).toEqual(COBRADO);
 	});
 
 	it("un ticket que ya no existe contesta como siempre", async () => {
@@ -183,14 +183,14 @@ describe("borrar un ticket desde la Handy (AUD-14)", () => {
 			const r = await borrar("aud14-ruta-otro-cobro", [...SIEMBRA, ...LINEA_DE_OTRO_COBRO], {});
 			expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
 			expect(r.devuelto).toEqual([]);
-			expect([r.turso, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
+			expect([r.nube, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
 		});
 
 		it("si entra entre la lectura y el lote, el lote no borra nada y la Handy no lo da por borrado", async () => {
 			const r = await borrar("aud14-ruta-otro-cobro-carrera", SIEMBRA, { antesDelLote: LINEA_DE_OTRO_COBRO });
 			expect(r.devuelto).toEqual([{ ok: true, data: 0 }]);
 			expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
-			expect([r.turso, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
+			expect([r.nube, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
 		});
 	});
 });

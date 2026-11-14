@@ -145,8 +145,8 @@ impl AppError {
     ///
     /// El mensaje legible sale de `message` o `details.message` cuando existen. Muchos 500 del
     /// Worker conservan el identificador de máquina en `error` y colocan el diagnóstico real en
-    /// `details`; perderlo aquí convertía errores accionables (migración alterada, Turso, etc.) en
-    /// un opaco "Error interno".
+    /// `details`; perderlo aquí convertía errores accionables (migración alterada, base central,
+    /// etc.) en un opaco "Error interno".
     pub fn from_api_body(status: u16, body: &str) -> Self {
         let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
 

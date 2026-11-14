@@ -130,8 +130,6 @@ async function escenario<T>(nombre: string, prueba: (e: Escenario) => Promise<T>
 			LICENSE_STORE_KEY: STORE_KEY,
 			TURSO_DATABASE_URL: "libsql://no-se-usa",
 			TURSO_AUTH_TOKEN: "no-se-usa",
-			TURSO_PLATFORM_TOKEN: "no-se-usa",
-			TURSO_ORG_SLUG: "no-se-usa",
 			STRIPE_SECRET_KEY: "sk_de_pruebas",
 			STRIPE_WEBHOOK_SECRET: SECRETO_DEL_WEBHOOK,
 			TenantHub: hub.ns,
