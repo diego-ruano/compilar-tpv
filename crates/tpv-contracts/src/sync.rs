@@ -76,6 +76,11 @@ pub struct SyncHealth {
     /// SYNC-20 · dirección SUBIDA: operaciones APARTADAS. La nube no las tiene y no va a tenerlas
     /// sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
     pub subida_en_cuarentena: i64,
+    /// SYNC-36 · De las de `quarantined`, las que no pueden salir solas (las filas que tocan son
+    /// inciertas o dudosas) y llevan una semana apartadas (`BAJADA_ATASCADA_TRAS_MS`). Mientras haya
+    /// alguna, el contraste diario no repara; lo arregla traer el estado actual de la nube, y se
+    /// avisa al administrador.
+    pub bajada_atascada: i64,
 }
 
 /// Lo que el drenado necesita saber tras un `apply_ack` fallido (SYNC-20): si esta operación se

@@ -1238,6 +1238,12 @@ impl SyncRepository for SqliteSyncRepository {
             "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0 AND Intentos > 0;",
         )
         .await?;
+        // SYNC-36: las de la bajada que no pueden salir solas y llevan una semana apartadas.
+        let bajada_atascada = crate::cuarentenas_bajada::atascadas(
+            conn,
+            now_ms() - tpv_application::use_cases::sync::BAJADA_ATASCADA_TRAS_MS,
+        )
+        .await?;
 
         Ok(SyncHealth {
             outbox_pending,
@@ -1246,6 +1252,7 @@ impl SyncRepository for SqliteSyncRepository {
             failing,
             subida_fallando,
             subida_en_cuarentena,
+            bajada_atascada,
         })
     }
 

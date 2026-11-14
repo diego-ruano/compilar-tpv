@@ -57,6 +57,12 @@ antigua crearía dos historiales que no hay forma de juntar.
   por modo (no tener base es normal en una Handy).
 - **Reconciliación pendiente**: se restauró y todavía no se ha comprobado contra la nube.
 
+Fuera de estos estados, un administrador puede traer el estado actual de la nube desde Configuración
+→ Conectividad cuando un cambio de la nube lleva una semana atascado en su cuarentena (SYNC-36,
+[sincronizacion.md](sincronizacion.md#la-salida-de-una-cuarentena-de-bajada-sync-36)), y sólo con
+nada por subir: la guardia del outbox lo niega si no. Al terminar se cierra la sesión y sigue la
+reconciliación en esta pantalla, como tras cualquier otra.
+
 Mientras dure:
 
 - **El socket no se abre** (`pausada`): un catch-up desde cero aplicaría días de operaciones sobre

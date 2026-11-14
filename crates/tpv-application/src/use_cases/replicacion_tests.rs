@@ -121,7 +121,7 @@ struct FakeRepo {
         }
         async fn health(&self) -> AppResult<SyncHealth> {
             let apartadas = self.apartadas.lock().unwrap().len() as i64;
-            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64 - apartadas,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:apartadas})
+            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64 - apartadas,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:apartadas,bajada_atascada:0})
         }
         async fn bootstrap_restaurar(
             &self,

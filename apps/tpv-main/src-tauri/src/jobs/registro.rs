@@ -114,6 +114,12 @@ const RESUMEN_ESTADISTICAS_PRESUPUESTO: Duration = Duration::from_secs(3);
 /// apartado tras 30 días, así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
+/// SYNC-36 · Cada cuánto se mira si hay un cambio de la nube atascado en su cuarentena desde hace una
+/// semana. Lo que tarda en aparecer el aviso no importa (es a la semana), y lo que tarda en cerrarse
+/// tras recuperar la nube, tampoco mucho: el aviso no bloquea nada. Una notificación descartada
+/// vuelve en la pasada siguiente mientras la situación siga, así que no más a menudo.
+const BAJADA_ATASCADA_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
 /// Cada cuánto se traen unas páginas del histórico pendiente (SYNC-19, fase 2).
 ///
 /// Cada vencimiento trae unas páginas (`BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`) sin acaparar
@@ -311,6 +317,16 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(backup_local),
+        },
+        Job {
+            // SYNC-36: un cambio de la nube que no puede salir solo de su cuarentena deja al
+            // contraste sin reparar; a la semana se avisa al administrador, con la salida.
+            nombre: "bajada_atascada",
+            cada: Duration::from_secs(BAJADA_ATASCADA_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(15 * 60),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(bajada_atascada),
         },
         Job {
             nombre: "backfill_historico",
@@ -675,6 +691,19 @@ async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let vaciadas = uc_sync::vaciar_cuarentenas_de_bajada(repo.as_ref(), ahora).await?;
     if vaciadas > 0 {
         tracing::info!(target: "tpv::sync", vaciadas, "cambios de la nube en cuarentena de más de 30 días, sin sus datos");
+    }
+    Ok(())
+}
+
+/// SYNC-36 · Avisa a los administradores de un cambio de la nube que lleva una semana en su
+/// cuarentena sin poder salir solo (`uc_sync::avisar_bajada_atascada`), y cierra el aviso cuando ya
+/// no lo hay. Lo arregla traer el estado actual de la nube (Configuración → Conectividad).
+async fn bajada_atascada(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.sync_repo().await?;
+    let notifier = state.notifier().await?;
+    if uc_sync::avisar_bajada_atascada(repo.as_ref(), notifier.as_ref()).await? {
+        tracing::warn!(target: "tpv::sync", "un cambio de la nube lleva una semana sin poder salir de su cuarentena: avisado");
     }
     Ok(())
 }

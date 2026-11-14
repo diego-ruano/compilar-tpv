@@ -84,6 +84,10 @@ pub async fn sync_bootstrap_desde_nube(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<BootstrapResultado, AppErrorDto> {
+    // SYNC-36: también se llega con la sesión abierta, desde Configuración → Conectividad, cuando un
+    // cambio de la nube se ha atascado en su cuarentena; entonces sólo un administrador. Desde la
+    // pantalla de recuperación no hay sesión y no se exige nada (permisos.md).
+    state.exigir_rol_si_hay_sesion(&[crate::ADMIN]).await?;
     let app_data_dir = app
         .path()
         .app_data_dir()

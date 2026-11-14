@@ -779,6 +779,19 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   vuelven a mirar 20 por pasada, y las que no caben tampoco se marcan; de las cuarentenas se leen
   10.000, y de lo apartado de la subida, 1.000 operaciones (con más se da todo por chocado).
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
+- **Lo que no puede salir solo se avisa.** Una cuarentena de filas inciertas o dudosas (o sin
+  `Filas_Json`) no la trae nunca la salida, y mientras esté ahí el contraste no repara. Si lleva una
+  semana apartada (`BAJADA_ATASCADA_TRAS_MS`, desde su primer fallo), cuenta en el panel de salud
+  (`SyncHealth::bajada_atascada`, `cuarentenas_bajada::atascadas`) y el job `bajada_atascada` avisa
+  a los administradores (`use_cases::sync::avisar_bajada_atascada`): una notificación con clave, que
+  no se repite mientras siga activa y se cierra sola cuando ya no queda ninguna, y que no bloquea
+  nada. Su acción lleva a Configuración → Conectividad, que lo explica y ofrece «Recuperar el
+  estado actual de la nube» sólo si es seguro: sin nada de este equipo por subir ni apartado de la
+  subida (se perdería al sustituir la base; la guardia de `bootstrap_restaurar` lo vuelve a
+  comprobar dentro de su transacción). Pide confirmación (durante unos minutos no se vende ni en el
+  TPV ni en las Handy), sólo la puede pedir un administrador, y después cierra la sesión y sigue
+  como cualquier otra recuperación desde la nube, que vacía las cuarentenas
+  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)).
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el

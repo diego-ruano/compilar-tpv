@@ -3132,6 +3132,13 @@ export type SyncHealth = {
 	 *  sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
 	 */
 	subida_en_cuarentena: number,
+	/**
+	 *  SYNC-36 · De las de `quarantined`, las que no pueden salir solas (las filas que tocan son
+	 *  inciertas o dudosas) y llevan una semana apartadas (`BAJADA_ATASCADA_TRAS_MS`). Mientras haya
+	 *  alguna, el contraste diario no repara; lo arregla traer el estado actual de la nube, y se
+	 *  avisa al administrador.
+	 */
+	bajada_atascada: number,
 };
 
 export type TableInput = {

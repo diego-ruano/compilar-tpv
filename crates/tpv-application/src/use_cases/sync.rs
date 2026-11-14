@@ -9,8 +9,11 @@ use tpv_contracts::sync::{
     ResultadoVerificacion, ResumenNube, SyncHealth,
 };
 
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
+use crate::ports::notificaciones::Notifier;
 use crate::ports::sync::{
     ContrasteLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave,
     SyncRepository,
@@ -152,6 +155,44 @@ pub async fn vaciar_cuarentenas_de_bajada(repo: &dyn SyncRepository, ahora_ms: i
 /// Foto de salud de la sincronización local (SYNC-14) para el panel de Conectividad.
 pub async fn health(repo: &dyn SyncRepository) -> AppResult<SyncHealth> {
     repo.health().await
+}
+
+/// SYNC-36 · Lo que tiene que llevar apartado un cambio de la nube que no puede salir solo de su
+/// cuarentena (sus filas son inciertas o dudosas) para que se avise al administrador. Antes, lo
+/// normal es que lo que frena al contraste se resuelva solo; una semana sin hacerlo ya no es eso.
+pub const BAJADA_ATASCADA_TRAS_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// La clave del aviso: uno por situación, mientras dure.
+pub const CLAVE_BAJADA_ATASCADA: &str = "bajada_atascada";
+
+/// SYNC-36 · Avisa a los administradores si hay algún cambio de la nube que no puede salir solo de
+/// su cuarentena y lleva una semana apartado (`SyncHealth::bajada_atascada`), y cierra el aviso
+/// cuando ya no lo hay (traer el estado actual de la nube vacía las cuarentenas). Devuelve si lo hay.
+///
+/// Es un aviso: no bloquea nada. Lleva su clave, así que mirarlo cada vez no repite la notificación,
+/// y la acción lleva a Configuración → Conectividad, que ofrece traer la nube cuando es seguro.
+pub async fn avisar_bajada_atascada(repo: &dyn SyncRepository, notifier: &dyn Notifier) -> AppResult<bool> {
+    if repo.health().await?.bajada_atascada == 0 {
+        notifier.resolver_por_clave(CLAVE_BAJADA_ATASCADA).await?;
+        return Ok(false);
+    }
+    notifier
+        .emitir(NuevaNotificacion {
+            tipo: "bajada_atascada".into(),
+            severidad: Severidad::Aviso,
+            titulo: "Un cambio hecho desde una Handy no se ha podido aplicar en el TPV".into(),
+            cuerpo: Some(
+                "Hace más de una semana que un cambio hecho desde una Handy no se puede aplicar en el TPV principal,                  y mientras tanto las comprobaciones diarias con la nube están en pausa. Se arregla trayendo el estado                  actual de la nube: en el TPV principal, Configuración → Conectividad → «Recuperar el estado actual de la nube»."
+                    .into(),
+            ),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_conectividad".into()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_BAJADA_ATASCADA.into()),
+            expira_en: None,
+        })
+        .await?;
+    Ok(true)
 }
 
 /// Reconstruye la BD local desde la nube (`/v1/sync/bootstrap`) y deja el checkpoint en el `seq`
