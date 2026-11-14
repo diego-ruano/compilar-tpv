@@ -627,6 +627,9 @@ describe("OBS-06: en la ruta de una imagen no viaja ningún nombre", () => {
 			`images/productos/${UUID}.jpg.jpg`,
 			`images/productos/${UUID}.svg`,
 			`images/otra/${UUID}.jpg`,
+			// La carpeta y el prefijo, en minúsculas: la Main no admite otra cosa al bajarla o al imprimirla.
+			`images/PRODUCTOS/${UUID}.jpg`,
+			`IMAGES/productos/${UUID}.jpg`,
 			`images/productos/../${UUID}.jpg`,
 			`images/productos/${UUID}`,
 		]) {

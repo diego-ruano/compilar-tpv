@@ -462,8 +462,9 @@ Noble sólo sirve de referencia independiente en tests. Placement sigue desactiv
 ## Imágenes
 
 Se guardan en R2 con prefijo por tenant, y su ruta es siempre `images/{carpeta}/{uuid}.{ext}`: una
-carpeta de la lista y por nombre el UUID que le pone la app al guardarla (`RUTA_DE_IMAGEN`,
-`domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`). Esa ruta va en el camino de
+carpeta de la lista, en minúsculas, y por nombre el UUID que le pone la app al guardarla
+(`RUTA_DE_IMAGEN`, `domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`, y en la
+Handy, `imageUrl.ts`, que admiten lo mismo). Esa ruta va en el camino de
 `/v1/images/…` y en la dirección pública de `r2.dev`, y Cloudflare guarda la URL de cada petición: un
 nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
 guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada

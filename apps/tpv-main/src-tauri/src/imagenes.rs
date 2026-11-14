@@ -167,7 +167,7 @@ mod tests {
         for rel in ["images/../data.db", "images/logo/../a.jpg", "images/logo/C:/a.jpg", "images/logo/a.jpg:datos", "images/logo/CON.jpg", "images/logo/a.svg", "images/logo/a.jpg/otro"] { assert!(!ruta_segura(rel), "{rel}"); }
         let uuid = "0190f3a1-7b2c-4d4e-8f00-123456789abc";
         for ext in ["jpg", "jpeg", "png", "webp", "JPG"] { assert!(ruta_segura(&format!("images/logo/{uuid}.{ext}"))); }
-        for rel in [format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
+        for rel in [format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg"), format!("images/LOGO/{uuid}.jpg"), format!("IMAGES/logo/{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
     }
 
     // OBS-06: el nombre de una imagen viaja en la URL; sólo se admite el UUID que le pone la app. Los

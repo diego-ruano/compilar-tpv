@@ -32,7 +32,7 @@ describe("imágenes al cambiar de vínculo", () => {
     });
     it("OBS-06: la Handy no pide a r2.dev una imagen cuyo nombre no sea el UUID de la app", async () => {
         h.invoke.mockResolvedValue("negocio-a");
-        for (const ruta of ["images/proveedores/Juan-Perez.jpg", "images/productos/tarta.png", "images/otra/x.jpg"]) {
+        for (const ruta of ["images/proveedores/Juan-Perez.jpg", "images/productos/tarta.png", "images/otra/x.jpg", P.replace("productos", "PRODUCTOS"), P.replace("images", "IMAGES")]) {
             expect(await resolveImageUrl(ruta), ruta).toBe("");
         }
         expect(h.invoke).not.toHaveBeenCalled();
