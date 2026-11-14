@@ -1,7 +1,8 @@
 # Tests de contrato Main (Rust) ↔ worker (TS)
 
 La lógica de hablar con la base de datos vive **dos veces**: en Rust (la Main, escritora única, contra su
-SQLite) y en TypeScript (el worker, que sirve a las Handy contra Turso). Las dos tienen que comportarse
+SQLite) y en TypeScript (el worker, que sirve a las Handy contra la base del negocio, el SQLite de su
+`TenantHub`). Las dos tienen que comportarse
 igual. Estos dos arneses convierten una divergencia en un **test rojo** en CI. No eliminan la duplicación
 ([ARCH-01](../../docs/pendientes.md#arch-01--doble-implementación-mainworker)); la fijan.
 

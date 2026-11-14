@@ -25,7 +25,8 @@ Tres reglas:
 
 ## Arquitectura
 
-- [sincronizacion.md](arquitectura/sincronizacion.md): outbox, WebSocket, `TenantHub`, cola, reparación.
+- [sincronizacion.md](arquitectura/sincronizacion.md): outbox, WebSocket, `TenantHub`, los lotes de la Main,
+  el contraste con la nube y la reparación.
 - [recuperacion.md](arquitectura/recuperacion.md): volver de perder la base local; copias; traslado.
 - [esquema.md](arquitectura/esquema.md): el esquema único y las migraciones.
 - [verifactu.md](arquitectura/verifactu.md): el registro de facturación (esta rama no remite a la AEAT).
@@ -34,7 +35,8 @@ Tres reglas:
 - [licencias.md](arquitectura/licencias.md): licencias, Stripe y administración.
 - [emparejamiento.md](arquitectura/emparejamiento.md): vincular una Handy y su token.
 - [permisos.md](arquitectura/permisos.md): sesión, gates, PIN y superficie de seguridad.
-- [worker.md](arquitectura/worker.md): el worker `tpv-api`, la base central y el cron.
+- [worker.md](arquitectura/worker.md): el worker `tpv-api`, la base de cada negocio (el SQLite de su
+  `TenantHub`), la base central (Turso) y el cron.
 - [jobs-e-interruptores.md](arquitectura/jobs-e-interruptores.md): tareas de fondo e interruptores remotos.
 - [frontend.md](arquitectura/frontend.md): estructura, datos, dinero en pantalla y CSP.
 - [observabilidad.md](arquitectura/observabilidad.md): Sentry, Axiom y vigilancia externa.
@@ -53,7 +55,7 @@ Tres reglas:
 - [compatibilidad-windows-7.md](estudios/compatibilidad-windows-7.md)
 - [metricas-produccion.md](estudios/metricas-produccion.md)
 - [reservas-web.md](estudios/reservas-web.md): plan de las reservas desde la web (widget, agenda y
-  entrega a la Main), sin implementar.
+  entrega a la Main) y lo que queda de él.
 
 ## Análisis
 

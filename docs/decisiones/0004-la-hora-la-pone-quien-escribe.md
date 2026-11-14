@@ -1,6 +1,7 @@
 # 0004 · La hora la pone quien escribe
 
-**Estado:** vigente.
+**Estado:** vigente. La base del negocio ya no está en Turso, sino en el SQLite de su Durable Object: ver
+[0008](0008-la-base-del-negocio-en-su-durable-object.md).
 
 ## Contexto
 

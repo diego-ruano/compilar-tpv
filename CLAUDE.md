@@ -2,8 +2,9 @@
 
 TPV de escritorio para hostelería: **Tauri 2 + React 19 + TypeScript** con backend **Rust** sobre
 **SQLite local (rusqlite)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio,
-que guarda la base del negocio en su SQLite, y Turso para la base central. La Main (Windows) vende
-contra su base local y replica cuando hay red; la Handy (Android) trabaja contra la nube. Qué es cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
+que guarda la base del negocio en su SQLite, y Turso sólo para la base central. La Main (Windows)
+vende contra su base local y replica cuando hay red; la Handy (Android) trabaja contra la nube. Qué es
+cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
 
 **Ramas.** `main` es Windows 10 y 11 **sin Veri\*factu**, y es donde se desarrolla;
 `compilacion-windows-7` es la variante de Windows 7 de `main` y recibe `main` por merge. Veri\*factu
@@ -37,7 +38,8 @@ crates/
   tpv-telemetry                  Sentry, spool a Axiom, filtro de datos personales
   tpv-contracts                  DTOs con Specta → packages/contracts
 packages/
-  database                       migrations/*.sql (esquema único) + schema.snapshot.sql
+  database                       migrations/*.sql (esquema único) + schema.snapshot.sql, y
+                                 estadisticas/*.sql (el resumen diario, en la Main y en el worker)
   contracts                      @tpv/contracts (bindings.ts generado)
   client                         @tpv/client (commands generados + errores)
   reservas-web-sdk               SDK de las reservas web (@altarialights/reservas-web-tpv, en npm): lo
@@ -162,6 +164,13 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 - **Toda escritura de negocio de la Main pasa por `WriteGuard::execute`**, que la captura en el outbox. Lo
   que es estado local del equipo (`_Jobs_State`, `_Sync_*`, `_Verifactu_*`, `_Recovery_State`,
   `_Backfill_Historico`, el backfill) va por `raw()`. `is_write_sql` no reconoce un `WITH … INSERT`.
+- **Una tabla que empieza por `_` es del equipo (o de cada lado), no del negocio**: no se replica, y todo
+  lo que recorre tablas (volcados, histórico, contraste, restauración) se la salta, en la Main
+  (`sync.rs::no_es_tabla_de_negocio`) y en el worker (`esTablaDeNegocio`).
+- **Una lista de tamaño variable va como un único parámetro JSON**, `IN (SELECT value FROM
+  json_each(?))` (`consultas::lista_json`), nunca un `?` por elemento: el SQLite del DO admite 100
+  parámetros por sentencia (DO-01). En la Main lo vigila `WriteGuard` al capturar; en el worker,
+  `test/listasEnUnParametro.test.ts`.
 - **Una sentencia por `query`/`execute`**: un texto con varias falla; varias seguidas van por
   `execute_batch`.
 - **IDs deterministas**: toda `TEXT PRIMARY KEY` recibe su UUID antes del `INSERT`; en el worker, un paso
@@ -200,12 +209,20 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 ### Worker ([worker.md](docs/arquitectura/worker.md))
 
 - **Una ruta no lee su propio cuerpo**: `cuerpo(schema)` / `consulta(schema)` de `lib/validacion.ts`, y el
-  handler usa `c.req.valid("json")`. Los cuerpos tolerantes de `sync` (la recuperación y el
-  contraste: [worker.md](docs/arquitectura/worker.md)) se quedan con `cuerpoTolerante`.
+  handler usa `c.req.valid("json")`. Los siete cuerpos tolerantes de `sync` (`/changes`, `/historico`,
+  `/salud` y los cuatro del contraste) y el de `/v1/interruptores` se quedan con `cuerpoTolerante`.
 - **Lo que decide antes de leer el cuerpo es middleware y va delante** (veto de rol, tope de tamaño, token de
   administración, filtro por IP). **Un `*.routes.ts` no resuelve roles.**
 - **Toda ruta autenticada pasa por `tenantAuth`** (que comprueba también la licencia). Tenant y dispositivo
   salen del token.
+- **Una ruta que lee o escribe la base del negocio lleva `alHub` justo detrás de `tenantAuth`** y se
+  ejecuta dentro del `TenantHub` (`lib/enElHub.ts`): fuera, `tenantQuery` y los volcados lanzan. Las
+  rutas de la Main que se quedan en el Worker vetan con `soloLaMainVigente`, no con `soloLaMain`.
+  Un test que monta un router suelto declara el doble de `alHub` (`test/helpers/rutaSuelta.ts`).
+- El objeto de un negocio se pide sólo por `lib/objetosDelNegocio.ts` (`hubDe`, `agendaDe`), nunca a
+  `env.TenantHub` o `env.AgendaWeb` directamente.
+- **Ningún dato personal ni texto libre en la query ni en el camino** (AUD-27): va en el cuerpo, y una
+  lectura por POST se declara con `lecturaPorPost()` delante de `tenantAuth`.
 - Un schema zod con contrapartida en Rust lleva su drift-guard (`Assert<SameKeys<…>>`), y **lo que
   acepta o rechaza es lo mismo que la Main**: un criterio de validación nuevo es un caso nuevo en
   `crates/tpv-domain/src/validacion_casos.json`, que leen los dos lados, con el `mensaje` que se enseña
@@ -218,7 +235,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   y el texto pasado por `textoABuscar` (`lib/busqueda.ts`; en la Main, `busqueda.rs`), nunca con
   `LIKE`: el SQLite del DO no admite un patrón de más de 50 bytes y el `%` y el `_` serían comodines.
   Las dos expresiones salen de la misma tabla (`busqueda_casos.json`), para que las dos devuelvan las
-  mismas filas.
+  mismas filas. Una lista que ya tiene la pantalla se filtra con `textoABuscar` y `contiene`
+  (`shared/lib/busqueda.ts`, la misma tabla), nunca con `toLowerCase().includes`.
 - Una ruta que devuelve listas pone **el techo en la respuesta**, no en cada pieza.
 - Un identificador de error nuevo va a `MENSAJES` o a `SIN_MENSAJE_PROPIO` (`lib/errorCodes.ts`).
 - Toda ruta que verifique un PIN lleva el freno de LOGIN-01 (`test/pinSiempreConFreno.test.ts`).
@@ -314,11 +332,17 @@ lo que hay que revisar es el cambio, no el test:
 - `error.rs::tests_mensajes_en_espanol` (tpv-application): ningún mensaje del dominio ni de los casos de
   uso es un nombre de campo o está en inglés.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,
-  `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`,
-  `mensajesEnEspanol`, `busquedaDeTexto`, `busquedaSinAcentos`.
+  `pinSiempreConFreno` (además de leer el fuente, prueban el veto por la `app` entera, dentro del
+  TenantHub), `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`,
+  `mensajesEnEspanol`, `busquedaDeTexto`, `busquedaSinAcentos`, `listasEnUnParametro` (DO-01),
+  `mainDesplazadaRest` (`soloLaMain` sólo en routers con `alHub`), `objetosDelNegocio.node` y
+  `sinDatosPersonalesEnLaQuery.node` (AUD-27); en la Handy, `tests_sin_datos_en_la_url`
+  (`tpv-infra-http`).
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
-- Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,
-  `horarios_casos.json`, `plano_reservas_casos.json` (la reserva de cada mesa, que depende de la
-  hora), `busqueda_casos.json` (qué letras se pliegan al buscar) y `validacion_casos.json` (la validación de entrada y lo que dice al rechazar, que los arneses de
-  contrato no ven).
+- Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `cantidad_casos.json`,
+  `scrub_casos.json`, `horarios_casos.json`, `plano_reservas_casos.json` (la reserva de cada mesa,
+  que depende de la hora), `busqueda_casos.json` (qué letras se pliegan al buscar),
+  `verificacion_casos.json` (la forma canónica, el hash y los cubos del contraste), `nif_casos.json`,
+  `firma_activacion_casos.json` y `validacion_casos.json` (la validación de entrada y lo que dice al
+  rechazar, que los arneses de contrato no ven).

@@ -306,8 +306,10 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   fiscales.
 - `cuerpoConIdentificador` es sólo para el emparejamiento. Los cuerpos permisivos de `sync`
   (`/changes`, `/historico`, `/salud` y las del contraste, `/verificar/resumen`, `/filas`,
-  `/por-clave` y `/claves`) usan `cuerpoTolerante` con schemas que coercen y ponen valores por defecto: están en el
-  camino de la recuperación y de la comprobación, donde se falla hacia «sigue trabajando».
+  `/por-clave` y `/claves`) usan `cuerpoTolerante` con schemas que coercen y ponen valores por
+  defecto: están en el camino de la recuperación y de la comprobación, donde se falla hacia «sigue
+  trabajando». También el de `/v1/interruptores`, que la Main pregunta con su versión
+  ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
 - **Un schema con contrapartida en Rust lleva drift-guard**:
   `Assert<SameKeys<z.infer<typeof xSchema>, XInput>>` (`lib/typeGuards.ts`) compara las claves en las
   dos direcciones; los tipos de los valores los cubre el paso a los command builders.

@@ -135,7 +135,7 @@ APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al termina
   `typecheck`).
 - **Un fallo deja una captura** en `e2e/fallos/` (no se versiona).
 - **Sus errores llegan a Sentry como `e2e`**: lo decide el identificador (`lib.rs::entorno_de_sentry`).
-- **Cada tanda crea una base en Turso** (grupo `tpv`) y la borra al terminar, con
+- **Cada tanda da de alta un negocio** (su base, en su `TenantHub`) y lo retira al terminar, con
   `/v1/admin/pruebas/retirar`. Lo que deje una tanda que no llegue al final lo borra la siguiente.
 
 ## Lo que no sube a E2E

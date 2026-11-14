@@ -1,7 +1,8 @@
 # 0007 · La reserva web no escribe en la base del negocio
 
-**Estado:** vigente (2026-10-17). Sin implementar: el plan está en
-[estudios/reservas-web.md](../estudios/reservas-web.md).
+**Estado:** vigente (2026-10-17). La base del negocio ya no está en Turso, sino en el SQLite de su
+Durable Object ([0008](0008-la-base-del-negocio-en-su-durable-object.md)): «Turso», aquí, es esa base.
+El plan y lo que queda de él están en [estudios/reservas-web.md](../estudios/reservas-web.md).
 
 ## Contexto
 
