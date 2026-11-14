@@ -452,15 +452,19 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         // cobro baja antes que él (es su clave foránea), así que con `Pagos` completo también está.
         //
         // DO-02: una tabla sin completar ya tiene aquí todo lo suyo desde `Ventana_Desde`, que trajo
-        // entero la fase 1 (un cobro con todos los de su comanda; un gasto, desde el día). Si el
-        // periodo empieza ahí o después, a este arqueo no le falta nada. Sin periodo (el primer
-        // cierre suma desde el principio) o sin saber hasta dónde llegó la fase 1, falta.
+        // entero la fase 1: un cobro, con todos los de su comanda, desde ese instante; un gasto,
+        // desde ese día (`Fecha >= date(…)`, `bootstrap.ventana.ts`). Si el periodo empieza ahí o
+        // después, a este arqueo no le falta nada: los gastos se comparan por día, porque uno de la
+        // mañana del mismo día ya bajó aunque la ventana empiece a mediodía (Codex). Sin periodo (el
+        // primer cierre suma desde el principio) o sin saber hasta dónde llegó la fase 1, falta.
         let db = self.db.read().await;
         let mut rows = db
             .query(
                 "SELECT COUNT(*) FROM _Backfill_Historico \
                   WHERE Completada = 0 AND Tabla IN ('Pagos', 'Cuentas_Gastos') \
-                    AND (?1 IS NULL OR Ventana_Desde IS NULL OR ?1 < Ventana_Desde);",
+                    AND (?1 IS NULL OR Ventana_Desde IS NULL \
+                         OR (Tabla = 'Pagos' AND ?1 < Ventana_Desde) \
+                         OR (Tabla = 'Cuentas_Gastos' AND date(?1) < date(Ventana_Desde)));",
                 vec![desde.map_or(Value::Null, |d| Value::Text(d.to_string()))],
             )
             .await
@@ -1503,6 +1507,29 @@ mod tests_historico_pendiente {
             let h = prep.historico_pendiente.unwrap_or_else(|| panic!("fase 1 desde {desde}: se avisa"));
             assert_eq!((h.tablas_pendientes, h.tablas_completadas), (2, 1));
         }
+    }
+
+    #[tokio::test]
+    async fn los_gastos_del_dia_en_que_empieza_la_fase_1_ya_estan_aqui() {
+        // La fase 1 trae los gastos desde el día de su ventana, no desde su hora: con el cierre
+        // esta mañana y la ventana a mediodía del mismo día, a los gastos no les falta nada.
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+               VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');
+             INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial,
+               Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado)
+               VALUES ('c1', '2026-05-14 09:00:00', 'u1', '2026-05-13 23:00:00', 0, 0, 0, 0, 0, 0, 0, 0);
+             INSERT INTO _Backfill_Historico (Tabla, Orden, Completada, Filas_Traidas, Ventana_Desde) VALUES
+               ('Pagos', 1, 1, 300, '2026-05-14 12:00:00'), ('Cuentas_Gastos', 2, 0, 0, '2026-05-14 12:00:00');",
+        )
+        .await;
+        assert!(preparar(&db).await.historico_pendiente.is_none(), "sólo bajan gastos de días anteriores");
+
+        // Los cobros sí se miden al instante: los de entre las 9 y las 12 pueden estar bajando.
+        sembrar(&db, "UPDATE _Backfill_Historico SET Completada = 0 WHERE Tabla = 'Pagos';").await;
+        assert!(preparar(&db).await.historico_pendiente.is_some());
     }
 
     #[tokio::test]
