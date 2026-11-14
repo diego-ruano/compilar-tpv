@@ -113,9 +113,38 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 }
 
 /**
- * Sin `resultKey`: el resultado son las filas que tocó cada UPDATE (`usuarios`, `trabajadores`),
- * para que la ruta diga que el trabajador no existe en vez de responder `ok` sin haber tocado nada
- * (RI-63). En un reintento idempotente llegan a `null`: ese resultado se guarda sin leer la base.
+ * RI-62: ¿editar esta ficha deja el negocio sin ningún administrador activo? Sí cuando el usuario es
+ * administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro. Sólo se mira
+ * el paso de «hay» a «no hay». El porqué, en `SQL_DEJARIA_SIN_ADMINISTRADOR` de
+ * `tpv-infra-sqlite/src/trabajadores.rs`: es la misma condición y tiene que seguir siéndolo. `?1` el
+ * usuario, `?2` el rol nuevo y `?3` el estado nuevo.
+ */
+const DEJARIA_SIN_ADMINISTRADOR = `
+	EXISTS (
+		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+		WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+	)
+	AND NOT (
+		?3 = 'Activo'
+		AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
+	)
+	AND NOT EXISTS (
+		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+		WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+	)
+`;
+
+/**
+ * Lo deciden dos guardas, dentro del lote que escribe (SYNC-30), como la Main dentro de su
+ * transacción:
+ *
+ * - RI-62: que la edición no deje el negocio sin administrador. Mirado antes, otro dispositivo
+ *   podía quitarle el rol al otro administrador entre la lectura y el lote.
+ * - RI-63: que la ficha exista (su usuario y su trabajador). Un id que no existe respondía `ok`.
+ *   SYNC-35: lo decidía la ruta por las filas que tocaba cada UPDATE, y en el reintento de una
+ *   edición cuyo recuento no se guardó llegaban a `null` y contestaba `ok` aunque la ficha se
+ *   hubiera borrado. Con la guarda, el reintento de una que entró contesta lo guardado y el de una
+ *   que no, se vuelve a decidir.
  */
 export function updateTrabajador(
 	idTrabajador: string,
@@ -127,7 +156,6 @@ export function updateTrabajador(
 	const updateUsuario = passwordHash
 		? {
 				kind: "execute",
-				saveAs: "usuarios",
 				sql: `
 					UPDATE Usuarios
 					SET
@@ -153,7 +181,6 @@ export function updateTrabajador(
 			}
 		: {
 				kind: "execute",
-				saveAs: "usuarios",
 				sql: `
 					UPDATE Usuarios
 					SET
@@ -182,10 +209,23 @@ export function updateTrabajador(
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: `SELECT NOT (${DEJARIA_SIN_ADMINISTRADOR});`,
+						args: [input.id_usuario, input.id_rol, input.estado],
+						error: "ultimo_administrador",
+						status: 409,
+					},
+					{
+						kind: "guard",
+						sql: "SELECT EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1) AND EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Trabajador = ?2);",
+						args: [input.id_usuario, idTrabajador],
+						error: "trabajador_no_encontrado",
+						status: 404,
+					},
 					updateUsuario,
 					{
 						kind: "execute",
-						saveAs: "trabajadores",
 						// TRAB-03: las tres columnas cifradas se omiten del SET. Omitirlas (en vez
 						// de ponerlas a NULL) es lo que hace que editar un trabajador desde la
 						// Handy CONSERVE lo que la Main guardó, en lugar de borrárselo.
@@ -213,6 +253,12 @@ export function updateTrabajador(
 	};
 }
 
+/**
+ * TRAB-04: el mismo turno no se asigna dos veces al mismo trabajador el mismo día, aunque cambie el
+ * área. Espejo de la comprobación de la Main. Lo decide la guarda, dentro del lote que la escribe
+ * (SYNC-30): mirado antes, otro dispositivo podía asignarlo entre la lectura y el lote, y el
+ * reintento de una que sí entró la encontraba a ella misma.
+ */
 export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 	const idAsignacion = nuevoId();
 	return {
@@ -221,6 +267,13 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: "SELECT NOT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3);",
+						args: [input.id_trabajador, input.fecha, input.id_turno],
+						error: "asignacion_duplicada",
+						status: 409,
+					},
 					{
 						kind: "execute",
 						sql: `
@@ -282,6 +335,14 @@ export function guardarAsignacion(input: AsignacionGuardarInput, existente: Grup
 	return { commandName: "horarios_guardar_asignacion", command: { type: "tenantDb.transaction", payload: { steps, resultKey: "guardado" } }, cloudPayload: input };
 }
 
+/**
+ * Edita una asignación de un solo tramo. Lo deciden dos guardas dentro del lote, en el orden de la
+ * Main (`update_asignacion`): una de dos tramos se edita como un conjunto (`horario_editar_conjunto`)
+ * y una que ya no está, `asignacion_no_encontrada`. SYNC-35: lo decidía la ruta por las filas que
+ * tocaba el UPDATE, y en el reintento de una edición cuyo recuento no se guardó llegaba `null` y
+ * contestaba `ok` aunque la asignación se hubiera borrado. El UPDATE replicado conserva su condición,
+ * que vuelve a evaluar la Main.
+ */
 export function updateAsignacion(
 	idAsignacion: string,
 	input: AsignacionUpdateInput,
@@ -289,25 +350,44 @@ export function updateAsignacion(
 	return {
 		commandName: "horarios_update_asignacion",
 		command: {
-			type: "tenantDb.exec",
+			type: "tenantDb.transaction",
 			payload: {
-				sql: `
-					UPDATE Asignacion_Turnos
-					SET
-						ID_Turno = ?2,
-						Area = ?3,
-						Hora_Inicio = ?4,
-						Hora_Fin = ?5,
-						Notas = ?6
-					WHERE ID_Asignacion = ?1 AND (SELECT COUNT(*) FROM Asignacion_Turnos a WHERE COALESCE(a.ID_Grupo, a.ID_Asignacion) = COALESCE(Asignacion_Turnos.ID_Grupo, Asignacion_Turnos.ID_Asignacion)) = 1;
-				`,
-				args: [
-					idAsignacion,
-					input.id_turno,
-					input.area,
-					input.hora_inicio,
-					input.hora_fin,
-					input.notas,
+				steps: [
+					{
+						kind: "guard",
+						sql: "SELECT (SELECT COUNT(*) FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1)) <= 1;",
+						args: [idAsignacion],
+						error: "horario_editar_conjunto",
+						status: 409,
+					},
+					{
+						kind: "guard",
+						sql: "SELECT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);",
+						args: [idAsignacion],
+						error: "asignacion_no_encontrada",
+						status: 404,
+					},
+					{
+						kind: "execute",
+						sql: `
+							UPDATE Asignacion_Turnos
+							SET
+								ID_Turno = ?2,
+								Area = ?3,
+								Hora_Inicio = ?4,
+								Hora_Fin = ?5,
+								Notas = ?6
+							WHERE ID_Asignacion = ?1 AND (SELECT COUNT(*) FROM Asignacion_Turnos a WHERE COALESCE(a.ID_Grupo, a.ID_Asignacion) = COALESCE(Asignacion_Turnos.ID_Grupo, Asignacion_Turnos.ID_Asignacion)) = 1;
+						`,
+						args: [
+							idAsignacion,
+							input.id_turno,
+							input.area,
+							input.hora_inicio,
+							input.hora_fin,
+							input.notas,
+						],
+					},
 				],
 			},
 		},

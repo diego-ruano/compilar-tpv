@@ -50,11 +50,12 @@ mesasRoutes.put("/reservas/:id/estado", cuerpo(S.setReservaEstadoSchema.omit({ i
 	if (id == null) return badRequest(c, "id_reserva_invalido");
 	const datos = c.req.valid("json");
 	// Con la reserva como está ahora, como la Main: la mesa abierta enseña una foto, y mientras tanto
-	// el cliente pudo cancelarla o pasar a «No vino». Se replica la escritura sin condición.
+	// el cliente pudo cancelarla o pasar a «No vino». Se replica la escritura sin condición; que la
+	// reserva siga como se leyó lo mira la guarda del comando, dentro del lote (SYNC-30).
 	const actual = await tenantQuery(c, (db) => estadoYOrigen(db, id));
 	const cambio = cambioDesdeLaMesa(actual?.estado ?? null, datos.estado);
 	if (cambio === "cambiada") return c.json({ error: "reserva_cambiada" }, 409);
-	if (cambio === "escribir") await apply(c, cmd.setReservaEstado(id, datos.estado));
+	if (cambio === "escribir" && actual) await apply(c, cmd.setReservaEstado(id, datos.estado, actual.estado));
 	return c.json({ ok: true });
 });
 
@@ -123,14 +124,12 @@ mesasRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
 	const entrada = c.req.valid("json");
 	// MESA-07: resolvemos Estado_Cocina como literal para que el statement replicado a
 	// la Main sea determinista (no una subquery de catalogo dentro del INSERT). El tipo de
-	// IVA y el precio del producto viajan igual, y en la misma lectura (RI-27).
+	// IVA y el precio del producto viajan igual, y en la misma lectura (RI-27). Que el producto siga
+	// en la carta y la comanda sin cobrar lo deciden las guardas del comando, dentro del lote
+	// (SYNC-30): `producto_archivado` o `comanda_cobrada`.
 	const datos = await tenantQuery(c, (db) =>
 		q.datosDeLinea(db, entrada.id_producto),
 	);
-	if (datos.archivado) return c.json({ ok: false, error: "producto_archivado" }, 409);
-	if (await tenantQuery(c, (db) => q.comandaCobrada(db, entrada.id_comanda))) {
-		return c.json({ ok: false, error: "comanda_cobrada" }, 409);
-	}
 	await apply(
 		c,
 		cmd.addLinea(

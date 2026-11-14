@@ -425,7 +425,8 @@ export async function searchProductos(
  * idéntica en las dos copias.
  *
  * Va en UNA sola lectura: son dos columnas de la misma fila y este camino está en el momento de
- * añadir una línea, que es lo que más se repite en un servicio.
+ * añadir una línea, que es lo que más se repite en un servicio. Que el producto siga en la carta lo
+ * mira la guarda del comando, dentro del lote (RI-54, SYNC-30: `guardasDeLinea.ts`).
  */
 export async function datosDeLinea(
 	db: Client,
@@ -434,13 +435,12 @@ export async function datosDeLinea(
 	pasaCocina: boolean;
 	ivaPercent: number | null;
 	nombre: string | null;
-	archivado: boolean;
 	precio: Dinero;
 }> {
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva, p.Nombre AS nombre,
-				p.Archivado_En IS NOT NULL AS archivado, COALESCE(p.Precio_Venta, 0) AS precio
+				COALESCE(p.Precio_Venta, 0) AS precio
 			FROM Productos p
 			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 			WHERE p.ID_Producto = ?1
@@ -455,25 +455,10 @@ export async function datosDeLinea(
 		pasaCocina: Number(fila?.pasa ?? 0) === 1,
 		ivaPercent: iva === null || iva === undefined ? null : Number(iva),
 		nombre: nombre === null || nombre === undefined ? null : String(nombre),
-		// RI-54: la ruta lo rechaza, igual que `snapshot_del_producto` en la Main.
-		archivado: Number(fila?.archivado ?? 0) === 1,
 		// RI-27: el precio de la línea sale del catálogo, nunca de la pantalla. Sin precio, 0 €.
 		// Espejo de `snapshot_del_producto` en la Main.
 		precio: deLaBase(fila?.precio),
 	};
-}
-
-/**
- * INC-20261030-016: si la comanda ya está cobrada, para que la ruta rechace la línea con su
- * mensaje. Espejo de `exigir_comanda_abierta` en la Main. Una comanda que no existe no cuenta como
- * cobrada (la de barra se crea en el mismo lote que su primera línea).
- */
-export async function comandaCobrada(db: Client, idComanda: string): Promise<boolean> {
-	const rs = await db.execute({
-		sql: "SELECT Estado <> 'Abierta' AS cobrada FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
-		args: [idComanda],
-	});
-	return Number(rows(rs)[0]?.cobrada ?? 0) === 1;
 }
 
 export async function idComandaByDetalle(

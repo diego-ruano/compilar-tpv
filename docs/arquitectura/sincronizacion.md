@@ -841,14 +841,73 @@ Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md]
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato
 ([tests/contract/README.md](../../tests/contract/README.md)).
 
-Una ruta decide leyendo la base fuera del lote (SYNC-30), y lo que llega a la Main es la sentencia, que
-la Main aplica con sus datos: puede tener sin subir lo que la ruta no vio. Por eso la regla que no
-puede romperse va también **dentro de la sentencia replicada**, y cada base la vuelve a evaluar al
-aplicarla: una línea sólo entra en una comanda abierta (INC-20261030-016) y borrar un ticket no borra
-nada si tiene algún cobro o alguna línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo
-antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya
-borrado: no tocó ninguna fila, o es el reintento de una operación ya aplicada y el resultado guardado
-lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
+### Lo que decide una escritura se mira dentro de su lote (SYNC-30)
+
+Una ruta lee la base antes de mandar su comando, y entre esa lectura y el lote puede entrar otra
+escritura (lo que sube la Main, otra Handy): mientras la ruta espera, el `TenantHub` atiende a los
+demás. Por eso **lo que decide si la escritura entra va en un paso de guarda del comando**
+(`{ kind: "guard", sql, args, error, status }`, `tenantHub.lote.ts`):
+
+- Es una consulta de una fila que se ejecuta en el mismo lote atómico que las escrituras, en su
+  orden (`loteEnBruto`), y se cumple si su primer valor es un número distinto de 0. Va delante de lo
+  que escribe, para mirar la base como estaba.
+- Si no se cumple, el lote entero se deshace —el gate de idempotencia y la línea del log con él—, no
+  se difunde nada y la escritura contesta su `error` con su `status` (4xx): el rechazo de negocio que
+  daría la ruta (`GuardaIncumplida`, que el motor no anota como fallo). Con las claves foráneas
+  aplazadas decide igual, en la segunda pasada, y lo que sale es su error.
+- **No se replica**: no está en `Sync_Changes` ni en el `change`, y a la Main sólo le llegan las
+  escrituras. Lo que decide la nube no lo vuelve a decidir la Main, que decide lo suyo en su propia
+  transacción. Una operación de la Main no lleva guardas.
+- Un reintento con la misma `X-Idempotency-Key` de una escritura cuya guarda no se cumplió se vuelve
+  a decidir, porque no quedó aplicada: con la base igual, contesta lo mismo. El de una que sí entró
+  choca antes con el gate y contesta lo guardado sin mirar la guarda. Por eso la ruta no mira antes lo
+  que decide una guarda: el reintento de una línea que entró antes de un cobro contestaba
+  `comanda_cobrada`, y el de un turno asignado se encontraba a sí mismo (`asignacion_duplicada`).
+- La ruta sí lee antes lo que necesita para construir el comando o para contestar sin escribir (una
+  reserva que ya no existe o ya está cancelada, el estado desde el que se marca la llegada) o para
+  decir más que la guarda (con qué choca un solape: la guarda contesta el mismo código con el texto
+  genérico).
+
+Van en guarda: cancelar una reserva que aún no ha llegado (`reserva_no_pendiente`); marcar desde la
+mesa la llegada o la salida, con la reserva como se leyó (`reserva_cambiada`); el solape de una
+reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`,
+`reserva_solapada`), con la duración y el modo del negocio leídos al aplicar, que su cliente siga
+existiendo (`cliente_no_encontrado`) y que el email de un cliente nuevo no sea de otro
+(`email_duplicado`), en el orden en que lo mira la ruta; el último
+administrador (`ultimo_administrador`) y que la ficha que se edita exista
+(`trabajador_no_encontrado`); el turno repetido de un trabajador (`asignacion_duplicada`) y editar
+una asignación que tiene dos tramos o que ya no está (`horario_editar_conjunto`,
+`asignacion_no_encontrada`); una línea de un producto archivado o en una comanda cobrada, en la mesa
+y en la barra (`producto_archivado`, `comanda_cobrada`, `mesas/guardasDeLinea.ts`), y quitar un
+producto que está en una comanda abierta (`producto_en_comanda_abierta`). Lo prueba
+`test/guardasEnElLote.test.ts`, con una escritura que entra entre la lectura de la ruta y su lote.
+
+Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden
+por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
+el guardado de un horario) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
+operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-10 lo afina después
+de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
+y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
+contestaban `ok` sin saber si lo editado seguía existiendo, o el 409 de un producto que ya se había
+quitado (SYNC-35): ahora lo decide su guarda.
+
+No necesitan guarda lo que ya para la base con un índice único (una comanda abierta por mesa, un
+cierre por periodo, nombres de zona, mesa y producto, correos de cliente), lo que cambia sólo al
+darse de alta (borrar una reserva web, que no se borra nunca), lo que la sentencia ya hace por sí
+misma con su condición (las altas puras, los ajustes de existencias, las notificaciones, el turno
+partido, el guardado de un horario, borrar un ticket), y lo que en una carrera no escribe nada
+distinto, sólo contesta otra cosa: finalizar una tarea que entretanto se le desasigna no toca
+ninguna fila. Tampoco el fichaje: lo hace la persona por sí misma, y dos entradas suyas en el mismo
+instante desde dos equipos no es algo que pase usando el programa.
+
+Lo que llega a la Main es la sentencia, que la Main aplica con sus datos: puede tener sin subir lo
+que la nube no vio (SYNC-29). Por eso la regla que no puede romperse va además **dentro de la
+sentencia replicada**, y cada base la vuelve a evaluar al aplicarla: una línea sólo entra en una
+comanda abierta (INC-20261030-016) y borrar un ticket no borra nada si tiene algún cobro o alguna
+línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo antes de mandar el lote
+(`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya borrado: no tocó ninguna
+fila, o es el reintento de una operación ya aplicada y el resultado guardado lleva `null` en lo que
+dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
 
 Toda escritura de la Handy lleva su `X-Idempotency-Key`, que es el `Op_Id` de la operación: un UUIDv7.
 El worker exige que tenga de 16 a 64 letras, cifras, guiones o guiones bajos (`lib/rutas.ts`) y

@@ -123,6 +123,15 @@ export type SqlArg = SqlScalar | SqlRef;
 // Sentencia de escritura ya resuelta (sin $ref): lo que se reenvía/persiste para la Main.
 export type ResolvedStmt = { sql: string; args: SqlScalar[] };
 
+/** SYNC-30: lo que contesta una escritura cuya guarda no se cumple (un paso `guard`). */
+export type Guarda = { error: string; status: number };
+
+/**
+ * Una sentencia del lote atómico, ya resuelta. Con `guarda`, es la consulta de un paso `guard`: el
+ * lote sólo sigue si su primer valor es un número distinto de 0 (`loteEnBruto`).
+ */
+export type SentenciaDelLote = ResolvedStmt & { guarda?: Guarda };
+
 export type ExecPayload = {
 	sql: string;
 	args?: SqlArg[];
@@ -157,6 +166,20 @@ export type TxStep =
 		sql: string;
 		args?: SqlArg[];
 		saveAs: string;
+	}
+	| {
+		/**
+		 * SYNC-30 · Una condición que tiene que cumplirse al aplicar, dentro del mismo lote atómico:
+		 * una consulta de una fila cuyo primer valor es un número distinto de 0 si se cumple. Si no, el
+		 * lote entero se deshace (el gate de idempotencia y la línea del log con él) y la escritura
+		 * contesta `error` con `status`, el mismo rechazo que daría la ruta. No se replica: a la Main
+		 * le llegan las escrituras del lote, que aplica con sus datos.
+		 */
+		kind: "guard";
+		sql: string;
+		args?: SqlArg[];
+		error: string;
+		status: number;
 	};
 
 export type TransactionPayload = {

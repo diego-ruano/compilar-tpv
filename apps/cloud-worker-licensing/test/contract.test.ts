@@ -17,6 +17,7 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
+import { GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
@@ -83,7 +84,7 @@ import {
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
 import { planAbrirORetomar } from "../src/domains/mesas/abrirORetomar";
-import { cobrarDetallesPlan, comandaCobrada, datosDeLinea } from "../src/domains/mesas/mesas.queries";
+import { cobrarDetallesPlan, datosDeLinea } from "../src/domains/mesas/mesas.queries";
 import {
 	eliminarProveedor,
 	guardarProveedor,
@@ -495,12 +496,13 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
 /**
  * Resuelve un `BuiltCommand` con el DO real y ejecuta sus sentencias contra el SQLite del tenant.
  *
- * Reproduce el **sobre** con el que el hub aplica de verdad un batch: una transacción con
- * `PRAGMA defer_foreign_keys = ON` (ver `applyInternalCommand`: "batch atómico = [PRAGMA defer FK]
+ * Reproduce el **sobre** con el que el hub aplica de verdad un batch: el mismo lote atómico
+ * (`loteEnBruto`) con `PRAGMA defer_foreign_keys = ON` delante (ver `loteDe`: "[PRAGMA defer FK]
  * + [gate idempotente] + [trabajo] + [log de sync]"). No es un detalle: un comando que borra en un
  * orden que deja referencias colgantes hasta el COMMIT —la anulación de un cobro borra las líneas
  * antes que sus `Pago_Detalles`— revienta por FK sin el pragma. Sin esto el harness diría que hay
- * divergencia donde solo había un envoltorio distinto.
+ * divergencia donde solo había un envoltorio distinto. Y las guardas del comando (SYNC-30) deciden
+ * como en la nube: una que no se cumple lanza `GuardaIncumplida` y no deja nada.
  */
 // TRAB-08: lo que viaja a la Main es el TEXTO de las sentencias replicadas. Una funcion no
 // determinista dentro (randomblob, random) se evalua OTRA VEZ alli y da otro valor: mismas filas
@@ -508,7 +510,7 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
 // hay que mirar la sentencia, no solo su efecto. Los IDs van como argumento, ya resueltos.
 export const SQL_NO_DETERMINISTA = /\brandomblob\s*\(|\brandom\s*\(/i;
 
-function aplicar(hub: any, sql: any, built: any): void {
+function aplicar(hub: any, _sql: any, built: any): void {
 	const batch = buildApplyBatch(built.command);
 	for (const st of batch.replicated) {
 		expect(
@@ -516,10 +518,7 @@ function aplicar(hub: any, sql: any, built: any): void {
 			`sentencia replicada con SQL no determinista (se re-evaluaria en la Main): ${st.sql}`,
 		).toBe(false);
 	}
-	hub.state.storage.transactionSync(() => {
-		sql.exec("PRAGMA defer_foreign_keys = ON;");
-		for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
-	});
+	loteEnBruto(hub.state.storage, [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }, ...batch.middle]);
 }
 
 /** Corre el comando del caso por su camino real (plan → builder → apply). El `switch` es el punto de
@@ -721,9 +720,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "reservas.cancelar": {
-			// Como la ruta: sólo se cancela la que aún no ha llegado.
-			const r = await estadoYOrigen(db, caso.entrada.id_reserva);
-			if (r?.estado !== "PROXIMA") throw new Error("reservas.cancelar: no está por venir");
+			// Sólo se cancela la que aún no ha llegado: lo decide la guarda del comando (SYNC-30).
 			aplicar(hub, sql, cancelarReserva(caso.entrada.id_reserva));
 			return;
 		}
@@ -770,7 +767,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "mesas.set_reserva_estado": {
-			aplicar(hub, sql, setReservaEstado(caso.entrada.id_reserva, caso.entrada.estado));
+			// Como la ruta: con el estado que lee, que la guarda exige que siga igual (SYNC-30).
+			const actual = await estadoYOrigen(db, caso.entrada.id_reserva);
+			if (!actual) throw new Error("mesas.set_reserva_estado: la reserva no existe");
+			aplicar(hub, sql, setReservaEstado(caso.entrada.id_reserva, caso.entrada.estado, actual.estado));
 			return;
 		}
 		case "cuentas.create_gasto": {
@@ -1094,9 +1094,9 @@ describe("edición de catálogo sin cambiar precios", () => {
 });
 
 // INC-20261030-016: una comanda cobrada no admite líneas nuevas. La Main lo rechaza con
-// `COMANDA_COBRADA`, y eso el harness de arriba no lo ve: sólo compara casos que salen bien. Aquí,
-// la consulta con la que la ruta rechaza y la condición del propio INSERT, que cubre a la Main
-// cobrando entre esa lectura y el lote (SYNC-30).
+// `COMANDA_COBRADA`, y eso el harness de arriba no lo ve: sólo compara casos que salen bien. Aquí, la
+// guarda con la que la nube lo rechaza dentro del lote (SYNC-30) y la condición del propio INSERT,
+// que es lo que llega a la Main: allí puede estar cobrada sin haberlo subido.
 describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 	const SIEMBRA = [
 		"INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Bar')",
@@ -1124,43 +1124,59 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 			"Cafe",
 			130 as any,
 		);
+	const lineaBarra = (idComanda: string) =>
+		addLinea({ id_comanda: idComanda, id_producto: "cafe", cantidad: 1 } as any, null, "Cafe", 130 as any);
 
-	it("la ruta sabe qué comanda está cobrada", async () => {
-		await enElHub("inc016-consulta", async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			crearEsquemaTenant(sql);
-			for (const s of SIEMBRA) sql.exec(s);
-			const db = clienteSobre(sql);
-			expect(await comandaCobrada(db as any, "mesa_cobrada")).toBe(true);
-			expect(await comandaCobrada(db as any, "barra_cobrada")).toBe(true);
-			expect(await comandaCobrada(db as any, "mesa_abierta")).toBe(false);
-			// La de barra se crea en el mismo lote que su primera línea: que no exista no es cobrada.
-			expect(await comandaCobrada(db as any, "aun_no_existe")).toBe(false);
+	/** El error con el que la nube rechaza el comando, o `null` si entra. */
+	function rechazo(hub: any, sql: any, built: any): string | null {
+		try {
+			aplicar(hub, sql, built);
+			return null;
+		} catch (e) {
+			if (e instanceof GuardaIncumplida) return e.code;
+			throw e;
+		}
+	}
+
+	/** Como aplica la Main un cambio que le llega: sólo lo replicado, sin las guardas. */
+	function comoLaMain(hub: any, sql: any, built: any) {
+		hub.state.storage.transactionSync(() => {
+			for (const st of buildApplyBatch(built.command).replicated) sql.exec(st.sql, ...(st.args ?? []));
 		});
-	});
+	}
 
-	it("Mesas no mete la línea en la comanda cobrada y sí en la abierta", async () => {
+	it("Mesas: la nube la rechaza en la cobrada y la mete en la abierta", async () => {
 		await enElHub("inc016-mesas", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
-			aplicar(hub, sql, lineaMesa("mesa_cobrada"));
-			aplicar(hub, sql, lineaMesa("mesa_abierta"));
+			expect(rechazo(hub, sql, lineaMesa("mesa_cobrada"))).toBe("comanda_cobrada");
+			expect(rechazo(hub, sql, lineaMesa("mesa_abierta"))).toBeNull();
 			expect(await lineasDe(sql, "mesa_cobrada")).toBe(0);
 			expect(await lineasDe(sql, "mesa_abierta")).toBe(1);
 		});
 	});
 
-	it("la barra no mete la línea en el ticket cobrado", async () => {
+	it("la barra: la nube la rechaza en el ticket cobrado, y uno que aún no existe se crea con ella", async () => {
 		await enElHub("inc016-barra", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
-			aplicar(
-				hub,
-				sql,
-				addLinea({ id_comanda: "barra_cobrada", id_producto: "cafe", cantidad: 1 } as any, null, "Cafe", 130 as any),
-			);
+			expect(rechazo(hub, sql, lineaBarra("barra_cobrada"))).toBe("comanda_cobrada");
+			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
+			expect(rechazo(hub, sql, lineaBarra("aun_no_existe"))).toBeNull();
+			expect(await lineasDe(sql, "aun_no_existe")).toBe(1);
+		});
+	});
+
+	it("la Main, que aplica sólo lo replicado, tampoco la mete en la que tiene cobrada", async () => {
+		await enElHub("inc016-main", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			comoLaMain(hub, sql, lineaMesa("mesa_cobrada"));
+			comoLaMain(hub, sql, lineaBarra("barra_cobrada"));
+			expect(await lineasDe(sql, "mesa_cobrada")).toBe(0);
 			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
 		});
 	});
@@ -1426,8 +1442,8 @@ describe("un alta con un id que ya existe no toca la fila (AUD-16)", () => {
 			const antes = filas(sql, "SELECT * FROM Comandas WHERE ID_Comanda='mesa_cobrada'");
 			aplicar(hub, sql, ticket("mesa_cobrada", "t-luis"));
 			expect(filas(sql, "SELECT * FROM Comandas WHERE ID_Comanda='mesa_cobrada'")).toEqual(antes);
-			// Sigue cobrada, así que tampoco admite líneas (INC-20261030-016).
-			aplicar(hub, sql, lineaCafe("nueva-1", "mesa_cobrada", 1));
+			// Sigue cobrada, así que tampoco admite líneas (INC-20261030-016): la guarda la rechaza.
+			expect(() => aplicar(hub, sql, lineaCafe("nueva-1", "mesa_cobrada", 1))).toThrow(GuardaIncumplida);
 			expect(n(sql, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='mesa_cobrada'")).toBe(1);
 		});
 	});

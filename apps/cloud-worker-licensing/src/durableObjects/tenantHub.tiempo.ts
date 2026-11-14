@@ -76,36 +76,89 @@ const FUNCIONES_DE_FECHA = new Set([
 	"timediff",
 ]);
 
-// ¿El `'now'` que empieza en `i` es argumento de una función de fecha? Se busca hacia atrás el
-// paréntesis que lo abre y el nombre que lleva delante. `minus` es el SQL en minúsculas.
-function esArgumentoDeFecha(minus: string, i: number): boolean {
-	let profundidad = 0;
-	for (let j = i - 1; j >= 0; j--) {
-		const c = minus[j];
-		if (c === ")") {
-			profundidad++;
-		} else if (c === "(") {
-			if (profundidad > 0) {
-				profundidad--;
-				continue;
-			}
-			const nombre = /([a-z_][a-z0-9_]*)\s*$/.exec(minus.slice(0, j));
-			return nombre !== null && FUNCIONES_DE_FECHA.has(nombre[1]);
+/** Un carácter que `\s` da por espacio. */
+const ESPACIO = /\s/;
+
+/** La letra en minúsculas, si es una mayúscula ASCII; si no, la misma. */
+function enMinuscula(c: number): number {
+	return c >= 65 && c <= 90 ? c + 32 : c;
+}
+
+/** `[a-z0-9_]`, sin mirar mayúsculas. */
+function esDePalabra(c: number): boolean {
+	const m = enMinuscula(c);
+	return (m >= 97 && m <= 122) || (m >= 48 && m <= 57) || m === 95;
+}
+
+function esCifra(c: number): boolean {
+	return c >= 48 && c <= 57;
+}
+
+/**
+ * El nombre que lleva delante el paréntesis que está en `j`, en minúsculas, o `null`: la palabra que
+ * lo precede, con espacios entre los dos o sin ellos, desde su primera letra o guion bajo
+ * (`9datetime(` es `datetime`). Es lo que daba `/([a-z_][a-z0-9_]*)\s*$/` sobre todo lo anterior al
+ * paréntesis, pero se miran sólo esos espacios y esa palabra: ninguno de los dos pasa de un
+ * paréntesis, así que el tramo de uno no llega al del anterior y cada carácter del SQL se mira como
+ * mucho una vez.
+ */
+function nombreAntesDe(sql: string, j: number): string | null {
+	let fin = j;
+	while (fin > 0 && ESPACIO.test(sql[fin - 1])) fin--;
+	let inicio = fin;
+	while (inicio > 0 && esDePalabra(sql.charCodeAt(inicio - 1))) inicio--;
+	while (inicio < fin && esCifra(sql.charCodeAt(inicio))) inicio++;
+	// Sólo letras ASCII, cifras y guion bajo: en minúsculas tiene la misma longitud.
+	return inicio < fin ? sql.slice(inicio, fin).toLowerCase() : null;
+}
+
+/** ¿Empieza en `i` un `'now'`, en cualquier caja? */
+function esAhora(sql: string, i: number): boolean {
+	return (
+		sql.charCodeAt(i) === 39 &&
+		enMinuscula(sql.charCodeAt(i + 1)) === 110 &&
+		enMinuscula(sql.charCodeAt(i + 2)) === 111 &&
+		enMinuscula(sql.charCodeAt(i + 3)) === 119 &&
+		sql.charCodeAt(i + 4) === 39
+	);
+}
+
+/**
+ * Dónde empieza, en `sql`, cada `'now'` que es argumento de una función de fecha.
+ *
+ * SYNC-34: una sola pasada hacia delante, con una pila de los paréntesis abiertos que dice de cada
+ * uno si es el de una función de fecha; un `'now'` mira la cima. Antes cada `'now'` recorría hacia
+ * atrás el texto hasta su paréntesis y pasaba una expresión sobre todo lo anterior: con muchos
+ * `'now'`, o con una palabra muy larga delante, el cuadrado de la longitud del SQL. Reconoce lo
+ * mismo (`test/tenantHubTiempo.test.ts` lo contrasta con aquel recorrido): la cima es el paréntesis
+ * abierto más cercano que no se cierra antes del `'now'`, que es el que se encontraba hacia atrás, y
+ * las comillas siguen sin contar. Las mayúsculas se miran carácter a carácter, sólo las ASCII y
+ * sobre el texto tal cual: `toLowerCase()` alarga algún carácter (`İ` pasa a ser dos), y las
+ * posiciones dejarían de ser las del texto en el que se sustituye.
+ */
+function ahorasDeFecha(sql: string): Set<number> {
+	const posiciones = new Set<number>();
+	const abiertos: boolean[] = [];
+	for (let i = 0; i < sql.length; i++) {
+		const c = sql.charCodeAt(i);
+		if (c === 40) {
+			const nombre = nombreAntesDe(sql, i);
+			abiertos.push(nombre !== null && FUNCIONES_DE_FECHA.has(nombre));
+		} else if (c === 41) {
+			// Un `)` sin su `(` no cierra nada.
+			abiertos.pop();
+		} else if (c === 39 && abiertos[abiertos.length - 1] === true && esAhora(sql, i)) {
+			posiciones.add(i);
 		}
 	}
-	return false;
+	return posiciones;
 }
 
 // ¿Alguna sentencia del comando pide la hora actual SIN resolver? Si la hay, EXIGIMOS X-Client-Now
 // para fijarla a literal determinista; si no, el comando ya viene con literales (p. ej. desde la
 // Main, que resuelve todas las suyas) y no hace falta.
 export function sqlHasNowLiteral(sql: unknown): boolean {
-	if (typeof sql !== "string") return false;
-	const minus = sql.toLowerCase();
-	for (let i = minus.indexOf("'now'"); i !== -1; i = minus.indexOf("'now'", i + 1)) {
-		if (esArgumentoDeFecha(minus, i)) return true;
-	}
-	return false;
+	return typeof sql === "string" && ahorasDeFecha(sql).size > 0;
 }
 
 export function commandHasNowLiteral(cmd: InternalApplyCommand): boolean {
@@ -132,12 +185,14 @@ const AHORA_LOCAL_RE = /'now'\s*,\s*'localtime'/gi;
 export function rewriteNowInSql(sql: string, dt: string): string {
 	if (typeof sql !== "string" || !sqlHasNowLiteral(sql)) return sql;
 	const d = dt.slice(0, 10);
-	return sql
+	const conLasCanonicas = sql
 		.split("datetime('now','localtime')").join(`'${dt}'`)
-		.split("date('now','localtime')").join(`'${d}'`)
-		.replace(AHORA_LOCAL_RE, (m: string, offset: number, entero: string) =>
-			esArgumentoDeFecha(entero.toLowerCase(), offset) ? `'${dt}'` : m,
-		);
+		.split("date('now','localtime')").join(`'${d}'`);
+	// Una vez para todo el texto (SYNC-34), no una por cada `'now','localtime'`.
+	const deFecha = ahorasDeFecha(conLasCanonicas);
+	return conLasCanonicas.replace(AHORA_LOCAL_RE, (m: string, offset: number) =>
+		deFecha.has(offset) ? `'${dt}'` : m,
+	);
 }
 
 export function rewriteCmdNowLiterals(

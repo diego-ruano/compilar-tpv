@@ -2,7 +2,13 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
-import type { ClienteResuelto } from "./reservas.queries";
+import {
+	argumentosDeLaGuarda,
+	SQL_EMAIL_LIBRE,
+	SQL_SIN_CHOQUE,
+	SQL_SIN_CHOQUE_PROHIBIDO,
+	type ClienteResuelto,
+} from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
 
 export type BuiltCommand = {
@@ -104,6 +110,44 @@ function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolea
 	return withId ? [input.id_reserva, ...args] : args;
 }
 
+/**
+ * SYNC-30: lo que decide si la reserva se guarda, mirado dentro del lote que la guarda, en el orden
+ * en que lo mira la ruta y la Main:
+ *
+ * - La mesa no choca con nada, si el solape está prohibido (`reserva_solapada_prohibida`) o si no
+ *   llega confirmado (`reserva_solapada`). Un solape confirmado con «avisar» entra. La duración y el
+ *   modo se leen del negocio al aplicar.
+ * - El cliente existente sigue existiendo (`cliente_no_encontrado`).
+ * - El email de un cliente nuevo no es de otro (`email_duplicado`). Esto sólo lo mira la guarda: el
+ *   reintento de una reserva que entró con su cliente nuevo se encontraba al cliente que había creado.
+ *
+ * Van delante de todo lo que escribe: la reserva no choca consigo misma, pero una nueva sin id lo
+ * recibe aquí.
+ */
+function guardasDeLaReserva(input: ReservaSaveInput, cliente: ClienteResuelto): any[] {
+	const guardas: any[] = [];
+	if (input.id_mesa) {
+		const args = argumentosDeLaGuarda({ ...input, id_mesa: input.id_mesa });
+		guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE_PROHIBIDO, args, error: "reserva_solapada_prohibida", status: 409 });
+		if (!input.forzar_solape) {
+			guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE, args, error: "reserva_solapada", status: 409 });
+		}
+	}
+	if (cliente.modo === "existente") {
+		guardas.push({
+			kind: "guard",
+			sql: "SELECT EXISTS (SELECT 1 FROM Clientes WHERE ID_Cliente = ?1);",
+			args: [cliente.id_cliente],
+			error: "cliente_no_encontrado",
+			status: 404,
+		});
+	}
+	if (cliente.modo === "nuevo" && input.email) {
+		guardas.push({ kind: "guard", sql: SQL_EMAIL_LIBRE, args: [input.email], error: "email_duplicado", status: 409 });
+	}
+	return guardas;
+}
+
 export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): BuiltCommand {
 	const cloudPayload = {
 		...input,
@@ -111,7 +155,7 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 	};
 
 	const { steps: pasosCliente, idCliente } = clienteSteps(input, cliente);
-	const steps: any[] = [...pasosCliente];
+	const steps: any[] = [...guardasDeLaReserva(input, cliente), ...pasosCliente];
 
 	if (input.id_reserva) {
 		steps.push({
@@ -240,9 +284,11 @@ export function deleteReserva(idReserva: string): BuiltCommand {
 /**
  * Cancela una reserva que aún no ha llegado: se queda, cancelada. Igual que la Main.
  *
- * Quién decide es la ruta, que la lee antes (`reservas.queries.ts::estadoYOrigen`): la sentencia no
- * lleva la condición porque se vuelve a evaluar en la Main al replicarse, que puede tener la reserva
- * en otro estado.
+ * Que aún no haya llegado lo decide la guarda, dentro del lote que la cancela (SYNC-30): la ruta la
+ * lee antes, pero entre su lectura y el lote la Main puede haberla sentado. Si entretanto se ha
+ * cancelado o se ha borrado, cancelarla no cambia nada y la guarda la deja pasar. La sentencia
+ * replicada no lleva la condición: se vuelve a evaluar en la Main al replicarse, que puede tener la
+ * reserva en otro estado, y lo que decide es la nube.
  */
 export function cancelarReserva(idReserva: string): BuiltCommand {
 	return {
@@ -251,6 +297,13 @@ export function cancelarReserva(idReserva: string): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: "SELECT NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Estado NOT IN ('PROXIMA', 'CANCELADA'));",
+						args: [idReserva],
+						error: "reserva_no_pendiente",
+						status: 409,
+					},
 					{
 						kind: "execute",
 						saveAs: "canceladas",

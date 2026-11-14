@@ -26,15 +26,11 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
-| [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
-| [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
-| [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
-| [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -205,26 +201,6 @@ Aplazado: exige primero acceso de lectura a la base del tenant.
 bypass: el estado de licencia va firmado con ed25519 y la clave pública está fijada en el binario
 (`LICENSE_SIGNING_PUBLIC_KEYS_B64`), y el emparejamiento firma con la clave del dispositivo. Queda como
 extra opcional, a revisar al fijar el modelo de precios.
-
-### OBS-06 · El nombre de una imagen heredada viaja en la URL
-
-Una imagen nueva se guarda con un UUID por nombre (`save_image`, en `src-tauri/src/lib.rs`). Pero
-`images_backfill`, que sube una vez las que ya había en el equipo, encola cada fichero de
-`images/{productos,categorias,proveedores,alergenos}` **con el nombre que tenía**, y ese nombre es
-parte del camino con el que la imagen se sube, se sirve y se borra (`/v1/images/…`). `ruta_segura`
-(`imagenes.rs`) y `REL_PATH_RE` (`images.routes.ts`) sólo piden letras, cifras, punto, guion y guion
-bajo: un `images/proveedores/Juan-Perez.jpg` pasa. Cloudflare guarda la URL de cada petición
-([observabilidad.md](arquitectura/observabilidad.md#lo-que-registra-cloudflare-de-cada-petición)),
-así que un nombre de persona puesto a un fichero acabaría en sus registros, que es lo que AUD-27
-quita del resto de rutas. También va en la dirección pública de `r2.dev` que carga la Handy.
-
-Hoy no hay instalaciones en producción con ficheros anteriores al UUID.
-
-Arreglo propuesto: antes de cualquier petición, renombrar lo heredado a un identificador opaco (un
-UUID con su extensión) y actualizar en la misma operación las referencias de la base (la ruta de
-imagen de productos, categorías, proveedores y alérgenos), por `WriteGuard` para que replique. Con
-eso `ruta_segura` y `REL_PATH_RE` se pueden estrechar a `<uuid>.<ext>` y la excepción de las rutas
-de imágenes en `test/sinDatosPersonalesEnLaQuery.node.test.ts` (`COMODINES`) pasa a ser una comprobación.
 
 ---
 
@@ -437,33 +413,6 @@ cambio remoto se respete la escritura local pendiente de la misma fila (aplicar 
 outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
 Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
 
-### SYNC-30 · Una ruta del worker decide con una lectura fuera de su transacción
-
-La Main decide dentro de la transacción que escribe: lee la fila y escribe con el cerrojo del
-escritor, y nadie se cuela en medio. Las rutas del worker no pueden: leen la base con `tenantQuery`,
-deciden y luego mandan el comando al motor del `TenantHub`, que lo aplica cuando le llega el turno
-del log. Entre la lectura y la escritura puede llegar otra (lo que sube la Main, otra Handy), también
-con la ruta ejecutándose dentro del DO: mientras espera, el DO atiende a los demás. El lote del
-`TenantHub` (`tenantHub.lote.ts`) sólo sabe ejecutar escrituras y lecturas que se devuelven: no
-tiene un paso que compruebe una condición y aborte el lote sin replicarse.
-
-Ejemplos: cancelar una reserva desde la Handy (`POST /v1/reservas/:id/cancelar`) comprueba que está
-`PROXIMA` y, si en esos milisegundos la Main la ha sentado, la cancela igual; marcar la llegada o la
-salida desde la mesa (`PUT /v1/mesas/reservas/:id/estado`), el solape con otra reserva en modo
-«prohibir», el último administrador, el turno repetido de un trabajador o una línea de un producto
-que se acaba de archivar funcionan igual. La ventana es de milisegundos y se suma a SYNC-29 (la Main
-puede tener la fila de otra forma sin subir), que es la más ancha de las dos.
-
-Lo que no puede romperse ya lo para la base con un índice único, también entre dos dispositivos a la
-vez: una comanda abierta por mesa, un cierre por periodo, nombres de zona, mesa y producto, correos
-de cliente. O una condición dentro de la propia sentencia, que la nube y la Main vuelven a evaluar al
-aplicarla: una línea en una comanda cobrada (INC-20261030-016) o borrar un ticket con cobros
-(AUD-14). Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
-identificadores o copia datos del catálogo. Lo que decide es poco más de una decena de comprobaciones.
-
-Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico, que no se
-replique y que devuelva un error de negocio si no se cumple; y pasar a él esas comprobaciones.
-
 ### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
 
 Si una Handy borra un ticket de barra mientras su cobro va de camino a la nube —la Main ya lo ha
@@ -532,52 +481,6 @@ restaurarla lo que demuestre que es del negocio: el PIN de un administrador de l
 reconciliación no dé por buena una base con el cursor por encima de lo que la nube ha emitido. No hay
 nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
 AUD-22 (la copia traída de fuera, restaurada sin PIN). Sin decidir.
-
-### SYNC-34 · Dos recorridos cuadráticos sobre el SQL que sube la Main
-
-Dos sitios del `TenantHub` miran el texto del SQL de una operación con un coste que crece con el
-cuadrado de su longitud, la misma forma que tenía AUD-33 (`/^"+|"+$/`):
-
-- `evalValueStep` (`tenantHub.sentencias.ts`) quita el `;` final de un paso `value` con
-  `/;+\s*$/`. Sin ancla al principio, con una racha de `;` que no está al final la expresión se
-  prueba desde cada uno y la recorre entera desde cada uno.
-- `esArgumentoDeFecha` (`tenantHub.tiempo.ts`), por cada `'now'` del SQL, recorre el texto hacia
-  atrás hasta el paréntesis que lo abre y pasa sobre todo lo anterior
-  `/([a-z_][a-z0-9_]*)\s*$/`, que se prueba desde cada letra de cada palabra. Con muchos `'now'`, o
-  con una palabra muy larga delante, el coste es cuadrático aunque se cambiara sólo la expresión.
-  Lo llaman `sqlHasNowLiteral`, `rewriteNowInSql` y `horaSinFijarEnSql`, en cada operación que
-  aplica el motor.
-
-Sólo los alcanza una Main autenticada (el `helloSigned` firmado con su clave y el rol `tpv` de su
-fila), con el SQL de sus propias operaciones, y en el Durable Object de su propio negocio: no
-comparte el isolate del worker con otros negocios. Lo que escribe la Handy lleva el SQL de los
-`*.commands.ts` del worker. Ninguno corre antes de autenticar.
-
-Arreglo propuesto: recorridos lineales escritos a mano, como `recortar` y `quitarComillas`
-(`lib/texto.ts`). En `evalValueStep`, quitar los `;` y los espacios finales recorriendo desde el
-final. En `tenantHub.tiempo.ts`, una sola pasada hacia delante con una pila de paréntesis abiertos,
-cada uno con el nombre que lleva delante (leído hacia atrás sólo sobre los espacios y la palabra que
-lo preceden), de modo que cada `'now'` mire la cima de la pila; con los casos de
-`test/tenantHubTiempo.test.ts` como referencia de que no cambia lo que se reconoce.
-
-### SYNC-35 · Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó
-
-En un reintento idempotente (la misma `X-Idempotency-Key`), `apply` devuelve el resultado que se
-guardó al aplicar. Si no se llegó a refinar (SYNC-10, que es best-effort), los recuentos y las
-lecturas son `null`: no dice si la escritura cambió algo, porque el lote se confirma también cuando
-una sentencia condicional no toca ninguna fila. Las rutas que deciden por el recuento lo resuelven releyendo el estado con
-`decidirPorEstado` (`lib/rutas.ts`): la papelera de notificaciones, `turno-partido` y
-`horarios/guardar`. Quedan tres que no:
-
-- `PUT /v1/trabajadores/:id` y `PUT /v1/trabajadores/horarios/asignaciones/:id` toman `null` por
-  éxito: si otro dispositivo borró lo que se editaba y se perdió la respuesta, el reintento contesta
-  200 sin haber cambiado nada. Lo editado ya no existe, y la pantalla lo ve al recargar.
-- `DELETE /v1/inventario/productos/:id` mira `en_uso`, una lectura del resultado: en el reintento
-  llega sin ella y contesta el 409 «producto en una comanda abierta» aunque el producto se haya borrado.
-
-Arreglo propuesto: `decidirPorEstado` en las tres, como en `horarios/guardar`, con una lectura de lo
-pedido (el trabajador o la asignación tal como se pidió; el producto, que ya no exista o esté
-archivado).
 
 ---
 

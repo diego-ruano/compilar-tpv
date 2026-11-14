@@ -275,6 +275,16 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   ruta anónima con cuerpo sin tope.
 - **Toda ruta autenticada pasa por `tenantAuth`** (`middleware/tenant.ts`): token, device-proof, rol de
   la fila, licencia en uso. Tenant y dispositivo salen del token, nunca del cuerpo.
+- **Lo que decide si una escritura entra va en una guarda de su comando, no en una lectura de la
+  ruta** (SYNC-30): un paso `{ kind: "guard", sql, args, error, status }` delante de lo que escribe,
+  que el `TenantHub` evalúa dentro del lote atómico y no replica. Si su consulta no da un número
+  distinto de 0, no queda nada (ni el gate de idempotencia) y la ruta contesta `error` con `status`,
+  un 4xx con su frase en `MENSAJES`. Leído antes de `apply`, otra escritura podía entrar mientras
+  el DO atendía a los demás. La ruta lee antes lo que necesita para construir el comando o para
+  contestar sin escribir; lo que decide la guarda sólo lo mira también si tiene algo más que decir
+  (con qué choca un solape), y entonces tiene que contestar lo mismo al reintento de una escritura
+  que ya entró, que el gate contesta sin mirar la guarda. El porqué y la lista, en
+  [sincronizacion.md](sincronizacion.md#lo-que-decide-una-escritura-se-mira-dentro-de-su-lote-sync-30).
 - **Ningún dato personal ni texto libre en la query ni en el camino: va en el cuerpo** (AUD-27).
   Cloudflare guarda el método y la URL de cada petición, y Logpush puede exportarlos a Axiom, sin
   pasar por el filtro de datos personales; el cuerpo no se registra
@@ -336,7 +346,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   la base, en `tenantAuth` y en las rutas de licencias; en el emparejamiento, el `devicePubKey` de
   `claim` como `invalid_devicePubKey` y el `sigB64` de `fetch-token` y `cancel` como `missing_proof`,
   con el `.max()` del schema delante del recorte y del `transform`. Lo vigilan
-  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`.
+  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`. Lo mismo con el SQL que sube la
+  Main, que el `TenantHub` mira en cada operación (SYNC-34): el `;` final de un paso `value`
+  (`evalValueStep`) se quita recorriendo desde el final, y los `'now'` que son argumento de una
+  función de fecha (`tenantHub.tiempo.ts`) se buscan en una sola pasada, con una pila de los
+  paréntesis abiertos. `test/tenantHubTiempo.test.ts` contrasta lo que se reconoce con el recorrido
+  de antes y pasa textos enormes.
 - **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
   `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale
@@ -446,7 +461,20 @@ Noble sólo sirve de referencia independiente en tests. Placement sigue desactiv
 
 ## Imágenes
 
-Se guardan en R2 con prefijo por tenant y una expresión contra rutas con `..` (`REL_PATH_RE`). El GET
+Se guardan en R2 con prefijo por tenant, y su ruta es siempre `images/{carpeta}/{uuid}.{ext}`: una
+carpeta de la lista, en minúsculas, y por nombre el UUID que le pone la app al guardarla
+(`RUTA_DE_IMAGEN`, `domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`, y en la
+Handy, `imageUrl.ts`, que admiten lo mismo). Esa ruta va en el camino de
+`/v1/images/…` y en la dirección pública de `r2.dev`, y Cloudflare guarda la URL de cada petición: un
+nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
+guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada
+(`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, encola la copia,
+cambia las filas que la usan (productos, categorías, proveedores y alérgenos) en una transacción por
+`WriteGuard`, que sube a la nube, y borra el fichero de antes. Encolada antes de cambiar las filas,
+un corte a medias no deja ninguna fila apuntando a una imagen que no va a subir. Una que no usa
+ninguna fila se queda como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
+pide a `r2.dev` (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
+`test/sinDatosPersonalesEnLaQuery.node.test.ts`. El GET
 público las sirve con `max-age=31536000, immutable`; borrar una la quita también del caché del edge,
 pero **sólo del centro de datos que atiende la petición** (barrer los demás pediría el API de purga). La
 Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl.ts`,

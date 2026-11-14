@@ -23,9 +23,13 @@ import type { Client, ResultSet } from "@libsql/client/web";
 
 import { MIGRATIONS, normalize, sha256Hex } from "../server/tenantMigrations";
 import { HubError } from "../lib/errorHttp";
+import type { Guarda } from "./tenantHub.types";
 
-/** Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. */
-type Sentencia = string | { sql: string; args?: unknown[] };
+/**
+ * Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. En un
+ * lote (`loteEnBruto`) puede llevar además la `guarda` de un paso `guard` (SYNC-30).
+ */
+type Sentencia = string | { sql: string; args?: unknown[]; guarda?: Guarda };
 
 /** Las filas de una sentencia en bruto: columnas y valores, sin el envoltorio de libsql. */
 export type FilasEnBruto = {
@@ -105,6 +109,10 @@ function esFkRota(e: unknown): boolean {
  *    `PRAGMA foreign_key_check`. Si queda alguna rota se lanza un error normal: la transacción se
  *    deshace y el motor lo clasifica como rechazo permanente.
  *
+ * Una sentencia con `guarda` (SYNC-30) se comprueba en cuanto se ejecuta, en cualquiera de las dos
+ * pasadas: si no se cumple, `GuardaIncumplida` sale de la transacción y no queda nada del lote. No es
+ * una FK rota, así que no se repite aplazando.
+ *
  * El paso 2 recorre las tablas con FK (unos 230 ms con 250.000 líneas), pero sólo lo paga quien
  * necesita el aplazamiento o trae una FK rota de verdad. Quien aplica varios lotes en un mismo turno
  * (`MotorTenantHub.aplicarLote`) pone tope a ese trabajo con `alAplazar`: se le pregunta justo antes
@@ -122,9 +130,12 @@ export function loteEnBruto(
 		storage.transactionSync(() => {
 			if (aplazar) sql.exec("PRAGMA defer_foreign_keys = ON;");
 			try {
-				const salida = sentencias.map((s) =>
-					APLAZAR_FK.test(partes(s).texto) ? VACIO : ejecutarEnBruto(sql, s),
-				);
+				const salida = sentencias.map((s) => {
+					if (APLAZAR_FK.test(partes(s).texto)) return VACIO;
+					const filas = ejecutarEnBruto(sql, s);
+					if (typeof s !== "string" && s.guarda) exigirGuarda(s.guarda, filas);
+					return filas;
+				});
 				if (aplazar) {
 					const rota = sql.exec("PRAGMA foreign_key_check;").toArray()[0] as
 						| { table?: string; parent?: string }
@@ -150,6 +161,29 @@ export function loteEnBruto(
 		if (opciones.alAplazar && !opciones.alAplazar()) throw new HaceFaltaAplazar();
 		return correr(true);
 	}
+}
+
+/**
+ * SYNC-30 · La guarda de un paso `guard` no se cumple: la escritura no se aplica y contesta el error
+ * de negocio de la guarda. Es un `HubError` (lo que lleva el resultado del RPC `aplicar`) y no un
+ * fallo: el motor no lo anota como tal.
+ */
+export class GuardaIncumplida extends HubError {
+	constructor(guarda: Guarda) {
+		super(guarda.error, guarda.status);
+		this.name = "GuardaIncumplida";
+	}
+}
+
+/**
+ * ¿Se cumple la guarda? Su consulta da una fila cuyo primer valor es un número distinto de 0. Sin
+ * fila, con `NULL` o con otra cosa, no se cumple. Lanzar aquí, dentro de `transactionSync`, deshace
+ * todo lo que el lote llevaba hecho.
+ */
+function exigirGuarda(guarda: Guarda, filas: FilasEnBruto): void {
+	const valor = filas.rows[0]?.[0];
+	const cumple = typeof valor === "number" ? valor !== 0 : typeof valor === "bigint" ? valor !== 0n : false;
+	if (!cumple) throw new GuardaIncumplida(guarda);
 }
 
 /**

@@ -112,6 +112,25 @@ describe("evalValueStep", () => {
 		expect(evalValueStep("select ?1", ["x"])).toBe("x");
 	});
 
+	// SYNC-34: el `;` final se quitaba con `/;+\s*$/`, que con una racha de `;` que no está al final
+	// tardaba el cuadrado de su longitud. Una Main autenticada sube el SQL de sus pasos `value`.
+	it("una racha larga de punto y coma no cuesta el cuadrado de su longitud", () => {
+		const racha = ";".repeat(200_000);
+		const inicio = performance.now();
+		expect(() => evalValueStep(`SELECT ${racha}x`, [])).toThrow(/value_step_no_evaluable_en_batch/);
+		expect(evalValueStep(`SELECT ?1${racha}`, ["x"])).toBe("x");
+		expect(evalValueStep(`SELECT ?1 ${racha}  `, ["x"])).toBe("x");
+		// Con la expresión de antes, minutos.
+		expect(performance.now() - inicio).toBeLessThan(1000);
+	});
+
+	it("sólo quita la racha de punto y coma del final, como antes", () => {
+		// Un `;` que no está al final deja una forma que no es del conjunto cerrado.
+		expect(() => evalValueStep("SELECT ?1; ;", ["x"])).toThrow(/value_step_no_evaluable_en_batch/);
+		expect(() => evalValueStep("SELECT ;?1", ["x"])).toThrow(/value_step_no_evaluable_en_batch/);
+		expect(evalValueStep("SELECT 'a;' || ?1;", ["x"])).toBe("a;x");
+	});
+
 	it("un parámetro que falta se resuelve a null, no a undefined", () => {
 		// `undefined` no es un escalar SQL válido: acabaría como argumento corrupto.
 		expect(evalValueStep("SELECT ?3", ["a"])).toBeNull();

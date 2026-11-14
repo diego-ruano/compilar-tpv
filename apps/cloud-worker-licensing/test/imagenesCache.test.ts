@@ -9,7 +9,7 @@ describe("caché pública de imágenes", () => {
 		const get = vi.fn(async () => ({ body: new Response("imagen").body, httpEtag: '"etag"' }));
 		const env = { IMAGES: { get } } as unknown as Env;
 		const app = new Hono<{ Bindings: Env }>().route("/v1/images", imagesRoutes);
-		const url = `https://imagenes.test/v1/images/${crypto.randomUUID()}/images/productos/prueba.jpg`;
+		const url = `https://imagenes.test/v1/images/${crypto.randomUUID()}/images/productos/${crypto.randomUUID()}.jpg`;
 		for (const query of ["?v=1", "?otro=2", ""]) {
 			const ctx = createExecutionContext();
 			const respuesta = await app.fetch(new Request(url + query), env, ctx);
@@ -36,7 +36,7 @@ describe("caché pública de imágenes", () => {
 		const get = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ body: new Response("llegó").body });
 		const env = { IMAGES: { get } } as unknown as Env;
 		const app = new Hono<{ Bindings: Env }>().route("/v1/images", imagesRoutes);
-		const url = `https://imagenes.test/v1/images/${crypto.randomUUID()}/images/logo/prueba.png`;
+		const url = `https://imagenes.test/v1/images/${crypto.randomUUID()}/images/logo/${crypto.randomUUID()}.png`;
 		const ctx = createExecutionContext();
 		expect((await app.fetch(new Request(url + "?v=1"), env, ctx)).status).toBe(404);
 		const respuesta = await app.fetch(new Request(url + "?v=2"), env, ctx);

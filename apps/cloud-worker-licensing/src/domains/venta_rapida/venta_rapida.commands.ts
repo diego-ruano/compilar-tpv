@@ -6,6 +6,7 @@ import type { Dinero } from "@tpv/contracts";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
+import { guardaComandaSinCobrar, guardaProductoEnLaCarta } from "../mesas/guardasDeLinea";
 import type { CobroPlan } from "./venta_rapida.queries";
 import type {
 	AddLineaInput,
@@ -109,6 +110,9 @@ export function addLinea(
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					// SYNC-30: el producto en la carta y el ticket sin cobrar, mirados dentro del lote.
+					guardaProductoEnLaCarta(input.id_producto),
+					guardaComandaSinCobrar(input.id_comanda),
 					idStep("id_detalle", input.id_detalle),
 					{
 						// Garantía idempotente: si la comanda no existiese (p. ej. el `change` del
@@ -131,9 +135,10 @@ export function addLinea(
 						args: [input.id_comanda, CANAL_BARRA],
 					},
 					{
-						// INC-20261030-016: sólo entra en un ticket abierto. La ruta ya lo rechaza
-						// antes, pero lo lee fuera de esta transacción (SYNC-30). El `WHERE` también
-						// evita que el `ON CONFLICT` se lea como parte del `SELECT`.
+						// INC-20261030-016: sólo entra en un ticket abierto. En la nube lo decide la
+						// guarda de arriba (SYNC-30); la condición es para la Main, que aplica esta
+						// sentencia con sus datos. El `WHERE` también evita que el `ON CONFLICT` se
+						// lea como parte del `SELECT`.
 						// AUD-16: alta pura (ver `idStep`); una línea que ya existe no se toca.
 						kind: "execute",
 						sql: `
