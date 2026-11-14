@@ -791,7 +791,10 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   comprobar dentro de su transacción). Pide confirmación (durante unos minutos no se vende ni en el
   TPV ni en las Handy), sólo la puede pedir un administrador, y después cierra la sesión y sigue
   como cualquier otra recuperación desde la nube, que vacía las cuarentenas
-  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)).
+  ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Mientras se trae, el motor
+  de réplica está parado (`SyncNativo::pausar_hasta_sin_sesion`, que espera a que acabe la sesión
+  en marcha): una sesión viva que aplicara un cambio después de restaurar llevaría el checkpoint
+  más allá de los cambios que la foto no trae y esa sesión había aplicado sobre la base de antes.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el

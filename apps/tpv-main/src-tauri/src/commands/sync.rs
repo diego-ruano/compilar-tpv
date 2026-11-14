@@ -95,9 +95,23 @@ pub async fn sync_bootstrap_desde_nube(
     // Puede no haber base: si la local era ilegible, el arranque siguió sin ella para poder llegar
     // hasta la pantalla de recuperación. El volcado necesita dónde escribir.
     crate::commands::recovery::asegurar_base_para_recuperar(&app, &state).await?;
-    let repo = state.sync_repo().await?;
-    Ok(uc::bootstrap_desde_nube(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
+    // Con el motor de réplica parado: una sesión viva que aplicara un cambio después de restaurar
+    // movería el checkpoint por encima de lo que la foto no trae (Codex, SYNC-36). Desde la pantalla
+    // de recuperación no hay sesión y esto es inmediato; desde Conectividad, espera a que acabe.
+    let motor = app.state::<crate::replicacion::SyncNativo>();
+    motor.pausar_hasta_sin_sesion(ESPERA_A_LA_REPLICA).await?;
+    let traida = async {
+        let repo = state.sync_repo().await?;
+        Ok::<_, AppErrorDto>(uc::bootstrap_desde_nube(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
+    }
+    .await;
+    motor.reanudar();
+    traida
 }
+
+/// Lo más que se espera a que la réplica termine lo que tenga en marcha antes de traer la nube: un
+/// lote espera su acuse hasta 30 s (`ESPERA_DEL_LOTE`).
+const ESPERA_A_LA_REPLICA: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// Inicialización destructiva sólo para el caso explícito `tenant_db_not_provisioned`. El servidor
 /// vuelve a comprobarlo antes de crear nada; una respuesta ambigua nunca llega a esta rama.

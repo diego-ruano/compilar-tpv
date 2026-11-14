@@ -1,5 +1,5 @@
 //! RI-31/RI-57: un único transporte nativo, independiente del ciclo de vida de React.
-use std::{sync::{Arc, Mutex}, time::Duration};
+use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{Duration, Instant}};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -18,10 +18,14 @@ pub(crate) struct SyncNativo {
     /// De cuántas operaciones es el siguiente lote de la subida. Sobrevive a las sesiones: un lote
     /// sin respuesta acaba con la suya, y la siguiente tiene que saberlo.
     ritmo: Arc<RitmoDeSubida>,
+    /// Mientras se trae el estado de la nube, el motor no abre ninguna sesión (`pausar`).
+    pausa: AtomicBool,
+    /// Hay una sesión normal (no de recuperación) en marcha.
+    en_sesion_normal: AtomicBool,
 }
 impl Default for SyncNativo {
     fn default() -> Self {
-        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0 }), ritmo: Arc::default() }
+        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0 }), ritmo: Arc::default(), pausa: AtomicBool::new(false), en_sesion_normal: AtomicBool::new(false) }
     }
 }
 impl SyncNativo {
@@ -32,6 +36,35 @@ impl SyncNativo {
         let _ = app.emit("sync:estado", foto.clone());
     }
     pub fn reintentar(&self) { self.reintentar.notify_one(); self.despertar.notify_one(); }
+
+    /// Para el motor mientras se trae el estado de la nube, y espera a que termine la sesión normal
+    /// que estuviera en marcha (Codex, SYNC-36). Traer la nube con una sesión viva no es seguro: la
+    /// restauración devuelve el checkpoint al `Seq` de su foto, y un cambio que esa sesión aplicara
+    /// después en vivo lo llevaría más allá, saltándose los que la foto no traía y la sesión ya
+    /// había aplicado sobre la base de antes. Despierta a la sesión para que mire en el momento si
+    /// sigue disponible (`sigue_disponible`, que con la pausa dice que no), y si en `plazo` no ha
+    /// terminado (un lote esperando su acuse), reanuda y falla sin haber tocado nada.
+    pub(crate) async fn pausar_hasta_sin_sesion(&self, plazo: Duration) -> AppResult<()> {
+        self.pausa.store(true, Ordering::SeqCst);
+        let hasta = Instant::now() + plazo;
+        while self.en_sesion_normal.load(Ordering::SeqCst) {
+            if Instant::now() >= hasta {
+                self.reanudar();
+                return Err(AppError::conflict(
+                    "La conexión con la nube está terminando lo que tenía en marcha. Vuelve a intentarlo en un momento.",
+                ));
+            }
+            self.despertar.notify_one();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
+
+    /// Quita la pausa y pide al motor que vuelva a mirar ya: tras traer la nube, para reconciliar.
+    pub(crate) fn reanudar(&self) {
+        self.pausa.store(false, Ordering::SeqCst);
+        self.reintentar();
+    }
 }
 
 struct Contexto { app: AppHandle }
@@ -58,6 +91,8 @@ impl ContextoReplicacion for Contexto {
         crate::commands::recovery::completar(&self.app.state::<AppState>(), high_water).await
     }
     async fn sigue_disponible(&self, recuperando: bool) -> AppResult<bool> {
+        // Se está trayendo el estado de la nube (`SyncNativo::pausar_hasta_sin_sesion`).
+        if self.app.state::<SyncNativo>().pausa.load(Ordering::SeqCst) { return Ok(false); }
         let state = self.app.state::<AppState>();
         if *state.mode.lock().await != Some(DeviceMode::Tpv) { return Ok(false); }
         let dir = self.app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
@@ -108,7 +143,17 @@ pub(crate) fn arrancar(app: AppHandle) {
             let mut detenida = false;
             if (disponible || recuperando) && con_licencia {
                 runtime.publicar(&app, "conectando", None);
-                match sesion(&app, recuperando).await {
+                // Lo mira `pausar_hasta_sin_sesion` antes de traer la nube. Se anota la sesión y
+                // DESPUÉS se mira la pausa (quien pausa hace lo contrario): una de las dos partes ve
+                // a la otra, y no hay hueco entre mirar `disponible` arriba y empezar.
+                runtime.en_sesion_normal.store(!recuperando, Ordering::SeqCst);
+                let fin = if runtime.pausa.load(Ordering::SeqCst) {
+                    Ok(uc::FinDeSesion::NoDisponible)
+                } else {
+                    sesion(&app, recuperando).await
+                };
+                runtime.en_sesion_normal.store(false, Ordering::SeqCst);
+                match fin {
                     Ok(uc::FinDeSesion::NoDisponible) => { retardo = 3; fallos = 0; espera = 1; }
                     // AUD-19: a esta base le falta lo que la nube ya purgó. Reconectar no lo
                     // arregla. SYNC-32: el caso de uso ya la ha pasado a recuperarse de la nube
@@ -152,4 +197,45 @@ pub(crate) fn arrancar(app: AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests_pausa {
+    //! Codex (SYNC-36): traer la nube con el motor parado. La pausa espera a que acabe la sesión
+    //! normal en marcha, y si no acaba a tiempo se deshace sin haber tocado nada.
+    use super::*;
+
+    #[tokio::test]
+    async fn la_pausa_espera_a_que_acabe_la_sesion_normal() {
+        let motor = Arc::new(SyncNativo::default());
+        motor.en_sesion_normal.store(true, Ordering::SeqCst);
+        let sesion = motor.clone();
+        let fin = tokio::spawn(async move {
+            // La sesión, despertada, mira si sigue disponible: con la pausa, no.
+            sesion.despertar.notified().await;
+            assert!(sesion.pausa.load(Ordering::SeqCst));
+            sesion.en_sesion_normal.store(false, Ordering::SeqCst);
+        });
+        motor.pausar_hasta_sin_sesion(Duration::from_secs(5)).await.unwrap();
+        fin.await.unwrap();
+        assert!(motor.pausa.load(Ordering::SeqCst), "sigue parado mientras se trae la nube");
+        motor.reanudar();
+        assert!(!motor.pausa.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn si_la_sesion_no_acaba_a_tiempo_se_deshace_la_pausa_y_falla() {
+        let motor = SyncNativo::default();
+        motor.en_sesion_normal.store(true, Ordering::SeqCst);
+        let e = motor.pausar_hasta_sin_sesion(Duration::from_millis(250)).await.unwrap_err();
+        assert!(e.to_string().contains("Vuelve a intentarlo"), "{e}");
+        assert!(!motor.pausa.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn sin_sesion_en_marcha_no_espera() {
+        let motor = SyncNativo::default();
+        motor.pausar_hasta_sin_sesion(Duration::from_millis(1)).await.unwrap();
+        assert!(motor.pausa.load(Ordering::SeqCst));
+    }
 }
