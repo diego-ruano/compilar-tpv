@@ -21,6 +21,11 @@ import { Hono } from "hono";
 import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { ahoraDelCliente, antesDe } from "./helpers/horaDelCliente";
+
+// «Ahora» del dispositivo que pregunta, y el comienzo de la ventana de 30 días que sale de él.
+const AHORA = ahoraDelCliente();
+const DESDE = antesDe(AHORA, 30 * 24);
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
@@ -63,7 +68,7 @@ async function conTenant<R>(nombre: string, sembrar: (sql: any) => void, usar: (
 						ruta,
 						{
 							method: "POST",
-							headers: { "content-type": "application/json", "x-client-now": "2026-11-13 12:00:00" },
+							headers: { "content-type": "application/json", "x-client-now": AHORA },
 							body: JSON.stringify(cuerpo ?? {}),
 						},
 						{} as any,
@@ -96,13 +101,15 @@ function sembrarZonas(sql: any, n: number): void {
 	}
 }
 
-/** Comandas de barra: las de hoy entran en la ventana; las de 2020, sólo en el conteo. */
+/** Comandas de barra: las de ayer entran en la ventana; las de 2020, sólo en el conteo. */
 function sembrarComandas(sql: any, recientes: number, antiguas: number): void {
 	for (let i = 0; i < recientes; i++) {
 		sql.exec(
 			`INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda)
-			 VALUES (?, 'BARRA', '2026-11-12 21:00:00', '2026-11-12 22:00:00', 'Pagada', ?);`,
+			 VALUES (?, 'BARRA', ?, ?, 'Pagada', ?);`,
 			`c-nueva-${String(i).padStart(4, "0")}`,
+			antesDe(AHORA, 15),
+			antesDe(AHORA, 14),
 			1250 + i,
 		);
 	}
@@ -152,7 +159,7 @@ describe("POST /v1/sync/verificar/resumen", () => {
 				);
 				expect(body).toMatchObject({ ok: true, aplazar: false, checkpoint: 4, hasta_seq: 4, ventana_omitida: false });
 				// 30 días antes de la hora de quien pregunta.
-				expect(body.desde).toBe("2026-10-14 12:00:00");
+				expect(body.desde).toBe(DESDE);
 
 				const zonas = tablaDe(body, "Zonas");
 				expect(Object.keys(zonas).sort()).toEqual(
@@ -202,7 +209,7 @@ describe("POST /v1/sync/verificar/resumen", () => {
 				// Las filas de ese cubo, y sólo ésas: entre ellas, la que ha cambiado.
 				const { status, body } = await pedir("/verificar/filas", {
 					tabla: "Zonas",
-					desde: "2026-10-14 12:00:00",
+					desde: DESDE,
 					cubos: 16,
 					pedir: cambiados,
 				});
@@ -346,8 +353,10 @@ describe("POST /v1/sync/verificar/resumen", () => {
 			for (let i = 0; i < 40; i++) {
 				sql.exec(
 					`INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado)
-					 VALUES (?, 'BARRA', '2026-10-23 12:00:00', '2026-10-23 13:00:00', 'Pagada');`,
+					 VALUES (?, 'BARRA', ?, ?, 'Pagada');`,
 					`c-octubre-${i}`,
+					antesDe(AHORA, 21 * 24),
+					antesDe(AHORA, 21 * 24 - 1),
 				);
 			}
 			sembrarComandas(sql, 10, 0);
@@ -357,18 +366,18 @@ describe("POST /v1/sync/verificar/resumen", () => {
 			expect(maestras).toBe(20);
 
 			for (const lector of [lectorDelHub(sql)]) {
-				const quien = { checkpoint: null, deviceId: "d1", clientNow: "2026-11-13 12:00:00", ahoraMs: Date.now() };
+				const quien = { checkpoint: null, deviceId: "d1", clientNow: AHORA, ahoraMs: Date.now() };
 				const leer = async (maxFilas: number) =>
 					JSON.parse(new TextDecoder().decode(await resumenDeVerificacion(lector, quien, maxFilas)));
 
 				const todo = await leer(1_000_000);
 				const filasDe = (cuerpo: any) => cuerpo.tablas.reduce((n: number, t: any) => n + (t.filas ?? 0), 0);
-				expect(todo).toMatchObject({ ventana_omitida: false, desde: "2026-10-14 12:00:00" });
+				expect(todo).toMatchObject({ ventana_omitida: false, desde: DESDE });
 				expect(tablaDe(todo, "Comandas").filas).toBe(50);
 
-				// Con sitio para todo menos las 40 de octubre: la ventana de una semana.
+				// Con sitio para todo menos las 40 de hace tres semanas: la ventana de una semana.
 				const semana = await leer(filasDe(todo) - 40);
-				expect(semana).toMatchObject({ ventana_omitida: false, desde: "2026-11-06 12:00:00" });
+				expect(semana).toMatchObject({ ventana_omitida: false, desde: antesDe(AHORA, 7 * 24) });
 				expect(tablaDe(semana, "Comandas")).toMatchObject({ filas: 10, total: 50 });
 
 				// Sin sitio ni para los maestros: sólo los conteos.
@@ -390,7 +399,7 @@ describe("POST /v1/sync/verificar/filas", () => {
 			sembrarLog(sql, 3);
 
 			for (const lector of [lectorDelHub(sql)]) {
-				const pedido = { tabla: "Zonas", desde: "2026-10-14 12:00:00", cubos: 4, pedir: [1, 3] };
+				const pedido = { tabla: "Zonas", desde: DESDE, cubos: 4, pedir: [1, 3] };
 				const vistas: string[] = [];
 				let cursor = 0;
 				let paginas = 0;
@@ -426,7 +435,7 @@ describe("POST /v1/sync/verificar/filas", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			sembrarZonas(sql, 100);
-			const pedido = { tabla: "Zonas", desde: "2026-10-14 12:00:00", cubos: 4, pedir: [2] };
+			const pedido = { tabla: "Zonas", desde: DESDE, cubos: 4, pedir: [2] };
 			const vistas: string[] = [];
 			let cursor = 0;
 			let paginas = 0;
@@ -456,7 +465,7 @@ describe("POST /v1/sync/verificar/filas", () => {
 				new TextDecoder().decode(
 					await filasDeLosCubos(
 						lectorDelHub(sql),
-						{ tabla: "Zonas", desde: "2026-10-14 12:00:00", cubos: 1, pedir: [0], cursor: 0 },
+						{ tabla: "Zonas", desde: DESDE, cubos: 1, pedir: [0], cursor: 0 },
 						1_000,
 					),
 				),
