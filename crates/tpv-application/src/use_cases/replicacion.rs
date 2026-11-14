@@ -446,6 +446,18 @@ async fn converger(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, ses
     }
 }
 
+/// Lo que se espera al socket en una vuelta del motor: 30 s con todo subido y 3 s con algo por subir.
+/// SYNC-29: una convergencia aplazada se repite a su hora aunque no llegue nada, pero sólo si puede
+/// correr; con algo por subir no toca, y su hora vencida no puede dejar el motor despertándose sin
+/// hacer nada.
+fn espera_del_socket(vacio: bool, puede_converger: bool, convergencia: &RitmoDeConvergencia) -> Duration {
+    let espera = Duration::from_secs(if vacio {30} else {3});
+    match convergencia.espera().filter(|_| puede_converger) {
+        Some(falta) => espera.min(falta.max(Duration::from_millis(100))),
+        None => espera,
+    }
+}
+
 /// AUD-15 · El saludo de la Main, siempre con `recovering`: el DO congela a las Handy
 /// (`main_volcando`) y deja pasar lo que suba la Main, y `ejecutar` las suelta con `recovery_ready`
 /// cuando se ha puesto al día: con el outbox vacío. Mirar antes si hay atraso no sirve: lo que se confirme entre mirarlo y
@@ -522,11 +534,9 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             continue;
         }
         // SYNC-29: con todo subido, lo que la nube ordenó de otra forma se trae de ella.
-        if vacio && !handy_por_soltar { converger(ctx, nube, &mut sesion).await; }
-        let mut espera = Duration::from_secs(if vacio {30} else {3});
-        // Una vuelta aplazada se repite a su hora, aunque no llegue nada por el socket.
-        if let Some(falta) = sesion.convergencia.espera() { espera = espera.min(falta.max(Duration::from_millis(100))); }
-        let msg = canal.recibir(espera).await?;
+        let puede_converger = vacio && !handy_por_soltar;
+        if puede_converger { converger(ctx, nube, &mut sesion).await; }
+        let msg = canal.recibir(espera_del_socket(vacio, puede_converger, &sesion.convergencia)).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
         // Un cambio de modo o de la palanca despierta al motor (`contexto_cambiado`): se mira ya.
         if despertar { disponible_comprobado = None; }
@@ -545,6 +555,15 @@ mod tests {
     fn un_cambio_mal_formado_no_avanza_el_cursor() {
         for m in [json!({}), json!({"opId":"x","seq":-1,"statements":[]}), json!({"opId":"x","seq":1,"statements":"SQL"})] { assert!(cambio(m).is_err()); }
         assert_eq!(cambio(json!({"opId":"x","seq":2,"statements":[]})).unwrap().seq, 2);
+    }
+    // SYNC-29 (Codex): una convergencia aplazada y vencida no acorta la espera si no puede correr.
+    #[test]
+    fn una_convergencia_vencida_solo_acorta_la_espera_si_puede_correr() {
+        let vencida = RitmoDeConvergencia { siguiente: Some(Instant::now()), aplazadas: 1 };
+        assert_eq!(espera_del_socket(true, true, &vencida), Duration::from_millis(100));
+        assert_eq!(espera_del_socket(false, false, &vencida), Duration::from_secs(3), "con algo por subir");
+        assert_eq!(espera_del_socket(true, false, &vencida), Duration::from_secs(30), "con las Handy por soltar");
+        assert_eq!(espera_del_socket(true, true, &RitmoDeConvergencia::default()), Duration::from_secs(30));
     }
     // AUD-18: cuatro esperas crecientes y cortas entre los cinco intentos de un cambio.
     #[test]
