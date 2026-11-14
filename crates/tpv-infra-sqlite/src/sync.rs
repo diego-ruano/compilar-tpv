@@ -92,10 +92,19 @@ fn json_to_value(v: &serde_json::Value) -> Value {
 /// margen no compra nada aquí: lo que importa es no volver a una sentencia por fila.
 const MAX_PARAMS_POR_SENTENCIA: usize = 900;
 
-/// Nombres de tabla realmente presentes en la BD local. El volcado de la nube se filtra contra
+/// ¿Es una tabla que no es de negocio, sino de este equipo o de SQLite? Lo que empieza por `_` es
+/// estado local (el outbox, el sello del negocio, el resumen de las estadísticas, el progreso del
+/// histórico…) y no viaja: aunque la nube lo mandara en un volcado o en una página del histórico, no
+/// se restaura ni se rellena encima de lo de aquí. El worker tampoco lo manda (`esTablaDeNegocio`).
+fn es_tabla_del_equipo(nombre: &str) -> bool {
+    nombre.starts_with('_') || nombre.starts_with("sqlite_")
+}
+
+/// Las tablas de negocio realmente presentes en la BD local. El volcado de la nube se filtra contra
 /// esto: una Main con una versión por detrás recibirá tablas que su esquema aún no tiene, y eso
-/// tiene que informarse, no reventar la recuperación.
-async fn tablas_locales(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
+/// tiene que informarse, no reventar la recuperación. Las del equipo no están
+/// ([`es_tabla_del_equipo`]).
+async fn tablas_de_negocio_locales(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
     let mut rows = conn
         .query("SELECT name FROM sqlite_master WHERE type = 'table';", ())
         .await
@@ -103,7 +112,9 @@ async fn tablas_locales(conn: &Connection) -> AppResult<std::collections::HashSe
     let mut out = std::collections::HashSet::new();
     while let Some(row) = rows.next().await.map_err(db_err)? {
         if let Ok(Value::Text(n)) = row.get_value(0) {
-            out.insert(n);
+            if !es_tabla_del_equipo(&n) {
+                out.insert(n);
+            }
         }
     }
     Ok(out)
@@ -1204,7 +1215,7 @@ impl SyncRepository for SqliteSyncRepository {
         let w = self.db.write().await;
         let conn = w.raw();
 
-        let locales = tablas_locales(conn).await?;
+        let locales = tablas_de_negocio_locales(conn).await?;
 
         // Se decide TODO antes de tocar nada: qué tablas se restauran y cuáles no existen aquí.
         let mut restaurables: Vec<&tpv_contracts::sync::BootstrapTabla> = Vec::new();
@@ -1406,7 +1417,7 @@ impl SyncRepository for SqliteSyncRepository {
                 snapshot.backfill.clone()
             };
             for (i, nombre) in orden_backfill.iter().enumerate() {
-                if !identificador_simple(nombre) {
+                if !identificador_simple(nombre) || es_tabla_del_equipo(nombre) {
                     continue;
                 }
                 conn.execute(
@@ -1500,11 +1511,12 @@ impl SyncRepository for SqliteSyncRepository {
 
         // Un worker más nuevo puede listar una tabla que esta versión todavía no tiene. Se da por
         // completada en vez de fallar: si no, el backfill se atascaría en ella para siempre y
-        // ninguna de las siguientes llegaría a bajarse. Misma regla que en el bootstrap.
-        if !tablas_locales(conn).await?.contains(&pagina.tabla) {
+        // ninguna de las siguientes llegaría a bajarse. Misma regla que en el bootstrap, también
+        // para una tabla del equipo, que no se rellena desde la nube (`es_tabla_del_equipo`).
+        if !tablas_de_negocio_locales(conn).await?.contains(&pagina.tabla) {
             conn.execute(
                 "UPDATE _Backfill_Historico \
-                 SET Completada = 1, Ultimo_Error = 'esta versión no conoce la tabla', \
+                 SET Completada = 1, Ultimo_Error = 'esta versión no tiene esa tabla de negocio', \
                      Ultimo_Intento_Ms = ?2 \
                  WHERE Tabla = ?1;",
                 vec![Value::Text(pagina.tabla.clone()), Value::Integer(now_ms())],
@@ -2687,6 +2699,52 @@ mod tests_backfill {
         assert_eq!(e.tablas_completadas, 0);
         // `Zonas` vino entera: no tiene nada que rellenar y no entra en la cola.
         assert_eq!(e.tabla_actual.as_deref(), Some("Comandas"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo que empieza por `_` es estado de este equipo (aquí, el resumen de las estadísticas): aunque
+    /// la nube lo mandara en el volcado o en una página del histórico, no se restaura, no entra en
+    /// la cola del histórico y no se rellena.
+    #[tokio::test]
+    async fn una_tabla_del_equipo_no_se_restaura_ni_se_rellena_aunque_la_mande_la_nube() {
+        let (repo, db, dir) = repo_temporal().await;
+        let ajeno = |dia: &str| vec![json!(dia)];
+
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 1,
+            total_filas: 2,
+            tablas: vec![
+                BootstrapTabla {
+                    nombre: "Zonas".into(),
+                    columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                    filas: vec![vec![json!("z1"), json!("Sala")]],
+                    parcial: false,
+                },
+                BootstrapTabla {
+                    nombre: "_Estad_Dias_Sucios".into(),
+                    columnas: vec!["Dia".into()],
+                    filas: vec![ajeno("1999-01-01")],
+                    parcial: true,
+                },
+            ],
+            backfill: vec!["_Estad_Dias_Sucios".into()],
+        }, "negocio-de-prueba")
+        .await
+        .unwrap();
+
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia LIKE '1999-%';").await, 0);
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), None, "una tabla del equipo no entra en la cola");
+
+        let pagina = HistoricoPagina {
+            tabla: "_Estad_Dias_Sucios".into(),
+            columnas: vec!["Dia".into()],
+            filas: vec![ajeno("1999-01-02")],
+            siguiente_cursor: None,
+        };
+        assert_eq!(repo.backfill_aplicar_pagina(pagina).await.unwrap(), 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia LIKE '1999-%';").await, 0);
 
         let _ = std::fs::remove_dir_all(dir);
     }
