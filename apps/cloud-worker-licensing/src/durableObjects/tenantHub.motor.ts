@@ -33,6 +33,7 @@ import { dentroDelHub } from "../lib/hubLocal";
 import {
 	baseAprovisionada,
 	clienteLocal,
+	GuardaIncumplida,
 	HaceFaltaAplazar,
 	loteEnBruto,
 	type FilasEnBruto,
@@ -65,6 +66,7 @@ import type {
 	OpDeLote,
 	ResolvedStmt,
 	Role,
+	SentenciaDelLote,
 	VeredictoDeLote,
 	WsAttachment,
 } from "./tenantHub.types";
@@ -954,6 +956,8 @@ export class MotorTenantHub {
 		try {
 			return await runApply();
 		} catch (e: any) {
+			// SYNC-30: una guarda que no se cumple es la respuesta de negocio de la ruta, no un fallo.
+			if (e instanceof GuardaIncumplida) throw e;
 			// Sólo los FALLOS van a Axiom (100%), con payload RECORTADO: nombre de comando + ids +
 			// error truncado. NO incluimos el comando ni sus args (evita filtrar datos y volumen).
 			// El freeze `main_offline` no llega aquí (se lanza antes) y ya tiene su propio evento.
@@ -1152,7 +1156,7 @@ export class MotorTenantHub {
 	 * El lote atómico de una operación contra la base de este DO, en el acto y sin esperas. Método, y
 	 * no una llamada directa, para que un test le ponga delante el fallo que quiera.
 	 */
-	private loteLocal(sentencias: ResolvedStmt[], alAplazar: () => boolean): FilasEnBruto[] {
+	private loteLocal(sentencias: SentenciaDelLote[], alAplazar: () => boolean): FilasEnBruto[] {
 		return loteEnBruto(this.state.storage, sentencias, { alAplazar });
 	}
 

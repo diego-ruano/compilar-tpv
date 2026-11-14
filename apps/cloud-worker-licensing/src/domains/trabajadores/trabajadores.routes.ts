@@ -71,12 +71,8 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_trabajador_invalido");
 	const datos = c.req.valid("json");
-	// RI-62: comprobación previa, como TRAB-04: los pasos de una transacción del DO no pueden
-	// abortarla según lo que lean. La Main la hace dentro de su transacción.
-	const sinAdmin = await tenantQuery(c, (db) =>
-		q.dejariaSinAdministrador(db, datos.id_usuario, datos.id_rol, datos.estado),
-	);
-	if (sinAdmin) return c.json({ error: "ultimo_administrador" }, 409);
+	// RI-62: que no deje el negocio sin administrador lo decide la guarda del comando, dentro del lote
+	// (SYNC-30): `ultimo_administrador`. La Main lo mira dentro de su transacción.
 	const passwordHash = datos.pin ? await hashPin(datos.pin) : null;
 	const filas = await apply(c, cmd.updateTrabajador(id, datos, passwordHash));
 	// RI-63: un id que no existe respondía `ok`. En un reintento las cuentas llegan a `null` (el
@@ -89,16 +85,8 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 
 trabajadoresRoutes.post("/horarios/asignaciones", cuerpo(S.asignacionCreateSchema), async (c) => {
 	const datos = c.req.valid("json");
-	// TRAB-04: bloquear el mismo turno para el mismo trabajador y día (aunque cambie el área).
-	const dup = await tenantQuery(c, (db) =>
-		q.existeAsignacionTurno(db, datos.id_trabajador, datos.fecha, datos.id_turno),
-	);
-	if (dup) {
-		return c.json(
-			{ error: "asignacion_duplicada", message: "Ese trabajador ya tiene ese turno asignado ese día." },
-			409,
-		);
-	}
+	// TRAB-04: el mismo turno para el mismo trabajador y día (aunque cambie el área) lo rechaza la
+	// guarda del comando, dentro del lote (SYNC-30): `asignacion_duplicada`.
 	const id = await apply(c, cmd.createAsignacion(datos));
 	return c.json({ ok: true, id_asignacion: id });
 });

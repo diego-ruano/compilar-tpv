@@ -6,6 +6,8 @@
 // esquema del control-plane, los WHERE que deciden una adjudicación, los UPDATE condicionales.
 // Un doble en memoria que "emule" esas cláusulas probaría el doble, no el código.
 
+import { GuardaIncumplida } from "../../src/durableObjects/tenantHub.sqlite";
+
 /**
  * Da a una fila del SqlStorage el acceso POSICIONAL que también tiene la de libsql.
  *
@@ -62,7 +64,17 @@ export function clienteSobre(sql: any, storage?: any) {
 		},
 
 		async batch(sentencias: any[], _modo?: string) {
-			const correr = () => sentencias.map((s) => ejecutar(s));
+			// SYNC-30: la guarda de un paso `guard` decide como en `loteEnBruto`: un número distinto
+			// de 0 en la primera columna de la primera fila, o el lote se deshace con su error.
+			const correr = () =>
+				sentencias.map((s) => {
+					const r = ejecutar(s);
+					if (s?.guarda) {
+						const valor = r.rows[0]?.[0];
+						if (typeof valor !== "number" || valor === 0) throw new GuardaIncumplida(s.guarda);
+					}
+					return r;
+				});
 			// Con el `storage` delante hay todo-o-nada de verdad (`transactionSync` deshace el lote
 			// si una sentencia revienta), que es lo que promete libsql y de lo que depende el apply
 			// agrupado. Sin él el doble no es atómico: pásalo siempre que el test mire un rollback.

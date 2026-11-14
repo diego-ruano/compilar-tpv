@@ -53,23 +53,24 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 
 	// RI-61: ¿se pisa con lo que ya ocupa la mesa (otra reserva o una comanda abierta)? Sin mesa no
 	// ocupa nada. Con los solapes prohibidos no se guarda; con «avisar», sólo si llega confirmado.
-	// La Main hace lo mismo dentro de su transacción.
-	if (datos.id_mesa) {
-		const idMesa = datos.id_mesa;
-		const choque = await tenantQuery(c, async (db) => {
-			const ajustes = await q.ajustesDeReserva(db);
-			const texto = await q.choqueEnLaMesa(db, { ...datos, id_mesa: idMesa }, ajustes.duracion);
-			return texto ? { texto, modo: ajustes.modo } : null;
-		});
-		if (choque?.modo === "prohibir") {
-			return c.json(
-				{ error: "reserva_solapada_prohibida", message: `${choque.texto} ${q.MSG_SOLAPE_PROHIBIDO}` },
-				409,
-			);
-		}
-		if (choque && !datos.forzar_solape) {
-			return c.json({ error: "reserva_solapada", message: choque.texto }, 409);
-		}
+	// La Main hace lo mismo dentro de su transacción. Aquí se mira para decir con qué choca, y el
+	// comando lo vuelve a mirar dentro del lote que guarda la reserva (SYNC-30).
+	const idMesa = datos.id_mesa;
+	const solape = idMesa
+		? await tenantQuery(c, async (db) => {
+				const ajustes = await q.ajustesDeReserva(db);
+				const texto = await q.choqueEnLaMesa(db, { ...datos, id_mesa: idMesa }, ajustes.duracion);
+				return { ajustes, texto };
+			})
+		: null;
+	if (solape?.texto && solape.ajustes.modo === "prohibir") {
+		return c.json(
+			{ error: "reserva_solapada_prohibida", message: `${solape.texto} ${q.MSG_SOLAPE_PROHIBIDO}` },
+			409,
+		);
+	}
+	if (solape?.texto && !datos.forzar_solape) {
+		return c.json({ error: "reserva_solapada", message: solape.texto }, 409);
 	}
 
 	// RI-61: el cliente llega decidido (ninguno, uno existente o uno nuevo); aquí no se casa nada.
@@ -77,7 +78,7 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 	if ("error" in cliente) {
 		return c.json({ error: cliente.error }, cliente.error === "email_duplicado" ? 409 : 404);
 	}
-	const id = await apply(c, cmd.saveReserva(datos, cliente));
+	const id = await apply(c, cmd.saveReserva(datos, cliente, solape?.ajustes ?? null));
 	return c.json({ ok: true, id_reserva: id });
 });
 
@@ -94,15 +95,15 @@ reservasRoutes.delete("/:id", async (c) => {
 });
 
 // Cancela una reserva que aún no ha llegado. `cancelada: false` si ya no existe; una ya cancelada
-// no se vuelve a escribir. El correo al cliente de una reserva web lo manda la Handy después
-// (`POST /v1/reservas-web/avisos`), como con cualquier cambio suyo.
+// no se vuelve a escribir. Que aún no haya llegado lo decide la guarda del comando al aplicarlo
+// (SYNC-30): si no, `reserva_no_pendiente`. El correo al cliente de una reserva web lo manda la
+// Handy después (`POST /v1/reservas-web/avisos`), como con cualquier cambio suyo.
 reservasRoutes.post("/:id/cancelar", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_reserva_invalido");
 	const r = await tenantQuery(c, (db) => q.estadoYOrigen(db, id));
 	if (!r) return c.json({ ok: true, cancelada: false });
 	if (r.estado === "CANCELADA") return c.json({ ok: true, cancelada: true });
-	if (r.estado !== "PROXIMA") return c.json({ error: "reserva_no_pendiente" }, 409);
 	await apply(c, cmd.cancelarReserva(id));
 	return c.json({ ok: true, cancelada: true });
 });

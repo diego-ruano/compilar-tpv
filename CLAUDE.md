@@ -222,6 +222,10 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   Un test que monta un router suelto declara el doble de `alHub` (`test/helpers/rutaSuelta.ts`).
 - El objeto de un negocio se pide sólo por `lib/objetosDelNegocio.ts` (`hubDe`, `agendaDe`), nunca a
   `env.TenantHub` o `env.AgendaWeb` directamente.
+- **Lo que decide si una escritura entra va en un paso `guard` de su comando** (SYNC-30), que el
+  `TenantHub` evalúa dentro del lote atómico y no replica; no en una lectura de la ruta antes de
+  `apply`, que se queda vieja mientras el DO atiende a otros y contesta mal al reintento de una
+  escritura que ya entró.
 - **Ningún dato personal ni texto libre en la query ni en el camino** (AUD-27): va en el cuerpo, y una
   lectura por POST se declara con `lecturaPorPost()` delante de `tenantAuth`.
 - Un schema zod con contrapartida en Rust lleva su drift-guard (`Assert<SameKeys<…>>`), y **lo que

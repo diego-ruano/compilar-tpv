@@ -7,6 +7,7 @@ import { nuevoId } from "../../lib/ids";
 import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
+import { guardaComandaSinCobrar, guardaProductoEnLaCarta } from "./guardasDeLinea";
 import type { CobroDetallesPlan } from "./mesas.queries";
 import type {
 	AbrirComandaInput,
@@ -282,8 +283,21 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 /** Estados con los que la reserva deja de estar viva y hay que soltar la comanda que la apuntaba. */
 const ESTADOS_QUE_CIERRAN_RESERVA = new Set(["FINALIZADA", "CANCELADA", "NO_SHOW"]);
 
-export function setReservaEstado(idReserva: string, estado: string): BuiltCommand {
+/**
+ * Marca desde la mesa que el cliente ha llegado o se ha ido. Lo decide la ruta con la reserva como
+ * la lee (`cambioDesdeLaMesa`), y `desde` es el estado que leyó: la guarda exige que la reserva siga
+ * así al aplicarlo, o ya como se pide (SYNC-30). Si entre la lectura y el lote la han cancelado,
+ * marcado «No vino» o borrado, `reserva_cambiada`, lo mismo que si la ruta lo hubiera visto.
+ */
+export function setReservaEstado(idReserva: string, estado: string, desde: string): BuiltCommand {
 	const steps: any[] = [
+		{
+			kind: "guard",
+			sql: "SELECT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Estado IN (?2, ?3));",
+			args: [idReserva, desde, estado],
+			error: "reserva_cambiada",
+			status: 409,
+		},
 		{
 			kind: "execute",
 			sql: "UPDATE Reservas SET Estado = ?2 WHERE ID_Reserva = ?1;",
@@ -436,7 +450,8 @@ export function addLinea(
 	nombreProducto: string | null,
 	precio: Dinero,
 ): BuiltCommand {
-	const steps: any[] = [];
+	// SYNC-30: el producto en la carta y la comanda sin cobrar, mirados dentro del lote.
+	const steps: any[] = [guardaProductoEnLaCarta(input.id_producto), guardaComandaSinCobrar(input.id_comanda)];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
 	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
 	const idDetalle = nuevoId();
@@ -470,9 +485,9 @@ export function addLinea(
 	// LÍNEA: una reimpresión tiene que enseñar lo del día de la venta, y el producto puede haberse
 	// borrado del catálogo desde entonces (INV-05). El precio (?5) también sale del catálogo (RI-27).
 	//
-	// INC-20261030-016: sólo entra en una comanda abierta. La ruta ya lo rechaza antes, pero lo
-	// lee fuera de esta transacción (SYNC-30): si la Main cobra en medio, la condición hace que no
-	// entre nada en vez de una línea que nadie va a cobrar.
+	// INC-20261030-016: sólo entra en una comanda abierta. En la nube lo decide la guarda de arriba
+	// (SYNC-30); la condición es para la Main, que aplica esta sentencia con sus datos y puede tener
+	// la comanda cobrada sin subir: allí no entra nada, en vez de una línea que nadie va a cobrar.
 	steps.push({
 		kind: "execute",
 		sql: `

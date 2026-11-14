@@ -120,10 +120,11 @@ export async function estadoYOrigen(
 	return r ? { estado: String(r.estado), origen: String(r.origen) } : null;
 }
 
-/** RI-61: la duración por defecto y el modo de solape del negocio. Espejo de `ajustes_de_reserva`. */
-export async function ajustesDeReserva(
-	db: Client,
-): Promise<{ duracion: number; modo: "avisar" | "prohibir" }> {
+/** RI-61: la duración por defecto y el modo de solape del negocio. */
+export type AjustesDeReserva = { duracion: number; modo: "avisar" | "prohibir" };
+
+/** Los ajustes de reserva del negocio. Espejo de `ajustes_de_reserva`. */
+export async function ajustesDeReserva(db: Client): Promise<AjustesDeReserva> {
 	const rs = await db.execute(
 		"SELECT Reserva_Duracion_Min AS duracion, Reserva_Solape AS modo FROM Business_Settings WHERE ID = 1;",
 	);
@@ -135,11 +136,9 @@ export async function ajustesDeReserva(
 }
 
 // RI-61: el mismo SQL que `SQL_CHOQUE_RESERVA` y `SQL_CHOQUE_COMANDA` en la Main
-// (`tpv-infra-sqlite/src/reservas.rs`), donde está explicado. Tiene que seguir siéndolo.
-const SQL_CHOQUE_RESERVA = `
-	SELECT R.Hora AS desde,
-	       strftime('%H:%M', datetime(R.Dia_YMD || ' ' || R.Hora,
-	                                  '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')) AS hasta
+// (`tpv-infra-sqlite/src/reservas.rs`), donde está explicado. Tiene que seguir siéndolo. Las
+// condiciones van aparte porque las usa también la guarda del solape (`SQL_SIN_CHOQUE_EN_LA_MESA`).
+const CHOCA_CON_UNA_RESERVA = `
 	FROM Reservas R
 	WHERE R.ID_Mesa = ?1
 	  AND R.ID_Reserva <> ?6
@@ -147,21 +146,54 @@ const SQL_CHOQUE_RESERVA = `
 	  AND datetime(R.Dia_YMD || ' ' || R.Hora) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
 	  AND datetime(R.Dia_YMD || ' ' || R.Hora, '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')
 	      > datetime(?2 || ' ' || ?3)
-	ORDER BY R.Dia_YMD, R.Hora, R.ID_Reserva
-	LIMIT 1;
 `;
 
-const SQL_CHOQUE_COMANDA = `
-	SELECT strftime('%H:%M', C.Fecha_Hora_Apertura) AS desde
+const CHOCA_CON_UNA_COMANDA = `
 	FROM Comandas C
 	WHERE C.ID_Mesa = ?1
 	  AND C.Estado = 'Abierta'
 	  AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
 	  AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?5 || ' minutes'), datetime('now','localtime'))
 	      > datetime(?2 || ' ' || ?3)
+`;
+
+const SQL_CHOQUE_RESERVA = `
+	SELECT R.Hora AS desde,
+	       strftime('%H:%M', datetime(R.Dia_YMD || ' ' || R.Hora,
+	                                  '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')) AS hasta
+	${CHOCA_CON_UNA_RESERVA}
+	ORDER BY R.Dia_YMD, R.Hora, R.ID_Reserva
+	LIMIT 1;
+`;
+
+const SQL_CHOQUE_COMANDA = `
+	SELECT strftime('%H:%M', C.Fecha_Hora_Apertura) AS desde
+	${CHOCA_CON_UNA_COMANDA}
 	ORDER BY C.Fecha_Hora_Apertura, C.ID_Comanda
 	LIMIT 1;
 `;
+
+/**
+ * SYNC-30: 1 si la mesa no choca con nada, con los argumentos de `argumentosDelChoque`. Es la guarda
+ * con la que `saveReserva` vuelve a mirar el solape dentro del lote que guarda la reserva: la ruta
+ * lo mira antes (`choqueEnLaMesa`, para decir con qué choca), y entre su lectura y el lote puede
+ * entrar otra reserva o abrirse una comanda en esa mesa.
+ */
+export const SQL_SIN_CHOQUE_EN_LA_MESA = `
+	SELECT NOT EXISTS (SELECT 1 ${CHOCA_CON_UNA_RESERVA})
+	   AND NOT EXISTS (SELECT 1 ${CHOCA_CON_UNA_COMANDA});
+`;
+
+/**
+ * Los argumentos de las consultas del choque: `?1` la mesa, `?2` y `?3` el día y la hora, `?4` la
+ * duración de la reserva, `?5` la del negocio y `?6` la propia reserva, que no choca consigo misma.
+ */
+export function argumentosDelChoque(
+	r: { id_mesa: string; dia_ymd: string; hora: string; duracion_min?: number | null; id_reserva?: string | null },
+	duracionDef: number,
+): [string, string, string, number, number, string] {
+	return [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef, r.id_reserva ?? ""];
+}
 
 /** Mismo texto que `MSG_SOLAPE_PROHIBIDO` en la Main. */
 export const MSG_SOLAPE_PROHIBIDO =
@@ -183,16 +215,15 @@ export async function choqueEnLaMesa(
 	},
 	duracionDef: number,
 ): Promise<string | null> {
-	const base = [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef];
+	const args = argumentosDelChoque(r, duracionDef);
 
-	const reserva = rows(
-		await db.execute({ sql: SQL_CHOQUE_RESERVA, args: [...base, r.id_reserva ?? ""] }),
-	)[0];
+	const reserva = rows(await db.execute({ sql: SQL_CHOQUE_RESERVA, args }))[0];
 	if (reserva) {
 		return `Esa mesa ya tiene una reserva de ${reserva.desde} a ${reserva.hasta}.`;
 	}
 
-	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: base }))[0];
+	// Sin la propia reserva, que esta consulta no usa.
+	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: args.slice(0, 5) }))[0];
 	if (comanda) {
 		return `Esa mesa está ocupada: tiene una comanda abierta desde las ${comanda.desde}.`;
 	}

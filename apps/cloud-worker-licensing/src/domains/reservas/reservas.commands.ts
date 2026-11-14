@@ -2,7 +2,12 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
-import type { ClienteResuelto } from "./reservas.queries";
+import {
+	argumentosDelChoque,
+	SQL_SIN_CHOQUE_EN_LA_MESA,
+	type AjustesDeReserva,
+	type ClienteResuelto,
+} from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
 
 export type BuiltCommand = {
@@ -104,14 +109,63 @@ function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolea
 	return withId ? [input.id_reserva, ...args] : args;
 }
 
-export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): BuiltCommand {
+/**
+ * SYNC-30: lo que la ruta decidió leyendo la base, otra vez dentro del lote que guarda la reserva.
+ *
+ * - El cliente existente sigue existiendo (`cliente_no_encontrado`).
+ * - La mesa no choca con nada, si el solape está prohibido (`reserva_solapada_prohibida`) o si no
+ *   llega confirmado (`reserva_solapada`). Un solape confirmado con «avisar» entra.
+ *
+ * Van delante de todo lo que escribe: la reserva no choca consigo misma, pero una nueva sin id lo
+ * recibe aquí.
+ */
+function guardasDeLaReserva(
+	input: ReservaSaveInput,
+	cliente: ClienteResuelto,
+	ajustes: AjustesDeReserva | null,
+): any[] {
+	const guardas: any[] = [];
+	if (cliente.modo === "existente") {
+		guardas.push({
+			kind: "guard",
+			sql: "SELECT EXISTS (SELECT 1 FROM Clientes WHERE ID_Cliente = ?1);",
+			args: [cliente.id_cliente],
+			error: "cliente_no_encontrado",
+			status: 404,
+		});
+	}
+	if (input.id_mesa && ajustes) {
+		const error =
+			ajustes.modo === "prohibir" ? "reserva_solapada_prohibida" : input.forzar_solape ? null : "reserva_solapada";
+		if (error) {
+			guardas.push({
+				kind: "guard",
+				sql: SQL_SIN_CHOQUE_EN_LA_MESA,
+				args: argumentosDelChoque({ ...input, id_mesa: input.id_mesa }, ajustes.duracion),
+				error,
+				status: 409,
+			});
+		}
+	}
+	return guardas;
+}
+
+/**
+ * `ajustes` son los del negocio cuando la reserva lleva mesa (la ruta los lee para mirar el solape),
+ * y `null` sin mesa.
+ */
+export function saveReserva(
+	input: ReservaSaveInput,
+	cliente: ClienteResuelto,
+	ajustes: AjustesDeReserva | null,
+): BuiltCommand {
 	const cloudPayload = {
 		...input,
 		id_cliente: cliente.modo === "existente" ? cliente.id_cliente : null,
 	};
 
 	const { steps: pasosCliente, idCliente } = clienteSteps(input, cliente);
-	const steps: any[] = [...pasosCliente];
+	const steps: any[] = [...guardasDeLaReserva(input, cliente, ajustes), ...pasosCliente];
 
 	if (input.id_reserva) {
 		steps.push({
@@ -240,9 +294,11 @@ export function deleteReserva(idReserva: string): BuiltCommand {
 /**
  * Cancela una reserva que aún no ha llegado: se queda, cancelada. Igual que la Main.
  *
- * Quién decide es la ruta, que la lee antes (`reservas.queries.ts::estadoYOrigen`): la sentencia no
- * lleva la condición porque se vuelve a evaluar en la Main al replicarse, que puede tener la reserva
- * en otro estado.
+ * Que aún no haya llegado lo decide la guarda, dentro del lote que la cancela (SYNC-30): la ruta la
+ * lee antes, pero entre su lectura y el lote la Main puede haberla sentado. Si entretanto se ha
+ * cancelado o se ha borrado, cancelarla no cambia nada y la guarda la deja pasar. La sentencia
+ * replicada no lleva la condición: se vuelve a evaluar en la Main al replicarse, que puede tener la
+ * reserva en otro estado, y lo que decide es la nube.
  */
 export function cancelarReserva(idReserva: string): BuiltCommand {
 	return {
@@ -251,6 +307,13 @@ export function cancelarReserva(idReserva: string): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: "SELECT NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Estado NOT IN ('PROXIMA', 'CANCELADA'));",
+						args: [idReserva],
+						error: "reserva_no_pendiente",
+						status: 409,
+					},
 					{
 						kind: "execute",
 						saveAs: "canceladas",

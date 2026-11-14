@@ -29,7 +29,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
-| [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
@@ -435,33 +434,6 @@ La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones
 cambio remoto se respete la escritura local pendiente de la misma fila (aplicar otra vez lo del
 outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
 Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
-
-### SYNC-30 · Una ruta del worker decide con una lectura fuera de su transacción
-
-La Main decide dentro de la transacción que escribe: lee la fila y escribe con el cerrojo del
-escritor, y nadie se cuela en medio. Las rutas del worker no pueden: leen la base con `tenantQuery`,
-deciden y luego mandan el comando al motor del `TenantHub`, que lo aplica cuando le llega el turno
-del log. Entre la lectura y la escritura puede llegar otra (lo que sube la Main, otra Handy), también
-con la ruta ejecutándose dentro del DO: mientras espera, el DO atiende a los demás. El lote del
-`TenantHub` (`tenantHub.lote.ts`) sólo sabe ejecutar escrituras y lecturas que se devuelven: no
-tiene un paso que compruebe una condición y aborte el lote sin replicarse.
-
-Ejemplos: cancelar una reserva desde la Handy (`POST /v1/reservas/:id/cancelar`) comprueba que está
-`PROXIMA` y, si en esos milisegundos la Main la ha sentado, la cancela igual; marcar la llegada o la
-salida desde la mesa (`PUT /v1/mesas/reservas/:id/estado`), el solape con otra reserva en modo
-«prohibir», el último administrador, el turno repetido de un trabajador o una línea de un producto
-que se acaba de archivar funcionan igual. La ventana es de milisegundos y se suma a SYNC-29 (la Main
-puede tener la fila de otra forma sin subir), que es la más ancha de las dos.
-
-Lo que no puede romperse ya lo para la base con un índice único, también entre dos dispositivos a la
-vez: una comanda abierta por mesa, un cierre por periodo, nombres de zona, mesa y producto, correos
-de cliente. O una condición dentro de la propia sentencia, que la nube y la Main vuelven a evaluar al
-aplicarla: una línea en una comanda cobrada (INC-20261030-016) o borrar un ticket con cobros
-(AUD-14). Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
-identificadores o copia datos del catálogo. Lo que decide es poco más de una decena de comprobaciones.
-
-Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico, que no se
-replique y que devuelva un error de negocio si no se cumple; y pasar a él esas comprobaciones.
 
 ### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
 

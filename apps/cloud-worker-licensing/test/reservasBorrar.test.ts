@@ -2,10 +2,11 @@
 //
 // Borrar y cancelar una reserva desde la Handy (docs/estudios/reservas-web.md §5.6). Borrar la quita;
 // cancelar la deja, cancelada, y sólo se cancela la que aún no ha llegado. Una reserva web no se
-// borra nunca. Lo decide la ruta al leerla, y el comando lleva sólo la sentencia elegida, sin
-// condición: lo que se replica a la Main se vuelve a evaluar allí, donde la reserva puede estar en
-// otro estado. El efecto lo fijan los casos de contrato `reservas/eliminar` y `reservas/cancelar`;
-// aquí, qué contesta la ruta y qué se replica.
+// borra nunca. Lo decide la ruta al leerla y, que la reserva aún no haya llegado, la guarda del
+// comando al aplicarlo (SYNC-30, `guardasEnElLote.test.ts`). Lo que se replica es sólo la sentencia
+// elegida, sin condición: se vuelve a evaluar en la Main, donde la reserva puede estar en otro
+// estado. El efecto lo fijan los casos de contrato `reservas/eliminar` y `reservas/cancelar`; aquí,
+// qué contesta la ruta y qué se replica.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -46,6 +47,7 @@ vi.mock("../src/lib/rutas", async (original) => ({
 }));
 
 const { reservasRoutes } = await import("../src/domains/reservas/reservas.routes");
+const { buildApplyBatch } = await import("../src/durableObjects/tenantHub.lote");
 
 const app = new Hono();
 app.route("/v1/reservas", reservasRoutes);
@@ -55,7 +57,11 @@ async function pedir(metodo: "DELETE" | "POST", ruta: string) {
 	return { status: res.status, json: (await res.json()) as any };
 }
 
-const sentencias = () => aplicados.flatMap((b) => b.command.payload.steps.map((s: any) => s.sql));
+/** Lo que se replica a la Main de lo que la ruta mandó aplicar. */
+const sentencias = () => aplicados.flatMap((b) => buildApplyBatch(b.command).replicated.map((s) => s.sql));
+/** Las guardas que lleva lo que la ruta mandó aplicar (SYNC-30): no se replican. */
+const guardas = () =>
+	aplicados.flatMap((b) => b.command.payload.steps.filter((s: any) => s.kind === "guard").map((s: any) => s.error));
 
 beforeEach(() => {
 	aplicados.length = 0;
@@ -94,6 +100,7 @@ describe("cancelar una reserva", () => {
 			"UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
 			"UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
 		]);
+		expect(guardas()).toEqual(["reserva_no_pendiente", "reserva_no_pendiente"]);
 	});
 
 	it("ya cancelada no se vuelve a escribir, y una que no existe dice que no", async () => {
@@ -102,10 +109,10 @@ describe("cancelar una reserva", () => {
 		expect(aplicados).toEqual([]);
 	});
 
-	it("sentada o sin presentarse ya no se cancela", async () => {
-		for (const id of ["sentada", "no-vino"]) {
-			expect(await pedir("POST", `${id}/cancelar`), id).toEqual({ status: 409, json: { error: "reserva_no_pendiente" } });
-		}
-		expect(aplicados).toEqual([]);
+	// Ya no lo mira la ruta: lo mira la guarda dentro del lote, también si la Main la sienta entre la
+	// lectura y el lote. Que la rechace lo prueba `guardasEnElLote.test.ts`, con el motor de verdad.
+	it("sentada o sin presentarse: la ruta manda el comando con su guarda, que la rechaza al aplicarlo", async () => {
+		for (const id of ["sentada", "no-vino"]) await pedir("POST", `${id}/cancelar`);
+		expect(guardas()).toEqual(["reserva_no_pendiente", "reserva_no_pendiente"]);
 	});
 });

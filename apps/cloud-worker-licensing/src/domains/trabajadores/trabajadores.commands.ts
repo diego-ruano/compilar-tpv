@@ -113,9 +113,35 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 }
 
 /**
+ * RI-62: ¿editar esta ficha deja el negocio sin ningún administrador activo? Sí cuando el usuario es
+ * administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro. Sólo se mira
+ * el paso de «hay» a «no hay». El porqué, en `SQL_DEJARIA_SIN_ADMINISTRADOR` de
+ * `tpv-infra-sqlite/src/trabajadores.rs`: es la misma condición y tiene que seguir siéndolo. `?1` el
+ * usuario, `?2` el rol nuevo y `?3` el estado nuevo.
+ */
+const DEJARIA_SIN_ADMINISTRADOR = `
+	EXISTS (
+		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+		WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+	)
+	AND NOT (
+		?3 = 'Activo'
+		AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
+	)
+	AND NOT EXISTS (
+		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+		WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+	)
+`;
+
+/**
  * Sin `resultKey`: el resultado son las filas que tocó cada UPDATE (`usuarios`, `trabajadores`),
  * para que la ruta diga que el trabajador no existe en vez de responder `ok` sin haber tocado nada
  * (RI-63). En un reintento idempotente llegan a `null`: ese resultado se guarda sin leer la base.
+ *
+ * RI-62: que la edición no deje el negocio sin administrador lo decide la guarda del primer paso,
+ * dentro del lote que escribe (SYNC-30): mirado antes, otro dispositivo podía quitarle el rol al
+ * otro administrador entre la lectura y el lote. La Main lo mira dentro de su transacción.
  */
 export function updateTrabajador(
 	idTrabajador: string,
@@ -182,6 +208,13 @@ export function updateTrabajador(
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: `SELECT NOT (${DEJARIA_SIN_ADMINISTRADOR});`,
+						args: [input.id_usuario, input.id_rol, input.estado],
+						error: "ultimo_administrador",
+						status: 409,
+					},
 					updateUsuario,
 					{
 						kind: "execute",
@@ -213,6 +246,12 @@ export function updateTrabajador(
 	};
 }
 
+/**
+ * TRAB-04: el mismo turno no se asigna dos veces al mismo trabajador el mismo día, aunque cambie el
+ * área. Espejo de la comprobación de la Main. Lo decide la guarda, dentro del lote que la escribe
+ * (SYNC-30): mirado antes, otro dispositivo podía asignarlo entre la lectura y el lote, y el
+ * reintento de una que sí entró la encontraba a ella misma.
+ */
 export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 	const idAsignacion = nuevoId();
 	return {
@@ -221,6 +260,13 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					{
+						kind: "guard",
+						sql: "SELECT NOT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3);",
+						args: [input.id_trabajador, input.fecha, input.id_turno],
+						error: "asignacion_duplicada",
+						status: 409,
+					},
 					{
 						kind: "execute",
 						sql: `

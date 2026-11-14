@@ -275,6 +275,16 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   ruta anónima con cuerpo sin tope.
 - **Toda ruta autenticada pasa por `tenantAuth`** (`middleware/tenant.ts`): token, device-proof, rol de
   la fila, licencia en uso. Tenant y dispositivo salen del token, nunca del cuerpo.
+- **Lo que decide si una escritura entra va en una guarda de su comando, no en una lectura de la
+  ruta** (SYNC-30): un paso `{ kind: "guard", sql, args, error, status }` delante de lo que escribe,
+  que el `TenantHub` evalúa dentro del lote atómico y no replica. Si su consulta no da un número
+  distinto de 0, no queda nada (ni el gate de idempotencia) y la ruta contesta `error` con `status`,
+  un 4xx con su frase en `MENSAJES`. Leído antes de `apply`, otra escritura podía entrar mientras
+  el DO atendía a los demás. La ruta lee antes lo que necesita para construir el comando o para
+  contestar sin escribir; lo que decide la guarda sólo lo mira también si tiene algo más que decir
+  (con qué choca un solape), y entonces tiene que contestar lo mismo al reintento de una escritura
+  que ya entró, que el gate contesta sin mirar la guarda. El porqué y la lista, en
+  [sincronizacion.md](sincronizacion.md#lo-que-decide-una-escritura-se-mira-dentro-de-su-lote-sync-30).
 - **Ningún dato personal ni texto libre en la query ni en el camino: va en el cuerpo** (AUD-27).
   Cloudflare guarda el método y la URL de cada petición, y Logpush puede exportarlos a Axiom, sin
   pasar por el filtro de datos personales; el cuerpo no se registra

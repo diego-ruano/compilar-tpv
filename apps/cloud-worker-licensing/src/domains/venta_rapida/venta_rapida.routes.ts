@@ -120,13 +120,11 @@ ventaRapidaRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
 	// El tipo de IVA y el precio se resuelven aquí y viajan como literales: dentro del INSERT
 	// serían una subconsulta que la Main reevaluaría en otro estado. El precio vuelve en la
 	// respuesta para que la pantalla enseñe el que se cobrará y no el de su carta en caché (RI-27).
+	// Que el producto siga en la carta y el ticket sin cobrar lo deciden las guardas del comando,
+	// dentro del lote (SYNC-30): `producto_archivado` o `comanda_cobrada`.
 	const datos = await tenantQuery(c, (db) =>
 		mesasQ.datosDeLinea(db, entrada.id_producto),
 	);
-	if (datos.archivado) return c.json({ ok: false, error: "producto_archivado" }, 409);
-	if (await tenantQuery(c, (db) => mesasQ.comandaCobrada(db, entrada.id_comanda))) {
-		return c.json({ ok: false, error: "comanda_cobrada" }, 409);
-	}
 	const id = await apply(c, cmd.addLinea(entrada, datos.ivaPercent, datos.nombre, datos.precio));
 	return c.json({ ok: true, id_detalle: id, precio_unitario: datos.precio });
 });

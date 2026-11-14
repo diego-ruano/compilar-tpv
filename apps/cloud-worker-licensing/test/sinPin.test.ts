@@ -44,7 +44,9 @@ describe("Sin_PIN · entrar sin PIN", () => {
 			const camarero = sql.exec("SELECT ID_Rol AS r FROM Roles WHERE Nombre_Rol = 'Camarero';").one().r;
 			const editar = (cambios: Record<string, unknown>) => {
 				const input = trabajadorUpdateSchema.parse({ ...EDICION, id_rol: camarero, ...cambios }) as any;
-				const paso = cmd.updateTrabajador("trab-1", input, null).command.payload.steps[0];
+				const paso = cmd
+					.updateTrabajador("trab-1", input, null)
+					.command.payload.steps.find((s: any) => s.saveAs === "usuarios");
 				sql.exec(paso.sql, ...paso.args);
 				return sql.exec("SELECT Sin_PIN AS s FROM Usuarios WHERE ID_Usuario = 'user-1';").one().s;
 			};
