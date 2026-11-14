@@ -27,8 +27,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
-| [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
-| [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
@@ -381,56 +379,6 @@ se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharí
 anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
 (`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
 
-### SYNC-29 · Un cambio de la Handy pisa en la Main una escritura suya sin subir
-
-La Main aplica lo que llega de la nube (`tpv-infra-sqlite/src/sync.rs::apply_one`) aunque esa fila
-tenga una escritura propia esperando en el outbox. Si una Handy edita la fila en los segundos que van
-de que la Main la escribe a que la sube, la nube se queda con lo de la Main (llegó después) y la Main
-con lo de la Handy (lo aplicó encima, y el eco de su propia escritura se descarta por idempotencia).
-Las dos copias quedan distintas hasta que `verificar_nube` lo ve y repara con lo de la Main.
-
-La bajada en orden (AUD-18) agranda la ventana: un cambio remoto que falla al aplicarse se reintenta
-tras unos segundos (`espera_para_reintentar`), y lo que la Main escriba en esa fila mientras tanto
-también lo pisa al entrar.
-
-Le pasa a cualquier escritura de la Main, pero donde más se nota es en la reserva desde la web
-(docs/estudios/reservas-web.md): la Main cancela una reserva porque lo pide el cliente, una Handy la
-edita en ese momento con su estado de antes, y la Main se queda con la reserva viva mientras la nube
-—y la agenda, que da la cancelación por hecha al verla en la nube— la tiene cancelada. La reparación
-diaria la volvería a subir viva.
-
-La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones: que al aplicar un
-cambio remoto se respete la escritura local pendiente de la misma fila (aplicar otra vez lo del
-outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
-Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
-
-### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
-
-Si una Handy borra un ticket de barra mientras su cobro va de camino a la nube —la Main ya lo ha
-confirmado y su subida aún no ha entrado en la nube—, la nube no ve ningún cobro y borra el ticket; la
-Main lo conserva, porque la condición de `deleteComandaIfSafe` se vuelve a evaluar allí (AUD-14). La
-ventana es la de un cobro en vuelo con la sesión de la Main viva: cada vez que la Main reconecta,
-congela a las Handy hasta haberse puesto al día (AUD-15). La subida del cobro choca después con la FK de
-`Pagos.ID_Comanda` y se aparta (`outbox_mark_failed`).
-
-Lo que viene detrás no lo devuelve entero:
-
-- **La reparación inmediata** repara las filas que escribió la operación apartada y que su analizador
-  sabe localizar (`sync_reparacion::analizar`), que sólo lee `INSERT … VALUES` y `UPDATE … WHERE
-  <clave>`. Se salta los `INSERT … SELECT` del cobro (`Pago_Detalles`, `Movimientos_Caja`,
-  `Suelto_Consumos`), y el cobro no escribe `Detalle_Comanda`. Si lleva `Lote_Consumos`, su FK a la
-  línea que falta revierte la reparación entera. Si no, puede entrar a medias: la comanda y el pago
-  sin líneas, con el cobro en Cuentas y el ticket fuera de la lista de la Handy, que sólo enseña
-  tickets con líneas.
-- **El contraste con la nube** (`verificar_nube`) sube lo que falta arriba por estado, padres primero,
-  y recorre las claves de una tabla entera por páginas; lo de una tabla cuyo padre no se ha podido
-  mirar entero no lo sube. Pero sus reparaciones no llevan `Repara_Op_Id`
-  (`contraste.rs::encolar_operacion`), y es lo único que retira una cuarentena al subir
-  (`outbox_confirmar_lote`): la del cobro y la de la reparación inmediata que falló se quedan.
-
-Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
-comanda afectada (la comanda, sus líneas, sus cobros y lo que cuelga de ellos); y que el contraste
-quede enlazado a las cuarentenas que resuelve.
 
 ### SYNC-33 · Una copia sin sello no dice de qué negocio es
 

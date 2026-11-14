@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use tpv_contracts::sync::{
     BackfillEstado, BootstrapResultado, BootstrapSnapshot, ClavesPagina, FilasDeCubos,
     FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, ResumenNube,
-    SyncChange, SyncHealth,
+    SqlStatement, SyncChange, SyncHealth,
 };
 
 use crate::error::AppResult;
@@ -98,6 +98,20 @@ pub trait PaginasDelContraste: Send + Sync {
     async fn por_clave(&self, pedido: PedidoPorClave) -> AppResult<FilasPorClave>;
     /// `/v1/sync/verificar/claves`.
     async fn claves(&self, pedido: PedidoDeClaves) -> AppResult<ClavesPagina>;
+}
+
+/// SYNC-29 · Lo que ha hecho una vuelta de la convergencia con el orden de la nube.
+#[derive(Debug, Clone, Default)]
+pub enum Convergencia {
+    /// No hay ninguna fila pendiente de traer.
+    #[default]
+    Nada,
+    /// Hay filas que traer, pero esta base tiene algo por subir o la nube va por delante de ella (o
+    /// se ha movido mientras se le pedían): no se ha escrito nada y se vuelve a intentar más tarde.
+    Aplazada,
+    /// Se han traído y escrito aquí las que eran distintas: `escritas`, para refrescar la interfaz.
+    /// `quedan`: había más de las que caben en una vuelta.
+    Hecha { escritas: Vec<SqlStatement>, quedan: bool },
 }
 
 /// Lo que ha dado una pasada del contraste en el repositorio.
@@ -194,6 +208,19 @@ pub trait SyncRepository: Send + Sync {
         nube: &dyn PaginasDelContraste,
         reparar: bool,
     ) -> AppResult<ContrasteLocal>;
+
+    /// SYNC-29 · El orden de la nube manda. Al aplicar un cambio de la nube con escrituras de aquí
+    /// sin ordenar todavía en sus tablas, `apply_changes` apunta las filas que toca: en la nube esas
+    /// escrituras irán detrás del cambio, y aquí fueron delante. Esto trae esas filas de la nube por
+    /// su clave (`/v1/sync/verificar/por-clave`) y las escribe aquí como están, sólo con nada por
+    /// subir y con la foto de la nube en lo que esta Main tiene de ella; si no, `Aplazada` sin escribir
+    /// nada. Nunca escribe en la nube ni mueve el outbox o el checkpoint.
+    ///
+    /// Por defecto no hay nada que traer: los dobles de los tests no marcan.
+    async fn converger_con_la_nube(&self, nube: &dyn PaginasDelContraste) -> AppResult<Convergencia> {
+        let _ = nube;
+        Ok(Convergencia::Nada)
+    }
 
     /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
     /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para

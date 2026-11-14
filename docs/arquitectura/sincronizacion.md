@@ -30,6 +30,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra; sus datos caducan y el contraste lo trae de la nube por estado (SYNC-36) |
+| El orden de la nube | `crates/tpv-infra-sqlite/src/convergencia.rs` | Lo que su orden dejó de otra forma aquí (una Handy escribió encima de algo de la Main sin subir) se apunta al aplicarlo y se trae de la nube en cuanto lo de aquí está subido (SYNC-29) |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
 | Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en la base del negocio. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
@@ -360,8 +361,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   - **rechazo sin clasificar**: un intento más para esa operación, y se deja de leer.
 
   Todo lo aplicado se confirma **en una transacción** (`outbox_confirmar_lote`): el anti-eco pasa a
-  llevar su `Seq`, la fila sale del outbox y, si era una reparación, sale con ella la apartada que
-  reparaba (SYNC-26). Un corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar
+  llevar su `Seq`, la fila sale del outbox y, si era una reparación, salen con ella las apartadas que
+  reparaba (SYNC-26, SYNC-31). Un corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar
   vuelve a subir: la nube contesta «ya estaba» a lo que ya tenía (idempotencia por `Op_Id`).
 - **Sin acuse no hay veredicto**: es el transporte, no le cuenta nada a nadie y la sesión acaba. Dos
   lotes seguidos sin respuesta pueden ser uno que la nube no consigue atender, así que el siguiente va
@@ -517,9 +518,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     tiene, una restricción, una clave foránea) no se arregla esperando. Mientras tanto el socket se
     sigue atendiendo, pero lo que llega en vivo no se aplica: lo trae después el catch-up desde el
     checkpoint, que es la fuente de verdad. Si la sesión se cae, la siguiente empieza por él.
-  - El reintento no se coordina con lo que el personal escribe aquí durante la espera: si toca la
-    misma fila, el cambio remoto la pisa al entrar. Es el riesgo aceptado SYNC-29
-    ([pendientes](../pendientes.md)), y la espera lo agranda en unos segundos.
+  - Lo que el personal escribe aquí durante la espera no sube hasta que el cambio entra o pasa a
+    cuarentena: si toca la misma fila, el cambio entra encima, aquí delante y en la nube detrás. Es
+    el caso de cualquier cambio que llega con algo de aquí sin ordenar en su tabla, y la fila se trae
+    después de la nube ([abajo](#el-orden-de-la-nube-manda-sync-29)).
   - Al quinto intento (`MAX_APPLY_ATTEMPTS`) pasa a **cuarentena** (`Quarantined = 1`, con lo
     necesario para diagnosticarlo): el checkpoint pasa por encima y la bajada sigue en orden desde ahí.
     El intento contado, el marcador de `_Sync_Applied_Ops`, la marca de cuarentena y el checkpoint van
@@ -615,6 +617,54 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   (SYNC-03). Un lote reenviado difunde otra vez, en su sitio y antes que lo nuevo, lo que encuentra
   ya aplicado.
 
+### El orden de la nube manda (SYNC-29)
+
+La Main aplica lo que baja aunque tenga escrituras suyas sin ordenar todavía. Si una Handy toca una
+fila en los segundos que van de que la Main la escribe a que la sube, en la nube la escritura de la
+Main va **detrás** del cambio (llegó después) y aquí fue **delante** (el cambio se aplicó encima), y
+el eco de la propia se descarta por idempotencia: la Main cancela una reserva, una Handy la sienta a la
+vez, y la nube —y la agenda de la web— la tienen cancelada mientras aquí sigue sentada. El orden que
+vale es el de la nube, que es el que ven las Handy y la agenda, y **la Main se ajusta a él en
+segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
+
+- **Al aplicar un cambio se apunta lo que puede quedar distinto.** Si esta Main tiene escrituras suyas
+  que la nube todavía no ha ordenado —en el outbox sin apartar (por subir o sin acuse), o confirmadas
+  con un `Seq` posterior al del cambio y cuyo eco no ha vuelto— en alguna de las tablas que escribe el
+  cambio, las filas que toca en esas tablas se apuntan en `_Sync_Por_Contrastar`, en la misma
+  transacción que lo aplica. Qué filas toca lo dice el simulacro de las cuarentenas de bajada
+  (`filas_tocadas.rs`), con la base de justo antes; si no lo sabe, se registra y no se apunta nada.
+  Lo de aquí que se escribe después del cambio va detrás en los dos sitios y no cuenta. No se apunta
+  lo fiscal (`Registros_Facturacion`, `Serie_Facturacion`: lo emite sólo la Main), ni más de 10.000
+  filas.
+- **Con todo subido, se traen de la nube.** El motor de réplica, con el outbox vacío (cada 3 s como
+  mucho), pide esas filas a la nube por su clave (`/v1/sync/verificar/por-clave`, hasta 500 por
+  vuelta) y sólo sigue si cada página trae como final del log (`hasta_seq`) lo que esta Main tiene de
+  la nube: su checkpoint o, por encima, lo suyo que la nube ya ha confirmado (en vivo la nube no le
+  devuelve a la Main lo suyo, así que el checkpoint no lo pasa hasta el siguiente cambio de otro). Lo
+  de los demás que va por debajo ya ha bajado, porque la nube lo difunde antes que el acuse y el
+  socket entrega en orden; con la bajada detenida no se pide nada. Así lo que se trae lleva todo lo
+  que esta Main ha aplicado y nada que no haya aplicado (un cambio posterior no se le aplicaría encima
+  otra vez). Con el escritor cogido se vuelve a mirar que nada de eso haya cambiado y que no haya
+  nada por subir, y se escribe aquí, por `raw()`: lo que está arriba
+  y aquí es distinto, con `INSERT … ON CONFLICT(clave) DO UPDATE`, padres primero; lo que arriba ya no
+  está, se borra aquí, hijas primero. Si algo se ha movido, la vuelta acaba sin escribir nada
+  (`Aplazada`) y se repite a los 2, 4, 8… segundos (hasta un minuto), también si la nube no contesta;
+  la sesión sigue. Lo escrito se avisa a la interfaz como un cambio más.
+- **Lo que no se trae, se deja**, con su motivo en el registro: una fila que escribió algo apartado de
+  la subida (lo que esta Main escribió y la nube no aceptó: lo sube su reparación, y traer lo de la
+  nube lo desharía aquí), un borrado cuyas cascadas llegan a algo apartado, una tabla con columnas
+  que esta versión no tiene o que la nube no sabe buscar. Lo cobrado no se borra desde la nube: si un
+  borrado se llevara un cobro por sus cascadas, no se hace. Una fila que no entra aquí (una clave
+  foránea, un `UNIQUE`) se intenta en cinco vueltas y se deja.
+- **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
+  vacía lo apuntado.
+- **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
+  sobre (salvo que la escribiera algo apartado de la subida); la trae la convergencia, y la pasada se
+  informa como `aplazado` (abajo).
+
+Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir otra
+(un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.
+
 ### Reparar una divergencia (SYNC-22, SYNC-24, SYNC-25)
 
 Apartar una operación evita el atasco pero deja la nube distinta, y la Handy enseña entonces otra cosa
@@ -625,8 +675,19 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   `Zona` se llevaría sus `Mesas`).
 - Una reparación es **una escritura más**: entra en el outbox y sube por el camino de siempre. Lleva su
   propio `Command_Name` y una reparación no se repara.
+- **Va en una operación, padres primero, y con la comanda entera** (SYNC-31): las filas que la
+  operación apartada escribió y su analizador sabe localizar (`sync_reparacion::analizar`: `INSERT …
+  VALUES` y `UPDATE … WHERE <clave>`) y, si alguna cuelga de una comanda (un cobro, una línea), la
+  comanda y todo lo que cuelga de ella por sus claves foráneas: sus líneas, sus cobros y, de éstos, las
+  líneas cobradas, las devoluciones, los consumos de stock, el movimiento de caja y el registro fiscal
+  (`filas_de_las_comandas`). Las tablas van por sus foráneas y, dentro de `Pagos`, cada devolución
+  detrás de su cobro. Hasta 2.000 filas; con más, sólo lo que tocaba la operación. Es lo que devuelve
+  a la nube un ticket que una Handy borró con su cobro en camino: allí no veía ningún cobro y lo
+  borró, aquí la condición del borrado no borró nada (AUD-14), y el cobro chocó después con la clave
+  foránea de `Pagos.ID_Comanda`. Lo que el cobro escribió con un `INSERT … SELECT` (las líneas
+  cobradas, los consumos) el analizador no lo ve; la comanda entera, sí.
 - Al subir, retira en la misma transacción la operación apartada que la motivó (`Repara_Op_Id`): el
-  aviso se apaga solo.
+  aviso se apaga solo. También si la reparación vuelve por el catch-up antes que su acuse.
 - Un `DELETE` apartado no se puede reparar por estado (la ausencia de una fila no es una fila): se
   cuenta y se informa (SYNC-23).
 - **El contraste con la nube** (job `verificar_nube`) compara la base de la Main con la de la nube,
@@ -705,8 +766,14 @@ fija que los dos SQLite resumen igual las mismas filas.
 - Si algo se mueve, la pasada se deja sin tocar nada y sin informar (`Contraste::Aplazado`): no es un
   fallo, y el job vuelve a los diez minutos.
 
-**Qué se repara.** La Main es el escritor único: una fila **distinta** se repara mandando cómo está
-aquí, una que **falta arriba** se sube por estado y una que **sobra arriba** se borra, porque con las
+**Qué se repara.** Una fila apuntada para traerla de la nube ([SYNC-29](#el-orden-de-la-nube-manda-sync-29))
+no se toca arriba, sea distinta, falte o sobre: ésa la ordenó la nube de otra forma, la trae la
+convergencia y la pasada queda `aplazado` (salvo que la escribiera algo apartado de la subida, que se
+repara como siempre). Una fila **distinta** se repara mandando cómo está aquí. Lo que se compara es una base con
+todo subido y la bajada al día, así que una diferencia que nadie ha apuntado no es de orden: es algo
+que la Main escribió y la nube no aceptó, o algo que no se sabe explicar, y se conserva lo de la Main,
+que es la autoridad de lo suyo (los cobros, la caja, lo fiscal sólo los escribe ella) y la base de la
+que se rehace la nube. Una que **falta arriba** se sube por estado y una que **sobra arriba** se borra, porque con las
 dos fotos del mismo instante lo que la nube tiene y aquí no está no puede ser algo de camino. Nada se
 toca si hay **alguna fila en `_Sync_Failed`** (AUD-18; en cuarentena o pendiente de reintentar), si
 queda histórico por bajar (VERIF-01) o con el interruptor `reparacion_nube` apagado: se compara y se
@@ -730,6 +797,16 @@ informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la
   sobra sí se borra). Lo que sí se ha visto se repara, borrados incluidos: cada fila que sobra se
   sabe que sobra. Un recorrido de claves que sigue donde lo dejó la pasada anterior y llega al final
   cuenta como completo.
+- **El plan retira lo apartado que resuelve** (SYNC-31): sus operaciones llevan en `Repara_Op_Id`
+  la lista JSON de las operaciones apartadas de la subida que escribieron alguna fila del plan (por
+  su clave o, si su sentencia no la nombra, en la misma tabla) y cuyas tablas se han comparado
+  enteras en esa pasada: con el plan arriba, esas tablas dicen lo mismo aquí y en la nube. El outbox
+  las retira cuando sube la última que las lleva, como retira la apartada de una reparación
+  inmediata; si una del plan no entra y se queda apartada, siguen ahí, y se retiran con ella cuando
+  un contraste siguiente sube lo que no entró. Mientras alguna del plan está por subir, la purga no se
+  lleva ni lo que resuelve ni la que no entró. Es lo que cierra un cobro apartado cuya reparación inmediata tampoco
+  entró: el contraste sube el ticket que falta arriba y, con él, se apagan las dos cuarentenas. Una
+  apartada que el plan no toca se queda hasta la purga, a los 30 días.
 
 #### La salida de una cuarentena de bajada (SYNC-36)
 
@@ -920,13 +997,16 @@ ninguna fila. Tampoco el fichaje: lo hace la persona por sí misma, y dos entrad
 instante desde dos equipos no es algo que pase usando el programa.
 
 Lo que llega a la Main es la sentencia, que la Main aplica con sus datos: puede tener sin subir lo
-que la nube no vio (SYNC-29). Por eso la regla que no puede romperse va además **dentro de la
-sentencia replicada**, y cada base la vuelve a evaluar al aplicarla: una línea sólo entra en una
-comanda abierta (INC-20261030-016) y borrar un ticket no borra nada si tiene algún cobro o alguna
-línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo antes de mandar el lote
-(`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya borrado: no tocó ninguna
-fila, o es el reintento de una operación ya aplicada y el resultado guardado lleva `null` en lo que
-dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
+que la nube no vio ([SYNC-29](#el-orden-de-la-nube-manda-sync-29)). Por eso la regla que no puede
+romperse va además **dentro de la sentencia replicada**, y cada base la vuelve a evaluar al
+aplicarla: una línea sólo entra en una comanda abierta (INC-20261030-016) y borrar un ticket no
+borra nada si tiene algún cobro o alguna línea cobrada (AUD-14). La ruta de borrar un ticket mira lo
+mismo antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo
+haya borrado: no tocó ninguna fila, o es el reintento de una operación ya aplicada y el resultado
+guardado lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en
+camino se borra en la nube; el cobro choca después con su clave foránea, se aparta, y su reparación
+devuelve a la nube el ticket entero ([arriba](#reparar-una-divergencia-sync-22-sync-24-sync-25),
+SYNC-31).
 
 Toda escritura de la Handy lleva su `X-Idempotency-Key`, que es el `Op_Id` de la operación: un UUIDv7.
 El worker exige que tenga de 16 a 64 letras, cifras, guiones o guiones bajos (`lib/rutas.ts`) y

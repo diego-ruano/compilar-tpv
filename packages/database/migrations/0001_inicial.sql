@@ -1857,7 +1857,8 @@ CREATE TABLE IF NOT EXISTS _Sync_Outbox (
     Ultimo_Error TEXT,
     Ultimo_Intento_Ms INTEGER,
     Cuarentena INTEGER NOT NULL DEFAULT 0,
-    -- SYNC-26: si esta fila es una REPARACION, el Op_Id de la operacion apartada que la motivo.
+    -- SYNC-26: si esta fila es una REPARACION, el Op_Id de la operacion apartada que la motivo
+    -- o, en una del contraste con la nube, la lista JSON de las que resuelve (SYNC-31).
     --
     -- Existe para poder cerrar el aviso. Sin el enlace, una operacion apartada se quedaba en
     -- cuarentena para siempre aunque su reparacion hubiera subido: el panel seguiria diciendo
@@ -1905,6 +1906,21 @@ CREATE TABLE IF NOT EXISTS _Sync_Failed (
     Filas_Json TEXT CHECK (Filas_Json IS NULL OR json_valid(Filas_Json)),
     Datos_Vaciados_At_Ms INTEGER,
     Ultima_Salida_Ms INTEGER
+);
+
+-- SYNC-29: el orden de la nube manda. Filas que un cambio de la nube toco mientras esta Main tenia
+-- escrituras suyas sin ordenar en la misma tabla (por subir, o confirmadas y sin eco): en la nube
+-- esas escrituras van detras del cambio y aqui fueron delante, asi que la fila puede haber quedado
+-- distinta. En cuanto lo de aqui esta subido y la bajada al dia, se trae de la nube por su clave y se
+-- escribe aqui como esta (`convergencia.rs`). Clave_Json es su clave primaria en JSON; Seq, el cambio
+-- que la toco por ultima vez; Intentos, las veces que no ha entrado aqui.
+CREATE TABLE IF NOT EXISTS _Sync_Por_Contrastar (
+    Tabla TEXT NOT NULL,
+    Clave_Json TEXT NOT NULL CHECK (json_valid(Clave_Json)),
+    Seq INTEGER NOT NULL,
+    Desde_Ms INTEGER NOT NULL,
+    Intentos INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (Tabla, Clave_Json)
 );
 
 -- Estado local y persistente del protocolo de recuperacion. Vive dentro de la BD para que

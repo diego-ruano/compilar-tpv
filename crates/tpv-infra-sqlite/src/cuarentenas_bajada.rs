@@ -553,7 +553,7 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
 }
 
 /// Las columnas de la clave primaria de cada tabla de aquí.
-async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
+pub(crate) async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
     let r = db.read().await;
     r.conn()
         .foto(|foto| {
@@ -602,7 +602,7 @@ fn es_dudosa(t: &Tocadas, apartado: &tocadas::Estaticas) -> bool {
 }
 
 /// Lo que toca lo apartado de la subida: lo que esta Main escribió y la nube no tiene.
-async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>) -> AppResult<tocadas::Estaticas> {
+pub(crate) async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>) -> AppResult<tocadas::Estaticas> {
     let r = db.read().await;
     let mut filas = r
         .conn()
@@ -641,7 +641,7 @@ async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>
 /// fila que la de la nube (Codex, SYNC-36). Y si borra una fila, cualquier cosa apartada en las
 /// tablas a las que llega su borrado por las cascadas (`cascadas`): borrar aquí se llevaría con
 /// ellas lo que esta Main escribió debajo y la nube no tiene.
-fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas, cascadas: &Cascadas) -> bool {
+pub(crate) fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas, cascadas: &Cascadas) -> bool {
     subida.tablas.contains("*")
         || t.tablas.iter().any(|x| subida.tablas.contains(x))
         || t.por_filtro.iter().any(|x| subida.todas.contains(x))
@@ -652,7 +652,7 @@ fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas, cascadas: &Casc
 /// Las tablas a las que llega el borrado de una fila de cada tabla: sus hijas por una foránea con
 /// `ON DELETE CASCADE`, `SET NULL` o `SET DEFAULT`, y las de éstas.
 #[derive(Debug, Default)]
-struct Cascadas {
+pub(crate) struct Cascadas {
     hijas: HashMap<String, Vec<String>>,
 }
 
@@ -673,7 +673,7 @@ impl Cascadas {
     }
 }
 
-async fn cascadas(db: &Db) -> AppResult<Cascadas> {
+pub(crate) async fn cascadas(db: &Db) -> AppResult<Cascadas> {
     let r = db.read().await;
     r.conn()
         .foto(|foto| {
@@ -696,17 +696,17 @@ async fn cascadas(db: &Db) -> AppResult<Cascadas> {
 }
 
 /// Lo que se ha traído de una tabla.
-struct Traida {
-    columnas: Vec<String>,
+pub(crate) struct Traida {
+    pub columnas: Vec<String>,
     /// Por la forma canónica de su clave (`filas_tocadas::canonica_de`).
-    filas: HashMap<String, Vec<Json>>,
+    pub filas: HashMap<String, Vec<Json>>,
     /// La nube no ha sabido buscarla: las cuarentenas que la tocan se quedan.
-    sin_buscar: bool,
+    pub sin_buscar: bool,
 }
 
 /// Trae de la nube las filas de `tabla` con esas claves. `None` si la nube se ha movido desde el
 /// resumen (otro `hasta_seq`).
-async fn traer(
+pub(crate) async fn traer(
     nube: &dyn PaginasDelContraste,
     tabla: &str,
     pedidas: &[Vec<Json>],
@@ -882,7 +882,7 @@ async fn aplicar(
     .await
 }
 
-async fn columnas_locales(conn: &Connection, tabla: &str) -> AppResult<Vec<String>> {
+pub(crate) async fn columnas_locales(conn: &Connection, tabla: &str) -> AppResult<Vec<String>> {
     let mut filas = conn
         .query("SELECT name FROM pragma_table_info(?1) ORDER BY cid;", vec![Value::Text(tabla.to_owned())])
         .await
@@ -898,7 +898,7 @@ async fn columnas_locales(conn: &Connection, tabla: &str) -> AppResult<Vec<Strin
 
 /// La sentencia que deja una fila como está en la nube: `INSERT … ON CONFLICT(clave) DO UPDATE`.
 /// ⚠️ Nunca `INSERT OR REPLACE`: borraría la fila y dispararía las cascadas que la apuntan.
-fn escribir_como_esta(tabla: &str, columnas: &[String], clave: &[String]) -> String {
+pub(crate) fn escribir_como_esta(tabla: &str, columnas: &[String], clave: &[String]) -> String {
     let lista = columnas.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
     let marcas = (1..=columnas.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
     let objetivo = clave.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");

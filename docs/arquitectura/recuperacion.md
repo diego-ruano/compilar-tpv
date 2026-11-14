@@ -152,9 +152,9 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
-esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_Failed` y siembra
-`_Backfill_Historico` con su `Ventana_Desde` (sólo si es un instante de verdad; si no, `NULL`, que
-el cierre de caja trata como «no se sabe» y avisa).
+esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_Failed` y
+`_Sync_Por_Contrastar` y siembra `_Backfill_Historico` con su `Ventana_Desde` (sólo si es un instante
+de verdad; si no, `NULL`, que el cierre de caja trata como «no se sabe» y avisa).
 
 Si lo que se reemplaza es una copia restaurada que no llegó a reconciliarse (AUD-19), su outbox no
 pasa a la base nueva, como en el traslado: es de antes, y lo que el equipo de entonces ya subió se
