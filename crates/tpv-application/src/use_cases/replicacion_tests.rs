@@ -860,3 +860,51 @@ async fn si_la_nube_no_contesta_la_sesion_sigue() {
     assert_eq!(*ctx.avisos.lock().unwrap(),0);
     assert_eq!(*ctx.recogidas.lock().unwrap(),2,"la de conectar y la del aviso");
 }
+
+// ── SYNC-29 con SYNC-32 y SYNC-36 · traer la nube para también la convergencia ──
+
+/// Un socket que, al entregar el `despertar`, deja el motor en pausa: `sigue_disponible` dice que no,
+/// como cuando se trae el estado de la nube desde Conectividad (`SyncNativo::pausar_hasta_sin_sesion`).
+struct PausaAlDespertar<'a> { entrantes:VecDeque<Option<Value>>, enviados:Vec<Value>, sigue:&'a Mutex<bool> }
+#[async_trait]
+impl CanalReplicacion for PausaAlDespertar<'_> {
+    async fn enviar(&mut self,m:Value)->AppResult<()> {self.enviados.push(m);Ok(())}
+    async fn recibir(&mut self,_:Duration)->AppResult<Option<Value>> {
+        let m=self.entrantes.pop_front().ok_or_else(||AppError::external("Socket cerrado"))?;
+        if m.as_ref().is_some_and(|m|m["type"]=="despertar") { *self.sigue.lock().unwrap()=false; }
+        Ok(m.map(|m|con_su_lote(m,&self.enviados)))
+    }
+}
+
+#[tokio::test]
+async fn con_el_motor_en_pausa_para_traer_la_nube_no_se_trae_nada_por_clave() {
+    // Lo de aquí sube justo con el despertar de la pausa y hay algo apuntado: sin la pausa, la vuelta
+    // siguiente lo pediría por clave.
+    let guion=||vec![Some(acuse(vec![pasajera("a")])),Some(json!({"type":"despertar"})),Some(acuse(vec![ok("a",1)]))];
+    let ctx=disponible(contexto(vec![op("a")]));ctx.repo.convergencias.lock().unwrap().push_back(traida());
+    let n=nube(vec![pagina(vec![],0),por_clave()]);
+    let mut c=conversacion(guion());
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(*ctx.repo.al_converger.lock().unwrap(),vec![0]);
+    // Con la pausa, la sesión acaba antes de mirar: lo traído se escribiría sobre la base que la
+    // restauración va a reemplazar, y la restauración vacía lo apuntado.
+    let ctx=disponible(contexto(vec![op("a")]));ctx.repo.convergencias.lock().unwrap().push_back(traida());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=PausaAlDespertar{entrantes:guion().into(),enviados:vec![],sigue:&ctx.sigue};
+    assert_eq!(ejecutar(&ctx,&n,&mut c,false).await.unwrap(),FinDeSesion::NoDisponible);
+    assert!(pendientes(&ctx).is_empty(),"lo de aquí sí subió");
+    assert!(ctx.repo.al_converger.lock().unwrap().is_empty());
+    assert_eq!(*n.calls.lock().unwrap(),["/v1/sync/changes"]);
+}
+
+#[tokio::test]
+async fn una_base_anterior_a_la_nube_pasa_a_recuperarse_sin_traer_nada_por_clave() {
+    // SYNC-32: la base va a reemplazarse con la de la nube; lo apuntado no se pide.
+    let ctx=disponible(contexto(vec![]));*ctx.repo.cursor.lock().unwrap()=10;
+    ctx.repo.convergencias.lock().unwrap().push_back(traida());
+    let n=nube(vec![purgado_hasta_700()]);let mut c=conversacion(vec![estado()]);
+    assert_eq!(ejecutar(&ctx,&n,&mut c,false).await.unwrap(),FinDeSesion::AnteriorAlLog);
+    assert!(*ctx.repo.anterior_a_la_nube.lock().unwrap());
+    assert!(ctx.repo.al_converger.lock().unwrap().is_empty());
+    assert_eq!(*n.calls.lock().unwrap(),["/v1/sync/changes"]);
+}
