@@ -17,11 +17,16 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
+| [DO-02](#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre) | 🟡 | Una Main con mucho desde el último cierre no cabe en la fase 1 de la recuperación | Sin decidir |
+| [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
+| [SYNC-36](#sync-36--lo-que-no-entró-de-la-bajada-se-guarda-para-siempre-con-sus-datos) | 🟡 | Lo que no entró de la bajada se guarda en la Main para siempre, con sus datos personales | Sin decidir |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
+| [PERM-CACHE](#perm-cache--un-permiso-retirado-puede-seguir-valiendo-hasta-5-minutos-en-la-handy) | 🔵 | Un permiso retirado puede seguir valiendo hasta 5 minutos en la Handy si se pierde el aviso | Sin decidir |
+| [CORREO-01](#correo-01--tres-casos-en-que-un-pedido-a-un-proveedor-puede-salir-dos-veces) | 🔵 | Tres casos en que un pedido a un proveedor puede salir dos veces | Sin decidir |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
@@ -32,6 +37,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
 | [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
+| [SYNC-37](#sync-37--una-página-del-histórico-de-10000-cobros-toma-el-escritor-unos-03-s) | 🔵 | Una página del histórico de 10.000 cobros toma el escritor de la Main unos 0,3 s | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -196,6 +202,30 @@ segundo en una GPU de consumo.
 
 Aplazado: exige primero acceso de lectura a la base del tenant.
 
+### PERM-CACHE · Un permiso retirado puede seguir valiendo hasta 5 minutos en la Handy
+
+La Handy guarda la autorización de la sesión mientras su socket de avisos está abierto
+([permisos.md](arquitectura/permisos.md#la-autorización-guardada-en-la-handy-perm-cache)). Un permiso
+retirado en la Main deja de valer en cuanto llega el aviso del cambio, casi a la vez. Si ese aviso se
+pierde con el socket aparentemente abierto (uno muerto que el latido todavía no ha detectado, o el
+`TenantHub` que se reinicia entre aplicar y difundir), lo guardado vale hasta que caduca: como mucho 5
+minutos (`EDAD_MAXIMA_MS`). Sin decidir si esa ventana vale o se acorta, a cambio de más preguntas a la
+nube por hora.
+
+### CORREO-01 · Tres casos en que un pedido a un proveedor puede salir dos veces
+
+Un pedido que se reintenta no sale dos veces: lleva su clave de envío, y la nube reserva el id con el
+cupo en la misma sentencia ([worker.md](arquitectura/worker.md#correo)). Quedan tres casos:
+
+- **Con la base central caída** el pedido sale igual, también con clave, y no queda apuntado: un
+  reintento lo vuelve a mandar. Entre no mandarlo y mandarlo dos veces se ha elegido lo segundo.
+- **Uno que salió y se quedó en `enviando`** (el worker se cortó a medias, o fallaron los tres intentos
+  de apuntar que salió) se vuelve a reservar pasados cinco minutos, y un reintento lo repite.
+- **La clave vive en el `localStorage` de la Main** (`claveDeEnvio.ts`): sin almacenamiento, con el de
+  la aplicación borrado o pasada una semana, el reintento lleva otra clave y es otro envío.
+
+Sin decidir si alguno pide algo más.
+
 ### LIC-02 · Sin certificate pinning
 
 `http_client()` (`tpv-infra-licensing/src/lib.rs`) no fija el certificado del host. No habilita ningún
@@ -342,6 +372,16 @@ El DO trae la vuelta a cualquier punto de los últimos 30 días, pero no hay for
 fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a un instante, y una copia
 diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
 queda como opción para guardar esas copias.
+
+### SYNC-36 · Lo que no entró de la bajada se guarda para siempre, con sus datos
+
+Un cambio de la nube que no entra en la Main acaba en cuarentena en `_Sync_Failed`, con sus sentencias y
+los datos que escribían (nombres, teléfonos y correos de clientes, notas). Lo apartado de la subida se
+retira a los 30 días; esto no caduca, porque es la barrera del contraste: con una fila en
+`_Sync_Failed` no se repara nada, y sin ella el contraste daría la base por al día y borraría arriba
+lo que la Handy escribió y aquí falta ([sincronizacion.md](arquitectura/sincronizacion.md#recibir)).
+Así que esos datos se quedan en el equipo sin plazo (LEGAL-01, DB-14). Sin decidir cómo sale una
+cuarentena de la bajada, y qué se hace con sus datos mientras tanto.
 
 ### DO-PERDIDA · Un negocio que se queda sin su base en la nube no tiene salida sin soporte
 
@@ -564,6 +604,15 @@ una sentencia condicional no toca ninguna fila. Las rutas que deciden por el rec
 Arreglo propuesto: `decidirPorEstado` en las tres, como en `horarios/guardar`, con una lectura de lo
 pedido (el trabajador o la asignación tal como se pidió; el producto, que ya no exista o esté
 archivado).
+
+### SYNC-37 · Una página del histórico de 10.000 cobros toma el escritor unos 0,3 s
+
+Al bajar el histórico, cada página toma el escritor de la Main mientras se aplica, y los triggers del
+resumen diario de las estadísticas apuntan sus días: medido en local, una de 10.000 cobros tarda unos
+280 ms (110 ms sin los triggers), y es lo más que espera una venta que llega a mitad
+([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)). Las páginas de 10.000
+sólo van con tres minutos sin escrituras; con el equipo trabajando son de 2.000. Sin decidir si se
+acepta o se bajan las páginas de cobros.
 
 ---
 
