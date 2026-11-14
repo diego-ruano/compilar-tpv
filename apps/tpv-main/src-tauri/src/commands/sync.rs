@@ -99,6 +99,7 @@ pub async fn sync_bootstrap_desde_nube(
     // movería el checkpoint por encima de lo que la foto no trae (Codex, SYNC-36). Desde la pantalla
     // de recuperación no hay sesión y esto es inmediato; desde Conectividad, espera a que acabe.
     let motor = app.state::<crate::replicacion::SyncNativo>();
+    let _turno = motor.turno_para_traer_la_nube()?;
     motor.pausar_hasta_sin_sesion(ESPERA_A_LA_REPLICA).await?;
     let traida = async {
         let repo = state.sync_repo().await?;
