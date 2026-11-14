@@ -224,16 +224,46 @@ describe("una ruta anónima lleva el tope de su cuerpo delante (AUD-34)", () => 
 // más allá.
 
 /** Dónde monta la `app` cada router (`app.route("/v1/cuentas", cuentasRoutes)`). */
-const MONTAJES = new Map([...appFuente.matchAll(/app\.route\("([^"]+)", (\w+)\)/g)].map((m) => [m[2], m[1]] as const));
+const MONTAJES = new Map([...appFuente.matchAll(/app\.route\(\s*"([^"]+)",\s*(\w+)\s*\)/g)].map((m) => [m[2], m[1]] as const));
 
 /** Un veto de rol que decide con el rol de la identidad (`soloLaMain…`), no los de la Main vigente. */
 const VETO_DE_ROL = /\bsoloLaMain(?!Vigente)\w*/;
 
-/** Cada ruta de la `app` con un veto de rol, en su cadena o en el `use("*")` de su router. */
-function rutasConVetoDeRol(): { metodo: string; ruta: string }[] {
-	const rutas: { metodo: string; ruta: string }[] = [];
+/**
+ * Las rutas que hoy llevan un veto de rol, escritas a mano. El barrido del fuente encuentra las que se
+ * añadan; esta lista es lo que no puede perder: si a una le quitan el veto, o el barrido deja de
+ * reconocer su router, se sigue pidiendo y tiene que dar 403. Una ruta nueva con veto se apunta aquí.
+ */
+const CON_VETO_DE_ROL = [
+	"DELETE /v1/cuentas/gastos/:id",
+	"POST /v1/cuentas/gastos",
+	"POST /v1/cuentas/pagos/:id/anular",
+	"POST /v1/login/correo-recuperacion/confirmar",
+	"POST /v1/login/correo-recuperacion/estado",
+	"POST /v1/login/correo-recuperacion/solicitar",
+	"POST /v1/login/correo-recuperacion/usar-el-de-la-compra",
+	"POST /v1/login/recuperar-pin/solicitar",
+	"POST /v1/login/recuperar-pin/verificar",
+	"POST /v1/mesas/cobrar-detalles",
+	"POST /v1/sync/bootstrap",
+	"POST /v1/sync/changes",
+	"POST /v1/sync/historico",
+	"POST /v1/sync/initialize-empty",
+	"POST /v1/sync/salud",
+	"POST /v1/sync/verificar/claves",
+	"POST /v1/sync/verificar/filas",
+	"POST /v1/sync/verificar/por-clave",
+	"POST /v1/sync/verificar/resumen",
+	"POST /v1/venta-rapida/cobrar-fraccionado",
+	"PUT /v1/cuentas/gastos/:id",
+	"PUT /v1/cuentas/pagos/:id",
+];
+
+/** Cada ruta de la `app` con un veto de rol en el fuente, en su cadena o en el `use("*")` de su router. */
+function rutasConVetoDeRol(): string[] {
+	const rutas: string[] = [];
 	for (const fuente of Object.values(fuentes)) {
-		const prefijo = MONTAJES.get(/export const (\w+) = new Hono/.exec(fuente)?.[1] ?? "");
+		const prefijo = MONTAJES.get(/export const (\w+)\s*=\s*new Hono/.exec(fuente)?.[1] ?? "");
 		if (!prefijo) continue;
 		const todoElRouter = [...fuente.matchAll(/^\w+\.use\(\s*"\*",([\s\S]*?)\);/gm)].some((m) => VETO_DE_ROL.test(m[1]));
 		for (const m of fuente.matchAll(/^\w+\.(post|get|put|patch|delete)\(\s*\n?\s*"([^"]+)"/gm)) {
@@ -243,28 +273,30 @@ function rutasConVetoDeRol(): { metodo: string; ruta: string }[] {
 			const handler = bloque.search(/\basync\s*\(\s*c\s*\)/);
 			const cadena = handler === -1 ? bloque : bloque.slice(0, handler);
 			if (!todoElRouter && !VETO_DE_ROL.test(cadena)) continue;
-			rutas.push({ metodo: m[1].toUpperCase(), ruta: prefijo + m[2].replace(/:\w+/g, "x") });
+			rutas.push(`${m[1].toUpperCase()} ${prefijo}${m[2]}`);
 		}
 	}
 	return rutas;
 }
 
 describe("el veto, por el camino desplegado", () => {
-	it("una Handy se queda en el veto de cada ruta, dentro del TenantHub, aunque el cuerpo no valga", async () => {
-		const rutas = rutasConVetoDeRol();
-		// Las de la caja, cobrar, la recuperación del PIN y todo sync: si el barrido no las ve, no prueba nada.
-		expect(rutas.map((r) => r.ruta)).toEqual(
-			expect.arrayContaining(["/v1/cuentas/pagos/x/anular", "/v1/mesas/cobrar-detalles", "/v1/venta-rapida/cobrar-fraccionado", "/v1/sync/changes"]),
-		);
-		expect(rutas.length).toBeGreaterThan(15);
+	it("el barrido del fuente ve las rutas con veto que hay", () => {
+		// Si deja de ver una, o es que ya no lleva el veto (lo pilla la petición de abajo) o es que el
+		// barrido ya no reconoce su router: que se vea aquí, no en silencio.
+		expect(rutasConVetoDeRol()).toEqual(expect.arrayContaining(CON_VETO_DE_ROL));
+	});
 
+	it("una Handy se queda en el veto de cada ruta, dentro del TenantHub, aunque el cuerpo no valga", async () => {
+		const rutas = [...new Set([...CON_VETO_DE_ROL, ...rutasConVetoDeRol()])];
 		await conNegocioFirmado(deps, "veto-desplegado", async (n) => {
 			const mal: string[] = [];
-			for (const { metodo, ruta } of rutas) {
+			for (const r of rutas) {
+				const [metodo, plantilla] = r.split(" ");
+				const ruta = plantilla.replace(/:\w+/g, "x");
 				const conCuerpo = metodo !== "GET" && metodo !== "DELETE";
-				const r = await pedirComo(deps, app, n, HANDY, metodo, ruta, conCuerpo ? { esto: "no vale" } : undefined);
-				if (r.status !== 403 || r.viajes !== 1) {
-					mal.push(`${metodo} ${ruta}: ${r.status}, ${r.viajes} viajes, ${JSON.stringify(r.json).slice(0, 120)}`);
+				const res = await pedirComo(deps, app, n, HANDY, metodo, ruta, conCuerpo ? { esto: "no vale" } : undefined);
+				if (res.status !== 403 || res.viajes !== 1) {
+					mal.push(`${r}: ${res.status}, ${res.viajes} viajes, ${JSON.stringify(res.json).slice(0, 120)}`);
 				}
 			}
 			expect(mal, "la Handy pasó el veto, o se decidió fuera del TenantHub").toEqual([]);
