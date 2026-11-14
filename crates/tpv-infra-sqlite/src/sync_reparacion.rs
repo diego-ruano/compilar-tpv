@@ -463,10 +463,12 @@ async fn filas_donde(
         return Ok(Vec::new());
     }
     let lista = clave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
-    // La lista va en un solo parámetro, como en todo lo que tiene un tamaño que no se sabe.
+    // La lista va en un solo parámetro, como en todo lo que tiene un tamaño que no se sabe. Sin
+    // `ORDER BY`: con él, SQLite recorrería todas las que cumplen para ordenarlas antes de cortar, y
+    // el orden de lo que sube lo pone después quien las encola.
     let mut filas = conn
         .query(
-            &format!("SELECT {lista} FROM \"{tabla}\" WHERE \"{columna}\" IN (SELECT value FROM json_each(?1)) ORDER BY {lista} LIMIT ?2;"),
+            &format!("SELECT {lista} FROM \"{tabla}\" WHERE \"{columna}\" IN (SELECT value FROM json_each(?1)) LIMIT ?2;"),
             vec![Value::Text(serde_json::to_string(valores).unwrap_or_else(|_| "[]".into())), Value::Integer(tope as i64)],
         )
         .await?;
