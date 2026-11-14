@@ -32,6 +32,12 @@ pub async fn recovery_status(
                 state: RecoveryState::TransferPending,
             });
         }
+        // SYNC-32: y una base anterior a lo que guarda la nube, por lo mismo.
+        if tpv_infra_sqlite::recovery::hay_base_anterior_a_la_nube(&app_data_dir(&app)?) {
+            return Ok(RecoveryStatus {
+                state: RecoveryState::OlderThanCloud,
+            });
+        }
         // No tener `Db` son dos cosas muy distintas y no pueden contestar lo mismo. En Handy no
         // existe SQLite local y, por definición, tampoco una recuperación de Main. En una Main sí
         // la hay: significa que la base no se pudo abrir al arrancar (corrupta o ilegible), que es

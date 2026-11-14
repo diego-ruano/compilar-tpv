@@ -73,6 +73,11 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     // La licencia viene de otro equipo: lo de este ordenador es de antes, copias incluidas, así que
     // sólo se ofrece la nube (el backend también rechaza restaurar una copia local en este estado).
     const trasladoPendiente = useEstadoSync((s) => s.trasladoPendiente);
+    // SYNC-32: la base de este ordenador se cambió por fuera del programa y es anterior a lo que
+    // guarda la nube. Como en un traslado, sólo sirve la nube (el backend también rechaza una copia
+    // local en este estado), y lo que tuviera pendiente se guarda aparte al traerla.
+    const anteriorALaNube = useEstadoSync((s) => s.anteriorALaNube);
+    const soloLaNube = trasladoPendiente || anteriorALaNube;
     const fase = useEstadoSync((s) => s.faseRecuperacion);
     const errorReconciliacion = useEstadoSync((s) => s.errorRecuperacion);
     const iniciarReconciliacion = useEstadoSync((s) => s.iniciarReconciliacion);
@@ -174,13 +179,15 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                         <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
                             {trasladoPendiente
                                 ? "La licencia se ha pasado a este ordenador desde otro equipo. Los datos que tenga este ordenador son de antes, así que hay que traer los actuales de la nube. Lo que hubiera aquí se guarda aparte, sin borrarlo."
-                                : "Puedes usar una copia diaria de este ordenador o descargar el estado actual de la nube. Después se comprobarán ambos lados antes de permitir trabajar de nuevo."}
+                                : anteriorALaNube
+                                  ? "Los datos de este ordenador se han cambiado por fuera del programa (por ejemplo, al restaurar una copia del disco) y son anteriores a lo que guarda la nube, así que ya no se pueden poner al día con ella. Para seguir trabajando hay que traer el estado actual de la nube. Lo que este ordenador tenía sin subir se guarda aparte, sin borrarlo."
+                                  : "Puedes usar una copia diaria de este ordenador o descargar el estado actual de la nube. Después se comprobarán ambos lados antes de permitir trabajar de nuevo."}
                         </p>
                         {/* Se dice ANTES de elegir, no al fallar: con una copia local la gente da
                             por hecho que no hace falta red, y la comprobación contra la nube (que
                             es lo que desbloquea el login) sí la necesita. */}
                         <p className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg">
-                            {trasladoPendiente
+                            {soloLaNube
                                 ? "Hace falta conexión a internet para traer los datos."
                                 : "Hace falta conexión a internet para completar la recuperación, también si eliges una copia de este ordenador."}
                         </p>
@@ -267,7 +274,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                     </div>
                                 )}
 
-                                {!trasladoPendiente && (
+                                {!soloLaNube && (
                                 <div>
                                     <h2 className="text-sm font-semibold">Copias de este ordenador</h2>
                                     <div className="mt-3 grid gap-2">
@@ -329,7 +336,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                 </div>
                                 )}
 
-                                <div className={trasladoPendiente ? "" : "border-t border-border pt-5"}>
+                                <div className={soloLaNube ? "" : "border-t border-border pt-5"}>
                                     <Button
                                         disabled={operacion !== null}
                                         onClick={() => void ejecutar("cloud", commands.syncBootstrapDesdeNube)}
@@ -345,7 +352,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                             <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
                                             <span>
                                                 {volcadoDemasiadoGrande
-                                                    ? trasladoPendiente
+                                                    ? soloLaNube
                                                         ? "No se pueden traer los datos de la nube: lo imprescindible para volver a trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) ocupa más de lo que se puede descargar de una vez. Contacta con soporte."
                                                         : "No se pueden traer los datos de la nube: lo imprescindible para volver a trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) ocupa más de lo que se puede descargar de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, contacta con soporte."
                                                     : error.message}

@@ -31,6 +31,7 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
 | Copia anterior al log | `replicacion.rs::falta_un_tramo` + `purgadoHasta` de `/v1/sync/changes` | Le falta un tramo purgado: no se reconcilia (AUD-19) |
 | Traslado de licencia | `use_cases/licensing.rs::activate` + `recovery.rs::BaseLocal` (la marca) | La base de antes del traslado no se usa |
+| Base anterior a la nube | `use_cases/replicacion.rs::anterior_al_log` + `recovery.rs::marcar_anterior_a_la_nube` (la marca) | Una base cambiada por fuera del programa no se usa: se trae la nube (SYNC-32) |
 | El sello de la base (AUD-06) | `_Negocio` (`0002_negocio.sql`) · `crates/tpv-infra-sqlite/src/sello.rs` · `tpv_domain::licensing::que_hacer_con_la_base` | De qué negocio es cada base y cada copia; una base sólo se usa con la licencia de su negocio |
 | Cambio de negocio | `use_cases/licensing.rs::activate` (licencia pendiente + marca `AppData/cambio-de-negocio`) + reinicio (`commands/licensing.rs`) | La licencia es de otro negocio que la base: queda pendiente y el TPV se reinicia |
 | Aplicarlo al arrancar | `lib.rs::run` → `use_cases/licensing.rs::aplicar_cambio_de_negocio_pendiente` | Apartar lo del anterior, la licencia pendiente a vigente, quitar la marca; antes de abrir nada |
@@ -44,6 +45,8 @@ antigua crearía dos historiales que no hay forma de juntar.
 `recovery_status` da uno de estos estados, y `TransferPending` manda sobre los demás:
 
 - **Traslado pendiente**: este equipo acaba de recibir la licencia de otro (abajo).
+- **Base anterior a la nube** (`OlderThanCloud`): en una sesión normal, la réplica ha visto que a la
+  base le falta lo que la nube ya purgó (abajo). Después del traslado, manda sobre los demás.
 - **Faltan los datos**: la base tiene **cero usuarios**. En una instalación nueva eso no pasa, porque
   el seed crea el administrador; con la licencia activada el seed no lo crea, precisamente para que una
   base vacía no se confunda con una instalación nueva. Si se confundiera, el administrador del seed
@@ -286,6 +289,31 @@ no puede comprobar lo que falta y para. Por eso el worker se despliega antes que
 
 Tras **5 ciclos seguidos fallidos** (contador del motor nativo) la reconciliación queda `bloqueada`: deja
 de reintentar sola y la pantalla vuelve a ofrecer las alternativas.
+
+## Una base anterior a lo que guarda la nube (SYNC-32)
+
+Una Main que trabaja con su base y se conecta con normalidad no puede quedarse por detrás de lo que
+la nube purga: el suelo de la purga no pasa de su checkpoint mientras lo reporta. Llega ahí una base
+**cambiada por fuera del programa** (una imagen de disco restaurada, una `data.db` copiada a mano):
+su cursor es de antes, y `/v1/sync/changes` dice que ya se purgó algo por encima (`purgadoHasta`).
+Esa base no se puede poner al día, y su outbox mezcla lo vendido desde el cambio con lo que la base
+vieja tenía pendiente, que el equipo de entonces ya subió (volvería a aplicarse en cuanto caducara su
+`Applied_Operations`). Se trata como un traslado de licencia:
+
+- **La sesión se para sin aplicar ni subir nada** (`FinDeSesion::AnteriorAlLog`) y el caso de uso
+  anota la base como anterior a la nube (`SyncRepository::marcar_anterior_a_la_nube`): la marca
+  `AppData/anterior-a-la-nube`, fuera de `data.db` como la del traslado, y las escrituras de negocio
+  cerradas en ese momento.
+- **El estado pasa a `OlderThanCloud`**, también al volver a abrir el TPV: el motor no vuelve a
+  conectar, los jobs de la Main operativa no corren y una copia de este ordenador no se restaura (son
+  de esa base o de antes: una imagen de disco las trae con ella).
+- **La pantalla se entera sola**: el motor publica `detenida`, la interfaz relee el estado de la
+  recuperación, cierra la sesión si la hay y enseña la pantalla de recuperación, que explica qué ha
+  pasado y sólo ofrece «Recuperar el estado actual de la nube».
+- **Traer la nube guarda antes lo de aquí**: la base entera, con su outbox, va a
+  `backups/antes-de-la-nube-*` (la misma familia que la copia sin reconciliar de AUD-19), el outbox
+  se vacía dentro de la transacción (la excepción a la guardia, como en el traslado) y la marca se
+  quita después del `COMMIT`. Después se reconcilia como cualquier otra reconstrucción.
 
 ## Traslado de licencia
 

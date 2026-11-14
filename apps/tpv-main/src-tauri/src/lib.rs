@@ -3693,6 +3693,8 @@ mod tests_exenciones_del_gate {
             "$APPDATA/device_config.json",
             "$APPDATA/license_state.json",
             "$APPDATA/traslado-pendiente",
+            // SYNC-32: la base anterior a lo que guarda la nube, pendiente de traerla.
+            "$APPDATA/anterior-a-la-nube",
             // AUD-06: el cambio de negocio pendiente de reinicio, y la licencia que espera a él.
             "$APPDATA/cambio-de-negocio",
             "$APPDATA/cambio-de-negocio.tmp",

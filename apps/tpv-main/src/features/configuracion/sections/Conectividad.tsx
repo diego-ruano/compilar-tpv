@@ -57,9 +57,10 @@ const ESTADO_TEXTO: Record<
 		tono: "neutro",
 	},
 	// AUD-19: la base de este equipo es anterior a lo que guarda la nube. No se arregla reconectando.
+	// SYNC-32: el TPV pasa a la pantalla de recuperación, que trae el estado actual de la nube.
 	detenida: {
 		titulo: "Sincronización detenida",
-		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Este TPV sigue funcionando y guarda todo lo que hagas, pero no lo sube ni recibe nada; los Handy no pueden trabajar. Esto no se arregla solo.",
+		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Hay que recuperar el estado actual de la nube desde la pantalla de recuperación; lo que este equipo tenía sin subir se guarda aparte.",
 		tono: "malo",
 	},
 };

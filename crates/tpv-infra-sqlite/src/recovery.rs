@@ -58,6 +58,13 @@ const ANTES_DE_LA_NUBE_PREFIX: &str = "antes-de-la-nube-";
 /// reconstruido desde la nube. Vive FUERA de `data.db` a propósito: restaurar una copia local
 /// no puede borrarla, porque esa copia también es de antes del traslado.
 const MARCA_TRASLADO: &str = "traslado-pendiente";
+/// SYNC-32 · Marca en AppData de que la base de este equipo es anterior a lo que la nube ya ha
+/// purgado (se cambió por fuera del programa: una imagen de disco, una `data.db` copiada a mano) y
+/// todavía no se ha reconstruido desde la nube. La pone la réplica al verlo en una sesión normal
+/// (`use_cases::replicacion`, `FinDeSesion::AnteriorAlLog`) y la quita esa reconstrucción. Como la
+/// del traslado, vive FUERA de `data.db`: cambiar la base otra vez, o restaurar una copia, no la
+/// borra.
+const MARCA_ANTERIOR_A_LA_NUBE: &str = "anterior-a-la-nube";
 /// AUD-06 · Marca en AppData de un cambio de negocio pendiente: se ha activado la licencia de otro
 /// negocio que el de la base, guardada como pendiente, y el TPV se reinicia. Lleva el negocio
 /// activado y se escribe entera o no se escribe. Mientras está, el proceso que la puso sigue siendo
@@ -75,14 +82,16 @@ const APARTADO_EN_CURSO: &str = "apartado-en-curso";
 const NEGOCIO_ANTERIOR_PREFIX: &str = "negocio-anterior-";
 /// AUD-06 · Lo que un negocio tiene en la raíz de AppData, fuera de la base y de `backups/`: las
 /// copias previas a una migración y los temporales de una restauración (por prefijo), la cola de
-/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes y la de
-/// un traslado. Lo que es del equipo (la licencia, el modo, los interruptores, la telemetría) no.
-const DEL_NEGOCIO_EN_APPDATA: [&str; 5] = [
+/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes, la de
+/// un traslado y la de una base anterior a la nube. Lo que es del equipo (la licencia, el modo, los
+/// interruptores, la telemetría) no.
+const DEL_NEGOCIO_EN_APPDATA: [&str; 6] = [
     "image_uploads.json",
     "image_uploads.json.tmp",
     "images",
     "image_backfill_done",
     MARCA_TRASLADO,
+    MARCA_ANTERIOR_A_LA_NUBE,
 ];
 const DEL_NEGOCIO_EN_APPDATA_POR_PREFIJO: [&str; 2] = [MIGRACION_PREFIX, "data.restore."];
 
@@ -254,6 +263,12 @@ pub async fn status(db: &Db) -> AppResult<RecoveryStatus> {
             state: RecoveryState::TransferPending,
         });
     }
+    // SYNC-32: lo mismo con una base anterior a lo que guarda la nube.
+    if hay_base_anterior_a_la_nube(db.carpeta()) {
+        return Ok(RecoveryStatus {
+            state: RecoveryState::OlderThanCloud,
+        });
+    }
 
     let r = db.read().await;
     let conn = r.conn();
@@ -294,6 +309,34 @@ pub fn hay_traslado_pendiente(app_data_dir: &Path) -> bool {
 /// La quita la reconstrucción desde la nube, al terminar.
 pub(crate) fn quitar_marca_traslado(app_data_dir: &Path) -> AppResult<()> {
     match std::fs::remove_file(app_data_dir.join(MARCA_TRASLADO)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(db_err(e)),
+        _ => Ok(()),
+    }
+}
+
+/// SYNC-32 · Deja constancia de que la base de este equipo es anterior a lo que la nube ya ha
+/// purgado, y cierra las escrituras de negocio de la base abierta.
+///
+/// Es el camino del traslado: `status` dice `OlderThanCloud`, la aplicación entra en la pantalla de
+/// recuperación (sólo con la nube), el outbox no sube (lo de antes del cambio de base que el equipo
+/// de entonces ya subió volvería a aplicarse) y la reconstrucción desde la nube guarda antes la base
+/// entera, con lo pendiente, y quita la marca.
+pub fn marcar_anterior_a_la_nube(db: &Db) -> AppResult<()> {
+    let carpeta = db.carpeta();
+    std::fs::create_dir_all(carpeta).map_err(db_err)?;
+    std::fs::write(carpeta.join(MARCA_ANTERIOR_A_LA_NUBE), now_ms().to_string()).map_err(db_err)?;
+    db.bloquear_escrituras_de_negocio(true);
+    Ok(())
+}
+
+/// SYNC-32 · ¿La base de este equipo es anterior a lo que guarda la nube y aún no se ha reconstruido?
+pub fn hay_base_anterior_a_la_nube(app_data_dir: &Path) -> bool {
+    app_data_dir.join(MARCA_ANTERIOR_A_LA_NUBE).exists()
+}
+
+/// SYNC-32 · La quita la reconstrucción desde la nube, después del `COMMIT`.
+pub(crate) fn quitar_marca_anterior_a_la_nube(app_data_dir: &Path) -> AppResult<()> {
+    match std::fs::remove_file(app_data_dir.join(MARCA_ANTERIOR_A_LA_NUBE)) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(db_err(e)),
         _ => Ok(()),
     }
@@ -1335,6 +1378,13 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
             "La licencia viene de otro equipo: los datos tienen que traerse de la nube. Una copia de este ordenador es de antes del traslado.",
         ));
     }
+    // SYNC-32: lo mismo con una base anterior a lo que guarda la nube. Las copias de este ordenador
+    // son de esa base o de antes (una imagen de disco las trae con ella): la salida es la nube.
+    if hay_base_anterior_a_la_nube(app_data_dir) {
+        return Err(AppError::conflict(
+            "Los datos de este ordenador son anteriores a lo que guarda la nube: hay que traer el estado actual de la nube. Una copia de este ordenador no sirve.",
+        ));
+    }
     // AUD-06: tampoco sobre una base de otro negocio que la licencia (sin apartar porque algo no se
     // dejó mover), ni con un apartado a medias: ésa se aparta entera antes de poner nada en su sitio.
     // Restaurar la movería sola y dejaría lo demás de su negocio (sus imágenes, su cola) junto a la
@@ -1510,6 +1560,32 @@ mod tests {
         assert_eq!(status(&db).await.unwrap().state, RecoveryState::ReconciliationPending);
         // Quitar una marca que ya no está no es un error: la reconstrucción puede repetirse.
         quitar_marca_traslado(&dir).unwrap();
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// SYNC-32: una base anterior a lo que guarda la nube no se usa, tenga usuarios o esté a medio
+    /// reconciliar, hasta reconstruirla desde la nube. Un traslado manda sobre ella (también es
+    /// «sólo la nube», y su pantalla lo explica). Marcarla cierra las escrituras al momento.
+    #[tokio::test]
+    async fn una_base_anterior_a_la_nube_no_se_usa_hasta_traer_la_nube() {
+        let dir = test_dir("anterior_estado");
+        let db = db_operativa(&dir).await;
+        assert!(!db.escrituras_de_negocio_bloqueadas());
+
+        marcar_anterior_a_la_nube(&db).unwrap();
+        assert!(db.escrituras_de_negocio_bloqueadas());
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::OlderThanCloud);
+        mark_reconciliation_pending(&db).await.unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::OlderThanCloud);
+        marcar_traslado(&dir).unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::TransferPending);
+        quitar_marca_traslado(&dir).unwrap();
+
+        quitar_marca_anterior_a_la_nube(&dir).unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::ReconciliationPending);
+        quitar_marca_anterior_a_la_nube(&dir).unwrap();
 
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
@@ -2569,7 +2645,7 @@ mod tests {
         }
         let del_negocio = [
             "data.db.bak.9", "data.db.bak.10", "data.restore.11.tmp", "image_uploads.json",
-            "image_uploads.json.tmp", "image_backfill_done", "traslado-pendiente",
+            "image_uploads.json.tmp", "image_backfill_done", "traslado-pendiente", "anterior-a-la-nube",
         ];
         for nombre in del_negocio {
             std::fs::write(dir.join(nombre), "de A").unwrap();

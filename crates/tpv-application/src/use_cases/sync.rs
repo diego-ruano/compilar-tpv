@@ -543,6 +543,9 @@ mod tests {
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())
         }
+        async fn marcar_anterior_a_la_nube(&self) -> AppResult<()> {
+            panic!("no usado")
+        }
         async fn health(&self) -> AppResult<SyncHealth> {
             panic!("no usado")
         }

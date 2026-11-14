@@ -64,4 +64,15 @@ describe("presentación de la réplica nativa", () => {
         h.listeners.get("sync:estado")!({payload:{revision:2,estado:"conectado",detalle:null,fase_recuperacion:"completada",fallos_recuperacion:0}});
         expect(useEstadoSync.getState().reconciliacionPendiente).toBe(false); socket.detener();
     });
+    it("una sesión detenida por una base anterior a la nube relee la recuperación y la pantalla pasa a ella (SYNC-32)", async () => {
+        h.invoke.mockImplementation(async (name) => name === "sync_estado" ? {revision:0,estado:"conectado",detalle:null,fase_recuperacion:"inactiva",fallos_recuperacion:0} : name === "recovery_status" ? {state:"older_than_cloud"} : null);
+        const socket = iniciarSocketMain(entrada)!; await asentar();
+        expect(useEstadoSync.getState().anteriorALaNube).toBe(false);
+        h.listeners.get("sync:estado")!({payload:{revision:1,estado:"detenida",detalle:"Los datos de este equipo son anteriores a lo que guarda la nube",fase_recuperacion:"inactiva",fallos_recuperacion:0}});
+        await asentar();
+        expect(h.invoke.mock.calls.map(([name]) => name)).toContain("recovery_status");
+        expect(useEstadoSync.getState()).toMatchObject({ estado: "detenida", anteriorALaNube: true, datosPerdidos: true });
+        socket.detener();
+        useEstadoSync.getState().configurarRecuperacion("ready");
+    });
 });

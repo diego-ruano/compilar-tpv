@@ -111,8 +111,10 @@ pub(crate) fn arrancar(app: AppHandle) {
                 match sesion(&app, recuperando).await {
                     Ok(uc::FinDeSesion::NoDisponible) => { retardo = 3; fallos = 0; espera = 1; }
                     // AUD-19: a esta base le falta lo que la nube ya purgó. Reconectar no lo
-                    // arregla: se espera a que se pida reintentar o al siguiente arranque, sin
-                    // tocar los datos ni el outbox, y se sigue vendiendo.
+                    // arregla. SYNC-32: el caso de uso ya la ha pasado a recuperarse de la nube
+                    // (escrituras cerradas, lo pendiente se guarda aparte al traerla); la pantalla
+                    // se entera por este `detenida` y relee el estado de la recuperación. Se espera
+                    // a que se pida reintentar, que es lo que hace la recuperación al terminar.
                     Ok(uc::FinDeSesion::AnteriorAlLog) => {
                         runtime.publicar(&app, "detenida", Some(uc::MOTIVO_ANTERIOR_AL_LOG.into()));
                         detenida = true;

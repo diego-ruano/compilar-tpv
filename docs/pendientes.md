@@ -31,7 +31,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
-| [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
 | [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
@@ -483,24 +482,6 @@ Lo que viene detrás no lo devuelve entero:
 Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
 comanda afectada (la comanda, sus líneas, sus cobros y lo que cuelga de ellos); y que el contraste
 quede enlazado a las cuarentenas que resuelve.
-
-### SYNC-32 · Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube
-
-Si la nube ya ha purgado algo por encima del checkpoint de la Main (`purgadoHasta`, AUD-19) y la base
-no está en recuperación, la sesión se detiene (`FinDeSesion::AnteriorAlLog`): no aplica, no sube y no
-mueve el checkpoint, Conectividad dice `detenida` y la Main sigue vendiendo en local. Con la purga
-actual sólo llega ahí una base cambiada por fuera de la aplicación (una imagen de disco restaurada,
-una `data.db` copiada a mano), porque el suelo de la purga no pasa del checkpoint de una Main que
-reporta.
-
-Falta el camino para salir: la pantalla de recuperación sólo aparece en los estados de recuperación,
-y reconstruir desde la nube con el outbox lleno lo niega la guardia (`bootstrap_restaurar`). Ese
-outbox mezcla lo vendido desde el cambio de base con lo que la base vieja tenía pendiente, que el
-equipo de entonces ya subió y que volvería a aplicarse si su `Applied_Operations` ha caducado. Hay
-que decidir qué se hace con él (guardarlo aparte y descartarlo, como en el traslado; subir sólo lo
-posterior al cambio de base, si se puede distinguir; o pasar por la recuperación aceptando que el
-cobro se detenga mientras tanto) y cómo se le ofrece al personal. Mientras tanto, el mensaje manda
-contactar con soporte (OPS-02). Sin decidir.
 
 ### SYNC-33 · Una copia sin sello no dice de qué negocio es
 

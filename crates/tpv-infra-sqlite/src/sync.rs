@@ -1196,6 +1196,10 @@ impl SyncRepository for SqliteSyncRepository {
         crate::cuarentenas_bajada::vaciar(&self.db, antes_de_ms).await
     }
 
+    async fn marcar_anterior_a_la_nube(&self) -> AppResult<()> {
+        crate::recovery::marcar_anterior_a_la_nube(&self.db)
+    }
+
     async fn health(&self) -> AppResult<SyncHealth> {
         let r = self.db.read().await;
         let conn = r.conn();
@@ -1263,12 +1267,19 @@ impl SyncRepository for SqliteSyncRepository {
         // es de antes: lo que el equipo de entonces ya subió volvería a aplicarse en cuanto caducara
         // su `Applied_Operations`, y un `UPDATE` viejo devolvería un PIN o un rol ya cambiados. Se
         // guarda la base entera, con ese outbox, y no se sube.
-        let copia_sin_reconciliar = !traslado && reconciliacion_pendiente(&self.db).await?;
-        if copia_sin_reconciliar {
+        //
+        // SYNC-32: y con una base que se cambió por fuera del programa y es anterior a lo que la nube
+        // ya purgó. Su outbox mezcla lo vendido desde el cambio de base con lo que la base vieja
+        // tenía pendiente, que el equipo de entonces ya subió: como en un traslado, se guarda aparte
+        // con la base entera y no se sube.
+        let anterior_a_la_nube = !traslado && crate::recovery::hay_base_anterior_a_la_nube(self.db.carpeta());
+        let copia_sin_reconciliar =
+            !traslado && !anterior_a_la_nube && reconciliacion_pendiente(&self.db).await?;
+        if anterior_a_la_nube || copia_sin_reconciliar {
             let copia = crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?;
-            tracing::info!(target: "tpv::sync", copia = %copia.display(), "copia sin reconciliar guardada antes de traer la nube");
+            tracing::info!(target: "tpv::sync", copia = %copia.display(), anterior_a_la_nube, "base de antes guardada antes de traer la nube");
         }
-        let apartar_outbox = traslado || copia_sin_reconciliar;
+        let apartar_outbox = traslado || anterior_a_la_nube || copia_sin_reconciliar;
 
         let w = self.db.write().await;
         let conn = w.raw();
@@ -1358,7 +1369,7 @@ impl SyncRepository for SqliteSyncRepository {
                     None => 0,
                 }
             };
-            if pendientes > 0 && !reconciliando && !sin_usuarios && !traslado {
+            if pendientes > 0 && !reconciliando && !sin_usuarios && !apartar_outbox {
                 return Err(AppError::conflict(format!(
                     "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
@@ -1521,6 +1532,12 @@ impl SyncRepository for SqliteSyncRepository {
                     if let Err(e) = crate::recovery::quitar_marca_traslado(self.db.carpeta()) {
                         tracing::warn!(target: "tpv::sync", error = %e, "no se pudo quitar la marca de traslado");
                     }
+                }
+                // SYNC-32: lo mismo, y por lo mismo, con la de una base anterior a la nube. Se quita
+                // aunque esta reconstrucción no la viera (una marca puesta mientras bajaba el
+                // volcado): la base que queda es la de la nube.
+                if let Err(e) = crate::recovery::quitar_marca_anterior_a_la_nube(self.db.carpeta()) {
+                    tracing::warn!(target: "tpv::sync", error = %e, "no se pudo quitar la marca de base anterior a la nube");
                 }
                 Ok(BootstrapResultado {
                     seq: snapshot.seq,

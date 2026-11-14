@@ -2608,7 +2608,13 @@ export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending" 
  *  del traslado, así que no se puede trabajar con ella: se reconstruye desde la nube, igual que
  *  un equipo nuevo. Sólo con la nube — una copia local también sería de antes.
  */
-"transfer_pending";
+"transfer_pending" |
+/**
+ *  SYNC-32 · La base de este equipo se cambió por fuera del programa y es anterior a lo que la
+ *  nube ya ha purgado: no se puede poner al día con ella. Como en un traslado, lo que tenía
+ *  pendiente se guarda aparte y se reconstruye desde la nube. Sólo con la nube.
+ */
+"older_than_cloud";
 
 export type RecoveryStatus = {
 	state: RecoveryState,

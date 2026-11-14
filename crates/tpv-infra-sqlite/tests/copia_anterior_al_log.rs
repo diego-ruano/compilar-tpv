@@ -30,7 +30,7 @@ use tpv_contracts::recovery::RecoveryState;
 use tpv_contracts::sync::{OutboxFallo, SqlStatement};
 use tpv_domain::login::hash_pin;
 use tpv_infra_sqlite::connection::init_main_db;
-use tpv_infra_sqlite::db::Db;
+use tpv_infra_sqlite::db::{Db, Writer};
 use tpv_infra_sqlite::ejecutor::Value;
 use tpv_infra_sqlite::recovery;
 use tpv_infra_sqlite::sync::SqliteSyncRepository;
@@ -351,6 +351,100 @@ async fn tras_traer_la_nube_la_reconciliacion_tampoco_termina_contra_un_worker_s
     // Con el worker actualizado, la misma reconciliación termina.
     *nube.cambios.lock().unwrap() = json!({"ok": true, "items": [], "nextSince": 50, "highWater": 50, "purgadoHasta": 0});
     replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
+    assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::Ready);
+
+    drop(ctx);
+    drop(repo);
+    cerrar(db).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// SYNC-32 · Una Main **en sesión normal** cuya base se cambió por fuera del programa (una imagen de
+/// disco restaurada, una `data.db` copiada a mano) y es anterior a lo que la nube ya purgó. Se trata
+/// como un traslado de licencia: lo pendiente se guarda aparte, la Main pasa a recuperarse de la nube
+/// (sólo de la nube) y, al traerla, el outbox de antes no pasa a la base nueva.
+#[tokio::test]
+async fn una_main_en_sesion_normal_anterior_a_lo_purgado_pasa_a_recuperarse_de_la_nube() {
+    let dir = dir_temporal();
+    let pin = hash_pin("9999").unwrap();
+
+    // 1) Una base trabajando: su dueña, el cursor en 10 y una venta de hoy en el outbox.
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
+    escribir(
+        &db,
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('u-duena', ?1, 'duena@bar.test', ?2, 'Marta', 'Activo');",
+        vec![Value::Text(ROL_ADMIN.into()), Value::Text(pin)],
+    )
+    .await;
+    escribir(&db, "UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;", vec![]).await;
+    let venta = json!([{"sql": "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);", "args": ["z-hoy", "Terraza"]}]);
+    escribir(
+        &db,
+        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-venta-de-hoy', 'main_op', ?1, 1);",
+        vec![Value::Text(venta.to_string())],
+    )
+    .await;
+    let copia_local = recovery::create_backup(&db, &dir).await.unwrap().expect("copia hecha");
+    assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::Ready);
+    let repo = Arc::new(SqliteSyncRepository::new(db.clone()));
+    let ctx = Ctx { db: db.clone(), repo: repo.clone() };
+
+    // 2) La sesión normal: la nube ya purgó hasta el 700. No aplica ni sube nada, y la Main pasa a
+    //    recuperarse de la nube: sin escrituras de negocio y sin copias de este ordenador.
+    let nube = Nube::default();
+    *nube.cambios.lock().unwrap() = json!({
+        "ok": true,
+        "items": [{"opId": "op-701", "seq": 701, "statements": []}],
+        "nextSince": 701, "highWater": 1700, "purgadoHasta": 700,
+    });
+    let mut socket = Socket::default();
+    let fin = replicacion::ejecutar(&ctx, &nube, &mut socket, false).await.unwrap();
+    assert_eq!(fin, replicacion::FinDeSesion::AnteriorAlLog);
+    assert!(socket.enviados.is_empty(), "ni sube lo pendiente ni suelta a las Handy");
+    assert_eq!(numero(&db, "SELECT Last_Seq FROM _Sync_State WHERE Id = 1;").await, 10);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1, "lo pendiente sigue ahí");
+    assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::OlderThanCloud);
+    let escrita = db.write().await.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-x', 'X');", ()).await;
+    assert!(escrita.is_err(), "con la base anterior a la nube no entra ninguna escritura de negocio");
+    let e = recovery::prepare_restore(&dir, &copia_local.id, Some("negocio-de-prueba")).await.unwrap_err();
+    assert!(e.to_string().contains("anteriores a lo que guarda la nube"), "{e}");
+
+    // Reabrir no lo cambia: la marca vive fuera de la base.
+    drop(ctx);
+    drop(repo);
+    cerrar(db).await;
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
+    assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::OlderThanCloud);
+    assert!(db.write().await.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-x', 'X');", ()).await.is_err());
+    let repo = Arc::new(SqliteSyncRepository::new(db.clone()));
+    let ctx = Ctx { db: db.clone(), repo: repo.clone() };
+
+    // 3) «Recuperar el estado actual de la nube»: la base de antes se guarda entera, con lo que tenía
+    //    pendiente, y el outbox no pasa a la nueva (como en un traslado).
+    let (columnas, filas) = usuarios_como_la_nube(&db).await;
+    *nube.volcado.lock().unwrap() = json!({
+        "seq": 1700,
+        "total_filas": filas.len(),
+        "tablas": [{"nombre": "Usuarios", "columnas": columnas, "filas": filas, "parcial": false}],
+        "backfill": [],
+    });
+    uc_sync::bootstrap_desde_nube(&nube, repo.as_ref()).await.unwrap();
+    let guardadas = std::fs::read_dir(dir.join("backups"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().unwrap().to_str().unwrap().starts_with("antes-de-la-nube-"))
+        .collect::<Vec<_>>();
+    assert_eq!(guardadas.len(), 1, "la base de antes se guarda aparte");
+    assert_eq!(outbox_de_la_copia(&guardadas[0], &dir), vec![venta.to_string()]);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
+    assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::ReconciliationPending);
+
+    // 4) Y la reconciliación termina sin subir lo de antes.
+    *nube.cambios.lock().unwrap() = json!({"ok": true, "items": [], "nextSince": 1700, "highWater": 1700, "purgadoHasta": 700});
+    let mut socket = Socket::default();
+    replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
+    assert!(socket.enviados.iter().all(|m| m["type"] != "apply_lote"), "{:?}", socket.enviados);
     assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::Ready);
 
     drop(ctx);
