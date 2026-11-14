@@ -71,15 +71,11 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_trabajador_invalido");
 	const datos = c.req.valid("json");
-	// RI-62: que no deje el negocio sin administrador lo decide la guarda del comando, dentro del lote
-	// (SYNC-30): `ultimo_administrador`. La Main lo mira dentro de su transacción.
+	// Que no deje el negocio sin administrador (RI-62) y que la ficha exista (RI-63) lo deciden las
+	// guardas del comando, dentro del lote (SYNC-30, SYNC-35): `ultimo_administrador`,
+	// `trabajador_no_encontrado`. La Main lo mira dentro de su transacción.
 	const passwordHash = datos.pin ? await hashPin(datos.pin) : null;
-	const filas = await apply(c, cmd.updateTrabajador(id, datos, passwordHash));
-	// RI-63: un id que no existe respondía `ok`. En un reintento las cuentas llegan a `null` (el
-	// resultado guardado no lee la base): eso no es «no existe».
-	if (filas?.usuarios === 0 || filas?.trabajadores === 0) {
-		return c.json({ error: "trabajador_no_encontrado" }, 404);
-	}
+	await apply(c, cmd.updateTrabajador(id, datos, passwordHash));
 	return c.json({ ok: true });
 });
 
@@ -110,8 +106,9 @@ trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSc
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_asignacion_invalido");
 	const datos = c.req.valid("json");
-	const afectadas = await apply(c, cmd.updateAsignacion(id, datos));
-	if (afectadas === 0) return c.json({ error: "horario_editar_conjunto", message: "Edita los dos tramos del horario como un conjunto." }, 409);
+	// Una de dos tramos (`horario_editar_conjunto`) y una que ya no está (`asignacion_no_encontrada`)
+	// las rechazan las guardas del comando, dentro del lote (SYNC-35).
+	await apply(c, cmd.updateAsignacion(id, datos));
 	return c.json({ ok: true });
 });
 

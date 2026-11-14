@@ -104,6 +104,11 @@ export async function apply(
  * best-effort); y el lote se confirma también cuando la escritura condicional no toca ninguna fila, así
  * que `null` puede ser «hecho» o «no se pudo». Es lo que hace ya borrar un ticket (AUD-14); salió en
  * AUD-26.
+ *
+ * Si lo que decide es una condición previa (que exista lo que se edita, que no esté en uso lo que se
+ * quita), mejor una guarda en el comando (SYNC-30): decide dentro del lote, el reintento de lo que
+ * entró contesta lo guardado y la ruta no mira el resultado. Así van editar una ficha, editar una
+ * asignación de un tramo y quitar un producto (SYNC-35).
  */
 export async function decidirPorEstado(
 	resultado: unknown,

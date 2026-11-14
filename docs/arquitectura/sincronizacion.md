@@ -872,10 +872,22 @@ Van en guarda: cancelar una reserva que aún no ha llegado (`reserva_no_pendient
 mesa la llegada o la salida, con la reserva como se leyó (`reserva_cambiada`); el solape de una
 reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`,
 `reserva_solapada`) y que su cliente siga existiendo (`cliente_no_encontrado`); el último
-administrador (`ultimo_administrador`); el turno repetido de un trabajador
-(`asignacion_duplicada`), y una línea de un producto archivado o en una comanda cobrada, en la mesa
-y en la barra (`producto_archivado`, `comanda_cobrada`, `mesas/guardasDeLinea.ts`). Lo prueba
+administrador (`ultimo_administrador`) y que la ficha que se edita exista
+(`trabajador_no_encontrado`); el turno repetido de un trabajador (`asignacion_duplicada`) y editar
+una asignación que tiene dos tramos o que ya no está (`horario_editar_conjunto`,
+`asignacion_no_encontrada`); una línea de un producto archivado o en una comanda cobrada, en la mesa
+y en la barra (`producto_archivado`, `comanda_cobrada`, `mesas/guardasDeLinea.ts`), y quitar un
+producto que está en una comanda abierta (`producto_en_comanda_abierta`). Lo prueba
 `test/guardasEnElLote.test.ts`, con una escritura que entra entre la lectura de la ruta y su lote.
+
+Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden
+por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
+el guardado de un horario) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
+operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-10 lo afina después
+de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
+y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
+contestaban `ok` sin saber si lo editado seguía existiendo, o el 409 de un producto que ya se había
+quitado (SYNC-35): ahora lo decide su guarda.
 
 No necesitan guarda lo que ya para la base con un índice único (una comanda abierta por mesa, un
 cierre por periodo, nombres de zona, mesa y producto, correos de cliente), lo que cambia sólo al

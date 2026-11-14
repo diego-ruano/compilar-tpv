@@ -204,25 +204,6 @@ export async function getProductoStockSuelto(
 	return r.Stock_Suelto == null ? null : Number(r.Stock_Suelto);
 }
 
-// INV-05: ¿está el producto en una comanda todavía abierta? Es lo único que impide quitarlo; si sólo
-// tiene ventas cerradas, se archiva (RI-54).
-export async function productoEnComandaAbierta(
-	db: Client,
-	idProducto: string,
-): Promise<boolean> {
-	const rs = await db.execute({
-		sql: `
-			SELECT 1
-			FROM Detalle_Comanda dc
-			JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
-			WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta'
-			LIMIT 1;
-		`,
-		args: [idProducto],
-	});
-	return (rs.rows ?? []).length > 0;
-}
-
 export async function listLotesByProducto(
 	db: Client,
 	idProducto: string,

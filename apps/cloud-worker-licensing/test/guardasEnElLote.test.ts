@@ -10,6 +10,10 @@
 // nada, que no llega a la Main, que convive con las claves foráneas aplazadas y que un reintento
 // con la misma clave vuelve a decidir. Después, cada comprobación que se ha pasado a una guarda, con
 // la ruta de verdad y una escritura que entra en la base entre su lectura y su lote.
+//
+// SYNC-35 · Al final, las tres rutas que decidían por el recuento o por una lectura que devolvía el
+// lote, y que en el reintento de una escritura cuyo resultado no se guardó entero contestaban mal:
+// ahora lo decide una guarda, y la ruta no mira el resultado.
 
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -48,12 +52,14 @@ const { reservasRoutes } = await import("../src/domains/reservas/reservas.routes
 const { mesasRoutes } = await import("../src/domains/mesas/mesas.routes");
 const { trabajadoresRoutes } = await import("../src/domains/trabajadores/trabajadores.routes");
 const { ventaRapidaRoutes } = await import("../src/domains/venta_rapida/venta_rapida.routes");
+const { inventarioRoutes } = await import("../src/domains/inventario/inventario.routes");
 
 const app = new Hono();
 app.route("/v1/reservas", reservasRoutes);
 app.route("/v1/mesas", mesasRoutes);
 app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
+app.route("/v1/inventario", inventarioRoutes);
 app.onError((e: any, c) => c.json(cuerpoDeErrorConStatus(e), e.status ?? 500));
 
 const ADMIN = "00000000-0000-7000-8000-000000000001";
@@ -534,6 +540,136 @@ describe("SYNC-30 · una línea de un producto que se acaba de archivar, o en un
 			const reintento = await n.pedir("POST", "/v1/venta-rapida/lineas", deBarra, { clave: "clave-de-la-linea-de-barra" });
 			expect(reintento).toEqual(primera);
 			expect(lineasDe(n, "de-barra")).toBe(1);
+		});
+	});
+});
+
+/* =========================================================
+   SYNC-35: el reintento de una escritura cuyo resultado no se guardó
+========================================================= */
+
+/**
+ * La escritura de `clave` aplicada, con su resultado guardado sin lo que dependía de la base: lo que
+ * deja el gate (`storageResult`) cuando no se llega a refinar después de aplicarla (SYNC-10, que es
+ * best-effort).
+ */
+function sinResultadoGuardado(n: Negocio, clave: string) {
+	expect(n.n(`SELECT COUNT(*) FROM Applied_Operations WHERE Op_Id = '${clave}'`)).toBe(1);
+	n.sql.exec("UPDATE Applied_Operations SET Result_Json = 'null' WHERE Op_Id = ?;", clave);
+}
+
+describe("SYNC-35 · editar la ficha de un trabajador", () => {
+	const ana = { ...anaCamarera, id_rol: ADMIN };
+
+	it("una que no existe, o que otro borra entre la lectura y el lote, es trabajador_no_encontrado, también al reintentarla", async () => {
+		await conNegocio("ficha-borrada", USUARIOS, async (n) => {
+			const noExiste = await n.pedir("PUT", "/v1/trabajadores/otro", { ...ana, id_trabajador: "otro" });
+			expect(noExiste).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+
+			const clave = "clave-de-la-ficha-borrada";
+			const primera = await n.pedir("PUT", "/v1/trabajadores/trab-ana", ana, {
+				clave,
+				antesDelLote: ["DELETE FROM Trabajadores WHERE ID_Trabajador = 'trab-ana'"],
+			});
+			expect(primera).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+			expect(await n.pedir("PUT", "/v1/trabajadores/trab-ana", ana, { clave })).toEqual(primera);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+		});
+	});
+
+	it("el reintento de una edición que entró contesta ok aunque su recuento no se guardara", async () => {
+		await conNegocio("ficha-reintento", USUARIOS, async (n) => {
+			const clave = "clave-de-la-ficha-editada";
+			const cambio = { ...ana, nombre: "Ana María" };
+			expect((await n.pedir("PUT", "/v1/trabajadores/trab-ana", cambio, { clave })).status).toBe(200);
+			sinResultadoGuardado(n, clave);
+			n.sql.exec("DELETE FROM Trabajadores WHERE ID_Trabajador = 'trab-ana'");
+			expect(await n.pedir("PUT", "/v1/trabajadores/trab-ana", cambio, { clave })).toEqual({ status: 200, json: { ok: true } });
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(1);
+		});
+	});
+});
+
+describe("SYNC-35 · editar una asignación de un tramo", () => {
+	const ASIGNACIONES = [
+		...USUARIOS,
+		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('sola', 'trab-ana', '2030-05-10', 'manana', 'Sala', '09:00', '14:00')",
+		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('t1', 'g', 'trab-ana', '2030-05-11', 'manana', 'Sala', '09:00', '12:00')",
+		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('t2', 'g', 'trab-ana', '2030-05-11', 'manana', 'Sala', '17:00', '20:00')",
+	];
+	const cambio = { id_turno: "manana", area: "Barra", hora_inicio: "10:00", hora_fin: "15:00", notas: null };
+	const areaDe = (n: Negocio, id: string) =>
+		n.sql.exec("SELECT Area AS a FROM Asignacion_Turnos WHERE ID_Asignacion = ?;", id).toArray()[0]?.a ?? null;
+
+	it("una de dos tramos se edita como un conjunto, y una que no está es asignacion_no_encontrada", async () => {
+		await conNegocio("asignacion-guardas", ASIGNACIONES, async (n) => {
+			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/t1", { ...cambio, id_asignacion: "t1" })).toEqual({
+				status: 409,
+				json: { ok: false, error: "horario_editar_conjunto" },
+			});
+			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/no-esta", { ...cambio, id_asignacion: "no-esta" })).toEqual({
+				status: 404,
+				json: { ok: false, error: "asignacion_no_encontrada" },
+			});
+			expect((await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" })).status).toBe(200);
+			expect([areaDe(n, "sola"), areaDe(n, "t1")]).toEqual(["Barra", "Sala"]);
+		});
+	});
+
+	it("si otro la borra antes del lote, el reintento contesta lo mismo; si entró, ok aunque su recuento no se guardara", async () => {
+		await conNegocio("asignacion-reintento", ASIGNACIONES, async (n) => {
+			const borrada = "clave-de-la-asignacion-borrada";
+			const primera = await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" }, {
+				clave: borrada,
+				antesDelLote: ["DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = 'sola'"],
+			});
+			expect(primera).toEqual({ status: 404, json: { ok: false, error: "asignacion_no_encontrada" } });
+			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" }, { clave: borrada })).toEqual(primera);
+
+			n.sql.exec(
+				"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('otra-sola', 'trab-ana', '2030-05-12', 'manana', 'Sala')",
+			);
+			const editada = "clave-de-la-asignacion-editada";
+			expect((await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/otra-sola", { ...cambio, id_asignacion: "otra-sola" }, { clave: editada })).status).toBe(200);
+			sinResultadoGuardado(n, editada);
+			n.sql.exec("DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = 'otra-sola'");
+			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/otra-sola", { ...cambio, id_asignacion: "otra-sola" }, { clave: editada })).toEqual({
+				status: 200,
+				json: { ok: true },
+			});
+		});
+	});
+});
+
+describe("SYNC-35 · quitar un producto del catálogo", () => {
+	const PRODUCTO = [
+		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar')",
+		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('cafe', 'cat', 'Café', 130)",
+		"INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('abierta', 'BARRA', '2026-11-14 10:00:00', 'Abierta')",
+	];
+	const LINEA =
+		"INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('l1', 'abierta', 'cafe', 1, 130)";
+	const productos = (n: Negocio) => n.n("SELECT COUNT(*) FROM Productos WHERE ID_Producto = 'cafe'");
+
+	it("en una comanda abierta, también si la línea entra entre la lectura y el lote, no se quita", async () => {
+		await conNegocio("producto-en-uso", PRODUCTO, async (n) => {
+			const r = await n.pedir("DELETE", "/v1/inventario/productos/cafe", undefined, { antesDelLote: [LINEA] });
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "producto_en_comanda_abierta" } });
+			expect(productos(n)).toBe(1);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+		});
+	});
+
+	// Antes la ruta decidía con una lectura que devolvía el lote (`en_uso`), y en el reintento de un
+	// borrado que había entrado llegaba sin ella: contestaba el 409 aunque el producto ya no estuviera.
+	it("el reintento de un borrado que entró contesta ok aunque su resultado no se guardara", async () => {
+		await conNegocio("producto-reintento", PRODUCTO, async (n) => {
+			const clave = "clave-del-producto-quitado";
+			const ok = { status: 200, json: { ok: true } };
+			expect(await n.pedir("DELETE", "/v1/inventario/productos/cafe", undefined, { clave })).toEqual(ok);
+			expect(productos(n)).toBe(0);
+			sinResultadoGuardado(n, clave);
+			expect(await n.pedir("DELETE", "/v1/inventario/productos/cafe", undefined, { clave })).toEqual(ok);
 		});
 	});
 });

@@ -238,17 +238,30 @@ const SQL_QUITAR_PRODUCTO = [
 	"DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
 ];
 
+/**
+ * INV-05: sólo lo impide estar en una comanda abierta, y lo decide la guarda dentro del lote
+ * (`producto_en_comanda_abierta`). SYNC-35: lo decidía la ruta con una lectura que el lote devolvía
+ * (RI-39), y el reintento de un borrado que había entrado llegaba sin ella y contestaba el 409
+ * aunque el producto ya no estuviera. Con la guarda, el reintento de uno que entró contesta lo
+ * guardado y el de uno que no, se vuelve a decidir. Las sentencias replicadas conservan su
+ * condición, que vuelve a evaluar la Main.
+ */
 export function deleteProducto(idProducto: string): BuiltCommand {
-	// RI-39: el resultado y las guardas se evalúan en la misma transacción del DO.
 	const steps = [
-		{ kind: "row", saveAs: "enUso", sql: `SELECT EXISTS (
-			SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
-			WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta') AS en_uso;`, args: [idProducto] },
+		{
+			kind: "guard",
+			sql: `SELECT NOT EXISTS (
+				SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+				WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
+			args: [idProducto],
+			error: "producto_en_comanda_abierta",
+			status: 409,
+		},
 		...SQL_QUITAR_PRODUCTO.map((sql) => ({ kind: "execute", sql, args: [idProducto] })),
 	];
 	return {
 		commandName: "inventario_delete_producto",
-		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "enUso" } },
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_producto: idProducto },
 	};
 }

@@ -123,12 +123,10 @@ inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_us
 inventarioRoutes.delete("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto_invalido");
-	// INV-05: sólo lo impide estar en una comanda abierta. Con ventas cerradas se archiva (RI-54),
-	// y eso lo decide el propio comando.
-	const enUso = await tenantQuery(c, (db) => q.productoEnComandaAbierta(db, id));
-	if (enUso) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
-	const resultado = await apply(c, cmd.deleteProducto(id));
-	if (Number(resultado?.en_uso) !== 0) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
+	// INV-05: sólo lo impide estar en una comanda abierta, y lo decide la guarda del comando dentro
+	// del lote (SYNC-35): `producto_en_comanda_abierta`. Con ventas cerradas se archiva (RI-54), y
+	// eso lo decide el propio comando.
+	await apply(c, cmd.deleteProducto(id));
 	return c.json({ ok: true });
 });
 

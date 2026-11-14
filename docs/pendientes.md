@@ -32,7 +32,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
-| [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -503,25 +502,6 @@ restaurarla lo que demuestre que es del negocio: el PIN de un administrador de l
 reconciliación no dé por buena una base con el cursor por encima de lo que la nube ha emitido. No hay
 nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
 AUD-22 (la copia traída de fuera, restaurada sin PIN). Sin decidir.
-
-### SYNC-35 · Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó
-
-En un reintento idempotente (la misma `X-Idempotency-Key`), `apply` devuelve el resultado que se
-guardó al aplicar. Si no se llegó a refinar (SYNC-10, que es best-effort), los recuentos y las
-lecturas son `null`: no dice si la escritura cambió algo, porque el lote se confirma también cuando
-una sentencia condicional no toca ninguna fila. Las rutas que deciden por el recuento lo resuelven releyendo el estado con
-`decidirPorEstado` (`lib/rutas.ts`): la papelera de notificaciones, `turno-partido` y
-`horarios/guardar`. Quedan tres que no:
-
-- `PUT /v1/trabajadores/:id` y `PUT /v1/trabajadores/horarios/asignaciones/:id` toman `null` por
-  éxito: si otro dispositivo borró lo que se editaba y se perdió la respuesta, el reintento contesta
-  200 sin haber cambiado nada. Lo editado ya no existe, y la pantalla lo ve al recargar.
-- `DELETE /v1/inventario/productos/:id` mira `en_uso`, una lectura del resultado: en el reintento
-  llega sin ella y contesta el 409 «producto en una comanda abierta» aunque el producto se haya borrado.
-
-Arreglo propuesto: `decidirPorEstado` en las tres, como en `horarios/guardar`, con una lectura de lo
-pedido (el trabajador o la asignación tal como se pidió; el producto, que ya no exista o esté
-archivado).
 
 ---
 

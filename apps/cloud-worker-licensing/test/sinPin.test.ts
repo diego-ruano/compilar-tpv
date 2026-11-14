@@ -46,7 +46,7 @@ describe("Sin_PIN · entrar sin PIN", () => {
 				const input = trabajadorUpdateSchema.parse({ ...EDICION, id_rol: camarero, ...cambios }) as any;
 				const paso = cmd
 					.updateTrabajador("trab-1", input, null)
-					.command.payload.steps.find((s: any) => s.saveAs === "usuarios");
+					.command.payload.steps.find((s: any) => s.kind === "execute" && s.sql.includes("UPDATE Usuarios"));
 				sql.exec(paso.sql, ...paso.args);
 				return sql.exec("SELECT Sin_PIN AS s FROM Usuarios WHERE ID_Usuario = 'user-1';").one().s;
 			};
