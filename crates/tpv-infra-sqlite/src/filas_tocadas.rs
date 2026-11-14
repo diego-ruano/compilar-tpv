@@ -30,7 +30,12 @@
 //! - **Lo que no se sabe** se dice (`incierto`), y entonces el cambio no se trae por estado: su
 //!   cuarentena se queda. Es una sentencia que no se sabe leer ni ejecutar (una tabla que esta versión
 //!   no tiene), una que no escribe filas (un `COMMIT`), un `REPLACE` (que borra lo que choca, sea cual
-//!   sea su clave) o más filas de las que caben.
+//!   sea su clave), un `ON CONFLICT` sobre otra columna que la clave que aquí no se puede ejecutar
+//!   (actualiza la fila que ya tiene ese valor, y sólo el `RETURNING` dice cuál) o más filas de las
+//!   que caben.
+//! - **Lo que sale de esta base y no de la sentencia** (un `WHERE` por una foránea, un `INSERT …
+//!   SELECT`, ese `ON CONFLICT`) se dice por tabla (`por_filtro`): son las filas de la nube sólo si
+//!   aquí no había nada distinto en esa tabla.
 //!
 //! Las filas que una sentencia **borra** se marcan (`borrada`): si la nube ya no las tiene, aquí
 //! tampoco tienen que estar. De las demás, que la nube no las tenga no dice nada de esta base.
@@ -367,6 +372,20 @@ fn una_sentencia(
         }
     }
 
+    // Un `ON CONFLICT` sobre otra columna que la clave (`ON CONFLICT(Nombre_Zona) DO UPDATE`)
+    // actualiza la fila que ya tiene ese valor, con su clave, y no la que la sentencia proponía: lo
+    // que se mira antes no la ve. Sólo la dice el `RETURNING`, así que tiene que poder ejecutarse.
+    let por_otra_clave = forma.tipo == Tipo::Insertar
+        && forma.conflictos.iter().any(|(objetivo, actualiza)| {
+            *actualiza
+                && objetivo.as_ref().is_none_or(|columnas| {
+                    columnas.len() != clave.len() || !columnas.iter().all(|c| clave.iter().any(|k| k.eq_ignore_ascii_case(c)))
+                })
+        });
+    if por_otra_clave && forma.con_returning {
+        return Err(());
+    }
+
     // Y la sentencia, con su `RETURNING`: lo que de verdad toca aquí.
     let ejecutada = if forma.con_returning {
         sim.filas(&st.sql, args, usize::MAX).map(|_| Vec::new())
@@ -388,8 +407,9 @@ fn una_sentencia(
                 }
             }
         }
-        // Falla aquí (es la que choca, o depende de una que chocó): vale lo que se miró antes.
-        Err(_) if previa.is_some() => {}
+        // Falla aquí (es la que choca, o depende de una que chocó): vale lo que se miró antes, salvo
+        // que lo que actualiza no se pueda mirar antes.
+        Err(_) if previa.is_some() && !por_otra_clave => {}
         Err(_) => return Err(()),
     }
     // Lo que se salta al chocar no sale en el `RETURNING`: sin haberlo mirado antes, no se sabe.
@@ -399,7 +419,7 @@ fn una_sentencia(
     // Sus filas sólo las nombra la sentencia si es un `VALUES` (leído antes) o un `WHERE` por la
     // clave entera; las demás se han sacado de esta base.
     let nombra_sus_filas = match forma.tipo {
-        Tipo::Insertar => forma.origen_valores && previa.is_some(),
+        Tipo::Insertar => forma.origen_valores && previa.is_some() && !por_otra_clave,
         Tipo::Actualizar | Tipo::Borrar => nombrada,
     };
     if !nombra_sus_filas {
@@ -681,6 +701,9 @@ struct Forma {
     origen: Option<(usize, usize)>,
     /// Su origen es un `VALUES`: lo que inserta no depende de nada de la base.
     origen_valores: bool,
+    /// Las cláusulas `ON CONFLICT` de un `INSERT`: sus columnas (`None` sin ellas o si no son sólo
+    /// columnas) y si actualizan (`DO UPDATE`).
+    conflictos: Vec<(Option<Vec<String>>, bool)>,
     donde: Donde,
     /// Las igualdades de su `WHERE` que se pueden usar solas: `columna = valor`.
     igualdades: Vec<(String, String)>,
@@ -760,6 +783,7 @@ impl Forma {
             columnas: None,
             origen: None,
             origen_valores: false,
+            conflictos: Vec::new(),
             donde: Donde::NoSe,
             igualdades: Vec::new(),
         };
@@ -792,6 +816,25 @@ impl Forma {
                     }
                     // Un `ON CONFLICT … DO NOTHING`, en cualquiera de sus cláusulas.
                     forma.puede_saltarse |= t.buscar(corte, n, |j| t.es(j, "DO") && t.es(j + 1, "NOTHING")).is_some();
+                    // Y cada cláusula: sobre qué columnas y si actualiza.
+                    let mut j = corte;
+                    while let Some(on) = t.buscar(j, n, |k| t.es(k, "ON") && t.es(k + 1, "CONFLICT")) {
+                        let mut k = on + 2;
+                        let objetivo = if t.signo(k, "(") {
+                            let cierre = t.cierre(k)?;
+                            let partes: Vec<usize> = (k + 1..cierre).collect();
+                            k = cierre + 1;
+                            // Sólo nombres separados por comas; un `COLLATE` o una expresión, no se sabe.
+                            let simples = partes.len() % 2 == 1
+                                && partes.iter().enumerate().all(|(x, p)| if x % 2 == 0 { t.nombre(*p).is_some() } else { t.signo(*p, ",") });
+                            simples.then(|| partes.iter().step_by(2).filter_map(|p| t.nombre(*p)).collect())
+                        } else {
+                            None
+                        };
+                        let hacer = t.buscar(k, n, |x| t.es(x, "DO"))?;
+                        forma.conflictos.push((objetivo, t.es(hacer + 1, "UPDATE")));
+                        j = hacer + 1;
+                    }
                 }
             }
             Tipo::Actualizar | Tipo::Borrar => {
@@ -1198,6 +1241,30 @@ mod tests {
         .await;
         assert!(!t.incierto, "{t:?}");
         assert_eq!(t.filas, vec![fila("Producto_Alergenos", &["p1", "a1"], false), fila("Producto_Alergenos", &["p2", "a1"], false)]);
+    }
+
+    #[tokio::test]
+    async fn un_upsert_por_otra_columna_toca_la_fila_que_ya_tiene_ese_valor() {
+        // Codex: `ON CONFLICT(Nombre_Zona)` (el de `mesas.commands.ts`) actualiza la zona que ya se
+        // llama así, con su clave, y no la que la sentencia proponía. Sólo lo dice el `RETURNING`.
+        let db = base("upsert").await;
+        sembrar(&db, NEGOCIO).await;
+        let sql = "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES (?1, ?2, ?3) \
+                   ON CONFLICT(Nombre_Zona) WHERE Archivada_En IS NULL DO UPDATE SET Room_Points = excluded.Room_Points;";
+        let cambio = [st(sql, vec![json!("z-nueva"), json!("Terraza"), json!("[1]")])];
+        let t = tocadas(&db, &cambio).await;
+        assert!(!t.incierto, "{t:?}");
+        assert!(t.filas.contains(&fila("Zonas", &["z1"], false)), "la que se llama así: {t:?}");
+        assert_eq!(t.por_filtro, vec!["Zonas"], "se ha sacado de esta base");
+
+        // Si aquí no se puede ejecutar, no se sabe cuál actualizó arriba.
+        sembrar(&db, "CREATE TRIGGER no_entra BEFORE UPDATE ON Zonas BEGIN SELECT RAISE(ABORT, 'no_entra'); END;").await;
+        let t = tocadas(&db, &cambio).await;
+        assert!(t.incierto, "{t:?}");
+
+        // Sobre la clave, en cambio, la fila es la que dice.
+        let f = Forma::leer("INSERT INTO Zonas (ID_Zona) VALUES (?1) ON CONFLICT(ID_Zona) DO UPDATE SET x = 1 ON CONFLICT DO NOTHING;").unwrap();
+        assert_eq!(f.conflictos, vec![(Some(vec!["ID_Zona".to_string()]), true), (None, false)]);
     }
 
     #[tokio::test]

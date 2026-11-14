@@ -529,9 +529,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     no ejecuta nada que no sea leer o escribir filas) con un `RETURNING` de la clave, sobre la base de
     justo antes del cambio (`filas_tocadas.rs`). De la sentencia que choca, y de lo que se salta al
     chocar, se miran antes las claves de lo que inserta o las de las filas que cumplen las igualdades
-    de su `WHERE` sobre la clave o una foránea. Lo que borra se marca. Lo que no se sabe (una tabla
-    que esta versión no tiene, un `REPLACE`, más de 5.000 filas) queda como incierto, y se vuelve a
-    mirar en cada intento y en cada pasada mientras quedan sentencias.
+    de su `WHERE` sobre la clave o una foránea; de un `ON CONFLICT` sobre otra columna que la clave
+    (actualiza la fila que ya tiene ese valor), sólo el `RETURNING`. Lo que borra se marca, y las
+    tablas cuyas filas salen de esta base y no de la sentencia, también (`por_filtro`). Lo que no se
+    sabe (una tabla que esta versión no tiene, un `REPLACE`, ese `ON CONFLICT` sin poder ejecutarse,
+    más de 5.000 filas) queda como incierto, y se vuelve a mirar en cada intento y en cada pasada
+    mientras quedan sentencias.
   - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
