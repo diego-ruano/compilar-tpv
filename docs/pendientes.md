@@ -25,8 +25,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
-| [PERM-CACHE](#perm-cache--un-permiso-retirado-puede-seguir-valiendo-hasta-5-minutos-en-la-handy) | 🔵 | Un permiso retirado puede seguir valiendo hasta 5 minutos en la Handy si se pierde el aviso | Sin decidir |
-| [CORREO-01](#correo-01--tres-casos-en-que-un-pedido-a-un-proveedor-puede-salir-dos-veces) | 🔵 | Tres casos en que un pedido a un proveedor puede salir dos veces | Sin decidir |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
@@ -200,31 +198,6 @@ segundo en una GPU de consumo.
   (`tpv-infra-sqlite/src/login.rs`) migraría los hashes solos si cambia el esquema.
 
 Aplazado: exige primero acceso de lectura a la base del tenant.
-
-### PERM-CACHE · Un permiso retirado puede seguir valiendo hasta 5 minutos en la Handy
-
-La Handy guarda la autorización de la sesión mientras su socket de avisos está abierto
-([permisos.md](arquitectura/permisos.md#la-autorización-guardada-en-la-handy-perm-cache)). Un permiso
-retirado en la Main deja de valer en cuanto llega el aviso del cambio, casi a la vez. Si ese aviso se
-pierde con el socket aparentemente abierto (uno muerto que el latido todavía no ha detectado, o el
-`TenantHub` que se reinicia entre aplicar y difundir), lo guardado vale hasta que caduca: como mucho 5
-minutos (`EDAD_MAXIMA_MS`). Sin decidir si esa ventana vale o se acorta, a cambio de más preguntas a la
-nube por hora.
-
-### CORREO-01 · Tres casos en que un pedido a un proveedor puede salir dos veces
-
-Un pedido que se reintenta no sale dos veces: lleva su clave de envío, y la nube reserva el id con el
-cupo en la misma sentencia ([worker.md](arquitectura/worker.md#correo)). Quedan tres casos:
-
-- **Con la base central caída** el pedido sale igual, también con clave, y no queda apuntado: un
-  reintento lo vuelve a mandar. Entre no mandarlo y mandarlo dos veces se ha elegido lo segundo.
-- **Uno que salió y se quedó en `enviando`** (el worker se cortó a medias, o fallaron los tres intentos
-  de apuntar que salió) se vuelve a reservar pasados cinco minutos, y un reintento lo repite.
-- **La clave vive en el `localStorage` de la Main** (`claveDeEnvio.ts`): con el de la aplicación borrado
-  o pasada una semana, el reintento lleva otra clave y es otro envío; sin almacenamiento la clave dura lo
-  que la aplicación esté abierta, y un reintento después de reiniciarla es otro envío.
-
-Sin decidir si alguno pide algo más.
 
 ### LIC-02 · Sin certificate pinning
 
