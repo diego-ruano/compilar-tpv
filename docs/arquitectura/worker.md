@@ -336,7 +336,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   la base, en `tenantAuth` y en las rutas de licencias; en el emparejamiento, el `devicePubKey` de
   `claim` como `invalid_devicePubKey` y el `sigB64` de `fetch-token` y `cancel` como `missing_proof`,
   con el `.max()` del schema delante del recorte y del `transform`. Lo vigilan
-  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`.
+  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`. Lo mismo con el SQL que sube la
+  Main, que el `TenantHub` mira en cada operación (SYNC-34): el `;` final de un paso `value`
+  (`evalValueStep`) se quita recorriendo desde el final, y los `'now'` que son argumento de una
+  función de fecha (`tenantHub.tiempo.ts`) se buscan en una sola pasada, con una pila de los
+  paréntesis abiertos. `test/tenantHubTiempo.test.ts` contrasta lo que se reconoce con el recorrido
+  de antes y pasa textos enormes.
 - **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
   `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale

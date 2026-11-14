@@ -448,3 +448,149 @@ describe("horaSinFijar", () => {
 		expect(horaSinFijarEnSql("UPDATE A SET Mi_Current_Time_X = 1;")).toBeNull();
 	});
 });
+
+/* =========================================================
+   SYNC-34: el mismo reconocimiento, en tiempo lineal
+========================================================= */
+
+// El recorrido de antes, tal cual: cada `'now'` buscaba hacia atrás su paréntesis y pasaba una
+// expresión sobre todo lo anterior. Es la referencia de lo que tiene que reconocerse.
+const FECHA_DE_ANTES = new Set(["datetime", "date", "time", "julianday", "strftime", "unixepoch", "timediff"]);
+function esArgumentoDeFechaDeAntes(minus: string, i: number): boolean {
+	let profundidad = 0;
+	for (let j = i - 1; j >= 0; j--) {
+		const c = minus[j];
+		if (c === ")") {
+			profundidad++;
+		} else if (c === "(") {
+			if (profundidad > 0) {
+				profundidad--;
+				continue;
+			}
+			const nombre = /([a-z_][a-z0-9_]*)\s*$/.exec(minus.slice(0, j));
+			return nombre !== null && FECHA_DE_ANTES.has(nombre[1]);
+		}
+	}
+	return false;
+}
+function sqlHasNowLiteralDeAntes(sql: string): boolean {
+	const minus = sql.toLowerCase();
+	for (let i = minus.indexOf("'now'"); i !== -1; i = minus.indexOf("'now'", i + 1)) {
+		if (esArgumentoDeFechaDeAntes(minus, i)) return true;
+	}
+	return false;
+}
+function rewriteNowInSqlDeAntes(sql: string, dt: string): string {
+	if (!sqlHasNowLiteralDeAntes(sql)) return sql;
+	return sql
+		.split("datetime('now','localtime')").join(`'${dt}'`)
+		.split("date('now','localtime')").join(`'${dt.slice(0, 10)}'`)
+		.replace(/'now'\s*,\s*'localtime'/gi, (m: string, offset: number, entero: string) =>
+			esArgumentoDeFechaDeAntes(entero.toLowerCase(), offset) ? `'${dt}'` : m,
+		);
+}
+
+/** Las piezas con las que se arman los textos: paréntesis, nombres, espacios y los dos literales. */
+const PIEZAS = [
+	"(", ")", "'now'", "'NOW'", "datetime", "DATE", "strftime", "x", "9", "_", " ", "\u00a0", "\n", ",", "'localtime'", "'",
+];
+
+/** Un generador de números con semilla: los mismos textos en cada ejecución. */
+function conSemilla(semilla: number): () => number {
+	let s = semilla >>> 0;
+	return () => {
+		s = (s * 1664525 + 1013904223) >>> 0;
+		return s / 2 ** 32;
+	};
+}
+
+function comprobarComoAntes(sql: string) {
+	expect(sqlHasNowLiteral(sql), JSON.stringify(sql)).toBe(sqlHasNowLiteralDeAntes(sql));
+	expect(rewriteNowInSql(sql, DT), JSON.stringify(sql)).toBe(rewriteNowInSqlDeAntes(sql, DT));
+}
+
+describe("SYNC-34 · reconoce lo mismo que el recorrido de antes", () => {
+	it("en todos los textos de hasta cuatro piezas", () => {
+		let comprobados = 0;
+		const recorrer = (texto: string, piezas: number) => {
+			comprobarComoAntes(texto);
+			comprobados++;
+			if (piezas < 4) for (const p of PIEZAS) recorrer(texto + p, piezas + 1);
+		};
+		recorrer("", 0);
+		expect(comprobados).toBe((PIEZAS.length ** 5 - 1) / (PIEZAS.length - 1));
+	});
+
+	it("en textos más largos, al azar con semilla", () => {
+		const azar = conSemilla(34);
+		for (let n = 0; n < 5000; n++) {
+			const largo = 5 + Math.floor(azar() * 30);
+			let texto = "";
+			for (let k = 0; k < largo; k++) texto += PIEZAS[Math.floor(azar() * PIEZAS.length)];
+			comprobarComoAntes(texto);
+		}
+	});
+
+	it("en las sentencias de verdad", () => {
+		for (const sql of [
+			"INSERT INTO T (a,b,c) VALUES (datetime('now','localtime'), datetime('now','localtime'), date('now','localtime'));",
+			"SELECT 1 WHERE datetime(C.Fecha) < datetime('now','localtime','-2 days') AND x IN (SELECT y FROM z WHERE f('now'));",
+			"UPDATE A SET f = strftime('%H','NOW','localtime'), g = coalesce(date( 'now' , 'localtime' ), 'now');",
+			"SELECT MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?5 || ' minutes'), datetime('now','localtime')) > datetime(?2 || ' ' || ?3)",
+			"INSERT INTO Notas (a, b) VALUES ('now','localtime');",
+			"SELECT datetime(')', 'now', 'localtime'), date('(', 'now','localtime')",
+			"SELECT 9datetime('now','localtime'), x.date ('now','localtime'), _f('now','localtime')",
+		]) {
+			comprobarComoAntes(sql);
+		}
+	});
+});
+
+const turno = () => new Promise((r) => setTimeout(r, 0));
+
+/** Lo que tarda `f`. El reloj se lee tras ceder el turno: dentro de código síncrono puede no avanzar. */
+async function cronometrar(f: () => void): Promise<number> {
+	await turno();
+	const t0 = Date.now();
+	f();
+	await turno();
+	return Date.now() - t0;
+}
+
+// Con el recorrido de antes, cada uno de estos textos tardaba de segundos a minutos: el cuadrado de
+// su longitud. El SQL lo sube una Main autenticada, con sus operaciones, al DO de su negocio.
+describe("SYNC-34 · un texto enorme no cuesta el cuadrado de su longitud", () => {
+	it("muchos 'now' dentro de un paréntesis que no es de fecha", async () => {
+		const sql = `SELECT f(${"'now', ".repeat(60_000)}1);`;
+		let hay = true;
+		let sinFijar: string | null = "x";
+		const ms = await cronometrar(() => {
+			hay = sqlHasNowLiteral(sql);
+			sinFijar = horaSinFijarEnSql(sql);
+		});
+		expect(hay).toBe(false);
+		expect(sinFijar).toBeNull();
+		expect(ms).toBeLessThan(2000);
+	}, 30_000);
+
+	it("muchos 'now','localtime' con modificador, que se fijan uno a uno", async () => {
+		const sql = "SELECT " + "datetime('now','localtime','+1 day'), ".repeat(20_000) + "1;";
+		let fijado = "";
+		const ms = await cronometrar(() => {
+			fijado = rewriteNowInSql(sql, DT);
+		});
+		expect(fijado.split(`datetime('${DT}','+1 day')`).length - 1).toBe(20_000);
+		expect(sqlHasNowLiteral(fijado)).toBe(false);
+		expect(ms).toBeLessThan(2000);
+	}, 30_000);
+
+	it("una palabra muy larga delante de la función", async () => {
+		const sql = `SELECT ${"a".repeat(200_000)} datetime('now','localtime','+1 day');`;
+		let fijado = "";
+		const ms = await cronometrar(() => {
+			fijado = rewriteNowInSql(sql, DT);
+		});
+		expect(fijado.endsWith(` datetime('${DT}','+1 day');`)).toBe(true);
+		expect(ms).toBeLessThan(2000);
+	}, 30_000);
+});

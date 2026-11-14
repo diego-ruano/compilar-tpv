@@ -89,12 +89,24 @@ export function allRowsFromResult(result: any): any[] {
 	return rows.map((r: any) => toPlainValue(r));
 }
 
+/**
+ * Sin la racha de `;` del final. SYNC-34: lo hacía `/;+\s*$/`, que sin ancla al principio se prueba
+ * desde cada `;` de una racha que no está al final y la recorre entera desde cada uno: el cuadrado de
+ * su longitud. Aquí se recorre desde el final, como `quitarComillas` (`lib/texto.ts`). El texto llega
+ * ya recortado, así que el `\s*` de la expresión no tenía nada que quitar.
+ */
+function sinPuntoYComaFinal(texto: string): string {
+	let fin = texto.length;
+	while (fin > 0 && texto.charCodeAt(fin - 1) === 59) fin--;
+	return texto.slice(0, fin);
+}
+
 // Evalúa en JS un paso `value` para no gastar un round trip a la base por cada uno.
 // Cubre el set CERRADO de formas que generan los *.commands.ts (echo de un literal,
 // constante numérica, o concatenación 'prefijo' || ?N). Cualquier otra forma lanza,
 // para no resolver mal en silencio (fail-fast: lo detectarían los tests).
 export function evalValueStep(sql: string, args: SqlScalar[]): SqlScalar {
-	const s = String(sql || "").trim().replace(/;+\s*$/, "").trim();
+	const s = sinPuntoYComaFinal(String(sql || "").trim()).trim();
 	let m = s.match(/^SELECT\s+\?(\d+)$/i);
 	if (m) return args[Number(m[1]) - 1] ?? null;
 	m = s.match(/^SELECT\s+(-?\d+(?:\.\d+)?)$/i);
