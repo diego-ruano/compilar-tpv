@@ -38,32 +38,3 @@ pub fn now_local_datetime() -> String {
 pub fn now_local_date() -> String {
     chrono::Local::now().format("%Y-%m-%d").to_string()
 }
-
-/// Patrón `LIKE` que encuentra `texto` tal cual en cualquier posición (RI-52). El `%` y el `_`
-/// que escriba el usuario se escapan con `\`, así que la consulta tiene que llevar
-/// `LIKE ?n ESCAPE '\'`. Sin escapar, buscar «50%» encontraba también «500».
-pub fn patron_contiene(texto: &str) -> String {
-    let mut patron = String::with_capacity(texto.len() + 2);
-    patron.push('%');
-    for c in texto.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            patron.push('\\');
-        }
-        patron.push(c);
-    }
-    patron.push('%');
-    patron
-}
-
-#[cfg(test)]
-mod tests {
-    use super::patron_contiene;
-
-    #[test]
-    fn el_patron_escapa_los_comodines_del_usuario() {
-        assert_eq!(patron_contiene("ana"), "%ana%");
-        assert_eq!(patron_contiene("50%"), "%50\\%%");
-        assert_eq!(patron_contiene("a_b"), "%a\\_b%");
-        assert_eq!(patron_contiene("c:\\x"), "%c:\\\\x%");
-    }
-}

@@ -36,6 +36,7 @@ import {
   useSetVinculos,
 } from "../../features/proveedores/proveedoresQueries";
 import { conAviso } from "../../shared/lib/conAviso";
+import { contiene, textoABuscar } from "../../shared/lib/busqueda";
 
 type ProveedorUI = ProveedorDto & { urlImagen: string };
 type ProductoUI = ProductoProveedorDto & { urlImagen: string };
@@ -203,23 +204,18 @@ export default function Proveedores() {
   }, [vista, proveedorActivo, productosProveedorQuery.data, productosProveedorQuery.isError]);
 
   const proveedoresFiltrados = useMemo(() => {
-    const s = busqueda.trim().toLowerCase();
+    const s = textoABuscar(busqueda);
     if (!s) return proveedores;
-    return proveedores.filter((p) => {
-      const n = (p.nombre_empresa || "").toLowerCase();
-      const e = (p.email || "").toLowerCase();
-      const t = (p.telefono || "").toLowerCase();
-      const c = (p.cif || "").toLowerCase();
-      const o = (p.informacion_adicional || "").toLowerCase();
-      return n.includes(s) || e.includes(s) || t.includes(s) || c.includes(s) || o.includes(s);
-    });
+    return proveedores.filter((p) =>
+      contiene(s, p.nombre_empresa, p.email, p.telefono, p.cif, p.informacion_adicional),
+    );
   }, [proveedores, busqueda]);
 
   const productosProveedorFiltrados = useMemo(() => {
     if (vista !== "detail") return [];
-    const s = busqueda.trim().toLowerCase();
+    const s = textoABuscar(busqueda);
     if (!s) return productosProveedor;
-    return productosProveedor.filter((p) => p.nombre.toLowerCase().includes(s));
+    return productosProveedor.filter((p) => contiene(s, p.nombre));
   }, [vista, productosProveedor, busqueda]);
 
   const productosDisponiblesFiltrados = useMemo(() => {
@@ -227,9 +223,9 @@ export default function Proveedores() {
     if (categorias.length > 0 && categoriaActivaId !== null) {
       list = list.filter((p) => p.id_categoria === categoriaActivaId);
     }
-    const s = busquedaProductos.trim().toLowerCase();
+    const s = textoABuscar(busquedaProductos);
     if (!s) return list;
-    return list.filter((p) => p.nombre.toLowerCase().includes(s));
+    return list.filter((p) => contiene(s, p.nombre));
   }, [productosDisponibles, busquedaProductos, categoriaActivaId, categorias.length]);
 
   function volverALista() {

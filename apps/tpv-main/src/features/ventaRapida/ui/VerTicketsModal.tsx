@@ -8,6 +8,7 @@ import type { ComandaBarraRow, IndexRow, VerTicketsDetalleRow } from "@tpv/contr
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
 import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
 import { eur, escalar } from "../../../shared/lib/dinero";
+import { contiene, textoABuscar } from "../../../shared/lib/busqueda";
 
 function parseWhen(fecha: string) {
   const t = Date.parse(fecha);
@@ -212,9 +213,8 @@ export default function VerTicketsModal({
       return true;
     });
 
-    if (s) {
-      const needle = s.toLowerCase();
-
+    const needle = textoABuscar(s);
+    if (needle) {
       out = out.filter((r) => {
         const id = String(r.c.ID_Comanda ?? "");
         const idx = indexByComanda[id];
@@ -230,11 +230,9 @@ export default function VerTicketsModal({
           idx?.Productos ?? "",
           idx ? `lineas ${idx.NumLineas}` : "",
           idx ? `unidades ${idx.Unidades}` : "",
-        ]
-          .join(" · ")
-          .toLowerCase();
+        ].join(" · ");
 
-        return baseText.includes(needle);
+        return contiene(needle, baseText);
       });
     }
 

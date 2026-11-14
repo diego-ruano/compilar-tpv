@@ -1,6 +1,6 @@
 //! Adaptador SQLite del repositorio de pedidos a proveedores. Local-First (sin outbox).
 
-use crate::util::{now_local_datetime, patron_contiene};
+use crate::util::now_local_datetime;
 use crate::consultas::{db_err};
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -57,16 +57,23 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
     ) -> AppResult<PedidosPageDto> {
         let db = self.db.read().await;
 
-        // Filtro opcional: LIKE case-insensitive sobre proveedor/email/notas/estado. El mismo
-        // patrón `?1` se reutiliza en los cuatro campos, con lo escrito tal cual (RI-52).
+        // Filtro opcional sobre proveedor, correo, notas y estado: sin acentos ni mayúsculas, con
+        // la misma expresión que los demás buscadores (`busqueda.rs`), y con lo escrito tal cual
+        // (RI-52: con `instr` el `%` y el `_` no son comodines). El mismo `?1` en los cuatro.
         let mut where_params: Vec<Value> = Vec::new();
-        let where_sql = if let Some(term) = &search {
-            where_params.push(Value::Text(patron_contiene(term)));
-            " WHERE pr.Nombre_Empresa LIKE ?1 ESCAPE '\\' OR p.Email_Destino LIKE ?1 ESCAPE '\\' \
-              OR p.Notas LIKE ?1 ESCAPE '\\' OR p.Estado LIKE ?1 ESCAPE '\\'"
-                .to_string()
-        } else {
-            String::new()
+        let where_sql = match search.as_deref().and_then(crate::busqueda::texto_a_buscar) {
+            Some(texto) => {
+                where_params.push(Value::Text(texto));
+                let en = |col: &str| format!("instr({}, ?1) > 0", crate::busqueda::normalizada(col));
+                format!(
+                    " WHERE {} OR {} OR {} OR {}",
+                    en("pr.Nombre_Empresa"),
+                    en("p.Email_Destino"),
+                    en("p.Notas"),
+                    en("p.Estado")
+                )
+            }
+            None => String::new(),
         };
 
         // 1) Total de coincidencias (para paginación en la UI).
@@ -286,7 +293,8 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
 
 #[cfg(test)]
 mod tests_busqueda {
-    //! RI-52: lo que se escribe en el buscador se busca tal cual; `%` y `_` no son comodines.
+    //! RI-52: lo que se escribe en el buscador se busca tal cual; `%` y `_` no son comodines. Y sin
+    //! acentos ni mayúsculas, como los demás buscadores (`busqueda.rs`).
 
     use super::*;
 
@@ -303,7 +311,10 @@ mod tests_busqueda {
                      INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) \
                        VALUES ('p-500', 'borrador', '2026-01-02 10:00:00', 'pedir 500 cajas'); \
                      INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) \
-                       VALUES ('p-ab', 'borrador', '2026-01-03 10:00:00', 'ref a_b');",
+                       VALUES ('p-ab', 'borrador', '2026-01-03 10:00:00', 'ref a_b'); \
+                     INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('pr-1', 'CAFÉS Ñandú'); \
+                     INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Notas) \
+                       VALUES ('p-cafe', 'pr-1', 'enviado', '2026-01-04 10:00:00', 'Crème brûlée');",
                 )
                 .await
                 .unwrap();
@@ -325,6 +336,18 @@ mod tests_busqueda {
         assert_eq!(ids(&repo, "a_b").await, vec!["p-ab"]);
         assert_eq!(ids(&repo, "_").await, vec!["p-ab"]);
         assert_eq!(ids(&repo, "50").await, vec!["p-50", "p-500"]);
+    }
+
+    #[tokio::test]
+    async fn sin_acentos_ni_mayusculas_en_cada_campo() {
+        let (repo, _dir) = abrir().await;
+        // El proveedor por su nombre, las notas y el estado.
+        assert_eq!(ids(&repo, "cafes nandu").await, vec!["p-cafe"]);
+        assert_eq!(ids(&repo, "ÑANDÚ").await, vec!["p-cafe"]);
+        assert_eq!(ids(&repo, "CREME BRULEE").await, vec!["p-cafe"]);
+        assert_eq!(ids(&repo, "Enviado").await, vec!["p-cafe"]);
+        // Un acento suelto no es buscar nada: no filtra.
+        assert_eq!(ids(&repo, "\u{301}").await.len(), 4);
     }
 }
 

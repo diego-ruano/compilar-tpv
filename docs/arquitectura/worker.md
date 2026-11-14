@@ -198,7 +198,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Lo que teclea el usuario se busca con `instr(${normalizada(col)}, ?) > 0`, nunca con `LIKE`**: un
   patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
   patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra
-  y los listados de caja, y la Main busca igual para devolver las mismas filas. Un `LIKE` con un
+  y los listados de caja, y la Main busca igual para devolver las mismas filas (y así busca también
+  los pedidos a proveedores, que sólo están en ella). Las listas que filtra la propia pantalla usan
+  la misma regla ([frontend.md](frontend.md#los-buscadores)). Un `LIKE` con un
   patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
 - **Y sin acentos ni mayúsculas**: «café» encuentra «CAFÉ Solo» y «CAÑA», «Caña». El `lower()` de

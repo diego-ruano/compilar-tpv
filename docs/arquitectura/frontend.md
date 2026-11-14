@@ -142,6 +142,17 @@ modo activo: editar, añadir vértice, borrar o colocar una mesa. Sus borradores
 optimistas: sólo se persisten al guardar el plano. Los formularios conservan sus propios errores
 y bloquean envíos repetidos mientras esperan confirmación.
 
+## Los buscadores
+
+Lo que se teclea en un buscador se compara **sin acentos ni mayúsculas**: «café» encuentra «CAFÉ
+Solo» y «CAÑA», «Caña». Lo que busca en la base lo hace el SQL de la Main o del worker
+([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)); una lista que ya tiene la
+pantalla (Proveedores y sus productos, Clientes, los tickets de la barra) se filtra con
+`shared/lib/busqueda.ts`: `textoABuscar(lo tecleado)` (`null` si no queda nada, y entonces no se
+filtra) y `contiene(buscado, ...textos)`. Es la misma regla y la misma tabla
+(`crates/tpv-domain/src/busqueda_casos.json`, que lee `test/busqueda.test.ts`), así que una lista
+filtrada aquí y una buscada en la base encuentran lo mismo. Nunca `toLowerCase().includes`.
+
 ## El tamaño de la interfaz
 
 La interfaz está pensada para 1280 píxeles de CSS de ancho. En una pantalla más estrecha (un

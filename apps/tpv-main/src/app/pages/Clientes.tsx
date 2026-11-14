@@ -36,6 +36,7 @@ import {
   useUpdateCliente,
 } from "../../features/clientes/clientesQueries";
 import { conAviso } from "../../shared/lib/conAviso";
+import { contiene, textoABuscar } from "../../shared/lib/busqueda";
 import type { Dinero } from "@tpv/contracts";
 import { eur } from "../../shared/lib/dinero";
 
@@ -163,12 +164,9 @@ export default function Clientes() {
   }, [overview.isError]);
 
   const clientesFiltrados = useMemo(() => {
-    const s = busqueda.trim().toLowerCase();
+    const s = textoABuscar(busqueda);
     if (!s) return clientes;
-    return clientes.filter((c) => {
-      const full = `${c.Nombre} ${c.Email} ${c.Telefono}`.toLowerCase();
-      return full.includes(s);
-    });
+    return clientes.filter((c) => contiene(s, `${c.Nombre} ${c.Email} ${c.Telefono}`));
   }, [clientes, busqueda]);
 
   // Navegación anterior/siguiente en la vista de detalle.
