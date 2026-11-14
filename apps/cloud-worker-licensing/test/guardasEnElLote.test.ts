@@ -759,3 +759,75 @@ describe("SYNC-35 · quitar un producto del catálogo", () => {
 		});
 	});
 });
+
+/* =========================================================
+   El ajuste de existencias (RI-55): lo visto lo decide la guarda
+========================================================= */
+
+describe("SYNC-30 · ajustar las existencias de un lote o el stock suelto", () => {
+	const STOCK = [
+		...USUARIOS,
+		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar')",
+		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('cafe', 'cat', 'Café', 130, 10)",
+		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote', 'cafe', 'L1', 5, '2026-11-01 10:00:00')",
+	];
+	const VENTA_DEL_LOTE = "UPDATE Lotes_Producto SET Stock_Disponible = 4 WHERE ID_Lote = 'lote'";
+	const lote = (n: Negocio) => n.n("SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = 'lote'");
+	const suelto = (n: Negocio) => n.n("SELECT Stock_Suelto FROM Productos WHERE ID_Producto = 'cafe'");
+	const ajustes = (n: Negocio) => n.n("SELECT COUNT(*) FROM Movimientos_Stock WHERE Tipo = 'AJUSTE'");
+	const ok = { status: 200, json: { ok: true } };
+
+	// Antes la ruta miraba lo visto antes del lote: en el reintento de un ajuste que ya había entrado
+	// veía lo nuevo y contestaba `stock_cambiado`.
+	it("el reintento de un ajuste que entró contesta ok, también si después ha cambiado", async () => {
+		await conNegocio("ajuste-reintento", STOCK, async (n) => {
+			const clave = "clave-del-ajuste";
+			const ajuste = { stock_visto: 5, stock_nuevo: 3, motivo: null, id_usuario: "ana" };
+			expect(await n.pedir("PATCH", "/v1/inventario/lotes/lote", ajuste, { clave })).toEqual(ok);
+			expect([lote(n), ajustes(n)]).toEqual([3, 1]);
+			expect(await n.pedir("PATCH", "/v1/inventario/lotes/lote", ajuste, { clave })).toEqual(ok);
+			// Una venta después: el reintento sigue siendo el de algo que ya entró.
+			n.sql.exec("UPDATE Lotes_Producto SET Stock_Disponible = 2 WHERE ID_Lote = 'lote'");
+			expect(await n.pedir("PATCH", "/v1/inventario/lotes/lote", ajuste, { clave })).toEqual(ok);
+			expect([lote(n), ajustes(n)]).toEqual([2, 1]);
+
+			const claveSuelto = "clave-del-ajuste-suelto";
+			const ajusteSuelto = { stock_visto: 10, stock_nuevo: 7, motivo: null, id_usuario: "ana" };
+			expect(await n.pedir("PATCH", "/v1/inventario/productos/cafe/stock-suelto", ajusteSuelto, { clave: claveSuelto })).toEqual(ok);
+			n.sql.exec("UPDATE Productos SET Stock_Suelto = 6 WHERE ID_Producto = 'cafe'");
+			expect(await n.pedir("PATCH", "/v1/inventario/productos/cafe/stock-suelto", ajusteSuelto, { clave: claveSuelto })).toEqual(ok);
+			expect([suelto(n), ajustes(n)]).toEqual([6, 2]);
+		});
+	});
+
+	it("una venta entre la lectura de la ruta y el lote es stock_cambiado, con lo que hay ahora, y no deja nada", async () => {
+		await conNegocio("ajuste-tarde", STOCK, async (n) => {
+			const r = await n.pedir("PATCH", "/v1/inventario/lotes/lote", { stock_visto: 5, stock_nuevo: 3, motivo: null, id_usuario: "ana" }, {
+				antesDelLote: [VENTA_DEL_LOTE],
+			});
+			expect(r.status).toBe(409);
+			expect(r.json).toMatchObject({ ok: false, error: "stock_cambiado" });
+			expect(r.json.message).toContain("ahora hay 4");
+			expect([lote(n), ajustes(n)]).toEqual([4, 0]);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+
+			const s = await n.pedir("PATCH", "/v1/inventario/productos/cafe/stock-suelto", { stock_visto: 10, stock_nuevo: 7, motivo: null, id_usuario: "ana" }, {
+				antesDelLote: ["UPDATE Productos SET Stock_Suelto = 9 WHERE ID_Producto = 'cafe'"],
+			});
+			expect(s.status).toBe(409);
+			expect(s.json.message).toContain("ahora hay 9");
+			expect([suelto(n), ajustes(n)]).toEqual([9, 0]);
+		});
+	});
+
+	it("lo visto que ya no es lo que hay es stock_cambiado, y lo que ya está como se pide es ok sin escribir", async () => {
+		await conNegocio("ajuste-visto", STOCK, async (n) => {
+			const tarde = await n.pedir("PATCH", "/v1/inventario/lotes/lote", { stock_visto: 8, stock_nuevo: 3, motivo: null, id_usuario: "ana" });
+			expect(tarde.status).toBe(409);
+			expect(tarde.json.message).toContain("ahora hay 5");
+			expect(await n.pedir("PATCH", "/v1/inventario/lotes/lote", { stock_visto: 8, stock_nuevo: 5, motivo: null, id_usuario: "ana" })).toEqual(ok);
+			expect([lote(n), ajustes(n)]).toEqual([5, 0]);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+		});
+	});
+});

@@ -969,14 +969,16 @@ mesa la llegada o la salida, con la reserva como se leyó (`reserva_cambiada`); 
 reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`,
 `reserva_solapada`), con la duración y el modo del negocio leídos al aplicar, que su cliente siga
 existiendo (`cliente_no_encontrado`) y que el email de un cliente nuevo no sea de otro
-(`email_duplicado`), en el orden en que lo mira la ruta; el último
-administrador (`ultimo_administrador`) y que la ficha que se edita exista
-(`trabajador_no_encontrado`); el turno repetido de un trabajador (`asignacion_duplicada`) y editar
-una asignación que tiene dos tramos o que ya no está (`horario_editar_conjunto`,
-`asignacion_no_encontrada`); una línea de un producto archivado o en una comanda cobrada, en la mesa
-y en la barra (`producto_archivado`, `comanda_cobrada`, `mesas/guardasDeLinea.ts`), y quitar un
-producto que está en una comanda abierta (`producto_en_comanda_abierta`). Lo prueba
-`test/guardasEnElLote.test.ts`, con una escritura que entra entre la lectura de la ruta y su lote.
+(`email_duplicado`), en el orden en que lo mira la ruta; el último administrador
+(`ultimo_administrador`) y que la ficha que se edita exista (`trabajador_no_encontrado`); el turno
+repetido de un trabajador (`asignacion_duplicada`) y editar una asignación que tiene dos tramos o
+que ya no está (`horario_editar_conjunto`, `asignacion_no_encontrada`); una línea de un producto
+archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivado`,
+`comanda_cobrada`, `mesas/guardasDeLinea.ts`); quitar un producto que está en una comanda abierta
+(`producto_en_comanda_abierta`), y ajustar las existencias de un lote o el stock suelto con lo que
+se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está como se pide, y el
+rechazo lo cuenta con lo que hay ahora). Lo prueba `test/guardasEnElLote.test.ts`, con una escritura
+que entra entre la lectura de la ruta y su lote.
 
 Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden
 por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
@@ -985,16 +987,17 @@ operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-
 de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
 y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
 contestaban `ok` sin saber si lo editado seguía existiendo, o el 409 de un producto que ya se había
-quitado (SYNC-35): ahora lo decide su guarda.
+quitado (SYNC-35): ahora lo decide su guarda. El ajuste de existencias miraba lo visto en la ruta, y
+el reintento de uno que ya había entrado veía lo nuevo y contestaba `stock_cambiado`.
 
 No necesitan guarda lo que ya para la base con un índice único (una comanda abierta por mesa, un
 cierre por periodo, nombres de zona, mesa y producto, correos de cliente), lo que cambia sólo al
 darse de alta (borrar una reserva web, que no se borra nunca), lo que la sentencia ya hace por sí
-misma con su condición (las altas puras, los ajustes de existencias, las notificaciones, el turno
-partido, el guardado de un horario, borrar un ticket), y lo que en una carrera no escribe nada
-distinto, sólo contesta otra cosa: finalizar una tarea que entretanto se le desasigna no toca
-ninguna fila. Tampoco el fichaje: lo hace la persona por sí misma, y dos entradas suyas en el mismo
-instante desde dos equipos no es algo que pase usando el programa.
+misma con su condición (las altas puras, las notificaciones, el turno partido, el guardado de un
+horario, borrar un ticket), y lo que en una carrera no escribe nada distinto, sólo contesta otra
+cosa: finalizar una tarea que entretanto se le desasigna no toca ninguna fila. Tampoco el fichaje:
+lo hace la persona por sí misma, y dos entradas suyas en el mismo instante desde dos equipos no es
+algo que pase usando el programa.
 
 Lo que llega a la Main es la sentencia, que la Main aplica con sus datos: puede tener sin subir lo
 que la nube no vio ([SYNC-29](#el-orden-de-la-nube-manda-sync-29)). Por eso la regla que no puede

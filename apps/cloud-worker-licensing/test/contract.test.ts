@@ -521,6 +521,15 @@ function aplicar(hub: any, _sql: any, built: any): void {
 	loteEnBruto(hub.state.storage, [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }, ...batch.middle]);
 }
 
+/** Un ajuste de existencias que llega tarde lo rechaza su guarda: no es un fallo del caso. */
+function aplicarSalvoStockCambiado(hub: any, sql: any, built: any): void {
+	try {
+		aplicar(hub, sql, built);
+	} catch (e) {
+		if (!(e instanceof GuardaIncumplida && e.code === "stock_cambiado")) throw e;
+	}
+}
+
 /** Corre el comando del caso por su camino real (plan → builder → apply). El `switch` es el punto de
  *  extensión: un dominio nuevo añade su brazo aquí y en el lado Rust (`aplicar_comando`). */
 async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<void> {
@@ -667,13 +676,14 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "inventario.ajustar_lote": {
-			// Sin la comprobación previa de la ruta: si lo visto no es lo que hay, la condición del
-			// propio comando tiene que dejarlo todo como estaba (RI-55).
-			aplicar(hub, sql, ajustarLote(caso.entrada.id_lote, caso.entrada as any, caso.entrada.id_usuario));
+			// Si lo visto no es lo que hay, la guarda del comando lo rechaza (`stock_cambiado`) y no
+			// queda nada (RI-55, SYNC-30); lo que se compara es el efecto, como en la Main, que
+			// contesta un `Conflict`.
+			aplicarSalvoStockCambiado(hub, sql, ajustarLote(caso.entrada.id_lote, caso.entrada as any, caso.entrada.id_usuario));
 			return;
 		}
 		case "inventario.ajustar_stock_suelto": {
-			aplicar(hub, sql, ajustarStockSuelto(caso.entrada.id_producto, caso.entrada as any, caso.entrada.id_usuario));
+			aplicarSalvoStockCambiado(hub, sql, ajustarStockSuelto(caso.entrada.id_producto, caso.entrada as any, caso.entrada.id_usuario));
 			return;
 		}
 		case "config.patch_business": {

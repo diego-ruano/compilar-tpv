@@ -631,12 +631,14 @@ impl InventarioRepository for SqliteInventarioRepository {
                     None => return Err(AppError::validation("Lote no encontrado")),
                 }
             };
-            if !stock_sin_cambios(Some(a.stock_visto), Some(actual)) {
-                return Err(stock_cambiado(Some(actual)));
-            }
+            // Ya está como se pide: no hay nada que ajustar, aunque lo visto ya no sea lo que hay.
+            // Igual en el worker, donde es además el reintento de un ajuste que ya entró.
             let delta = redondear_cantidad(a.stock_nuevo - actual);
             if delta == 0.0 {
                 return Ok(());
+            }
+            if !stock_sin_cambios(Some(a.stock_visto), Some(actual)) {
+                return Err(stock_cambiado(Some(actual)));
             }
 
             conn.execute(
@@ -690,11 +692,12 @@ impl InventarioRepository for SqliteInventarioRepository {
                     None => return Err(AppError::validation("Producto no encontrado")),
                 }
             };
-            if !stock_sin_cambios(a.stock_visto, actual) {
-                return Err(stock_cambiado(actual));
-            }
+            // Como en un lote: ya como se pide es ok.
             if stock_sin_cambios(a.stock_nuevo, actual) {
                 return Ok(());
+            }
+            if !stock_sin_cambios(a.stock_visto, actual) {
+                return Err(stock_cambiado(actual));
             }
 
             conn.execute(

@@ -21,6 +21,7 @@ import * as q from "./inventario.queries";
 import * as cmd from "./inventario.commands";
 import * as S from "./inventario.schemas";
 import { badRequest } from "../../server/utils/response";
+import { HubError } from "../../lib/errorHttp";
 import { cuerpo } from "../../lib/validacion";
 import { apply, parseId } from "../../lib/rutas";
 import { redondearCantidad } from "../../lib/cantidad";
@@ -42,6 +43,11 @@ function sigueComoSeVio(visto: number | null, actual: number | null): boolean {
 /** Una cantidad para un mensaje: sin ceros de más y con coma decimal («7», «0,5»). */
 function cantidadTexto(x: number): string {
 	return String(redondearCantidad(x)).replace(".", ",");
+}
+
+/** ¿Es el rechazo de la guarda de un ajuste: lo visto ya no era lo que había al aplicarlo? */
+function esStockCambiado(e: unknown): boolean {
+	return e instanceof HubError && e.code === "stock_cambiado";
 }
 
 /** El ajuste llega tarde: lo que se vio ya no es lo que hay (RI-55). */
@@ -153,13 +159,16 @@ inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema.extend({ id_usuar
 	const datos = c.req.valid("json");
 	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
-	// RI-55: si lo que se vio ya no es lo que hay, alguien vendió o ajustó entre medias.
-	const actual = redondearCantidad(info.stock_disponible);
-	if (!sigueComoSeVio(datos.stock_visto, actual)) return stockCambiado(c, actual);
-	if (sigueComoSeVio(datos.stock_nuevo, actual)) return c.json({ ok: true });
-	// Y la misma condición va dentro del comando, por si se cuela algo entre esta lectura y el DO.
-	const ajustado = await apply(c, cmd.ajustarLote(id, datos, datos.id_usuario));
-	if (Number(ajustado ?? 0) === 0) {
+	// Ya está como se pide: no hay nada que ajustar.
+	if (sigueComoSeVio(datos.stock_nuevo, redondearCantidad(info.stock_disponible))) return c.json({ ok: true });
+	// RI-55: si lo que se vio ya no es lo que hay, alguien vendió o ajustó entre medias. Lo decide la
+	// guarda del comando dentro del lote (SYNC-30), no esta lectura: el reintento de un ajuste que ya
+	// entró vería aquí lo nuevo y no lo visto, y contestaba `stock_cambiado`. El rechazo se cuenta con
+	// lo que hay ahora.
+	try {
+		await apply(c, cmd.ajustarLote(id, datos, datos.id_usuario));
+	} catch (e) {
+		if (!esStockCambiado(e)) throw e;
 		const ahora = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 		return stockCambiado(c, ahora ? redondearCantidad(ahora.stock_disponible) : null);
 	}
@@ -176,11 +185,14 @@ inventarioRoutes.patch(
 		const datos = c.req.valid("json");
 		const leido = await tenantQuery(c, (db) => q.getProductoStockSuelto(db, id));
 		if (leido === undefined) return c.json({ error: "Producto no encontrado" }, 404);
-		const actual = leido == null ? null : redondearCantidad(leido);
-		if (!sigueComoSeVio(datos.stock_visto ?? null, actual)) return stockCambiado(c, actual);
-		if (sigueComoSeVio(datos.stock_nuevo ?? null, actual)) return c.json({ ok: true });
-		const ajustado = await apply(c, cmd.ajustarStockSuelto(id, datos, datos.id_usuario));
-		if (Number(ajustado ?? 0) === 0) {
+		// Como en un lote: ya como se pide es ok, y lo visto lo decide la guarda del comando.
+		if (sigueComoSeVio(datos.stock_nuevo ?? null, leido == null ? null : redondearCantidad(leido))) {
+			return c.json({ ok: true });
+		}
+		try {
+			await apply(c, cmd.ajustarStockSuelto(id, datos, datos.id_usuario));
+		} catch (e) {
+			if (!esStockCambiado(e)) throw e;
 			const ahora = await tenantQuery(c, (db) => q.getProductoStockSuelto(db, id));
 			return stockCambiado(c, ahora == null ? null : redondearCantidad(ahora));
 		}

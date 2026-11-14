@@ -344,14 +344,21 @@ export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand
 /** `|stock - visto| < medio gramo` en SQL: la misma tolerancia que `stock_sin_cambios` de Rust. */
 const SIGUE_COMO_SE_VIO = "ABS(COALESCE(Stock_Disponible,0) - ?2) < 0.0005";
 
-// RI-55: ajuste de las existencias de un lote con lo que se vio. La ruta ya ha comprobado que lo
-// visto es lo que hay, pero entre esa lectura y el DO puede colarse una venta: por eso el movimiento
-// y el UPDATE llevan la misma condición, evaluada antes de cambiar nada, y si no se cumple no se
-// aplica ninguno (`ajustado` = 0 filas, y la ruta contesta 409).
+// RI-55: ajuste de las existencias de un lote con lo que se vio. Que lo visto siga siendo lo que hay
+// lo decide la guarda, dentro del lote (SYNC-30): si entretanto se ha colado una venta, no entra nada
+// y la ruta contesta `stock_cambiado`. El movimiento y el UPDATE llevan además la misma condición,
+// evaluada antes de cambiar nada: la guarda no se replica, y la Main la vuelve a evaluar con sus datos.
 export function ajustarLote(idLote: string, input: AjusteLoteInput, idUsuario: string): BuiltCommand {
 	const visto = redondearCantidad(input.stock_visto);
 	const nuevo = redondearCantidad(input.stock_nuevo);
 	const steps: any[] = [
+		{
+			kind: "guard",
+			sql: `SELECT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?1 AND ${SIGUE_COMO_SE_VIO});`,
+			args: [idLote, visto],
+			error: "stock_cambiado",
+			status: 409,
+		},
 		{
 			kind: "execute",
 			sql: `
@@ -374,20 +381,20 @@ export function ajustarLote(idLote: string, input: AjusteLoteInput, idUsuario: s
 		},
 		{
 			kind: "execute",
-			saveAs: "ajustado",
 			sql: `UPDATE Lotes_Producto SET Stock_Disponible = ?3 WHERE ID_Lote = ?1 AND ${SIGUE_COMO_SE_VIO};`,
 			args: [idLote, visto, nuevo],
 		},
 	];
 	return {
 		commandName: "inventario_ajustar_lote",
-		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "ajustado" } },
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_lote: idLote, ...input },
 	};
 }
 
-// RI-55: lo mismo para el stock suelto de un producto. `null` es «no lleva stock suelto», así que la
-// condición compara también eso; dejar de llevarlo es un movimiento que lo devuelve a cero.
+// RI-55: lo mismo para el stock suelto de un producto, con su guarda. `null` es «no lleva stock
+// suelto», así que la condición compara también eso; dejar de llevarlo es un movimiento que lo
+// devuelve a cero.
 export function ajustarStockSuelto(idProducto: string, input: AjusteStockSueltoInput, idUsuario: string): BuiltCommand {
 	const visto = input.stock_visto == null ? null : redondearCantidad(input.stock_visto);
 	const nuevo = input.stock_nuevo == null ? null : redondearCantidad(input.stock_nuevo);
@@ -396,6 +403,13 @@ export function ajustarStockSuelto(idProducto: string, input: AjusteStockSueltoI
 	const motivo =
 		cleanOrNull(input.motivo) ?? (nuevo == null ? "Deja de llevar stock suelto" : "Ajuste manual");
 	const steps: any[] = [
+		{
+			kind: "guard",
+			sql: `SELECT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND ${comoSeVio});`,
+			args: [idProducto, visto],
+			error: "stock_cambiado",
+			status: 409,
+		},
 		{
 			kind: "execute",
 			sql: `
@@ -416,14 +430,13 @@ export function ajustarStockSuelto(idProducto: string, input: AjusteStockSueltoI
 		},
 		{
 			kind: "execute",
-			saveAs: "ajustado",
 			sql: `UPDATE Productos SET Stock_Suelto = ?3 WHERE ID_Producto = ?1 AND ${comoSeVio};`,
 			args: [idProducto, visto, nuevo],
 		},
 	];
 	return {
 		commandName: "inventario_ajustar_stock_suelto",
-		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "ajustado" } },
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_producto: idProducto, ...input },
 	};
 }
