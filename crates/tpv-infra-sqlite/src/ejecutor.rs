@@ -326,8 +326,20 @@ impl Connection {
             }
             conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")?;
             let resultado = trabajo(&Simulacro { conn });
+            // Lo escrito en el simulacro no puede quedarse: con la transacción abierta, el siguiente
+            // `COMMIT` de esta conexión lo confirmaría. Si el `ROLLBACK` falla (Codex), se intenta
+            // otra vez, y si sigue abierta, la conexión no se vuelve a usar: el pánico cierra el
+            // ejecutor (ver `nueva`), que la deshace al cerrarla.
+            for _ in 0..2 {
+                if conn.is_autocommit() {
+                    break;
+                }
+                if let Err(e) = conn.execute_batch("ROLLBACK;") {
+                    tracing::error!(error = %e, "No se pudo deshacer el simulacro");
+                }
+            }
             if !conn.is_autocommit() {
-                conn.execute_batch("ROLLBACK;")?;
+                panic!("el simulacro no se ha podido deshacer");
             }
             Ok(resultado)
         }).await
