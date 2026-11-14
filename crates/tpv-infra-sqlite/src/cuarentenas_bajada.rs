@@ -88,9 +88,28 @@ const CLAVES_POR_PETICION: usize = 500;
 
 /* ===== Los datos caducan ===== */
 
+/// Cuántas se vacían de una vez, con el escritor cogido. Entre tanda y tanda se suelta: de una que se
+/// mira otra vez qué tocó hay que ejecutar sus sentencias, y un cobro no tiene por qué esperar a todas.
+const VACIADAS_POR_TANDA: usize = 20;
+
 /// Vacía los datos de lo que no entró de la bajada y lleva en cuarentena desde antes de
 /// `antes_de_ms`, y devuelve cuántas. Ver el encabezado.
 pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
+    let mut total = 0u64;
+    // Lo vaciado no se vuelve a leer, así que cada tanda va más allá. Una tanda que no llega a su
+    // tope es la última; el tope de vueltas es por si algo no se dejara vaciar.
+    for _ in 0..(MAX_CUARENTENAS_LEIDAS / VACIADAS_POR_TANDA) {
+        let (leidas, vaciadas) = vaciar_una_tanda(db, antes_de_ms).await?;
+        total += vaciadas;
+        if leidas < VACIADAS_POR_TANDA || vaciadas == 0 {
+            break;
+        }
+    }
+    Ok(total)
+}
+
+/// Una tanda de [`vaciar`]: cuántas ha leído y cuántas ha vaciado.
+async fn vaciar_una_tanda(db: &Db, antes_de_ms: i64) -> AppResult<(usize, u64)> {
     let w = db.write().await;
     let conn: &Connection = w.raw();
 
@@ -98,8 +117,8 @@ pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
         .query(
             "SELECT Op_Id, Statements_Json, Filas_Json, Last_Error FROM _Sync_Failed \
               WHERE Quarantined = 1 AND Datos_Vaciados_At_Ms IS NULL AND Last_Failed_At_Ms < ?1 \
-              ORDER BY Seq;",
-            vec![Value::Integer(antes_de_ms)],
+              ORDER BY Seq LIMIT ?2;",
+            vec![Value::Integer(antes_de_ms), Value::Integer(VACIADAS_POR_TANDA as i64)],
         )
         .await
         .map_err(db_err)?;
@@ -113,8 +132,9 @@ pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
         pendientes.push((op, texto(1).unwrap_or_default(), texto(2), texto(3)));
     }
     drop(filas);
-    if pendientes.is_empty() {
-        return Ok(0);
+    let leidas = pendientes.len();
+    if leidas == 0 {
+        return Ok((0, 0));
     }
 
     // Es la última ocasión de saber qué filas tocó: después ya no quedan sentencias.
@@ -138,7 +158,7 @@ pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
     }
 
     let ahora = now_ms();
-    conn.transaccion(async {
+    let n = conn.transaccion(async {
         let mut n = 0u64;
         for (op, filas, error) in &vaciadas {
             n += conn
@@ -158,7 +178,8 @@ pub(crate) async fn vaciar(db: &Db, antes_de_ms: i64) -> AppResult<u64> {
         }
         Ok(n)
     })
-    .await
+    .await?;
+    Ok((leidas, n))
 }
 
 /// La clase de un error al aplicar un cambio, sin nada de lo que el cambio llevaba: qué restricción
@@ -881,6 +902,30 @@ mod tests {
 
         // Una vez.
         assert_eq!(vaciar(&db, 1000).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn se_vacian_todas_por_tandas() {
+        // Codex: se leían y simulaban todas de una vez con el escritor cogido. Ahora van por tandas,
+        // y se vacían todas igual.
+        let db = base("tandas").await;
+        sembrar(
+            &db,
+            r#"WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 45)
+               INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)
+               SELECT 'op-' || i, i, '[{"sql":"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);","args":["z-' || i || '","Zona de Ana ' || i || '"]}]',
+                      5, 1, 'x', 1, 1 FROM s;"#,
+        )
+        .await;
+
+        assert_eq!(vaciar(&db, 1000).await.unwrap(), 45);
+        let r = db.read().await;
+        let mut f = r
+            .conn()
+            .query("SELECT COUNT(*) FROM _Sync_Failed WHERE Statements_Json = '[]' AND Filas_Json LIKE '%z-%';", ())
+            .await
+            .unwrap();
+        assert_eq!(f.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 45, "todas, con lo que tocaron");
     }
 
     fn mesa(id: &str) -> FilaTocada {

@@ -551,7 +551,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   a los mismos 30 días de apartarse, `purga_sync` vacía sus sentencias (`Datos_Vaciados_At_Ms`) y deja
   su error en su clase (`sentencia #2: unique (Clientes.Email)`; lo que no es de una clase conocida,
   `otro`). Queda lo que no es de nadie: su operación, su `Seq`, sus intentos, sus fechas y las filas
-  que tocó, por su clave, que se miran por última vez antes de vaciarla si no se sabían.
+  que tocó, por su clave, que se miran por última vez antes de vaciarla si no se sabían. Va por
+  tandas de 20, soltando el escritor entre una y otra. Como el job es diario, una puede llegar a
+  vaciarse hasta un día después de cumplir los 30, y nada se vacía mientras el equipo no está
+  operativo (apagado o recuperando sus datos).
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
   página de catch-up de mil cambios (los que pide la Main, `CAMBIOS_POR_PAGINA`) no deja a un cobro
