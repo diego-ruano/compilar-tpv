@@ -317,7 +317,11 @@ pub trait SyncRepository: Send + Sync {
     /// - **Por la conexión CRUDA**: por `execute()` cada fila del histórico se capturaría en
     ///   `_Sync_Outbox` y el equipo devolvería a la nube, operación a operación, el histórico entero
     ///   que acaba de bajarse de ella.
-    async fn backfill_aplicar_pagina(&self, pagina: HistoricoPagina) -> AppResult<i64>;
+    ///
+    /// `desde` es el cursor con el que se pidió la página. Si la tabla ya no está ahí (completa, o con
+    /// la cola vuelta a sembrar porque se ha traído el estado de la nube mientras la página venía de
+    /// camino), la página no se aplica y devuelve 0 (Codex, SYNC-36).
+    async fn backfill_aplicar_pagina(&self, desde: i64, pagina: HistoricoPagina) -> AppResult<i64>;
 
     /// Deja constancia de por qué falló el último intento sobre una tabla. No mueve el cursor: lo
     /// que estaba a medias se repite, que es lo correcto siendo idempotente.

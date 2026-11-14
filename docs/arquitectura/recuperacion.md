@@ -179,6 +179,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - ⚠️ **Por `WriteGuard::raw()`**: por `execute()` devolvería a la nube, fila a fila, el histórico que
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
+- Una página sólo se aplica si la tabla sigue en la cola con el cursor con el que se pidió
+  (`backfill_aplicar_pagina`, con el escritor cogido): traer el estado de la nube desde
+  Conectividad vuelve a sembrar la cola sin esperar a este job, y una página de antes completaría la
+  tabla sin lo anterior.
 - Una página lleva hasta 10.000 filas y hasta 4 MiB (`HISTORICO_MAX_FILAS`, `HISTORICO_MAX_BYTES`):
   cada una ocupa el hilo del DO del negocio mientras se escribe, y entre una y otra atiende lo demás.
   Si se corta por tamaño trae su `siguiente_cursor` igual, y nunca viene sin al menos una fila (una

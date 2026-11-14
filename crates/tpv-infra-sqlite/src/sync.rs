@@ -123,6 +123,19 @@ pub(crate) fn no_es_tabla_de_negocio(nombre: &str) -> bool {
         || ANDAMIAJE_DE_LA_NUBE.iter().chain(ESTADO_DE_CADA_LADO.iter()).any(|t| t.eq_ignore_ascii_case(nombre))
 }
 
+/// ¿Sigue `tabla` en la cola del histórico sin completar y con el cursor `desde`? Lo mira
+/// `backfill_aplicar_pagina` antes de aplicar una página, con el escritor cogido.
+async fn sigue_en_la_cola(conn: &Connection, tabla: &str, desde: i64) -> AppResult<bool> {
+    let mut filas = conn
+        .query(
+            "SELECT 1 FROM _Backfill_Historico WHERE Tabla = ?1 AND Completada = 0 AND Cursor = ?2;",
+            vec![Value::Text(tabla.to_string()), Value::Integer(desde)],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(filas.next().await.map_err(db_err)?.is_some())
+}
+
 /// Las tablas de negocio realmente presentes en la BD local. El volcado de la nube se filtra contra
 /// esto: una Main con una versión por detrás recibirá tablas que su esquema aún no tiene, y eso
 /// tiene que informarse, no reventar la recuperación. Las que no son de negocio no están
@@ -1759,7 +1772,7 @@ impl SyncRepository for SqliteSyncRepository {
         }
     }
 
-    async fn backfill_aplicar_pagina(&self, pagina: HistoricoPagina) -> AppResult<i64> {
+    async fn backfill_aplicar_pagina(&self, desde: i64, pagina: HistoricoPagina) -> AppResult<i64> {
         if !identificador_simple(&pagina.tabla) {
             return Err(AppError::validation(format!(
                 "nombre de tabla inaceptable en el histórico: {}",
@@ -1775,6 +1788,17 @@ impl SyncRepository for SqliteSyncRepository {
 
         let w = self.db.write().await;
         let conn = w.raw();
+
+        // Codex (SYNC-36): la página tiene que seguir siendo la que toca. Traer el estado de la nube
+        // desde Conectividad no espera a este job: si restaura con una página en camino, la cola vuelve
+        // a empezar, y esa página, pedida con el cursor de antes, la completaría o la adelantaría
+        // dejando sin bajar lo anterior. Se mira con el escritor cogido, que es lo que toma también
+        // la restauración. (Una primera página, pedida desde 0, sigue valiendo tras volver a sembrar:
+        // sus filas son de la nube y no pisan nada.)
+        if !sigue_en_la_cola(conn, &pagina.tabla, desde).await? {
+            tracing::info!(target: "tpv::sync", tabla = %pagina.tabla, desde, "una página del histórico que ya no toca no se aplica");
+            return Ok(0);
+        }
 
         // Un worker más nuevo puede listar una tabla que esta versión todavía no tiene. Se da por
         // completada en vez de fallar: si no, el backfill se atascaría en ella para siempre y
@@ -3081,10 +3105,10 @@ mod tests_backfill {
             filas: vec![ajeno("1999-01-02")],
             siguiente_cursor: None,
         };
-        assert_eq!(repo.backfill_aplicar_pagina(pagina).await.unwrap(), 0);
+        assert_eq!(repo.backfill_aplicar_pagina(0, pagina).await.unwrap(), 0);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia LIKE '1999-%';").await, 0);
         let pagina = HistoricoPagina { tabla: "Sync_Changes".into(), columnas: columnas_del_log(), filas: vec![cambio(2)], siguiente_cursor: None };
-        assert_eq!(repo.backfill_aplicar_pagina(pagina).await.unwrap(), 0);
+        assert_eq!(repo.backfill_aplicar_pagina(0, pagina).await.unwrap(), 0);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Sync_Changes;").await, 0);
 
         let _ = std::fs::remove_dir_all(dir);
@@ -3118,7 +3142,7 @@ mod tests_backfill {
                 .unwrap();
         }
 
-        repo.backfill_aplicar_pagina(pagina(
+        repo.backfill_aplicar_pagina(0, pagina(
             vec![
                 vec![json!("z1"), json!("Nombre VIEJO del historico")],
                 vec![json!("z2"), json!("Terraza")],
@@ -3150,7 +3174,7 @@ mod tests_backfill {
 
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
 
-        repo.backfill_aplicar_pagina(pagina(
+        repo.backfill_aplicar_pagina(0, pagina(
             vec![
                 vec![json!("z1"), json!("Terraza")],
                 vec![json!("z2"), json!("Salon")],
@@ -3176,7 +3200,7 @@ mod tests_backfill {
         let (repo, _db, dir) = repo_temporal().await;
         tras_recuperar(&repo).await;
 
-        repo.backfill_aplicar_pagina(pagina(vec![vec![json!("z1"), json!("A")]], Some(50)))
+        repo.backfill_aplicar_pagina(0, pagina(vec![vec![json!("z1"), json!("A")]], Some(50)))
             .await
             .unwrap();
         assert_eq!(
@@ -3184,7 +3208,7 @@ mod tests_backfill {
             Some(("Zonas".to_string(), 50))
         );
 
-        repo.backfill_aplicar_pagina(pagina(vec![vec![json!("z2"), json!("B")]], None))
+        repo.backfill_aplicar_pagina(50, pagina(vec![vec![json!("z2"), json!("B")]], None))
             .await
             .unwrap();
         assert_eq!(
@@ -3210,14 +3234,40 @@ mod tests_backfill {
         tras_recuperar(&repo).await;
 
         let p = || pagina(vec![vec![json!("z1"), json!("Terraza")]], Some(7));
-        repo.backfill_aplicar_pagina(p()).await.unwrap();
-        repo.backfill_aplicar_pagina(p()).await.unwrap();
+        repo.backfill_aplicar_pagina(0, p()).await.unwrap();
+        repo.backfill_aplicar_pagina(0, p()).await.unwrap();
 
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
         assert_eq!(
             repo.backfill_siguiente().await.unwrap(),
             Some(("Zonas".to_string(), 7))
         );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Codex (SYNC-36): traer el estado de la nube desde Conectividad vuelve a sembrar la cola mientras
+    /// una página puede venir de camino. Pedida con el cursor de antes, no se aplica: si no, la
+    /// tabla quedaría completa sin haber bajado lo anterior.
+    #[tokio::test]
+    async fn una_pagina_pedida_antes_de_volver_a_traer_la_nube_no_se_aplica() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+        repo.backfill_aplicar_pagina(0, pagina(vec![vec![json!("z1"), json!("A")]], Some(50))).await.unwrap();
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), Some(("Zonas".to_string(), 50)));
+
+        // Se trae la nube otra vez; la última página, pedida desde 50, llega después.
+        tras_recuperar(&repo).await;
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), Some(("Zonas".to_string(), 0)));
+        assert_eq!(repo.backfill_aplicar_pagina(50, pagina(vec![vec![json!("z2"), json!("B")]], None)).await.unwrap(), 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 0);
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), Some(("Zonas".to_string(), 0)), "sigue pendiente desde el principio");
+
+        // Tampoco cuenta una de una tabla ya completa.
+        repo.backfill_aplicar_pagina(0, pagina(vec![vec![json!("z1"), json!("A")]], None)).await.unwrap();
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), None);
+        assert_eq!(repo.backfill_aplicar_pagina(0, pagina(vec![vec![json!("z3"), json!("C")]], None)).await.unwrap(), 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -3237,7 +3287,7 @@ mod tests_backfill {
             siguiente_cursor: Some(99),
         };
 
-        assert!(repo.backfill_aplicar_pagina(mala).await.is_err());
+        assert!(repo.backfill_aplicar_pagina(0, mala).await.is_err());
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 0);
         assert_eq!(
             repo.backfill_siguiente().await.unwrap(),
@@ -3295,7 +3345,7 @@ mod tests_backfill {
             ])
         };
 
-        let e = repo.backfill_aplicar_pagina(pagina()).await.unwrap_err().to_string();
+        let e = repo.backfill_aplicar_pagina(0, pagina()).await.unwrap_err().to_string();
         assert!(e.contains("cierre-x") && e.contains("idx_cierres_un_periodo"), "dice qué fila y por qué: {e}");
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 1, "la página no entra a medias");
         let estado = repo.backfill_estado().await.unwrap();
@@ -3311,7 +3361,7 @@ mod tests_backfill {
                 .await
                 .unwrap();
         }
-        assert_eq!(repo.backfill_aplicar_pagina(pagina()).await.unwrap(), 3);
+        assert_eq!(repo.backfill_aplicar_pagina(0, pagina()).await.unwrap(), 3);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 3);
         assert_eq!(
             contar(&db, "SELECT COUNT(*) FROM Cierres_Caja WHERE ID_Cierre = 'cierre-y' AND Reabierto_En IS NOT NULL;").await,
@@ -3343,7 +3393,7 @@ mod tests_backfill {
         .unwrap();
 
         let e = repo
-            .backfill_aplicar_pagina(HistoricoPagina {
+            .backfill_aplicar_pagina(0, HistoricoPagina {
                 tabla: "Detalle_Comanda".into(),
                 columnas: vec!["ID_Detalle".into(), "ID_Comanda".into(), "Cantidad".into(), "Precio_Unitario".into()],
                 filas: vec![vec![json!("d-1"), json!("c-que-no-esta"), json!(1), json!(250)]],
@@ -3367,7 +3417,7 @@ mod tests_backfill {
         tras_recuperar(&repo).await;
 
         let mala = pagina(vec![vec![json!("z1"), json!("Terraza")], vec![json!("z2"), serde_json::Value::Null]], None);
-        let e = repo.backfill_aplicar_pagina(mala).await.unwrap_err().to_string();
+        let e = repo.backfill_aplicar_pagina(0, mala).await.unwrap_err().to_string();
         assert!(e.contains("z2") && e.contains("NOT NULL"), "{e}");
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 0);
         assert_eq!(repo.backfill_estado().await.unwrap().tablas_pendientes, 1);
@@ -3428,7 +3478,7 @@ mod tests_backfill {
             Some(("Tabla_Del_Futuro".to_string(), 0))
         );
 
-        repo.backfill_aplicar_pagina(HistoricoPagina {
+        repo.backfill_aplicar_pagina(0, HistoricoPagina {
             tabla: "Tabla_Del_Futuro".into(),
             columnas: vec![],
             filas: vec![],
@@ -3454,7 +3504,7 @@ mod tests_backfill {
         tras_recuperar(&repo).await;
 
         assert!(repo
-            .backfill_aplicar_pagina(HistoricoPagina {
+            .backfill_aplicar_pagina(0, HistoricoPagina {
                 tabla: "Zonas; DROP TABLE Pagos".into(),
                 columnas: vec!["ID_Zona".into()],
                 filas: vec![],
@@ -3464,7 +3514,7 @@ mod tests_backfill {
             .is_err());
 
         assert!(repo
-            .backfill_aplicar_pagina(HistoricoPagina {
+            .backfill_aplicar_pagina(0, HistoricoPagina {
                 tabla: "Zonas".into(),
                 columnas: vec!["ID_Zona\") --".into()],
                 filas: vec![vec![json!("z1")]],

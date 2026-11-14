@@ -145,7 +145,7 @@ struct FakeRepo {
         async fn backfill_siguiente(&self) -> AppResult<Option<(String, i64)>> {
             Ok(None)
         }
-        async fn backfill_aplicar_pagina(&self, _: HistoricoPagina) -> AppResult<i64> {
+        async fn backfill_aplicar_pagina(&self, _: i64, _: HistoricoPagina) -> AppResult<i64> {
             panic!("no usado")
         }
         async fn backfill_marcar_error(&self, _: &str, _: &str) -> AppResult<()> {
