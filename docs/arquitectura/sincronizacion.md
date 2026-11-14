@@ -635,10 +635,14 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   filas.
 - **Con todo subido, se traen de la nube.** El motor de réplica, con el outbox vacío (cada 3 s como
   mucho), pide esas filas a la nube por su clave (`/v1/sync/verificar/por-clave`, hasta 500 por
-  vuelta) y sólo sigue si cada página trae como final del log (`hasta_seq`) el checkpoint de esta Main:
-  así lo que se trae lleva todo lo que esta Main ha aplicado y nada que no haya aplicado (un cambio
-  posterior no se le aplicaría encima otra vez). Con el escritor cogido se vuelve a mirar que el
-  checkpoint sea ése y que no haya nada por subir, y se escribe aquí, por `raw()`: lo que está arriba
+  vuelta) y sólo sigue si cada página trae como final del log (`hasta_seq`) lo que esta Main tiene de
+  la nube: su checkpoint o, por encima, lo suyo que la nube ya ha confirmado (en vivo la nube no le
+  devuelve a la Main lo suyo, así que el checkpoint no lo pasa hasta el siguiente cambio de otro). Lo
+  de los demás que va por debajo ya ha bajado, porque la nube lo difunde antes que el acuse y el
+  socket entrega en orden; con la bajada detenida no se pide nada. Así lo que se trae lleva todo lo
+  que esta Main ha aplicado y nada que no haya aplicado (un cambio posterior no se le aplicaría encima
+  otra vez). Con el escritor cogido se vuelve a mirar que nada de eso haya cambiado y que no haya
+  nada por subir, y se escribe aquí, por `raw()`: lo que está arriba
   y aquí es distinto, con `INSERT … ON CONFLICT(clave) DO UPDATE`, padres primero; lo que arriba ya no
   está, se borra aquí, hijas primero. Si algo se ha movido, la vuelta acaba sin escribir nada
   (`Aplazada`) y se repite a los 2, 4, 8… segundos (hasta un minuto), también si la nube no contesta;

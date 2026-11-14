@@ -115,10 +115,11 @@ async fn escribir_aqui(db: &Arc<Db>, nombre_zona: &str) {
     w.execute("UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = 'z1';", vec![Value::Text(nombre_zona.into())]).await.unwrap();
 }
 
-/// La carrera: lo que la Main escribe (`escribe`) queda por subir, la Handy escribe lo suyo en la nube
-/// (`Seq` 41) y la Main lo aplica encima; después sube lo de la Main (`Seq` 42) y su eco vuelve. El
-/// log de la nube y el checkpoint acaban en 42.
-async fn la_carrera(repo: &SqliteSyncRepository, db: &Arc<Db>, nube: &NubeDeContraste, de_la_handy: Vec<SqlStatement>) {
+/// La carrera: lo de la Main queda por subir, la Handy escribe lo suyo en la nube (`Seq` 41) y la
+/// Main lo aplica encima; después sube lo de la Main (`Seq` 42) y llega su acuse. El log de la nube
+/// acaba en 42. En vivo la nube no le devuelve a la Main lo suyo, así que el checkpoint se queda en
+/// 41; `con_eco` es una reconexión, cuyo catch-up sí lo trae, y lo deja en 42.
+async fn la_carrera(repo: &SqliteSyncRepository, nube: &NubeDeContraste, de_la_handy: Vec<SqlStatement>, con_eco: bool) {
     let propia = repo.outbox_pending(10).await.unwrap();
     assert_eq!(propia.len(), 1, "lo de la Main, por subir");
     let propia = propia.into_iter().next().unwrap();
@@ -128,9 +129,10 @@ async fn la_carrera(repo: &SqliteSyncRepository, db: &Arc<Db>, nube: &NubeDeCont
 
     nube.aplicar(&propia.statements).await;
     repo.outbox_confirmar_lote(&[(propia.op_id.clone(), 42)]).await.unwrap();
-    repo.apply_changes(vec![SyncChange { op_id: propia.op_id.clone(), seq: 42, statements: propia.statements }]).await.unwrap();
-    assert_eq!(repo.get_checkpoint().await.unwrap(), 42);
-    let _ = db;
+    if con_eco {
+        repo.apply_changes(vec![SyncChange { op_id: propia.op_id.clone(), seq: 42, statements: propia.statements }]).await.unwrap();
+    }
+    assert_eq!(repo.get_checkpoint().await.unwrap(), if con_eco { 42 } else { 41 });
     *nube.hasta_seq.lock().unwrap() = 42;
     *nube.ultimo_ajeno.lock().unwrap() = 41;
 }
@@ -157,7 +159,7 @@ fn hecha(c: Convergencia) -> (Vec<SqlStatement>, bool) {
 async fn la_cancelacion_de_la_main_se_queda_aunque_una_handy_la_sentara_a_la_vez() {
     let (repo, db, dir, nube) = base("cancelada").await;
     assert!(SqliteReservasRepository::new(db.clone()).cancelar("r1").await.unwrap());
-    la_carrera(&repo, &db, &nube, la_handy_la_sienta()).await;
+    la_carrera(&repo, &nube, la_handy_la_sienta(), false).await;
 
     // Lo que dejaba SYNC-29: aquí sentada, en la nube cancelada.
     assert_eq!(estado(&db).await, "ACTIVA");
@@ -177,7 +179,7 @@ async fn la_cancelacion_de_la_main_se_queda_aunque_una_handy_la_sentara_a_la_vez
     assert_eq!(marcas(&db).await, "0");
     // Sólo aquí: ni el outbox ni el checkpoint se mueven.
     assert!(repo.outbox_pending(10).await.unwrap().is_empty());
-    assert_eq!(repo.get_checkpoint().await.unwrap(), 42);
+    assert_eq!(repo.get_checkpoint().await.unwrap(), 41);
 
     // Y las dos bases cuadran.
     let r = pasada(&repo, &nube).await;
@@ -197,7 +199,7 @@ async fn una_reserva_que_la_main_borro_y_una_handy_edito_a_la_vez_se_queda_borra
     // edición fue delante y el borrado detrás.
     let (repo, db, dir, nube) = base("borrada").await;
     assert!(SqliteReservasRepository::new(db.clone()).eliminar("r1").await.unwrap());
-    la_carrera(&repo, &db, &nube, la_handy_la_edita()).await;
+    la_carrera(&repo, &nube, la_handy_la_edita(), true).await;
     assert_eq!(estado(&db).await, "PROXIMA");
     assert_eq!(estado(&nube.db).await, "-");
 
@@ -241,15 +243,22 @@ async fn sin_nada_de_aqui_por_ordenar_en_esas_tablas_no_se_marca_nada() {
 async fn si_la_nube_va_por_delante_o_hay_algo_por_subir_se_deja_para_luego_sin_tocar_nada() {
     let (repo, db, dir, nube) = base("aplazada").await;
     assert!(SqliteReservasRepository::new(db.clone()).cancelar("r1").await.unwrap());
-    la_carrera(&repo, &db, &nube, la_handy_la_sienta()).await;
+    la_carrera(&repo, &nube, la_handy_la_sienta(), false).await;
 
     // La nube tiene algo que esta Main todavía no ha aplicado.
     *nube.hasta_seq.lock().unwrap() = 43;
     assert!(matches!(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap(), Convergencia::Aplazada));
     assert_eq!((estado(&db).await, marcas(&db).await), ("ACTIVA".to_string(), "1".to_string()));
 
-    // Hay algo de aquí por subir: ni se pide.
+    // La bajada está detenida en un cambio que no ha entrado: ni se pide.
     *nube.hasta_seq.lock().unwrap() = 42;
+    sembrar(&db, "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-43', 43, '[]', 1, 0, 1, 1);").await;
+    let pedidas = nube.rutas_pedidas().len();
+    assert!(matches!(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap(), Convergencia::Aplazada));
+    assert_eq!(nube.rutas_pedidas().len(), pedidas);
+    sembrar(&db, "DELETE FROM _Sync_Failed;").await;
+
+    // Hay algo de aquí por subir: ni se pide.
     escribir_aqui(&db, "Terraza cubierta").await;
     let pedidas = nube.rutas_pedidas().len();
     assert!(matches!(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap(), Convergencia::Aplazada));
@@ -284,7 +293,7 @@ impl PaginasDelContraste for EscribeAlPedir<'_> {
 async fn una_escritura_de_aqui_mientras_se_pide_a_la_nube_deja_la_vuelta_sin_escribir_nada() {
     let (repo, db, dir, nube) = base("escritura-en-medio").await;
     assert!(SqliteReservasRepository::new(db.clone()).cancelar("r1").await.unwrap());
-    la_carrera(&repo, &db, &nube, la_handy_la_sienta()).await;
+    la_carrera(&repo, &nube, la_handy_la_sienta(), false).await;
 
     let paginas = EscribeAlPedir { nube: &nube, db: db.clone() };
     assert!(matches!(repo.converger_con_la_nube(&paginas).await.unwrap(), Convergencia::Aplazada));
@@ -297,7 +306,7 @@ async fn una_escritura_de_aqui_mientras_se_pide_a_la_nube_deja_la_vuelta_sin_esc
 async fn lo_que_la_main_escribio_y_la_nube_no_acepto_no_se_pisa() {
     let (repo, db, dir, nube) = base("apartada").await;
     assert!(SqliteReservasRepository::new(db.clone()).cancelar("r1").await.unwrap());
-    la_carrera(&repo, &db, &nube, la_handy_la_sienta()).await;
+    la_carrera(&repo, &nube, la_handy_la_sienta(), false).await;
     // Una escritura de aquí sobre esa reserva que la nube rechazó, apartada.
     let apartada = serde_json::to_string(&[sentencia("UPDATE Reservas SET Nota = ?2 WHERE ID_Reserva = ?1;", vec![json!("r1"), json!("Alergia")])]).unwrap();
     sembrar(

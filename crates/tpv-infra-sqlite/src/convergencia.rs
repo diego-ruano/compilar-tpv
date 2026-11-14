@@ -14,14 +14,16 @@
 //!    `_Sync_Por_Contrastar`, en la misma transacción que lo aplica. Qué filas toca lo dice el
 //!    simulacro de `filas_tocadas` (el de las cuarentenas de bajada), con la base de justo antes.
 //! 2. **Traer** ([`converger`]). Con todo lo de aquí subido (nada pendiente en el outbox) y la bajada
-//!    al día —el final del log de la nube (`hasta_seq` de `/v1/sync/verificar/por-clave`) es el
-//!    checkpoint de esta Main—, se piden esas filas a la nube por su clave y se escriben aquí como
-//!    están, por `raw()`: lo que está arriba con `INSERT … ON CONFLICT(clave) DO UPDATE`, y lo que
-//!    arriba ya no está se borra aquí. Con el escritor cogido se vuelve a mirar que el checkpoint siga
-//!    siendo ése y que no haya nada por subir; si no, la vuelta se deja sin escribir nada
+//!    al día y sin detener —el final del log de la nube (`hasta_seq` de
+//!    `/v1/sync/verificar/por-clave`) es lo que esta Main tiene de ella: su checkpoint o, por encima,
+//!    lo suyo que la nube ya confirmó y cuyo eco no ha bajado—, se piden esas filas a la nube por su
+//!    clave y se escriben aquí como están, por `raw()`: lo que está arriba con `INSERT … ON
+//!    CONFLICT(clave) DO UPDATE`, y lo que arriba ya no está se borra aquí. Con el escritor cogido se
+//!    vuelve a mirar que nada de eso haya cambiado; si no, la vuelta se deja sin escribir nada
 //!    ([`Convergencia::Aplazada`]) y el motor la repite más tarde. Así lo que se trae ya lleva todo lo
 //!    que esta Main ha aplicado, y nada que no haya aplicado: un cambio posterior no se le aplicaría
-//!    encima otra vez.
+//!    encima otra vez. Lo de los demás que va por debajo de lo suyo ya confirmado ha bajado: la nube
+//!    lo difunde antes que el acuse, y el socket entrega en orden.
 //!
 //! Lo que no hace nunca: escribir en la nube, tocar el outbox, la bajada o el checkpoint. Y lo que no
 //! trae: lo fiscal (lo emite esta Main, y la Handy no lo escribe), una fila de algo apartado de la
@@ -92,6 +94,36 @@ fn tablas_que_escribe(sentencias: &[SqlStatement]) -> (HashSet<String>, bool) {
     (e.todas, e.tablas.contains("*"))
 }
 
+/// El mayor `Seq` de una operación propia que la nube ya ha confirmado y cuyo eco no ha bajado; 0
+/// si ninguna. Un anti-eco con un `Seq` por encima del checkpoint sólo puede ser de una propia: lo
+/// que baja de los demás se apunta con su `Seq` al aplicarse, y la bajada va en orden.
+async fn adelantada(conn: &Connection) -> AppResult<i64> {
+    let mut filas = conn
+        .query(
+            "SELECT COALESCE(MAX(Seq), 0) FROM _Sync_Applied_Ops \
+              WHERE Seq > (SELECT Last_Seq FROM _Sync_State WHERE Id = 1);",
+            (),
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(match filas.next().await.map_err(db_err)? {
+        Some(f) => match f.get_value(0).map_err(db_err)? {
+            Value::Integer(n) => n,
+            _ => 0,
+        },
+        None => 0,
+    })
+}
+
+/// AUD-18 · ¿Está la bajada detenida en un cambio que no ha entrado (un fallo sin cuarentena)?
+async fn bajada_detenida(conn: &Connection) -> AppResult<bool> {
+    let mut filas = conn
+        .query("SELECT 1 FROM _Sync_Failed WHERE Quarantined = 0 LIMIT 1;", ())
+        .await
+        .map_err(db_err)?;
+    Ok(filas.next().await.map_err(db_err)?.is_some())
+}
+
 /// Lo que dice [`Carrera::alcance`] de un cambio.
 pub(crate) enum Alcance {
     Tablas(HashSet<String>),
@@ -130,24 +162,7 @@ impl Carrera {
             ops.push((op, tablas));
         }
         drop(filas);
-        // Un anti-eco con un `Seq` por encima del checkpoint es de una operación propia: lo que baja
-        // de los demás se apunta con su `Seq` al aplicarse, y la bajada va en orden.
-        let mut filas = conn
-            .query(
-                "SELECT COALESCE(MAX(Seq), 0) FROM _Sync_Applied_Ops \
-                  WHERE Seq > (SELECT Last_Seq FROM _Sync_State WHERE Id = 1);",
-                (),
-            )
-            .await
-            .map_err(db_err)?;
-        let adelantada = match filas.next().await.map_err(db_err)? {
-            Some(f) => match f.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
-                _ => 0,
-            },
-            None => 0,
-        };
-        Ok(Carrera { ops, todas, adelantada })
+        Ok(Carrera { ops, todas, adelantada: adelantada(conn).await? })
     }
 
     /// Las tablas de `ch` en las que lo de aquí puede ir delante aquí y detrás en la nube. `None`
@@ -375,20 +390,27 @@ async fn no_ha_entrado(conn: &Connection, m: &Marca, motivo: &str) -> AppResult<
 /// SYNC-29 · Una vuelta: trae de la nube hasta [`MARCAS_POR_VUELTA`] filas apuntadas y las escribe
 /// aquí como están arriba. Ver el encabezado.
 pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppResult<Convergencia> {
-    let (marcas, quedan, marca) = {
+    let (marcas, quedan, marca, hasta) = {
         let r = db.read().await;
         let (marcas, quedan) = leer_marcas(r.conn(), MARCAS_POR_VUELTA as i64).await?;
         if marcas.is_empty() {
             return Ok(Convergencia::Nada);
         }
-        (marcas, quedan, r.conn().foto(crate::contraste::leer_marca).await.map_err(db_err)?)
+        let marca = r.conn().foto(crate::contraste::leer_marca).await.map_err(db_err)?;
+        // Hasta dónde llega lo que esta Main tiene de la nube: el checkpoint o, por encima, lo suyo
+        // que la nube ya ha confirmado y cuyo eco no ha bajado (en vivo no baja: la nube no se lo
+        // devuelve a quien lo manda). Lo de los demás anterior a eso ya ha bajado: la nube lo difunde
+        // antes que el acuse, y el socket entrega en orden.
+        let hasta = marca.checkpoint.max(adelantada(r.conn()).await?);
+        (marcas, quedan, marca, hasta)
     };
-    // Con algo por subir, la nube no tiene todavía lo de aquí.
-    if marca.pendientes > 0 {
+    // Con algo por subir, la nube no tiene todavía lo de aquí; con la bajada detenida en un cambio,
+    // esta Main no tiene todavía lo de allí.
+    if marca.pendientes > 0 || bajada_detenida(db.read().await.conn()).await? {
         return Ok(Convergencia::Aplazada);
     }
 
-    // Lo que hay arriba, con la foto del final del log en el checkpoint de esta Main.
+    // Lo que hay arriba, con la foto del final del log en lo que esta Main tiene de la nube.
     let claves = bajada::claves_primarias(db).await?;
     let mut pedir: BTreeMap<&str, Vec<Vec<Json>>> = BTreeMap::new();
     for m in &marcas {
@@ -397,7 +419,7 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     let mut arriba: HashMap<&str, Traida> = HashMap::new();
     for (tabla, pedidas) in &pedir {
         let clave = claves.get(*tabla).map(Vec::as_slice).unwrap_or_default();
-        match bajada::traer(nube, tabla, pedidas, clave, marca.checkpoint).await {
+        match bajada::traer(nube, tabla, pedidas, clave, hasta).await {
             Ok(Some(t)) => {
                 arriba.insert(tabla, t);
             }
@@ -414,7 +436,11 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     let w = db.write().await;
     let conn: &Connection = w.raw();
     let ahora = conn.foto(crate::contraste::leer_marca).await.map_err(db_err)?;
-    if ahora.checkpoint != marca.checkpoint || ahora.pendientes > 0 {
+    if ahora.checkpoint != marca.checkpoint
+        || ahora.pendientes > 0
+        || marca.checkpoint.max(adelantada(conn).await?) != hasta
+        || bajada_detenida(conn).await?
+    {
         return Ok(Convergencia::Aplazada);
     }
     let subida = bajada::lo_apartado_de_la_subida(db, &claves).await?;

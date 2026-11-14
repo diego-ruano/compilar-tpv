@@ -213,7 +213,7 @@ pub trait SyncRepository: Send + Sync {
     /// sin ordenar todavía en sus tablas, `apply_changes` apunta las filas que toca: en la nube esas
     /// escrituras irán detrás del cambio, y aquí fueron delante. Esto trae esas filas de la nube por
     /// su clave (`/v1/sync/verificar/por-clave`) y las escribe aquí como están, sólo con nada por
-    /// subir y con la foto de la nube en el checkpoint de esta Main; si no, `Aplazada` sin escribir
+    /// subir y con la foto de la nube en lo que esta Main tiene de ella; si no, `Aplazada` sin escribir
     /// nada. Nunca escribe en la nube ni mueve el outbox o el checkpoint.
     ///
     /// Por defecto no hay nada que traer: los dobles de los tests no marcan.
