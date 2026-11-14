@@ -25,6 +25,10 @@ que le falta. El hash es el SHA-256 del fichero entero con los finales de línea
 `migration_altered`. Los dos aplican cada migración en su transacción con las FK apagadas alrededor de
 la tanda y comprueban `foreign_key_check` antes de confirmar.
 
+Por eso los comentarios de `0001_inicial.sql` que hablan de Turso se quedan como están: son de cuando
+la base del negocio en la nube estaba allí, y hoy esa base es el SQLite de su `TenantHub`
+([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)).
+
 ### Por qué con las FK apagadas
 
 Una migración que le quita una restricción a una tabla tiene que reconstruirla: crear la nueva,

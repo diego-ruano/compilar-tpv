@@ -1,6 +1,6 @@
 // test/lecturasEnHoraLocal.test.ts
 //
-// REV-03: «hoy» es el del bar, no el de Turso.
+// REV-03: «hoy» es el del bar, no el del servidor.
 //
 // Las lecturas de la Handy se ejecutan en la nube, que corre en UTC, así que un `date('now','localtime')`
 // dentro de la consulta devolvía el día del servidor. Entre medianoche y las dos de la mañana (verano
