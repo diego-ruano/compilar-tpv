@@ -556,16 +556,14 @@ export type ClaveReservaWebDto = {
 	codigo: string,
 };
 
-/**  Las claves de una tabla en la nube (SYNC-25). */
-export type ClavesTabla = {
-	nombre: string,
-	columnas: string[],
-	claves: unknown[][],
-	/**
-	 *  La tabla pasó del tope y la lista no viaja. Se dice en vez de mandar media: media lista se
-	 *  leería como «te sobran 400.000 filas» y provocaría un borrado masivo.
-	 */
-	truncada?: boolean,
+/**  Una página de `/v1/sync/verificar/claves`: claves primarias de una tabla, en orden de clave. */
+export type ClavesPagina = {
+	tabla: string,
+	columnas?: string[],
+	claves?: unknown[][],
+	/**  La última clave de la página si queda algo detrás; `None` si era la última. */
+	siguiente_cursor?: unknown[] | null,
+	hasta_seq?: number,
 };
 
 /**
@@ -784,15 +782,6 @@ export type ContactSettingsPatch_Serialize = {
 	contact_phone?: string,
 };
 
-/**
- *  `COUNT(*)` de una tabla ENTERA en la nube. Es lo único que ve una fila perdida fuera de la
- *  ventana, y cuesta un agregado por tabla.
- */
-export type ConteoTabla = {
-	nombre: string,
-	filas: number,
-};
-
 export type CopySemanaInput = {
 	from_monday: string,
 	to_monday: string,
@@ -917,19 +906,14 @@ export type DenominacionInput = {
 /**  Lo que no cuadra en una tabla. */
 export type DescuadreTabla = {
 	tabla: string,
-	/**
-	 *  Filas que la Main tiene y la nube no. Sale de comparar los `COUNT(*)`, así que se sabe
-	 *  CUÁNTAS pero no cuáles: para eso haría falta la ventana local, y la definición de la ventana
-	 *  vive en el worker a propósito (una sola fuente). Las que importan de verdad —las de una
-	 *  operación apartada— ya las repara SYNC-22 en el momento, sin esperar a este contraste.
-	 */
+	/**  Filas que la Main tiene y la nube no. Se suben por estado. */
 	faltan: number,
 	/**
-	 *  Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir, y **no se repara
-	 *  por estado**: la ausencia de una fila no es una fila que mandar (SYNC-23).
+	 *  Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir: se borran arriba
+	 *  sólo si esta Main puede afirmar que está al día.
 	 */
 	sobran: number,
-	/**  Filas que están en los dos sitios con contenido distinto. Éstas SÍ se reparan. */
+	/**  Filas que están en los dos sitios con contenido distinto. Se reparan con el de la Main. */
 	distintas: number,
 };
 
@@ -1209,6 +1193,29 @@ export type FalloDeComando = {
 	duracion_ms: number,
 	/**  Cuántas veces cuenta este aviso: 1, o las que se juntaron en la ventana de un minuto. */
 	veces: number,
+};
+
+/**  Una página de `/v1/sync/verificar/filas`: las filas de los cubos que no cuadraban. */
+export type FilasDeCubos = {
+	tabla: string,
+	columnas?: string[],
+	filas?: unknown[][],
+	/**  `None` = no quedan más. Cualquier otra cosa es «sigue pidiendo desde aquí». */
+	siguiente_cursor?: number | null,
+	hasta_seq?: number,
+};
+
+/**
+ *  Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
+ *  Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
+ *  ha venido se vuelve a pedir.
+ */
+export type FilasPorClave = {
+	tabla: string,
+	columnas?: string[],
+	filas?: unknown[][],
+	cortada?: boolean,
+	hasta_seq?: number,
 };
 
 export type FinalizarTareaInput = {
@@ -2823,31 +2830,36 @@ export type ResultadoRecogidaWeb =
 /**  No se ha podido guardar: al cliente se le avisa por correo. */
 "fallida";
 
-/**  Lo que dejó una pasada de verificación. */
+/**  Lo que dejó una pasada del contraste. */
 export type ResultadoVerificacion = {
 	descuadres: DescuadreTabla[],
 	/**  Filas cuya reparación se ha encolado en esta pasada. */
 	reparadas: number,
-	ventana_omitida: boolean,
 	/**
-	 *  SYNC-25: tablas cuyo contador no cuadra y de las que hay que pedir las claves para saber
-	 *  **cuáles** filas bailan, no sólo cuántas. Vacío = todo cuadra y no hay segunda fase.
+	 *  La nube no pudo resumir la ventana: sólo se han comparado los conteos (y las claves de lo
+	 *  que no cuadraba).
 	 */
-	tablas_a_examinar?: TablaAExaminar[],
+	ventana_omitida: boolean,
 	/**  Filas de más en la nube cuyo borrado se ha encolado. */
 	borradas?: number,
 	/**
-	 *  SYNC-26: se encontraron diferencias pero NO se ha tocado nada, porque esta Main no podía
-	 *  afirmar que estuviera al día (checkpoint por detrás de la foto, o cuarentena de bajada).
-	 *
-	 *  Cubre las dos operaciones y no sólo el borrado, que fue el error inicial: si la Main va
-	 *  atrasada, una fila «distinta» puede serlo porque la Handy acaba de escribirla y aquí
-	 *  todavía no ha llegado. Repararla entonces pisaría lo nuevo con lo viejo — el mismo daño que
-	 *  borrar de más, sólo que más difícil de ver.
+	 *  Se encontraron diferencias que NO se han tocado: esta Main no podía afirmar que estuviera
+	 *  al día (un fallo de bajada, histórico por bajar, la base se movió antes de escribir), la
+	 *  reparación está apagada, o la pasada llegó a su tope antes de mirarlo todo.
 	 *
 	 *  Se informa: es la diferencia entre «no hay nada que arreglar» y «lo hay y no me atrevo».
 	 */
 	aplazado?: boolean,
+	/**
+	 *  Filas que se han bajado de la nube para compararlas una a una: las de los cubos que no
+	 *  cuadraban. Cero es lo normal.
+	 */
+	filas_examinadas?: number,
+	/**
+	 *  Tablas que no se han podido comparar por valores: sin clave primaria, con otras columnas
+	 *  que en la nube (otra versión del programa), o cuyas filas no llegaron como en el resumen.
+	 */
+	tablas_sin_comparar?: string[],
 };
 
 /**
@@ -2868,6 +2880,65 @@ export type ResumenCajaDto = {
 	 */
 	count_anuladas: number,
 	total_anulado: Dinero,
+};
+
+/**
+ *  Respuesta de `/v1/sync/verificar/resumen`: lo que la nube dice de cada tabla para que la Main
+ *  lo compare con su base **sin bajarse las filas**.
+ *
+ *  O bien es un resumen (`aplazar = false`), o bien la nube dice que ahora no (`aplazar = true`,
+ *  con su `motivo`): el negocio está escribiendo, o a esta Main le falta por aplicar algo de lo que
+ *  hay en el log. Lo segundo no es un fallo: se reintenta más tarde.
+ */
+export type ResumenNube = {
+	aplazar?: boolean,
+	/**  Por qué se aplaza: `actividad`, `por_delante` o `desfase`. Diagnóstico, no ramificación. */
+	motivo?: string | null,
+	/**
+	 *  El checkpoint que mandó la Main, devuelto: por encima de él no hay en el log de la nube
+	 *  nada que no sea de esta Main. `None` si la nube no lo ha comprobado.
+	 */
+	checkpoint?: number | null,
+	/**
+	 *  El `Seq` del final del log de la nube en la foto de la que sale el resumen. Las páginas
+	 *  de filas y de claves traen el suyo: si no es éste, la nube se ha movido entre medias.
+	 */
+	hasta_seq?: number,
+	/**  Límite inferior de la ventana. Vuelve tal cual al pedir las filas de un cubo. */
+	desde?: string,
+	/**  La ventana no cabía en lo que la nube resume de una vez: sólo vienen los conteos. */
+	ventana_omitida?: boolean,
+	tablas?: ResumenTabla[],
+};
+
+/**
+ *  Lo que el resumen dice de una tabla.
+ *
+ *  `sql` es la sentencia de su ventana, la que la nube ha resumido. La Main **ejecuta esa misma
+ *  sentencia** en su base: la definición de la ventana vive en el worker y en ningún otro sitio.
+ */
+export type ResumenTabla = {
+	nombre: string,
+	/**
+	 *  `COUNT(*)` de la tabla ENTERA en la nube: lo único que ve lo que falta o sobra fuera de la
+	 *  ventana.
+	 */
+	total?: number,
+	/**  Sin ella (ventana omitida), de esta tabla sólo se compara `total`. */
+	sql?: string | null,
+	args?: unknown[],
+	/**  Las columnas de la ventana, en su orden: el de los valores de cada fila resumida. */
+	columnas?: string[],
+	/**  Las columnas de la clave primaria. Vacío: la tabla no tiene, y no se compara por valores. */
+	claves?: string[],
+	/**  Filas de la ventana en la nube. */
+	filas?: number,
+	/**  En cuántos cubos viene resumida (`tpv_domain::contraste`). */
+	cubos?: number,
+	/**  Filas de cada cubo. */
+	cuentas?: number[],
+	/**  La suma de los hashes de las filas de cada cubo: dieciséis cifras hexadecimales. */
+	sumas?: string[],
 };
 
 export type RolPermisos = {
@@ -3053,18 +3124,6 @@ export type SyncHealth = {
 	 *  sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
 	 */
 	subida_en_cuarentena: number,
-};
-
-/**
- *  Una tabla de la que hay que pedir las claves, con las columnas que la forman.
- *
- *  Las columnas las decide la MAIN leyendo su propio esquema y viajan en la petición. El esquema es
- *  el mismo en los dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean dos
- *  sitios distintos, porque entonces pueden discrepar.
- */
-export type TablaAExaminar = {
-	nombre: string,
-	claves: string[],
 };
 
 export type TableInput = {
@@ -3539,38 +3598,6 @@ export type VerTicketsDetalleRow = {
 	Estado_Cocina: string,
 	Pagado: number,
 	Notas: string | null,
-};
-
-/**  Respuesta de `/v1/sync/verificar-claves`. */
-export type VerificacionClaves = {
-	tablas: ClavesTabla[],
-};
-
-/**
- *  Respuesta de `/v1/sync/verificar`: la foto con la que se contrasta.
- *
- *  `ventana` reusa `BootstrapTabla` porque es exactamente la misma forma y la construye la misma
- *  sentencia del worker: tener dos formas para el mismo volcado sería tener dos que pueden divergir.
- */
-export type VerificacionNube = {
-	conteos: ConteoTabla[],
-	ventana: BootstrapTabla[],
-	/**  La ventana no cabía y sólo vienen los conteos. Media comprobación es mejor que ninguna. */
-	ventana_omitida?: boolean,
-	/**  Límite inferior de la ventana que usó el worker (informativo). */
-	desde?: string,
-	/**
-	 *  SYNC-25: hasta qué `Seq` del log de la nube llega esta foto, **leído después de las filas**.
-	 *
-	 *  Es lo que permite borrar arriba sin peligro. Si el checkpoint local llega hasta aquí, esta
-	 *  Main ya ha visto todo lo que viaja en la foto, así que una fila que le falte no puede ser
-	 *  «algo que acaba de escribir la Handy y todavía no me ha llegado»: es un borrado suyo que no
-	 *  llegó a subir. Si no llega, no se borra nada y se espera al ciclo siguiente.
-	 *
-	 *  `#[serde(default)]` = 0 con un worker anterior, y 0 nunca alcanza al checkpoint local salvo
-	 *  en una base recién estrenada (donde tampoco hay nada que borrar). Falla cerrado.
-	 */
-	hasta_seq?: number,
 };
 
 /**  RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla. */

@@ -76,13 +76,14 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 		});
 	});
 
-	it("el contraste, sus claves y una página del histórico, igual", async () => {
+	it("el contraste (su resumen, sus filas y sus claves) y una página del histórico, igual", async () => {
 		await conNegocioFirmado(deps, "volcado-hub-resto", async (n) => {
 			await sembrar(n);
 
 			for (const [ruta, cuerpo] of [
-				["/v1/sync/verificar", {}],
-				["/v1/sync/verificar-claves", { tablas: [{ nombre: "Comandas", claves: ["ID_Comanda"] }] }],
+				["/v1/sync/verificar/resumen", { checkpoint: 1 }],
+				["/v1/sync/verificar/filas", { tabla: "Comandas", desde: "2020-01-01 00:00:00", cubos: 2, pedir: [0, 1] }],
+				["/v1/sync/verificar/claves", { tabla: "Comandas", limite: 25 }],
 				["/v1/sync/historico", { tabla: "Comandas", cursor: 0, limite: 25 }],
 			] as const) {
 				const res = await pedirFirmado(deps, app, n, ruta, { cuerpo, cabeceras: AHORA });

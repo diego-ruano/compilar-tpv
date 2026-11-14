@@ -103,13 +103,16 @@ const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// lenta, se cortaba a mitad del cuerpo y volvía a empezar de cero en cada intento.
 const HTTP_TIMEOUT_VOLCADO_SECS: u64 = 150;
 
-/// Las rutas que contestan con un volcado: la fase 1 de la recuperación, las páginas de la fase 2
-/// y las dos del contraste con la nube.
-const RUTAS_DE_VOLCADO: [&str; 4] = [
+/// Las rutas que contestan con un volcado o que pueden tardar en hacerlo: la fase 1 de la
+/// recuperación, las páginas de la fase 2 y las del contraste con la nube (el resumen, que recorre
+/// la ventana entera en el TenantHub, y las páginas de filas y de claves, de varios MB).
+const RUTAS_DE_VOLCADO: [&str; 6] = [
     "/v1/sync/bootstrap",
     "/v1/sync/historico",
-    "/v1/sync/verificar",
-    "/v1/sync/verificar-claves",
+    "/v1/sync/verificar/resumen",
+    "/v1/sync/verificar/filas",
+    "/v1/sync/verificar/por-clave",
+    "/v1/sync/verificar/claves",
 ];
 
 /// El plazo de una petición según lo que pide. Es por petición (`RequestBuilder::timeout`, que
@@ -2882,11 +2885,18 @@ mod tests_transporte_de_volcados {
         let volcado = Duration::from_secs(HTTP_TIMEOUT_VOLCADO_SECS);
         let normal = Duration::from_secs(HTTP_TIMEOUT_SECS);
         assert!((120..=180).contains(&HTTP_TIMEOUT_VOLCADO_SECS));
-        for ruta in ["/v1/sync/bootstrap", "/v1/sync/historico", "/v1/sync/verificar", "/v1/sync/verificar-claves"] {
+        for ruta in [
+            "/v1/sync/bootstrap",
+            "/v1/sync/historico",
+            "/v1/sync/verificar/resumen",
+            "/v1/sync/verificar/filas",
+            "/v1/sync/verificar/por-clave",
+            "/v1/sync/verificar/claves",
+        ] {
             assert_eq!(plazo_de(ruta), volcado, "{ruta}");
         }
         assert_eq!(plazo_de("/v1/sync/bootstrap?x=1"), volcado);
-        for ruta in ["/v1/sync/changes", "/v1/sync/salud", "/v1/ws/ticket", "/v1/license/status", "/v1/sync/bootstrap-otra"] {
+        for ruta in ["/v1/sync/changes", "/v1/sync/salud", "/v1/ws/ticket", "/v1/license/status", "/v1/sync/bootstrap-otra", "/v1/sync/verificar"] {
             assert_eq!(plazo_de(ruta), normal, "{ruta}");
         }
     }

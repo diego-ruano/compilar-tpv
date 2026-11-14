@@ -31,7 +31,8 @@ pub struct Momento {
 pub enum Vuelta {
     /// No tocaba: nada ha salido hacia la nube.
     NoToca(Espera),
-    /// La foto de la nube iba por delante de lo que ha bajado esta Main: no se ha comparado, y se
+    /// No era el momento (había algo por subir, la nube estaba escribiendo o iba por delante de
+    /// esta Main, o una de las dos bases se movió durante la pasada): no se ha comparado, y se
     /// vuelve a intentar a los diez minutos.
     Aplazada,
     /// Se ha contrastado.
@@ -73,7 +74,7 @@ pub async fn verificar_si_toca(
             estado.anotar(IntentoVerificacion::Hecha, momento.ahora_ms).await?;
             Ok(Vuelta::Hecha(resultado))
         }
-        Ok(Contraste::FotoPorDelante) => {
+        Ok(Contraste::Aplazado) => {
             estado.anotar(IntentoVerificacion::Aplazada, momento.ahora_ms).await?;
             Ok(Vuelta::Aplazada)
         }

@@ -74,6 +74,8 @@ pub mod reservas_web_avisos;
 pub mod stats;
 pub mod stock_alertas;
 pub mod sync;
+// El contraste con la nube por resúmenes: el lado de la Main (`/v1/sync/verificar/*`).
+pub(crate) mod contraste;
 pub mod sync_reparacion;
 pub mod tareas;
 pub mod tickets;

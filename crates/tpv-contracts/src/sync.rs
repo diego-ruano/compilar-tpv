@@ -176,114 +176,166 @@ pub struct BootstrapResultado {
     pub tablas_desconocidas: Vec<String>,
 }
 
-/* ===== SYNC-24: contrastar la nube contra la Main ===== */
+/* ===== El contraste con la nube, por resúmenes ===== */
 
-/// `COUNT(*)` de una tabla ENTERA en la nube. Es lo único que ve una fila perdida fuera de la
-/// ventana, y cuesta un agregado por tabla.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct ConteoTabla {
-    pub nombre: String,
-    pub filas: i64,
-}
-
-/// Respuesta de `/v1/sync/verificar`: la foto con la que se contrasta.
+/// Respuesta de `/v1/sync/verificar/resumen`: lo que la nube dice de cada tabla para que la Main
+/// lo compare con su base **sin bajarse las filas**.
 ///
-/// `ventana` reusa `BootstrapTabla` porque es exactamente la misma forma y la construye la misma
-/// sentencia del worker: tener dos formas para el mismo volcado sería tener dos que pueden divergir.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct VerificacionNube {
-    pub conteos: Vec<ConteoTabla>,
-    pub ventana: Vec<BootstrapTabla>,
-    /// La ventana no cabía y sólo vienen los conteos. Media comprobación es mejor que ninguna.
+/// O bien es un resumen (`aplazar = false`), o bien la nube dice que ahora no (`aplazar = true`,
+/// con su `motivo`): el negocio está escribiendo, o a esta Main le falta por aplicar algo de lo que
+/// hay en el log. Lo segundo no es un fallo: se reintenta más tarde.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct ResumenNube {
     #[serde(default)]
-    pub ventana_omitida: bool,
-    /// Límite inferior de la ventana que usó el worker (informativo).
+    pub aplazar: bool,
+    /// Por qué se aplaza: `actividad`, `por_delante` o `desfase`. Diagnóstico, no ramificación.
+    #[serde(default)]
+    pub motivo: Option<String>,
+    /// El checkpoint que mandó la Main, devuelto: por encima de él no hay en el log de la nube
+    /// nada que no sea de esta Main. `None` si la nube no lo ha comprobado.
+    #[serde(default)]
+    pub checkpoint: Option<i64>,
+    /// El `Seq` del final del log de la nube en la foto de la que sale el resumen. Las páginas
+    /// de filas y de claves traen el suyo: si no es éste, la nube se ha movido entre medias.
+    #[serde(default)]
+    pub hasta_seq: i64,
+    /// Límite inferior de la ventana. Vuelve tal cual al pedir las filas de un cubo.
     #[serde(default)]
     pub desde: String,
-    /// SYNC-25: hasta qué `Seq` del log de la nube llega esta foto, **leído después de las filas**.
-    ///
-    /// Es lo que permite borrar arriba sin peligro. Si el checkpoint local llega hasta aquí, esta
-    /// Main ya ha visto todo lo que viaja en la foto, así que una fila que le falte no puede ser
-    /// «algo que acaba de escribir la Handy y todavía no me ha llegado»: es un borrado suyo que no
-    /// llegó a subir. Si no llega, no se borra nada y se espera al ciclo siguiente.
-    ///
-    /// `#[serde(default)]` = 0 con un worker anterior, y 0 nunca alcanza al checkpoint local salvo
-    /// en una base recién estrenada (donde tampoco hay nada que borrar). Falla cerrado.
+    /// La ventana no cabía en lo que la nube resume de una vez: sólo vienen los conteos.
+    #[serde(default)]
+    pub ventana_omitida: bool,
+    #[serde(default)]
+    pub tablas: Vec<ResumenTabla>,
+}
+
+/// Lo que el resumen dice de una tabla.
+///
+/// `sql` es la sentencia de su ventana, la que la nube ha resumido. La Main **ejecuta esa misma
+/// sentencia** en su base: la definición de la ventana vive en el worker y en ningún otro sitio.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct ResumenTabla {
+    pub nombre: String,
+    /// `COUNT(*)` de la tabla ENTERA en la nube: lo único que ve lo que falta o sobra fuera de la
+    /// ventana.
+    #[serde(default)]
+    pub total: i64,
+    /// Sin ella (ventana omitida), de esta tabla sólo se compara `total`.
+    #[serde(default)]
+    pub sql: Option<String>,
+    #[serde(default)]
+    #[specta(type = Vec<specta_typescript::Unknown>)]
+    pub args: Vec<serde_json::Value>,
+    /// Las columnas de la ventana, en su orden: el de los valores de cada fila resumida.
+    #[serde(default)]
+    pub columnas: Vec<String>,
+    /// Las columnas de la clave primaria. Vacío: la tabla no tiene, y no se compara por valores.
+    #[serde(default)]
+    pub claves: Vec<String>,
+    /// Filas de la ventana en la nube.
+    #[serde(default)]
+    pub filas: i64,
+    /// En cuántos cubos viene resumida (`tpv_domain::contraste`).
+    #[serde(default)]
+    pub cubos: u32,
+    /// Filas de cada cubo.
+    #[serde(default)]
+    pub cuentas: Vec<i64>,
+    /// La suma de los hashes de las filas de cada cubo: dieciséis cifras hexadecimales.
+    #[serde(default)]
+    pub sumas: Vec<String>,
+}
+
+/// Una página de `/v1/sync/verificar/filas`: las filas de los cubos que no cuadraban.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct FilasDeCubos {
+    pub tabla: String,
+    #[serde(default)]
+    pub columnas: Vec<String>,
+    #[serde(default)]
+    #[specta(type = Vec<Vec<specta_typescript::Unknown>>)]
+    pub filas: Vec<Vec<serde_json::Value>>,
+    /// `None` = no quedan más. Cualquier otra cosa es «sigue pidiendo desde aquí».
+    #[serde(default)]
+    pub siguiente_cursor: Option<i64>,
+    #[serde(default)]
+    pub hasta_seq: i64,
+}
+
+/// Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
+/// Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
+/// ha venido se vuelve a pedir.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct FilasPorClave {
+    pub tabla: String,
+    #[serde(default)]
+    pub columnas: Vec<String>,
+    #[serde(default)]
+    #[specta(type = Vec<Vec<specta_typescript::Unknown>>)]
+    pub filas: Vec<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub cortada: bool,
+    #[serde(default)]
+    pub hasta_seq: i64,
+}
+
+/// Una página de `/v1/sync/verificar/claves`: claves primarias de una tabla, en orden de clave.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct ClavesPagina {
+    pub tabla: String,
+    #[serde(default)]
+    pub columnas: Vec<String>,
+    #[serde(default)]
+    #[specta(type = Vec<Vec<specta_typescript::Unknown>>)]
+    pub claves: Vec<Vec<serde_json::Value>>,
+    /// La última clave de la página si queda algo detrás; `None` si era la última.
+    #[serde(default)]
+    #[specta(type = Option<Vec<specta_typescript::Unknown>>)]
+    pub siguiente_cursor: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     pub hasta_seq: i64,
 }
 
 /// Lo que no cuadra en una tabla.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DescuadreTabla {
     pub tabla: String,
-    /// Filas que la Main tiene y la nube no. Sale de comparar los `COUNT(*)`, así que se sabe
-    /// CUÁNTAS pero no cuáles: para eso haría falta la ventana local, y la definición de la ventana
-    /// vive en el worker a propósito (una sola fuente). Las que importan de verdad —las de una
-    /// operación apartada— ya las repara SYNC-22 en el momento, sin esperar a este contraste.
+    /// Filas que la Main tiene y la nube no. Se suben por estado.
     pub faltan: i64,
-    /// Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir, y **no se repara
-    /// por estado**: la ausencia de una fila no es una fila que mandar (SYNC-23).
+    /// Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir: se borran arriba
+    /// sólo si esta Main puede afirmar que está al día.
     pub sobran: i64,
-    /// Filas que están en los dos sitios con contenido distinto. Éstas SÍ se reparan.
+    /// Filas que están en los dos sitios con contenido distinto. Se reparan con el de la Main.
     pub distintas: i64,
 }
 
-/// Lo que dejó una pasada de verificación.
+/// Lo que dejó una pasada del contraste.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct ResultadoVerificacion {
     pub descuadres: Vec<DescuadreTabla>,
     /// Filas cuya reparación se ha encolado en esta pasada.
     pub reparadas: i64,
+    /// La nube no pudo resumir la ventana: sólo se han comparado los conteos (y las claves de lo
+    /// que no cuadraba).
     pub ventana_omitida: bool,
-    /// SYNC-25: tablas cuyo contador no cuadra y de las que hay que pedir las claves para saber
-    /// **cuáles** filas bailan, no sólo cuántas. Vacío = todo cuadra y no hay segunda fase.
-    #[serde(default)]
-    pub tablas_a_examinar: Vec<TablaAExaminar>,
     /// Filas de más en la nube cuyo borrado se ha encolado.
     #[serde(default)]
     pub borradas: i64,
-    /// SYNC-26: se encontraron diferencias pero NO se ha tocado nada, porque esta Main no podía
-    /// afirmar que estuviera al día (checkpoint por detrás de la foto, o cuarentena de bajada).
-    ///
-    /// Cubre las dos operaciones y no sólo el borrado, que fue el error inicial: si la Main va
-    /// atrasada, una fila «distinta» puede serlo porque la Handy acaba de escribirla y aquí
-    /// todavía no ha llegado. Repararla entonces pisaría lo nuevo con lo viejo — el mismo daño que
-    /// borrar de más, sólo que más difícil de ver.
+    /// Se encontraron diferencias que NO se han tocado: esta Main no podía afirmar que estuviera
+    /// al día (un fallo de bajada, histórico por bajar, la base se movió antes de escribir), la
+    /// reparación está apagada, o la pasada llegó a su tope antes de mirarlo todo.
     ///
     /// Se informa: es la diferencia entre «no hay nada que arreglar» y «lo hay y no me atrevo».
     #[serde(default)]
     pub aplazado: bool,
-}
-
-/// Una tabla de la que hay que pedir las claves, con las columnas que la forman.
-///
-/// Las columnas las decide la MAIN leyendo su propio esquema y viajan en la petición. El esquema es
-/// el mismo en los dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean dos
-/// sitios distintos, porque entonces pueden discrepar.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct TablaAExaminar {
-    pub nombre: String,
-    pub claves: Vec<String>,
-}
-
-/// Las claves de una tabla en la nube (SYNC-25).
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct ClavesTabla {
-    pub nombre: String,
-    pub columnas: Vec<String>,
-    #[specta(type = Vec<Vec<specta_typescript::Unknown>>)]
-    pub claves: Vec<Vec<serde_json::Value>>,
-    /// La tabla pasó del tope y la lista no viaja. Se dice en vez de mandar media: media lista se
-    /// leería como «te sobran 400.000 filas» y provocaría un borrado masivo.
+    /// Filas que se han bajado de la nube para compararlas una a una: las de los cubos que no
+    /// cuadraban. Cero es lo normal.
     #[serde(default)]
-    pub truncada: bool,
-}
-
-/// Respuesta de `/v1/sync/verificar-claves`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
-pub struct VerificacionClaves {
-    pub tablas: Vec<ClavesTabla>,
+    pub filas_examinadas: i64,
+    /// Tablas que no se han podido comparar por valores: sin clave primaria, con otras columnas
+    /// que en la nube (otra versión del programa), o cuyas filas no llegaron como en el resumen.
+    #[serde(default)]
+    pub tablas_sin_comparar: Vec<String>,
 }
 
 /// RI-31: estado de réplica para la UI, sin SQL ni credenciales.

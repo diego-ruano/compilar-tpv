@@ -476,21 +476,15 @@ Lo que viene detrás no lo devuelve entero:
   línea que falta revierte la reparación entera. Si no, puede entrar a medias: la comanda y el pago
   sin líneas, con el cobro en Cuentas y el ticket fuera de la lista de la Handy, que sólo enseña
   tickets con líneas.
-- **El contraste diario** (`verificar_nube`) sube lo que falta arriba en una sola operación, que el
-  DO aplica con las FK diferidas, pero:
-  - Las claves de `/verificar-claves` comparten un presupuesto (`TOPE_CLAVES`, que es también el de
-    una tabla sola). Si `Detalle_Comanda` no cabe, sale `truncada` y la Main se la salta
-    (`plan_de_claves`), así que la operación puede llevar filas que apuntan a líneas que no están
-    (`Pago_Detalles`, `Lote_Consumos`, `Suelto_Consumos`): falla por FK, y con ella todo lo demás que
-    reparaba, cada día. No hay cursor para pedir una tabla por partes.
-  - Sus reparaciones no llevan `Repara_Op_Id` (`encolar_op_de_reparacion`), y es lo único que retira
-    una cuarentena al subir (`outbox_confirmar_lote`): la del cobro y la de la reparación inmediata que
-    falló se quedan.
+- **El contraste con la nube** (`verificar_nube`) sube lo que falta arriba por estado, padres primero,
+  y recorre las claves de una tabla entera por páginas; lo de una tabla cuyo padre no se ha podido
+  mirar entero no lo sube. Pero sus reparaciones no llevan `Repara_Op_Id`
+  (`contraste.rs::encolar_operacion`), y es lo único que retira una cuarentena al subir
+  (`outbox_confirmar_lote`): la del cobro y la de la reparación inmediata que falló se quedan.
 
 Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
 comanda afectada (la comanda, sus líneas, sus cobros y lo que cuelga de ellos); y que el contraste
-pida las claves por páginas, no encole una reparación a la que le falta una tabla de la que dependen
-sus filas y quede enlazado a las cuarentenas que resuelve.
+quede enlazado a las cuarentenas que resuelve.
 
 ### SYNC-32 · Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube
 

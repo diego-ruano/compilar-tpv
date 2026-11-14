@@ -34,7 +34,8 @@ pub struct SituacionVerificacion {
 pub enum IntentoVerificacion {
     /// Se comparó: es una pasada buena, encontrara lo que encontrara.
     Hecha,
-    /// La nube contestó, pero su foto iba por delante de lo que ha bajado esta Main: no se comparó.
+    /// No era el momento (la nube estaba escribiendo o iba por delante de lo que ha bajado esta Main,
+    /// o una de las dos bases se movió durante la pasada): no se comparó.
     Aplazada,
     /// No se pudo: la nube no contestó, o contestó algo que no se entiende.
     Fallida,

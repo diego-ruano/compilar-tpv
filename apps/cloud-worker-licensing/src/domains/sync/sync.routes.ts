@@ -23,12 +23,19 @@ import { getDb } from "../../server/db";
 import { provisionTenantDatabase } from "../licensing/licensing.helpers";
 import {
 	TRANSACCIONALES,
-	esTablaDeNegocio,
 	esTransaccional,
-	sentenciaConteo,
 	sentenciaVolcado,
 	ventanasCandidatas,
 } from "./bootstrap.ventana";
+import { SQL_SEQ, contadorDeVentanas, leerPuntoDePartida, seqDe } from "./puntoDePartida";
+import { cubosValidos } from "./resumenCubos";
+import {
+	esTablaVerificable,
+	filasDeLosCubos,
+	filasPorClave,
+	paginaDeClaves,
+	resumenDeVerificacion,
+} from "./verificar";
 import {
 	Escritor,
 	HISTORICO_MAX_BYTES,
@@ -40,14 +47,15 @@ import {
 	primerValor,
 	siguiente,
 	type Lector,
-	type Resultado,
-	type Sentencia,
 } from "./volcado";
 import {
 	changesSchema,
 	historicoSchema,
 	saludSyncSchema,
-	verificarClavesSchema,
+	verificarClavesPorPaginasSchema,
+	verificarFilasSchema,
+	verificarPorClaveSchema,
+	verificarResumenSchema,
 } from "./sync.schemas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
@@ -59,8 +67,7 @@ export const syncRoutes = new Hono<Ctx>();
 syncRoutes.use("/changes", gzipSiSeAcepta);
 syncRoutes.use("/bootstrap", gzipSiSeAcepta);
 syncRoutes.use("/historico", gzipSiSeAcepta);
-syncRoutes.use("/verificar", gzipSiSeAcepta);
-syncRoutes.use("/verificar-claves", gzipSiSeAcepta);
+syncRoutes.use("/verificar/*", gzipSiSeAcepta);
 
 // ARQ-06: autenticación y rol se resuelven antes de que el validador lea el cuerpo.
 syncRoutes.use("*", tenantAuth, alHub, soloLaMain("forbidden_not_tpv", 403));
@@ -227,30 +234,6 @@ export type Topes = { filas: number; bytes: number };
 
 const TOPES: Topes = { filas: BOOTSTRAP_MAX_FILAS, bytes: VOLCADO_MAX_BYTES };
 
-const SQL_TABLAS: Sentencia = {
-	sql: "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC;",
-	args: [],
-};
-const SQL_ULTIMO_CIERRE: Sentencia = {
-	sql: `SELECT Fecha_Hora FROM Cierres_Caja WHERE Reabierto_En IS NULL
-	      ORDER BY Fecha_Hora DESC LIMIT 1;`,
-	args: [],
-};
-const SQL_SEQ: Sentencia = { sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;", args: [] };
-
-/** Las tablas de negocio y la hora del último cierre no reabierto: de dónde sale la ventana. */
-function leerPuntoDePartida(lector: Lector): Promise<{ tablas: string[]; ultimoCierre: string | null }> {
-	return lector.foto([SQL_TABLAS, SQL_ULTIMO_CIERRE], (rs) => {
-		const tablas = [...siguiente(rs).filas].map((f) => String(f[0] ?? "")).filter(esTablaDeNegocio);
-		const cierre = primerValor(siguiente(rs));
-		return { tablas, ultimoCierre: cierre == null ? null : String(cierre) };
-	});
-}
-
-function seqDe(r: Resultado): number {
-	return Number(primerValor(r) ?? 0);
-}
-
 /* ===== La ventana que cabe ===== */
 
 /** Lo que ocupa una tabla en un volcado: lo que lleva siempre y, de media, cada una de sus filas. */
@@ -292,23 +275,14 @@ function pesarTablas(lector: Lector, tablas: string[]): Promise<Map<string, Peso
 type Medida = { filas: number; bytes: number };
 
 /**
- * Mide ventanas de una misma base: cuenta EXACTAMENTE las filas que entrarían (con las sentencias
- * del volcado, no la tabla entera) y estima sus bytes con el peso de cada tabla. Las maestras no
- * dependen de la ventana y se cuentan una vez.
+ * Mide ventanas de una misma base: cuenta EXACTAMENTE las filas que entrarían
+ * (`contadorDeVentanas`) y estima sus bytes con el peso de cada tabla.
  */
 function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, Peso>): (desde: string) => Promise<Medida> {
-	const deMaestras = new Map<string, number>();
+	const contar = contadorDeVentanas(lector, tablas);
 	return async (desde) => {
-		const porContar = tablas.filter((t) => esTransaccional(t) || !deMaestras.has(t));
-		const contadas = await lector.foto(
-			porContar.map((t) => sentenciaConteo(t, desde)),
-			(rs) => new Map(porContar.map((t) => [t, Number(primerValor(siguiente(rs)) ?? 0)])),
-		);
-		for (const [t, n] of contadas) if (!esTransaccional(t)) deMaestras.set(t, n);
-
 		const medida: Medida = { filas: 0, bytes: 0 };
-		for (const t of tablas) {
-			const n = contadas.get(t) ?? deMaestras.get(t) ?? 0;
+		for (const [t, n] of await contar(desde)) {
 			const peso = pesos.get(t) ?? { fijo: 0, porFila: 0 };
 			medida.filas += n;
 			medida.bytes += peso.fijo + n * peso.porFila;
@@ -562,186 +536,59 @@ syncRoutes.post("/initialize-empty", async (c) => {
 	return c.json({ ok: true });
 });
 
-/* ===== SYNC-24: comprobar que la nube y la Main dicen lo mismo ===== */
+/* ===== El contraste por resúmenes (`verificar.ts`) ===== */
 
-/**
- * Foto para CONTRASTAR, no para restaurar.
- *
- * Devuelve dos cosas y cada una cubre lo que la otra no:
- *
- * - `conteos`: `COUNT(*)` de **todas** las tablas de negocio, enteras. Es baratísimo (un agregado
- *   por tabla) y es lo único que ve una fila que falta o que sobra fuera de la ventana.
- * - `ventana`: el contenido de la ventana de la fase 1 (los últimos `VENTANA_DIAS`, o lo que quepa
- *   de ellos), con las MISMAS sentencias que el bootstrap. Es lo que ve un VALOR distinto — el
- *   caso que nos mordió (un `UPDATE` de `Razon_Social` que no llegó a subir) y que ningún contador
- *   detecta, porque la fila está en los dos sitios.
- *
- * El histórico viejo se queda fuera a propósito: ya no cambia, así que volver a leerlo cada ciclo
- * es pagar lecturas de la base por comprobar datos inmutables. Si algo se descuadró ahí, se descuadró
- * cuando estaba dentro de la ventana.
- *
- * Los conteos y la ventana se leen en dos pasos, no en una sola foto como el `/bootstrap`. Aquí
- * no hace falta que coincidan al milímetro: lo peor que produce una escritura que entre entre los
- * dos es un descuadre que al ciclo siguiente ya no está. Lo que sí importa es dónde se lee el
- * `Seq` (abajo).
- *
- * Los topes entran por parámetro para poder probar el desborde sin sembrar un mes de un bar.
- */
-export async function fotoDeVerificacion(
-	lector: Lector,
-	clientNow: unknown,
-	topes: Topes = TOPES,
-): Promise<Uint8Array<ArrayBuffer>> {
-	const { tablas, ultimoCierre } = await leerPuntoDePartida(lector);
-	const candidatas = ventanasCandidatas(clientNow, ultimoCierre);
-
-	// Conteos de tabla ENTERA (no de la ventana): es lo que delata una fila perdida en el
-	// histórico, que la ventana no mira.
-	const conteos = await lector.foto(
-		tablas.map((t) => ({ sql: `SELECT COUNT(*) AS n FROM "${t}";`, args: [] })),
-		(rs) => tablas.map((nombre) => ({ nombre, filas: Number(primerValor(siguiente(rs)) ?? 0) })),
-	);
-	const cabecera = (desde: string) =>
-		`{"conteos":${JSON.stringify(conteos)},"desde":${JSON.stringify(desde)}`;
-
-	// La ventana es la de la fase 1 de la recuperación, con sus topes y encogida igual: si los 30
-	// días no caben se contrasta lo que quepa (una semana, un día, o lo que hay desde el último
-	// cierre), que sigue viendo un valor distinto en lo reciente. Si no cabe ni eso, se devuelven
-	// los conteos igualmente: media comprobación es mejor que ninguna, y es justo el caso en el que
-	// más falta hace saber que algo va mal.
-	//
-	// El `Seq` se lee DESPUES de las filas, y eso NO es un detalle de implementacion.
-	//
-	// La Main lo usa para decidir si puede borrar arriba lo que aqui sobra: solo se atreve si su
-	// marcapaginas llega hasta aqui, porque entonces ya ha visto todo lo que hay en esta foto y
-	// una fila que le falte no puede ser "algo de la Handy que aun no me ha llegado".
-	//
-	// Leyendolo ANTES, una escritura que entrara a mitad de la lectura acabaria en la foto con
-	// un Seq mayor del que se apunto: la Main se creeria al dia y borraria una comanda que
-	// acaban de abrir. Leyendolo al final, el numero es siempre >= al de cualquier fila que
-	// viaje, asi que la comparacion falla del lado que no destruye nada.
-	const r = await volcarLaVentanaQueQuepa(lector, tablas, candidatas, topes, (desde) =>
-		lector.foto([...tablas.map((t) => sentenciaVolcado(t, desde)), SQL_SEQ], (rs) => {
-			const e = new Escritor(topes.bytes);
-			e.texto(`${cabecera(desde)},"ventana_omitida":false,"ventana":`);
-			if (escribirTablas(e, tablas, rs, topes.filas) === null) return null;
-			e.texto(`,"hasta_seq":${seqDe(siguiente(rs))}}`);
-			return e.cerrar();
+// POST /v1/sync/verificar/resumen  { checkpoint?: number }
+// El resumen por cubos de la ventana, o `{ aplazar: true }` si no es el momento: el negocio está
+// escribiendo, o a la Main le falta por aplicar algo de lo que hay en el log.
+syncRoutes.post("/verificar/resumen", cuerpoTolerante(verificarResumenSchema), async (c) => {
+	const { checkpoint } = c.req.valid("json");
+	return enJson(
+		await resumenDeVerificacion(lectorDe(c), {
+			checkpoint,
+			deviceId: c.get("deviceId"),
+			clientNow: c.req.header("x-client-now"),
+			ahoraMs: Date.now(),
 		}),
 	);
-	if (r.volcado) return r.volcado;
-
-	const hastaSeq = await lector.foto([SQL_SEQ], (rs) => seqDe(siguiente(rs)));
-	return enBytes(`${cabecera(candidatas[0])},"ventana_omitida":true,"ventana":[],"hasta_seq":${hastaSeq}}`);
-}
-
-syncRoutes.post("/verificar", async (c) => {
-	return enJson(await fotoDeVerificacion(lectorDe(c), c.req.header("x-client-now")));
 });
 
-/**
- * Las CLAVES de una tabla, sin su contenido (SYNC-25).
- *
- * Con `/verificar` a secas, la Main sólo puede preguntar en una dirección: «esta fila que tienes,
- * ¿está igual en mi base?». La contraria —«esta fila que tengo yo, ¿está en la tuya?»— no puede
- * hacerla, porque para recorrer *sus* filas de la ventana tendría que reproducir la definición de
- * la ventana, que vive aquí a propósito (una sola fuente, con sus CTEs de comandas e hijas).
- * Copiarla a Rust serían dos definiciones que acabarían divergiendo.
- *
- * Con la lista de claves delante no hace falta reproducir nada: la Main resta los dos conjuntos y
- * sabe EXACTAMENTE cuáles faltan arriba y cuáles sobran, en vez de saber sólo cuántas.
- *
- * Sobre la tabla ENTERA y no sobre la ventana: una clave ocupa poco, y así se ve también lo que se
- * haya descuadrado en el histórico.
- *
- * ⚠️ **Esto no se pide nunca salvo que algo ya no cuadre.** La Main compara primero los `COUNT(*)`,
- * que cuestan un agregado por tabla, y sólo pide las claves de las tablas cuyo contador no encaja.
- * El caso normal —todo cuadra— no paga nada de esto; la parte cara se paga el día que hay un
- * problema, que es cuando merece la pena pagarla.
- *
- * Las columnas de la clave las manda la MAIN y no se deducen aquí. El esquema es el mismo en los
- * dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean **dos sitios
- * distintos**, porque entonces pueden discrepar.
- */
-/**
- * Tope de filas de UNA respuesta de `/verificar-claves`, y también el de una tabla suelta.
- *
- * Una lista de claves crece con la tabla, y sin techo una base con años de histórico devolvería
- * decenas de megas por una petición de diagnóstico.
- */
-export const TOPE_CLAVES = 200_000;
-
-/**
- * Lee las claves de cada tabla **gastando un presupuesto común** (REV-21).
- *
- * El tope por tabla no acotaba nada por sí solo: la petición admite 60 tablas y se resolvían
- * **todas a la vez** en un `batch`, así que el peor caso eran 60 × 200.000 listas de claves vivas
- * en un isolate de 128 MB. No hacía falta un atacante: un negocio con años de histórico y varias
- * tablas descuadradas lo alcanza solo, y justo el día que la verificación hace falta — que es el
- * único día en que este endpoint se pide.
- *
- * Por eso se recorren de una en una y el presupuesto se va gastando: las primeras tablas salen
- * enteras y las que ya no caben se marcan `truncada`, que es lo que la Main sabe leer («ésta no la
- * puedo comparar, la salto», `sync.rs::contrastar_con_la_nube`). Se pierde una comparación y se
- * vuelve a pedir; lo que no se pierde es el isolate, que se las llevaría todas por delante.
- *
- * El tope entra por parámetro para poder probar el reparto sin sembrar doscientas mil filas.
- */
-export async function leerClaves(
-	db: { execute: (q: { sql: string; args: any[] }) => Promise<any> },
-	tablas: { nombre: string; claves: string[] }[],
-	tope: number,
-): Promise<{
-	tablas: { nombre: string; columnas: string[]; claves: unknown[][]; truncada: boolean }[];
-}> {
-	let presupuesto = tope;
-	const salida: {
-		nombre: string;
-		columnas: string[];
-		claves: unknown[][];
-		truncada: boolean;
-	}[] = [];
-
-	for (const t of tablas) {
-		const cabe = Math.min(tope, presupuesto);
-		// Sin presupuesto no se consulta siquiera: traer filas para tirarlas es pagar la memoria
-		// igual, que es justo lo que se viene a evitar.
-		if (cabe <= 0) {
-			salida.push({ nombre: t.nombre, columnas: t.claves, claves: [], truncada: true });
-			continue;
-		}
-
-		const r = await db.execute({
-			sql: `SELECT ${t.claves.map((k) => `"${k}"`).join(", ")} FROM "${t.nombre}" LIMIT ${cabe + 1};`,
-			args: [],
-		});
-		const filas = r.rows ?? [];
-
-		// Media lista se leería como «te sobran 400.000 filas», así que o va entera o no va.
-		if (filas.length > cabe) {
-			salida.push({ nombre: t.nombre, columnas: t.claves, claves: [], truncada: true });
-			continue;
-		}
-
-		presupuesto -= filas.length;
-		salida.push({
-			nombre: t.nombre,
-			columnas: t.claves,
-			claves: filas.map((f: any) => t.claves.map((k) => f[k] ?? null)),
-			truncada: false,
-		});
+// POST /v1/sync/verificar/filas  { tabla, desde, cubos, pedir: number[], cursor?: number }
+// Las filas de los cubos que a la Main no le cuadran, por páginas.
+syncRoutes.post("/verificar/filas", cuerpoTolerante(verificarFilasSchema), async (c) => {
+	const pedido = c.req.valid("json");
+	// El nombre de tabla se interpola en el SQL: sólo una tabla de negocio, como en `/historico`.
+	if (!esTablaVerificable(pedido.tabla)) {
+		return c.json({ ok: false, code: "validation", error: "tabla_no_verificable" }, 400);
 	}
+	if (!cubosValidos(pedido.cubos)) {
+		return c.json({ ok: false, code: "validation", error: "cubos_no_validos" }, 400);
+	}
+	return enJson(await filasDeLosCubos(lectorDe(c), pedido));
+});
 
-	return { tablas: salida };
-}
+// POST /v1/sync/verificar/por-clave  { tabla, claves: unknown[][] }
+// Unas filas por su clave primaria, estén o no en la ventana.
+syncRoutes.post("/verificar/por-clave", cuerpoTolerante(verificarPorClaveSchema), async (c) => {
+	const pedido = c.req.valid("json");
+	if (!esTablaVerificable(pedido.tabla)) {
+		return c.json({ ok: false, code: "validation", error: "tabla_no_verificable" }, 400);
+	}
+	const filas = await filasPorClave(lectorDe(c), pedido);
+	if (!filas) return c.json({ ok: false, code: "validation", error: "claves_no_validas" }, 400);
+	return enJson(filas);
+});
 
-syncRoutes.post("/verificar-claves", cuerpoTolerante(verificarClavesSchema), async (c) => {
-	const { tablas } = c.req.valid("json");
-	if (!tablas.length) return c.json({ tablas: [] });
-
-	const resultado = await tenantQuery(c, (db) => leerClaves(db, tablas, TOPE_CLAVES));
-
-	return c.json(resultado);
+// POST /v1/sync/verificar/claves  { tabla, cursor?: unknown[], limite?: number }
+// Las claves primarias de una tabla entera, por páginas y en orden de clave.
+syncRoutes.post("/verificar/claves", cuerpoTolerante(verificarClavesPorPaginasSchema), async (c) => {
+	const pedido = c.req.valid("json");
+	if (!esTablaVerificable(pedido.tabla)) {
+		return c.json({ ok: false, code: "validation", error: "tabla_no_verificable" }, 400);
+	}
+	const pagina = await paginaDeClaves(lectorDe(c), pedido);
+	if (!pagina) return c.json({ ok: false, code: "validation", error: "cursor_no_valido" }, 400);
+	return enJson(pagina);
 });
 
 /**
@@ -767,6 +614,10 @@ syncRoutes.post("/salud", cuerpoTolerante(saludSyncSchema), async (c) => {
 			descuadres: datos.descuadres,
 			apartadas: datos.apartadas,
 			reparadas: datos.reparadas,
+			borradas: datos.borradas,
+			aplazado: datos.aplazado,
+			filas_examinadas: datos.filas_examinadas,
+			tablas_sin_comparar: datos.tablas_sin_comparar,
 			ventana_omitida: datos.ventana_omitida,
 			reparacion_apagada: datos.reparacion_apagada,
 		}),

@@ -196,7 +196,7 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
   pasa y lo que devuelve como valor. El cuerpo de la respuesta de una ruta que se ejecuta dentro del
   DO no lo tiene: viaja como flujo (comprobado en local con 40 MiB).
-- **Los volcados de sync** (`/v1/sync/bootstrap`, `/verificar` e `/historico`) no leen por
+- **Los volcados de sync** (`/v1/sync/bootstrap` e `/historico`, y las páginas del contraste) no leen por
   `tenantQuery`: dentro del DO recorren el cursor de su SQLite una vez y escriben cada fila una vez,
   ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
   JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
@@ -212,8 +212,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `Array.from(cursor.raw())` lo agotan; quien lo recorra a mano y pueda parar antes tiene que
   terminarlo, como hace el lector de los volcados.
 - **Las respuestas de sync que crecen con el negocio salen en gzip si quien pregunta lo acepta**
-  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico`, `/verificar` y
-  `/verificar-claves`. Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
+  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico` y las del
+  contraste (`/verificar/*`). Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
   `tenantAuth` y `alHub`: el `TenantHub` contesta sin comprimir y comprime el Worker lo que vuelve,
   para no gastar el hilo del negocio. La respuesta comprimida lleva `encodeBody: "manual"`; sin
   eso, el runtime comprime al transmitir lo que lleva `Content-Encoding` y saldría comprimida dos
@@ -283,10 +283,10 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Lo que la Handy no puede hacer** lo vetan middlewares: `soloLaMainCobra` (`cobro_solo_en_main`),
   `soloLaMainEscribeCaja` (`caja_solo_en_main`), y `lib/hub.ts::TABLAS_SOLO_MAIN` para las tablas
   fiscales.
-- `cuerpoConIdentificador` es sólo para el emparejamiento. Los cuatro cuerpos permisivos de `sync`
-  (`/changes`, `/historico`, `/verificar-claves`, `/salud`) usan `cuerpoTolerante` con schemas que
-  coercen y ponen valores por defecto: están en el camino de la recuperación, donde se falla hacia
-  «sigue trabajando».
+- `cuerpoConIdentificador` es sólo para el emparejamiento. Los cuerpos permisivos de `sync`
+  (`/changes`, `/historico`, `/salud` y las del contraste, `/verificar/resumen`, `/filas`,
+  `/por-clave` y `/claves`) usan `cuerpoTolerante` con schemas que coercen y ponen valores por defecto: están en el
+  camino de la recuperación y de la comprobación, donde se falla hacia «sigue trabajando».
 - **Un schema con contrapartida en Rust lleva drift-guard**:
   `Assert<SameKeys<z.infer<typeof xSchema>, XInput>>` (`lib/typeGuards.ts`) compara las claves en las
   dos direcciones; los tipos de los valores los cubre el paso a los command builders.
@@ -319,9 +319,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale
   como fallo de validación sino como un 500.
 - **El techo va en la respuesta, no en cada pieza**: una ruta que devuelve listas reparte un presupuesto
-  común (como `leerClaves` en `/verificar-claves`, que marca `truncada` lo que no cabe). Un isolate
-  tiene 128 MB. Lo que crece con el negocio se acota además en bytes, mientras se escribe
-  (`VOLCADO_MAX_BYTES`): un tope de filas no dice lo que ocupan.
+  común, o va por páginas con un cursor (como las claves del contraste, `/v1/sync/verificar/claves`).
+  Un isolate tiene 128 MB. Lo que crece con el negocio se acota además en bytes, mientras se escribe
+  (`VOLCADO_MAX_BYTES`, las páginas del contraste): un tope de filas no dice lo que ocupan.
 - **Un importe que llega por la API viene en céntimos enteros** (`zDinero`); un `12.5` se rechaza.
   Uno que no puede ser negativo (un precio de venta, el coste de un lote) va con
   `zDineroNoNegativoCon(mensaje)` y el texto de la Main.

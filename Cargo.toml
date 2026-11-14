@@ -40,7 +40,10 @@ async-trait = "0.1"
 
 # ── Serde / JSON ──
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: un número que llega en JSON se lee como el doble exacto que se escribió. Sin
+# él, serde lee algunos decimales largos con un bit de menos, y el contraste con la nube (que suma el
+# hash de cada fila) daría por distinta una fila igual; la recuperación restauraría ese bit de menos.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # ── Fechas ──
 chrono = { version = "0.4", features = ["serde"] }

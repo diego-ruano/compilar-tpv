@@ -5,13 +5,16 @@ use serde_json::json;
 
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
-    HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncHealth,
-    VerificacionClaves, VerificacionNube,
+    ClavesPagina, FilasDeCubos, FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo,
+    ResultadoVerificacion, ResumenNube, SyncHealth,
 };
 
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
-use crate::ports::sync::SyncRepository;
+use crate::ports::sync::{
+    ContrasteLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave,
+    SyncRepository,
+};
 
 /// Pide `ruta` a la nube (modo `tpv`) y lee la respuesta **directamente en su tipo**.
 ///
@@ -298,29 +301,36 @@ pub async fn inicializar_tenant_vacio(
     bootstrap_desde_nube(nube, repo).await
 }
 
-/// SYNC-24: contrasta la nube contra esta base, repara lo que se pueda y **se chiva solo**.
+/// El contraste con la nube: compara esta base con la de la nube, repara lo que se pueda y **se
+/// chiva solo**.
+///
+/// Va por resúmenes (`docs/arquitectura/sincronizacion.md`): la nube manda, por tabla, sus conteos
+/// y el resumen por cubos de su ventana (`/v1/sync/verificar/resumen`), y de lo que no cuadra se
+/// bajan sólo las filas de los cubos que no cuadran (`/verificar/filas`) y, fuera de la ventana,
+/// las claves por páginas (`/verificar/claves`). Lo compara y lo repara el repositorio
+/// ([`SyncRepository::contrastar_con_la_nube`]); aquí se orquesta y se informa.
 ///
 /// Los tres pasos van juntos a propósito. Separar "comprobar" de "contar lo que se ha encontrado"
 /// deja la puerta abierta a que alguien llame a lo primero sin lo segundo, y entonces el descuadre
-/// vuelve a existir sin que nadie lo sepa — que es exactamente el estado del que se viene.
+/// vuelve a existir sin que nadie lo sepa.
 ///
-/// El informe va al worker y de ahí a Axiom, **no al usuario**: un `op_id` y un error de SQL no los
-/// puede atender quien está delante del TPV, y un aviso que no se puede atender enseña a ignorar
-/// los avisos. Quien está delante sólo ve la consecuencia, en Conectividad.
+/// El informe va al worker y de ahí a Axiom, **no al usuario**: quien está delante del TPV no puede
+/// atender un descuadre, y un aviso que no se puede atender enseña a ignorar los avisos. Se informa
+/// SIEMPRE que se compara, también cuando todo cuadra: un silencio no distingue "va bien" de "este
+/// equipo lleva tres semanas sin comprobarse".
 ///
-/// Se informa SIEMPRE, también cuando todo cuadra: un silencio no distingue "va bien" de "este
-/// equipo lleva tres semanas sin comprobarse". Lo que se vigila es la serie, no el evento suelto.
+/// `reparar = false` es el interruptor `reparacion_nube` apagado (PROD-06): se compara y se informa
+/// igual, pero no se escribe nada.
 ///
-/// `reparar = false` es el interruptor `reparacion_nube` apagado (PROD-06): se compara y se
-/// informa igual —es lo que permite ver si el problema sigue ahí—, pero no se escribe nada.
+/// Sólo se compara con las dos fotos del mismo instante: sin nada de aquí por subir y sin nada de
+/// allí por bajar. Si no es así —el negocio está escribiendo, a esta Main le falta algo por aplicar,
+/// la base se mueve a mitad de la pasada— se devuelve [`Contraste::Aplazado`], que no es un fallo:
+/// el job lo reintenta en unos minutos.
 ///
-/// VERIF-01 · **Con el histórico a medias no se contrasta.** Tras recuperar desde la nube, la
-/// fase 2 va trayendo lo que la ventana de la fase 1 dejó fuera; hasta que termina, todo lo que
-/// falta por bajar saldría como «la nube tiene filas que aquí no están», y el checkpoint —que es
-/// el `Seq` de la foto de la fase 1— dice que esta Main está al día. Con eso se pedían las claves
-/// y cada fila pendiente de bajar se convertía en un `DELETE` arriba: los cierres de caja con sus
-/// cascadas, los fichajes… borrados de la nube antes de que el backfill los trajera. No se pide
-/// nada ni se informa: comparar maestros enteros con transaccionales a medias no dice nada.
+/// VERIF-01 · **Con el histórico a medias no se contrasta.** Tras recuperar desde la nube, la fase 2
+/// va trayendo lo que la ventana de la fase 1 dejó fuera; hasta que termina, todo lo que falta por
+/// bajar saldría como «la nube tiene filas que aquí no están», y borrarlo arriba se llevaría lo que
+/// el backfill iba a traer. No se pide nada ni se informa.
 pub async fn verificar_contra_la_nube(
     nube: &dyn PairingService,
     repo: &dyn SyncRepository,
@@ -330,59 +340,32 @@ pub async fn verificar_contra_la_nube(
         return Ok(Contraste::HistoricoPendiente);
     }
 
-    let foto: VerificacionNube = pedir(
+    // La marca de esta base antes de pedir nada: el resumen sólo vale contra ella. Con algo por
+    // subir, la nube no tiene todavía lo de aquí y no hay nada que pedirle.
+    let marca = repo.contraste_marca().await?;
+    if marca.pendientes > 0 {
+        return Ok(Contraste::Aplazado);
+    }
+
+    let resumen: ResumenNube = pedir(
         nube,
-        "/v1/sync/verificar",
-        json!({}),
-        "respuesta de /v1/sync/verificar",
+        "/v1/sync/verificar/resumen",
+        json!({ "checkpoint": marca.checkpoint }),
+        "respuesta de /v1/sync/verificar/resumen",
         AppError::Internal,
     )
     .await?;
-
-    // VERIF-02 · La foto va por delante de lo que ha bajado esta Main: algo de lo que trae está
-    // todavía de camino (una Handy acaba de escribir, o el catch-up no ha terminado). Compararla
-    // daría por descuadre lo que se arregla solo en cuanto llegue, y no se podría tocar nada
-    // arriba (`puede_borrar_arriba`). No se compara ni se informa: quien llama lo reintenta en
-    // unos minutos. Con un worker que no manda `hasta_seq` (0) se compara, y no se toca nada.
-    if foto.hasta_seq > repo.get_checkpoint().await? {
-        return Ok(Contraste::FotoPorDelante);
+    // La nube dice que ahora no: el negocio está escribiendo, o a esta Main le falta por aplicar
+    // algo de lo que hay en el log.
+    if resumen.aplazar {
+        return Ok(Contraste::Aplazado);
     }
 
-    // Se guarda ANTES de ceder la foto: es lo que decide si se puede borrar arriba.
-    let hasta_seq = foto.hasta_seq;
-    let mut resultado = repo.contrastar_con_la_nube(foto, reparar).await?;
-
-    // SYNC-25 · segunda fase, y **sólo si hace falta**: un contador que no cuadra dice que algo
-    // baila, no qué. Las claves lo dicen exactamente, pero pesan, así que se piden únicamente de
-    // las tablas que ya se sabe que están mal. El caso normal —todo cuadra— no paga nada de esto.
-    if !resultado.tablas_a_examinar.is_empty() {
-        let claves: VerificacionClaves = pedir(
-            nube,
-            "/v1/sync/verificar-claves",
-            json!({ "tablas": resultado.tablas_a_examinar }),
-            "respuesta de /v1/sync/verificar-claves",
-            AppError::Internal,
-        )
-        .await?;
-
-        let (mas_descuadres, reparadas, borradas, aplazado) =
-            repo.contrastar_claves(claves, hasta_seq, reparar).await?;
-
-        // La segunda fase sabe CUÁLES, así que su cuenta manda sobre la estimación por contadores
-        // de la primera. Dejar las dos sumaría el mismo descuadre dos veces.
-        for d in mas_descuadres {
-            match resultado.descuadres.iter_mut().find(|x| x.tabla == d.tabla) {
-                Some(x) => {
-                    x.faltan = d.faltan;
-                    x.sobran = d.sobran;
-                }
-                None => resultado.descuadres.push(d),
-            }
-        }
-        resultado.reparadas += reparadas;
-        resultado.borradas = borradas;
-        resultado.aplazado = resultado.aplazado || aplazado;
-    }
+    let paginas = PaginasPorRest { nube };
+    let resultado = match repo.contrastar_con_la_nube(resumen, marca, &paginas, reparar).await? {
+        ContrasteLocal::Hecho(resultado) => resultado,
+        ContrasteLocal::SeHaMovido => return Ok(Contraste::Aplazado),
+    };
 
     let informe = json!({
         "descuadres": resultado.descuadres,
@@ -391,6 +374,8 @@ pub async fn verificar_contra_la_nube(
         "borradas": resultado.borradas,
         "aplazado": resultado.aplazado,
         "ventana_omitida": resultado.ventana_omitida,
+        "filas_examinadas": resultado.filas_examinadas,
+        "tablas_sin_comparar": resultado.tablas_sin_comparar,
         "reparacion_apagada": !reparar,
     });
     // Best-effort, y el error se descarta A SABIENDAS. Dos razones: que el informe no salga no
@@ -404,6 +389,54 @@ pub async fn verificar_contra_la_nube(
     Ok(Contraste::Hecho(resultado))
 }
 
+/// Las páginas del contraste por la API REST de la nube: lo que el repositorio pide además del
+/// resumen.
+struct PaginasPorRest<'a> {
+    nube: &'a dyn PairingService,
+}
+
+#[async_trait::async_trait]
+impl PaginasDelContraste for PaginasPorRest<'_> {
+    async fn filas(&self, pedido: PedidoDeFilas) -> AppResult<FilasDeCubos> {
+        pedir(
+            self.nube,
+            "/v1/sync/verificar/filas",
+            json!({
+                "tabla": pedido.tabla,
+                "desde": pedido.desde,
+                "cubos": pedido.cubos,
+                "pedir": pedido.pedir,
+                "cursor": pedido.cursor,
+            }),
+            "respuesta de /v1/sync/verificar/filas",
+            AppError::Internal,
+        )
+        .await
+    }
+
+    async fn por_clave(&self, pedido: PedidoPorClave) -> AppResult<FilasPorClave> {
+        pedir(
+            self.nube,
+            "/v1/sync/verificar/por-clave",
+            json!({ "tabla": pedido.tabla, "claves": pedido.claves }),
+            "respuesta de /v1/sync/verificar/por-clave",
+            AppError::Internal,
+        )
+        .await
+    }
+
+    async fn claves(&self, pedido: PedidoDeClaves) -> AppResult<ClavesPagina> {
+        pedir(
+            self.nube,
+            "/v1/sync/verificar/claves",
+            json!({ "tabla": pedido.tabla, "cursor": pedido.cursor }),
+            "respuesta de /v1/sync/verificar/claves",
+            AppError::Internal,
+        )
+        .await
+    }
+}
+
 /// Lo que ha hecho una pasada de [`verificar_contra_la_nube`].
 #[derive(Debug)]
 pub enum Contraste {
@@ -411,8 +444,10 @@ pub enum Contraste {
     Hecho(ResultadoVerificacion),
     /// VERIF-01 · No se ha pedido nada a la nube: el histórico todavía se está descargando.
     HistoricoPendiente,
-    /// VERIF-02 · La foto de la nube iba por delante del checkpoint local: no se ha comparado.
-    FotoPorDelante,
+    /// VERIF-02 · No se ha comparado, o se ha dejado a medias sin tocar nada: había algo por subir,
+    /// la nube estaba escribiendo o iba por delante de esta Main, o una de las dos bases se movió
+    /// durante la pasada. No es un fallo: se reintenta en unos minutos.
+    Aplazado,
 }
 
 impl Contraste {
@@ -420,7 +455,7 @@ impl Contraste {
     pub fn hecho(self) -> Option<ResultadoVerificacion> {
         match self {
             Contraste::Hecho(r) => Some(r),
-            Contraste::HistoricoPendiente | Contraste::FotoPorDelante => None,
+            Contraste::HistoricoPendiente | Contraste::Aplazado => None,
         }
     }
 }
@@ -465,20 +500,17 @@ mod tests {
         async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
             Ok(OutboxFallo::default())
         }
+        async fn contraste_marca(&self) -> AppResult<crate::ports::sync::MarcaLocal> {
+            Ok(crate::ports::sync::MarcaLocal::default())
+        }
         async fn contrastar_con_la_nube(
             &self,
-            _: VerificacionNube,
+            _: ResumenNube,
+            _: crate::ports::sync::MarcaLocal,
+            _: &dyn PaginasDelContraste,
             _: bool,
-        ) -> AppResult<ResultadoVerificacion> {
-            Ok(ResultadoVerificacion::default())
-        }
-        async fn contrastar_claves(
-            &self,
-            _: VerificacionClaves,
-            _: i64,
-            _: bool,
-        ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)> {
-            Ok((Vec::new(), 0, 0, false))
+        ) -> AppResult<ContrasteLocal> {
+            Ok(ContrasteLocal::Hecho(ResultadoVerificacion::default()))
         }
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())
@@ -604,29 +636,48 @@ mod tests_leer_respuesta {
     }
 
     #[test]
-    fn la_foto_del_contraste_de_un_worker_sin_hasta_seq() {
-        let foto: VerificacionNube = leer(r#"{"conteos":[{"nombre":"Zonas","filas":3}],"ventana":[]}"#).unwrap();
-        assert_eq!(foto.conteos[0].filas, 3);
-        assert_eq!(foto.hasta_seq, 0, "sin `hasta_seq` no se puede afirmar nada: falla cerrado");
-        assert!(!foto.ventana_omitida);
-
-        let foto: VerificacionNube = leer(
-            r#"{"conteos":[],"ventana":[],"ventana_omitida":true,"desde":"2026-10-14 00:00:00","hasta_seq":88}"#,
+    fn el_resumen_del_contraste_y_su_aplazamiento() {
+        // Aplazado: sin tablas, con su motivo y lo que se le dice que espere (que no se usa).
+        let resumen: ResumenNube = leer(
+            r#"{"ok":true,"aplazar":true,"motivo":"actividad","reintentar_en_s":90,"hasta_seq":3}"#,
         )
         .unwrap();
-        assert_eq!((foto.hasta_seq, foto.ventana_omitida), (88, true));
+        assert!(resumen.aplazar);
+        assert_eq!(resumen.motivo.as_deref(), Some("actividad"));
+        assert!(resumen.tablas.is_empty());
+
+        // Un resumen: una tabla con su ventana y otra sólo con su conteo.
+        let resumen: ResumenNube = leer(
+            r#"{"ok":true,"aplazar":false,"checkpoint":4,"hasta_seq":9,"desde":"2026-10-14 12:00:00","ventana_omitida":false,
+                "tablas":[{"nombre":"Zonas","total":2,"sql":"SELECT * FROM \"Zonas\";","args":[],"columnas":["ID_Zona","Nombre_Zona"],
+                           "claves":["ID_Zona"],"filas":2,"cubos":1,"cuentas":[2],"sumas":["00000000000000ff"]},
+                          {"nombre":"Comandas","total":17}]}"#,
+        )
+        .unwrap();
+        assert_eq!((resumen.checkpoint, resumen.hasta_seq), (Some(4), 9));
+        assert_eq!(resumen.tablas[0].cuentas, vec![2]);
+        assert_eq!(resumen.tablas[1].sql, None, "sin ventana sólo se compara el conteo");
+        assert_eq!(resumen.tablas[1].total, 17);
+
+        // Sin `checkpoint` la nube no ha comprobado nada: no se puede comparar.
+        let resumen: ResumenNube = leer(r#"{"ok":true,"tablas":[]}"#).unwrap();
+        assert_eq!((resumen.checkpoint, resumen.aplazar), (None, false));
     }
 
     #[test]
-    fn las_claves_y_una_pagina_del_historico() {
-        let claves: VerificacionClaves = leer(
-            r#"{"tablas":[{"nombre":"Pago_Detalles","columnas":["ID_Pago","ID_Detalle"],"claves":[["p1","d1"]]},
-                         {"nombre":"Comandas","columnas":["ID_Comanda"],"claves":[],"truncada":true}]}"#,
+    fn las_paginas_del_contraste_y_una_del_historico() {
+        let filas: FilasDeCubos = leer(
+            r#"{"ok":true,"tabla":"Zonas","columnas":["ID_Zona"],"filas":[["z1"],["z2"]],"siguiente_cursor":null,"hasta_seq":9}"#,
         )
         .unwrap();
-        assert_eq!(claves.tablas[0].claves.len(), 1);
-        assert!(!claves.tablas[0].truncada);
-        assert!(claves.tablas[1].truncada);
+        assert_eq!((filas.filas.len(), filas.siguiente_cursor, filas.hasta_seq), (2, None, 9));
+
+        let claves: ClavesPagina = leer(
+            r#"{"ok":true,"tabla":"Pago_Detalles","columnas":["ID_Pago","ID_Detalle"],"claves":[["p1","d1"]],"siguiente_cursor":["p1","d1"],"hasta_seq":9}"#,
+        )
+        .unwrap();
+        assert_eq!(claves.claves.len(), 1);
+        assert_eq!(claves.siguiente_cursor, Some(vec![json!("p1"), json!("d1")]));
 
         let pagina: HistoricoPagina = leer(
             r#"{"ok":true,"tabla":"Comandas","columnas":["ID_Comanda","Total_Comanda"],"filas":[["c1",1250]],"siguiente_cursor":2000}"#,
@@ -652,15 +703,15 @@ mod tests_leer_respuesta {
 
         // También si el resto del cuerpo encaja en el tipo: no es una foto vacía con la que dar
         // el contraste por hecho, ni un volcado sin tablas.
-        let err = leer::<VerificacionNube>(r#"{"ok":false,"code":"conflict","error":"x","conteos":[],"ventana":[]}"#)
+        let err = leer::<ResumenNube>(r#"{"ok":false,"code":"conflict","error":"x","tablas":[]}"#)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
-        let err = leer::<VerificacionClaves>(r#"{"tablas":[],"error":"x","code":"conflict","ok":false}"#).unwrap_err();
+        let err = leer::<ClavesPagina>(r#"{"tabla":"Zonas","claves":[],"error":"x","code":"conflict","ok":false}"#).unwrap_err();
         assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
 
         // Un `ok` que no es un booleano no dice nada, como antes: se lee el cuerpo.
-        assert!(leer::<VerificacionClaves>(r#"{"ok":"no","tablas":[]}"#).is_ok());
-        assert!(leer::<VerificacionClaves>(r#"{"ok":true,"tablas":[]}"#).is_ok());
+        assert!(leer::<ClavesPagina>(r#"{"ok":"no","tabla":"Zonas","claves":[]}"#).is_ok());
+        assert!(leer::<ClavesPagina>(r#"{"ok":true,"tabla":"Zonas","claves":[]}"#).is_ok());
     }
 
     #[test]
@@ -674,11 +725,11 @@ mod tests_leer_respuesta {
         assert_eq!(err.code(), ErrorCode::External);
 
         // Un cuerpo cortado o que no es JSON, igual; y cada ruta conserva su clase de error.
-        let err = leer_respuesta::<VerificacionNube>(b"{\"conteos\":[", "respuesta de /v1/sync/verificar", AppError::Internal)
+        let err = leer_respuesta::<ResumenNube>(b"{\"tablas\":[", "respuesta de /v1/sync/verificar/resumen", AppError::Internal)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::Internal);
         assert!(leer::<HistoricoPagina>("<html>502 Bad Gateway</html>").is_err());
-        assert!(leer::<VerificacionClaves>("").is_err());
+        assert!(leer::<ClavesPagina>("").is_err());
     }
 
     /// La nube de un test: contesta con un `Value`, y el puerto lo entrega en bytes por defecto.
@@ -749,11 +800,11 @@ mod tests_leer_respuesta {
     #[tokio::test]
     async fn un_adaptador_que_solo_sabe_contestar_en_json_sirve_igual() {
         // Los dobles de los tests no implementan `tpv_server_post_bytes`: vale el del puerto.
-        let nube = NubeDePrueba(serde_json::json!({ "tablas": [] }));
-        let claves: VerificacionClaves =
-            pedir(&nube, "/v1/sync/verificar-claves", json!({}), "respuesta de prueba", AppError::Internal)
+        let nube = NubeDePrueba(serde_json::json!({ "tabla": "Zonas", "claves": [] }));
+        let claves: ClavesPagina =
+            pedir(&nube, "/v1/sync/verificar/claves", json!({}), "respuesta de prueba", AppError::Internal)
                 .await
                 .unwrap();
-        assert!(claves.tablas.is_empty());
+        assert!(claves.claves.is_empty());
     }
 }

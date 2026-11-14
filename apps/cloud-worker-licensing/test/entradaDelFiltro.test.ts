@@ -82,8 +82,8 @@ describe("AUD-32 · la ruta de una petición rechazada", () => {
 	});
 
 	it("una ruta normal llega entera", async () => {
-		const evento = await rechazo("/v1/sync/verificar", "POST");
-		expect(evento).toMatchObject({ ruta: "/v1/sync/verificar", metodo: "POST" });
+		const evento = await rechazo("/v1/sync/verificar/resumen", "POST");
+		expect(evento).toMatchObject({ ruta: "/v1/sync/verificar/resumen", metodo: "POST" });
 	});
 });
 

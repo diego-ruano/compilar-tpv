@@ -7,9 +7,9 @@
 use async_trait::async_trait;
 
 use tpv_contracts::sync::{
-    BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina, OutboxEntry,
-    OutboxFallo, ResultadoVerificacion, SyncChange, SyncHealth, VerificacionClaves,
-    VerificacionNube,
+    BackfillEstado, BootstrapResultado, BootstrapSnapshot, ClavesPagina, FilasDeCubos,
+    FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, ResumenNube,
+    SyncChange, SyncHealth,
 };
 
 use crate::error::AppResult;
@@ -38,6 +38,76 @@ pub struct CambioDetenido {
     /// Intentos fallidos que lleva (`_Sync_Failed.Attempts`): con él decide el motor cuánto espera
     /// antes del siguiente.
     pub intentos: i64,
+}
+
+/// Lo que tiene que seguir igual en esta base durante toda una pasada del contraste con la nube.
+///
+/// El contraste compara dos fotos, la de la nube y la de aquí, y sólo valen si son del mismo
+/// instante: sin nada de aquí por subir y sin nada de allí por bajar. Como una pasada son varias
+/// peticiones, eso se comprueba con una **marca** que se lee al empezar y se vuelve a mirar en cada
+/// paso; si ha cambiado, la base se ha movido y la pasada se deja para luego.
+///
+/// - `checkpoint`: hasta qué `Seq` del log de la nube ha aplicado esta Main lo de los demás. Se
+///   mueve con cada cambio que baja.
+/// - `escrituras`: cuántas operaciones ha generado esta base en toda su vida (el contador del
+///   outbox, que no vuelve atrás). Se mueve con cada escritura de negocio de aquí.
+/// - `pendientes`: las que quedan por subir. Con alguna, la nube no tiene todavía lo de aquí.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MarcaLocal {
+    pub checkpoint: i64,
+    pub escrituras: i64,
+    pub pendientes: i64,
+}
+
+/// Las filas de unos cubos de una tabla que se piden a la nube.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoDeFilas {
+    pub tabla: String,
+    /// El `desde` del resumen: la ventana es la misma.
+    pub desde: String,
+    /// En cuántos cubos venía resumida la tabla, y cuáles se piden.
+    pub cubos: u32,
+    pub pedir: Vec<u32>,
+    /// El `siguiente_cursor` de la página anterior; 0 para empezar.
+    pub cursor: i64,
+}
+
+/// Una página de las claves de una tabla que se pide a la nube.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoDeClaves {
+    pub tabla: String,
+    /// La última clave de la página anterior; `None` para empezar.
+    pub cursor: Option<Vec<serde_json::Value>>,
+}
+
+/// Unas filas que se piden a la nube por su clave primaria.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoPorClave {
+    pub tabla: String,
+    /// Cada clave, con sus valores en el orden de la clave.
+    pub claves: Vec<Vec<serde_json::Value>>,
+}
+
+/// Por dónde el contraste pide a la nube lo que le hace falta además del resumen. Lo implementa el
+/// caso de uso sobre el cliente REST; el repositorio sólo sabe que puede pedir páginas.
+#[async_trait]
+pub trait PaginasDelContraste: Send + Sync {
+    /// `/v1/sync/verificar/filas`.
+    async fn filas(&self, pedido: PedidoDeFilas) -> AppResult<FilasDeCubos>;
+    /// `/v1/sync/verificar/por-clave`.
+    async fn por_clave(&self, pedido: PedidoPorClave) -> AppResult<FilasPorClave>;
+    /// `/v1/sync/verificar/claves`.
+    async fn claves(&self, pedido: PedidoDeClaves) -> AppResult<ClavesPagina>;
+}
+
+/// Lo que ha dado una pasada del contraste en el repositorio.
+#[derive(Debug, Clone)]
+pub enum ContrasteLocal {
+    /// Se ha comparado, y encolado lo que se pudiera reparar.
+    Hecho(ResultadoVerificacion),
+    /// No se ha comparado, o se ha dejado a medias sin tocar nada: esta base o la nube se han
+    /// movido desde que se pidió el resumen. No es un fallo; se reintenta más tarde.
+    SeHaMovido,
 }
 
 #[async_trait]
@@ -92,36 +162,32 @@ pub trait SyncRepository: Send + Sync {
         permanente: bool,
     ) -> AppResult<OutboxFallo>;
 
-    /// SYNC-24: contrasta la foto de la nube contra esta base y encola la reparación de lo que no
-    /// cuadre. Devuelve qué se ha encontrado, para poder informarlo.
+    /// La marca de esta base ahora mismo ([`MarcaLocal`]), leída de una vez.
+    async fn contraste_marca(&self) -> AppResult<MarcaLocal>;
+
+    /// El contraste con la nube: compara el resumen que manda con el de esta base, baja las filas
+    /// de los cubos que no cuadran y las claves de lo que no cuadra fuera de la ventana, y encola
+    /// la reparación.
     ///
-    /// Sólo lee y encola: no borra nada arriba ni aplica nada aquí. La Main es el escritor único,
-    /// así que ante una diferencia su versión es la buena — pero "la nube tiene una fila que aquí
-    /// no está" NO se resuelve borrándola: podría ser una fila recién creada por la Handy que esta
-    /// Main todavía no ha recibido.
+    /// - Una fila **distinta** se repara mandando cómo está aquí: la Main es el escritor único.
+    /// - Una que **falta arriba** se sube por estado.
+    /// - Una que **sobra arriba** se borra, porque sólo se compara con esta Main al día: lo que la
+    ///   nube tiene y aquí no está no puede ser algo que todavía esté de camino.
+    ///
+    /// Nada se toca si esta Main no puede afirmar que su foto y la de la nube son del mismo
+    /// instante: `marca` es la que se leyó antes de pedir el resumen, y tiene que seguir igual al
+    /// comparar y, con el escritor cogido, justo antes de encolar. Tampoco con un fallo de bajada
+    /// en `_Sync_Failed` (AUD-18) ni con histórico por bajar (VERIF-01): entonces se compara y se
+    /// informa, y lo que habría que tocar sale como `aplazado`.
     ///
     /// Con `reparar = false` (interruptor `reparacion_nube`, PROD-06) sólo compara: no encola nada.
     async fn contrastar_con_la_nube(
         &self,
-        foto: VerificacionNube,
+        resumen: ResumenNube,
+        marca: MarcaLocal,
+        nube: &dyn PaginasDelContraste,
         reparar: bool,
-    ) -> AppResult<ResultadoVerificacion>;
-
-    /// SYNC-25 · segunda fase: con las claves de la nube delante, resta los dos conjuntos.
-    ///
-    /// Devuelve `(descuadres, reparadas, borradas, aplazado)`. Lo que falta arriba se
-    /// repara por estado; lo que sobra se borra **sólo** si esta Main puede afirmar que está al
-    /// día — si no, se informa y se espera al ciclo siguiente, que es lo que impide que un dato
-    /// recién creado en la Handy se borre por llegar tarde. AUD-18: con cualquier fallo de bajada
-    /// en `_Sync_Failed` (en cuarentena o no) no se toca nada arriba: ni se borra ni se sube.
-    ///
-    /// Con `reparar = false` ni repara ni borra: sólo cuenta.
-    async fn contrastar_claves(
-        &self,
-        respuesta: VerificacionClaves,
-        hasta_seq: i64,
-        reparar: bool,
-    ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)>;
+    ) -> AppResult<ContrasteLocal>;
 
     /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
     /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para

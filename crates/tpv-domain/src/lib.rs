@@ -12,6 +12,8 @@ pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cantidad;
+/// El resumen por cubos del contraste con la nube: forma canónica, hash y cubo de una fila.
+pub mod contraste;
 pub mod cuentas;
 /// El tipo del dinero (ARQ-01): céntimos enteros de punta a punta.
 pub mod dinero;

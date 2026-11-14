@@ -9,6 +9,12 @@ igual. Estos dos arneses convierten una divergencia en un **test rojo** en CI. N
 |---|---|---|---|
 | **Escritura** | Mismo comando → **mismas filas** | La replicación no converge | `casos/` · `golden/` · `cobertura.json` |
 | **Lectura** | Mismas filas → **mismo resultado, en el mismo orden** | Los datos convergen pero la Handy y la Main enseñan otra cosa | `lecturas/casos/` · `lecturas/golden/` |
+| **Contraste** | Mismas filas → **mismo resumen por cubos** en el SQLite de la Main y en el del DO | El contraste con la nube baja la ventana entera cada día, o no ve lo distinto | `contraste/semilla.json` · `contraste/golden.json` |
+
+El del contraste lo bendice `tpv-infra-sqlite/src/contraste.rs` (`BLESS_CONTRASTE=1 cargo nextest run -p
+tpv-infra-sqlite contraste_golden`) y se conforma `apps/cloud-worker-licensing/test/contrasteGolden.test.ts`,
+que siembra lo mismo en el SQLite de un `TenantHub` y le pide el resumen (`resumenDeVerificacion`). La forma canónica y el hash valor a valor los fija aparte la tabla
+[`verificacion_casos.json`](../../crates/tpv-domain/src/verificacion_casos.json).
 
 El **golden lo bendice Rust** (el lado canónico) y el worker se conforma.
 

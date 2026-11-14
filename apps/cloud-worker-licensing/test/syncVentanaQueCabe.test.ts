@@ -12,8 +12,10 @@
 //   · lo imprescindible viaja SIEMPRE: los maestros, lo que sigue vivo, lo que hay desde el último
 //     cierre de caja y el último registro de facturación. Si ni eso cabe, entonces sí es un 413;
 //   · `parcial` y `backfill` no dependen del ancho: la Main rellena lo mismo;
-//   · la medida previa es una estimación, y quien manda es lo que se escribe;
-//   · el contraste diario (`/verificar`) usa la misma ventana.
+//   · la medida previa es una estimación, y quien manda es lo que se escribe.
+//
+// El contraste diario resume la misma ventana, con su propio tope en filas
+// (`syncVerificar.test.ts`).
 
 import { describe, expect, it } from "vitest";
 
@@ -27,7 +29,7 @@ import {
 	esTransaccional,
 	ventanasCandidatas,
 } from "../src/domains/sync/bootstrap.ventana";
-import { fotoDeVerificacion, volcarFase1, type Topes } from "../src/domains/sync/sync.routes";
+import { volcarFase1, type Topes } from "../src/domains/sync/sync.routes";
 import { lectorDelCliente, lectorDelHub, type Lector } from "../src/domains/sync/volcado";
 
 // El instante de referencia se congela al cargar el fichero: con el reloj leído en cada llamada, la
@@ -432,49 +434,6 @@ describe("la fase 1 se encoge hasta caber", () => {
 
 			// Y si de verdad no cabe, sigue siendo que no.
 			expect((await fase1(delHub, { ...SIN_TOPE, bytes: Math.round(real.bytes / 2) })).volcado).toBeNull();
-		});
-	});
-});
-
-describe("el contraste diario usa la ventana que cabe", () => {
-	/** La foto del contraste; sus tablas, también como `tablas`, para mirarlas como las del volcado. */
-	const leer = async (lector: Lector, topes: Topes) => {
-		const foto = JSON.parse(new TextDecoder().decode(await fotoDeVerificacion(lector, AHORA, topes)));
-		return { ...foto, tablas: foto.ventana };
-	};
-
-	it("con menos sitio contrasta una ventana más estrecha, y sólo la omite si no cabe ni lo imprescindible", async () => {
-		await enElHub("ventana-que-cabe-verificar", async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			crearEsquemaTenant(sql);
-			sembrarBar(sql);
-
-			for (const [camino, lector] of lectores(sql)) {
-				const mes = await leer(lector, SIN_TOPE);
-				expect(mes.ventana_omitida, camino).toBe(false);
-				expect(mes.desde, camino).toBe(haceDias(30));
-				expect(ventasCon(mes, "vieja"), camino).toBe(VIEJAS);
-				const filasDelMes = filasDe(mes);
-
-				const semana = await leer(lector, { ...SIN_TOPE, filas: filasDelMes - 1 });
-				expect(semana.ventana_omitida, camino).toBe(false);
-				expect(semana.desde, camino).toBe(haceDias(7));
-				expect(ventasCon(semana, "vieja"), camino).toBe(0);
-				expect(ventasCon(semana, "semana"), camino).toBe(DE_LA_SEMANA);
-				// Los conteos siguen siendo de la tabla entera, quepa lo que quepa.
-				const comandas = VIEJAS + DE_LA_SEMANA + DESDE_EL_CIERRE + DE_HOY + 3;
-				for (const foto of [mes, semana]) {
-					expect(foto.conteos.find((c: any) => c.nombre === "Comandas").filas, camino).toBe(comandas);
-					expect(foto.hasta_seq, camino).toBe(1);
-				}
-
-				const nada = await leer(lector, { ...SIN_TOPE, bytes: 2_000 });
-				expect(nada.ventana_omitida, camino).toBe(true);
-				expect(nada.ventana, camino).toEqual([]);
-				expect(nada.desde, camino).toBe(haceDias(30));
-				expect(nada.conteos.find((c: any) => c.nombre === "Comandas").filas, camino).toBe(comandas);
-				expect(nada.hasta_seq, camino).toBe(1);
-			}
 		});
 	});
 });
