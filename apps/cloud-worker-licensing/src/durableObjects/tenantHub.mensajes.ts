@@ -330,7 +330,7 @@ export function atenderRecoveryReady(
  * aplicado nada: el rol, la forma de cualquiera de sus operaciones, o que la sesión ya no sea la
  * de la Main.
  */
-export async function atenderApplyLote(
+async function atenderApplyLote(
 	ctx: ContextoDeMensajes,
 	ws: WebSocket,
 	a: WsAttachment,

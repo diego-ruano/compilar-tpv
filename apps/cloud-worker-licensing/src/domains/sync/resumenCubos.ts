@@ -182,7 +182,7 @@ export class Canonico {
  * XOR, mezcladas con el `fmix32` de MurmurHash3, y de eso los 8 bits altos. Entre menos cubos son
  * los bits altos de éste.
  */
-export function cubo256(alto: number, bajo: number): number {
+function cubo256(alto: number, bajo: number): number {
 	let h = (alto ^ bajo) | 0;
 	h ^= h >>> 16;
 	h = Math.imul(h, 0x85ebca6b);

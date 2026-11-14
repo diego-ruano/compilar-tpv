@@ -408,7 +408,7 @@ export async function provisionTenantDatabase(dbi: Client, env: Env, tenantId: s
 }
 
 /** ¿Tiene ya su base este negocio? Como `provisionTenantDatabase`, por el DO de al lado si lo hay. */
-export async function negocioAprovisionado(env: Env, tenantId: string): Promise<boolean> {
+async function negocioAprovisionado(env: Env, tenantId: string): Promise<boolean> {
 	const local = hubLocal(tenantId);
 	return local ? local.estaAprovisionado() : hubDe(env, tenantId).estaAprovisionado();
 }
