@@ -59,7 +59,7 @@ export type HelloSignedMsg = {
 export type RecoveryReadyMsg = { type: "recovery_ready" };
 
 /** Una operación de un `apply_lote`, tal como llega: el comando interno, para el motor idempotente. */
-export type OpDeLoteMsg = {
+type OpDeLoteMsg = {
 	opId?: string;
 	op_id?: string;
 	commandName?: string;
