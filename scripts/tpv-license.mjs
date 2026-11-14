@@ -269,7 +269,7 @@ async function interruptorApagar(args) {
 
     Id  ${res.interruptorId}   (pnpm interruptor:encender -- --id ${res.interruptorId})
 
-  Los TPV lo obedecen en unos 5 minutos; la cola del DO, en menos de uno.
+  Los TPV lo obedecen en unos 5 minutos; el worker (reservas_web), en menos de uno.
 `);
 }
 

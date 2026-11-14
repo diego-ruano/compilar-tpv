@@ -61,8 +61,10 @@ un fallo parcial.
 
 ### Cuándo se contrasta con la nube (VERIF-02)
 
-El contraste baja la ventana de la fase 1 del negocio (30 días, o lo que quepa de ellos:
-[recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)) y la compara fila a fila: no es
+El contraste resume las dos bases por cubos (la ventana de la fase 1, 30 días o lo que quepa de
+ellos: [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)), baja las filas de los
+cubos que no cuadran y, fuera de la ventana, recorre las claves por páginas
+([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)): no es
 trabajo para la apertura del bar, que es cuando vence cualquier job diario de un TPV que se apaga
 por la noche. Por eso no va a intervalo fijo: el job vence cada cuarto de hora y pregunta a una
 regla pura (`tpv_domain::verificacion_nube::cuando_verificar`, con su tabla de casos) si toca; si
@@ -88,8 +90,9 @@ las de después y dejaría al contraste sin momento tranquilo hasta que el reloj
 
 ### Qué no va aquí
 
-- El ciclo de vida del WebSocket (latido, subida del outbox, reconexión): es una máquina de estados de
-  la conexión y vive en `socketMain.ts`.
+- El ciclo de vida del WebSocket de la Main (latido, subida del outbox por lotes, bajada, reconexión):
+  es una máquina de estados de la conexión y vive en Rust (`use_cases/replicacion.rs`, con su
+  transporte en `src-tauri/src/replicacion.rs`); `socketMain.ts` es sólo su puente con la pantalla.
 - El ciclo de vida de una pantalla (refresco de un panel abierto, cuentas atrás).
 - La telemetría: tiene su hilo y su cola propios ([observabilidad.md](observabilidad.md)).
 

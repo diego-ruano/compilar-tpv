@@ -300,8 +300,8 @@ y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la v
 - **Las Handy** se quedan sin Main (`main_offline`) cuando se cierra el socket del equipo anterior y
   hasta que el nuevo se conecta y se pone al día. Mientras el anterior siga dentro, no.
 - **Lo que tenía sin subir**: lo que no haya mandado cuando se le cierra se queda en su outbox. Lo
-  que mandó antes sí está en la nube, y lo que dejó en la cola del `TenantHub` (un volcado) se
-  aplica igual.
+  que mandó y la nube le aplicó está en la nube; un lote que todavía esperaba su turno no entra (la
+  sesión se vuelve a mirar en el turno del log) y se queda también en el outbox.
 
 **Los topes de verdad van por licencia** (RI-68, `license_otp_eventos`, ventana de 24 h):
 - como mucho **5 códigos enviados**; pasado el tope se contesta igual, sin enviar;
