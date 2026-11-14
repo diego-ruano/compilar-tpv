@@ -28,8 +28,6 @@ const sumaTurso = (porEtapa, etapas, base) =>
     { http: 0, sentencias: 0, lecturas: 0, escrituras: 0 },
   );
 
-const delta = (despues, antes, campo) => (despues?.[campo] != null && antes?.[campo] != null ? despues[campo] - antes[campo] : null);
-
 function leerEntradas(carpeta) {
   const ruta = join(carpeta, "peticiones.jsonl");
   if (!existsSync(ruta)) return [];
@@ -74,7 +72,7 @@ export function escribirInforme(carpeta) {
   if (estado.socket) {
     l.push(`| Sockets | ${estado.socket.enviados} mensajes enviados (sin contar ${estado.socket.pings} pings) · recibidos: ${lista(estado.socket.recibidos)} |`);
   }
-  if (estado.destino === "nube") l.push(`| Limpieza | ${estado.retirado ? "negocio retirado (base de Turso borrada y licencia anulada)" : "**sin retirar del todo**: ver «Limpieza»"} |`);
+  if (estado.destino === "nube") l.push(`| Limpieza | ${estado.retirado ? "negocio retirado (su base, su agenda y sus imágenes borradas, y la licencia anulada)" : "**sin retirar del todo**: ver «Limpieza»"} |`);
   l.push("");
 
   if (pasos) {
@@ -179,25 +177,13 @@ export function escribirInforme(carpeta) {
   }
 
   const t = coste?.turso;
-  if (t?.antes || t?.despuesPreparacion) {
-    const base = `tpv-${estado.tenantId}`;
-    const prep = t.despuesPreparacion;
-    const fin = t.despuesCarga;
-    const asentada = x => (x ? (x.asentado ? "sí" : "no") : "no se midió");
-    l.push("### Turso (medido en la nube con `turso db inspect`)", "");
-    l.push("| Base | Fase | Filas leídas | Filas escritas | Asentado |", "|---|---|---|---|---|");
-    l.push(`| ${base} | alta y preparación | ${n(prep?.[base]?.filasLeidas)} | ${n(prep?.[base]?.filasEscritas)} | ${asentada(prep)} |`);
-    l.push(`| ${base} | carga | ${n(delta(fin?.[base], prep?.[base], "filasLeidas"))} | ${n(delta(fin?.[base], prep?.[base], "filasEscritas"))} | ${asentada(fin)} |`);
-    l.push(`| tpv-control | preparación | ${n(delta(prep?.["tpv-control"], t.antes?.["tpv-control"], "filasLeidas"))} | ${n(delta(prep?.["tpv-control"], t.antes?.["tpv-control"], "filasEscritas"))} | orientativo |`);
-    l.push(`| tpv-control | carga | ${n(delta(fin?.["tpv-control"], prep?.["tpv-control"], "filasLeidas"))} | ${n(delta(fin?.["tpv-control"], prep?.["tpv-control"], "filasEscritas"))} | orientativo |`);
-    l.push("", "`tpv-control` es compartida: sus cifras incluyen lo que hayan hecho a la vez otros equipos y las esperas entre lecturas, así que no entran en el coste por paso.", "");
-    if (prep?.asentado && fin?.asentado) {
-      anotar("tursoFilasLeidas", delta(fin[base], prep[base], "filasLeidas"), "medidas en la nube (base del negocio)");
-      anotar("tursoFilasEscritas", delta(fin[base], prep[base], "filasEscritas"), "medidas en la nube (base del negocio)");
-    } else if (prep || fin) {
-      l.push("> El uso de Turso no se asentó a tiempo: las cifras de la carga no son fiables y no entran en el coste por paso.", "");
-    }
-    if (t.plan) l.push("Uso del mes de toda la organización al empezar:", "", "```", t.plan, "```", "");
+  if (t?.plan) {
+    l.push("### Turso (la base central)", "");
+    l.push(
+      "En la nube no se miden sus filas: allí sólo queda la base central (`tpv-control`), compartida con los equipos de verdad, y su uso cambia con cualquiera de ellos. Las de cada paso salen de una tanda en local; la base del negocio es el SQLite de su TenantHub, y sus filas van en la tabla de Cloudflare.",
+      "",
+    );
+    l.push("Uso del mes de toda la organización al empezar:", "", "```", t.plan, "```", "");
   }
 
   const cf = coste?.cloudflare;
@@ -250,6 +236,7 @@ export function escribirInforme(carpeta) {
       if (restoDo < escriturasHandy) l.push(`> Cloudflare cuenta ${restoDo} invocaciones del DO además de los mensajes de socket, menos que las ${escriturasHandy} escrituras de la Handy: revisa la medida.`, "");
       anotar("doPeticiones", restoDo + wsCarga / 20, "medidas en la nube");
       // La duración del DO no va por paso: depende del tiempo que está despierto (ver la sesión abierta).
+      anotar("doFilasLeidas", doCarga.filasLeidas, "medidas en la nube");
       anotar("doFilasEscritas", doCarga.filasEscritas, "medidas en la nube");
       anotar("workerCpuMs", cf.carga.worker.cpuMsFetch, "medida en la nube");
     }
@@ -259,9 +246,10 @@ export function escribirInforme(carpeta) {
     ["Peticiones al worker", "workerPeticiones"],
     ["CPU del worker (ms)", "workerCpuMs"],
     ["Peticiones al Durable Object", "doPeticiones"],
+    ["Filas leídas en el SQLite del DO", "doFilasLeidas"],
     ["Filas escritas en el SQLite del DO", "doFilasEscritas"],
-    ["Filas leídas en Turso", "tursoFilasLeidas"],
-    ["Filas escritas en Turso", "tursoFilasEscritas"],
+    ["Filas leídas en Turso (base central)", "tursoFilasLeidas"],
+    ["Filas escritas en Turso (base central)", "tursoFilasEscritas"],
   ];
   const medidas = dimensiones.filter(([, clave]) => porPaso[clave] > 0);
   if (medidas.length) {
@@ -272,11 +260,15 @@ export function escribirInforme(carpeta) {
       const caben = INCLUIDO[clave] / porPaso[clave];
       l.push(`| ${titulo} | ${n(porPaso[clave], 3)} | ${fuente[clave]} | ${n(INCLUIDO[clave])} | ${n(caben)} | ${n(caben / 30)} |`);
     }
-    const faltan = dimensiones.filter(([, clave]) => porPaso[clave] == null).map(([titulo]) => titulo.toLowerCase());
+    const faltan = dimensiones.filter(([, clave]) => porPaso[clave] == null).map(([titulo]) => (/^[A-Z][a-z]/.test(titulo) ? titulo[0].toLowerCase() + titulo.slice(1) : titulo));
     if (faltan.length) l.push("", `Sin medir en esta tanda: ${faltan.join(", ")}.`);
     l.push("");
     const total = clave => (porPaso[clave] != null ? porPaso[clave] * pasos : null);
-    l.push(`La carga gastó ${pct(total("workerPeticiones"), INCLUIDO.workerPeticiones)} de las peticiones del worker del mes y ${pct(total("tursoFilasEscritas"), INCLUIDO.tursoFilasEscritas)} de las filas escritas de Turso.`, "");
+    const filasEscritas =
+      porPaso.doFilasEscritas != null
+        ? `${pct(total("doFilasEscritas"), INCLUIDO.doFilasEscritas)} de las filas escritas del SQLite de los DO`
+        : `${pct(total("tursoFilasEscritas"), INCLUIDO.tursoFilasEscritas)} de las filas escritas de Turso`;
+    l.push(`La carga gastó ${pct(total("workerPeticiones"), INCLUIDO.workerPeticiones)} de las peticiones del worker del mes y ${filasEscritas}.`, "");
   }
 
   if (estado.avisos?.length) l.push("## Avisos", "", ...estado.avisos.map(a => `- ${a}`), "");
@@ -285,7 +277,7 @@ export function escribirInforme(carpeta) {
     l.push("## Limpieza", "");
     if (!estado.licenseId) l.push("No se llegó a emitir la licencia: no hay nada que retirar.");
     else if (estado.retirado) {
-      l.push("La base de Turso del negocio se borró y la licencia de pruebas quedó anulada con `/v1/admin/pruebas/retirar`. Queda, como en cada tanda de E2E: el almacenamiento del Durable Object del negocio (no hay ruta que lo borre), las filas de `devices` de la Main y la Handy sintéticas y la licencia anulada.");
+      l.push("`/v1/admin/pruebas/retirar` anuló la licencia de pruebas y borró lo que el negocio guardaba en la nube: su base en el TenantHub, su agenda de reservas web y sus imágenes. Queda, como en cada tanda de E2E: las filas de `devices` de la Main y la Handy sintéticas, la del negocio en `tenants` (dada por borrada) y la licencia anulada.");
     } else {
       l.push(`**Sin retirar del todo.** ${estado.motivoSinRetirar ?? ""}`);
       l.push("", "`pnpm carga --retirar` lista lo que hay; `pnpm carga --retirar --si` retira todos los negocios de pruebas.");
@@ -295,7 +287,7 @@ export function escribirInforme(carpeta) {
 
   l.push("## Ficheros", "", "- `peticiones.jsonl`: cada petición con su tiempo y su resultado.", "- `estado.json`: identificadores del negocio, ventanas de tiempo y contadores.");
   if (tursoLocal) l.push("- `turso-local.json`: filas de Turso por paso.", "- `worker.log`: la salida de `wrangler dev`, con los logs del worker.");
-  if (coste) l.push("- `coste.json`: lo medido en Cloudflare y Turso.");
+  if (coste) l.push("- `coste.json`: lo medido en Cloudflare y el plan de Turso al empezar.");
   l.push("");
 
   const texto = l.join("\n");

@@ -78,9 +78,9 @@ export async function prepararNegocio(ctx) {
 
   const main = new Equipo({ nombre: "main", rol: "main", base: ctx.base, identidad: nuevaIdentidad(), registro });
   ctx.main = main;
-  anunciar(ctx, "activar", "Activar la licencia en la Main (crea y migra la base del negocio)");
+  anunciar(ctx, "activar", "Activar la licencia en la Main (crea la base del negocio en su TenantHub)");
   // Antes de activar: el worker crea la fila de `devices` antes que la base, así que si la activación
-  // falla a medias, este id lleva al negocio (y a su base `tpv-<tenant>`) que la retirada no ve.
+  // falla a medias, este id lleva al negocio (y a la base de su TenantHub) que la retirada no ve.
   ctx.estado.mainDeviceId = main.identidad.deviceId;
   ctx.estado.activacion = "en curso";
   ctx.guardarEstado();

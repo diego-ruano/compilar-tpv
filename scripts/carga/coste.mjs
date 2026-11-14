@@ -1,6 +1,9 @@
 // Cuánto ha gastado una tanda contra la nube. Cloudflare, por su API GraphQL de analítica con la
-// sesión de wrangler de este equipo (no se crea ningún token). Turso, con `turso db inspect` de la CLI
-// del WSL. Ninguna de las dos credenciales se imprime ni se guarda.
+// sesión de wrangler de este equipo (no se crea ningún token): el worker y el Durable Object del
+// negocio, también las filas que lee y escribe su SQLite, que es la base del negocio. De Turso, donde
+// sólo queda la base central, compartida con los equipos de verdad, se mira el plan de la organización
+// con la CLI del WSL: cuánto le queda al mes, no lo que gasta la tanda. Ninguna de las dos
+// credenciales se imprime ni se guarda.
 //
 // Las cuotas incluidas son las publicadas el 2026-11-10:
 // - Workers Paid: https://developers.cloudflare.com/workers/platform/pricing/
@@ -258,7 +261,11 @@ export function planDeTurso() {
   };
 }
 
-/** El uso del mes de una base: filas leídas y escritas y espacio. null si no existe o no hay CLI. */
+/**
+ * El uso del mes de una base: filas leídas y escritas y espacio. null si no existe o no hay CLI. Sirve
+ * para saber que la CLI mira la organización de producción (la que tiene `tpv-control`); lo que gasta
+ * la tanda en ella no sale de aquí: es compartida y cambia con cualquier equipo.
+ */
 export function usoDeBase(nombre) {
   if (!/^[a-z0-9-]{1,64}$/.test(nombre)) throw new Error(`Nombre de base inesperado: ${nombre}`);
   const r = turso(`db inspect ${nombre}`);
@@ -270,32 +277,4 @@ export function usoDeBase(nombre) {
     espacio: r.stdout.match(/Total space used:\s*(.+)/)?.[1]?.trim() ?? null,
   };
   return Number.isFinite(uso.filasLeidas) && Number.isFinite(uso.filasEscritas) ? uso : null;
-}
-
-const igual = (a, b) => a != null && b != null && a.filasLeidas === b.filasLeidas && a.filasEscritas === b.filasEscritas;
-
-/**
- * Lee el uso de la base del negocio hasta que se asienta. Turso no documenta con qué retraso lo
- * actualiza, así que se espera antes de la primera lectura y se exigen tres lecturas iguales
- * seguidas. Además:
- * - `distintoDe`: la lectura tiene que haber cambiado respecto a esa (que recoja la fase medida);
- * - `exigirEscrituras`: una base recién migrada y sembrada no puede estar a cero;
- * - una lectura fallida rompe la racha.
- * `otras` (tpv-control) se leen a la vez como dato orientativo, pero no deciden: es una base
- * compartida que cambia con cualquier equipo.
- */
-export async function usoAsentado(base, { otras = [], distintoDe = null, exigirEscrituras = false, esperaInicialMs = 90_000, cadaMs = 45_000, maxMs = 600_000, cancelado = () => false } = {}) {
-  const limite = Date.now() + maxMs;
-  await esperarSalvoCancelacion(esperaInicialMs, cancelado);
-  const racha = [];
-  for (;;) {
-    const uso = usoDeBase(base);
-    const valida = uso != null && (!exigirEscrituras || uso.filasEscritas > 0) && (!distintoDe || !igual(uso, distintoDe));
-    if (!valida || (racha.length && !igual(uso, racha.at(-1)))) racha.length = 0;
-    if (valida) racha.push(uso);
-    const resultado = { [base]: uso, ...Object.fromEntries(otras.map(o => [o, usoDeBase(o)])) };
-    if (racha.length >= 3) return { ...resultado, asentado: true };
-    if (cancelado() || Date.now() + cadaMs > limite) return { ...resultado, asentado: false };
-    await esperarSalvoCancelacion(cadaMs, cancelado);
-  }
 }

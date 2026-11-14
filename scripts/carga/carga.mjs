@@ -12,7 +12,7 @@ import { setTimeout as dormir } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { pedirAdmin } from "./cliente.mjs";
-import { esperarSalvoCancelacion, medirCloudflare, planDeTurso, prepararCloudflare, usoAsentado, usoDeBase } from "./coste.mjs";
+import { esperarSalvoCancelacion, medirCloudflare, planDeTurso, prepararCloudflare, usoDeBase } from "./coste.mjs";
 import { cerrarSockets, comprobarSubida, ejecutarPlan, planDeCarga, prepararNegocio } from "./escenario.mjs";
 import { escribirInforme } from "./informe.mjs";
 import { levantarLocal } from "./local.mjs";
@@ -26,7 +26,7 @@ const TOPE_MINIMO = 70;
 const AYUDA = `
 Generador de carga del TPV (docs/guias/pruebas-de-carga.md)
 
-  pnpm carga --local                     el worker en este equipo, con Turso en sqld del WSL
+  pnpm carga --local                     el worker en este equipo, con la base central en sqld del WSL
   node scripts/carga/carga.mjs --nube    el worker desplegado, con un negocio de pruebas que se retira al final
   pnpm carga --medir <carpeta>           vuelve a medir Cloudflare de una tanda en la nube
   pnpm carga --retirar                   lista los negocios de pruebas; con --si, los retira todos
@@ -36,7 +36,7 @@ Opciones:
   --vueltas <n>      repite el servicio n veces sobre el mismo negocio (por defecto 1, máximo 20)
   --tope <n>         peticiones como mucho antes de limpiar (por defecto 150, mínimo ${TOPE_MINIMO})
   --sin-retirar      en la nube, deja vivo el negocio de pruebas
-  --sin-medir        en la nube, no espera a medir Turso ni Cloudflare
+  --sin-medir        en la nube, no espera a medir Cloudflare (y contrasta la subida de la Main)
 
 En la nube, mejor con node que con pnpm: en Windows, Ctrl+C sobre pnpm devuelve el prompt
 mientras la tanda sigue detrás limpiando.
@@ -122,9 +122,10 @@ async function licenciasDePruebasVivas(admin) {
 }
 
 /**
- * `/v1/admin/pruebas/retirar` hasta que no quede nada: borra la base de Turso de cada negocio de
- * pruebas (10 por llamada) y anula las licencias. Lo que Turso no pudo borrar vuelve a salir en la
- * llamada siguiente, así que se reintenta un par de veces; los fallos que valen son los de la última.
+ * `/v1/admin/pruebas/retirar` hasta que no quede nada: anula las licencias y borra lo que cada negocio
+ * de pruebas guarda en la nube (su base en el TenantHub, su agenda de reservas web y sus imágenes),
+ * unos pocos por llamada. Lo que no se pudo borrar vuelve a salir en la llamada siguiente, así que se
+ * reintenta un par de veces; los fallos que valen son los de la última.
  */
 async function retirarPruebas(admin) {
   let negocios = 0;
@@ -159,7 +160,8 @@ async function comprobacionesPrevias(ctx, a) {
       );
     }
   }
-  // La cuota de Turso se mira siempre: en el plan gratuito, pasarse bloquea todas las bases.
+  // La cuota de Turso se mira siempre: allí sigue la base central, y en el plan gratuito pasarse
+  // bloquea todas las bases de la organización.
   const plan = planDeTurso();
   if (!plan) throw new Error("No se pudo leer el plan de Turso con la CLI del WSL (¿sesión caducada? «turso auth login» en el WSL): sin él no se sabe si la tanda cabe en la cuota.");
   const sinLeer = Object.entries(plan.porcentajes).filter(([, p]) => p !== null && !Number.isFinite(p));
@@ -168,10 +170,9 @@ async function comprobacionesPrevias(ctx, a) {
   if (altos.length) {
     throw new Error(`Turso va al ${altos.map(([k, p]) => `${p} % en ${k}`).join(", ")}: en el plan gratuito pasarse bloquea TODAS las bases, también la de producción.`);
   }
-  // Que la CLI mire la organización de producción: si no ve tpv-control, sus cifras serían de otra.
-  const control = usoDeBase("tpv-control");
-  if (!control) throw new Error("La CLI de Turso del WSL no ve la base tpv-control: está en otra organización o la sesión no sirve.");
-  ctx.coste.turso = { plan: plan.texto, antes: { "tpv-control": control } };
+  // Que la CLI mire la organización de producción: si no ve tpv-control, el plan sería el de otra.
+  if (!usoDeBase("tpv-control")) throw new Error("La CLI de Turso del WSL no ve la base tpv-control: está en otra organización o la sesión no sirve.");
+  ctx.coste.turso = { plan: plan.texto };
 }
 
 /** Hasta el minuto siguiente y un segundo: Cloudflare agrega los Durable Objects por minuto. */
@@ -199,13 +200,13 @@ async function retirarLaTanda(ctx) {
     if (sigue) {
       estado.motivoSinRetirar = "La licencia sigue sin anular después de retirar.";
     } else if (fallo) {
-      estado.motivoSinRetirar = `La licencia quedó anulada, pero Turso no borró la base tpv-${estado.tenantId} (${fallo.error}). «pnpm carga --retirar --si» lo reintenta.`;
+      estado.motivoSinRetirar = `La licencia quedó anulada, pero no se pudo borrar lo del negocio ${estado.tenantId} (${fallo.error}). «pnpm carga --retirar --si» lo reintenta.`;
     } else if (!estado.tenantId && estado.activacion === "en curso") {
       // AUD-09: el worker crea la base antes de apuntar el negocio en la licencia; si la activación
       // no contestó, la retirada no la ve.
       estado.motivoSinRetirar =
-        "La licencia quedó anulada, pero la activación no llegó a contestar: si alcanzó a crear la base, queda una tpv-<negocio> en el grupo tpv que la retirada no ve. " +
-        `El negocio sale de tpv-control con SELECT tenant_id FROM devices WHERE device_id = '${estado.mainDeviceId}', y la base se borra a mano con «turso db destroy».`;
+        "La licencia quedó anulada, pero la activación no llegó a contestar: si alcanzó a crear la base, queda en el TenantHub de un negocio que la retirada no ve. " +
+        `El negocio sale de tpv-control con SELECT tenant_id FROM devices WHERE device_id = '${estado.mainDeviceId}'; no hay ruta que borre ese objeto, que ocupa lo que una base recién creada.`;
     } else {
       estado.retirado = true;
     }
@@ -298,15 +299,8 @@ async function tanda(a) {
     console.log("\nPreparación");
     await prepararNegocio(ctx);
 
-    if (destino === "nube") {
-      if (medir) {
-        console.log("  · Turso: uso de la base del negocio tras el alta (se espera a que se asiente)");
-        ctx.coste.turso.despuesPreparacion = await usoAsentado(`tpv-${ctx.estado.tenantId}`, { otras: ["tpv-control"], exigirEscrituras: true, cancelado });
-        guardarCoste();
-      }
-      if (ctx.cancelado) throw new Cancelado();
-      await alMinutoSiguiente(cancelado);
-    }
+    // La carga en sus propios minutos: Cloudflare agrega los Durable Objects por minuto.
+    if (destino === "nube") await alMinutoSiguiente(cancelado);
     if (ctx.cancelado) throw new Cancelado();
 
     console.log(`\nCarga: ${planDeCarga().length * vueltas} pasos (${vueltas} vueltas) a ${ritmo} por segundo`);
@@ -351,17 +345,8 @@ async function tanda(a) {
       await ctx.local?.parar();
     } else {
       registro.etapa = "limpieza";
-      const negocio = ctx.estado.tenantId ? `tpv-${ctx.estado.tenantId}` : null;
-      const antes = ctx.coste.turso?.despuesPreparacion;
-      if (medir && limpia && negocio && antes?.asentado) {
-        try {
-          console.log("  · Turso: uso tras la carga, antes de borrar la base (se espera a que se asiente)");
-          ctx.coste.turso.despuesCarga = await usoAsentado(negocio, { otras: ["tpv-control"], distintoDe: antes[negocio], cancelado });
-          guardarCoste();
-        } catch (e) {
-          registro.avisar(`No se pudo medir Turso tras la carga: ${e.message}`);
-        }
-      }
+      // Retirar no espera a medir: las filas del SQLite del negocio las da después Cloudflare, por
+      // ventanas, aunque su base ya esté borrada.
       if (ctx.estado.licenseId && !a.sinRetirar) {
         await retirarLaTanda(ctx);
         if (!ctx.estado.retirado) registro.avisar(`El negocio de pruebas no quedó retirado del todo: ${ctx.estado.motivoSinRetirar}`);
@@ -392,7 +377,8 @@ async function tanda(a) {
     const carga = registro.entradas.filter(e => e.fase === "carga");
     console.log(`\nResultado: ${carga.filter(e => e.ok).length} de ${carga.length} peticiones de la carga bien${ctx.estado.error ? ` · se paró: ${ctx.estado.error}` : ""}`);
     const porPaso = resumen?.porPaso ?? {};
-    if (porPaso.tursoFilasEscritas != null) console.log(`Turso: ${porPaso.tursoFilasLeidas.toFixed(1)} filas leídas y ${porPaso.tursoFilasEscritas.toFixed(1)} escritas por paso de la carga`);
+    if (porPaso.tursoFilasEscritas != null) console.log(`Base central: ${porPaso.tursoFilasLeidas.toFixed(1)} filas leídas y ${porPaso.tursoFilasEscritas.toFixed(1)} escritas por paso de la carga`);
+    if (porPaso.doFilasEscritas != null) console.log(`Base del negocio (SQLite del DO): ${porPaso.doFilasLeidas.toFixed(1)} filas leídas y ${porPaso.doFilasEscritas.toFixed(1)} escritas por paso de la carga`);
     if (destino === "nube") console.log(ctx.estado.retirado ? "Limpieza: negocio retirado." : `Limpieza: ${ctx.estado.motivoSinRetirar ?? "sin retirar."}`);
     console.log(`Informe: ${relative(RAIZ, join(carpeta, "informe.md"))}\n`);
     const sinLimpiar = destino === "nube" && ctx.estado.licenseId && !a.sinRetirar && !ctx.estado.retirado;

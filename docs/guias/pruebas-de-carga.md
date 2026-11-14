@@ -1,8 +1,10 @@
 # Pruebas de carga
 
 `pnpm carga` monta un negocio de pruebas con una Main y una Handy sintéticas, lanza un plan de
-peticiones variadas de un servicio y mide lo que cuesta en Cloudflare y en Turso. El código está en
-[scripts/carga/](../../scripts/carga/) y cada tanda deja su carpeta en `target/carga/`.
+peticiones variadas de un servicio y mide lo que cuesta: en local, las filas de la base central
+(Turso); en la nube, el worker y el Durable Object del negocio con la analítica de Cloudflare. El
+código está en [scripts/carga/](../../scripts/carga/) y cada tanda deja su carpeta en
+`target/carga/`.
 
 ## Qué hace una tanda
 
@@ -100,38 +102,38 @@ Cada uno de esos fallos manda eventos a Axiom o a Sentry, y por eso no se insist
 avanzar, se salta las medidas y va directo a retirar. La limpieza no tiene frenos ni tope, y repite
 lo que falle.
 
-**Medida:**
-- **Turso**, con `turso db inspect` del WSL. Decide por la base del negocio:
-  - espera un minuto y medio y pide tres lecturas iguales seguidas;
-  - tras el alta, la base no puede estar a cero; tras la carga, tiene que haber cambiado.
+**Medida:** con el GraphQL de analítica de Cloudflare y la sesión de wrangler de este equipo
+(`wrangler auth token`, sin dejar el token en los logs de wrangler): las peticiones y la CPU del
+worker, y del Durable Object del negocio sus invocaciones, su duración y las filas que lee y escribe
+su SQLite, que es la base del negocio. Mide cinco ventanas, cada una en sus propios minutos porque
+los Durable Objects se agregan por minuto:
+- la preparación;
+- los minutos entre la preparación y la carga, con la sesión abierta y sin tráfico: lo que cuesta una
+  Main conectada sin que nadie toque nada;
+- la carga;
+- el cierre de los sockets, que es coste de la sesión y no de los pasos;
+- una de control sin prueba, que da el ruido de fondo.
 
-  Se mide siempre antes de retirar, porque una base borrada ya no se puede consultar. `tpv-control`
-  se lee a la vez, pero sólo como dato orientativo: es compartida.
-- **Cloudflare**, con el GraphQL de analítica y la sesión de wrangler de este equipo
-  (`wrangler auth token`, sin dejar el token en los logs de wrangler). Mide cinco ventanas, cada una
-  en sus propios minutos porque los Durable Objects se agregan por minuto:
-  - la preparación;
-  - los minutos entre la preparación y la carga, con la sesión abierta y sin tráfico: lo que cuesta
-    una Main conectada sin que nadie toque nada;
-  - la carga;
-  - el cierre de los sockets, que es coste de la sesión y no de los pasos;
-  - una de control sin prueba, que da el ruido de fondo.
+Empieza a leer 5 minutos después de la carga. Da la medida por buena cuando dos lecturas coinciden y
+recogen al menos las peticiones que el generador sabe que mandó. Si no se asienta,
+`pnpm carga --medir <carpeta>` vuelve a medir y rehace el informe. Las peticiones al worker no salen
+del GraphQL, que mezcla las invocaciones del Durable Object: las cuenta el propio generador.
 
-  Empieza a leer 5 minutos después de la carga. Da la medida por buena cuando dos lecturas coinciden y
-  recogen al menos las peticiones que el generador sabe que mandó. Si no se asienta,
-  `pnpm carga --medir <carpeta>` vuelve a medir y rehace el informe.
+**Qué no mide en la nube:** las filas de Turso. Allí sólo queda la base central (`tpv-control`),
+compartida con los equipos de verdad, y su uso cambia con cualquiera de ellos: las filas que cada
+paso lee y escribe en ella salen de una tanda en local. De Turso, en la nube sólo se mira el plan de
+la organización al empezar, que va en el informe.
 
-Las peticiones al worker no salen del GraphQL, que mezcla las invocaciones del Durable Object: las
-cuenta el propio generador.
-
-**Limpieza:** `/v1/admin/pruebas/retirar` borra la base de Turso y anula la licencia. El negocio sólo
-se da por retirado si la licencia quedó anulada y Turso no devolvió fallos para su base. Si la
-activación no llegó a contestar, la base que pudiera haber creado no la ve la retirada: el informe
-dice cómo encontrarla. Quedan, como con los E2E, el almacenamiento del Durable Object del negocio y
-las filas de `devices` de los dos equipos sintéticos.
+**Limpieza:** `/v1/admin/pruebas/retirar` anula la licencia y borra lo que el negocio guarda en la
+nube: su base en el `TenantHub`, su agenda de reservas web y sus imágenes. El negocio sólo se da por
+retirado si la licencia quedó anulada y la retirada no devolvió fallos para él. Si la activación no
+llegó a contestar, la base que pudiera haber creado no la ve la retirada: el informe dice cómo
+encontrar el negocio, y no hay ruta que borre ese objeto. Quedan, como con los E2E, las filas de
+`devices` de los dos equipos sintéticos, la del negocio en `tenants` (dada por borrada) y la licencia
+anulada.
 
 `pnpm carga --retirar` lista los negocios de pruebas sin retirar; `pnpm carga --retirar --si` los
-retira todos y reintenta las bases que una retirada anterior no pudo borrar.
+retira todos y reintenta lo que una retirada anterior no pudo borrar.
 
 No se lanza a la vez que una tanda de E2E: cada una retira todos los negocios de pruebas.
 
@@ -143,7 +145,7 @@ No se lanza a la vez que una tanda de E2E: cada una retira todos los negocios de
 | `--vueltas <n>` | Repite el servicio sobre el mismo negocio (1 por defecto, 20 como mucho); el tope tiene que dar para todas |
 | `--tope <n>` | Peticiones como mucho antes de limpiar (150 por defecto, 70 como mínimo) |
 | `--sin-retirar` | En la nube, deja vivo el negocio de pruebas |
-| `--sin-medir` | En la nube, no espera a medir Turso ni Cloudflare (la cuota de Turso se mira igual) |
+| `--sin-medir` | En la nube, no espera a medir Cloudflare y contrasta la subida de la Main (la cuota de Turso se mira igual) |
 | `--medir <carpeta>` | Vuelve a medir Cloudflare de una tanda en la nube |
 | `--retirar [--si]` | Lista los negocios de pruebas; con `--si`, los retira todos |
 
