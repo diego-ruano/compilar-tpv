@@ -109,9 +109,9 @@ const RESUMEN_ESTADISTICAS_CALMA_MS: i64 = 2 * 60 * 1000;
 /// Lo que puede durar una pasada. Lo que no quepa queda apuntado para la siguiente.
 const RESUMEN_ESTADISTICAS_PRESUPUESTO: Duration = Duration::from_secs(3);
 
-/// Cada cuánto se poda `_Sync_Applied_Ops` y se retira lo apartado de la subida. Los registros solo
-/// son purgables tras un TTL de 72 h, y lo apartado tras 30 días, así que una pasada al día va
-/// sobrada.
+/// Cada cuánto se poda `_Sync_Applied_Ops`, se retira lo apartado de la subida y se vacían los
+/// datos de lo que no entró de la bajada. Los registros solo son purgables tras un TTL de 72 h, y lo
+/// apartado tras 30 días, así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Cada cuánto se traen unas páginas del histórico pendiente (SYNC-19, fase 2).
@@ -658,16 +658,23 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 ///
 /// Y lo apartado de la subida, que no se vaciaba nunca: se retira a los 30 días de su último
 /// intento, salvo lo que espera a su reparación (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por
-/// qué 30). Lo que no entró de la bajada se queda: es la barrera del contraste con la nube.
+/// qué 30). Lo que no entró de la bajada se queda, porque es la barrera del contraste con la nube,
+/// pero a los mismos 30 días sin sus datos (SYNC-36): sus sentencias se vacían y queda lo que tocó,
+/// por su clave.
 ///
 /// Antes iba colgada del drenado del outbox y solo se ejecutaba si esa pasada había subido algo;
 /// como job tiene disparador propio y corre también en un equipo online y ocioso.
 async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
-    let purgadas = uc_sync::purgar_cuarentenas(repo.as_ref(), tpv_infra_sqlite::util::now_ms()).await?;
+    let ahora = tpv_infra_sqlite::util::now_ms();
+    let purgadas = uc_sync::purgar_cuarentenas(repo.as_ref(), ahora).await?;
     if purgadas > 0 {
         tracing::info!(target: "tpv::sync", purgadas, "operaciones apartadas de más de 30 días retiradas");
+    }
+    let vaciadas = uc_sync::vaciar_cuarentenas_de_bajada(repo.as_ref(), ahora).await?;
+    if vaciadas > 0 {
+        tracing::info!(target: "tpv::sync", vaciadas, "cambios de la nube en cuarentena de más de 30 días, sin sus datos");
     }
     Ok(())
 }

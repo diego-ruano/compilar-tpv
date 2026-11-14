@@ -743,7 +743,7 @@ async fn comprobar_por_clave(
 /// Los dos lados llegan por caminos distintos —uno de la base local, otro de JSON— y la misma
 /// clave tiene que verse igual: un entero, como entero aunque venga como `1.0`. El separador es
 /// `\u{1f}` y no una coma: (`"a"`, `"b,c"`) y (`"a,b"`, `"c"`) no pueden dar la misma cadena.
-fn clave_canonica(valores: &[serde_json::Value]) -> Option<String> {
+pub(crate) fn clave_canonica(valores: &[serde_json::Value]) -> Option<String> {
     let mut partes = Vec::with_capacity(valores.len());
     for v in valores {
         partes.push(match v {

@@ -1888,6 +1888,10 @@ INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
 
 -- Cuarentena de BAJADA: cambios remotos que esta Main no ha sabido aplicar. Tras 5
 -- intentos se apartan y el checkpoint AVANZA, para que el resto siga convergiendo.
+-- SYNC-36: Filas_Json son las filas que toca el cambio (su tabla y su clave primaria, nada
+-- mas), con las que el contraste lo trae de la nube por estado. A los 30 dias de apartarse se
+-- vacian sus sentencias (Datos_Vaciados_At_Ms) y la fila se queda: es la barrera del contraste
+-- hasta que lo que toco este en esta base.
 CREATE TABLE IF NOT EXISTS _Sync_Failed (
     Op_Id TEXT NOT NULL PRIMARY KEY,
     Seq INTEGER NOT NULL,
@@ -1896,7 +1900,9 @@ CREATE TABLE IF NOT EXISTS _Sync_Failed (
     Quarantined INTEGER NOT NULL DEFAULT 0,
     Last_Error TEXT,
     First_Failed_At_Ms INTEGER NOT NULL,
-    Last_Failed_At_Ms INTEGER NOT NULL
+    Last_Failed_At_Ms INTEGER NOT NULL,
+    Filas_Json TEXT CHECK (Filas_Json IS NULL OR json_valid(Filas_Json)),
+    Datos_Vaciados_At_Ms INTEGER
 );
 
 -- Estado local y persistente del protocolo de recuperacion. Vive dentro de la BD para que

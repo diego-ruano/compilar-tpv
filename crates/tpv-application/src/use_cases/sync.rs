@@ -131,13 +131,22 @@ pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
 /// enseña a no mirarlo. Treinta días dan para que alguien lo vea en el panel y lo consulte, también
 /// en un equipo que pase semanas sin conexión.
 ///
-/// Las de la bajada no caducan (`SyncRepository::purgar_cuarentenas` dice por qué).
+/// Las de la bajada no se retiran (`SyncRepository::purgar_cuarentenas` dice por qué), pero a los
+/// mismos treinta días se quedan sin sus datos (SYNC-36, [`vaciar_cuarentenas_de_bajada`]): para
+/// entonces se registraron al apartarse, y queda lo que tocaron, por su clave.
 pub const RETENCION_CUARENTENAS_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// Retira las operaciones apartadas de la subida de más de [`RETENCION_CUARENTENAS_MS`]
 /// (`purga_sync`, cada día), y devuelve cuántas.
 pub async fn purgar_cuarentenas(repo: &dyn SyncRepository, ahora_ms: i64) -> AppResult<u64> {
     repo.purgar_cuarentenas(ahora_ms - RETENCION_CUARENTENAS_MS).await
+}
+
+/// SYNC-36 · Vacía los datos de lo que no entró de la bajada y lleva apartado más de
+/// [`RETENCION_CUARENTENAS_MS`] (`purga_sync`, cada día), y devuelve cuántas. La cuarentena se
+/// queda, sin datos de nadie: es la barrera del contraste (`SyncRepository::vaciar_cuarentenas_de_bajada`).
+pub async fn vaciar_cuarentenas_de_bajada(repo: &dyn SyncRepository, ahora_ms: i64) -> AppResult<u64> {
+    repo.vaciar_cuarentenas_de_bajada(ahora_ms - RETENCION_CUARENTENAS_MS).await
 }
 
 /// Foto de salud de la sincronización local (SYNC-14) para el panel de Conectividad.

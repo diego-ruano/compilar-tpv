@@ -306,6 +306,33 @@ impl Connection {
         }).await
     }
 
+    /// Un **simulacro**: `trabajo` corre entero en el hilo de la conexión, dentro de una transacción
+    /// con las claves foráneas aplazadas que se deshace siempre. Lo que escriba no queda.
+    ///
+    /// Es para saber qué haría una escritura sin hacerla (SYNC-36: qué filas toca un cambio de la
+    /// nube que no entra). Va en un solo trabajo del hilo para que nada se cuele entre sus
+    /// sentencias, y [`Simulacro::filas`] no ejecuta nada en cuanto la transacción ya no está: una
+    /// sentencia que la cerrara (o un error que la deshiciera entera) dejaría lo siguiente en
+    /// autocommit, confirmándose de verdad. Pensado para la conexión de escritura, sin otra
+    /// transacción abierta.
+    pub(crate) async fn simulacro<T: Send + 'static>(
+        &self,
+        trabajo: impl for<'c> FnOnce(&Simulacro<'c>) -> T + Send + 'static,
+    ) -> Result<T, ErrorSql> {
+        self.ejecutor.pedir(move |s| {
+            let conn = s.conn;
+            if !conn.is_autocommit() {
+                return Err(ErrorSql::Misuse("el simulacro necesita la conexión sin transacción".into()));
+            }
+            conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")?;
+            let resultado = trabajo(&Simulacro { conn });
+            if !conn.is_autocommit() {
+                conn.execute_batch("ROLLBACK;")?;
+            }
+            Ok(resultado)
+        }).await
+    }
+
     pub(crate) async fn sanear(&self) -> Result<(), ErrorSql> {
         self.ejecutor.pedir(|s| {
             if !s.conn.is_autocommit() { s.conn.execute_batch("ROLLBACK;")?; }
@@ -359,6 +386,11 @@ impl ValorPrestado<'_> {
 /// ellos. Es la primera de las tres cosas que se le piden a una sentencia que viene de fuera; las
 /// otras dos las dice SQLite (que sea una sola, y que no escriba).
 fn empieza_como_lectura(sql: &str) -> bool {
+    empieza_por(sql, &["SELECT", "WITH"])
+}
+
+/// ¿Empieza `sql` por una de `palabras`, con espacio o comentarios delante o sin ellos?
+fn empieza_por(sql: &str, palabras: &[&str]) -> bool {
     let mut resto = sql.trim_start();
     loop {
         if let Some(tras) = resto.strip_prefix("--") {
@@ -369,10 +401,55 @@ fn empieza_como_lectura(sql: &str) -> bool {
             break;
         }
     }
-    ["SELECT", "WITH"].iter().any(|palabra| {
+    palabras.iter().any(|palabra| {
         resto.get(..palabra.len()).is_some_and(|cabeza| cabeza.eq_ignore_ascii_case(palabra))
             && !resto[palabra.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
     })
+}
+
+/// El error de [`Simulacro::filas`] cuando una sentencia devuelve más filas que su tope.
+pub(crate) const DEMASIADAS_FILAS: &str = "demasiadas filas en el simulacro";
+
+/// Las sentencias de un [`Connection::simulacro`].
+pub struct Simulacro<'c> {
+    conn: &'c rusqlite::Connection,
+}
+
+impl Simulacro<'_> {
+    /// Ejecuta UNA sentencia y copia las filas que devuelva (las de su `RETURNING`, si escribe),
+    /// hasta `tope`; con más, es un error.
+    ///
+    /// Sólo lo que lee o escribe filas: una sentencia que no empieza por `SELECT`, `WITH`,
+    /// `INSERT`, `REPLACE`, `UPDATE`, `DELETE` o `VALUES` (un `COMMIT`, un `PRAGMA`, un `ATTACH`)
+    /// se rechaza sin ejecutarla, y un texto con varias, también. Y nada se ejecuta si la
+    /// transacción del simulacro ya no está, ni se da por bueno lo que la haya cerrado.
+    pub fn filas(&self, sql: &str, args: &[Value], tope: usize) -> Result<Vec<Vec<Value>>, ErrorSql> {
+        let cerrada = || ErrorSql::Misuse("el simulacro ya no tiene su transacción".into());
+        if self.conn.is_autocommit() {
+            return Err(cerrada());
+        }
+        if !empieza_por(sql, &["SELECT", "WITH", "INSERT", "REPLACE", "UPDATE", "DELETE", "VALUES"]) {
+            return Err(ErrorSql::Misuse("en un simulacro sólo se leen o escriben filas".into()));
+        }
+        let resultado = (|| {
+            let mut stmt = self.conn.prepare(sql)?;
+            enlazar(&mut stmt, args, sql)?;
+            let columnas = stmt.column_count();
+            let mut filas = stmt.raw_query();
+            let mut salida = Vec::new();
+            while let Some(f) = filas.next()? {
+                if salida.len() == tope {
+                    return Err(ErrorSql::Misuse(DEMASIADAS_FILAS.into()));
+                }
+                salida.push((0..columnas).map(|i| f.get_ref(i).map(valor)).collect::<Result<Vec<_>, _>>()?);
+            }
+            Ok(salida)
+        })();
+        if self.conn.is_autocommit() {
+            return Err(cerrada());
+        }
+        resultado
+    }
 }
 
 /// Las lecturas de una [`Connection::foto`]. Todas ven la base del mismo instante.

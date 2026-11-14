@@ -202,12 +202,27 @@ pub trait SyncRepository: Send + Sync {
     /// sigue por subir se queda: la retira esa subida (SYNC-26). La retención la decide el caso de
     /// uso (`use_cases::sync::RETENCION_CUARENTENAS_MS`).
     ///
-    /// Las de la bajada (`_Sync_Failed`) no se retiran nunca: un cambio de la nube que no entró en
-    /// esta base es lo que le impide al contraste borrar arriba lo que aquí falta o subir lo que la
-    /// nube borró (`contraste.rs::Guarda::sin_fallos`). Sin él, esta Main parecería al día sin estarlo.
+    /// Las de la bajada (`_Sync_Failed`) no se retiran: un cambio de la nube que no entró en esta
+    /// base es lo que le impide al contraste borrar arriba lo que aquí falta o subir lo que la nube
+    /// borró (`contraste.rs::Guarda::sin_fallos`). Sin él, esta Main parecería al día sin estarlo.
+    /// Sólo se vacían sus datos ([`Self::vaciar_cuarentenas_de_bajada`], SYNC-36).
     ///
     /// Por defecto no retira nada: los dobles de los tests no tienen cuarentenas.
     async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<u64> {
+        let _ = antes_de_ms;
+        Ok(0)
+    }
+
+    /// SYNC-36 · Vacía los datos de lo que no entró de la bajada (`_Sync_Failed` en cuarentena) y
+    /// lleva apartado desde antes de `antes_de_ms`, y devuelve cuántas. Sus sentencias llevan lo que
+    /// escribía el cambio (nombres, teléfonos, notas de clientes): se vacían, y el texto de su error
+    /// se queda en su clase. La fila sigue, con lo que hace falta para traerla de la nube y para
+    /// diagnosticarla sin datos de nadie (su operación, su `Seq`, sus intentos, sus fechas y las
+    /// filas que tocó, por su clave): sigue siendo la barrera del contraste hasta que lo que tocó
+    /// esté aquí.
+    ///
+    /// Por defecto no vacía nada: los dobles de los tests no tienen cuarentenas.
+    async fn vaciar_cuarentenas_de_bajada(&self, antes_de_ms: i64) -> AppResult<u64> {
         let _ = antes_de_ms;
         Ok(0)
     }

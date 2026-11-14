@@ -107,7 +107,7 @@ const ESTADO_DE_CADA_LADO: [&str; 1] = ["Intentos_Login"];
 /// `sqlite_` es de SQLite, y están el andamiaje de la nube y el freno del PIN. Nada de eso viaja:
 /// aunque la nube lo mandara en un volcado o en una página del histórico, no se restaura ni se
 /// rellena encima de lo de aquí. El worker tampoco lo manda (`esTablaDeNegocio`, el mismo criterio).
-fn no_es_tabla_de_negocio(nombre: &str) -> bool {
+pub(crate) fn no_es_tabla_de_negocio(nombre: &str) -> bool {
     nombre.starts_with('_')
         || nombre.starts_with("sqlite_")
         || ANDAMIAJE_DE_LA_NUBE.iter().chain(ESTADO_DE_CADA_LADO.iter()).any(|t| t.eq_ignore_ascii_case(nombre))
@@ -469,24 +469,44 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
     Ok(n)
 }
 
+/// SYNC-36 · ¿Falta saber qué filas toca este cambio? Sí si no tiene fallo anotado, o lo tiene sin
+/// ellas o con unas inciertas.
+async fn hay_que_mirar_lo_que_toca(conn: &Connection, op_id: &str) -> AppResult<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM _Sync_Failed \
+              WHERE Op_Id = ?1 AND Filas_Json IS NOT NULL AND NOT json_extract(Filas_Json, '$.incierto') LIMIT 1;",
+            vec![Value::Text(op_id.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(rows.next().await.map_err(db_err)?.is_none())
+}
+
 /// Registra (o incrementa) el fallo de una op en `_Sync_Failed` y devuelve el nº de intentos
 /// acumulados. Sirve de contador persistente entre ciclos de catch-up para decidir la cuarentena.
-async fn bump_failure(conn: &Connection, ch: &SyncChange, err: &str) -> AppResult<i64> {
+///
+/// SYNC-36: `tocadas` son las filas que toca el cambio (`filas_tocadas`), si se han mirado. Se
+/// guardan las primeras que se saben; unas inciertas se sustituyen por las de otro intento.
+async fn bump_failure(conn: &Connection, ch: &SyncChange, err: &str, tocadas: Option<&str>) -> AppResult<i64> {
     let now = now_ms();
     let stmts_json = serde_json::to_string(&ch.statements).unwrap_or_else(|_| "[]".to_string());
     let err_trunc: String = err.chars().take(500).collect();
     conn.execute(
         "INSERT INTO _Sync_Failed \
-           (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms) \
-         VALUES (?1, ?2, ?3, 1, 0, ?4, ?5, ?5) \
+           (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms, Filas_Json) \
+         VALUES (?1, ?2, ?3, 1, 0, ?4, ?5, ?5, ?6) \
          ON CONFLICT(Op_Id) DO UPDATE SET \
-           Attempts = Attempts + 1, Last_Error = ?4, Last_Failed_At_Ms = ?5;",
+           Attempts = Attempts + 1, Last_Error = ?4, Last_Failed_At_Ms = ?5, \
+           Filas_Json = CASE WHEN Filas_Json IS NULL OR json_extract(Filas_Json, '$.incierto') THEN COALESCE(?6, Filas_Json) \
+                             ELSE Filas_Json END;",
         vec![
             Value::Text(ch.op_id.clone()),
             Value::Integer(ch.seq),
             Value::Text(stmts_json),
             Value::Text(err_trunc),
             Value::Integer(now),
+            tocadas.map_or(Value::Null, |t| Value::Text(t.to_owned())),
         ],
     )
     .await
@@ -547,7 +567,9 @@ enum Fallo {
 /// una con su commit, y una copia (`VACUUM INTO`) podía fotografiar el marcador sin el checkpoint:
 /// al restaurarla, el catch-up traía el cambio, el gate lo daba por aplicado y el checkpoint lo
 /// dejaba atrás sin haberlo aplicado nunca.
-async fn anotar_fallo(conn: &Connection, ch: &SyncChange, err: &str) -> AppResult<Fallo> {
+///
+/// SYNC-36: `tocadas`, las filas que toca el cambio, se guardan con el fallo (`bump_failure`).
+async fn anotar_fallo(conn: &Connection, ch: &SyncChange, err: &str, tocadas: Option<&str>) -> AppResult<Fallo> {
     conn.transaccion(async {
         // El ROLLBACK de `apply_one` se llevó también la confirmación de subida, y ésa no depende
         // de que aquí se pueda aplicar: el cambio ha vuelto de la nube, así que allí está.
@@ -574,7 +596,7 @@ async fn anotar_fallo(conn: &Connection, ch: &SyncChange, err: &str) -> AppResul
         .await
         .map_err(db_err)?;
 
-        let attempts = bump_failure(conn, ch, err).await?;
+        let attempts = bump_failure(conn, ch, err, tocadas).await?;
         if attempts >= MAX_APPLY_ATTEMPTS {
             quarantine(conn, ch).await?;
             return Ok(Fallo::Cuarentena(attempts));
@@ -786,7 +808,16 @@ impl SyncRepository for SqliteSyncRepository {
                 // reintentos, ponemos la op en cuarentena (se salta + avanza checkpoint +
                 // alerta) para NO bloquear el resto de la cola indefinidamente. AUD-18: todo en
                 // una transacción (`anotar_fallo`).
-                let (attempts, cuarentena) = match anotar_fallo(conn, ch, &e.to_string()).await? {
+                //
+                // SYNC-36: con el fallo se guardan las filas que toca, para poder traerlas de la nube
+                // si acaba en cuarentena. Se miran ahora, con la base de justo antes del cambio, y
+                // sólo si no se saben ya de un intento anterior.
+                let tocadas = if hay_que_mirar_lo_que_toca(conn, &ch.op_id).await? {
+                    Some(crate::filas_tocadas::de_un_cambio(conn, &ch.statements).await.a_json())
+                } else {
+                    None
+                };
+                let (attempts, cuarentena) = match anotar_fallo(conn, ch, &e.to_string(), tocadas.as_deref()).await? {
                     // AUD-18: un duplicado de algo ya procesado: no se anota ni detiene nada.
                     Fallo::YaProcesado => {
                         tracing::warn!(
@@ -1136,7 +1167,8 @@ impl SyncRepository for SqliteSyncRepository {
         //
         // `_Sync_Failed` no se toca: un cambio de la nube en cuarentena es la barrera del contraste
         // (`contraste.rs::Guarda::sin_fallos`). Retirarlo le dejaría borrar arriba lo que la Handy
-        // escribió y aquí no entró, o subir lo que la nube ya había borrado.
+        // escribió y aquí no entró, o subir lo que la nube ya había borrado. Sólo se vacían sus
+        // datos (`vaciar_cuarentenas_de_bajada`, SYNC-36).
         let w = self.db.write().await;
         w.raw()
             .execute(
@@ -1149,6 +1181,11 @@ impl SyncRepository for SqliteSyncRepository {
             )
             .await
             .map_err(db_err)
+    }
+
+    async fn vaciar_cuarentenas_de_bajada(&self, antes_de_ms: i64) -> AppResult<u64> {
+        // SYNC-36. Por `raw()`: `_Sync_Failed` es estado local de este equipo.
+        crate::cuarentenas_bajada::vaciar(&self.db, antes_de_ms).await
     }
 
     async fn health(&self) -> AppResult<SyncHealth> {
@@ -3860,6 +3897,43 @@ mod tests_bajada_en_orden {
             MAX_APPLY_ATTEMPTS,
         );
         assert!(repo.cambio_detenido().await.unwrap().is_none());
+        // SYNC-36: una tabla que esta versión no tiene: no se sabe qué filas toca.
+        let filas = texto(&db, "SELECT Filas_Json FROM _Sync_Failed WHERE Op_Id = 'op-2';").await;
+        assert!(crate::filas_tocadas::Tocadas::de_json(&filas).incierto, "{filas}");
+    }
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> String {
+        let r = db.read().await;
+        let mut filas = r.conn().query(sql, ()).await.unwrap();
+        let fila = filas.next().await.unwrap().expect("una fila");
+        match fila.get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("no es un texto: {otro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn al_fallar_se_guardan_las_filas_que_toca_y_la_cuarentena_las_conserva() {
+        // SYNC-36: la mesa de una zona que aquí no existe. Se mira en el primer intento, con la
+        // base de justo antes del cambio, y no se vuelve a mirar.
+        let (repo, db, _dir) = repo_temporal().await;
+        repo.apply_changes(vec![zona("op-1", 1, "z1"), mesa("op-2", 2, "m1", "zx")]).await.unwrap();
+        let primera = texto(&db, "SELECT Filas_Json FROM _Sync_Failed WHERE Op_Id = 'op-2';").await;
+        let tocadas = crate::filas_tocadas::Tocadas::de_json(&primera);
+        assert!(!tocadas.incierto, "{primera}");
+        assert_eq!(tocadas.tablas, vec!["Mesas".to_string()]);
+        assert_eq!(
+            tocadas.filas,
+            vec![crate::filas_tocadas::FilaTocada { tabla: "Mesas".into(), clave: vec![serde_json::json!("m1")], borrada: false }]
+        );
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 0, "el simulacro no deja nada");
+
+        for _ in 1..MAX_APPLY_ATTEMPTS {
+            let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+            repo.apply_changes(vec![detenido]).await.unwrap();
+        }
+        assert_eq!(numero(&db, "SELECT Quarantined FROM _Sync_Failed WHERE Op_Id = 'op-2';").await, 1);
+        assert_eq!(texto(&db, "SELECT Filas_Json FROM _Sync_Failed WHERE Op_Id = 'op-2';").await, primera);
     }
 
     #[tokio::test]
@@ -4166,7 +4240,7 @@ mod tests_bajada_en_orden {
         let duplicado = zona("op-12", 12, "z-12");
         {
             let w = db.write().await;
-            let fallo = anotar_fallo(w.raw(), &duplicado, "error puntual leyendo el checkpoint")
+            let fallo = anotar_fallo(w.raw(), &duplicado, "error puntual leyendo el checkpoint", None)
                 .await
                 .unwrap();
             assert!(matches!(fallo, Fallo::YaProcesado));

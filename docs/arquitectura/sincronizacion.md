@@ -29,6 +29,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Captura | `crates/tpv-infra-sqlite/src/db.rs` | `WriteGuard::execute` reescribe la hora a literal, ejecuta y guarda la sentencia en `_Sync_Outbox` en la misma transacción. `raw()` escribe sin capturar |
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
+| Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra, y la caducidad de los datos de su cuarentena (SYNC-36) |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
 | Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en la base del negocio. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
@@ -520,6 +521,17 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     necesario para diagnosticarlo): el checkpoint pasa por encima y la bajada sigue en orden desde ahí.
     El intento contado, el marcador de `_Sync_Applied_Ops`, la marca de cuarentena y el checkpoint van
     en una sola transacción (`anotar_fallo`): una copia de la base tiene los cuatro o ninguno.
+  - **Con el primer fallo se apunta qué filas toca** (`Filas_Json`: su tabla y su clave primaria,
+    SYNC-36): es lo que queda del cambio cuando sus datos caducan.
+    Ni el cambio ni el log de la nube lo dicen, y muchas sentencias no nombran sus filas (`UPDATE …
+    WHERE ID_Proveedor = ?1`, `INSERT … SELECT`), así que se ejecutan en un **simulacro**
+    (`Connection::simulacro`: una transacción con las foráneas aplazadas que se deshace siempre, y que
+    no ejecuta nada que no sea leer o escribir filas) con un `RETURNING` de la clave, sobre la base de
+    justo antes del cambio (`filas_tocadas.rs`). De la sentencia que choca, y de lo que se salta al
+    chocar, se miran antes las claves de lo que inserta o las de las filas que cumplen las igualdades
+    de su `WHERE` sobre la clave o una foránea. Lo que borra se marca. Lo que no se sabe (una tabla
+    que esta versión no tiene, un `REPLACE`, más de 5.000 filas) queda como incierto, y se vuelve a
+    mirar en cada intento y en cada pasada mientras quedan sentencias.
   - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
     al final de la actual.
 - «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
@@ -529,9 +541,13 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   telemetría al apartarse, se encoló la reparación por estado y el contraste con la nube ha pasado
   decenas de veces; lo que queda es la sentencia, con los datos que llevara, y un contador en rojo
   que ya no se apagaría. Una apartada cuya reparación sigue sin subir no se retira: la retira esa
-  subida. **Lo que no entró de la bajada no caduca**: es la barrera del contraste
+  subida. **Lo que no entró de la bajada no se retira**: es la barrera del contraste
   (`_Sync_Failed` vacía es una de las condiciones para reparar), que sin ella daría esta base por al
-  día y borraría arriba lo que la Handy escribió y aquí falta.
+  día y borraría arriba lo que la Handy escribió y aquí falta. **Sus datos sí caducan** (SYNC-36):
+  a los mismos 30 días de apartarse, `purga_sync` vacía sus sentencias (`Datos_Vaciados_At_Ms`) y deja
+  su error en su clase (`sentencia #2: unique (Clientes.Email)`; lo que no es de una clase conocida,
+  `otro`). Queda lo que no es de nadie: su operación, su `Seq`, sus intentos, sus fechas y las filas
+  que tocó, por su clave, que se miran por última vez antes de vaciarla si no se sabían.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
   página de catch-up de mil cambios (los que pide la Main, `CAMBIOS_POR_PAGINA`) no deja a un cobro
