@@ -4,8 +4,8 @@
 //!
 //! Protege el **dato en reposo en la nube**: quien consiga un volcado de la base de datos
 //! del tenant en la nube ve texto cifrado, no DNIs ni IBANes. La clave (DEK) no vive en esa
-//! base de datos: la genera el worker al aprovisionar, se la entrega **una vez** a la Main
-//! y ésta la guarda en el almacén de secretos del sistema (keyring / Android Keystore).
+//! base de datos: la genera el worker en la primera activación, se la entrega a la Main en cada
+//! activación y ésta la guarda en el almacén de secretos del sistema (keyring / Android Keystore).
 //!
 //! NO es zero-knowledge: el control-plane conserva una copia de la DEK para poder
 //! devolvérsela al cliente si cambia de equipo. Es la misma decisión que toma cualquier
