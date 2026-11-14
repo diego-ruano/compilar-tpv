@@ -35,7 +35,7 @@
 //! Las filas que una sentencia **borra** se marcan (`borrada`): si la nube ya no las tiene, aquí
 //! tampoco tienen que estar. De las demás, que la nube no las tenga no dice nada de esta base.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value as Json};
 use tpv_contracts::sync::SqlStatement;
@@ -914,6 +914,46 @@ fn igualdad(t: &Troceada<'_>, a: usize, b: usize, tabla: &str, alias: Option<&st
 
 /* ===== Lo que se sabe sin ejecutar ===== */
 
+/// Las filas que tocan unas sentencias **sin ejecutarlas**: las de un `INSERT … VALUES` cuya clave va
+/// en parámetros o literales, y las de un `UPDATE` o un `DELETE` cuyo `WHERE` iguala la clave entera.
+/// De lo demás, sólo su tabla (`tablas`). Es para lo que esta base ya escribió (lo apartado de la
+/// subida): ni se puede ejecutar otra vez ni hace falta precisión, sólo saber con qué choca.
+pub(crate) struct Estaticas {
+    pub claves: HashSet<String>,
+    pub tablas: HashSet<String>,
+}
+
+pub(crate) fn estaticas(sentencias: &[SqlStatement], clave_de: &dyn Fn(&str) -> Vec<String>) -> Estaticas {
+    let mut salida = Estaticas { claves: HashSet::new(), tablas: HashSet::new() };
+    for st in sentencias {
+        let Some(forma) = Forma::leer(&st.sql) else {
+            if !empieza_por_pragma(&st.sql) {
+                // No se sabe ni la tabla: con todo.
+                salida.tablas.insert("*".into());
+            }
+            continue;
+        };
+        if crate::sync::no_es_tabla_de_negocio(&forma.tabla) {
+            continue;
+        }
+        let clave = clave_de(&forma.tabla);
+        let claves = if clave.is_empty() || forma.reemplaza { None } else { claves_estaticas(&st.sql, &st.args, &forma, &clave) };
+        match claves {
+            Some(claves) => {
+                for k in claves {
+                    if let Some(c) = canonica(&forma.tabla, &k) {
+                        salida.claves.insert(c);
+                    }
+                }
+            }
+            None => {
+                salida.tablas.insert(forma.tabla.clone());
+            }
+        }
+    }
+    salida
+}
+
 /// El valor de un parámetro numerado o un literal, sin ejecutar nada.
 fn valor_estatico(texto: &str, args: &[Json]) -> Option<Json> {
     if let Some(n) = texto.strip_prefix('?') {
@@ -982,6 +1022,11 @@ fn claves_estaticas(sql: &str, args: &[Json], forma: &Forma, clave: &[String]) -
             Some(vec![k])
         }
     }
+}
+
+/// La forma canónica de una fila, para cruzarla con [`Estaticas`].
+pub(crate) fn canonica_de(fila: &FilaTocada) -> Option<String> {
+    canonica(&fila.tabla, &fila.clave)
 }
 
 #[cfg(test)]
@@ -1267,5 +1312,30 @@ mod tests {
         // Lo que no escribe filas no es una forma.
         assert!(Forma::leer("SELECT 1").is_none());
         assert!(Forma::leer("UPDATE 'x").is_none(), "un texto sin cerrar");
+    }
+
+    #[test]
+    fn lo_que_se_sabe_sin_ejecutar() {
+        let clave = |t: &str| -> Vec<String> {
+            match t {
+                "Pago_Detalles" => vec!["ID_Pago".into(), "ID_Detalle".into()],
+                _ => vec![format!("ID_{}", t.trim_end_matches('s'))],
+            }
+        };
+        let e = estaticas(
+            &[
+                st("INSERT INTO Mesas (ID_Mesa, Numero_Mesa) VALUES (?1, ?2), ('m9', '9');", vec![json!("m8"), json!("8")]),
+                st("UPDATE Pago_Detalles SET x = 1 WHERE ID_Detalle = ?2 AND ID_Pago = ?1;", vec![json!("p1"), json!("d1")]),
+                st("DELETE FROM Zonas WHERE Nombre = 'x';", vec![]),
+                st("INSERT INTO Pagos (ID_Pago) SELECT ?1;", vec![json!("p2")]),
+            ],
+            &clave,
+        );
+        let mut claves: Vec<String> = e.claves.iter().map(|c| c.replace('\u{1f}', "|")).collect();
+        claves.sort();
+        assert_eq!(claves, vec!["Mesas|tm8", "Mesas|tm9", "Pago_Detalles|tp1|td1"]);
+        let mut tablas: Vec<&String> = e.tablas.iter().collect();
+        tablas.sort();
+        assert_eq!(tablas, vec!["Pagos", "Zonas"]);
     }
 }

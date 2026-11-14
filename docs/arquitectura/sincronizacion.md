@@ -29,7 +29,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Captura | `crates/tpv-infra-sqlite/src/db.rs` | `WriteGuard::execute` reescribe la hora a literal, ejecuta y guarda la sentencia en `_Sync_Outbox` en la misma transacción. `raw()` escribe sin capturar |
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
-| Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra, y la caducidad de los datos de su cuarentena (SYNC-36) |
+| Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra; sus datos caducan y el contraste lo trae de la nube por estado (SYNC-36) |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
 | Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en la base del negocio. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
@@ -522,7 +522,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     El intento contado, el marcador de `_Sync_Applied_Ops`, la marca de cuarentena y el checkpoint van
     en una sola transacción (`anotar_fallo`): una copia de la base tiene los cuatro o ninguno.
   - **Con el primer fallo se apunta qué filas toca** (`Filas_Json`: su tabla y su clave primaria,
-    SYNC-36): es lo que queda del cambio cuando sus datos caducan.
+    SYNC-36), que es con lo que su cuarentena sale después ([abajo](#la-salida-de-una-cuarentena-de-bajada-sync-36)).
     Ni el cambio ni el log de la nube lo dicen, y muchas sentencias no nombran sus filas (`UPDATE …
     WHERE ID_Proveedor = ?1`, `INSERT … SELECT`), así que se ejecutan en un **simulacro**
     (`Connection::simulacro`: una transacción con las foráneas aplazadas que se deshace siempre, y que
@@ -543,7 +543,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   que ya no se apagaría. Una apartada cuya reparación sigue sin subir no se retira: la retira esa
   subida. **Lo que no entró de la bajada no se retira**: es la barrera del contraste
   (`_Sync_Failed` vacía es una de las condiciones para reparar), que sin ella daría esta base por al
-  día y borraría arriba lo que la Handy escribió y aquí falta. **Sus datos sí caducan** (SYNC-36):
+  día y borraría arriba lo que la Handy escribió y aquí falta. Lo cierra el contraste al traerlo de
+  la nube ([abajo](#la-salida-de-una-cuarentena-de-bajada-sync-36)). **Sus datos sí caducan** (SYNC-36):
   a los mismos 30 días de apartarse, `purga_sync` vacía sus sentencias (`Datos_Vaciados_At_Ms`) y deja
   su error en su clase (`sentencia #2: unique (Clientes.Email)`; lo que no es de una clase conocida,
   `otro`). Queda lo que no es de nadie: su operación, su `Seq`, sus intentos, sus fechas y las filas
@@ -694,7 +695,7 @@ aquí, una que **falta arriba** se sube por estado y una que **sobra arriba** se
 dos fotos del mismo instante lo que la nube tiene y aquí no está no puede ser algo de camino. Nada se
 toca si hay **alguna fila en `_Sync_Failed`** (AUD-18; en cuarentena o pendiente de reintentar), si
 queda histórico por bajar (VERIF-01) o con el interruptor `reparacion_nube` apagado: se compara y se
-informa como `aplazado`.
+informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la misma pasada (abajo).
 
 - **Un borrado sólo borra si la nube no ha cambiado desde la foto**: el `DELETE` lleva la condición
   de que en `Sync_Changes` no haya nada por encima del `hasta_seq` del resumen salvo las reparaciones
@@ -714,6 +715,44 @@ informa como `aplazado`.
   sobra sí se borra). Lo que sí se ha visto se repara, borrados incluidos: cada fila que sobra se
   sabe que sobra. Un recorrido de claves que sigue donde lo dejó la pasada anterior y llega al final
   cuenta como completo.
+
+#### La salida de una cuarentena de bajada (SYNC-36)
+
+Un cambio de la nube en cuarentena deja al contraste sin reparar, y sin salida se quedaría así para
+siempre. Por qué acaba ahí un cambio: lo que el SQLite de la Main no deja escribir y el de la nube sí
+—una columna o una tabla que esta versión aún no tiene; un `UNIQUE` con algo de aquí que todavía no
+ha subido (la comanda abierta de la mesa, el correo de una clienta); una clave foránea cuyo padre está
+en otra cuarentena o aquí se borró y el borrado aún no ha subido— y que no se arregla en los
+segundos de los reintentos. Reintentar después sus sentencias no sirve: lo de detrás ya habría pasado
+por esas filas, y aplicarlas encima devolvería una fila a un valor viejo o repetiría un `Stock - 1`.
+
+Así que **se trae de la nube cómo están ahora las filas que tocó**, en la pasada del contraste con
+permiso para reparar, después del resumen y antes de comparar nada (`cuarentenas_bajada.rs`):
+
+- **Con la foto del resumen.** Que no esté aplazado ya dice que en la nube no hay nada ajeno por
+  encima del checkpoint de esta Main; cada página de `/v1/sync/verificar/por-clave` tiene que traer su
+  mismo `hasta_seq`, y con el escritor cogido la marca tiene que ser la de antes de pedirlo, sin
+  histórico por bajar. Lo que se trae no es anterior al cambio (su `Seq` no pasa del checkpoint) ni
+  lleva nada que esta Main no haya aplicado ya: un cambio que aún no ha bajado no se le aplicaría
+  encima otra vez. Si algo se mueve antes de aplicar, la pasada entera es `SeHaMovido` sin haber
+  escrito nada.
+- **Sólo se escribe aquí**, por `raw()`; nada sube ni se borra en la nube. Lo que está arriba se
+  escribe como está, con `INSERT … ON CONFLICT(clave) DO UPDATE`; lo que no está sólo se borra aquí si
+  el cambio lo borraba (que la nube ya no tenga lo que el cambio insertó o cambió dice que se borró
+  después, y ese borrado ya bajó o tiene su propia cuarentena), con sus cascadas, como arriba.
+- **Una a una, en orden de `Seq`**, cada una en su transacción con las foráneas aplazadas: primero lo
+  que se borra, hijas primero, y después lo que se escribe, padres primero. Si todo entra, la
+  cuarentena se borra en la misma transacción y se informa (`INFO`, con su `op_id`); la hija cuyo
+  padre estaba en otra cuarentena entra en cuanto entra la del padre. Sin ninguna, la guarda deja
+  reparar y el contraste repara en esa misma pasada.
+- **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
+  filas son inciertas; toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta Main
+  escribió ahí, y traerla lo desharía aquí); sigue sin entrar (el `UNIQUE` con el que chocaba sigue
+  ahí: `no_entra: …`, con la clase del error); o la tabla tiene columnas que esta versión no tiene. Se
+  vuelve a intentar en la pasada siguiente.
+- **Trabajo acotado**: hasta 50 cuarentenas y 5.000 filas por pasada (la primera se intenta siempre),
+  en peticiones de 500 claves.
+- Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el

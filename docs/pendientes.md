@@ -19,7 +19,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
 | [DO-02](#do-02--la-recuperación-de-una-main-con-mucho-desde-el-último-cierre) | 🟡 | Una Main con mucho desde el último cierre no cabe en la fase 1 de la recuperación | Sin decidir |
 | [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
-| [SYNC-36](#sync-36--lo-que-no-entró-de-la-bajada-se-guarda-para-siempre-con-sus-datos) | 🟡 | Lo que no entró de la bajada se guarda en la Main para siempre, con sus datos personales | Sin decidir |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
@@ -345,16 +344,6 @@ El DO trae la vuelta a cualquier punto de los últimos 30 días, pero no hay for
 fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a un instante, y una copia
 diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
 queda como opción para guardar esas copias.
-
-### SYNC-36 · Lo que no entró de la bajada se guarda para siempre, con sus datos
-
-Un cambio de la nube que no entra en la Main acaba en cuarentena en `_Sync_Failed`, con sus sentencias y
-los datos que escribían (nombres, teléfonos y correos de clientes, notas). Lo apartado de la subida se
-retira a los 30 días; esto no caduca, porque es la barrera del contraste: con una fila en
-`_Sync_Failed` no se repara nada, y sin ella el contraste daría la base por al día y borraría arriba
-lo que la Handy escribió y aquí falta ([sincronizacion.md](arquitectura/sincronizacion.md#recibir)).
-Así que esos datos se quedan en el equipo sin plazo (LEGAL-01, DB-14). Sin decidir cómo sale una
-cuarentena de la bajada, y qué se hace con sus datos mientras tanto.
 
 ### DO-PERDIDA · Un negocio que se queda sin su base en la nube no tiene salida sin soporte
 

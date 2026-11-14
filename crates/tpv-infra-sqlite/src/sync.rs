@@ -1168,7 +1168,7 @@ impl SyncRepository for SqliteSyncRepository {
         // `_Sync_Failed` no se toca: un cambio de la nube en cuarentena es la barrera del contraste
         // (`contraste.rs::Guarda::sin_fallos`). Retirarlo le dejaría borrar arriba lo que la Handy
         // escribió y aquí no entró, o subir lo que la nube ya había borrado. Sólo se vacían sus
-        // datos (`vaciar_cuarentenas_de_bajada`, SYNC-36).
+        // datos (`vaciar_cuarentenas_de_bajada`), y lo cierra el contraste (SYNC-36).
         let w = self.db.write().await;
         w.raw()
             .execute(

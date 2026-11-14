@@ -14,6 +14,10 @@
 //!
 //! Y se repara como siempre, por estado y por el outbox (`sync_reparacion`).
 //!
+//! Antes de comparar, lo que no entró de la bajada y está en cuarentena se trae de la nube por
+//! estado con la foto del resumen (`cuarentenas_bajada.rs`, SYNC-36): con una cuarentena no se
+//! repara nada, y así sale.
+//!
 //! # Las dos fotos tienen que ser del mismo instante
 //!
 //! Comparar la nube de las 9:00 con la base de las 9:01 da por descuadre lo que se ha vendido en
@@ -93,7 +97,7 @@ impl Guarda {
     }
 }
 
-fn leer_marca(foto: &Foto<'_>) -> Result<MarcaLocal, ErrorSql> {
+pub(crate) fn leer_marca(foto: &Foto<'_>) -> Result<MarcaLocal, ErrorSql> {
     Ok(MarcaLocal {
         checkpoint: foto.entero("SELECT Last_Seq FROM _Sync_State WHERE Id = 1;", &[])?.unwrap_or(0),
         // El contador de un `AUTOINCREMENT` no vuelve atrás aunque se vacíe la tabla: es cuántas
@@ -288,7 +292,7 @@ fn resumir_ventana(
 
 /// Ordena las tablas **padres primero**, siguiendo sus claves foráneas, y dice de cada una a qué
 /// tablas apunta. Lo que no se puede ordenar (un ciclo) va detrás, por nombre.
-fn padres_primero(foto: &Foto<'_>, nombres: &[String]) -> Result<Vec<(String, HashSet<String>)>, ErrorSql> {
+pub(crate) fn padres_primero(foto: &Foto<'_>, nombres: &[String]) -> Result<Vec<(String, HashSet<String>)>, ErrorSql> {
     let presentes: HashSet<&str> = nombres.iter().map(String::as_str).collect();
     let mut padres: HashMap<&str, HashSet<String>> = HashMap::new();
     for nombre in nombres {
@@ -1239,6 +1243,13 @@ pub(crate) async fn contrastar(
         || resumen.hasta_seq < marca.checkpoint
         || marca.pendientes != 0
     {
+        return Ok(ContrasteLocal::SeHaMovido);
+    }
+
+    // SYNC-36: lo que no entró de la bajada se trae de la nube por estado, con la foto de este
+    // resumen, antes de mirar nada. Lo que entra cierra su cuarentena, y si no queda ninguna, la
+    // guarda deja reparar en esta misma pasada. Escribe sólo aquí, y no mueve la marca.
+    if reparar && crate::cuarentenas_bajada::resolver(db, resumen.hasta_seq, marca, nube).await?.is_none() {
         return Ok(ContrasteLocal::SeHaMovido);
     }
 

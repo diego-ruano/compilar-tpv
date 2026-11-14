@@ -658,9 +658,9 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 ///
 /// Y lo apartado de la subida, que no se vaciaba nunca: se retira a los 30 días de su último
 /// intento, salvo lo que espera a su reparación (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por
-/// qué 30). Lo que no entró de la bajada se queda, porque es la barrera del contraste con la nube,
-/// pero a los mismos 30 días sin sus datos (SYNC-36): sus sentencias se vacían y queda lo que tocó,
-/// por su clave.
+/// qué 30). Lo que no entró de la bajada se queda, porque es la barrera del contraste con la nube
+/// (la cierra el contraste al traerlo, SYNC-36), pero a los mismos 30 días sin sus datos: sus
+/// sentencias se vacían y queda lo que tocó, por su clave.
 ///
 /// Antes iba colgada del drenado del outbox y solo se ejecutaba si esa pasada había subido algo;
 /// como job tiene disparador propio y corre también en un equipo online y ocioso.

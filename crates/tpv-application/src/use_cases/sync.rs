@@ -133,7 +133,7 @@ pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
 ///
 /// Las de la bajada no se retiran (`SyncRepository::purgar_cuarentenas` dice por qué), pero a los
 /// mismos treinta días se quedan sin sus datos (SYNC-36, [`vaciar_cuarentenas_de_bajada`]): para
-/// entonces se registraron al apartarse, y queda lo que tocaron, por su clave.
+/// entonces se registraron al apartarse y se han intentado traer de la nube en cada contraste.
 pub const RETENCION_CUARENTENAS_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 /// Retira las operaciones apartadas de la subida de más de [`RETENCION_CUARENTENAS_MS`]

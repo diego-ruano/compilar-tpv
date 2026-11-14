@@ -55,7 +55,7 @@ un fallo parcial.
 | `resumen_estadisticas` | 10 min | 4 min | MainOperativa | — | Rehace los días sucios del resumen diario de las estadísticas anteriores a hoy, del más reciente al más antiguo, con 3 s de presupuesto y sólo tras 2 min sin ninguna escritura; lo que no quepa, en la siguiente pasada o al abrir la pantalla ([esquema.md](esquema.md#el-resumen-diario-de-las-estadísticas-17-de-0001)) |
 | `backup_local` | 24 h | 5 min | MainOperativa | — | Copia diaria y purga de restos ([recuperacion.md](recuperacion.md)) |
 | `backfill_historico` | 5 min | 3 min | MainOperativa | `backfill_historico` | Fase 2 de la recuperación |
-| `verificar_nube` | 15 min | 10 min | MainOperativa | (`reparacion_nube` dentro) | Mira si toca contrastar con la nube y, si toca, contrasta y repara ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)). Cuándo toca lo decide su propia regla ([abajo](#cuándo-se-contrasta-con-la-nube-verif-02)); casi todas las vueltas acaban en «no toca» |
+| `verificar_nube` | 15 min | 10 min | MainOperativa | (`reparacion_nube` dentro) | Mira si toca contrastar con la nube y, si toca, trae de la nube lo que no entró de la bajada ([SYNC-36](sincronizacion.md#la-salida-de-una-cuarentena-de-bajada-sync-36)), contrasta y repara ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)). Cuándo toca lo decide su propia regla ([abajo](#cuándo-se-contrasta-con-la-nube-verif-02)); casi todas las vueltas acaban en «no toca» |
 | `cifrado_pii` | 6 h | 60 s | MainOperativa | `cifrado_pii` | Cifra la PII del personal que siga en claro |
 | `updater` (sólo escritorio) | 6 h | 30 s | Siempre | — | Comprueba el feed de actualizaciones y avisa |
 
@@ -122,7 +122,7 @@ pnpm interruptor:lista    -- [--historial]
 
 | Interruptor | Dónde se mira | Qué deja de pasar |
 |---|---|---|
-| `reparacion_nube` | `verificar_nube` | Encolar reparaciones y borrados; se sigue comparando e informando |
+| `reparacion_nube` | `verificar_nube` | Encolar reparaciones y borrados, y traer de la nube lo que no entró de la bajada; se sigue comparando e informando |
 | `backfill_historico` | motor de jobs | Bajar el histórico tras una recuperación |
 | `cifrado_pii` | motor de jobs | Convertir la PII del personal a cifrado |
 | `imagenes` | `lib.rs::drenar_imagenes` | Subir imágenes a R2 |

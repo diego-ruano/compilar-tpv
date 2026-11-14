@@ -1,10 +1,11 @@
-//! SYNC-36 · Lo que no entró de la bajada: sus datos caducan.
+//! SYNC-36 · Lo que no entró de la bajada: sus datos caducan y su cuarentena tiene salida.
 //!
 //! Un cambio de la nube que no se puede aplicar aquí acaba, al quinto intento, en cuarentena
 //! (`_Sync_Failed`, AUD-18), y una fila ahí es la barrera del contraste con la nube: con ella no se
 //! repara nada, porque lo que aquí falta puede ser lo que escribió ese cambio, y repararlo sería
-//! borrar arriba lo que una Handy escribió. Por eso no se retira. Pero sus sentencias llevan lo que
-//! escribía (nombres, teléfonos, notas de clientes), y no tienen por qué quedarse en el equipo.
+//! borrar arriba lo que una Handy escribió. Antes no había salida en la operación normal (sólo una
+//! recuperación vaciaba la tabla): un cambio atascado dejaba al negocio sin reparaciones para
+//! siempre, y sus datos —nombres, teléfonos, notas— en el equipo.
 //!
 //! # Los datos caducan ([`vaciar`])
 //!
@@ -12,16 +13,64 @@
 //! vacían sus sentencias y el texto de su error se queda en su clase (`unique (Comandas.ID_Mesa)`).
 //! La fila sigue: su operación, su `Seq`, sus intentos, sus fechas y las filas que tocó
 //! (`Filas_Json`: tabla y clave primaria, identificadores). Con eso se diagnostica sin datos de nadie
-//! y se sigue sabiendo qué hay que traer de la nube, y la barrera sigue en pie.
+//! y se sigue pudiendo traer de la nube, y la barrera sigue en pie.
+//!
+//! # La salida ([`resolver`])
+//!
+//! En cada pasada del contraste con permiso para reparar, antes de comparar nada, se trae de la nube
+//! **cómo están ahora** las filas que tocó cada cuarentena (`/v1/sync/verificar/por-clave`) y se
+//! aplican aquí por estado. Si todo entra, la cuarentena se cierra en la misma transacción, y si no
+//! queda ninguna la barrera se levanta y el contraste repara en esa misma pasada.
+//!
+//! - **Con la foto del resumen.** El resumen de esa pasada ya garantiza que la nube no tiene nada
+//!   ajeno por encima del checkpoint de esta Main (`por_delante`) ni actividad reciente, y cada
+//!   página por clave tiene que traer su mismo `hasta_seq`; aquí, con el escritor cogido, la marca
+//!   tiene que seguir siendo la de entonces (ni un cambio de la nube aplicado ni una escritura de
+//!   aquí entre medias). Así lo que se trae no es anterior al cambio en cuarentena (su `Seq` no pasa
+//!   del checkpoint) ni posterior a lo que esta Main ha aplicado: un cambio que aún no ha bajado no
+//!   se aplicaría encima otra vez al bajar (un `Stock - 1` dos veces).
+//! - **Sólo se escribe aquí**, por `raw()`, y nada en la nube: lo que se trae ya está arriba.
+//! - **Lo que está arriba** se escribe con `INSERT … ON CONFLICT(clave) DO UPDATE` (nunca `INSERT OR
+//!   REPLACE`, que borraría y dispararía las cascadas). **Lo que no está arriba** sólo se borra aquí
+//!   si el cambio lo borraba: que la nube no tenga una fila que el cambio insertó o cambió dice que
+//!   alguien la borró después, y ese borrado ya bajó o tiene su propia cuarentena. Un borrado aquí
+//!   arrastra sus cascadas, como arriba. Todo va en una transacción con las foráneas aplazadas:
+//!   primero lo que se borra (hijas primero) y después lo que se escribe (padres primero).
+//! - **Una a una, en orden de `Seq`**: la que no entra no frena a las demás, y la hija que fallaba
+//!   porque su padre estaba en otra cuarentena entra en cuanto entra la del padre.
+//! - **Lo que no se puede traer, se queda** y se informa: un cambio cuyas filas no se saben
+//!   (`incierto`), uno que toca lo mismo que algo apartado de la subida (la nube no tiene lo que esta
+//!   Main escribió ahí, y traerla lo desharía aquí), una fila que sigue sin entrar (el `UNIQUE` con el
+//!   que chocaba sigue ahí) o una tabla con columnas que esta versión no tiene. Se vuelve a intentar
+//!   en la pasada siguiente, y cada pasada tiene su tope de trabajo.
+//!
+//! **Reintentar sus sentencias** no sirve de salida: para cuando entraran, lo de detrás ya habría
+//! pasado por esas filas, y aplicarlas encima devolvería una fila a un valor viejo o repetiría un
+//! `Stock - 1`. El estado de la nube, en cambio, ya lleva el cambio y todo lo posterior.
 
-use tpv_application::error::AppResult;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use serde_json::Value as Json;
+use tpv_application::error::{AppError, AppResult};
+use tpv_application::ports::sync::{MarcaLocal, PaginasDelContraste, PedidoPorClave};
+use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::sync::SqlStatement;
 
 use crate::consultas::db_err;
 use crate::db::{Db, Writer};
 use crate::ejecutor::{Connection, Value};
-use crate::filas_tocadas::{self as tocadas, Tocadas};
+use crate::filas_tocadas::{self as tocadas, cita, FilaTocada, Tocadas};
 use crate::util::now_ms;
+
+/// Lo más que se intenta cerrar en una pasada. Lo que no quepa, en la siguiente.
+pub(crate) const MAX_CUARENTENAS_POR_PASADA: usize = 50;
+
+/// Lo más que se trae de la nube en una pasada, en filas. La primera cuarentena se intenta siempre,
+/// aunque toque más (hasta `MAX_FILAS_TOCADAS`).
+pub(crate) const MAX_FILAS_POR_PASADA: usize = 5_000;
+
+/// Claves por petición a `/v1/sync/verificar/por-clave`, como el contraste.
+const CLAVES_POR_PETICION: usize = 500;
 
 /* ===== Los datos caducan ===== */
 
@@ -150,10 +199,499 @@ pub(crate) fn clase_de_error(texto: Option<&str>) -> Option<String> {
     })
 }
 
+/* ===== La salida ===== */
+
+/// Lo que ha hecho una pasada con las cuarentenas de bajada.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Salida {
+    pub resueltas: usize,
+    pub quedan: usize,
+}
+
+/// Una cuarentena de bajada, como se lee.
+struct Cuarentena {
+    op_id: String,
+    seq: i64,
+    sentencias: String,
+    tocadas: Tocadas,
+    sabidas: bool,
+}
+
+/// Los motivos propios por los que una cuarentena que se intenta cerrar se queda.
+const MOTIVOS: [&str; 6] = [
+    "la_nube_no_la_ha_traido",
+    "la_nube_no_la_sabe_buscar",
+    "la_clave_no_es_la_de_aqui",
+    "clave_ilegible",
+    "columnas_desconocidas",
+    "valor_binario",
+];
+
+/// Por qué una cuarentena se queda. Va a la telemetría: no lleva datos de nadie (lo que dice SQLite,
+/// en su clase).
+fn motivo_de(e: &AppError) -> String {
+    let texto = e.to_string();
+    if MOTIVOS.contains(&texto.as_str()) {
+        return texto;
+    }
+    format!("no_entra: {}", clase_de_error(Some(&texto)).unwrap_or_else(|| "otro".into()))
+}
+
+/// La salida de las cuarentenas de bajada, con la foto del resumen de esta pasada del contraste
+/// (`hasta_seq`) y la marca de esta base de antes de pedirlo. `None` si una de las dos bases se ha
+/// movido: no se ha escrito nada. Ver el encabezado.
+pub(crate) async fn resolver(
+    db: &Db,
+    hasta_seq: i64,
+    marca: MarcaLocal,
+    nube: &dyn PaginasDelContraste,
+) -> AppResult<Option<Salida>> {
+    let (mut cuarentenas, total) = leer_cuarentenas(db).await?;
+    if cuarentenas.is_empty() {
+        return Ok(Some(Salida::default()));
+    }
+
+    // Las que no saben qué tocan y aún tienen sus sentencias se miran otra vez: la tabla que esta
+    // versión no tenía puede tenerla ya.
+    {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for c in cuarentenas.iter_mut().filter(|c| c.tocadas.incierto) {
+            let sentencias: Vec<SqlStatement> = serde_json::from_str(&c.sentencias).unwrap_or_default();
+            if sentencias.is_empty() {
+                continue;
+            }
+            let ahora = tocadas::de_un_cambio(conn, &sentencias).await;
+            if !ahora.incierto || !c.sabidas {
+                conn.execute(
+                    "UPDATE _Sync_Failed SET Filas_Json = ?2 WHERE Op_Id = ?1 AND Quarantined = 1;",
+                    vec![Value::Text(c.op_id.clone()), Value::Text(ahora.a_json())],
+                )
+                .await
+                .map_err(db_err)?;
+                c.tocadas = ahora;
+            }
+        }
+    }
+
+    let claves = claves_primarias(db).await?;
+    let subida = lo_apartado_de_la_subida(db, &claves).await?;
+
+    // Las que se intentan en esta pasada, y lo que hay que pedir de cada tabla.
+    let mut intentadas: Vec<&Cuarentena> = Vec::new();
+    let mut quedan: Vec<(&Cuarentena, String)> = Vec::new();
+    let mut pedir: BTreeMap<String, Vec<Vec<Json>>> = BTreeMap::new();
+    let mut pedidas: HashSet<String> = HashSet::new();
+    for c in &cuarentenas {
+        if c.seq > hasta_seq {
+            // La foto de la nube es anterior al cambio: con ella no se puede cerrar.
+            quedan.push((c, "anterior_al_cambio".into()));
+            continue;
+        }
+        if c.tocadas.incierto {
+            quedan.push((c, "filas_inciertas".into()));
+            continue;
+        }
+        if choca_con_la_subida(&c.tocadas, &subida) {
+            quedan.push((c, "choca_con_lo_apartado_de_la_subida".into()));
+            continue;
+        }
+        let nuevas: Vec<&FilaTocada> = c
+            .tocadas
+            .filas
+            .iter()
+            .filter(|f| !crate::sync::no_es_tabla_de_negocio(&f.tabla))
+            .filter(|f| tocadas::canonica_de(f).is_some_and(|k| !pedidas.contains(&k)))
+            .collect();
+        if !intentadas.is_empty() && pedidas.len() + nuevas.len() > MAX_FILAS_POR_PASADA {
+            break;
+        }
+        for f in nuevas {
+            if let Some(k) = tocadas::canonica_de(f) {
+                pedidas.insert(k);
+                pedir.entry(f.tabla.clone()).or_default().push(f.clave.clone());
+            }
+        }
+        intentadas.push(c);
+    }
+
+    let mut arriba: HashMap<String, Traida> = HashMap::new();
+    for (tabla, claves_de_la_tabla) in &pedir {
+        match traer(nube, tabla, claves_de_la_tabla, claves.get(tabla).map(Vec::as_slice).unwrap_or_default(), hasta_seq).await? {
+            Some(t) => {
+                arriba.insert(tabla.clone(), t);
+            }
+            None => return Ok(None),
+        }
+    }
+
+    // Con el escritor cogido: la base tiene que seguir como estaba al pedir el resumen.
+    let w = db.write().await;
+    let conn: &Connection = w.raw();
+    let (ahora, historico_completo) = conn
+        .foto(|foto| {
+            let marca = crate::contraste::leer_marca(foto)?;
+            let pendiente = foto.entero("SELECT COUNT(*) FROM _Backfill_Historico WHERE Completada = 0;", &[])?.unwrap_or(0);
+            Ok((marca, pendiente == 0))
+        })
+        .await
+        .map_err(db_err)?;
+    if ahora != marca || !historico_completo {
+        return Ok(None);
+    }
+    let tablas: Vec<String> = pedir.keys().cloned().collect();
+    let orden: Vec<String> = conn
+        .foto(move |foto| crate::contraste::padres_primero(foto, &tablas))
+        .await
+        .map_err(db_err)?
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+
+    let mut resueltas = 0usize;
+    for c in &intentadas {
+        match aplicar(conn, c, &arriba, &orden, &claves).await {
+            Ok(true) => {
+                resueltas += 1;
+                tracing::info!(
+                    target: "tpv::sync",
+                    op_id = %c.op_id,
+                    seq = c.seq,
+                    filas = c.tocadas.filas.len(),
+                    "cuarentena de bajada cerrada: lo que tocó se ha traído de la nube (SYNC-36)"
+                );
+            }
+            // Ya no estaba: la ha cerrado otro camino.
+            Ok(false) => {}
+            Err(e) => quedan.push((c, motivo_de(&e))),
+        }
+    }
+    for (c, motivo) in &quedan {
+        tracing::warn!(
+            target: "tpv::sync",
+            op_id = %c.op_id,
+            seq = c.seq,
+            motivo = %motivo,
+            "cuarentena de bajada que no se puede cerrar todavía (SYNC-36)"
+        );
+    }
+    Ok(Some(Salida { resueltas, quedan: total - resueltas }))
+}
+
+/// Las primeras cuarentenas de bajada, por orden, y cuántas hay.
+async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
+    let r = db.read().await;
+    let total = r
+        .conn()
+        .foto(|foto| foto.entero("SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 1;", &[]))
+        .await
+        .map_err(db_err)?
+        .unwrap_or(0) as usize;
+    let mut filas = r
+        .conn()
+        .query(
+            "SELECT Op_Id, Seq, Statements_Json, Filas_Json FROM _Sync_Failed \
+              WHERE Quarantined = 1 ORDER BY Seq LIMIT ?1;",
+            vec![Value::Integer(MAX_CUARENTENAS_POR_PASADA as i64)],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut salida = Vec::new();
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        let Ok(Value::Text(op_id)) = f.get_value(0) else { continue };
+        let seq = match f.get_value(1) {
+            Ok(Value::Integer(n)) => n,
+            _ => continue,
+        };
+        let sentencias = match f.get_value(2) {
+            Ok(Value::Text(t)) => t,
+            _ => String::new(),
+        };
+        let (tocadas, sabidas) = match f.get_value(3) {
+            Ok(Value::Text(t)) => (Tocadas::de_json(&t), true),
+            _ => (Tocadas::incierta(Vec::new()), false),
+        };
+        salida.push(Cuarentena { op_id, seq, sentencias, tocadas, sabidas });
+    }
+    Ok((salida, total))
+}
+
+/// Las columnas de la clave primaria de cada tabla de aquí.
+async fn claves_primarias(db: &Db) -> AppResult<HashMap<String, Vec<String>>> {
+    let r = db.read().await;
+    r.conn()
+        .foto(|foto| {
+            let mut claves: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+            for f in foto.filas(
+                "SELECT m.name, p.name, p.pk FROM sqlite_master m JOIN pragma_table_info(m.name) p \
+                  WHERE m.type = 'table' AND p.pk > 0;",
+                &[],
+            )? {
+                if let (Some(Value::Text(t)), Some(Value::Text(c)), Some(Value::Integer(pk))) = (f.first(), f.get(1), f.get(2)) {
+                    claves.entry(t.clone()).or_default().push((*pk, c.clone()));
+                }
+            }
+            Ok(claves
+                .into_iter()
+                .map(|(t, mut cs)| {
+                    cs.sort();
+                    (t, cs.into_iter().map(|(_, c)| c).collect())
+                })
+                .collect())
+        })
+        .await
+        .map_err(db_err)
+}
+
+/// Lo que toca lo apartado de la subida: lo que esta Main escribió y la nube no tiene.
+async fn lo_apartado_de_la_subida(db: &Db, claves: &HashMap<String, Vec<String>>) -> AppResult<tocadas::Estaticas> {
+    let r = db.read().await;
+    let mut filas = r
+        .conn()
+        .query("SELECT Statements_Json FROM _Sync_Outbox WHERE Cuarentena = 1;", ())
+        .await
+        .map_err(db_err)?;
+    let mut todas = tocadas::Estaticas { claves: HashSet::new(), tablas: HashSet::new() };
+    let clave_de = |t: &str| claves.get(t).cloned().unwrap_or_default();
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        let sentencias: Vec<SqlStatement> = match f.get_value(0) {
+            Ok(Value::Text(t)) => serde_json::from_str(&t).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let e = tocadas::estaticas(&sentencias, &clave_de);
+        todas.claves.extend(e.claves);
+        todas.tablas.extend(e.tablas);
+    }
+    Ok(todas)
+}
+
+fn choca_con_la_subida(t: &Tocadas, subida: &tocadas::Estaticas) -> bool {
+    subida.tablas.contains("*")
+        || t.tablas.iter().any(|x| subida.tablas.contains(x))
+        || t.filas.iter().any(|f| subida.tablas.contains(&f.tabla) || tocadas::canonica_de(f).is_some_and(|k| subida.claves.contains(&k)))
+}
+
+/// Lo que se ha traído de una tabla.
+struct Traida {
+    columnas: Vec<String>,
+    /// Por la forma canónica de su clave (`filas_tocadas::canonica_de`).
+    filas: HashMap<String, Vec<Json>>,
+    /// La nube no ha sabido buscarla: las cuarentenas que la tocan se quedan.
+    sin_buscar: bool,
+}
+
+/// Trae de la nube las filas de `tabla` con esas claves. `None` si la nube se ha movido desde el
+/// resumen (otro `hasta_seq`).
+async fn traer(
+    nube: &dyn PaginasDelContraste,
+    tabla: &str,
+    pedidas: &[Vec<Json>],
+    clave: &[String],
+    hasta_seq: i64,
+) -> AppResult<Option<Traida>> {
+    let mut traida = Traida { columnas: Vec::new(), filas: HashMap::new(), sin_buscar: false };
+    if clave.is_empty() {
+        // Sin clave aquí, no se sabe qué fila es cada una.
+        traida.sin_buscar = true;
+        return Ok(Some(traida));
+    }
+    for tanda in pedidas.chunks(CLAVES_POR_PETICION) {
+        let mut pendientes: Vec<Vec<Json>> = tanda.to_vec();
+        loop {
+            let pagina = match nube.por_clave(PedidoPorClave { tabla: tabla.to_owned(), claves: pendientes.clone() }).await {
+                Ok(p) => p,
+                // La nube no la sabe buscar (otra clave arriba): se queda sin traer, y con ella las
+                // cuarentenas que la tocan. Cualquier otro fallo es de la pasada.
+                Err(e) if e.code() == ErrorCode::Validation => {
+                    traida.sin_buscar = true;
+                    return Ok(Some(traida));
+                }
+                Err(e) => return Err(e),
+            };
+            if pagina.hasta_seq != hasta_seq {
+                return Ok(None);
+            }
+            if pagina.tabla != tabla {
+                return Err(AppError::external("las filas por clave de la nube son de otra tabla"));
+            }
+            if !pagina.filas.is_empty() {
+                if traida.columnas.is_empty() {
+                    traida.columnas = pagina.columnas.clone();
+                } else if traida.columnas != pagina.columnas {
+                    return Ok(None);
+                }
+            }
+            let posiciones: Option<Vec<usize>> =
+                clave.iter().map(|k| traida.columnas.iter().position(|c| c.eq_ignore_ascii_case(k))).collect();
+            let antes = traida.filas.len();
+            for fila in pagina.filas {
+                let Some(posiciones) = posiciones.as_ref() else {
+                    traida.sin_buscar = true;
+                    return Ok(Some(traida));
+                };
+                let valores: Vec<Json> = posiciones.iter().filter_map(|i| fila.get(*i).cloned()).collect();
+                match crate::filas_tocadas::canonica_de(&FilaTocada { tabla: tabla.to_owned(), clave: valores, borrada: false }) {
+                    Some(k) => {
+                        traida.filas.insert(k, fila);
+                    }
+                    None => {
+                        traida.sin_buscar = true;
+                        return Ok(Some(traida));
+                    }
+                }
+            }
+            if !pagina.cortada {
+                break;
+            }
+            // Lo que no ha cabido se vuelve a pedir; una página cortada trae al menos una fila.
+            if traida.filas.len() == antes {
+                return Err(AppError::external("las filas por clave de la nube no avanzan"));
+            }
+            pendientes.retain(|k| {
+                crate::filas_tocadas::canonica_de(&FilaTocada { tabla: tabla.to_owned(), clave: k.clone(), borrada: false })
+                    .is_some_and(|c| !traida.filas.contains_key(&c))
+            });
+            if pendientes.is_empty() {
+                break;
+            }
+        }
+    }
+    Ok(Some(traida))
+}
+
+/// El valor de una celda que llega de la nube. Un blob (`{"blob": …}`) no se sabe escribir.
+fn celda(v: &Json) -> Option<Value> {
+    match v {
+        Json::Null => Some(Value::Null),
+        Json::Bool(b) => Some(Value::Integer(i64::from(*b))),
+        Json::Number(n) => n.as_i64().map(Value::Integer).or_else(|| n.as_f64().map(Value::Real)),
+        Json::String(s) => Some(Value::Text(s.clone())),
+        _ => None,
+    }
+}
+
+/// Aplica aquí lo que se ha traído de una cuarentena y la cierra, en una transacción. `false` si ya
+/// no estaba en cuarentena. Un `Err` deja todo como estaba.
+async fn aplicar(
+    conn: &Connection,
+    c: &Cuarentena,
+    arriba: &HashMap<String, Traida>,
+    orden: &[String],
+    claves: &HashMap<String, Vec<String>>,
+) -> AppResult<bool> {
+    // Lo que no se ha podido traer, ni se intenta.
+    for f in &c.tocadas.filas {
+        if crate::sync::no_es_tabla_de_negocio(&f.tabla) {
+            continue;
+        }
+        let Some(t) = arriba.get(&f.tabla) else {
+            return Err(AppError::internal("la_nube_no_la_ha_traido"));
+        };
+        if t.sin_buscar {
+            return Err(AppError::internal("la_nube_no_la_sabe_buscar"));
+        }
+        // Una clave que no es la de la tabla de aquí no dice qué fila es.
+        if claves.get(&f.tabla).is_none_or(|k| k.is_empty() || k.len() != f.clave.len()) {
+            return Err(AppError::internal("la_clave_no_es_la_de_aqui"));
+        }
+    }
+
+    let posicion = |tabla: &str| orden.iter().position(|t| t == tabla).unwrap_or(usize::MAX);
+    let mut filas: Vec<&FilaTocada> =
+        c.tocadas.filas.iter().filter(|f| !crate::sync::no_es_tabla_de_negocio(&f.tabla)).collect();
+    filas.sort_by_key(|f| posicion(&f.tabla));
+
+    conn.transaccion(async {
+        let mut sigue = conn
+            .query("SELECT 1 FROM _Sync_Failed WHERE Op_Id = ?1 AND Quarantined = 1;", vec![Value::Text(c.op_id.clone())])
+            .await
+            .map_err(db_err)?;
+        if sigue.next().await.map_err(db_err)?.is_none() {
+            return Ok(false);
+        }
+        drop(sigue);
+
+        let mut columnas_de: HashMap<&str, Vec<String>> = HashMap::new();
+        // Lo que el cambio borraba y arriba ya no está: hijas primero.
+        for f in filas.iter().rev() {
+            let traida = &arriba[&f.tabla];
+            let k = tocadas::canonica_de(f).unwrap_or_default();
+            if !f.borrada || traida.filas.contains_key(&k) {
+                continue;
+            }
+            let clave = claves.get(&f.tabla).cloned().unwrap_or_default();
+            if clave.len() != f.clave.len() {
+                return Err(AppError::internal("la_clave_no_es_la_de_aqui"));
+            }
+            let donde = clave.iter().enumerate().map(|(i, c)| format!("{} = ?{}", cita(c), i + 1)).collect::<Vec<_>>().join(" AND ");
+            let args = f.clave.iter().map(celda).collect::<Option<Vec<_>>>().ok_or_else(|| AppError::internal("clave_ilegible"))?;
+            conn.execute(&format!("DELETE FROM {} WHERE {donde};", cita(&f.tabla)), args).await.map_err(db_err)?;
+        }
+        // Lo que está arriba, como está: padres primero.
+        for f in &filas {
+            let traida = &arriba[&f.tabla];
+            let k = tocadas::canonica_de(f).unwrap_or_default();
+            let Some(fila) = traida.filas.get(&k) else { continue };
+            let locales = match columnas_de.get(f.tabla.as_str()) {
+                Some(c) => c.clone(),
+                None => {
+                    let c = columnas_locales(conn, &f.tabla).await?;
+                    columnas_de.insert(&f.tabla, c.clone());
+                    c
+                }
+            };
+            if traida.columnas.iter().any(|c| !locales.iter().any(|l| l.eq_ignore_ascii_case(c))) {
+                return Err(AppError::internal("columnas_desconocidas"));
+            }
+            let clave = claves.get(&f.tabla).cloned().unwrap_or_default();
+            let valores = fila.iter().map(celda).collect::<Option<Vec<_>>>().ok_or_else(|| AppError::internal("valor_binario"))?;
+            conn.execute(&escribir_como_esta(&f.tabla, &traida.columnas, &clave), valores).await.map_err(db_err)?;
+        }
+        conn.execute(
+            "DELETE FROM _Sync_Failed WHERE Op_Id = ?1 AND Quarantined = 1;",
+            vec![Value::Text(c.op_id.clone())],
+        )
+        .await
+        .map_err(db_err)?;
+        Ok(true)
+    })
+    .await
+}
+
+async fn columnas_locales(conn: &Connection, tabla: &str) -> AppResult<Vec<String>> {
+    let mut filas = conn
+        .query("SELECT name FROM pragma_table_info(?1) ORDER BY cid;", vec![Value::Text(tabla.to_owned())])
+        .await
+        .map_err(db_err)?;
+    let mut salida = Vec::new();
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        if let Ok(Value::Text(n)) = f.get_value(0) {
+            salida.push(n);
+        }
+    }
+    Ok(salida)
+}
+
+/// La sentencia que deja una fila como está en la nube: `INSERT … ON CONFLICT(clave) DO UPDATE`.
+/// ⚠️ Nunca `INSERT OR REPLACE`: borraría la fila y dispararía las cascadas que la apuntan.
+fn escribir_como_esta(tabla: &str, columnas: &[String], clave: &[String]) -> String {
+    let lista = columnas.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
+    let marcas = (1..=columnas.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    let objetivo = clave.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
+    let asignaciones = columnas
+        .iter()
+        .filter(|c| !clave.iter().any(|k| k.eq_ignore_ascii_case(c)))
+        .map(|c| format!("{} = excluded.{}", cita(c), cita(c)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let accion = if asignaciones.is_empty() { "DO NOTHING".to_owned() } else { format!("DO UPDATE SET {asignaciones}") };
+    format!("INSERT INTO {} ({lista}) VALUES ({marcas}) ON CONFLICT({objetivo}) {accion};", cita(tabla))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filas_tocadas::FilaTocada;
     use std::sync::Arc;
 
     async fn base(nombre: &str) -> Arc<Db> {
@@ -248,5 +786,17 @@ mod tests {
 
         // Una vez.
         assert_eq!(vaciar(&db, 1000).await.unwrap(), 0);
+    }
+
+    #[test]
+    fn una_fila_se_escribe_como_esta_sin_reemplazarla() {
+        let sql = escribir_como_esta("Mesas", &["ID_Mesa".into(), "Capacidad".into()], &["ID_Mesa".into()]);
+        assert_eq!(
+            sql,
+            "INSERT INTO \"Mesas\" (\"ID_Mesa\", \"Capacidad\") VALUES (?1, ?2) ON CONFLICT(\"ID_Mesa\") DO UPDATE SET \"Capacidad\" = excluded.\"Capacidad\";"
+        );
+        let sql = escribir_como_esta("Producto_Alergenos", &["ID_Producto".into(), "ID_Alergeno".into()], &["ID_Producto".into(), "ID_Alergeno".into()]);
+        assert!(sql.ends_with("DO NOTHING;"), "{sql}");
+        assert!(!sql.contains("REPLACE"));
     }
 }

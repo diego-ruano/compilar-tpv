@@ -180,7 +180,13 @@ pub trait SyncRepository: Send + Sync {
     /// en `_Sync_Failed` (AUD-18) ni con histórico por bajar (VERIF-01): entonces se compara y se
     /// informa, y lo que habría que tocar sale como `aplazado`.
     ///
-    /// Con `reparar = false` (interruptor `reparacion_nube`, PROD-06) sólo compara: no encola nada.
+    /// SYNC-36 · Antes de comparar, lo que no entró de la bajada y está en cuarentena se trae de la
+    /// nube por estado, con la foto de este resumen (`/v1/sync/verificar/por-clave`): lo que entra
+    /// aquí cierra su cuarentena, y sin ninguna se repara en la misma pasada. Sólo escribe en esta
+    /// base.
+    ///
+    /// Con `reparar = false` (interruptor `reparacion_nube`, PROD-06) sólo compara: no encola ni
+    /// trae nada.
     async fn contrastar_con_la_nube(
         &self,
         resumen: ResumenNube,
@@ -205,7 +211,8 @@ pub trait SyncRepository: Send + Sync {
     /// Las de la bajada (`_Sync_Failed`) no se retiran: un cambio de la nube que no entró en esta
     /// base es lo que le impide al contraste borrar arriba lo que aquí falta o subir lo que la nube
     /// borró (`contraste.rs::Guarda::sin_fallos`). Sin él, esta Main parecería al día sin estarlo.
-    /// Sólo se vacían sus datos ([`Self::vaciar_cuarentenas_de_bajada`], SYNC-36).
+    /// Sólo se vacían sus datos ([`Self::vaciar_cuarentenas_de_bajada`]), y salen cuando el
+    /// contraste trae de la nube lo que tocaron (SYNC-36).
     ///
     /// Por defecto no retira nada: los dobles de los tests no tienen cuarentenas.
     async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<u64> {

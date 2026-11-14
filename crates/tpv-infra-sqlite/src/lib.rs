@@ -78,8 +78,8 @@ pub mod reservas_web_avisos;
 pub mod stats;
 pub mod stock_alertas;
 pub mod sync;
-// SYNC-36: las filas que toca un cambio de la nube que no entra en esta base, y la caducidad de
-// los datos de su cuarentena.
+// SYNC-36: las filas que toca un cambio de la nube que no entra en esta base, y lo que se hace
+// con su cuarentena: sus datos caducan y el contraste la cierra trayéndolas de la nube.
 pub(crate) mod filas_tocadas;
 pub(crate) mod cuarentenas_bajada;
 // El contraste con la nube por resúmenes: el lado de la Main (`/v1/sync/verificar/*`).
