@@ -84,6 +84,8 @@ pub(crate) mod filas_tocadas;
 pub(crate) mod cuarentenas_bajada;
 // El contraste con la nube por resúmenes: el lado de la Main (`/v1/sync/verificar/*`).
 pub(crate) mod contraste;
+// SYNC-29: el orden de la nube manda. Lo que su orden dejó de otra forma aquí se trae de ella.
+pub(crate) mod convergencia;
 pub mod sync_reparacion;
 pub mod tareas;
 pub mod tickets;

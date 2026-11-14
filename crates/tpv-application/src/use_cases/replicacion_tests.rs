@@ -20,6 +20,8 @@ struct FakeRepo {
     // apartadas (`Cuarentena = 1`: siguen en el outbox, fuera de lo pendiente) y los rechazos
     // contados de cada operación.
     confirmaciones: Mutex<Vec<Vec<(String, i64)>>>, apartadas: Mutex<Vec<String>>, rechazos: Mutex<HashMap<String, i64>>,
+    // SYNC-29: lo que contesta cada vuelta de la convergencia y lo que había por subir en cada una.
+    convergencias: Mutex<VecDeque<crate::ports::sync::Convergencia>>, al_converger: Mutex<Vec<usize>>,
 }
     #[async_trait]
     impl SyncRepository for FakeRepo {
@@ -109,6 +111,16 @@ struct FakeRepo {
             _: bool,
         ) -> AppResult<crate::ports::sync::ContrasteLocal> {
             Ok(crate::ports::sync::ContrasteLocal::Hecho(ResultadoVerificacion::default()))
+        }
+        /// La de verdad pide las filas a la nube por clave: aquí se pide una cuando trae algo.
+        async fn converger_con_la_nube(&self, nube: &dyn crate::ports::sync::PaginasDelContraste) -> AppResult<crate::ports::sync::Convergencia> {
+            let por_subir = { let apartadas = self.apartadas.lock().unwrap(); self.pending.lock().unwrap().iter().filter(|e| !apartadas.contains(&e.op_id)).count() };
+            self.al_converger.lock().unwrap().push(por_subir);
+            let r = self.convergencias.lock().unwrap().pop_front().unwrap_or_default();
+            if matches!(r, crate::ports::sync::Convergencia::Hecha { .. }) {
+                nube.por_clave(crate::ports::sync::PedidoPorClave { tabla: "Reservas".into(), claves: vec![vec![json!("r1")]] }).await?;
+            }
+            Ok(r)
         }
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())
@@ -779,4 +791,62 @@ async fn en_el_borde_se_pone_al_dia_y_sin_purgado_hasta_solo_falla_la_recuperaci
     let n=nube(vec![sin_marca(),json!({"items":[],"nextSince":11,"highWater":11})]);
     assert_eq!(catch_up(&ctx,&n,false).await.unwrap().high_water,11);
     assert_eq!(*ctx.repo.aplicados.lock().unwrap(),vec![11]);
+}
+
+// ── SYNC-29 · lo que la nube ordenó de otra forma se trae de ella ───────────
+
+fn traida()->crate::ports::sync::Convergencia {
+    crate::ports::sync::Convergencia::Hecha{escritas:vec![SqlStatement{sql:"INSERT INTO \"Reservas\" (\"ID_Reserva\", \"Estado\") VALUES (?1, ?2) ON CONFLICT(\"ID_Reserva\") DO UPDATE SET \"Estado\" = excluded.\"Estado\";".into(),args:vec![json!("r1"),json!("CANCELADA")]}],quedan:false}
+}
+/// Lo que contesta `/v1/sync/verificar/por-clave` (`verificar.ts::filasPorClave`).
+fn por_clave()->Value {json!({"ok":true,"tabla":"Reservas","columnas":["ID_Reserva","Estado"],"filas":[["r1","CANCELADA"]],"cortada":false,"hasta_seq":1})}
+
+#[tokio::test]
+async fn con_todo_subido_se_trae_de_la_nube_lo_que_su_orden_dejo_distinto_y_se_avisa_a_la_interfaz() {
+    let ctx=disponible(contexto(vec![op("a")]));ctx.repo.convergencias.lock().unwrap().push_back(traida());
+    let n=nube(vec![pagina(vec![],0),por_clave()]);
+    let mut c=conversacion(vec![Some(acuse(vec![ok("a",1)]))]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    // Una vez, con lo de aquí ya subido; se pide por clave a la nube por REST y lo escrito refresca
+    // la interfaz.
+    assert_eq!(*ctx.repo.al_converger.lock().unwrap(),vec![0]);
+    assert_eq!(*n.calls.lock().unwrap(),["/v1/sync/changes","/v1/sync/verificar/por-clave"]);
+    assert_eq!(*ctx.avisos.lock().unwrap(),1);
+    // Por el socket no sale nada más: nunca se escribe en la nube desde aquí.
+    assert_eq!(c.log,[">apply_lote","<apply_lote_ack",">recovery_ready"]);
+}
+
+#[tokio::test]
+async fn con_algo_por_subir_no_se_mira() {
+    // La nube no tiene todavía lo de aquí: lo que traiga no lo lleva.
+    let ctx=disponible(contexto(vec![op("a")]));
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![Some(acuse(vec![pasajera("a")])),Some(json!({"type":"main_online"}))]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert!(ctx.repo.al_converger.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn una_vuelta_aplazada_no_se_repite_en_cada_mensaje_y_vuelve_a_su_hora() {
+    let ctx=disponible(contexto(vec![]));ctx.repo.convergencias.lock().unwrap().push_back(crate::ports::sync::Convergencia::Aplazada);
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut entrantes=vec![estado()];
+    entrantes.extend((0..20).map(|_|Some(json!({"type":"main_online"}))));
+    let mut s=socket(entrantes);
+    assert!(ejecutar(&ctx,&n,&mut s,false).await.is_err());
+    assert_eq!(ctx.repo.al_converger.lock().unwrap().len(),1,"una, no una por mensaje");
+    // Sin mensajes, el socket no se espera los 30 s: la vuelta aplazada se repite a los 2.
+    assert!(s.esperas[0]<=Duration::from_secs(2)&&s.esperas[0]>Duration::from_secs(1),"{:?}",s.esperas);
+}
+
+#[tokio::test]
+async fn si_la_nube_no_contesta_la_sesion_sigue() {
+    // Pedir por clave falla (la nube no tiene respuesta preparada): se vuelve a intentar luego y lo
+    // demás del socket se sigue atendiendo.
+    let ctx=disponible(contexto(vec![]));ctx.repo.convergencias.lock().unwrap().push_back(traida());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(),Some(json!({"type":"reservas_web"}))]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket, no por la nube");
+    assert_eq!(*ctx.avisos.lock().unwrap(),0);
+    assert_eq!(*ctx.recogidas.lock().unwrap(),2,"la de conectar y la del aviso");
 }

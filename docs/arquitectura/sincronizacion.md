@@ -30,6 +30,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra; sus datos caducan y el contraste lo trae de la nube por estado (SYNC-36) |
+| El orden de la nube | `crates/tpv-infra-sqlite/src/convergencia.rs` | Lo que su orden dejó de otra forma aquí (una Handy escribió encima de algo de la Main sin subir) se apunta al aplicarlo y se trae de la nube en cuanto lo de aquí está subido (SYNC-29) |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
 | Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en la base del negocio. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
@@ -514,9 +515,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     tiene, una restricción, una clave foránea) no se arregla esperando. Mientras tanto el socket se
     sigue atendiendo, pero lo que llega en vivo no se aplica: lo trae después el catch-up desde el
     checkpoint, que es la fuente de verdad. Si la sesión se cae, la siguiente empieza por él.
-  - El reintento no se coordina con lo que el personal escribe aquí durante la espera: si toca la
-    misma fila, el cambio remoto la pisa al entrar. Es el riesgo aceptado SYNC-29
-    ([pendientes](../pendientes.md)), y la espera lo agranda en unos segundos.
+  - Lo que el personal escribe aquí durante la espera no sube hasta que el cambio entra o pasa a
+    cuarentena: si toca la misma fila, el cambio entra encima, aquí delante y en la nube detrás. Es
+    el caso de cualquier cambio que llega con algo de aquí sin ordenar en su tabla, y la fila se trae
+    después de la nube ([abajo](#el-orden-de-la-nube-manda-sync-29)).
   - Al quinto intento (`MAX_APPLY_ATTEMPTS`) pasa a **cuarentena** (`Quarantined = 1`, con lo
     necesario para diagnosticarlo): el checkpoint pasa por encima y la bajada sigue en orden desde ahí.
     El intento contado, el marcador de `_Sync_Applied_Ops`, la marca de cuarentena y el checkpoint van
@@ -611,6 +613,49 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   ven al reconectar; y el emisor que reintenta recibe el resultado guardado y provoca otra difusión
   (SYNC-03). Un lote reenviado difunde otra vez, en su sitio y antes que lo nuevo, lo que encuentra
   ya aplicado.
+
+### El orden de la nube manda (SYNC-29)
+
+La Main aplica lo que baja aunque tenga escrituras suyas sin ordenar todavía. Si una Handy toca una
+fila en los segundos que van de que la Main la escribe a que la sube, en la nube la escritura de la
+Main va **detrás** del cambio (llegó después) y aquí fue **delante** (el cambio se aplicó encima), y
+el eco de la propia se descarta por idempotencia: la Main cancela una reserva, una Handy la sienta a la
+vez, y la nube —y la agenda de la web— la tienen cancelada mientras aquí sigue sentada. El orden que
+vale es el de la nube, que es el que ven las Handy y la agenda, y **la Main se ajusta a él en
+segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
+
+- **Al aplicar un cambio se apunta lo que puede quedar distinto.** Si esta Main tiene escrituras suyas
+  que la nube todavía no ha ordenado —en el outbox sin apartar (por subir o sin acuse), o confirmadas
+  con un `Seq` posterior al del cambio y cuyo eco no ha vuelto— en alguna de las tablas que escribe el
+  cambio, las filas que toca en esas tablas se apuntan en `_Sync_Por_Contrastar`, en la misma
+  transacción que lo aplica. Qué filas toca lo dice el simulacro de las cuarentenas de bajada
+  (`filas_tocadas.rs`), con la base de justo antes; si no lo sabe, se registra y no se apunta nada.
+  Lo de aquí que se escribe después del cambio va detrás en los dos sitios y no cuenta. No se apunta
+  lo fiscal (`Registros_Facturacion`, `Serie_Facturacion`: lo emite sólo la Main), ni más de 10.000
+  filas.
+- **Con todo subido, se traen de la nube.** El motor de réplica, con el outbox vacío (cada 3 s como
+  mucho), pide esas filas a la nube por su clave (`/v1/sync/verificar/por-clave`, hasta 500 por
+  vuelta) y sólo sigue si cada página trae como final del log (`hasta_seq`) el checkpoint de esta Main:
+  así lo que se trae lleva todo lo que esta Main ha aplicado y nada que no haya aplicado (un cambio
+  posterior no se le aplicaría encima otra vez). Con el escritor cogido se vuelve a mirar que el
+  checkpoint sea ése y que no haya nada por subir, y se escribe aquí, por `raw()`: lo que está arriba
+  y aquí es distinto, con `INSERT … ON CONFLICT(clave) DO UPDATE`, padres primero; lo que arriba ya no
+  está, se borra aquí, hijas primero. Si algo se ha movido, la vuelta acaba sin escribir nada
+  (`Aplazada`) y se repite a los 2, 4, 8… segundos (hasta un minuto), también si la nube no contesta;
+  la sesión sigue. Lo escrito se avisa a la interfaz como un cambio más.
+- **Lo que no se trae, se deja**, con su motivo en el registro: una fila que escribió algo apartado de
+  la subida (lo que esta Main escribió y la nube no aceptó: lo sube su reparación, y traer lo de la
+  nube lo desharía aquí), un borrado cuyas cascadas llegan a algo apartado, una tabla con columnas
+  que esta versión no tiene o que la nube no sabe buscar. Lo cobrado no se borra desde la nube: si un
+  borrado se llevara un cobro por sus cascadas, no se hace. Una fila que no entra aquí (una clave
+  foránea, un `UNIQUE`) se intenta en cinco vueltas y se deja.
+- **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
+  vacía lo apuntado.
+- **El contraste diario no lo deshace**: una fila distinta que está apuntada no se sube; la trae la
+  convergencia, y la pasada se informa como `aplazado` (abajo).
+
+Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir otra
+(un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.
 
 ### Reparar una divergencia (SYNC-22, SYNC-24, SYNC-25)
 
@@ -713,8 +758,13 @@ fija que los dos SQLite resumen igual las mismas filas.
 - Si algo se mueve, la pasada se deja sin tocar nada y sin informar (`Contraste::Aplazado`): no es un
   fallo, y el job vuelve a los diez minutos.
 
-**Qué se repara.** La Main es el escritor único: una fila **distinta** se repara mandando cómo está
-aquí, una que **falta arriba** se sube por estado y una que **sobra arriba** se borra, porque con las
+**Qué se repara.** Una fila **distinta** se repara mandando cómo está aquí, salvo que esté apuntada
+para traerla de la nube ([SYNC-29](#el-orden-de-la-nube-manda-sync-29)): ésa la ordenó la nube de
+otra forma, la trae la convergencia y la pasada queda `aplazado`. Lo que se compara es una base con
+todo subido y la bajada al día, así que una diferencia que nadie ha apuntado no es de orden: es algo
+que la Main escribió y la nube no aceptó, o algo que no se sabe explicar, y se conserva lo de la Main,
+que es la autoridad de lo suyo (los cobros, la caja, lo fiscal sólo los escribe ella) y la base de la
+que se rehace la nube. Una que **falta arriba** se sube por estado y una que **sobra arriba** se borra, porque con las
 dos fotos del mismo instante lo que la nube tiene y aquí no está no puede ser algo de camino. Nada se
 toca si hay **alguna fila en `_Sync_Failed`** (AUD-18; en cuarentena o pendiente de reintentar), si
 queda histórico por bajar (VERIF-01) o con el interruptor `reparacion_nube` apagado: se compara y se

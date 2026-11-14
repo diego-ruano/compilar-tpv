@@ -1047,6 +1047,8 @@ async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement], repar
 struct Encolado {
     reparadas: i64,
     borradas: i64,
+    /// SYNC-29: filas distintas que no se suben porque las trae la convergencia.
+    por_converger: i64,
 }
 
 /// El borrado arriba de una fila que sobra, **sólo si la nube no ha cambiado desde la foto**, y
@@ -1207,12 +1209,17 @@ async fn encolar_plan(
         return Ok(None);
     }
 
+    // SYNC-29: una fila distinta que un cambio de la nube tocó con algo de aquí sin ordenar no se
+    // sube: la nube la ordenó de otra forma, y la trae la convergencia. Salvo que la escribiera algo
+    // apartado de la subida: eso es lo de aquí que la nube no aceptó, y se repara subiéndolo.
+    let por_converger = distintas_por_converger(db, conn, hallazgos).await?;
+
     let mut subir: Vec<SqlStatement> = Vec::new();
     for (tabla, h) in hallazgos {
         let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
         let mut de_la_tabla = Vec::new();
         for f in h.distintas.iter().chain(&h.faltan) {
-            if !vistas.insert(f) {
+            if !vistas.insert(f) || por_converger.contains(f) {
                 continue;
             }
             // `None`: la fila tiene algo que no se replica (un blob). No se manda a medias.
@@ -1243,6 +1250,7 @@ async fn encolar_plan(
         let plan: Vec<&FilaAfectada> = hallazgos
             .iter()
             .flat_map(|(_, h)| h.distintas.iter().chain(&h.faltan).chain(h.sobran.iter().filter(|_| borrar)))
+            .filter(|f| !por_converger.contains(*f))
             .collect();
         let resueltas = apartadas_que_resuelve(db, conn, &plan, completas).await?;
         let repara = match resueltas.is_empty() {
@@ -1267,7 +1275,50 @@ async fn encolar_plan(
             );
         }
     }
-    Ok(Some(Encolado { reparadas, borradas }))
+    Ok(Some(Encolado { reparadas, borradas, por_converger: por_converger.len() as i64 }))
+}
+
+/// Las formas canónicas de una fila (`filas_tocadas::canonica_de`), para cruzarla con lo que se sabe
+/// de otras sentencias: con su clave como texto y, si parece un número, como número (`WHERE ID =
+/// 7`), que es otra forma.
+fn formas_canonicas(f: &FilaAfectada) -> Vec<String> {
+    use crate::filas_tocadas::{canonica_de, FilaTocada};
+    let texto = f.clave.iter().map(|(_, v)| serde_json::Value::String(v.clone())).collect();
+    let numero = f
+        .clave
+        .iter()
+        .map(|(_, v)| v.parse::<i64>().map_or_else(|_| serde_json::Value::String(v.clone()), serde_json::Value::from))
+        .collect();
+    [texto, numero]
+        .into_iter()
+        .filter_map(|clave| canonica_de(&FilaTocada { tabla: f.tabla.clone(), clave, borrada: false }))
+        .collect()
+}
+
+/// SYNC-29 · Las filas distintas de lo hallado que la convergencia tiene apuntadas
+/// (`_Sync_Por_Contrastar`) y que no escribió nada apartado de la subida: no se suben.
+async fn distintas_por_converger<'h>(
+    db: &Db,
+    conn: &Connection,
+    hallazgos: &'h [(String, Hallazgo)],
+) -> AppResult<HashSet<&'h FilaAfectada>> {
+    let marcadas = crate::convergencia::marcadas(conn).await?;
+    if marcadas.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let claves = crate::cuarentenas_bajada::claves_primarias(db).await?;
+    let apartado = crate::cuarentenas_bajada::lo_apartado_de_la_subida(db, &claves).await?;
+    Ok(hallazgos
+        .iter()
+        .flat_map(|(_, h)| h.distintas.iter())
+        .filter(|f| {
+            let formas = formas_canonicas(f);
+            formas.iter().any(|c| marcadas.contains(c))
+                && !(apartado.tablas.contains("*")
+                    || apartado.tablas.contains(&f.tabla)
+                    || formas.iter().any(|c| apartado.claves.contains(c)))
+        })
+        .collect())
 }
 
 /// Lo más que se lee de lo apartado de la subida para enlazarlo a un plan. Lo que no quepa se
@@ -1288,7 +1339,7 @@ async fn apartadas_que_resuelve(
     plan: &[&FilaAfectada],
     completas: &HashSet<String>,
 ) -> AppResult<Vec<String>> {
-    use crate::filas_tocadas::{canonica_de, estaticas, FilaTocada};
+    use crate::filas_tocadas::estaticas;
 
     let mut filas = conn
         .query(
@@ -1308,23 +1359,11 @@ async fn apartadas_que_resuelve(
         return Ok(Vec::new());
     }
 
-    // Las filas del plan como las dice `estaticas`: una clave de texto y, si parece un número, como
-    // número (`WHERE ID = 7`), que es otra forma canónica.
     let mut claves_del_plan: HashSet<String> = HashSet::new();
     let mut tablas_del_plan: HashSet<&str> = HashSet::new();
     for f in plan {
         tablas_del_plan.insert(f.tabla.as_str());
-        let texto = f.clave.iter().map(|(_, v)| serde_json::Value::String(v.clone())).collect();
-        let numero = f
-            .clave
-            .iter()
-            .map(|(_, v)| v.parse::<i64>().map_or_else(|_| serde_json::Value::String(v.clone()), serde_json::Value::from))
-            .collect();
-        for clave in [texto, numero] {
-            if let Some(c) = canonica_de(&FilaTocada { tabla: f.tabla.clone(), clave, borrada: false }) {
-                claves_del_plan.insert(c);
-            }
-        }
+        claves_del_plan.extend(formas_canonicas(f));
     }
 
     let claves = crate::cuarentenas_bajada::claves_primarias(db).await?;
@@ -1502,6 +1541,8 @@ pub(crate) async fn contrastar(
             Some(encolado) => {
                 resultado.reparadas = encolado.reparadas;
                 resultado.borradas = encolado.borradas;
+                // SYNC-29: lo que trae la convergencia queda sin tocar en esta pasada.
+                resultado.aplazado |= encolado.por_converger > 0;
             }
             // Entre comparar y escribir ha cambiado algo: lo visto ya no vale ni para contarlo.
             None => return Ok(ContrasteLocal::SeHaMovido),

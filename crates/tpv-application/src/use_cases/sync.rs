@@ -12,8 +12,8 @@ use tpv_contracts::sync::{
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
 use crate::ports::sync::{
-    ContrasteLocal, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave,
-    SyncRepository,
+    ContrasteLocal, Convergencia, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas,
+    PedidoPorClave, SyncRepository,
 };
 
 /// Pide `ruta` a la nube (modo `tpv`) y lee la respuesta **directamente en su tipo**.
@@ -415,6 +415,16 @@ pub async fn verificar_contra_la_nube(
         .await;
 
     Ok(Contraste::Hecho(resultado))
+}
+
+/// SYNC-29 · Una vuelta de la convergencia con el orden de la nube: trae de la nube, por su clave,
+/// las filas que su orden dejó de otra forma aquí y las escribe aquí
+/// ([`SyncRepository::converger_con_la_nube`]). La llama el motor de réplica con todo subido.
+pub async fn converger_con_la_nube(
+    nube: &dyn PairingService,
+    repo: &dyn SyncRepository,
+) -> AppResult<Convergencia> {
+    repo.converger_con_la_nube(&PaginasPorRest { nube }).await
 }
 
 /// Las páginas del contraste por la API REST de la nube: lo que el repositorio pide además del

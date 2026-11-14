@@ -28,7 +28,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
-| [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
@@ -412,29 +411,6 @@ grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) factur
 se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
 anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
 (`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
-
-### SYNC-29 · Un cambio de la Handy pisa en la Main una escritura suya sin subir
-
-La Main aplica lo que llega de la nube (`tpv-infra-sqlite/src/sync.rs::apply_one`) aunque esa fila
-tenga una escritura propia esperando en el outbox. Si una Handy edita la fila en los segundos que van
-de que la Main la escribe a que la sube, la nube se queda con lo de la Main (llegó después) y la Main
-con lo de la Handy (lo aplicó encima, y el eco de su propia escritura se descarta por idempotencia).
-Las dos copias quedan distintas hasta que `verificar_nube` lo ve y repara con lo de la Main.
-
-La bajada en orden (AUD-18) agranda la ventana: un cambio remoto que falla al aplicarse se reintenta
-tras unos segundos (`espera_para_reintentar`), y lo que la Main escriba en esa fila mientras tanto
-también lo pisa al entrar.
-
-Le pasa a cualquier escritura de la Main, pero donde más se nota es en la reserva desde la web
-(docs/estudios/reservas-web.md): la Main cancela una reserva porque lo pide el cliente, una Handy la
-edita en ese momento con su estado de antes, y la Main se queda con la reserva viva mientras la nube
-—y la agenda, que da la cancelación por hecha al verla en la nube— la tiene cancelada. La reparación
-diaria la volvería a subir viva.
-
-La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones: que al aplicar un
-cambio remoto se respete la escritura local pendiente de la misma fila (aplicar otra vez lo del
-outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
-Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
 
 ### SYNC-30 · Una ruta del worker decide con una lectura fuera de su transacción
 

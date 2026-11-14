@@ -3,7 +3,7 @@
 use std::{collections::HashMap, time::{Duration, Instant}};
 use serde_json::{json, Value};
 use tpv_contracts::{licensing::FirmaDispositivo, sync::{OutboxEntry, SyncChange}};
-use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida}, sync::{BajadaAplicada, CambioDetenido}}};
+use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida}, sync::{BajadaAplicada, CambioDetenido, Convergencia}}};
 
 const MAX_PAGINAS: usize = 2000;
 /// Lo que ocupan como mucho las sentencias de un lote (`apply_lote`). Una operación que pase de
@@ -62,12 +62,51 @@ impl Bajada {
     }
 }
 
+/// SYNC-29 · Lo más a menudo que se mira, con todo subido, si hay filas que traer de la nube porque
+/// su orden las dejó de otra forma aquí. Mirarlo es una consulta local; sólo con algo apuntado se
+/// pide a la nube.
+const CONVERGER_CADA: Duration = Duration::from_secs(3);
+/// Lo más que se espera para volver a intentarlo cuando esta base o la nube se están moviendo.
+const CONVERGER_ESPERA_MAX: Duration = Duration::from_secs(60);
+/// Las vueltas seguidas como mucho, cuando hay más filas de las que caben en una.
+const CONVERGER_VUELTAS: usize = 10;
+
+/// SYNC-29 · Cuándo toca la convergencia siguiente.
+#[derive(Debug, Default)]
+struct RitmoDeConvergencia {
+    /// `None`: ya.
+    siguiente: Option<Instant>,
+    /// Vueltas aplazadas seguidas: con cada una se espera el doble.
+    aplazadas: u32,
+}
+
+impl RitmoDeConvergencia {
+    fn toca(&self) -> bool {
+        self.siguiente.is_none_or(|t| Instant::now() >= t)
+    }
+    /// Lo que falta para la siguiente, si hay una aplazada esperando.
+    fn espera(&self) -> Option<Duration> {
+        (self.aplazadas > 0).then(|| self.siguiente.map(|t| t.saturating_duration_since(Instant::now())).unwrap_or_default())
+    }
+    fn al_dia(&mut self) {
+        self.aplazadas = 0;
+        self.siguiente = Some(Instant::now() + CONVERGER_CADA);
+    }
+    fn aplazar(&mut self) {
+        self.aplazadas = self.aplazadas.saturating_add(1);
+        let espera = Duration::from_secs(1 << self.aplazadas.min(6)).min(CONVERGER_ESPERA_MAX);
+        self.siguiente = Some(Instant::now() + espera);
+    }
+}
+
 /// Una sesión del motor: su bajada (AUD-18) y lo que lleva subido.
 #[derive(Debug, Default)]
 pub struct Sesion {
     bajada: Bajada,
     /// Los lotes que ha mandado esta sesión: con él se nombra cada uno.
     lotes: u64,
+    /// SYNC-29: cuándo se vuelve a mirar si hay algo que traer de la nube.
+    convergencia: RitmoDeConvergencia,
 }
 
 /// Lo que deja un catch-up: el final del log que ha visto, si se ha detenido, en qué cambio, y si a
@@ -382,6 +421,31 @@ async fn no_cabe(ctx: &dyn ContextoReplicacion, ritmo: &RitmoDeSubida, lote: &[O
     Ok(fallo.apartada)
 }
 
+/// SYNC-29 · El orden de la nube manda: con todo lo de aquí subido, se traen de la nube las filas que
+/// su orden dejó de otra forma aquí (`SyncRepository::converger_con_la_nube`) y se avisa a la
+/// interfaz de lo que se ha escrito. No escribe en la nube ni toca la bajada o el checkpoint, y un
+/// fallo no acaba la sesión: se vuelve a intentar más tarde, esperando cada vez el doble.
+async fn converger(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, sesion: &mut Sesion) {
+    for _ in 0..CONVERGER_VUELTAS {
+        if !sesion.convergencia.toca() {
+            return;
+        }
+        let r = match ctx.repositorio().await {
+            Ok(repo) => crate::use_cases::sync::converger_con_la_nube(nube, repo.as_ref()).await,
+            Err(e) => Err(e),
+        };
+        match r {
+            Ok(Convergencia::Hecha { escritas, quedan }) => {
+                if !escritas.is_empty() { ctx.cambios(&escritas); }
+                sesion.convergencia.al_dia();
+                if quedan { sesion.convergencia.siguiente = None; } else { return; }
+            }
+            Ok(Convergencia::Nada) => return sesion.convergencia.al_dia(),
+            Ok(Convergencia::Aplazada) | Err(_) => return sesion.convergencia.aplazar(),
+        }
+    }
+}
+
 /// AUD-15 · El saludo de la Main, siempre con `recovering`: el DO congela a las Handy
 /// (`main_volcando`) y deja pasar lo que suba la Main, y `ejecutar` las suelta con `recovery_ready`
 /// cuando se ha puesto al día: con el outbox vacío. Mirar antes si hay atraso no sirve: lo que se confirme entre mirarlo y
@@ -457,7 +521,12 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             ultimo_sondeo = Instant::now();
             continue;
         }
-        let msg = canal.recibir(Duration::from_secs(if vacio {30} else {3})).await?;
+        // SYNC-29: con todo subido, lo que la nube ordenó de otra forma se trae de ella.
+        if vacio && !handy_por_soltar { converger(ctx, nube, &mut sesion).await; }
+        let mut espera = Duration::from_secs(if vacio {30} else {3});
+        // Una vuelta aplazada se repite a su hora, aunque no llegue nada por el socket.
+        if let Some(falta) = sesion.convergencia.espera() { espera = espera.min(falta.max(Duration::from_millis(100))); }
+        let msg = canal.recibir(espera).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
         // Un cambio de modo o de la palanca despierta al motor (`contexto_cambiado`): se mira ya.
         if despertar { disponible_comprobado = None; }

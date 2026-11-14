@@ -772,7 +772,10 @@ async fn detenido_antes_de(
 /// anterior. Antes eran la transacción más cuatro sentencias sueltas en autocommit, cada una con su
 /// propio commit (RI-33). `defer_foreign_keys` evita fallos por orden dentro de la propia
 /// operación. Corre sobre la conexión CRUDA de escritura (sin captura).
-async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> {
+///
+/// SYNC-29: `marcas` son las filas que toca el cambio y que esta Main puede tener de otra forma que
+/// la nube (`convergencia::Carrera`); si se aplica, se apuntan en la misma transacción.
+async fn apply_one(conn: &Connection, ch: &SyncChange, marcas: &[crate::filas_tocadas::FilaTocada]) -> AppResult<Aplicacion> {
     let res: AppResult<Aplicacion> = conn.transaccion(async {
         // AUD-18: nada pasa por delante de uno anterior que falló y no se ha resuelto. Va lo
         // primero, antes incluso de dar por confirmada una subida: un cambio que no se procesa ahora
@@ -851,6 +854,12 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
         .await
         .map_err(db_err)?;
 
+        // SYNC-29: lo que la nube ordenó de otra forma, para traerlo cuando lo de aquí esté subido.
+        // Que no se pueda apuntar no detiene la bajada: lo que quede distinto lo verá el contraste.
+        if let Err(e) = crate::convergencia::marcar(conn, marcas, ch.seq).await {
+            tracing::warn!(target: "tpv::sync", op_id = %ch.op_id, seq = ch.seq, error = %e, "SYNC-29: no se han podido apuntar las filas del cambio");
+        }
+
         // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
         pasar_el_checkpoint(conn, ch).await?;
 
@@ -875,9 +884,22 @@ impl SyncRepository for SqliteSyncRepository {
             // quien espera, un cobro por ejemplo. Conexión CRUDA → no se re-captura en el outbox.
             let w = self.db.write().await;
             let conn: &Connection = w.raw();
+            // SYNC-29: lo de aquí que la nube todavía no ha ordenado. Con el escritor cogido, dentro
+            // del tramo no entra nada nuevo.
+            let mut carrera = crate::convergencia::Carrera::leer(conn).await?;
 
             for ch in tramo {
-                let e = match apply_one(conn, ch).await {
+                // Las filas que este cambio toca en tablas en las que esta Main tiene escrituras sin
+                // ordenar: aquí van detrás de ellas y en la nube irán delante. Se miran con la base
+                // de justo antes del cambio.
+                let marcas = match carrera.alcance(ch) {
+                    Some(alcance) => crate::convergencia::filas_a_marcar(conn, ch, &alcance).await,
+                    None => Vec::new(),
+                };
+                let resultado = apply_one(conn, ch, &marcas).await;
+                // Lo que baje después de un eco propio va también después en la nube.
+                carrera.ya_ordenada(&ch.op_id);
+                let e = match resultado {
                     Ok(Aplicacion::Aplicada) => {
                         aplicadas.push(ch.op_id.clone());
                         continue;
@@ -1203,6 +1225,11 @@ impl SyncRepository for SqliteSyncRepository {
         crate::contraste::contrastar(&self.db, resumen, marca, nube, reparar).await
     }
 
+    async fn converger_con_la_nube(&self, nube: &dyn PaginasDelContraste) -> AppResult<tpv_application::ports::sync::Convergencia> {
+        // SYNC-29. Por `raw()`: lo que se trae ya está en la nube.
+        crate::convergencia::converger(&self.db, nube).await
+    }
+
     async fn purge_applied_ops(&self) -> AppResult<()> {
         // Red de seguridad para los anti-ecos que no se ascendieron por cursor (p. ej. un acuse
         // sin `seq` por cache-hit de idempotencia): retira los registros ANTIGUOS (TTL) cuyo
@@ -1494,6 +1521,10 @@ impl SyncRepository for SqliteSyncRepository {
                 .await
                 .map_err(db_err)?;
             conn.execute("DELETE FROM _Sync_Failed;", ())
+                .await
+                .map_err(db_err)?;
+            // SYNC-29: lo que había que traer de la nube ya es la nube.
+            conn.execute("DELETE FROM _Sync_Por_Contrastar;", ())
                 .await
                 .map_err(db_err)?;
             if apartar_outbox {
