@@ -10,8 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
+import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import {
@@ -24,13 +23,7 @@ import {
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-let clienteActual: any = null;
 let esTpv = true;
-
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
-}));
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -83,11 +76,9 @@ async function pedir(
 		crearEsquemaTenant(sql);
 		sembrar(sql);
 
-		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
-		// Con la ruta en el Worker y dentro del TenantHub: las dos contestan lo mismo.
-		return pedirPorLosDosCaminos(
+		return pedirEnElHub(
 			() =>
 				app.request(
 					ruta,
@@ -141,7 +132,6 @@ function sembrarVenta(
 
 beforeEach(() => {
 	esTpv = true;
-	clienteActual = null;
 });
 
 describe("bootstrap acotado · los maestros", () => {

@@ -10,28 +10,21 @@
 //
 // El tope de verdad son 24 MiB; aquí se pone en 64 KiB para no sembrar un mes de un bar.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
+import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-let clienteActual: any = null;
 
 vi.mock("../src/domains/sync/volcado", async (original) => ({
 	...(await (original as any)()),
 	VOLCADO_MAX_BYTES: 64 * 1024,
 	HISTORICO_MAX_BYTES: 64 * 1024,
-}));
-
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
 }));
 
 vi.mock("../src/middleware/tenant", async (original) => ({
@@ -45,12 +38,12 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 }));
 
 const { bytesUtf8 } = await import("../src/lib/texto");
-const { Escritor, VOLCADO_MAX_BYTES, HISTORICO_MAX_BYTES, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
+const { Escritor, VOLCADO_MAX_BYTES, HISTORICO_MAX_BYTES, escribirTablas, lectorDe, lectorDelHub, siguiente } =
 	await import("../src/domains/sync/volcado");
 const { syncRoutes, paginaDelHistorico, volcarFase1, BOOTSTRAP_MAX_FILAS } =
 	await import("../src/domains/sync/sync.routes");
 
-/** Una petición a la ruta, por los dos caminos, y además lo que ocupó la respuesta. */
+/** Una petición a la ruta, dentro del TenantHub, y además lo que ocupó la respuesta. */
 async function conTenant<R>(
 	nombre: string,
 	sembrar: (sql: any) => void,
@@ -63,12 +56,11 @@ async function conTenant<R>(
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		sembrar(sql);
-		clienteActual = clienteSobre(sql);
 
 		const app = new Hono();
 		app.route("/", syncRoutes);
 		const pedir = async (ruta: string, cuerpo?: unknown) => {
-			const r = await pedirPorLosDosCaminos(
+			const r = await pedirEnElHub(
 				() =>
 					app.request(
 						ruta,
@@ -121,11 +113,13 @@ function sembrarSeq(sql: any, n: number): void {
 	}
 }
 
-beforeEach(() => {
-	clienteActual = null;
-});
-
 describe("el lector del TenantHub", () => {
+	it("fuera del TenantHub de su negocio no lee: la ruta no lleva alHub", async () => {
+		// Como `tenantQuery`: no hay otro sitio del que leer la base del negocio.
+		const c = { env: {} as any, get: () => "t1", req: { header: () => undefined } };
+		await expect(lectorDe(c).foto([{ sql: "SELECT 1;", args: [] }], () => 1)).rejects.toThrow("falta alHub");
+	});
+
 	it("no deja ninguna sentencia a medias, aunque quien lee no termine un resultado", async () => {
 		await enElHub("volcado-lector-agota", async (hub: any) => {
 			const sql = hub.state.storage.sql;
@@ -396,7 +390,7 @@ describe("POST /v1/sync/historico · el tope en bytes", () => {
 			}
 
 			const TOPE = 20_000;
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+			for (const lector of [lectorDelHub(sql)]) {
 				const vistas: string[] = [];
 				let cursor: number | null = 0;
 				let vueltas = 0;
@@ -424,7 +418,7 @@ describe("POST /v1/sync/historico · el tope en bytes", () => {
 			crearEsquemaTenant(sql);
 			sembrarComandas(sql, 3);
 
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+			for (const lector of [lectorDelHub(sql)]) {
 				const vistas: string[] = [];
 				let cursor: number | null = 0;
 				let vueltas = 0;

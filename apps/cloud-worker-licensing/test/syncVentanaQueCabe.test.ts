@@ -19,7 +19,6 @@
 
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import {
@@ -30,7 +29,7 @@ import {
 	ventanasCandidatas,
 } from "../src/domains/sync/bootstrap.ventana";
 import { volcarFase1, type Topes } from "../src/domains/sync/sync.routes";
-import { lectorDelCliente, lectorDelHub, type Lector } from "../src/domains/sync/volcado";
+import { lectorDelHub, type Lector } from "../src/domains/sync/volcado";
 
 // El instante de referencia se congela al cargar el fichero: con el reloj leído en cada llamada, la
 // misma expresión da dos valores al caer entre dos segundos.
@@ -187,14 +186,6 @@ function sembrarBar(sql: any): void {
 	sql.exec("INSERT INTO Sync_Changes (Op_Id, Statements_Json, Created_At_Ms) VALUES ('op-1', '[]', 1);");
 }
 
-/** Los dos lectores de la misma base: el del TenantHub y el del Worker. */
-function lectores(sql: any): Array<[string, Lector]> {
-	return [
-		["dentro del TenantHub", lectorDelHub(sql)],
-		["en el Worker", lectorDelCliente(clienteSobre(sql))],
-	];
-}
-
 async function fase1(lector: Lector, topes: Topes): Promise<{ volcado: Volcado; bytes: number } | { volcado: null; totalFilas: number }> {
 	const r = await volcarFase1(lector, AHORA, topes);
 	if (!r.cuerpo) return { volcado: null, totalFilas: r.totalFilas };
@@ -290,75 +281,57 @@ describe("la fase 1 se encoge hasta caber", () => {
 			crearEsquemaTenant(sql);
 			sembrarBar(sql);
 
-			for (const [camino, lector] of lectores(sql)) {
-				// Sin topes que estorben: el mes entero.
-				const mes = await fase1(lector, SIN_TOPE);
-				if (!mes.volcado) throw new Error("el mes no cabe sin topes");
-				expect(mes.volcado.ventana_desde, camino).toBe(haceDias(30));
-				expect(ventasCon(mes.volcado, "vieja"), camino).toBe(VIEJAS);
-				expect(ventasCon(mes.volcado, "semana"), camino).toBe(DE_LA_SEMANA);
-				comprobarLoImprescindible(mes.volcado, `${camino}, 30 días`);
+			const lector = lectorDelHub(sql);
+			// Sin topes que estorben: el mes entero.
+			const mes = await fase1(lector, SIN_TOPE);
+			if (!mes.volcado) throw new Error("el mes no cabe sin topes");
+			expect(mes.volcado.ventana_desde).toBe(haceDias(30));
+			expect(ventasCon(mes.volcado, "vieja")).toBe(VIEJAS);
+			expect(ventasCon(mes.volcado, "semana")).toBe(DE_LA_SEMANA);
+			comprobarLoImprescindible(mes.volcado, "30 días");
 
-				// Con una fila menos de sitio que el mes: la semana. El tope de filas es exacto (se
-				// cuenta antes de leer), así que sirve para medir cada escalón.
-				const semana = await fase1(lector, { ...SIN_TOPE, filas: filasDe(mes.volcado) - 1 });
-				if (!semana.volcado) throw new Error("la semana no cabe");
-				expect(semana.volcado.ventana_desde, camino).toBe(haceDias(7));
-				expect(ventasCon(semana.volcado, "vieja"), camino).toBe(0);
-				expect(ventasCon(semana.volcado, "semana"), camino).toBe(DE_LA_SEMANA);
-				comprobarLoImprescindible(semana.volcado, `${camino}, 7 días`);
+			// Con una fila menos de sitio que el mes: la semana. El tope de filas es exacto (se
+			// cuenta antes de leer), así que sirve para medir cada escalón.
+			const semana = await fase1(lector, { ...SIN_TOPE, filas: filasDe(mes.volcado) - 1 });
+			if (!semana.volcado) throw new Error("la semana no cabe");
+			expect(semana.volcado.ventana_desde).toBe(haceDias(7));
+			expect(ventasCon(semana.volcado, "vieja")).toBe(0);
+			expect(ventasCon(semana.volcado, "semana")).toBe(DE_LA_SEMANA);
+			comprobarLoImprescindible(semana.volcado, "7 días");
 
-				// Y con una menos que la semana: sólo lo imprescindible, desde el último cierre.
-				const minimo = await fase1(lector, { ...SIN_TOPE, filas: filasDe(semana.volcado) - 1 });
-				if (!minimo.volcado) throw new Error("lo imprescindible no cabe");
-				expect(minimo.volcado.ventana_desde, camino).toBe(CIERRE);
-				expect(ventasCon(minimo.volcado, "vieja"), camino).toBe(0);
-				expect(ventasCon(minimo.volcado, "semana"), camino).toBe(0);
-				expect(ventasCon(minimo.volcado, "periodo"), camino).toBe(DESDE_EL_CIERRE);
-				// El cierre anterior al último ya no entra: es histórico.
-				expect(valores(minimo.volcado, "Cierres_Caja", "ID_Cierre"), camino).toEqual(["ci-ultimo"]);
-				comprobarLoImprescindible(minimo.volcado, `${camino}, lo imprescindible`);
+			// Y con una menos que la semana: sólo lo imprescindible, desde el último cierre.
+			const minimo = await fase1(lector, { ...SIN_TOPE, filas: filasDe(semana.volcado) - 1 });
+			if (!minimo.volcado) throw new Error("lo imprescindible no cabe");
+			expect(minimo.volcado.ventana_desde).toBe(CIERRE);
+			expect(ventasCon(minimo.volcado, "vieja")).toBe(0);
+			expect(ventasCon(minimo.volcado, "semana")).toBe(0);
+			expect(ventasCon(minimo.volcado, "periodo")).toBe(DESDE_EL_CIERRE);
+			// El cierre anterior al último ya no entra: es histórico.
+			expect(valores(minimo.volcado, "Cierres_Caja", "ID_Cierre")).toEqual(["ci-ultimo"]);
+			comprobarLoImprescindible(minimo.volcado, "lo imprescindible");
 
-				// Si ni eso cabe, no hay ventana que valga: es el «no cabe» de siempre, con sus filas.
-				const nada = await fase1(lector, { ...SIN_TOPE, filas: filasDe(minimo.volcado) - 1 });
-				expect(nada, camino).toEqual({ volcado: null, totalFilas: filasDe(minimo.volcado) });
+			// Si ni eso cabe, no hay ventana que valga: es el «no cabe» de siempre, con sus filas.
+			const nada = await fase1(lector, { ...SIN_TOPE, filas: filasDe(minimo.volcado) - 1 });
+			expect(nada).toEqual({ volcado: null, totalFilas: filasDe(minimo.volcado) });
 
-				// Lo mismo con el tope en BYTES, que es el que alcanza un bar de verdad. A medio
-				// camino entre lo que ocupa un escalón y el siguiente sale el estrecho de los dos.
-				const entre = (a: number, b: number) => Math.round((a + b) / 2);
-				const porBytes = async (bytes: number) => fase1(lector, { ...SIN_TOPE, bytes });
+			// Lo mismo con el tope en BYTES, que es el que alcanza un bar de verdad. A medio
+			// camino entre lo que ocupa un escalón y el siguiente sale el estrecho de los dos.
+			const entre = (a: number, b: number) => Math.round((a + b) / 2);
+			const porBytes = async (bytes: number) => fase1(lector, { ...SIN_TOPE, bytes });
 
-				const comoElMes = await porBytes(mes.bytes * 2);
-				expect(comoElMes.volcado?.ventana_desde, camino).toBe(haceDias(30));
+			const comoElMes = await porBytes(mes.bytes * 2);
+			expect(comoElMes.volcado?.ventana_desde).toBe(haceDias(30));
 
-				const comoLaSemana = await porBytes(entre(mes.bytes, semana.bytes));
-				expect(comoLaSemana.volcado?.ventana_desde, camino).toBe(haceDias(7));
-				expect(comoLaSemana.volcado, camino).toEqual(semana.volcado);
+			const comoLaSemana = await porBytes(entre(mes.bytes, semana.bytes));
+			expect(comoLaSemana.volcado?.ventana_desde).toBe(haceDias(7));
+			expect(comoLaSemana.volcado).toEqual(semana.volcado);
 
-				const comoElMinimo = await porBytes(entre(semana.bytes, minimo.bytes));
-				expect(comoElMinimo.volcado?.ventana_desde, camino).toBe(CIERRE);
-				expect(comoElMinimo.volcado, camino).toEqual(minimo.volcado);
+			const comoElMinimo = await porBytes(entre(semana.bytes, minimo.bytes));
+			expect(comoElMinimo.volcado?.ventana_desde).toBe(CIERRE);
+			expect(comoElMinimo.volcado).toEqual(minimo.volcado);
 
-				const sinSitio = await porBytes(Math.round(minimo.bytes / 2));
-				expect(sinSitio, camino).toEqual({ volcado: null, totalFilas: filasDe(minimo.volcado) });
-			}
-		});
-	});
-
-	it("los dos lectores eligen la misma ventana y escriben lo mismo", async () => {
-		await enElHub("ventana-que-cabe-caminos", async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			crearEsquemaTenant(sql);
-			sembrarBar(sql);
-
-			const [[, delHub], [, delWorker]] = lectores(sql);
-			const mes = await volcarFase1(delHub, AHORA, SIN_TOPE);
-			if (!mes.cuerpo) throw new Error("el mes no cabe sin topes");
-			for (const bytes of [mes.cuerpo.byteLength * 2, Math.round(mes.cuerpo.byteLength * 0.7), 20_000]) {
-				const a = await volcarFase1(delHub, AHORA, { ...SIN_TOPE, bytes });
-				const b = await volcarFase1(delWorker, AHORA, { ...SIN_TOPE, bytes });
-				expect(a, `${bytes} bytes`).toEqual(b);
-			}
+			const sinSitio = await porBytes(Math.round(minimo.bytes / 2));
+			expect(sinSitio).toEqual({ volcado: null, totalFilas: filasDe(minimo.volcado) });
 		});
 	});
 
@@ -379,21 +352,20 @@ describe("la fase 1 se encoge hasta caber", () => {
 			for (let i = 0; i < 200; i++) gasto(`g-largo-${i}`, haceDias(20), "Reparación de la cafetera. ".repeat(40));
 			for (let i = 0; i < 100; i++) gasto(`g-corto-${i}`, haceDias(2), "Pan");
 
-			for (const [camino, lector] of lectores(sql)) {
-				const mes = await fase1(lector, SIN_TOPE);
-				const semana = await fase1(lector, { ...SIN_TOPE, filas: 250 });
-				if (!mes.volcado || !semana.volcado) throw new Error("no caben sin topes");
-				expect(semana.volcado.ventana_desde, camino).toBe(haceDias(7));
-				// El mes real ocupa mucho más que la semana…
-				expect(mes.bytes, camino).toBeGreaterThan(semana.bytes + 150_000);
+			const lector = lectorDelHub(sql);
+			const mes = await fase1(lector, SIN_TOPE);
+			const semana = await fase1(lector, { ...SIN_TOPE, filas: 250 });
+			if (!mes.volcado || !semana.volcado) throw new Error("no caben sin topes");
+			expect(semana.volcado.ventana_desde).toBe(haceDias(7));
+			// El mes real ocupa mucho más que la semana…
+			expect(mes.bytes).toBeGreaterThan(semana.bytes + 150_000);
 
-				// …y con sitio para la semana y 50 KB más, la medida (300 gastos «cortos») da el mes
-				// por bueno. Lo que llega es la semana, entera.
-				const r = await fase1(lector, { ...SIN_TOPE, bytes: semana.bytes + 50_000 });
-				expect(r.volcado?.ventana_desde, camino).toBe(haceDias(7));
-				expect(r.volcado, camino).toEqual(semana.volcado);
-				expect(tabla(r.volcado!, "Cuentas_Gastos").filas, camino).toHaveLength(100);
-			}
+			// …y con sitio para la semana y 50 KB más, la medida (300 gastos «cortos») da el mes
+			// por bueno. Lo que llega es la semana, entera.
+			const r = await fase1(lector, { ...SIN_TOPE, bytes: semana.bytes + 50_000 });
+			expect(r.volcado?.ventana_desde).toBe(haceDias(7));
+			expect(r.volcado).toEqual(semana.volcado);
+			expect(tabla(r.volcado!, "Cuentas_Gastos").filas).toHaveLength(100);
 		});
 	});
 
@@ -416,24 +388,20 @@ describe("la fase 1 se encoge hasta caber", () => {
 				);
 			}
 
-			const [[, delHub], [, delWorker]] = lectores(sql);
-			const real = await fase1(delHub, SIN_TOPE);
+			const lector = lectorDelHub(sql);
+			const real = await fase1(lector, SIN_TOPE);
 			if (!real.volcado) throw new Error("no cabe sin topes");
 			const topes = { ...SIN_TOPE, bytes: real.bytes * 2 };
 
 			// Con sitio para el doble de lo que ocupa de verdad, viaja: lo imprescindible, entero.
-			const r = await fase1(delHub, topes);
+			const r = await fase1(lector, topes);
 			if (!r.volcado) throw new Error("lo imprescindible cabía y se ha contestado que no");
 			expect(r.volcado.ventana_desde).toBe(AHORA);
 			expect(tabla(r.volcado, "Clientes").filas).toHaveLength(2_064);
 			expect(r.bytes).toBeLessThanOrEqual(topes.bytes);
 
-			// Con la ruta en el Worker no se intenta: allí intentarlo es traer todas las filas por
-			// la llamada al DO, que es lo que el techo viene a evitar.
-			expect((await fase1(delWorker, topes)).volcado).toBeNull();
-
 			// Y si de verdad no cabe, sigue siendo que no.
-			expect((await fase1(delHub, { ...SIN_TOPE, bytes: Math.round(real.bytes / 2) })).volcado).toBeNull();
+			expect((await fase1(lector, { ...SIN_TOPE, bytes: Math.round(real.bytes / 2) })).volcado).toBeNull();
 		});
 	});
 });

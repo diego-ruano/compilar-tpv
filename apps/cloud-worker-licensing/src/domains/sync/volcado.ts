@@ -15,18 +15,14 @@
 // - **El techo.** `VOLCADO_MAX_BYTES`. Quien escribe para en cuanto lo pasa, y cada ruta contesta
 //   lo que ya contestaba cuando el volcado no cabía por filas.
 //
-// Desplegada, la ruta se ejecuta siempre dentro del TenantHub. Fuera de él sólo corre un router
-// montado suelto en un test, con `tenantQuery` de mentira (`test/helpers/rutaSuelta.ts`): ahí las
-// filas llegan por `tenantQuery`, ya montadas, y se escriben igual. Lo que sale es lo mismo, byte a
-// byte (`test/helpers/dosCaminos.ts`), y el techo es el mismo; lo que cambia es que ese lote ya está
-// entero en memoria cuando se empieza a escribir (`paraAlEscribir`).
-
-import type { Client, ResultSet } from "@libsql/client/web";
+// La ruta se ejecuta siempre dentro del TenantHub (`alHub`), y el lector sólo lee ahí: fuera lanza,
+// como `tenantQuery`. Como el cursor se lee según se recorre, quien escribe puede parar a mitad sin
+// haber cargado lo que no cabe.
 
 import { parseClientNow, rewriteNowInSql } from "../../durableObjects/tenantHub.tiempo";
 import { hubLocal } from "../../lib/hubLocal";
 import { bytesUtf8 } from "../../lib/texto";
-import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
+import type { ContextoDeLectura } from "../../lib/tenantClient";
 
 /**
  * Techo de una respuesta de volcado, en bytes de JSON sin comprimir. Va además del tope de filas
@@ -75,29 +71,8 @@ export type Resultado = { columnas: string[]; filas: Iterable<unknown[]> };
  * entre la primera sentencia y la última. Con un `await` dentro dejaría de ser una foto.
  */
 export type Lector = {
-	/**
-	 * Si las filas se leen según se recorren: es así con el cursor del DO, y entonces quien escribe
-	 * puede parar a mitad sin haber cargado lo que no cabe. Con el lector de un cliente no: el lote
-	 * entero ya está en memoria cuando se empieza a escribir.
-	 */
-	readonly paraAlEscribir: boolean;
 	foto<T>(sentencias: Sentencia[], usar: (resultados: Iterator<Resultado>) => T): Promise<T>;
 };
-
-function* posicionales(filas: Iterable<unknown>, columnas: string[]): Generator<unknown[]> {
-	for (const fila of filas) {
-		yield Array.isArray(fila)
-			? fila
-			: columnas.map((col) => (fila as Record<string, unknown>)[col] ?? null);
-	}
-}
-
-function* delLote(lote: ResultSet[]): Generator<Resultado> {
-	for (const rs of lote) {
-		const columnas = (rs.columns ?? []).map(String);
-		yield { columnas, filas: posicionales(rs.rows ?? [], columnas) };
-	}
-}
 
 /**
  * El lector del SQLite de un Durable Object: recorre el cursor, sin nada intermedio.
@@ -110,7 +85,6 @@ function* delLote(lote: ResultSet[]): Generator<Resultado> {
  */
 export function lectorDelHub(sql: SqlStorage): Lector {
 	return {
-		paraAlEscribir: true,
 		foto: async (sentencias, usar) => {
 			let abierto: Iterator<unknown[]> | null = null;
 			const agotar = () => {
@@ -135,27 +109,20 @@ export function lectorDelHub(sql: SqlStorage): Lector {
 	};
 }
 
-/** El lector sobre un `Client`: un lote de lectura, que da la foto, y sus filas ya montadas. */
-export function lectorDelCliente(db: Pick<Client, "batch">): Lector {
-	return {
-		paraAlEscribir: false,
-		foto: async (sentencias, usar) => usar(delLote(await db.batch(sentencias as any, "read"))),
-	};
-}
-
 /**
  * El lector de la petición en curso: el SQLite de al lado, dentro del TenantHub del negocio, que es
- * donde corre la ruta desplegada; `tenantQuery` en un router montado suelto en un test. En los dos, «ahora» es el de quien pregunta
- * (REV-03): `tenantQuery` lo fija por su cuenta y aquí se fija igual, con la misma función.
+ * donde corre la ruta (`alHub`). Fuera de él lanza, como `tenantQuery`: es un router sin `alHub`. Un
+ * test que monta el router suelto la ejecuta dentro con `dentroDelHub` y el SQLite de un DO de
+ * verdad (`test/helpers/volcadoEnElHub.ts`). «Ahora» es el de quien pregunta (REV-03), fijado con la
+ * misma función que `tenantQuery`.
  */
 export function lectorDe(c: ContextoDeLectura): Lector {
 	return {
-		get paraAlEscribir() {
-			return hubLocal(c.get("tenantId")) !== null;
-		},
 		async foto(sentencias, usar) {
 			const local = hubLocal(c.get("tenantId"));
-			if (!local) return tenantQuery(c, (db) => lectorDelCliente(db).foto(sentencias, usar));
+			if (!local) {
+				throw new Error("volcado: la ruta no se está ejecutando en el TenantHub de su negocio (¿falta alHub en su router?)");
+			}
 			const ahora = parseClientNow(c.req.header("X-Client-Now"));
 			const fijadas = ahora
 				? sentencias.map((s) => ({ sql: rewriteNowInSql(s.sql, ahora), args: s.args }))

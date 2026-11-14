@@ -5,8 +5,8 @@
 //
 // Dentro del DO el volcado lee del cursor de su SQLite y sale como bytes ya escritos
 // (`domains/sync/volcado.ts`). Lo que se fija aquí es que eso llega entero a quien pregunta
-// cruzando el RPC, en un solo viaje y sin ninguna consulta suelta. Que el lector del cursor y el
-// del cliente escriben lo mismo, byte a byte, lo fijan los tests de cada ruta (`helpers/dosCaminos.ts`).
+// cruzando el RPC, en un solo viaje y sin ninguna consulta suelta. Lo que contesta cada ruta lo
+// fijan sus tests, con el router suelto y la ruta dentro del TenantHub (`helpers/volcadoEnElHub.ts`).
 //
 // El veto de rol (`soloLaMain`) es el de verdad. Dentro del TenantHub decide con el rol que llega
 // con la identidad: la base central de pruebas es el SQLite de otro Durable Object, que desde el del

@@ -302,9 +302,8 @@ function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, 
  *   la candidata siguiente.
  * - Si se queda larga, se descarta una candidata que cabía y viaja una más estrecha. Con la última
  *   no puede pasar: detrás no hay otra, y descartarla por una estimación sería contestar «no cabe»
- *   a un negocio que sí cabe. Se intenta siempre que quepa por filas, y decide lo que se escribe.
- *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con el lector de un cliente, intentarlo es
- *   traer todas las filas antes de escribir, así que allí la estimación sí descarta.)
+ *   a un negocio que sí cabe. Se intenta siempre que quepa por filas, y decide lo que se escribe:
+ *   el cursor se lee según se escribe, así que intentarlo no carga lo que no cabe.
  *
  * La medida va fuera de la foto a propósito: sólo decide qué ventana se intenta, no es el dato.
  * `volcar` recibe el límite UNA vez y lo usa en todas sus sentencias, de modo que padre e hijas
@@ -327,7 +326,7 @@ async function volcarLaVentanaQueQuepa<T>(
 		filas = medida.filas;
 		if (medida.filas > topes.filas) continue;
 		const esLaUltima = i === candidatas.length - 1;
-		if (medida.bytes > topes.bytes && !(esLaUltima && lector.paraAlEscribir)) continue;
+		if (medida.bytes > topes.bytes && !esLaUltima) continue;
 		const volcado = await volcar(desde);
 		if (volcado !== null) return { volcado };
 	}

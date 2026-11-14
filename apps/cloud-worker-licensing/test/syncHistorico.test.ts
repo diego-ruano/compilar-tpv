@@ -9,21 +9,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
+import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-let clienteActual: any = null;
 let esTpv = true;
-
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
-}));
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -53,7 +46,7 @@ type Pagina = {
 /**
  * Levanta un tenant, lo siembra y deja pedir varias páginas seguidas sobre el MISMO estado. El
  * recorrido completo es lo que se prueba: una página suelta no dice si el cursor avanza bien. Cada
- * página se pide con la ruta en el Worker y dentro del TenantHub: las dos contestan lo mismo.
+ * página se pide con la ruta dentro del TenantHub.
  */
 async function conTenant<R>(
 	nombre: string,
@@ -67,12 +60,11 @@ async function conTenant<R>(
 		crearEsquemaTenant(sql);
 		sembrar(sql);
 
-		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
 
 		const pedir = (cuerpo: any): Promise<{ status: number; body: Pagina }> =>
-			pedirPorLosDosCaminos(
+			pedirEnElHub(
 				() =>
 					app.request(
 						"/historico",
@@ -103,7 +95,6 @@ function sembrarComandas(sql: any, n: number) {
 
 beforeEach(() => {
 	esTpv = true;
-	clienteActual = null;
 });
 
 describe("POST /v1/sync/historico", () => {

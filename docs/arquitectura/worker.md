@@ -221,8 +221,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   volcado (150 s, y lo pide en gzip: [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)).
   Como el cursor se lee según se escribe, la ventana más estrecha se intenta siempre aunque su
   estimación no quepa, y decide lo escrito. Los bytes se cuentan al escribir, exactos (UTF-8), y las
-  filas también. Un router de sync montado suelto en un test lee por `tenantQuery`, y para una misma
-  ventana la respuesta es la misma byte a byte (`test/helpers/dosCaminos.ts`).
+  filas también. El lector sólo lee dentro del TenantHub (fuera lanza, como `tenantQuery`): un test
+  que monta el router de sync suelto ejecuta la ruta dentro, con `dentroDelHub` y el SQLite de un DO
+  de verdad (`test/helpers/volcadoEnElHub.ts`).
 - **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
   sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
   un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y

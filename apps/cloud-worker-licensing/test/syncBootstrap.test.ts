@@ -15,23 +15,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
+import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-/** Cliente SQL del test en curso; lo lee el `tenantQuery` simulado. */
-let clienteActual: any = null;
 /** Qué contesta `isTpvDevice`: el guard del endpoint. */
 let esTpv = true;
-
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
-}));
 
 // El router monta `tenantAuth` él mismo; aquí se sustituye por el mínimo que necesita el handler.
 vi.mock("../src/middleware/tenant", async (original) => ({
@@ -57,8 +49,8 @@ type Volcado = {
 };
 
 /**
- * Levanta un tenant real sobre el SqlStorage del DO, lo siembra y pide el volcado, con la ruta en el
- * Worker y dentro del TenantHub: las dos contestan lo mismo.
+ * Levanta un tenant real sobre el SqlStorage del DO, lo siembra y pide el volcado, con la ruta dentro
+ * del TenantHub.
  */
 async function pedirVolcado(
 	nombre: string,
@@ -71,10 +63,9 @@ async function pedirVolcado(
 		crearEsquemaTenant(sql);
 		sembrar(sql);
 
-		clienteActual = clienteSobre(sql);
 		const app = new Hono();
 		app.route("/", syncRoutes);
-		return pedirPorLosDosCaminos(() => app.request("/bootstrap", { method: "POST" }, {} as any), sql);
+		return pedirEnElHub(() => app.request("/bootstrap", { method: "POST" }, {} as any), sql);
 	});
 }
 
@@ -84,7 +75,6 @@ function tabla(body: Volcado, nombre: string) {
 
 beforeEach(() => {
 	esTpv = true;
-	clienteActual = null;
 });
 
 describe("POST /v1/sync/bootstrap", () => {

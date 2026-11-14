@@ -1,8 +1,8 @@
 // test/syncVerificar.test.ts
 //
 // El contraste por resúmenes (`domains/sync/verificar.ts`): `/v1/sync/verificar/resumen`, `/filas`
-// y `/claves`, contra el SQLite de un TenantHub de verdad y por los dos lectores (el cursor del DO,
-// que es como corre desplegada, y el de un cliente, el de un router suelto: `helpers/dosCaminos.ts`).
+// y `/claves`, contra el SQLite de un TenantHub de verdad, con la ruta dentro de él
+// (`helpers/volcadoEnElHub.ts`).
 //
 // Lo que se fija:
 //
@@ -15,23 +15,16 @@
 //   quien pregunta;
 // - los techos: las filas que lee un resumen, los bytes de una página de filas y de una de claves.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { pedirPorLosDosCaminos } from "./helpers/dosCaminos";
+import { pedirEnElHub } from "./helpers/volcadoEnElHub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-let clienteActual: any = null;
-
-vi.mock("../src/lib/tenantClient", async (original) => ({
-	...(await (original as any)()),
-	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
-}));
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -43,7 +36,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
-const { lectorDelCliente, lectorDelHub } = await import("../src/domains/sync/volcado");
+const { lectorDelHub } = await import("../src/domains/sync/volcado");
 const { syncRoutes } = await import("../src/domains/sync/sync.routes");
 const { Resumidor, cubosPara } = await import("../src/domains/sync/resumenCubos");
 const { CALMA_PARA_RESUMIR_MS, filasDeLosCubos, filasPorClave, paginaDeClaves, resumenDeVerificacion } = await import(
@@ -54,18 +47,17 @@ const { sentenciaVolcado } = await import("../src/domains/sync/bootstrap.ventana
 
 type Pedir = (ruta: string, cuerpo?: unknown) => Promise<{ status: number; body: any; bytes: number }>;
 
-/** Un TenantHub con su esquema, y una forma de pedirle una ruta por los dos caminos. */
+/** Un TenantHub con su esquema, y una forma de pedirle una ruta. */
 async function conTenant<R>(nombre: string, sembrar: (sql: any) => void, usar: (pedir: Pedir, sql: any) => Promise<R>): Promise<R> {
 	return enElHub(`verificar-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		sembrar(sql);
-		clienteActual = clienteSobre(sql);
 
 		const app = new Hono();
 		app.route("/", syncRoutes);
 		const pedir: Pedir = async (ruta, cuerpo) => {
-			const r = await pedirPorLosDosCaminos(
+			const r = await pedirEnElHub(
 				() =>
 					app.request(
 						ruta,
@@ -141,10 +133,6 @@ function cubosDistintos(a: any, b: any): number[] {
 	expect(a.cubos).toBe(b.cubos);
 	return a.cuentas.flatMap((n: number, i: number) => (n !== b.cuentas[i] || a.sumas[i] !== b.sumas[i] ? [i] : []));
 }
-
-beforeEach(() => {
-	clienteActual = null;
-});
 
 describe("POST /v1/sync/verificar/resumen", () => {
 	it("el sobre lleva los nombres que deserializa Rust, y resume lo que devuelve su sentencia", async () => {
@@ -368,7 +356,7 @@ describe("POST /v1/sync/verificar/resumen", () => {
 			);
 			expect(maestras).toBe(20);
 
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+			for (const lector of [lectorDelHub(sql)]) {
 				const quien = { checkpoint: null, deviceId: "d1", clientNow: "2026-11-13 12:00:00", ahoraMs: Date.now() };
 				const leer = async (maxFilas: number) =>
 					JSON.parse(new TextDecoder().decode(await resumenDeVerificacion(lector, quien, maxFilas)));
@@ -401,7 +389,7 @@ describe("POST /v1/sync/verificar/filas", () => {
 			sembrarZonas(sql, 400);
 			sembrarLog(sql, 3);
 
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+			for (const lector of [lectorDelHub(sql)]) {
 				const pedido = { tabla: "Zonas", desde: "2026-10-14 12:00:00", cubos: 4, pedir: [1, 3] };
 				const vistas: string[] = [];
 				let cursor = 0;
@@ -647,7 +635,7 @@ describe("POST /v1/sync/verificar/claves", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			sembrarZonas(sql, 200);
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
+			for (const lector of [lectorDelHub(sql)]) {
 				const bytes = await paginaDeClaves(lector, { tabla: "Zonas", cursor: null, limite: 200 }, 2_000);
 				expect(bytes).not.toBeNull();
 				const pagina = JSON.parse(new TextDecoder().decode(bytes!));

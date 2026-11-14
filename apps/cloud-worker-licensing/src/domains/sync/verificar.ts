@@ -53,14 +53,6 @@ import {
 export const RESUMEN_MAX_FILAS = 1_000_000;
 
 /**
- * Lo mismo con el lector de un cliente, que sólo usa un router montado suelto en un test
- * (`tenantQuery` de mentira, `volcado.ts`): allí las filas no se leen del cursor del DO, sino que
- * llegan enteras en memoria antes de escribir nada. A unos 180 bytes por fila, cien mil quedan muy
- * por debajo de lo que eso aguanta.
- */
-const RESUMEN_MAX_FILAS_CON_UN_CLIENTE = 100_000;
-
-/**
  * Lo que tiene que llevar quieta la base para resumirla. Con una escritura reciente el negocio está
  * trabajando: la foto caducaría antes de que la Main la comparase, y el resumen ocuparía el hilo
  * que atiende a las Handy.
@@ -252,7 +244,7 @@ type TablaResumida = {
 export async function resumenDeVerificacion(
 	lector: Lector,
 	quien: QuienPregunta,
-	maxFilas: number = lector.paraAlEscribir ? RESUMEN_MAX_FILAS : RESUMEN_MAX_FILAS_CON_UN_CLIENTE,
+	maxFilas: number = RESUMEN_MAX_FILAS,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	// Antes de medir nada: si no es el momento, la respuesta cuesta cuatro lecturas de una fila.
 	const antes = await lector.foto(sentenciasDelMomento(quien), (rs) => mirarElMomento(rs, quien));
