@@ -765,11 +765,12 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   de `dudosa`, que no caduca): para entonces lo que la Main escribió y la nube rechazó ya no va a
   subir, y lo que se trae es lo de la nube.
 - **Trabajo acotado**: se intentan hasta 50 cuarentenas y 5.000 filas por pasada (la primera se
-  intenta siempre), en peticiones de 500 claves. Las que no caben se dejan para otra pasada y se sigue
-  con las de detrás, y las que ni se intentan (inciertas, o que chocan con lo apartado) no cuentan:
-  unas atascadas al principio no dejan sin intentar a las demás. De las inciertas se vuelven a mirar
-  20 por pasada; de lo apartado de la subida se leen 1.000 operaciones, y con más se da todo por
-  chocado.
+  intenta siempre), en peticiones de 500 claves. Cada pasada empieza por las que hace más que no se
+  miran (`Ultima_Salida_Ms`) y las aplica en orden de `Seq`; las que no caben se dejan para otra
+  pasada, que empieza por ellas, y las que ni se intentan (inciertas, dudosas o que chocan con lo
+  apartado) no cuentan: unas atascadas no dejan sin intentar a las demás. De las inciertas se
+  vuelven a mirar 20 por pasada; de las cuarentenas se leen 10.000, y de lo apartado de la subida,
+  1.000 operaciones (con más se da todo por chocado).
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,

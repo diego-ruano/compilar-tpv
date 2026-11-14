@@ -336,7 +336,7 @@ pub(crate) async fn resolver(
     // número o por filas) se dejan para otra pasada, y se sigue mirando las de detrás.
     let mut intentadas: Vec<&Cuarentena> = Vec::new();
     let mut quedan: Vec<(&Cuarentena, String)> = Vec::new();
-    let mut sin_intentar = 0usize;
+    let mut saltadas: HashSet<&str> = HashSet::new();
     let mut pedir: BTreeMap<String, Vec<Vec<Json>>> = BTreeMap::new();
     let mut pedidas: HashSet<String> = HashSet::new();
     for c in &cuarentenas {
@@ -367,7 +367,7 @@ pub(crate) async fn resolver(
         if intentadas.len() == MAX_CUARENTENAS_POR_PASADA
             || (!intentadas.is_empty() && pedidas.len() + nuevas.len() > MAX_FILAS_POR_PASADA)
         {
-            sin_intentar += 1;
+            saltadas.insert(c.op_id.as_str());
             continue;
         }
         for f in nuevas {
@@ -412,6 +412,10 @@ pub(crate) async fn resolver(
         .map(|(t, _)| t)
         .collect();
 
+    // Se han elegido empezando por las que hace más que no se miran; se aplican en orden de `Seq`,
+    // que es el de la nube: la del padre antes que la de la hija.
+    let mut intentadas = intentadas;
+    intentadas.sort_by_key(|c| c.seq);
     let mut resueltas = 0usize;
     for c in &intentadas {
         match aplicar(conn, c, &arriba, &orden, &claves).await {
@@ -439,9 +443,18 @@ pub(crate) async fn resolver(
             "cuarentena de bajada que no se puede cerrar todavía (SYNC-36)"
         );
     }
-    if sin_intentar > 0 {
-        tracing::info!(target: "tpv::sync", sin_intentar, "cuarentenas de bajada que no caben en esta pasada (SYNC-36)");
+    if !saltadas.is_empty() {
+        tracing::info!(target: "tpv::sync", sin_intentar = saltadas.len(), "cuarentenas de bajada que no caben en esta pasada (SYNC-36)");
     }
+    // Las que se han mirado van detrás en la pasada siguiente; las que no cabían, no: así ni unas
+    // atascadas al principio ni el tope de lectura dejan a ninguna sin intentar para siempre.
+    let miradas: Vec<&str> = cuarentenas.iter().map(|c| c.op_id.as_str()).filter(|op| !saltadas.contains(op)).collect();
+    conn.execute(
+        "UPDATE _Sync_Failed SET Ultima_Salida_Ms = ?1 WHERE Quarantined = 1 AND Op_Id IN (SELECT value FROM json_each(?2));",
+        vec![Value::Integer(now_ms()), Value::Text(serde_json::to_string(&miradas).map_err(db_err)?)],
+    )
+    .await
+    .map_err(db_err)?;
     Ok(Some(Salida { resueltas, quedan: total - resueltas }))
 }
 
@@ -458,7 +471,7 @@ async fn leer_cuarentenas(db: &Db) -> AppResult<(Vec<Cuarentena>, usize)> {
         .conn()
         .query(
             "SELECT Op_Id, Seq, Statements_Json <> '[]', Filas_Json FROM _Sync_Failed \
-              WHERE Quarantined = 1 ORDER BY Seq LIMIT ?1;",
+              WHERE Quarantined = 1 ORDER BY COALESCE(Ultima_Salida_Ms, 0), Seq LIMIT ?1;",
             vec![Value::Integer(MAX_CUARENTENAS_LEIDAS as i64)],
         )
         .await

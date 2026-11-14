@@ -314,6 +314,55 @@ async fn lo_que_choca_con_lo_apartado_de_la_subida_se_queda() {
 }
 
 #[tokio::test]
+async fn las_que_siguen_sin_entrar_no_dejan_sin_intentar_a_las_de_detras() {
+    // Codex (segunda pasada): 50 que se intentan y siguen sin entrar consumían el cupo de cada pasada,
+    // y la 51 no se intentaba nunca. Ahora cada pasada empieza por las que hace más que no se miran.
+    let (repo, db, dir) = base("rotan").await;
+    sembrar(&db, NEGOCIO).await;
+    sembrar(
+        &db,
+        "CREATE TRIGGER anterior_alta BEFORE INSERT ON Zonas WHEN NEW.Nombre_Zona LIKE 'Bodega%'
+           BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;
+         CREATE TRIGGER anterior_nombre BEFORE UPDATE ON Zonas WHEN NEW.Nombre_Zona = 'Salón azul'
+           BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;
+         UPDATE _Sync_State SET Last_Seq = 30 WHERE Id = 1;",
+    )
+    .await;
+    let mut cambios: Vec<SyncChange> = (0..55)
+        .map(|i| {
+            cambio(
+                &format!("op-b{i:02}"),
+                31 + i,
+                vec![("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);", vec![json!(format!("zb{i:02}")), json!(format!("Bodega {i}"))])],
+            )
+        })
+        .collect();
+    cambios.push(cambio("op-azul", 86, vec![("UPDATE Zonas SET Nombre_Zona = ?2 WHERE ID_Zona = ?1;", vec![json!("z2"), json!("Salón azul")])]));
+    for ch in &cambios {
+        bajar(&repo, ch).await;
+    }
+    let nube = NubeDeContraste::nueva("rotan").await;
+    nube.sembrar(NEGOCIO).await;
+    for ch in &cambios {
+        nube.aplicar(&ch.statements).await;
+    }
+    *nube.hasta_seq.lock().unwrap() = 86;
+    *nube.ultimo_ajeno.lock().unwrap() = 86;
+    // El nombre ya se sabe guardar; las bodegas, no.
+    sembrar(&db, "DROP TRIGGER anterior_nombre;").await;
+
+    hecha(pasada(&repo, &nube, true).await);
+    assert!(en_cuarentena(&db).await.contains(&"op-azul".to_string()), "la 56 no ha cabido en la primera");
+    hecha(pasada(&repo, &nube, true).await);
+    let quedan = en_cuarentena(&db).await;
+    assert!(!quedan.contains(&"op-azul".to_string()), "en la segunda, sí");
+    assert_eq!(quedan.len(), 55);
+    assert_eq!(textos(&db, "SELECT Nombre_Zona FROM Zonas WHERE ID_Zona = 'z2';").await, vec!["Salón azul"]);
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn lo_apuntado_con_algo_apartado_en_su_tabla_no_se_trae_ni_cuando_lo_apartado_se_retira() {
     // Codex: aquí la mesa m2 es de la zona 2 por una escritura de la Main que la nube rechazó; arriba
     // sigue en la 1. La Handy cambia las mesas de la zona 1 por su zona, y aquí el filtro no ve la m2.
