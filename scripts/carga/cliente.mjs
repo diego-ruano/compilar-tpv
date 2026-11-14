@@ -20,8 +20,8 @@ const PING = '{"type":"ping"}';
  * Lo que la Main sube de una vez (`replicacion.rs::cortar`): hasta 200 operaciones y 256 KB de
  * sentencias, contados en bytes de UTF-8; una operación mayor va sola. El TenantHub aplica hasta 512 KB.
  */
-export const LOTE_MAX_OPS = 200;
-export const LOTE_MAX_BYTES = 256 * 1024;
+const LOTE_MAX_OPS = 200;
+const LOTE_MAX_BYTES = 256 * 1024;
 /** Lo que la Main espera el acuse de un lote (`ESPERA_DEL_LOTE`). */
 const ESPERA_DEL_LOTE_MS = 30_000;
 /** Reenvíos seguidos sin aplicar nada (pasajeros o sin intentar) antes de dar la subida por atascada. */
@@ -30,7 +30,7 @@ const REENVIOS_SIN_AVANCE = 3;
 const ESPERA_TRAS_PASAJERO_MS = 1000;
 
 /** Una operación del lote tal como la manda la Main (`replicacion.rs::operacion`). */
-export function operacionDeLote(op) {
+function operacionDeLote(op) {
   return {
     opId: op.opId,
     commandName: op.commandName,
@@ -42,7 +42,7 @@ export function operacionDeLote(op) {
 }
 
 /** Lo que pesan las sentencias de una operación, como las mide la Main: su JSON en bytes de UTF-8. */
-export function bytesDeSentencias(op) {
+function bytesDeSentencias(op) {
   return Buffer.byteLength(JSON.stringify(op.sentencias.map(s => ({ sql: s.sql, args: s.args }))));
 }
 
@@ -52,7 +52,7 @@ export function bytesDeSentencias(op) {
  *
  * @param {{ op: { opId: string, sentencias: { sql: string, args: unknown[] }[] } }[]} pendientes
  */
-export function cortarLote(pendientes, { maxOps = LOTE_MAX_OPS, maxBytes = LOTE_MAX_BYTES } = {}) {
+function cortarLote(pendientes, { maxOps = LOTE_MAX_OPS, maxBytes = LOTE_MAX_BYTES } = {}) {
   const lote = [];
   let bytes = 0;
   for (const p of pendientes) {
@@ -80,7 +80,7 @@ const cierto = (v, campo) => v?.[campo] === true;
  *
  * @param {{ opId: string }[]} opIds  las operaciones del lote, en orden
  */
-export function leerAcuse(opIds, acuse) {
+function leerAcuse(opIds, acuse) {
   const lectura = { entero: null, aplicadas: [], rechazadas: [], noIntentadas: 0, sinVeredicto: 0, parada: null };
   if (!cierto(acuse, "ok")) {
     lectura.entero = { error: String(acuse?.error ?? "sin_error"), transitorio: cierto(acuse, "transitorio"), permanente: cierto(acuse, "permanente") };
@@ -258,7 +258,7 @@ export class Equipo {
  * `central;dur=12;desc="2", hub-lee;dur=8;desc="1", total;dur=25, colo;desc="CDG"` →
  * `{ central: { ms: 12, n: 2 }, "hub-lee": { ms: 8, n: 1 }, total: { ms: 25 }, colo: "CDG" }`.
  */
-export function leerServerTiming(cabecera) {
+function leerServerTiming(cabecera) {
   if (!cabecera) return null;
   const salida = {};
   for (const parte of cabecera.split(",")) {
