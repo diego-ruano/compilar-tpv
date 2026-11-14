@@ -871,7 +871,9 @@ demás. Por eso **lo que decide si la escritura entra va en un paso de guarda de
 Van en guarda: cancelar una reserva que aún no ha llegado (`reserva_no_pendiente`); marcar desde la
 mesa la llegada o la salida, con la reserva como se leyó (`reserva_cambiada`); el solape de una
 reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`,
-`reserva_solapada`) y que su cliente siga existiendo (`cliente_no_encontrado`); el último
+`reserva_solapada`), con la duración y el modo del negocio leídos al aplicar, que su cliente siga
+existiendo (`cliente_no_encontrado`) y que el email de un cliente nuevo no sea de otro
+(`email_duplicado`), en el orden en que lo mira la ruta; el último
 administrador (`ultimo_administrador`) y que la ficha que se edita exista
 (`trabajador_no_encontrado`); el turno repetido de un trabajador (`asignacion_duplicada`) y editar
 una asignación que tiene dos tramos o que ya no está (`horario_editar_conjunto`,

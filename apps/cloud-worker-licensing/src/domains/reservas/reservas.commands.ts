@@ -3,9 +3,10 @@
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import {
-	argumentosDelChoque,
-	SQL_SIN_CHOQUE_EN_LA_MESA,
-	type AjustesDeReserva,
+	argumentosDeLaGuarda,
+	SQL_EMAIL_LIBRE,
+	SQL_SIN_CHOQUE,
+	SQL_SIN_CHOQUE_PROHIBIDO,
 	type ClienteResuelto,
 } from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
@@ -110,21 +111,28 @@ function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolea
 }
 
 /**
- * SYNC-30: lo que la ruta decidió leyendo la base, otra vez dentro del lote que guarda la reserva.
+ * SYNC-30: lo que decide si la reserva se guarda, mirado dentro del lote que la guarda, en el orden
+ * en que lo mira la ruta y la Main:
  *
- * - El cliente existente sigue existiendo (`cliente_no_encontrado`).
  * - La mesa no choca con nada, si el solape está prohibido (`reserva_solapada_prohibida`) o si no
- *   llega confirmado (`reserva_solapada`). Un solape confirmado con «avisar» entra.
+ *   llega confirmado (`reserva_solapada`). Un solape confirmado con «avisar» entra. La duración y el
+ *   modo se leen del negocio al aplicar.
+ * - El cliente existente sigue existiendo (`cliente_no_encontrado`).
+ * - El email de un cliente nuevo no es de otro (`email_duplicado`). Esto sólo lo mira la guarda: el
+ *   reintento de una reserva que entró con su cliente nuevo se encontraba al cliente que había creado.
  *
  * Van delante de todo lo que escribe: la reserva no choca consigo misma, pero una nueva sin id lo
  * recibe aquí.
  */
-function guardasDeLaReserva(
-	input: ReservaSaveInput,
-	cliente: ClienteResuelto,
-	ajustes: AjustesDeReserva | null,
-): any[] {
+function guardasDeLaReserva(input: ReservaSaveInput, cliente: ClienteResuelto): any[] {
 	const guardas: any[] = [];
+	if (input.id_mesa) {
+		const args = argumentosDeLaGuarda({ ...input, id_mesa: input.id_mesa });
+		guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE_PROHIBIDO, args, error: "reserva_solapada_prohibida", status: 409 });
+		if (!input.forzar_solape) {
+			guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE, args, error: "reserva_solapada", status: 409 });
+		}
+	}
 	if (cliente.modo === "existente") {
 		guardas.push({
 			kind: "guard",
@@ -134,38 +142,20 @@ function guardasDeLaReserva(
 			status: 404,
 		});
 	}
-	if (input.id_mesa && ajustes) {
-		const error =
-			ajustes.modo === "prohibir" ? "reserva_solapada_prohibida" : input.forzar_solape ? null : "reserva_solapada";
-		if (error) {
-			guardas.push({
-				kind: "guard",
-				sql: SQL_SIN_CHOQUE_EN_LA_MESA,
-				args: argumentosDelChoque({ ...input, id_mesa: input.id_mesa }, ajustes.duracion),
-				error,
-				status: 409,
-			});
-		}
+	if (cliente.modo === "nuevo" && input.email) {
+		guardas.push({ kind: "guard", sql: SQL_EMAIL_LIBRE, args: [input.email], error: "email_duplicado", status: 409 });
 	}
 	return guardas;
 }
 
-/**
- * `ajustes` son los del negocio cuando la reserva lleva mesa (la ruta los lee para mirar el solape),
- * y `null` sin mesa.
- */
-export function saveReserva(
-	input: ReservaSaveInput,
-	cliente: ClienteResuelto,
-	ajustes: AjustesDeReserva | null,
-): BuiltCommand {
+export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): BuiltCommand {
 	const cloudPayload = {
 		...input,
 		id_cliente: cliente.modo === "existente" ? cliente.id_cliente : null,
 	};
 
 	const { steps: pasosCliente, idCliente } = clienteSteps(input, cliente);
-	const steps: any[] = [...guardasDeLaReserva(input, cliente, ajustes), ...pasosCliente];
+	const steps: any[] = [...guardasDeLaReserva(input, cliente), ...pasosCliente];
 
 	if (input.id_reserva) {
 		steps.push({

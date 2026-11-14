@@ -425,6 +425,92 @@ describe("SYNC-30 · el solape de una reserva nueva", () => {
 			},
 		);
 	});
+
+	// La duración y el modo los lee la guarda del negocio al aplicar: la ruta los leyó en «avisar» y
+	// la reserva llegó confirmada, pero entretanto se prohíben los solapes y entra otra reserva.
+	it("si entre la lectura y el lote se prohíben los solapes, una confirmada tampoco entra", async () => {
+		await conNegocio("solape-ajustes", MESA, async (n) => {
+			const r = await n.pedir("POST", "/v1/reservas", nueva(true), {
+				antesDelLote: ["UPDATE Business_Settings SET Reserva_Solape = 'prohibir' WHERE ID = 1", otraEnLaMesa],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "reserva_solapada_prohibida" } });
+			expect(reservas(n)).toBe(1);
+		});
+	});
+
+	it("con la duración del negocio de cuando se aplica", async () => {
+		// La otra empieza a las 22:30: con 120 min de duración por defecto choca, con 60 no.
+		await conNegocio("solape-duracion", [...MESA, "UPDATE Business_Settings SET Reserva_Duracion_Min = 60 WHERE ID = 1"], async (n) => {
+			const r = await n.pedir("POST", "/v1/reservas", nueva(), {
+				antesDelLote: [
+					"UPDATE Business_Settings SET Reserva_Duracion_Min = 120 WHERE ID = 1",
+					reservaEn("otra", "PROXIMA", "22:30"),
+				],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "reserva_solapada" } });
+		});
+	});
+
+	// Las guardas van en el orden en que lo mira la ruta: un reintento con la base igual contesta lo
+	// mismo que la primera vez.
+	it("si a la vez se borra el cliente y entra otra reserva, el solape primero, también al reintentar", async () => {
+		await conNegocio(
+			"solape-y-cliente",
+			[...MESA, "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli', 'Ana')"],
+			async (n) => {
+				const clave = "clave-del-solape-y-el-cliente";
+				const primera = await n.pedir("POST", "/v1/reservas", { ...nueva(), id_cliente: "cli" }, {
+					clave,
+					antesDelLote: ["DELETE FROM Clientes WHERE ID_Cliente = 'cli'", otraEnLaMesa],
+				});
+				expect(primera.json.error).toBe("reserva_solapada");
+				const reintento = await n.pedir("POST", "/v1/reservas", { ...nueva(), id_cliente: "cli" }, { clave });
+				expect(reintento.status).toBe(409);
+				expect(reintento.json.error).toBe("reserva_solapada");
+			},
+		);
+	});
+});
+
+describe("SYNC-30 · el cliente nuevo de una reserva", () => {
+	const conCliente = {
+		id_reserva: "con-cliente",
+		id_mesa: null,
+		dia_ymd: "2030-05-10",
+		hora: "21:00",
+		turno: "cena",
+		comensales: 2,
+		duracion_min: null,
+		nota: null,
+		id_cliente: null,
+		nombre_cliente: "Ana",
+		email: "ana@bar.test",
+		telefono: null,
+		forzar_solape: false,
+	};
+
+	it("un email que ya es de otro cliente, también si entra entre la lectura y el lote, es email_duplicado", async () => {
+		await conNegocio("email-duplicado", [], async (n) => {
+			const r = await n.pedir("POST", "/v1/reservas", conCliente, {
+				antesDelLote: ["INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('otro', 'Otra', 'ANA@bar.test')"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "email_duplicado" } });
+			expect(n.n("SELECT COUNT(*) FROM Reservas")).toBe(0);
+			expect(n.n("SELECT COUNT(*) FROM Clientes")).toBe(1);
+		});
+	});
+
+	// Antes la ruta lo miraba antes de mandar el lote, y el reintento de una reserva que había entrado
+	// con su cliente nuevo se encontraba al cliente que ella misma había creado.
+	it("el reintento de una que entró con su cliente nuevo contesta lo mismo que la primera vez", async () => {
+		await conNegocio("email-reintento", [], async (n) => {
+			const clave = "clave-de-la-reserva-con-cliente";
+			const primera = await n.pedir("POST", "/v1/reservas", conCliente, { clave });
+			expect(primera).toEqual({ status: 200, json: { ok: true, id_reserva: "con-cliente" } });
+			expect(await n.pedir("POST", "/v1/reservas", conCliente, { clave })).toEqual(primera);
+			expect(n.n("SELECT COUNT(*) FROM Clientes")).toBe(1);
+		});
+	});
 });
 
 const USUARIOS = [

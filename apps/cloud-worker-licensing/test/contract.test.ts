@@ -91,7 +91,7 @@ import {
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
 import { cancelarReserva, deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
-import { ajustesDeReserva, estadoYOrigen, resolverCliente } from "../src/domains/reservas/reservas.queries";
+import { estadoYOrigen, resolverCliente } from "../src/domains/reservas/reservas.queries";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import {
 	createTarea,
@@ -708,12 +708,11 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "reservas.guardar": {
 			// Como la ruta: el schema normaliza la entrada y RI-61 resuelve el cliente (ninguno, uno
-			// existente o uno nuevo) antes de construir el comando; con mesa, lee los ajustes del solape.
+			// existente o uno nuevo) antes de construir el comando.
 			const datos = reservaSaveSchema.parse(caso.entrada);
 			const cliente = await resolverCliente(db, datos);
 			if ("error" in cliente) throw new Error(`reservas.guardar: ${cliente.error}`);
-			const ajustes = datos.id_mesa ? await ajustesDeReserva(db) : null;
-			aplicar(hub, sql, saveReserva({ ...datos, turno: caso.entrada.turno } as any, cliente, ajustes));
+			aplicar(hub, sql, saveReserva({ ...datos, turno: caso.entrada.turno } as any, cliente));
 			return;
 		}
 		case "reservas.eliminar": {

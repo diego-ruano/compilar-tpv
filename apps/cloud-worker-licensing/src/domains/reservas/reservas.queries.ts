@@ -137,23 +137,25 @@ export async function ajustesDeReserva(db: Client): Promise<AjustesDeReserva> {
 
 // RI-61: el mismo SQL que `SQL_CHOQUE_RESERVA` y `SQL_CHOQUE_COMANDA` en la Main
 // (`tpv-infra-sqlite/src/reservas.rs`), donde está explicado. Tiene que seguir siéndolo. Las
-// condiciones van aparte porque las usa también la guarda del solape (`SQL_SIN_CHOQUE_EN_LA_MESA`).
-const CHOCA_CON_UNA_RESERVA = `
+// condiciones van aparte porque las usan también las guardas del solape (`SQL_SIN_CHOQUE…`), que
+// leen la duración del negocio dentro del lote en vez de recibirla: `duracion` es la de la reserva,
+// `porDefecto` la del negocio y `propia` la reserva, que no choca consigo misma.
+const chocaConUnaReserva = (duracion: string, porDefecto: string, propia: string) => `
 	FROM Reservas R
 	WHERE R.ID_Mesa = ?1
-	  AND R.ID_Reserva <> ?6
+	  AND R.ID_Reserva <> ${propia}
 	  AND R.Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA')
-	  AND datetime(R.Dia_YMD || ' ' || R.Hora) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
-	  AND datetime(R.Dia_YMD || ' ' || R.Hora, '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')
+	  AND datetime(R.Dia_YMD || ' ' || R.Hora) < datetime(?2 || ' ' || ?3, '+' || ${duracion} || ' minutes')
+	  AND datetime(R.Dia_YMD || ' ' || R.Hora, '+' || COALESCE(R.Duracion_Min, ${porDefecto}) || ' minutes')
 	      > datetime(?2 || ' ' || ?3)
 `;
 
-const CHOCA_CON_UNA_COMANDA = `
+const chocaConUnaComanda = (duracion: string, porDefecto: string) => `
 	FROM Comandas C
 	WHERE C.ID_Mesa = ?1
 	  AND C.Estado = 'Abierta'
-	  AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
-	  AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?5 || ' minutes'), datetime('now','localtime'))
+	  AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ${duracion} || ' minutes')
+	  AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ${porDefecto} || ' minutes'), datetime('now','localtime'))
 	      > datetime(?2 || ' ' || ?3)
 `;
 
@@ -161,38 +163,54 @@ const SQL_CHOQUE_RESERVA = `
 	SELECT R.Hora AS desde,
 	       strftime('%H:%M', datetime(R.Dia_YMD || ' ' || R.Hora,
 	                                  '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')) AS hasta
-	${CHOCA_CON_UNA_RESERVA}
+	${chocaConUnaReserva("?4", "?5", "?6")}
 	ORDER BY R.Dia_YMD, R.Hora, R.ID_Reserva
 	LIMIT 1;
 `;
 
 const SQL_CHOQUE_COMANDA = `
 	SELECT strftime('%H:%M', C.Fecha_Hora_Apertura) AS desde
-	${CHOCA_CON_UNA_COMANDA}
+	${chocaConUnaComanda("?4", "?5")}
 	ORDER BY C.Fecha_Hora_Apertura, C.ID_Comanda
 	LIMIT 1;
 `;
 
-/**
- * SYNC-30: 1 si la mesa no choca con nada, con los argumentos de `argumentosDelChoque`. Es la guarda
- * con la que `saveReserva` vuelve a mirar el solape dentro del lote que guarda la reserva: la ruta
- * lo mira antes (`choqueEnLaMesa`, para decir con qué choca), y entre su lectura y el lote puede
- * entrar otra reserva o abrirse una comanda en esa mesa.
- */
-export const SQL_SIN_CHOQUE_EN_LA_MESA = `
-	SELECT NOT EXISTS (SELECT 1 ${CHOCA_CON_UNA_RESERVA})
-	   AND NOT EXISTS (SELECT 1 ${CHOCA_CON_UNA_COMANDA});
-`;
+/** La duración por defecto del negocio, leída en la propia sentencia: la de `ajustesDeReserva`. */
+const DURACION_DEL_NEGOCIO =
+	"COALESCE((SELECT Reserva_Duracion_Min FROM Business_Settings WHERE ID = 1 AND Reserva_Duracion_Min > 0), 120)";
+
+/** ¿Choca la reserva con otra o con una comanda abierta? Con los argumentos de `argumentosDeLaGuarda`. */
+const CHOCA_EN_EL_LOTE = `(
+	EXISTS (SELECT 1 ${chocaConUnaReserva(`COALESCE(?4, ${DURACION_DEL_NEGOCIO})`, DURACION_DEL_NEGOCIO, "?5")})
+	OR EXISTS (SELECT 1 ${chocaConUnaComanda(`COALESCE(?4, ${DURACION_DEL_NEGOCIO})`, DURACION_DEL_NEGOCIO)})
+)`;
 
 /**
- * Los argumentos de las consultas del choque: `?1` la mesa, `?2` y `?3` el día y la hora, `?4` la
- * duración de la reserva, `?5` la del negocio y `?6` la propia reserva, que no choca consigo misma.
+ * SYNC-30: las guardas con las que `saveReserva` vuelve a mirar el solape dentro del lote que guarda
+ * la reserva. La ruta lo mira antes (`choqueEnLaMesa`, para decir con qué choca), y entre su lectura
+ * y el lote puede entrar otra reserva, abrirse una comanda en esa mesa o cambiar los ajustes: aquí la
+ * duración y el modo del negocio se leen al aplicar, como hace la Main dentro de su transacción.
+ *
+ * - `SQL_SIN_CHOQUE_PROHIBIDO`: 1 salvo que los solapes estén prohibidos y la mesa choque.
+ * - `SQL_SIN_CHOQUE`: 1 si la mesa no choca con nada (la reserva no llega confirmada).
  */
-export function argumentosDelChoque(
-	r: { id_mesa: string; dia_ymd: string; hora: string; duracion_min?: number | null; id_reserva?: string | null },
-	duracionDef: number,
-): [string, string, string, number, number, string] {
-	return [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef, r.id_reserva ?? ""];
+export const SQL_SIN_CHOQUE_PROHIBIDO = `
+	SELECT NOT ((SELECT Reserva_Solape FROM Business_Settings WHERE ID = 1) IS 'prohibir' AND ${CHOCA_EN_EL_LOTE});
+`;
+export const SQL_SIN_CHOQUE = `SELECT NOT ${CHOCA_EN_EL_LOTE};`;
+
+/**
+ * Los argumentos de las guardas del solape: `?1` la mesa, `?2` y `?3` el día y la hora, `?4` la
+ * duración de la reserva (sin ella, la del negocio) y `?5` la propia reserva.
+ */
+export function argumentosDeLaGuarda(r: {
+	id_mesa: string;
+	dia_ymd: string;
+	hora: string;
+	duracion_min?: number | null;
+	id_reserva?: string | null;
+}): [string, string, string, number | null, string] {
+	return [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? null, r.id_reserva ?? ""];
 }
 
 /** Mismo texto que `MSG_SOLAPE_PROHIBIDO` en la Main. */
@@ -215,15 +233,16 @@ export async function choqueEnLaMesa(
 	},
 	duracionDef: number,
 ): Promise<string | null> {
-	const args = argumentosDelChoque(r, duracionDef);
+	const base = [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef];
 
-	const reserva = rows(await db.execute({ sql: SQL_CHOQUE_RESERVA, args }))[0];
+	const reserva = rows(
+		await db.execute({ sql: SQL_CHOQUE_RESERVA, args: [...base, r.id_reserva ?? ""] }),
+	)[0];
 	if (reserva) {
 		return `Esa mesa ya tiene una reserva de ${reserva.desde} a ${reserva.hasta}.`;
 	}
 
-	// Sin la propia reserva, que esta consulta no usa.
-	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: args.slice(0, 5) }))[0];
+	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: base }))[0];
 	if (comanda) {
 		return `Esa mesa está ocupada: tiene una comanda abierta desde las ${comanda.desde}.`;
 	}
@@ -247,6 +266,9 @@ const COLS_CLIENTE = `
 // Por email sin distinguir mayúsculas: es el criterio del índice único `ux_clientes_email` (sobre
 // `lower(Email)`), el mismo por el que luego rechazaría el INSERT. Espejo de `POR_EMAIL` en la Main.
 const POR_EMAIL = "Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1";
+
+/** SYNC-30: 1 si el email (`?1`) no es de ningún cliente. La guarda del cliente nuevo de una reserva. */
+export const SQL_EMAIL_LIBRE = `SELECT NOT EXISTS (SELECT 1 FROM Clientes WHERE ${POR_EMAIL});`;
 const POR_TELEFONO = "Telefono = ?1";
 const POR_ID = "ID_Cliente = ?1";
 
@@ -298,8 +320,10 @@ export async function buscarCliente(
  * - **ninguno**: sin cliente.
  * - **existente**: se le asigna; lo escrito sólo rellena sus huecos (RES-01), y un email que ya es de
  *   otro cliente no se le pone. Si ya no existe, `cliente_no_encontrado`.
- * - **nuevo**: una ficha nueva aunque otra comparta el teléfono; un email que ya es de otro cliente
- *   es `email_duplicado`.
+ * - **nuevo**: una ficha nueva aunque otra comparta el teléfono. Un email que ya es de otro cliente
+ *   es `email_duplicado`, y lo decide la guarda de `saveReserva` dentro del lote (SYNC-30): mirado
+ *   aquí, el reintento de una reserva que había entrado con su cliente nuevo se encontraba al
+ *   cliente que ella misma había creado.
  *
  * Los valores del merge se calculan aquí y viajan horneados en la sentencia, para que la escritura
  * replicada sea determinista.
@@ -321,7 +345,7 @@ export async function resolverCliente(
 		telefono?: string | null;
 		email?: string | null;
 	},
-): Promise<ClienteResuelto | { error: "cliente_no_encontrado" | "email_duplicado" }> {
+): Promise<ClienteResuelto | { error: "cliente_no_encontrado" }> {
 	if (datos.id_cliente) {
 		const ex = await clientePor(db, POR_ID, datos.id_cliente);
 		if (!ex) return { error: "cliente_no_encontrado" };
@@ -343,12 +367,7 @@ export async function resolverCliente(
 		};
 	}
 
-	if (datos.nombre_cliente) {
-		if (datos.email && (await clientePor(db, POR_EMAIL, datos.email))) {
-			return { error: "email_duplicado" };
-		}
-		return { modo: "nuevo" };
-	}
+	if (datos.nombre_cliente) return { modo: "nuevo" };
 
 	return { modo: "ninguno" };
 }

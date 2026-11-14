@@ -75,10 +75,9 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 
 	// RI-61: el cliente llega decidido (ninguno, uno existente o uno nuevo); aquí no se casa nada.
 	const cliente = await tenantQuery(c, (db) => q.resolverCliente(db, datos));
-	if ("error" in cliente) {
-		return c.json({ error: cliente.error }, cliente.error === "email_duplicado" ? 409 : 404);
-	}
-	const id = await apply(c, cmd.saveReserva(datos, cliente, solape?.ajustes ?? null));
+	// Un email de un cliente nuevo que ya es de otro lo rechaza la guarda del comando (`email_duplicado`).
+	if ("error" in cliente) return c.json({ error: cliente.error }, 404);
+	const id = await apply(c, cmd.saveReserva(datos, cliente));
 	return c.json({ ok: true, id_reserva: id });
 });
 
