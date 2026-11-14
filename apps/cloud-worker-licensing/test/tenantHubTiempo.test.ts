@@ -540,8 +540,21 @@ describe("SYNC-34 · reconoce lo mismo que el recorrido de antes", () => {
 			"INSERT INTO Notas (a, b) VALUES ('now','localtime');",
 			"SELECT datetime(')', 'now', 'localtime'), date('(', 'now','localtime')",
 			"SELECT 9datetime('now','localtime'), x.date ('now','localtime'), _f('now','localtime')",
+			"SELECT 'İ', strftime('%Y', 'now', 'localtime');",
 		]) {
 			comprobarComoAntes(sql);
+		}
+	});
+
+	// `'İ'.toLowerCase()` son dos unidades: las posiciones del texto en minúsculas ya no son las del
+	// texto en el que se sustituye. Se mira cada carácter sobre el texto tal cual (revisión de SYNC-34).
+	it("con un carácter que se alarga al pasarlo a minúsculas delante, fija la hora igual", () => {
+		for (const delante of ["İ", "İİİ", "İx"]) {
+			const sql = `SELECT '${delante}', strftime('%Y', 'now', 'localtime'), datetime('now','localtime','+1 day');`;
+			expect(sqlHasNowLiteral(sql), sql).toBe(true);
+			expect(rewriteNowInSql(sql, DT), sql).toBe(
+				`SELECT '${delante}', strftime('%Y', '${DT}'), datetime('${DT}','+1 day');`,
+			);
 		}
 	});
 });
