@@ -92,18 +92,31 @@ fn json_to_value(v: &serde_json::Value) -> Value {
 /// margen no compra nada aquí: lo que importa es no volver a una sentencia por fila.
 const MAX_PARAMS_POR_SENTENCIA: usize = 900;
 
-/// ¿Es una tabla que no es de negocio, sino de este equipo o de SQLite? Lo que empieza por `_` es
-/// estado local (el outbox, el sello del negocio, el resumen de las estadísticas, el progreso del
-/// histórico…) y no viaja: aunque la nube lo mandara en un volcado o en una página del histórico, no
-/// se restaura ni se rellena encima de lo de aquí. El worker tampoco lo manda (`esTablaDeNegocio`).
-fn es_tabla_del_equipo(nombre: &str) -> bool {
-    nombre.starts_with('_') || nombre.starts_with("sqlite_")
+/// Las tablas del esquema compartido que sólo usa la nube (`TABLAS_DE_ANDAMIAJE` del worker): el
+/// log, el gate de idempotencia y los checkpoints de las Main. En la Main existen vacías, y
+/// `Sync_Changes` tiene que seguir estándolo: es lo que deja sin efecto aquí el borrado condicionado
+/// del contraste (`contraste.rs::borrado_si_la_nube_no_ha_cambiado`).
+const ANDAMIAJE_DE_LA_NUBE: [&str; 3] = ["Sync_Changes", "Applied_Operations", "Sync_Main_Checkpoints"];
+
+/// El freno del PIN: cada lado lleva el suyo y sus filas no viajan (`TABLAS_NO_RESTAURADAS` del
+/// worker).
+const ESTADO_DE_CADA_LADO: [&str; 1] = ["Intentos_Login"];
+
+/// ¿Es una tabla que no es de negocio? Lo que empieza por `_` es estado local de este equipo (el
+/// outbox, el sello del negocio, el resumen de las estadísticas, el progreso del histórico…), lo de
+/// `sqlite_` es de SQLite, y están el andamiaje de la nube y el freno del PIN. Nada de eso viaja:
+/// aunque la nube lo mandara en un volcado o en una página del histórico, no se restaura ni se
+/// rellena encima de lo de aquí. El worker tampoco lo manda (`esTablaDeNegocio`, el mismo criterio).
+fn no_es_tabla_de_negocio(nombre: &str) -> bool {
+    nombre.starts_with('_')
+        || nombre.starts_with("sqlite_")
+        || ANDAMIAJE_DE_LA_NUBE.iter().chain(ESTADO_DE_CADA_LADO.iter()).any(|t| t.eq_ignore_ascii_case(nombre))
 }
 
 /// Las tablas de negocio realmente presentes en la BD local. El volcado de la nube se filtra contra
 /// esto: una Main con una versión por detrás recibirá tablas que su esquema aún no tiene, y eso
-/// tiene que informarse, no reventar la recuperación. Las del equipo no están
-/// ([`es_tabla_del_equipo`]).
+/// tiene que informarse, no reventar la recuperación. Las que no son de negocio no están
+/// ([`no_es_tabla_de_negocio`]).
 async fn tablas_de_negocio_locales(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
     let mut rows = conn
         .query("SELECT name FROM sqlite_master WHERE type = 'table';", ())
@@ -112,7 +125,7 @@ async fn tablas_de_negocio_locales(conn: &Connection) -> AppResult<std::collecti
     let mut out = std::collections::HashSet::new();
     while let Some(row) = rows.next().await.map_err(db_err)? {
         if let Ok(Value::Text(n)) = row.get_value(0) {
-            if !es_tabla_del_equipo(&n) {
+            if !no_es_tabla_de_negocio(&n) {
                 out.insert(n);
             }
         }
@@ -1417,7 +1430,7 @@ impl SyncRepository for SqliteSyncRepository {
                 snapshot.backfill.clone()
             };
             for (i, nombre) in orden_backfill.iter().enumerate() {
-                if !identificador_simple(nombre) || es_tabla_del_equipo(nombre) {
+                if !identificador_simple(nombre) || no_es_tabla_de_negocio(nombre) {
                     continue;
                 }
                 conn.execute(
@@ -1512,7 +1525,7 @@ impl SyncRepository for SqliteSyncRepository {
         // Un worker más nuevo puede listar una tabla que esta versión todavía no tiene. Se da por
         // completada en vez de fallar: si no, el backfill se atascaría en ella para siempre y
         // ninguna de las siguientes llegaría a bajarse. Misma regla que en el bootstrap, también
-        // para una tabla del equipo, que no se rellena desde la nube (`es_tabla_del_equipo`).
+        // para una tabla que no es de negocio, que no se rellena desde la nube (`no_es_tabla_de_negocio`).
         if !tablas_de_negocio_locales(conn).await?.contains(&pagina.tabla) {
             conn.execute(
                 "UPDATE _Backfill_Historico \
@@ -2703,39 +2716,47 @@ mod tests_backfill {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Lo que empieza por `_` es estado de este equipo (aquí, el resumen de las estadísticas): aunque
-    /// la nube lo mandara en el volcado o en una página del histórico, no se restaura, no entra en
-    /// la cola del histórico y no se rellena.
+    /// Lo que no es de negocio no viaja: lo que empieza por `_` es estado de este equipo (aquí, el
+    /// resumen de las estadísticas) y `Sync_Changes` es el log de la nube, que en la Main está vacío
+    /// (es lo que deja sin efecto aquí el borrado condicionado del contraste). Aunque la nube los
+    /// mandara en el volcado o en una página del histórico, no se restauran, no entran en la cola del
+    /// histórico y no se rellenan.
     #[tokio::test]
-    async fn una_tabla_del_equipo_no_se_restaura_ni_se_rellena_aunque_la_mande_la_nube() {
+    async fn lo_que_no_es_de_negocio_no_se_restaura_ni_se_rellena_aunque_lo_mande_la_nube() {
         let (repo, db, dir) = repo_temporal().await;
         let ajeno = |dia: &str| vec![json!(dia)];
+        let cambio = |seq: i64| vec![json!(seq), json!(format!("op-{seq}")), json!("[]"), json!(1)];
+        let columnas_del_log = || vec!["Seq".into(), "Op_Id".into(), "Statements_Json".into(), "Created_At_Ms".into()];
 
-        repo.bootstrap_restaurar(BootstrapSnapshot {
-            seq: 1,
-            total_filas: 2,
-            tablas: vec![
-                BootstrapTabla {
-                    nombre: "Zonas".into(),
-                    columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
-                    filas: vec![vec![json!("z1"), json!("Sala")]],
-                    parcial: false,
-                },
-                BootstrapTabla {
-                    nombre: "_Estad_Dias_Sucios".into(),
-                    columnas: vec!["Dia".into()],
-                    filas: vec![ajeno("1999-01-01")],
-                    parcial: true,
-                },
-            ],
-            backfill: vec!["_Estad_Dias_Sucios".into()],
-        }, "negocio-de-prueba")
-        .await
-        .unwrap();
+        let resultado = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 1,
+                total_filas: 3,
+                tablas: vec![
+                    BootstrapTabla {
+                        nombre: "Zonas".into(),
+                        columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                        filas: vec![vec![json!("z1"), json!("Sala")]],
+                        parcial: false,
+                    },
+                    BootstrapTabla {
+                        nombre: "_Estad_Dias_Sucios".into(),
+                        columnas: vec!["Dia".into()],
+                        filas: vec![ajeno("1999-01-01")],
+                        parcial: true,
+                    },
+                    BootstrapTabla { nombre: "Sync_Changes".into(), columnas: columnas_del_log(), filas: vec![cambio(1)], parcial: true },
+                ],
+                backfill: vec!["_Estad_Dias_Sucios".into(), "Sync_Changes".into()],
+            }, "negocio-de-prueba")
+            .await
+            .unwrap();
 
+        assert_eq!(resultado.tablas_restauradas, ["Zonas"]);
+        assert_eq!(resultado.filas_restauradas, 1);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
-        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia LIKE '1999-%';").await, 0);
-        assert_eq!(repo.backfill_siguiente().await.unwrap(), None, "una tabla del equipo no entra en la cola");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Sync_Changes;").await, 0);
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), None, "ninguna de las dos entra en la cola");
 
         let pagina = HistoricoPagina {
             tabla: "_Estad_Dias_Sucios".into(),
@@ -2745,8 +2766,21 @@ mod tests_backfill {
         };
         assert_eq!(repo.backfill_aplicar_pagina(pagina).await.unwrap(), 0);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Estad_Dias_Sucios WHERE Dia LIKE '1999-%';").await, 0);
+        let pagina = HistoricoPagina { tabla: "Sync_Changes".into(), columnas: columnas_del_log(), filas: vec![cambio(2)], siguiente_cursor: None };
+        assert_eq!(repo.backfill_aplicar_pagina(pagina).await.unwrap(), 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Sync_Changes;").await, 0);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn no_es_de_negocio_lo_que_el_worker_tampoco_manda() {
+        for t in ["_Estad_Dias_Sucios", "_Negocio", "_Sync_Outbox", "sqlite_sequence", "Sync_Changes", "sync_changes", "Applied_Operations", "Sync_Main_Checkpoints", "Intentos_Login"] {
+            assert!(no_es_tabla_de_negocio(t), "{t}");
+        }
+        for t in ["Zonas", "Pagos", "Detalle_Comanda", "Usuarios"] {
+            assert!(!no_es_tabla_de_negocio(t), "{t}");
+        }
     }
 
     /// SYNC-19. La fase 2 NUNCA pisa una fila que ya esté: lo que está en local llegó por el
