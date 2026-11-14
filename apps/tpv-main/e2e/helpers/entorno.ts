@@ -184,14 +184,18 @@ export function romperBaseDeDatos(): void {
 }
 
 
+/** El contenido de la copia que planta `plantarCopiaCorrupta`: ni gzip ni SQLite. */
+const COPIA_CORRUPTA = "esto tampoco es una base de datos\n";
+
 /**
  * Deja en la carpeta de copias una que NO es una base de datos, con fecha más reciente que las
- * buenas para que la pantalla la ofrezca la primera ("Última copia").
+ * buenas, junto a la base rota.
  *
- * Una copia se corrompe en el disco como cualquier otro fichero, y el daño de no detectarlo es
- * grande: si `prepare_restore` no validara ANTES de tocar la `data.db`, un intento con una copia
- * mala dejaría al equipo peor de lo que estaba, justo el día de la avería. Que la validación
- * existe lo prueba Rust; lo que no prueba nadie es que la PANTALLA lo diga y deje elegir otra.
+ * Una copia se corrompe en el disco como cualquier otro fichero. Con la base rota, el arranque no
+ * sabe de qué negocio es y la aparta entera con lo que tampoco lo dice (AUD-06), así que esta copia
+ * no llega a la pantalla: es lo que comprueba `copias-2`. Que una copia mala que sí llegue se rechace
+ * ANTES de tocar la `data.db`, y que la pantalla lo diga, lo prueban Rust y
+ * `test/react/recuperarDatos.test.tsx`.
  */
 export function plantarCopiaCorrupta(): void {
     const dir = dirDatosE2E();
@@ -201,13 +205,32 @@ export function plantarCopiaCorrupta(): void {
 
     const copias = path.join(dir, "backups");
     fs.mkdirSync(copias, { recursive: true });
-    // El nombre es el que reconoce `list_backups`: `data-<epoch ms>.db.gz`. El contenido no es
-    // gzip ni SQLite: el formato se reconoce por el contenido, así que llega a la validación.
-    fs.writeFileSync(
-        path.join(copias, `data-${Date.now()}.db.gz`),
-        "esto tampoco es una base de datos\n".repeat(64),
-        "utf8",
-    );
+    // El nombre es el que reconoce `list_backups`: `data-<epoch ms>.db.gz`.
+    fs.writeFileSync(path.join(copias, `data-${Date.now()}.db.gz`), COPIA_CORRUPTA.repeat(64), "utf8");
+}
+
+/**
+ * Las fechas (epoch ms, las de su nombre) de las copias corruptas que el arranque apartó con la
+ * base rota: las que están en algún `backups/negocio-anterior-*` con el contenido de
+ * `plantarCopiaCorrupta`.
+ */
+export function copiasCorruptasApartadas(): number[] {
+    const raiz = path.join(dirDatosE2E(), "backups");
+    if (!fs.existsSync(raiz)) return [];
+    const fechas: number[] = [];
+    for (const apartado of fs.readdirSync(raiz)) {
+        if (!apartado.startsWith("negocio-anterior-")) continue;
+        const copias = path.join(raiz, apartado, "backups");
+        if (!fs.existsSync(copias)) continue;
+        for (const nombre of fs.readdirSync(copias)) {
+            const fecha = /^data-(\d+)\.db\.gz$/.exec(nombre);
+            if (!fecha) continue;
+            if (fs.readFileSync(path.join(copias, nombre), "utf8").startsWith(COPIA_CORRUPTA)) {
+                fechas.push(Number(fecha[1]));
+            }
+        }
+    }
+    return fechas;
 }
 
 /**

@@ -59,6 +59,37 @@ it("enseña la antigüedad de cada copia y avisa, sin impedirla, de la que pasa 
     expect(screen.getByRole("button", { name: "Recuperar el estado actual de la nube" })).toBeEnabled();
 });
 
+it("una copia que no se puede restaurar se rechaza diciendo por qué, y deja elegir otra", async () => {
+    // Una copia se corrompe en el disco como cualquier otro fichero. Que `prepare_restore` la valide
+    // antes de tocar la `data.db` lo prueba Rust; esto fija que la pantalla lo cuente y no se quede en
+    // «Recuperación en curso» con la copia buena justo debajo. (La E2E ya no llega a este caso: una
+    // copia ilegible se aparta al arrancar con la base rota, AUD-06; ver `copias-2-recuperar.e2e.ts`.)
+    const ahora = Date.now();
+    invoke.mockImplementation(async (comando: string) => {
+        if (comando === "recovery_list_backups") {
+            return [
+                { id: "data-2.db.gz", created_at_ms: ahora - 60_000, size_bytes: 1024, importada: false },
+                { id: "data-1.db.gz", created_at_ms: ahora - 3_600_000, size_bytes: 1024, importada: false },
+            ];
+        }
+        if (comando === "recovery_restore_backup") {
+            throw { code: "backup_corrupt", message: "No se puede abrir la copia: file is not a database" };
+        }
+        return undefined;
+    });
+
+    render(<RecuperarDatos />);
+
+    (await screen.findByRole("button", { name: /^Última copia: / })).click();
+
+    expect(await screen.findByText(/No se puede abrir la copia: file is not a database/)).toBeInTheDocument();
+    expect(screen.queryByText("Recuperación en curso")).not.toBeInTheDocument();
+    // Las copias siguen ahí para elegir otra, y la nube también.
+    expect(screen.getByRole("button", { name: /^Última copia: / })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Copia: / })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Recuperar el estado actual de la nube" })).toBeEnabled();
+});
+
 it("una copia anterior al log acaba ofreciendo la nube, con el motivo a la vista", async () => {
     // Lo que publica el motor tras cinco ciclos fallidos con esa copia (`replicacion.rs::arrancar`).
     useEstadoSync.setState({

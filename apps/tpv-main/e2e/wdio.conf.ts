@@ -61,7 +61,7 @@ let appium: ChildProcess | null = null;
  */
 type Receta = {
     equipo: "nuevo" | "el de antes" | "el de antes, roto";
-    /** Deja además una copia inservible entre las buenas. Sólo la quiere el tramo que la prueba. */
+    /** Deja además una copia ilegible entre las buenas, que el arranque aparta. Sólo la quiere `copias-2`. */
     copiaMala?: boolean;
 };
 

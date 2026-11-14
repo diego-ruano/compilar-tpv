@@ -8,16 +8,17 @@
 //   · una `data.db` ilegible NO puede impedir el arranque — si el `setup()` reventara, no habría
 //     ventana, y entonces la pantalla de recuperación (donde están las copias) sería inalcanzable
 //     justo en el caso para el que se guardan;
+//   · lo que no se deja leer se aparta y no se ofrece (AUD-06), y la copia buena sigue ahí;
 //   · restaurar deja el login BLOQUEADO hasta que la nube confirme que los dos lados coinciden.
 //     Restaurado no es utilizable: trabajar sobre una copia sin reconciliar crearía dos historiales
 //     divergentes;
 //   · y la reconciliación tiene que converger de verdad y abrir el login, porque si no el producto
 //     no tiene salida: sin internet, una Main que perdió su `data.db` no vende.
 
-import { $, browser, expect } from "@wdio/globals";
+import { browser, expect } from "@wdio/globals";
 
 import { ficharYEntrar } from "../helpers/arranque.js";
-import { cargarDotEnv } from "../helpers/entorno.js";
+import { cargarDotEnv, copiasCorruptasApartadas } from "../helpers/entorno.js";
 import { CATEGORIA } from "../helpers/copias.js";
 import { PIN } from "../helpers/equipo.js";
 import { conTexto, leerDeLaApp, pulsar, pulsarXPath } from "../helpers/ui.js";
@@ -43,32 +44,24 @@ describe("Copias de seguridad · la avería y la vuelta", () => {
         await conTexto("button", "Última copia").waitForDisplayed({ timeout: 30_000 });
     });
 
-    it("3 · una copia inservible se rechaza, se dice, y deja elegir otra", async () => {
-        // `beforeSession` dejó una copia que no es una base de datos, con fecha más reciente que la
-        // buena: por eso es la que la pantalla ofrece primero como "Última copia".
-        //
-        // Lo que se comprueba no es la validación —eso ya lo prueba Rust— sino que la PANTALLA
-        // cuente lo que ha pasado. Si se lo tragara y se quedara en "Recuperación en curso", el
-        // dueño se quedaría mirando un reloj el día de la avería, con la copia buena justo debajo.
-        await pulsarXPath(
-            '//button[contains(normalize-space(.), "Última copia")]',
-            "botón de la copia corrupta",
-        );
+    it("3 · una copia ilegible no se ofrece: se aparta con la base rota", async () => {
+        // `beforeSession` dejó, más reciente que la buena, una copia que no es una base de datos. Al
+        // arrancar, la base rota no dice de qué negocio es, y AUD-06 la aparta entera con lo que
+        // tampoco lo dice (`recovery::resolver_al_abrir`): esa copia se va con ella y no llega a la
+        // pantalla. Que una copia mala que sí llegue se rechace diciendo por qué, y deje elegir
+        // otra, lo prueban Rust (`prepare_restore`) y la pantalla (`test/react/recuperarDatos.test.tsx`).
+        const apartadas = copiasCorruptasApartadas();
+        expect(apartadas.length).toBeGreaterThan(0);
 
-        const aviso = $('//div[contains(@class,"bg-danger-soft")]');
-        await aviso.waitForDisplayed({ timeout: 60_000 });
-        expect((await aviso.getText()).trim().length).toBeGreaterThan(0);
-
-        // Y el intento no ha dejado el equipo peor: la copia buena sigue ofreciéndose. La
-        // validación ocurre sobre un fichero aparte, ANTES de tocar la `data.db`.
-        await conTexto("button", "Copia:").waitForDisplayed({ timeout: 20_000 });
+        const ofrecidas = await leerDeLaApp("recovery_list_backups");
+        const fechas = ofrecidas.map((c) => c.created_at_ms);
+        for (const ms of apartadas) expect(fechas).not.toContain(ms);
     });
 
     it("4 · restaura la copia buena y reconcilia contra la nube", async () => {
-        // La buena ya no es "Última copia" —ese sitio lo ocupa la corrupta— sino la siguiente, que
-        // la pantalla etiqueta simplemente "Copia".
+        // Apartada la ilegible, la buena es la más reciente: la "Última copia".
         await pulsarXPath(
-            '//button[starts-with(normalize-space(.), "Copia:")]',
+            '//button[contains(normalize-space(.), "Última copia")]',
             "botón de la copia buena",
         );
 
