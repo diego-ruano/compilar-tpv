@@ -206,8 +206,7 @@ pub const BACKFILL_FILAS_POR_PAGINA: i64 = 2_000;
 pub const BACKFILL_PAGINAS_POR_TICK: usize = 10;
 
 /// Filas por página con el equipo en calma: las que admite el worker (`HISTORICO_MAX_FILAS`, 10.000),
-/// que además corta la página en 4 MiB (`HISTORICO_MAX_BYTES`). Un worker anterior la recorta a las
-/// suyas (2.000) y el histórico baja igual, más despacio.
+/// que además corta la página en 4 MiB (`HISTORICO_MAX_BYTES`).
 pub const BACKFILL_FILAS_POR_PAGINA_EN_CALMA: i64 = 10_000;
 
 /// Páginas por vencimiento con el equipo en calma: hasta 400.000 filas cada cinco minutos. Un año de
@@ -295,9 +294,7 @@ pub async fn backfill_paso(
             }
         };
 
-        // Un worker antiguo (sin `/historico`) no puede llegar aquí: respondería 404 y el error de
-        // arriba se lo habría llevado. Lo que sí puede pasar es que conteste otra tabla; aplicarla
-        // avanzaría el cursor de una que no se ha pedido.
+        // Una página de otra tabla no se aplica: avanzaría el cursor de una que no se ha pedido.
         if pagina.tabla != tabla {
             return Err(AppError::external(format!(
                 "el servidor contestó con la tabla {} para una petición de {tabla}",
@@ -618,9 +615,9 @@ mod tests {
 
 #[cfg(test)]
 mod tests_leer_respuesta {
-    //! De los bytes de la respuesta al tipo, sin un `Value` de por medio: lo que mandaba un worker
-    //! anterior se sigue leyendo, lo que añada uno más nuevo no estorba, y un cuerpo que no encaja
-    //! se dice sin citar lo que traía.
+    //! De los bytes de la respuesta al tipo, sin un `Value` de por medio: lo que añada un worker más
+    //! nuevo no estorba, lo que falte no se adivina, y un cuerpo que no encaja se dice sin citar lo
+    //! que traía.
 
     use super::*;
     use tpv_contracts::errors::ErrorCode;
@@ -630,17 +627,21 @@ mod tests_leer_respuesta {
     }
 
     #[test]
-    fn el_volcado_de_un_worker_anterior_se_sigue_leyendo() {
-        // Antes de SYNC-19: `totalFilas` en camelCase, sin `parcial` ni `backfill`.
-        let foto: BootstrapSnapshot = leer(
-            r#"{"ok":true,"seq":41,"totalFilas":2,"tablas":[
-                 {"nombre":"Zonas","columnas":["ID_Zona","Nombre_Zona"],"filas":[["z1","Salón"],["z2",null]]}]}"#,
-        )
-        .unwrap();
+    fn un_volcado_sin_lo_que_manda_el_worker_no_se_lee() {
+        // Sin `parcial` no se sabe si la tabla viene entera, y sin `backfill`, qué rellenar después:
+        // darlo por entero dejaría el histórico sin bajar, sin que nadie lo vea.
+        let tabla = r#"{"nombre":"Zonas","columnas":["ID_Zona","Nombre_Zona"],"filas":[["z1","Salón"],["z2",null]]"#;
+        for cuerpo in [
+            format!(r#"{{"ok":true,"seq":41,"total_filas":2,"tablas":[{tabla}}}],"backfill":[]}}"#),
+            format!(r#"{{"ok":true,"seq":41,"total_filas":2,"tablas":[{tabla},"parcial":false}}]}}"#),
+            format!(r#"{{"ok":true,"seq":41,"totalFilas":2,"tablas":[{tabla},"parcial":false}}],"backfill":[]}}"#),
+        ] {
+            assert!(leer::<BootstrapSnapshot>(&cuerpo).is_err(), "{cuerpo}");
+        }
+        let foto: BootstrapSnapshot =
+            leer(&format!(r#"{{"ok":true,"seq":41,"total_filas":2,"tablas":[{tabla},"parcial":false}}],"backfill":[]}}"#)).unwrap();
         assert_eq!((foto.seq, foto.total_filas), (41, 2));
         assert_eq!(foto.tablas[0].filas[1], vec![serde_json::json!("z2"), serde_json::Value::Null]);
-        assert!(!foto.tablas[0].parcial);
-        assert!(foto.backfill.is_empty());
     }
 
     #[test]
@@ -739,7 +740,7 @@ mod tests_leer_respuesta {
     #[test]
     fn lo_que_no_encaja_se_dice_sin_citar_lo_que_traia() {
         // AUD-28: el texto de serde citaría el valor («invalid type: string "Ana López"…»).
-        let err = leer::<BootstrapSnapshot>(r#"{"seq":"Ana López 600123456","total_filas":0,"tablas":[]}"#).unwrap_err();
+        let err = leer::<BootstrapSnapshot>(r#"{"seq":"Ana López 600123456","total_filas":0,"tablas":[],"backfill":[]}"#).unwrap_err();
         let texto = err.to_string();
         assert!(texto.contains("respuesta de prueba ilegible"), "{texto}");
         assert!(texto.contains("línea 1"), "{texto}");

@@ -57,8 +57,8 @@ export function Actualizaciones({ darkMode }: { darkMode: boolean }) {
 			setStatus(s);
 			setCheckedAt(new Date());
 		} catch (e) {
-			// `updater_status` no debería fallar (los errores de feed vienen dentro), pero si el
-			// comando no existe (build antigua) lo tratamos como "no se pudo comprobar".
+			// `updater_status` no debería fallar (los errores de feed vienen dentro); si falla, se
+			// trata como "no se pudo comprobar".
 			setStatus({
 				current_version: "",
 				supported: true,

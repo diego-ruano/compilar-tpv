@@ -87,7 +87,7 @@ export const reservaSaveSchema = z
 		forzar_solape: z.boolean().optional().nullable(),
 		nota: z.any().optional().nullable(),
 		// El estado no viaja (como en la Main): una nueva nace PROXIMA y una que se edita conserva el
-		// suyo. Una clave `estado` de una Handy antigua se descarta sin más.
+		// suyo. Una clave `estado` se descarta sin más.
 		id_mesa: z.any().optional().nullable(),
 		// RI-61: el cliente es opcional y explícito (ver `ClienteReserva::desde` en la Main).
 		id_cliente: z.any().optional().nullable(),

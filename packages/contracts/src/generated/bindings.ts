@@ -242,50 +242,8 @@ export type BootstrapResultado = {
  *  tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
  *  que el catch-up siga desde justo después sin huecos ni solapes.
  */
-export type BootstrapSnapshot = BootstrapSnapshot_Serialize | BootstrapSnapshot_Deserialize;
-
-/**
- *  Respuesta de `/v1/sync/bootstrap`: el estado actual del tenant y el `seq` EXACTO en el que se
- *  tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
- *  que el catch-up siga desde justo después sin huecos ni solapes.
- */
-export type BootstrapSnapshot_Deserialize = {
+export type BootstrapSnapshot = {
 	seq: number,
-	tablas: BootstrapTabla[],
-	/**
-	 *  SYNC-19: las tablas a rellenar en la fase 2, **en orden de padres primero**. El orden lo
-	 *  decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
-	 *  así que una hija insertada antes que su padre no tiene dónde apoyarse.
-	 */
-	backfill?: string[],
-} & {
-	/**
-	 *  `alias` porque la app y el worker se despliegan por separado: un TPV actualizado contra un
-	 *  worker viejo (o al revés) no puede quedarse sin recuperar la base por el nombre de un campo
-	 *  que ni siquiera se lee. El worker lo mandaba en camelCase desde el principio.
-	 */
-	total_filas: number,
-} | {
-	/**
-	 *  `alias` porque la app y el worker se despliegan por separado: un TPV actualizado contra un
-	 *  worker viejo (o al revés) no puede quedarse sin recuperar la base por el nombre de un campo
-	 *  que ni siquiera se lee. El worker lo mandaba en camelCase desde el principio.
-	 */
-	totalFilas: number,
-};
-
-/**
- *  Respuesta de `/v1/sync/bootstrap`: el estado actual del tenant y el `seq` EXACTO en el que se
- *  tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
- *  que el catch-up siga desde justo después sin huecos ni solapes.
- */
-export type BootstrapSnapshot_Serialize = {
-	seq: number,
-	/**
-	 *  `alias` porque la app y el worker se despliegan por separado: un TPV actualizado contra un
-	 *  worker viejo (o al revés) no puede quedarse sin recuperar la base por el nombre de un campo
-	 *  que ni siquiera se lee. El worker lo mandaba en camelCase desde el principio.
-	 */
 	total_filas: number,
 	tablas: BootstrapTabla[],
 	/**
@@ -307,11 +265,8 @@ export type BootstrapTabla = {
 	/**
 	 *  SYNC-19: lo que viene está recortado por la ventana de la fase 1, así que esta tabla queda
 	 *  pendiente de backfill. Lo decide el worker, que es donde vive la clasificación.
-	 *
-	 *  `#[serde(default)]` porque un worker anterior a SYNC-19 no lo manda: ahí el volcado ya venía
-	 *  entero y no hay nada que rellenar después.
 	 */
-	parcial?: boolean,
+	parcial: boolean,
 };
 
 export type BusinessSettings = {

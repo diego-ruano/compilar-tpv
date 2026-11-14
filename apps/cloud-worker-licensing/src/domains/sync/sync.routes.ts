@@ -95,7 +95,7 @@ function rows(rs: any): any[] {
  * viaja igual (partirlo no se puede, y dejarlo fuera atascaría a la Main en él). Una página cortada
  * lleva su `nextSince`, el `Seq` de su último cambio, igual que una completa, y la Main sigue pidiendo
  * desde ahí hasta que una llega vacía (`use_cases/replicacion.rs::catch_up`): no necesita saber que
- * se ha cortado, y una Main anterior a esto tampoco.
+ * se ha cortado.
  */
 export const CAMBIOS_MAX_BYTES = 4 * 1024 * 1024;
 

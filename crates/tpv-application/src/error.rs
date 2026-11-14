@@ -138,8 +138,8 @@ impl AppError {
     ///    hay —el status HTTP, el contexto de la ruta—. Re-derivarlo del texto haría que el
     ///    mismo error fuese `validation` para el worker y `external` para el cliente, que es
     ///    exactamente la divergencia que el catálogo compartido existe para evitar.
-    /// 2. **`from_wire(error)`**, si no hay `code` (worker anterior a ARCH-05) o si el `code`
-    ///    es uno que este cliente todavía no conoce (worker más nuevo).
+    /// 2. **`from_wire(error)`**, si no hay `code` o si el `code` es uno que este cliente no
+    ///    conoce.
     /// 3. **`External`** con el status, si no hay JSON del que sacar nada. El cuerpo no entra en el
     ///    mensaje (AUD-28, ver `rechazo_sin_error`).
     ///
@@ -259,15 +259,14 @@ mod tests_respuesta_api {
         assert_eq!(err.to_string(), "migration_altered: 0001_inicial.sql");
     }
 
-    /// Compatibilidad hacia atrás: un worker anterior a ARCH-05 no manda `code`.
+    /// Sin `code`, manda el string de negocio.
     #[test]
     fn sin_code_se_traduce_el_string_de_negocio() {
         let body = r#"{"ok":false,"error":"main_offline"}"#;
         assert_eq!(code_de(409, body), ErrorCode::MainOffline);
     }
 
-    /// Compatibilidad hacia delante: un worker más nuevo puede mandar un código que este
-    /// binario no conoce. No puede tumbar nada ni inventarse un significado.
+    /// Un código que este binario no conoce no puede tumbar nada ni inventarse un significado.
     #[test]
     fn un_code_desconocido_cae_al_string_de_negocio() {
         let body = r#"{"ok":false,"code":"codigo_del_futuro","error":"not_approved"}"#;

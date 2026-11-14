@@ -222,7 +222,7 @@ describe("POST /v1/sync/historico", () => {
 				expect(resto.body.filas.length).toBe(5);
 				expect(resto.body.siguiente_cursor).toBeNull();
 
-				// Sin `limite` (o una Main anterior, que pide 1.000), lo de siempre.
+				// Sin `limite`, 1.000.
 				const cero = await pedir({ tabla: "Comandas", limite: 0 });
 				expect(cero.body.filas.length).toBe(1_000);
 			},

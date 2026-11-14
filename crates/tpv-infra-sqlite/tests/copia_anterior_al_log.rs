@@ -273,7 +273,7 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
     baja[pos("Password_Hash")] = json!(pin_nuevo);
     *nube.volcado.lock().unwrap() = json!({
         "seq": 1700,
-        "totalFilas": filas.len(),
+        "total_filas": filas.len(),
         "tablas": [{"nombre": "Usuarios", "columnas": columnas, "filas": filas, "parcial": false}],
         "backfill": [],
     });
@@ -333,7 +333,7 @@ async fn tras_traer_la_nube_la_reconciliacion_tampoco_termina_contra_un_worker_s
     let nube = Nube::default();
     *nube.volcado.lock().unwrap() = json!({
         "seq": 50,
-        "totalFilas": filas.len(),
+        "total_filas": filas.len(),
         "tablas": [{"nombre": "Usuarios", "columnas": columnas, "filas": filas, "parcial": false}],
         "backfill": [],
     });
