@@ -1265,10 +1265,6 @@ impl SyncRepository for SqliteSyncRepository {
         // tener operaciones que nunca subieron) y se reemplaza por la de la nube, outbox incluido.
         // La copia va ANTES de tomar el escritor: `VACUUM INTO` usa el pool de lectura.
         let traslado = crate::recovery::hay_traslado_pendiente(self.db.carpeta());
-        if traslado {
-            let copia = crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?;
-            tracing::info!(target: "tpv::sync", copia = %copia.display(), "base de antes del traslado guardada");
-        }
         // AUD-19: lo mismo con una copia restaurada que todavía no se ha reconciliado (la que se
         // rechaza por anterior a lo que guarda la nube, o cualquier otra que no converge). Su outbox
         // es de antes: lo que el equipo de entonces ya subió volvería a aplicarse en cuanto caducara
@@ -1282,11 +1278,20 @@ impl SyncRepository for SqliteSyncRepository {
         let anterior_a_la_nube = !traslado && crate::recovery::hay_base_anterior_a_la_nube(self.db.carpeta());
         let copia_sin_reconciliar =
             !traslado && !anterior_a_la_nube && reconciliacion_pendiente(&self.db).await?;
-        if anterior_a_la_nube || copia_sin_reconciliar {
-            let copia = crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?;
-            tracing::info!(target: "tpv::sync", copia = %copia.display(), anterior_a_la_nube, "base de antes guardada antes de traer la nube");
-        }
         let apartar_outbox = traslado || anterior_a_la_nube || copia_sin_reconciliar;
+        if apartar_outbox {
+            // Codex: en los tres casos las escrituras de negocio ya están cerradas, pero una que pasó
+            // el cerrojo antes de cerrarlo puede seguir en su transacción. Tomar el escritor y
+            // soltarlo la deja terminar antes de la copia: si no, la copia no la tendría y la
+            // transacción de abajo la borraría del outbox. Después no entra ninguna.
+            drop(self.db.write().await);
+            let copia = if traslado {
+                crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?
+            } else {
+                crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?
+            };
+            tracing::info!(target: "tpv::sync", copia = %copia.display(), traslado, anterior_a_la_nube, "base de antes guardada antes de traer la nube");
+        }
 
         let w = self.db.write().await;
         let conn = w.raw();

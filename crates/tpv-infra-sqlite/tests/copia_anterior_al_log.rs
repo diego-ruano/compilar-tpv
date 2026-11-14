@@ -452,3 +452,67 @@ async fn una_main_en_sesion_normal_anterior_a_lo_purgado_pasa_a_recuperarse_de_l
     cerrar(db).await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Codex · Una venta que pasó el cerrojo antes de que se cerrara sigue en su transacción cuando se
+/// trae la nube. La copia de antes la espera: lo que el outbox de la base nueva ya no tiene está en
+/// la copia, nunca en ninguna de las dos.
+#[tokio::test]
+async fn la_copia_de_antes_espera_a_la_venta_que_estaba_a_medias() {
+    let dir = dir_temporal();
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
+    escribir(
+        &db,
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('u-duena', ?1, 'duena@bar.test', ?2, 'Marta', 'Activo');",
+        vec![Value::Text(ROL_ADMIN.into()), Value::Text(hash_pin("9999").unwrap())],
+    )
+    .await;
+    let (columnas, filas) = usuarios_como_la_nube(&db).await;
+
+    // La venta empieza; antes de que confirme, la base pasa a ser anterior a la nube.
+    let (empezada, esperar_empezada) = tokio::sync::oneshot::channel::<()>();
+    let base = db.clone();
+    let venta = tokio::spawn(async move {
+        let w = base.write().await;
+        let conn = w.raw();
+        conn.transaccion(async move {
+            conn.execute(
+                "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-a-medias', 'main_op', '[]', 1);",
+                (),
+            )
+            .await
+            .map_err(|e| AppError::repository(e.to_string()))?;
+            let _ = empezada.send(());
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    });
+    esperar_empezada.await.unwrap();
+    recovery::marcar_anterior_a_la_nube(&db).unwrap();
+
+    let repo = Arc::new(SqliteSyncRepository::new(db.clone()));
+    let nube = Nube::default();
+    *nube.volcado.lock().unwrap() = json!({
+        "seq": 50,
+        "total_filas": filas.len(),
+        "tablas": [{"nombre": "Usuarios", "columnas": columnas, "filas": filas, "parcial": false}],
+        "backfill": [],
+    });
+    uc_sync::bootstrap_desde_nube(&nube, repo.as_ref()).await.unwrap();
+    venta.await.unwrap();
+
+    let guardadas = std::fs::read_dir(dir.join("backups"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().unwrap().to_str().unwrap().starts_with("antes-de-la-nube-"))
+        .collect::<Vec<_>>();
+    assert_eq!(guardadas.len(), 1);
+    assert_eq!(outbox_de_la_copia(&guardadas[0], &dir), vec!["[]".to_string()], "la venta a medias está en la copia");
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
+
+    drop(repo);
+    cerrar(db).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

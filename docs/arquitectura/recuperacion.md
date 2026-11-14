@@ -317,7 +317,9 @@ vieja tenía pendiente, que el equipo de entonces ya subió (volvería a aplicar
   recuperación, cierra la sesión si la hay y enseña la pantalla de recuperación, que explica qué ha
   pasado y sólo ofrece «Recuperar el estado actual de la nube».
 - **Traer la nube guarda antes lo de aquí**: la base entera, con su outbox, va a
-  `backups/antes-de-la-nube-*` (la misma familia que la copia sin reconciliar de AUD-19), el outbox
+  `backups/antes-de-la-nube-*` (la misma familia que la copia sin reconciliar de AUD-19). Antes de
+  copiarla se toma y se suelta el escritor, para que la escritura que pasó el cerrojo antes de
+  cerrarse termine dentro de la copia (lo mismo en el traslado y en la copia sin reconciliar). El outbox
   se vacía dentro de la transacción (la excepción a la guardia, como en el traslado) y la marca se
   quita después del `COMMIT`. Después se reconcilia como cualquier otra reconstrucción.
 
