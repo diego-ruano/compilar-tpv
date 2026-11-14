@@ -15,8 +15,9 @@
 //   (C) en lotes de tamaño al azar, con acuses que se pierden (el lote se reenvía entero) y lotes
 //       cortados a medias que se reenvían enteros.
 //
-// En los tres: las mismas tablas de negocio, el mismo orden de `Op_Id` en el log, las mismas
-// sentencias replicadas, el mismo veredicto para cada operación, y el objeto vivo al terminar.
+// En los tres: las mismas tablas de negocio, los mismos días apuntados por los triggers de las
+// estadísticas, el mismo orden de `Op_Id` en el log, las mismas sentencias replicadas, el mismo
+// veredicto para cada operación, y el objeto vivo al terminar.
 
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -180,6 +181,11 @@ async function huellas(sql: any): Promise<Record<string, string>> {
 
 type Resultado = {
 	tablas: Record<string, string>;
+	/**
+	 * Los días que han apuntado los triggers del resumen de las estadísticas (§17 de `0001`), que
+	 * saltan dentro de la transacción de cada operación: lo que se deshace no deja su marca.
+	 */
+	diasSucios: string[];
 	/** Los `Op_Id` del log, en orden de `Seq`, y la huella de sus sentencias en ese orden. */
 	log: string[];
 	sentencias: string;
@@ -215,6 +221,10 @@ async function recoger(m: MainEnElHub, historias: Record<string, string[]>, medi
 		.map((d) => d.opId);
 	return {
 		tablas: await huellas(m.sql),
+		diasSucios: m.sql
+			.exec("SELECT Dia FROM _Estad_Dias_Sucios ORDER BY Dia;")
+			.toArray()
+			.map((f: any) => String(f.Dia)),
 		log: filas.map((f) => String(f.Op_Id)),
 		sentencias: await sha(filas.map((f) => String(f.Statements_Json)).join("\n")),
 		historias,
@@ -395,11 +405,14 @@ describe("el outbox de un servicio, subido de tres formas", () => {
 		expect(Object.keys(a.historias)).toHaveLength(total);
 		// AUD-18: lo difundido sale en el orden del log.
 		expect(a.difundidos).toEqual(a.log);
+		// Los cobros del servicio apuntan sus días: los triggers del resumen saltan dentro de los lotes.
+		expect(a.diasSucios.length).toBeGreaterThan(0);
 
 		for (const [nombre, otro] of [["en lotes", b], ["al azar (1)", c1], ["al azar (2)", c2]] as const) {
 			expect(otro.log, `${nombre}: el orden del log`).toEqual(a.log);
 			expect(otro.sentencias, `${nombre}: las sentencias replicadas`).toBe(a.sentencias);
 			expect(otro.tablas, `${nombre}: las tablas de negocio`).toEqual(a.tablas);
+			expect(otro.diasSucios, `${nombre}: los días que apuntan los triggers de las estadísticas`).toEqual(a.diasSucios);
 			expect(otro.historias, `${nombre}: los veredictos`).toEqual(a.historias);
 			expect(otro.difundidos, `${nombre}: el orden de la primera difusión`).toEqual(a.log);
 		}
