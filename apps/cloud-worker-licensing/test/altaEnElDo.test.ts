@@ -114,6 +114,8 @@ describe("POST /v1/sync/initialize-empty corre dentro del DO sin llamarse a sí 
 			deps,
 			"inicializar-vacia",
 			async (n) => {
+				// Sólo nace vacía la base de un negocio que no ha nacido (`test/basePerdida.test.ts`).
+				n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
 				await sinLlamarseASiMismo(n.tenantId);
 
 				const res = await app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, env);
@@ -129,7 +131,8 @@ describe("POST /v1/sync/initialize-empty corre dentro del DO sin llamarse a sí 
 				expect(otra.status).toBe(409);
 				expect(await otra.json()).toMatchObject({ ok: false, error: "tenant_db_already_provisioned" });
 			},
-			{ sinBase: true },
+			// La ruta pregunta a la base central desde dentro del TenantHub: va en su mismo objeto.
+			{ sinBase: true, centralEnElNegocio: true },
 		);
 	});
 

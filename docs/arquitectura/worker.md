@@ -78,8 +78,14 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   a la base central; así, con el dispositivo y la licencia en caché, una petición no la toca. Una
   baja se nota al caducar esa entrada, lo mismo que tarda `tenantAuth` en rechazar al dispositivo en
   cualquier otra ruta. En un router sin `alHub` (el emparejamiento, los dispositivos, las reservas
-  web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
-  Lo cubre `test/rolEnLaIdentidad.test.ts`.
+  web de la Main) el veto corre en el Worker (`soloLaMainVigente`) y lee la fila viva y la licencia,
+  sin caché (`rolDelDispositivo`, `vetoDeLicencia`). Lo cubren `test/rolEnLaIdentidad.test.ts` y
+  `test/mainDesplazadaRest.test.ts`.
+- **Una petición de un `tpv` que el hub no tiene por la Main no se ejecuta** (AUD-02,
+  `MotorTenantHub.vetoDeMain`), en ninguna ruta: es lo que rechaza el veto de licencia del Worker,
+  que guarda su respuesta un minuto por isolate. El hub lo sabe al momento por su tabla
+  ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)); la Main de
+  verdad no paga nada, y la que no cuadra pregunta a la base central antes de que se la rechace.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql sobre el SQLite
   del DO (`tenantHub.sqlite.ts`). Sólo dentro del DO: toda ruta que lo usa lleva `alHub`, y fuera
@@ -102,6 +108,17 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
   siembra el mismo administrador, con el mismo id, en la suya.
+- **El objeto sabe de qué negocio es, y sólo atiende al suyo** (DO-NEGOCIO,
+  `tenantHub.negocio.ts`). El alta lo apunta en el sello de su base (`_Negocio`, el mismo de la base
+  local de la Main), y toda llamada que trae un negocio se contrasta con él antes de hacer nada:
+  `ejecutarRuta`, `aplicar`, `leerParaLaWeb`, `aprovisionar`, `releerMain` y la apertura
+  del WebSocket (después, el negocio de una sesión es el de su attachment). El Worker ya llega al
+  objeto por el nombre del negocio, así que es la segunda comprobación: si salta es un fallo del
+  programa, `negocio_ajeno` (500), a Sentry una vez por instancia y a Axiom cada vez. Un objeto con
+  base de antes de que se apuntara se queda con el negocio de la primera llamada que le llega, que
+  viene del Worker por ese mismo nombre; uno sin base no apunta nada. Con el negocio apuntado, los
+  eventos de salud lo llevan aunque la instancia la haya despertado un socket, sin ninguna llamada
+  que se lo diga. Lo cubre `test/negocioDelHub.test.ts`.
 - **Si el viaje al DO falla, no es un fallo del programa** (`alHub`, `lib/enElHub.ts`). Lo que una
   ruta lanza dentro del DO lo recoge allí su `onError`; una excepción de `ejecutarRuta` es que el
   objeto no ha podido atender, y Cloudflare dice por qué en el propio error:
@@ -125,7 +142,28 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   esa marca SQLite lo deshace dentro de cada una. La Main hace lo mismo (`sql_productos` y `sql_clientes_recurrentes`,
   en `tpv-infra-sqlite/src/stats.rs`), el arnés de lectura fija que las dos dan el mismo resultado y
   el plan de las dos sentencias tiene su test en cada lado.
-- Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
+- **Un objeto sin base no dice por qué lo está** (DO-PERDIDA, `lib/basePerdida.ts`): el negocio no
+  ha nacido todavía, o su base está en otro objeto (el despliegue apunta a otro espacio de nombres o
+  a otra jurisdicción) o se ha perdido. Lo distingue la base central, sin cambiar su esquema: un
+  negocio nace al activarse su primera licencia, y la activación crea la base **antes** de apuntar la
+  licencia (`activateLicenseFirstTime` es lo único que escribe `activated_at_ms`). Así que una
+  licencia suya con `activated_at_ms` prueba que su base existió. Lo que sale de ahí:
+  - una ruta autenticada que se encuentra sin base contesta `tenant_db_not_provisioned` (404) si el
+    negocio no ha nacido y `tenant_db_perdida` (503, `external`) si ya nació (`app.onError`), con un
+    aviso a Sentry y a Axiom, uno cada diez minutos por negocio e isolate. Sólo con lo primero ofrece
+    la Main crear una base vacía, y un equipo con licencia ya no se lo encuentra: su activación creó
+    la base;
+  - una base sólo se crea para un negocio que no ha nacido (`provisionTenantDatabase`, por donde
+    pasan la activación y `/v1/sync/initialize-empty`). La activación de uno que ya nació (el mismo
+    equipo que vuelve o el nuevo de un traslado) mira que su base esté antes de gastar el código y de
+    tocar la fila del equipo, y no crea una vacía en su lugar;
+  - si la base central no contesta, no se sabe: 500, y no se crea ni se ofrece nada;
+  - el socket de la Main no pasa por aquí: su `apply` sigue recibiendo `tenant_db_not_provisioned`,
+    que para su outbox es pasajero.
+
+  Otro camino que activara una licencia tendría que crear antes la base. Lo cubre
+  `test/basePerdida.test.ts`; lo que queda sin salida, en
+  [DO-PERDIDA](../pendientes.md#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
   piden en Europa occidental, para que nazcan ahí aunque quien los llame primero esté en otro sitio,

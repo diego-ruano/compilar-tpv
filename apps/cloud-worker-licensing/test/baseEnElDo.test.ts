@@ -30,6 +30,9 @@ const LINEA = (id: string, comanda: string) => ({
 });
 const DEFER = "PRAGMA defer_foreign_keys = ON;";
 
+/** La base central de un negocio que todavía no ha nacido: ninguna licencia suya se ha activado. */
+const SIN_LICENCIAS = { execute: async () => ({ rows: [] }) } as any;
+
 describe("esquema", () => {
 	it("se crea una vez, queda registrado y migrar otra vez no hace nada", async () => {
 		await enElHub("base-esquema", async (hub) => {
@@ -132,9 +135,9 @@ describe("una lectura de la web va entera, en un viaje, al TenantHub", () => {
 			status: 404,
 		});
 
-		const primera = await provisionTenantDatabase(null as any, env as any, tenantId);
+		const primera = await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		expect(primera.reused).toBe(false);
-		const segunda = await provisionTenantDatabase(null as any, env as any, tenantId);
+		const segunda = await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		expect(segunda.reused).toBe(true);
 
 		expect(await leerParaLaWeb(env as any, tenantId, { que: "negocioDelCorreo" })).toMatchObject({ nombre: expect.any(String) });
@@ -142,7 +145,7 @@ describe("una lectura de la web va entera, en un viaje, al TenantHub", () => {
 
 	it("lo que devuelve cruza el RPC con sus `Set` y sus `Map`", async () => {
 		const tenantId = "t-base-rpc-colecciones";
-		await provisionTenantDatabase(null as any, env as any, tenantId);
+		await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		await enElHub(tenantId, (hub: any) => {
 			const sql = hub.state.storage.sql;
 			sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
@@ -176,7 +179,7 @@ describe("una lectura de la web va entera, en un viaje, al TenantHub", () => {
 
 	it("un error de SQL llega con su mensaje", async () => {
 		const tenantId = "t-base-rpc-error";
-		await provisionTenantDatabase(null as any, env as any, tenantId);
+		await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		await enElHub(tenantId, (hub: any) => hub.state.storage.sql.exec("DROP TABLE Reserva_Web_Cierres;"));
 		await expect(leerParaLaWeb(env as any, tenantId, { que: "dia", dia: "2026-12-24" })).rejects.toThrow(/no such table/);
 	});

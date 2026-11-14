@@ -231,6 +231,15 @@ AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_repla
 es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
 aprovisionada para el perdedor se queda vacía.
 
+**La base va antes que la licencia, y sólo para un negocio que no ha nacido** (DO-PERDIDA). Una
+licencia con `activated_at_ms` es la prueba de que la base de su negocio existió, y con eso se
+distingue un objeto vacío porque el negocio no ha nacido de uno que ha perdido su base
+([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Por eso
+`activateLicenseFirstTime` va después de aprovisionar, y otro camino que activara una licencia
+tendría que hacer lo mismo. Al volver el mismo equipo a su licencia, o en un traslado con su código,
+la base se mira antes de gastar el código y de tocar la fila del equipo: si falta, `tenant_db_perdida`
+(503) sin hacer nada, y no se crea una vacía en su lugar.
+
 **En un equipo que era de otro negocio** (AUD-06). Con la licencia anulada o trasladada, el equipo ya
 no tiene una licencia viva a la que sumar tiempo, así que una clave sin estrenar abre un negocio
 nuevo; pero su base local es la del anterior. Si el equipo era la Main (`role = 'tpv'`) de otro
@@ -259,8 +268,15 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
 y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
 
 - **REST**: `tenantAuth` lo rechaza con `device_replaced`, pero guarda la respuesta 60 s por isolate.
-  Durante ese minuto, una petición suya que caiga en un isolate que lo dio por bueno todavía pasa.
-  El ticket del socket lo comprueba sin caché: desde el traslado no recibe ninguno.
+  Una petición suya que caiga en un isolate que lo dio por bueno llega hasta el `TenantHub`, y ahí se
+  para: el hub sabe quién es la Main (su tabla, que el aviso del traslado pone al día en el acto) y
+  contesta lo mismo, `device_replaced` (`vetoDeMain`, en todas las rutas de un `tpv`). Si la tabla
+  todavía no lo sabe porque el aviso no llegó, pasa, como antes: como mucho el minuto que el Worker
+  guarda su respuesta, o hasta que algo hace que el hub vuelva a leer quién es la Main; si la
+  tabla dice otra Main, el hub pregunta a la base central antes de rechazar, para no dejar fuera a la
+  nueva por un aviso perdido. Las pocas rutas de la Main que se ejecutan en el Worker (emparejar,
+  dispositivos, reservas de la web) miran la licencia sin caché (`soloLaMainVigente`). El ticket del
+  socket también: desde el traslado no recibe ninguno.
 - **El socket que tenía abierto**: con la licencia ya cambiada, la ruta avisa al `TenantHub` del
   negocio (`lib/hub.ts::avisarCambioDeLicencia`), que vuelve a leer quién es la Main y le cierra el
   socket. El aviso no nombra a quién echar: si llega tarde, cuando la licencia ya ha vuelto a ese

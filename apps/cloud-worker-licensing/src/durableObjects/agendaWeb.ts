@@ -50,7 +50,7 @@ export class AgendaWeb extends DurableObject<Env> {
 		return this.fila.atender(() => this.motor.cancelar(p));
 	}
 
-	// La entrega a la Main (§4.5): sólo desde sus rutas, detrás de `soloLaMain`.
+	// La entrega a la Main (§4.5): sólo desde sus rutas, detrás de `soloLaMainVigente`.
 	pendientes(p: { tenantId: string }): Promise<{ ok: true } & PendientesReservaWebDto> {
 		return this.fila.atender(() => this.motor.pendientes(p));
 	}

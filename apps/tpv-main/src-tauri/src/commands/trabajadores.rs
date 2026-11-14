@@ -97,7 +97,13 @@ pub async fn trabajadores_update(
 ) -> Result<bool, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.trabajadores_repo().await?;
-    Ok(uc::update_trabajador(repo.as_ref(), args).await?)
+    let guardado = uc::update_trabajador(repo.as_ref(), args).await;
+    // PERM-CACHE: la edición cambia el rol y el estado de un usuario, que puede ser el de la sesión,
+    // y a la Handy que la hace no le vuelve su propio cambio como aviso. Se tira lo guardado haya ido
+    // bien o no: una respuesta que se pierde no dice que no se escribiera. El alta no lo necesita: un
+    // usuario nuevo no es el de ninguna sesión.
+    state.olvidar_autorizacion();
+    Ok(guardado?)
 }
 
 /* Escrituras */

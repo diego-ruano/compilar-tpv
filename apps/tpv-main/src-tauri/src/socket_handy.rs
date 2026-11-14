@@ -3,7 +3,7 @@ use std::{future::Future, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, ti
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{sync::{watch, Notify}, time::Instant};
-use tpv_application::{error::{AppError, AppResult}, ports::{canal_nube::CanalNube, licensing::PairingService}, use_cases::{presencia_handy::{self, AlVolver, PresenciaHandy, PLAZO_PONG_MS}, saludo_socket}};
+use tpv_application::{error::{AppError, AppResult}, ports::{canal_nube::CanalNube, licensing::PairingService}, use_cases::{autorizacion_guardada::Canal, presencia_handy::{self, AlVolver, PresenciaHandy, PLAZO_PONG_MS}, saludo_socket}};
 use tpv_contracts::socket_handy::{AvisoSocketHandy, ConexionHandy, EstadoSocketHandy};
 use tpv_infra_http::websocket::{conectar, Latido};
 use tpv_infra_licensing::PairingAdapter;
@@ -22,6 +22,13 @@ pub(crate) struct HandyNativo {
 /// Un ping de comprobación por mandar: el latido y la conexión a la que pertenece.
 struct Comprobacion { latido: Latido, generacion: u64, conexion: u64 }
 
+/// PERM-CACHE: la autorización guardada sólo vale mientras los avisos llegan, y por la conexión
+/// por la que llegan. Cada vez que cambia la foto del socket se le dice cuál es, con el cerrojo de
+/// `presencia` todavía cogido: quien vea la foto nueva ya no encuentra lo guardado con la anterior.
+fn avisar_del_canal(app: &AppHandle, foto: &EstadoSocketHandy) {
+    if let Some(estado) = app.try_state::<AppState>() { estado.canal_de_avisos(Canal::de(foto)); }
+}
+
 impl HandyNativo {
     fn nuevo(orden: watch::Sender<u64>) -> Self {
         Self { presencia: Mutex::new(PresenciaHandy::default()), orden, latido: Mutex::new(None), comprobando: AtomicBool::new(false) }
@@ -36,6 +43,7 @@ impl HandyNativo {
         if p.foto.generacion != generacion { return; }
         cambio(&mut p);
         p.foto.revision += 1;
+        avisar_del_canal(app, &p.foto);
         let _ = app.emit("handy:estado", p.foto.clone());
     }
 
@@ -44,6 +52,7 @@ impl HandyNativo {
         let mut p = self.presencia.lock().unwrap_or_else(|e| e.into_inner());
         p.activar(None, false);
         p.foto.revision += 1;
+        avisar_del_canal(app, &p.foto);
         let _ = app.emit("handy:estado", p.foto.clone());
         self.orden.send_modify(|revision| *revision += 1);
     }
@@ -145,6 +154,8 @@ async fn sesion(app: &AppHandle, nube: &PairingAdapter, generacion: u64) -> AppR
         if p.foto.generacion != generacion { return Ok(()); }
         let anterior = (p.foto.main_online, p.foto.volcando);
         if let Some(cambio) = p.atender(m)? {
+            // PERM-CACHE: antes de avisar a la pantalla, que relee sus permisos al enterarse.
+            if let Some(estado) = app.try_state::<AppState>() { estado.aviso_de_cambio(&cambio); }
             let _ = app.emit("handy:cambio", AvisoSocketHandy { generacion, cambio });
         } else if anterior != (p.foto.main_online, p.foto.volcando) {
             p.foto.revision += 1;

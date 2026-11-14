@@ -103,6 +103,37 @@ export function soloLaMain(error: string, status: 401 | 403): MiddlewareHandler<
 }
 
 /**
+ * AUD-02 · `soloLaMain` para las rutas de la Main que se ejecutan en el Worker y no en el TenantHub:
+ * emparejar una Handy, ver y desvincular dispositivos y recoger las reservas de la web. Además del
+ * rol, la licencia, leída **sin** la caché de un minuto de `tenantAuth`.
+ *
+ * Con esa caché, el equipo al que se le acaba de trasladar o anular la licencia seguía entrando un
+ * minuto en un isolate que lo había dado por bueno. En las rutas que corren dentro del TenantHub lo
+ * para el propio hub, que sabe quién es la Main (`MotorTenantHub.vetoDeMain`); éstas no pasan por
+ * él, así que se pregunta aquí. Son pocas y se usan poco (la pantalla de vincular, el aviso de una
+ * reserva), y lo que hacen no se deshace: aprobar una Handy le da credenciales del negocio, y las
+ * reservas recogidas dejan de estar para la Main de verdad. El rechazo es el de `tenantAuth`.
+ *
+ * Un router cuyas rutas de la Main se queden en el Worker usa éste y no `soloLaMain`; lo vigila
+ * `test/mainDesplazadaRest.test.ts`.
+ */
+export function soloLaMainVigente(error: string, status: 401 | 403): MiddlewareHandler<any> {
+	const delRol = soloLaMain(error, status);
+	return async (c, next) => {
+		let esTpv = false;
+		const rechazo = await delRol(c, async () => {
+			esTpv = true;
+		});
+		if (!esTpv) return rechazo;
+		if (!hubLocal()) {
+			const veto = await vetoDeLicencia(c, { sinCache: true });
+			if (veto) return forbidden(c.req.raw, veto);
+		}
+		await next();
+	};
+}
+
+/**
  * Cobrar es cosa de la Main y solo de la Main.
  *
  * Una Handy no tiene impresora ni cajón, así que cerrar una mesa desde ella dejaría al cliente sin

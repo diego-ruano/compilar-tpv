@@ -4,7 +4,7 @@
 // Configuración → Vincular Handy, y por eso vive junto al emparejamiento.
 //
 // Como el resto del dominio, aquí sólo se decide: quién pregunta lo resuelven `tenantAuth` y
-// `soloLaMain` en la ruta.
+// `soloLaMainVigente` en la ruta.
 
 import type { Client } from "@libsql/client/web";
 

@@ -66,6 +66,12 @@ const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// El objeto del negocio está saturado o no ha podido atender la petición (`lib/enElHub.ts`).
 	"hub_overloaded",
 	"hub_unavailable",
+	// AUD-02: el TenantHub no ha podido preguntar a la base central si este equipo sigue siendo la
+	// Main (`MotorTenantHub.vetoDeMain`).
+	"main_sin_comprobar",
+	// DO-PERDIDA: el negocio ya nació y su base no está en su TenantHub (`lib/basePerdida.ts`). No
+	// es `tenant_db_not_provisioned`, que es con lo que la Main ofrece crear una base vacía.
+	"tenant_db_perdida",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -287,11 +293,15 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tenant_db_provision_failed:
 		"No se ha podido preparar la base de datos en la nube. Inténtalo de nuevo en unos minutos.",
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
+	tenant_db_perdida:
+		"La base de datos de este negocio no está en la nube, donde debería estar. En este equipo no se ha borrado nada. Contacta con soporte antes de hacer nada más.",
 	tenant_db_migration_failed:
 		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
 	hub_overloaded:
 		"La nube está atendiendo demasiadas peticiones de este negocio. Espera unos segundos y vuelve a intentarlo.",
 	hub_unavailable: "La nube no ha podido atender la petición. Vuelve a intentarlo en unos segundos.",
+	main_sin_comprobar:
+		"La nube no ha podido comprobar la licencia de este equipo. Vuelve a intentarlo en unos segundos.",
 	invalid_code: "El código no es correcto.",
 	code_expired: "El código ha caducado. Pide uno nuevo.",
 	correo_invalido: "Ese correo no parece válido. Revísalo.",
@@ -432,6 +442,8 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"missing_ticket",
 	"missing_transaction_steps",
 	"missing_webhook_secret",
+	// DO-NEGOCIO: una llamada ha llegado al TenantHub de un negocio con el identificador de otro.
+	"negocio_ajeno",
 	"no_session",
 	"not_authenticated",
 	"pair_code_generation_failed",

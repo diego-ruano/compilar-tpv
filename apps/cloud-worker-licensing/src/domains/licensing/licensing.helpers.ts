@@ -28,6 +28,7 @@ import { sha256HexBytes, sha256HexStr } from "../../server/utils/crypto";
 import { leerBearer } from "../../lib/sesion";
 import { hubDe } from "../../lib/hub";
 import { hubLocal } from "../../lib/hubLocal";
+import { errorDeBasePerdida, negocioNacido } from "../../lib/basePerdida";
 import { quitarComillas } from "../../lib/texto";
 
 /** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
@@ -389,11 +390,19 @@ async function comprobarFirma(
  * Garantiza que el negocio tiene su base con el esquema aplicado y el admin inicial.
  *
  * La base es el SQLite de su TenantHub, y aprovisionarla es cosa suya (`MotorTenantHub.aprovisionar`):
- * crea el esquema, o aplica lo pendiente si ya lo tiene, y siembra el administrador si la base nace
- * vacía. Desde una ruta que ya corre dentro de ese DO (`/v1/sync/initialize-empty`) se le pide al
- * de al lado, sin RPC: un objeto no se llama a sí mismo.
+ * crea el esquema y siembra el administrador. Desde una ruta que ya corre dentro de ese DO
+ * (`/v1/sync/initialize-empty`) se le pide al de al lado, sin RPC: un objeto no se llama a sí mismo.
+ *
+ * DO-PERDIDA · **Sólo se crea la base de un negocio que no ha nacido** (`lib/basePerdida.ts`). Si
+ * ya la tiene, no hay nada que hacer (`reused`). Si no la tiene y alguna licencia suya llegó a
+ * activarse, su base existió y no está donde se la busca: lanza `tenant_db_perdida` sin crear nada.
+ * Una base vacía en su lugar dejaría al negocio con una nube en blanco y los datos de verdad en otro
+ * objeto. Por aquí pasan la activación (también la de un equipo nuevo en un traslado, que antes
+ * creaba esa base vacía sin preguntar) y `/v1/sync/initialize-empty`.
  */
-export async function provisionTenantDatabase(_dbi: Client, env: Env, tenantId: string): Promise<{ reused: boolean }> {
+export async function provisionTenantDatabase(dbi: Client, env: Env, tenantId: string): Promise<{ reused: boolean }> {
+	if (await negocioAprovisionado(env, tenantId)) return { reused: true };
+	if (await negocioNacido(dbi, tenantId)) throw errorDeBasePerdida();
 	const local = hubLocal(tenantId);
 	return local ? local.aprovisionar() : hubDe(env, tenantId).aprovisionar(tenantId);
 }

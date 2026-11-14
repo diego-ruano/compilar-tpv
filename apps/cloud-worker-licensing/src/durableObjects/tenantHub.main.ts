@@ -56,9 +56,17 @@ function asegurarMain(storage: Almacen): void {
  */
 export type MainVigente = { leida: boolean; deviceId: string | null };
 
-/** Quién es la Main ahora mismo, según la tabla. No espera a nadie. */
+/**
+ * Quién es la Main ahora mismo, según la tabla. No espera a nadie, y no crea la tabla: sin ella es
+ * que no se ha leído nunca, lo mismo que con la tabla recién creada. Se mira también en un objeto
+ * sin base (una ruta de un `tpv`, `vetoDeMain`), y preguntarle no puede dejarle nada escrito.
+ */
 export function mainVigente(storage: Almacen): MainVigente {
-	asegurarTabla(storage);
+	const hayTabla =
+		storage.sql
+			.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_Main_Vigente';")
+			.toArray().length > 0;
+	if (!hayTabla) return { leida: false, deviceId: null };
 	const fila = storage.sql
 		.exec("SELECT Device_Id, Lectura_Aplicada FROM _Main_Vigente WHERE Id = 1;")
 		.toArray()[0] as any;

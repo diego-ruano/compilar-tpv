@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
+import { forbidden, json, serverError } from "../server/utils/response";
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { ingestToAxiom } from "../observability/axiom";
@@ -18,6 +19,7 @@ import {
 	tocaComprobar,
 } from "./tenantHub.main";
 import type { MainVigente } from "./tenantHub.main";
+import { apuntarNegocio, negocioApuntado } from "./tenantHub.negocio";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
 import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
@@ -129,7 +131,8 @@ export class MotorTenantHub {
 	// La base del negocio es el SQLite de este DO. El cliente se monta una vez por
 	// instancia, tras comprobar que el negocio está aprovisionado y su esquema al día.
 	private baseLocal: Client | null = null;
-	// El negocio de este DO, para las trazas: lo dice la primera petición que llega.
+	// El negocio de este DO para las trazas de un objeto que todavía no lo tiene apuntado (sin base):
+	// lo dice la primera petición que llega. Con base, manda el apuntado (`negocioParaTrazas`).
 	private tenantIdVisto: string | null = null;
 	// Lo que ya se ha avisado desde esta instancia (`avisarUnaVez`): una avería de la base del
 	// negocio la ve cada petición, y con un aviso basta. Se pierde al hibernar: vuelve a avisar.
@@ -289,10 +292,15 @@ export class MotorTenantHub {
 	 * pendientes, y dice que ya estaba (`reused`).
 	 */
 	async aprovisionar(tenantId: string): Promise<{ reused: boolean }> {
+		if (!tenantId) throw new HubError("missing_tenant_id", 400);
+		const ajeno = this.negocioAjeno(tenantId, "aprovisionar");
+		if (ajeno) throw ajeno;
 		this.tenantIdVisto ??= tenantId;
 		const storage = this.state.storage;
 		const reused = baseAprovisionada(storage.sql);
 		await this.migrarEnExclusiva();
+		// DO-NEGOCIO: el objeto queda con su negocio apuntado desde que tiene base.
+		apuntarNegocio(storage, tenantId);
 		await sembrarAdminInicial(storage);
 		this.baseLocal = clienteLocal(storage);
 		return { reused };
@@ -300,6 +308,49 @@ export class MotorTenantHub {
 
 	estaAprovisionado(): boolean {
 		return baseAprovisionada(this.state.storage.sql);
+	}
+
+	// ---- DO-NEGOCIO: de qué negocio es este objeto ------------------------------------------
+	//
+	// El negocio se apunta en el alta, en el sello de la base (`tenantHub.negocio.ts`), y toda
+	// llamada que trae uno se contrasta con él antes de hacer nada: `ejecutarRuta`, `aplicar`,
+	// `leerParaLaWeb`, `aprovisionar`, `releerMain` y la apertura del WebSocket. El Worker ya llega
+	// al objeto por el nombre del negocio, así que en condiciones normales esto no decide nada: es
+	// la segunda comprobación, y si salta es un fallo del programa.
+
+	/**
+	 * ¿Trae esta llamada el negocio de otro objeto? Devuelve el error con el que se rechaza, o
+	 * `null` si el negocio es el de éste.
+	 *
+	 * - **Con negocio apuntado**, cualquier otro (también uno vacío) se rechaza con `negocio_ajeno`
+	 *   (500): va a Sentry, una vez por instancia, y a Axiom cada vez, con la operación.
+	 * - **Con base y sin negocio apuntado** (un objeto dado de alta antes de que se apuntara), la
+	 *   base se queda con el de la primera llamada que llegue. Esa llamada viene del Worker, que
+	 *   ha encontrado el objeto por ese mismo nombre; dentro no hay nada más con lo que contrastarlo.
+	 * - **Sin base** no hay nada que guardar: la llamada sigue, y contestará que no hay base o la
+	 *   creará (`aprovisionar`), que es quien apunta el negocio.
+	 */
+	private negocioAjeno(tenantId: string, operacion: string): HubError | null {
+		const storage = this.state.storage;
+		const propio = negocioApuntado(storage);
+		if (propio === null) {
+			if (apuntarNegocio(storage, tenantId)) this.emitSyncEvent("negocio_adoptado", { operacion });
+			return null;
+		}
+		if (propio === tenantId) return null;
+
+		const error = new HubError("negocio_ajeno", 500);
+		if (!this.avisados.has("negocio_ajeno")) {
+			this.avisados.add("negocio_ajeno");
+			capturarError(error, "hub.negocio_ajeno");
+		}
+		this.emitSyncEvent("negocio_ajeno", { operacion, recibido: tenantId });
+		return error;
+	}
+
+	/** El negocio que llevan los eventos de salud: el apuntado y, sin base, el de la última llamada. */
+	private negocioParaTrazas(): string | undefined {
+		return negocioApuntado(this.state.storage) ?? this.tenantIdVisto ?? undefined;
 	}
 
 	/**
@@ -313,6 +364,8 @@ export class MotorTenantHub {
 	 */
 	async leerParaLaWeb(tenantId: string, lectura: LecturaWeb): Promise<RespuestaDeLecturaWeb> {
 		try {
+			const ajeno = this.negocioAjeno(tenantId, "leerParaLaWeb");
+			if (ajeno) throw ajeno;
 			return { ok: true, valor: await leerConLaHoraDelNegocio(await this.getTenantDb(tenantId), lectura) };
 		} catch (e) {
 			if (e instanceof HubError) {
@@ -605,6 +658,8 @@ export class MotorTenantHub {
 	 * actividad vuelve a preguntar sin esperar al minuto.
 	 */
 	async releerMain(tenantId: string): Promise<void> {
+		const ajeno = this.negocioAjeno(tenantId, "releerMain");
+		if (ajeno) throw ajeno;
 		olvidarComprobacion(this.state.storage);
 		if (!tenantId) return;
 		try {
@@ -613,6 +668,53 @@ export class MotorTenantHub {
 			capturarError(e, "sync.main_vigente");
 			olvidarComprobacion(this.state.storage);
 		}
+	}
+
+	/**
+	 * AUD-02 · Una ruta que llega de un `tpv` (`ejecutarRuta`): ¿sigue siendo ese equipo la Main?
+	 * Devuelve el identificador con el que se rechaza, el mismo que da el veto de licencia del Worker
+	 * (`lib/licenciaEnUso.ts`), o `null` si puede pasar.
+	 *
+	 * El Worker ya lo ha comprobado, pero guarda su respuesta un minuto por isolate: en ese minuto, el
+	 * equipo al que se le ha trasladado o anulado la licencia todavía llega hasta aquí. La tabla del
+	 * hub se pone al día en el acto con el aviso del cambio (`releerMain`), así que aquí se le para.
+	 *
+	 * - **Todas las rutas de un `tpv`, no una lista.** Es lo que rechaza el veto del Worker: una Main
+	 *   que ha dejado de serlo no escribe ni tampoco lee el negocio. Y una ruta nueva queda cubierta
+	 *   sin acordarse de nada.
+	 * - **Una Handy no pasa por aquí**: nunca es la Main, y su licencia la mira el Worker.
+	 * - **Si la tabla no se ha leído nunca, pasa**: no hay nada que contradiga al Worker, igual que
+	 *   con las sesiones (`esLaMain`).
+	 * - **Si la tabla dice que la Main es otro equipo, se pregunta a la base central antes de
+	 *   rechazar.** El Worker acaba de dar por bueno a éste, y una de las dos cosas está atrasada: su
+	 *   caché de un minuto, o la tabla, si el aviso del traslado no llegó (es best-effort). Sin esa
+	 *   lectura, el equipo NUEVO de un traslado cuyo aviso se perdió se quedaría fuera hasta saludar
+	 *   por el socket, y antes de eso tiene que traerse los datos por REST. La lectura es por índice y
+	 *   con plazo, y sólo la paga la petición que no cuadra. Como toda lectura, echa de paso a la
+	 *   sesión `tpv` que ya no sea la Main (`fijarMain`).
+	 * - **Si la base central no contesta, no se ejecuta** (`sin_comprobar`): 503
+	 *   `main_sin_comprobar`, que quien llama repite. Ni se deja pasar a quien la tabla dice que no
+	 *   es la Main, ni se le dice que ha sido sustituido sin saberlo.
+	 */
+	private async vetoDeMain(
+		identidad: IdentidadDelWorker,
+	): Promise<"device_replaced" | "license_revoked" | "sin_comprobar" | null> {
+		if (identidad.rol !== "tpv") return null;
+		const esOtro = (v: MainVigente) => v.leida && v.deviceId !== identidad.deviceId;
+		if (!esOtro(this.mainVigente())) return null;
+
+		try {
+			await this.leerMain(identidad.tenantId);
+		} catch (e) {
+			capturarError(e, "sync.main_vigente");
+			return "sin_comprobar";
+		}
+		const vigente = this.mainVigente();
+		if (!esOtro(vigente)) return null;
+
+		const motivo = vigente.deviceId ? "device_replaced" : "license_revoked";
+		this.emitSyncEvent("ruta_de_main_rechazada", { device_id: identidad.deviceId, motivo });
+		return motivo;
 	}
 
 	/**
@@ -1162,7 +1264,7 @@ export class MotorTenantHub {
 				_time: new Date().toISOString(),
 				service: "tpv-sync",
 				event: name,
-				tenant_id: this.tenantIdVisto ?? undefined,
+				tenant_id: this.negocioParaTrazas(),
 				connected_devices: this.authedCount(),
 				main_connected: this.isMainConnected(),
 				...fields,
@@ -1381,6 +1483,13 @@ export class MotorTenantHub {
 			return new Response("Expected WebSocket", { status: 426 });
 		}
 
+		// DO-NEGOCIO: el negocio de la sesión se queda en su attachment, y de ahí sale el de todo lo
+		// que mande después. Se comprueba aquí, antes de aceptar el socket.
+		const tenantId = request.headers.get("x-tenant-id") || "";
+		if (tenantId && this.negocioAjeno(tenantId, "ws")) {
+			return new Response("negocio_ajeno", { status: 500 });
+		}
+
 		// El Worker canjeó el ticket con el dispositivo vivo, pero pudo darse de baja entre el canje y
 		// este momento: su `revocarDispositivo` llegó antes que el socket y no tuvo nada que cerrar.
 		const deviceId = request.headers.get("x-device-id") || "";
@@ -1409,6 +1518,8 @@ export class MotorTenantHub {
 	}
 
 	async aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
+		const ajeno = params.tenantId ? this.negocioAjeno(params.tenantId, "aplicar") : null;
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
 		return aplicar(this.ctxRutas(), params);
 	}
 
@@ -1418,6 +1529,17 @@ export class MotorTenantHub {
 	 * escrituras a `aplicar`, sin RPC: la petición cuesta un viaje, el que la ha traído.
 	 */
 	async ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
+		const ajeno = this.negocioAjeno(identidad.tenantId, "ejecutarRuta");
+		if (ajeno) return serverError(peticion, ajeno.code);
+
+		// AUD-02: de un `tpv`, sólo la Main. Lo último antes de ejecutar la ruta: de aquí a ella no
+		// hay ninguna espera.
+		const veto = await this.vetoDeMain(identidad);
+		if (veto === "sin_comprobar") {
+			return json({ ok: false, code: "external", error: "main_sin_comprobar" }, 503, peticion);
+		}
+		if (veto) return forbidden(peticion, veto);
+
 		const ctxEjecucion = {
 			waitUntil: (p: Promise<unknown>) => this.state.waitUntil(p),
 			passThroughOnException: () => undefined,

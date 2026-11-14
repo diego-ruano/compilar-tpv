@@ -20,7 +20,7 @@
 //   - POST /v1/stripe/webhook   → compras (emite/extiende licencia)
 //   - /v1/admin/licenses/*      → alta manual (token admin)
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 
 import type { Env } from "./env";
@@ -31,6 +31,7 @@ import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
 import { hubDe } from "./lib/hub";
 import { cuerpoDeErrorConStatus } from "./lib/errorHttp";
+import { avisarBasePerdida, esBasePerdida, negocioNacido } from "./lib/basePerdida";
 import {
 	json,
 	unauthorized,
@@ -226,9 +227,50 @@ app.route("/v1/update", updatesRoutes);
 // ---------------- Gestión de dispositivos ----------------
 app.route("/v1/device", dispositivosRoutes);
 
+/**
+ * DO-PERDIDA · Una ruta autenticada se ha encontrado sin la base del negocio (`lib/basePerdida.ts`).
+ *
+ * Si el negocio ya nació, no es un negocio sin estrenar: contesta `tenant_db_perdida` (503) y avisa,
+ * en vez del `tenant_db_not_provisioned` con el que la Main ofrece crear una base vacía. Si no ha
+ * nacido, o la ruta no tiene negocio (las públicas), devuelve `null` y sale lo de siempre. Si la
+ * base central no contesta, no se sabe: un 500, que tampoco ofrece nada.
+ */
+async function siLaBaseSeHaPerdido(err: unknown, c: Context<{ Bindings: Env }>): Promise<Response | null> {
+	const yaLoEs = esBasePerdida(err);
+	if (!yaLoEs && (err as { code?: unknown } | null)?.code !== "tenant_db_not_provisioned") return null;
+	const variables = c as unknown as { get: (clave: "tenantId" | "deviceId") => string | undefined };
+	const tenantId = variables.get("tenantId");
+	if (!tenantId) return null;
+
+	if (!yaLoEs) {
+		try {
+			if (!(await negocioNacido(getDb(c.env), tenantId))) return null;
+		} catch (e) {
+			capturarError(e, "tenant_db.perdida");
+			return serverError(c.req.raw, "internal_error");
+		}
+	}
+
+	const aviso = avisarBasePerdida(c.env, {
+		tenant_id: tenantId,
+		device_id: variables.get("deviceId"),
+		donde: `${c.req.method} ${c.req.routePath}`,
+	});
+	try {
+		c.executionCtx.waitUntil(aviso);
+	} catch {
+		// Sin contexto de ejecución (los tests): perder el aviso no puede tumbar la respuesta.
+		void aviso;
+	}
+	return c.json({ ok: false, error: "tenant_db_perdida" }, 503);
+}
+
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
 // idempotency_*) a JSON; el resto cae a un 500 sin detalle (FABLE-B).
-app.onError((err, c) => {
+app.onError(async (err, c) => {
+	const perdida = await siLaBaseSeHaPerdido(err, c);
+	if (perdida) return perdida;
+
 	// Reporta a Sentry también los errores que aquí traducimos a JSON: Hono los captura antes de
 	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
 	capturarError(err, `${c.req.method} ${c.req.routePath}`);

@@ -27,7 +27,7 @@ import type { MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
 import { cuerpoConIdentificador, topeAnonimo } from "../../lib/validacion";
-import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMainVigente, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 import { ipDeLaPeticion } from "./pairing.avisos";
 import { demasiadasPeticiones, entregarToken, reclamarCodigo, soltarCodigo } from "./pairing.handy";
@@ -58,7 +58,7 @@ const filtroExterior: MiddlewareHandler<Ctx> = async (c, next) => {
 };
 
 /** La Main que habla por estas rutas: token + device-proof + licencia viva + rol `tpv`. */
-const laMain = [tenantAuth, soloLaMain("forbidden_not_tpv", 401)] as const;
+const laMain = [tenantAuth, soloLaMainVigente("forbidden_not_tpv", 401)] as const;
 
 // ---- Handy (anónimos, firmados por el dispositivo que reclamó) ----
 

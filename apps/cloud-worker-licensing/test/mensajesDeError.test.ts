@@ -101,7 +101,8 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		// rol, que es un middleware con el identificador como argumento — ya no en un `if` del handler.
 		/\bmessage:\s*"([^"]+)"/g,
 		/textoObligatorio\(\s*"([^"]+)"/g,
-		/soloLaMain\(\s*"([^"]+)"/g,
+		// AUD-02: en las rutas de la Main que se quedan en el Worker, `soloLaMainVigente`.
+		/soloLaMain(?:Vigente)?\(\s*"([^"]+)"/g,
 		// La agenda de reservas web (`agendaWeb.motor.ts`): sus rechazos cruzan el RPC como resultado.
 		/rechazo\(\s*"([^"]+)"/g,
 	];
