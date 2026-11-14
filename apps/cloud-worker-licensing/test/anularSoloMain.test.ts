@@ -7,19 +7,33 @@
 // un bar sin dejar rastro, que es justo el agujero que este plan tapa. Dejar la regla sólo en la
 // interfaz significa que cualquiera con el token de una Handy anula igualmente, y ese token vive
 // en un móvil que se queda en la barra.
+//
+// El veto se prueba suelto (el middleware con el rol que devuelve la base central) y por el camino
+// desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub, que decide con
+// el rol de la identidad.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/** Rol que devuelve la BD central en cada test. */
-let rolEnLaBd: string | null = "handy";
+import { conNegocioFirmado, HANDY, MAIN, pedirComo } from "./helpers/negocioFirmado";
 
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({
-		execute: async () => ({ rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] }),
-	}),
+/** Rol que devuelve la BD central en cada test del veto suelto. */
+let rolEnLaBd: string | null = "handy";
+/** La base central de verdad, en los tests por el camino desplegado. */
+let dbCentral: unknown = null;
+
+vi.mock("../src/server/db", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/server/db")>()),
+	getDb: () =>
+		dbCentral ?? {
+			execute: async () => ({ rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] }),
+		},
 }));
 
 const { soloLaMainEscribeCaja } = await import("../src/middleware/tenant");
+const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
 
 /** Contexto de Hono con lo justo que mira el guard. */
 function contexto() {
@@ -92,5 +106,22 @@ describe("la ruta de anular", () => {
 		const bloque = fuente.slice(inicio);
 		expect(bloque.indexOf("soloLaMainEscribeCaja")).toBeLessThan(bloque.indexOf("cuerpo("));
 		expect(bloque.indexOf("soloLaMainEscribeCaja")).toBeLessThan(bloque.indexOf("cmd.anularPago"));
+	});
+});
+
+describe("por el camino desplegado", () => {
+	it("la Handy no anula: lo decide el TenantHub con el rol de la identidad, antes de mirar el cuerpo", async () => {
+		await conNegocioFirmado(deps, "anular-desplegado", async (n) => {
+			// Un cuerpo que no vale: si el veto fuera detrás del validador, saldría un 400.
+			const handy = await pedirComo(deps, app, n, HANDY, "POST", "/v1/cuentas/pagos/p-1/anular", { esto: "no" });
+			expect(handy.status).toBe(403);
+			expect(handy.json).toMatchObject({ ok: false, error: "caja_solo_en_main" });
+			expect(handy.viajes).toBe(1);
+
+			// La Main pasa el veto y llega al validador.
+			const main = await pedirComo(deps, app, n, MAIN, "POST", "/v1/cuentas/pagos/p-1/anular", { esto: "no" });
+			expect(main.status).toBe(400);
+			expect(main.viajes).toBe(1);
+		});
 	});
 });

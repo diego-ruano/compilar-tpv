@@ -170,6 +170,31 @@ export async function pedirFirmado(
 	return app.request(peticion, undefined, { ...env, ...opciones.entorno });
 }
 
+/**
+ * Una petición firmada por `deviceId` (`MAIN` o `HANDY`) a la `app` entera: su estado, su cuerpo y
+ * cuántos viajes ha hecho al TenantHub (`hub-ruta`). Es el camino desplegado: `tenantAuth` en el
+ * Worker, `alHub`, `ejecutarRuta` y la ruta dentro del DO con el rol de la identidad.
+ */
+export async function pedirComo(
+	deps: Pick<Dependencias, "firmarSesion">,
+	app: { request: (peticion: Request, init: undefined, env: any) => Response | Promise<Response> },
+	n: Negocio,
+	deviceId: string,
+	metodo: string,
+	ruta: string,
+	cuerpo?: unknown,
+): Promise<{ status: number; json: any; viajes: number }> {
+	const res = await app.request(await peticionFirmada(deps, n, deviceId, metodo, ruta, { cuerpo }), undefined, env);
+	const texto = await res.text();
+	let json: any = null;
+	try {
+		json = texto ? JSON.parse(texto) : null;
+	} catch {
+		json = texto;
+	}
+	return { status: res.status, json, viajes: viajes(res, "hub-ruta") };
+}
+
 /** Cuántos viajes de un tramo cuenta el `Server-Timing` (`hub-ruta;dur=12;desc="1"`). */
 export function viajes(respuesta: Response, tramo: string): number {
 	const tiempos = respuesta.headers.get("Server-Timing") ?? "";

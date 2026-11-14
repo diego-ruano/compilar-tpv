@@ -16,11 +16,26 @@
 //
 // Leer el fuente es la única forma de verlo: el olvido no es un comportamiento que se pueda
 // provocar, es una línea que no está. Que la reserva aguante los intentos simultáneos sí es un
-// comportamiento, y lo prueba `loginFrenoConcurrente.test.ts`.
+// comportamiento, y lo prueba `loginFrenoConcurrente.test.ts`. Y que el freno funciona por el camino
+// desplegado (la `app`, `alHub` y la ruta dentro del TenantHub, con el freno en la base del negocio),
+// el último caso.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import fuente from "../src/domains/login/login.routes.ts?raw";
+import { conNegocioFirmado, enLaBaseDe, HANDY, pedirComo } from "./helpers/negocioFirmado";
+
+let dbCentral: unknown = null;
+
+vi.mock("../src/server/db", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/server/db")>()),
+	getDb: () => dbCentral,
+}));
+
+const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
 
 const fuentes = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
@@ -101,5 +116,36 @@ describe("REV-06 · verificar un PIN exige el freno de LOGIN-01", () => {
 		expect(rutas).toContain("POST /login");
 		expect(rutas).not.toContain("POST /complete-initial-setup");
 		expect(rutas).not.toContain("POST /sync-initial-setup");
+	});
+});
+
+describe("por el camino desplegado", () => {
+	it("una Handy que falla el PIN se frena dentro del TenantHub, con el freno en la base del negocio", async () => {
+		await conNegocioFirmado(deps, "pin-desplegado", async (n) => {
+			// Un hash que no se deja verificar: cada intento es un fallo, sin las 100.000 vueltas.
+			await enLaBaseDe(n, (sql) =>
+				sql.exec(
+					`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Requiere_Setup)
+					 VALUES ('u-pin', '00000000-0000-7000-8000-000000000001', 'pin@ejemplo.test', 'pbkdf2$no-es-un-hash', 'Pin', 'Activo', 0);`,
+				),
+			);
+			const intentar = () => pedirComo(deps, app, n, HANDY, "POST", "/v1/login/login", { id_usuario: "u-pin", pin: "1234" });
+
+			// Cinco libres y el sexto, que pone el bloqueo: los seis se verifican y fallan.
+			for (let i = 1; i <= 6; i++) {
+				const r = await intentar();
+				expect(r.status, `intento ${i}`).toBe(401);
+				expect(r.viajes, `intento ${i}`).toBe(1);
+			}
+			// El séptimo no se verifica.
+			const frenado = await intentar();
+			expect(frenado.status).toBe(429);
+			expect(frenado.viajes).toBe(1);
+			await enLaBaseDe(n, (sql) => {
+				const fila = sql.exec("SELECT Intentos_Fallidos AS n, Bloqueado_Hasta_Ms AS hasta FROM Intentos_Login WHERE ID_Usuario = 'u-pin';").one();
+				expect(fila.n).toBe(6);
+				expect(fila.hasta).toBeGreaterThan(Date.now());
+			});
+		});
 	});
 });

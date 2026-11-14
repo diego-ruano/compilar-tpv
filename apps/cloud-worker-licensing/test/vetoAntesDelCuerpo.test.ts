@@ -15,8 +15,25 @@
 // roles**. Preguntarle a la base qué rol tiene un dispositivo es trabajo del middleware
 // (`soloLaMain(...)` en `middleware/tenant.ts`); un router que lo hace por su cuenta es, casi
 // siempre, uno que lo está haciendo tarde.
+//
+// Y lo mismo por el camino desplegado: cada ruta con un veto de rol, pedida por una Handy con un
+// cuerpo que no vale a la `app` entera, se queda en el veto dentro del TenantHub (el último bloque).
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { conNegocioFirmado, HANDY, pedirComo } from "./helpers/negocioFirmado";
+
+let dbCentral: unknown = null;
+
+vi.mock("../src/server/db", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/server/db")>()),
+	getDb: () => dbCentral,
+}));
+
+const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
 
 /** Leer el fuente con `?raw` (Vite): dentro del pool de workers no hay `node:fs`. */
 const fuentes = import.meta.glob("../src/domains/**/*.routes.ts", {
@@ -24,6 +41,9 @@ const fuentes = import.meta.glob("../src/domains/**/*.routes.ts", {
 	import: "default",
 	eager: true,
 }) as Record<string, string>;
+const appFuente = Object.values(
+	import.meta.glob("../src/app.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>,
+)[0];
 
 /** Las primitivas que resuelven un rol. Su sitio es el middleware, no el handler. */
 const PRIMITIVAS_DE_ROL = /\b(isTpvDevice|tieneRol|rolDelDispositivo)\s*\(/g;
@@ -192,5 +212,62 @@ describe("una ruta anónima lleva el tope de su cuerpo delante (AUD-34)", () => 
 		const admin = fuentes["../src/domains/admin/admin.routes.ts"];
 		expect(admin).toMatch(/^adminRoutes\.use\("\*", requireAdmin\);[\s\S]*^adminRoutes\.route\("\/reservas-web", reservasWebAdminRoutes\);/m);
 		for (const f of TRAS_REQUIRE_ADMIN) expect(fuentes[`../src/domains/${f}`], f).toBeDefined();
+	});
+});
+
+// ─── El veto por el camino desplegado ─────────────────────────────────────────────────────────────
+//
+// Lo de arriba lee el orden del fuente; esto lo comprueba con la petición de verdad: la `app` entera,
+// `tenantAuth` en el Worker, `alHub`, `ejecutarRuta` y la ruta dentro del TenantHub, que decide con
+// el rol que trae la identidad. Una regresión en cualquiera de esos pasos (la identidad sin el rol, un
+// router sin `alHub`, el veto detrás del validador) deja pasar a la Handy hasta el 400 del cuerpo, o
+// más allá.
+
+/** Dónde monta la `app` cada router (`app.route("/v1/cuentas", cuentasRoutes)`). */
+const MONTAJES = new Map([...appFuente.matchAll(/app\.route\("([^"]+)", (\w+)\)/g)].map((m) => [m[2], m[1]] as const));
+
+/** Un veto de rol que decide con el rol de la identidad (`soloLaMain…`), no los de la Main vigente. */
+const VETO_DE_ROL = /\bsoloLaMain(?!Vigente)\w*/;
+
+/** Cada ruta de la `app` con un veto de rol, en su cadena o en el `use("*")` de su router. */
+function rutasConVetoDeRol(): { metodo: string; ruta: string }[] {
+	const rutas: { metodo: string; ruta: string }[] = [];
+	for (const fuente of Object.values(fuentes)) {
+		const prefijo = MONTAJES.get(/export const (\w+) = new Hono/.exec(fuente)?.[1] ?? "");
+		if (!prefijo) continue;
+		const todoElRouter = [...fuente.matchAll(/^\w+\.use\(\s*"\*",([\s\S]*?)\);/gm)].some((m) => VETO_DE_ROL.test(m[1]));
+		for (const m of fuente.matchAll(/^\w+\.(post|get|put|patch|delete)\(\s*\n?\s*"([^"]+)"/gm)) {
+			const desde = fuente.slice(m.index!);
+			const fin = desde.search(/\n\}?\);/);
+			const bloque = fin === -1 ? desde : desde.slice(0, fin);
+			const handler = bloque.search(/\basync\s*\(\s*c\s*\)/);
+			const cadena = handler === -1 ? bloque : bloque.slice(0, handler);
+			if (!todoElRouter && !VETO_DE_ROL.test(cadena)) continue;
+			rutas.push({ metodo: m[1].toUpperCase(), ruta: prefijo + m[2].replace(/:\w+/g, "x") });
+		}
+	}
+	return rutas;
+}
+
+describe("el veto, por el camino desplegado", () => {
+	it("una Handy se queda en el veto de cada ruta, dentro del TenantHub, aunque el cuerpo no valga", async () => {
+		const rutas = rutasConVetoDeRol();
+		// Las de la caja, cobrar, la recuperación del PIN y todo sync: si el barrido no las ve, no prueba nada.
+		expect(rutas.map((r) => r.ruta)).toEqual(
+			expect.arrayContaining(["/v1/cuentas/pagos/x/anular", "/v1/mesas/cobrar-detalles", "/v1/venta-rapida/cobrar-fraccionado", "/v1/sync/changes"]),
+		);
+		expect(rutas.length).toBeGreaterThan(15);
+
+		await conNegocioFirmado(deps, "veto-desplegado", async (n) => {
+			const mal: string[] = [];
+			for (const { metodo, ruta } of rutas) {
+				const conCuerpo = metodo !== "GET" && metodo !== "DELETE";
+				const r = await pedirComo(deps, app, n, HANDY, metodo, ruta, conCuerpo ? { esto: "no vale" } : undefined);
+				if (r.status !== 403 || r.viajes !== 1) {
+					mal.push(`${metodo} ${ruta}: ${r.status}, ${r.viajes} viajes, ${JSON.stringify(r.json).slice(0, 120)}`);
+				}
+			}
+			expect(mal, "la Handy pasó el veto, o se decidió fuera del TenantHub").toEqual([]);
+		});
 	});
 });

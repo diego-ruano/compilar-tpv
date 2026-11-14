@@ -19,7 +19,10 @@
 
 import { describe, it, expect } from "vitest";
 
+import { enElHub } from "./helpers/hub";
+
 const { applyViaHub, HubError } = await import("../src/lib/hub");
+const { dentroDelHub } = await import("../src/lib/hubLocal");
 
 /** `env` con un TenantHub que registra si LLEGÓ a llamarse. */
 function entorno() {
@@ -133,5 +136,51 @@ describe("las tablas fiscales sólo las escribe la Main", () => {
 				payload: { sql: "insert into registros_facturacion (ID_Registro) values (?);", args: ["x"] },
 			}),
 		).rejects.toBeInstanceOf(HubError);
+	});
+});
+
+describe("dentro del TenantHub, que es por donde escribe toda ruta desplegada", () => {
+	// Desplegada, una ruta de negocio se ejecuta dentro del DO (`ejecutarRuta`), y su escritura va al
+	// motor de al lado (`hubLocal().aplicar`), no por RPC: es la otra rama de `applyViaHub`, y el veto
+	// tiene que ir antes de las dos. Ninguna ruta escribe en estas tablas, así que no hay petición que
+	// lo alcance por la `app`: se ejecuta como lo haría una, con el motor de verdad.
+	it("el veto va antes de llegar al motor, y lo que no es de la Main llega", async () => {
+		await enElHub("fiscal-en-el-hub", async (hub: any) => {
+			await hub.aprovisionar("t-fiscal");
+			const llegan: string[] = [];
+			const local = {
+				identidad: { tenantId: "t-fiscal", deviceId: "handy-1", token: "", licHash: "", rol: "handy" as const },
+				base: () => hub.getTenantDb("t-fiscal"),
+				sql: async () => hub.state.storage.sql,
+				aplicar: async (p: any) => {
+					llegan.push(p.opId);
+					return hub.aplicar(p);
+				},
+				estaAprovisionado: () => true,
+				aprovisionar: () => hub.aprovisionar("t-fiscal"),
+			};
+			// Sin `TenantHub` en el entorno: dentro del DO no hay RPC.
+			const escribir = (opId: string, sql: string) =>
+				dentroDelHub(local, () =>
+					applyViaHub({} as any, {
+						tenantId: "t-fiscal",
+						deviceId: "handy-1",
+						opId,
+						commandName: "x",
+						command: { type: "tenantDb.exec", payload: { sql, args: ["x"] } },
+					}),
+				);
+
+			await expect(escribir("op-fiscal", "INSERT INTO Registros_Facturacion (ID_Registro) VALUES (?);"))
+				.rejects.toMatchObject({ status: 403 });
+			await expect(escribir("op-permisos", "DELETE FROM Roles_Permisos WHERE ID_Rol = ?;"))
+				.rejects.toMatchObject({ status: 403 });
+			expect(llegan).toEqual([]);
+
+			// Lo demás llega al motor, que aquí lo rechaza por otra cosa: no hay ninguna Main conectada.
+			await expect(escribir("op-zona", "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?, 'Sala');"))
+				.rejects.toMatchObject({ code: "main_offline" });
+			expect(llegan).toEqual(["op-zona"]);
+		});
 	});
 });

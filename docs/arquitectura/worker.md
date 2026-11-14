@@ -262,7 +262,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Todo lo que decide antes de leer el cuerpo es middleware y va delante**: el veto de rol
   (`soloLaMain…`), un tope de tamaño, un token de administración, el filtro por IP del emparejamiento. Un
   `*.routes.ts` no resuelve roles. Lo vigilan `test/anularSoloMain.test.ts` y
-  `test/vetoAntesDelCuerpo.test.ts`.
+  `test/vetoAntesDelCuerpo.test.ts`, que además pide cada ruta con un veto de rol como una Handy, con un
+  cuerpo que no vale, por la `app` entera: tiene que quedarse en el veto, dentro del TenantHub.
 - **Una ruta anónima lleva el tope de su cuerpo delante** (AUD-34): lo que no pasa por `tenantAuth`
   ni por un token de administración no lee un cuerpo entero antes de saber quién llama. Se declara
   antes que la ruta, `xRoutes.use("/ruta", topeAnonimo())` (`lib/validacion.ts`, 413
@@ -560,7 +561,7 @@ no lo vigila nada.
 | Lo que se llama | Doble |
 |---|---|
 | La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
-| El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`) |
+| El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`): `helpers/negocioFirmado.ts` monta el negocio y firma las peticiones de la Main y de la Handy (`pedirComo`) |
 | La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
 | La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` |

@@ -7,23 +7,37 @@
 // Es una regla que el servidor tiene que hacer cumplir por su cuenta. Dejarla solo en la interfaz
 // de la Handy significa que cualquiera con su token puede cobrar igualmente — y el token de una
 // Handy vive en un móvil que se queda en la barra.
+//
+// El veto se prueba suelto (el middleware con el rol que devuelve la base central) y por el camino
+// desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub, que decide con
+// el rol de la identidad.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/** Rol que devuelve la BD central en cada test. */
+import { conNegocioFirmado, HANDY, MAIN, pedirComo } from "./helpers/negocioFirmado";
+
+/** Rol que devuelve la BD central en cada test del veto suelto. */
 let rolEnLaBd: string | null = "handy";
 const consultas: Array<{ sql: string; args: unknown[] }> = [];
+/** La base central de verdad, en los tests por el camino desplegado. */
+let dbCentral: unknown = null;
 
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({
-		execute: async (q: { sql: string; args: unknown[] }) => {
-			consultas.push(q);
-			return { rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] };
+vi.mock("../src/server/db", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/server/db")>()),
+	getDb: () =>
+		dbCentral ?? {
+			execute: async (q: { sql: string; args: unknown[] }) => {
+				consultas.push(q);
+				return { rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] };
+			},
 		},
-	}),
 }));
 
 const { soloLaMainCobra, rolDelDispositivo } = await import("../src/middleware/tenant");
+const { app } = await import("../src/app");
+const { firmarSesion } = await import("../src/lib/sesion");
+const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
 
 /** Contexto de Hono con lo justo que mira el guard. */
 function contexto() {
@@ -121,5 +135,26 @@ describe("de dónde sale el rol", () => {
 		await rolDelDispositivo({} as any, "t1", "d1");
 
 		expect(consultas[0].sql).toContain("revoked_at_ms IS NULL");
+	});
+});
+
+describe("por el camino desplegado", () => {
+	it("la Handy no cobra ni en mesas ni en la barra: lo decide el TenantHub, antes de mirar el cuerpo", async () => {
+		await conNegocioFirmado(deps, "cobro-desplegado", async (n) => {
+			for (const ruta of ["/v1/mesas/cobrar-detalles", "/v1/venta-rapida/cobrar-fraccionado"]) {
+				// Un cuerpo que no vale: si el veto fuera detrás del validador, saldría un 400.
+				const handy = await pedirComo(deps, app, n, HANDY, "POST", ruta, { esto: "no es un cobro" });
+				expect(handy.status, ruta).toBe(403);
+				expect(handy.json, ruta).toMatchObject({ ok: false, error: "cobro_solo_en_main" });
+				expect(handy.viajes, ruta).toBe(1);
+
+				// La Main pasa el veto y llega al validador.
+				const main = await pedirComo(deps, app, n, MAIN, "POST", ruta, { esto: "no es un cobro" });
+				expect(main.status, ruta).toBe(400);
+				expect(main.viajes, ruta).toBe(1);
+			}
+			// El rol viajó con la identidad: el veto no se lo pidió a la base central (`rolDelDispositivo`).
+			expect(n.central.filter((q) => /SELECT role FROM devices WHERE .*revoked_at_ms IS NULL/.test(q))).toEqual([]);
+		});
 	});
 });
