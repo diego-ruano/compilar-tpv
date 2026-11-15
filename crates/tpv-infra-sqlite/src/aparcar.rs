@@ -419,6 +419,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ningun_choque_del_esquema_deshace_la_transaccion_entera() {
+        // Lo que separa lo que choca (la convergencia y la salida de las cuarentenas, SYNC-37 y
+        // SYNC-38) sigue escribiendo tras una sentencia que choca, porque SQLite sólo deshace ésa. Un
+        // `ON CONFLICT ROLLBACK` o un `RAISE(ROLLBACK)` deshace la transacción entera, y lo que viniera
+        // detrás se confirmaría suelto, con lo aparcado incluido (Codex). Si alguno hace falta, eso
+        // hay que revisarlo antes.
+        let db = base("sin-rollback").await;
+        let r = db.read().await;
+        let mut f = r
+            .conn()
+            .query("SELECT group_concat(name, ', ') FROM sqlite_master WHERE sql LIKE '%ROLLBACK%';", ())
+            .await
+            .unwrap();
+        assert_eq!(f.next().await.unwrap().unwrap().get_value(0).unwrap(), Value::Null);
+    }
+
+    #[tokio::test]
     async fn la_mesa_de_una_comanda_abierta_se_aparca_solo_si_tiene_mesa() {
         // SYNC-38: dos comandas abiertas que se cambian la mesa, y un ticket de barra (sin mesa), que
         // no ocupa sitio en el índice y al que el CHECK no le deja tener mesa.

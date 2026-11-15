@@ -360,7 +360,8 @@ enum Accion {
     Nada,
 }
 
-fn celda(v: &Json) -> Option<Value> {
+/// El valor de una celda que llega en JSON. Un blob (`{"blob": …}`) no se sabe escribir.
+pub(crate) fn celda(v: &Json) -> Option<Value> {
     match v {
         Json::Null => Some(Value::Null),
         Json::Bool(b) => Some(Value::Integer(i64::from(*b))),

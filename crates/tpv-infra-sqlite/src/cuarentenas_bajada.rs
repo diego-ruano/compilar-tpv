@@ -980,8 +980,10 @@ async fn aplicar(
 }
 
 /// SYNC-38 · Las cuarentenas de `grupo` (su posición) cuyas filas chocan al escribirlas juntas,
-/// aparcando: lo de [`preparar`] en una transacción que se deshace siempre, sentencia a sentencia
-/// (SQLite sólo deshace la que choca). Una fila que choca aparta a todas las que la tocan.
+/// aparcando: lo de [`preparar`] en un simulacro (`Connection::simulacro`, que se deshace siempre),
+/// sentencia a sentencia (SQLite sólo deshace la que choca). Una fila que choca aparta a todas las
+/// que la tocan. Si algo deshiciera la transacción entera, el simulacro no ejecuta nada más y esto es
+/// un error (Codex): no se sabe qué choca.
 async fn las_que_chocan(
     conn: &Connection,
     grupo: &[&Cuarentena],
@@ -991,25 +993,35 @@ async fn las_que_chocan(
     unicos: &mut crate::aparcar::Unicos,
 ) -> AppResult<HashSet<usize>> {
     let Traer { borrar, aparcar, escribir } = preparar(conn, grupo, arriba, orden, claves, unicos).await?;
-    let mut chocan: HashSet<usize> = HashSet::new();
-    let r = conn
-        .transaccion(async {
-            for s in &aparcar {
-                crate::convergencia::una(conn, s).await?;
+    let valores = |s: &SqlStatement| s.args.iter().map(crate::convergencia::celda).collect::<Option<Vec<Value>>>();
+    let aparcar = aparcar
+        .iter()
+        .map(|s| Some((s.sql.clone(), valores(s)?)))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| AppError::internal("valor_binario"))?;
+    let resto = borrar
+        .iter()
+        .chain(&escribir)
+        .map(|(s, de)| Some((s.sql.clone(), valores(s)?, de.clone())))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| AppError::internal("valor_binario"))?;
+    conn.simulacro(move |s| {
+        for (sql, args) in &aparcar {
+            s.filas(sql, args, 0)?;
+        }
+        let mut chocan: HashSet<usize> = HashSet::new();
+        for (sql, args, de) in &resto {
+            if s.filas(sql, args, 0).is_err() {
+                // Que la transacción siga ahí: si no, no se sabe nada de lo que venga detrás.
+                s.filas("SELECT 1;", &[], 1)?;
+                chocan.extend(de.iter().copied());
             }
-            for (s, de) in borrar.iter().chain(&escribir) {
-                if crate::convergencia::una(conn, s).await.is_err() {
-                    chocan.extend(de.iter().copied());
-                }
-            }
-            Err::<(), _>(AppError::internal("se_deshace"))
-        })
-        .await;
-    match r {
-        Err(e) if e.to_string() == "se_deshace" => Ok(chocan),
-        Err(e) => Err(e),
-        Ok(()) => Ok(chocan),
-    }
+        }
+        Ok::<_, crate::ejecutor::ErrorSql>(chocan)
+    })
+    .await
+    .map_err(db_err)?
+    .map_err(db_err)
 }
 
 /// SYNC-38 · Las cuarentenas que solas chocan con un índice único, otra vez juntas ([`aplicar`]): un
