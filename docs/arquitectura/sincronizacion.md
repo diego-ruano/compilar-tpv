@@ -870,6 +870,13 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   cuarentena se borra en la misma transacción y se informa (`INFO`, con su `op_id`); la hija cuyo
   padre estaba en otra cuarentena entra en cuanto entra la del padre. Sin ninguna, la guarda deja
   reparar y el contraste repara en esa misma pasada.
+- **Un valor único que se cruzan dos filas se trae aparcándolo** (SYNC-38), como en la
+  convergencia ([arriba](#el-orden-de-la-nube-manda-sync-29), `aparcar.rs`): con dos filas o más de
+  una tabla, cada una aparca antes los valores únicos que cambia, en la misma transacción, y su
+  escritura los pisa. Y las que solas chocan con un índice único se intentan otra vez todas juntas,
+  en una transacción: un cambio que le da a una zona el nombre de otra y otro que le da a ésa el de
+  la primera chocan cada uno con lo que el otro todavía no ha traído. Lo de todas es de la misma foto
+  de la nube; si así tampoco entran, se quedan como estaban.
 - **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
   filas son inciertas o dudosas; toca lo mismo que algo apartado de la subida (la nube no tiene lo
   que esta Main escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta

@@ -376,7 +376,9 @@ struct Plan<'a> {
     aparcar: Option<SqlStatement>,
 }
 
-async fn una(conn: &Connection, s: &SqlStatement) -> AppResult<()> {
+/// Ejecuta una sentencia con sus argumentos tal como llegan en JSON. Lo usa también la salida de las
+/// cuarentenas de bajada (`cuarentenas_bajada.rs`).
+pub(crate) async fn una(conn: &Connection, s: &SqlStatement) -> AppResult<()> {
     let args = s.args.iter().map(celda).collect::<Option<Vec<_>>>().ok_or_else(|| AppError::internal("valor_binario"))?;
     conn.execute(&s.sql, args).await.map_err(db_err)?;
     Ok(())

@@ -6,8 +6,9 @@
 //! sea cual sea el orden. Con tres que rotan (`A → B → C → A`) o en cadena (`A → B`, `B → C`), igual.
 //! Así que, en la misma transacción y antes de escribir ninguna, cada fila que va a cambiar algo de
 //! un índice único **aparca** su valor en uno que no choca con nada, y la escritura de cada una lo
-//! pisa con el bueno. Lo usan la convergencia, que escribe aquí lo de la nube (`convergencia.rs`), y
-//! la reparación del contraste, que sube lo de aquí en una operación que la nube aplica en una
+//! pisa con el bueno. Lo usan la convergencia, que escribe aquí lo de la nube (`convergencia.rs`), la
+//! salida de las cuarentenas de bajada, que también (`cuarentenas_bajada.rs`, SYNC-38), y la
+//! reparación del contraste, que sube lo de aquí en una operación que la nube aplica en una
 //! transacción (`contraste.rs`). Lo aparcado no sobrevive a su transacción: la escritura de la fila
 //! va en la misma y lo pisa, y si algo no entra se deshace todo.
 //!

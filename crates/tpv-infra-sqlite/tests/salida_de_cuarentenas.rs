@@ -496,6 +496,127 @@ async fn las_que_no_se_pueden_traer_no_dejan_sin_intentar_a_las_de_detras() {
     cerrar(db, dir, nube).await;
 }
 
+// ── Un valor único que se cruzan dos filas (SYNC-38) ──────────────────────────
+
+/// Los nombres de las zonas, por su clave: `z1:Terraza z2:Salón`.
+async fn zonas(db: &Arc<Db>) -> String {
+    textos(db, "SELECT group_concat(ID_Zona || ':' || Nombre_Zona, ' ') FROM (SELECT * FROM Zonas ORDER BY ID_Zona);").await.join("")
+}
+
+/// Lo aparcado que se haya quedado (`aparcar::valor_temporal` empieza por `\u{1}`).
+async fn aparcadas(db: &Arc<Db>) -> i64 {
+    numero(db, "SELECT COUNT(*) FROM Zonas WHERE instr(Nombre_Zona, char(1)) > 0;").await
+}
+
+const NOMBRE: &str = "UPDATE Zonas SET Nombre_Zona = ?2 WHERE ID_Zona = ?1;";
+
+/// Una Main con la versión anterior que recibe `cambios` (todos en cuarentena) y la nube con ellos
+/// aplicados; después, la versión nueva. Las dos bases empiezan con el negocio y `comun`. El
+/// checkpoint y el log de la nube, en el último.
+async fn con_la_version_anterior(
+    nombre: &str,
+    comun: &str,
+    anterior: &str,
+    cambios: &[SyncChange],
+) -> (Arc<SqliteSyncRepository>, Arc<Db>, PathBuf, NubeDeContraste) {
+    let (repo, db, dir) = base(nombre).await;
+    let negocio = format!("{NEGOCIO} {comun}");
+    sembrar(&db, &negocio).await;
+    sembrar(&db, anterior).await;
+    sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 30 WHERE Id = 1;").await;
+    for ch in cambios {
+        bajar(&repo, ch).await;
+    }
+    assert_eq!(en_cuarentena(&db).await.len(), cambios.len());
+    let nube = NubeDeContraste::nueva(nombre).await;
+    nube.sembrar(&negocio).await;
+    for ch in cambios {
+        nube.aplicar(&ch.statements).await;
+    }
+    let ultimo = cambios.last().unwrap().seq;
+    *nube.hasta_seq.lock().unwrap() = ultimo;
+    *nube.ultimo_ajeno.lock().unwrap() = ultimo;
+    sembrar(&db, "DROP TRIGGER anterior;").await;
+    (repo, db, dir, nube)
+}
+
+#[tokio::test]
+async fn un_cambio_que_intercambia_dos_nombres_sale_aparcandolos() {
+    // La Handy se cambia los nombres de la terraza y el salón en un cambio que aquí no entró. Traída
+    // de la nube, la terraza choca con el salón de aquí y al revés, en el orden que sea: sólo entran
+    // juntas, aparcando antes los nombres.
+    let cambio_31 = cambio(
+        "op-31",
+        31,
+        vec![(NOMBRE, vec![json!("z1"), json!("_z1")]), (NOMBRE, vec![json!("z2"), json!("Terraza")]), (NOMBRE, vec![json!("z1"), json!("Salón")])],
+    );
+    let anterior = "CREATE TRIGGER anterior BEFORE UPDATE ON Zonas WHEN NEW.Nombre_Zona = '_z1'
+                      BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;";
+    let (repo, db, dir, nube) = con_la_version_anterior("intercambio", "", anterior, &[cambio_31]).await;
+    assert_eq!(zonas(&db).await, "z1:Terraza z2:Salón");
+
+    let r = hecha(pasada(&repo, &nube, true).await);
+    assert!(en_cuarentena(&db).await.is_empty());
+    assert_eq!(zonas(&db).await, "z1:Salón z2:Terraza");
+    assert_eq!(aparcadas(&db).await, 0, "nada aparcado se queda");
+    assert_eq!((r.descuadres.len(), r.reparadas, r.aplazado), (0, 0, false), "{r:?}");
+    assert_eq!(reparaciones(&repo).await, 0);
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn dos_cambios_que_se_cruzan_un_nombre_salen_juntos() {
+    // La Handy deja el salón como bodega, llama salón a la terraza y terraza a la bodega: tres
+    // cambios. Aquí el primero no entró (la versión anterior no sabe de bodegas) y los otros dos
+    // chocaron con él. Traídas de la nube, cada una sola choca con lo que la otra aún no ha traído;
+    // juntas, aparcando, entran las tres.
+    let cambios = [
+        cambio("op-31", 31, vec![(NOMBRE, vec![json!("z2"), json!("Bodega")])]),
+        cambio("op-32", 32, vec![(NOMBRE, vec![json!("z1"), json!("Salón")])]),
+        cambio("op-33", 33, vec![(NOMBRE, vec![json!("z2"), json!("Terraza")])]),
+    ];
+    let anterior = "CREATE TRIGGER anterior BEFORE UPDATE ON Zonas WHEN NEW.Nombre_Zona = 'Bodega'
+                      BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;";
+    let (repo, db, dir, nube) = con_la_version_anterior("cruzadas", "", anterior, &cambios).await;
+    assert_eq!(zonas(&db).await, "z1:Terraza z2:Salón");
+    assert_eq!(zonas(&nube.db).await, "z1:Salón z2:Terraza");
+
+    let r = hecha(pasada(&repo, &nube, true).await);
+    assert!(en_cuarentena(&db).await.is_empty(), "{:?}", en_cuarentena(&db).await);
+    assert_eq!(zonas(&db).await, "z1:Salón z2:Terraza");
+    assert_eq!(aparcadas(&db).await, 0);
+    assert_eq!((r.descuadres.len(), r.aplazado), (0, false), "{r:?}");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn lo_que_choca_con_algo_de_aqui_que_no_se_trae_se_queda_sin_dejar_nada_aparcado() {
+    // La Handy llama Bodega a la terraza y Patio a la barra en un cambio que aquí no entró, y aquí
+    // el salón se llama Bodega por algo que no está apuntado en ningún sitio. Traídas de la nube, las
+    // dos zonas aparcan su nombre y la terraza choca con el salón, que no se trae: no entra nada,
+    // la cuarentena se queda y lo aparcado no sale de su transacción.
+    let cambio_31 = cambio(
+        "op-31",
+        31,
+        vec![(NOMBRE, vec![json!("z1"), json!("Bodega")]), (NOMBRE, vec![json!("z3"), json!("Patio")])],
+    );
+    let anterior = "CREATE TRIGGER anterior BEFORE UPDATE ON Zonas WHEN NEW.Nombre_Zona = 'Patio'
+                      BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;";
+    let barra = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z3', 'Barra');";
+    let (repo, db, dir, nube) = con_la_version_anterior("choca-con-lo-de-aqui", barra, anterior, &[cambio_31]).await;
+    sembrar(&db, "UPDATE Zonas SET Nombre_Zona = 'Bodega' WHERE ID_Zona = 'z2';").await;
+
+    let r = hecha(pasada(&repo, &nube, true).await);
+    assert_eq!(en_cuarentena(&db).await, vec!["op-31"]);
+    assert!(r.aplazado);
+    assert_eq!(zonas(&db).await, "z1:Terraza z2:Bodega z3:Barra");
+    assert_eq!(aparcadas(&db).await, 0);
+
+    cerrar(db, dir, nube).await;
+}
+
 // ── Los datos caducan ─────────────────────────────────────────────────────────
 
 #[tokio::test]
