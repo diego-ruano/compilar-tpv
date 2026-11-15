@@ -659,10 +659,12 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   cada índice único en el que cambia algo de lo que lo decide (su clave y, en uno parcial como el de
   los nombres de las zonas activas, su condición): en `NULL` si lo admite y va tal cual en la clave,
   y si no, en un texto que sale de su clave primaria; nunca en la clave primaria ni en una columna de
-  un `CHECK`. La escritura de cada fila lo pisa, y si algo no entra se deshace todo: lo aparcado no
-  sale de la transacción. Vale para dos, para tres que rotan y para una cadena. Un índice que no se
-  sabe aparcar (el de la comanda abierta de una mesa, cuya mesa sale en un `CHECK`) se queda como
-  estaba.
+  un `CHECK` que mire su valor. La mesa de una comanda abierta sale en un `CHECK` que sólo mira si
+  es `NULL` (`(Canal = 'MESA') = (ID_Mesa IS NOT NULL)`), así que se aparca en el texto y sólo si no
+  lo es (SYNC-38): una fila con `NULL` no choca con nada en un índice único. La escritura de cada
+  fila lo pisa, y si algo no entra se deshace todo: lo aparcado no sale de la transacción. Vale para
+  dos, para tres que rotan y para una cadena. Un índice que no se supiera aparcar (hoy no hay
+  ninguno en el esquema) se quedaría como estaba.
 - **Lo que no se trae, se deja**, con su motivo en el registro: una fila que escribió algo apartado de
   la subida (lo que esta Main escribió y la nube no aceptó: lo sube su reparación, y traer lo de la
   nube lo desharía aquí), un borrado cuyas cascadas llegan a algo apartado, una tabla con columnas

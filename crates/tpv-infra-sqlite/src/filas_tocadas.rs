@@ -756,17 +756,35 @@ pub(crate) fn nombres_de_un_indice(sql: &str) -> Option<(Vec<String>, Vec<String
 }
 
 /// SYNC-37 · Los nombres que salen dentro de los `CHECK` de un `CREATE TABLE`, como los de
-/// [`nombres_de_un_indice`]. `None` si no se sabe trocear.
-pub(crate) fn nombres_en_checks(sql: &str) -> Option<Vec<String>> {
+/// [`nombres_de_un_indice`], cada uno con si ahí sólo se mira si es `NULL` (SYNC-38: `x IS NULL` o
+/// `x IS NOT NULL`, entre paréntesis o unido con `AND`, `OR` o `NOT`; el `CHECK` da lo mismo con
+/// cualquier valor que no sea `NULL`). `None` si no se sabe trocear.
+pub(crate) fn nombres_en_checks(sql: &str) -> Option<Vec<(String, bool)>> {
     let t = Troceada::de(sql)?;
     let mut nombres = Vec::new();
     for i in 0..t.piezas.len() {
         if t.es(i, "CHECK") && t.signo(i + 1, "(") {
             let cierra = t.cierre(i + 1)?;
-            nombres.extend((i + 2..cierra).filter_map(|j| t.nombre(j)));
+            for j in i + 2..cierra {
+                if let Some(n) = t.nombre(j) {
+                    nombres.push((n, solo_si_es_nulo(&t, j)));
+                }
+            }
         }
     }
     Some(nombres)
+}
+
+/// ¿La pieza `j` de un `CHECK` es una columna de la que sólo se mira si es `NULL`? Ver
+/// [`nombres_en_checks`]. Lo que no tiene exactamente esa forma (una función, una comparación, un
+/// nombre con su tabla delante) cuenta como que se mira su valor.
+fn solo_si_es_nulo(t: &Troceada<'_>, j: usize) -> bool {
+    let une = |k: usize| t.es(k, "AND") || t.es(k, "OR") || t.es(k, "NOT");
+    if !(t.signo(j - 1, "(") || une(j - 1)) || !t.es(j + 1, "IS") {
+        return false;
+    }
+    let nulo = if t.es(j + 2, "NOT") { j + 3 } else { j + 2 };
+    t.es(nulo, "NULL") && (t.signo(nulo + 1, ")") || t.es(nulo + 1, "AND") || t.es(nulo + 1, "OR"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1590,5 +1608,23 @@ mod tests {
         let mut todas: Vec<&String> = e.todas.iter().collect();
         todas.sort();
         assert_eq!(todas, vec!["Mesas", "Pago_Detalles", "Pagos", "Zonas"]);
+    }
+
+    #[test]
+    fn de_un_check_se_sabe_que_columna_solo_se_mira_por_si_es_nula() {
+        // SYNC-38: `(Canal = 'MESA') = (A IS NOT NULL)` sólo mira si `A` es NULL; `C IS NULL OR C > 0`
+        // mira también su valor, y lo que va en una función o con su tabla delante cuenta como que
+        // se mira su valor.
+        let sql = "CREATE TABLE T (A TEXT, B TEXT, C INT, D TEXT, E TEXT, \
+                   CHECK ((Canal = 'MESA') = (A IS NOT NULL)), CHECK (C IS NULL OR C > 0), \
+                   CHECK (NOT B IS NULL AND length(D) IS NOT NULL), CHECK (T.E IS NULL));";
+        let nombres = nombres_en_checks(sql).unwrap();
+        let de = |n: &str| nombres.iter().filter(|(x, _)| x == n).map(|(_, nulo)| *nulo).collect::<Vec<_>>();
+        assert_eq!(de("A"), [true]);
+        assert_eq!(de("B"), [true]);
+        assert_eq!(de("C"), [true, false]);
+        assert_eq!(de("D"), [false]);
+        assert_eq!(de("E"), [false]);
+        assert_eq!(de("Canal"), [false]);
     }
 }

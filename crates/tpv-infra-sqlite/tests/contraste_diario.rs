@@ -373,10 +373,20 @@ async fn fuera_de_la_ventana_se_recorren_las_claves_por_paginas() {
     assert_eq!((r.reparadas, r.borradas, r.aplazado), (1, 2, false));
     let paginas = nube.pedidas().iter().filter(|p| *p == "/v1/sync/verificar/claves").count();
     assert_eq!(paginas, 15, "101 comandas de 7 en 7");
+    // Las que sobran aparcan antes su mesa por si la necesita la que sube (SYNC-38; sin mesa, no
+    // aparcan nada), y se borran al final.
     let sube = reparaciones(&repo).await;
-    assert!(sube[0].args.contains(&json!("c-vieja-0013")));
-    assert_eq!(sube[1].args[0], json!("c-vieja-9998"));
-    assert_eq!(sube[2].args[0], json!("c-vieja-9999"));
+    let que: Vec<(&str, &JsonValue)> = sube.iter().map(|s| (s.sql.split(' ').next().unwrap(), &s.args[0])).collect();
+    assert_eq!(
+        que,
+        [
+            ("UPDATE", &json!("c-vieja-9998")),
+            ("UPDATE", &json!("c-vieja-9999")),
+            ("INSERT", &json!("c-vieja-0013")),
+            ("DELETE", &json!("c-vieja-9998")),
+            ("DELETE", &json!("c-vieja-9999")),
+        ]
+    );
 
     subir_reparaciones(&repo, &nube).await;
     let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());

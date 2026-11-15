@@ -658,6 +658,39 @@ async fn en_un_indice_parcial_tambien_se_cruza_lo_que_entra_y_sale_de_el() {
 }
 
 #[tokio::test]
+async fn dos_comandas_abiertas_que_se_cambian_la_mesa_se_traen_aparcando_la_mesa() {
+    // SYNC-38: arriba las comandas abiertas de la 1 y la 2 se han cambiado de mesa. El índice de una
+    // comanda abierta por mesa no se sabía aparcar (la mesa sale en un CHECK): ahora se aparca en
+    // texto, y sólo si tiene mesa. Un ticket de barra, sin mesa, no se toca.
+    let (repo, db, dir, nube) = base("comandas-cruzadas").await;
+    let comandas = "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                         VALUES ('m2', 'z1', '2', 2, 0, 0, 'rect', 80, 80);
+                    INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES
+                         ('c1', 'm1', 'MESA', '2026-11-15 12:00:00', 'Abierta'),
+                         ('c2', 'm2', 'MESA', '2026-11-15 12:05:00', 'Abierta'),
+                         ('c3', NULL, 'BARRA', '2026-11-15 12:10:00', 'Abierta');";
+    sembrar(&db, comandas).await;
+    nube.sembrar(comandas).await;
+    nube.sembrar(
+        "UPDATE Comandas SET Canal = 'BARRA', ID_Mesa = NULL WHERE ID_Comanda = 'c1';
+         UPDATE Comandas SET ID_Mesa = 'm1' WHERE ID_Comanda = 'c2';
+         UPDATE Comandas SET Canal = 'MESA', ID_Mesa = 'm2' WHERE ID_Comanda = 'c1';
+         UPDATE Comandas SET Fecha_Hora_Apertura = '2026-11-15 12:11:00' WHERE ID_Comanda = 'c3';",
+    )
+    .await;
+    apuntar(&db, "Comandas", &["c1", "c2", "c3"]).await;
+
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 3);
+    let de_las_comandas = "SELECT group_concat(ID_Comanda || '=' || COALESCE(ID_Mesa, '-'), ' ') FROM (SELECT * FROM Comandas ORDER BY ID_Comanda);";
+    assert_eq!(texto(&db, de_las_comandas).await, "c1=m2 c2=m1 c3=-");
+    assert_eq!(texto(&db, "SELECT COUNT(*) FROM Comandas WHERE instr(ID_Mesa, char(1)) > 0;").await, "0");
+    assert_eq!(marcas(&db).await, "0");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn una_fila_que_sigue_sin_entrar_conserva_su_marca_y_se_reintenta_sin_prisa() {
     // Arriba el salón se llama Comedor y la terraza Salón, pero aquí sólo está apuntada la terraza:
     // traerla choca con el salón de aquí, que no se trae.

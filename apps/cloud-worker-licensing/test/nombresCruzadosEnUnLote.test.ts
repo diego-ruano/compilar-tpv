@@ -169,3 +169,101 @@ describe("SYNC-38 · una zona que sobra con el nombre de otra que se sube, en un
 		});
 	});
 });
+
+// SYNC-38 · Dos comandas abiertas que se cambian la mesa.
+//
+// El índice de una comanda abierta por mesa (`Comandas(ID_Mesa) WHERE Estado = 'Abierta'`) se aparca
+// en la mesa, que sale en un CHECK que sólo mira si es NULL (`(Canal = 'MESA') = (ID_Mesa IS NOT
+// NULL)`): en texto, y sólo si la comanda tiene mesa. El texto aparcado no es una mesa, así que la
+// foránea sólo se cumple al confirmar: el TenantHub la aplica aplazando las foráneas. Las sentencias
+// son las que fija `aparcar.rs` en su test `la_mesa_de_una_comanda_abierta_se_aparca_solo_si_tiene_mesa`.
+
+const APARCAR_MESA =
+	'UPDATE "Comandas" SET "ID_Mesa" = CASE WHEN ("ID_Mesa" IS NOT ?2 OR "Estado" IS NOT ?3) AND "ID_Mesa" IS NOT NULL ' +
+	'THEN ?4 ELSE "ID_Mesa" END WHERE "ID_Comanda" = ?1 AND ("ID_Mesa" IS NOT ?2 OR "Estado" IS NOT ?3);';
+const ESCRIBIR_COMANDA =
+	'INSERT INTO "Comandas" ("ID_Comanda", "ID_Mesa", "Canal", "Fecha_Hora_Apertura", "Estado") VALUES (?1, ?2, ?3, ?4, ?5) ' +
+	'ON CONFLICT("ID_Comanda") DO UPDATE SET "ID_Mesa" = excluded."ID_Mesa", "Canal" = excluded."Canal", ' +
+	'"Fecha_Hora_Apertura" = excluded."Fecha_Hora_Apertura", "Estado" = excluded."Estado";';
+const PLANO = [
+	{ sql: ALTA, args: ["z-1", "Terraza"] },
+	{
+		sql:
+			"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) " +
+			"VALUES (?1, 'z-1', ?2, 4, 0, 0, 'rect', 80, 80);",
+		args: ["m-1", "1"],
+	},
+	{
+		sql:
+			"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) " +
+			"VALUES (?1, 'z-1', ?2, 4, 0, 0, 'rect', 80, 80);",
+		args: ["m-2", "2"],
+	},
+	{
+		sql: "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES (?1, ?2, ?3, '2026-11-15 12:00:00', 'Abierta');",
+		args: ["c-1", "m-1", "MESA"],
+	},
+	{
+		sql: "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES (?1, ?2, ?3, '2026-11-15 12:00:00', 'Abierta');",
+		args: ["c-2", "m-2", "MESA"],
+	},
+	{
+		sql: "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES (?1, ?2, ?3, '2026-11-15 12:00:00', 'Abierta');",
+		args: ["c-3", null, "BARRA"],
+	},
+];
+const aparcarMesa = (id: string, mesa: string | null) => ({ sql: APARCAR_MESA, args: [id, mesa, "Abierta", temporal(id)] });
+const escribirComanda = (id: string, mesa: string | null, canal: string) => ({
+	sql: ESCRIBIR_COMANDA,
+	args: [id, mesa, canal, "2026-11-15 12:00:00", "Abierta"],
+});
+const comandas = (sql: any): string[] =>
+	sql
+		.exec("SELECT ID_Comanda, ID_Mesa FROM Comandas ORDER BY ID_Comanda;")
+		.toArray()
+		.map((f: any) => `${f.ID_Comanda}=${f.ID_Mesa ?? "-"}`);
+
+describe("SYNC-38 · dos comandas abiertas que se cambian la mesa, en una reparación de la Main", () => {
+	it("aparcando la mesa de las que la tienen, la operación entra entera y no deja nada aparcado", async () => {
+		await enUnHub("comandas-cruzadas", async (m) => {
+			await m.mandarLote([opDelOutbox("op-1", PLANO)]);
+
+			const acuse = await m.mandarLote([
+				opDelOutbox(
+					"rep-1",
+					[
+						aparcarMesa("c-1", "m-2"),
+						aparcarMesa("c-2", "m-1"),
+						// El ticket de barra pasa a la mesa 1: sin mesa, no aparca nada (el CHECK no lo admitiría).
+						aparcarMesa("c-3", "m-1"),
+						escribirComanda("c-1", "m-2", "MESA"),
+						escribirComanda("c-2", "m-1", "MESA"),
+						escribirComanda("c-3", null, "BARRA"),
+					],
+					"main_reparacion",
+				),
+			]);
+
+			expect(acuse.resultados).toEqual([expect.objectContaining({ opId: "rep-1", ok: true })]);
+			expect(comandas(m.sql)).toEqual(["c-1=m-2", "c-2=m-1", "c-3=-"]);
+		});
+	});
+
+	it("sin aparcar, la primera escritura choca con la otra comanda y no entra nada", async () => {
+		await enUnHub("comandas-cruzadas-sin-aparcar", async (m) => {
+			await m.mandarLote([opDelOutbox("op-1", PLANO)]);
+
+			const acuse = await m.mandarLote([
+				opDelOutbox(
+					"rep-1",
+					[escribirComanda("c-1", "m-2", "MESA"), escribirComanda("c-2", "m-1", "MESA")],
+					"main_reparacion",
+				),
+			]);
+
+			expect(acuse.resultados[0]).toMatchObject({ opId: "rep-1", ok: false, permanente: true });
+			expect(String(acuse.resultados[0].error)).toContain("UNIQUE constraint failed: Comandas.ID_Mesa");
+			expect(comandas(m.sql)).toEqual(["c-1=m-1", "c-2=m-2", "c-3=-"]);
+		});
+	});
+});

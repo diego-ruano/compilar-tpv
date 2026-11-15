@@ -20,6 +20,11 @@
 //!   (las foráneas se comprueban al confirmar, y para entonces ya tiene su valor). En una clave con
 //!   expresiones (`lower(Email)`), la columna sale del texto del índice, y ahí el `NULL` no sirve
 //!   (`COALESCE(x, '')` lo convierte en un valor).
+//! - SYNC-38 · Si no queda otra, sí una de un `CHECK` que **sólo mira si es `NULL`** y va tal cual
+//!   en la clave: la mesa de una comanda abierta (`(Canal = 'MESA') = (ID_Mesa IS NOT NULL)`, en
+//!   `Comandas(ID_Mesa) WHERE Estado = 'Abierta'`). Ese `CHECK` da lo mismo con cualquier valor que
+//!   no sea `NULL`, así que se aparca en el texto y sólo si no es `NULL`: una fila con `NULL` en la
+//!   clave no choca con nada en un índice único.
 //! - Se aparca **sólo si cambia algo de lo que decide el índice**: su clave y, en uno parcial, su
 //!   condición (`Nombre_Zona … WHERE Archivada_En IS NULL`: una zona que se archiva y otra con su
 //!   nombre que se desarchiva también se cruzan). Lo decide la sentencia al ejecutarse, comparando lo
@@ -29,9 +34,9 @@
 //!   que se escriba con ella. Lo mira quien escribe.
 //!
 //! Un índice que no se sabe aparcar se queda como estaba: si dos filas se cruzan en él, no entran.
-//! Es el de una clave cuyas columnas son todas de la clave primaria o de un `CHECK` (la mesa de una
-//! comanda abierta: `(Canal = 'MESA') = (ID_Mesa IS NOT NULL)`), o el de una expresión que no deja
-//! único el valor temporal (`substr(x, 1, 3)`).
+//! Es el de una clave cuyas columnas son todas de la clave primaria o de un `CHECK` que mira su
+//! valor, o el de una expresión que no deja único el valor temporal (`substr(x, 1, 3)`). En el
+//! esquema de hoy no hay ninguno.
 
 use std::collections::{HashMap, HashSet};
 
@@ -50,6 +55,8 @@ pub(crate) struct IndiceUnico {
     pub aparcada: String,
     /// Se aparca en `NULL`; si no, en el texto de [`valor_temporal`].
     pub en_nulo: bool,
+    /// SYNC-38: se aparca sólo si no es `NULL` (un `CHECK` mira si lo es).
+    pub si_no_es_nulo: bool,
     /// Las columnas que deciden el índice: su clave y su condición.
     pub decide: Vec<String>,
 }
@@ -105,15 +112,16 @@ pub(crate) async fn indices_unicos(conn: &Connection, tabla: &str) -> AppResult<
         .filter_map(|f| texto(&f[0]))
         .filter_map(|c| columna(&c))
         .collect();
-    let checks: HashSet<String> = filas(conn, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1;", tabla, 1)
+    let en_checks: Vec<(String, bool)> = filas(conn, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1;", tabla, 1)
         .await?
         .first()
         .and_then(|f| texto(&f[0]))
         .and_then(|sql| nombres_en_checks(&sql))
-        .unwrap_or_default()
-        .iter()
-        .filter_map(columna)
-        .collect();
+        .unwrap_or_default();
+    // Las columnas que algún `CHECK` mira por su valor, y las que sólo por si son `NULL` (SYNC-38).
+    let checks: HashSet<String> = en_checks.iter().filter(|(_, nulo)| !nulo).filter_map(|(c, _)| columna(c)).collect();
+    let solo_si_es_nulo: HashSet<String> =
+        en_checks.iter().filter_map(|(c, _)| columna(c)).filter(|c| !checks.contains(c)).collect();
 
     let mut salida = Vec::new();
     let indices = filas(
@@ -156,17 +164,25 @@ pub(crate) async fn indices_unicos(conn: &Connection, tabla: &str) -> AppResult<
                 decide.push(c);
             }
         }
-        let libre = |c: &&String| !primaria.contains(*c) && !checks.contains(*c);
-        let (aparcada, en_nulo) = if let Some(c) = tal_cual.iter().filter(libre).find(|c| admite_nulo.contains(*c)) {
-            (c.clone(), true)
+        let libre = |c: &&String| !primaria.contains(*c) && !checks.contains(*c) && !solo_si_es_nulo.contains(*c);
+        // SYNC-38: si no queda otra, una que un `CHECK` sólo mira por si es `NULL`, tal cual en la
+        // clave, y mejor si no es de una foránea.
+        let por_su_nulidad = tal_cual
+            .iter()
+            .filter(|c| !primaria.contains(*c) && solo_si_es_nulo.contains(*c))
+            .min_by_key(|c| foraneas.contains(*c));
+        let (aparcada, en_nulo, si_no_es_nulo) = if let Some(c) = tal_cual.iter().filter(libre).find(|c| admite_nulo.contains(*c)) {
+            (c.clone(), true, false)
         } else if let Some(c) = clave.iter().filter(libre).find(|c| !foraneas.contains(*c)) {
-            (c.clone(), false)
+            (c.clone(), false, false)
         } else if let Some(c) = clave.iter().find(libre) {
-            (c.clone(), false)
+            (c.clone(), false, false)
+        } else if let Some(c) = por_su_nulidad {
+            (c.clone(), false, true)
         } else {
             continue;
         };
-        salida.push(IndiceUnico { aparcada, en_nulo, decide });
+        salida.push(IndiceUnico { aparcada, en_nulo, si_no_es_nulo, decide });
     }
     Ok(salida)
 }
@@ -208,8 +224,8 @@ pub(crate) fn aparcar(
     };
     let donde: Vec<String> =
         clave.iter().map(|k| posicion(k).map(|p| format!("{} = ?{}", cita(k), numero(p)))).collect::<Option<_>>()?;
-    // (columna, en `NULL`, las condiciones de los índices que la aparcan)
-    let mut aparcadas: Vec<(String, bool, Vec<String>)> = Vec::new();
+    // Las columnas que se aparcan, con las condiciones de los índices que las aparcan.
+    let mut aparcadas: Vec<(Aparcada, Vec<String>)> = Vec::new();
     for ix in indices {
         if posicion(&ix.aparcada).is_none() {
             continue;
@@ -223,32 +239,27 @@ pub(crate) fn aparcar(
             continue;
         }
         let cambia = cambia.join(" OR ");
-        match aparcadas.iter_mut().find(|(c, ..)| c.eq_ignore_ascii_case(&ix.aparcada)) {
-            Some((_, en_nulo, condiciones)) => {
-                *en_nulo &= ix.en_nulo;
+        match aparcadas.iter_mut().find(|(a, _)| a.columna.eq_ignore_ascii_case(&ix.aparcada)) {
+            Some((a, condiciones)) => {
+                a.juntar(ix);
                 condiciones.push(cambia);
             }
-            None => aparcadas.push((ix.aparcada.clone(), ix.en_nulo, vec![cambia])),
+            None => aparcadas.push((Aparcada::de(ix), vec![cambia])),
         }
     }
     if aparcadas.is_empty() {
         return None;
     }
-    let temporal = match aparcadas.iter().all(|(_, en_nulo, _)| *en_nulo) {
+    let temporal = match aparcadas.iter().all(|(a, _)| a.en_nulo) {
         true => String::new(),
         false => {
             args.push(Json::String(valor_temporal(&valores_clave)));
             format!("?{}", args.len())
         }
     };
-    let asignaciones: Vec<String> = aparcadas
-        .iter()
-        .map(|(c, en_nulo, condiciones)| {
-            let valor = if *en_nulo { "NULL" } else { temporal.as_str() };
-            format!("{c} = CASE WHEN {} THEN {valor} ELSE {c} END", condiciones.join(" OR "), c = cita(c))
-        })
-        .collect();
-    let alguna = aparcadas.iter().flat_map(|(_, _, condiciones)| condiciones.iter().cloned()).collect::<Vec<_>>().join(" OR ");
+    let asignaciones: Vec<String> =
+        aparcadas.iter().map(|(a, condiciones)| a.asignacion(Some(condiciones.join(" OR ")), &temporal)).collect();
+    let alguna = aparcadas.iter().flat_map(|(_, condiciones)| condiciones.iter().cloned()).collect::<Vec<_>>().join(" OR ");
     Some(SqlStatement {
         sql: format!("UPDATE {} SET {} WHERE {} AND ({alguna});", cita(tabla), asignaciones.join(", "), donde.join(" AND ")),
         args,
@@ -264,29 +275,59 @@ pub(crate) fn aparcar(
 /// la otra entra antes de que se borre. Quien la manda le pone a `donde` la misma condición que a su
 /// borrado, en la misma transacción: si no se borra, tampoco se aparca.
 pub(crate) fn aparcar_la_que_sobra(tabla: &str, indices: &[IndiceUnico], donde: &str, mut args: Vec<Json>, clave: &[Json]) -> Option<SqlStatement> {
-    // (columna, en `NULL`)
-    let mut aparcadas: Vec<(String, bool)> = Vec::new();
+    let mut aparcadas: Vec<Aparcada> = Vec::new();
     for ix in indices {
-        match aparcadas.iter_mut().find(|(c, _)| c.eq_ignore_ascii_case(&ix.aparcada)) {
-            Some((_, en_nulo)) => *en_nulo &= ix.en_nulo,
-            None => aparcadas.push((ix.aparcada.clone(), ix.en_nulo)),
+        match aparcadas.iter_mut().find(|a| a.columna.eq_ignore_ascii_case(&ix.aparcada)) {
+            Some(a) => a.juntar(ix),
+            None => aparcadas.push(Aparcada::de(ix)),
         }
     }
     if aparcadas.is_empty() {
         return None;
     }
-    let temporal = match aparcadas.iter().all(|(_, en_nulo)| *en_nulo) {
+    let temporal = match aparcadas.iter().all(|a| a.en_nulo) {
         true => String::new(),
         false => {
             args.push(Json::String(valor_temporal(clave)));
             format!("?{}", args.len())
         }
     };
-    let asignaciones: Vec<String> = aparcadas
-        .iter()
-        .map(|(c, en_nulo)| format!("{} = {}", cita(c), if *en_nulo { "NULL" } else { temporal.as_str() }))
-        .collect();
+    let asignaciones: Vec<String> = aparcadas.iter().map(|a| a.asignacion(None, &temporal)).collect();
     Some(SqlStatement { sql: format!("UPDATE {} SET {} WHERE {donde};", cita(tabla), asignaciones.join(", ")), args })
+}
+
+/// Una columna que se aparca, con lo de todos los índices que la aparcan.
+struct Aparcada {
+    columna: String,
+    /// En `NULL` si todos lo admiten; si no, en el texto temporal.
+    en_nulo: bool,
+    /// SYNC-38: sólo si no es `NULL`, si alguno lo pide.
+    si_no_es_nulo: bool,
+}
+
+impl Aparcada {
+    fn de(ix: &IndiceUnico) -> Self {
+        Aparcada { columna: ix.aparcada.clone(), en_nulo: ix.en_nulo, si_no_es_nulo: ix.si_no_es_nulo }
+    }
+
+    fn juntar(&mut self, ix: &IndiceUnico) {
+        self.en_nulo &= ix.en_nulo;
+        self.si_no_es_nulo |= ix.si_no_es_nulo;
+    }
+
+    /// `columna = …`: el valor aparcado (`NULL` o `temporal`, el número de su argumento) cuando se
+    /// cumple `cuando` (siempre, sin ella) y, si lo pide, la columna no es `NULL`; si no, lo que tiene.
+    fn asignacion(&self, cuando: Option<String>, temporal: &str) -> String {
+        let c = cita(&self.columna);
+        let valor = if self.en_nulo { "NULL" } else { temporal };
+        let cuando = match (cuando, self.si_no_es_nulo) {
+            (Some(cuando), false) => cuando,
+            (Some(cuando), true) => format!("({cuando}) AND {c} IS NOT NULL"),
+            (None, true) => format!("{c} IS NOT NULL"),
+            (None, false) => return format!("{c} = {valor}"),
+        };
+        format!("{c} = CASE WHEN {cuando} THEN {valor} ELSE {c} END")
+    }
 }
 
 #[cfg(test)]
@@ -302,7 +343,7 @@ mod tests {
     }
 
     fn indice(aparcada: &str, en_nulo: bool, decide: &[&str]) -> IndiceUnico {
-        IndiceUnico { aparcada: aparcada.into(), en_nulo, decide: decide.iter().map(|d| d.to_string()).collect() }
+        IndiceUnico { aparcada: aparcada.into(), en_nulo, si_no_es_nulo: false, decide: decide.iter().map(|d| d.to_string()).collect() }
     }
 
     #[tokio::test]
@@ -335,12 +376,114 @@ mod tests {
                 indice("Numero_Seguridad_Social", true, &["Numero_Seguridad_Social"]),
             ]
         );
-        // La mesa de una comanda sale en un CHECK (`(Canal = 'MESA') = (ID_Mesa IS NOT NULL)`): ese
-        // índice no se sabe aparcar.
-        assert!(de("Comandas").await.is_empty());
+        // SYNC-38: la mesa de una comanda sale en un CHECK que sólo mira si es NULL
+        // (`(Canal = 'MESA') = (ID_Mesa IS NOT NULL)`): en texto, y sólo si no lo es.
+        assert_eq!(
+            de("Comandas").await,
+            vec![IndiceUnico { si_no_es_nulo: true, ..indice("ID_Mesa", false, &["ID_Mesa", "Estado"]) }]
+        );
         // Sin índices únicos, o sólo el de la clave primaria.
         assert!(de("Reservas").await.is_empty());
         assert!(de("Producto_Alergenos").await.is_empty());
+
+        // Y no queda ningún índice único de una tabla de negocio que no se sepa aparcar.
+        let mut tablas = conn
+            .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name;", ())
+            .await
+            .unwrap();
+        let mut nombres: Vec<String> = Vec::new();
+        while let Some(f) = tablas.next().await.unwrap() {
+            nombres.push(f.get::<String>(0).unwrap());
+        }
+        drop(tablas);
+        let mut sin_aparcar = Vec::new();
+        for t in nombres.iter().filter(|t| !crate::sync::no_es_tabla_de_negocio(t)) {
+            let mut f = conn
+                .query(
+                    "SELECT COUNT(*) FROM pragma_index_list(?1) l WHERE l.\"unique\" = 1 AND l.origin <> 'pk' \
+                       AND (NOT EXISTS (SELECT 1 FROM pragma_table_info(?1) WHERE pk > 0) \
+                            OR EXISTS (SELECT 1 FROM pragma_table_info(?1) p WHERE p.pk > 0 \
+                                        AND p.name NOT IN (SELECT name FROM pragma_index_info(l.name) WHERE name IS NOT NULL)));",
+                    vec![Value::Text(t.clone())],
+                )
+                .await
+                .unwrap();
+            let unicos = f.next().await.unwrap().unwrap().get::<i64>(0).unwrap();
+            drop(f);
+            if unicos != indices_unicos(conn, t).await.unwrap().len() as i64 {
+                sin_aparcar.push(t.clone());
+            }
+        }
+        assert!(sin_aparcar.is_empty(), "{sin_aparcar:?}");
+        drop(w);
+    }
+
+    #[tokio::test]
+    async fn la_mesa_de_una_comanda_abierta_se_aparca_solo_si_tiene_mesa() {
+        // SYNC-38: dos comandas abiertas que se cambian la mesa, y un ticket de barra (sin mesa), que
+        // no ocupa sitio en el índice y al que el CHECK no le deja tener mesa.
+        let db = base("comanda-abierta").await;
+        let w = db.write().await;
+        let conn = w.raw();
+        conn.execute_batch(
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');
+             INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                  VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 80, 80), ('m2', 'z1', '2', 4, 0, 0, 'rect', 80, 80);
+             INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES
+                  ('c1', 'm1', 'MESA', '2026-11-15 12:00:00', 'Abierta'),
+                  ('c2', 'm2', 'MESA', '2026-11-15 12:00:00', 'Abierta'),
+                  ('c3', NULL, 'BARRA', '2026-11-15 12:00:00', 'Abierta');",
+        )
+        .await
+        .unwrap();
+        let indices = indices_unicos(conn, "Comandas").await.unwrap();
+        let columnas: Vec<String> = ["ID_Comanda", "ID_Mesa", "Canal", "Estado"].map(String::from).to_vec();
+        let clave = vec!["ID_Comanda".to_string()];
+        let ejecutar = |s: SqlStatement| async move {
+            let args = s.args.iter().map(|a| match a {
+                Json::String(t) => Value::Text(t.clone()),
+                Json::Null => Value::Null,
+                otro => Value::Integer(otro.as_i64().unwrap()),
+            });
+            conn.execute(&s.sql, args.collect::<Vec<_>>()).await.unwrap()
+        };
+        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;").await.unwrap();
+        // La de la mesa 1 pasa a la 2, y la de la 2 a la 1: se aparcan las dos.
+        let c1 = aparcar("Comandas", &indices, &columnas, &[json!("c1"), json!("m2"), json!("MESA"), json!("Abierta")], &clave).unwrap();
+        // El texto que fija `test/nombresCruzadosEnUnLote.test.ts` en el TenantHub.
+        assert_eq!(
+            c1.sql,
+            "UPDATE \"Comandas\" SET \"ID_Mesa\" = CASE WHEN (\"ID_Mesa\" IS NOT ?2 OR \"Estado\" IS NOT ?3) AND \"ID_Mesa\" IS NOT NULL \
+             THEN ?4 ELSE \"ID_Mesa\" END WHERE \"ID_Comanda\" = ?1 AND (\"ID_Mesa\" IS NOT ?2 OR \"Estado\" IS NOT ?3);"
+        );
+        assert_eq!(c1.args, vec![json!("c1"), json!("m2"), json!("Abierta"), json!(valor_temporal(&[json!("c1")]))]);
+        assert_eq!(ejecutar(c1).await, 1);
+        let c2 = aparcar("Comandas", &indices, &columnas, &[json!("c2"), json!("m1"), json!("MESA"), json!("Abierta")], &clave).unwrap();
+        assert_eq!(ejecutar(c2).await, 1);
+        // El ticket de barra pasa a una mesa: la sentencia lo toca, pero sin mesa no aparca nada (el
+        // CHECK no lo admitiría).
+        let c3 = aparcar("Comandas", &indices, &columnas, &[json!("c3"), json!("m1"), json!("MESA"), json!("Abierta")], &clave).unwrap();
+        ejecutar(c3).await;
+        // Y las escrituras entran, sin nada aparcado.
+        conn.execute_batch(
+            "UPDATE Comandas SET ID_Mesa = 'm2' WHERE ID_Comanda = 'c1';
+             UPDATE Comandas SET ID_Mesa = 'm1' WHERE ID_Comanda = 'c2';
+             COMMIT;",
+        )
+        .await
+        .unwrap();
+        let mut f = conn
+            .query("SELECT group_concat(ID_Comanda || '=' || COALESCE(ID_Mesa, '-'), ' ') FROM (SELECT * FROM Comandas ORDER BY ID_Comanda);", ())
+            .await
+            .unwrap();
+        assert_eq!(f.next().await.unwrap().unwrap().get::<String>(0).unwrap(), "c1=m2 c2=m1 c3=-");
+        drop(f);
+        // Lo que sobra arriba también: con mesa, en texto; sin ella, se queda como está.
+        let sobra = aparcar_la_que_sobra("Comandas", &indices, "\"ID_Comanda\" = ?1", vec![json!("c9")], &[json!("c9")]).unwrap();
+        assert_eq!(
+            sobra.sql,
+            "UPDATE \"Comandas\" SET \"ID_Mesa\" = CASE WHEN \"ID_Mesa\" IS NOT NULL THEN ?2 ELSE \"ID_Mesa\" END WHERE \"ID_Comanda\" = ?1;"
+        );
         drop(w);
     }
 
