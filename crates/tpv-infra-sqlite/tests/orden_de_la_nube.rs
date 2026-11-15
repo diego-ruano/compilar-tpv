@@ -555,6 +555,38 @@ async fn un_intercambio_entra_aunque_otra_fila_de_su_tabla_choque_con_algo_que_n
 }
 
 #[tokio::test]
+async fn las_marcas_de_una_tabla_no_se_parten_entre_vueltas() {
+    // Codex: mil zonas apuntadas, cada una cruzada con la que está quinientas más allá. Partidas en
+    // vueltas de quinientas no se encontrarían nunca: cada mitad fallaría sin la otra, una y otra
+    // vez. Las de una tabla van juntas.
+    let (repo, db, dir, nube) = base("mil-cruzadas").await;
+    let mil = "WITH RECURSIVE s(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM s WHERE i < 999)
+               INSERT INTO Zonas (ID_Zona, Nombre_Zona) SELECT printf('z-%04d', i), printf('Zona %04d', i) FROM s;";
+    sembrar(&db, mil).await;
+    nube.sembrar(mil).await;
+    nube.sembrar(
+        "UPDATE Zonas SET Nombre_Zona = '_' || ID_Zona WHERE ID_Zona LIKE 'z-%';
+         UPDATE Zonas SET Nombre_Zona = printf('Zona %04d', (CAST(substr(ID_Zona, 3) AS INTEGER) + 500) % 1000) WHERE ID_Zona LIKE 'z-%';",
+    )
+    .await;
+    sembrar(
+        &db,
+        "INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms)
+         SELECT 'Zonas', json_array(ID_Zona), 40, 1 FROM Zonas WHERE ID_Zona LIKE 'z-%';",
+    )
+    .await;
+
+    let (escritas, quedan) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!((escritas.len(), quedan), (1000, false));
+    assert_eq!(marcas(&db).await, "0");
+    let cruzadas = "SELECT COUNT(*) FROM Zonas WHERE Nombre_Zona = printf('Zona %04d', (CAST(substr(ID_Zona, 3) AS INTEGER) + 500) % 1000);";
+    assert_eq!(texto(&db, cruzadas).await, "1000");
+    assert_eq!(aparcadas(&db).await, "0");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn en_un_indice_parcial_tambien_se_cruza_lo_que_entra_y_sale_de_el() {
     // `Productos(Nombre) WHERE Archivado_En IS NULL`: arriba, la caña y el tercio se han cambiado el
     // nombre, y de las dos claras se ha archivado la que estaba a la venta y se ha vuelto a poner la

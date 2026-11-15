@@ -638,7 +638,8 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   filas.
 - **Con todo subido, se traen de la nube.** El motor de réplica, con el outbox vacío (cada 3 s como
   mucho), pide esas filas a la nube por su clave (`/v1/sync/verificar/por-clave`, hasta 500 por
-  vuelta) y sólo sigue si cada página trae como final del log (`hasta_seq`) lo que esta Main tiene de
+  vuelta, sin partir una tabla entre dos: dos filas cruzadas sólo entran juntas, SYNC-37) y sólo
+  sigue si cada página trae como final del log (`hasta_seq`) lo que esta Main tiene de
   la nube: su checkpoint o, por encima, lo suyo que la nube ya ha confirmado (en vivo la nube no le
   devuelve a la Main lo suyo, así que el checkpoint no lo pasa hasta el siguiente cambio de otro). Lo
   de los demás que va por debajo ya ha bajado, porque la nube lo difunde antes que el acuse y el

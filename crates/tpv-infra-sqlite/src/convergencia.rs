@@ -63,8 +63,8 @@ const FISCALES: [&str; 2] = ["Registros_Facturacion", "Serie_Facturacion"];
 /// mucho sin poder traer nada, y lo que quede distinto lo verá el contraste.
 pub(crate) const MAX_MARCAS: i64 = 10_000;
 
-/// Lo más que se trae en una vuelta. La nube lo contesta en una petición por tabla (`por-clave`
-/// admite 500 claves).
+/// Lo más que se trae en una vuelta, salvo lo que haga falta para no partir una tabla entre dos
+/// (SYNC-37). La nube lo contesta en una petición por tabla (`por-clave` admite 500 claves).
 pub(crate) const MARCAS_POR_VUELTA: usize = 500;
 
 /// Las veces que se intenta traer una fila que esta Main no trae por decisión (un borrado que se
@@ -274,31 +274,52 @@ struct Marca {
 }
 
 /// Las marcas, las que menos veces han fallado primero (SYNC-37: una que no entra no deja sin
-/// intentar a las demás) y, entre ellas, las más antiguas; hasta `cuantas`, y si hay más.
+/// intentar a las demás) y, entre ellas, las más antiguas; hasta `cuantas`, y si hay más. Si hay
+/// más, se añaden las demás de las tablas que ya salen (hasta [`MAX_MARCAS`]): dos filas que se han
+/// cruzado un valor único sólo entran juntas, y partidas entre vueltas no se encontrarían nunca.
 async fn leer_marcas(conn: &Connection, cuantas: i64) -> AppResult<(Vec<Marca>, bool)> {
-    let mut filas = conn
-        .query(
-            "SELECT Tabla, Clave_Json, Intentos FROM _Sync_Por_Contrastar ORDER BY Intentos, Desde_Ms, Tabla, Clave_Json LIMIT ?1;",
-            vec![Value::Integer(cuantas + 1)],
-        )
-        .await
-        .map_err(db_err)?;
-    let mut salida = Vec::new();
-    let mut mas = false;
-    while let Some(f) = filas.next().await.map_err(db_err)? {
-        if salida.len() as i64 == cuantas {
-            mas = true;
-            break;
+    async fn leer(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Vec<Marca>> {
+        let mut filas = conn.query(sql, args).await.map_err(db_err)?;
+        let mut salida = Vec::new();
+        while let Some(f) = filas.next().await.map_err(db_err)? {
+            let (Ok(Value::Text(tabla)), Ok(Value::Text(clave_json))) = (f.get_value(0), f.get_value(1)) else { continue };
+            let intentos = match f.get_value(2) {
+                Ok(Value::Integer(n)) => n,
+                _ => 0,
+            };
+            let clave: Vec<Json> = serde_json::from_str(&clave_json).unwrap_or_default();
+            salida.push(Marca { fila: FilaTocada { tabla, clave, borrada: false }, clave_json, intentos });
         }
-        let (Ok(Value::Text(tabla)), Ok(Value::Text(clave_json))) = (f.get_value(0), f.get_value(1)) else { continue };
-        let intentos = match f.get_value(2) {
-            Ok(Value::Integer(n)) => n,
-            _ => 0,
-        };
-        let clave: Vec<Json> = serde_json::from_str(&clave_json).unwrap_or_default();
-        salida.push(Marca { fila: FilaTocada { tabla, clave, borrada: false }, clave_json, intentos });
+        Ok(salida)
     }
-    Ok((salida, mas))
+    let mut salida = leer(
+        conn,
+        "SELECT Tabla, Clave_Json, Intentos FROM _Sync_Por_Contrastar ORDER BY Intentos, Desde_Ms, Tabla, Clave_Json LIMIT ?1;",
+        vec![Value::Integer(cuantas + 1)],
+    )
+    .await?;
+    if salida.len() as i64 <= cuantas {
+        return Ok((salida, false));
+    }
+    salida.truncate(cuantas as usize);
+    let tablas: HashSet<&str> = salida.iter().map(|m| m.fila.tabla.as_str()).collect();
+    let tablas = Value::Text(serde_json::to_string(&tablas).map_err(db_err)?);
+    let vistas: HashSet<(String, String)> = salida.iter().map(|m| (m.fila.tabla.clone(), m.clave_json.clone())).collect();
+    let resto = leer(
+        conn,
+        "SELECT Tabla, Clave_Json, Intentos FROM _Sync_Por_Contrastar WHERE Tabla IN (SELECT value FROM json_each(?1)) \
+          ORDER BY Intentos, Desde_Ms, Tabla, Clave_Json LIMIT ?2;",
+        vec![tablas, Value::Integer(MAX_MARCAS)],
+    )
+    .await?;
+    salida.extend(resto.into_iter().filter(|m| !vistas.contains(&(m.fila.tabla.clone(), m.clave_json.clone()))));
+    salida.truncate(MAX_MARCAS as usize);
+    let mut total = conn.query("SELECT COUNT(*) FROM _Sync_Por_Contrastar;", ()).await.map_err(db_err)?;
+    let quedan = match total.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+        Some(Ok(Value::Integer(n))) => n > salida.len() as i64,
+        _ => true,
+    };
+    Ok((salida, quedan))
 }
 
 /// Lo que se hace aquí con una fila apuntada.
