@@ -28,7 +28,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
-| [SYNC-37](#sync-37--la-convergencia-no-trae-dos-filas-que-se-intercambian-un-valor-único) | 🔵 | La convergencia no trae dos filas que se intercambian un valor único | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -403,19 +402,6 @@ restaurarla lo que demuestre que es del negocio: el PIN de un administrador de l
 reconciliación no dé por buena una base con el cursor por encima de lo que la nube ha emitido. No hay
 nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
 AUD-22 (la copia traída de fuera, restaurada sin PIN). Sin decidir.
-
-### SYNC-37 · La convergencia no trae dos filas que se intercambian un valor único
-
-La convergencia (SYNC-29, `convergencia.rs`) escribe cada fila apuntada como está en la nube con
-`INSERT … ON CONFLICT(clave) DO UPDATE`. Si la Main intercambia un valor único entre dos filas (los
-nombres de dos zonas: `z1=A`, `z2=B` pasan a `z1=B`, `z2=A`) a la vez que una Handy guarda el plano
-de antes, aquí queda `A/B` y en la nube `B/A`. Traer cualquiera de las dos choca con
-`UNIQUE(Nombre_Zona)` mientras la otra siga como está, juntas también (el índice se comprueba
-sentencia a sentencia), y a la quinta vuelta las marcas se retiran sin haber convergido; lo que
-queda distinto lo ve el contraste, cuya reparación sube lo de aquí y choca igual arriba. Necesita
-una Handy guardando el plano en los segundos en que la Main intercambia dos nombres. Arreglo
-posible: escribir esas filas pasando por un valor temporal dentro de la misma transacción, y no
-retirar las marcas que siguen sin resolver. Sin decidir.
 
 ---
 

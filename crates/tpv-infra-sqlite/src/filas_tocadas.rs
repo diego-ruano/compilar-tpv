@@ -740,6 +740,35 @@ impl<'a> Troceada<'a> {
     }
 }
 
+/// SYNC-37 · Los nombres de la clave y de la condición de un `CREATE INDEX`, sin comillas y en su
+/// orden (`aparcar.rs`). Van mezclados con las palabras clave y las funciones (`lower`, `IS`,
+/// `NULL`): quien llama se queda con los que son columnas de la tabla. `None` si no se sabe trocear.
+pub(crate) fn nombres_de_un_indice(sql: &str) -> Option<(Vec<String>, Vec<String>)> {
+    let t = Troceada::de(sql)?;
+    let abre = t.buscar(0, t.piezas.len(), |i| t.signo(i, "("))?;
+    let cierra = t.cierre(abre)?;
+    let clave = (abre + 1..cierra).filter_map(|i| t.nombre(i)).collect();
+    let condicion = match t.buscar(cierra + 1, t.piezas.len(), |i| t.es(i, "WHERE")) {
+        Some(w) => (w + 1..t.piezas.len()).filter_map(|i| t.nombre(i)).collect(),
+        None => Vec::new(),
+    };
+    Some((clave, condicion))
+}
+
+/// SYNC-37 · Los nombres que salen dentro de los `CHECK` de un `CREATE TABLE`, como los de
+/// [`nombres_de_un_indice`]. `None` si no se sabe trocear.
+pub(crate) fn nombres_en_checks(sql: &str) -> Option<Vec<String>> {
+    let t = Troceada::de(sql)?;
+    let mut nombres = Vec::new();
+    for i in 0..t.piezas.len() {
+        if t.es(i, "CHECK") && t.signo(i + 1, "(") {
+            let cierra = t.cierre(i + 1)?;
+            nombres.extend((i + 2..cierra).filter_map(|j| t.nombre(j)));
+        }
+    }
+    Some(nombres)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tipo {
     Insertar,

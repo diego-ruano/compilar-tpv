@@ -7,6 +7,10 @@
 //! que es lo que ve la agenda de la web. Aquí el cambio de la Handy se aplicó encima: la reserva queda
 //! sentada, y el eco de la cancelación se descarta porque ya está aplicada. La Main tiene que acabar
 //! como la nube en cuanto lo suyo está subido, y el contraste diario no puede volver a subirla viva.
+//!
+//! SYNC-37: y lo mismo cuando lo que se cruza es un valor único. La Main se cambia los nombres de
+//! dos zonas mientras una Handy guarda el plano de antes: aquí queda `A/B` y en la nube `B/A`, y
+//! traer cualquiera de las dos choca con la otra si no se aparca antes su nombre.
 
 mod comun;
 
@@ -18,13 +22,16 @@ use serde_json::{json, Value as JsonValue};
 
 use comun::nube_de_contraste::{NubeDeContraste, Paginas};
 use tpv_application::error::AppResult;
+use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::sync::{
     ContrasteLocal, Convergencia, PaginasDelContraste, PedidoDeClaves, PedidoDeFilas, PedidoPorClave, SyncRepository,
 };
+use tpv_contracts::mesas::{RoomPoly, SalonInput, TableInput};
 use tpv_contracts::sync::{ClavesPagina, FilasDeCubos, FilasPorClave, ResultadoVerificacion, SqlStatement, SyncChange};
 use tpv_infra_sqlite::db::{Db, Writer};
 use tpv_infra_sqlite::ejecutor::Value;
+use tpv_infra_sqlite::mesas::SqliteMesasRepository;
 use tpv_infra_sqlite::reservas::SqliteReservasRepository;
 use tpv_infra_sqlite::sync::SqliteSyncRepository;
 
@@ -337,9 +344,10 @@ async fn lo_que_la_main_escribio_y_la_nube_no_acepto_no_se_pisa() {
 }
 
 #[tokio::test]
-async fn lo_cobrado_no_se_borra_desde_la_nube_y_lo_que_no_entra_se_deja_a_los_cinco_intentos() {
+async fn lo_cobrado_no_se_borra_desde_la_nube_y_a_los_cinco_intentos_se_deja_al_contraste() {
     // Una comanda que la nube no tiene y aquí tiene un cobro: borrarla aquí se llevaría el cobro
-    // por la cascada de `Pagos.ID_Comanda`. No se hace, y a la quinta vuelta se deja.
+    // por la cascada de `Pagos.ID_Comanda`. No se hace, y a la quinta vuelta se deja: lo de aquí es
+    // lo bueno, y lo sube el contraste. Hasta entonces no ha cambiado nada, y la vuelta se aplaza.
     let (repo, db, dir, nube) = base("cobro").await;
     sembrar(
         &db,
@@ -350,13 +358,250 @@ async fn lo_cobrado_no_se_borra_desde_la_nube_y_lo_que_no_entra_se_deja_a_los_ci
     )
     .await;
 
-    for vuelta in 1..=5 {
-        let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
-        assert!(escritas.is_empty(), "vuelta {vuelta}");
+    for vuelta in 1..=4 {
+        let c = repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap();
+        assert!(matches!(c, Convergencia::Aplazada), "vuelta {vuelta}: {c:?}");
         assert_eq!(texto(&db, "SELECT COUNT(*) FROM Pagos WHERE ID_Pago = 'p1';").await, "1", "vuelta {vuelta}");
+        assert_eq!(marcas(&db).await, "1");
     }
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert!(escritas.is_empty());
+    assert_eq!(texto(&db, "SELECT COUNT(*) FROM Pagos WHERE ID_Pago = 'p1';").await, "1");
     assert_eq!(texto(&db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'c1';").await, "1");
     assert_eq!(marcas(&db).await, "0");
+
+    cerrar(db, dir, nube).await;
+}
+
+// ── Un valor único que se cruzan dos filas (SYNC-37) ──────────────────────────
+
+/// Dos zonas más, en las dos bases.
+const ZONAS: &str = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z2', 'Salón'), ('z3', 'Barra');";
+
+/// Las zonas, por su clave: `z1=Terraza z2=Salón …`.
+async fn zonas(db: &Arc<Db>) -> String {
+    texto(db, "SELECT group_concat(ID_Zona || '=' || Nombre_Zona, ' ') FROM (SELECT * FROM Zonas ORDER BY ID_Zona);").await
+}
+
+/// Lo aparcado que se haya quedado en una base (`aparcar::valor_temporal` empieza por `\u{1}`).
+async fn aparcadas(db: &Arc<Db>) -> String {
+    texto(
+        db,
+        "SELECT (SELECT COUNT(*) FROM Zonas WHERE instr(Nombre_Zona, char(1)) > 0)
+              + (SELECT COUNT(*) FROM Productos WHERE instr(Nombre, char(1)) > 0);",
+    )
+    .await
+}
+
+/// Apunta filas para traerlas de la nube, como si las hubiera tocado un cambio en carrera.
+async fn apuntar(db: &Arc<Db>, tabla: &str, claves: &[&str]) {
+    for (i, k) in claves.iter().enumerate() {
+        sembrar(
+            db,
+            &format!("INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms) VALUES ('{tabla}', '[\"{k}\"]', 40, {});", i + 1),
+        )
+        .await;
+    }
+}
+
+fn zona(id: &str, nombre: &str, mesas: Vec<TableInput>) -> SalonInput {
+    SalonInput { id: format!("db-zona-{id}"), name: nombre.into(), room: RoomPoly { kind: "poly".into(), points: vec![] }, tables: mesas }
+}
+
+fn mesa(id: &str, numero: &str) -> TableInput {
+    TableInput { id: format!("db-mesa-{id}"), name: numero.into(), x: 0, y: 0, width: 80, height: 80, radius: None, seats: 4, shape: "rect".into() }
+}
+
+/// La Handy guarda el plano que tenía en pantalla, el de antes (`saveLayout`, `mesas.commands.ts`):
+/// aparca los nombres de las zonas y los vuelve a poner, con la hora de la Handy ya fijada por el DO.
+fn la_handy_guarda_el_plano_de_antes() -> Vec<SqlStatement> {
+    let mut sentencias = vec![sentencia(
+        "UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona WHERE ID_Zona IN (SELECT value FROM json_each(?1));",
+        vec![json!("[\"z1\",\"z2\",\"z3\"]")],
+    )];
+    for (id, nombre) in [("z1", "Terraza"), ("z2", "Salón"), ("z3", "Barra")] {
+        sentencias.push(sentencia(
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At) VALUES (?1, ?2, ?3, '2026-11-15 12:00:00') \
+             ON CONFLICT(ID_Zona) DO UPDATE SET Nombre_Zona = excluded.Nombre_Zona, Room_Points = excluded.Room_Points, \
+               Updated_At = excluded.Updated_At;",
+            vec![json!(id), json!(nombre), json!("[]")],
+        ));
+    }
+    sentencias
+}
+
+#[tokio::test]
+async fn dos_zonas_que_la_main_se_cambia_de_nombre_mientras_una_handy_guarda_el_plano_acaban_como_la_nube() {
+    let (repo, db, dir, nube) = base("intercambio").await;
+    sembrar(&db, ZONAS).await;
+    nube.sembrar(ZONAS).await;
+    // La Main se cambia los nombres de la terraza y el salón, con su plano de verdad.
+    SqliteMesasRepository::new(db.clone())
+        .save_layout(vec![zona("z1", "Salón", vec![mesa("m1", "1")]), zona("z2", "Terraza", vec![]), zona("z3", "Barra", vec![])])
+        .await
+        .unwrap();
+    la_carrera(&repo, &nube, la_handy_guarda_el_plano_de_antes(), false).await;
+
+    // Lo que dejaba SYNC-37: aquí el plano de la Handy, arriba el de la Main, y las tres zonas
+    // que tocó la Handy, apuntadas.
+    assert_eq!(zonas(&db).await, "z1=Terraza z2=Salón z3=Barra");
+    assert_eq!(zonas(&nube.db).await, "z1=Salón z2=Terraza z3=Barra");
+    assert_eq!(marcas(&db).await, "3");
+    let mesa_antes = texto(&db, "SELECT json_array(ID_Zona, Numero_Mesa, Updated_At) FROM Mesas WHERE ID_Mesa = 'm1';").await;
+
+    // El contraste no las toca: las trae la convergencia, las tres de una vez. Las dos que se
+    // cruzan aparcan antes su nombre; la barra sólo cambia su hora.
+    let r = pasada(&repo, &nube).await;
+    assert_eq!((r.reparadas, r.aplazado), (0, true), "{r:?}");
+    let (escritas, quedan) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!((escritas.len(), quedan), (3, false));
+    assert!(escritas.iter().all(|s| s.sql.starts_with("INSERT INTO \"Zonas\"")), "{escritas:?}");
+    assert_eq!(zonas(&db).await, "z1=Salón z2=Terraza z3=Barra");
+    assert_eq!(marcas(&db).await, "0");
+    // Nada aparcado se queda, lo que no estaba apuntado sigue igual, y nada sube.
+    assert_eq!(aparcadas(&db).await, "0");
+    assert_eq!(texto(&db, "SELECT json_array(ID_Zona, Numero_Mesa, Updated_At) FROM Mesas WHERE ID_Mesa = 'm1';").await, mesa_antes);
+    assert_eq!(estado(&db).await, "PROXIMA");
+    assert!(repo.outbox_pending(10).await.unwrap().is_empty());
+
+    // Y las dos bases cuadran, también en la hora de cada zona.
+    let r = pasada(&repo, &nube).await;
+    assert_eq!(r.descuadres, vec![], "{r:?}");
+    assert_eq!((r.reparadas, r.aplazado), (0, false));
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn tres_zonas_que_rotan_el_nombre_tambien_se_traen_aunque_otra_fila_no_entre() {
+    let (repo, db, dir, nube) = base("rotacion").await;
+    sembrar(&db, ZONAS).await;
+    nube.sembrar(ZONAS).await;
+    // Arriba, Terraza → Salón → Barra → Terraza; y una mesa en un patio que aquí no está.
+    nube.sembrar(
+        "UPDATE Zonas SET Nombre_Zona = '_' || ID_Zona;
+         UPDATE Zonas SET Nombre_Zona = CASE ID_Zona WHEN 'z1' THEN 'Salón' WHEN 'z2' THEN 'Barra' ELSE 'Terraza' END;
+         INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Patio');
+         INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+              VALUES ('m9', 'z9', '9', 2, 0, 0, 'rect', 80, 80);",
+    )
+    .await;
+    apuntar(&db, "Zonas", &["z1", "z2", "z3"]).await;
+    apuntar(&db, "Mesas", &["m9"]).await;
+
+    // La mesa no entra (su zona no se trae) y deshace la vuelta entera; las zonas se vuelven a
+    // intentar juntas, aparcando sus nombres, y entran. La mesa se queda apuntada.
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 3);
+    assert_eq!(zonas(&db).await, "z1=Salón z2=Barra z3=Terraza");
+    assert_eq!(aparcadas(&db).await, "0");
+    assert_eq!(texto(&db, "SELECT Tabla || ' ' || Clave_Json || ' ' || Intentos FROM _Sync_Por_Contrastar;").await, "Mesas [\"m9\"] 1");
+    assert_eq!(texto(&db, "SELECT COUNT(*) FROM Mesas WHERE ID_Mesa = 'm9';").await, "0");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn en_un_indice_parcial_tambien_se_cruza_lo_que_entra_y_sale_de_el() {
+    // `Productos(Nombre) WHERE Archivado_En IS NULL`: arriba, la caña y el tercio se han cambiado el
+    // nombre, y de las dos claras se ha archivado la que estaba a la venta y se ha vuelto a poner la
+    // archivada. La caña archivada no se ha tocado: comparte nombre con una a la venta, y no choca.
+    let productos = "
+        INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Cervezas');
+        INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES
+            ('p1', 'cat-1', 'Caña', 250, NULL), ('p2', 'cat-1', 'Tercio', 320, NULL),
+            ('p3', 'cat-1', 'Clara', 280, NULL), ('p4', 'cat-1', 'Clara', 300, '2026-11-01 10:00:00'),
+            ('p5', 'cat-1', 'Caña', 200, '2026-10-01 10:00:00');
+    ";
+    let (repo, db, dir, nube) = base("parcial").await;
+    sembrar(&db, productos).await;
+    nube.sembrar(productos).await;
+    nube.sembrar(
+        "UPDATE Productos SET Nombre = '_' || ID_Producto WHERE ID_Producto IN ('p1', 'p2');
+         UPDATE Productos SET Nombre = 'Tercio' WHERE ID_Producto = 'p1';
+         UPDATE Productos SET Nombre = 'Caña' WHERE ID_Producto = 'p2';
+         UPDATE Productos SET Archivado_En = '2026-11-14 09:00:00' WHERE ID_Producto = 'p3';
+         UPDATE Productos SET Archivado_En = NULL WHERE ID_Producto = 'p4';",
+    )
+    .await;
+    // La que se desarchiva, antes que la que se archiva: escrita sola, chocaría.
+    apuntar(&db, "Productos", &["p4", "p3", "p2", "p1"]).await;
+
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 4);
+    let productos = "SELECT group_concat(ID_Producto || '=' || Nombre || (CASE WHEN Archivado_En IS NULL THEN '' ELSE '*' END), ' ') \
+                     FROM (SELECT * FROM Productos ORDER BY ID_Producto);";
+    assert_eq!(texto(&db, productos).await, "p1=Tercio p2=Caña p3=Clara* p4=Clara p5=Caña*");
+    assert_eq!(texto(&db, productos).await, texto(&nube.db, productos).await);
+    assert_eq!((marcas(&db).await, aparcadas(&db).await), ("0".to_string(), "0".to_string()));
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn una_fila_que_sigue_sin_entrar_conserva_su_marca_y_se_reintenta_sin_prisa() {
+    // Arriba el salón se llama Comedor y la terraza Salón, pero aquí sólo está apuntada la terraza:
+    // traerla choca con el salón de aquí, que no se trae.
+    let (repo, db, dir, nube) = base("atascada").await;
+    sembrar(&db, ZONAS).await;
+    nube.sembrar(ZONAS).await;
+    nube.sembrar("UPDATE Zonas SET Nombre_Zona = 'Comedor' WHERE ID_Zona = 'z2'; UPDATE Zonas SET Nombre_Zona = 'Salón' WHERE ID_Zona = 'z1';")
+        .await;
+    apuntar(&db, "Zonas", &["z1"]).await;
+
+    // No entra, y no se deja: cada vuelta se aplaza (el motor espera cada vez el doble) sin dejar
+    // nada aparcado.
+    for vuelta in 1..=6 {
+        let c = repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap();
+        assert!(matches!(c, Convergencia::Aplazada), "vuelta {vuelta}: {c:?}");
+        assert_eq!(zonas(&db).await, "z1=Terraza z2=Salón z3=Barra", "vuelta {vuelta}");
+        assert_eq!(aparcadas(&db).await, "0");
+    }
+    assert_eq!(texto(&db, "SELECT Intentos FROM _Sync_Por_Contrastar WHERE Tabla = 'Zonas' AND Clave_Json = '[\"z1\"]';").await, "6");
+    assert!(repo.outbox_pending(10).await.unwrap().is_empty());
+
+    // Cuando un cambio de la nube apunta también el salón, entran las dos.
+    apuntar(&db, "Zonas", &["z2"]).await;
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 2);
+    assert_eq!(zonas(&db).await, "z1=Salón z2=Comedor z3=Barra");
+    assert_eq!(marcas(&db).await, "0");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn el_contraste_sube_dos_nombres_cruzados_en_una_operacion_que_la_nube_puede_aplicar() {
+    // Sin nada apuntado (lo que quede distinto por otro camino): aquí `z1=Salón z2=Terraza`, arriba
+    // al revés. La reparación sube lo de aquí, y la nube, que comprueba el índice sentencia a
+    // sentencia, sólo la puede aplicar si los nombres van aparcados antes.
+    let (repo, db, dir, nube) = base("contraste-cruzado").await;
+    sembrar(&db, ZONAS).await;
+    nube.sembrar(ZONAS).await;
+    sembrar(
+        &db,
+        "UPDATE Zonas SET Nombre_Zona = '_' || ID_Zona WHERE ID_Zona IN ('z1', 'z2');
+         UPDATE Zonas SET Nombre_Zona = 'Salón' WHERE ID_Zona = 'z1';
+         UPDATE Zonas SET Nombre_Zona = 'Terraza' WHERE ID_Zona = 'z2';",
+    )
+    .await;
+
+    let r = pasada(&repo, &nube).await;
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (2, 0, false), "{r:?}");
+    let ops = repo.outbox_pending(10).await.unwrap();
+    assert_eq!(ops.len(), 1, "las dos en la misma operación");
+    let sql: Vec<&str> = ops[0].statements.iter().map(|s| s.sql.as_str()).collect();
+    assert_eq!(sql.len(), 4, "{sql:?}");
+    assert!(sql[..2].iter().all(|s| s.starts_with("UPDATE \"Zonas\" SET \"Nombre_Zona\" = CASE WHEN")), "{sql:?}");
+    assert!(sql[2..].iter().all(|s| s.starts_with("INSERT INTO \"Zonas\"")), "{sql:?}");
+
+    // La nube la aplica en una transacción, como el DO, y queda como aquí, sin nada aparcado.
+    nube.aplicar(&ops[0].statements).await;
+    repo.outbox_confirmar_lote(&[(ops[0].op_id.clone(), 41)]).await.unwrap();
+    assert_eq!(zonas(&nube.db).await, "z1=Salón z2=Terraza z3=Barra");
+    assert_eq!(aparcadas(&nube.db).await, "0");
+    *nube.hasta_seq.lock().unwrap() = 41;
+    assert_eq!(pasada(&repo, &nube).await.descuadres, vec![]);
 
     cerrar(db, dir, nube).await;
 }

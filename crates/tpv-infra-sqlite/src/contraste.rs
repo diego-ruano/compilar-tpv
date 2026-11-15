@@ -1193,6 +1193,11 @@ pub(crate) fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, V
 /// ([`borrado_si_la_nube_no_ha_cambiado`]). Todas las operaciones entran en el outbox juntas o
 /// ninguna.
 ///
+/// SYNC-37 · Con dos filas o más de una tabla que están arriba con otra cosa, lo de esa tabla
+/// empieza aparcando sus valores únicos (`aparcar.rs`), y va entero en una operación, que la nube
+/// aplica en una transacción: dos que se han intercambiado un nombre entran juntas, y lo aparcado
+/// no sale de esa transacción.
+///
 /// SYNC-31 · Todas llevan en `Repara_Op_Id` las operaciones apartadas de la subida que el plan
 /// resuelve ([`apartadas_que_resuelve`]): el outbox las retira cuando sube la última que las lleva, y
 /// no si alguna de ellas se queda apartada (`sync::retirar_lo_que_repara`). `completas` son las tablas que esta pasada ha comparado
@@ -1218,21 +1223,49 @@ async fn encolar_plan(
     // no aceptó, y se repara como siempre.
     let por_converger = apuntadas_por_converger(db, conn, hallazgos).await?;
 
-    let mut subir: Vec<SqlStatement> = Vec::new();
+    // Lo que sube, tabla a tabla: (sus sentencias, si van juntas en una operación). Y cuántas filas.
+    let mut subir: Vec<(Vec<SqlStatement>, bool)> = Vec::new();
+    let mut reparadas = 0i64;
+    let mut unicos = crate::aparcar::Unicos::default();
     for (tabla, h) in hallazgos {
         let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
         let mut de_la_tabla = Vec::new();
+        // SYNC-37: lo que está arriba con otra cosa aparca antes sus valores únicos, por si dos de
+        // ellas se los han intercambiado (arriba `A/B`, aquí `B/A`): escritas una a una, la primera
+        // chocaría con la segunda en la nube.
+        let mut aparcan = Vec::new();
+        let indices = match h.distintas.len() >= 2 {
+            true => unicos.de(conn, tabla).await?.to_vec(),
+            false => Vec::new(),
+        };
+        let columnas = match indices.is_empty() {
+            true => Vec::new(),
+            false => crate::cuarentenas_bajada::columnas_locales(conn, tabla).await?,
+        };
+        let distintas: HashSet<&FilaAfectada> = h.distintas.iter().collect();
         for f in h.distintas.iter().chain(&h.faltan) {
             if !vistas.insert(f) || por_converger.contains(f) {
                 continue;
             }
             // `None`: la fila tiene algo que no se replica (un blob). No se manda a medias.
             if let Some(st) = rep::sentencia_de_reparacion(conn, f).await.map_err(db_err)? {
+                if !indices.is_empty() && distintas.contains(f) {
+                    let clave: Vec<String> = f.clave.iter().map(|(c, _)| c.clone()).collect();
+                    aparcan.extend(crate::aparcar::aparcar(tabla, &indices, &columnas, &st.args, &clave));
+                }
                 de_la_tabla.push(st);
             }
         }
         let refs = autorreferencias(conn, tabla).await?;
-        subir.extend(padres_antes(de_la_tabla, &refs));
+        let de_la_tabla = padres_antes(de_la_tabla, &refs);
+        reparadas += de_la_tabla.len() as i64;
+        // Lo aparcado va en la misma operación que lo que lo pisa: si no cabe todo en una, no se
+        // aparca (y dos filas que se cruzan no entran, como sin esto).
+        if aparcan.len() >= 2 && aparcan.len() + de_la_tabla.len() <= SENTENCIAS_POR_OPERACION {
+            subir.push((aparcan.into_iter().chain(de_la_tabla).collect(), true));
+        } else {
+            subir.push((de_la_tabla, false));
+        }
     }
     let mut quitar: Vec<SqlStatement> = Vec::new();
     if borrar {
@@ -1250,7 +1283,7 @@ async fn encolar_plan(
         }
     }
 
-    let (reparadas, borradas) = (subir.len() as i64, quitar.len() as i64);
+    let borradas = quitar.len() as i64;
     if reparadas + borradas > 0 {
         let plan: Vec<&FilaAfectada> = hallazgos
             .iter()
@@ -1262,8 +1295,7 @@ async fn encolar_plan(
             true => None,
             false => Some(serde_json::to_string(&resueltas).map_err(db_err)?),
         };
-        let sentencias: Vec<SqlStatement> = subir.into_iter().chain(quitar).collect();
-        let operaciones: Vec<&[SqlStatement]> = sentencias.chunks(SENTENCIAS_POR_OPERACION).collect();
+        let operaciones = en_operaciones(subir.into_iter().chain([(quitar, false)]));
         conn.transaccion(async {
             for operacion in &operaciones {
                 encolar_operacion(conn, operacion, repara.as_deref()).await?;
@@ -1280,6 +1312,29 @@ async fn encolar_plan(
         }
     }
     Ok(Some(Encolado { reparadas, borradas, por_converger: por_converger.len() as i64 }))
+}
+
+/// Parte lo que sube en operaciones de [`SENTENCIAS_POR_OPERACION`] sentencias, en su orden. Un
+/// grupo que va `junto` (SYNC-37: una tabla con valores únicos aparcados y lo que los pisa) no se
+/// parte: si no cabe en lo que queda de la operación, empieza otra. Cabe en una, o no va junto.
+fn en_operaciones(grupos: impl IntoIterator<Item = (Vec<SqlStatement>, bool)>) -> Vec<Vec<SqlStatement>> {
+    let mut operaciones: Vec<Vec<SqlStatement>> = Vec::new();
+    let mut actual: Vec<SqlStatement> = Vec::new();
+    for (sentencias, junto) in grupos {
+        if junto && !actual.is_empty() && actual.len() + sentencias.len() > SENTENCIAS_POR_OPERACION {
+            operaciones.push(std::mem::take(&mut actual));
+        }
+        for s in sentencias {
+            if actual.len() == SENTENCIAS_POR_OPERACION {
+                operaciones.push(std::mem::take(&mut actual));
+            }
+            actual.push(s);
+        }
+    }
+    if !actual.is_empty() {
+        operaciones.push(actual);
+    }
+    operaciones
 }
 
 /// Las formas canónicas de una fila (`filas_tocadas::canonica_de`), para cruzarla con lo que se sabe
@@ -1910,6 +1965,25 @@ mod tests {
         assert_eq!(orden, ["-- x", "-- p1", "-- d1", "-- d2"]);
         // Sin autorreferencias, como venían.
         assert_eq!(padres_antes(vec![st("b", None), st("a", None)], &[]).len(), 2);
+    }
+
+    #[test]
+    fn lo_que_aparca_valores_unicos_va_entero_en_una_operacion() {
+        // SYNC-37: lo aparcado y lo que lo pisa no se separan; lo demás se parte como siempre.
+        let st = |n: usize| SqlStatement { sql: format!("-- {n}"), args: vec![] };
+        let grupo = |desde: usize, cuantas: usize| (desde..desde + cuantas).map(st).collect::<Vec<_>>();
+        let tamanos = |ops: Vec<Vec<SqlStatement>>| ops.iter().map(Vec::len).collect::<Vec<_>>();
+        let n = SENTENCIAS_POR_OPERACION;
+        // Sin aparcar, en tandas llenas.
+        assert_eq!(tamanos(en_operaciones([(grupo(0, n - 10), false), (grupo(n, 30), false)])), [n, 20]);
+        // Lo que aparca, si no cabe en lo que queda, empieza otra operación.
+        let ops = en_operaciones([(grupo(0, n - 10), false), (grupo(n, 30), true), (grupo(2 * n, 5), false)]);
+        assert_eq!(tamanos(ops.clone()), [n - 10, 35]);
+        assert_eq!(ops[1][0].sql, format!("-- {n}"));
+        // Si cabe, sigue en la misma; y todo en su orden.
+        let ops = en_operaciones([(grupo(0, 10), false), (grupo(10, 30), true), (grupo(40, 5), false)]);
+        assert_eq!(ops.concat().iter().map(|s| s.sql.clone()).collect::<Vec<_>>(), (0..45).map(|i| format!("-- {i}")).collect::<Vec<_>>());
+        assert_eq!(tamanos(ops), [45]);
     }
 
     #[tokio::test]

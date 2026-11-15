@@ -650,12 +650,31 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   está, se borra aquí, hijas primero. Si algo se ha movido, la vuelta acaba sin escribir nada
   (`Aplazada`) y se repite a los 2, 4, 8… segundos (hasta un minuto), también si la nube no contesta;
   la sesión sigue. Lo escrito se avisa a la interfaz como un cambio más.
+- **Un valor único que se cruzan dos filas se trae aparcándolo** (SYNC-37, `aparcar.rs`). La Main
+  se cambia los nombres de dos zonas mientras una Handy guarda el plano de antes: aquí queda `A/B` y
+  arriba `B/A`, y escribir cualquiera de las dos choca con la otra, porque el índice se comprueba
+  sentencia a sentencia. Así que, cuando se escriben juntas dos filas o más de una tabla, en la
+  misma transacción y antes de escribir ninguna, cada una que ya está aquí aparca la columna de
+  cada índice único en el que cambia algo de lo que lo decide (su clave y, en uno parcial como el de
+  los nombres de las zonas activas, su condición): en `NULL` si lo admite y va tal cual en la clave,
+  y si no, en un texto que sale de su clave primaria; nunca en la clave primaria ni en una columna de
+  un `CHECK`. La escritura de cada fila lo pisa, y si algo no entra se deshace todo: lo aparcado no
+  sale de la transacción. Vale para dos, para tres que rotan y para una cadena. Un índice que no se
+  sabe aparcar (el de la comanda abierta de una mesa, cuya mesa sale en un `CHECK`) se queda como
+  estaba.
 - **Lo que no se trae, se deja**, con su motivo en el registro: una fila que escribió algo apartado de
   la subida (lo que esta Main escribió y la nube no aceptó: lo sube su reparación, y traer lo de la
   nube lo desharía aquí), un borrado cuyas cascadas llegan a algo apartado, una tabla con columnas
   que esta versión no tiene o que la nube no sabe buscar. Lo cobrado no se borra desde la nube: si un
-  borrado se llevara un cobro por sus cascadas, no se hace. Una fila que no entra aquí (una clave
-  foránea, un `UNIQUE`) se intenta en cinco vueltas y se deja.
+  borrado se llevara un cobro por sus cascadas, no se hace, y a la quinta vuelta se deja (lo sube el
+  contraste).
+- **Lo que no entra aquí se queda apuntado** (SYNC-37): una fila que aun aparcando choca con algo
+  de esta base que no se trae (un `UNIQUE` con otra fila, una clave foránea). Se intenta todo junto;
+  si algo no entra, tabla a tabla (aparcando), y la tabla que no entra, fila a fila. La que no entra
+  cuenta un intento, va detrás de las demás en la vuelta siguiente y a la quinta se avisa (`WARN`,
+  «sigue sin entrar»); una vuelta en la que no entra nada acaba `Aplazada`, y el motor espera el
+  doble para la siguiente, hasta un minuto. No se retira: el contraste no toca una fila apuntada, y
+  retirarla dejaría que subiera lo de aquí y deshiciera el orden de la nube.
 - **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
   vacía lo apuntado.
 - **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
@@ -793,6 +812,13 @@ informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la
   como `Pagos` con su `ID_Pago_Origen`, sus filas) y lo que se borra, hijas primero (en una tabla que
   se apunta a sí misma, de la clave mayor a la menor: con UUIDv7 una devolución va antes que su
   cobro), en operaciones de 500 sentencias que entran juntas en el outbox.
+- **Dos filas que arriba tienen un valor único cruzado suben aparcándolo** (SYNC-37), como las trae
+  la convergencia: aquí `A/B`, arriba `B/A`, y el `TenantHub` comprueba el índice sentencia a
+  sentencia. Con dos filas distintas o más en una tabla con índices únicos, lo de esa tabla empieza
+  por una sentencia por fila que aparca sus valores únicos si arriba difieren de los de aquí (lo
+  decide la nube al aplicarla, con lo que tenga entonces), y va entero en una operación, que la nube
+  aplica en una transacción: la escritura de cada fila lo pisa, y lo aparcado nunca queda en la base
+  de la nube. Si no cabe en una operación, no se aparca.
 - Lo que no se ha podido mirar entero (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de
   claves, o una tabla sin comparar) se informa como `aplazado`, y lo que falta arriba en las hijas
   de una tabla así no se sube: podría apuntar a una fila suya que falta arriba sin saberse (lo que le

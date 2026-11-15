@@ -31,6 +31,13 @@
 //! lo desharía aquí), ni un borrado cuyas cascadas lleguen a algo apartado o se lleven un cobro. Esas
 //! marcas se retiran con su motivo en el registro, y lo que quede distinto lo verá el contraste.
 //!
+//! SYNC-37 · Dos filas que la nube dejó con un valor único intercambiado (los nombres de dos zonas)
+//! se escriben aparcando antes ese valor (`aparcar.rs`), en la misma transacción. Una fila que aun así
+//! no entra aquí (un `UNIQUE` con una fila que no se trae, una foránea) se queda apuntada y se vuelve
+//! a intentar detrás de las que no han fallado; una vuelta que no consigue nada acaba `Aplazada`, y
+//! el motor espera cada vez el doble, hasta un minuto. Retirarla se la dejaría al contraste, que
+//! subiría lo de aquí y desharía el orden de la nube.
+//!
 //! Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir
 //! otra (un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.
 
@@ -60,8 +67,9 @@ pub(crate) const MAX_MARCAS: i64 = 10_000;
 /// admite 500 claves).
 pub(crate) const MARCAS_POR_VUELTA: usize = 500;
 
-/// Las veces que se intenta escribir aquí una fila que no entra (una clave foránea, un `UNIQUE`)
-/// antes de dejarla.
+/// Las veces que se intenta traer una fila que esta Main no trae por decisión (un borrado que se
+/// llevaría un cobro, un valor que no sabe escribir) antes de dejársela al contraste. Una que no
+/// entra por esta base no se deja nunca (SYNC-37): a este intento se avisa de que sigue sin entrar.
 const MAX_INTENTOS: i64 = 5;
 
 /// Lo más que se lee del outbox para saber en qué tablas está escribiendo esta Main. Con más, se da
@@ -261,13 +269,16 @@ struct Marca {
     fila: FilaTocada,
     /// Como está guardada (`Clave_Json`), para retirarla.
     clave_json: String,
+    /// Las vueltas en que no ha entrado aquí.
+    intentos: i64,
 }
 
-/// Las marcas, las más antiguas primero, hasta `cuantas`, y si hay más.
+/// Las marcas, las que menos veces han fallado primero (SYNC-37: una que no entra no deja sin
+/// intentar a las demás) y, entre ellas, las más antiguas; hasta `cuantas`, y si hay más.
 async fn leer_marcas(conn: &Connection, cuantas: i64) -> AppResult<(Vec<Marca>, bool)> {
     let mut filas = conn
         .query(
-            "SELECT Tabla, Clave_Json FROM _Sync_Por_Contrastar ORDER BY Desde_Ms, Tabla, Clave_Json LIMIT ?1;",
+            "SELECT Tabla, Clave_Json, Intentos FROM _Sync_Por_Contrastar ORDER BY Intentos, Desde_Ms, Tabla, Clave_Json LIMIT ?1;",
             vec![Value::Integer(cuantas + 1)],
         )
         .await
@@ -280,16 +291,20 @@ async fn leer_marcas(conn: &Connection, cuantas: i64) -> AppResult<(Vec<Marca>, 
             break;
         }
         let (Ok(Value::Text(tabla)), Ok(Value::Text(clave_json))) = (f.get_value(0), f.get_value(1)) else { continue };
+        let intentos = match f.get_value(2) {
+            Ok(Value::Integer(n)) => n,
+            _ => 0,
+        };
         let clave: Vec<Json> = serde_json::from_str(&clave_json).unwrap_or_default();
-        salida.push(Marca { fila: FilaTocada { tabla, clave, borrada: false }, clave_json });
+        salida.push(Marca { fila: FilaTocada { tabla, clave, borrada: false }, clave_json, intentos });
     }
     Ok((salida, mas))
 }
 
 /// Lo que se hace aquí con una fila apuntada.
 enum Accion {
-    /// Arriba está así y aquí no: se escribe como está.
-    Escribir(Vec<Json>),
+    /// Arriba está así y aquí no: se escribe como está. `existe`: aquí está, con otra cosa.
+    Escribir { fila: Vec<Json>, existe: bool },
     /// Arriba ya no está y aquí sí: se borra.
     Borrar,
     /// Ya está igual.
@@ -335,28 +350,72 @@ struct Plan<'a> {
     accion: Accion,
     /// La sentencia que la deja aquí como arriba (`None` con [`Accion::Nada`]).
     sentencia: Option<SqlStatement>,
+    /// SYNC-37: la que aparca antes sus valores únicos, si ya está aquí y se escribe con otras de su
+    /// tabla (`aparcar.rs`).
+    aparcar: Option<SqlStatement>,
 }
 
-/// Ejecuta lo de unos planes en orden: primero los borrados, después lo que se escribe.
-async fn ejecutar(conn: &Connection, planes: &[&Plan<'_>]) -> AppResult<()> {
+async fn una(conn: &Connection, s: &SqlStatement) -> AppResult<()> {
+    let args = s.args.iter().map(celda).collect::<Option<Vec<_>>>().ok_or_else(|| AppError::internal("valor_binario"))?;
+    conn.execute(&s.sql, args).await.map_err(db_err)?;
+    Ok(())
+}
+
+/// Ejecuta lo de unos planes, que llegan con los borrados delante: primero los borrados y después
+/// lo que se escribe. Con `aparcando`, antes de escribir nada se aparcan los valores únicos de todo
+/// lo que se escribe (SYNC-37): así dos que se intercambian uno entran juntas. Cada escritura pisa
+/// lo aparcado de su fila.
+async fn ejecutar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> AppResult<()> {
     let borrados = planes.iter().filter(|p| matches!(p.accion, Accion::Borrar)).count();
+    let (borrar, escribir) = planes.split_at(borrados);
     // Lo cobrado no se borra desde la nube: si un borrado se llevara un cobro por sus cascadas, no
     // se hace nada (sus registros fiscales perderían el pago al que apuntan). Se cuenta antes y
     // después de los borrados, que van delante.
     let antes = if borrados > 0 { Some(cobros(conn).await?) } else { None };
-    for (i, p) in planes.iter().enumerate() {
-        let Some(s) = &p.sentencia else { continue };
-        let args = s.args.iter().map(celda).collect::<Option<Vec<_>>>().ok_or_else(|| AppError::internal("valor_binario"))?;
-        conn.execute(&s.sql, args).await.map_err(db_err)?;
-        if i + 1 == borrados {
-            if let Some(antes) = antes.filter(|n| *n > 0) {
-                if cobros(conn).await? != antes {
-                    return Err(AppError::internal("se_llevaria_un_cobro"));
-                }
-            }
+    for s in borrar.iter().filter_map(|p| p.sentencia.as_ref()) {
+        una(conn, s).await?;
+    }
+    if let Some(antes) = antes.filter(|n| *n > 0) {
+        if cobros(conn).await? != antes {
+            return Err(AppError::internal("se_llevaria_un_cobro"));
         }
     }
+    if aparcando {
+        for s in escribir.iter().filter_map(|p| p.aparcar.as_ref()) {
+            una(conn, s).await?;
+        }
+    }
+    for s in escribir.iter().filter_map(|p| p.sentencia.as_ref()) {
+        una(conn, s).await?;
+    }
     Ok(())
+}
+
+/// Lo de unos planes en una transacción, con sus marcas retiradas en ella.
+async fn intentar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> AppResult<()> {
+    conn.transaccion(async {
+        ejecutar(conn, planes, aparcando).await?;
+        retirar(conn, &planes.iter().map(|p| p.marca).collect::<Vec<_>>()).await
+    })
+    .await
+}
+
+/// Lo que se intenta junto cuando no entra todo: cada borrado solo, y lo que se escribe, tabla a
+/// tabla (lo que se intercambia un valor único es de la misma tabla).
+fn tandas<'p, 'a>(en_orden: &'p [&'p Plan<'a>]) -> Vec<&'p [&'p Plan<'a>]> {
+    let mut salida: Vec<&'p [&'p Plan<'a>]> = Vec::new();
+    let mut desde = 0;
+    for i in 1..=en_orden.len() {
+        let corta = i == en_orden.len()
+            || matches!(en_orden[i].accion, Accion::Borrar)
+            || matches!(en_orden[i - 1].accion, Accion::Borrar)
+            || en_orden[i].marca.fila.tabla != en_orden[i - 1].marca.fila.tabla;
+        if corta {
+            salida.push(&en_orden[desde..i]);
+            desde = i;
+        }
+    }
+    salida
 }
 
 async fn retirar(conn: &Connection, marcas: &[&Marca]) -> AppResult<()> {
@@ -374,29 +433,35 @@ async fn retirar(conn: &Connection, marcas: &[&Marca]) -> AppResult<()> {
     Ok(())
 }
 
-/// Una fila que no ha entrado: un intento más, y al llegar a [`MAX_INTENTOS`], se deja.
-async fn no_ha_entrado(conn: &Connection, m: &Marca, motivo: &str) -> AppResult<()> {
-    conn.execute(
-        "UPDATE _Sync_Por_Contrastar SET Intentos = Intentos + 1 WHERE Tabla = ?1 AND Clave_Json = ?2;",
-        vec![Value::Text(m.fila.tabla.clone()), Value::Text(m.clave_json.clone())],
-    )
-    .await
-    .map_err(db_err)?;
-    let n = conn
-        .execute(
-            "DELETE FROM _Sync_Por_Contrastar WHERE Tabla = ?1 AND Clave_Json = ?2 AND Intentos >= ?3;",
-            vec![Value::Text(m.fila.tabla.clone()), Value::Text(m.clave_json.clone()), Value::Integer(MAX_INTENTOS)],
-        )
-        .await
-        .map_err(db_err)?;
-    tracing::warn!(
-        target: "tpv::sync",
-        tabla = %m.fila.tabla,
-        motivo,
-        dejada = n > 0,
-        "SYNC-29: una fila de la nube no entra en esta base"
-    );
-    Ok(())
+/// Una fila que no ha entrado: un intento más. Si es por decisión de esta Main (un borrado que se
+/// llevaría un cobro, un valor que no sabe escribir), al llegar a [`MAX_INTENTOS`] se deja: lo de
+/// aquí es lo bueno, y lo sube el contraste. Si no ha entrado en esta base (SYNC-37: un `UNIQUE`
+/// con una fila que no se trae, una foránea), se queda apuntada, y a ese intento se avisa de que
+/// sigue sin entrar. Devuelve si se ha dejado.
+async fn no_ha_entrado(conn: &Connection, m: &Marca, motivo: &str) -> AppResult<bool> {
+    let intentos = m.intentos.saturating_add(1);
+    let por_decision = matches!(motivo, "se_llevaria_un_cobro" | "valor_binario");
+    let dejada = por_decision && intentos >= MAX_INTENTOS;
+    let args = vec![Value::Text(m.fila.tabla.clone()), Value::Text(m.clave_json.clone())];
+    let sql = match dejada {
+        true => "DELETE FROM _Sync_Por_Contrastar WHERE Tabla = ?1 AND Clave_Json = ?2;",
+        false => "UPDATE _Sync_Por_Contrastar SET Intentos = Intentos + 1 WHERE Tabla = ?1 AND Clave_Json = ?2;",
+    };
+    conn.execute(sql, args).await.map_err(db_err)?;
+    if intentos == MAX_INTENTOS && !dejada {
+        tracing::warn!(
+            target: "tpv::sync",
+            tabla = %m.fila.tabla,
+            motivo,
+            intentos,
+            "SYNC-37: una fila de la nube sigue sin entrar en esta base; se queda apuntada y se sigue intentando"
+        );
+    } else if intentos <= MAX_INTENTOS {
+        tracing::warn!(target: "tpv::sync", tabla = %m.fila.tabla, motivo, intentos, dejada, "SYNC-29: una fila de la nube no entra en esta base");
+    } else {
+        tracing::debug!(target: "tpv::sync", tabla = %m.fila.tabla, motivo, intentos, "SYNC-37: una fila de la nube sigue sin entrar");
+    }
+    Ok(dejada)
 }
 
 /// SYNC-29 · Una vuelta: trae de la nube hasta [`MARCAS_POR_VUELTA`] filas apuntadas y las escribe
@@ -491,7 +556,7 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                 }
                 match crate::sync_reparacion::fila_difiere(conn, tabla, &traida.columnas, fila, &clave).await.map_err(db_err)? {
                     Some(false) => Accion::Nada,
-                    _ => Accion::Escribir(fila.clone()),
+                    difiere => Accion::Escribir { fila: fila.clone(), existe: difiere.is_some() },
                 }
             }
             None if existe(conn, tabla, &clave, &valores_clave).await? => Accion::Borrar,
@@ -499,7 +564,7 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
         };
         let sentencia = match &accion {
             Accion::Nada => None,
-            Accion::Escribir(fila) => Some(SqlStatement {
+            Accion::Escribir { fila, .. } => Some(SqlStatement {
                 sql: bajada::escribir_como_esta(tabla, &traida.columnas, &clave),
                 args: fila.clone(),
             }),
@@ -523,7 +588,27 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                 continue;
             }
         }
-        planes.push(Plan { marca: m, accion, sentencia });
+        planes.push(Plan { marca: m, accion, sentencia, aparcar: None });
+    }
+
+    // SYNC-37: lo que se escribe sobre una fila que ya está aquí aparca antes sus valores únicos,
+    // si se escribe con otra de su tabla: pueden habérselos intercambiado, o la otra puede llevarse
+    // el que ésta deja (una zona nueva con el nombre que deja otra), y se escriben en cualquier orden.
+    let mut por_tabla: HashMap<&str, usize> = HashMap::new();
+    for p in &planes {
+        if matches!(p.accion, Accion::Escribir { .. }) {
+            *por_tabla.entry(p.marca.fila.tabla.as_str()).or_default() += 1;
+        }
+    }
+    let mut unicos = crate::aparcar::Unicos::default();
+    for p in planes.iter_mut() {
+        let Accion::Escribir { fila, existe: true } = &p.accion else { continue };
+        let tabla = p.marca.fila.tabla.as_str();
+        if por_tabla.get(tabla).copied().unwrap_or(0) < 2 {
+            continue;
+        }
+        let indices = unicos.de(conn, tabla).await?;
+        p.aparcar = crate::aparcar::aparcar(tabla, indices, &arriba[tabla].columnas, fila, claves.get(tabla).map(Vec::as_slice).unwrap_or_default());
     }
 
     // Lo que se borra, hijas primero; lo que se escribe, padres primero.
@@ -537,10 +622,10 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     let posicion = |t: &str| orden.iter().position(|x| x == t).unwrap_or(usize::MAX);
     let mut borrar: Vec<&Plan<'_>> = planes.iter().filter(|p| matches!(p.accion, Accion::Borrar)).collect();
     borrar.sort_by_key(|p| std::cmp::Reverse(posicion(&p.marca.fila.tabla)));
-    let mut escribir: Vec<&Plan<'_>> = planes.iter().filter(|p| matches!(p.accion, Accion::Escribir(_))).collect();
+    let mut escribir: Vec<&Plan<'_>> = planes.iter().filter(|p| matches!(p.accion, Accion::Escribir { .. })).collect();
     escribir.sort_by_key(|p| posicion(&p.marca.fila.tabla));
     let en_orden: Vec<&Plan<'_>> = borrar.into_iter().chain(escribir).collect();
-    let sentencias: Vec<&SqlStatement> = en_orden.iter().filter_map(|p| p.sentencia.as_ref()).collect();
+    let sentencias = |planes: &[&Plan<'_>]| -> Vec<SqlStatement> { planes.iter().filter_map(|p| p.sentencia.clone()).collect() };
 
     for (m, motivo) in &dejadas {
         tracing::warn!(target: "tpv::sync", tabla = %m.fila.tabla, motivo, "SYNC-29: una fila de la nube no se trae");
@@ -548,44 +633,52 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     let todas: Vec<&Marca> = planes.iter().map(|p| p.marca).chain(dejadas.iter().map(|(m, _)| *m)).collect();
     let todo = conn
         .transaccion(async {
-            ejecutar(conn, &en_orden).await?;
+            ejecutar(conn, &en_orden, true).await?;
             retirar(conn, &todas).await
         })
         .await;
-    let escritas: Vec<SqlStatement> = match todo {
-        Ok(()) => sentencias.into_iter().cloned().collect(),
-        // Alguna no entra: una a una, y la que no entra cuenta un intento.
+    let (escritas, avanza) = match todo {
+        Ok(()) => (sentencias(&en_orden), true),
+        // Alguna no entra. Lo de cada tabla junto, aparcando sus valores únicos; y la tabla que no
+        // entra, fila a fila (una sola no tiene con quién cruzarse: sin aparcar). La que no entra
+        // cuenta un intento.
         Err(_) => {
             let mut escritas = Vec::new();
-            for p in &en_orden {
-                let Some(s) = &p.sentencia else { continue };
-                let una = conn
-                    .transaccion(async {
-                        ejecutar(conn, &[*p]).await?;
-                        retirar(conn, &[p.marca]).await
-                    })
-                    .await;
-                match una {
-                    Ok(()) => escritas.push(s.clone()),
-                    Err(e) => {
-                        // Lo nuestro, tal cual; lo de SQLite, en su clase (sin los datos de la fila).
-                        let texto = e.to_string();
-                        let motivo = match texto.as_str() {
-                            "se_llevaria_un_cobro" | "valor_binario" => texto,
-                            _ => crate::cuarentenas_bajada::clase_de_error(Some(&texto)).unwrap_or_default(),
-                        };
-                        no_ha_entrado(conn, p.marca, &motivo).await?;
+            let mut dejadas_ahora = false;
+            for tanda in tandas(&en_orden) {
+                if tanda.len() > 1 && intentar(conn, tanda, true).await.is_ok() {
+                    escritas.extend(sentencias(tanda));
+                    continue;
+                }
+                for p in tanda {
+                    match intentar(conn, &[*p], false).await {
+                        Ok(()) => escritas.extend(sentencias(&[*p])),
+                        Err(e) => {
+                            // Lo nuestro, tal cual; lo de SQLite, en su clase (sin los datos de la fila).
+                            let texto = e.to_string();
+                            let motivo = match texto.as_str() {
+                                "se_llevaria_un_cobro" | "valor_binario" => texto,
+                                _ => crate::cuarentenas_bajada::clase_de_error(Some(&texto)).unwrap_or_default(),
+                            };
+                            dejadas_ahora |= no_ha_entrado(conn, p.marca, &motivo).await?;
+                        }
                     }
                 }
             }
             let sin_nada: Vec<&Marca> =
                 planes.iter().filter(|p| p.sentencia.is_none()).map(|p| p.marca).chain(dejadas.iter().map(|(m, _)| *m)).collect();
             retirar(conn, &sin_nada).await?;
-            escritas
+            let avanza = !escritas.is_empty() || !sin_nada.is_empty() || dejadas_ahora;
+            (escritas, avanza)
         }
     };
     if !escritas.is_empty() {
         tracing::info!(target: "tpv::sync", filas = escritas.len(), "SYNC-29: filas traídas de la nube, que las ordenó de otra forma");
+    }
+    // SYNC-37: si no ha entrado nada y todo sigue apuntado, la vuelta no ha cambiado nada: el motor
+    // espera más para la siguiente, en vez de volver a pedirlo a los pocos segundos.
+    if !avanza {
+        return Ok(Convergencia::Aplazada);
     }
     Ok(Convergencia::Hecha { escritas, quedan })
 }

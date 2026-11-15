@@ -88,6 +88,8 @@ pub(crate) mod cuarentenas_bajada;
 pub(crate) mod contraste;
 // SYNC-29: el orden de la nube manda. Lo que su orden dejó de otra forma aquí se trae de ella.
 pub(crate) mod convergencia;
+// SYNC-37: escribir de una vez filas que se intercambian un valor único.
+pub(crate) mod aparcar;
 pub mod sync_reparacion;
 pub mod tareas;
 pub mod tickets;

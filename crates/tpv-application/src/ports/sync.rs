@@ -113,7 +113,8 @@ pub enum Convergencia {
     #[default]
     Nada,
     /// Hay filas que traer, pero esta base tiene algo por subir o la nube va por delante de ella (o
-    /// se ha movido mientras se le pedían): no se ha escrito nada y se vuelve a intentar más tarde.
+    /// se ha movido mientras se le pedían), o las que se han intentado siguen sin entrar aquí y se
+    /// quedan apuntadas (SYNC-37): no se ha escrito nada y se vuelve a intentar más tarde.
     Aplazada,
     /// Se han traído y escrito aquí las que eran distintas: `escritas`, para refrescar la interfaz.
     /// `quedan`: había más de las que caben en una vuelta.
