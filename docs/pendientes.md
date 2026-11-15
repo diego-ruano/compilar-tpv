@@ -27,7 +27,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Aplazado por decisión del responsable (lo que falta para AUD-22) |
-| [SYNC-38](#sync-38--lo-que-la-convergencia-o-la-salida-de-una-cuarentena-no-consigue-escribir) | 🔵 | Lo que la convergencia o la salida de una cuarentena no consigue escribir se queda apuntado sin plazo | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -388,29 +387,6 @@ reconciliación no dé por buena una base con el cursor por encima de lo que la 
 nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
 AUD-22 (la copia traída de fuera, restaurada sin PIN). Aplazado por decisión del responsable: no
 entra antes de salir al público.
-
-### SYNC-38 · Lo que la convergencia o la salida de una cuarentena no consigue escribir
-
-La convergencia (SYNC-29, `convergencia.rs`) aparca los valores únicos de las filas que trae de la
-nube para que un intercambio entre (SYNC-37, `aparcar.rs`), y una fila que aun así choca con un
-`UNIQUE` o una foránea conserva su marca y se reintenta, como mucho una vez por minuto. Quedan sin
-salida:
-
-- **Dos fallos a la vez**: una fila apuntada que choca con una divergencia de aquí que no está
-  apuntada. Se reintenta sin plazo, el contraste no la toca (es una fila apuntada) y su subida de la
-  otra fila choca igual arriba. Antes de SYNC-37, al quinto intento se desapuntaba y el contraste
-  imponía lo de la Main.
-- **Un cruce en el índice de la comanda abierta de una mesa** (`ID_Mesa` sale en un `CHECK` y no se
-  aparca) y una cadena de más de cuatro eslabones que acaba en algo que no se trae.
-- **La salida de una cuarentena de bajada** (SYNC-36, `cuarentenas_bajada.rs`) escribe las filas de la
-  nube sin aparcar, como hacía la convergencia: un intercambio de un valor único la deja sin entrar.
-- **La reparación del contraste** borra arriba lo que sobra después de subir lo demás: una fila que
-  sobra y tiene el valor único que necesita otra de aquí hace fallar la operación.
-
-Todos piden dos cosas raras a la vez. Arreglo posible: aparcar también en la salida de las
-cuarentenas, borrar antes de subir en la reparación, y que lo que lleva días apuntado sin entrar avise
-al administrador como `bajada_atascada`, cuya salida (traer el estado de la nube) lo resuelve. Sin
-decidir.
 
 ---
 
