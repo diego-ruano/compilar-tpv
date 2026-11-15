@@ -453,8 +453,9 @@ async fn intentar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> A
 
 /// Las veces que [`cruzadas`] aparta lo que choca y lo repite. Cada vez vuelve a escribir el grupo
 /// entero con el escritor cogido, y cada una sólo aparta un eslabón de una cadena que acaba en algo
-/// que no se trae: sin tope, una cadena larga costaría el cuadrado de su largo (Codex).
-const MAX_SEPARACIONES: usize = 4;
+/// que no se trae: sin tope, una cadena larga costaría el cuadrado de su largo (Codex). Lo usa también
+/// la salida de las cuarentenas de bajada para las que se intentan juntas (SYNC-38).
+pub(crate) const MAX_SEPARACIONES: usize = 4;
 
 /// SYNC-37 · Unas filas de una tabla que solas chocan con un índice único: pueden estar cruzadas
 /// entre ellas, y alguna chocar además con algo de aquí que no se trae. Se aparcan todas y se

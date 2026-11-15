@@ -901,7 +901,10 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   escritura los pisa. Y las que solas chocan con un índice único se intentan otra vez todas juntas,
   en una transacción: un cambio que le da a una zona el nombre de otra y otro que le da a ésa el de
   la primera chocan cada uno con lo que el otro todavía no ha traído. Lo de todas es de la misma foto
-  de la nube; si así tampoco entran, se quedan como estaban.
+  de la nube. Si así tampoco entran, se apartan las que chocan con algo más (se escribe todo en una
+  transacción que se deshace siempre, sentencia a sentencia, y una fila que choca aparta a todas las
+  cuarentenas que la tocan) y se repite con las demás, como mucho cuatro veces, como en la
+  convergencia; lo que no entra se queda como estaba.
 - **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
   filas son inciertas o dudosas; toca lo mismo que algo apartado de la subida (la nube no tiene lo
   que esta Main escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta

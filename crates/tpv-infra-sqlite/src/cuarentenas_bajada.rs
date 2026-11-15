@@ -522,16 +522,16 @@ pub(crate) async fn resolver(
             }
         }
     }
-    // SYNC-38 · Las que solas chocan con un índice único pueden haberse cruzado un valor entre ellas
-    // (un cambio le da a una zona el nombre de otra y otro cambio, a ésa, el de la primera): cada una
-    // choca con lo que la otra todavía no ha traído. Se intentan otra vez juntas, aparcando, en una
-    // transacción: lo de todas es de la misma foto de la nube.
-    if chocan.len() >= 2 && matches!(aplicar(conn, &chocan, &arriba, &orden, &claves, &mut unicos).await, Ok(true)) {
-        for c in &chocan {
+    // SYNC-38 · Las que solas chocan con un índice único pueden haberse cruzado un valor entre ellas:
+    // otra vez juntas, aparcando, en una transacción (lo de todas es de la misma foto de la nube), y
+    // apartando las que chocan con algo más.
+    if chocan.len() >= 2 {
+        let entran = juntas(conn, chocan, &arriba, &orden, &claves, &mut unicos).await;
+        for c in &entran {
             resueltas += 1;
             cerrada(c);
         }
-        quedan.retain(|(c, _)| !chocan.iter().any(|x| std::ptr::eq(*x, *c)));
+        quedan.retain(|(c, _)| !entran.iter().any(|x| std::ptr::eq(*x, *c)));
     }
     for (c, motivo) in &quedan {
         tracing::warn!(
@@ -827,63 +827,79 @@ pub(crate) async fn traer(
     Ok(Some(traida))
 }
 
-/// Aplica aquí lo que se ha traído de unas cuarentenas (normalmente una) y las cierra, en una
-/// transacción. `false` si alguna ya no estaba en cuarentena. Un `Err` deja todo como estaba.
+/// Lo que hay que ejecutar para traer unas cuarentenas, en su orden: lo que se borra, lo que aparca y
+/// lo que se escribe. De cada borrado y cada escritura, las cuarentenas del grupo (su posición) que
+/// tocan esa fila.
+struct Traer {
+    borrar: Vec<(SqlStatement, Vec<usize>)>,
+    aparcar: Vec<SqlStatement>,
+    escribir: Vec<(SqlStatement, Vec<usize>)>,
+}
+
+/// Lo que traería aquí lo que se ha traído de la nube para `grupo`. Un `Err` (con su motivo) si no se
+/// puede ni intentar.
 ///
 /// SYNC-38 · Lo que se escribe aparca antes sus valores únicos, como en la convergencia
 /// (`aparcar.rs`): dos filas que la nube ha dejado con un nombre intercambiado sólo entran juntas, y
-/// en el orden que sea la primera chocaría con la segunda. Lo aparcado lo pisa la escritura de su
-/// fila en la misma transacción, y si algo no entra se deshace todo.
-async fn aplicar(
+/// en el orden que sea la primera chocaría con la segunda.
+async fn preparar(
     conn: &Connection,
     grupo: &[&Cuarentena],
     arriba: &HashMap<String, Traida>,
     orden: &[String],
     claves: &HashMap<String, Vec<String>>,
     unicos: &mut crate::aparcar::Unicos,
-) -> AppResult<bool> {
-    // Lo que tocan, una vez cada fila: borrada si alguna la borraba.
-    let mut filas: Vec<FilaTocada> = Vec::new();
+) -> AppResult<Traer> {
+    // Lo que tocan, una vez cada fila: borrada si alguna la borraba, y con las que la tocan.
+    let mut filas: Vec<(FilaTocada, Vec<usize>)> = Vec::new();
     let mut vistas: HashMap<String, usize> = HashMap::new();
-    for f in grupo.iter().flat_map(|c| &c.tocadas.filas).filter(|f| !crate::sync::no_es_tabla_de_negocio(&f.tabla)) {
-        // Lo que no se ha podido traer, ni se intenta.
-        let Some(t) = arriba.get(&f.tabla) else {
-            return Err(AppError::internal("la_nube_no_la_ha_traido"));
-        };
-        if t.sin_buscar {
-            return Err(AppError::internal("la_nube_no_la_sabe_buscar"));
-        }
-        // Una clave que no es la de la tabla de aquí no dice qué fila es.
-        if claves.get(&f.tabla).is_none_or(|k| k.is_empty() || k.len() != f.clave.len()) {
-            return Err(AppError::internal("la_clave_no_es_la_de_aqui"));
-        }
-        let k = tocadas::canonica_de(f).ok_or_else(|| AppError::internal("clave_ilegible"))?;
-        match vistas.get(&k) {
-            Some(i) => filas[*i].borrada |= f.borrada,
-            None => {
-                vistas.insert(k, filas.len());
-                filas.push(f.clone());
+    for (i, c) in grupo.iter().enumerate() {
+        for f in c.tocadas.filas.iter().filter(|f| !crate::sync::no_es_tabla_de_negocio(&f.tabla)) {
+            // Lo que no se ha podido traer, ni se intenta.
+            let Some(t) = arriba.get(&f.tabla) else {
+                return Err(AppError::internal("la_nube_no_la_ha_traido"));
+            };
+            if t.sin_buscar {
+                return Err(AppError::internal("la_nube_no_la_sabe_buscar"));
+            }
+            // Una clave que no es la de la tabla de aquí no dice qué fila es.
+            if claves.get(&f.tabla).is_none_or(|k| k.is_empty() || k.len() != f.clave.len()) {
+                return Err(AppError::internal("la_clave_no_es_la_de_aqui"));
+            }
+            let k = tocadas::canonica_de(f).ok_or_else(|| AppError::internal("clave_ilegible"))?;
+            match vistas.get(&k) {
+                Some(j) => {
+                    let (fila, de) = &mut filas[*j];
+                    fila.borrada |= f.borrada;
+                    if !de.contains(&i) {
+                        de.push(i);
+                    }
+                }
+                None => {
+                    vistas.insert(k, filas.len());
+                    filas.push((f.clone(), vec![i]));
+                }
             }
         }
     }
     let posicion = |tabla: &str| orden.iter().position(|t| t == tabla).unwrap_or(usize::MAX);
-    filas.sort_by_key(|f| posicion(&f.tabla));
+    filas.sort_by_key(|(f, _)| posicion(&f.tabla));
 
     // Lo que el cambio borraba y arriba ya no está: hijas primero.
-    let mut borrar: Vec<SqlStatement> = Vec::new();
-    for f in filas.iter().rev() {
+    let mut borrar = Vec::new();
+    for (f, de) in filas.iter().rev() {
         let k = tocadas::canonica_de(f).unwrap_or_default();
         if !f.borrada || arriba[&f.tabla].filas.contains_key(&k) {
             continue;
         }
         let clave = &claves[&f.tabla];
         let donde = clave.iter().enumerate().map(|(i, c)| format!("{} = ?{}", cita(c), i + 1)).collect::<Vec<_>>().join(" AND ");
-        borrar.push(SqlStatement { sql: format!("DELETE FROM {} WHERE {donde};", cita(&f.tabla)), args: f.clave.clone() });
+        borrar.push((SqlStatement { sql: format!("DELETE FROM {} WHERE {donde};", cita(&f.tabla)), args: f.clave.clone() }, de.clone()));
     }
     // Lo que está arriba, como está: padres primero.
-    let mut escribir: Vec<(&str, &Vec<Json>)> = Vec::new();
+    let mut escribir: Vec<(&str, &Vec<Json>, &Vec<usize>)> = Vec::new();
     let mut columnas_de: HashMap<&str, Vec<String>> = HashMap::new();
-    for f in &filas {
+    for (f, de) in &filas {
         let traida = &arriba[&f.tabla];
         let Some(fila) = traida.filas.get(&tocadas::canonica_de(f).unwrap_or_default()) else { continue };
         if !columnas_de.contains_key(f.tabla.as_str()) {
@@ -892,29 +908,46 @@ async fn aplicar(
         if traida.columnas.iter().any(|c| !columnas_de[f.tabla.as_str()].iter().any(|l| l.eq_ignore_ascii_case(c))) {
             return Err(AppError::internal("columnas_desconocidas"));
         }
-        escribir.push((f.tabla.as_str(), fila));
+        escribir.push((f.tabla.as_str(), fila, de));
     }
     // Con dos filas o más de una tabla, cada una aparca antes los valores únicos que va a cambiar
     // (si no está aquí, la sentencia no toca nada).
     let mut por_tabla: HashMap<&str, usize> = HashMap::new();
-    for (tabla, _) in &escribir {
+    for (tabla, ..) in &escribir {
         *por_tabla.entry(tabla).or_default() += 1;
     }
     let mut aparcar: Vec<SqlStatement> = Vec::new();
-    for (tabla, fila) in &escribir {
+    for (tabla, fila, _) in &escribir {
         if por_tabla[tabla] >= 2 {
             let indices = unicos.de(conn, tabla).await?;
             aparcar.extend(crate::aparcar::aparcar(tabla, indices, &arriba[*tabla].columnas, fila, &claves[*tabla]));
         }
     }
-    let escribir: Vec<SqlStatement> = escribir
+    let escribir = escribir
         .iter()
-        .map(|(tabla, fila)| SqlStatement {
-            sql: escribir_como_esta(tabla, &arriba[*tabla].columnas, &claves[*tabla]),
-            args: (*fila).clone(),
+        .map(|(tabla, fila, de)| {
+            let sql = escribir_como_esta(tabla, &arriba[*tabla].columnas, &claves[*tabla]);
+            (SqlStatement { sql, args: (*fila).clone() }, (*de).clone())
         })
         .collect();
+    Ok(Traer { borrar, aparcar, escribir })
+}
 
+/// Aplica aquí lo que se ha traído de unas cuarentenas (normalmente una) y las cierra, en una
+/// transacción ([`preparar`]). `false` si alguna ya no estaba en cuarentena. Un `Err` deja todo como
+/// estaba: lo aparcado lo pisa la escritura de su fila en la misma transacción, y si algo no entra se
+/// deshace todo.
+async fn aplicar(
+    conn: &Connection,
+    grupo: &[&Cuarentena],
+    arriba: &HashMap<String, Traida>,
+    orden: &[String],
+    claves: &HashMap<String, Vec<String>>,
+    unicos: &mut crate::aparcar::Unicos,
+) -> AppResult<bool> {
+    let Traer { borrar, aparcar, escribir } = preparar(conn, grupo, arriba, orden, claves, unicos).await?;
+    let borrar = borrar.into_iter().map(|(s, _)| s).collect::<Vec<_>>();
+    let escribir = escribir.into_iter().map(|(s, _)| s).collect::<Vec<_>>();
     let ops = Value::Text(serde_json::to_string(&grupo.iter().map(|c| c.op_id.as_str()).collect::<Vec<_>>()).map_err(db_err)?);
     conn.transaccion(async {
         let mut filas_siguen = conn
@@ -944,6 +977,73 @@ async fn aplicar(
         Ok(true)
     })
     .await
+}
+
+/// SYNC-38 · Las cuarentenas de `grupo` (su posición) cuyas filas chocan al escribirlas juntas,
+/// aparcando: lo de [`preparar`] en una transacción que se deshace siempre, sentencia a sentencia
+/// (SQLite sólo deshace la que choca). Una fila que choca aparta a todas las que la tocan.
+async fn las_que_chocan(
+    conn: &Connection,
+    grupo: &[&Cuarentena],
+    arriba: &HashMap<String, Traida>,
+    orden: &[String],
+    claves: &HashMap<String, Vec<String>>,
+    unicos: &mut crate::aparcar::Unicos,
+) -> AppResult<HashSet<usize>> {
+    let Traer { borrar, aparcar, escribir } = preparar(conn, grupo, arriba, orden, claves, unicos).await?;
+    let mut chocan: HashSet<usize> = HashSet::new();
+    let r = conn
+        .transaccion(async {
+            for s in &aparcar {
+                crate::convergencia::una(conn, s).await?;
+            }
+            for (s, de) in borrar.iter().chain(&escribir) {
+                if crate::convergencia::una(conn, s).await.is_err() {
+                    chocan.extend(de.iter().copied());
+                }
+            }
+            Err::<(), _>(AppError::internal("se_deshace"))
+        })
+        .await;
+    match r {
+        Err(e) if e.to_string() == "se_deshace" => Ok(chocan),
+        Err(e) => Err(e),
+        Ok(()) => Ok(chocan),
+    }
+}
+
+/// SYNC-38 · Las cuarentenas que solas chocan con un índice único, otra vez juntas ([`aplicar`]): un
+/// cambio que le da a una zona el nombre de otra y otro que le da a ésa el de la primera chocan cada
+/// uno con lo que el otro todavía no ha traído. Si no entran, se apartan las que chocan
+/// ([`las_que_chocan`]) y se repite con las demás, como mucho `MAX_SEPARACIONES` veces (como la
+/// convergencia): una que choca con algo de aquí que no se trae no deja sin entrar al resto. Devuelve
+/// las que han entrado, ya cerradas.
+async fn juntas<'c>(
+    conn: &Connection,
+    mut grupo: Vec<&'c Cuarentena>,
+    arriba: &HashMap<String, Traida>,
+    orden: &[String],
+    claves: &HashMap<String, Vec<String>>,
+    unicos: &mut crate::aparcar::Unicos,
+) -> Vec<&'c Cuarentena> {
+    for _ in 0..crate::convergencia::MAX_SEPARACIONES {
+        if grupo.len() < 2 {
+            break;
+        }
+        match aplicar(conn, &grupo, arriba, orden, claves, unicos).await {
+            Ok(true) => return grupo,
+            // Alguna ya no está: la ha cerrado otro camino.
+            Ok(false) => break,
+            Err(_) => {}
+        }
+        let chocan = match las_que_chocan(conn, &grupo, arriba, orden, claves, unicos).await {
+            Ok(c) if !c.is_empty() && c.len() < grupo.len() => c,
+            // Chocan todas, o falla otra cosa (una foránea al confirmar): no hay nada que separar.
+            _ => break,
+        };
+        grupo = grupo.into_iter().enumerate().filter(|(i, _)| !chocan.contains(i)).map(|(_, c)| c).collect();
+    }
+    Vec::new()
 }
 
 pub(crate) async fn columnas_locales(conn: &Connection, tabla: &str) -> AppResult<Vec<String>> {

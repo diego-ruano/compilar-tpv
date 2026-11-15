@@ -592,6 +592,32 @@ async fn dos_cambios_que_se_cruzan_un_nombre_salen_juntos() {
 }
 
 #[tokio::test]
+async fn una_que_choca_con_algo_de_aqui_no_deja_sin_salir_a_las_que_se_cruzan() {
+    // Codex: las que solas chocan con un índice único se intentaban juntas todo o nada. Aquí, tres se
+    // cruzan el nombre de la terraza y el salón, y otra trae la barra con un nombre que aquí tiene la
+    // cocina por algo que no está apuntado. Juntas no entran; sin ésa, sí.
+    let cambios = [
+        cambio("op-31", 31, vec![(NOMBRE, vec![json!("z2"), json!("Bodega")])]),
+        cambio("op-32", 32, vec![(NOMBRE, vec![json!("z1"), json!("Salón")])]),
+        cambio("op-33", 33, vec![(NOMBRE, vec![json!("z2"), json!("Terraza")])]),
+        cambio("op-34", 34, vec![(NOMBRE, vec![json!("z3"), json!("Bodega 3")])]),
+    ];
+    let anterior = "CREATE TRIGGER anterior BEFORE UPDATE ON Zonas WHEN NEW.Nombre_Zona LIKE 'Bodega%'
+                      BEGIN SELECT RAISE(ABORT, 'version_anterior'); END;";
+    let otras = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z3', 'Barra'), ('z4', 'Cocina');";
+    let (repo, db, dir, nube) = con_la_version_anterior("cruzadas-y-otra", otras, anterior, &cambios).await;
+    sembrar(&db, "UPDATE Zonas SET Nombre_Zona = 'Bodega 3' WHERE ID_Zona = 'z4';").await;
+
+    let r = hecha(pasada(&repo, &nube, true).await);
+    assert_eq!(en_cuarentena(&db).await, vec!["op-34"]);
+    assert!(r.aplazado);
+    assert_eq!(zonas(&db).await, "z1:Salón z2:Terraza z3:Barra z4:Bodega 3");
+    assert_eq!(aparcadas(&db).await, 0);
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn lo_que_choca_con_algo_de_aqui_que_no_se_trae_se_queda_sin_dejar_nada_aparcado() {
     // La Handy llama Bodega a la terraza y Patio a la barra en un cambio que aquí no entró, y aquí
     // el salón se llama Bodega por algo que no está apuntado en ningún sitio. Traídas de la nube, las
