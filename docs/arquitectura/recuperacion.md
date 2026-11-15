@@ -134,8 +134,10 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   el cierre de caja para avisar (`caja_por_bajar`). Por lo demás le da igual: restaura lo que llega
   y la fase 2 recorre cada tabla transaccional entera, así que con una ventana estrecha acaba con lo
   mismo; lo que cambia es que los días que no entraron llegan después, con el histórico, tabla a
-  tabla y de lo más antiguo a lo más nuevo (lo que hay desde el último cierre, lo último:
-  [DO-04](../pendientes.md#do-04--el-histórico-baja-tabla-a-tabla-y-lo-más-reciente-llega-lo-último)).
+  tabla (padres primero) y cada una de lo más antiguo a lo más nuevo. Lo del periodo abierto es lo
+  último que llega: en un bar grande, sus cobros, detrás de todas las comandas y sus líneas. Hasta
+  entonces el arqueo avisa de que puede salir corto, con el progreso de la descarga, y deja cerrar
+  igual ([caja.md](caja.md)).
 - **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
   la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
   bajan un volcado (`/bootstrap`, `/historico` y las del contraste, `/verificar/*`) tienen 150 s de
