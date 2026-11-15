@@ -104,7 +104,8 @@ const CLAVES_POR_PETICION: usize = 500;
 /// Se leen como mucho las `MAX_CUARENTENAS_LEIDAS` más antiguas, como en la salida, pero sólo de las
 /// que pueden contar (Codex, SYNC-38): la consulta ya deja fuera las que seguro que no (sin intentar,
 /// con `incierto` a `false`, sin `dudosa` y con todas sus filas bien escritas), para que miles de ésas
-/// no tapen a una que sí. Lo que deja pasar lo decide [`Tocadas::de_json`], como en la salida.
+/// no tapen a una que sí. Lo que deja pasar lo decide [`Tocadas::de_json`], como en la salida. La
+/// consulta lee `Filas_Json` como lo escribe [`Tocadas::a_json`], que es lo único que lo escribe.
 pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<i64> {
     let mut filas = conn
         .query(
@@ -113,7 +114,8 @@ pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<
                 AND (Ultima_Salida_Ms IS NOT NULL OR Filas_Json IS NULL \
                      OR json_type(Filas_Json, '$.incierto') IS NOT 'false' \
                      OR json_type(Filas_Json, '$.dudosa') IS 'true' \
-                     OR EXISTS (SELECT 1 FROM json_each(Filas_Json, '$.filas') f \
+                     OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_type(Filas_Json, '$.filas') = 'array' \
+                                                             THEN json_extract(Filas_Json, '$.filas') ELSE '[]' END) f \
                                  WHERE CASE WHEN f.type = 'object' \
                                             THEN json_type(f.value, '$.tabla') IS NOT 'text' \
                                               OR json_type(f.value, '$.clave') IS NOT 'array' \
