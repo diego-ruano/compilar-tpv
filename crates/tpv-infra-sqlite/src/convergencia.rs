@@ -225,10 +225,13 @@ pub(crate) async fn marcar(conn: &Connection, filas: &[FilaTocada], seq: i64) ->
         .map(|f| serde_json::json!({ "t": f.tabla, "k": serde_json::to_string(&f.clave).unwrap_or_default() }))
         .collect();
     let lista = Value::Text(serde_json::to_string(&lista).map_err(db_err)?);
-    // Las que ya estaban apuntadas, con el cambio de ahora; las nuevas, en lo que quede de sitio.
+    // Las que ya estaban apuntadas, con el cambio de ahora y sus intentos otra vez desde el principio;
+    // las nuevas, en lo que quede de sitio. SYNC-38 (Codex): una que ya ha fallado se queda en uno, no
+    // en cero: con lo que la vuelve a tocar no ha entrado todavía, y el aviso de lo que lleva una
+    // semana sin entrar (`atascadas`) no puede apagarse por eso.
     let ya = conn
         .execute(
-            "UPDATE _Sync_Por_Contrastar SET Seq = ?2, Intentos = 0 \
+            "UPDATE _Sync_Por_Contrastar SET Seq = ?2, Intentos = MIN(Intentos, 1) \
               WHERE (Tabla, Clave_Json) IN (SELECT json_extract(value, '$.t'), json_extract(value, '$.k') FROM json_each(?1));",
             vec![lista.clone(), Value::Integer(seq)],
         )
@@ -258,8 +261,9 @@ pub(crate) async fn marcar(conn: &Connection, filas: &[FilaTocada], seq: i64) ->
 }
 
 /// SYNC-38 · Cuántas filas apuntadas llevan sin traerse desde antes de `antes_de_ms` (desde que se
-/// apuntaron: una que entra se borra, y si la vuelve a tocar un cambio se apunta de nuevo) y no han
-/// entrado aquí la última vez que se intentó (`Intentos`, que vuelve a cero si la toca otro cambio).
+/// apuntaron: una que entra se borra, y si la vuelve a tocar un cambio se apunta de nuevo) y alguna
+/// vez han fallado al intentarlo (`Intentos`: si la vuelve a tocar un cambio, [`marcar`] la deja en
+/// uno y no en cero, así que una que ha fallado cuenta mientras siga apuntada).
 /// Son las que no entran por algo de esta base que no se trae: una divergencia que nadie ha apuntado,
 /// una cadena más larga de lo que se separa. No las retira nadie (el contraste no las toca, y
 /// retirarlas dejaría subir lo de aquí encima del orden de la nube); las cuenta el panel de salud
@@ -859,7 +863,31 @@ mod tests {
             marcar(w.raw(), &[fila("r1"), fila("nueva-1"), fila("nueva-2")], 7).await.unwrap();
         }
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Por_Contrastar;").await, MAX_MARCAS);
-        assert_eq!(numero(&db, "SELECT Seq * 10 + Intentos FROM _Sync_Por_Contrastar WHERE Clave_Json = '[\"r1\"]';").await, 70);
+        // Con el cambio de ahora, y sus intentos desde el principio (en uno, porque ya había fallado).
+        assert_eq!(numero(&db, "SELECT Seq * 10 + Intentos FROM _Sync_Por_Contrastar WHERE Clave_Json = '[\"r1\"]';").await, 71);
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Por_Contrastar WHERE Clave_Json LIKE '%nueva%';").await, 1);
+    }
+
+    #[tokio::test]
+    async fn una_fila_que_ha_fallado_sigue_contando_como_atascada_aunque_la_vuelva_a_apuntar_otro_cambio() {
+        // Codex: volver a apuntarla ponía sus intentos a cero, y el aviso de lo que lleva una semana
+        // sin entrar se apagaba aunque siguiera sin entrar. La que nunca se ha podido intentar (sin
+        // conexión) sigue sin contar.
+        let db = base("atascada-reapuntada").await;
+        let hace_ocho_dias = now_ms() - 8 * 24 * 60 * 60 * 1000;
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms, Intentos)
+                 VALUES ('Reservas', '[\"r1\"]', 1, ?1, 6), ('Reservas', '[\"r2\"]', 1, ?1, 0);",
+                vec![Value::Integer(hace_ocho_dias)],
+            )
+            .await
+            .unwrap();
+        let hace_una_semana = now_ms() - 7 * 24 * 60 * 60 * 1000;
+        assert_eq!(atascadas(w.raw(), hace_una_semana).await.unwrap(), 1);
+        marcar(w.raw(), &[fila("r1"), fila("r2")], 9).await.unwrap();
+        assert_eq!(atascadas(w.raw(), hace_una_semana).await.unwrap(), 1, "r1 sigue sin entrar; r2 no se ha intentado");
+        drop(w);
     }
 }

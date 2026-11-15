@@ -684,9 +684,10 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   apuntada, y retirarla dejaría que subiera lo de aquí y deshiciera el orden de la nube.
 - **Lo que lleva una semana apuntado sin entrar se avisa** (SYNC-38): una fila que choca a la vez
   con algo de aquí que nadie ha apuntado, o una cadena más larga de lo que se separa. Si lleva una
-  semana apuntada (`Desde_Ms`: al entrar se borra, y otro cambio que la toque la vuelve a apuntar) y
-  la última vez que se intentó no entró (`Intentos`, que vuelve a cero cuando la toca otro cambio;
-  una que nunca se ha podido intentar, sin conexión, no cuenta), cuenta en el panel de salud y se
+  semana apuntada (`Desde_Ms`: al entrar se borra) y alguna vez ha fallado al intentarlo
+  (`Intentos`: cuando otro cambio la vuelve a apuntar, sus intentos empiezan otra vez, pero en uno si
+  ya había fallado, así que una que ha fallado cuenta mientras siga apuntada; una que nunca se ha
+  podido intentar, sin conexión, no cuenta), cuenta en el panel de salud y se
   avisa a los administradores con el mismo aviso que una cuarentena de bajada que no sale
   ([abajo](#la-salida-de-una-cuarentena-de-bajada-sync-36)), cuya salida, traer el estado actual de
   la nube, vacía lo apuntado. Mientras tanto se sigue intentando, como mucho una vez por minuto.

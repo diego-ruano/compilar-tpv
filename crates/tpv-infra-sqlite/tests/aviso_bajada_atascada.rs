@@ -159,7 +159,7 @@ async fn una_fila_apuntada_que_no_entra_avisa_a_la_semana_con_el_mismo_aviso_y_s
     let (dir, db, repo, notif) = abrir().await;
 
     // Lo que no cuenta: una de hace dos días que no entra, y una de hace diez que no se ha podido
-    // intentar (el equipo sin conexión) o que acaba de tocar otro cambio.
+    // intentar nunca (el equipo sin conexión).
     apuntada(&db, "z-reciente", 2, 6).await;
     apuntada(&db, "z-sin-intentar", 10, 0).await;
     assert_eq!(repo.health().await.unwrap().bajada_atascada, 0);
