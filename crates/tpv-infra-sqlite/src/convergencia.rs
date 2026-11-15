@@ -400,6 +400,45 @@ async fn intentar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> A
     .await
 }
 
+/// SYNC-37 · Unas filas de una tabla que solas chocan con un índice único: pueden estar cruzadas
+/// entre ellas, y alguna chocar además con algo de aquí que no se trae. Se aparcan todas y se
+/// escribe cada una; la que choca no deshace a las demás (SQLite sólo deshace la sentencia), pero si
+/// alguna choca se deshace todo y se repite sin ellas, hasta que entran las que quedan o no queda
+/// nada que cruzar. Devuelve las que han entrado, con sus marcas retiradas.
+async fn cruzadas<'p, 'a>(conn: &Connection, mut grupo: Vec<&'p Plan<'a>>) -> Vec<&'p Plan<'a>> {
+    while grupo.len() > 1 {
+        let mut chocan: Vec<usize> = Vec::new();
+        let r = conn
+            .transaccion(async {
+                for s in grupo.iter().filter_map(|p| p.aparcar.as_ref()) {
+                    una(conn, s).await?;
+                }
+                for (i, p) in grupo.iter().enumerate() {
+                    if let Some(s) = &p.sentencia {
+                        if una(conn, s).await.is_err() {
+                            chocan.push(i);
+                        }
+                    }
+                }
+                if !chocan.is_empty() {
+                    return Err(AppError::internal("chocan"));
+                }
+                retirar(conn, &grupo.iter().map(|p| p.marca).collect::<Vec<_>>()).await
+            })
+            .await;
+        match r {
+            Ok(()) => return grupo,
+            // Las que chocan, fuera; las demás, otra vez.
+            Err(_) if !chocan.is_empty() && chocan.len() < grupo.len() => {
+                grupo = grupo.into_iter().enumerate().filter(|(i, _)| !chocan.contains(i)).map(|(_, p)| p).collect();
+            }
+            // Chocan todas, o falla otra cosa (una foránea al confirmar): no hay nada que separar.
+            Err(_) => break,
+        }
+    }
+    Vec::new()
+}
+
 /// Lo que se intenta junto cuando no entra todo: cada borrado solo, y lo que se escribe, tabla a
 /// tabla (lo que se intercambia un valor único es de la misma tabla).
 fn tandas<'p, 'a>(en_orden: &'p [&'p Plan<'a>]) -> Vec<&'p [&'p Plan<'a>]> {
@@ -640,8 +679,9 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     let (escritas, avanza) = match todo {
         Ok(()) => (sentencias(&en_orden), true),
         // Alguna no entra. Lo de cada tabla junto, aparcando sus valores únicos; y la tabla que no
-        // entra, fila a fila (una sola no tiene con quién cruzarse: sin aparcar). La que no entra
-        // cuenta un intento.
+        // entra, fila a fila (una sola no tiene con quién cruzarse: sin aparcar). Las que solas
+        // chocan con un índice único pueden estar cruzadas entre ellas: juntas otra vez, aparcando y
+        // apartando las que chocan con algo más ([`cruzadas`]). La que no entra cuenta un intento.
         Err(_) => {
             let mut escritas = Vec::new();
             let mut dejadas_ahora = false;
@@ -650,6 +690,7 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                     escritas.extend(sentencias(tanda));
                     continue;
                 }
+                let mut fallan: Vec<(&Plan<'_>, String)> = Vec::new();
                 for p in tanda {
                     match intentar(conn, &[*p], false).await {
                         Ok(()) => escritas.extend(sentencias(&[*p])),
@@ -660,9 +701,18 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                                 "se_llevaria_un_cobro" | "valor_binario" => texto,
                                 _ => crate::cuarentenas_bajada::clase_de_error(Some(&texto)).unwrap_or_default(),
                             };
-                            dejadas_ahora |= no_ha_entrado(conn, p.marca, &motivo).await?;
+                            fallan.push((p, motivo));
                         }
                     }
+                }
+                let chocan: Vec<&Plan<'_>> = fallan.iter().filter(|(_, m)| m.starts_with("unique")).map(|(p, _)| *p).collect();
+                if chocan.len() > 1 {
+                    let entran = cruzadas(conn, chocan).await;
+                    escritas.extend(sentencias(&entran));
+                    fallan.retain(|(p, _)| !entran.iter().any(|e| std::ptr::eq(*e, *p)));
+                }
+                for (p, motivo) in &fallan {
+                    dejadas_ahora |= no_ha_entrado(conn, p.marca, motivo).await?;
                 }
             }
             let sin_nada: Vec<&Marca> =

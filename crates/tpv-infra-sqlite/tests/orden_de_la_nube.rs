@@ -502,6 +502,59 @@ async fn tres_zonas_que_rotan_el_nombre_tambien_se_traen_aunque_otra_fila_no_ent
 }
 
 #[tokio::test]
+async fn dos_mesas_que_se_cambian_el_numero_entran_aunque_otra_de_su_tabla_no_entre() {
+    // Arriba, la 1 y la 2 de la terraza se han cambiado el número, y hay una mesa en un patio que
+    // aquí no está. Las tres son de la misma tabla: juntas no entran (la del patio no tiene zona), y
+    // una a una tampoco las cruzadas. Juntas las dos que sólo chocan con el índice, sí.
+    let (repo, db, dir, nube) = base("mesas-cruzadas").await;
+    let otra_mesa = "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                          VALUES ('m2', 'z1', '2', 2, 0, 0, 'rect', 80, 80);";
+    sembrar(&db, otra_mesa).await;
+    nube.sembrar(otra_mesa).await;
+    nube.sembrar(
+        "UPDATE Mesas SET Numero_Mesa = '_' || ID_Mesa;
+         UPDATE Mesas SET Numero_Mesa = CASE ID_Mesa WHEN 'm1' THEN '2' ELSE '1' END;
+         INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Patio');
+         INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+              VALUES ('m9', 'z9', '9', 2, 0, 0, 'rect', 80, 80);",
+    )
+    .await;
+    apuntar(&db, "Mesas", &["m1", "m9", "m2"]).await;
+
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 2);
+    let mesas = "SELECT group_concat(ID_Mesa || '=' || Numero_Mesa, ' ') FROM (SELECT * FROM Mesas ORDER BY ID_Mesa);";
+    assert_eq!(texto(&db, mesas).await, "m1=2 m2=1");
+    assert_eq!(texto(&db, "SELECT Tabla || ' ' || Clave_Json || ' ' || Intentos FROM _Sync_Por_Contrastar;").await, "Mesas [\"m9\"] 1");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn un_intercambio_entra_aunque_otra_fila_de_su_tabla_choque_con_algo_que_no_se_trae() {
+    // Codex: arriba la terraza y el salón se han cambiado el nombre, y la barra se llama Cocina, que
+    // aquí es el nombre de una zona que no está apuntada. La barra no entra; el intercambio, sí.
+    let (repo, db, dir, nube) = base("intercambio-y-otra").await;
+    let zonas_y_cocina = format!("{ZONAS} INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z4', 'Cocina');");
+    sembrar(&db, &zonas_y_cocina).await;
+    nube.sembrar(&zonas_y_cocina).await;
+    nube.sembrar(
+        "UPDATE Zonas SET Nombre_Zona = '_' || ID_Zona;
+         UPDATE Zonas SET Nombre_Zona = CASE ID_Zona WHEN 'z1' THEN 'Salón' WHEN 'z2' THEN 'Terraza' WHEN 'z3' THEN 'Cocina' ELSE 'Almacén' END;",
+    )
+    .await;
+    apuntar(&db, "Zonas", &["z1", "z2", "z3"]).await;
+
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 2);
+    assert_eq!(zonas(&db).await, "z1=Salón z2=Terraza z3=Barra z4=Cocina");
+    assert_eq!(aparcadas(&db).await, "0");
+    assert_eq!(texto(&db, "SELECT Tabla || ' ' || Clave_Json || ' ' || Intentos FROM _Sync_Por_Contrastar;").await, "Zonas [\"z3\"] 1");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn en_un_indice_parcial_tambien_se_cruza_lo_que_entra_y_sale_de_el() {
     // `Productos(Nombre) WHERE Archivado_En IS NULL`: arriba, la caña y el tercio se han cambiado el
     // nombre, y de las dos claras se ha archivado la que estaba a la venta y se ha vuelto a poner la
