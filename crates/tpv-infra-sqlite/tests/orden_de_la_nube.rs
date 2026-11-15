@@ -555,6 +555,40 @@ async fn un_intercambio_entra_aunque_otra_fila_de_su_tabla_choque_con_algo_que_n
 }
 
 #[tokio::test]
+async fn un_intercambio_entra_aunque_otra_fila_de_su_tabla_rompa_una_foranea_al_confirmar() {
+    // Codex: arriba dos trabajadores se han cambiado el DNI; otro se ha quedado con el DNI de un
+    // cuarto y con un usuario que aquí no está, y el cuarto con el DNI del tercero. Solas chocan las
+    // cuatro con el índice; juntas entran todas las sentencias, pero la foránea del tercero sólo
+    // saltaría al confirmar. Se busca antes, y el intercambio de los dos primeros entra.
+    let (repo, db, dir, nube) = base("dni-cruzados").await;
+    let plantilla = "
+        INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+             SELECT 'u' || i, '00000000-0000-7000-8000-000000000002', 'u' || i || '@bar.test', 'x', 'U' || i
+               FROM (SELECT 1 AS i UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4);
+        INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, DNI) VALUES ('t1', 'u1', 'A'), ('t2', 'u2', 'B'), ('t3', 'u3', 'C'), ('t4', 'u4', 'D');
+    ";
+    sembrar(&db, plantilla).await;
+    nube.sembrar(plantilla).await;
+    nube.sembrar(
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+              VALUES ('u9', '00000000-0000-7000-8000-000000000002', 'u9@bar.test', 'x', 'U9');
+         UPDATE Trabajadores SET DNI = NULL;
+         UPDATE Trabajadores SET DNI = CASE ID_Trabajador WHEN 't1' THEN 'B' WHEN 't2' THEN 'A' WHEN 't3' THEN 'D' ELSE 'C' END;
+         UPDATE Trabajadores SET ID_Usuario = 'u9' WHERE ID_Trabajador = 't3';",
+    )
+    .await;
+    apuntar(&db, "Trabajadores", &["t1", "t2", "t3", "t4"]).await;
+
+    let (escritas, _) = hecha(repo.converger_con_la_nube(&Paginas(&nube)).await.unwrap());
+    assert_eq!(escritas.len(), 2);
+    let trabajadores = "SELECT group_concat(ID_Trabajador || '=' || ID_Usuario || '/' || DNI, ' ') FROM (SELECT * FROM Trabajadores ORDER BY ID_Trabajador);";
+    assert_eq!(texto(&db, trabajadores).await, "t1=u1/B t2=u2/A t3=u3/C t4=u4/D");
+    assert_eq!(texto(&db, "SELECT group_concat(Clave_Json, ' ') FROM (SELECT Clave_Json FROM _Sync_Por_Contrastar ORDER BY Clave_Json);").await, "[\"t3\"] [\"t4\"]");
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
 async fn las_marcas_de_una_tabla_no_se_parten_entre_vueltas() {
     // Codex: mil zonas apuntadas, cada una cruzada con la que está quinientas más allá. Partidas en
     // vueltas de quinientas no se encontrarían nunca: cada mitad fallaría sin la otra, una y otra

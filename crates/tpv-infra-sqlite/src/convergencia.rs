@@ -423,10 +423,11 @@ async fn intentar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> A
 
 /// SYNC-37 · Unas filas de una tabla que solas chocan con un índice único: pueden estar cruzadas
 /// entre ellas, y alguna chocar además con algo de aquí que no se trae. Se aparcan todas y se
-/// escribe cada una; la que choca no deshace a las demás (SQLite sólo deshace la sentencia), pero si
-/// alguna choca se deshace todo y se repite sin ellas, hasta que entran las que quedan o no queda
-/// nada que cruzar. Devuelve las que han entrado, con sus marcas retiradas.
-async fn cruzadas<'p, 'a>(conn: &Connection, mut grupo: Vec<&'p Plan<'a>>) -> Vec<&'p Plan<'a>> {
+/// escribe cada una; la que choca no deshace a las demás (SQLite sólo deshace la sentencia), y la que
+/// rompe una foránea se busca antes de confirmar (aplazada, sólo saltaría al confirmar, sin decir
+/// cuál). Si alguna choca o rompe, se deshace todo y se repite sin ellas, hasta que entran las que
+/// quedan o no queda nada que cruzar. Devuelve las que han entrado, con sus marcas retiradas.
+async fn cruzadas<'p, 'a>(conn: &Connection, clave: &[String], mut grupo: Vec<&'p Plan<'a>>) -> Vec<&'p Plan<'a>> {
     while grupo.len() > 1 {
         let mut chocan: Vec<usize> = Vec::new();
         let r = conn
@@ -441,6 +442,11 @@ async fn cruzadas<'p, 'a>(conn: &Connection, mut grupo: Vec<&'p Plan<'a>>) -> Ve
                         }
                     }
                 }
+                for i in rompen_una_foranea(conn, clave, &grupo).await? {
+                    if !chocan.contains(&i) {
+                        chocan.push(i);
+                    }
+                }
                 if !chocan.is_empty() {
                     return Err(AppError::internal("chocan"));
                 }
@@ -453,11 +459,36 @@ async fn cruzadas<'p, 'a>(conn: &Connection, mut grupo: Vec<&'p Plan<'a>>) -> Ve
             Err(_) if !chocan.is_empty() && chocan.len() < grupo.len() => {
                 grupo = grupo.into_iter().enumerate().filter(|(i, _)| !chocan.contains(i)).map(|(_, p)| p).collect();
             }
-            // Chocan todas, o falla otra cosa (una foránea al confirmar): no hay nada que separar.
+            // Chocan todas, o falla otra cosa: no hay nada que separar.
             Err(_) => break,
         }
     }
     Vec::new()
+}
+
+/// Las filas de `grupo` (todas de una tabla, de clave primaria `clave`) que ahora mismo rompen una
+/// clave foránea de su tabla, según `PRAGMA foreign_key_check`.
+async fn rompen_una_foranea(conn: &Connection, clave: &[String], grupo: &[&Plan<'_>]) -> AppResult<Vec<usize>> {
+    let Some(tabla) = grupo.first().map(|p| p.marca.fila.tabla.as_str()) else { return Ok(Vec::new()) };
+    if clave.is_empty() {
+        return Ok(Vec::new());
+    }
+    let lista = clave.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
+    let mut filas = conn
+        .query(
+            &format!("SELECT {lista} FROM {} WHERE rowid IN (SELECT \"rowid\" FROM pragma_foreign_key_check(?1));", cita(tabla)),
+            vec![Value::Text(tabla.to_owned())],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut rotas: HashSet<String> = HashSet::new();
+    while let Some(f) = filas.next().await.map_err(db_err)? {
+        let valores = (0..clave.len()).map(|i| f.get_value(i as i32).map(|v| crate::sync_reparacion::valor_a_json(&v))).collect::<Result<Vec<_>, _>>();
+        if let Some(c) = valores.ok().and_then(|v| canonica_de(&FilaTocada { tabla: tabla.to_owned(), clave: v, borrada: false })) {
+            rotas.insert(c);
+        }
+    }
+    Ok(grupo.iter().enumerate().filter(|(_, p)| canonica_de(&p.marca.fila).is_some_and(|c| rotas.contains(&c))).map(|(i, _)| i).collect())
 }
 
 /// Lo que se intenta junto cuando no entra todo: cada borrado solo, y lo que se escribe, tabla a
@@ -728,7 +759,8 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                 }
                 let chocan: Vec<&Plan<'_>> = fallan.iter().filter(|(_, m)| m.starts_with("unique")).map(|(p, _)| *p).collect();
                 if chocan.len() > 1 {
-                    let entran = cruzadas(conn, chocan).await;
+                    let clave = claves.get(&chocan[0].marca.fila.tabla).map(Vec::as_slice).unwrap_or_default();
+                    let entran = cruzadas(conn, clave, chocan).await;
                     escritas.extend(sentencias(&entran));
                     fallan.retain(|(p, _)| !entran.iter().any(|e| std::ptr::eq(*e, *p)));
                 }

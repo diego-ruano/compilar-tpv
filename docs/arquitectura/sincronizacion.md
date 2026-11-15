@@ -673,7 +673,8 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   de esta base que no se trae (un `UNIQUE` con otra fila, una clave foránea). Se intenta todo junto;
   si algo no entra, tabla a tabla (aparcando); la tabla que no entra, fila a fila, y las que solas
   chocan con un índice único, otra vez juntas, apartando las que chocan con algo de aquí que no se
-  trae (SQLite sólo deshace la sentencia que choca). La que no entra cuenta un intento, va
+  trae (SQLite sólo deshace la sentencia que choca) o rompen una foránea (se mira con
+  `foreign_key_check` antes de confirmar). La que no entra cuenta un intento, va
   detrás de las demás en la vuelta siguiente y a la quinta se avisa (`WARN`, «sigue sin entrar»);
   una vuelta en la que no entra nada acaba `Aplazada`, y el motor espera el doble para la
   siguiente, hasta un minuto. No se retira: el contraste no toca una fila apuntada, y retirarla
