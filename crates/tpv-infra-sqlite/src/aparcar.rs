@@ -255,6 +255,40 @@ pub(crate) fn aparcar(
     })
 }
 
+/// SYNC-38 · La sentencia que aparca todos los valores únicos de una fila que se va a borrar en la
+/// misma transacción: la columna aparcada de cada índice de `indices`, sin mirar qué tiene. La fila
+/// es la que cumple `donde`, cuyos argumentos son `args`; `clave` son los valores de su clave
+/// primaria, de los que sale su valor temporal. `None` si no hay nada que aparcar.
+///
+/// Es la de una fila que sobra en la nube y tiene el valor que necesita otra que se sube: aparcada,
+/// la otra entra antes de que se borre. Quien la manda le pone a `donde` la misma condición que a su
+/// borrado, en la misma transacción: si no se borra, tampoco se aparca.
+pub(crate) fn aparcar_la_que_sobra(tabla: &str, indices: &[IndiceUnico], donde: &str, mut args: Vec<Json>, clave: &[Json]) -> Option<SqlStatement> {
+    // (columna, en `NULL`)
+    let mut aparcadas: Vec<(String, bool)> = Vec::new();
+    for ix in indices {
+        match aparcadas.iter_mut().find(|(c, _)| c.eq_ignore_ascii_case(&ix.aparcada)) {
+            Some((_, en_nulo)) => *en_nulo &= ix.en_nulo,
+            None => aparcadas.push((ix.aparcada.clone(), ix.en_nulo)),
+        }
+    }
+    if aparcadas.is_empty() {
+        return None;
+    }
+    let temporal = match aparcadas.iter().all(|(_, en_nulo)| *en_nulo) {
+        true => String::new(),
+        false => {
+            args.push(Json::String(valor_temporal(clave)));
+            format!("?{}", args.len())
+        }
+    };
+    let asignaciones: Vec<String> = aparcadas
+        .iter()
+        .map(|(c, en_nulo)| format!("{} = {}", cita(c), if *en_nulo { "NULL" } else { temporal.as_str() }))
+        .collect();
+    Some(SqlStatement { sql: format!("UPDATE {} SET {} WHERE {donde};", cita(tabla), asignaciones.join(", ")), args })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

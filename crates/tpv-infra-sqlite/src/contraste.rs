@@ -1072,18 +1072,37 @@ struct Encolado {
 /// además que el log tenga algo a partir del `hasta_seq`, que en la nube siempre es así (la purga
 /// deja la cola del log) y en una Main nunca: allí no hace nada.
 fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Option<SqlStatement> {
-    let base = rep::sentencia_de_borrado(fila)?;
-    let mut args = base.args;
+    let (donde, mut args) = rep::donde_de_la_clave(fila)?;
+    let condicion = si_la_nube_no_ha_cambiado(&mut args, hasta_seq);
+    Some(SqlStatement { sql: format!("DELETE FROM \"{}\" WHERE {donde} AND {condicion};", fila.tabla), args })
+}
+
+/// La condición de [`borrado_si_la_nube_no_ha_cambiado`]: en el log de la nube hay algo a partir
+/// de `hasta_seq`, y por encima nada que no sea una reparación. Sus dos argumentos van al final de
+/// `args`.
+fn si_la_nube_no_ha_cambiado(args: &mut Vec<serde_json::Value>, hasta_seq: i64) -> String {
     args.push(serde_json::Value::from(hasta_seq));
     let n_seq = args.len();
     args.push(serde_json::Value::from(rep::COMANDO_REPARACION));
-    let sql = format!(
-        "{} AND EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?{n_seq}) \
-         AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n_seq} AND Command_Name IS NOT ?{});",
-        base.sql.trim_end().trim_end_matches(';'),
-        n_seq + 1,
-    );
-    Some(SqlStatement { sql, args })
+    format!(
+        "EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?{n_seq}) \
+         AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n_seq} AND Command_Name IS NOT ?{})",
+        n_seq + 1
+    )
+}
+
+/// SYNC-38 · Lo que aparca, antes de subir lo demás, los valores únicos de una fila que sobra arriba,
+/// con la misma condición que su borrado ([`borrado_si_la_nube_no_ha_cambiado`]). Una fila que falta
+/// arriba puede necesitar el nombre de una que sobra (aquí se renombró la zona y se creó otra con el
+/// nombre de antes): subida antes del borrado, chocaría con ella. Va en la misma operación que lo que
+/// sube y que su borrado, que la nube aplica en una transacción y en el turno del log: la condición da
+/// lo mismo en las dos sentencias, así que lo aparcado se borra en ella, y si no se borra, tampoco se
+/// aparca. En una Main, como el borrado, no hace nada.
+fn aparcar_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, indices: &[crate::aparcar::IndiceUnico], hasta_seq: i64) -> Option<SqlStatement> {
+    let (donde, mut args) = rep::donde_de_la_clave(fila)?;
+    let clave: Vec<serde_json::Value> = args.clone();
+    let condicion = si_la_nube_no_ha_cambiado(&mut args, hasta_seq);
+    crate::aparcar::aparcar_la_que_sobra(&fila.tabla, indices, &format!("{donde} AND {condicion}"), args, &clave)
 }
 
 /// Las claves foráneas de `tabla` que apuntan a ella misma (un cobro que devuelve otro cobro): de
@@ -1198,6 +1217,14 @@ pub(crate) fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, V
 /// aplica en una transacción: dos que se han intercambiado un nombre entran juntas, y lo aparcado
 /// no sale de esa transacción.
 ///
+/// SYNC-38 · Y lo que sobra arriba de una tabla de la que algo sube aparca antes sus valores únicos,
+/// con la condición de su borrado ([`aparcar_si_la_nube_no_ha_cambiado`]): una fila que falta arriba
+/// puede necesitar el nombre de una que sobra. Entonces el plan va entero en una operación, porque lo
+/// aparcado y su borrado tienen que ir en la misma; si no cabe, no se aparca. Los borrados no se
+/// adelantan a lo que sube: borrar antes un padre que sobra se llevaría por su `ON DELETE CASCADE`
+/// una hija que aquí está en otro padre (la subida la mueve antes) y, con ella, lo que cuelga de ésta,
+/// que no sube porque es igual en los dos lados.
+///
 /// SYNC-31 · Todas llevan en `Repara_Op_Id` las operaciones apartadas de la subida que el plan
 /// resuelve ([`apartadas_que_resuelve`]): el outbox las retira cuando sube la última que las lleva, y
 /// no si alguna de ellas se queda apartada (`sync::retirar_lo_que_repara`). `completas` son las tablas que esta pasada ha comparado
@@ -1225,6 +1252,8 @@ async fn encolar_plan(
 
     // Lo que sube, tabla a tabla: (sus sentencias, si van juntas en una operación). Y cuántas filas.
     let mut subir: Vec<(Vec<SqlStatement>, bool)> = Vec::new();
+    // SYNC-38: de cada tabla de `subir`, lo que aparca antes lo que le sobra arriba.
+    let mut aparcan_las_que_sobran: Vec<Vec<SqlStatement>> = Vec::new();
     let mut reparadas = 0i64;
     let mut unicos = crate::aparcar::Unicos::default();
     for (tabla, h) in hallazgos {
@@ -1259,6 +1288,17 @@ async fn encolar_plan(
         let refs = autorreferencias(conn, tabla).await?;
         let de_la_tabla = padres_antes(de_la_tabla, &refs);
         reparadas += de_la_tabla.len() as i64;
+        // SYNC-38: lo que sobra arriba de esta tabla y se va a borrar puede tener el valor único que
+        // necesita algo de lo que sube: se aparca antes, con la condición de su borrado.
+        let mut las_que_sobran = Vec::new();
+        if borrar && !de_la_tabla.is_empty() {
+            let sobran: Vec<&FilaAfectada> = h.sobran.iter().filter(|f| !por_converger.contains(*f)).collect();
+            if !sobran.is_empty() {
+                let indices = unicos.de(conn, tabla).await?;
+                las_que_sobran = sobran.into_iter().filter_map(|f| aparcar_si_la_nube_no_ha_cambiado(f, indices, hasta_seq)).collect();
+            }
+        }
+        aparcan_las_que_sobran.push(las_que_sobran);
         // Lo aparcado va en la misma operación que lo que lo pisa: si no cabe todo en una, no se
         // aparca (y dos filas que se cruzan no entran, como sin esto).
         if aparcan.len() >= 2 && aparcan.len() + de_la_tabla.len() <= SENTENCIAS_POR_OPERACION {
@@ -1295,7 +1335,23 @@ async fn encolar_plan(
             true => None,
             false => Some(serde_json::to_string(&resueltas).map_err(db_err)?),
         };
-        let operaciones = en_operaciones(subir.into_iter().chain([(quitar, false)]));
+        // SYNC-38: lo que aparca lo que sobra va en la misma operación que lo que sube y que los
+        // borrados, que van detrás de todo: con eso, el plan entero en una. Si no cabe, no se aparca
+        // (y lo que choque con una fila que sobra no entra, como sin esto; la pasada siguiente, con
+        // menos que reparar, lo vuelve a intentar).
+        let aparcadas: usize = aparcan_las_que_sobran.iter().map(Vec::len).sum();
+        let total = aparcadas + quitar.len() + subir.iter().map(|(s, _)| s.len()).sum::<usize>();
+        let operaciones = if aparcadas > 0 && total <= SENTENCIAS_POR_OPERACION {
+            let mut una: Vec<SqlStatement> = Vec::with_capacity(total);
+            for (aparcan, (de_la_tabla, _)) in aparcan_las_que_sobran.into_iter().zip(subir) {
+                una.extend(aparcan);
+                una.extend(de_la_tabla);
+            }
+            una.extend(quitar);
+            vec![una]
+        } else {
+            en_operaciones(subir.into_iter().chain([(quitar, false)]))
+        };
         conn.transaccion(async {
             for operacion in &operaciones {
                 encolar_operacion(conn, operacion, repara.as_deref()).await?;
@@ -2026,6 +2082,98 @@ mod tests {
             w.raw().execute(&st.sql, args).await.unwrap();
         }
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z9';").await, 1);
+    }
+
+    #[tokio::test]
+    async fn lo_que_sobra_aparca_sus_valores_unicos_con_la_condicion_de_su_borrado() {
+        // SYNC-38. La zona que sobra arriba suelta su nombre si, y sólo si, se va a borrar.
+        let (db, _dir) = base("contraste_aparcar_lo_que_sobra").await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Patio');").await;
+        let w = db.write().await;
+        let indices = crate::aparcar::indices_unicos(w.raw(), "Zonas").await.unwrap();
+        let st = aparcar_si_la_nube_no_ha_cambiado(&zona("z9"), &indices, 45).unwrap();
+        assert_eq!(
+            st.sql,
+            "UPDATE \"Zonas\" SET \"Nombre_Zona\" = ?4 WHERE \"ID_Zona\" = ?1 AND EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?2) \
+             AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?2 AND Command_Name IS NOT ?3);"
+        );
+        let temporal = crate::aparcar::valor_temporal(&[serde_json::json!("z9")]);
+        assert_eq!(st.args, vec![serde_json::json!("z9"), serde_json::json!(45), serde_json::json!("main_reparacion"), serde_json::json!(temporal)]);
+        // Lo que sube lo leen la subida y SYNC-31 sin ejecutarlo: es una escritura de esa zona.
+        let e = crate::filas_tocadas::estaticas(std::slice::from_ref(&st), &|_| vec!["ID_Zona".to_string()]);
+        assert!(e.todas.contains("Zonas") && !e.tablas.contains("*"), "{:?}", e.tablas);
+        assert_eq!(e.claves.len(), 1);
+        // Sin índices únicos no hay nada que aparcar.
+        assert!(aparcar_si_la_nube_no_ha_cambiado(&zona("z9"), &[], 45).is_none());
+
+        // En una Main (`Sync_Changes` vacía) no hace nada, como el borrado.
+        let args: Vec<Value> = st
+            .args
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => Value::Text(s.clone()),
+                otro => Value::Integer(otro.as_i64().unwrap()),
+            })
+            .collect();
+        assert_eq!(w.raw().execute(&st.sql, args).await.unwrap(), 0);
+        drop(w);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE Nombre_Zona = 'Patio';").await, 1);
+    }
+
+    #[tokio::test]
+    async fn lo_que_aparca_lo_que_sobra_va_con_todo_el_plan_en_una_operacion_y_si_no_cabe_no_se_aparca() {
+        // SYNC-38. Aquí la zona `z4` se llama Patio y arriba no está; arriba sobra `z9`, que se llama
+        // así. Lo de las dos va en una operación: aparcar `z9`, subir `z4`, borrar `z9`.
+        let (db, _dir) = base("contraste_plan_con_lo_que_sobra").await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z4', 'Patio');
+             UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;",
+        )
+        .await;
+        let plan = vec![("Zonas".to_string(), hallazgo(&[], &["z4"], &["z9"]))];
+        let marca_ahora = marca(&db).await.unwrap();
+        encolar_plan(&db, marca_ahora, 100, &plan, true, &HashSet::new()).await.unwrap().expect("se encola");
+        let ops = {
+            let r = db.read().await;
+            let mut f = r.conn().query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq;", ()).await.unwrap();
+            let mut ops: Vec<Vec<SqlStatement>> = Vec::new();
+            while let Some(fila) = f.next().await.unwrap() {
+                ops.push(serde_json::from_str(&fila.get::<String>(0).unwrap()).unwrap());
+            }
+            ops
+        };
+        assert_eq!(ops.len(), 1);
+        let sql: Vec<&str> = ops[0].iter().map(|s| s.sql.as_str()).collect();
+        assert_eq!(sql.len(), 3, "{sql:?}");
+        assert!(sql[0].starts_with("UPDATE \"Zonas\" SET \"Nombre_Zona\" = ?4 WHERE \"ID_Zona\" = ?1 AND EXISTS"), "{}", sql[0]);
+        assert!(sql[1].starts_with("INSERT INTO \"Zonas\""), "{}", sql[1]);
+        assert!(sql[2].starts_with("DELETE FROM \"Zonas\""), "{}", sql[2]);
+
+        // Sin nada que suba de esa tabla, lo que sobra no aparca nada.
+        sembrar(&db, "DELETE FROM _Sync_Outbox;").await;
+        let solo_sobra = vec![("Zonas".to_string(), hallazgo(&[], &[], &["z9"]))];
+        let marca_ahora = marca(&db).await.unwrap();
+        encolar_plan(&db, marca_ahora, 100, &solo_sobra, true, &HashSet::new()).await.unwrap().expect("se encola");
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%UPDATE%';").await, 0);
+
+        // Un plan que no cabe en una operación no aparca lo que sobra, y se parte como siempre.
+        sembrar(&db, "DELETE FROM _Sync_Outbox;").await;
+        sembrar(
+            &db,
+            &format!(
+                "WITH RECURSIVE s(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM s WHERE i + 1 < {SENTENCIAS_POR_OPERACION})
+                 INSERT INTO Zonas (ID_Zona, Nombre_Zona) SELECT printf('zn-%04d', i), printf('Nueva %04d', i) FROM s;"
+            ),
+        )
+        .await;
+        let muchas: Vec<String> = (0..SENTENCIAS_POR_OPERACION).map(|i| format!("zn-{i:04}")).collect();
+        let muchas: Vec<&str> = muchas.iter().map(String::as_str).collect();
+        let grande = vec![("Zonas".to_string(), hallazgo(&[], &muchas, &["z9"]))];
+        let marca_ahora = marca(&db).await.unwrap();
+        encolar_plan(&db, marca_ahora, 100, &grande, true, &HashSet::new()).await.unwrap().expect("se encola");
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 2);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%\"UPDATE %';").await, 0);
     }
 
     #[tokio::test]

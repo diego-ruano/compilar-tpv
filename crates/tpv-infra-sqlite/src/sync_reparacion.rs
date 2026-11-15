@@ -778,6 +778,13 @@ pub async fn fila_difiere(
 /// `puede_borrar_arriba`, que comprueba que esta Main esté realmente al día. Separarlo es
 /// deliberado: construir la sentencia es inocuo, decidir mandarla no lo es.
 pub fn sentencia_de_borrado(fila: &FilaAfectada) -> Option<SqlStatement> {
+    let (donde, args) = donde_de_la_clave(fila)?;
+    Some(SqlStatement { sql: format!("DELETE FROM \"{}\" WHERE {donde};", fila.tabla), args })
+}
+
+/// La condición que señala una fila por su clave (`"ID" = ?1 AND …`) y sus argumentos. `None` si la
+/// tabla o una columna no es un nombre aceptable, o no tiene clave.
+pub(crate) fn donde_de_la_clave(fila: &FilaAfectada) -> Option<(String, Vec<serde_json::Value>)> {
     if !nombre_aceptable(&fila.tabla) || fila.clave.is_empty() {
         return None;
     }
@@ -790,12 +797,5 @@ pub fn sentencia_de_borrado(fila: &FilaAfectada) -> Option<SqlStatement> {
         donde.push(format!("\"{c}\" = ?{}", i + 1));
         args.push(json!(v));
     }
-    Some(SqlStatement {
-        sql: format!(
-            "DELETE FROM \"{}\" WHERE {};",
-            fila.tabla,
-            donde.join(" AND ")
-        ),
-        args,
-    })
+    Some((donde.join(" AND "), args))
 }

@@ -294,15 +294,18 @@ async fn un_valor_distinto_una_fila_que_falta_y_una_que_sobra_se_encuentran_se_r
     assert!(!pedidas.contains(&"/v1/sync/verificar/claves".to_string()), "{pedidas:?}");
 
     // Lo que sube: la zona con su nombre de aquí y la mesa que falta, por estado, y el borrado de
-    // la que sobra, en ese orden (padres primero, borrados al final).
+    // la que sobra, en ese orden (padres primero, borrados al final). Delante de las zonas, la que
+    // sobra aparca su nombre por si lo necesita lo que sube (SYNC-38), con la condición de su borrado.
     let sube = reparaciones(&repo).await;
-    assert_eq!(sube.len(), 3, "{sube:?}");
-    assert!(sube[0].sql.starts_with("INSERT INTO \"Zonas\"") && sube[0].sql.contains("ON CONFLICT"), "{}", sube[0].sql);
-    assert!(sube[0].args.contains(&json!("Salón de la ría")));
-    assert!(sube[1].sql.starts_with("INSERT INTO \"Mesas\"") && sube[1].args.contains(&json!("m3")), "{}", sube[1].sql);
+    assert_eq!(sube.len(), 4, "{sube:?}");
+    assert!(sube[0].sql.starts_with("UPDATE \"Zonas\" SET \"Nombre_Zona\" = ?4 WHERE \"ID_Zona\" = ?1 AND EXISTS"), "{}", sube[0].sql);
+    assert_eq!(sube[0].args[..3], [json!("z9"), json!(45), json!("main_reparacion")]);
+    assert!(sube[1].sql.starts_with("INSERT INTO \"Zonas\"") && sube[1].sql.contains("ON CONFLICT"), "{}", sube[1].sql);
+    assert!(sube[1].args.contains(&json!("Salón de la ría")));
+    assert!(sube[2].sql.starts_with("INSERT INTO \"Mesas\"") && sube[2].args.contains(&json!("m3")), "{}", sube[2].sql);
     // El borrado, sólo si la nube no ha cambiado desde la foto (`hasta_seq` 45), y sólo en la nube.
-    assert!(sube[2].sql.starts_with("DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND EXISTS"), "{}", sube[2].sql);
-    assert_eq!(sube[2].args, vec![json!("z9"), json!(45), json!("main_reparacion")]);
+    assert!(sube[3].sql.starts_with("DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND EXISTS"), "{}", sube[3].sql);
+    assert_eq!(sube[3].args, vec![json!("z9"), json!(45), json!("main_reparacion")]);
     // Esta base no se ha tocado.
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 3);
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 3);
@@ -454,6 +457,106 @@ async fn lo_que_sobra_no_se_borra_si_la_nube_ha_cambiado_antes_de_aplicarlo() {
         f.next().await.unwrap().unwrap().get::<String>(0).unwrap()
     };
     assert_eq!(nombre_z2, "Salón de la ría", "lo que se sube por estado se sube");
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+/// Los nombres de las zonas de una base, por su clave.
+async fn zonas(db: &Arc<Db>) -> Vec<String> {
+    let r = db.read().await;
+    let mut f = r.conn().query("SELECT ID_Zona || '=' || Nombre_Zona FROM Zonas ORDER BY ID_Zona;", ()).await.unwrap();
+    let mut salida = Vec::new();
+    while let Some(fila) = f.next().await.unwrap() {
+        salida.push(fila.get::<String>(0).unwrap());
+    }
+    salida
+}
+
+/// Una zona que falta arriba con el nombre de otra que sobra: aquí se renombró la terraza y se
+/// creó otra zona con su nombre, y arriba sigue la de antes (`z9`) y no la nueva (`z4`).
+async fn sobra_con_el_nombre(nube: &Nube, db: &Arc<Db>) {
+    sembrar(db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z4', 'Patio');").await;
+    nube.contraste.sembrar("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Patio');").await;
+}
+
+#[tokio::test]
+async fn una_fila_que_falta_arriba_con_el_valor_unico_de_una_que_sobra_entra_en_la_misma_operacion() {
+    // SYNC-38: subida antes del borrado, la que falta chocaría con la que sobra en la nube, que
+    // comprueba el índice sentencia a sentencia. La que sobra aparca antes su nombre, con la
+    // condición de su borrado, y todo va en una operación.
+    let (repo, db, dir, nube) = negocio_igual("sobra-con-el-nombre").await;
+    sobra_con_el_nombre(&nube, &db).await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!(r.descuadres, vec![descuadre("Zonas", 1, 1, 0)]);
+    assert_eq!((r.reparadas, r.borradas), (1, 1));
+    let ops = repo.outbox_pending(10).await.unwrap();
+    assert_eq!(ops.len(), 1, "en una operación");
+    let sql: Vec<&str> = ops[0].statements.iter().map(|s| s.sql.as_str()).collect();
+    assert!(sql[0].starts_with("UPDATE \"Zonas\" SET \"Nombre_Zona\""), "{sql:?}");
+    assert!(sql[1].starts_with("INSERT INTO \"Zonas\""), "{sql:?}");
+    assert!(sql[2].starts_with("DELETE FROM \"Zonas\""), "{sql:?}");
+
+    // La nube la aplica en una transacción, como el DO, y queda como aquí, sin nada aparcado.
+    subir_reparaciones(&repo, &nube).await;
+    let en_la_nube = zonas(&nube.contraste.db).await;
+    assert!(en_la_nube.contains(&"z4=Patio".to_string()) && !en_la_nube.iter().any(|z| z.starts_with("z9=")), "{en_la_nube:?}");
+    assert_eq!(en_la_nube, zonas(&db).await);
+    *nube.contraste.hasta_seq.lock().unwrap() = 46;
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!(r.descuadres, vec![]);
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn si_la_nube_ha_cambiado_lo_que_sobra_ni_se_aparca_ni_se_borra() {
+    // SYNC-38: la misma condición que el borrado. Una Handy escribe entre la foto y la reparación:
+    // no se aparca, la que falta choca con la que sobra y la operación no entra entera. Nada
+    // aparcado se queda en la nube.
+    let (repo, db, dir, nube) = negocio_igual("sobra-con-el-nombre-movida").await;
+    sobra_con_el_nombre(&nube, &db).await;
+    hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    nube.contraste
+        .sembrar(
+            "INSERT INTO Sync_Changes (Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
+             VALUES (46, 'op-handy', 'mesas.abrir', '[]', 'handy-1', 1);",
+        )
+        .await;
+    let antes = zonas(&nube.contraste.db).await;
+
+    // La nube la aplica como el DO, sentencia a sentencia en una transacción.
+    let op = repo.outbox_pending(10).await.unwrap().remove(0);
+    let resultados = {
+        let w = nube.contraste.db.write().await;
+        let conn = w.raw();
+        conn.execute_batch("PRAGMA defer_foreign_keys = ON; BEGIN;").await.unwrap();
+        let mut resultados = Vec::new();
+        for s in &op.statements {
+            let args: Vec<tpv_infra_sqlite::ejecutor::Value> = s
+                .args
+                .iter()
+                .map(|v| match v {
+                    JsonValue::String(t) => tpv_infra_sqlite::ejecutor::Value::Text(t.clone()),
+                    JsonValue::Number(n) => tpv_infra_sqlite::ejecutor::Value::Integer(n.as_i64().unwrap()),
+                    _ => tpv_infra_sqlite::ejecutor::Value::Null,
+                })
+                .collect();
+            let r = conn.execute(&s.sql, args).await;
+            let fallo = r.is_err();
+            resultados.push(r.ok());
+            if fallo {
+                break;
+            }
+        }
+        conn.execute_batch("ROLLBACK;").await.unwrap();
+        resultados
+    };
+    assert_eq!(resultados, vec![Some(0), None], "no aparca, y la que falta choca con la que sobra");
+    assert_eq!(zonas(&nube.contraste.db).await, antes);
+    assert!(antes.contains(&"z9=Patio".to_string()));
 
     nube.cerrar().await;
     cerrar(db, dir).await;

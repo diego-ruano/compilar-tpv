@@ -824,6 +824,18 @@ informa como `aplazado`. Lo que está en cuarentena se intenta traer antes en la
   decide la nube al aplicarla, con lo que tenga entonces), y va entero en una operación, que la nube
   aplica en una transacción: la escritura de cada fila lo pisa, y lo aparcado nunca queda en la base
   de la nube. Si no cabe en una operación, no se aparca.
+- **Una fila que sobra arriba con el valor único que necesita otra que sube aparca antes ese valor**
+  (SYNC-38): aquí se renombró la terraza y se creó otra zona con su nombre, y arriba sigue la de
+  antes y falta la nueva. La que sobra se borra detrás de todo lo que sube, así que, si de su tabla
+  sube algo y la tabla tiene índices únicos, el plan empieza esa tabla aparcando los valores únicos
+  de lo que le sobra, con la misma condición que su borrado (la nube no ha cambiado desde la foto).
+  Todo el plan va entonces en una operación: la nube la aplica en una transacción y en el turno del
+  log, y la condición da lo mismo en el aparcamiento y en el borrado, así que lo aparcado se borra
+  en ella; si la nube ha cambiado, ni se aparca ni se borra, y lo que choca no entra (la pasada
+  siguiente lo vuelve a mirar). Si el plan no cabe en una operación, no se aparca. En una Main, como
+  el borrado, no hace nada. Los borrados no se adelantan a lo que sube: borrar antes un padre que
+  sobra se llevaría por su `ON DELETE CASCADE` una hija que aquí está en otro padre (la subida la
+  mueve antes) y, con ella, lo que cuelga de ésta, que es igual en los dos lados y no sube.
 - Lo que no se ha podido mirar entero (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de
   claves, o una tabla sin comparar) se informa como `aplazado`, y lo que falta arriba en las hijas
   de una tabla así no se sube: podría apuntar a una fila suya que falta arriba sin saberse (lo que le
