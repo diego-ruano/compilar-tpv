@@ -153,6 +153,31 @@ async fn una_cuarentena_que_no_sale_avisa_a_la_semana_una_vez_y_se_cierra_al_res
 }
 
 #[tokio::test]
+async fn miles_de_cuarentenas_que_no_cuentan_no_tapan_a_una_que_si() {
+    // Codex: el tope de lectura se aplicaba antes de mirar cuáles cuentan, y diez mil que salen solas
+    // (sin intentar, con la reparación apagada) dejaban fuera a una incierta más reciente.
+    let (dir, db, repo, notif) = abrir().await;
+    {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 10000)
+                 INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error,
+                                           First_Failed_At_Ms, Last_Failed_At_Ms, Filas_Json)
+                 SELECT 'cierta-' || i, i, '[]', 5, 1, 'x', ?1, ?1, ?2 FROM s;",
+                vec![Value::Integer(now_ms() - 10 * DIA_MS), Value::Text(CIERTA.into())],
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(repo.health().await.unwrap().bajada_atascada, 0);
+    cuarentena(&db, "incierta-vieja", 8, Some(INCIERTA), true, false).await;
+    assert_eq!(repo.health().await.unwrap().bajada_atascada, 1);
+
+    cerrar(dir, db, repo, notif).await;
+}
+
+#[tokio::test]
 async fn una_fila_apuntada_que_no_entra_avisa_a_la_semana_con_el_mismo_aviso_y_se_cierra_al_traer_la_nube() {
     // SYNC-38: la convergencia la reintenta como mucho una vez por minuto y no la retira (el
     // contraste no la toca, y retirarla dejaría subir lo de aquí encima del orden de la nube).

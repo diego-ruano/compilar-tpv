@@ -101,12 +101,25 @@ const CLAVES_POR_PETICION: usize = 500;
 /// ello se avisa al administrador y se le ofrece traer el estado actual de la nube. Una que la salida
 /// no ha intentado nunca (sin conexión, o con la reparación apagada) no cuenta.
 ///
-/// Se leen como mucho las `MAX_CUARENTENAS_LEIDAS` más antiguas, como en la salida.
+/// Se leen como mucho las `MAX_CUARENTENAS_LEIDAS` más antiguas, como en la salida, pero sólo de las
+/// que pueden contar (Codex, SYNC-38): la consulta ya deja fuera las que seguro que no (sin intentar,
+/// con `incierto` a `false`, sin `dudosa` y con todas sus filas bien escritas), para que miles de ésas
+/// no tapen a una que sí. Lo que deja pasar lo decide [`Tocadas::de_json`], como en la salida.
 pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<i64> {
     let mut filas = conn
         .query(
             "SELECT Filas_Json, Ultima_Salida_Ms IS NOT NULL FROM _Sync_Failed \
-              WHERE Quarantined = 1 AND First_Failed_At_Ms <= ?1 ORDER BY First_Failed_At_Ms LIMIT ?2;",
+              WHERE Quarantined = 1 AND First_Failed_At_Ms <= ?1 \
+                AND (Ultima_Salida_Ms IS NOT NULL OR Filas_Json IS NULL \
+                     OR json_type(Filas_Json, '$.incierto') IS NOT 'false' \
+                     OR json_type(Filas_Json, '$.dudosa') IS 'true' \
+                     OR EXISTS (SELECT 1 FROM json_each(Filas_Json, '$.filas') f \
+                                 WHERE CASE WHEN f.type = 'object' \
+                                            THEN json_type(f.value, '$.tabla') IS NOT 'text' \
+                                              OR json_type(f.value, '$.clave') IS NOT 'array' \
+                                              OR json_array_length(f.value, '$.clave') = 0 \
+                                            ELSE 1 END)) \
+              ORDER BY First_Failed_At_Ms LIMIT ?2;",
             vec![Value::Integer(antes_de_ms), Value::Integer(MAX_CUARENTENAS_LEIDAS as i64)],
         )
         .await
