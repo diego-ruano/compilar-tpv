@@ -421,14 +421,23 @@ async fn intentar(conn: &Connection, planes: &[&Plan<'_>], aparcando: bool) -> A
     .await
 }
 
+/// Las veces que [`cruzadas`] aparta lo que choca y lo repite. Cada vez vuelve a escribir el grupo
+/// entero con el escritor cogido, y cada una sólo aparta un eslabón de una cadena que acaba en algo
+/// que no se trae: sin tope, una cadena larga costaría el cuadrado de su largo (Codex).
+const MAX_SEPARACIONES: usize = 4;
+
 /// SYNC-37 · Unas filas de una tabla que solas chocan con un índice único: pueden estar cruzadas
 /// entre ellas, y alguna chocar además con algo de aquí que no se trae. Se aparcan todas y se
 /// escribe cada una; la que choca no deshace a las demás (SQLite sólo deshace la sentencia), y la que
 /// rompe una foránea se busca antes de confirmar (aplazada, sólo saltaría al confirmar, sin decir
 /// cuál). Si alguna choca o rompe, se deshace todo y se repite sin ellas, hasta que entran las que
-/// quedan o no queda nada que cruzar. Devuelve las que han entrado, con sus marcas retiradas.
+/// quedan, no queda nada que cruzar o se llega a [`MAX_SEPARACIONES`]. Devuelve las que han
+/// entrado, con sus marcas retiradas.
 async fn cruzadas<'p, 'a>(conn: &Connection, clave: &[String], mut grupo: Vec<&'p Plan<'a>>) -> Vec<&'p Plan<'a>> {
-    while grupo.len() > 1 {
+    for _ in 0..MAX_SEPARACIONES {
+        if grupo.len() < 2 {
+            break;
+        }
         let mut chocan: Vec<usize> = Vec::new();
         let r = conn
             .transaccion(async {

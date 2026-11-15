@@ -674,11 +674,12 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   si algo no entra, tabla a tabla (aparcando); la tabla que no entra, fila a fila, y las que solas
   chocan con un índice único, otra vez juntas, apartando las que chocan con algo de aquí que no se
   trae (SQLite sólo deshace la sentencia que choca) o rompen una foránea (se mira con
-  `foreign_key_check` antes de confirmar). La que no entra cuenta un intento, va
-  detrás de las demás en la vuelta siguiente y a la quinta se avisa (`WARN`, «sigue sin entrar»);
-  una vuelta en la que no entra nada acaba `Aplazada`, y el motor espera el doble para la
-  siguiente, hasta un minuto. No se retira: el contraste no toca una fila apuntada, y retirarla
-  dejaría que subiera lo de aquí y deshiciera el orden de la nube.
+  `foreign_key_check` antes de confirmar), hasta cuatro veces: cada una reescribe el grupo con el
+  escritor cogido, y una cadena larga que acaba en algo que no se trae se queda sin separar. La que
+  no entra cuenta un intento, va detrás de las demás en la vuelta siguiente y a la quinta se avisa
+  (`WARN`, «sigue sin entrar»); una vuelta en la que no entra nada acaba `Aplazada`, y el motor
+  espera el doble para la siguiente, hasta un minuto. No se retira: el contraste no toca una fila
+  apuntada, y retirarla dejaría que subiera lo de aquí y deshiciera el orden de la nube.
 - **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
   vacía lo apuntado.
 - **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
