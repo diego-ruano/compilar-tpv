@@ -90,19 +90,23 @@ pub(crate) const MAX_FILAS_POR_PASADA: usize = 5_000;
 /// Claves por petición a `/v1/sync/verificar/por-clave`, como el contraste.
 const CLAVES_POR_PETICION: usize = 500;
 
-/* ===== Las que no pueden salir solas ===== */
+/* ===== Las que no salen ===== */
 
-/// Cuántas cuarentenas de bajada no pueden salir solas y llevan apartadas desde antes de
-/// `antes_de_ms`: las de filas inciertas o dudosas (o sin `Filas_Json`, que se lee como incierta),
-/// que [`resolver`] no trae nunca por estado. Las demás salen en la pasada del contraste en que
-/// desaparece lo que las frena. Lo cuenta el panel de salud (`SyncHealth::bajada_atascada`), y con
-/// ello se avisa al administrador y se le ofrece traer el estado actual de la nube.
+/// Cuántas cuarentenas de bajada llevan apartadas desde antes de `antes_de_ms` sin salir: las de
+/// filas inciertas o dudosas (o sin `Filas_Json`, que se lee como incierta), que [`resolver`] no trae
+/// nunca por estado, y (SYNC-38) las que la salida ya ha intentado (`Ultima_Salida_Ms`) y siguen ahí:
+/// lo que traen choca con algo de esta base que no se trae, o lo frena algo apartado de la subida que
+/// tampoco ha salido en una semana. Lo normal es que lo que frena al contraste se resuelva antes; una
+/// semana sin hacerlo ya no lo es. Lo cuenta el panel de salud (`SyncHealth::bajada_atascada`), y con
+/// ello se avisa al administrador y se le ofrece traer el estado actual de la nube. Una que la salida
+/// no ha intentado nunca (sin conexión, o con la reparación apagada) no cuenta.
 ///
 /// Se leen como mucho las `MAX_CUARENTENAS_LEIDAS` más antiguas, como en la salida.
 pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<i64> {
     let mut filas = conn
         .query(
-            "SELECT Filas_Json FROM _Sync_Failed WHERE Quarantined = 1 AND First_Failed_At_Ms <= ?1 ORDER BY First_Failed_At_Ms LIMIT ?2;",
+            "SELECT Filas_Json, Ultima_Salida_Ms IS NOT NULL FROM _Sync_Failed \
+              WHERE Quarantined = 1 AND First_Failed_At_Ms <= ?1 ORDER BY First_Failed_At_Ms LIMIT ?2;",
             vec![Value::Integer(antes_de_ms), Value::Integer(MAX_CUARENTENAS_LEIDAS as i64)],
         )
         .await
@@ -113,7 +117,8 @@ pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<
             Value::Text(t) => Tocadas::de_json(&t),
             _ => Tocadas::incierta_de_todo(Vec::new()),
         };
-        if tocadas.incierto || tocadas.dudosa {
+        let intentada = matches!(f.get_value(1).map_err(db_err)?, Value::Integer(1));
+        if tocadas.incierto || tocadas.dudosa || intentada {
             n += 1;
         }
     }

@@ -36,7 +36,8 @@
 //! no entra aquí (un `UNIQUE` con una fila que no se trae, una foránea) se queda apuntada y se vuelve
 //! a intentar detrás de las que no han fallado; una vuelta que no consigue nada acaba `Aplazada`, y
 //! el motor espera cada vez el doble, hasta un minuto. Retirarla se la dejaría al contraste, que
-//! subiría lo de aquí y desharía el orden de la nube.
+//! subiría lo de aquí y desharía el orden de la nube. SYNC-38: la que lleva una semana sin entrar se
+//! avisa al administrador ([`atascadas`]), y traer el estado actual de la nube la resuelve.
 //!
 //! Lo que no se ve: lo que una escritura de aquí lee de una fila que el cambio tocó para escribir
 //! otra (un `INSERT … SELECT` sobre ella), y un cambio cuyas filas el simulacro no sabe decir.
@@ -254,6 +255,29 @@ pub(crate) async fn marcar(conn: &Connection, filas: &[FilaTocada], seq: i64) ->
         tracing::warn!(target: "tpv::sync", seq, filas = filas.len(), "SYNC-29: no caben más filas por traer de la nube; algunas no se apuntan");
     }
     Ok(())
+}
+
+/// SYNC-38 · Cuántas filas apuntadas llevan sin traerse desde antes de `antes_de_ms` (desde que se
+/// apuntaron: una que entra se borra, y si la vuelve a tocar un cambio se apunta de nuevo) y no han
+/// entrado aquí la última vez que se intentó (`Intentos`, que vuelve a cero si la toca otro cambio).
+/// Son las que no entran por algo de esta base que no se trae: una divergencia que nadie ha apuntado,
+/// una cadena más larga de lo que se separa. No las retira nadie (el contraste no las toca, y
+/// retirarlas dejaría subir lo de aquí encima del orden de la nube); las cuenta el panel de salud
+/// (`SyncHealth::bajada_atascada`), con lo que se avisa al administrador, y las resuelve traer el
+/// estado actual de la nube, que vacía lo apuntado. Una que nunca se ha podido intentar (el equipo
+/// sin conexión) no cuenta.
+pub(crate) async fn atascadas(conn: &Connection, antes_de_ms: i64) -> AppResult<i64> {
+    let mut filas = conn
+        .query(
+            "SELECT COUNT(*) FROM _Sync_Por_Contrastar WHERE Intentos > 0 AND Desde_Ms <= ?1;",
+            vec![Value::Integer(antes_de_ms)],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(match filas.next().await.map_err(db_err)?.map(|f| f.get_value(0)) {
+        Some(Ok(Value::Integer(n))) => n,
+        _ => 0,
+    })
 }
 
 /// SYNC-29 · Las filas apuntadas, en su forma canónica (`filas_tocadas::canonica_de`), hasta

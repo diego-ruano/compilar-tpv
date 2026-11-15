@@ -696,14 +696,15 @@ async fn purga_sync(app: AppHandle) -> Result<(), String> {
 }
 
 /// SYNC-36 · Avisa a los administradores de un cambio de la nube que lleva una semana en su
-/// cuarentena sin poder salir solo (`uc_sync::avisar_bajada_atascada`), y cierra el aviso cuando ya
-/// no lo hay. Lo arregla traer el estado actual de la nube (Configuración → Conectividad).
+/// cuarentena sin salir o, SYNC-38, de una fila que lleva una semana apuntada para traerla de la nube
+/// sin entrar (`uc_sync::avisar_bajada_atascada`), y cierra el aviso cuando ya no lo hay. Lo arregla
+/// traer el estado actual de la nube (Configuración → Conectividad).
 async fn bajada_atascada(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let repo = state.sync_repo().await?;
     let notifier = state.notifier().await?;
     if uc_sync::avisar_bajada_atascada(repo.as_ref(), notifier.as_ref()).await? {
-        tracing::warn!(target: "tpv::sync", "un cambio de la nube lleva una semana sin poder salir de su cuarentena: avisado");
+        tracing::warn!(target: "tpv::sync", "lo que la nube ha cambiado lleva una semana sin poder escribirse aquí: avisado");
     }
     Ok(())
 }

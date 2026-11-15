@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
-// SYNC-36: un cambio hecho desde una Handy que este TPV no puede aplicar y que lleva una semana sin
-// poder salir solo de su cuarentena. Conectividad lo explica y ofrece traer el estado actual de la
+// SYNC-36: cambios hechos desde las Handy que este TPV lleva una semana sin poder aplicar (un cambio
+// en cuarentena que no sale o, SYNC-38, filas que había que traer de la nube y no entran).
+// Conectividad lo explica y ofrece traer el estado actual de la
 // nube, sólo si es seguro (nada de este TPV por subir) y con confirmación; al traerlo se cierra la
 // sesión y sigue la pantalla de recuperación. Corre el panel de verdad; sólo se sustituye el IPC.
 import { cleanup, render, screen } from "@testing-library/react";
@@ -57,8 +58,8 @@ function pintar(salud: SyncHealth) {
 it("con nada por subir, lo explica y trae la nube tras confirmar: la sesión se cierra y sigue la recuperación", async () => {
     pintar(SANA);
 
-    expect(await screen.findByText("Un cambio hecho desde una Handy no se ha podido aplicar en este TPV")).toBeTruthy();
-    expect(screen.getByText(/las comprobaciones diarias con la nube están en pausa/)).toBeTruthy();
+    expect(await screen.findByText("Hay cambios hechos desde las Handy que este TPV no ha podido aplicar")).toBeTruthy();
+    expect(screen.getByText(/las comprobaciones diarias con la nube no lo pueden arreglar/)).toBeTruthy();
 
     // Primero se pide confirmación, diciendo lo que pasa mientras tanto.
     screen.getByRole("button", { name: "Recuperar el estado actual de la nube" }).click();
@@ -90,5 +91,5 @@ it("sin nada atascado no aparece", async () => {
     pintar({ ...SANA, bajada_atascada: 0 });
 
     expect(await screen.findByText("Pendientes de subir")).toBeTruthy();
-    expect(screen.queryByText("Un cambio hecho desde una Handy no se ha podido aplicar en este TPV")).toBeNull();
+    expect(screen.queryByText("Hay cambios hechos desde las Handy que este TPV no ha podido aplicar")).toBeNull();
 });

@@ -1419,12 +1419,11 @@ impl SyncRepository for SqliteSyncRepository {
             "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0 AND Intentos > 0;",
         )
         .await?;
-        // SYNC-36: las de la bajada que no pueden salir solas y llevan una semana apartadas.
-        let bajada_atascada = crate::cuarentenas_bajada::atascadas(
-            conn,
-            now_ms() - tpv_application::use_cases::sync::BAJADA_ATASCADA_TRAS_MS,
-        )
-        .await?;
+        // SYNC-36: lo de la bajada que lleva una semana apartado sin salir; y SYNC-38, lo que lleva
+        // una semana apuntado para traerlo de la nube sin entrar.
+        let hace_una_semana = now_ms() - tpv_application::use_cases::sync::BAJADA_ATASCADA_TRAS_MS;
+        let bajada_atascada = crate::cuarentenas_bajada::atascadas(conn, hace_una_semana).await?
+            + crate::convergencia::atascadas(conn, hace_una_semana).await?;
 
         Ok(SyncHealth {
             outbox_pending,
@@ -2452,6 +2451,40 @@ mod tests_bootstrap {
         assert_eq!(zonas(&db).await, vec!["Salon".to_string()]);
         assert_eq!(r.filas_restauradas, 1);
         assert_eq!(r.seq, 42);
+    }
+
+    /// SYNC-38 · Traer el estado actual de la nube es la salida del aviso `bajada_atascada`: vacía las
+    /// cuarentenas de bajada y lo apuntado para traer de la nube, y con ello el aviso se cierra.
+    #[tokio::test]
+    async fn restaurar_vacia_las_cuarentenas_de_bajada_y_lo_apuntado() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, First_Failed_At_Ms, Last_Failed_At_Ms)
+                          VALUES ('op-1', 1, '[]', 5, 1, 1, 1);
+                     INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms, Intentos) VALUES ('Zonas', '[\"z1\"]', 1, 1, 9);",
+                )
+                .await
+                .unwrap();
+        }
+        repo.bootstrap_restaurar(
+            BootstrapSnapshot {
+                seq: 42,
+                total_filas: 1,
+                tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
+                backfill: vec![],
+                ventana_desde: None,
+            },
+            "negocio-de-prueba",
+        )
+        .await
+        .unwrap();
+        assert_eq!(repo.health().await.unwrap().quarantined, 0);
+        let r = db.read().await;
+        let mut f = r.conn().query("SELECT COUNT(*) FROM _Sync_Por_Contrastar;", ()).await.unwrap();
+        assert_eq!(f.next().await.unwrap().unwrap().get_value(0).unwrap(), Value::Integer(0));
     }
 
     /// El resumen diario de las estadísticas es una caché de la base de antes: restaurar lo vacía y

@@ -276,9 +276,10 @@ export function SaludSync({ darkMode }: { darkMode: boolean }) {
 }
 
 /**
- * SYNC-36 · Un cambio hecho desde una Handy que este TPV no ha podido aplicar y que no puede salir
- * solo de su cuarentena: lleva una semana así, y mientras tanto el contraste diario con la nube no
- * repara nada. Lo arregla traer el estado actual de la nube, que sustituye la base de este TPV.
+ * SYNC-36 · Lo que la nube ha cambiado (casi siempre, desde una Handy) y lleva una semana sin
+ * poder escribirse en este TPV: un cambio en cuarentena que no sale, mientras el contraste diario
+ * con la nube no repara nada, o (SYNC-38) filas que había que traer de la nube y no entran, que el
+ * contraste no toca. Lo arregla traer el estado actual de la nube, que sustituye la base de este TPV.
  *
  * Sólo se ofrece cuando es seguro: sin nada de este TPV por subir (ni pendiente ni rechazado por la
  * nube), que se perdería al sustituir la base; el backend lo vuelve a comprobar dentro de la misma
@@ -314,12 +315,13 @@ function RecuperarDeLaNube({ health }: { health: SyncHealth }) {
 		<div className="mt-3 grid gap-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-fg">
 			<div>
 				<p className="font-semibold text-danger">
-					Un cambio hecho desde una Handy no se ha podido aplicar en este TPV
+					Hay cambios hechos desde las Handy que este TPV no ha podido aplicar
 				</p>
 				<p className="mt-1">
-					Hace más de una semana que no se puede aplicar, y mientras tanto las comprobaciones
-					diarias con la nube están en pausa. Se arregla trayendo el estado actual de la nube:
-					los datos de este TPV se sustituyen por los de la nube, que ya tiene ese cambio.
+					Hace más de una semana que no se pueden aplicar: este TPV puede enseñar datos
+					distintos de los de las Handy, y las comprobaciones diarias con la nube no lo pueden
+					arreglar. Se arregla trayendo el estado actual de la nube: los datos de este TPV se
+					sustituyen por los de la nube, que ya tiene esos cambios.
 				</p>
 			</div>
 

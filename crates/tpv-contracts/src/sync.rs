@@ -76,10 +76,12 @@ pub struct SyncHealth {
     /// SYNC-20 · dirección SUBIDA: operaciones APARTADAS. La nube no las tiene y no va a tenerlas
     /// sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
     pub subida_en_cuarentena: i64,
-    /// SYNC-36 · De las de `quarantined`, las que no pueden salir solas (las filas que tocan son
-    /// inciertas o dudosas) y llevan una semana apartadas (`BAJADA_ATASCADA_TRAS_MS`). Mientras haya
-    /// alguna, el contraste diario no repara; lo arregla traer el estado actual de la nube, y se
-    /// avisa al administrador.
+    /// SYNC-36 · Lo que la nube ha cambiado y lleva una semana (`BAJADA_ATASCADA_TRAS_MS`) sin poder
+    /// escribirse aquí: de las de `quarantined`, las que no pueden salir solas (las filas que tocan
+    /// son inciertas o dudosas) o que la salida ya ha intentado y siguen ahí, mientras el contraste
+    /// diario no repara nada; y (SYNC-38) las filas apuntadas para traerlas de la nube que no entran,
+    /// que el contraste no toca. Lo arregla traer el estado actual de la nube, y se avisa al
+    /// administrador.
     pub bajada_atascada: i64,
 }
 

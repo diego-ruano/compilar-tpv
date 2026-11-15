@@ -682,6 +682,16 @@ segundos** (`tpv-infra-sqlite/src/convergencia.rs`):
   (`WARN`, «sigue sin entrar»); una vuelta en la que no entra nada acaba `Aplazada`, y el motor
   espera el doble para la siguiente, hasta un minuto. No se retira: el contraste no toca una fila
   apuntada, y retirarla dejaría que subiera lo de aquí y deshiciera el orden de la nube.
+- **Lo que lleva una semana apuntado sin entrar se avisa** (SYNC-38): una fila que choca a la vez
+  con algo de aquí que nadie ha apuntado, o una cadena más larga de lo que se separa. Si lleva una
+  semana apuntada (`Desde_Ms`: al entrar se borra, y otro cambio que la toque la vuelve a apuntar) y
+  la última vez que se intentó no entró (`Intentos`, que vuelve a cero cuando la toca otro cambio;
+  una que nunca se ha podido intentar, sin conexión, no cuenta), cuenta en el panel de salud y se
+  avisa a los administradores con el mismo aviso que una cuarentena de bajada que no sale
+  ([abajo](#la-salida-de-una-cuarentena-de-bajada-sync-36)), cuya salida, traer el estado actual de
+  la nube, vacía lo apuntado. Mientras tanto se sigue intentando, como mucho una vez por minuto.
+  Ninguna se retira sola, tampoco al cabo de más tiempo: lo de aquí subiría encima de lo que la nube
+  ordenó después.
 - **Nunca escribe en la nube** ni toca el outbox, la bajada o el checkpoint. Restaurar desde la nube
   vacía lo apuntado.
 - **El contraste diario no lo deshace**: una fila apuntada no se toca arriba, sea distinta, falte o
@@ -910,18 +920,24 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   vuelven a mirar 20 por pasada, y las que no caben tampoco se marcan; de las cuarentenas se leen
   10.000, y de lo apartado de la subida, 1.000 operaciones (con más se da todo por chocado).
 - Funciona igual con los datos ya vaciados: sólo usa las filas que tocó.
-- **Lo que no puede salir solo se avisa.** Una cuarentena de filas inciertas o dudosas (o sin
-  `Filas_Json`) no la trae nunca la salida, y mientras esté ahí el contraste no repara. Si lleva una
-  semana apartada (`BAJADA_ATASCADA_TRAS_MS`, desde su primer fallo), cuenta en el panel de salud
-  (`SyncHealth::bajada_atascada`, `cuarentenas_bajada::atascadas`) y el job `bajada_atascada` avisa
-  a los administradores (`use_cases::sync::avisar_bajada_atascada`): una notificación con clave, que
-  no se repite mientras siga activa y se cierra sola cuando ya no queda ninguna, y que no bloquea
-  nada. Su acción lleva a Configuración → Conectividad, que lo explica y ofrece «Recuperar el estado
-  actual de la nube» sólo si es seguro: sin nada de este equipo por subir ni apartado de la subida
-  (se perdería al sustituir la base; la guardia de `bootstrap_restaurar` lo vuelve a comprobar
-  dentro de su transacción). Pide confirmación (durante unos minutos no se vende ni en el TPV ni en
-  las Handy), sólo la puede pedir un administrador, y después cierra la sesión y sigue como
-  cualquier otra recuperación desde la nube, que vacía las cuarentenas
+- **Lo que no sale en una semana se avisa.** Una cuarentena de filas inciertas o dudosas (o sin
+  `Filas_Json`) no la trae nunca la salida, y mientras esté ahí el contraste no repara. Tampoco sale
+  una cuyas filas traídas chocan con algo de aquí que no se trae (SYNC-38). Si lleva una semana
+  apartada (`BAJADA_ATASCADA_TRAS_MS`, desde su primer fallo) y es de las primeras o la salida ya la
+  ha intentado (`Ultima_Salida_Ms`; una que no se ha podido intentar nunca, sin conexión o con la
+  reparación apagada, no cuenta), cuenta en el panel de salud (`SyncHealth::bajada_atascada`,
+  `cuarentenas_bajada::atascadas`), con las filas que la convergencia lleva una semana sin poder
+  traer ([arriba](#el-orden-de-la-nube-manda-sync-29), `convergencia::atascadas`). El job
+  `bajada_atascada` avisa a los administradores (`use_cases::sync::avisar_bajada_atascada`): una
+  notificación con clave, la misma para los dos casos («Hay cambios hechos desde las Handy que el TPV
+  no ha podido aplicar»), que no se repite mientras siga activa y se cierra sola cuando ya no queda
+  nada, y que no bloquea nada. Su acción lleva a Configuración → Conectividad, que lo explica y
+  ofrece «Recuperar el estado actual de la nube» sólo si es seguro: sin nada de este equipo por
+  subir ni apartado de la subida (se perdería al sustituir la base; la guardia de
+  `bootstrap_restaurar` lo vuelve a comprobar dentro de su transacción). Pide confirmación (durante
+  unos minutos no se vende ni en el TPV ni en las Handy), sólo la puede pedir un administrador, y
+  después cierra la sesión y sigue como cualquier otra recuperación desde la nube, que vacía las
+  cuarentenas y lo apuntado
   ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Mientras se trae, el motor
   de réplica está parado (`SyncNativo::pausar_hasta_sin_sesion`, que espera a que acabe la sesión en
   marcha, también la que empezó recuperando y sigue en vivo; y de una en una): una sesión viva que
