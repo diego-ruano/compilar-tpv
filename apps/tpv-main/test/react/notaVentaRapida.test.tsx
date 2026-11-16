@@ -16,7 +16,7 @@ it("permite guardar una nota en una línea identificada por UUID", async () => {
         paso="productos" totalPendiente={deCentimos(300)} totalSeleccionado={deCentimos(0)} haySeleccion={false}
         onCobrarTodo={nada} onCobrarFraccionado={nada} onToggleSeleccion={nada} onEliminarLinea={nada}
         onCobrarTarjeta={nada} onStartEfectivo={nada} onCancelarCobro={nada}
-        quiereFactura={false} onQuiereFacturaChange={nada} onGuardarNota={guardar}
+        quiereFactura={false} onQuiereFacturaChange={nada} onGuardarNota={guardar} onGuardarIngredientes={async () => {}}
     />);
     const nota = await screen.findByTitle("Añadir/editar nota");
     expect(nota).toBeEnabled();

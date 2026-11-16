@@ -1,0 +1,33 @@
+{
+  "Ingredientes": [
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-brioche",
+      "Nombre": "Brioche"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-integral",
+      "Nombre": "Integral"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-ketchup",
+      "Nombre": "Pan con ketchup"
+    }
+  ],
+  "Producto_Ingredientes": [
+    {
+      "ID_Ingrediente": "ing-brioche",
+      "ID_Producto": "prod-1"
+    },
+    {
+      "ID_Ingrediente": "ing-ketchup",
+      "ID_Producto": "prod-1"
+    },
+    {
+      "ID_Ingrediente": "ing-integral",
+      "ID_Producto": "prod-2"
+    }
+  ]
+}

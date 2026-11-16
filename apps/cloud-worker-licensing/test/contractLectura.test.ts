@@ -37,6 +37,7 @@ import {
 	productDetail,
 	resumen as resumenInventario,
 } from "../src/domains/inventario/inventario.queries";
+import { catalogoIngredientes, ingredientesDeProducto } from "../src/domains/inventario/ingredientes.queries";
 import {
 	getBusiness,
 	getContact,
@@ -195,6 +196,10 @@ import goldenInvAlergenos from "../../../tests/contract/lecturas/golden/inventar
 import casoInvLotes from "../../../tests/contract/lecturas/casos/inventario/lotes_por_producto.json";
 import goldenInvLotes from "../../../tests/contract/lecturas/golden/inventario/lotes_por_producto.json";
 import casoInvDetalle from "../../../tests/contract/lecturas/casos/inventario/product_detail.json";
+import casoInvCatalogoIngr from "../../../tests/contract/lecturas/casos/inventario/catalogo_ingredientes.json";
+import goldenInvCatalogoIngr from "../../../tests/contract/lecturas/golden/inventario/catalogo_ingredientes.json";
+import casoInvIngrProducto from "../../../tests/contract/lecturas/casos/inventario/ingredientes_de_producto.json";
+import goldenInvIngrProducto from "../../../tests/contract/lecturas/golden/inventario/ingredientes_de_producto.json";
 import goldenInvDetalle from "../../../tests/contract/lecturas/golden/inventario/product_detail.json";
 import casoLoginUsuarios from "../../../tests/contract/lecturas/casos/login/usuarios.json";
 import goldenLoginUsuarios from "../../../tests/contract/lecturas/golden/login/usuarios.json";
@@ -373,6 +378,8 @@ const CASOS = [
 	{ nombre: "inventario_alergenos", caso: casoInvAlergenos, golden: goldenInvAlergenos },
 	{ nombre: "inventario_lotes_por_producto", caso: casoInvLotes, golden: goldenInvLotes },
 	{ nombre: "inventario_product_detail", caso: casoInvDetalle, golden: goldenInvDetalle },
+	{ nombre: "inventario_catalogo_ingredientes", caso: casoInvCatalogoIngr, golden: goldenInvCatalogoIngr },
+	{ nombre: "inventario_ingredientes_de_producto", caso: casoInvIngrProducto, golden: goldenInvIngrProducto },
 	{ nombre: "login_usuarios", caso: casoLoginUsuarios, golden: goldenLoginUsuarios },
 	{ nombre: "login_punch_status", caso: casoLoginPunch, golden: goldenLoginPunch },
 	{ nombre: "notificaciones_listar", caso: casoNotifListar, golden: goldenNotifListar },
@@ -595,6 +602,10 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return listAlergenos(db);
 		case "inventario.lotes_por_producto":
 			return listLotesByProducto(db, e.id_producto);
+		case "inventario.catalogo_ingredientes":
+			return catalogoIngredientes(db);
+		case "inventario.ingredientes_de_producto":
+			return ingredientesDeProducto(db, e.id_producto);
 		case "inventario.product_detail":
 			return productDetail(db, e.id_producto);
 		case "login.usuarios":

@@ -106,6 +106,9 @@ pub struct MesaLineaComandaRow {
     pub iva_percent: Option<f64>,
     #[serde(rename = "Notas")]
     pub notas: Option<String>,
+    /// Lo que se pidió distinto: el array JSON de `Detalle_Comanda.Cambios_Ingredientes`, tal cual.
+    #[serde(rename = "Cambios_Ingredientes")]
+    pub cambios_ingredientes: Option<String>,
     #[serde(rename = "Estado_Cocina")]
     pub estado_cocina: Option<String>,
     #[serde(rename = "Nombre")]
@@ -213,6 +216,9 @@ pub struct KitchenRow {
     pub nombre_producto: String,
     #[serde(rename = "Notas")]
     pub notas: Option<String>,
+    /// Lo que se pidió distinto (array JSON, ver `MesaLineaComandaRow`).
+    #[serde(rename = "Cambios_Ingredientes")]
+    pub cambios_ingredientes: Option<String>,
     #[serde(rename = "Estado_Cocina")]
     pub estado_cocina: Option<String>,
     #[serde(rename = "Pagado")]
@@ -315,6 +321,24 @@ pub struct MesasUpdateDetalleNotaInput {
     pub id_detalle: String,
     #[serde(default)]
     pub nota: Option<String>,
+}
+
+/// Un ingrediente que se pide distinto en una línea: `tipo` es `"SIN"` o `"EXTRA"`. El nombre va
+/// porque la línea guarda el que tenía al pedirlo (`tpv_domain::ingredientes`).
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct CambioIngredienteInput {
+    pub id_ingrediente: String,
+    pub nombre: String,
+    pub tipo: String,
+}
+
+/// Lo que se pide distinto en una línea, entero: sustituye a lo que hubiera. Vacío, la línea vuelve
+/// a ir como el producto. Vale para mesas y para venta rápida (es la misma tabla).
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct MesasUpdateDetalleIngredientesInput {
+    pub id_detalle: String,
+    #[serde(default)]
+    pub cambios: Vec<CambioIngredienteInput>,
 }
 
 /// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).

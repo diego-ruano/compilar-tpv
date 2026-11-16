@@ -1,0 +1,43 @@
+{
+  "categorias": [
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "Nombre": "Pan"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pasta",
+      "Nombre": "Pasta"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "Nombre": "Salsas"
+    }
+  ],
+  "ingredientes": [
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-brioche",
+      "Nombre": "Brioche"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-integral-pan",
+      "Nombre": "Integral"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pasta",
+      "ID_Ingrediente": "ing-integral-pasta",
+      "Nombre": "Integral"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "ID_Ingrediente": "ing-alioli",
+      "Nombre": "alioli"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-angel",
+      "Nombre": "Ángel"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import { resolveImageUrl, triggerImageUploadDrain } from "../../../shared/lib/im
 import type { AlergenoInvDto, ProveedorMiniDto } from "@tpv/contracts";
 
 import { inventarioAPI } from "../api/inventarioAPI";
+import IngredientesProducto from "./IngredientesProducto";
 import { CampoDinero, useImporte } from "../../../shared/ui/CampoDinero";
 import {
     useAlergenos,
@@ -105,6 +106,10 @@ export function AddProductModal({
     const [selectedAlergenos, setSelectedAlergenos] = useState<Set<string>>(new Set());
     const [alergenoImgUrl, setAlergenoImgUrl] = useState<Record<string, string>>({});
 
+    // Los ingredientes que lleva. `null` mientras no se han cargado los del producto que se edita:
+    // entonces no se mandan y se quedan como estaban, en vez de borrarse al guardar.
+    const [selectedIngredientes, setSelectedIngredientes] = useState<Set<string> | null>(new Set());
+
     const [loading, setLoading] = useState(false);
     const toast = useToast();
 
@@ -190,6 +195,7 @@ export function AddProductModal({
 
                 setSelectedAlergenos(new Set());
                 setAlergenosOpen(false);
+                setSelectedIngredientes(new Set());
 
                 setCrearLoteInicial(true);
                 setCodigoLoteInicial("");
@@ -204,8 +210,13 @@ export function AddProductModal({
             }
 
             // Prefill on-demand del producto a editar (no se cachea: depende del id puntual).
-            const detalle = await inventarioAPI.getProductoDetalle(productIdToEdit ?? "");
+            setSelectedIngredientes(null);
+            const [detalle, ingredientes] = await Promise.all([
+                inventarioAPI.getProductoDetalle(productIdToEdit ?? ""),
+                inventarioAPI.ingredientesDeProducto(productIdToEdit ?? ""),
+            ]);
             if (cancelled) return;
+            setSelectedIngredientes(new Set(ingredientes));
 
             setIdCategoria(detalle.ID_Categoria);
             setIdProveedor(detalle.ID_Proveedor ?? "");
@@ -342,6 +353,7 @@ export function AddProductModal({
                     iva_percent: leerIva(iva_percent) ?? undefined,
                     stock_suelto: numeroOpcional(stockSuelto),
                     ids_alergenos: alergIds,
+                    ids_ingredientes: selectedIngredientes ? [...selectedIngredientes] : undefined,
                 })) || (isEdit ? productIdToEdit : null);
 
             if (!finalProductId) {
@@ -763,6 +775,20 @@ export function AddProductModal({
                                 )}
                             </div>
                         </div>
+                    </div>
+
+                    <div className="sm:col-span-2 lg:col-span-4">
+                        {selectedIngredientes ? (
+                            <IngredientesProducto
+                                seleccionados={selectedIngredientes}
+                                onChange={setSelectedIngredientes}
+                                disabled={loading}
+                            />
+                        ) : (
+                            <p className="rounded-2xl border border-border px-4 py-3 text-sm text-fg-muted">
+                                Cargando ingredientes…
+                            </p>
+                        )}
                     </div>
 
                     <div className="flex flex-col gap-2 sm:col-span-2 lg:col-span-4">

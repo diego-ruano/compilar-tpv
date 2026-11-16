@@ -11,9 +11,10 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_contracts::inventario::{
-    AlergenoInvDto, AlergenoMiniDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
+    AlergenoInvDto, AlergenoMiniDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
+use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
     AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
@@ -46,6 +47,60 @@ fn alergeno_mini(a: AlergenoInvDto) -> AlergenoMiniDto {
 
 #[async_trait]
 impl InventarioRepository for HttpInventarioRepository {
+    // ── Ingredientes ──
+    async fn catalogo_ingredientes(&self) -> AppResult<CatalogoIngredientesDto> {
+        self.client.get_json("/v1/inventario/ingredientes").await
+    }
+
+    async fn ingredientes_de_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
+        self.client
+            .get_json(&format!("/v1/inventario/productos/{id_producto}/ingredientes"))
+            .await
+    }
+
+    async fn guardar_categoria_ingrediente(&self, c: CategoriaIngredienteGuardar) -> AppResult<String> {
+        let generado = c.id.is_none().then_some("id_categoria_ingrediente");
+        let id = c.id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let body = json!({ "id_categoria_ingrediente": id, "nombre": c.nombre });
+        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
+        let (_, enviado): (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/ingredientes/categorias", &body, generado)
+            .await?;
+        Ok(enviado.unwrap_or(id))
+    }
+
+    async fn borrar_categoria_ingrediente(&self, id: &str) -> AppResult<()> {
+        let _: JsonValue = self
+            .client
+            .delete_json(&format!("/v1/inventario/ingredientes/categorias/{id}"))
+            .await?;
+        Ok(())
+    }
+
+    async fn guardar_ingrediente(&self, i: IngredienteGuardar) -> AppResult<String> {
+        let generado = i.id.is_none().then_some("id_ingrediente");
+        let id = i.id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let body = json!({
+            "id_ingrediente": id,
+            "id_categoria_ingrediente": i.id_categoria,
+            "nombre": i.nombre,
+        });
+        let (_, enviado): (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/ingredientes", &body, generado)
+            .await?;
+        Ok(enviado.unwrap_or(id))
+    }
+
+    async fn borrar_ingrediente(&self, id: &str) -> AppResult<()> {
+        let _: JsonValue = self
+            .client
+            .delete_json(&format!("/v1/inventario/ingredientes/{id}"))
+            .await?;
+        Ok(())
+    }
+
     // ── Lecturas ──
     async fn list_categorias(&self) -> AppResult<Vec<CategoriaInvDto>> {
         self.client.get_json("/v1/inventario/categorias").await
@@ -231,6 +286,7 @@ impl HttpInventarioRepository {
             // Sin capacidad de recepción tampoco se introduce stock si desapareció el producto.
             "stock_suelto": if recibir { producto.stock_suelto } else { None },
             "ids_alergenos": producto.ids_alergenos,
+            "ids_ingredientes": producto.ids_ingredientes,
         });
         // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
         let (_, enviado): (JsonValue, _) = self

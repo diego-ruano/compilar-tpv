@@ -17,6 +17,8 @@ export type TicketItem = {
     iva_percent?: number | null;
 
     notas?: string | null;
+    /** Lo que se pidió distinto: el JSON de `Cambios_Ingredientes` (ver `inventario/ingredientes.ts`). */
+    cambiosIngredientes?: string | null;
 };
 
 export type Paso = "categorias" | "productos" | "metodo" | "efectivo";

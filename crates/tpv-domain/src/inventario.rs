@@ -61,6 +61,9 @@ pub struct ProductoUpsert {
     /// tributa distinto: algo envasado para llevar, tabaco, merchandising.
     pub iva_percent: Option<f64>,
     pub ids_alergenos: Vec<String>,
+    /// Los ingredientes que lleva. `None` = no tocarlos: así una pantalla que no los enseña no se los
+    /// lleva por delante al guardar.
+    pub ids_ingredientes: Option<Vec<String>>,
 }
 
 /// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
@@ -79,6 +82,7 @@ pub struct ProductoEntrada {
     pub stock_suelto: Option<f64>,
     pub iva_percent: Option<f64>,
     pub ids_alergenos: Vec<String>,
+    pub ids_ingredientes: Option<Vec<String>>,
 }
 
 impl ProductoUpsert {
@@ -97,6 +101,7 @@ impl ProductoUpsert {
             stock_suelto,
             iva_percent,
             ids_alergenos,
+            ids_ingredientes,
         } = input;
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
@@ -131,6 +136,7 @@ impl ProductoUpsert {
             stock_suelto: stock_suelto.filter(|v| v.is_finite()),
             iva_percent,
             ids_alergenos: normalize_ids(ids_alergenos),
+            ids_ingredientes: ids_ingredientes.map(normalize_ids),
         })
     }
 }
@@ -447,6 +453,7 @@ mod tests {
             stock_suelto,
             iva_percent: iva,
             ids_alergenos: alergenos,
+            ids_ingredientes: None,
         })
     }
 
@@ -515,6 +522,7 @@ mod tests {
                 stock_suelto: None,
                 iva_percent: None,
                 ids_alergenos: vec![],
+                ids_ingredientes: None,
             })
         };
         for malo in [-1, -5000] {

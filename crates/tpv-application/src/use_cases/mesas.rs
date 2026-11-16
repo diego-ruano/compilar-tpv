@@ -8,7 +8,7 @@ use tpv_contracts::mesas::{
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
     MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput,
-    MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
+    MesasUpdateDetalleIngredientesInput, MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
 };
 use tpv_contracts::verifactu::DestinatarioInput;
 use tpv_domain::mesas::{
@@ -207,6 +207,22 @@ pub async fn update_detalle_nota(
     }
     repo.update_detalle_nota(&input.id_detalle, limpiar_opcional(input.nota))
         .await
+}
+
+/// Lo que se pide distinto en una línea (sin cebolla, extra de queso). No cambia el precio.
+pub async fn update_detalle_ingredientes(
+    repo: &dyn MesasRepository,
+    input: MesasUpdateDetalleIngredientesInput,
+) -> AppResult<()> {
+    let id_detalle = input.id_detalle.trim();
+    if id_detalle.is_empty() {
+        return Err(AppError::validation("Falta la línea."));
+    }
+    let cambios = tpv_domain::ingredientes::cambios_de_linea(
+        input.cambios.into_iter().map(|c| (c.id_ingrediente, c.nombre, c.tipo)),
+    )
+    .map_err(AppError::validation)?;
+    repo.update_detalle_ingredientes(id_detalle, &cambios).await
 }
 
 /// REV-17: quién cobra llega **aparte** del input, porque sale de la sesión.

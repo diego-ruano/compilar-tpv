@@ -163,7 +163,62 @@ pub struct UpsertProductoResult {
     pub id_producto: String,
 }
 
+/* ── Ingredientes ── */
+
+/// Una categoría de ingredientes (Pan, Salsas, Quesos…).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CategoriaIngredienteDto {
+    #[serde(rename = "ID_Categoria_Ingrediente")]
+    pub id_categoria_ingrediente: String,
+    #[serde(rename = "Nombre")]
+    pub nombre: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct IngredienteDto {
+    #[serde(rename = "ID_Ingrediente")]
+    pub id_ingrediente: String,
+    #[serde(rename = "ID_Categoria_Ingrediente")]
+    pub id_categoria_ingrediente: String,
+    #[serde(rename = "Nombre")]
+    pub nombre: String,
+}
+
+/// Todas las categorías de ingredientes y todos los ingredientes, cada lista por nombre.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CatalogoIngredientesDto {
+    pub categorias: Vec<CategoriaIngredienteDto>,
+    pub ingredientes: Vec<IngredienteDto>,
+}
+
 /* ── Args/Inputs ── */
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct GuardarCategoriaIngredienteInput {
+    /// Sin id, una categoría nueva.
+    #[serde(default)]
+    pub id_categoria_ingrediente: Option<String>,
+    pub nombre: String,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct GuardarIngredienteInput {
+    /// Sin id, un ingrediente nuevo.
+    #[serde(default)]
+    pub id_ingrediente: Option<String>,
+    pub id_categoria_ingrediente: String,
+    pub nombre: String,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct IdCategoriaIngredienteArgs {
+    pub id_categoria_ingrediente: String,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct IdIngredienteArgs {
+    pub id_ingrediente: String,
+}
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct IdCategoriaArgs {
@@ -223,6 +278,9 @@ pub struct UpsertProductoInput {
     pub iva_percent: Option<f64>,
     #[serde(default)]
     pub ids_alergenos: Vec<String>,
+    /// Los ingredientes que lleva. Ausente o `null` = no tocarlos.
+    #[serde(default)]
+    pub ids_ingredientes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

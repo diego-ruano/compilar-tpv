@@ -66,6 +66,7 @@ export const nombresComandos = {
     "remove_one_pending_detalle": "removeOnePendingDetalle",
     "delete_detalle": "deleteDetalle",
     "update_detalle_nota": "updateDetalleNota",
+    "update_detalle_ingredientes": "updateDetalleIngredientes",
     "cobrar_detalles": "cobrarDetalles",
     "kitchen_list_today_pending": "kitchenListTodayPending",
     "kitchen_set_line_state": "kitchenSetLineState",
@@ -83,6 +84,12 @@ export const nombresComandos = {
     "inventario_update_lote": "inventarioUpdateLote",
     "inventario_ajustar_lote": "inventarioAjustarLote",
     "inventario_ajustar_stock_suelto": "inventarioAjustarStockSuelto",
+    "inventario_catalogo_ingredientes": "inventarioCatalogoIngredientes",
+    "inventario_ingredientes_de_producto": "inventarioIngredientesDeProducto",
+    "inventario_guardar_categoria_ingrediente": "inventarioGuardarCategoriaIngrediente",
+    "inventario_borrar_categoria_ingrediente": "inventarioBorrarCategoriaIngrediente",
+    "inventario_guardar_ingrediente": "inventarioGuardarIngrediente",
+    "inventario_borrar_ingrediente": "inventarioBorrarIngrediente",
     "tareas_get_trabajadores": "tareasGetTrabajadores",
     "tareas_create_tarea": "tareasCreateTarea",
     "tareas_get_tareas_admin": "tareasGetTareasAdmin",
@@ -295,6 +302,7 @@ type Argumentos = {
     "remove_one_pending_detalle": { args: Parameters<Comandos["removeOnePendingDetalle"]>[0] };
     "delete_detalle": { args: Parameters<Comandos["deleteDetalle"]>[0] };
     "update_detalle_nota": { args: Parameters<Comandos["updateDetalleNota"]>[0] };
+    "update_detalle_ingredientes": { args: Parameters<Comandos["updateDetalleIngredientes"]>[0] };
     "cobrar_detalles": { args: Parameters<Comandos["cobrarDetalles"]>[0] };
     "kitchen_list_today_pending": {  };
     "kitchen_set_line_state": { args: Parameters<Comandos["kitchenSetLineState"]>[0] };
@@ -312,6 +320,12 @@ type Argumentos = {
     "inventario_update_lote": { args: Parameters<Comandos["inventarioUpdateLote"]>[0] };
     "inventario_ajustar_lote": { args: Parameters<Comandos["inventarioAjustarLote"]>[0] };
     "inventario_ajustar_stock_suelto": { args: Parameters<Comandos["inventarioAjustarStockSuelto"]>[0] };
+    "inventario_catalogo_ingredientes": {  };
+    "inventario_ingredientes_de_producto": { args: Parameters<Comandos["inventarioIngredientesDeProducto"]>[0] };
+    "inventario_guardar_categoria_ingrediente": { args: Parameters<Comandos["inventarioGuardarCategoriaIngrediente"]>[0] };
+    "inventario_borrar_categoria_ingrediente": { args: Parameters<Comandos["inventarioBorrarCategoriaIngrediente"]>[0] };
+    "inventario_guardar_ingrediente": { args: Parameters<Comandos["inventarioGuardarIngrediente"]>[0] };
+    "inventario_borrar_ingrediente": { args: Parameters<Comandos["inventarioBorrarIngrediente"]>[0] };
     "tareas_get_trabajadores": {  };
     "tareas_create_tarea": { args: Parameters<Comandos["tareasCreateTarea"]>[0] };
     "tareas_get_tareas_admin": {  };

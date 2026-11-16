@@ -9,6 +9,7 @@
 use serde_json::{json, Map, Value};
 
 use crate::configuracion::validate_iva_percent;
+use crate::ingredientes::{cambios_de_linea, forma_guardada, CategoriaIngredienteGuardar, IngredienteGuardar};
 use crate::dinero::Dinero;
 use crate::inventario::{
     LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
@@ -139,8 +140,33 @@ fn producto(e: &Value) -> Result<Value, String> {
         stock_suelto: e["stock_suelto"].as_f64(),
         iva_percent: e["iva_percent"].as_f64(),
         ids_alergenos: Vec::new(),
+        ids_ingredientes: e.get("ids_ingredientes").and_then(Value::as_array).map(|v| {
+            v.iter().map(|x| x.as_str().unwrap_or_default().to_string()).collect()
+        }),
     })?;
-    Ok(json!({ "iva_percent": p.iva_percent, "nombre": p.nombre }))
+    Ok(json!({ "iva_percent": p.iva_percent, "nombre": p.nombre, "ids_ingredientes": p.ids_ingredientes }))
+}
+
+fn categoria_ingrediente(e: &Value) -> Result<Value, String> {
+    let c = CategoriaIngredienteGuardar::validar(texto_opcional(e, "id_categoria_ingrediente"), &texto(e, "nombre"))?;
+    Ok(json!({ "nombre": c.nombre }))
+}
+
+fn ingrediente(e: &Value) -> Result<Value, String> {
+    let i = IngredienteGuardar::validar(
+        texto_opcional(e, "id_ingrediente"),
+        &texto(e, "id_categoria_ingrediente"),
+        &texto(e, "nombre"),
+    )?;
+    Ok(json!({ "nombre": i.nombre, "id_categoria_ingrediente": i.id_categoria }))
+}
+
+fn cambios_ingredientes(e: &Value) -> Result<Value, String> {
+    let lista = e["cambios"].as_array().cloned().unwrap_or_default();
+    let cambios = cambios_de_linea(
+        lista.iter().map(|c| (texto(c, "id_ingrediente"), texto(c, "nombre"), texto(c, "tipo"))),
+    )?;
+    Ok(json!({ "cambios": forma_guardada(&cambios) }))
 }
 
 /// Los días de un horario: cada campo pasa por `dia_de_horario` con la frase que le da su caso de
@@ -191,6 +217,9 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "reserva_estado_mesa" => crate::reservas::estado_desde_la_mesa(&texto(entrada, "estado"))
             .map(|e| json!({ "estado": e.como_texto() })),
         "plano" => plano(entrada),
+        "categoria_ingrediente" => categoria_ingrediente(entrada),
+        "ingrediente" => ingrediente(entrada),
+        "cambios_ingredientes" => cambios_ingredientes(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

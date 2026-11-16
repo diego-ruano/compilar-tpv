@@ -63,6 +63,13 @@ pub trait MesasRepository: Send + Sync {
     ) -> AppResult<()>;
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()>;
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()>;
+    /// Lo que se pide distinto en la línea, ya validado (`tpv_domain::ingredientes`); vacío la deja
+    /// como el producto. Como la nota, una línea cobrada no se toca.
+    async fn update_detalle_ingredientes(
+        &self,
+        id_detalle: &str,
+        cambios: &[tpv_domain::ingredientes::CambioIngrediente],
+    ) -> AppResult<()>;
     /// Devuelve el **id del pago**: con él se pide su ticket (`ticket_de_pago`, RI-29), que se
     /// compone desde la base con el número y la factura que se guardaron con el pago.
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String>;

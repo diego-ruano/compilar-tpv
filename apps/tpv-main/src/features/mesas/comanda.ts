@@ -43,6 +43,7 @@ export function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
             estadoCocina: pasa ? r.Estado_Cocina || "PENDIENTE" : "NO_COCINA",
             pasaCocina: pasa,
             notas: r.Notas,
+            cambiosIngredientes: r.Cambios_Ingredientes ?? null,
             // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
             iva_percent: r.IVA_Percent ?? null,
         };

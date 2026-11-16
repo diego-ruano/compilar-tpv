@@ -64,6 +64,8 @@ pub(crate) mod consumo_stock;
 pub mod estadisticas_diarias;
 // OBS-06: las referencias de imagen de la base, para renombrar las heredadas.
 pub mod imagenes;
+/// Ingredientes: catálogo, los de cada producto y sus borrados (lo usa el repo de inventario).
+pub(crate) mod ingredientes;
 pub mod inventario;
 pub mod jobs;
 pub mod login;

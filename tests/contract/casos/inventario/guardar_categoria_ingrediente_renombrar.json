@@ -1,0 +1,19 @@
+{
+  "descripcion": "Renombrar una categoría de ingredientes: el mismo id, otro nombre; sus ingredientes siguen en ella.",
+  "comando": "inventario.guardar_categoria_ingrediente",
+  "seed": [
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-pan', 'Pan');",
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-salsas', 'Salsas');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-brioche', 'cat-pan', 'Brioche');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-integral', 'cat-pan', 'Integral');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-ketchup', 'cat-salsas', 'Ketchup');"
+  ],
+  "entrada": {
+    "id_categoria_ingrediente": "cat-pan",
+    "nombre": "Panes"
+  },
+  "snapshot": {
+    "Categorias_Ingrediente": "SELECT ID_Categoria_Ingrediente, Nombre FROM Categorias_Ingrediente",
+    "Ingredientes": "SELECT ID_Ingrediente, ID_Categoria_Ingrediente, Nombre FROM Ingredientes"
+  }
+}

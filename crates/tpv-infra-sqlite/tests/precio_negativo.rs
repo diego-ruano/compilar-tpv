@@ -328,6 +328,7 @@ async fn el_caso_de_uso_de_la_main_rechaza_el_precio_y_el_coste_negativos() {
         stock_suelto: None,
         iva_percent: None,
         ids_alergenos: vec![],
+        ids_ingredientes: None,
     };
 
     let e = tpv_application::use_cases::inventario::upsert_producto(&repo, "u1", producto("ipc-neg", -5000), &autorizacion)

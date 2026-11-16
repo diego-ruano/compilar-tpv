@@ -1,11 +1,13 @@
 //! Casos de uso de inventario (Local-First).
 
 use tpv_contracts::inventario::{
-    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, InventarioResumenResponse,
+    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto,
+    CreateLoteInput, GuardarCategoriaIngredienteInput, GuardarIngredienteInput, InventarioResumenResponse,
     LoteDto, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto,
     ProveedorMiniDto, SummaryArgs, UpdateLoteInput,
     UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
+use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
     AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
@@ -102,6 +104,7 @@ pub async fn upsert_producto(
         stock_suelto: input.stock_suelto,
         iva_percent: input.iva_percent,
         ids_alergenos: input.ids_alergenos,
+        ids_ingredientes: input.ids_ingredientes,
     })
     .map_err(AppError::validation)?;
     let precios = tpv_domain::permisos::permite(&autorizacion.rol, &autorizacion.permisos, "catalogo.precios");
@@ -168,6 +171,52 @@ pub async fn ajustar_stock_suelto(repo: &R, id_usuario: &str, input: AjusteStock
     .map_err(AppError::validation)?;
     repo.ajustar_stock_suelto(id_usuario, ajuste).await?;
     Ok("OK".to_string())
+}
+
+/* ── Ingredientes ── */
+
+pub async fn catalogo_ingredientes(repo: &R) -> AppResult<CatalogoIngredientesDto> {
+    repo.catalogo_ingredientes().await
+}
+
+pub async fn ingredientes_de_producto(repo: &R, id_producto: String) -> AppResult<Vec<String>> {
+    repo.ingredientes_de_producto(id_producto.trim()).await
+}
+
+pub async fn guardar_categoria_ingrediente(
+    repo: &R,
+    input: GuardarCategoriaIngredienteInput,
+) -> AppResult<String> {
+    let categoria =
+        CategoriaIngredienteGuardar::validar(input.id_categoria_ingrediente, &input.nombre)
+            .map_err(AppError::validation)?;
+    repo.guardar_categoria_ingrediente(categoria).await
+}
+
+pub async fn borrar_categoria_ingrediente(repo: &R, id: String) -> AppResult<()> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(AppError::validation("Falta la categoría."));
+    }
+    repo.borrar_categoria_ingrediente(id).await
+}
+
+pub async fn guardar_ingrediente(repo: &R, input: GuardarIngredienteInput) -> AppResult<String> {
+    let ingrediente = IngredienteGuardar::validar(
+        input.id_ingrediente,
+        &input.id_categoria_ingrediente,
+        &input.nombre,
+    )
+    .map_err(AppError::validation)?;
+    repo.guardar_ingrediente(ingrediente).await
+}
+
+pub async fn borrar_ingrediente(repo: &R, id: String) -> AppResult<()> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(AppError::validation(tpv_domain::ingredientes::MSG_FALTA_INGREDIENTE));
+    }
+    repo.borrar_ingrediente(id).await
 }
 
 #[cfg(test)]

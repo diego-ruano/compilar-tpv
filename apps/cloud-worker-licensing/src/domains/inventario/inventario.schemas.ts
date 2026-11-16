@@ -13,6 +13,8 @@ import { zIva } from "../../lib/iva";
 import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
+	GuardarCategoriaIngredienteInput as ContractGuardarCategoriaIngredienteInput,
+	GuardarIngredienteInput as ContractGuardarIngredienteInput,
 	AjusteLoteInput as ContractAjusteLoteInput,
 	AjusteStockSueltoInput as ContractAjusteStockSueltoInput,
 	CreateLoteInput as ContractCreateLoteInput,
@@ -64,6 +66,20 @@ export const upsertProductoSchema = z.object({
 	// RI-78: ausente o `null` es «el del negocio»; fuera de 0–100 se rechaza, como en la Main.
 	iva_percent: zIva.nullish(),
 	ids_alergenos: idList,
+	// Ausente o `null` = no tocarlos. Los vacíos se descartan al normalizar, como en la Main.
+	ids_ingredientes: z.array(z.string()).nullish(),
+});
+
+// Ingredientes: los mismos textos que la Main (`tpv-domain/src/ingredientes.rs`).
+export const guardarCategoriaIngredienteSchema = z.object({
+	id_categoria_ingrediente: optId,
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre de la categoría de ingredientes."),
+});
+
+export const guardarIngredienteSchema = z.object({
+	id_ingrediente: optId,
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del ingrediente."),
+	id_categoria_ingrediente: idCon("Elige la categoría del ingrediente."),
 });
 
 // Los mismos textos que en la Main (`tpv-domain/src/inventario.rs`).
@@ -150,6 +166,8 @@ export const ajusteStockSueltoSchema = z.object({
 });
 
 export type UpsertCategoriaInput = ContractUpsertCategoriaInput;
+export type GuardarCategoriaIngredienteInput = ContractGuardarCategoriaIngredienteInput;
+export type GuardarIngredienteInput = ContractGuardarIngredienteInput;
 
 export type UpsertProductoInput = Omit<
 	ContractUpsertProductoInput,
@@ -162,6 +180,7 @@ export type UpsertProductoInput = Omit<
 	| "cantidad_pedido_esperada"
 	| "stock_suelto"
 	| "iva_percent"
+	| "ids_ingredientes"
 > & {
 	id_proveedor?: string | null;
 	precio_venta?: number | null;
@@ -172,6 +191,7 @@ export type UpsertProductoInput = Omit<
 	cantidad_pedido_esperada?: number | null;
 	stock_suelto?: number | null;
 	iva_percent?: number | null;
+	ids_ingredientes?: string[] | null;
 };
 
 
@@ -221,6 +241,8 @@ export type AjusteStockSueltoInput = Omit<
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GUpsertCategoria = Assert<SameKeys<z.infer<typeof upsertCategoriaSchema>, UpsertCategoriaInput>>;
+type _GCategoriaIngrediente = Assert<SameKeys<z.infer<typeof guardarCategoriaIngredienteSchema>, GuardarCategoriaIngredienteInput>>;
+type _GIngrediente = Assert<SameKeys<z.infer<typeof guardarIngredienteSchema>, GuardarIngredienteInput>>;
 type _GUpsertProducto = Assert<SameKeys<z.infer<typeof upsertProductoSchema>, UpsertProductoInput>>;
 type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteCampos>, CreateLoteInput>>;
 type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteCampos>, UpdateLoteInput>>;

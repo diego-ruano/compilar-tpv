@@ -1,0 +1,20 @@
+{
+  "descripcion": "Sin cambios (null), la línea vuelve a ir como el producto.",
+  "comando": "mesas.update_detalle_ingredientes",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Cocina');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Hamburguesa', 950);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 1, 950);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Cambios_Ingredientes) VALUES ('detalle-2', 'comanda-1', 'prod-1', 1, 950, '[{\"id\":\"ing-ketchup\",\"nombre\":\"Ketchup\",\"tipo\":\"SIN\"}]');"
+  ],
+  "entrada": {
+    "id_detalle": "detalle-2",
+    "cambios": null
+  },
+  "snapshot": {
+    "Detalle_Comanda": "SELECT ID_Detalle, Cambios_Ingredientes FROM Detalle_Comanda"
+  }
+}

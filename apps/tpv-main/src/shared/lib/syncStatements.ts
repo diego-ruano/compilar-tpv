@@ -89,6 +89,11 @@ const TABLE_TO_FEATURES: Record<string, readonly Clave[]> = {
 	movimientos_stock: ["inventario"],
 	alergenos: ["inventario"],
 	producto_alergenos: ["inventario"],
+	// Los ingredientes se gestionan en Inventario, y la ventana de ingredientes de una línea los lee
+	// con las mismas claves. Lo que se pidió distinto en cada línea va en `detalle_comanda`.
+	categorias_ingrediente: ["inventario"],
+	ingredientes: ["inventario"],
+	producto_ingredientes: ["inventario"],
 	proveedores: ["proveedores", "inventario", "cuentas", "pedidos_proveedor", "stats"],
 	pedidos_proveedor: ["pedidos_proveedor", "inventario"],
 	lineas_pedido_proveedor: ["pedidos_proveedor", "inventario"],

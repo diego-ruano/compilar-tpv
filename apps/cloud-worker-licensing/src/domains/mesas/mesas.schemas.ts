@@ -171,6 +171,49 @@ export const updateNotaSchema = z
 	})
 	.transform((v) => ({ ...v, nota: cleanOrNull(v.nota) }));
 
+// Lo que se pide distinto en una línea. Espejo de `tpv_domain::ingredientes::cambios_de_linea`:
+// cada cambio con su ingrediente, su nombre y «SIN» o «EXTRA» (lo primero que falle, en ese orden y
+// con el mismo texto); un ingrediente repetido cuenta una vez (el primero) y, si quedan más de 100,
+// se rechaza. Sale ya en su forma guardada: el JSON con las mismas claves y en el mismo orden que
+// escribe la Main, o `null` si no queda ninguno.
+const MSG_FALTA_INGREDIENTE = "Falta el ingrediente.";
+const MSG_NOMBRE_INGREDIENTE = "Escribe el nombre del ingrediente.";
+const MSG_TIPO_DE_CAMBIO = "Cada ingrediente cambiado va «sin» o «extra».";
+const MSG_DEMASIADOS_CAMBIOS = "Son demasiados ingredientes cambiados para una línea.";
+const MAX_CAMBIOS_POR_LINEA = 100;
+
+type CambioIngrediente = { id_ingrediente: string; nombre: string; tipo: string };
+
+function sinRepetidos(cambios: CambioIngrediente[]): CambioIngrediente[] {
+	const vistos = new Set<string>();
+	return cambios.filter((c) => !vistos.has(c.id_ingrediente) && vistos.add(c.id_ingrediente));
+}
+
+export const cambiosIngredientesSchema = z
+	.object({
+		cambios: z
+			.array(
+				z.object({
+					id_ingrediente: z.string().overwrite(recortar).min(1, MSG_FALTA_INGREDIENTE),
+					nombre: z.string().overwrite(recortar).min(1, MSG_NOMBRE_INGREDIENTE),
+					tipo: z
+						.string()
+						.overwrite(recortar)
+						.refine((t) => t === "SIN" || t === "EXTRA", MSG_TIPO_DE_CAMBIO),
+				}),
+			)
+			.default([]),
+	})
+	.superRefine((v, ctx) => {
+		if (sinRepetidos(v.cambios).length > MAX_CAMBIOS_POR_LINEA) {
+			ctx.addIssue({ code: "custom", path: ["cambios"], message: MSG_DEMASIADOS_CAMBIOS });
+		}
+	})
+	.transform((v) => {
+		const lista = sinRepetidos(v.cambios).map((c) => ({ id: c.id_ingrediente, nombre: c.nombre, tipo: c.tipo }));
+		return { cambios: lista.length ? JSON.stringify(lista) : null };
+	});
+
 export const cobrarDetallesSchema = z
 	.object({
 		id_comanda: idField("Falta la comanda."),

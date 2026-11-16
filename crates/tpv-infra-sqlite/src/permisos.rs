@@ -82,7 +82,7 @@ mod tests {
         let repo = crate::inventario::SqliteInventarioRepository::new(db.clone());
         let producto = tpv_domain::inventario::ProductoUpsert {
             id:Some("p".into()),id_categoria:"cat".into(),id_proveedor:None,nombre:"Nombre editado".into(),
-            precio_venta:Some(tpv_domain::dinero::Dinero::de_centimos(100)),stock_minimo:None,unidad_medida:None,nombre_imagen:None,ruta_imagen:None,cantidad_pedido_esperada:None,stock_suelto:None,iva_percent:None,ids_alergenos:vec![],
+            precio_venta:Some(tpv_domain::dinero::Dinero::de_centimos(100)),stock_minimo:None,unidad_medida:None,nombre_imagen:None,ruta_imagen:None,cantidad_pedido_esperada:None,stock_suelto:None,iva_percent:None,ids_alergenos:vec![],ids_ingredientes:None,
         };
         repo.upsert_producto_autorizado("camarero",producto.clone(),false,false).await.unwrap();
         db.write().await.raw().execute("UPDATE Productos SET Precio_Venta=200 WHERE ID_Producto='p'",()).await.unwrap();

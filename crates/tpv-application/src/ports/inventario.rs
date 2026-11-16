@@ -3,9 +3,10 @@
 use async_trait::async_trait;
 
 use tpv_contracts::inventario::{
-    AlergenoInvDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
+    AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
     ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
+use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
     AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
@@ -49,4 +50,19 @@ pub trait InventarioRepository: Send + Sync {
     async fn ajustar_lote(&self, id_usuario: &str, ajuste: AjusteLote) -> AppResult<()>;
     /// Lo mismo para el stock suelto de un producto (RI-55).
     async fn ajustar_stock_suelto(&self, id_usuario: &str, ajuste: AjusteSuelto) -> AppResult<()>;
+
+    // ── Ingredientes (sin cantidades, stock ni precio) ──
+    /// Todas las categorías de ingredientes y todos los ingredientes.
+    async fn catalogo_ingredientes(&self) -> AppResult<CatalogoIngredientesDto>;
+    /// Los ids de los ingredientes que lleva un producto.
+    async fn ingredientes_de_producto(&self, id_producto: &str) -> AppResult<Vec<String>>;
+    /// Crea o renombra una categoría de ingredientes; devuelve su id.
+    async fn guardar_categoria_ingrediente(&self, categoria: CategoriaIngredienteGuardar) -> AppResult<String>;
+    /// Borra una categoría con sus ingredientes, y los quita de los productos que los llevaban. Lo
+    /// ya pedido no cambia: cada línea guarda el nombre.
+    async fn borrar_categoria_ingrediente(&self, id_categoria_ingrediente: &str) -> AppResult<()>;
+    /// Crea, renombra o cambia de categoría un ingrediente; devuelve su id.
+    async fn guardar_ingrediente(&self, ingrediente: IngredienteGuardar) -> AppResult<String>;
+    /// Borra un ingrediente y lo quita de los productos que lo llevaban.
+    async fn borrar_ingrediente(&self, id_ingrediente: &str) -> AppResult<()>;
 }

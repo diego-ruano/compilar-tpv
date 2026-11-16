@@ -71,6 +71,12 @@ import {
 	upsertProducto,
 } from "../src/domains/inventario/inventario.commands";
 import {
+	borrarCategoriaIngrediente,
+	borrarIngrediente,
+	guardarCategoriaIngrediente,
+	guardarIngrediente,
+} from "../src/domains/inventario/ingredientes.commands";
+import {
 	abrirComanda,
 	addLinea as addLineaMesa,
 	cobrarDetalles,
@@ -81,6 +87,7 @@ import {
 	setReservaEstado,
 	setReservaIfNull,
 	setTrabajadorIfNull,
+	updateDetalleIngredientes,
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
 import { planAbrirORetomar } from "../src/domains/mesas/abrirORetomar";
@@ -250,6 +257,28 @@ import casoMesaRemoveOne from "../../../tests/contract/casos/mesas/remove_one_pe
 import goldenMesaRemoveOne from "../../../tests/contract/golden/mesas/remove_one_pending_detalle.json";
 import casoMesaDeleteDet from "../../../tests/contract/casos/mesas/delete_detalle.json";
 import goldenMesaDeleteDet from "../../../tests/contract/golden/mesas/delete_detalle.json";
+import casoInvGuardarCatIngr from "../../../tests/contract/casos/inventario/guardar_categoria_ingrediente.json";
+import goldenInvGuardarCatIngr from "../../../tests/contract/golden/inventario/guardar_categoria_ingrediente.json";
+import casoInvRenombrarCatIngr from "../../../tests/contract/casos/inventario/guardar_categoria_ingrediente_renombrar.json";
+import goldenInvRenombrarCatIngr from "../../../tests/contract/golden/inventario/guardar_categoria_ingrediente_renombrar.json";
+import casoInvGuardarIngr from "../../../tests/contract/casos/inventario/guardar_ingrediente.json";
+import goldenInvGuardarIngr from "../../../tests/contract/golden/inventario/guardar_ingrediente.json";
+import casoInvMoverIngr from "../../../tests/contract/casos/inventario/guardar_ingrediente_mover.json";
+import goldenInvMoverIngr from "../../../tests/contract/golden/inventario/guardar_ingrediente_mover.json";
+import casoInvBorrarCatIngr from "../../../tests/contract/casos/inventario/borrar_categoria_ingrediente.json";
+import goldenInvBorrarCatIngr from "../../../tests/contract/golden/inventario/borrar_categoria_ingrediente.json";
+import casoInvBorrarIngr from "../../../tests/contract/casos/inventario/borrar_ingrediente.json";
+import goldenInvBorrarIngr from "../../../tests/contract/golden/inventario/borrar_ingrediente.json";
+import casoInvUpsertConIngr from "../../../tests/contract/casos/inventario/upsert_producto_con_ingredientes.json";
+import goldenInvUpsertConIngr from "../../../tests/contract/golden/inventario/upsert_producto_con_ingredientes.json";
+import casoInvUpsertSinListaIngr from "../../../tests/contract/casos/inventario/upsert_producto_sin_lista_de_ingredientes.json";
+import goldenInvUpsertSinListaIngr from "../../../tests/contract/golden/inventario/upsert_producto_sin_lista_de_ingredientes.json";
+import casoInvDeleteConIngr from "../../../tests/contract/casos/inventario/delete_producto_con_ingredientes.json";
+import goldenInvDeleteConIngr from "../../../tests/contract/golden/inventario/delete_producto_con_ingredientes.json";
+import casoMesaUpdateIngr from "../../../tests/contract/casos/mesas/update_detalle_ingredientes.json";
+import goldenMesaUpdateIngr from "../../../tests/contract/golden/mesas/update_detalle_ingredientes.json";
+import casoMesaQuitarIngr from "../../../tests/contract/casos/mesas/update_detalle_ingredientes_quitar.json";
+import goldenMesaQuitarIngr from "../../../tests/contract/golden/mesas/update_detalle_ingredientes_quitar.json";
 import casoMesaUpdateNota from "../../../tests/contract/casos/mesas/update_detalle_nota.json";
 import goldenMesaUpdateNota from "../../../tests/contract/golden/mesas/update_detalle_nota.json";
 import casoMesaKitchen from "../../../tests/contract/casos/mesas/kitchen_set_line_state.json";
@@ -396,6 +425,17 @@ const CASOS = [
 	{ nombre: "mesas_remove_one_pending", caso: casoMesaRemoveOne, golden: goldenMesaRemoveOne },
 	{ nombre: "mesas_delete_detalle", caso: casoMesaDeleteDet, golden: goldenMesaDeleteDet },
 	{ nombre: "mesas_update_detalle_nota", caso: casoMesaUpdateNota, golden: goldenMesaUpdateNota },
+	{ nombre: "inventario_guardar_categoria_ingrediente", caso: casoInvGuardarCatIngr, golden: goldenInvGuardarCatIngr },
+	{ nombre: "inventario_guardar_categoria_ingrediente_renombrar", caso: casoInvRenombrarCatIngr, golden: goldenInvRenombrarCatIngr },
+	{ nombre: "inventario_guardar_ingrediente", caso: casoInvGuardarIngr, golden: goldenInvGuardarIngr },
+	{ nombre: "inventario_guardar_ingrediente_mover", caso: casoInvMoverIngr, golden: goldenInvMoverIngr },
+	{ nombre: "inventario_borrar_categoria_ingrediente", caso: casoInvBorrarCatIngr, golden: goldenInvBorrarCatIngr },
+	{ nombre: "inventario_borrar_ingrediente", caso: casoInvBorrarIngr, golden: goldenInvBorrarIngr },
+	{ nombre: "inventario_upsert_producto_con_ingredientes", caso: casoInvUpsertConIngr, golden: goldenInvUpsertConIngr },
+	{ nombre: "inventario_upsert_producto_sin_lista_de_ingredientes", caso: casoInvUpsertSinListaIngr, golden: goldenInvUpsertSinListaIngr },
+	{ nombre: "inventario_delete_producto_con_ingredientes", caso: casoInvDeleteConIngr, golden: goldenInvDeleteConIngr },
+	{ nombre: "mesas_update_detalle_ingredientes", caso: casoMesaUpdateIngr, golden: goldenMesaUpdateIngr },
+	{ nombre: "mesas_update_detalle_ingredientes_quitar", caso: casoMesaQuitarIngr, golden: goldenMesaQuitarIngr },
 	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
 	{ nombre: "cuentas_create_gasto", caso: casoCuentasCrearGasto, golden: goldenCuentasCrearGasto },
 	{ nombre: "cuentas_update_gasto", caso: casoCuentasUpdateGasto, golden: goldenCuentasUpdateGasto },
@@ -667,6 +707,22 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			aplicar(hub, sql, upsertProducto(caso.entrada as any, ex.rows.length === 0, caso.entrada.id_usuario));
 			return;
 		}
+		case "inventario.guardar_categoria_ingrediente": {
+			aplicar(hub, sql, guardarCategoriaIngrediente(caso.entrada as any));
+			return;
+		}
+		case "inventario.borrar_categoria_ingrediente": {
+			aplicar(hub, sql, borrarCategoriaIngrediente(caso.entrada.id_categoria_ingrediente));
+			return;
+		}
+		case "inventario.guardar_ingrediente": {
+			aplicar(hub, sql, guardarIngrediente(caso.entrada as any));
+			return;
+		}
+		case "inventario.borrar_ingrediente": {
+			aplicar(hub, sql, borrarIngrediente(caso.entrada.id_ingrediente));
+			return;
+		}
 		case "inventario.delete_producto": {
 			aplicar(hub, sql, deleteProducto(caso.entrada.id_producto));
 			return;
@@ -921,6 +977,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "mesas.delete_detalle": {
 			aplicar(hub, sql, deleteDetalle(caso.entrada.id_detalle, caso.entrada.id_comanda));
+			return;
+		}
+		case "mesas.update_detalle_ingredientes": {
+			aplicar(hub, sql, updateDetalleIngredientes(caso.entrada.id_detalle, caso.entrada.cambios));
 			return;
 		}
 		case "mesas.update_detalle_nota": {

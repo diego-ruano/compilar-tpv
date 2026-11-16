@@ -13,8 +13,11 @@ import type {
     AjusteLoteInput,
     AjusteStockSueltoInput,
     AlergenoInvDto,
+    CatalogoIngredientesDto,
     CategoriaInvDto,
     CreateLoteInput,
+    GuardarCategoriaIngredienteInput,
+    GuardarIngredienteInput,
     InventarioResumenResponse,
     LoteDto,
     ProductDetailResponse,
@@ -94,5 +97,31 @@ export const inventarioAPI = {
 
     async ajustarStockSuelto(args: AjusteStockSueltoInput): Promise<void> {
         await commands.inventarioAjustarStockSuelto(args);
+    },
+
+    /* ── Ingredientes ── */
+
+    catalogoIngredientes(): Promise<CatalogoIngredientesDto> {
+        return commands.inventarioCatalogoIngredientes();
+    },
+
+    ingredientesDeProducto(id_producto: string): Promise<string[]> {
+        return commands.inventarioIngredientesDeProducto({ id_producto });
+    },
+
+    guardarCategoriaIngrediente(args: GuardarCategoriaIngredienteInput): Promise<string> {
+        return commands.inventarioGuardarCategoriaIngrediente(args);
+    },
+
+    async borrarCategoriaIngrediente(id_categoria_ingrediente: string): Promise<void> {
+        await commands.inventarioBorrarCategoriaIngrediente({ id_categoria_ingrediente });
+    },
+
+    guardarIngrediente(args: GuardarIngredienteInput): Promise<string> {
+        return commands.inventarioGuardarIngrediente(args);
+    },
+
+    async borrarIngrediente(id_ingrediente: string): Promise<void> {
+        await commands.inventarioBorrarIngrediente({ id_ingrediente });
     },
 };

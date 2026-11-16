@@ -1,5 +1,6 @@
 [
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 2.0,
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",
@@ -12,6 +13,7 @@
     "Precio_Unitario": 300
   },
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",
@@ -24,6 +26,7 @@
     "Precio_Unitario": 300
   },
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",

@@ -21,6 +21,8 @@ pub mod cuentas;
 pub mod dinero;
 /// Fechas que llegan como texto: un único criterio de validez (RI-78).
 pub mod fechas;
+/// Ingredientes de los productos y lo que se pide distinto en una línea (sin precio ni stock).
+pub mod ingredientes;
 pub mod inventario;
 pub mod licensing;
 pub mod login;

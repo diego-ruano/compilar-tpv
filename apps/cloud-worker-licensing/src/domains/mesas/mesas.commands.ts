@@ -602,6 +602,29 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 	};
 }
 
+/** Espejo de `update_detalle_ingredientes` de la Main: como la nota, una línea cobrada no se toca.
+ *  `cambios` llega ya en su forma guardada (`cambiosIngredientesSchema`). */
+export function updateDetalleIngredientes(idDetalle: string, cambios: string | null): BuiltCommand {
+	return {
+		commandName: "update_detalle_ingredientes",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Detalle_Comanda
+					SET Cambios_Ingredientes = ?2
+					WHERE ID_Detalle = ?1
+						AND NOT EXISTS (
+							SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+						);
+				`,
+				args: [idDetalle, cambios],
+			},
+		},
+		cloudPayload: { id_detalle: idDetalle, cambios },
+	};
+}
+
 export function cobrarDetalles(
 	input: CobrarDetallesInput,
 	plan: Extract<CobroDetallesPlan, { ok: true }>,

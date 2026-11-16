@@ -1,0 +1,26 @@
+{
+  "Producto_Ingredientes": [
+    {
+      "ID_Ingrediente": "ing-brioche",
+      "ID_Producto": "prod-1"
+    },
+    {
+      "ID_Ingrediente": "ing-ketchup",
+      "ID_Producto": "prod-1"
+    },
+    {
+      "ID_Ingrediente": "ing-integral",
+      "ID_Producto": "prod-2"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Nombre": "Hamburguesa doble"
+    },
+    {
+      "ID_Producto": "prod-2",
+      "Nombre": "Perrito"
+    }
+  ]
+}

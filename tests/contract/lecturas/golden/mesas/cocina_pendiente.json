@@ -1,5 +1,6 @@
 [
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 2.0,
     "Estado_Cocina": "PENDIENTE",
     "Fecha_Hora_Apertura": "2099-01-01 13:00:00",
@@ -11,6 +12,7 @@
     "Pagado": 0
   },
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
     "Estado_Cocina": "PENDIENTE",
     "Fecha_Hora_Apertura": "2099-01-01 13:30:00",
@@ -22,6 +24,7 @@
     "Pagado": 0
   },
   {
+    "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
     "Estado_Cocina": "PENDIENTE",
     "Fecha_Hora_Apertura": "2099-01-01 21:30:00",

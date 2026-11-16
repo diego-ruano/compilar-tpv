@@ -1,0 +1,21 @@
+{
+  "Categorias_Ingrediente": [
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "Nombre": "Salsas"
+    }
+  ],
+  "Ingredientes": [
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "ID_Ingrediente": "ing-ketchup",
+      "Nombre": "Ketchup"
+    }
+  ],
+  "Producto_Ingredientes": [
+    {
+      "ID_Ingrediente": "ing-ketchup",
+      "ID_Producto": "prod-1"
+    }
+  ]
+}

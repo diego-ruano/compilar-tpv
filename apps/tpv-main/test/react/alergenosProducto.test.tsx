@@ -16,13 +16,16 @@ const datos = vi.hoisted(() => ({
     proveedores: [],
 }));
 
-vi.mock("../../src/features/inventario/api/inventarioAPI", () => ({ inventarioAPI: { getProductoDetalle: datos.leer } }));
+vi.mock("../../src/features/inventario/api/inventarioAPI", () => ({
+    inventarioAPI: { getProductoDetalle: datos.leer, ingredientesDeProducto: async () => ["ingrediente-1"] },
+}));
 vi.mock("../../src/features/inventario/inventarioQueries", () => ({
     useAlergenos: () => ({ data: datos.alergenos }),
     useCategorias: () => ({ data: datos.categorias }),
     useProveedoresMini: () => ({ data: datos.proveedores }),
     useUpsertProducto: () => ({ mutateAsync: datos.guardar }),
     useCreateLote: () => ({ mutateAsync: vi.fn() }),
+    useCatalogoIngredientes: () => ({ data: { categorias: [], ingredientes: [] } }),
 }));
 vi.mock("../../src/shared/lib/imageUrl", () => ({
     resolveImageUrl: async (ruta: string) => `https://imagenes.test${ruta}`,
@@ -58,6 +61,8 @@ it("muestra iconos con UUID, guarda las altas y bajas y recupera la selección",
     fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
     await waitFor(() => expect(datos.guardar).toHaveBeenCalledOnce());
     expect(datos.guardar.mock.calls[0][0].ids_alergenos).toEqual([datos.alergenos[1].ID_Alergeno]);
+    // Los ingredientes que ya llevaba, sin tocarlos, se guardan tal cual: editar la ficha no los borra.
+    expect(datos.guardar.mock.calls[0][0].ids_ingredientes).toEqual(["ingrediente-1"]);
     await waitFor(() => expect(props.onSaved).toHaveBeenCalledOnce());
 
     const ficha = await datos.leer.mock.results[0].value;

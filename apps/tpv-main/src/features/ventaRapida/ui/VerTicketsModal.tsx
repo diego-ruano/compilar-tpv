@@ -9,6 +9,7 @@ import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
 import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
 import { eur, escalar } from "../../../shared/lib/dinero";
 import { contiene, textoABuscar } from "../../../shared/lib/busqueda";
+import { textoCambios } from "../../inventario/ingredientes";
 
 function parseWhen(fecha: string) {
   const t = Date.parse(fecha);
@@ -468,6 +469,12 @@ export default function VerTicketsModal({
                                             x{Number(d.Cantidad || 1)}
                                           </span>
                                         </p>
+
+                                        {textoCambios(d.Cambios_Ingredientes) ? (
+                                          <p className="mt-1 text-xs font-semibold text-warning">
+                                            🥗 {textoCambios(d.Cambios_Ingredientes)}
+                                          </p>
+                                        ) : null}
 
                                         {d.Notas ? (
                                           <p className="mt-1 text-xs text-fg-muted">

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import { cocinaSetLineaEstado, type KitchenRow } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
+import { textoCambios } from "../inventario/ingredientes";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 
 type KitchenLine = {
@@ -10,6 +11,8 @@ type KitchenLine = {
     cantidad: number;
     nombre: string;
     notas: string | null;
+    /** «SIN Cebolla · EXTRA Queso», o vacío si va como el producto. */
+    cambios: string;
     estadoCocina: "PENDIENTE" | "PREPARADO" | string;
     pagado: 0 | 1;
 };
@@ -167,6 +170,7 @@ export default function KitchenBoard({
                 cantidad: Number(r.Cantidad ?? 1),
                 nombre: String(r.Nombre_Producto ?? ""),
                 notas: r.Notas ? String(r.Notas) : null,
+                cambios: textoCambios(r.Cambios_Ingredientes),
                 estadoCocina:
                     (String(r.Estado_Cocina ?? "PENDIENTE") as any) ||
                     "PENDIENTE",
@@ -364,6 +368,19 @@ export default function KitchenBoard({
                                                                 {l.cantidad}×{" "}
                                                                 {l.nombre}
                                                             </p>
+
+                                                            {l.cambios ? (
+                                                                <div className="mt-1">
+                                                                    <span className="inline-flex max-w-full items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft px-2 py-1 text-xs font-bold text-danger">
+                                                                        <span className="shrink-0">
+                                                                            🥗
+                                                                        </span>
+                                                                        <span className="min-w-0 break-words">
+                                                                            {l.cambios}
+                                                                        </span>
+                                                                    </span>
+                                                                </div>
+                                                            ) : null}
 
                                                             {l.notas ? (
                                                                 <div className="mt-1">

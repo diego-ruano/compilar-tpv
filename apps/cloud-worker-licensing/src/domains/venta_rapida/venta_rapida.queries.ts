@@ -222,7 +222,8 @@ export async function lineas(
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
-				dc.IVA_Percent AS IVA_Percent
+				dc.IVA_Percent AS IVA_Percent,
+				dc.Cambios_Ingredientes AS Cambios_Ingredientes
 			FROM Detalle_Comanda dc
 			LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 			WHERE dc.ID_Comanda = ?1
@@ -291,7 +292,8 @@ export async function detallesVerTicket(
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				dc.Notas AS Notas,
-				dc.IVA_Percent AS IVA_Percent
+				dc.IVA_Percent AS IVA_Percent,
+				dc.Cambios_Ingredientes AS Cambios_Ingredientes
 			FROM Detalle_Comanda dc
 			LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 			WHERE dc.ID_Comanda = ?1

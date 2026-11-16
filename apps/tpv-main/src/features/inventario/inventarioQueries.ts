@@ -15,6 +15,8 @@ import type {
   AjusteLoteInput,
   AjusteStockSueltoInput,
   CreateLoteInput,
+  GuardarCategoriaIngredienteInput,
+  GuardarIngredienteInput,
   UpdateLoteInput,
   UpsertCategoriaInput,
   UpsertProductoInput,
@@ -36,7 +38,63 @@ export const inventarioKeys = {
   lotes: (idProducto: string) => ["inventario", "lotes", idProducto] as const,
   proveedoresMini: () => ["inventario", "proveedores-mini"] as const,
   alergenos: () => ["inventario", "alergenos"] as const,
+  catalogoIngredientes: () => ["inventario", "ingredientes"] as const,
+  ingredientesDeProducto: (idProducto: string) =>
+    ["inventario", "ingredientes-de-producto", idProducto] as const,
 };
+
+/** Categorías de ingredientes e ingredientes — datos de referencia, cacheados. */
+export function useCatalogoIngredientes() {
+  return useQuery({
+    queryKey: inventarioKeys.catalogoIngredientes(),
+    queryFn: () => inventarioAPI.catalogoIngredientes(),
+  });
+}
+
+/** Los ids de los ingredientes que lleva un producto — cacheados por id. */
+export function useIngredientesDeProducto(idProducto: string | null) {
+  return useQuery({
+    queryKey: inventarioKeys.ingredientesDeProducto(idProducto ?? ""),
+    enabled: !!idProducto,
+    queryFn: () => inventarioAPI.ingredientesDeProducto(idProducto ?? ""),
+  });
+}
+
+/** Alta o renombre de una categoría de ingredientes; invalida la caché de inventario. */
+export function useGuardarCategoriaIngrediente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: GuardarCategoriaIngredienteInput) => inventarioAPI.guardarCategoriaIngrediente(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
+/** Borrar una categoría de ingredientes (con sus ingredientes); invalida la caché de inventario. */
+export function useBorrarCategoriaIngrediente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => inventarioAPI.borrarCategoriaIngrediente(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
+/** Alta, renombre o cambio de categoría de un ingrediente; invalida la caché de inventario. */
+export function useGuardarIngrediente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: GuardarIngredienteInput) => inventarioAPI.guardarIngrediente(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
+/** Borrar un ingrediente (y quitarlo de los productos); invalida la caché de inventario. */
+export function useBorrarIngrediente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => inventarioAPI.borrarIngrediente(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
 
 /** Resuelve una ruta de imagen a URL utilizable (local en Main, CDN en Handy). */
 const resolverUrlImagen = resolveImageUrl;

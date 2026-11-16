@@ -13,6 +13,7 @@ import ProductsSection from "../../features/inventario/ui/ProductsSection";
 import AddCategoryModal from "../../features/inventario/ui/AddCategoryModal";
 import { AddProductModal } from "../../features/inventario/ui/AddProductModal";
 import ProductDetailModal from "../../features/inventario/ProductDetailModal";
+import IngredientesModal from "../../features/inventario/ui/IngredientesModal";
 
 import { useDeleteProducto } from "../../features/inventario/inventarioQueries";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -39,6 +40,7 @@ export default function Inventario() {
 
     const [openAddCategory, setOpenAddCategory] = useState(false);
     const [openAddProduct, setOpenAddProduct] = useState(false);
+    const [openIngredientes, setOpenIngredientes] = useState(false);
 
     const [openProductDetail, setOpenProductDetail] = useState(false);
     const [productDetailId, setProductDetailId] = useState<string | null>(null);
@@ -73,6 +75,7 @@ export default function Inventario() {
                         setProductos([]);
                     }}
                     onNewCategory={() => setOpenAddCategory(true)}
+                    onIngredientes={() => setOpenIngredientes(true)}
                     onNewProduct={() => {
                         setProductIdToEdit(null);
                         setOpenAddProduct(true);
@@ -95,6 +98,8 @@ export default function Inventario() {
                         }}
                     />
                 )}
+
+                <IngredientesModal open={openIngredientes} onClose={() => setOpenIngredientes(false)} />
 
                 <AddCategoryModal
                     open={openAddCategory}

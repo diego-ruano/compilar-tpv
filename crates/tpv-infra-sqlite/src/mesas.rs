@@ -356,7 +356,8 @@ pub(crate) const SQL_LINEAS_COMANDA: &str = r#"
       D.IVA_Percent,
       CASE WHEN EXISTS (
         SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
-      ) THEN 1 ELSE 0 END AS Pagado
+      ) THEN 1 ELSE 0 END AS Pagado,
+      D.Cambios_Ingredientes
     FROM Detalle_Comanda D
     LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
     LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
@@ -427,7 +428,8 @@ pub(crate) const SQL_COCINA_PENDIENTE: &str = r#"
       COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
       CASE WHEN EXISTS (
         SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
-      ) THEN 1 ELSE 0 END AS Pagado
+      ) THEN 1 ELSE 0 END AS Pagado,
+      dc.Cambios_Ingredientes
     FROM Comandas c
     CROSS JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
     LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -997,6 +999,7 @@ impl MesasRepository for SqliteMesasRepository {
                 pasa_cocina: v_i64(r.get_value(8).map_err(db_err)?).unwrap_or(0),
                 iva_percent: v_f64(r.get_value(9).map_err(db_err)?),
                 pagado: v_i64(r.get_value(10).map_err(db_err)?).unwrap_or(0),
+                cambios_ingredientes: v_string(r.get_value(11).map_err(db_err)?),
             });
         }
         Ok(out)
@@ -1342,6 +1345,35 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(())
     }
 
+    /// Como la nota: una línea ya cobrada no se toca. El worker manda la misma sentencia
+    /// (`updateDetalleIngredientes`).
+    async fn update_detalle_ingredientes(
+        &self,
+        id_detalle: &str,
+        cambios: &[tpv_domain::ingredientes::CambioIngrediente],
+    ) -> AppResult<()> {
+        let cambios = tpv_domain::ingredientes::forma_guardada(cambios);
+        let g = self.db.write().await;
+        let db = &g;
+        db.execute(
+            r#"
+            UPDATE Detalle_Comanda
+            SET Cambios_Ingredientes = ?2
+            WHERE ID_Detalle = ?1
+              AND NOT EXISTS (
+                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+              );
+            "#,
+            vec![
+                Value::Text(id_detalle.to_string()),
+                cambios.map(Value::Text).unwrap_or(Value::Null),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
@@ -1568,6 +1600,7 @@ impl MesasRepository for SqliteMesasRepository {
                 notas: v_string(r.get_value(6).map_err(db_err)?),
                 estado_cocina: v_string(r.get_value(7).map_err(db_err)?),
                 pagado: v_i64(r.get_value(8).map_err(db_err)?).unwrap_or(0),
+                cambios_ingredientes: v_string(r.get_value(9).map_err(db_err)?),
             });
         }
         Ok(out)

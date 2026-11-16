@@ -12,6 +12,7 @@ import { commands } from "@tpv/client";
 
 
 import type {
+    CambioIngredienteInput,
     CategoriaVendibleOut,
     ComandaConLineasOut,
     ComandaRow,
@@ -267,6 +268,17 @@ export async function mesasUpdateDetalleNota(params: {
     if (!id) return;
 
     await commands.updateDetalleNota({ id_detalle: id, nota: params.nota ?? undefined });
+}
+
+/** Lo que se pide distinto en la línea; vacío la deja como el producto. Vale también para barra. */
+export async function mesasUpdateDetalleIngredientes(params: {
+    idDetalle: string;
+    cambios: CambioIngredienteInput[];
+}): Promise<void> {
+    const id = params.idDetalle.trim();
+    if (!id) return;
+
+    await commands.updateDetalleIngredientes({ id_detalle: id, cambios: params.cambios });
 }
 
 export async function mesasCobrarDetalles(params: {

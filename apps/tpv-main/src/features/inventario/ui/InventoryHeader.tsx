@@ -1,7 +1,7 @@
 // components/inventario/InventoryHeader.tsx
 import React from "react";
 import { usePermisos } from "../../../shared/lib/usePermisos";
-import { Package, ArrowLeft, Plus, FolderPlus } from "lucide-react";
+import { Package, ArrowLeft, Plus, FolderPlus, Salad } from "lucide-react";
 
 export default function InventoryHeader({
     titulo,
@@ -9,12 +9,15 @@ export default function InventoryHeader({
     onBack,
     onNewCategory,
     onNewProduct,
+    onIngredientes,
 }: {
     titulo: string;
     categoriaSeleccionada: any | null;
     onBack: () => void;
     onNewCategory: () => void;
     onNewProduct: () => void;
+    /** Abre la lista de ingredientes (por categorías). */
+    onIngredientes: () => void;
 }) {
     const { puede } = usePermisos();
     return (
@@ -44,15 +47,25 @@ export default function InventoryHeader({
 
                 {/* Derecha: acción */}
                 {!categoriaSeleccionada ? (
-                    <button
-                        type="button"
-                        disabled={!puede("catalogo.editar")}
-                        onClick={onNewCategory}
-                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
-                    >
-                        <FolderPlus className="size-4" aria-hidden />
-                        <span className="hidden xs:inline">Nueva categoría</span>
-                    </button>
+                    <div className="flex w-full shrink-0 gap-2 xs:w-auto">
+                        <button
+                            type="button"
+                            onClick={onIngredientes}
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] xs:flex-none"
+                        >
+                            <Salad className="size-4" aria-hidden />
+                            <span className="hidden xs:inline">Ingredientes</span>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!puede("catalogo.editar")}
+                            onClick={onNewCategory}
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:flex-none"
+                        >
+                            <FolderPlus className="size-4" aria-hidden />
+                            <span className="hidden xs:inline">Nueva categoría</span>
+                        </button>
+                    </div>
                 ) : (
                     <button
                         type="button"

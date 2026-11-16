@@ -11,7 +11,7 @@ use tpv_contracts::mesas::{
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
     MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput,
-    MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
+    MesasUpdateDetalleIngredientesInput, MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
 };
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -222,6 +222,20 @@ pub async fn update_detalle_nota(
     state.exigir_permiso("servicio.vender").await?;
     let repo = state.mesas_repo().await?;
     uc::update_detalle_nota(repo.as_ref(), args).await?;
+    Ok("OK".to_string())
+}
+
+/// Lo que se pide distinto en una línea (sin cebolla, extra de queso). Vale también para venta
+/// rápida: es la misma tabla. No cambia el precio.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_detalle_ingredientes(
+    state: State<'_, AppState>,
+    args: MesasUpdateDetalleIngredientesInput,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    let repo = state.mesas_repo().await?;
+    uc::update_detalle_ingredientes(repo.as_ref(), args).await?;
     Ok("OK".to_string())
 }
 

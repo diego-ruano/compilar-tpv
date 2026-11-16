@@ -1,0 +1,16 @@
+{
+  "Producto_Ingredientes": [
+    {
+      "ID_Ingrediente": "ing-integral",
+      "ID_Producto": "prod-2"
+    },
+    {
+      "ID_Ingrediente": "ing-integral",
+      "ID_Producto": "prod-1"
+    },
+    {
+      "ID_Ingrediente": "ing-ketchup",
+      "ID_Producto": "prod-1"
+    }
+  ]
+}

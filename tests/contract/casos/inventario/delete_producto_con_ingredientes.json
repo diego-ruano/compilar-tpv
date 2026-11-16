@@ -1,0 +1,25 @@
+{
+  "descripcion": "Un producto sin historia se borra y se lleva sus ingredientes (no los del catálogo); el de al lado conserva los suyos.",
+  "comando": "inventario.delete_producto",
+  "seed": [
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-pan', 'Pan');",
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-salsas', 'Salsas');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-brioche', 'cat-pan', 'Brioche');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-integral', 'cat-pan', 'Integral');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-ketchup', 'cat-salsas', 'Ketchup');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Cocina');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Hamburguesa', 950);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-2', 'cat-1', 'Perrito', 600);",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-1', 'ing-brioche');",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-1', 'ing-ketchup');",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-2', 'ing-integral');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto FROM Productos",
+    "Ingredientes": "SELECT ID_Ingrediente FROM Ingredientes",
+    "Producto_Ingredientes": "SELECT ID_Producto, ID_Ingrediente FROM Producto_Ingredientes"
+  }
+}

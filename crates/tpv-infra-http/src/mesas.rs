@@ -181,6 +181,27 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
+    /// Los cambios van ya validados; el worker los vuelve a validar y les da la misma forma
+    /// guardada que la Main.
+    async fn update_detalle_ingredientes(
+        &self,
+        id_detalle: &str,
+        cambios: &[tpv_domain::ingredientes::CambioIngrediente],
+    ) -> AppResult<()> {
+        let lista: Vec<JsonValue> = cambios
+            .iter()
+            .map(|c| json!({ "id_ingrediente": c.id, "nombre": c.nombre, "tipo": c.tipo }))
+            .collect();
+        let _: JsonValue = self
+            .client
+            .put_json(
+                &format!("/v1/mesas/lineas/{id_detalle}/ingredientes"),
+                &json!({ "cambios": lista }),
+            )
+            .await?;
+        Ok(())
+    }
+
     /// El worker rechaza el cobro desde un Handy (solo cobra la Main, que es la que tiene
     /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un pago. Se
     /// mantiene el camino por si algún día se retoma.

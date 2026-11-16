@@ -19,6 +19,8 @@ import { applyViaHub } from "../../lib/hub";
 
 import * as q from "./inventario.queries";
 import * as cmd from "./inventario.commands";
+import * as qi from "./ingredientes.queries";
+import * as cmdi from "./ingredientes.commands";
 import * as S from "./inventario.schemas";
 import { badRequest } from "../../server/utils/response";
 import { HubError } from "../../lib/errorHttp";
@@ -93,6 +95,16 @@ inventarioRoutes.get("/alergenos", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.listAlergenos(db))),
 );
 
+inventarioRoutes.get("/ingredientes", async (c) =>
+	c.json(await tenantQuery(c, (db) => qi.catalogoIngredientes(db))),
+);
+
+inventarioRoutes.get("/productos/:id/ingredientes", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_producto_invalido");
+	return c.json(await tenantQuery(c, (db) => qi.ingredientesDeProducto(db, id)));
+});
+
 inventarioRoutes.get("/productos/:id/lotes", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto_invalido");
@@ -108,6 +120,32 @@ inventarioRoutes.get("/productos/:id", async (c) => {
 });
 
 // ───────────────── ESCRITURAS ─────────────────
+
+// Ingredientes. Un nombre repetido o una categoría que ya no existe lo deciden las guardas del
+// comando, dentro del lote (SYNC-30).
+inventarioRoutes.post("/ingredientes/categorias", cuerpo(S.guardarCategoriaIngredienteSchema), async (c) => {
+	const id = await apply(c, cmdi.guardarCategoriaIngrediente(c.req.valid("json")));
+	return c.json({ id_categoria_ingrediente: id });
+});
+
+inventarioRoutes.delete("/ingredientes/categorias/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_categoria_invalido");
+	await apply(c, cmdi.borrarCategoriaIngrediente(id));
+	return c.json({ ok: true });
+});
+
+inventarioRoutes.post("/ingredientes", cuerpo(S.guardarIngredienteSchema), async (c) => {
+	const id = await apply(c, cmdi.guardarIngrediente(c.req.valid("json")));
+	return c.json({ id_ingrediente: id });
+});
+
+inventarioRoutes.delete("/ingredientes/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_ingrediente_invalido");
+	await apply(c, cmdi.borrarIngrediente(id));
+	return c.json({ ok: true });
+});
 
 inventarioRoutes.post("/categorias", cuerpo(S.upsertCategoriaSchema), async (c) => {
 	const datos = c.req.valid("json");

@@ -17,12 +17,18 @@ import casosJson from "../../../crates/tpv-domain/src/validacion_casos.json?raw"
 import { negocioPatchSchema } from "../src/domains/configuracion/configuracion.schemas";
 import {
 	createLoteSchema,
+	guardarCategoriaIngredienteSchema,
+	guardarIngredienteSchema,
 	updateLoteSchema,
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import { validarConMensaje } from "../src/lib/validacion";
-import { saveLayoutSchema, setReservaEstadoSchema } from "../src/domains/mesas/mesas.schemas";
+import {
+	cambiosIngredientesSchema,
+	saveLayoutSchema,
+	setReservaEstadoSchema,
+} from "../src/domains/mesas/mesas.schemas";
 import { altaReservaWebSchema } from "../src/domains/reservas_web/reservasWeb.schemas";
 import {
 	asignacionCreateSchema,
@@ -58,6 +64,9 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	reserva_web: (e) => validarConMensaje(altaReservaWebSchema, e),
 	reserva_estado_mesa: (e) => validarConMensaje(setReservaEstadoSchema, e),
 	plano: (e) => validarConMensaje(saveLayoutSchema, e),
+	categoria_ingrediente: (e) => validarConMensaje(guardarCategoriaIngredienteSchema, e),
+	ingrediente: (e) => validarConMensaje(guardarIngredienteSchema, e),
+	cambios_ingredientes: (e) => validarConMensaje(cambiosIngredientesSchema, e),
 	negocio: async (e) => {
 		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
 		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;

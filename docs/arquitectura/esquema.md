@@ -3,8 +3,9 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
 en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
 `packages/database/migrations/`, aplicados en orden.
-Hoy son dos: `0001_inicial.sql`, con el esquema completo, y `0002_negocio.sql`, el sello de la base
-(AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)).
+Hoy son tres: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
+(AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)), y
+`0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)).
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
@@ -201,3 +202,24 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
 - **Tras restaurar la base se vacía**: `bootstrap_restaurar` y la copia que se va a instalar
   (`prepare_restore`) borran el resumen y apuntan como sucios todos los días con cobros
   (`estadisticas_diarias::reiniciar`).
+
+## Los ingredientes (`0003`)
+
+Qué lleva cada producto, para pedirlo «sin cebolla» o «con extra de queso». **Sin cantidades, sin stock
+y sin precio**: nada de esto toca el cobro, el inventario ni el registro fiscal.
+
+- `Categorias_Ingrediente` y `Ingredientes` son el catálogo, agrupado por categorías (Pan, Salsas…):
+  el nombre de una categoría no se repite, y el de un ingrediente no se repite dentro de su categoría.
+  Se gestionan en Inventario → Ingredientes, con el permiso `catalogo.editar`.
+- `Producto_Ingredientes` dice qué lleva cada producto; se guarda con la ficha
+  (`UpsertProductoInput.ids_ingredientes`). Sin la lista (`null`) no se tocan, para que un cliente que
+  no los enseña no los borre al guardar. Un id que ya no existe no entra.
+- `Detalle_Comanda.Cambios_Ingredientes` es lo que se pidió distinto en una línea: un array JSON de
+  `{id, nombre, tipo}` con `tipo` `SIN` o `EXTRA`, o `NULL` si va como el producto. Guarda el nombre que
+  tenía el ingrediente al pedirlo, como `Nombre_Producto`: renombrar o borrar un ingrediente no cambia lo
+  ya pedido. La forma la fija `tpv_domain::ingredientes::cambios_de_linea` y el worker la escribe igual
+  (`cambiosIngredientesSchema`), con su caso en `validacion_casos.json`. Como la nota, una línea cobrada
+  no se cambia.
+- Borrar una categoría se lleva sus ingredientes y los quita de los productos; borrar un ingrediente, lo
+  mismo. Se hace con sentencias explícitas y en orden en los dos lados (`SQL_BORRAR_CATEGORIA`,
+  `SQL_BORRAR_INGREDIENTE`), no con las cascadas de las FK, como `SQL_QUITAR_PRODUCTO`.

@@ -13,6 +13,8 @@ export type TicketItem = {
     estadoCocina: "PENDIENTE" | "PREPARADO" | string;
     pasaCocina: boolean;
     notas: string | null;
+    /** Lo que se pidió distinto: el JSON de `Cambios_Ingredientes` (ver `inventario/ingredientes.ts`). */
+    cambiosIngredientes: string | null;
     /** Tipo de IVA con el que se vendió la línea; `null` = el general del negocio. */
     iva_percent: number | null;
 };

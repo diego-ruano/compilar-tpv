@@ -130,6 +130,25 @@ const SQL_ALTA_DEL_SUELTO = `
 	WHERE NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?2);
 `;
 
+/** Las sentencias que dejan a un producto con exactamente estos ingredientes (ids ya normalizados).
+ *  Espejo de `sql_ingredientes_del_producto`. `idProducto` puede ser una referencia del lote. */
+function pasosIngredientesDelProducto(idProducto: unknown, ids: string[]): any[] {
+	const pasos: any[] = [
+		{ kind: "execute", sql: "DELETE FROM Producto_Ingredientes WHERE ID_Producto = ?1;", args: [idProducto] },
+	];
+	if (ids.length > 0) {
+		pasos.push({
+			kind: "execute",
+			sql: `INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente)
+				SELECT ?1, value FROM json_each(?2)
+				WHERE value IN (SELECT ID_Ingrediente FROM Ingredientes)
+				ON CONFLICT DO NOTHING;`,
+			args: [idProducto, JSON.stringify(ids)],
+		});
+	}
+	return pasos;
+}
+
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
 // Queda en `id` para que viaje en el broadcast y la Main lo aplique con el mismo id.
 function idStep(provided?: string | null) {
@@ -206,6 +225,10 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idU
 			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
 			args: [REF_ID, idA],
 		})),
+		// Sin la lista (una pantalla que no los enseña), los ingredientes se quedan como estaban.
+		...(input.ids_ingredientes == null
+			? []
+			: pasosIngredientesDelProducto(REF_ID, normalizeIds(input.ids_ingredientes))),
 	];
 	return {
 		commandName: "inventario_upsert_producto",
@@ -232,6 +255,8 @@ const SQL_QUITAR_PRODUCTO = [
 	`DELETE FROM Movimientos_Stock WHERE ID_Producto = ?1
 		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Lotes_Producto WHERE ID_Producto = ?1
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
+	`DELETE FROM Producto_Ingredientes WHERE ID_Producto = ?1
 		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1
 		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,

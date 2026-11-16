@@ -1,0 +1,29 @@
+{
+  "Categorias_Ingrediente": [
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "Nombre": "Panes"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "Nombre": "Salsas"
+    }
+  ],
+  "Ingredientes": [
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-brioche",
+      "Nombre": "Brioche"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-pan",
+      "ID_Ingrediente": "ing-integral",
+      "Nombre": "Integral"
+    },
+    {
+      "ID_Categoria_Ingrediente": "cat-salsas",
+      "ID_Ingrediente": "ing-ketchup",
+      "Nombre": "Ketchup"
+    }
+  ]
+}

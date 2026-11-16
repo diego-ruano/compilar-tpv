@@ -7,13 +7,16 @@ import {
   StickyNote,
   ReceiptText,
   Printer,
+  Salad,
 } from "lucide-react";
 import { Paso, TicketItem } from "../types";
 import { cn, lineaGuardada } from "../utils";
 import PrintTicketModal, { type CobroImprimible } from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
 import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
-import type { Dinero } from "@tpv/contracts";
+import type { CambioIngredienteInput, Dinero } from "@tpv/contracts";
+import IngredientesLineaModal from "../../inventario/ui/IngredientesLineaModal";
+import { textoCambios } from "../../inventario/ingredientes";
 import { eur } from "../../../shared/lib/dinero";
 
 export default function TicketPanel({
@@ -39,6 +42,7 @@ export default function TicketPanel({
   onQuiereFacturaChange,
 
   onGuardarNota,
+  onGuardarIngredientes,
 
 }: {
   ocupado?: boolean;
@@ -68,6 +72,8 @@ export default function TicketPanel({
   onQuiereFacturaChange: (v: boolean) => void;
 
   onGuardarNota: (detalleId: string, nota: string) => void | Promise<void>;
+  /** Lo que se pide distinto en una línea (sin cebolla, extra de queso). */
+  onGuardarIngredientes: (detalleId: string, cambios: CambioIngredienteInput[]) => Promise<void>;
 
 }) {
   const hayPendientes = ticket.some((t) => !t.pagado);
@@ -128,6 +134,8 @@ export default function TicketPanel({
   const toggleGroup = (name: string) => {
     setExpandedGroups((prev) => ({ ...prev, [name]: !prev[name] }));
   };
+
+  const [ingredientesItem, setIngredientesItem] = useState<TicketItem | null>(null);
 
   const openNotaModal = (t: TicketItem) => {
     if (!lineaGuardada(t)) return;
@@ -302,6 +310,7 @@ export default function TicketPanel({
                             const checked = t.seleccionado && !t.pagado;
                             const notas = String(t.notas ?? "").trim();
                             const tieneNota = Boolean(notas);
+                            const cambios = textoCambios(t.cambiosIngredientes);
                             const guardada = lineaGuardada(t);
                             const disabledLine = t.pagado;
 
@@ -363,6 +372,12 @@ export default function TicketPanel({
                                       {t.pagado ? "Cobrado" : "Pendiente"}
                                     </p>
 
+                                    {cambios ? (
+                                      <p className="mt-1 truncate text-xs font-semibold text-warning" title={cambios}>
+                                        🥗 {cambios}
+                                      </p>
+                                    ) : null}
+
                                     {tieneNota ? (
                                       <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
                                         <StickyNote className="size-3 shrink-0" aria-hidden />
@@ -381,6 +396,33 @@ export default function TicketPanel({
                                   >
                                     {eur(t.precio)}
                                   </span>
+
+                                  {!t.pagado && t.productoId ? (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (guardada) setIngredientesItem(t);
+                                      }}
+                                      disabled={!guardada || ocupado}
+                                      className={cn(
+                                        "grid size-8 place-items-center rounded-lg border transition",
+                                        !guardada
+                                          ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                                          : cambios
+                                            ? "border-warning/30 bg-warning-soft text-warning cursor-pointer"
+                                            : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
+                                      )}
+                                      title={
+                                        guardada
+                                          ? "Ingredientes"
+                                          : "Los ingredientes estarán disponibles cuando la línea esté confirmada"
+                                      }
+                                      aria-label="Ingredientes"
+                                    >
+                                      <Salad className="size-4" aria-hidden />
+                                    </button>
+                                  ) : null}
 
                                   <button
                                     type="button"
@@ -580,6 +622,20 @@ export default function TicketPanel({
         items={ticket}
         cobro={ultimoCobro}
       />
+
+      {ingredientesItem ? (
+        <IngredientesLineaModal
+          productoId={ingredientesItem.productoId || null}
+          productoNombre={ingredientesItem.nombre}
+          cambiosGuardados={ingredientesItem.cambiosIngredientes ?? null}
+          onCancel={() => setIngredientesItem(null)}
+          onSave={async (cambios) => {
+            if (!lineaGuardada(ingredientesItem)) return;
+            await onGuardarIngredientes(ingredientesItem.detalleId, cambios);
+            setIngredientesItem(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

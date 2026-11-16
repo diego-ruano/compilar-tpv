@@ -4,7 +4,9 @@ use tauri::State;
 
 use tpv_application::use_cases::inventario as uc;
 use tpv_contracts::inventario::{
-    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
+    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto,
+    CreateLoteInput, GuardarCategoriaIngredienteInput, GuardarIngredienteInput, IdCategoriaArgs,
+    IdCategoriaIngredienteArgs, IdIngredienteArgs,
     IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoListDto, ProveedorMiniDto, SummaryArgs,
     UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
@@ -154,4 +156,76 @@ pub async fn inventario_ajustar_stock_suelto(
     let sesion = state.exigir_permiso("stock.ajustar").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::ajustar_stock_suelto(repo.as_ref(), &sesion.id_usuario, args).await?)
+}
+
+/* ── Ingredientes ── */
+
+/// Las categorías de ingredientes y los ingredientes. Sin gate: la ventana de una línea los lee a
+/// mitad de servicio.
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_catalogo_ingredientes(
+    state: State<'_, AppState>,
+) -> Result<CatalogoIngredientesDto, AppErrorDto> {
+    let repo = state.inventario_repo().await?;
+    Ok(uc::catalogo_ingredientes(repo.as_ref()).await?)
+}
+
+/// Los ids de los ingredientes que lleva un producto (la ficha y la ventana de una línea).
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_ingredientes_de_producto(
+    state: State<'_, AppState>,
+    args: IdProductoArgs,
+) -> Result<Vec<String>, AppErrorDto> {
+    let repo = state.inventario_repo().await?;
+    Ok(uc::ingredientes_de_producto(repo.as_ref(), args.id_producto).await?)
+}
+
+/// Crea o renombra una categoría de ingredientes; devuelve su id.
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_guardar_categoria_ingrediente(
+    state: State<'_, AppState>,
+    args: GuardarCategoriaIngredienteInput,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.editar").await?;
+    let repo = state.inventario_repo().await?;
+    Ok(uc::guardar_categoria_ingrediente(repo.as_ref(), args).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_borrar_categoria_ingrediente(
+    state: State<'_, AppState>,
+    args: IdCategoriaIngredienteArgs,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.editar").await?;
+    let repo = state.inventario_repo().await?;
+    uc::borrar_categoria_ingrediente(repo.as_ref(), args.id_categoria_ingrediente).await?;
+    Ok("OK".to_string())
+}
+
+/// Crea, renombra o cambia de categoría un ingrediente; devuelve su id.
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_guardar_ingrediente(
+    state: State<'_, AppState>,
+    args: GuardarIngredienteInput,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.editar").await?;
+    let repo = state.inventario_repo().await?;
+    Ok(uc::guardar_ingrediente(repo.as_ref(), args).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_borrar_ingrediente(
+    state: State<'_, AppState>,
+    args: IdIngredienteArgs,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.editar").await?;
+    let repo = state.inventario_repo().await?;
+    uc::borrar_ingrediente(repo.as_ref(), args.id_ingrediente).await?;
+    Ok("OK".to_string())
 }

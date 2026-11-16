@@ -257,6 +257,11 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tarea_no_asignada: "Esa tarea ya no está asignada a ti. Actualiza la lista.",
 	// INC-20261030-016: el mismo texto que da la Main (`COMANDA_COBRADA`).
 	comanda_cobrada: "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.",
+	// Ingredientes: los mismos textos que la Main (`tpv-infra-sqlite/src/ingredientes.rs`).
+	categoria_ingrediente_repetida: "Ya hay una categoría de ingredientes con ese nombre.",
+	ingrediente_repetido: "Ya hay un ingrediente con ese nombre en esa categoría.",
+	categoria_ingrediente_no_existe:
+		"Esa categoría de ingredientes ya no existe. Vuelve a abrir la lista de ingredientes.",
 	producto_en_comanda_abierta:
 		"No se puede borrar: el producto está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
 	// RI-55: un ajuste de existencias que llega tarde. La ruta lo acompaña de lo que hay ahora.
@@ -370,6 +375,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"id_comanda_invalido",
 	"id_detalle_invalido",
 	"id_gasto_invalido",
+	"id_ingrediente_invalido",
 	"id_lote_invalido",
 	"id_mesa_invalido",
 	"id_notificacion_invalido",

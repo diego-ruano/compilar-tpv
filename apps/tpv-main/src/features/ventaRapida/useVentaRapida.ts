@@ -51,6 +51,8 @@ vrRemoveLastUnpaidLinea,
 vrSearchProductos,
 vrUpdateNotaDetalle,
 } from "./ventaRapidaAPI";
+import { mesasUpdateDetalleIngredientes } from "../mesas/mesasApi";
+import type { CambioIngredienteInput } from "@tpv/contracts";
 
 /* =========================
    EVENTO GLOBAL
@@ -210,6 +212,7 @@ export function useVentaRapida() {
           seleccionado: false,
           categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
           notas: l.Notas ?? null,
+          cambiosIngredientes: l.Cambios_Ingredientes ?? null,
           // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
           iva_percent: l.IVA_Percent ?? null,
         };
@@ -514,6 +517,20 @@ export function useVentaRapida() {
       if (recuperacion.pendientes.some(p => p.cobro.id_comanda === id)) { setOpenPendientes(true); return; }
       ++lecturaTicketRef.current;
       await vrUpdateNotaDetalle(detalleId, nota.trim());
+      await cargarComandaEnTicketPanel(id, { keepSelection: true });
+      emitVrChanged();
+    });
+  }, [cola, cargarComandaEnTicketPanel, recuperacion.pendientes]);
+
+  // Los ingredientes de una línea: el mismo comando que en mesas (es la misma tabla), por la cola.
+  const onGuardarIngredientes = useCallback(async (detalleId: string, cambios: CambioIngredienteInput[]) => {
+    if (cobroEnCursoRef.current) return;
+    await cola.ejecutar(async () => {
+      const id = idComandaActivaRef.current;
+      if (!id || cobroEnCursoRef.current) return;
+      if (recuperacion.pendientes.some(p => p.cobro.id_comanda === id)) { setOpenPendientes(true); return; }
+      ++lecturaTicketRef.current;
+      await mesasUpdateDetalleIngredientes({ idDetalle: detalleId, cambios });
       await cargarComandaEnTicketPanel(id, { keepSelection: true });
       emitVrChanged();
     });
@@ -959,7 +976,7 @@ export function useVentaRapida() {
     getQtyZero, getQty, onSelectCategoriaCb, onAddProductoCb, onRemoveProductoCb, onOpenProductDetailCb,
     onVolverCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
     haySeleccion, seleccionaTodoPendiente, toggleSeleccion, eliminarLineaTicket, limpiarSeleccion, setQuiereFactura,
-    quiereFactura, onGuardarNota, openProductDetail,
+    quiereFactura, onGuardarNota, onGuardarIngredientes, openProductDetail,
     cerrarDetalleProducto, productDetailId, pideFactura, cancelarFactura, confirmarFactura, limite_simplif,
     errorFactura, openPendientes, setErrorFactura, setPideFactura, resolverPendiente, openVerTickets,
     setOpenVerTickets, comandasBarra, abrirTicketDesdeModal, eliminarTicketDesdeModal, cobrarTicketDesdeModal,

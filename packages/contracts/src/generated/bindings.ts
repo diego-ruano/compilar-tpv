@@ -380,6 +380,16 @@ export type CambioCajaInput = { tipo: "editar_pago"; id_pago: string; fecha_hora
  */
 clase?: string | null } | { tipo: "crear_gasto"; fecha: string; importe: Dinero; pagado_con_caja: boolean } | { tipo: "editar_gasto"; id_gasto: string; fecha: string; importe: Dinero; pagado_con_caja: boolean } | { tipo: "borrar_gasto"; id_gasto: string };
 
+/**
+ *  Un ingrediente que se pide distinto en una línea: `tipo` es `"SIN"` o `"EXTRA"`. El nombre va
+ *  porque la línea guarda el que tenía al pedirlo (`tpv_domain::ingredientes`).
+ */
+export type CambioIngredienteInput = {
+	id_ingrediente: string,
+	nombre: string,
+	tipo: string,
+};
+
 export type CambioReplicado = {
 	/**  None obliga a refrescar todas las consultas: una tabla sin clasificar nunca deja datos viejos. */
 	tablas: string[] | null,
@@ -393,6 +403,18 @@ export type CambioZoom = "acercar" | "alejar" |
 
 export type CambioZoomArgs = {
 	cambio: CambioZoom,
+};
+
+/**  Todas las categorías de ingredientes y todos los ingredientes, cada lista por nombre. */
+export type CatalogoIngredientesDto = {
+	categorias: CategoriaIngredienteDto[],
+	ingredientes: IngredienteDto[],
+};
+
+/**  Una categoría de ingredientes (Pan, Salsas, Quesos…). */
+export type CategoriaIngredienteDto = {
+	ID_Categoria_Ingrediente: string,
+	Nombre: string,
 };
 
 export type CategoriaInvDto = {
@@ -1221,6 +1243,19 @@ export type GravedadFallo =
 /**  Un fallo del programa: hay que mirarlo. */
 "programa";
 
+export type GuardarCategoriaIngredienteInput = {
+	/**  Sin id, una categoría nueva. */
+	id_categoria_ingrediente?: string | null,
+	nombre: string,
+};
+
+export type GuardarIngredienteInput = {
+	/**  Sin id, un ingrediente nuevo. */
+	id_ingrediente?: string | null,
+	id_categoria_ingrediente: string,
+	nombre: string,
+};
+
 export type GuardarPermisosInput = {
 	id_rol: string,
 	permisos_vistos: string[],
@@ -1250,6 +1285,14 @@ export type HorariosSemanaArgs = {
 
 export type IdCategoriaArgs = {
 	id_categoria: string,
+};
+
+export type IdCategoriaIngredienteArgs = {
+	id_categoria_ingrediente: string,
+};
+
+export type IdIngredienteArgs = {
+	id_ingrediente: string,
 };
 
 export type IdProductoArgs = {
@@ -1285,6 +1328,12 @@ export type IndexRow = {
 	Productos: string | null,
 	NumLineas: number,
 	Unidades: number | null,
+};
+
+export type IngredienteDto = {
+	ID_Ingrediente: string,
+	ID_Categoria_Ingrediente: string,
+	Nombre: string,
 };
 
 /**  Catálogo cerrado de lo que se puede apagar desde la nube. */
@@ -1355,6 +1404,8 @@ export type KitchenRow = {
 	Cantidad: number | null,
 	Nombre_Producto: string,
 	Notas: string | null,
+	/**  Lo que se pidió distinto (array JSON, ver `MesaLineaComandaRow`). */
+	Cambios_Ingredientes: string | null,
 	Estado_Cocina: string | null,
 	Pagado: number,
 };
@@ -1589,6 +1640,8 @@ export type LineaComandaRow = {
 	/**  Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio. */
 	IVA_Percent: number | null,
 	Notas: string | null,
+	/**  Lo que se pidió distinto (array JSON de `Detalle_Comanda.Cambios_Ingredientes`). */
+	Cambios_Ingredientes: string | null,
 	Estado_Cocina: string | null,
 	Pagado: number,
 	Nombre: string,
@@ -1693,6 +1746,8 @@ export type MesaLineaComandaRow = {
 	 */
 	IVA_Percent: number | null,
 	Notas: string | null,
+	/**  Lo que se pidió distinto: el array JSON de `Detalle_Comanda.Cambios_Ingredientes`, tal cual. */
+	Cambios_Ingredientes: string | null,
 	Estado_Cocina: string | null,
 	Nombre: string,
 	Pasa_Cocina: number,
@@ -1859,6 +1914,15 @@ export type MesasTopComandas = {
 	mesa: string,
 	zona: string,
 	comandas: number,
+};
+
+/**
+ *  Lo que se pide distinto en una línea, entero: sustituye a lo que hubiera. Vacío, la línea vuelve
+ *  a ir como el producto. Vale para mesas y para venta rápida (es la misma tabla).
+ */
+export type MesasUpdateDetalleIngredientesInput = {
+	id_detalle: string,
+	cambios?: CambioIngredienteInput[],
 };
 
 export type MesasUpdateDetalleNotaInput = {
@@ -3586,6 +3650,8 @@ export type UpsertProductoInput = {
 	/**  Tipo de IVA propio (opcional; None = hereda el del negocio). */
 	iva_percent?: number | null,
 	ids_alergenos?: string[],
+	/**  Los ingredientes que lleva. Ausente o `null` = no tocarlos. */
+	ids_ingredientes?: string[] | null,
 };
 
 export type UpsertProductoResult = {
@@ -3615,6 +3681,8 @@ export type VerTicketsDetalleRow = {
 	Estado_Cocina: string,
 	Pagado: number,
 	Notas: string | null,
+	/**  Lo que se pidió distinto (array JSON de `Detalle_Comanda.Cambios_Ingredientes`). */
+	Cambios_Ingredientes: string | null,
 };
 
 /**  RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla. */

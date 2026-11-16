@@ -1,0 +1,14 @@
+{
+  "Detalle_Comanda": [
+    {
+      "Cambios_Ingredientes": "[{\"id\":\"ing-cebolla\",\"nombre\":\"Cebolla\",\"tipo\":\"SIN\"},{\"id\":\"ing-queso\",\"nombre\":\"Queso\",\"tipo\":\"EXTRA\"}]",
+      "ID_Detalle": "detalle-1",
+      "Precio_Unitario": 950
+    },
+    {
+      "Cambios_Ingredientes": "[{\"id\":\"ing-ketchup\",\"nombre\":\"Ketchup\",\"tipo\":\"SIN\"}]",
+      "ID_Detalle": "detalle-2",
+      "Precio_Unitario": 950
+    }
+  ]
+}

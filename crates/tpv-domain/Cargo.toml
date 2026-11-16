@@ -10,6 +10,8 @@ strum = { workspace = true }
 specta = { workspace = true }
 specta-typescript = { workspace = true }
 serde = { workspace = true }
+# La forma guardada de los cambios de ingredientes de una línea (un array JSON, ver ingredientes.rs).
+serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 # Cripto de PIN (PBKDF2-HMAC-SHA256) para el dominio de login: cómputo puro, sin I/O.
@@ -22,4 +24,3 @@ subtle = { workspace = true }
 # red ni Tauri: Specta es una macro de derivación que genera el tipo, no una dependencia de runtime.
 
 [dev-dependencies]
-serde_json = { workspace = true }

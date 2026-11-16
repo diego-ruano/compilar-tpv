@@ -1,0 +1,38 @@
+{
+  "descripcion": "Guardar la ficha sin lista de ingredientes (un cliente que no los enseña) los deja como estaban.",
+  "comando": "inventario.upsert_producto",
+  "seed": [
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-pan', 'Pan');",
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-salsas', 'Salsas');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-brioche', 'cat-pan', 'Brioche');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-integral', 'cat-pan', 'Integral');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-ketchup', 'cat-salsas', 'Ketchup');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Cocina');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Hamburguesa', 950);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-2', 'cat-1', 'Perrito', 600);",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-1', 'ing-brioche');",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-1', 'ing-ketchup');",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-2', 'ing-integral');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('usuario-autor','00000000-0000-7000-8000-000000000001','autor@test','no-usado','Autor');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "id_categoria": "cat-1",
+    "id_proveedor": null,
+    "nombre": "Hamburguesa doble",
+    "precio_venta": 950,
+    "stock_minimo": null,
+    "unidad_medida": null,
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "cantidad_pedido_esperada": null,
+    "stock_suelto": null,
+    "iva_percent": null,
+    "ids_alergenos": [],
+    "id_usuario": "usuario-autor"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, Nombre FROM Productos",
+    "Producto_Ingredientes": "SELECT ID_Producto, ID_Ingrediente FROM Producto_Ingredientes"
+  }
+}

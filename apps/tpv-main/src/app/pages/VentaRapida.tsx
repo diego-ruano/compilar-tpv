@@ -26,7 +26,7 @@ export default function VentaRapida() {
     getQtyZero, getQty, onSelectCategoriaCb, onAddProductoCb, onRemoveProductoCb, onOpenProductDetailCb,
     onVolverCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
     haySeleccion, seleccionaTodoPendiente, toggleSeleccion, eliminarLineaTicket, limpiarSeleccion, setQuiereFactura,
-    quiereFactura, onGuardarNota, openProductDetail,
+    quiereFactura, onGuardarNota, onGuardarIngredientes, openProductDetail,
     cerrarDetalleProducto, productDetailId, pideFactura, cancelarFactura, confirmarFactura, limite_simplif,
     errorFactura, openPendientes, setErrorFactura, setPideFactura, resolverPendiente, openVerTickets,
     setOpenVerTickets, comandasBarra, abrirTicketDesdeModal, eliminarTicketDesdeModal, cobrarTicketDesdeModal,
@@ -154,6 +154,7 @@ export default function VentaRapida() {
             quiereFactura={quiereFactura}
             onQuiereFacturaChange={setQuiereFactura}
             onGuardarNota={onGuardarNota}
+            onGuardarIngredientes={onGuardarIngredientes}
           />
         </div>
       </div>

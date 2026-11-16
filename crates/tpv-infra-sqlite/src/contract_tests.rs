@@ -311,6 +311,15 @@ casos_de_contrato! {
     inventario__ajustar_stock_suelto,
     inventario__upsert_producto_con_suelto,
     inventario__upsert_producto_no_toca_suelto,
+    inventario__guardar_categoria_ingrediente,
+    inventario__guardar_categoria_ingrediente_renombrar,
+    inventario__guardar_ingrediente,
+    inventario__guardar_ingrediente_mover,
+    inventario__borrar_categoria_ingrediente,
+    inventario__borrar_ingrediente,
+    inventario__upsert_producto_con_ingredientes,
+    inventario__upsert_producto_sin_lista_de_ingredientes,
+    inventario__delete_producto_con_ingredientes,
     configuracion__patch_business,
     configuracion__patch_contact,
     configuracion__patch_ticket,
@@ -349,6 +358,8 @@ casos_de_contrato! {
     mesas__remove_one_pending_detalle,
     mesas__delete_detalle,
     mesas__update_detalle_nota,
+    mesas__update_detalle_ingredientes,
+    mesas__update_detalle_ingredientes_quitar,
     mesas__kitchen_set_line_state,
     cuentas__create_gasto,
     cuentas__update_gasto,
@@ -538,9 +549,39 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 stock_suelto: e["stock_suelto"].as_f64(),
                 iva_percent: e["iva_percent"].as_f64(),
                 ids_alergenos: strings(&e["ids_alergenos"]),
+                ids_ingredientes: e.get("ids_ingredientes").filter(|v| !v.is_null()).map(strings),
             })
             .await
             .expect("upsert producto");
+        }
+        "inventario.guardar_categoria_ingrediente" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.guardar_categoria_ingrediente(tpv_domain::ingredientes::CategoriaIngredienteGuardar {
+                id: opt_str(&e["id_categoria_ingrediente"]),
+                nombre: s(&e["nombre"]),
+            })
+            .await
+            .expect("guardar categoria de ingredientes");
+        }
+        "inventario.borrar_categoria_ingrediente" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.borrar_categoria_ingrediente(&s(&e["id_categoria_ingrediente"]))
+                .await
+                .expect("borrar categoria de ingredientes");
+        }
+        "inventario.guardar_ingrediente" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.guardar_ingrediente(tpv_domain::ingredientes::IngredienteGuardar {
+                id: opt_str(&e["id_ingrediente"]),
+                id_categoria: s(&e["id_categoria_ingrediente"]),
+                nombre: s(&e["nombre"]),
+            })
+            .await
+            .expect("guardar ingrediente");
+        }
+        "inventario.borrar_ingrediente" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.borrar_ingrediente(&s(&e["id_ingrediente"])).await.expect("borrar ingrediente");
         }
         "inventario.delete_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());
@@ -851,6 +892,16 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "mesas.delete_detalle" => {
             let repo = SqliteMesasRepository::new(db.clone());
             repo.delete_detalle(&s(&e["id_detalle"])).await.expect("delete detalle");
+        }
+        "mesas.update_detalle_ingredientes" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            // La entrada trae la forma guardada (el JSON), que es lo que se compara con el worker.
+            let cambios: Vec<tpv_domain::ingredientes::CambioIngrediente> = opt_str(&e["cambios"])
+                .map(|t| serde_json::from_str(&t).expect("cambios en JSON"))
+                .unwrap_or_default();
+            repo.update_detalle_ingredientes(&s(&e["id_detalle"]), &cambios)
+                .await
+                .expect("update detalle ingredientes");
         }
         "mesas.update_detalle_nota" => {
             let repo = SqliteMesasRepository::new(db.clone());

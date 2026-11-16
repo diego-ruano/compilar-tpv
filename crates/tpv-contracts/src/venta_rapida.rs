@@ -59,6 +59,8 @@ pub struct LineaComandaRow {
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
     pub IVA_Percent: Option<f64>,
     pub Notas: Option<String>,
+    /// Lo que se pidió distinto (array JSON de `Detalle_Comanda.Cambios_Ingredientes`).
+    pub Cambios_Ingredientes: Option<String>,
     pub Estado_Cocina: Option<String>,
     pub Pagado: i64,
     pub Nombre: String,
@@ -77,6 +79,8 @@ pub struct VerTicketsDetalleRow {
     pub Estado_Cocina: String,
     pub Pagado: i64,
     pub Notas: Option<String>,
+    /// Lo que se pidió distinto (array JSON de `Detalle_Comanda.Cambios_Ingredientes`).
+    pub Cambios_Ingredientes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

@@ -7,7 +7,7 @@ import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
 // components/mesasComponents/MesaComandaModal.tsx
 import { useQuery,useQueryClient } from "@tanstack/react-query";
 import { nombreDeMesa } from "@tpv/plano/nombre";
-import { ImageOff,Printer } from "lucide-react";
+import { ImageOff,Printer,Salad } from "lucide-react";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useAuth } from "../../shared/stores/useAuth";
@@ -23,8 +23,11 @@ import DatosFiscalesModal from "../../shared/ticket/DatosFiscalesModal";
 import PrintTicketModal,{ type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 import { useToast } from "../../shared/toast";
 import ProductDetailModal from "../inventario/ProductDetailModal";
+import IngredientesLineaModal from "../inventario/ui/IngredientesLineaModal";
+import { textoCambios } from "../inventario/ingredientes";
 
 import type {
+CambioIngredienteInput,
 DestinatarioInput,
 MesaMetaOut
 } from "@tpv/contracts";
@@ -38,7 +41,7 @@ sumaImportes,
 totalRecuento,
 } from "../../shared/lib/efectivo";
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
-import { mesasCobrarDetalles,mesasComandaAbierta,mesasComandaSetReservaIfNull,mesasLoadMesaMeta,mesasLoadTicket,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
+import { mesasCobrarDetalles,mesasComandaAbierta,mesasComandaSetReservaIfNull,mesasLoadMesaMeta,mesasLoadTicket,mesasUpdateDetalleIngredientes,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
 import { mesasKeys } from "./mesasQueries";
 
 /* =========================
@@ -174,6 +177,20 @@ export default function MesaComandaModal({
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleNota({ idDetalle, nota: nota.trim() || null });
+            await leerTicket(cId);
+            notifyChanged();
+        });
+    };
+
+    // Los ingredientes de una línea (sin cebolla, extra de queso). Va por la misma cola que la nota.
+    const [ingredientesTarget, setIngredientesTarget] = useState<TicketItem | null>(null);
+
+    const guardarIngredientesLinea = async (idDetalle: string, cambios: CambioIngredienteInput[]) => {
+        if (!idComanda || cobroEnCursoRef.current) return;
+        const cId = idComanda;
+        ++lecturaTicketRef.current.version;
+        await cola.ejecutar(async () => {
+            await mesasUpdateDetalleIngredientes({ idDetalle, cambios });
             await leerTicket(cId);
             notifyChanged();
         });
@@ -757,6 +774,19 @@ export default function MesaComandaModal({
                 }}
             />
 
+            {ingredientesTarget ? (
+                <IngredientesLineaModal
+                    productoId={ingredientesTarget.productoId || null}
+                    productoNombre={ingredientesTarget.nombre}
+                    cambiosGuardados={ingredientesTarget.cambiosIngredientes}
+                    onCancel={() => setIngredientesTarget(null)}
+                    onSave={async (cambios) => {
+                        await guardarIngredientesLinea(ingredientesTarget.id, cambios);
+                        setIngredientesTarget(null);
+                    }}
+                />
+            ) : null}
+
             <ProductDetailModal
                 open={openProductDetail}
                 onClose={cerrarDetalleProducto}
@@ -1146,6 +1176,7 @@ export default function MesaComandaModal({
                                     {ticket.map((t) => {
                                         const checked = t.seleccionado && !t.pagado;
                                         const hasNota = Boolean((t.notas ?? "").trim());
+                                        const cambios = textoCambios(t.cambiosIngredientes);
 
                                         return (
                                             <div
@@ -1222,6 +1253,12 @@ export default function MesaComandaModal({
                                                                         : "Pendiente"}
                                                         </p>
 
+                                                        {cambios ? (
+                                                            <p className="mt-1 text-[11px] font-semibold text-warning truncate" title={cambios}>
+                                                                🥗 {cambios}
+                                                            </p>
+                                                        ) : null}
+
                                                         {hasNota ? (
                                                             <p className="mt-1 text-[11px] text-fg-muted truncate">
                                                                 📝 {t.notas}
@@ -1240,6 +1277,26 @@ export default function MesaComandaModal({
                                                     >
                                                         {eur(t.precio)}
                                                     </span>
+
+                                                    {!t.pagado && t.productoId ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setIngredientesTarget(t);
+                                                            }}
+                                                            className={cn(
+                                                                "w-8 h-8 flex items-center justify-center rounded-lg border transition",
+                                                                cambios
+                                                                    ? "border-amber-200 bg-amber-50 text-warning hover:bg-warning-soft"
+                                                                    : "border-border text-fg-subtle hover:bg-surface-2",
+                                                            )}
+                                                            title="Ingredientes"
+                                                            aria-label="Ingredientes"
+                                                        >
+                                                            <Salad className="size-4" aria-hidden />
+                                                        </button>
+                                                    ) : null}
 
                                                     {!t.pagado ? (
                                                         <button

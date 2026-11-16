@@ -196,7 +196,8 @@ export async function lineas(
 				D.IVA_Percent AS IVA_Percent,
 				CASE WHEN EXISTS (
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
-				) THEN 1 ELSE 0 END AS Pagado
+				) THEN 1 ELSE 0 END AS Pagado,
+				D.Cambios_Ingredientes AS Cambios_Ingredientes
 			FROM Detalle_Comanda D
 			LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
 			LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
@@ -572,7 +573,8 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 			COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
 			CASE WHEN EXISTS (
 				SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
-			) THEN 1 ELSE 0 END AS Pagado
+			) THEN 1 ELSE 0 END AS Pagado,
+			dc.Cambios_Ingredientes AS Cambios_Ingredientes
 		FROM Comandas c
 		CROSS JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
 		LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa

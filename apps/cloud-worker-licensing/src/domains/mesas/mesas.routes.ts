@@ -178,6 +178,14 @@ mesasRoutes.put(
 	},
 );
 
+// Lo que se pide distinto en una línea (sin cebolla, extra de queso). No cambia el precio.
+mesasRoutes.put("/lineas/:id/ingredientes", cuerpo(S.cambiosIngredientesSchema), async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_detalle_invalido");
+	await apply(c, cmd.updateDetalleIngredientes(id, c.req.valid("json").cambios));
+	return c.json({ ok: true });
+});
+
 mesasRoutes.post("/cobrar-detalles", soloLaMainCobra, cuerpo(S.cobrarDetallesSchema), async (c) => {
 	const datos = c.req.valid("json");
 	const plan = await tenantQuery(c, (db) =>

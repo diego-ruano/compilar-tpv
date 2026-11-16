@@ -1,0 +1,19 @@
+{
+  "descripcion": "Alta de un ingrediente en una categoría, con id provisto.",
+  "comando": "inventario.guardar_ingrediente",
+  "seed": [
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-pan', 'Pan');",
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-salsas', 'Salsas');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-brioche', 'cat-pan', 'Brioche');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-integral', 'cat-pan', 'Integral');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-ketchup', 'cat-salsas', 'Ketchup');"
+  ],
+  "entrada": {
+    "id_ingrediente": "ing-centeno",
+    "id_categoria_ingrediente": "cat-pan",
+    "nombre": "Centeno"
+  },
+  "snapshot": {
+    "Ingredientes": "SELECT ID_Ingrediente, ID_Categoria_Ingrediente, Nombre FROM Ingredientes"
+  }
+}

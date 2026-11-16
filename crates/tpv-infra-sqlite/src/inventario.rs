@@ -10,8 +10,9 @@ use crate::ejecutor::Row;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::inventario::InventarioRepository;
+use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_contracts::inventario::{
-    AlergenoInvDto, AlergenoMiniDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
+    AlergenoInvDto, AlergenoMiniDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoResumenDto,
     ProveedorMiniDto,
 };
@@ -160,6 +161,8 @@ pub(crate) const SQL_QUITAR_PRODUCTO: &[&str] = &[
        AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Lotes_Producto WHERE ID_Producto = ?1 \
        AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
+    "DELETE FROM Producto_Ingredientes WHERE ID_Producto = ?1 \
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1 \
        AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
@@ -167,6 +170,35 @@ pub(crate) const SQL_QUITAR_PRODUCTO: &[&str] = &[
 
 #[async_trait]
 impl InventarioRepository for SqliteInventarioRepository {
+    async fn catalogo_ingredientes(&self) -> AppResult<CatalogoIngredientesDto> {
+        self.catalogo_ingredientes_impl().await
+    }
+
+    async fn ingredientes_de_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
+        self.ingredientes_de_producto_impl(id_producto).await
+    }
+
+    async fn guardar_categoria_ingrediente(&self, categoria: CategoriaIngredienteGuardar) -> AppResult<String> {
+        // La comprobación del nombre y la escritura, bajo el mismo escritor (RI-39).
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.transaccion(crate::ingredientes::guardar_categoria(conn, categoria)).await
+    }
+
+    async fn borrar_categoria_ingrediente(&self, id_categoria_ingrediente: &str) -> AppResult<()> {
+        self.borrar_en_orden(crate::ingredientes::SQL_BORRAR_CATEGORIA, id_categoria_ingrediente).await
+    }
+
+    async fn guardar_ingrediente(&self, ingrediente: IngredienteGuardar) -> AppResult<String> {
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.transaccion(crate::ingredientes::guardar_ingrediente(conn, ingrediente)).await
+    }
+
+    async fn borrar_ingrediente(&self, id_ingrediente: &str) -> AppResult<()> {
+        self.borrar_en_orden(crate::ingredientes::SQL_BORRAR_INGREDIENTE, id_ingrediente).await
+    }
+
     async fn list_categorias(&self) -> AppResult<Vec<CategoriaInvDto>> {
         let db = self.db.read().await;
         let mut rows = db
@@ -742,6 +774,31 @@ impl InventarioRepository for SqliteInventarioRepository {
 }
 
 /// Una cantidad para un mensaje: sin ceros de más y con coma decimal («7», «0,5»).
+/// Ingredientes: el SQL vive en `crate::ingredientes`; aquí sólo se toma la base.
+impl SqliteInventarioRepository {
+    async fn catalogo_ingredientes_impl(&self) -> AppResult<CatalogoIngredientesDto> {
+        let db = self.db.read().await;
+        crate::ingredientes::catalogo(&db).await
+    }
+
+    async fn ingredientes_de_producto_impl(&self, id_producto: &str) -> AppResult<Vec<String>> {
+        let db = self.db.read().await;
+        crate::ingredientes::de_producto(&db, id_producto).await
+    }
+
+    async fn borrar_en_orden(&self, sentencias: &[&str], id: &str) -> AppResult<()> {
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.transaccion(async {
+            for sql in sentencias {
+                conn.execute(sql, vec![Value::Text(id.to_string())]).await.map_err(db_err)?;
+            }
+            Ok(())
+        })
+        .await
+    }
+}
+
 fn cantidad_texto(x: f64) -> String {
     let s = format!("{:.3}", redondear_cantidad(x));
     let s = s.trim_end_matches('0').trim_end_matches('.');
@@ -870,6 +927,12 @@ impl SqliteInventarioRepository {
                 )
                 .await
                 .map_err(db_err)?;
+            }
+            // Sin la lista (una pantalla que no los enseña), los ingredientes se quedan como estaban.
+            if let Some(ids) = p.ids_ingredientes {
+                for (sql, args) in crate::ingredientes::sql_ingredientes_del_producto(&id_producto, &ids) {
+                    conn.execute(sql, args).await.map_err(db_err)?;
+                }
             }
             Ok(())
         }).await?;
@@ -1435,6 +1498,7 @@ mod tests_alta_del_suelto {
                     stock_suelto: Some(stock),
                     iva_percent: None,
                     ids_alergenos: vec![],
+                    ids_ingredientes: None,
                 },
             )
             .await

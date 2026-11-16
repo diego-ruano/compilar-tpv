@@ -1,0 +1,12 @@
+{
+  "Detalle_Comanda": [
+    {
+      "Cambios_Ingredientes": null,
+      "ID_Detalle": "detalle-1"
+    },
+    {
+      "Cambios_Ingredientes": null,
+      "ID_Detalle": "detalle-2"
+    }
+  ]
+}
