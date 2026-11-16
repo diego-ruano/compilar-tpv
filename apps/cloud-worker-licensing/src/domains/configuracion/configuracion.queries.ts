@@ -102,7 +102,7 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		reserva_solape: r.reserva_solape === "prohibir" ? "prohibir" : "avisar",
 		reserva_no_vino_min: noVino(r.reserva_no_vino_min),
 		// INC-01: espejo de `get_business` en la Main. Sólo se lee; la pone el job de la Main.
-		zona_horaria: String(r.zona_horaria ?? "").trim() || "Europe/Madrid",
+		zona_horaria: recortar(String(r.zona_horaria ?? "")) || "Europe/Madrid",
 	};
 }
 
