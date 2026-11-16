@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cloudPost } from "../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../shared/lib/deviceFingerprint";
 import { useEstadoSync } from "../../shared/stores/useEstadoSync";
+import { usePairCode } from "../../shared/stores/usePairCode";
 
 export type PairPendingItem = {
 	pairCode: string;
@@ -122,8 +123,11 @@ export function useAprobarHandy() {
 		mutationFn: (pairCode: string) =>
 			cloudPost("tpv", "/v1/pair/approve", { pairCode }),
 		// Las dos listas cambian a la vez: la solicitud se va de pendientes y el dispositivo
-		// aparece en vinculados.
-		onSuccess: () => qc.invalidateQueries({ queryKey: pairingKeys.all }),
+		// aparece en vinculados. El código ya no vale (OBS-01).
+		onSuccess: (_r, pairCode) => {
+			void usePairCode.getState().gastado(pairCode);
+			return qc.invalidateQueries({ queryKey: pairingKeys.all });
+		},
 	});
 }
 
@@ -137,7 +141,10 @@ export function useRechazarHandy() {
 	return useMutation({
 		mutationFn: (pairCode: string) =>
 			cloudPost("tpv", "/v1/pair/reject", { pairCode }),
-		onSuccess: () => qc.invalidateQueries({ queryKey: pairingKeys.pendientes }),
+		onSuccess: (_r, pairCode) => {
+			void usePairCode.getState().gastado(pairCode);
+			return qc.invalidateQueries({ queryKey: pairingKeys.pendientes });
+		},
 	});
 }
 

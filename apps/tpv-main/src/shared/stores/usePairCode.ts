@@ -10,8 +10,9 @@ import { commands } from "@tpv/client";
 // navegar, así que cada visita pedía uno nuevo: el QR cambiaba delante del camarero que estaba
 // intentando escanearlo, y el TPV gastaba una petición firmada por visita.
 //
-// La regla es: se pide uno nuevo sólo si no hay ninguno, si el que hay ya caducó, o si alguien
-// pulsa "Regenerar".
+// La regla es: se pide uno nuevo sólo si no hay ninguno, si el que hay ya caducó, si alguien
+// pulsa "Regenerar", o si ya se ha gastado (OBS-01): un código es de un solo uso, y en cuanto una
+// Handy lo reclama ya no le sirve a otra aunque le quede tiempo.
 
 import { create } from "zustand";
 
@@ -30,6 +31,8 @@ type PairCodeStore = {
 	asegurar: () => Promise<void>;
 	/** Pide uno nuevo aunque el actual siga vigente (botón "Regenerar"). */
 	regenerar: () => Promise<void>;
+	/** `code` ya lo ha reclamado una Handy: si es el que se enseña, se cambia por uno nuevo. */
+	gastado: (code: string) => Promise<void>;
 };
 
 /**
@@ -84,6 +87,12 @@ export const usePairCode = create<PairCodeStore>((set, get) => {
 
 		regenerar: async () => {
 			if (get().loading) return;
+			await pedir();
+		},
+
+		gastado: async (code) => {
+			const s = get();
+			if (s.loading || !code || s.code !== code) return;
 			await pedir();
 		},
 	};

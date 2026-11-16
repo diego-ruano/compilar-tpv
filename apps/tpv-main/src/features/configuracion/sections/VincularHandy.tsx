@@ -86,6 +86,13 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	const revocar = useRevocarHandy();
 
 	const pending = pendientes.data ?? [];
+
+	// OBS-01: en cuanto una Handy reclama el código que se enseña, ya no le sirve a otra aunque le
+	// quede tiempo. Se cambia por uno nuevo; la solicitud sigue en pendientes con el suyo.
+	const gastarCodigo = usePairCode((s) => s.gastado);
+	useEffect(() => {
+		if (pairCode && pending.some((p) => p.pairCode === pairCode)) void gastarCodigo(pairCode);
+	}, [pending, pairCode, gastarCodigo]);
 	const linked = vinculados.data ?? [];
 
 	// El cartel rojo sale cuando la consulta está EN error (React Query ya ha reintentado): un
