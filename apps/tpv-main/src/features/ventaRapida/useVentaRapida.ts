@@ -7,6 +7,7 @@ import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { captureException } from "../../shared/observability/sentry";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
+import { useMode } from "../../shared/stores/useMode";
 import { useToast } from "../../shared/toast";
 
 import type { CobroImprimible } from "../../shared/ticket/PrintTicketModal";
@@ -856,6 +857,8 @@ export function useVentaRapida() {
 
   const cobrarTicketDesdeModal = useCallback(
     async (id: string) => {
+      // INC-04: sólo cobra la Main; la pantalla ya no lo ofrece en una Handy.
+      if (useMode.getState().mode !== "tpv") return;
       if (hasPendingTicketWrites()) {
         warnPendingTicketWrites();
         return;

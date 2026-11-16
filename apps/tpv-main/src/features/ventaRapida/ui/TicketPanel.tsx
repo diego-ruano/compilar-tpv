@@ -84,7 +84,9 @@ export default function TicketPanel({
   const esMain = useMode((s) => s.mode) === "tpv";
   const canCobrarTodo = esMain && hayPendientes && !ocupado;
   const canCobrarFraccionado = esMain && haySeleccion && !ocupado;
-  const canCobrarMetodo = haySeleccion && !ocupado;
+  // INC-04: también los métodos. Desde «Cobrar» del listado la Handy llegaba a ellos con las líneas
+  // ya elegidas, y el intento acababa rechazado por la nube.
+  const canCobrarMetodo = esMain && haySeleccion && !ocupado;
 
   const [notaOpen, setNotaOpen] = useState(false);
   const [notaSaving, setNotaSaving] = useState(false);

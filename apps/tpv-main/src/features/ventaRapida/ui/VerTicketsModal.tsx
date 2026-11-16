@@ -12,6 +12,7 @@ import { contiene, textoABuscar } from "../../../shared/lib/busqueda";
 import { textoCambios } from "../../inventario/ingredientes";
 import { diaDeFecha, diaYHoraCortos, hoyEnElNegocio } from "../../../shared/lib/diaDelNegocio";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
+import { useMode } from "../../../shared/stores/useMode";
 
 // Sale de las líneas sin cobrar y no de `Estado`: una comanda cobrada a la que se le añaden líneas
 // sigue en «Pagada» aunque tenga algo por cobrar. Tampoco del importe pendiente: un ticket con sólo
@@ -67,6 +68,9 @@ export default function VerTicketsModal({
     const t = window.setTimeout(() => setShowIndexHint(true), 300);
     return () => window.clearTimeout(t);
   }, [loadingIndex]);
+
+  // INC-04: cobrar es cosa de la Main (impresora, cajón); en una Handy el botón no lleva a cobrar.
+  const esMain = useMode((st) => st.mode) === "tpv";
 
   // INC-01: «Hoy» es el día del negocio, no el del dispositivo: una Handy con otra zona veía otro día.
   const zonaDelNegocio = useBusinessSettings((st) => st.zona_horaria);
@@ -326,7 +330,7 @@ export default function VerTicketsModal({
               <div className="grid grid-cols-1 gap-3">
                 {rows.map(({ c, when, totalPendiente, total, est }) => {
                   // INC-05: se puede cobrar mientras quede alguna línea sin cobrar, aunque sea de 0,00 €.
-                  const cobrable = est === "SIN COBRAR";
+                  const cobrable = esMain && est === "SIN COBRAR";
                   const badge =
                     est === "COBRADO"
                       ? "border-success/30 bg-success-soft text-success"
@@ -389,6 +393,7 @@ export default function VerTicketsModal({
                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                             )}
                             disabled={!cobrable}
+                            title={esMain ? undefined : "Los cobros se hacen en el TPV principal"}
                           >
                             Cobrar
                           </button>
