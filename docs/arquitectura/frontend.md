@@ -153,6 +153,13 @@ filtra) y `contiene(buscado, ...textos)`. Es la misma regla y la misma tabla
 (`crates/tpv-domain/src/busqueda_casos.json`, que lee `test/busqueda.test.ts`), así que una lista
 filtrada aquí y una buscada en la base encuentran lo mismo. Nunca `toLowerCase().includes`.
 
+## Las fechas y el día del negocio
+
+Las fechas de la base son la hora de pared del negocio, sin desfase (`YYYY-MM-DD HH:MM:SS`). La pantalla
+no las pasa por `Date`, que las leería con la zona del dispositivo: su día es su texto (`diaDeFecha`) y
+«hoy» es el del negocio, `hoyEnElNegocio(zona_horaria)` con la zona de `BusinessSettings`, que pone la
+Main (`shared/lib/diaDelNegocio.ts`). Así una Handy con otra zona ve el mismo «Hoy» que la Main.
+
 ## El tamaño de la interfaz
 
 La interfaz está pensada para 1280 píxeles de CSS de ancho. En una pantalla más estrecha (un
