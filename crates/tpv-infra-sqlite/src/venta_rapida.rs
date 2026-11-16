@@ -616,9 +616,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   ) THEN 1 ELSE 0 END AS Pagado,
                   COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
                   dc.IVA_Percent,
-                  dc.Cambios_Ingredientes
+                  dc.Cambios_Ingredientes,
+                  cat.Nombre AS Categoria
                 FROM Detalle_Comanda dc
                 LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
+                LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
                 WHERE dc.ID_Comanda = ?1
                 ORDER BY dc.ID_Detalle ASC;
                 "#,
@@ -641,6 +643,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 Nombre: v_string(r.get_value(8).map_err(db_err)?).unwrap_or_else(|| "Producto".into()),
                 IVA_Percent: v_f64(r.get_value(9).map_err(db_err)?),
                 Cambios_Ingredientes: v_string(r.get_value(10).map_err(db_err)?),
+                Categoria: v_string(r.get_value(11).map_err(db_err)?),
             });
         }
         Ok(out)

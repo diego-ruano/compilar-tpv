@@ -2,6 +2,7 @@
   {
     "Cambios_Ingredientes": null,
     "Cantidad": 2.0,
+    "Categoria": "Bebidas",
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",
     "ID_Detalle": "det-1",
@@ -15,6 +16,7 @@
   {
     "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
+    "Categoria": "Bebidas",
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",
     "ID_Detalle": "det-2",
@@ -28,6 +30,7 @@
   {
     "Cambios_Ingredientes": null,
     "Cantidad": 1.0,
+    "Categoria": null,
     "Estado_Cocina": "PENDIENTE",
     "ID_Comanda": "com-barra",
     "ID_Detalle": "det-3",

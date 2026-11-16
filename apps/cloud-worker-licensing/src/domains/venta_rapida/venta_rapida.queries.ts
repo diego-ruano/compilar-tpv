@@ -223,9 +223,11 @@ export async function lineas(
 				) THEN 1 ELSE 0 END AS Pagado,
 				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				dc.IVA_Percent AS IVA_Percent,
-				dc.Cambios_Ingredientes AS Cambios_Ingredientes
+				dc.Cambios_Ingredientes AS Cambios_Ingredientes,
+				cat.Nombre AS Categoria
 			FROM Detalle_Comanda dc
 			LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
+			LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 			WHERE dc.ID_Comanda = ?1
 			ORDER BY dc.ID_Detalle ASC;
 		`,

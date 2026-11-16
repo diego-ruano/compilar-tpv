@@ -1651,6 +1651,11 @@ export type LineaComandaRow = {
 	Estado_Cocina: string | null,
 	Pagado: number,
 	Nombre: string,
+	/**
+	 *  El nombre de la categoría del producto, con el que el ticket agrupa sus líneas (INC-03).
+	 *  `None` si el producto ya no existe.
+	 */
+	Categoria: string | null,
 };
 
 /**  Una línea de un cobro, con lo que queda por devolver de ella. */

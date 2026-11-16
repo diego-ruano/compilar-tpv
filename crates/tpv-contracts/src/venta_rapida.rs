@@ -64,6 +64,9 @@ pub struct LineaComandaRow {
     pub Estado_Cocina: Option<String>,
     pub Pagado: i64,
     pub Nombre: String,
+    /// El nombre de la categoría del producto, con el que el ticket agrupa sus líneas (INC-03).
+    /// `None` si el producto ya no existe.
+    pub Categoria: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

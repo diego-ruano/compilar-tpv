@@ -76,19 +76,6 @@ export function useVentaRapida() {
   const { categorias, setCategorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos,
     query, setQuery, q, busqueda, loadingBusqueda, cargarCategorias, cargarProductosDeCategoria, buscarProductosPorNombre } = useCatalogoServicio(true, apiCatalogo, false);
 
-  const categoriaNombreById = useMemo(() => {
-    const map: Record<string, string> = {};
-
-    for (const cat of categorias) {
-      const id = String(cat.ID_Categoria ?? "").trim();
-      if (id) {
-        map[id] = String(cat.Nombre ?? "");
-      }
-    }
-
-    return map;
-  }, [categorias]);
-
   const toast = useToast();
 
   const idTrabajadorAuth = useAuth((s) => s.idTrabajador);
@@ -99,34 +86,6 @@ export function useVentaRapida() {
   const cobroEnCursoRef = useRef(false);
   const [cobrando, setCobrando] = useState(false);
 
-  const getCategoriaNombreParaProducto = useCallback(
-    (productoId: string | null | undefined) => {
-      const id = String(productoId ?? "").trim();
-      if (!id) return null;
-
-      const fromProductos = productos.find((p) => p.ID_Producto === id);
-      if (fromProductos?.ID_Categoria) {
-        const nombre = categoriaNombreById[String(fromProductos.ID_Categoria)] ?? null;
-        if (nombre) return nombre;
-      }
-
-      const fromBusqueda = busqueda.find((p) => p.ID_Producto === id);
-      if (fromBusqueda?.ID_Categoria) {
-        const nombre = categoriaNombreById[String(fromBusqueda.ID_Categoria)] ?? null;
-        if (nombre) return nombre;
-      }
-
-      if (categoriaSeleccionada?.ID_Categoria) {
-        const idCat = String(categoriaSeleccionada.ID_Categoria ?? "").trim();
-        if (idCat && idCat === String(fromProductos?.ID_Categoria ?? "") && categoriaSeleccionada.Nombre) {
-          return categoriaSeleccionada.Nombre;
-        }
-      }
-
-      return null;
-    },
-    [busqueda, categoriaNombreById, categoriaSeleccionada, productos],
-  );
 
   const [ticket, setTicket] = useState<TicketItem[]>([]);
   const ticketRef = useRef<TicketItem[]>([]);
@@ -210,7 +169,9 @@ export function useVentaRapida() {
           precio: escalar(l.Precio_Unitario, l.Cantidad || 1),
           pagado: l.Pagado === 1,
           seleccionado: false,
-          categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
+          // INC-03: la categoría viene con la línea. Deducirla de los productos que la pantalla tenía
+          // cargados dejaba en «Sin categoría» lo de otras categorías al recargar el ticket.
+          categoriaNombre: l.Categoria ?? null,
           notas: l.Notas ?? null,
           cambiosIngredientes: l.Cambios_Ingredientes ?? null,
           // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
@@ -242,30 +203,8 @@ export function useVentaRapida() {
 
       return ui;
     },
-    [getCategoriaNombreParaProducto, setSeleccionadosLocal],
+    [setSeleccionadosLocal],
   );
-
-  useEffect(() => {
-    if (!ticket.length) return;
-
-    let changed = false;
-    const nextTicket = ticket.map((item) => {
-      if (String(item.categoriaNombre ?? "").trim()) return item;
-
-      const resolved = getCategoriaNombreParaProducto(item.productoId);
-      if (resolved) {
-        changed = true;
-        return { ...item, categoriaNombre: resolved };
-      }
-
-      return item;
-    });
-
-    if (changed) {
-      ticketRef.current = nextTicket;
-      setTicket(nextTicket);
-    }
-  }, [getCategoriaNombreParaProducto, ticket]);
 
   useEffect(() => {
     return () => {
