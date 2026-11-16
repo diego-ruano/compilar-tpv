@@ -13,10 +13,11 @@ import { textoCambios } from "../../inventario/ingredientes";
 import { diaDeFecha, diaYHoraCortos, hoyEnElNegocio } from "../../../shared/lib/diaDelNegocio";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 
-// Sale de lo pendiente y no de `Estado`: una comanda cobrada a la que se le añaden líneas
-// sigue en «Pagada» aunque tenga importe por cobrar.
+// Sale de las líneas sin cobrar y no de `Estado`: una comanda cobrada a la que se le añaden líneas
+// sigue en «Pagada» aunque tenga algo por cobrar. Tampoco del importe pendiente: un ticket con sólo
+// una invitación (0,00 €) sin cobrar no está cobrado (INC-05). El listado sólo trae tickets con líneas.
 function estadoTicket(c: ComandaBarraRow) {
-  return c.Total_Pendiente <= 0 ? "COBRADO" : "SIN COBRAR";
+  return c.Pendientes_Pago > 0 ? "SIN COBRAR" : "COBRADO";
 }
 
 type Filtro = "RECIENTES" | "SIN_COBRAR" | "COBRADOS";
@@ -324,6 +325,8 @@ export default function VerTicketsModal({
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 gap-3">
                 {rows.map(({ c, when, totalPendiente, total, est }) => {
+                  // INC-05: se puede cobrar mientras quede alguna línea sin cobrar, aunque sea de 0,00 €.
+                  const cobrable = est === "SIN COBRAR";
                   const badge =
                     est === "COBRADO"
                       ? "border-success/30 bg-success-soft text-success"
@@ -381,11 +384,11 @@ export default function VerTicketsModal({
                             onClick={conAviso(() => onCobrarTicket(String(c.ID_Comanda)))}
                             className={cn(
                               "rounded-xl px-3 py-2 text-sm font-semibold transition",
-                              totalPendiente > 0
+                              cobrable
                                 ? "border border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer"
                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                             )}
-                            disabled={totalPendiente <= 0}
+                            disabled={!cobrable}
                           >
                             Cobrar
                           </button>
