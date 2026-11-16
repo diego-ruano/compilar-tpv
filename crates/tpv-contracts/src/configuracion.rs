@@ -39,6 +39,11 @@ pub struct BusinessSettings {
     /// A los cuántos minutos de su hora se marca «No vino» una reserva a la que no ha llegado nadie;
     /// 0 = nunca. Lo aplica el job `reservas_no_vino` de la Main.
     pub reserva_no_vino_min: i64,
+
+    /// Zona horaria IANA del negocio (`Europe/Madrid`, `Atlantic/Canary`). Sólo se lee: la pone el
+    /// job `zona_horaria` de la Main con la de su reloj. Con ella cada pantalla sabe qué día es «hoy»
+    /// en el negocio aunque el dispositivo tenga otra zona (INC-01).
+    pub zona_horaria: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

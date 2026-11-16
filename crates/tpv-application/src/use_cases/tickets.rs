@@ -183,6 +183,7 @@ mod tests {
             reserva_duracion_min: 120,
             reserva_solape: "avisar".into(),
             reserva_no_vino_min: 0,
+            zona_horaria: "Europe/Madrid".into(),
         }
     }
 

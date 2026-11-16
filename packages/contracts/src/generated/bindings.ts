@@ -316,6 +316,12 @@ export type BusinessSettings = {
 	 *  0 = nunca. Lo aplica el job `reservas_no_vino` de la Main.
 	 */
 	reserva_no_vino_min: number,
+	/**
+	 *  Zona horaria IANA del negocio (`Europe/Madrid`, `Atlantic/Canary`). Sólo se lee: la pone el
+	 *  job `zona_horaria` de la Main con la de su reloj. Con ella cada pantalla sabe qué día es «hoy»
+	 *  en el negocio aunque el dispositivo tenga otra zona (INC-01).
+	 */
+	zona_horaria: string,
 };
 
 export type BusinessSettingsPatch = BusinessSettingsPatch_Serialize | BusinessSettingsPatch_Deserialize;

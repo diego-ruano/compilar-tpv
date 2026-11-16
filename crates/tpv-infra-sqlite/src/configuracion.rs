@@ -135,7 +135,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno, Reserva_Duracion_Min, Reserva_Solape, Reserva_No_Vino_Min FROM Business_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno, Reserva_Duracion_Min, Reserva_Solape, Reserva_No_Vino_Min, Zona_Horaria FROM Business_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -176,6 +176,10 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             reserva_no_vino_min: v_i64(g(14)?)
                 .and_then(|m| tpv_domain::reservas::no_vino_valido(m).ok())
                 .unwrap_or(0),
+            zona_horaria: v_string(g(15)?)
+                .map(|z| z.trim().to_string())
+                .filter(|z| !z.is_empty())
+                .unwrap_or_else(|| tpv_domain::reservas_web::ZONA_POR_DEFECTO.to_string()),
         })
     }
 

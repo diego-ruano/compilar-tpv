@@ -10,20 +10,8 @@ import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
 import { eur, escalar } from "../../../shared/lib/dinero";
 import { contiene, textoABuscar } from "../../../shared/lib/busqueda";
 import { textoCambios } from "../../inventario/ingredientes";
-
-function parseWhen(fecha: string) {
-  const t = Date.parse(fecha);
-  return Number.isFinite(t) ? new Date(t) : new Date();
-}
-
-function isTodayLocal(dt: Date) {
-  const now = new Date();
-  return (
-    dt.getFullYear() === now.getFullYear() &&
-    dt.getMonth() === now.getMonth() &&
-    dt.getDate() === now.getDate()
-  );
-}
+import { diaDeFecha, diaYHoraCortos, hoyEnElNegocio } from "../../../shared/lib/diaDelNegocio";
+import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 
 // Sale de lo pendiente y no de `Estado`: una comanda cobrada a la que se le añaden líneas
 // sigue en «Pagada» aunque tenga importe por cobrar.
@@ -79,33 +67,21 @@ export default function VerTicketsModal({
     return () => window.clearTimeout(t);
   }, [loadingIndex]);
 
+  // INC-01: «Hoy» es el día del negocio, no el del dispositivo: una Handy con otra zona veía otro día.
+  const zonaDelNegocio = useBusinessSettings((st) => st.zona_horaria);
+
   const baseRows = useMemo(() => {
-    const filtered = comandas
-      .map((c) => ({ c, dt: parseWhen(c.Fecha_Hora_Apertura) }))
-      .filter(({ dt }) => isTodayLocal(dt));
-
-    return filtered.map(({ c, dt }) => {
-      const totalPendiente = c.Total_Pendiente;
-      const total = c.Total_Comanda;
-      const est = estadoTicket(c);
-
-      const when = dt.toLocaleString("es-ES", {
-        day: "2-digit",
-        month: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      return {
+    const hoy = hoyEnElNegocio(zonaDelNegocio);
+    return comandas
+      .filter((c) => diaDeFecha(c.Fecha_Hora_Apertura) === hoy)
+      .map((c) => ({
         c,
-        dt,
-        when,
-        totalPendiente,
-        total,
-        est,
-      };
-    });
-  }, [comandas]);
+        when: diaYHoraCortos(c.Fecha_Hora_Apertura),
+        totalPendiente: c.Total_Pendiente,
+        total: c.Total_Comanda,
+        est: estadoTicket(c),
+      }));
+  }, [comandas, zonaDelNegocio]);
 
   const prefetchIndex = useCallback(
     async (idsHoy: string[]) => {
@@ -238,7 +214,8 @@ export default function VerTicketsModal({
       });
     }
 
-    out.sort((a, b) => b.dt.getTime() - a.dt.getTime());
+    // La fecha guardada (`YYYY-MM-DD HH:MM:SS`) se ordena como texto.
+    out.sort((a, b) => b.c.Fecha_Hora_Apertura.localeCompare(a.c.Fecha_Hora_Apertura));
     return out;
   }, [baseRows, filtro, s, indexByComanda]);
 

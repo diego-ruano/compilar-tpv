@@ -13,5 +13,6 @@
   "reserva_solape": "avisar",
   "telefono": "961111111",
   "umbral_descuadre": 1250,
-  "verifactu_entorno": "produccion"
+  "verifactu_entorno": "produccion",
+  "zona_horaria": "Europe/Madrid"
 }

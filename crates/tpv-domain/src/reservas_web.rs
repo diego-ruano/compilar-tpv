@@ -11,6 +11,9 @@
 ///
 /// Hoy se reconocen las dos de España. Con otros desfases no hay respuesta, y quien llama deja la que
 /// hubiera.
+/// La zona del negocio cuando la base no tiene una (la que pone el esquema por defecto).
+pub const ZONA_POR_DEFECTO: &str = "Europe/Madrid";
+
 pub fn zona_por_desfases(invierno_min: i32, verano_min: i32) -> Option<&'static str> {
     match (invierno_min, verano_min) {
         (60, 120) => Some("Europe/Madrid"),

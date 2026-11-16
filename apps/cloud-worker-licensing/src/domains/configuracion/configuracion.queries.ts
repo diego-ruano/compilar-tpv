@@ -71,7 +71,8 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 			Verifactu_Entorno AS verifactu_entorno,
 			Reserva_Duracion_Min AS reserva_duracion_min,
 			Reserva_Solape AS reserva_solape,
-			Reserva_No_Vino_Min AS reserva_no_vino_min
+			Reserva_No_Vino_Min AS reserva_no_vino_min,
+			Zona_Horaria AS zona_horaria
 		FROM Business_Settings
 		WHERE ID=1
 		LIMIT 1;
@@ -100,6 +101,8 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 			Number(r.reserva_duracion_min) > 0 ? Number(r.reserva_duracion_min) : 120,
 		reserva_solape: r.reserva_solape === "prohibir" ? "prohibir" : "avisar",
 		reserva_no_vino_min: noVino(r.reserva_no_vino_min),
+		// INC-01: espejo de `get_business` en la Main. Sólo se lee; la pone el job de la Main.
+		zona_horaria: String(r.zona_horaria ?? "").trim() || "Europe/Madrid",
 	};
 }
 

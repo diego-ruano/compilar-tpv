@@ -29,6 +29,8 @@ const DEFAULTS: BusinessSettings = {
     reserva_solape: "avisar",
     // 0 = nunca marcar «No vino» solo (el valor por defecto del esquema).
     reserva_no_vino_min: 0,
+    // La del esquema por defecto; la real la pone la Main con la de su reloj.
+    zona_horaria: "Europe/Madrid",
 };
 
 type BusinessSettingsState = BusinessSettings & {
