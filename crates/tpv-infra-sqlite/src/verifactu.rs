@@ -140,6 +140,22 @@ pub(crate) struct DatosObligado {
     pub limite_simplif: Dinero,
 }
 
+/// Qué dato del obligado falta para emitir, dicho tal cual (POS-13): sólo el que falta.
+fn lo_que_falta_del_obligado(nif: &str, razon_social: &str) -> Option<&'static str> {
+    match (nif.trim().is_empty(), razon_social.trim().is_empty()) {
+        (true, true) => Some(
+            "Faltan el NIF y la razón social del negocio: sin ellos no se puede emitir la factura.",
+        ),
+        (true, false) => {
+            Some("Falta el NIF del negocio: sin él no se puede emitir la factura.")
+        }
+        (false, true) => Some(
+            "Falta la razón social del negocio: sin ella no se puede emitir la factura.",
+        ),
+        (false, false) => None,
+    }
+}
+
 /// Lee y **valida** los datos fiscales del obligado.
 ///
 /// Devuelve `DatosFiscalesIncompletos` si falta el NIF o la razón social, o si el NIF no supera su
@@ -176,11 +192,8 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         .filter(|v| *v > Dinero::CERO)
         .unwrap_or(vf::LIMITE_SIMPLIFICADA_HOSTELERIA);
 
-    if nif.is_empty() || razon_social.trim().is_empty() {
-        return Err(AppError::coded(
-            ErrorCode::DatosFiscalesIncompletos,
-            "Faltan el NIF y la razón social del negocio: sin ellos no se puede emitir la factura.",
-        ));
+    if let Some(mensaje) = lo_que_falta_del_obligado(&nif, &razon_social) {
+        return Err(AppError::coded(ErrorCode::DatosFiscalesIncompletos, mensaje));
     }
     if !vf::nif_valido(&nif) {
         // Se comprueba aquí y no al enviar porque al enviar vuelve como error admisible horas
@@ -2087,6 +2100,16 @@ mod tests {
     #[allow(dead_code)]
     fn eur(euros: f64) -> Dinero {
         Dinero::de_euros(euros)
+    }
+
+    #[test]
+    fn el_aviso_del_obligado_dice_solo_lo_que_falta() {
+        // POS-13: con el NIF puesto, el aviso no puede pedir el NIF.
+        let falta = |nif, razon| lo_que_falta_del_obligado(nif, razon).unwrap_or("");
+        assert!(falta("B12345674", " ").starts_with("Falta la razón social"));
+        assert!(falta("", "Bar Pepe SL").starts_with("Falta el NIF"));
+        assert!(falta("", "").starts_with("Faltan el NIF y la razón social"));
+        assert_eq!(lo_que_falta_del_obligado("B12345674", "Bar Pepe SL"), None);
     }
 
     #[test]
