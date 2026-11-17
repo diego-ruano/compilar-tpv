@@ -55,9 +55,31 @@ pub fn fecha_de_instante(s: &str) -> Option<NaiveDate> {
     fecha_ymd(dia)
 }
 
+/// La hora de pared de un instante con su desfase, `YYYY-MM-DD HH:MM:SS+HH:MM`: la `X-Client-Now`
+/// de la Handy (MES-INC-03). Su zona puede no ser la del negocio, y con el desfase el worker la
+/// pasa a la del negocio (`instanteDeClientNow` en `tenantHub.tiempo.ts`).
+pub fn hora_con_desfase<Tz: chrono::TimeZone>(t: chrono::DateTime<Tz>) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    t.format("%Y-%m-%d %H:%M:%S%:z").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_hora_de_la_handy_lleva_su_desfase() {
+        use chrono::{FixedOffset, TimeZone};
+        let en = |desfase_s: i32| {
+            let zona = FixedOffset::east_opt(desfase_s).unwrap();
+            hora_con_desfase(zona.with_ymd_and_hms(2026, 11, 16, 20, 58, 17).unwrap())
+        };
+        assert_eq!(en(0), "2026-11-16 20:58:17+00:00");
+        assert_eq!(en(3600), "2026-11-16 20:58:17+01:00");
+        assert_eq!(en(-(3 * 3600 + 1800)), "2026-11-16 20:58:17-03:30");
+    }
 
     #[test]
     fn normalizar_un_dia_recorta_y_se_queda_con_la_fecha() {

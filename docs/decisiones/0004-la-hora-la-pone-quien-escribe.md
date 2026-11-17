@@ -18,7 +18,9 @@ horas distintas en cada sitio, y una venta de las 23:59 podría caer en otro dí
 - **El esquema no tiene `DEFAULT` de hora**: quien inserta la informa.
 - **En la nube, la hora local del emisor viaja en `X-Client-Now`** y el `TenantHub` la usa para fijar
   `'now'` en las escrituras de la Handy (`tenantHub.tiempo.ts`). Lo que no puede fijar (`'now'` en UTC,
-  `CURRENT_*`, o sin cabecera) se rechaza.
+  `CURRENT_*`, o sin cabecera) se rechaza. La de la Handy llega con su desfase y el `TenantHub` la
+  pasa a la zona del negocio antes de usarla: manda el reloj del equipo, pero la hora es la del
+  negocio (MES-INC-03).
 - **Las lecturas de la Handy también** se resuelven con `X-Client-Now` (`lib/tenantClient.ts::tenantQuery`):
   si no, «hoy» sería el día UTC de Turso.
 

@@ -31,6 +31,7 @@ use uuid::Uuid;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::PairingService;
 use tpv_contracts::licensing::ApiSignedHeaders;
+use tpv_domain::fechas::hora_con_desfase;
 use tpv_infra_licensing::{reloj, PairingAdapter};
 
 /// Host del worker unificado `tpv-api`. La constante vive en `tpv-infra-licensing` (la crate
@@ -168,6 +169,9 @@ impl CloudClient {
     /// worker vuelve a montar. Es un parámetro para que el test compruebe que lo firmado es lo
     /// que sale, sin tocar la identidad del equipo.
     ///
+    /// MES-INC-03 — va con su desfase (`hora_con_desfase`): la zona de esta Handy puede no ser la del
+    /// negocio, y el worker la pasa a la del negocio antes de usarla.
+    ///
     /// SYNC-04 — `x-client-now`: el reloj lo pone el dispositivo EMISOR, no el servidor. El worker
     /// usa esta hora local para resolver a literal fijo los `datetime('now',…)` de las escrituras,
     /// de modo que la fila salga idéntica en nube, Main y Handy (replicación determinista). Si falta,
@@ -209,7 +213,7 @@ impl CloudClient {
         );
 
         let h = firmar(method.as_str(), &destino, cuerpo)?;
-        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let client_now = hora_con_desfase(chrono::Local::now());
         let mut rb = self
             .http
             .request(method, url)
@@ -782,8 +786,10 @@ mod tests_lectura_por_post {
     async fn sale_como_una_lectura_con_la_hora_y_sin_clave_de_idempotencia() {
         let r = lectura_por_post("/v1/cuentas/entradas", &serde_json::json!({ "q": "Cliente Ficticio" })).await;
 
-        // La hora local de quien pregunta, como en un GET (REV-03): «hoy» es el de la Handy.
-        assert!(r.cabeceras.contains_key("x-client-now"), "falta x-client-now");
+        // La hora de quien pregunta, como en un GET (REV-03), con su desfase (MES-INC-03): el worker
+        // la pasa a la del negocio.
+        let ahora = r.cabeceras.get("x-client-now").expect("falta x-client-now");
+        assert_eq!(ahora.len(), "2026-11-16 21:58:17+01:00".len(), "{ahora:?}");
         assert!(
             !r.cabeceras.contains_key("x-idempotency-key"),
             "una lectura no lleva clave de idempotencia"

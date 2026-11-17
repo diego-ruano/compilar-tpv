@@ -25,6 +25,7 @@
 // que viven en un solo sitio; si cambias cómo se fija la hora, cambias las dos a la vez.
 
 import { diaDeInstante } from "../lib/fechas";
+import { recortar } from "../lib/texto";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
 const CLIENT_NOW_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -62,6 +63,22 @@ export function parseClientNow(raw: unknown): string | null {
 	const clientMs = new Date(s.replace(" ", "T") + "Z").getTime();
 	if (!Number.isFinite(clientMs) || Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) return null;
 	return s;
+}
+
+const CLIENT_NOW_CON_DESFASE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})$/;
+
+/**
+ * MES-INC-03: el instante de una `X-Client-Now` que lleva su desfase (`YYYY-MM-DD HH:MM:SS+HH:MM`,
+ * la de la Handy); `null` si no lo lleva o no es un instante. La hora de pared de la Handy es la de
+ * SU zona, que puede no ser la del negocio (un Android en GMT en un bar de Madrid): con el desfase,
+ * el TenantHub la pasa a la hora del negocio antes de ejecutar la ruta (`conLaHoraDelNegocio`), y
+ * todo lo de abajo sigue leyendo una hora sin desfase. La de la Main va sin él: es la del negocio.
+ */
+export function instanteDeClientNow(raw: unknown): number | null {
+	const m = CLIENT_NOW_CON_DESFASE_RE.exec(recortar(String(raw ?? "")));
+	if (!m || diaDeInstante(`${m[1]} ${m[2]}`) === null) return null;
+	const ms = Date.parse(`${m[1]}T${m[2]}${m[3]}`);
+	return Number.isFinite(ms) ? ms : null;
 }
 
 // Las funciones de fecha de SQLite. Un `'now'` sólo es «ahora» cuando es argumento de una de ellas:

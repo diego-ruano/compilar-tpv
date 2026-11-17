@@ -28,6 +28,7 @@ import {
 	type LecturaWeb,
 	type RespuestaDeLecturaWeb,
 } from "../domains/reservas_web/lecturasDeLaWeb";
+import { horaDelNegocio, horaLocalEn } from "../domains/reservas_web/horaDelNegocio";
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
@@ -54,6 +55,7 @@ import { esBaseLlena, esFalloPasajero, esRechazoPermanente } from "./tenantHub.e
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
+	instanteDeClientNow,
 	nowMs,
 	parseClientNow,
 	rewriteCmdNowLiterals,
@@ -1512,6 +1514,9 @@ export class MotorTenantHub {
 		const ajeno = this.negocioAjeno(identidad.tenantId, "ejecutarRuta");
 		if (ajeno) return serverError(peticion, ajeno.code);
 
+		// MES-INC-03: antes del veto, que es lo último que espera.
+		peticion = await this.conLaHoraDelNegocio(peticion, identidad.tenantId);
+
 		// AUD-02: de un `tpv`, sólo la Main. Lo último antes de ejecutar la ruta: de aquí a ella no
 		// hay ninguna espera.
 		const veto = await this.vetoDeMain(identidad);
@@ -1539,6 +1544,29 @@ export class MotorTenantHub {
 			},
 			async () => app.fetch(peticion, this.env, ctxEjecucion),
 		);
+	}
+
+	/**
+	 * MES-INC-03: la petición con su `X-Client-Now` en la hora del negocio. La Handy la manda con su
+	 * desfase (`instanteDeClientNow`) y su hora de pared puede ser la de otra zona: un Android en GMT
+	 * en un bar de Madrid iba una hora por detrás en todo lo que escribía y leía (la reserva próxima no
+	 * salía, «hoy» cambiaba antes). Se pasa aquí, por donde entran todas las rutas de negocio, a la
+	 * zona que deja la Main (`Zona_Horaria`), y las rutas siguen leyendo una hora sin desfase. Sin
+	 * desfase (la Main, una Handy de antes) la petición sigue tal cual. Sin base todavía, la zona de
+	 * por defecto: la ruta contestará lo suyo.
+	 */
+	private async conLaHoraDelNegocio(peticion: Request, tenantId: string): Promise<Request> {
+		const instante = instanteDeClientNow(peticion.headers.get("x-client-now"));
+		if (instante === null) return peticion;
+		let hora: string;
+		try {
+			hora = await horaDelNegocio(await this.getTenantDb(tenantId), instante);
+		} catch {
+			hora = horaLocalEn("", instante);
+		}
+		const cabeceras = new Headers(peticion.headers);
+		cabeceras.set("x-client-now", hora);
+		return new Request(peticion, { headers: cabeceras });
 	}
 
 	async revocarDispositivo(deviceId: string): Promise<void> {

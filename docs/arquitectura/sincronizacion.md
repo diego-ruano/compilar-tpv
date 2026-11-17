@@ -173,6 +173,13 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   Handy o cada operación de un lote de la Main. Los dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
   (`lib/fechas.ts::diaDeInstante`: ni las 24:30 ni un 29 de febrero que no existe, AUD-21) a menos de
   14 h 05 min del reloj del worker (`tenantHub.tiempo.ts::parseClientNow`).
+- **La hora es la del negocio, no la del dispositivo** (MES-INC-03). La Handy manda la suya con su
+  desfase (`YYYY-MM-DD HH:MM:SS+HH:MM`, `tpv_domain::fechas::hora_con_desfase`), porque su zona puede
+  ser otra (un Android en GMT en un bar de Madrid). `ejecutarRuta`, por donde entran todas las rutas
+  de negocio, la pasa a la zona que deja la Main (`Business_Settings.Zona_Horaria`) y le quita el
+  desfase (`conLaHoraDelNegocio`): lo que hay detrás sólo ve horas sin desfase. La Main la manda sin
+  él, porque su zona es la del negocio, y una sin desfase pasa tal cual. Lo cubre
+  `test/horaDeLaHandy.test.ts`.
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
   fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`) y con el
   mismo criterio de lo que vale (`parseClientNow`). Sin cabecera, o con una que no vale, manda el

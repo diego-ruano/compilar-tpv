@@ -1359,7 +1359,13 @@ impl PairingAdapter {
         // El reloj lo pone el dispositivo emisor (Main o Handy), NO el servidor: el worker usa
         // esta hora local para resolver los `datetime('now')` de las escrituras a un literal fijo,
         // de modo que la fila sea idéntica en nube/Main/Handy (replicación determinista).
-        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        // MES-INC-03: la de la Handy, con su desfase, que el worker pasa a la zona del negocio. La de
+        // la Main va sin él: su zona es la del negocio (`Zona_Horaria` sale de ella).
+        let client_now = if mode == "handy" {
+            tpv_domain::fechas::hora_con_desfase(chrono::Local::now())
+        } else {
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+        };
         if let Ok(v) = HeaderValue::from_str(&client_now) {
             headers.insert("x-client-now", v);
         }
