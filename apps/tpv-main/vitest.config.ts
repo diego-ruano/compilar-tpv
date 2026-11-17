@@ -20,6 +20,10 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+	// El JSX de la app (`react-jsx`) también para los paquetes del workspace que no tienen
+	// `tsconfig.json` (`@tpv/plano`): sin esto se compilan con `React.createElement` sin importarlo.
+	// En la app lo hace `@vitejs/plugin-react`.
+	esbuild: { jsx: "automatic" },
 	test: {
 		environment: "node",
 		include: ["test/**/*.test.{ts,tsx}"],

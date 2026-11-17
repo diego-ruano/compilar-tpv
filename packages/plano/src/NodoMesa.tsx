@@ -18,6 +18,9 @@ export default function NodoMesa({
     const tactil = dejarDesplazar ? { preventDefault: false } : {};
     const pulsar = aspecto.pulsable && onPulsar ? () => onPulsar(mesa) : undefined;
     const r = mesa.radius ?? 45;
+    // MES-INC-04: cada texto en una sola línea, cortado con «…» si no cabe. Con su ancho, Konva
+    // parte un nombre largo en varias líneas, y en una mesa pequeña bajaban encima de la segunda.
+    const unaLinea = { wrap: "none", ellipsis: true } as const;
 
     return (
         <Group x={mesa.x} y={mesa.y} onClick={pulsar} onTap={pulsar}>
@@ -42,6 +45,7 @@ export default function NodoMesa({
                         align="center"
                         fontSize={13}
                         fill={aspecto.texto}
+                        {...unaLinea}
                         {...tactil}
                     />
                     <Text
@@ -52,6 +56,7 @@ export default function NodoMesa({
                         align="center"
                         fontSize={11}
                         fill={aspecto.subtexto}
+                        {...unaLinea}
                         {...tactil}
                     />
                 </>
@@ -68,8 +73,8 @@ export default function NodoMesa({
                         shadowOpacity={0.12}
                         {...tactil}
                     />
-                    <Text text={aspecto.etiqueta} x={10} y={10} fontSize={13} fill={aspecto.texto} {...tactil} />
-                    <Text text={aspecto.subetiqueta} x={10} y={30} fontSize={11} fill={aspecto.subtexto} {...tactil} />
+                    <Text text={aspecto.etiqueta} x={10} y={10} width={Math.max(mesa.width - 20, 0)} fontSize={13} fill={aspecto.texto} {...unaLinea} {...tactil} />
+                    <Text text={aspecto.subetiqueta} x={10} y={30} width={Math.max(mesa.width - 20, 0)} fontSize={11} fill={aspecto.subtexto} {...unaLinea} {...tactil} />
                 </>
             )}
         </Group>
