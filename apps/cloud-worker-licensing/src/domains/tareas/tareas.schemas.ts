@@ -30,15 +30,18 @@ function normalizeIds(ids: string[]): string[] {
 }
 
 const optStr = z.string().nullish().transform(cleanOptional);
-const idsTrabajadores = z.array(z.string()).default([]).transform(normalizeIds);
+// Al crearla y al reasignarla (TAR-INC-02): una tarea sin nadie no sale en ninguna lista.
+const idsTrabajadores = z
+	.array(z.string())
+	.default([])
+	.transform(normalizeIds)
+	.refine((ids) => ids.length > 0, { message: "Asigna la tarea a alguien." });
 
 export const createTareaSchema = z.object({
 	titulo: z.string().overwrite(recortar).min(1, "Escribe el título de la tarea."),
 	descripcion: optStr,
 	fecha_limite: optStr,
-	ids_trabajadores: idsTrabajadores.refine((ids) => ids.length > 0, {
-		message: "Asigna la tarea a alguien.",
-	}),
+	ids_trabajadores: idsTrabajadores,
 });
 
 export const updateTareaSchema = z.object({

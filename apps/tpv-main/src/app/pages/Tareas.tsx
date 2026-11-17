@@ -255,8 +255,12 @@ export default function Tareas() {
   const tareasPendientes = useMemo(() => {
     const src = isAdmin ? tareasAdmin : misTareas;
     if (isAdmin) {
+      // TAR-INC-02: una tarea que se quedó sin nadie asignado (antes se podía) sale aquí, para
+      // asignarla o borrarla; si no, no estaba en ninguna lista.
       return src.filter(
-        (t) => (t.Total_Asignados ?? 0) > (t.Total_Finalizadas ?? 0),
+        (t) =>
+          (t.Total_Asignados ?? 0) === 0 ||
+          (t.Total_Asignados ?? 0) > (t.Total_Finalizadas ?? 0),
       );
     }
     return src.filter((t) => (t.Estado ?? "PENDIENTE") === "PENDIENTE");
@@ -410,6 +414,7 @@ export default function Tareas() {
   const guardarCambiosAdmin = async () => {
     if (!selected) return;
     if (!adminEditTitulo.trim()) return;
+    if (!adminEditIdsAsignados.length) return;
 
     setAdminSaving(true);
     try {
@@ -534,9 +539,11 @@ export default function Tareas() {
             <Column title="Pendientes">
               {tareasPendientes.length ? (
                 tareasPendientes.map((t) => {
-                  const subtitle = isAdmin
-                    ? `${t.Total_Finalizadas ?? 0}/${t.Total_Asignados ?? 0} finalizadas`
-                    : (t.Descripcion ?? "");
+                  const subtitle = !isAdmin
+                    ? (t.Descripcion ?? "")
+                    : (t.Total_Asignados ?? 0) === 0
+                      ? "Sin asignar"
+                      : `${t.Total_Finalizadas ?? 0}/${t.Total_Asignados ?? 0} finalizadas`;
 
                   const done =
                     !isAdmin && (t.Estado ?? "PENDIENTE") === "FINALIZADA";
@@ -796,7 +803,9 @@ export default function Tareas() {
                         </div>
 
                         <p className="mt-2 text-sm text-fg-subtle">
-                          Asignados: {adminEditIdsAsignados.length}
+                          {adminEditIdsAsignados.length
+                            ? `Asignados: ${adminEditIdsAsignados.length}`
+                            : "Asigna la tarea a alguien."}
                         </p>
 
                         {adminDetalleAsignados.length ? (
@@ -871,7 +880,8 @@ export default function Tareas() {
                         disabled={
                           adminSaving ||
                           adminDeleting ||
-                          !adminEditTitulo.trim()
+                          !adminEditTitulo.trim() ||
+                          !adminEditIdsAsignados.length
                         }
                       >
                         {adminSaving ? "Guardando…" : "Guardar cambios"}

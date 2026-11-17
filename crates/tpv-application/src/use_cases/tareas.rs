@@ -192,6 +192,12 @@ pub async fn set_asignaciones(
 
     let ids_nuevos = normalizar_ids(input.ids_trabajadores);
 
+    // TAR-INC-02: lo mismo que al crearla. Una tarea sin nadie no sale en ninguna lista de quien
+    // la hace, y antes se quedaba así sin aviso.
+    if ids_nuevos.is_empty() {
+        return Err(AppError::validation("Asigna la tarea a alguien."));
+    }
+
     // Asignados ANTES del cambio, para notificar SOLO a los recién añadidos (los que ya estaban
     // no vuelven a recibir "tarea asignada"). Solo se lee si hay Notifier.
     let previos: Vec<String> = if notifier.is_some() {
@@ -544,6 +550,18 @@ mod tests {
         assert!(es_validacion(
             set_asignaciones(&repo, None,input).await.unwrap_err()
         ));
+        assert!(repo.asignaciones.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_asignaciones_no_deja_la_tarea_sin_nadie() {
+        let repo = FakeRepo::default();
+        let input = SetAsignacionesTareaInput {
+            id_tarea: "tarea1".into(),
+            ids_trabajadores: vec!["  ".into()], // se normaliza a vacío
+        };
+        let e = set_asignaciones(&repo, None, input).await.unwrap_err();
+        assert!(matches!(e, AppError::Validation(ref m) if m == "Asigna la tarea a alguien."), "{e:?}");
         assert!(repo.asignaciones.lock().unwrap().is_empty());
     }
 
