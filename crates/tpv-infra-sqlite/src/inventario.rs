@@ -1,7 +1,10 @@
 //! Adaptador SQLite del repositorio de inventario. Local-First (sin outbox/applied).
 
 use crate::util::new_id;
-use crate::consultas::{db_err};
+use crate::consultas::{db_err, select_one_i64};
+
+/// INV-INC-03: el mismo texto que el worker (`categoria_repetida`).
+pub const MSG_CATEGORIA_REPETIDA: &str = "Ya hay una categoría con ese nombre.";
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -457,6 +460,18 @@ impl InventarioRepository for SqliteInventarioRepository {
     async fn create_categoria(&self, c: CategoriaUpsert) -> AppResult<()> {
         let id = c.id.unwrap_or_else(new_id);
         let db = self.db.write().await;
+        // INV-INC-03: un nombre que ya tiene otra se rechaza con su frase, antes de que el `UNIQUE`
+        // lo haga con la del motor. Bajo el mismo escritor que escribe.
+        let repetida = select_one_i64(
+            &db,
+            "SELECT 1 FROM Categorias_Producto WHERE Nombre = ?2 AND ID_Categoria <> ?1 LIMIT 1;",
+            vec![Value::Text(id.clone()), Value::Text(c.nombre.clone())],
+        )
+        .await?
+        .is_some();
+        if repetida {
+            return Err(AppError::conflict(MSG_CATEGORIA_REPETIDA));
+        }
         db.execute(
                 r#"
                 INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina)
@@ -1566,3 +1581,37 @@ mod tests_alta_del_suelto {
     }
 }
 
+
+#[cfg(test)]
+mod tests_categoria_repetida {
+    //! INV-INC-03: repetir el nombre de una categoría enseñaba «UNIQUE constraint failed:
+    //! Categorias_Producto.Nombre».
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo() -> (SqliteInventarioRepository, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("categoria_repetida");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteInventarioRepository::new(db), dir)
+    }
+
+    fn categoria(id: Option<&str>, nombre: &str) -> CategoriaUpsert {
+        CategoriaUpsert::validar(id.map(Into::into), nombre.into(), String::new(), String::new(), true, false).unwrap()
+    }
+
+    #[tokio::test]
+    async fn otra_con_el_mismo_nombre_se_rechaza_con_su_frase() {
+        let (repo, dir) = repo().await;
+        repo.create_categoria(categoria(Some("a"), "Bebidas")).await.unwrap();
+
+        let e = repo.create_categoria(categoria(None, "Bebidas")).await.unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+        assert_eq!(e.to_string(), MSG_CATEGORIA_REPETIDA);
+
+        // La misma, guardada otra vez con su nombre, sí.
+        repo.create_categoria(categoria(Some("a"), "Bebidas")).await.unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

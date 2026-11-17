@@ -157,8 +157,18 @@ function idStep(provided?: string | null) {
 }
 
 export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
+	const id = recortar(input.id_categoria ?? "") || nuevoId();
 	const steps: any[] = [
-		idStep(input.id_categoria),
+		idStep(id),
+		// INV-INC-03: un nombre que ya tiene otra se rechaza con su frase, antes de que el `UNIQUE`
+		// lo haga con la del motor. Como en la Main (`create_categoria`).
+		{
+			kind: "guard",
+			sql: "SELECT NOT EXISTS (SELECT 1 FROM Categorias_Producto WHERE Nombre = ?2 AND ID_Categoria <> ?1);",
+			args: [id, recortar(input.nombre)],
+			error: "categoria_repetida",
+			status: 409,
+		},
 		{
 			kind: "execute",
 			sql: SQL_UPSERT_CATEGORIA,

@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
+import { MENSAJES } from "../src/lib/errorCodes";
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { clienteSobre } from "./helpers/clienteSql";
@@ -828,6 +829,33 @@ describe("SYNC-30 · ajustar las existencias de un lote o el stock suelto", () =
 			expect(await n.pedir("PATCH", "/v1/inventario/lotes/lote", { stock_visto: 8, stock_nuevo: 5, motivo: null, id_usuario: "ana" })).toEqual(ok);
 			expect([lote(n), ajustes(n)]).toEqual([5, 0]);
 			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+		});
+	});
+});
+
+// INV-INC-03: repetir el nombre de una categoría enseñaba el error del motor («UNIQUE constraint
+// failed: Categorias_Producto.Nombre»). Ahora lo rechaza una guarda con su frase, como la Main.
+describe("INV-INC-03 · una categoría con el nombre de otra", () => {
+	const SEMBRADO = ["INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('bar', 'Bebidas');"];
+	const categoria = (id: string | null, nombre: string) =>
+		({ id_categoria: id, nombre, nombre_imagen: "", ruta_imagen: "", vendible: true, pasa_cocina: false });
+
+	it("se rechaza con su frase, sin escribir nada", async () => {
+		await conNegocio("categoria-repetida", SEMBRADO, async (n) => {
+			const r = await n.pedir("POST", "/v1/inventario/categorias", categoria(null, " Bebidas "));
+			expect(r.status).toBe(409);
+			expect(r.json.error).toBe("categoria_repetida");
+			// La frase la pone `completarErrores` por el código, con el mismo texto que la Main.
+			expect(MENSAJES.categoria_repetida).toBe("Ya hay una categoría con ese nombre.");
+			expect(n.n("SELECT COUNT(*) FROM Categorias_Producto")).toBe(1);
+		});
+	});
+
+	it("la misma, guardada con su nombre, y otra con otro nombre, entran", async () => {
+		await conNegocio("categoria-no-repetida", SEMBRADO, async (n) => {
+			expect((await n.pedir("POST", "/v1/inventario/categorias", categoria("bar", "Bebidas"))).status).toBe(200);
+			expect((await n.pedir("POST", "/v1/inventario/categorias", categoria(null, "Postres"))).status).toBe(200);
+			expect(n.n("SELECT COUNT(*) FROM Categorias_Producto")).toBe(2);
 		});
 	});
 });
