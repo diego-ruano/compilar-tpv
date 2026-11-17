@@ -156,10 +156,13 @@ const SQL_RESERVAS_VENTANA = `
 	WHERE R.Dia_YMD >= date(?1, '-1 day') AND R.Dia_YMD <= date(?1, '+1 day');
 `;
 
+// RES-04: una comanda abierta ocupa su mesa todo el día de hoy (y lo anterior): en la Main, la
+// reserva de un día que no es posterior a hoy choca. Como intervalo, desde siempre hasta el final
+// de hoy, con el mismo `date('now','localtime')`.
 const SQL_COMANDAS_ABIERTAS = `
 	SELECT C.ID_Mesa AS id_mesa,
-	       datetime(C.Fecha_Hora_Apertura) AS inicio,
-	       MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?1 || ' minutes'), datetime('now','localtime')) AS fin
+	       '0000-01-01 00:00:00' AS inicio,
+	       datetime(date('now','localtime'), '+1 day') AS fin
 	FROM Comandas C
 	WHERE C.Estado = 'Abierta' AND C.ID_Mesa IS NOT NULL;
 `;
@@ -168,7 +171,7 @@ export async function ocupacionAlrededorDe(db: Client, dia: string, duracion: nu
 	const [rsReservas, rsComandas] = await db.batch(
 		[
 			{ sql: SQL_RESERVAS_VENTANA, args: [dia, duracion] },
-			{ sql: SQL_COMANDAS_ABIERTAS, args: [duracion] },
+			{ sql: SQL_COMANDAS_ABIERTAS, args: [] },
 		],
 		"read",
 	);

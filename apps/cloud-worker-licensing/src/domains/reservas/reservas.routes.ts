@@ -63,14 +63,18 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 				return { ajustes, texto };
 			})
 		: null;
+	// RES-04: una comanda abierta hoy en la mesa no se salta nunca.
+	if (solape?.texto?.con === "comanda") {
+		return c.json({ error: "mesa_con_comanda_hoy", message: solape.texto.texto }, 409);
+	}
 	if (solape?.texto && solape.ajustes.modo === "prohibir") {
 		return c.json(
-			{ error: "reserva_solapada_prohibida", message: `${solape.texto} ${q.MSG_SOLAPE_PROHIBIDO}` },
+			{ error: "reserva_solapada_prohibida", message: `${solape.texto.texto} ${q.MSG_SOLAPE_PROHIBIDO}` },
 			409,
 		);
 	}
 	if (solape?.texto && !datos.forzar_solape) {
-		return c.json({ error: "reserva_solapada", message: solape.texto }, 409);
+		return c.json({ error: "reserva_solapada", message: solape.texto.texto }, 409);
 	}
 
 	// RI-61: el cliente llega decidido (ninguno, uno existente o uno nuevo); aquí no se casa nada.

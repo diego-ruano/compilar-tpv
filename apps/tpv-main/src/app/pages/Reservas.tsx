@@ -48,6 +48,9 @@ import { diaAlCambiarDeMes, mismoMes } from "../../features/reservas/calendario"
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
+import { hoyEnElNegocio } from "../../shared/lib/diaDelNegocio";
+import { useMesasMesaMeta } from "../../features/mesas/mesasQueries";
+import { comandaImpideReservar, mesasConComandaHoy } from "../../features/reservas/comandaAbierta";
 
 /* =========================
    Tipos
@@ -452,7 +455,6 @@ export default function Reservas() {
   ========================================================= */
   const [mostrarMapaMesas, setMostrarMapaMesas] = useState(false);
   const [salonsLayout, setSalonsLayout] = useState<Salon[]>([]);
-  const emptyMesaMetaById = useMemo(() => ({} as Record<number, MesaMetaOut>), []);
 
   useEffect(() => {
     let cancelado = false;
@@ -541,6 +543,16 @@ export default function Reservas() {
     () => mesas.find((m) => m.id_mesa === form.idMesa) ?? null,
     [mesas, form.idMesa],
   );
+
+  // RES-04: una mesa con una comanda abierta no se puede reservar para hoy, a ninguna hora (no se
+  // sabe cuándo se irán); para mañana sí. Con el día de hoy, el plano para elegir mesa las enseña
+  // ocupadas, como en Mesas, y al elegir una se avisa antes de guardar.
+  const zonaDelNegocio = useBusinessSettings((s) => s.zona_horaria);
+  const esHoy = seleccionadoClave === hoyEnElNegocio(zonaDelNegocio);
+  const metaDeMesas = useMesasMesaMeta({ enabled: mostrarFormulario && esHoy });
+  const conComandaHoy = useMemo(() => mesasConComandaHoy(metaDeMesas.data, esHoy), [esHoy, metaDeMesas.data]);
+  const reservaEditada = reservaEditandoId ? reservasMes.find((r) => r.id_reserva === reservaEditandoId) : undefined;
+  const comandaEnLaMesaElegida = comandaImpideReservar(conComandaHoy, form.idMesa, seleccionadoClave, reservaEditada);
 
   /* =========================
      Acciones
@@ -1105,6 +1117,12 @@ export default function Reservas() {
                           ) : null}
                         </div>
 
+                        {comandaEnLaMesaElegida ? (
+                          <div role="alert" className="mt-1 text-[11px] font-semibold text-danger">
+                            Esa mesa tiene una comanda abierta: hoy no se puede reservar. Elige otra mesa u otro día.
+                          </div>
+                        ) : null}
+
                         <div className="mt-1 text-[11px] text-fg-muted">
                           Salón: <b>{form.idMesa ? (zonaSeleccionada?.nombre_zona ?? "-") : "sin mesa"}</b>{" "}
                           · Turno: <b>{turnoLabel(turnoPorHora(form.hora))}</b>
@@ -1145,7 +1163,7 @@ export default function Reservas() {
                       }
                       setForm((p) => ({ ...p, idZona: zonaId, idMesa: "" }));
                     }}
-                    mesaMetaById={emptyMesaMetaById}
+                    mesaMetaById={conComandaHoy as unknown as Record<number, MesaMetaOut>}
                     onSelectMesa={(mesaIdRaw) => {
                       const idMesa = parseDbMesaId(mesaIdRaw);
                       if (!idMesa) {

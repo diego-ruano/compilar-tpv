@@ -150,13 +150,15 @@ const chocaConUnaReserva = (duracion: string, porDefecto: string, propia: string
 	      > datetime(?2 || ' ' || ?3)
 `;
 
-const chocaConUnaComanda = (duracion: string, porDefecto: string) => `
+// RES-04: una comanda abierta ocupa la mesa todo el día; no cuenta la de la propia reserva ni la de
+// una que ya era de esa mesa ese día. `propia` es la reserva.
+const chocaConUnaComanda = (propia: string) => `
 	FROM Comandas C
 	WHERE C.ID_Mesa = ?1
 	  AND C.Estado = 'Abierta'
-	  AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ${duracion} || ' minutes')
-	  AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ${porDefecto} || ' minutes'), datetime('now','localtime'))
-	      > datetime(?2 || ' ' || ?3)
+	  AND ?2 <= date('now','localtime')
+	  AND C.ID_Reserva IS NOT ${propia}
+	  AND NOT EXISTS (SELECT 1 FROM Reservas R0 WHERE R0.ID_Reserva = ${propia} AND R0.ID_Mesa = ?1 AND R0.Dia_YMD = ?2)
 `;
 
 const SQL_CHOQUE_RESERVA = `
@@ -170,7 +172,7 @@ const SQL_CHOQUE_RESERVA = `
 
 const SQL_CHOQUE_COMANDA = `
 	SELECT strftime('%H:%M', C.Fecha_Hora_Apertura) AS desde
-	${chocaConUnaComanda("?4", "?5")}
+	${chocaConUnaComanda("?3")}
 	ORDER BY C.Fecha_Hora_Apertura, C.ID_Comanda
 	LIMIT 1;
 `;
@@ -179,10 +181,9 @@ const SQL_CHOQUE_COMANDA = `
 const DURACION_DEL_NEGOCIO =
 	"COALESCE((SELECT Reserva_Duracion_Min FROM Business_Settings WHERE ID = 1 AND Reserva_Duracion_Min > 0), 120)";
 
-/** ¿Choca la reserva con otra o con una comanda abierta? Con los argumentos de `argumentosDeLaGuarda`. */
+/** ¿Choca la reserva con otra? Con los argumentos de `argumentosDeLaGuarda`. */
 const CHOCA_EN_EL_LOTE = `(
 	EXISTS (SELECT 1 ${chocaConUnaReserva(`COALESCE(?4, ${DURACION_DEL_NEGOCIO})`, DURACION_DEL_NEGOCIO, "?5")})
-	OR EXISTS (SELECT 1 ${chocaConUnaComanda(`COALESCE(?4, ${DURACION_DEL_NEGOCIO})`, DURACION_DEL_NEGOCIO)})
 )`;
 
 /**
@@ -198,6 +199,8 @@ export const SQL_SIN_CHOQUE_PROHIBIDO = `
 	SELECT NOT ((SELECT Reserva_Solape FROM Business_Settings WHERE ID = 1) IS 'prohibir' AND ${CHOCA_EN_EL_LOTE});
 `;
 export const SQL_SIN_CHOQUE = `SELECT NOT ${CHOCA_EN_EL_LOTE};`;
+/** RES-04: 1 salvo que la mesa tenga hoy una comanda abierta, que no se salta ni confirmando. */
+export const SQL_SIN_COMANDA_HOY = `SELECT NOT EXISTS (SELECT 1 ${chocaConUnaComanda("?5")});`;
 
 /**
  * Los argumentos de las guardas del solape: `?1` la mesa, `?2` y `?3` el día y la hora, `?4` la
@@ -232,19 +235,24 @@ export async function choqueEnLaMesa(
 		id_reserva: string | null;
 	},
 	duracionDef: number,
-): Promise<string | null> {
+): Promise<{ con: "reserva" | "comanda"; texto: string } | null> {
 	const base = [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef];
 
 	const reserva = rows(
 		await db.execute({ sql: SQL_CHOQUE_RESERVA, args: [...base, r.id_reserva ?? ""] }),
 	)[0];
 	if (reserva) {
-		return `Esa mesa ya tiene una reserva de ${reserva.desde} a ${reserva.hasta}.`;
+		return { con: "reserva", texto: `Esa mesa ya tiene una reserva de ${reserva.desde} a ${reserva.hasta}.` };
 	}
 
-	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: base }))[0];
+	const comanda = rows(
+		await db.execute({ sql: SQL_CHOQUE_COMANDA, args: [r.id_mesa, r.dia_ymd, r.id_reserva ?? ""] }),
+	)[0];
 	if (comanda) {
-		return `Esa mesa está ocupada: tiene una comanda abierta desde las ${comanda.desde}.`;
+		return {
+			con: "comanda",
+			texto: `Esa mesa tiene una comanda abierta desde las ${comanda.desde}: hoy no se puede reservar. Elige otra mesa u otro día.`,
+		};
 	}
 	return null;
 }

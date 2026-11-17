@@ -257,6 +257,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tarea_no_asignada: "Esa tarea ya no está asignada a ti. Actualiza la lista.",
 	// INC-20261030-016: el mismo texto que da la Main (`COMANDA_COBRADA`).
 	comanda_cobrada: "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.",
+	// RES-04: la guarda; la ruta lo dice antes con la hora de la comanda (`choqueEnLaMesa`).
+	mesa_con_comanda_hoy: "Esa mesa tiene una comanda abierta: hoy no se puede reservar. Elige otra mesa u otro día.",
 	// INV-INC-03: el mismo texto que la Main (`MSG_CATEGORIA_REPETIDA`).
 	categoria_repetida: "Ya hay una categoría con ese nombre.",
 	// Ingredientes: los mismos textos que la Main (`tpv-infra-sqlite/src/ingredientes.rs`).

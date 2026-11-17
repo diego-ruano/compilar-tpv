@@ -40,7 +40,7 @@ administración propio (mientras tanto, el CLI).
 |---|---|
 | Confirmación | Automática. El bar no acepta ni rechaza nada |
 | Qué se reserva | Una mesa concreta, con la capacidad que tiene en el plano |
-| Mesas que se ofrecen | Reservables desde la web, con capacidad entre N y N + 2 (N = personas), libres durante toda la reserva y sin comanda abierta |
+| Mesas que se ofrecen | Reservables desde la web, con capacidad entre N y N + 2 (N = personas), libres durante toda la reserva y, si es para hoy, sin comanda abierta (una comanda abierta ocupa la mesa todo el día, como en el TPV) |
 | Duración | La del negocio (`Business_Settings.Reserva_Duracion_Min`). No hay una duración propia para la web |
 | Qué mesas y cuándo | En el editor del plano, por mesa: casilla «Reservable desde la web», días de la semana, fechas opcionales (calendario) y franja horaria |
 | Hora de llegada | La elige el cliente, al minuto, dentro de lo permitido |

@@ -413,6 +413,23 @@ describe("SYNC-30 · el solape de una reserva nueva", () => {
 		});
 	});
 
+	// RES-04: una comanda abierta hoy en la mesa no se salta ni confirmando el aviso.
+	it("una comanda que se abre hoy entre la lectura y el lote la para, aunque llegue confirmada", async () => {
+		await conNegocio("solape-comanda-hoy", MESA, async (n) => {
+			const hoy = ahora().slice(0, 10);
+			const comanda = `INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) VALUES ('c1', 'mesa', 'MESA', '${ahora()}', 'Abierta')`;
+			const r = await n.pedir("POST", "/v1/reservas", { ...nueva(true), dia_ymd: hoy, hora: "23:59" }, { antesDelLote: [comanda] });
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "mesa_con_comanda_hoy" } });
+			expect(reservas(n)).toBe(0);
+			// Leída por la ruta, lo dice con la hora de la comanda.
+			const otra = await n.pedir("POST", "/v1/reservas", { ...nueva(true), dia_ymd: hoy, hora: "23:59" });
+			expect(otra.status).toBe(409);
+			expect(otra.json.error).toBe("mesa_con_comanda_hoy");
+			expect(otra.json.message).toMatch(/hoy no se puede reservar/);
+			expect(reservas(n)).toBe(0);
+		});
+	});
+
 	it("si el cliente elegido se borra entre la lectura y el lote, cliente_no_encontrado", async () => {
 		await conNegocio(
 			"cliente-borrado",

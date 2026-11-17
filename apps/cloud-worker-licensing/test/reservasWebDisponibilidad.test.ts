@@ -218,22 +218,29 @@ describe("los intervalos de la base del negocio dan lo mismo que el SQL de choqu
 				 VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 80, 80);`,
 			);
 			for (const s of SEMILLA) sql.exec(s);
-			// A las 10:00 de quien pregunta, la comanda abierta desde las 09:10 ocupa hasta las 11:10.
+			// A las 10:00 de quien pregunta, la comanda abierta desde las 09:10 ocupa la mesa todo el día
+			// (RES-04): hoy choca a cualquier hora, y mañana sólo lo que se cruza con una reserva.
 			const db = conLaHoraDeQuienPregunta(clienteSobre(sql), "2026-05-10 10:00:00");
 
-			const { ocupaciones, ids } = await ocupacionAlrededorDe(db, "2026-05-10", 120);
-			expect([...ids].sort()).toEqual(["r1", "r2", "r3", "r4", "r5"]);
+			const chocanEl = async (dia: string) => {
+				const { ocupaciones } = await ocupacionAlrededorDe(db, dia, 120);
+				const distintas: string[] = [];
+				let chocan = 0;
+				for (const hora of HORAS) {
+					const main = (await choqueEnLaMesa(db, { id_mesa: "m1", dia_ymd: dia, hora, duracion_min: null, id_reserva: null }, 120)) !== null;
+					const agenda = ocupaciones.some((o) => o.id_mesa === "m1" && seCruzan(o, intervalo(dia, hora, 120)));
+					if (main !== agenda) distintas.push(`${dia} ${hora}: Main ${main}, agenda ${agenda}`);
+					if (main) chocan++;
+				}
+				expect(distintas).toEqual([]);
+				return chocan;
+			};
 
-			const distintas: string[] = [];
-			let chocan = 0;
-			for (const hora of HORAS) {
-				const main = (await choqueEnLaMesa(db, { id_mesa: "m1", dia_ymd: "2026-05-10", hora, duracion_min: null, id_reserva: null }, 120)) !== null;
-				const agenda = ocupaciones.some((o) => o.id_mesa === "m1" && seCruzan(o, intervalo("2026-05-10", hora, 120)));
-				if (main !== agenda) distintas.push(`${hora}: Main ${main}, agenda ${agenda}`);
-				if (main) chocan++;
-			}
-			expect(distintas).toEqual([]);
+			const { ids } = await ocupacionAlrededorDe(db, "2026-05-10", 120);
+			expect([...ids].sort()).toEqual(["r1", "r2", "r3", "r4", "r5"]);
+			expect(await chocanEl("2026-05-10")).toBe(HORAS.length);
 			// Que la tabla mire las dos cosas: horas que chocan y horas que no.
+			const chocan = await chocanEl("2026-05-11");
 			expect(chocan).toBeGreaterThan(3);
 			expect(chocan).toBeLessThan(HORAS.length - 3);
 		});

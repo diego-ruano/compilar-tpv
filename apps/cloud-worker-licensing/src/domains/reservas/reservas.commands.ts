@@ -7,6 +7,7 @@ import {
 	SQL_EMAIL_LIBRE,
 	SQL_SIN_CHOQUE,
 	SQL_SIN_CHOQUE_PROHIBIDO,
+	SQL_SIN_COMANDA_HOY,
 	type ClienteResuelto,
 } from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
@@ -128,6 +129,8 @@ function guardasDeLaReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 	const guardas: any[] = [];
 	if (input.id_mesa) {
 		const args = argumentosDeLaGuarda({ ...input, id_mesa: input.id_mesa });
+		// RES-04: una comanda abierta hoy en la mesa no se salta ni con el aviso confirmado.
+		guardas.push({ kind: "guard", sql: SQL_SIN_COMANDA_HOY, args, error: "mesa_con_comanda_hoy", status: 409 });
 		guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE_PROHIBIDO, args, error: "reserva_solapada_prohibida", status: 409 });
 		if (!input.forzar_solape) {
 			guardas.push({ kind: "guard", sql: SQL_SIN_CHOQUE, args, error: "reserva_solapada", status: 409 });

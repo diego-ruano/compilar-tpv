@@ -203,24 +203,33 @@ const SQL_CHOQUE_RESERVA: &str = r#"
     LIMIT 1;
 "#;
 
-/// RI-61: una comanda abierta en la mesa que se cruza con la reserva. Quien está sentado ocupa la
-/// mesa desde que se abrió la comanda y, como no se sabe cuándo se irá, durante la duración por
-/// defecto o hasta ahora, lo que sea más tarde. Así, reservar para ya una mesa con gente avisa, y
-/// reservarla para mañana no.
+/// RI-61 / RES-04: una comanda abierta en la mesa ocupa la mesa **todo el día**: no se sabe cuándo
+/// se irá quien está sentado, así que no se puede reservar para hoy, a ninguna hora, y para mañana
+/// sí. Al cerrarse la comanda se puede reservar. No cuenta la comanda de la propia reserva (sus
+/// clientes ya están sentados), ni la de una reserva que ya era de esa mesa ese día: cambiarle la
+/// nota o la hora no crea el choque.
 ///
-/// ?1 = mesa, ?2 = día, ?3 = hora, ?4 = minutos de la reserva, ?5 = minutos por defecto.
-/// Mismo SQL en el worker (`choqueEnLaMesa`).
+/// ?1 = mesa, ?2 = día, ?3 = la reserva. Mismo SQL en el worker (`choqueEnLaMesa`).
 const SQL_CHOQUE_COMANDA: &str = r#"
     SELECT strftime('%H:%M', C.Fecha_Hora_Apertura)
     FROM Comandas C
     WHERE C.ID_Mesa = ?1
       AND C.Estado = 'Abierta'
-      AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
-      AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?5 || ' minutes'), datetime('now','localtime'))
-          > datetime(?2 || ' ' || ?3)
+      AND ?2 <= date('now','localtime')
+      AND C.ID_Reserva IS NOT ?3
+      AND NOT EXISTS (SELECT 1 FROM Reservas R0 WHERE R0.ID_Reserva = ?3 AND R0.ID_Mesa = ?1 AND R0.Dia_YMD = ?2)
     ORDER BY C.Fecha_Hora_Apertura, C.ID_Comanda
     LIMIT 1;
 "#;
+
+/// Con qué choca una reserva en su mesa. Una reserva que se cruza depende de lo que diga el negocio
+/// (avisar o prohibir); una comanda abierta hoy no se salta nunca (RES-04).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Choque {
+    Reserva(String),
+    Comanda(String),
+}
+
 
 /// Mismo texto en el worker (`MSG_SOLAPE_PROHIBIDO`).
 const MSG_SOLAPE_PROHIBIDO: &str =
@@ -235,7 +244,7 @@ pub(crate) async fn choque_en_la_mesa<C: Reader>(
     (dia_ymd, hora, duracion_min): (&str, &str, Option<i64>),
     id_reserva: &str,
     duracion_def: i64,
-) -> AppResult<Option<String>> {
+) -> AppResult<Option<Choque>> {
     let duracion = duracion_min.unwrap_or(duracion_def);
     let base = vec![
         Value::Text(id_mesa.to_string()),
@@ -245,21 +254,26 @@ pub(crate) async fn choque_en_la_mesa<C: Reader>(
         Value::Integer(duracion_def),
     ];
 
-    let mut args = base.clone();
+    let mut args = base;
     args.push(Value::Text(id_reserva.to_string()));
     let mut rows = conn.query(SQL_CHOQUE_RESERVA, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
         let desde = s(row.get_value(0).map_err(db_err)?);
         let hasta = s(row.get_value(1).map_err(db_err)?);
-        return Ok(Some(format!("Esa mesa ya tiene una reserva de {desde} a {hasta}.")));
+        return Ok(Some(Choque::Reserva(format!("Esa mesa ya tiene una reserva de {desde} a {hasta}."))));
     }
 
-    let mut rows = conn.query(SQL_CHOQUE_COMANDA, base).await.map_err(db_err)?;
+    let args = vec![
+        Value::Text(id_mesa.to_string()),
+        Value::Text(dia_ymd.to_string()),
+        Value::Text(id_reserva.to_string()),
+    ];
+    let mut rows = conn.query(SQL_CHOQUE_COMANDA, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
         let desde = s(row.get_value(0).map_err(db_err)?);
-        return Ok(Some(format!(
-            "Esa mesa está ocupada: tiene una comanda abierta desde las {desde}."
-        )));
+        return Ok(Some(Choque::Comanda(format!(
+            "Esa mesa tiene una comanda abierta desde las {desde}: hoy no se puede reservar. Elige otra mesa u otro día."
+        ))));
     }
     Ok(None)
 }
@@ -347,7 +361,10 @@ impl ReservasRepository for SqliteReservasRepository {
                     duracion_def,
                 )
                 .await?;
-                if let Some(choque) = choque {
+                if let Some(Choque::Comanda(texto)) = choque {
+                    return Err(AppError::conflict(texto));
+                }
+                if let Some(Choque::Reserva(choque)) = choque {
                     match modo {
                         ModoSolape::Prohibir => {
                             return Err(AppError::conflict(format!("{choque} {MSG_SOLAPE_PROHIBIDO}")))
@@ -951,23 +968,55 @@ mod tests_solape {
         assert!(repo.guardar(reserva("2026-05-10", "21:15", None), false).await.unwrap());
     }
 
+    /// RES-04: una comanda abierta ocupa la mesa todo el día: no se sabe cuándo se irá quien está
+    /// sentado. Hoy no se puede reservar a ninguna hora, ni confirmando el aviso; mañana sí; y al
+    /// cerrarse la comanda, hoy también.
     #[tokio::test]
-    async fn una_comanda_abierta_ocupa_la_mesa_ahora_pero_no_manana() {
+    async fn una_comanda_abierta_no_deja_reservar_hoy_pero_si_manana() {
         let (db, repo, _dir) = abrir().await;
         sql(
             &db,
-            "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado) \
-             VALUES ('c1', 'm1', 'MESA', datetime('now','localtime','-10 minutes'), 'Abierta');",
+            "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado)              VALUES ('c1', 'm1', 'MESA', datetime('now','localtime','-10 minutes'), 'Abierta');",
         )
         .await;
         let ahora = Local::now();
         let hoy = ahora.format("%Y-%m-%d").to_string();
-        let hora = ahora.format("%H:%M").to_string();
         let manana = (ahora + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
 
-        let r = repo.guardar(reserva(&hoy, &hora, None), false).await;
-        assert!(es_aviso(&r), "{r:?}");
-        assert!(repo.guardar(reserva(&manana, &hora, None), false).await.unwrap());
+        for (hora, forzar) in [(ahora.format("%H:%M").to_string(), false), ("23:59".to_string(), true)] {
+            let r = repo.guardar(reserva(&hoy, &hora, None), forzar).await;
+            assert!(
+                matches!(&r, Err(AppError::Conflict(m)) if m.contains("hoy no se puede reservar")),
+                "{hora}: {r:?}"
+            );
+        }
+        assert!(repo.guardar(reserva(&manana, "14:00", None), false).await.unwrap());
+
+        sql(&db, "UPDATE Comandas SET Estado = 'Pagada';").await;
+        assert!(repo.guardar(reserva(&hoy, "23:59", None), false).await.unwrap());
+    }
+
+    /// RES-04: no cuenta la comanda de la propia reserva (sus clientes ya están sentados), ni la de
+    /// una reserva que ya era de esa mesa ese día: cambiarle la nota no crea el choque.
+    #[tokio::test]
+    async fn la_comanda_no_bloquea_cambiar_una_reserva_que_ya_era_de_la_mesa() {
+        let (db, repo, _dir) = abrir().await;
+        let hoy = Local::now().format("%Y-%m-%d").to_string();
+        let mut r = reserva(&hoy, "23:00", None);
+        r.id = Some("r1".into());
+        repo.guardar(r.clone(), false).await.unwrap();
+        sql(
+            &db,
+            "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado)              VALUES ('ajena', 'm1', 'MESA', datetime('now','localtime'), 'Abierta');",
+        )
+        .await;
+
+        r.nota = Some("Cumpleaños".into());
+        assert!(repo.guardar(r.clone(), false).await.unwrap());
+
+        // La suya: los clientes han llegado y se ha abierto su comanda.
+        sql(&db, "UPDATE Comandas SET ID_Reserva = 'r1' WHERE ID_Comanda = 'ajena';").await;
+        assert!(repo.guardar(r, false).await.unwrap());
     }
 
     #[tokio::test]

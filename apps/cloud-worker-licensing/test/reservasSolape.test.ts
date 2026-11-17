@@ -37,9 +37,10 @@ const R2100 = `INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, 
 describe("RI-61 · lo que se pisa en una mesa", () => {
 	it("las 21:00 y las 21:15 se pisan; las 23:00 ya no (el fin no cuenta)", async () => {
 		await conMesa("solape-basico", [R2100], async (db) => {
-			expect(await choqueEnLaMesa(db, reserva("2026-05-10", "21:15"), 120)).toBe(
-				"Esa mesa ya tiene una reserva de 21:00 a 23:00.",
-			);
+			expect(await choqueEnLaMesa(db, reserva("2026-05-10", "21:15"), 120)).toEqual({
+				con: "reserva",
+				texto: "Esa mesa ya tiene una reserva de 21:00 a 23:00.",
+			});
 			expect(await choqueEnLaMesa(db, reserva("2026-05-10", "23:00"), 120)).toBeNull();
 			// Su propia duración manda: una de 30 min a las 20:30 acaba justo a las 21:00.
 			expect(await choqueEnLaMesa(db, reserva("2026-05-10", "20:30", 30), 120)).toBeNull();
@@ -69,15 +70,35 @@ describe("RI-61 · lo que se pisa en una mesa", () => {
 		);
 	});
 
-	it("una comanda abierta ocupa la mesa con la hora de quien reserva, no la del servidor", async () => {
+	// RES-04: una comanda abierta ocupa la mesa todo el día de quien reserva (no el del servidor):
+	// no se sabe cuándo se irá quien está sentado. Mañana sí se puede.
+	it("una comanda abierta no deja reservar hoy a ninguna hora, y mañana sí", async () => {
 		const comanda = `INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado)
 			VALUES ('c1', 'm1', 'MESA', '2026-05-10 20:10:00', 'Abierta');`;
 		await conMesa("solape-comanda", [comanda], async (db) => {
-			// A las 20:30 de quien reserva, la mesa tiene gente sentada desde las 20:10.
-			expect(await choqueEnLaMesa(db, reserva("2026-05-10", "20:45"), 120)).toBe(
-				"Esa mesa está ocupada: tiene una comanda abierta desde las 20:10.",
-			);
-			expect(await choqueEnLaMesa(db, reserva("2026-05-11", "20:45"), 120)).toBeNull();
+			const texto =
+				"Esa mesa tiene una comanda abierta desde las 20:10: hoy no se puede reservar. Elige otra mesa u otro día.";
+			for (const hora of ["20:45", "23:59", "09:00"]) {
+				expect(await choqueEnLaMesa(db, reserva("2026-05-10", hora), 120), hora).toEqual({ con: "comanda", texto });
+			}
+			expect(await choqueEnLaMesa(db, reserva("2026-05-11", "00:30"), 120)).toBeNull();
+		});
+	});
+
+	it("no cuenta la comanda de la propia reserva ni la de una que ya era de esa mesa ese día", async () => {
+		const sentados = [
+			R2100,
+			`INSERT INTO Comandas (ID_Comanda, ID_Mesa, ID_Reserva, Canal, Fecha_Hora_Apertura, Estado)
+			 VALUES ('c1', 'm1', 'r1', 'MESA', '2026-05-10 20:10:00', 'Abierta');`,
+		];
+		await conMesa("solape-comanda-propia", sentados, async (db) => {
+			expect(await choqueEnLaMesa(db, { ...reserva("2026-05-10", "21:00"), id_reserva: "r1" }, 120)).toBeNull();
+		});
+		const ajena = [R2100, `INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado)
+			 VALUES ('c1', 'm1', 'MESA', '2026-05-10 20:10:00', 'Abierta');`];
+		await conMesa("solape-comanda-ya-era", ajena, async (db) => {
+			// Cambiarle algo a la r1, que ya era de esa mesa ese día, no crea el choque.
+			expect(await choqueEnLaMesa(db, { ...reserva("2026-05-10", "21:00"), id_reserva: "r1" }, 120)).toBeNull();
 		});
 	});
 
