@@ -104,6 +104,23 @@ it("envía un solo cobro al pulsar dos veces antes de que el backend responda", 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cobrar con tarjeta" })).not.toBeInTheDocument());
 });
 
+// MES-INC-02: cobrada entera, la mesa se ve vacía, pero el ticket del cobro se puede imprimir.
+it("después de cobrar toda la mesa se puede imprimir el ticket del cobro", async () => {
+    api.mesasAddDetalle.mockResolvedValueOnce([fila("detalle")]);
+    api.mesasCobrarDetalles.mockResolvedValueOnce("pago");
+    await abrir();
+    const imprimir = screen.getByRole("button", { name: "Imprimir" });
+    expect(imprimir).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    await waitFor(() => expect(imprimir).toBeEnabled());
+    api.mesasLoadTicket.mockResolvedValue([{ ...fila("detalle"), Pagado: 1 }]);
+    fireEvent.click(screen.getByRole("button", { name: "Cobrar todo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cobrar con tarjeta" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cobrar con tarjeta" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Total pendiente:").textContent).toContain("0,00"));
+    expect(imprimir).toBeEnabled();
+});
+
 // INC-20261030-016: la comanda y la reserva del modal se fijaban al abrir. Si otro equipo cobraba
 // la comanda y abría la siguiente, o cerraba la reserva, esta pantalla no se enteraba, y lo que se
 // añadía iba a la comanda ya cobrada, donde nadie lo iba a cobrar.

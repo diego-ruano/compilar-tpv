@@ -96,6 +96,9 @@ export default function MesaComandaModal({
     // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza;
     // esto evita que se llegue a intentar.
     const puedeCobrar = useMode((s) => s.mode) === "tpv";
+    // MES-INC-02: cobrada entera, la mesa se ve vacía (`mapTicketRows`), pero el ticket del cobro
+    // recién hecho sigue saliendo.
+    const nadaQueImprimir = ticket.length === 0 && !ultimoCobro;
 
     const { idUsuario, idTrabajador, role } = useAuth();
     const isAdmin = (role || "").toLowerCase().includes("admin");
@@ -673,10 +676,10 @@ export default function MesaComandaModal({
                 <button
                     type="button"
                     onClick={() => setPrintOpen(true)}
-                    disabled={ticket.length === 0}
+                    disabled={nadaQueImprimir}
                     className={cn(
                         "flex items-center gap-2 rounded-xl border px-3 h-10 text-sm font-semibold transition",
-                        ticket.length === 0
+                        nadaQueImprimir
                             ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
                             : "border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer",
                     )}
