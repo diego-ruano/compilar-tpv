@@ -18,6 +18,15 @@ function SummaryList({
     emptyText: string;
     keyFn: (p: ProductoResumenDto, idx: number) => string;
 }) {
+    // INV-MEJ-01: vacía, el mensaje va sin la tabla. Con su ancho mínimo, en un móvil obligaba a
+    // desplazarse de lado para leer que no hay nada, y lo cortaba.
+    if (rows.length === 0) {
+        return (
+            <ListProducts title={title}>
+                <p className="rounded-2xl border border-border py-4 text-center text-fg-muted">{emptyText}</p>
+            </ListProducts>
+        );
+    }
     return (
         <ListProducts title={title}>
             <div className="flex min-h-0 flex-1 overflow-x-auto rounded-2xl border border-border [scrollbar-gutter:stable]">
@@ -34,10 +43,7 @@ function SummaryList({
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-y-auto pb-4 pr-2">
-                    {rows.length === 0 ? (
-                        <p className="py-4 text-center text-fg-muted">{emptyText}</p>
-                    ) : (
-                        rows.map((p, idx) => (
+                    {rows.map((p, idx) => (
                             <div key={keyFn(p, idx)} className="border-t border-border">
                                 <ItemListProduct
                                     cantidad={formatCantidad(p.Stock_Actual, p.Unidad_Medida)}
@@ -47,8 +53,7 @@ function SummaryList({
                                     precio={p.Precio_Venta != null ? eur(p.Precio_Venta) : "—"}
                                 />
                             </div>
-                        ))
-                    )}
+                        ))}
                 </div>
               </div>
             </div>

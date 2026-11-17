@@ -59,8 +59,10 @@ export default function InventoryHeader({
                         <button
                             type="button"
                             disabled={!puede("catalogo.editar")}
+                            // INV-MEJ-01: desactivado se veía igual que activo y no decía por qué.
+                            title={puede("catalogo.editar") ? undefined : "No tienes permiso para crear categorías"}
                             onClick={onNewCategory}
-                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:flex-none"
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed xs:flex-none"
                         >
                             <FolderPlus className="size-4" aria-hidden />
                             <span className="hidden xs:inline">Nueva categoría</span>
@@ -70,8 +72,9 @@ export default function InventoryHeader({
                     <button
                         type="button"
                         disabled={!puede("catalogo.editar") || !puede("catalogo.precios")}
+                        title={puede("catalogo.editar") && puede("catalogo.precios") ? undefined : "No tienes permiso para crear productos"}
                         onClick={onNewProduct}
-                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
+                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed xs:w-auto"
                     >
                         <Plus className="size-4" aria-hidden />
                         <span className="hidden xs:inline">Nuevo producto</span>
