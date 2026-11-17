@@ -413,6 +413,24 @@ describe("SYNC-30 · el solape de una reserva nueva", () => {
 		});
 	});
 
+	// SYN-INC-04: un formulario abierto mientras otro equipo cancela la reserva no la cambia.
+	it("una reserva que se cierra entre la lectura y el lote no se cambia", async () => {
+		await conNegocio("editar-cancelada", [...MESA, reservaEn("r1", "PROXIMA")], async (n) => {
+			const cambio = { ...nueva(true), id_reserva: "r1", comensales: 7 };
+			const r = await n.pedir("POST", "/v1/reservas", cambio, {
+				antesDelLote: ["UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = 'r1'"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "reserva_cerrada" } });
+			expect(n.n("SELECT Comensales FROM Reservas WHERE ID_Reserva = 'r1'")).toBe(2);
+			expect(estadoDe(n, "r1")).toBe("CANCELADA");
+			expect(MENSAJES.reserva_cerrada).toMatch(/ya está cerrada/);
+			// Viva, sí: también la que ya está en la mesa.
+			n.sql.exec("UPDATE Reservas SET Estado = 'ACTIVA';");
+			expect((await n.pedir("POST", "/v1/reservas", cambio)).status).toBe(200);
+			expect(n.n("SELECT Comensales FROM Reservas WHERE ID_Reserva = 'r1'")).toBe(7);
+		});
+	});
+
 	// RES-04: una comanda abierta hoy en la mesa no se salta ni confirmando el aviso.
 	it("una comanda que se abre hoy entre la lectura y el lote la para, aunque llegue confirmada", async () => {
 		await conNegocio("solape-comanda-hoy", MESA, async (n) => {

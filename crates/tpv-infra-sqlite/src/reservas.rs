@@ -231,6 +231,14 @@ pub(crate) enum Choque {
 }
 
 
+/// Los estados en los que una reserva todavía se cambia: la que no ha llegado y la que está en la
+/// mesa. Es lo que enseña «Modificar» en la pantalla (`ocupaMesa`).
+const RESERVA_VIVA: [&str; 2] = ["PROXIMA", "ACTIVA"];
+
+/// SYN-INC-04. Mismo texto en el worker (`reserva_cerrada`).
+pub const MSG_RESERVA_CERRADA: &str =
+    "Esa reserva ya está cerrada (cancelada, terminada o no vino): ya no se puede cambiar. Cierra el formulario.";
+
 /// Mismo texto en el worker (`MSG_SOLAPE_PROHIBIDO`).
 const MSG_SOLAPE_PROHIBIDO: &str =
     "En este negocio no se pueden solapar reservas (Configuración → Reservas).";
@@ -349,6 +357,19 @@ impl ReservasRepository for SqliteReservasRepository {
             // UUIDv7 explícito: si no viene id (alta), lo generamos. Upsert por id.
             let id_reserva = r.id.clone().unwrap_or_else(new_id);
 
+            // SYN-INC-04: sólo se cambia una reserva viva. Un formulario abierto mientras otro equipo
+            // la cancelaba (o la terminaba, o la marcaba «No vino») la cambiaba igual: el estado no
+            // se toca al editar, pero sí los comensales, la hora o la mesa de una reserva cerrada.
+            let estado = select_one_string(
+                conn,
+                "SELECT Estado FROM Reservas WHERE ID_Reserva = ?1 LIMIT 1;",
+                vec![Value::Text(id_reserva.clone())],
+            )
+            .await?;
+            if estado.as_deref().is_some_and(|e| !RESERVA_VIVA.contains(&e)) {
+                return Err(AppError::conflict(MSG_RESERVA_CERRADA));
+            }
+
             // RI-61: ¿se pisa con lo que ya ocupa la mesa? Sin mesa no ocupa nada. Dentro de la
             // transacción, así que dos reservas a la vez no se cuelan la una a la otra.
             if let Some(ref id_mesa) = r.id_mesa {
@@ -379,13 +400,7 @@ impl ReservasRepository for SqliteReservasRepository {
 
             let id_cliente = resolver_cliente(conn, &r.cliente).await?;
 
-            let exists = select_one_i64(
-                conn,
-                "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 LIMIT 1;",
-                vec![Value::Text(id_reserva.clone())],
-            )
-            .await?
-            .is_some();
+            let exists = estado.is_some();
 
             // El estado no se toca al editar: lo cambian sólo sus acciones. Una nueva nace PROXIMA.
             if exists {
@@ -1017,6 +1032,32 @@ mod tests_solape {
         // La suya: los clientes han llegado y se ha abierto su comanda.
         sql(&db, "UPDATE Comandas SET ID_Reserva = 'r1' WHERE ID_Comanda = 'ajena';").await;
         assert!(repo.guardar(r, false).await.unwrap());
+    }
+
+    /// SYN-INC-04: un formulario que seguía abierto mientras otro equipo cancelaba la reserva la
+    /// cambió igual (de ocho a siete comensales, cancelada). Una cerrada ya no se cambia; una viva sí.
+    #[tokio::test]
+    async fn una_reserva_cerrada_no_se_cambia() {
+        let (db, repo, _dir) = abrir().await;
+        let mut r = reserva("2026-05-10", "21:00", None);
+        r.id = Some("r1".into());
+        repo.guardar(r.clone(), false).await.unwrap();
+        r.comensales = 7;
+
+        for estado in ["CANCELADA", "FINALIZADA", "NO_SHOW"] {
+            sql(&db, &format!("UPDATE Reservas SET Estado = '{estado}';")).await;
+            let e = repo.guardar(r.clone(), false).await;
+            assert!(matches!(&e, Err(AppError::Conflict(m)) if m == MSG_RESERVA_CERRADA), "{estado}: {e:?}");
+        }
+        let g = db.read().await;
+        let n = select_one_i64(&g, "SELECT Comensales FROM Reservas;", vec![]).await.unwrap().unwrap();
+        drop(g);
+        assert_eq!(n, 2, "no se ha tocado");
+
+        for estado in ["ACTIVA", "PROXIMA"] {
+            sql(&db, &format!("UPDATE Reservas SET Estado = '{estado}';")).await;
+            assert!(repo.guardar(r.clone(), false).await.unwrap(), "{estado}");
+        }
     }
 
     #[tokio::test]

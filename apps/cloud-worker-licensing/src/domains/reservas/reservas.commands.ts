@@ -127,6 +127,17 @@ function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolea
  */
 function guardasDeLaReserva(input: ReservaSaveInput, cliente: ClienteResuelto): any[] {
 	const guardas: any[] = [];
+	// SYN-INC-04: sólo se cambia una reserva viva (la que no ha llegado o la que está en la mesa).
+	// Un formulario abierto mientras otro equipo la cancelaba la cambiaba igual. Como la Main.
+	if (input.id_reserva) {
+		guardas.push({
+			kind: "guard",
+			sql: "SELECT NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Estado NOT IN ('PROXIMA', 'ACTIVA'));",
+			args: [input.id_reserva],
+			error: "reserva_cerrada",
+			status: 409,
+		});
+	}
 	if (input.id_mesa) {
 		const args = argumentosDeLaGuarda({ ...input, id_mesa: input.id_mesa });
 		// RES-04: una comanda abierta hoy en la mesa no se salta ni con el aviso confirmado.
