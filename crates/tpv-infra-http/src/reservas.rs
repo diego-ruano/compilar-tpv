@@ -75,6 +75,16 @@ impl ReservasRepository for HttpReservasRepository {
             "nombre_cliente": nombre,
             "telefono": telefono,
             "email": email,
+            // RES-INC-03: el worker no la guarda si ya no está como la vio el formulario.
+            "visto": reserva.visto.map(|v| json!({
+                "id_mesa": v.id_mesa,
+                "dia_ymd": v.dia_ymd,
+                "hora": v.hora,
+                "comensales": v.comensales,
+                "duracion_min": v.duracion_min,
+                "nota": v.nota,
+                "id_cliente": v.id_cliente,
+            })),
         });
         let _: (JsonValue, _) = self
             .client

@@ -51,6 +51,14 @@ import { conAviso } from "../../shared/lib/conAviso";
 import { hoyEnElNegocio } from "../../shared/lib/diaDelNegocio";
 import { useMesasMesaMeta } from "../../features/mesas/mesasQueries";
 import { comandaImpideReservar, mesasConComandaHoy } from "../../features/reservas/comandaAbierta";
+import {
+  clienteSinTocar,
+  formDeReserva,
+  motivoParaNoGuardar,
+  rebasar,
+  vistoDe,
+  type FormReserva,
+} from "../../features/reservas/edicion";
 
 /* =========================
    Tipos
@@ -392,18 +400,7 @@ export default function Reservas() {
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [reservaEditandoId, setReservaEditandoId] = useState<string | null>(null);
 
-  const [form, setForm] = useState<{
-    nombreCliente: string;
-    telefono: string;
-    email: string;
-    hora: string;
-    comensales: number;
-    /** `null` = la duración por defecto del negocio. */
-    duracionMin: number | null;
-    nota: string;
-    idZona: string;
-    idMesa: string;
-  }>({
+  const [form, setForm] = useState<FormReserva>({
     nombreCliente: "",
     telefono: "",
     email: "",
@@ -552,6 +549,34 @@ export default function Reservas() {
   const metaDeMesas = useMesasMesaMeta({ enabled: mostrarFormulario && esHoy });
   const conComandaHoy = useMemo(() => mesasConComandaHoy(metaDeMesas.data, esHoy), [esHoy, metaDeMesas.data]);
   const reservaEditada = reservaEditandoId ? reservasMes.find((r) => r.id_reserva === reservaEditandoId) : undefined;
+
+  // RES-INC-03 / SYN-INC-04: lo que el formulario tiene por visto de la reserva que edita, y lo que
+  // llega de otro equipo mientras tanto: entra en los campos que no se han tocado. Si se cierra, se
+  // borra o se mueve de día, se avisa y no se deja guardar (`features/reservas/edicion.ts`).
+  const [baseEditada, setBaseEditada] = useState<ReservaUI | null>(null);
+  useEffect(() => {
+    if (!baseEditada || !reservaEditada || reservaEditada === baseEditada) return;
+    if (reservaEditada.dia_ymd !== baseEditada.dia_ymd) return;
+    if (clienteSinTocar(form, baseEditada) && reservaEditada.id_cliente !== baseEditada.id_cliente) {
+      setClienteAsignado(
+        reservaEditada.id_cliente
+          ? {
+              id: reservaEditada.id_cliente,
+              nombre: reservaEditada.nombre_cliente,
+              telefono: reservaEditada.telefono_cliente ?? "",
+              email: reservaEditada.email_cliente ?? "",
+            }
+          : null,
+      );
+    }
+    setForm((f) => rebasar(f, baseEditada, reservaEditada));
+    setBaseEditada(reservaEditada);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sólo cuando llega otra versión de la reserva
+  }, [reservaEditada]);
+  const motivoNoGuardar =
+    reservaEditandoId && reservasMesQuery.data !== undefined
+      ? motivoParaNoGuardar(reservaEditada, seleccionadoClave)
+      : null;
   const comandaEnLaMesaElegida = comandaImpideReservar(conComandaHoy, form.idMesa, seleccionadoClave, reservaEditada);
 
   /* =========================
@@ -595,6 +620,7 @@ export default function Reservas() {
   }
 
   function abrirFormulario(reserva?: ReservaUI) {
+    setBaseEditada(reserva ?? null);
     if (reserva) {
       setReservaEditandoId(reserva.id_reserva);
       setClienteAsignado(
@@ -607,17 +633,7 @@ export default function Reservas() {
             }
           : null,
       );
-      setForm({
-        nombreCliente: reserva.nombre_cliente,
-        telefono: reserva.telefono_cliente ?? "",
-        email: reserva.email_cliente ?? "",
-        hora: reserva.hora,
-        comensales: reserva.comensales,
-        duracionMin: reserva.duracion_min,
-        nota: reserva.nota ?? "",
-        idZona: reserva.id_zona,
-        idMesa: reserva.id_mesa,
-      });
+      setForm(formDeReserva(reserva));
     } else {
       setReservaEditandoId(null);
       resetFormulario();
@@ -631,6 +647,7 @@ export default function Reservas() {
   function cerrarFormulario() {
     setMostrarFormulario(false);
     setReservaEditandoId(null);
+    setBaseEditada(null);
     setMostrarMapaMesas(false);
     resetFormulario();
   }
@@ -724,6 +741,7 @@ export default function Reservas() {
 
   async function guardarReserva(e: React.FormEvent) {
     e.preventDefault();
+    if (motivoNoGuardar) return;
 
     const emailTrim = form.email.trim();
     if (emailTrim && !emailValido(emailTrim)) {
@@ -777,6 +795,8 @@ export default function Reservas() {
         nombre_cliente: cliente.nombreCliente,
         telefono: cliente.telefono,
         email: cliente.email,
+        // RES-INC-03: el backend no la guarda si ya no está como la tiene el formulario.
+        visto: reservaEditandoId && baseEditada ? vistoDe(baseEditada) : null,
       };
 
       let ok: boolean;
@@ -793,6 +813,7 @@ export default function Reservas() {
       if (!ok) return toast.error("Error", "No se pudo guardar la reserva.");
 
       setReservaEditandoId(null);
+      setBaseEditada(null);
       setMostrarFormulario(false);
       setMostrarMapaMesas(false);
       resetFormulario();
@@ -1130,6 +1151,12 @@ export default function Reservas() {
                       </div>
                     </div>
 
+                    {motivoNoGuardar ? (
+                      <div role="alert" className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-semibold text-danger">
+                        {motivoNoGuardar}
+                      </div>
+                    ) : null}
+
                     <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                       <button
                         type="button"
@@ -1141,7 +1168,8 @@ export default function Reservas() {
 
                       <button
                         type="submit"
-                        className="cursor-pointer rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover"
+                        disabled={!!motivoNoGuardar}
+                        className="cursor-pointer rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {reservaEditandoId != null ? "GUARDAR CAMBIOS" : "GUARDAR"}
                       </button>

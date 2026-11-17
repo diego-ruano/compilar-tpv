@@ -8,6 +8,7 @@ import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ReservaBuscarClienteArgs,
 	ReservaSaveInput as ContractReservaSaveInput,
+	ReservaVistaDto,
 } from "@tpv/contracts";
 
 const TURNOS = new Set(["DESAYUNO", "COMIDA", "CAFE", "CENA"]);
@@ -69,6 +70,17 @@ function normalizeTurno(raw: unknown, hora: string): string {
 }
 
 
+/** RES-INC-03: la reserva tal como la cargó el formulario que la edita (los valores de su lectura). */
+const reservaVistaSchema = z.object({
+	id_mesa: z.string(),
+	dia_ymd: z.string(),
+	hora: z.string(),
+	comensales: z.number().int(),
+	duracion_min: z.number().int().nullable(),
+	nota: z.string().nullable(),
+	id_cliente: z.string().nullable(),
+});
+
 export const reservaSaveSchema = z
 	.object({
 		id_reserva: z.coerce.string().overwrite(recortar).min(1).nullable().optional(),
@@ -94,6 +106,7 @@ export const reservaSaveSchema = z
 		nombre_cliente: z.any().optional().nullable(),
 		telefono: z.any().optional().nullable(),
 		email: z.any().optional().nullable(),
+		visto: reservaVistaSchema.optional().nullable(),
 	})
 	.superRefine((v, ctx) => {
 		const sinFicha = !cleanOrNull(v.id_cliente) && !cleanOrNull(v.nombre_cliente);
@@ -146,6 +159,7 @@ export const reservaSaveSchema = z
 			nombre_cliente: cleanOrNull(v.nombre_cliente),
 			telefono: cleanOrNull(v.telefono),
 			email: cleanEmailOrNull(v.email),
+			visto: v.visto ?? null,
 		};
 	});
 
@@ -174,6 +188,7 @@ type NullableReservaFields =
 	| "nombre_cliente"
 	| "turno"
 	| "nota"
+	| "visto"
 	| "telefono"
 	| "email";
 
@@ -189,6 +204,7 @@ export type ReservaSaveInput = Omit<
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GReservaSave = Assert<SameKeys<z.infer<typeof reservaSaveSchema>, ReservaSaveInput>>;
+type _GReservaVista = Assert<SameKeys<z.infer<typeof reservaVistaSchema>, ReservaVistaDto>>;
 type _GBuscarCliente = Assert<
 	SameKeys<z.infer<typeof buscarClienteSchema>, Required<ReservaBuscarClienteArgs>>
 >;

@@ -1062,7 +1062,10 @@ archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivad
 `comanda_cobrada`, `mesas/guardasDeLinea.ts`); quitar un producto que está en una comanda abierta
 (`producto_en_comanda_abierta`), y ajustar las existencias de un lote o el stock suelto con lo que
 se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está como se pide, y el
-rechazo lo cuenta con lo que hay ahora). Lo prueba `test/guardasEnElLote.test.ts`, con una escritura
+rechazo lo cuenta con lo que hay ahora); cambiar una reserva cerrada (`reserva_cerrada`) o que ha
+cambiado desde que se abrió el formulario (`reserva_cambiada_al_editar`: la edición trae la reserva
+como la vio, RES-INC-03), y reservar para hoy una mesa con una comanda abierta
+(`mesa_con_comanda_hoy`). Lo prueba `test/guardasEnElLote.test.ts`, con una escritura
 que entra entre la lectura de la ruta y su lote.
 
 Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden

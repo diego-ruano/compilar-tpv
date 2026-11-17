@@ -683,6 +683,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                     opt_str(&e["email"]),
                 )
                 .expect("cliente de la reserva"),
+                visto: None,
             }, e["forzar_solape"].as_bool().unwrap_or(false))
             .await
             .expect("guardar reserva");

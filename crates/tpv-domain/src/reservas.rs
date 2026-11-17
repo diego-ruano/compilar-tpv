@@ -204,6 +204,24 @@ pub struct ReservaValidada {
     pub duracion_min: Option<i64>,
     pub nota: Option<String>,
     pub cliente: ClienteReserva,
+    /// RES-INC-03: al editar, la reserva tal como la cargó el formulario. Si cuando llega ya no
+    /// está así (otro equipo la cambió entretanto), no se guarda: se escribirían encima, con lo
+    /// que tenía el formulario, los campos que el otro cambió. `None` en un alta (y de un cliente
+    /// de antes, que no la manda).
+    pub visto: Option<ReservaVista>,
+}
+
+/// RES-INC-03: lo que el formulario vio de la reserva que edita, con los valores que dio su lectura.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservaVista {
+    /// Vacío = sin mesa.
+    pub id_mesa: String,
+    pub dia_ymd: String,
+    pub hora: String,
+    pub comensales: i64,
+    pub duracion_min: Option<i64>,
+    pub nota: Option<String>,
+    pub id_cliente: Option<String>,
 }
 
 /// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
@@ -264,6 +282,7 @@ impl ReservaValidada {
             duracion_min,
             nota: limpia(nota),
             cliente,
+            visto: None,
         })
     }
 }

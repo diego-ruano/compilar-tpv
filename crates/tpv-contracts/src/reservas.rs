@@ -97,6 +97,38 @@ pub struct ReservaSaveInput {
     pub telefono: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
+
+    /// RES-INC-03: al editar, la reserva tal como la cargó el formulario (los valores de su
+    /// `ReservaDto`). Si ya no está así cuando llega, no se guarda. Sin ella (un alta, o un
+    /// cliente de antes) no se comprueba.
+    #[serde(default)]
+    pub visto: Option<ReservaVistaDto>,
+}
+
+/// RES-INC-03: lo que el formulario vio de la reserva que edita.
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct ReservaVistaDto {
+    pub id_mesa: String,
+    pub dia_ymd: String,
+    pub hora: String,
+    pub comensales: i64,
+    pub duracion_min: Option<i64>,
+    pub nota: Option<String>,
+    pub id_cliente: Option<String>,
+}
+
+impl From<ReservaVistaDto> for tpv_domain::reservas::ReservaVista {
+    fn from(v: ReservaVistaDto) -> Self {
+        Self {
+            id_mesa: v.id_mesa,
+            dia_ymd: v.dia_ymd,
+            hora: v.hora,
+            comensales: v.comensales,
+            duracion_min: v.duracion_min,
+            nota: v.nota,
+            id_cliente: v.id_cliente,
+        }
+    }
 }
 
 /// RI-61: ¿el teléfono o el email que se acaban de escribir ya son de un cliente? Se pregunta antes

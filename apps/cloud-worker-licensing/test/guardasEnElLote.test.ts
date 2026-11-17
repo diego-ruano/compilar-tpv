@@ -431,6 +431,33 @@ describe("SYNC-30 · el solape de una reserva nueva", () => {
 		});
 	});
 
+	// RES-INC-03: la Main subió los comensales a 3 con la reserva abierta en la Handy, que sólo tocó la
+	// nota y al guardar volvía a escribir sus 2. La edición trae lo que vio el formulario.
+	it("una edición sobre una reserva que ha cambiado desde que se abrió no se guarda", async () => {
+		await conNegocio("editar-cambiada", [...MESA, reservaEn("r1", "PROXIMA")], async (n) => {
+			const visto = { id_mesa: "mesa", dia_ymd: "2030-05-10", hora: "21:00", comensales: 2, duracion_min: null, nota: null, id_cliente: null };
+			const soloLaNota = { ...nueva(true), id_reserva: "r1", nota: "Cumpleaños", visto };
+			const r = await n.pedir("POST", "/v1/reservas", soloLaNota, {
+				antesDelLote: ["UPDATE Reservas SET Comensales = 3 WHERE ID_Reserva = 'r1'"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "reserva_cambiada_al_editar" } });
+			expect(n.n("SELECT Comensales FROM Reservas WHERE ID_Reserva = 'r1'")).toBe(3);
+			expect(MENSAJES.reserva_cambiada_al_editar).toMatch(/ha cambiado en otro equipo/);
+
+			// Con lo de ahora, entra.
+			const alDia = { ...soloLaNota, comensales: 3, visto: { ...visto, comensales: 3 } };
+			expect((await n.pedir("POST", "/v1/reservas", alDia)).status).toBe(200);
+			expect(n.n("SELECT COUNT(*) FROM Reservas WHERE Nota = 'Cumpleaños' AND Comensales = 3")).toBe(1);
+
+			// Una borrada entretanto no vuelve.
+			const tarde = await n.pedir("POST", "/v1/reservas", { ...alDia, visto: { ...visto, comensales: 3, nota: "Cumpleaños" } }, {
+				antesDelLote: ["DELETE FROM Reservas WHERE ID_Reserva = 'r1'"],
+			});
+			expect(tarde.status).toBe(409);
+			expect(n.n("SELECT COUNT(*) FROM Reservas")).toBe(0);
+		});
+	});
+
 	// RES-04: una comanda abierta hoy en la mesa no se salta ni confirmando el aviso.
 	it("una comanda que se abre hoy entre la lectura y el lote la para, aunque llegue confirmada", async () => {
 		await conNegocio("solape-comanda-hoy", MESA, async (n) => {

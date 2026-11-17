@@ -4,6 +4,8 @@ import type { Client } from "@libsql/client/web";
 
 import type { ClienteCoincidente, ReservaDto, ReservasMetaDto } from "@tpv/contracts";
 
+import { recortar } from "../../lib/texto";
+
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
 	return (rs?.rows ?? []).map((r: any) => {
@@ -214,6 +216,30 @@ export function argumentosDeLaGuarda(r: {
 	id_reserva?: string | null;
 }): [string, string, string, number | null, string] {
 	return [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? null, r.id_reserva ?? ""];
+}
+
+/**
+ * RES-INC-03: 1 si la reserva sigue como la vio el formulario que la edita. Mismo SQL que
+ * `SQL_SIGUE_COMO_LA_VIO` en la Main: compara lo que da su lectura (la mesa vacía si no tiene, la
+ * nota recortada, el cliente que existe). Los argumentos, de `argumentosDeLoVisto`.
+ */
+export const SQL_SIGUE_COMO_LA_VIO = `
+	SELECT EXISTS (SELECT 1 FROM Reservas R
+		WHERE R.ID_Reserva = ?1
+		  AND COALESCE(R.ID_Mesa, '') = ?2
+		  AND R.Dia_YMD = ?3
+		  AND R.Hora = ?4
+		  AND R.Comensales = ?5
+		  AND R.Duracion_Min IS ?6
+		  AND trim(COALESCE(R.Nota, '')) = ?7
+		  AND COALESCE((SELECT C.ID_Cliente FROM Clientes C WHERE C.ID_Cliente = R.ID_Cliente), '') = ?8);
+`;
+
+export function argumentosDeLoVisto(
+	idReserva: string,
+	v: { id_mesa: string; dia_ymd: string; hora: string; comensales: number; duracion_min: number | null; nota: string | null; id_cliente: string | null },
+): (string | number | null)[] {
+	return [idReserva, v.id_mesa, v.dia_ymd, v.hora, v.comensales, v.duracion_min, recortar(v.nota ?? ""), v.id_cliente ?? ""];
 }
 
 /** Mismo texto que `MSG_SOLAPE_PROHIBIDO` en la Main. */

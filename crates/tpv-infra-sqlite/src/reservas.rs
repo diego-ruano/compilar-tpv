@@ -12,7 +12,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas::{NoVinoReservas, ReservasRepository};
 use tpv_contracts::reservas::{ClienteCoincidente, MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
 use tpv_contracts::errors::ErrorCode;
-use tpv_domain::reservas::{ClienteReserva, ModoSolape, ReservaValidada, DURACION_POR_DEFECTO_MIN};
+use tpv_domain::reservas::{ClienteReserva, ModoSolape, ReservaValidada, ReservaVista, DURACION_POR_DEFECTO_MIN};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_i64, v_string};
@@ -235,6 +235,45 @@ pub(crate) enum Choque {
 /// mesa. Es lo que enseña «Modificar» en la pantalla (`ocupaMesa`).
 const RESERVA_VIVA: [&str; 2] = ["PROXIMA", "ACTIVA"];
 
+/// RES-INC-03: ¿la reserva sigue como la vio el formulario? Compara lo que da su lectura
+/// (`SQL_SELECT_RESERVA`: la mesa vacía si no tiene, la nota recortada, el cliente que existe).
+/// Mismo SQL en el worker (`SQL_SIGUE_COMO_LA_VIO`).
+const SQL_SIGUE_COMO_LA_VIO: &str = r#"
+    SELECT 1 FROM Reservas R
+    WHERE R.ID_Reserva = ?1
+      AND COALESCE(R.ID_Mesa, '') = ?2
+      AND R.Dia_YMD = ?3
+      AND R.Hora = ?4
+      AND R.Comensales = ?5
+      AND R.Duracion_Min IS ?6
+      AND trim(COALESCE(R.Nota, '')) = ?7
+      AND COALESCE((SELECT C.ID_Cliente FROM Clientes C WHERE C.ID_Cliente = R.ID_Cliente), '') = ?8
+    LIMIT 1;
+"#;
+
+async fn sigue_como_la_vio<C: Reader>(conn: &C, id_reserva: &str, v: &ReservaVista) -> AppResult<bool> {
+    Ok(select_one_i64(
+        conn,
+        SQL_SIGUE_COMO_LA_VIO,
+        vec![
+            Value::Text(id_reserva.to_string()),
+            Value::Text(v.id_mesa.clone()),
+            Value::Text(v.dia_ymd.clone()),
+            Value::Text(v.hora.clone()),
+            Value::Integer(v.comensales),
+            opt_int(v.duracion_min),
+            Value::Text(v.nota.as_deref().unwrap_or("").trim().to_string()),
+            Value::Text(v.id_cliente.clone().unwrap_or_default()),
+        ],
+    )
+    .await?
+    .is_some())
+}
+
+/// RES-INC-03. Mismo texto en el worker (`reserva_cambiada_al_editar`).
+pub const MSG_RESERVA_CAMBIADA_AL_EDITAR: &str =
+    "Esta reserva ha cambiado en otro equipo mientras la editabas. Cierra el formulario y vuelve a abrirla.";
+
 /// SYN-INC-04. Mismo texto en el worker (`reserva_cerrada`).
 pub const MSG_RESERVA_CERRADA: &str =
     "Esa reserva ya está cerrada (cancelada, terminada o no vino): ya no se puede cambiar. Cierra el formulario.";
@@ -368,6 +407,13 @@ impl ReservasRepository for SqliteReservasRepository {
             .await?;
             if estado.as_deref().is_some_and(|e| !RESERVA_VIVA.contains(&e)) {
                 return Err(AppError::conflict(MSG_RESERVA_CERRADA));
+            }
+            // RES-INC-03: la edición trae la reserva como la vio el formulario. Si otro equipo la ha
+            // cambiado (o borrado) entretanto, escribirla pisaría lo suyo con lo que tenía éste.
+            if let (Some(_), Some(v)) = (&r.id, &r.visto) {
+                if !sigue_como_la_vio(conn, &id_reserva, v).await? {
+                    return Err(AppError::conflict(MSG_RESERVA_CAMBIADA_AL_EDITAR));
+                }
             }
 
             // RI-61: ¿se pisa con lo que ya ocupa la mesa? Sin mesa no ocupa nada. Dentro de la
@@ -658,6 +704,7 @@ mod tests_cliente {
             duracion_min: None,
             nota: None,
             cliente,
+            visto: None,
         }
     }
 
@@ -914,6 +961,7 @@ mod tests_solape {
             duracion_min: duracion,
             nota: None,
             cliente: ClienteReserva::Ninguno,
+            visto: None,
         }
     }
 
@@ -1058,6 +1106,56 @@ mod tests_solape {
             sql(&db, &format!("UPDATE Reservas SET Estado = '{estado}';")).await;
             assert!(repo.guardar(r.clone(), false).await.unwrap(), "{estado}");
         }
+    }
+
+    /// RES-INC-03: la Main subió los comensales de 2 a 3 con la reserva abierta en una Handy, que
+    /// sólo tocó la nota; al guardar, la Handy volvió a escribir sus 2. La edición trae ahora lo que
+    /// vio el formulario, y si la reserva ya no está así, no se guarda.
+    #[tokio::test]
+    async fn una_edicion_sobre_una_reserva_que_ha_cambiado_no_se_guarda() {
+        let (db, repo, _dir) = abrir().await;
+        let mut r = reserva("2026-05-10", "21:00", None);
+        r.id = Some("r1".into());
+        repo.guardar(r.clone(), false).await.unwrap();
+        let vista = ReservaVista {
+            id_mesa: "m1".into(),
+            dia_ymd: "2026-05-10".into(),
+            hora: "21:00".into(),
+            comensales: 2,
+            duracion_min: None,
+            nota: None,
+            id_cliente: None,
+        };
+
+        // La Main: 3 comensales.
+        let mut main = r.clone();
+        main.comensales = 3;
+        main.visto = Some(vista.clone());
+        repo.guardar(main, false).await.unwrap();
+
+        // La Handy, con lo de antes: sólo la nota.
+        let mut handy = r.clone();
+        handy.nota = Some("Cumpleaños".into());
+        handy.visto = Some(vista.clone());
+        let e = repo.guardar(handy.clone(), false).await;
+        assert!(matches!(&e, Err(AppError::Conflict(m)) if m == MSG_RESERVA_CAMBIADA_AL_EDITAR), "{e:?}");
+        let g = db.read().await;
+        let ahora = select_one_string(&g, "SELECT Comensales || '|' || COALESCE(Nota, '') FROM Reservas;", vec![]).await.unwrap();
+        drop(g);
+        assert_eq!(ahora.as_deref(), Some("3|"));
+
+        // Con lo de ahora, sí.
+        handy.comensales = 3;
+        handy.visto = Some(ReservaVista { comensales: 3, ..vista.clone() });
+        assert!(repo.guardar(handy, false).await.unwrap());
+
+        // Una borrada entretanto no vuelve: la edición no la crea de nuevo.
+        sql(&db, "DELETE FROM Reservas;").await;
+        let mut tarde = r.clone();
+        tarde.visto = Some(vista);
+        assert!(repo.guardar(tarde, false).await.is_err());
+        let g = db.read().await;
+        assert_eq!(select_one_i64(&g, "SELECT COUNT(*) FROM Reservas;", vec![]).await.unwrap(), Some(0));
     }
 
     #[tokio::test]

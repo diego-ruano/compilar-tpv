@@ -40,7 +40,8 @@ pub async fn guardar(
     let dia = input.dia_ymd.trim().to_string();
     let hora = input.hora.trim().to_string();
 
-    let validada = ReservaValidada::validar(tpv_domain::reservas::ReservaEntrada {
+    let visto = input.visto.map(Into::into);
+    let mut validada = ReservaValidada::validar(tpv_domain::reservas::ReservaEntrada {
         id_reserva: input.id_reserva,
         dia_ymd: &input.dia_ymd,
         hora: &input.hora,
@@ -55,6 +56,10 @@ pub async fn guardar(
         email: input.email,
     })
     .map_err(AppError::validation)?;
+    // RES-INC-03: sólo al editar.
+    if validada.id.is_some() {
+        validada.visto = visto;
+    }
 
     // Cómo estaba, para saber si al cliente de una reserva web hay que decirle algo (§5.7).
     let antes = match (&id_editada, avisos) {
@@ -317,6 +322,7 @@ mod tests {
             nombre_cliente: Some("Ana".into()),
             telefono: None,
             email: None,
+            visto: None,
         }
     }
 

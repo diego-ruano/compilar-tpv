@@ -2806,6 +2806,23 @@ export type ReservaSaveInput = {
 	nombre_cliente?: string | null,
 	telefono?: string | null,
 	email?: string | null,
+	/**
+	 *  RES-INC-03: al editar, la reserva tal como la cargó el formulario (los valores de su
+	 *  `ReservaDto`). Si ya no está así cuando llega, no se guarda. Sin ella (un alta, o un
+	 *  cliente de antes) no se comprueba.
+	 */
+	visto?: ReservaVistaDto | null,
+};
+
+/**  RES-INC-03: lo que el formulario vio de la reserva que edita. */
+export type ReservaVistaDto = {
+	id_mesa: string,
+	dia_ymd: string,
+	hora: string,
+	comensales: number,
+	duracion_min: number | null,
+	nota: string | null,
+	id_cliente: string | null,
 };
 
 export type ReservaWebActivarInput = {

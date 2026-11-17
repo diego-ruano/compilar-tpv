@@ -8,6 +8,8 @@ import {
 	SQL_SIN_CHOQUE,
 	SQL_SIN_CHOQUE_PROHIBIDO,
 	SQL_SIN_COMANDA_HOY,
+	SQL_SIGUE_COMO_LA_VIO,
+	argumentosDeLoVisto,
 	type ClienteResuelto,
 } from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
@@ -137,6 +139,17 @@ function guardasDeLaReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 			error: "reserva_cerrada",
 			status: 409,
 		});
+		// RES-INC-03: si otro equipo la ha cambiado (o borrado) desde que el formulario la cargó,
+		// escribirla pisaría lo suyo con lo que tenía éste.
+		if (input.visto) {
+			guardas.push({
+				kind: "guard",
+				sql: SQL_SIGUE_COMO_LA_VIO,
+				args: argumentosDeLoVisto(input.id_reserva, input.visto),
+				error: "reserva_cambiada_al_editar",
+				status: 409,
+			});
+		}
 	}
 	if (input.id_mesa) {
 		const args = argumentosDeLaGuarda({ ...input, id_mesa: input.id_mesa });
