@@ -51,6 +51,7 @@ import { conAviso } from "../../shared/lib/conAviso";
 import { hoyEnElNegocio } from "../../shared/lib/diaDelNegocio";
 import { useMesasMesaMeta } from "../../features/mesas/mesasQueries";
 import { comandaImpideReservar, mesasConComandaHoy } from "../../features/reservas/comandaAbierta";
+import { avisoDeAforo, mesaConPlazas } from "../../features/reservas/aforo";
 import {
   clienteSinTocar,
   formDeReserva,
@@ -1113,7 +1114,7 @@ export default function Reservas() {
                         <div className="flex flex-col gap-2 xs:flex-row">
                           <input
                             readOnly
-                            value={mesaSeleccionada ? mesaSeleccionada.numero_mesa : ""}
+                            value={mesaSeleccionada ? mesaConPlazas(mesaSeleccionada.numero_mesa, mesaSeleccionada.capacidad) : ""}
                             placeholder="Sin mesa asignada"
                             onClick={() => setMostrarMapaMesas(true)}
                             className="w-full cursor-pointer rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
@@ -1137,6 +1138,12 @@ export default function Reservas() {
                             </button>
                           ) : null}
                         </div>
+
+                        {mesaSeleccionada && avisoDeAforo(Number(form.comensales), mesaSeleccionada.capacidad) ? (
+                          <div className="mt-1 text-[11px] font-semibold text-warning">
+                            {avisoDeAforo(Number(form.comensales), mesaSeleccionada.capacidad)}
+                          </div>
+                        ) : null}
 
                         {comandaEnLaMesaElegida ? (
                           <div role="alert" className="mt-1 text-[11px] font-semibold text-danger">
