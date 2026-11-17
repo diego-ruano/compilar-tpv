@@ -3,18 +3,21 @@
 // vista propia, con «Marcar como finalizada», cuando a quien la mira le quitan el permiso; ni
 // quedarse abierto si la tarea ya no está en su lista.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import Tareas from "../../src/app/pages/Tareas";
 import { useAuth } from "../../src/shared/stores/useAuth";
 
-const { estado, consulta, mutacion, tarea } = vi.hoisted(() => ({
-    estado: { gestiona: true, admin: [] as unknown[], mias: [] as unknown[], trabajadores: [] as unknown[], asignados: [] as unknown[] },
+const { estado, consulta, mutacion, tarea, finalizar } = vi.hoisted(() => ({
+    finalizar: vi.fn(async (_: unknown) => true),
+    estado: { gestiona: true, propias: true, admin: [] as unknown[], mias: [] as unknown[], trabajadores: [] as unknown[], asignados: [] as unknown[] },
     consulta: (data: unknown[]) => ({ data, isSuccess: true, isFetching: false, refetch: async () => ({}) }),
     mutacion: () => ({ mutateAsync: async () => true, isPending: false }),
     tarea: { ID_Tarea: "t1", Titulo: "Limpiar la barra", Descripcion: null, Fecha_Limite: null, Fecha_Creacion: "2026-10-30 10:00:00", Total_Asignados: 2, Total_Finalizadas: 0 },
 }));
 vi.mock("../../src/shared/lib/usePermisos", () => ({
-    usePermisos: () => ({ puede: (c: string) => (c === "tareas.gestionar" ? estado.gestiona : true) }),
+    usePermisos: () => ({
+        puede: (c: string) => (c === "tareas.gestionar" ? estado.gestiona : c === "tareas.propias" ? estado.propias : true),
+    }),
 }));
 vi.mock("../../src/features/tareas/tareasQueries", () => ({
     useTrabajadores: () => consulta(estado.trabajadores),
@@ -23,7 +26,7 @@ vi.mock("../../src/features/tareas/tareasQueries", () => ({
     usePapelera: () => consulta([]),
     useCreateTarea: mutacion, useUpdateTarea: mutacion, useSetAsignacionesTarea: mutacion,
     useDeleteTarea: mutacion, useRestaurarTarea: mutacion, useVaciarPapelera: mutacion,
-    useMarcarTareaFinalizada: mutacion,
+    useMarcarTareaFinalizada: () => ({ mutateAsync: finalizar, isPending: false }),
 }));
 vi.mock("@tpv/client", () => ({
     commands: { tareasGetTareaById: async () => tarea, tareasGetTareaAsignados: async () => estado.asignados },
@@ -32,7 +35,8 @@ vi.mock("../../src/shared/lib/conAviso", () => ({ conAviso: (fn: () => unknown) 
 
 afterEach(() => {
     cleanup();
-    Object.assign(estado, { gestiona: true, admin: [], mias: [], trabajadores: [], asignados: [] });
+    finalizar.mockClear();
+    Object.assign(estado, { gestiona: true, propias: true, admin: [], mias: [], trabajadores: [], asignados: [] });
 });
 
 async function abrirComoGestor() {
@@ -75,4 +79,31 @@ it("una tarea sin asignados sale en Pendientes y no se guarda sin nadie", async 
 
     fireEvent.click(screen.getByRole("checkbox"));
     expect(guardar).toBeEnabled();
+});
+
+// TAR-INC-03: el Encargado, con los dos permisos, abre sus tareas en el detalle de gestión, que no
+// tenía cómo acabar la suya.
+describe("quien gestiona y tiene la suya pendiente", () => {
+    const asignacion = (ID_Trabajador: string, Estado: string) => ({
+        ID_Trabajador, Nombre: ID_Trabajador, Apellido: null, Puesto: null,
+        Asignada_At: "2026-10-30 10:00:00", Estado, Finalizada_At: null,
+    });
+
+    it("puede marcar la suya como finalizada desde el detalle de gestión", async () => {
+        estado.asignados = [asignacion("encargado", "PENDIENTE"), asignacion("ana", "PENDIENTE")];
+        await abrirComoGestor();
+        fireEvent.click(await screen.findByRole("button", { name: "Marcar la mía como finalizada" }));
+        await waitFor(() => expect(finalizar).toHaveBeenCalledWith({ id_tarea: "t1", id_trabajador: "encargado" }));
+    });
+
+    it.each([
+        ["sin el permiso de las suyas", () => { estado.propias = false; estado.asignados = [asignacion("encargado", "PENDIENTE")]; }],
+        ["si la suya ya está finalizada", () => { estado.asignados = [asignacion("encargado", "FINALIZADA")]; }],
+        ["si no es suya", () => { estado.asignados = [asignacion("ana", "PENDIENTE")]; }],
+    ])("no aparece %s", async (_, preparar) => {
+        preparar();
+        await abrirComoGestor();
+        await screen.findAllByText(/Asignada:/);
+        expect(screen.queryByRole("button", { name: "Marcar la mía como finalizada" })).not.toBeInTheDocument();
+    });
 });

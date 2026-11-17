@@ -168,7 +168,9 @@ function Modal({
 
 export default function Tareas() {
   const { idTrabajador: id_trabajador } = useAuth();
-  const isAdmin = usePermisos().puede("tareas.gestionar");
+  const permisos = usePermisos();
+  const isAdmin = permisos.puede("tareas.gestionar");
+  const veLasPropias = permisos.puede("tareas.propias");
 
   // Lecturas cacheadas (TanStack Query). El admin necesita trabajadores + tareas de admin;
   // el no-admin sólo sus tareas. Cada query se habilita según el rol.
@@ -368,6 +370,8 @@ export default function Tareas() {
     setSelected(t);
     setDetalleComoGestor(isAdmin);
     setModalDetalle(true);
+    // Lo de la tarea abierta antes no vale para ésta mientras llega lo suyo.
+    setAdminDetalleAsignados([]);
 
     if (!isAdmin) return;
 
@@ -460,6 +464,17 @@ export default function Tareas() {
       setConfirmando(false);
     }
   };
+
+  // TAR-INC-03: quien gestiona ve el detalle de gestión, que no tenía cómo acabar su propia
+  // asignación. Si además tiene el permiso de las suyas y la suya está pendiente, puede acabarla
+  // desde ahí (el comando toma al trabajador de la sesión).
+  const miAsignacionPendiente =
+    isAdmin &&
+    veLasPropias &&
+    !!id_trabajador &&
+    adminDetalleAsignados.some(
+      (a) => a.ID_Trabajador === id_trabajador && a.Estado === "PENDIENTE",
+    );
 
   const modalTitle = isAdmin
     ? adminEditTitulo?.trim() || selected?.Titulo || "Detalle de tarea"
@@ -874,6 +889,15 @@ export default function Tareas() {
                       >
                         Cancelar
                       </button>
+                      {miAsignacionPendiente ? (
+                        <button
+                          onClick={conAviso(finalizar)}
+                          className="w-full rounded-xl border border-accent px-4 py-2.5 font-semibold text-accent hover:bg-accent-soft disabled:opacity-60 sm:w-auto sm:rounded-2xl"
+                          disabled={adminSaving || adminDeleting || marcarFinalizadaM.isPending}
+                        >
+                          Marcar la mía como finalizada
+                        </button>
+                      ) : null}
                       <button
                         onClick={conAviso(guardarCambiosAdmin)}
                         className="w-full rounded-xl bg-accent px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
