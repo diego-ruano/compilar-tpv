@@ -75,7 +75,7 @@ const apiCatalogo = { categorias: vrListCategoriasVendibles, productos: vrListPr
 /** RI-47: controlador de venta; la vista consume exclusivamente datos confirmados. */
 export function useVentaRapida() {
   const { categorias, setCategorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos,
-    query, setQuery, q, busqueda, loadingBusqueda, cargarCategorias, cargarProductosDeCategoria, buscarProductosPorNombre } = useCatalogoServicio(true, apiCatalogo, false);
+    query, setQuery, q, busqueda, loadingBusqueda, cargarCategorias } = useCatalogoServicio(true, apiCatalogo, false);
 
   const toast = useToast();
 
@@ -701,30 +701,7 @@ export function useVentaRapida() {
     return "Elige una categoría para ver sus productos.";
   }, [paso, showingSearch, categoriaSeleccionada]);
 
-  const onProductoGuardado = useCallback(async () => {
-    if (showingSearch) return buscarProductosPorNombre(q);
-    if (categoriaSeleccionada) return cargarProductosDeCategoria(categoriaSeleccionada);
-    return cargarCategorias();
-  }, [
-    showingSearch,
-    buscarProductosPorNombre,
-    q,
-    categoriaSeleccionada,
-    cargarProductosDeCategoria,
-    cargarCategorias,
-  ]);
-
-  // Sincronización nube → catálogo: al llegar un cambio por WebSocket (`syncTick`) que afecte
-  // al catálogo (productos/categorías/stock), recargar SOLO la vista de catálogo visible
-  // (búsqueda / productos de la categoría abierta / grid de categorías). Va en un efecto aparte
-  // del ticket a propósito: se refresca sin tocar el ticket ni el resto de la pantalla (buena
-  // UX). Si el cambio fue solo de una comanda, no recargamos el catálogo.
-  useEffect(() => {
-    if (!syncTick) return;
-    if (!useSyncSignal.getState().comanda.touchedCatalog) return;
-    void onProductoGuardado();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncTick]);
+  // El catálogo se relee solo cuando cambia por la réplica: lo hace `useCatalogoServicio` (INV-INC-02).
 
   const variant: "search" | "categories" | "products" = showingSearch
     ? "search"
