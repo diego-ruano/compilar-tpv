@@ -1228,14 +1228,17 @@ export default function Reservas() {
               ) : reservasDelDia.length === 0 ? (
                 <div className="text-sm text-fg-muted">No hay reservas para este día.</div>
               ) : (
-                <div className="h-full overflow-y-auto space-y-3 pr-2">
+                // RES-MEJ-01: la tarjeta pone las acciones al lado según el ancho de la lista, no de la
+                // ventana: con el calendario al lado (xl), a la lista le quedaba poco y el nombre se
+                // reducía a «Q…». Por debajo de 48rem, las acciones van debajo.
+                <div className="@container h-full overflow-y-auto space-y-3 pr-2">
                   {reservasDelDia.map((r) => {
                     // Cancelada, terminada o sin presentarse: se queda a la vista, atenuada.
                     const viva = ocupaMesa(r.estado);
                     return (
                     <div
                       key={r.id_reserva}
-                      className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:flex-row md:justify-between md:gap-4 md:p-4"
+                      className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:p-4 @3xl:flex-row @3xl:justify-between @3xl:gap-4"
                     >
                       <div className={`flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4 ${viva ? "" : "opacity-60"}`}>
                         <div className={`flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center ${viva ? "" : "grayscale"}`}>
@@ -1299,7 +1302,7 @@ export default function Reservas() {
                         </div>
                       </div>
 
-                      <div className="grid shrink-0 grid-cols-2 gap-2 md:flex md:items-center">
+                      <div className="grid shrink-0 grid-cols-2 gap-2 @3xl:flex @3xl:items-center">
                         {/* Una reserva cerrada ya no se cambia. */}
                         {viva ? (
                           <button
