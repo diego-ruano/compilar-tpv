@@ -101,7 +101,6 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
   const p: ProductoDetalleDto | null = detalleQuery.data ?? null;
   const lotes = useMemo<LoteDto[]>(() => lotesQuery.data ?? [], [lotesQuery.data]);
-  const loading = detalleQuery.isFetching || lotesQuery.isFetching;
 
   // Resuelve URLs de imagen (producto + alérgenos) cuando llega el detalle cacheado.
   useEffect(() => {
@@ -215,10 +214,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
         </div>
 
         <div className="min-h-0 overflow-y-auto p-3 sm:p-6">
-          {loading ? (
-            <p className="text-center text-fg-muted">Cargando...</p>
-          ) : !p ? (
-            <p className="text-center text-fg-muted">No se encontró el producto.</p>
+          {/* INV-MEJ-02: nada de «Cargando» mientras se relee. Cambiaba la ficha entera por el texto en
+              cada refresco de fondo (lo que llega de otro equipo), y eso desmontaba lo que hubiera
+              abierto dentro: un ajuste o un lote a medio escribir se perdía. Se queda lo de antes
+              hasta que llega lo nuevo. */}
+          {!p ? (
+            detalleQuery.isPending ? null : <p className="text-center text-fg-muted">No se encontró el producto.</p>
           ) : (
             <>
               <div className="flex items-center gap-3 sm:gap-4">
@@ -545,11 +546,13 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <AjustarExistenciasModal
                   onClose={() => setAjustando(null)}
                   titulo={`Lote ${ajustando.lote.Codigo_Lote} de ${p.Nombre}`}
-                  actual={Number(ajustando.lote.Stock_Disponible ?? 0)}
-                  onConfirmar={async (nuevo, motivo) => {
+                  actual={Number(
+                    (lotes.find((l) => l.ID_Lote === ajustando.lote.ID_Lote) ?? ajustando.lote).Stock_Disponible ?? 0,
+                  )}
+                  onConfirmar={async (nuevo, motivo, visto) => {
                     await ajustarLote.mutateAsync({
                       id_lote: ajustando.lote.ID_Lote,
-                      stock_visto: Number(ajustando.lote.Stock_Disponible ?? 0),
+                      stock_visto: visto ?? 0,
                       stock_nuevo: nuevo ?? 0,
                       motivo: motivo ?? undefined,
                     });
@@ -563,10 +566,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   titulo={`Stock suelto de ${p.Nombre}`}
                   actual={p.Stock_Suelto ?? null}
                   permiteDejarDeLlevar
-                  onConfirmar={async (nuevo, motivo) => {
+                  onConfirmar={async (nuevo, motivo, visto) => {
+                    // INV-MEJ-02: lo que se veía en el modal, no lo que hay ahora en la ficha: si
+                    // otro equipo lo cambió entre medias, el backend rechaza en vez de pisarlo.
                     await ajustarSuelto.mutateAsync({
                       id_producto: p.ID_Producto,
-                      stock_visto: p.Stock_Suelto ?? undefined,
+                      stock_visto: visto ?? undefined,
                       stock_nuevo: nuevo ?? undefined,
                       motivo: motivo ?? undefined,
                     });
