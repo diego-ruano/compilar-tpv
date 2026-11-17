@@ -32,6 +32,25 @@ impl SqliteReservasWebRepository {
     }
 }
 
+/// ¿Son el mismo teléfono? Por sus cifras: «600 100 200» y «600100200» lo son.
+fn mismo_telefono(a: &str, b: &str) -> bool {
+    let cifras = |t: &str| t.chars().filter(char::is_ascii_digit).collect::<String>();
+    cifras(a) == cifras(b)
+}
+
+/// La nota de una reserva web, con el teléfono que se escribió en la web si no es el de la ficha
+/// del cliente (la ficha no se cambia: es la de un cliente que ya existía).
+fn nota_con_telefono(nota: Option<&str>, telefono: Option<&str>) -> Option<String> {
+    let nota = nota.map(str::trim).filter(|n| !n.is_empty());
+    let telefono = telefono.filter(|t| !t.is_empty()).map(|t| format!("Teléfono dado en la web: {t}"));
+    match (nota, telefono) {
+        (Some(n), Some(t)) => Some(format!("{n}
+{t}")),
+        (Some(n), None) => Some(n.to_string()),
+        (None, t) => t,
+    }
+}
+
 #[async_trait]
 impl ReservasWebRepository for SqliteReservasWebRepository {
     async fn zona_horaria(&self) -> AppResult<String> {
@@ -310,8 +329,16 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
 
             // El cliente es el de ese correo (`ux_clientes_email`). Si ya existe, lo escrito sólo
             // rellena sus huecos (RES-01); si no, uno nuevo con el UUID antes del INSERT.
+            // El teléfono que se escribió en la web, si no es el de la ficha: la ficha no se toca, y
+            // se apunta en la nota de esta reserva para que quien la atienda lo tenga.
+            let mut telefono_distinto: Option<String> = None;
             let id_cliente = match cliente_por(conn, POR_EMAIL, &a.alta.email).await? {
                 Some(existente) => {
+                    if let Some(de_la_ficha) = existente.telefono.as_deref() {
+                        if !mismo_telefono(de_la_ficha, &a.alta.telefono) {
+                            telefono_distinto = Some(a.alta.telefono.trim().to_string());
+                        }
+                    }
                     if existente.telefono.is_none() {
                         conn.execute(
                             "UPDATE Clientes SET Telefono = ?1 WHERE ID_Cliente = ?2;",
@@ -356,7 +383,7 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                     Value::Text(a.alta.hora.clone()),
                     Value::Text(a.turno.clone()),
                     Value::Integer(a.alta.personas),
-                    opt_text(a.alta.nota.clone()),
+                    opt_text(nota_con_telefono(a.alta.nota.as_deref(), telefono_distinto.as_deref())),
                     Value::Text(creada),
                 ],
             )
@@ -867,6 +894,37 @@ mod tests {
             analisis.filas.iter().map(|f| (f.tabla.as_str(), f.clave[0].1.as_str())).collect::<Vec<_>>(),
             [("Clientes", "c1"), ("Reservas", "r1")]
         );
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El cliente de ese correo ya tiene otro teléfono: la ficha no se toca, y el que se escribió en
+    /// la web se apunta en la nota de la reserva. El mismo con otros espacios no cuenta como otro.
+    #[tokio::test]
+    async fn el_telefono_de_la_web_que_no_es_el_de_la_ficha_va_a_la_nota() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email) VALUES ('c1', 'Ana', '611 000 000', 'ana@correo.es');                      INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email) VALUES ('c2', 'Luis', '600 11 22 33', 'luis@correo.es');",
+                )
+                .await
+                .unwrap();
+        }
+
+        repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+        repo.registrar_alta(alta("r2", "luis@correo.es", "m2", "21:00")).await.unwrap();
+
+        assert_eq!(
+            fila(&db, "SELECT Nota FROM Reservas WHERE ID_Reserva = 'r1';").await,
+            ["Silla para bebé
+Teléfono dado en la web: 600112233"]
+        );
+        assert_eq!(fila(&db, "SELECT Telefono FROM Clientes WHERE ID_Cliente = 'c1';").await, ["611 000 000"]);
+        // El de Luis es el mismo número con espacios: la nota queda como la escribió.
+        assert_eq!(fila(&db, "SELECT Nota FROM Reservas WHERE ID_Reserva = 'r2';").await, ["Silla para bebé"]);
         drop(repo);
         let _ = std::fs::remove_dir_all(&dir);
     }
