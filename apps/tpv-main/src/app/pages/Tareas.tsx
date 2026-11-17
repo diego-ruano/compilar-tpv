@@ -18,6 +18,8 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { usePermisos } from "../../shared/lib/usePermisos";
 import { ListChecks, Plus, X, Trash2, RotateCcw } from "lucide-react";
 import { conAviso } from "../../shared/lib/conAviso";
+import { diaDeFecha, hoyEnElNegocio } from "../../shared/lib/diaDelNegocio";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 
 type TareaUI = {
   ID_Tarea: string;
@@ -75,15 +77,23 @@ function Column({
   );
 }
 
+/** TAR-MEJ-01: la fecha límite ya pasó (`hoy` es el día del negocio, `YYYY-MM-DD`). */
+function estaVencida(fechaLimite: string | null | undefined, hoy: string) {
+  const dia = diaDeFecha(fechaLimite);
+  return dia !== null && dia < hoy;
+}
+
 function Card({
   title,
   subtitle,
   done,
+  vencida,
   onClick,
 }: {
   title: string;
   subtitle?: string;
   done?: boolean;
+  vencida?: boolean;
   onClick?: () => void;
 }) {
   return (
@@ -108,6 +118,12 @@ function Card({
             >
               {title}
             </p>
+
+            {vencida ? (
+              <span className="shrink-0 rounded-full bg-danger-soft px-2 py-0.5 text-xs font-semibold text-danger">
+                Vencida
+              </span>
+            ) : null}
           </div>
 
           {subtitle ? (
@@ -253,6 +269,9 @@ export default function Tareas() {
   >([]);
   const [adminSaving, setAdminSaving] = useState(false);
   const [adminDeleting, setAdminDeleting] = useState(false);
+
+  const zonaDelNegocio = useBusinessSettings((st) => st.zona_horaria);
+  const hoy = hoyEnElNegocio(zonaDelNegocio);
 
   const tareasPendientes = useMemo(() => {
     const src = isAdmin ? tareasAdmin : misTareas;
@@ -569,6 +588,7 @@ export default function Tareas() {
                       title={t.Titulo}
                       subtitle={subtitle}
                       done={done}
+                      vencida={!done && estaVencida(t.Fecha_Limite, hoy)}
                       onClick={conAviso(() => openDetalle(t))}
                     />
                   );

@@ -107,3 +107,18 @@ describe("quien gestiona y tiene la suya pendiente", () => {
         expect(screen.queryByRole("button", { name: "Marcar la mía como finalizada" })).not.toBeInTheDocument();
     });
 });
+
+// TAR-MEJ-01: una tarea con el límite pasado se veía igual que las demás en la lista.
+it("una pendiente con el límite pasado lleva «Vencida»; la de más adelante, la acabada o sin límite, no", async () => {
+    useAuth.setState({ idUsuario: "u", idTrabajador: "encargado", role: "encargado" });
+    estado.admin = [
+        { ...tarea, ID_Tarea: "a", Titulo: "Pasada", Fecha_Limite: "2020-01-01" },
+        { ...tarea, ID_Tarea: "b", Titulo: "Lejana", Fecha_Limite: "2999-12-31" },
+        { ...tarea, ID_Tarea: "c", Titulo: "Sin límite", Fecha_Limite: null },
+        { ...tarea, ID_Tarea: "d", Titulo: "Acabada", Fecha_Limite: "2020-01-01", Total_Finalizadas: 2 },
+    ];
+    render(<Tareas />);
+    await screen.findByText("Pasada");
+    expect(screen.getAllByText("Vencida")).toHaveLength(1);
+    expect(screen.getByText("Pasada").closest("button")).toHaveTextContent("Vencida");
+});
