@@ -850,7 +850,8 @@ impl MesasRepository for SqliteMesasRepository {
             .map_err(db_err)?;
 
             if matches!(estado, tpv_domain::estados::EstadoReserva::Finalizada | tpv_domain::estados::EstadoReserva::Cancelada | tpv_domain::estados::EstadoReserva::NoShow) {
-                // La comanda se queda con el cliente de la reserva (EST-INC-01).
+                // La comanda deja de ser de la reserva, pero se queda con su cliente si aún no tenía
+                // uno (EST-INC-01): un cobro posterior de esa comanda le suma a él.
                 db.execute(
                     crate::reservas::SQL_DESVINCULAR_COMANDAS,
                     vec![Value::Text(id_reserva.to_string())],

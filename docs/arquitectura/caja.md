@@ -244,7 +244,8 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
 - **El gasto se acredita y se resta al cliente de la comanda** (`Comandas.ID_Cliente`), que se fija
   al cobrar desde el de su reserva (RI-61), y también al desengancharla de la reserva (cerrarla desde
   la mesa o borrarla) si aún no tenía uno. Así, borrar o reasignar la reserva después de cobrar no le
-  quita el gasto al cliente; la reconciliación y Estadísticas → Clientes cuentan igual (el de la
+  quita el gasto al cliente, y lo que se cobre de esa comanda después de cerrar la reserva le suma
+  a él; la reconciliación y Estadísticas → Clientes cuentan igual (el de la
   comanda y, si no lo tiene, el de la reserva).
 - **Un cobro anulado queda congelado**: no se edita (moverlo de fecha cambiaría de periodo una
   anulación) ni se «desanula» (se vuelve a cobrar).

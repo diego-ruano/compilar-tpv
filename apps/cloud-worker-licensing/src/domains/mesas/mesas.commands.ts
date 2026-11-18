@@ -306,14 +306,14 @@ export function setReservaEstado(idReserva: string, estado: string, desde: strin
 		},
 	];
 
-	// Al cerrar la reserva se desliga la comanda que la referenciaba. Si no, la comanda sigue
-	// contando como "de esa reserva" y el cliente sigue colgando de ella al cobrar. Paridad con
-	// `SqliteMesasRepository::set_reserva_estado`; la condición se evalúa AQUÍ (no en el SQL) para
-	// que la nube y la Main emitan exactamente las mismas sentencias.
+	// Al cerrar la reserva se desliga la comanda que la referenciaba: deja de ser «de esa reserva»
+	// (la mesa ya no la enseña como suya). El cliente no se suelta: la comanda se queda con el de la
+	// reserva si aún no tenía uno (EST-INC-01), y un cobro posterior de esa comanda le suma a él.
+	// Paridad con `SqliteMesasRepository::set_reserva_estado`; la condición se evalúa AQUÍ (no en el
+	// SQL) para que la nube y la Main emitan exactamente las mismas sentencias.
 	if (ESTADOS_QUE_CIERRAN_RESERVA.has(estado)) {
 		steps.push({
 			kind: "execute",
-			// La comanda se queda con el cliente de la reserva (EST-INC-01).
 			sql: SQL_DESVINCULAR_COMANDAS,
 			args: [idReserva],
 		});
