@@ -389,10 +389,10 @@ impl ReservasRepository for SqliteReservasRepository {
         }
     }
 
-    async fn guardar(&self, r: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
+    async fn guardar(&self, r: ReservaValidada, forzar_solape: bool) -> AppResult<String> {
         let g = self.db.write().await;
         let conn = &g;
-        let res: AppResult<bool> = conn.transaccion(async {
+        let res: AppResult<String> = conn.transaccion(async {
             // UUIDv7 explícito: si no viene id (alta), lo generamos. Upsert por id.
             let id_reserva = r.id.clone().unwrap_or_else(new_id);
 
@@ -485,7 +485,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 .map_err(db_err)?;
             }
 
-            Ok(true)
+            Ok(id_reserva)
         }).await;
 
         res
@@ -745,14 +745,14 @@ mod tests_cliente {
         // Bea no tiene email; se le asigna la reserva escribiendo el de Ana. Ponérselo chocaría con
         // el índice único y tumbaría la reserva; se queda sin él.
         let (db, repo, _dir) = abrir().await;
-        assert!(repo
+        repo
             .guardar(reserva(ClienteReserva::Existente {
                 id: "bea".into(),
                 telefono: None,
                 email: Some("ana@x.com".into()),
             }), false)
             .await
-            .unwrap());
+            .unwrap();
         assert_eq!(texto(&db, "SELECT Email FROM Clientes WHERE ID_Cliente = 'bea';").await, None);
         assert_eq!(
             texto(&db, "SELECT ID_Cliente FROM Reservas;").await.as_deref(),
@@ -763,7 +763,9 @@ mod tests_cliente {
     #[tokio::test]
     async fn una_reserva_sin_cliente_no_crea_ninguna_ficha() {
         let (db, repo, _dir) = abrir().await;
-        assert!(repo.guardar(reserva(ClienteReserva::Ninguno), false).await.unwrap());
+        // Devuelve el id que le ha dado (el aviso de «Nueva reserva» lleva a ella).
+        let id = repo.guardar(reserva(ClienteReserva::Ninguno), false).await.unwrap();
+        assert_eq!(texto(&db, "SELECT ID_Reserva FROM Reservas;").await, Some(id));
         assert_eq!(texto(&db, "SELECT ID_Cliente FROM Reservas;").await, None);
         assert_eq!(texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM Clientes;").await.as_deref(), Some("2"));
     }
@@ -969,7 +971,7 @@ mod tests_solape {
         db.write().await.raw().execute_batch(sql).await.unwrap();
     }
 
-    fn es_aviso(r: &AppResult<bool>) -> bool {
+    fn es_aviso(r: &AppResult<String>) -> bool {
         matches!(r, Err(AppError::Coded(ErrorCode::ReservaSolapada, _)))
     }
 
@@ -984,7 +986,7 @@ mod tests_solape {
             assert_eq!(msg, "Esa mesa ya tiene una reserva de 21:00 a 23:00.");
         }
         // Con «permitir con aviso», confirmarlo la guarda.
-        assert!(repo.guardar(reserva("2026-05-10", "21:15", None), true).await.unwrap());
+        repo.guardar(reserva("2026-05-10", "21:15", None), true).await.unwrap();
     }
 
     #[tokio::test]
@@ -992,10 +994,10 @@ mod tests_solape {
         let (_db, repo, _dir) = abrir().await;
         repo.guardar(reserva("2026-05-10", "21:00", None), false).await.unwrap();
         // 21:00 + 2 h por defecto: las 23:00 ya están libres.
-        assert!(repo.guardar(reserva("2026-05-10", "23:00", None), false).await.unwrap());
+        repo.guardar(reserva("2026-05-10", "23:00", None), false).await.unwrap();
         // Una de una hora a las 13:00 deja libre las 14:00.
         repo.guardar(reserva("2026-05-10", "13:00", Some(60)), false).await.unwrap();
-        assert!(repo.guardar(reserva("2026-05-10", "14:00", None), false).await.unwrap());
+        repo.guardar(reserva("2026-05-10", "14:00", None), false).await.unwrap();
     }
 
     #[tokio::test]
@@ -1020,7 +1022,7 @@ mod tests_solape {
         let (db, repo, _dir) = abrir().await;
         sql(&db, "UPDATE Business_Settings SET Reserva_Duracion_Min = 30 WHERE ID = 1;").await;
         repo.guardar(reserva("2026-05-10", "21:00", None), false).await.unwrap();
-        assert!(repo.guardar(reserva("2026-05-10", "21:30", None), false).await.unwrap());
+        repo.guardar(reserva("2026-05-10", "21:30", None), false).await.unwrap();
     }
 
     #[tokio::test]
@@ -1028,7 +1030,7 @@ mod tests_solape {
         let (db, repo, _dir) = abrir().await;
         repo.guardar(reserva("2026-05-10", "21:00", None), false).await.unwrap();
         sql(&db, "UPDATE Reservas SET Estado = 'CANCELADA';").await;
-        assert!(repo.guardar(reserva("2026-05-10", "21:15", None), false).await.unwrap());
+        repo.guardar(reserva("2026-05-10", "21:15", None), false).await.unwrap();
     }
 
     /// RES-04: una comanda abierta ocupa la mesa todo el día: no se sabe cuándo se irá quien está
@@ -1053,10 +1055,10 @@ mod tests_solape {
                 "{hora}: {r:?}"
             );
         }
-        assert!(repo.guardar(reserva(&manana, "14:00", None), false).await.unwrap());
+        repo.guardar(reserva(&manana, "14:00", None), false).await.unwrap();
 
         sql(&db, "UPDATE Comandas SET Estado = 'Pagada';").await;
-        assert!(repo.guardar(reserva(&hoy, "23:59", None), false).await.unwrap());
+        repo.guardar(reserva(&hoy, "23:59", None), false).await.unwrap();
     }
 
     /// RES-04: no cuenta la comanda de la propia reserva (sus clientes ya están sentados), ni la de
@@ -1075,11 +1077,11 @@ mod tests_solape {
         .await;
 
         r.nota = Some("Cumpleaños".into());
-        assert!(repo.guardar(r.clone(), false).await.unwrap());
+        repo.guardar(r.clone(), false).await.unwrap();
 
         // La suya: los clientes han llegado y se ha abierto su comanda.
         sql(&db, "UPDATE Comandas SET ID_Reserva = 'r1' WHERE ID_Comanda = 'ajena';").await;
-        assert!(repo.guardar(r, false).await.unwrap());
+        repo.guardar(r, false).await.unwrap();
     }
 
     /// SYN-INC-04: un formulario que seguía abierto mientras otro equipo cancelaba la reserva la
@@ -1104,7 +1106,7 @@ mod tests_solape {
 
         for estado in ["ACTIVA", "PROXIMA"] {
             sql(&db, &format!("UPDATE Reservas SET Estado = '{estado}';")).await;
-            assert!(repo.guardar(r.clone(), false).await.unwrap(), "{estado}");
+            repo.guardar(r.clone(), false).await.unwrap_or_else(|e| panic!("{estado}: {e}"));
         }
     }
 
@@ -1147,7 +1149,7 @@ mod tests_solape {
         // Con lo de ahora, sí.
         handy.comensales = 3;
         handy.visto = Some(ReservaVista { comensales: 3, ..vista.clone() });
-        assert!(repo.guardar(handy, false).await.unwrap());
+        repo.guardar(handy, false).await.unwrap();
 
         // Una borrada entretanto no vuelve: la edición no la crea de nuevo.
         sql(&db, "DELETE FROM Reservas;").await;
@@ -1164,7 +1166,7 @@ mod tests_solape {
         repo.guardar(reserva("2026-05-10", "21:00", None), false).await.unwrap();
         let mut sin_mesa = reserva("2026-05-10", "21:00", None);
         sin_mesa.id_mesa = None;
-        assert!(repo.guardar(sin_mesa, false).await.unwrap());
+        repo.guardar(sin_mesa, false).await.unwrap();
     }
 }
 

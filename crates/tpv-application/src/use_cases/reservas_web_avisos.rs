@@ -263,7 +263,7 @@ mod tests {
             }
             Ok(self.0.clone())
         }
-        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<String> {
             panic!("ajeno a esta prueba")
         }
         async fn buscar_cliente(&self, _: Option<&str>, _: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {

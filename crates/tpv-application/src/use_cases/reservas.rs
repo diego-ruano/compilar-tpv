@@ -67,7 +67,9 @@ pub async fn guardar(
         _ => None,
     };
 
-    let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
+    // El id con el que ha quedado: el de una nueva lo elige el repositorio, y el aviso lleva a ella.
+    let id_reserva = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
+    let ok = true;
 
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
         avisar_al_cliente(repo, avisos, &antes, ahora_local).await;
@@ -89,7 +91,7 @@ pub async fn guardar(
                     cuerpo: Some(cuerpo.trim().to_string()),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_reservas".to_string()),
-                    payload: None,
+                    payload: Some(payload_del_aviso(&id_reserva, &dia)),
                     clave_dedupe: None,
                     expira_en: None,
                 })
@@ -98,6 +100,13 @@ pub async fn guardar(
     }
 
     Ok(ok)
+}
+
+/// El `payload` de un aviso de reserva (`accion: "ver_reservas"`): qué reserva es y de qué día, para
+/// que la pantalla de Reservas abra ese día y la señale (`features/notificaciones/acciones.ts`). Lo
+/// llevan todos los avisos de reservas: el de una nueva, el de una próxima y los de la web.
+pub(crate) fn payload_del_aviso(id_reserva: &str, dia_ymd: &str) -> String {
+    serde_json::json!({ "id_reserva": id_reserva, "dia_ymd": dia_ymd }).to_string()
 }
 
 /// RI-61: el cliente que ya tiene ese teléfono o ese email, para que la pantalla pregunte antes de
@@ -243,7 +252,7 @@ mod tests {
         async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
             panic!("repo llamado")
         }
-        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<String> {
             panic!("repo llamado")
         }
         async fn buscar_cliente(
@@ -274,8 +283,8 @@ mod tests {
         async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
             Ok(None)
         }
-        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
-            Ok(true)
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<String> {
+            Ok("r-nueva".into())
         }
         async fn buscar_cliente(
             &self,
@@ -335,6 +344,10 @@ mod tests {
         assert_eq!(emitidas.len(), 1);
         assert_eq!(emitidas[0].tipo, "reserva_nueva");
         assert_eq!(emitidas[0].destino, Destino::Rol(ADMIN_ROL_ID.to_string()));
+        // Lleva a la reserva: su id (el que le ha dado el repositorio) y su día.
+        assert_eq!(emitidas[0].accion.as_deref(), Some("ver_reservas"));
+        let payload: serde_json::Value = serde_json::from_str(emitidas[0].payload.as_deref().expect("payload")).unwrap();
+        assert_eq!(payload, serde_json::json!({ "id_reserva": "r-nueva", "dia_ymd": "2026-07-25" }));
     }
 
     #[tokio::test]
@@ -428,7 +441,7 @@ mod tests {
         async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
             Ok(self.0.lock().unwrap().clone())
         }
-        async fn guardar(&self, v: ReservaValidada, _: bool) -> AppResult<bool> {
+        async fn guardar(&self, v: ReservaValidada, _: bool) -> AppResult<String> {
             let mut r = self.0.lock().unwrap();
             let r = r.as_mut().expect("hay reserva");
             r.dia_ymd = v.dia_ymd;
@@ -437,7 +450,7 @@ mod tests {
             r.nota = v.nota;
             r.id_mesa = v.id_mesa.unwrap_or_default();
             r.numero_mesa = if r.id_mesa == "m2" { "Terraza 2".into() } else { "Mesa 1".into() };
-            Ok(true)
+            Ok(r.id_reserva.clone())
         }
         async fn buscar_cliente(&self, _: Option<&str>, _: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {
             Ok(None)
@@ -593,7 +606,7 @@ mod tests {
             }
             self.0.reserva(id).await
         }
-        async fn guardar(&self, v: ReservaValidada, f: bool) -> AppResult<bool> {
+        async fn guardar(&self, v: ReservaValidada, f: bool) -> AppResult<String> {
             self.0.guardar(v, f).await
         }
         async fn buscar_cliente(&self, t: Option<&str>, e: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {

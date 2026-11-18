@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CalendarDays,
   ChevronLeft,
@@ -44,7 +45,7 @@ import {
   esWebPorVenir,
 } from "../../features/reservas/reservaWeb";
 import { etiquetaEstado, ocupaMesa, ordenarDelDia, resumenDelDia } from "../../features/reservas/estadoReserva";
-import { diaAlCambiarDeMes, mismoMes } from "../../features/reservas/calendario";
+import { diaAlCambiarDeMes, mismoMes, reservaAvisada } from "../../features/reservas/calendario";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -371,8 +372,24 @@ export default function Reservas() {
     [roleSession, nombreSession],
   );
 
-  const [mesActual, setMesActual] = useState<Date>(() => inicioMesLocal(hoy));
-  const [diaSeleccionado, setDiaSeleccionado] = useState<Date>(() => hoy);
+  // El aviso de una reserva (Notificaciones) trae cuál es y su día: se abre en ese día y se señala
+  // su tarjeta. Sin él, o con uno que no vale, en hoy.
+  const location = useLocation();
+  const avisada = reservaAvisada(location.state);
+  const [mesActual, setMesActual] = useState<Date>(() => inicioMesLocal(avisada?.dia ?? hoy));
+  const [diaSeleccionado, setDiaSeleccionado] = useState<Date>(() => avisada?.dia ?? hoy);
+  const [resaltada, setResaltada] = useState<string | null>(() => avisada?.id_reserva ?? null);
+  // Otro aviso con la pantalla ya abierta (una navegación nueva): su día y su reserva.
+  const navegacion = useRef(location.key);
+  useEffect(() => {
+    if (navegacion.current === location.key) return;
+    navegacion.current = location.key;
+    const otra = reservaAvisada(location.state);
+    if (!otra) return;
+    setMesActual(inicioMesLocal(otra.dia));
+    setDiaSeleccionado(otra.dia);
+    setResaltada(otra.id_reserva);
+  }, [location.key, location.state]);
 
   // Rango del mes para la query de reservas (cacheada por desde/hasta).
   const rangoMes = useMemo(
@@ -518,6 +535,18 @@ export default function Reservas() {
   ========================================================= */
   // Las canceladas, terminadas y de clientes que no vinieron siguen en la lista, atenuadas y al
   // final; el calendario y el total cuentan sólo las vivas.
+  // La reserva del aviso, a la vista en cuanto está en la lista (una vez por aviso).
+  const desplazada = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resaltada || desplazada.current === resaltada) return;
+    const tarjeta = Array.from(document.querySelectorAll<HTMLElement>("[data-reserva]")).find(
+      (e) => e.dataset.reserva === resaltada,
+    );
+    if (!tarjeta) return;
+    desplazada.current = resaltada;
+    tarjeta.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  });
+
   const reservasDelDia = useMemo(
     () => ordenarDelDia(reservasMes.filter((r) => r.dia_ymd === seleccionadoClave)),
     [reservasMes, seleccionadoClave],
@@ -1238,7 +1267,11 @@ export default function Reservas() {
                     return (
                     <div
                       key={r.id_reserva}
-                      className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:p-4 @3xl:flex-row @3xl:justify-between @3xl:gap-4"
+                      data-reserva={r.id_reserva}
+                      aria-current={r.id_reserva === resaltada ? "true" : undefined}
+                      className={`flex flex-col items-stretch gap-3 rounded-2xl border bg-surface p-3 shadow-sm md:p-4 @3xl:flex-row @3xl:justify-between @3xl:gap-4 ${
+                        r.id_reserva === resaltada ? "border-accent ring-2 ring-accent" : "border-border"
+                      }`}
                     >
                       <div className={`flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4 ${viva ? "" : "opacity-60"}`}>
                         <div className={`flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center ${viva ? "" : "grayscale"}`}>

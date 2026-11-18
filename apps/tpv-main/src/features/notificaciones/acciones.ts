@@ -10,12 +10,14 @@
 // sin romper la pantalla.
 
 import type { SectionKey } from "../configuracion/types";
+import { reservaAvisada, type ReservaAvisada } from "../reservas/calendario";
 
 export type DestinoNotificacion = {
   /** Ruta del router a la que navegar. */
   to: string;
-  /** Estado de navegación; lo usa Configuración para abrir una sección concreta. */
-  state?: { seccion: SectionKey };
+  /** Estado de navegación: la sección que abre Configuración, o la reserva que Reservas abre en su
+   *  día y señala. */
+  state?: { seccion: SectionKey } | { reserva: ReservaAvisada };
 };
 
 const DESTINOS: Record<string, DestinoNotificacion> = {
@@ -36,9 +38,32 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   ver_conectividad: { to: "/Configuracion", state: { seccion: "CONECTIVIDAD" } },
 };
 
+/**
+ * El destino de una notificación. La de una reserva (`ver_reservas`) lleva en su `payload` qué reserva
+ * es y de qué día (`{id_reserva, dia_ymd}`, `use_cases/reservas.rs::payload_del_aviso`): Reservas abre
+ * ese día y la señala. Sin `payload`, o con uno que no vale, abre en hoy, como antes.
+ */
 export function destinoDeAccion(
   accion: string | null | undefined,
+  payload?: string | null,
 ): DestinoNotificacion | null {
   if (!accion) return null;
-  return DESTINOS[accion] ?? null;
+  const destino = DESTINOS[accion] ?? null;
+  if (destino && accion === "ver_reservas") {
+    const reserva = reservaDelPayload(payload);
+    if (reserva) return { ...destino, state: { reserva } };
+  }
+  return destino;
+}
+
+function reservaDelPayload(payload: string | null | undefined): ReservaAvisada | null {
+  if (!payload) return null;
+  let leido: unknown;
+  try {
+    leido = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  const r = reservaAvisada({ reserva: leido });
+  return r ? { id_reserva: r.id_reserva, dia_ymd: r.dia_ymd } : null;
 }

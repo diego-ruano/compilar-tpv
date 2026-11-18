@@ -194,12 +194,13 @@ async fn registrar(
                             "Reserva web en una mesa ocupada",
                             format!("{detalle}. Muévela a otra mesa."),
                             &p.id_reserva,
+                            &p.dia_ymd,
                         ))
                         .await;
                         Ok(contestar(id, ResultadoRecogidaWeb::Solapada, None))
                     } else {
                         resumen.registradas += 1;
-                        avisar(notifier, aviso("reserva_web_nueva", Severidad::Info, "Nueva reserva web", detalle, &p.id_reserva))
+                        avisar(notifier, aviso("reserva_web_nueva", Severidad::Info, "Nueva reserva web", detalle, &p.id_reserva, &p.dia_ymd))
                             .await;
                         Ok(contestar(id, ResultadoRecogidaWeb::Registrada, None))
                     }
@@ -222,6 +223,7 @@ async fn registrar(
                     "Reserva web cancelada por el cliente",
                     detalle,
                     &p.id_reserva,
+                    &r.dia_ymd,
                 ))
                 .await;
                 Ok(contestar(id, ResultadoRecogidaWeb::Registrada, None))
@@ -258,7 +260,7 @@ fn detalle(nombre: Option<&str>, dia_ymd: &str, hora: &str, mesa: Option<&str>) 
 
 /// A los administradores, como la de «Nueva reserva». Con su clave por reserva y tipo: la misma
 /// petición entregada dos veces no avisa dos veces.
-fn aviso(tipo: &str, severidad: Severidad, titulo: &str, cuerpo: String, id_reserva: &str) -> NuevaNotificacion {
+fn aviso(tipo: &str, severidad: Severidad, titulo: &str, cuerpo: String, id_reserva: &str, dia_ymd: &str) -> NuevaNotificacion {
     NuevaNotificacion {
         tipo: tipo.to_string(),
         severidad,
@@ -266,7 +268,7 @@ fn aviso(tipo: &str, severidad: Severidad, titulo: &str, cuerpo: String, id_rese
         cuerpo: Some(cuerpo),
         destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
         accion: Some("ver_reservas".to_string()),
-        payload: None,
+        payload: Some(super::reservas::payload_del_aviso(id_reserva, dia_ymd)),
         clave_dedupe: Some(format!("{tipo}:{id_reserva}")),
         expira_en: None,
     }
@@ -291,6 +293,7 @@ fn aviso_fallida(p: &PeticionReservaWebDto) -> NuevaNotificacion {
         "No se ha podido registrar una reserva web",
         cuerpo,
         &p.id_reserva,
+        &p.dia_ymd,
     )
 }
 
@@ -521,6 +524,10 @@ mod tests {
         assert_eq!(notas[1].cuerpo.as_deref(), Some("Ana · 24/10 21:00 · sin mesa. Muévela a otra mesa."));
         assert_eq!(notas[2].cuerpo.as_deref(), Some("Luis · 25/10 14:00 · Mesa 2"));
         assert_eq!(notas[0].clave_dedupe.as_deref(), Some("reserva_web_nueva:r1"));
+        // Cada uno lleva a su reserva y a su día.
+        let payload = |i: usize| serde_json::from_str::<serde_json::Value>(notas[i].payload.as_deref().unwrap()).unwrap();
+        assert_eq!(payload(0), serde_json::json!({ "id_reserva": "r1", "dia_ymd": "2026-10-24" }));
+        assert_eq!(payload(2)["dia_ymd"], "2026-10-25");
     }
 
     #[test]

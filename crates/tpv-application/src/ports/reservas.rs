@@ -27,7 +27,10 @@ pub trait ReservasRepository: Send + Sync {
     /// Si la reserva se pisa con otra de su mesa o con una comanda abierta en ella, decide el modo
     /// del negocio (`Business_Settings.Reserva_Solape`): con «prohibir» es un `Conflict`; con
     /// «avisar», un `ReservaSolapada` salvo que llegue `forzar_solape`.
-    async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<bool>;
+    ///
+    /// Devuelve el id con el que ha quedado la reserva: el de una nueva lo elige el repositorio
+    /// (un UUIDv7), y el aviso de «Nueva reserva» lleva a ella.
+    async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<String>;
 
     /// RI-61: el cliente que ya tiene ese email o, si no, ese teléfono (ya normalizados).
     async fn buscar_cliente(

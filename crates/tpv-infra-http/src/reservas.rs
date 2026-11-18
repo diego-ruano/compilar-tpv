@@ -48,7 +48,7 @@ impl ReservasRepository for HttpReservasRepository {
         self.client.get_json(&format!("/v1/reservas/{id_reserva}")).await
     }
 
-    async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
+    async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<String> {
         // RI-61: el cliente viaja decidido, en los mismos campos que la entrada de la pantalla, y el
         // worker lo resuelve igual que la Main (`resolverCliente`).
         let generado = reserva.id.is_none().then_some("id_reserva");
@@ -86,11 +86,12 @@ impl ReservasRepository for HttpReservasRepository {
                 "id_cliente": v.id_cliente,
             })),
         });
-        let _: (JsonValue, _) = self
+        // El id que salió de verdad: si esto era el reintento de un alta incierta, el del primer envío.
+        let (_, salio): (JsonValue, _) = self
             .client
             .post_json_creando("/v1/reservas", &body, generado)
             .await?;
-        Ok(true)
+        Ok(salio.unwrap_or(id_reserva))
     }
 
     async fn buscar_cliente(

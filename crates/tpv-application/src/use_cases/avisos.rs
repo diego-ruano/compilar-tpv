@@ -51,7 +51,7 @@ pub async fn escanear(
                     cuerpo: Some(cuerpo),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_reservas".to_string()),
-                    payload: None,
+                    payload: Some(super::reservas::payload_del_aviso(&r.id_reserva, &r.dia_ymd)),
                     clave_dedupe: Some(format!("reserva_proxima:{}", r.id_reserva)),
                     expira_en: None,
                 })
@@ -117,6 +117,9 @@ mod tests {
         assert!(e.iter().all(|n| n.destino == Destino::Rol(ADMIN_ROL_ID.to_string())));
         assert!(e.iter().any(|n| n.clave_dedupe.as_deref() == Some("tarea_vencida:t1")));
         assert!(e.iter().any(|n| n.clave_dedupe.as_deref() == Some("reserva_proxima:r1")));
+        // El de la reserva lleva a ella: su id y su día.
+        let reserva = e.iter().find(|n| n.tipo == "reserva_proxima").unwrap();
+        assert_eq!(reserva.payload.as_deref(), Some(r#"{"dia_ymd":"2026-07-25","id_reserva":"r1"}"#));
     }
 
     #[tokio::test]

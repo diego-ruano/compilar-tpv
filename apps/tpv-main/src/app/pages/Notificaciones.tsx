@@ -94,7 +94,7 @@ export default function Notificaciones() {
     }
     // Navegar es lo último: la mutación (y su invalidación en `onSuccess`) sobrevive al desmontaje
     // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
-    const destino = destinoDeAccion(n.accion);
+    const destino = destinoDeAccion(n.accion, n.payload);
     if (destino) void navigate(destino.to, { state: destino.state });
   }
 
@@ -191,7 +191,7 @@ export default function Notificaciones() {
           {items.map((n) => {
             const a = aspecto(n.severidad);
             const Icon = a.icon;
-            const destino = destinoDeAccion(n.accion);
+            const destino = destinoDeAccion(n.accion, n.payload);
             return (
               <div
                 key={n.id_notificacion}
