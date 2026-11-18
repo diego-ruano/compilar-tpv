@@ -148,7 +148,6 @@ y cuáles faltan.
 
 ### Fuera por construcción
 
-- `pedidos_proveedor`: sólo existe en Rust.
 - `Pagos.Numero_Ticket` no entra en los snapshots de cobro: lo asigna sólo la Main, que es la única que
   cobra.
 - `login.punch` se cubre llamando a `exec_punch`, el efecto, sin la verificación del PIN: autenticar no es

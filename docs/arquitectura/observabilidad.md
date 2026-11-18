@@ -136,7 +136,7 @@ exhaustiva (`GRAVEDAD`: un código nuevo no compila hasta tener la suya) y lo cu
 - **Lo que no es un fallo del programa va como `external`**: los errores de la impresora
   (`fallo_de_impresora` en `lib.rs`) lo son, o cada rollo que se acaba sería un issue.
 - **Lo que una Handy no tiene porque es de la Main es `conflict`**, una respuesta esperada: los
-  registros de facturación, el ticket de un cobro y los pedidos a proveedores
+  registros de facturación, el ticket de un cobro o la reserva web
   (`AppState::base_de_la_main`), igual que la caja en sus repositorios HTTP. Una Main sin su base
   sí es `internal`.
 

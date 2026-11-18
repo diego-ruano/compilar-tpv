@@ -102,8 +102,8 @@ export default function PedidosSection({ proveedores }: Props) {
   const pedidos = query.data?.pages.flatMap((p) => p.pedidos) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
-  // Una carga que falla se avisa: una lista sin cargar no puede parecer vacía (en la Handy, por
-  // ejemplo, los pedidos no se pueden leer, y salía «Sin pedidos»).
+  // Una carga que falla se avisa: una lista sin cargar no puede parecer vacía (sin red, una Handy
+  // no puede leer los pedidos de la nube, y no puede salir «Sin pedidos»).
   useEffect(() => {
     if (query.isError) {
       toast.error("No se pudieron cargar los pedidos", toAppError(query.error).message);

@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-// Y una carga que falla (la Handy no puede leer los pedidos) se avisa: salía «Sin pedidos».
+// Y una carga que falla (una Handy sin red no puede leer los pedidos de la nube) se avisa: salía «Sin pedidos».
 // «Cancelar pedido» cancelaba un borrador ya guardado sin preguntar, y cancelado no se puede editar
 // ni mandar. Ahora pregunta; un borrador nuevo sin guardar se cierra sin preguntar. Corre la sección
 // de verdad; sólo se sustituyen el IPC y el diálogo de confirmación.
@@ -17,9 +17,9 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 	invoke: async (comando: string) => {
 		ipc.llamadas.push(comando);
 		if (comando === "pedidos_proveedor_get_page") {
-			// Lo que contesta la Handy: los pedidos sólo los tiene la Main.
+			// Lo que contesta una Handy sin red.
 			if (ipc.falla) {
-				throw { code: "validation", message: "Los pedidos a proveedores sólo se gestionan desde el TPV principal" };
+				throw { code: "external", message: "No hay conexión con la nube" };
 			}
 			return {
 				pedidos: [
@@ -85,7 +85,7 @@ it("una carga que falla se dice, y no parece una lista vacía", async () => {
 	ipc.falla = true;
 	pintar();
 	expect(await screen.findByText("No se pudieron cargar los pedidos", { selector: "p" })).toBeTruthy();
-	expect(screen.getAllByText(/sólo se gestionan desde el TPV principal/).length).toBeGreaterThan(0);
+	expect(screen.getAllByText(/No hay conexión con la nube/).length).toBeGreaterThan(0);
 	expect(screen.queryByText("Sin pedidos")).toBeNull();
 	expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
 	ipc.falla = false;

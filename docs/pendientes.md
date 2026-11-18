@@ -26,7 +26,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
-| [PED-HANDY](#ped-handy--los-pedidos-a-proveedores-desde-la-handy) | 🟡 | Los pedidos a proveedores sólo se gestionan en la Main, y la Handy deja prepararlos para rechazarlos al guardar | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -362,31 +361,6 @@ grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) factur
 se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
 anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
 (`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
-
-
-### PED-HANDY · Los pedidos a proveedores desde la Handy
-
-Falta decidir si los pedidos a proveedores se gestionan también desde la Handy. Hoy son sólo de la
-Main: en la Handy, `state.pedidos_proveedor_repo()` contesta «Los pedidos a proveedores sólo se
-gestionan desde el TPV principal» (no hay ruta en el worker ni repositorio en `tpv-infra-http`). Lo
-que se ve:
-
-- **La lista**: la sección de Pedidos de Proveedores no puede leer nada. Antes salía «Sin pedidos»,
-  como si no hubiera ninguno; ahora dice que no se han podido cargar y por qué.
-- **Preparar uno**: «Nuevo pedido» abre el formulario y deja rellenarlo entero, y al guardar se
-  rechaza con ese mensaje: se pierde lo escrito.
-- **«Mandar»**: el correo al proveedor sale antes de guardar el pedido, firmado con la identidad del
-  TPV principal (`email_enviar_pedido`, modo `tpv`), que la Handy no tiene: fallaría al firmar,
-  antes de mandar nada.
-
-Opciones:
-
-1. **Ocultarlos en la Handy**: sin la sección de pedidos ni la acción «Pedidos» de un aviso. Lo más
-   rápido, y coherente con que hoy no funcionan.
-2. **Una lista de sólo lectura en el worker**: ver qué se ha pedido y a quién, sin crear, editar ni
-   mandar desde la Handy (una ruta `GET` y su repositorio en `tpv-infra-http`).
-3. **Llevar los pedidos a la nube**: rutas de escritura en el worker con sus comandos y sus arneses de
-   contrato, como cualquier otro dominio, y decidir quién manda el correo.
 
 ---
 

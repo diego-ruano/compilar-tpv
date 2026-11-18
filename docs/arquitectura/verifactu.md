@@ -331,7 +331,7 @@ escritura a `Registros_Facturacion` y `Serie_Facturacion` (`lib/hub.ts`, `TABLAS
 La Handy no pregunta el estado fiscal ni saca el aviso de los datos que faltan: `useEstadoFiscal`
 y `AvisoFiscalMontado` miran el modo del equipo (un escritorio también puede ser una Handy). Si
 aun así se pide algo que sólo existe en la Main —los registros de facturación, el ticket de un
-cobro, los pedidos a proveedores—, Rust contesta `conflict` con «…sólo … en el TPV principal»
+cobro—, Rust contesta `conflict` con «…sólo … en el TPV principal»
 (`AppState::base_de_la_main`), que es una respuesta esperada y no va a Sentry.
 
 ---

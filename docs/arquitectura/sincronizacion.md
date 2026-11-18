@@ -1129,7 +1129,9 @@ cambiado desde que se abrió el formulario (`reserva_cambiada_al_editar`: la edi
 como la vio, RES-INC-03), reservar para hoy una mesa con una comanda abierta
 (`mesa_con_comanda_hoy`); el correo de un cliente que se da de alta o se edita desde la ficha
 (`email_duplicado`, `clientes.commands.ts`: con la lectura de la ruta, una Handy que daba de alta el
-mismo correo entre medias acababa en el error del índice, SYN-INC-07), y fichar (TRA-INC-04, `login.commands.ts`): la entrada, con las cuatro
+mismo correo entre medias acababa en el error del índice, SYN-INC-07); editar un pedido a un
+proveedor que otro equipo ya ha enviado o cancelado (`pedido_no_editable`, PED-HANDY: la cabecera y
+las líneas van juntas, y la Main lo rechaza igual), y fichar (TRA-INC-04, `login.commands.ts`): la entrada, con las cuatro
 frases de la Main en su orden y que la parte que eligió la ruta siga siendo la que toca; la salida,
 que la jornada que leyó la ruta siga sin salida, y si no la hay, «La salida ya está fichada.» cuando
 otro equipo acaba de fichar una (en la Main, lo mismo en `exec_punch`). La sentencia de la salida
@@ -1139,7 +1141,7 @@ que entra entre la lectura de la ruta y su lote.
 
 Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden
 por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
-el guardado de un horario) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
+el guardado de un horario, enviar o cancelar un pedido a un proveedor) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
 operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-10 lo afina después
 de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
 y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
@@ -1151,7 +1153,7 @@ No necesitan guarda lo que ya para la base con un índice único (una comanda ab
 cierre por periodo, nombres de zona, mesa y producto), lo que cambia sólo al
 darse de alta (borrar una reserva web, que no se borra nunca), lo que la sentencia ya hace por sí
 misma con su condición (las altas puras, las notificaciones, el turno partido, el guardado de un
-horario, borrar un ticket), y lo que en una carrera no escribe nada distinto, sólo contesta otra
+horario, borrar un ticket, enviar o cancelar un pedido, que sólo toca un borrador), y lo que en una carrera no escribe nada distinto, sólo contesta otra
 cosa: finalizar una tarea que entretanto se le desasigna no toca ninguna fila.
 
 Lo que llega a la Main es la sentencia, que la Main aplica con sus datos: puede tener sin subir lo

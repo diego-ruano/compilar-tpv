@@ -17,10 +17,10 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 |---|---|---|
 | `GET /health` | `server/salud.ts` | La sonda externa |
 | `GET /ws`, `/v1/ws` | `src/app.ts`, `domains/ws` | El WebSocket del `TenantHub` (con ticket de un solo uso, canjeado en `domains/ws/canje.ts`) |
-| `/v1/clientes`, `/configuracion`, `/cuentas`, `/inventario`, `/login`, `/mesas`, `/notificaciones`, `/proveedores`, `/reservas`, `/stats`, `/tareas`, `/trabajadores`, `/venta-rapida` | `domains/<dominio>/` | La Handy (lecturas y escrituras de negocio) |
+| `/v1/clientes`, `/configuracion`, `/cuentas`, `/inventario`, `/login`, `/mesas`, `/notificaciones`, `/pedidos-proveedor`, `/proveedores`, `/reservas`, `/stats`, `/tareas`, `/trabajadores`, `/venta-rapida` | `domains/<dominio>/` | La Handy (lecturas y escrituras de negocio) |
 | `/v1/sync/*` | `domains/sync/` | La Main: catch-up, volcado, histórico, contraste ([sincronizacion.md](sincronizacion.md)) |
 | `/v1/images/*` | `domains/images/` | Subir, servir y borrar imágenes en R2 |
-| `/v1/email/*` | `domains/email/` | Pedidos a proveedores |
+| `/v1/email/*` | `domains/email/` | El correo de un pedido a un proveedor (la Main y la Handy) |
 | `/v1/pair/*`, `/v1/device/*` | `domains/pairing/` | Emparejamiento ([emparejamiento.md](emparejamiento.md)) |
 | `/v1/license/*`, `/v1/stripe/*`, `/v1/admin/*` | `domains/{licensing,stripe,admin}/` | Licencias ([licencias.md](licencias.md)) |
 | `/v1/interruptores` | `domains/interruptores/` | La Main ([jobs-e-interruptores.md](jobs-e-interruptores.md)) |
@@ -197,11 +197,10 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   vuelve a componer un `?` por elemento.
 - **Lo que teclea el usuario se busca con `instr(${normalizada(col)}, ?) > 0`, nunca con `LIKE`**: un
   patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
-  patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra
-  y los listados de caja, y la Main busca igual para devolver las mismas filas (y así busca también
-  los pedidos a proveedores, que sólo están en ella). Las listas que filtra la propia pantalla usan
-  la misma regla ([frontend.md](frontend.md#los-buscadores)). Un `LIKE` con un
-  patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
+  patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra,
+  los listados de caja y los pedidos a proveedores, y la Main busca igual para devolver las mismas
+  filas. Las listas que filtra la propia pantalla usan la misma regla
+  ([frontend.md](frontend.md#los-buscadores)). Un `LIKE` con un patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
 - **Y sin acentos ni mayúsculas**: «café» encuentra «CAFÉ Solo» y «CAÑA», «Caña». El `lower()` de
   SQLite sólo baja las letras ASCII y el DO no admite funciones propias, así que `normalizada(col)`
@@ -404,7 +403,7 @@ que se reservó. Las dos dejan de contar al salir de la ventana. Si la base cent
 pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
 (`RETENCION_ENVIOS_MS`).
 
-**Un pedido no sale dos veces.** La Main manda con cada pedido su clave de envío (`id_envio`, la
+**Un pedido no sale dos veces.** La Main o la Handy manda con cada pedido su clave de envío (`id_envio`, la
 misma mientras se reintenta el mismo pedido sin cambiarlo, guardada en el almacenamiento de la
 aplicación hasta que el envío termina bien: `claveDeEnvio.ts`), y es el id de su
 fila (`pedido:<negocio>:<id_envio>`). La reserva del cupo es también la del id, en la misma
