@@ -18,6 +18,23 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
+/**
+ * SYNC-30: 1 si el email (`?1`) no es de ningún cliente salvo, si lo hay, el que se guarda (`?2`).
+ * Es el criterio del índice único `ux_clientes_email` (sobre `lower(Email)`, sin contar los vacíos),
+ * y va en un paso `guard` del comando: mirado por la ruta antes de `apply`, se quedaba viejo
+ * mientras el TenantHub atendía a otros (una Handy daba de alta el mismo correo entre la lectura y el
+ * lote, y lo que contestaba era el error de SQLite del índice), y el reintento de un alta que ya
+ * había entrado se encontraba a sí mismo si llegaba sin su id.
+ */
+export const SQL_EMAIL_LIBRE_SALVO = `SELECT NOT EXISTS (SELECT 1 FROM Clientes
+	WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = lower(?1) AND ID_Cliente IS NOT ?2);`;
+
+/** La guarda del correo de una ficha que se guarda (`id`: su id, o la referencia al paso que lo da). */
+function guardaDelEmail(email: string | null, id: unknown): any[] {
+	if (!email) return [];
+	return [{ kind: "guard", sql: SQL_EMAIL_LIBRE_SALVO, args: [email, id], error: "email_duplicado", status: 409 }];
+}
+
 // Local-First/UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno.
 function idStep(provided?: string | null) {
 	const id = recortar(provided ?? "") || nuevoId();
@@ -38,6 +55,7 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 
 	const steps = [
 		idStep(input.id_cliente),
+		...guardaDelEmail(cloudPayload.email, REF_ID),
 		{
 			kind: "execute",
 			sql: `
@@ -92,23 +110,29 @@ export function updateCliente(idCliente: string, input: UpdateClienteInput): Bui
 	return {
 		commandName: "clientes_update_cliente",
 		command: {
-			type: "tenantDb.exec",
+			type: "tenantDb.transaction",
 			payload: {
-				sql: `
-					UPDATE Clientes
-					SET
-						Nombre = ?1,
-						Telefono = ?2,
-						Email = ?3,
-						Notas = ?4
-					WHERE ID_Cliente = ?5;
-				`,
-				args: [
-					cloudPayload.nombre,
-					cloudPayload.telefono,
-					cloudPayload.email,
-					cloudPayload.notas,
-					cloudPayload.id_cliente,
+				steps: [
+					...guardaDelEmail(cloudPayload.email, cloudPayload.id_cliente),
+					{
+						kind: "execute",
+						sql: `
+							UPDATE Clientes
+							SET
+								Nombre = ?1,
+								Telefono = ?2,
+								Email = ?3,
+								Notas = ?4
+							WHERE ID_Cliente = ?5;
+						`,
+						args: [
+							cloudPayload.nombre,
+							cloudPayload.telefono,
+							cloudPayload.email,
+							cloudPayload.notas,
+							cloudPayload.id_cliente,
+						],
+					},
 				],
 			},
 		},

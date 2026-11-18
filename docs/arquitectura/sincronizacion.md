@@ -1103,7 +1103,9 @@ se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está co
 rechazo lo cuenta con lo que hay ahora); cambiar una reserva cerrada (`reserva_cerrada`) o que ha
 cambiado desde que se abrió el formulario (`reserva_cambiada_al_editar`: la edición trae la reserva
 como la vio, RES-INC-03), reservar para hoy una mesa con una comanda abierta
-(`mesa_con_comanda_hoy`), y fichar (TRA-INC-04, `login.commands.ts`): la entrada, con las cuatro
+(`mesa_con_comanda_hoy`); el correo de un cliente que se da de alta o se edita desde la ficha
+(`email_duplicado`, `clientes.commands.ts`: con la lectura de la ruta, una Handy que daba de alta el
+mismo correo entre medias acababa en el error del índice, SYN-INC-07), y fichar (TRA-INC-04, `login.commands.ts`): la entrada, con las cuatro
 frases de la Main en su orden y que la parte que eligió la ruta siga siendo la que toca; la salida,
 que la jornada que leyó la ruta siga sin salida, y si no la hay, «La salida ya está fichada.» cuando
 otro equipo acaba de fichar una (en la Main, lo mismo en `exec_punch`). La sentencia de la salida
@@ -1122,7 +1124,7 @@ quitado (SYNC-35): ahora lo decide su guarda. El ajuste de existencias miraba lo
 el reintento de uno que ya había entrado veía lo nuevo y contestaba `stock_cambiado`.
 
 No necesitan guarda lo que ya para la base con un índice único (una comanda abierta por mesa, un
-cierre por periodo, nombres de zona, mesa y producto, correos de cliente), lo que cambia sólo al
+cierre por periodo, nombres de zona, mesa y producto), lo que cambia sólo al
 darse de alta (borrar una reserva web, que no se borra nunca), lo que la sentencia ya hace por sí
 misma con su condición (las altas puras, las notificaciones, el turno partido, el guardado de un
 horario, borrar un ticket), y lo que en una carrera no escribe nada distinto, sólo contesta otra

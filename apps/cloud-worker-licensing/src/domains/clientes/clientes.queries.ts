@@ -115,23 +115,3 @@ export async function form(
 	});
 	return (rows(rs)[0] ?? null) as ClienteForm | null;
 }
-
-// CLI-04: ¿hay ya otro cliente con este email? (case-insensitive; excluye `excluirId`
-// para permitir re-guardar el mismo cliente). Backstop real es el índice único
-// `ux_clientes_email`; este pre-check sólo da un 409 limpio en la ruta.
-export async function emailEnUso(
-	db: Client,
-	email: string,
-	excluirId?: string | null,
-): Promise<boolean> {
-	const rs = excluirId
-		? await db.execute({
-				sql: `SELECT 1 FROM Clientes WHERE lower(Email) = lower(?1) AND ID_Cliente <> ?2 LIMIT 1;`,
-				args: [email, excluirId],
-			})
-		: await db.execute({
-				sql: `SELECT 1 FROM Clientes WHERE lower(Email) = lower(?1) LIMIT 1;`,
-				args: [email],
-			});
-	return rows(rs).length > 0;
-}

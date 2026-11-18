@@ -54,6 +54,7 @@ const { mesasRoutes } = await import("../src/domains/mesas/mesas.routes");
 const { trabajadoresRoutes } = await import("../src/domains/trabajadores/trabajadores.routes");
 const { ventaRapidaRoutes } = await import("../src/domains/venta_rapida/venta_rapida.routes");
 const { inventarioRoutes } = await import("../src/domains/inventario/inventario.routes");
+const { clientesRoutes } = await import("../src/domains/clientes/clientes.routes");
 
 const app = new Hono();
 app.route("/v1/reservas", reservasRoutes);
@@ -61,6 +62,7 @@ app.route("/v1/mesas", mesasRoutes);
 app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
 app.route("/v1/inventario", inventarioRoutes);
+app.route("/v1/clientes", clientesRoutes);
 app.onError((e: any, c) => c.json(cuerpoDeErrorConStatus(e), e.status ?? 500));
 
 const ADMIN = "00000000-0000-7000-8000-000000000001";
@@ -1025,6 +1027,47 @@ describe("Libre: el día libre de un trabajador", () => {
 			n.sql.exec("UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 00:00:00' WHERE ID_Usuario = 'ana'");
 			const r = await n.pedir("POST", "/v1/trabajadores/horarios/libre", { id_trabajador: "trab-ana", fecha: "2099-01-06" });
 			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+		});
+	});
+});
+
+/* =========================================================
+   El correo de un cliente (SYN-INC-07)
+========================================================= */
+
+describe("SYNC-30 · el correo de un cliente lo decide la guarda del lote", () => {
+	const ana = { id_cliente: "ana-handy", nombre: "Ana", email: "Ana@Bar.test", telefono: null, notas: null };
+
+	it("un alta con el correo de otro cliente, también si entra entre la lectura y el lote, es email_duplicado", async () => {
+		await conNegocio("cliente-alta", [], async (n) => {
+			const r = await n.pedir("POST", "/v1/clientes", ana, {
+				antesDelLote: ["INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('ana-main', 'Ana', 'ana@bar.test')"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "email_duplicado" } });
+			expect(n.n("SELECT COUNT(*) FROM Clientes")).toBe(1);
+			expect(n.difundidos).toEqual([]);
+		});
+	});
+
+	it("cambiar el correo al de otro, también si entra entre la lectura y el lote, es email_duplicado", async () => {
+		await conNegocio("cliente-editar", ["INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('bea', 'Bea', 'bea@bar.test')"], async (n) => {
+			const r = await n.pedir("PUT", "/v1/clientes/bea", { nombre: "Bea", email: "ana@bar.test", telefono: null, notas: null }, {
+				antesDelLote: ["INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('ana-main', 'Ana', 'ANA@bar.test')"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "email_duplicado" } });
+			expect(n.n("SELECT COUNT(*) FROM Clientes WHERE Email = 'bea@bar.test'")).toBe(1);
+		});
+	});
+
+	it("guardar una ficha con su propio correo entra, y el reintento de un alta contesta lo mismo", async () => {
+		await conNegocio("cliente-propio", [], async (n) => {
+			const clave = "clave-del-alta-de-ana";
+			const primera = await n.pedir("POST", "/v1/clientes", ana, { clave });
+			expect(primera).toEqual({ status: 200, json: { ok: true, id_cliente: "ana-handy" } });
+			expect(await n.pedir("POST", "/v1/clientes", ana, { clave })).toEqual(primera);
+			const editar = await n.pedir("PUT", "/v1/clientes/ana-handy", { nombre: "Ana López", email: "ana@bar.test", telefono: null, notas: null });
+			expect(editar).toEqual({ status: 200, json: { ok: true } });
+			expect(n.n("SELECT COUNT(*) FROM Clientes WHERE Nombre = 'Ana López'")).toBe(1);
 		});
 	});
 });
