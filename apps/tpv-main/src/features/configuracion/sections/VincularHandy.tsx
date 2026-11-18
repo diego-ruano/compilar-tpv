@@ -143,7 +143,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 		<div className="relative flex flex-col gap-4">
 			<Panel
 				title="Vincular Handy"
-				subtitle="Escanea este QR con el dispositivo que quieras emparejar."
+				subtitle="Da al Handy este código para que pida la vinculación, y apruébala aquí."
 				right={
 					<GhostButton onClick={onRegenerate} disabled={loading || !hayNube} title={sinNubeTitle}>
 						{loading ? "Generando..." : "Generar nuevo"}
@@ -164,7 +164,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 							darkMode ? "text-white" : "text-fg",
 						)}
 					>
-						Escanea este código QR
+						Código de vinculación
 					</div>
 
 					<div
@@ -173,8 +173,9 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 							darkMode ? "text-fg-muted" : "text-fg-muted",
 						)}
 					>
-						En el Handy entra a Configuración → “Vincular dispositivo” y
-						escanea.
+						En el Handy, abre la app y elige «Handy» (si ya estaba vinculado, pulsa
+						«← Vinculación»). En «Conecta este Handy», pega el contenido de este QR o
+						escribe el código.
 					</div>
 
 					{/* Sin conexión no hay código que dar. Se dice así, y NO se enseña el error de red
@@ -280,9 +281,9 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 										darkMode ? "text-fg-muted" : "text-fg-muted",
 									)}
 								>
-									<li>1) Abre la app en el Handy.</li>
-									<li>2) Ve a Configuración → “Vincular dispositivo”.</li>
-									<li>3) Escanea el QR o introduce el código manualmente.</li>
+									<li>1) Abre la app en el Handy y elige «Handy». Si ya estaba vinculado, pulsa «← Vinculación».</li>
+									<li>2) En «Conecta este Handy», pega el contenido del QR o escribe el código de 6 cifras y pulsa «Vincular dispositivo».</li>
+									<li>3) Acepta aquí la solicitud, después de comprobar que la huella es la que enseña el Handy.</li>
 								</ol>
 
 								<div

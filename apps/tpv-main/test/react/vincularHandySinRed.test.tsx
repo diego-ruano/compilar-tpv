@@ -2,6 +2,7 @@
 // CFG-INC-04: sin red, «Regenerar código» y «Generar nuevo» se podían pulsar, no hacían nada que se
 // viera (el aviso de «Necesitas conexión» tapa el error) y el error, de llegar a verse, era el texto
 // de reqwest en inglés. Ahora se apagan y dicen por qué.
+import { readFileSync } from "node:fs";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -46,4 +47,23 @@ it("con conexión se pueden pulsar", async () => {
         expect(boton).toBeEnabled();
         expect(boton).not.toHaveAttribute("title");
     }
+});
+
+// El panel decía «Configuración → "Vincular dispositivo" y escanea», y en la Handy no hay nada así:
+// se vincula desde «Conecta este Handy», a la que se llega eligiendo «Handy» al abrir la app o con
+// «← Vinculación». Cada botón o pantalla que el panel nombra entre comillas tiene que existir en la
+// Handy.
+it("lo que el panel dice que se pulse en el Handy existe en el Handy", async () => {
+    useEstadoSync.setState({ estado: "conectado" });
+    const { container } = render(<VincularHandy darkMode={false} />);
+    await screen.findByText("Pasos");
+    const texto = container.textContent ?? "";
+    expect(texto).not.toContain("Configuración →");
+
+    const handy = ["../../src/app/arranque/EmparejarHandy.tsx", "../../src/app/arranque/SelectorModo.tsx", "../../src/app/AppBoot.tsx"]
+        .map((f) => readFileSync(new URL(f, import.meta.url), "utf8"))
+        .join("\n");
+    const nombrados = [...texto.matchAll(/«([^»]+)»/g)].map((m) => m[1]!);
+    expect(nombrados).toEqual(expect.arrayContaining(["Conecta este Handy", "Vincular dispositivo", "← Vinculación"]));
+    for (const nombre of nombrados) expect(handy, nombre).toContain(nombre);
 });
