@@ -2769,8 +2769,11 @@ export type PunchStatus = {
 	 *  backend con el mismo «hoy» con el que eligió la jornada, no la pantalla con el reloj del
 	 *  dispositivo, que en otra zona o cerca de medianoche decía «Jornada de ayer» de la de hoy
 	 *  (AUT-INC-02).
+	 *
+	 *  `default`: una Handy actualizada antes que el worker recibe el estado sin este campo, y sin
+	 *  el `default` no podía leerlo y nadie podía fichar ni entrar. Ausente = la de hoy.
 	 */
-	jornada_anterior: boolean,
+	jornada_anterior?: boolean,
 };
 
 export type PunchStatusArgs = {

@@ -47,7 +47,26 @@ pub struct PunchStatus {
     /// backend con el mismo «hoy» con el que eligió la jornada, no la pantalla con el reloj del
     /// dispositivo, que en otra zona o cerca de medianoche decía «Jornada de ayer» de la de hoy
     /// (AUT-INC-02).
+    ///
+    /// `default`: una Handy actualizada antes que el worker recibe el estado sin este campo, y sin
+    /// el `default` no podía leerlo y nadie podía fichar ni entrar. Ausente = la de hoy.
+    #[serde(default)]
     pub jornada_anterior: bool,
+}
+
+#[cfg(test)]
+mod tests_punch_status {
+    use super::PunchStatus;
+
+    /// Un worker anterior a `jornada_anterior` no lo manda: el estado se lee igual.
+    #[test]
+    fn el_estado_de_un_worker_sin_jornada_anterior_se_lee() {
+        let estado: PunchStatus = serde_json::from_str(
+            r#"{"fecha":"2026-11-18","turno_partido":0,"partes":[]}"#,
+        )
+        .expect("el estado sin jornada_anterior");
+        assert!(!estado.jornada_anterior);
+    }
 }
 
 /* =========================================================
