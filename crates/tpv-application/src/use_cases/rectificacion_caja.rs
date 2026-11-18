@@ -32,7 +32,8 @@ use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, DeleteGastoInput, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cierre_caja::{
-    calcular, fecha_de_apunte, momento_de_gasto, TotalesCaja,
+    calcular, fecha_de_apunte, momento_caja_de_gasto, momento_de_gasto, momento_de_gasto_guardado,
+    TotalesCaja,
 };
 use tpv_domain::cuentas::normalize_metodo;
 
@@ -88,12 +89,32 @@ fn posicion_guardada(a: &ApunteGuardado) -> Option<Posicion> {
             fecha,
             importe,
             pagado_con_caja,
+            momento_caja,
             ..
         } => Some(Posicion {
-            momento: momento_de_gasto(fecha)?,
+            momento: momento_de_gasto_guardado(fecha, momento_caja.as_deref())?,
             aporte: TotalesCaja::de_gasto(*pagado_con_caja, *importe),
         }),
     }
+}
+
+/// «Ahora», en el formato de las horas de caja. Es el mismo que usará el repositorio al guardar el
+/// gasto (CAJ-INC-01): un gasto del día cuenta desde que se apunta, y lo que se previsualiza tiene
+/// que ser lo que se guarda.
+fn ahora() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Dónde caerá un gasto con la fecha `fecha`: si sigue en el mismo día que el guardado, donde ya
+/// estaba (no se le cambia la hora de caja); si no, donde lo pone `momento_caja_de_gasto`.
+fn momento_de_gasto_nuevo(fecha: &str, guardado: Option<&Posicion>, dia_guardado: Option<&str>) -> AppResult<String> {
+    let dia = fecha_de_apunte(fecha).ok_or_else(|| AppError::validation(FECHA_DE_GASTO_NO_VALIDA))?;
+    if let (Some(p), Some(antes)) = (guardado, dia_guardado.and_then(fecha_de_apunte)) {
+        if antes.get(..10) == dia.get(..10) {
+            return Ok(p.momento.clone());
+        }
+    }
+    momento_caja_de_gasto(fecha, &ahora()).ok_or_else(|| AppError::validation(FECHA_DE_GASTO_NO_VALIDA))
 }
 
 /// Lo que el arqueo de un cierre dice HOY: lo rectificado si lo hay, la foto de esa noche si no.
@@ -247,8 +268,7 @@ async fn planificar(
             importe,
             pagado_con_caja,
         } => {
-            let momento = momento_de_gasto(fecha)
-                .ok_or_else(|| AppError::validation(FECHA_DE_GASTO_NO_VALIDA))?;
+            let momento = momento_de_gasto_nuevo(fecha, None, None)?;
             let despues = Posicion {
                 momento,
                 aporte: TotalesCaja::de_gasto(*pagado_con_caja, *importe),
@@ -261,13 +281,14 @@ async fn planificar(
             importe,
             pagado_con_caja,
         } => {
-            let momento = momento_de_gasto(fecha)
-                .ok_or_else(|| AppError::validation(FECHA_DE_GASTO_NO_VALIDA))?;
+            fecha_de_apunte(fecha).ok_or_else(|| AppError::validation(FECHA_DE_GASTO_NO_VALIDA))?;
             let guardado = repo.apunte(ApunteCaja::Gasto, id_gasto.trim()).await?;
-            if !matches!(guardado, Some(ApunteGuardado::Gasto { .. })) {
-                return Ok((Vec::new(), guardado));
-            }
+            let dia_guardado = match guardado.as_ref() {
+                Some(ApunteGuardado::Gasto { fecha, .. }) => fecha.clone(),
+                _ => return Ok((Vec::new(), guardado)),
+            };
             let antes = guardado.as_ref().and_then(posicion_guardada);
+            let momento = momento_de_gasto_nuevo(fecha, antes.as_ref(), Some(&dia_guardado))?;
             let despues = Posicion {
                 momento,
                 aporte: TotalesCaja::de_gasto(*pagado_con_caja, *importe),

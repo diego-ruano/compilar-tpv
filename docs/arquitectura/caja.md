@@ -77,10 +77,15 @@ retirado  = contado − dejado
   lote pueden ser negativos, en la Main (`ProductoUpsert::validar`, `LoteNuevo::validar`) y en el
   worker, con la misma regla y el mismo texto (`validacion_casos.json`); y una línea siempre copia
   el precio del catálogo (RI-27).
-- **Un gasto sólo resta si lleva `Pagado_Con_Caja`.** Un gasto no tiene hora: para decidir en qué
-  periodo cae se toma a las **12:00 de su día** (`HORA_DE_UN_GASTO`, la misma expresión en el SQL de
-  `totales_desde` y en `momento_de_gasto`). El gasto de la tarde cae en el cierre de esa noche aunque
-  se cierre de madrugada.
+- **Un gasto sólo resta si lleva `Pagado_Con_Caja`.** Para decidir en qué periodo cae se compara
+  por su **hora de caja** (`Cuentas_Gastos.Momento_Caja`, CAJ-INC-01), que pone quien escribe: al
+  apuntarlo con la fecha de hoy, la hora de ese momento; con la de otro día, o al cambiarlo a otro
+  día, ese día a las **12:00** (`HORA_DE_UN_GASTO`). Cambiar otra cosa no la mueve. Un gasto sin
+  ella cuenta a las 12:00 de su día. Es la misma expresión en el SQL del arqueo
+  (`COALESCE(Momento_Caja, …)`) y en `momento_de_gasto_guardado`, que usa la rectificación. Así, el
+  hielo pagado a la 01:20 cuenta en el cierre de la 01:30, y el gasto de la tarde apuntado al día
+  siguiente cae en el cierre de esa noche aunque se cierre de madrugada. El worker no escribe gastos
+  (las rutas de caja se vetan a la Handy).
 - **Lo que se deja en el cajón es el fondo del cierre siguiente.** El fondo sólo se acepta de la
   entrada en el **primer** cierre; en los demás lo manda el `Dejado` del anterior, para que nadie
   pueda reescribir el punto de partida y hacer desaparecer un descuadre.

@@ -219,22 +219,51 @@ fn tiene_forma(texto: &str, patron: &str) -> bool {
             .all(|(c, p)| if p == b'9' { c.is_ascii_digit() } else { c == p })
 }
 
-/// La hora a la que se da por hecho un gasto al decidir en qué cierre cae (CAJA-01).
+/// La hora a la que se da por hecho un gasto **sin hora de caja** al decidir en qué cierre cae
+/// (CAJA-01).
 ///
-/// Un gasto sólo guarda el día y un cierre es un instante, así que hace falta una hora. El mediodía
-/// es la que acierta en los dos horarios normales de un bar: si se cierra a las 23:00, el gasto de
-/// esa tarde cae en el cierre de esa noche; si se cierra a la 01:30 del día siguiente, también — y no
-/// en el de la madrugada anterior, que es donde caería tomando las 00:00. Lo que no puede acertar es
-/// un bar con dos cierres el mismo día: con sólo la fecha, el gasto va al primero.
+/// Un gasto guarda su momento de caja (`Momento_Caja`, CAJ-INC-01) cuando se apunta el mismo día,
+/// pero los apuntados para otro día —o los de antes de esa columna— sólo tienen el día, y un cierre
+/// es un instante. El mediodía es la hora que acierta en los dos horarios normales de un bar: si se
+/// cierra a las 23:00, el gasto de esa tarde cae en el cierre de esa noche; si se cierra a la 01:30
+/// del día siguiente, también — y no en el de la madrugada anterior, que es donde caería tomando las
+/// 00:00.
 ///
 /// La usan el SQL que suma los gastos de un periodo y el que busca a qué cierre pertenece un gasto.
 /// Si cada uno eligiera su hora, un gasto podría contar en un cierre y rectificar otro.
 pub const HORA_DE_UN_GASTO: &str = "12:00:00";
 
-/// El instante con el que un gasto se compara contra los cierres. `None` si la fecha no es válida.
+/// El instante de un día con el que se compara un gasto que no tiene hora de caja. `None` si la
+/// fecha no es válida.
 pub fn momento_de_gasto(fecha: &str) -> Option<String> {
     let f = fecha_de_apunte(fecha)?;
     Some(format!("{} {HORA_DE_UN_GASTO}", f.get(..10)?))
+}
+
+/// La hora de caja que se guarda en un gasto que se apunta (o se cambia de día) en el instante
+/// `ahora` (CAJ-INC-01).
+///
+/// Si es del mismo día que `ahora`, el dinero sale del cajón ahora: es su momento, y así el gasto
+/// apuntado a la 01:20 cuenta en el cierre de la 01:30 en vez de en el siguiente (a las 12:00 de
+/// «hoy» quedaba después de ese cierre). Si es de otro día, no hay otra hora que el día:
+/// [`momento_de_gasto`]. `None` si alguna de las dos fechas no es válida.
+pub fn momento_caja_de_gasto(fecha: &str, ahora: &str) -> Option<String> {
+    let dia = fecha_de_apunte(fecha)?;
+    let ahora = fecha_de_apunte(ahora)?;
+    if ahora.len() > 10 && ahora.get(..10)? == dia.get(..10)? {
+        Some(ahora)
+    } else {
+        momento_de_gasto(fecha)
+    }
+}
+
+/// El instante con el que se compara un gasto guardado: su hora de caja si la tiene y, si no, su
+/// día a las 12:00. Dice lo mismo que el `COALESCE(Momento_Caja, …)` del SQL del arqueo.
+pub fn momento_de_gasto_guardado(fecha: &str, momento_caja: Option<&str>) -> Option<String> {
+    momento_caja
+        .and_then(fecha_de_apunte)
+        .filter(|m| m.len() > 10)
+        .or_else(|| momento_de_gasto(fecha))
 }
 
 #[cfg(test)]
@@ -451,5 +480,34 @@ mod tests {
             Some("2026-05-10 12:00:00")
         );
         assert_eq!(momento_de_gasto("10/05/2026"), None);
+    }
+
+    #[test]
+    fn un_gasto_apuntado_hoy_cuenta_desde_ahora_y_uno_de_otro_dia_a_mediodia() {
+        // CAJ-INC-01. Apuntado a la 01:20 del día 11 con fecha del 11: sale del cajón a la 01:20 y
+        // es del cierre de la 01:30, no del siguiente (a las 12:00 del 11 caía después).
+        assert_eq!(
+            momento_caja_de_gasto("2026-05-11", "2026-05-11 01:20:00").as_deref(),
+            Some("2026-05-11 01:20:00")
+        );
+        // Apuntado el 11 para el 10: sólo hay día.
+        assert_eq!(
+            momento_caja_de_gasto("2026-05-10", "2026-05-11 01:20:00").as_deref(),
+            Some("2026-05-10 12:00:00")
+        );
+        assert_eq!(momento_caja_de_gasto("10/05/2026", "2026-05-11 01:20:00"), None);
+    }
+
+    #[test]
+    fn un_gasto_guardado_se_compara_por_su_hora_de_caja_si_la_tiene() {
+        assert_eq!(
+            momento_de_gasto_guardado("2026-05-11", Some("2026-05-11 01:20:00")).as_deref(),
+            Some("2026-05-11 01:20:00")
+        );
+        assert_eq!(
+            momento_de_gasto_guardado("2026-05-11", None).as_deref(),
+            Some("2026-05-11 12:00:00"),
+            "sin hora de caja, a mediodía de su día"
+        );
     }
 }

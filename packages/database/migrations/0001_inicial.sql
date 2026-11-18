@@ -786,6 +786,11 @@ ON Suelto_Consumos(ID_Producto);
 --
 -- Pagado_Con_Caja (CAJA-01): el dinero salio del cajon. Solo esos gastos restan del esperado del
 -- arqueo; una factura pagada por banco no ha tocado el cajon, y restarla haria "sobrar" ese dinero.
+--
+-- Momento_Caja (CAJ-INC-01): el instante con el que el gasto se compara contra los cierres. Lo pone
+-- quien escribe: la hora de apuntarlo si es del mismo dia, o ese dia a las 12:00 si es de otro. Sin
+-- el, se toma su dia a las 12:00 (HORA_DE_UN_GASTO), y un gasto apuntado de madrugada caia despues
+-- del cierre de esa madrugada.
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT NOT NULL PRIMARY KEY,
   Fecha DATE NOT NULL,
@@ -794,6 +799,7 @@ CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   Tipo_Gasto TEXT NOT NULL,
   ID_Proveedor TEXT NULL,
   Pagado_Con_Caja INTEGER NOT NULL DEFAULT 0,
+  Momento_Caja TEXT NULL,
   CHECK (Pagado_Con_Caja IN (0, 1)),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL
 );

@@ -45,11 +45,12 @@ fn texto_o_nulo(s: Option<&str>) -> Value {
 
 /// El instante con el que se compara un gasto contra un cierre, escrito en SQL.
 ///
-/// Tiene que decir lo mismo que `tpv_domain::cierre_caja::momento_de_gasto`, y por eso las dos
-/// salen de la misma constante: si cada lado eligiera su hora, un gasto podría contar en el arqueo de
-/// un cierre y rectificar el de otro.
-fn momento_de_gasto_sql(columna: &str) -> String {
-    format!("datetime(date({columna}) || ' {HORA_DE_UN_GASTO}')")
+/// Tiene que decir lo mismo que `tpv_domain::cierre_caja::momento_de_gasto_guardado`, y por eso las
+/// dos salen de la misma constante: si cada lado eligiera su hora, un gasto podría contar en el
+/// arqueo de un cierre y rectificar el de otro. Su hora de caja si la tiene (CAJ-INC-01) y, si no,
+/// su día a las 12:00.
+fn momento_de_gasto_sql() -> String {
+    format!("COALESCE(datetime(Momento_Caja), datetime(date(Fecha) || ' {HORA_DE_UN_GASTO}'))")
 }
 
 /// Columnas de un cierre, en el orden que espera `map_cierre`. El nombre de quien cerró se resuelve
@@ -151,8 +152,8 @@ async fn totales_entre<C: Reader>(
     // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
     // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
     //
-    // GASTOS (CAJA-01). Sólo los que salieron del cajón, y comparados a mediodía de su día
-    // (`HORA_DE_UN_GASTO`): un gasto no guarda hora.
+    // GASTOS (CAJA-01). Sólo los que salieron del cajón, y comparados por su hora de caja
+    // (`Momento_Caja`, CAJ-INC-01) o, sin ella, a mediodía de su día (`HORA_DE_UN_GASTO`).
     //
     // Las mismas reglas, sumadas aquí, son las que usa `TotalesCaja::de_cobro`/`de_gasto` para
     // previsualizar un cambio. Si una cambia, la otra también.
@@ -161,8 +162,8 @@ async fn totales_entre<C: Reader>(
     // usar idx_pagos_estado_fecha y cada arqueo recorría todos los cobros de la historia. Vale
     // porque las dos partes están en formato canónico: `desde` es la `Fecha_Hora` de un cierre y
     // `Fecha_Hora`/`Anulado_En` de un pago las pone el sistema (`fecha_de_apunte` normaliza lo que
-    // se edita a mano). Los gastos sí pasan por `momento_de_gasto_sql`: sólo guardan el día.
-    let gasto = momento_de_gasto_sql("Fecha");
+    // se edita a mano). Los gastos sí pasan por `momento_de_gasto_sql`: no todos guardan la hora.
+    let gasto = momento_de_gasto_sql();
     let sql = format!(
         r#"
         SELECT
@@ -703,7 +704,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             ApunteCaja::Gasto => {
                 r#"
                 SELECT COALESCE(Fecha,''), IFNULL(Importe,0), COALESCE(Pagado_Con_Caja,0),
-                       COALESCE(Concepto,'')
+                       COALESCE(Concepto,''), Momento_Caja
                 FROM Cuentas_Gastos WHERE ID_Gasto = ?1 LIMIT 1;
                 "#
             }
@@ -730,6 +731,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 importe: v_dinero(g(1)?).unwrap_or(Dinero::CERO),
                 pagado_con_caja: v_i64(g(2)?).unwrap_or(0) != 0,
                 concepto: v_string(g(3)?).unwrap_or_default(),
+                momento_caja: norm_opt_string(g(4)?),
             },
         }))
     }
@@ -1221,6 +1223,111 @@ mod tests {
 
         let lista = cierres.listar(10).await.unwrap();
         assert_eq!(lista[0].rect_descuadre, Some(eur(5.0)));
+    }
+
+    /// Un cierre de la madrugada del 11, a la 01:30, que empieza en el de la noche del 10.
+    const CIERRE_DE_MADRUGADA: &str = "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario,
+        Periodo_Desde, Fondo_Inicial, Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre,
+        Dejado, Retirado)
+        VALUES ('c2', '2026-05-11 01:30:00', 'u1', '2026-05-10 23:00:00', 0, 0, 500, -500, 0, 500, 0, 0);";
+
+    /// El hielo que se pagó del cajón a la 01:20 del día 11, apuntado en ese momento.
+    const GASTO_DE_MADRUGADA: &str = "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe,
+        Tipo_Gasto, Pagado_Con_Caja, Momento_Caja)
+        VALUES ('g-1h', '2026-05-11', 'Hielo', 500, 'Suministros', 1, '2026-05-11 01:20:00');";
+
+    #[tokio::test]
+    async fn un_gasto_apuntado_de_madrugada_cuenta_en_el_cierre_de_esa_madrugada() {
+        // CAJ-INC-01. Con sólo el día, el gasto del 11 contaba a las 12:00 del 11: después del
+        // cierre de la 01:30, que es cuando salió el dinero. Con su hora de caja, cuenta en él.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[GASTO_DE_MADRUGADA]).await;
+
+        let t = totales_entre(&db.read().await, Some("2026-05-10 23:00:00"), Some("2026-05-11 01:30:00"))
+            .await
+            .unwrap();
+        assert_eq!(t.gastos_caja, eur(5.0));
+        let siguiente = totales_entre(&db.read().await, Some("2026-05-11 01:30:00"), None).await.unwrap();
+        assert_eq!(siguiente.gastos_caja, Dinero::CERO, "y no lo vuelve a contar el siguiente");
+    }
+
+    #[tokio::test]
+    async fn corregir_un_gasto_de_madrugada_rectifica_el_cierre_en_que_conto() {
+        // La rectificación busca el cierre por la misma hora que el arqueo: si no, el gasto contaría
+        // en un cierre y corregirlo rectificaría otro (o ninguno).
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_DE_MADRUGADA, GASTO_DE_MADRUGADA]).await;
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+
+        let impacto = rect::previsualizar(
+            &caja,
+            &CambioCajaInput::EditarGasto {
+                id_gasto: "g-1h".into(),
+                fecha: "2026-05-11".into(),
+                importe: eur(8.0),
+                pagado_con_caja: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(impacto.cierres.len(), 1);
+        assert_eq!(impacto.cierres[0].id_cierre, "c2");
+        assert_eq!(impacto.cierres[0].esperado_despues, eur(-8.0));
+    }
+
+    /// La hora de caja guardada de un gasto.
+    async fn momento_caja(db: &Arc<Db>, id: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Momento_Caja FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
+                vec![Value::Text(id.into())],
+            )
+            .await
+            .unwrap();
+        norm_opt_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap())
+    }
+
+    #[tokio::test]
+    async fn un_gasto_guarda_su_hora_de_caja_al_apuntarlo_y_al_cambiarlo_de_dia() {
+        // CAJ-INC-01. La pone quien escribe: de hoy, la hora de apuntarlo; de otro día, ese día a
+        // las 12:00. Cambiar el importe no la mueve; cambiar el día, sí.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+        let hoy = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let antes = como_hora_de_caja(chrono::Local::now());
+
+        let mut de_hoy = gasto(&hoy, 5.0, Some(true));
+        de_hoy.id_gasto = Some("g-hoy".into());
+        tpv_application::use_cases::cuentas::create_gasto(&cuentas, Some("u1"), de_hoy).await.unwrap();
+        let m = momento_caja(&db, "g-hoy").await.expect("un gasto de hoy lleva su hora");
+        assert!(m.starts_with(&hoy) && m.as_str() >= antes.as_str(), "{m} es la hora de apuntarlo");
+
+        let mut de_ayer = gasto("2026-05-10", 5.0, Some(true));
+        de_ayer.id_gasto = Some("g-otro".into());
+        tpv_application::use_cases::cuentas::create_gasto(&cuentas, Some("u1"), de_ayer).await.unwrap();
+        assert_eq!(momento_caja(&db, "g-otro").await.as_deref(), Some("2026-05-10 12:00:00"));
+
+        let editar = |id: &str, fecha: &str, importe: f64| tpv_contracts::cuentas::UpdateGastoInput {
+            id_gasto: id.into(),
+            fecha: fecha.into(),
+            tipo_gasto: "Suministros".into(),
+            concepto: "Hielo".into(),
+            importe: eur(importe),
+            proveedor_id: None,
+            pagado_con_caja: Some(true),
+        };
+        tpv_application::use_cases::cuentas::update_gasto(&cuentas, editar("g-hoy", &hoy, 7.0))
+            .await
+            .unwrap();
+        assert_eq!(momento_caja(&db, "g-hoy").await.as_deref(), Some(m.as_str()), "mismo día, misma hora");
+
+        tpv_application::use_cases::cuentas::update_gasto(&cuentas, editar("g-hoy", "2026-05-09", 7.0))
+            .await
+            .unwrap();
+        assert_eq!(momento_caja(&db, "g-hoy").await.as_deref(), Some("2026-05-09 12:00:00"));
     }
 
     #[tokio::test]

@@ -26,6 +26,12 @@ use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use tpv_domain::cantidad::redondear_cantidad;
+use tpv_domain::cierre_caja::momento_caja_de_gasto;
+
+/// «Ahora» para la hora de caja de un gasto (CAJ-INC-01), en el formato de las horas de caja.
+fn ahora_de_caja() -> String {
+    crate::cierre_caja::como_hora_de_caja(chrono::Local::now())
+}
 
 pub struct SqliteCuentasRepository {
     db: Arc<Db>,
@@ -549,18 +555,22 @@ impl CuentasRepository for SqliteCuentasRepository {
         let id_gasto_mov = id_gasto.clone();
         let importe = g.importe;
         let concepto = g.concepto.clone();
+        // CAJ-INC-01: su hora de caja la pone quien escribe (decisión 0004). Si es de hoy, ahora; si
+        // es de otro día, ese día a mediodía.
+        let momento_caja = momento_caja_de_gasto(&g.fecha, &ahora_de_caja());
         let db = self.db.write().await;
         db.execute(
                 r#"
-                INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja)
-                VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7)
+                INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja, Momento_Caja)
+                VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7, ?8)
                 ON CONFLICT(ID_Gasto) DO UPDATE SET
                   Fecha = excluded.Fecha,
                   Concepto = excluded.Concepto,
                   Importe = excluded.Importe,
                   Tipo_Gasto = excluded.Tipo_Gasto,
                   ID_Proveedor = excluded.ID_Proveedor,
-                  Pagado_Con_Caja = excluded.Pagado_Con_Caja;
+                  Pagado_Con_Caja = excluded.Pagado_Con_Caja,
+                  Momento_Caja = excluded.Momento_Caja;
                 "#,
                 vec![
                     Value::Text(id_gasto),
@@ -573,6 +583,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         None => Value::Null,
                     },
                     Value::Integer(i64::from(g.pagado_con_caja)),
+                    momento_caja.map_or(Value::Null, Value::Text),
                 ],
             )
             .await
@@ -597,13 +608,18 @@ impl CuentasRepository for SqliteCuentasRepository {
     }
 
     async fn actualizar_gasto(&self, id_gasto: &str, g: GastoData) -> AppResult<bool> {
+        // CAJ-INC-01: si el gasto sigue en el mismo día, conserva su hora de caja (el dinero salió
+        // cuando salió); si se cambia de día, la del día nuevo. Las expresiones de un UPDATE leen la
+        // fila de antes, así que `date(Fecha)` es el día que tenía.
+        let momento_caja = momento_caja_de_gasto(&g.fecha, &ahora_de_caja());
         let db = self.db.write().await;
         let affected = db
             .execute(
                 r#"
                 UPDATE Cuentas_Gastos
                 SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6,
-                    Pagado_Con_Caja = ?7
+                    Pagado_Con_Caja = ?7,
+                    Momento_Caja = CASE WHEN date(?2) IS date(Fecha) THEN Momento_Caja ELSE ?8 END
                 WHERE ID_Gasto = ?1;
                 "#,
                 vec![
@@ -617,6 +633,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         None => Value::Null,
                     },
                     Value::Integer(i64::from(g.pagado_con_caja)),
+                    momento_caja.map_or(Value::Null, Value::Text),
                 ],
             )
             .await

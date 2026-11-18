@@ -32,6 +32,8 @@ pub enum ApunteGuardado {
         importe: Dinero,
         pagado_con_caja: bool,
         concepto: String,
+        /// Su hora de caja (CAJ-INC-01), si la tiene. Sin ella cuenta su día a las 12:00.
+        momento_caja: Option<String>,
     },
 }
 
