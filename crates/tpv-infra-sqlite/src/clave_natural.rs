@@ -164,7 +164,13 @@ pub(crate) async fn fundir(
         let sentencias = sentencias_de_la_fusion(conn, d, columnas, &nube, &id_nube, &locales, &de_aqui).await?;
         w.transaccion(async {
             for s in &sentencias {
-                let args = s.args.iter().map(crate::convergencia::celda).collect::<Option<Vec<Value>>>().unwrap_or_default();
+                // Un valor que no se sabe escribir (un blob) no se cambia por NULL: no se funde.
+                let args = s
+                    .args
+                    .iter()
+                    .map(crate::convergencia::celda)
+                    .collect::<Option<Vec<Value>>>()
+                    .ok_or_else(|| tpv_application::error::AppError::internal("valor_binario"))?;
                 w.execute(&s.sql, args).await.map_err(db_err)?;
             }
             retirar_lo_apartado(conn, d, &locales).await
