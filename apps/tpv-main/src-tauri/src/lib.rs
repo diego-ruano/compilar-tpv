@@ -4093,3 +4093,47 @@ mod tests_exenciones_del_gate {
         );
     }
 }
+
+#[cfg(test)]
+mod tests_hilo_de_la_interfaz {
+    //! SYN-INC-08: un comando Tauri síncrono corre en el hilo principal, que en Android es el de la
+    //! interfaz. Los de la vinculación leen el Keystore por JNI y los de la licencia, el disco: con
+    //! el equipo sin red o lento, la pantalla se congelaba y Android la daba por colgada (ANR). Un
+    //! comando o es `async`, o lleva `#[tauri::command(async)]`, que lo saca del hilo principal sin
+    //! cambiar lo que ve el frontend.
+
+    #[test]
+    fn ningun_comando_corre_en_el_hilo_de_la_interfaz() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut ficheros = vec![dir.join("lib.rs")];
+        for entrada in std::fs::read_dir(dir.join("commands")).unwrap() {
+            let ruta = entrada.unwrap().path();
+            if ruta.extension().is_some_and(|e| e == "rs") {
+                ficheros.push(ruta);
+            }
+        }
+        let mut vistos = 0;
+        for fichero in ficheros {
+            let fuente = std::fs::read_to_string(&fichero).unwrap();
+            for bloque in fuente.split("#[tauri::command]").skip(1) {
+                // Lo que sigue al atributo, saltando otros atributos y comentarios. Si no es una
+                // función, el texto era una cadena (los tests de este fichero lo citan).
+                let firma = bloque
+                    .lines()
+                    .map(str::trim)
+                    .find(|l| !l.is_empty() && !l.starts_with("#[") && !l.starts_with("//"))
+                    .unwrap_or("");
+                if !firma.starts_with("pub") {
+                    continue;
+                }
+                vistos += 1;
+                assert!(
+                    firma.contains("async fn"),
+                    "{}: `{firma}` correría en el hilo de la interfaz; hazlo `async` o ponle `#[tauri::command(async)]`",
+                    fichero.display()
+                );
+            }
+        }
+        assert!(vistos > 100, "el test ha dejado de ver los comandos ({vistos})");
+    }
+}

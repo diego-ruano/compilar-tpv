@@ -23,6 +23,11 @@ import {
 } from "./emparejamiento";
 
 export type EstadoEmparejamiento =
+	/**
+	 * SYN-INC-08: todavía no se ha leído el vínculo guardado. No es «sin vincular»: un Handy ya
+	 * vinculado que arranca sin red tardaba en contestar, y entretanto se le pedía vincularse.
+	 */
+	| { step: "leyendo" }
 	| { step: "idle" }
 	| {
 			step: "waiting_approval";
@@ -48,7 +53,8 @@ async function leerVinculoGuardado(): Promise<EstadoEmparejamiento> {
 }
 
 export function useEmparejamientoHandy(modo: ModeStateValue) {
-	const [estado, setEstado] = useState<EstadoEmparejamiento>({ step: "idle" });
+	// SYN-INC-08: se empieza leyendo; lo que no es un Handy no mira este estado.
+	const [estado, setEstado] = useState<EstadoEmparejamiento>({ step: "leyendo" });
 	const [ocupado, setOcupado] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	// Huella propia del dispositivo: el operador de la Main la compara con la que ve en la
@@ -89,6 +95,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	 */
 	async function cargarEmparejamientoExistente() {
 		setError(null);
+		setEstado({ step: "leyendo" });
 		try {
 			setEstado(await leerVinculoGuardado());
 		} catch (e: unknown) {

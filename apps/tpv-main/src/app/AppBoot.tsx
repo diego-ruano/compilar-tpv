@@ -120,6 +120,7 @@ export default function AppBoot({ router }: { router: any }) {
 		licenciaCargando: licencia.lic === "loading",
 		gate: licencia.gate === "loading" ? null : licencia.gate,
 		handyEmparejado,
+		handyLeyendoVinculo: emparejamiento.estado.step === "leyendo",
 		mainOnline,
 		mainVolcando,
 		rechazoHandy,

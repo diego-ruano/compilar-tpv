@@ -26,13 +26,13 @@ pub(crate) fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
     Ok(LicensingAdapter::new(app_data_dir(app)?))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn license_get_state(app: AppHandle) -> Result<Option<LicenseLocalState>, AppErrorDto> {
     Ok(uc::get_state(&svc(&app)?)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn license_clear_state(app: AppHandle) -> Result<String, AppErrorDto> {
     uc::clear_state(&svc(&app)?)?;

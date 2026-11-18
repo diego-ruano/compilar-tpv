@@ -34,6 +34,7 @@ const entrada = (e: Partial<EntradaArranque>): EntradaArranque => ({
 	licenciaCargando: false,
 	gate: gate(true, "ok"),
 	handyEmparejado: false,
+	handyLeyendoVinculo: false,
 	mainOnline: null,
 	mainVolcando: false,
 	rechazoHandy: null,
@@ -47,6 +48,8 @@ describe("qué pantalla enseña el arranque", () => {
 		["mientras se lee la licencia", { licenciaCargando: true }, { tipo: "cargando" }],
 		["un equipo sin modo elige modo", { modo: null }, { tipo: "elegir_modo" }],
 		["un Handy sin emparejar vincula, aunque haya Main", { modo: "handy", mainOnline: true }, { tipo: "handy_vincular" }],
+		// SYN-INC-08: un Handy vinculado que arranca sin red tarda en leer su vínculo; no se le pide vincular.
+		["un Handy que aún lee su vínculo espera cargando", { modo: "handy", handyLeyendoVinculo: true }, { tipo: "cargando" }],
 		[
 			"un Handy que aún no sabe de la Main espera, conectando",
 			{ modo: "handy", handyEmparejado: true, mainOnline: null },

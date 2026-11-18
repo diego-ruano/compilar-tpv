@@ -18,6 +18,8 @@
 //     antes se sustituía entera, y al volver la Main cada página empezaba de cero (la ficha que se
 //     editaba, el modal abierto, la lista en la que se estaba). Al arrancar o al vincular de nuevo
 //     no hay nada que conservar, y la espera sigue siendo la pantalla entera.
+//   · SYN-INC-08: un Handy que todavía no sabe si tiene vínculo guardado no es un Handy sin vincular:
+//     mientras lo lee, la pantalla de carga, no el formulario de vincular.
 
 import type { LicenseGateResult_Serialize as LicenseGateResult } from "@tpv/contracts";
 
@@ -32,6 +34,8 @@ export type EntradaArranque = {
 	gate: LicenseGateResult | null;
 	/** El Handy tiene token de emparejamiento. */
 	handyEmparejado: boolean;
+	/** SYN-INC-08: todavía se está leyendo si el Handy tiene vínculo guardado. */
+	handyLeyendoVinculo: boolean;
 	mainOnline: boolean | null;
 	mainVolcando: boolean;
 	/** La nube no deja entrar a este Handy, y por qué. `null` mientras no lo haya dicho. */
@@ -95,6 +99,8 @@ function pantalla(e: EntradaArranque): Pantalla {
 	if (e.modo === null) return { tipo: "elegir_modo" };
 
 	if (e.modo === "handy") {
+		// SYN-INC-08: sin saber todavía si hay vínculo, no se pide vincular: es la pantalla de carga.
+		if (e.handyLeyendoVinculo) return { tipo: "cargando" };
 		if (!e.handyEmparejado) return { tipo: "handy_vincular" };
 		if (e.mainOnline === true && !e.mainVolcando) return { tipo: "handy_app", espera: null };
 		const espera: EsperaHandy = {

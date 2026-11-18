@@ -17,13 +17,13 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 /// Sólo lectura/control de transporte: ningún comando acepta SQL ni confirmaciones.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_estado(app: AppHandle) -> tpv_contracts::sync::EstadoReplicacion {
     app.state::<crate::replicacion::SyncNativo>().estado()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn sync_reintentar(app: AppHandle) {
     app.state::<crate::replicacion::SyncNativo>().reintentar();

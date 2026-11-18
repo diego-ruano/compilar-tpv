@@ -93,20 +93,20 @@ pub async fn handy_set_token(app: AppHandle, state: State<'_, AppState>, args: H
     Ok("OK".into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
 
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto> {
     Ok(uc::device_identity(&svc(&app)?)?)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejamientoArgs) -> Result<FirmaDispositivo, AppErrorDto> {
     Ok(uc::firmar_emparejamiento(&svc(&app)?, args)?)
@@ -116,7 +116,7 @@ pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejami
 /// la de la nube, no la del equipo: con un reloj desfasado más de 2 min la nube rechaza la firma.
 /// Sin sesión, como los comandos de firma acotada: se usa en el emparejamiento de la Handy, antes de que nadie
 /// entre.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 pub fn device_hora_para_firmar(app: AppHandle) -> Result<i64, AppErrorDto> {
     Ok(uc::hora_para_firmar(&svc(&app)?))
