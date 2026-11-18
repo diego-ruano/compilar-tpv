@@ -39,6 +39,7 @@ const REPOSITORIOS: &[(&str, &str)] = &[
     ("login", include_str!("login.rs")),
     ("mesas", include_str!("mesas.rs")),
     ("notificaciones", include_str!("notificaciones.rs")),
+    ("pedidos_proveedor", include_str!("pedidos_proveedor.rs")),
     ("permisos", include_str!("permisos.rs")),
     ("proveedores", include_str!("proveedores.rs")),
     ("reservas", include_str!("reservas.rs")),

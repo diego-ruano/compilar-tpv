@@ -58,7 +58,8 @@ use tpv_infra_http::{
     cierre_caja::HttpCierreCajaRepository, clientes::HttpClientesRepository,
     configuracion::HttpConfiguracionRepository, cuentas::HttpCuentasRepository,
     inventario::HttpInventarioRepository, login::HttpLoginRepository, mesas::HttpMesasRepository,
-    notificaciones::HttpNotificacionesRepository, proveedores::HttpProveedoresRepository,
+    notificaciones::HttpNotificacionesRepository,
+    pedidos_proveedor::HttpPedidoProveedorRepository, proveedores::HttpProveedoresRepository,
     reservas::HttpReservasRepository, stats::HttpStatsRepository, tareas::HttpTareasRepository,
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
@@ -704,6 +705,13 @@ impl AppState {
         SqliteProveedoresRepository,
         HttpProveedoresRepository
     );
+    // PED-HANDY: los pedidos a proveedores también se gestionan desde la Handy, contra la nube.
+    repo_accessor!(
+        pedidos_proveedor_repo,
+        PedidoProveedorRepository,
+        SqlitePedidoProveedorRepository,
+        HttpPedidoProveedorRepository
+    );
     repo_accessor!(
         reservas_repo,
         ReservasRepository,
@@ -807,7 +815,7 @@ impl AppState {
     }
 
     /// La base local, para lo que **sólo existe en la Main**: los registros de facturación, el
-    /// ticket de un cobro y los pedidos a proveedores.
+    /// ticket de un cobro, la reserva web, la réplica y lo que recorren los jobs.
     ///
     /// Pedirlo desde una Handy no es un fallo del programa: es algo que ese equipo no tiene. Se
     /// contesta `conflict` —el estado del equipo no admite la operación—, como hacen sus
@@ -873,17 +881,6 @@ impl AppState {
     ) -> Result<Arc<dyn SyncRepository>, AppErrorDto> {
         let conn = self.base_de_la_main(solo_en_la_main).await?;
         Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
-    }
-
-    /// Pedidos a proveedores: Local-First, solo disponible en modo Main (SQLite).
-    pub(crate) async fn pedidos_proveedor_repo(
-        &self,
-    ) -> Result<Arc<dyn PedidoProveedorRepository>, AppErrorDto> {
-        let conn = self
-            .base_de_la_main("Los pedidos a proveedores sólo se gestionan desde el TPV principal")
-            .await?;
-        Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn))
-            as Arc<dyn PedidoProveedorRepository>)
     }
 
     /// Condición de los jobs que leen o escriben negocio. Una BD vacía o recién restaurada existe,
@@ -2355,7 +2352,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::proveedores::proveedores_get_categorias,
             commands::proveedores::proveedores_get_productos_all,
             commands::proveedores::proveedores_set_vinculos,
-            // pedidos a proveedores (Local-First, modo Main)
+            // pedidos a proveedores (la Main en su base; la Handy contra la nube, PED-HANDY)
             commands::pedidos_proveedor::pedidos_proveedor_get_page,
             commands::pedidos_proveedor::pedidos_proveedor_crear,
             commands::pedidos_proveedor::pedidos_proveedor_actualizar,
@@ -3516,7 +3513,7 @@ mod tests_autorizacion_guardada {
 
 #[cfg(test)]
 mod tests_solo_en_la_main {
-    //! Lo que sólo existe en la Main (registros de facturación, tickets, pedidos a proveedores),
+    //! Lo que sólo existe en la Main (registros de facturación, tickets, la reserva web, los jobs),
     //! pedido desde una Handy: es una respuesta esperada, no un fallo del programa. El código es lo
     //! que decide si el fallo de un comando va a Sentry (`fallosDeComandos.ts`).
 
@@ -3548,7 +3545,6 @@ mod tests_solo_en_la_main {
         vec![
             ("verifactu_repo", st.verifactu_repo().await.err()),
             ("tickets_repo", st.tickets_repo().await.err()),
-            ("pedidos_proveedor_repo", st.pedidos_proveedor_repo().await.err()),
             ("reservas_web_repo", st.reservas_web_repo().await.err()),
             ("reconciliacion_repo", st.reconciliacion_repo().await.err()),
             ("sync_repo_de_la_main", st.sync_repo_de_la_main("Sólo en el TPV principal").await.err()),

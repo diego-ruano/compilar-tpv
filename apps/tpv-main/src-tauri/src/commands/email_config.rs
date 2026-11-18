@@ -27,9 +27,21 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Error obteniendo AppData: {e}"))
 }
 
+/// PED-HANDY: el pedido sale firmado con la identidad de este equipo, la de la Main (`tpv`) o la
+/// de la Handy (`handy`, con su token). Con la de la Main siempre, una Handy fallaba al firmar
+/// antes de mandar nada. El worker acepta a cualquier dispositivo del negocio.
+fn modo_de_firma(modo: Option<crate::DeviceMode>) -> Result<&'static str, AppErrorDto> {
+    crate::signing_mode(modo).ok_or_else(|| {
+        AppErrorDto::new(
+            tpv_contracts::errors::ErrorCode::Conflict,
+            "Este equipo todavía no está configurado como TPV principal ni como Handy.",
+        )
+    })
+}
+
 /* ── Comando ─────────────────────────────────────────────────────────── */
 
-/// SEC-01: exige Administrador. Mandar un pedido compromete dinero con un proveedor y sale
+/// SEC-01: exige `pedidos.gestionar`. Mandar un pedido compromete dinero con un proveedor y sale
 /// firmado con el correo del negocio; «Proveedores y Pedidos» ya era una sección suya en el
 /// menú, y esto es el candado que le faltaba detrás.
 #[tauri::command]
@@ -58,6 +70,8 @@ pub async fn email_enviar_pedido(
         })).collect::<Vec<_>>(),
     });
 
+    let modo = modo_de_firma(*state.mode.lock().await)?;
+
     // El fallo sale con su código (`From<AppError> for AppErrorDto`). Convertido en texto llegaba
     // a la interfaz como `internal`, y lo que falla aquí casi nunca es el programa: no hay red, el
     // worker rechaza al destinatario, o el objeto del negocio no puede atender (`hub_overloaded`,
@@ -66,7 +80,7 @@ pub async fn email_enviar_pedido(
     uc_pairing::tpv_server_post_json(
         &svc,
         tpv_contracts::licensing::TpvServerPostJsonArgs {
-            mode: "tpv".into(),
+            mode: modo.into(),
             path: "/v1/email/enviar-pedido".into(),
             body,
         },
@@ -91,5 +105,19 @@ mod tests {
             .expect("el comando llama a tpv_server_post_json");
         assert!(envio.contains(".await?"), "el error del envío se propaga tal cual: {envio}");
         assert!(!envio.contains("map_err") && !envio.contains("format!"), "sin convertirlo en texto: {envio}");
+    }
+
+    /// PED-HANDY: una Handy manda el pedido con su identidad, no con la de la Main.
+    #[test]
+    fn el_pedido_se_firma_con_el_modo_del_equipo() {
+        use crate::DeviceMode;
+        assert_eq!(super::modo_de_firma(Some(DeviceMode::Tpv)).unwrap(), "tpv");
+        assert_eq!(super::modo_de_firma(Some(DeviceMode::Handy)).unwrap(), "handy");
+        let sin_modo = super::modo_de_firma(None).unwrap_err();
+        assert_eq!(sin_modo.code, tpv_contracts::errors::ErrorCode::Conflict);
+
+        let fuente = include_str!("email_config.rs");
+        let envio = fuente.split("uc_pairing::tpv_server_post_json(").nth(1).unwrap();
+        assert!(envio.contains("mode: modo.into()"), "el modo sale de `modo_de_firma`: {envio}");
     }
 }

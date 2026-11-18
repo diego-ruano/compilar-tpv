@@ -13,8 +13,8 @@
 //!
 //! ## Cobertura
 //! Implementados contra los dominios del worker (`/v1/<modulo>/*`): clientes, configuracion,
-//! cuentas, reservas, tareas, trabajadores, proveedores, stats, venta_rapida, inventario,
-//! mesas y login. Excepción conocida:
+//! cuentas, reservas, tareas, trabajadores, proveedores, pedidos_proveedor, stats, venta_rapida,
+//! inventario, mesas y login. Excepción conocida:
 //! - los métodos de **barra** de `MesasRepository` (el worker los sirve bajo `venta_rapida`):
 //!   se implementan como error explícito `endpoint_no_disponible_en_handy`.
 
@@ -26,6 +26,7 @@ pub mod inventario;
 pub mod login;
 pub mod mesas;
 pub mod notificaciones;
+pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reservas;
 pub mod stats;
