@@ -7,6 +7,7 @@ import { toAppError } from "@tpv/client";
 import { esPermisoDenegado, ROL_ADMIN } from "../../../shared/lib/permisos";
 import { conAviso } from "../../../shared/lib/conAviso";
 import CasillaSinPin from "./CasillaSinPin";
+import { CampoPin } from "../../../shared/ui";
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
@@ -414,15 +415,11 @@ function EditTrabajador() {
               <label className="text-sm font-medium">
                 {sinPinGuardado && !sinPin ? "PIN nuevo *" : "PIN nuevo (opcional)"}
               </label>
-              <input
-                value={pinNuevo}
-                onChange={(e) => setPinNuevo(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={6}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
+              <CampoPin
+                aria-label="PIN nuevo"
+                valor={pinNuevo}
+                onCambio={setPinNuevo}
                 placeholder={sinPinGuardado && !sinPin ? "1234" : "Dejar vacío para no cambiar"}
-                autoComplete="off"
               />
               <p className="text-xs text-fg-subtle">
                 {sinPinGuardado && !sinPin

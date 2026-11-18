@@ -7,6 +7,7 @@ import { toAppError } from "@tpv/client";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { ROL_ADMIN } from "../../../shared/lib/permisos";
 import CasillaSinPin from "./CasillaSinPin";
+import { CampoPin } from "../../../shared/ui";
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
@@ -319,15 +320,11 @@ function AddTrabajador() {
               <label className="text-sm font-medium">
                 {sinPin ? "PIN (opcional)" : "PIN (solo números) *"}
               </label>
-              <input
-                value={password}
-                onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={6}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
+              <CampoPin
+                aria-label="PIN"
+                valor={password}
+                onCambio={setPassword}
                 placeholder="1234"
-                autoComplete="off"
               />
               <p className="text-xs text-fg-subtle">
                 {sinPin

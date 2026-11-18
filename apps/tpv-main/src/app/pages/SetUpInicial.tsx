@@ -13,7 +13,7 @@ import {
 import ConfirmarCorreoRecuperacion from "../../features/login/ConfirmarCorreoRecuperacion";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
-import { Badge, Button, Card, Input } from "../../shared/ui";
+import { Badge, Button, CampoPin, Card, Input } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
 import { conAviso } from "../../shared/lib/conAviso";
 import { correoValido } from "../../shared/lib/correo";
@@ -245,20 +245,13 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                                 >
                                     Tu PIN
                                 </label>
-                                <Input
+                                <CampoPin
                                     id="setup-pin-nuevo"
-                                    type="password"
-                                    value={pinNuevo}
-                                    onChange={(e) =>
-                                        setPinNuevo(
-                                            e.target.value.replace(/\D/g, "").slice(0, 6),
-                                        )
-                                    }
-                                    className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
+                                    valor={pinNuevo}
+                                    onCambio={setPinNuevo}
+                                    claseContenedor="mt-2"
+                                    className="h-12 px-4 text-base tracking-[0.3em]"
                                     placeholder="••••"
-                                    inputMode="numeric"
-                                    autoComplete="new-password"
-                                    maxLength={6}
                                 />
                             </div>
 
@@ -269,24 +262,17 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                                 >
                                     Repite el PIN
                                 </label>
-                                <Input
+                                <CampoPin
                                     id="setup-pin-confirmacion"
-                                    type="password"
-                                    value={pinNuevo2}
-                                    onChange={(e) =>
-                                        setPinNuevo2(
-                                            e.target.value.replace(/\D/g, "").slice(0, 6),
-                                        )
-                                    }
+                                    valor={pinNuevo2}
+                                    onCambio={setPinNuevo2}
                                     invalid={
                                         pinNuevo2.length > 0 &&
                                         pinNuevo !== pinNuevo2
                                     }
-                                    className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
+                                    claseContenedor="mt-2"
+                                    className="h-12 px-4 text-base tracking-[0.3em]"
                                     placeholder="••••"
-                                    inputMode="numeric"
-                                    autoComplete="new-password"
-                                    maxLength={6}
                                 />
                                 {pinNuevo2.length > 0 && pinNuevo === pinNuevo2 ? (
                                     <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-success">

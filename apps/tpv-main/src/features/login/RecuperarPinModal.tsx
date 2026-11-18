@@ -15,7 +15,7 @@ import { useState } from "react";
 import { KeyRound, Mail, X } from "lucide-react";
 import { toAppError } from "@tpv/client";
 
-import { Button, Input, ModalShell } from "../../shared/ui";
+import { Button, CampoPin, Input, ModalShell } from "../../shared/ui";
 import { conAviso } from "../../shared/lib/conAviso";
 import { formatoCuentaAtras, useCuentaAtras } from "../../shared/lib/useCuentaAtras";
 
@@ -146,28 +146,24 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             <label className="block">
                                 <span className="text-sm font-semibold text-fg">PIN nuevo</span>
-                                <Input
-                                    type="password"
-                                    value={pin}
-                                    onChange={(e) => setPin(soloCifras(e.target.value, 6))}
-                                    inputMode="numeric"
-                                    autoComplete="new-password"
+                                <CampoPin
+                                    valor={pin}
+                                    onCambio={setPin}
                                     placeholder="4 a 6 cifras"
                                     disabled={ocupado}
-                                    className="mt-1 h-12 tracking-[0.3em]"
+                                    claseContenedor="mt-1"
+                                    className="h-12 tracking-[0.3em]"
                                 />
                             </label>
                             <label className="block">
                                 <span className="text-sm font-semibold text-fg">Repite el PIN</span>
-                                <Input
-                                    type="password"
-                                    value={pin2}
-                                    onChange={(e) => setPin2(soloCifras(e.target.value, 6))}
-                                    inputMode="numeric"
-                                    autoComplete="new-password"
+                                <CampoPin
+                                    valor={pin2}
+                                    onCambio={setPin2}
                                     invalid={pin2.length > 0 && !pinesCoinciden}
                                     disabled={ocupado}
-                                    className="mt-1 h-12 tracking-[0.3em]"
+                                    claseContenedor="mt-1"
+                                    className="h-12 tracking-[0.3em]"
                                 />
                             </label>
                         </div>
