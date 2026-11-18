@@ -184,11 +184,15 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                         </div>
                         <div className="min-w-0">
                             <h3 className="text-xl font-extrabold text-fg">Cerrar caja</h3>
-                            <p className="mt-0.5 text-sm text-fg-muted">
-                                {prep?.desde
-                                    ? `Desde el último cierre (${prep.desde})`
-                                    : "Primer cierre: no hay ninguno anterior"}
-                            </p>
+                            {/* Sólo con la preparación cargada: sin ella no se sabe si hay un cierre
+                                anterior, y decir «primer cierre» cuando ha fallado confunde. */}
+                            {prep ? (
+                                <p className="mt-0.5 text-sm text-fg-muted">
+                                    {prep.desde
+                                        ? `Desde el último cierre (${prep.desde})`
+                                        : "Primer cierre: no hay ninguno anterior"}
+                                </p>
+                            ) : null}
                         </div>
                     </div>
 
