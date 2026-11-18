@@ -105,6 +105,14 @@ function crossesMidnight(inicio: string, fin: string) {
   return fin < inicio;
 }
 
+/**
+ * Lo que quita «Libre» de un día: sus turnos de verdad (los predeterminados no son filas, y el libre
+ * ya es libre). Con alguno, se pide confirmación antes de quitarlo.
+ */
+function turnosQueQuitaElLibre(delDia: Asignacion[]): Asignacion[] {
+  return delDia.filter((a) => a.ID_Asignacion && !a.Libre);
+}
+
 function etiquetaDia(i: number) {
   return ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"][i] ?? "DÍA";
 }
@@ -425,6 +433,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
     return days;
   }, [weekStart]);
+  const hoyYmd = toYMD(new Date());
 
   const trabajadoresVisibles = useMemo(() => {
     if (puedeGestionarHorarios) return trabajadoresSafe;
@@ -648,9 +657,29 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
   };
 
-  /** Marca libre el día: sustituye lo que tuviera y tapa la plantilla. */
-  const marcarLibre = async (id_trabajador: string, fecha: string) => {
+  /**
+   * Marca libre el día: sustituye lo que tuviera y tapa la plantilla. Si ese día tiene turnos de
+   * verdad, los quita, así que antes se confirma diciendo cuáles.
+   */
+  const marcarLibre = async (t: TrabajadorRow, fecha: string, delDia: Asignacion[]) => {
     if (!sigueConPermiso()) return;
+    const id_trabajador = t.ID_Trabajador;
+    const quita = turnosQueQuitaElLibre(delDia);
+    if (quita.length > 0) {
+      const cuales = quita
+        .map((a) => {
+          const ini = hhmm(a.Hora_Inicio);
+          const fin = hhmm(a.Hora_Fin);
+          return ini && fin ? `${a.Nombre_Turno} ${ini}-${fin}` : a.Nombre_Turno;
+        })
+        .join(", ");
+      const ok = await confirmDialog(
+        `${t.Nombre} tiene ${quita.length === 1 ? "un turno" : `${quita.length} turnos`} el ${fecha} (${cuales}). ` +
+          `Al marcar el día libre se ${quita.length === 1 ? "quita" : "quitan"}.\n\n¿Continuar?`,
+        { title: "Marcar el día libre", kind: "warning" },
+      );
+      if (!ok) return;
+    }
     setError(null);
     try {
       await marcarLibreMut.mutateAsync({ id_trabajador, fecha });
@@ -991,10 +1020,11 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                             + Anadir
                           </button>
                         )}
-                        {puedeGestionarHorarios && !list.some((a) => a.Libre) && (
+                        {/* Un día que ya ha pasado no se marca libre: borraría los turnos que tuvo. */}
+                        {puedeGestionarHorarios && d.ymd >= hoyYmd && !list.some((a) => a.Libre) && (
                           <button
                             type="button"
-                            onClick={conAviso(() => marcarLibre(t.ID_Trabajador, d.ymd))}
+                            onClick={conAviso(() => marcarLibre(t, d.ymd, list))}
                             className="border border-border rounded-xl px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 transition-all"
                             title="Marcar el día libre: tapa el horario predeterminado"
                           >

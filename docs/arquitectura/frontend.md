@@ -225,7 +225,9 @@ eso borrar un turno no dejaba el día libre. «Libre» (`horariosMarcarLibre`, `
 /v1/trabajadores/horarios/libre`) sustituye lo que tuviera ese día por el día libre: una asignación
 del turno LIBRE sin horas (`Libre` en la fila), que es una celda real y tapa la plantilla. Su «X» la
 quita y el día vuelve a la plantilla; guardar un turno ese día también la quita. El turno LIBRE no se
-ofrece en el editor, y cuenta 0 horas (no entra en la puntualidad del cuadrante).
+ofrece en el editor, y cuenta 0 horas (no entra en la puntualidad del cuadrante). «Libre» sólo se
+ofrece de hoy en adelante (en un día pasado borraría los turnos que tuvo), y si el día tiene turnos
+de verdad pide confirmación diciendo cuáles quita.
 
 El dinero es un entero de céntimos de la base a la pantalla
 ([../decisiones/0005-dinero-en-centimos.md](../decisiones/0005-dinero-en-centimos.md)). En el frontend:

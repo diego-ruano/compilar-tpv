@@ -8,9 +8,10 @@ import Trabajadores from "../../src/app/pages/Trabajadores";
 
 const LIBRE = "00000000-0000-7000-8000-000000000101";
 
-const { marcarLibre, borrar, semana } = vi.hoisted(() => ({
+const { marcarLibre, borrar, confirmar, semana } = vi.hoisted(() => ({
     marcarLibre: vi.fn(),
     borrar: vi.fn(),
+    confirmar: vi.fn(),
     semana: { filas: [] as unknown[] },
 }));
 vi.mock("../../src/features/trabajadores/trabajadoresQueries", () => {
@@ -32,7 +33,7 @@ vi.mock("../../src/features/trabajadores/trabajadoresQueries", () => {
 vi.mock("../../src/shared/stores/useAuth", () => ({ useAuth: () => ({ idUsuario: "u1" }) }));
 vi.mock("../../src/shared/lib/usePermisos", () => ({ usePermisos: () => ({ rol: "Administrador", puede: () => true }) }));
 vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ info: vi.fn(), error: vi.fn(), success: vi.fn(), warning: vi.fn() }) }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn(), confirm: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn(), confirm: confirmar }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
 
 afterEach(() => {
@@ -55,11 +56,58 @@ function lunesDeEstaSemana(): string {
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-");
 }
 
-it("«Libre» marca el día libre del trabajador", async () => {
+function ymd(d: Date): string {
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-");
+}
+
+/** Un turno de verdad (una fila, no el predeterminado) de Ana hoy. */
+const turnoDeHoy = () => ({
+    ID_Asignacion: "turno-1",
+    ID_Grupo: null,
+    ID_Trabajador: "t1",
+    Fecha: ymd(new Date()),
+    ID_Turno: "m",
+    Area: "Sala",
+    Hora_Inicio: "09:00",
+    Hora_Fin: "14:00",
+    Notas: null,
+    Nombre_Turno: "MAÑANA",
+    Libre: false,
+});
+
+it("«Libre» marca el día libre del trabajador, sin preguntar si ese día no tiene turnos", async () => {
+    marcarLibre.mockResolvedValue(true);
+    render(pagina());
+    // El primero que se ofrece es el de hoy: los días pasados no lo tienen.
+    fireEvent.click(screen.getAllByRole("button", { name: "Libre" })[0]);
+    await waitFor(() => expect(marcarLibre).toHaveBeenCalledWith({ id_trabajador: "t1", fecha: ymd(new Date()) }));
+    expect(confirmar).not.toHaveBeenCalled();
+});
+
+it("no ofrece «Libre» en un día que ya ha pasado", () => {
+    render(pagina());
+    // Una sola persona: un botón por cada día de hoy al domingo.
+    const desdeHoy = 7 - ((new Date().getDay() + 6) % 7);
+    expect(screen.getAllByRole("button", { name: "Libre" })).toHaveLength(desdeHoy);
+});
+
+it("un día con turnos pide confirmación diciendo cuáles se quitan, y si se cancela no hace nada", async () => {
+    semana.filas = [turnoDeHoy()];
+    confirmar.mockResolvedValue(false);
+    render(pagina());
+    fireEvent.click(screen.getAllByRole("button", { name: "Libre" })[0]);
+    await waitFor(() => expect(confirmar).toHaveBeenCalledTimes(1));
+    expect(confirmar.mock.calls[0][0]).toContain("MAÑANA 09:00-14:00");
+    expect(marcarLibre).not.toHaveBeenCalled();
+});
+
+it("un día con turnos se marca libre al confirmarlo", async () => {
+    semana.filas = [turnoDeHoy()];
+    confirmar.mockResolvedValue(true);
     marcarLibre.mockResolvedValue(true);
     render(pagina());
     fireEvent.click(screen.getAllByRole("button", { name: "Libre" })[0]);
-    await waitFor(() => expect(marcarLibre).toHaveBeenCalledWith({ id_trabajador: "t1", fecha: lunesDeEstaSemana() }));
+    await waitFor(() => expect(marcarLibre).toHaveBeenCalledWith({ id_trabajador: "t1", fecha: ymd(new Date()) }));
 });
 
 it("un día libre se ve como tal, sin «Editar», y su «X» lo quita", async () => {
