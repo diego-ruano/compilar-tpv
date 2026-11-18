@@ -10,7 +10,7 @@ use crate::AppState;
 use tpv_application::error::AppError;
 use tpv_application::use_cases::sync as uc_sync;
 use tpv_contracts::errors::AppErrorDto;
-use tpv_contracts::recovery::{LocalBackupInfo, RecoveryState, RecoveryStatus};
+use tpv_contracts::recovery::{CopiaExportada, LocalBackupInfo, RecoveryState, RecoveryStatus};
 
 fn app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppErrorDto> {
     app.path()
@@ -105,11 +105,10 @@ pub async fn recovery_export_backup(
     app: AppHandle,
     backup_id: String,
     destino: String,
-) -> Result<(), AppErrorDto> {
+) -> Result<CopiaExportada, AppErrorDto> {
     let dir = app_data_dir(&app)?;
     let licencia = crate::negocio_de_la_licencia(&dir);
-    tpv_infra_sqlite::recovery::export_backup(&dir, &backup_id, Path::new(&destino), licencia.as_deref()).await?;
-    Ok(())
+    Ok(tpv_infra_sqlite::recovery::export_backup(&dir, &backup_id, Path::new(&destino), licencia.as_deref()).await?)
 }
 
 /// Trae una copia de fuera al almacén local. No restaura: deja la copia disponible para que la

@@ -808,6 +808,15 @@ export type ContactSettingsPatch_Serialize = {
 	contact_phone?: string,
 };
 
+/**  REC-INC-01 · Una copia guardada fuera con «Guardar fuera…», y dónde ha quedado. */
+export type CopiaExportada = {
+	/**
+	 *  El destino está en el mismo disco que los datos del programa (o no se ha podido saber): la
+	 *  copia no protege de una avería ni de un robo del equipo, y la pantalla lo dice.
+	 */
+	mismo_disco: boolean,
+};
+
 export type CopySemanaInput = {
 	from_monday: string,
 	to_monday: string,

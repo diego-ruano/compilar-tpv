@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use crate::ejecutor::{Connection, ErrorSql, Value};
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;
-use tpv_contracts::recovery::{LocalBackupInfo, RecoveryState, RecoveryStatus};
+use tpv_contracts::recovery::{CopiaExportada, LocalBackupInfo, RecoveryState, RecoveryStatus};
 
 use crate::db::Db;
 use tpv_application::ports::licensing::BaseDelEquipo;
@@ -1035,7 +1035,16 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
 /// (TRAB-03). Lo que sólo salva esta copia es lo que nunca llegó a subir.
 ///
 /// Sale tal como está guardada: comprimida (un `.db.gz`, que también abre 7-Zip).
-pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path, licencia: Option<&str>) -> AppResult<()> {
+///
+/// REC-INC-01: dice si el destino ha quedado en el mismo disco que los datos del programa. El
+/// diálogo deja guardarla en cualquier carpeta, y una copia en el mismo disco no protege de lo que
+/// protege una de fuera; la pantalla decía «Ya tienes un respaldo fuera de este ordenador» igual.
+pub async fn export_backup(
+    app_data_dir: &Path,
+    id: &str,
+    destino: &Path,
+    licencia: Option<&str>,
+) -> AppResult<CopiaExportada> {
     let source = resolve_backup(app_data_dir, id)?;
     // Validar ANTES de copiar: exportar una copia ilegible es peor que no exportar nada, porque
     // parece un respaldo y no lo es hasta el día que hace falta.
@@ -1049,7 +1058,53 @@ pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path, licenc
         }
     }
     copiar_fichero(&source, destino).await?;
-    Ok(())
+    Ok(CopiaExportada { mismo_disco: mismo_volumen(app_data_dir, destino) })
+}
+
+/// REC-INC-01 · ¿Están `a` y `b` en el mismo volumen? Las dos rutas tienen que existir. Si no se
+/// puede saber, sí: el aviso prudente es «no te protege de una avería», no «estás a salvo».
+///
+/// En Unix (Android) se compara el dispositivo. En Windows, la raíz del volumen: la unidad (`C:`,
+/// `E:`, la del USB) o el recurso de red (`\\servidor\carpeta`). Un volumen montado en una carpeta
+/// de otro sale como el mismo disco, que es el lado bueno de equivocarse.
+pub fn mismo_volumen(a: &Path, b: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(&a), std::fs::metadata(&b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev(),
+            _ => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        match (raiz_del_volumen(&a), raiz_del_volumen(&b)) {
+            (Some(x), Some(y)) => x == y,
+            _ => true,
+        }
+    }
+}
+
+/// La raíz del volumen de una ruta de Windows, normalizada (`C:`, `\\servidor\carpeta`), o `None`
+/// si la ruta no la lleva.
+#[cfg_attr(unix, allow(dead_code))]
+fn raiz_del_volumen(ruta: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match ruta.components().next()? {
+        Component::Prefix(p) => Some(match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => format!("{}:", (d as char).to_ascii_uppercase()),
+            Prefix::UNC(servidor, carpeta) | Prefix::VerbatimUNC(servidor, carpeta) => format!(
+                r"\\{}\{}",
+                servidor.to_string_lossy().to_lowercase(),
+                carpeta.to_string_lossy().to_lowercase()
+            ),
+            _ => p.as_os_str().to_string_lossy().to_lowercase(),
+        }),
+        _ => None,
+    }
 }
 
 /// Trae al almacén local una copia que estaba fuera, para poder restaurarla como cualquier otra.
@@ -2199,8 +2254,10 @@ mod tests {
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
 
         let fuera = dir.join("usb").join("copia-del-bar.db.gz");
-        export_backup(&dir, &backup.id, &fuera, Some("negocio-de-prueba")).await.unwrap();
+        let exportada = export_backup(&dir, &backup.id, &fuera, Some("negocio-de-prueba")).await.unwrap();
         assert!(fuera.is_file(), "la carpeta destino se crea si no existía");
+        // REC-INC-01: la «USB» de la prueba es una carpeta del mismo disco, y se dice.
+        assert!(exportada.mismo_disco, "una carpeta junto a los datos está en el mismo disco");
 
         std::fs::remove_file(dir.join(BACKUP_DIR).join(&backup.id)).unwrap();
         assert!(list_backups(&dir).unwrap().is_empty());
@@ -2987,5 +3044,48 @@ mod tests {
             assert!(backups.join(queda).exists(), "{queda}");
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_mismo_disco {
+    //! REC-INC-01 · «Guardar fuera…» dice si la copia ha quedado en el mismo disco que los datos.
+
+    use super::*;
+
+    #[test]
+    fn lo_que_no_se_puede_saber_es_el_mismo_disco() {
+        let dir = std::env::temp_dir();
+        let no_existe = dir.join("tpv-rec-inc-01-no-existe").join("x.db.gz");
+        assert!(mismo_volumen(&dir, &no_existe), "sin poder mirarlo, el aviso prudente");
+        assert!(mismo_volumen(&dir, &dir));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn en_windows_cuenta_la_unidad_o_el_recurso_de_red() {
+        let raiz = |r: &str| raiz_del_volumen(Path::new(r));
+        assert_eq!(raiz(r"C:\Users\bar\AppData"), Some("C:".into()));
+        assert_eq!(raiz(r"\\?\c:\Users\bar"), raiz(r"C:\otra\carpeta"), "con y sin el prefijo de canonicalize");
+        assert_ne!(raiz(r"C:\datos"), raiz(r"E:\copias"), "el USB es otra unidad");
+        assert_eq!(raiz(r"\\NAS\Copias\bar"), Some(r"\\nas\copias".into()));
+        assert_eq!(raiz(r"\\NAS\Copias\bar"), raiz(r"\\?\UNC\nas\copias\otra"));
+        assert_ne!(raiz(r"\\nas\copias"), raiz(r"C:\copias"));
+        assert_eq!(raiz(r"carpeta\relativa"), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn en_windows_otra_unidad_no_es_el_mismo_disco() {
+        // La unidad de los datos y cualquier otra que exista en el equipo (un USB, otra partición).
+        let datos = std::env::temp_dir();
+        let unidad = raiz_del_volumen(&std::fs::canonicalize(&datos).unwrap()).unwrap();
+        let otra = (b'C'..=b'Z')
+            .map(|d| format!("{}:\\", d as char))
+            .find(|r| !r.starts_with(&unidad) && Path::new(r).exists());
+        match otra {
+            Some(otra) => assert!(!mismo_volumen(&datos, Path::new(&otra)), "{otra}"),
+            None => eprintln!("este equipo sólo tiene la unidad {unidad}: no hay otra con la que comparar"),
+        }
     }
 }

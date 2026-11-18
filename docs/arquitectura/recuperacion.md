@@ -223,7 +223,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **Fuera del runtime async**: SQLite trabaja sin ceder en el hilo que lo llama, así que el
   `VACUUM INTO`, el `quick_check`, comprimir y copiar la base entera van por `spawn_blocking`.
 - **Copia ahora / guardar fuera / traer**: `recovery_create_backup`, `recovery_export_backup` (a donde
-  elija el usuario: un USB; sale comprimida, tal como está guardada) y `recovery_import_backup`, que la
+  elija el usuario: un USB; sale comprimida, tal como está guardada, y dice si ha quedado en el mismo
+  disco que los datos, comparando la raíz del volumen, o el dispositivo en Unix, y «sí» si no se sabe:
+  la pantalla avisa entonces de que esa copia no protege de una avería, REC-INC-01) y
+  `recovery_import_backup`, que la
   guarda comprimida como `import-*` y **no caduca**. Se importa una copia comprimida o una base tal cual
   (una `.db` de antes, o la `data.db` rescatada de otro equipo): el formato se reconoce por el contenido.
 - **Una copia lleva el sello de su base** (AUD-06): con el de otro negocio que el de la licencia, ni

@@ -11,6 +11,10 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 
+/** Lo que se dice cuando «Guardar fuera…» ha dejado la copia en el disco de los datos. */
+export const AVISO_MISMO_DISCO =
+	"Está en este mismo disco: no te protege de una avería. Cópiala a un USB o a otro equipo.";
+
 function tamanoTexto(bytes: number): string {
 	if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -77,8 +81,14 @@ export function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 				],
 			});
 			if (!destino) return;
-			await commands.recoveryExportBackup(copia.id, destino);
-			toast.success("Copia guardada", "Ya tienes un respaldo fuera de este ordenador.");
+			const guardada = await commands.recoveryExportBackup(copia.id, destino);
+			// REC-INC-01: el diálogo deja elegir cualquier carpeta, también una de este mismo disco, y
+			// ésa no protege de lo que protege una copia de fuera. Se dice cuál de las dos es.
+			if (guardada.mismo_disco) {
+				toast.warning("Copia guardada", AVISO_MISMO_DISCO);
+			} else {
+				toast.success("Copia guardada", "Está fuera de este disco: te protege si el ordenador se avería.");
+			}
 		} catch (e) {
 			toast.error("No se pudo guardar la copia", toAppError(e).message);
 		} finally {

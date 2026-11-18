@@ -33,3 +33,11 @@ pub struct LocalBackupInfo {
     /// diarias no la alcanza, y la pantalla la distingue: su fecha no dice nada de este disco.
     pub importada: bool,
 }
+
+/// REC-INC-01 · Una copia guardada fuera con «Guardar fuera…», y dónde ha quedado.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CopiaExportada {
+    /// El destino está en el mismo disco que los datos del programa (o no se ha podido saber): la
+    /// copia no protege de una avería ni de un robo del equipo, y la pantalla lo dice.
+    pub mismo_disco: bool,
+}
