@@ -112,6 +112,11 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   campos que no se han tocado y, si cambió uno tocado, se avisa junto a él. Al guardar se manda sólo
   lo que difiere de la base: el patch es parcial, y mandarlo todo devolvía a su valor de antes lo que
   otro equipo acababa de cambiar.
+- **Unos ajustes que no se han podido leer no se enseñan con sus valores por defecto** (CFG-INC-02):
+  el store guarda el `error` y deja `ready` en `false` hasta la primera lectura buena; si falla una
+  relectura, se queda con lo último leído y el error. La pantalla dice qué no se ha leído y por qué,
+  con «Reintentar», y no deja guardar encima. En la Handy, una respuesta del worker sin la zona
+  horaria (un worker anterior a ella) se lee con la del esquema (`tpv-infra-http/src/configuracion.rs`).
 - **Una relectura no sustituye lo que hay en pantalla**: nada de condicionar el contenido a
   `isFetching` ni de cambiarlo por un «Cargando…», que en una lectura de milisegundos se ve como un
   parpadeo. Sólo la primera carga (`isPending`) deja el hueco, sin texto; al releer, los datos de

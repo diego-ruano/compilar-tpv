@@ -45,6 +45,9 @@ export default function Configuracion() {
 
     const ticket = useTicketSettings((s) => s.settings);
     const setSetting = useTicketSettings((s) => s.setSetting);
+    const ticketListo = useTicketSettings((s) => s.ready);
+    const ticketError = useTicketSettings((s) => s.error);
+    const ticketInit = useTicketSettings((s) => s.init);
 
     const mode = useMode((s) => s.mode);
     const isMain = mode === "tpv";
@@ -54,6 +57,7 @@ export default function Configuracion() {
     const contact = useContactSettings();
     const contactReady = useContactSettings((s) => s.ready);
     const contactInit = useContactSettings((s) => s.init);
+    const contactError = useContactSettings((s) => s.error);
 
     // CFG-INC-01: el correo, como el resto de Negocio, es un borrador sobre lo guardado.
     const correo = useBorrador({ contact_email: contact.contact_email }, CAMPOS_CORREO);
@@ -187,6 +191,8 @@ export default function Configuracion() {
             await messageDialog(`${MSG_IVA}. Corrígelo en la sección Ticket.`, { kind: "error" });
             return;
         }
+        // CFG-INC-02: con una lectura fallida lo que hay en pantalla puede no ser lo guardado.
+        if (biz.error || contactError) return;
         // Y lo mismo con el NIF, que también va en el borrador: guardar uno que no vale deja el TPV
         // sin poder cobrar.
         if (draft.cif.trim() && !nifValido(draft.cif)) {
@@ -228,7 +234,7 @@ export default function Configuracion() {
     const onSaveBusiness = () => guardarNegocio(true);
     const onSaveNegocio = () => guardarNegocio(false);
 
-    const canSaveBusiness = dirty && !savingBiz;
+    const canSaveBusiness = dirty && !savingBiz && biz.error === null;
 
     const hayCambios = dirty || contactDirty;
     const descartarNegocio = () => {
@@ -525,7 +531,12 @@ export default function Configuracion() {
                                                 choqueCorreo={correo.choques.contact_email}
                                                 correo={contact_email}
                                                 setCorreo={setContactEmail}
-                                                correoCargando={!contactReady}
+                                                correoCargando={!contactReady && contactError === null}
+                                                correoError={contactError}
+                                                onReintentarCorreo={contactInit}
+                                                listo={biz.ready}
+                                                error={biz.error}
+                                                onReintentar={biz.init}
                                                 dirty={hayCambios}
                                                 saving={savingBiz}
                                                 onSave={onSaveNegocio}
@@ -579,6 +590,12 @@ export default function Configuracion() {
                                                     }))
                                                 }
                                                 ticket={ticket}
+                                                ticketListo={ticketListo}
+                                                ticketError={ticketError}
+                                                onReintentarTicket={ticketInit}
+                                                negocioListo={biz.ready}
+                                                negocioError={biz.error}
+                                                onReintentarNegocio={biz.init}
                                                 setSetting={setSetting}
                                                 onSaveBusiness={onSaveBusiness}
                                                 savingBiz={savingBiz}

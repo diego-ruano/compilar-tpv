@@ -10,9 +10,12 @@ import { Field } from "../ui/Field";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { etiquetaDuracion, opcionesDuracion, opcionesNoVino } from "../../reservas/duracion";
 import { ReservasWeb } from "./ReservasWeb";
+import { ErrorDeAjustes } from "../ui/ErrorDeAjustes";
 
 export function Reservas({ inputTone, isMain }: { inputTone: string; isMain: boolean }) {
 	const ready = useBusinessSettings((s) => s.ready);
+	const error = useBusinessSettings((s) => s.error);
+	const reintentar = useBusinessSettings((s) => s.init);
 	const duracion = useBusinessSettings((s) => s.reserva_duracion_min);
 	const solape = useBusinessSettings((s) => s.reserva_solape);
 	const noVino = useBusinessSettings((s) => s.reserva_no_vino_min);
@@ -21,8 +24,19 @@ export function Reservas({ inputTone, isMain }: { inputTone: string; isMain: boo
 	return (
 		<div className="flex flex-col gap-4">
 			<Panel title="Reservas">
+				{/* CFG-INC-02: sin leerlos no se enseñan los valores por defecto como si fueran los guardados. */}
+				{error ? (
+					<div className="mb-4">
+						<ErrorDeAjustes
+							titulo={ready ? "No se han podido volver a leer los ajustes de las reservas" : "No se han podido leer los ajustes de las reservas"}
+							motivo={error}
+							detalle={ready ? "Lo que ves puede no ser lo último que se guardó." : undefined}
+							onReintentar={reintentar}
+						/>
+					</div>
+				) : null}
 				{!ready ? (
-					<div className="py-4 text-sm text-fg-muted">Cargando…</div>
+					error ? null : <div className="py-4 text-sm text-fg-muted">Cargando…</div>
 				) : (
 					<div className="grid grid-cols-1 gap-5">
 						<Field

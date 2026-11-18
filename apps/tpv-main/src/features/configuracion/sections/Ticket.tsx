@@ -14,6 +14,7 @@ import { conAviso } from "../../../shared/lib/conAviso";
 import { deCentimos } from "../../../shared/lib/dinero";
 import { MSG_IVA } from "../../../shared/lib/iva";
 import { CambioDeOtroEquipo } from "../ui/CambioDeOtroEquipo";
+import { ErrorDeAjustes } from "../ui/ErrorDeAjustes";
 
 type TicketWidthOpt = {
     value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
@@ -73,6 +74,12 @@ export function Ticket({
     choqueFooter,
 
     ticket,
+    ticketListo,
+    ticketError,
+    onReintentarTicket,
+    negocioListo,
+    negocioError,
+    onReintentarNegocio,
     setSetting,
     onSaveBusiness,
     savingBiz,
@@ -91,6 +98,14 @@ export function Ticket({
     choqueFooter?: string;
 
     ticket: any;
+    /** CFG-INC-02: los ajustes del ticket se han leído alguna vez, y por qué falló la última lectura. */
+    ticketListo: boolean;
+    ticketError: string | null;
+    onReintentarTicket: () => Promise<void>;
+    /** Lo mismo con los del negocio, de donde salen el IVA y el mensaje final. */
+    negocioListo: boolean;
+    negocioError: string | null;
+    onReintentarNegocio: () => Promise<void>;
     setSetting: (k: any, v: any) => void;
     onSaveBusiness: () => Promise<void>;
     savingBiz: boolean;
@@ -131,9 +146,30 @@ export function Ticket({
         [],
     );
 
+    // CFG-INC-02: lo que no se ha podido leer no se enseña con sus valores por defecto.
+    const errorNegocio = negocioError ? (
+        <ErrorDeAjustes
+            titulo={negocioListo ? "No se han podido volver a leer los datos del negocio" : "No se han podido leer los datos del negocio"}
+            motivo={negocioError}
+            detalle={negocioListo ? "El IVA y el mensaje final pueden no ser los últimos guardados: no se pueden guardar hasta leerlos." : undefined}
+            onReintentar={onReintentarNegocio}
+        />
+    ) : null;
+    const errorTicket = ticketError ? (
+        <ErrorDeAjustes
+            titulo={ticketListo ? "No se han podido volver a leer los ajustes del ticket" : "No se han podido leer los ajustes del ticket"}
+            motivo={ticketError}
+            detalle={ticketListo ? "Lo que ves puede no ser lo último que se guardó." : undefined}
+            onReintentar={onReintentarTicket}
+        />
+    ) : null;
+
     return (
         <div className="flex flex-col gap-4">
+            {errorTicket}
             <Panel id="ticket-fiscal" title="IVA">
+                {errorNegocio}
+                {negocioListo ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field
                         label="IVA (%)"
@@ -166,7 +202,11 @@ export function Ticket({
                         </div>
                     </div>
                 </div>
+                ) : null}
             </Panel>
+
+            {ticketListo ? (
+            <>
 
             {/* ✅ NUEVO: Formato */}
             <Panel title="Formato de impresión">
@@ -298,7 +338,7 @@ export function Ticket({
                 </div>
 
                 {/* El mensaje final sólo se edita si sale en el ticket. */}
-                {ticket.show_footer_message ? (
+                {ticket.show_footer_message && negocioListo ? (
                     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field
                             label="Mensaje final del ticket"
@@ -320,7 +360,7 @@ export function Ticket({
                 <div className="mt-4 flex items-center justify-end gap-2">
                     <GhostButton
                         onClick={conAviso(onSaveBusiness)}
-                        disabled={!canSaveBusiness}
+                        disabled={!canSaveBusiness || negocioError !== null}
                     >
                         {savingBiz ? "Guardando…" : "Guardar"}
                     </GhostButton>
@@ -330,6 +370,8 @@ export function Ticket({
                     </PrimaryButton>
                 </div>
             </Panel>
+            </>
+            ) : null}
 
             {/* ✅ NUEVO: selección de impresora de tickets */}
             <PrinterPanel />

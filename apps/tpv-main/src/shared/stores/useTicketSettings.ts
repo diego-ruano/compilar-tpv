@@ -7,6 +7,7 @@ import {
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
 import { captureException } from "../observability/sentry";
+import { toAppError } from "@tpv/client";
 
 const DEFAULTS: TicketSettings = {
     show_logo: true,
@@ -31,6 +32,13 @@ const DEFAULTS: TicketSettings = {
 type TicketSettingsState = {
     settings: TicketSettings;
     ready: boolean;
+    /**
+     * CFG-INC-02: por qué no se han podido leer, o `null`. Sin una lectura buena `ready` sigue en
+     * `false`: antes se ponían los valores por defecto como si fueran los guardados, y la pantalla
+     * dejaba guardarlos encima de los buenos. Si falla una relectura se conservan los últimos
+     * leídos, y esto dice que pueden no ser los de ahora.
+     */
+    error: string | null;
     init: () => Promise<void>;
     limpiarContexto: () => void;
 
@@ -80,6 +88,7 @@ function scheduleFlush() {
 export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
     settings: DEFAULTS,
     ready: false,
+    error: null,
 
     init: async () => {
         const vigente = contexto;
@@ -96,11 +105,11 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
                 ),
             };
 
-            set({ settings: merged, ready: true });
+            set({ settings: merged, ready: true, error: null });
         } catch (e) {
             if (vigente !== contexto) return;
             captureException(e, { fase: "ajustes_ticket" });
-            set({ settings: DEFAULTS, ready: true });
+            set({ error: toAppError(e).message });
         }
     },
 
@@ -109,7 +118,7 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
         if (timer) window.clearTimeout(timer);
         timer = null;
         pending = {};
-        set({ settings: DEFAULTS, ready: false });
+        set({ settings: DEFAULTS, ready: false, error: null });
     },
 
     setSetting: (key, value) => {

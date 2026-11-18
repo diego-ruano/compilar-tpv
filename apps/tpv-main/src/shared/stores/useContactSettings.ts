@@ -6,6 +6,7 @@ import {
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
 import { captureException } from "../observability/sentry";
+import { toAppError } from "@tpv/client";
 
 const DEFAULTS: ContactSettings = {
     contact_email: "",
@@ -14,6 +15,13 @@ const DEFAULTS: ContactSettings = {
 
 type ContactSettingsState = ContactSettings & {
     ready: boolean;
+    /**
+     * CFG-INC-02: por qué no se han podido leer, o `null`. Sin una lectura buena `ready` sigue en
+     * `false`: antes se ponían los valores por defecto como si fueran los guardados, y la pantalla
+     * dejaba guardarlos encima de los buenos. Si falla una relectura se conservan los últimos
+     * leídos, y esto dice que pueden no ser los de ahora.
+     */
+    error: string | null;
     init: () => Promise<void>;
     limpiarContexto: () => void;
     setMany: (patch: Partial<ContactSettings>) => void;
@@ -39,17 +47,18 @@ async function escribirPendiente(): Promise<void> {
 export const useContactSettings = create<ContactSettingsState>((set, get) => ({
     ...DEFAULTS,
     ready: false,
+    error: null,
 
     init: async () => {
         const vigente = contexto;
         try {
             const s = await configGetContactSettings();
             if (vigente !== contexto) return;
-            set({ ...DEFAULTS, ...s, ready: true });
+            set({ ...DEFAULTS, ...s, ready: true, error: null });
         } catch (e) {
             if (vigente !== contexto) return;
             captureException(e, { fase: "ajustes_contacto" });
-            set({ ...DEFAULTS, ready: true });
+            set({ error: toAppError(e).message });
         }
     },
 
@@ -58,7 +67,7 @@ export const useContactSettings = create<ContactSettingsState>((set, get) => ({
         if (timer) window.clearTimeout(timer);
         timer = null;
         pending = {};
-        set({ ...DEFAULTS, ready: false });
+        set({ ...DEFAULTS, ready: false, error: null });
     },
 
     setMany: (patch) => {

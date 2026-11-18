@@ -29,6 +29,7 @@ import { useMode } from "../../../shared/stores/useMode";
 import { nifValido } from "../../../shared/ticket/nif";
 import { CorreoRecuperacion } from "./CorreoRecuperacion";
 import { CambioDeOtroEquipo } from "../ui/CambioDeOtroEquipo";
+import { ErrorDeAjustes } from "../ui/ErrorDeAjustes";
 import type { Choques } from "../borrador";
 
 export function Negocio({
@@ -41,6 +42,11 @@ export function Negocio({
     correo,
     setCorreo,
     correoCargando,
+    correoError,
+    onReintentarCorreo,
+    listo,
+    error,
+    onReintentar,
     dirty,
     saving,
     onSave,
@@ -56,6 +62,14 @@ export function Negocio({
     correo: string;
     setCorreo: (v: string) => void;
     correoCargando: boolean;
+    /** CFG-INC-02: el correo no se ha podido leer, y por qué. */
+    correoError: string | null;
+    onReintentarCorreo: () => Promise<void>;
+    /** Los datos del negocio se han leído alguna vez. Hasta entonces no hay formulario. */
+    listo: boolean;
+    /** CFG-INC-02: la última lectura de los datos del negocio ha fallado, y por qué. */
+    error: string | null;
+    onReintentar: () => Promise<void>;
     /** Cambios sin guardar en el borrador del negocio o en el correo. */
     dirty: boolean;
     saving: boolean;
@@ -132,8 +146,34 @@ export function Negocio({
         }
     };
 
+    // CFG-INC-02: sin una lectura buena no hay formulario. Antes salían los valores por defecto como
+    // si fueran los guardados, y «Guardar» los escribía encima de los buenos.
+    if (!listo) {
+        return (
+            <div className="flex flex-col gap-4">
+                {error ? (
+                    <ErrorDeAjustes
+                        titulo="No se han podido leer los datos del negocio"
+                        motivo={error}
+                        detalle="Hasta leerlos no se pueden ver ni cambiar."
+                        onReintentar={onReintentar}
+                    />
+                ) : null}
+                {esMain ? <CorreoRecuperacion /> : null}
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col gap-4">
+            {error ? (
+                <ErrorDeAjustes
+                    titulo="No se han podido volver a leer los datos del negocio"
+                    motivo={error}
+                    detalle="Lo que ves puede no ser lo último que se guardó: no se puede guardar hasta leerlos."
+                    onReintentar={onReintentar}
+                />
+            ) : null}
             <Panel
                 title="Datos del negocio"
                 subtitle="Salen en el ticket. Sin la razón social y el NIF no se puede cobrar."
@@ -220,9 +260,18 @@ export function Negocio({
                             value={correo}
                             onChange={(e) => setCorreo(e.target.value)}
                             placeholder={correoCargando ? "Cargando…" : "bar@ejemplo.com"}
-                            disabled={correoCargando}
+                            disabled={correoCargando || correoError !== null}
                             className={inputTone}
                         />
+                        {correoError ? (
+                            <div className="mt-2">
+                                <ErrorDeAjustes
+                                    titulo="No se ha podido leer el correo de contacto"
+                                    motivo={correoError}
+                                    onReintentar={onReintentarCorreo}
+                                />
+                            </div>
+                        ) : null}
                         <CambioDeOtroEquipo valor={choqueCorreo} />
                     </Field>
                 </div>
@@ -339,7 +388,7 @@ export function Negocio({
                 </GhostButton>
                 <PrimaryButton
                     onClick={conAviso(guardar)}
-                    disabled={!dirty || saving || nifMal}
+                    disabled={!dirty || saving || nifMal || error !== null || correoError !== null}
                 >
                     {saving ? "Guardando…" : "Guardar cambios"}
                 </PrimaryButton>
