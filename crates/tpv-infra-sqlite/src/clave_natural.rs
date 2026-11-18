@@ -27,11 +27,14 @@
 //!    sólo un `UPDATE` de los huecos, con lo de la de aquí y nada más (`COALESCE(NULLIF(col, ''), ?)`).
 //!    Así no se pisa lo que una Handy haya cambiado o vaciado después de la foto, ni se resucita la
 //!    ficha si la ha borrado.
+//!    Las notas no se rellenan: se unen, las de la nube y las de aquí si son otras.
 //! 3. Todo lo que apunta a la de aquí pasa a apuntar a la de la nube: las foráneas se leen del
 //!    esquema (`sync_reparacion::foraneas`), no de una lista escrita a mano.
 //! 4. Lo que es un agregado de la ficha (`Total_Gastado`) se re-deriva en el SQL, con lo que haya en
 //!    cada base al aplicarlo.
 //! 5. Se borra la de aquí.
+//! 6. Se avisa a los administradores de lo que se ha unido y de lo que de la de aquí se ha quedado
+//!    fuera porque la de la nube ya tenía otro valor (`fichas_unidas`): que quede rastro.
 //!
 //! En la misma transacción se retira lo apartado de la subida que nombraba la ficha de aquí
 //! ([`retirar_lo_apartado`]): lo que sólo escribía esa ficha ya no dice nada y se borra; lo demás
@@ -97,6 +100,11 @@ pub(crate) struct Descripcion {
     pub fichas: &'static str,
     /// La acción del aviso: la pantalla de esas fichas.
     pub accion: &'static str,
+    /// Las notas de la ficha: no se rellenan, se unen (la de la nube y, si es otra, la de aquí).
+    pub notas: Option<&'static str>,
+    /// Lo que se cuenta en el aviso de una fusión, con cómo se llama: lo que de la ficha de aquí ha
+    /// entrado (rellenaba un hueco) o se ha quedado fuera (la de la nube ya tenía otro).
+    pub campos: &'static [(&'static str, &'static str)],
 }
 
 /// Las tablas cuyas fichas se funden. Clientes (el correo) y Proveedores (el correo y el CIF), las
@@ -111,6 +119,15 @@ pub(crate) const DESCRIPCIONES: &[Descripcion] = &[
         nombre: "Nombre",
         fichas: "clientes",
         accion: "ver_clientes",
+        notas: Some("Notas"),
+        campos: &[
+            ("Nombre", "nombre"),
+            ("Telefono", "teléfono"),
+            ("Email", "correo"),
+            ("NIF", "NIF"),
+            ("Razon_Social", "razón social"),
+            ("Direccion_Fiscal", "dirección fiscal"),
+        ],
     },
     Descripcion {
         tabla: "Proveedores",
@@ -124,6 +141,14 @@ pub(crate) const DESCRIPCIONES: &[Descripcion] = &[
         nombre: "Nombre_Empresa",
         fichas: "proveedores",
         accion: "ver_proveedores",
+        notas: Some("Informacion_adicional"),
+        campos: &[
+            ("Nombre_Empresa", "nombre"),
+            ("Contacto", "contacto"),
+            ("Telefono", "teléfono"),
+            ("Email", "correo"),
+            ("CIF", "CIF"),
+        ],
     },
 ];
 
@@ -209,6 +234,30 @@ pub(crate) fn anotar(en_la_nube: &mut EnLaNube, tabla: &str, ids: &[String], tra
     }
 }
 
+/// Qué valores únicos comparten la ficha de aquí y la de la nube, para un aviso: cómo se llaman
+/// («correo», «correo y CIF») y, entre paréntesis, cuáles son.
+fn lo_que_comparten(d: &Descripcion, columnas: &[String], nube: &[Value], de_aqui: &[Value]) -> (String, String) {
+    let posicion = |c: &str| columnas.iter().position(|x| x.eq_ignore_ascii_case(c));
+    let mismos: Vec<(&str, String)> = d
+        .unicos
+        .iter()
+        .filter_map(|u| {
+            let i = posicion(u.columna)?;
+            let (a, b) = (texto(nube.get(i)?)?, texto(de_aqui.get(i)?)?);
+            let igual = if u.sin_mayusculas { a.to_lowercase() == b.to_lowercase() } else { a == b };
+            (igual && !a.is_empty()).then(|| (u.etiqueta, a.to_owned()))
+        })
+        .collect();
+    let etiquetas = if mismos.is_empty() {
+        d.unicos.iter().map(|u| u.etiqueta).collect::<Vec<_>>().join(" o ")
+    } else {
+        mismos.iter().map(|(e, _)| *e).collect::<Vec<_>>().join(" y ")
+    };
+    let valores = mismos.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
+    let detalle = if valores.is_empty() { String::new() } else { format!(" ({valores})") };
+    (etiquetas, detalle)
+}
+
 /// El aviso a los administradores de que la ficha de aquí `id_aqui` y la de la nube son distintas y
 /// tienen el mismo valor único: no se funden, y hay que resolverlo a mano.
 fn aviso_de_fichas_distintas(
@@ -227,23 +276,7 @@ fn aviso_de_fichas_distintas(
             .filter(|t| !t.trim().is_empty())
             .map_or_else(|| "Una ficha sin nombre".to_owned(), |t| format!("«{t}»"))
     };
-    let mismos: Vec<(&str, String)> = d
-        .unicos
-        .iter()
-        .filter_map(|u| {
-            let i = posicion(u.columna)?;
-            let (a, b) = (texto(nube.get(i)?)?, texto(de_aqui.get(i)?)?);
-            let igual = if u.sin_mayusculas { a.to_lowercase() == b.to_lowercase() } else { a == b };
-            (igual && !a.is_empty()).then(|| (u.etiqueta, a.to_owned()))
-        })
-        .collect();
-    let etiquetas = if mismos.is_empty() {
-        d.unicos.iter().map(|u| u.etiqueta).collect::<Vec<_>>().join(" o ")
-    } else {
-        mismos.iter().map(|(e, _)| *e).collect::<Vec<_>>().join(" y ")
-    };
-    let valores = mismos.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
-    let detalle = if valores.is_empty() { String::new() } else { format!(" ({valores})") };
+    let (etiquetas, detalle) = lo_que_comparten(d, columnas, nube, de_aqui);
     NuevaNotificacion {
         tipo: "fichas_distintas".into(),
         severidad: Severidad::Aviso,
@@ -259,6 +292,72 @@ fn aviso_de_fichas_distintas(
         accion: Some(d.accion.into()),
         payload: None,
         clave_dedupe: Some(format!("fichas_distintas:{}:{id_aqui}:{id_nube}", d.tabla)),
+        expira_en: None,
+    }
+}
+
+/// El aviso a los administradores de una fusión: qué ficha de aquí se ha unido a cuál de la nube, lo
+/// que ha entrado de ella y lo que se ha quedado fuera porque la de la nube ya tenía otro valor. Es
+/// el rastro de lo que se ha decidido sin preguntar.
+fn aviso_de_la_fusion(
+    d: &Descripcion,
+    columnas: &[String],
+    nube: &[Value],
+    id_aqui: &str,
+    de_aqui: &[Value],
+) -> NuevaNotificacion {
+    let posicion = |c: &str| columnas.iter().position(|x| x.eq_ignore_ascii_case(c));
+    let valor = |fila: &[Value], c: &str| posicion(c).and_then(|i| fila.get(i)).and_then(texto).filter(|t| !t.is_empty()).map(str::to_owned);
+    let nombre = |fila: &[Value]| valor(fila, d.nombre).map_or_else(|| "una ficha sin nombre".to_owned(), |t| format!("«{t}»"));
+    let mut entra: Vec<String> = Vec::new();
+    let mut fuera: Vec<String> = Vec::new();
+    for (c, etiqueta) in d.campos {
+        let Some(aqui) = valor(de_aqui, c) else { continue };
+        let unico = d.unicos.iter().find(|u| u.columna.eq_ignore_ascii_case(c));
+        match valor(nube, c) {
+            None => entra.push(format!("{etiqueta} {aqui}")),
+            Some(arriba) => {
+                let igual = match unico {
+                    Some(u) if u.sin_mayusculas => arriba.to_lowercase() == aqui.to_lowercase(),
+                    _ => arriba == aqui,
+                };
+                if !igual {
+                    fuera.push(format!("{etiqueta} {aqui}"));
+                }
+            }
+        }
+    }
+    if let Some(n) = d.notas.and_then(|c| valor(de_aqui, c)) {
+        let arriba = d.notas.and_then(|c| valor(nube, c));
+        if !arriba.is_some_and(|a| a.contains(&n)) {
+            entra.push("sus notas".to_owned());
+        }
+    }
+    let (mismo, detalle) = lo_que_comparten(d, columnas, nube, de_aqui);
+    let mut cuerpo = format!(
+        "{} (del TPV principal) y {} (de las Handy) tenían el mismo {mismo}{detalle}: eran la misma ficha y se ha \
+         quedado la de las Handy.",
+        nombre(de_aqui),
+        nombre(nube)
+    );
+    if !entra.is_empty() {
+        cuerpo.push_str(&format!(" Se le ha añadido de la del TPV principal: {}.", entra.join(", ")));
+    }
+    if !fuera.is_empty() {
+        cuerpo.push_str(&format!(
+            " No se ha guardado, porque la de las Handy ya tenía otro: {}. Si era lo bueno, corrígelo en la ficha.",
+            fuera.join(", ")
+        ));
+    }
+    NuevaNotificacion {
+        tipo: "fichas_unidas".into(),
+        severidad: if fuera.is_empty() { Severidad::Info } else { Severidad::Aviso },
+        titulo: format!("Se han unido dos fichas de {} que eran la misma", d.fichas),
+        cuerpo: Some(cuerpo),
+        destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+        accion: Some(d.accion.into()),
+        payload: None,
+        clave_dedupe: Some(format!("fichas_unidas:{}:{id_aqui}", d.tabla)),
         expira_en: None,
     }
 }
@@ -357,7 +456,12 @@ pub(crate) async fn fundir(
                     .ok_or_else(|| tpv_application::error::AppError::internal("valor_binario"))?;
                 w.execute(&s.sql, args).await.map_err(db_err)?;
             }
-            retirar_lo_apartado(conn, d, &locales).await
+            retirar_lo_apartado(conn, d, &locales).await?;
+            // Lo que se ha unido y lo que se ha quedado fuera, para que quede rastro.
+            for (l, fila) in locales.iter().zip(&de_aqui) {
+                crate::notificaciones::emitir_en(w, aviso_de_la_fusion(d, columnas, &nube, l, fila)).await?;
+            }
+            Ok(())
         })
         .await?;
         fundidas += locales.len();
@@ -453,7 +557,8 @@ async fn sentencias_de_la_fusion(
         .enumerate()
         .map(|(i, c)| {
             let arriba = &nube[i];
-            if c.eq_ignore_ascii_case(d.clave) || es(c, d.derivadas) || !vacio(arriba) {
+            let son_las_notas = d.notas.is_some_and(|n| c.eq_ignore_ascii_case(n));
+            if c.eq_ignore_ascii_case(d.clave) || es(c, d.derivadas) || son_las_notas || !vacio(arriba) {
                 return json(arriba);
             }
             match de_aqui.iter().map(|f| &f[i]).find(|v| !vacio(v)) {
@@ -491,6 +596,29 @@ async fn sentencias_de_la_fusion(
             sql: format!("UPDATE {} SET {rellenar} WHERE {} = ?{};", cita(d.tabla), cita(d.clave), args.len()),
             args,
         });
+    }
+
+    // 2-bis. Las notas no se rellenan: se unen. A las de la ficha (las que tenga en cada base al
+    //    aplicarlo) se les añaden las de cada ficha de aquí, si no las tiene ya.
+    if let Some(i) = d.notas.and_then(|n| columnas.iter().position(|c| c.eq_ignore_ascii_case(n))) {
+        let mut vistas: Vec<&str> = Vec::new();
+        for f in de_aqui {
+            let Some(n) = f.get(i).and_then(texto).filter(|t| !t.trim().is_empty()) else { continue };
+            if vistas.contains(&n) {
+                continue;
+            }
+            vistas.push(n);
+            sentencias.push(SqlStatement {
+                sql: format!(
+                    "UPDATE {t} SET {c} = CASE WHEN {c} IS NULL OR {c} = '' THEN ?1 WHEN instr({c}, ?1) > 0 THEN {c} \
+                     ELSE {c} || char(10) || ?1 END WHERE {k} = ?2;",
+                    t = cita(d.tabla),
+                    c = cita(&columnas[i]),
+                    k = cita(d.clave)
+                ),
+                args: vec![Json::String(n.to_owned()), Json::String(id_nube.to_owned())],
+            });
+        }
     }
 
     // 3. Lo que apunta a las de aquí, a la de la nube.

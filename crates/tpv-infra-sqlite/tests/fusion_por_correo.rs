@@ -654,3 +654,34 @@ async fn una_ficha_de_aqui_que_la_nube_tambien_tiene_no_se_funde_y_se_avisa() {
 
     cerrar(db, dir, nube).await;
 }
+
+#[tokio::test]
+async fn al_fundir_se_unen_las_notas_y_se_avisa_de_lo_que_se_queda_fuera() {
+    // Las dos Anas tienen teléfono y notas, distintos. Gana el teléfono de la nube, pero el de aquí no
+    // se pierde en silencio: el aviso dice que se ha quedado fuera. Las notas no se eligen: se unen.
+    let (repo, db, dir, nube) = las_dos_anas("notas").await;
+    sembrar(&db, &format!("UPDATE Clientes SET Telefono = '611000000' WHERE ID_Cliente = '{ANA_MAIN}';")).await;
+    nube.sembrar(&format!("UPDATE Clientes SET Notas = 'Mesa junto a la ventana' WHERE ID_Cliente = '{ANA_HANDY}';")).await;
+
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert_eq!(
+        filas(&db, "SELECT ID_Cliente, Nombre, Telefono, Notas FROM Clientes;").await,
+        vec![format!("{ANA_HANDY}|Ana García|600111222|Mesa junto a la ventana\nAlérgica al marisco")]
+    );
+    let aviso = filas(&db, "SELECT Tipo, Severidad, Accion, Titulo, Cuerpo FROM Notificaciones;").await;
+    assert_eq!(aviso.len(), 1, "{aviso:?}");
+    assert!(aviso[0].starts_with("fichas_unidas|aviso|ver_clientes|Se han unido dos fichas de clientes que eran la misma|"), "{aviso:?}");
+    assert!(aviso[0].contains("Se le ha añadido de la del TPV principal: sus notas."), "{aviso:?}");
+    assert!(
+        aviso[0].contains("No se ha guardado, porque la de las Handy ya tenía otro: nombre Ana, teléfono 611000000."),
+        "{aviso:?}"
+    );
+
+    // Arriba queda lo mismo, aviso incluido.
+    assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
+    for sql in [DE_ANA[0], "SELECT Tipo, Titulo, Cuerpo FROM Notificaciones;"] {
+        assert_eq!(filas(&nube.db, sql).await, filas(&db, sql).await, "{sql}");
+    }
+
+    cerrar(db, dir, nube).await;
+}

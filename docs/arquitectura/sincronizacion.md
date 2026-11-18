@@ -938,13 +938,17 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   `UPDATE` rellena los huecos con lo de la de aquí y nada más, `COALESCE(NULLIF(col, ''), ?)`: lo que
   la de la nube ya tenía no viaja, y arriba no vuelve al valor de la foto lo que una Handy haya
   cambiado o vaciado entretanto. Vacío es `NULL` o `''`, tal cual, también al decidir qué es un
-  hueco aquí. Después, todo lo que apunta a la de aquí pasa a la de la nube (las
+  hueco aquí. Las notas (`Notas`, `Informacion_adicional`) no se rellenan: se unen, las de la
+  ficha y, si no las tiene ya, las de la de aquí. Después, todo lo que apunta a la de aquí pasa a la de la nube (las
   foráneas se leen del esquema), el agregado (`Total_Gastado`) se re-deriva en el SQL y la de aquí
   se borra. En la misma transacción se retira lo apartado de la subida que nombraba la ficha de
   aquí: lo que sólo la escribía a ella se borra, y lo demás se repara por estado en una operación
   que lo lleva en `Repara_Op_Id` y que sube delante de la fusión (la reserva y el cobro entran
   apuntando a la ficha de la nube, que ya está arriba, y la fusión re-deriva el gasto con el cobro
-  dentro). Esa pasada del contraste se deja, porque la marca se ha movido; en la siguiente, con todo
+  dentro). En la misma transacción se avisa a los administradores (`fichas_unidas`) de qué fichas se
+  han unido, de lo que ha entrado de la de aquí y de lo que se ha quedado fuera porque la de la nube
+  ya tenía otro valor (el nombre, el teléfono, el NIF…), para que quede rastro y se pueda corregir.
+  Esa pasada del contraste se deja, porque la marca se ha movido; en la siguiente, con todo
   subido, la cuarentena sale sola y el contraste vuelve a reparar (si la reparación no entrara, lo
   sube el contraste y su plan lo retira). **Sólo se funde lo que esta Main escribió y la nube no
   tiene**, y las dos cosas se comprueban. Antes de fundir se le pide a la nube la ficha de aquí por su
