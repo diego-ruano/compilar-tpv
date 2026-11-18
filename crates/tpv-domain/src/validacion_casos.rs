@@ -17,7 +17,7 @@ use crate::inventario::{
 use crate::reservas::{ReservaEntrada, ReservaValidada};
 use crate::reservas_web::{AltaWebEntrada, AltaWebValidada};
 use crate::trabajadores::{
-    dia_de_horario, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO, MSG_SEMANA_ORIGEN,
+    dia_de_horario, validar_contrato, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO, MSG_SEMANA_ORIGEN,
 };
 
 fn texto(e: &Value, campo: &str) -> String {
@@ -179,6 +179,16 @@ fn dias_de_horario(e: &Value, campos: &[(&str, &str)]) -> Result<Value, String> 
     Ok(Value::Object(normalizado))
 }
 
+/// La ficha de un trabajador: las fechas del contrato (TRA-INC-01). El resto de la ficha lo valida
+/// el caso de uso; la base trae lo que el schema del worker exige para llegar hasta ellas.
+fn trabajador(e: &Value) -> Result<Value, String> {
+    let (inicio, fin) = validar_contrato(
+        texto_opcional(e, "fecha_inicio_contrato"),
+        texto_opcional(e, "fecha_fin_contrato"),
+    )?;
+    Ok(json!({ "fecha_inicio_contrato": inicio, "fecha_fin_contrato": fin }))
+}
+
 /// El plano que se guarda (MESAS-01): sus zonas y los nombres de sus mesas, recortados como se guardan.
 fn plano(e: &Value) -> Result<Value, String> {
     let vistas: Vec<crate::mesas::ZonaDelPlano<'_>> = e["salons"]
@@ -220,6 +230,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "categoria_ingrediente" => categoria_ingrediente(entrada),
         "ingrediente" => ingrediente(entrada),
         "cambios_ingredientes" => cambios_ingredientes(entrada),
+        "trabajador" => trabajador(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

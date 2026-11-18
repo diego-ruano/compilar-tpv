@@ -419,6 +419,8 @@ function AddTrabajador() {
               <input
                 type="date"
                 value={fechaFinContrato}
+                // TRA-INC-01: el calendario no ofrece días anteriores al inicio; el backend lo rechaza igual.
+                min={fechaInicioContrato || undefined}
                 disabled={indefinido}
                 onChange={(e) => setFechaFinContrato(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"

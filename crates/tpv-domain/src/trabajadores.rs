@@ -68,6 +68,39 @@ pub fn dia_de_horario(raw: &str, mensaje: &str) -> Result<String, String> {
     crate::fechas::normalizar_dia(raw).ok_or_else(|| mensaje.to_string())
 }
 
+/// Lo que se dice de las fechas del contrato que no valen (TRA-INC-01), lo mismo en el worker.
+pub const MSG_INICIO_CONTRATO: &str = "La fecha de inicio del contrato no es válida.";
+pub const MSG_FIN_CONTRATO: &str = "La fecha de fin del contrato no es válida.";
+pub const MSG_FIN_ANTES_DEL_INICIO: &str =
+    "La fecha de fin del contrato no puede ser anterior a la de inicio.";
+
+/// Las fechas del contrato tal como llegan, normalizadas a `YYYY-MM-DD` (vacío = sin fecha).
+///
+/// TRA-INC-01: se guardaba cualquier texto, y una fecha de fin anterior a la de inicio también.
+/// Cada una, si viene, tiene que ser una fecha real (`fechas::normalizar_dia`), y la de fin no
+/// puede ser anterior a la de inicio (el mismo día vale: un contrato de un día). Espejo en el
+/// worker: `fechasDeContrato` en `trabajadores.schemas.ts`.
+pub fn validar_contrato(
+    inicio: Option<String>,
+    fin: Option<String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let dia = |valor: Option<String>, mensaje: &str| -> Result<Option<String>, String> {
+        match limpiar_opcional(valor) {
+            None => Ok(None),
+            Some(v) => crate::fechas::normalizar_dia(&v).map(Some).ok_or_else(|| mensaje.to_string()),
+        }
+    };
+    let inicio = dia(inicio, MSG_INICIO_CONTRATO)?;
+    let fin = dia(fin, MSG_FIN_CONTRATO)?;
+    if let (Some(i), Some(f)) = (&inicio, &fin) {
+        // Ya son `YYYY-MM-DD` reales: comparar el texto es comparar las fechas.
+        if f < i {
+            return Err(MSG_FIN_ANTES_DEL_INICIO.to_string());
+        }
+    }
+    Ok((inicio, fin))
+}
+
 /// Texto obligatorio: recorta y exige no vacío.
 pub use crate::texto::requerido;
 
@@ -190,6 +223,23 @@ mod tests {
                 "La semana de origen no es válida."
             );
         }
+    }
+
+    #[test]
+    fn el_contrato_no_acaba_antes_de_empezar() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(
+            validar_contrato(s("2026-03-01"), s("2026-02-28")).unwrap_err(),
+            MSG_FIN_ANTES_DEL_INICIO
+        );
+        assert_eq!(
+            validar_contrato(s(" 2026-03-01 "), s("2026-03-01")).unwrap(),
+            (s("2026-03-01"), s("2026-03-01"))
+        );
+        assert_eq!(validar_contrato(s(""), s("2026-01-01")).unwrap(), (None, s("2026-01-01")));
+        assert_eq!(validar_contrato(None, None).unwrap(), (None, None));
+        assert_eq!(validar_contrato(s("2026-02-30"), None).unwrap_err(), MSG_INICIO_CONTRATO);
+        assert_eq!(validar_contrato(None, s("31/12/2026")).unwrap_err(), MSG_FIN_CONTRATO);
     }
 
     #[test]

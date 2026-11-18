@@ -9,7 +9,7 @@ use tpv_contracts::trabajadores::{
 };
 use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
-    dia_de_horario, limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
+    dia_de_horario, limpiar_opcional, normalizar_estado, requerido, validar_contrato, AsignacionCambios, AsignacionNueva,
     TrabajadorCambios, TrabajadorNuevo, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO,
     MSG_SEMANA_ORIGEN,
 };
@@ -175,6 +175,9 @@ pub async fn create_trabajador(
     // RI-63: llega el PIN y se valida aquí; lo hashea el adaptador que lo guarda.
     let pin = pin_de_teclado(&input.pin).map_err(AppError::validation)?;
     let nombre = requerido(&input.nombre, "Escribe el nombre del trabajador.").map_err(AppError::validation)?;
+    // TRA-INC-01: fechas reales, y el contrato no acaba antes de empezar.
+    let (fecha_inicio_contrato, fecha_fin_contrato) =
+        validar_contrato(input.fecha_inicio_contrato, input.fecha_fin_contrato).map_err(AppError::validation)?;
 
     let data = TrabajadorNuevo {
         id_rol: input.id_rol,
@@ -188,8 +191,8 @@ pub async fn create_trabajador(
         puesto: limpiar_opcional(input.puesto),
         iban: limpiar_opcional(input.iban),
         numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
-        fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
-        fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
+        fecha_inicio_contrato,
+        fecha_fin_contrato,
         sin_pin: input.sin_pin,
     };
 
@@ -217,6 +220,8 @@ pub async fn update_trabajador(
         Some(p) => Some(pin_de_teclado(&p).map_err(AppError::validation)?),
         None => None,
     };
+    let (fecha_inicio_contrato, fecha_fin_contrato) =
+        validar_contrato(input.fecha_inicio_contrato, input.fecha_fin_contrato).map_err(AppError::validation)?;
 
     let cambios = TrabajadorCambios {
         id_usuario: input.id_usuario,
@@ -230,8 +235,8 @@ pub async fn update_trabajador(
         puesto: limpiar_opcional(input.puesto),
         iban: limpiar_opcional(input.iban),
         numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
-        fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
-        fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
+        fecha_inicio_contrato,
+        fecha_fin_contrato,
         pin,
         sin_pin: input.sin_pin,
     };

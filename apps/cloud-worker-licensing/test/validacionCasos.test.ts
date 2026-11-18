@@ -34,6 +34,8 @@ import {
 	asignacionCreateSchema,
 	copySemanaSchema,
 	fechaLunesSchema,
+	trabajadorCreateSchema,
+	trabajadorUpdateSchema,
 } from "../src/domains/trabajadores/trabajadores.schemas";
 
 type Entrada = Record<string, unknown>;
@@ -67,6 +69,21 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	categoria_ingrediente: (e) => validarConMensaje(guardarCategoriaIngredienteSchema, e),
 	ingrediente: (e) => validarConMensaje(guardarIngredienteSchema, e),
 	cambios_ingredientes: (e) => validarConMensaje(cambiosIngredientesSchema, e),
+	// El alta y la edición validan las fechas del contrato igual: tienen que decir lo mismo.
+	trabajador: async (e) => {
+		const alta: Resultado = await validarConMensaje(trabajadorCreateSchema, e);
+		const edicion: Resultado = await validarConMensaje(trabajadorUpdateSchema, {
+			...e,
+			id_trabajador: "t1",
+			id_usuario: "u1",
+			pin: null,
+		});
+		expect({ success: edicion.success, mensaje: edicion.mensaje }).toEqual({
+			success: alta.success,
+			mensaje: alta.mensaje,
+		});
+		return alta;
+	},
 	negocio: async (e) => {
 		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
 		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;

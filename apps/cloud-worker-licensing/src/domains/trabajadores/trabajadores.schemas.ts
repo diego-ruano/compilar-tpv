@@ -2,7 +2,7 @@
 
 import * as z from "zod";
 
-import { esFechaYmd, zDia } from "../../lib/fechas";
+import { esFechaYmd, normalizarDia, zDia } from "../../lib/fechas";
 import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -59,6 +59,39 @@ function normalizeOptionalTime(raw: unknown): string | null {
 	return hhmm;
 }
 
+/** Lo que se dice de las fechas del contrato que no valen: el mismo texto que la Main (TRA-INC-01). */
+const MSG_INICIO_CONTRATO = "La fecha de inicio del contrato no es válida.";
+const MSG_FIN_CONTRATO = "La fecha de fin del contrato no es válida.";
+const MSG_FIN_ANTES_DEL_INICIO = "La fecha de fin del contrato no puede ser anterior a la de inicio.";
+
+/** Una fecha del contrato: vacía o ausente es `null`; si viene, una fecha real (`normalizarDia`). */
+function zFechaDeContrato(mensaje: string) {
+	return z.unknown().optional().transform((v, ctx) => {
+		const texto = cleanOrNull(v);
+		if (texto === null) return null;
+		const dia = normalizarDia(texto);
+		if (dia === null) {
+			ctx.addIssue({ code: "custom", message: mensaje });
+			return z.NEVER;
+		}
+		return dia;
+	});
+}
+
+/**
+ * TRA-INC-01: el contrato no acaba antes de empezar (el mismo día vale). Espejo de
+ * `validar_contrato` en `tpv-domain/src/trabajadores.rs`; los casos, en `validacion_casos.json`.
+ */
+function fechasDeContrato(
+	v: { fecha_inicio_contrato: string | null; fecha_fin_contrato: string | null },
+	ctx: z.RefinementCtx,
+) {
+	const { fecha_inicio_contrato: inicio, fecha_fin_contrato: fin } = v;
+	if (inicio !== null && fin !== null && fin < inicio) {
+		ctx.addIssue({ code: "custom", message: MSG_FIN_ANTES_DEL_INICIO, path: ["fecha_fin_contrato"] });
+	}
+}
+
 export const trabajadorCreateSchema = z
 	.object({
 		id_rol: idField("Elige un rol."),
@@ -76,19 +109,18 @@ export const trabajadorCreateSchema = z
 		// los envíe recibe un error en vez de creerse que se han guardado.
 		telefono: z.any().optional().nullable(),
 		puesto: z.any().optional().nullable(),
-		fecha_inicio_contrato: z.any().optional().nullable(),
-		fecha_fin_contrato: z.any().optional().nullable(),
+		fecha_inicio_contrato: zFechaDeContrato(MSG_INICIO_CONTRATO),
+		fecha_fin_contrato: zFechaDeContrato(MSG_FIN_CONTRATO),
 		// Entra sin PIN. Ausente, como en la Main: pide PIN.
 		sin_pin: z.boolean().optional().default(false),
 	})
+	.superRefine(fechasDeContrato)
 	.transform((v) => ({
 		...v,
 		apellido: cleanOrNull(v.apellido),
 		estado: normalizeEstado(v.estado),
 		telefono: cleanOrNull(v.telefono),
 		puesto: cleanOrNull(v.puesto),
-		fecha_inicio_contrato: cleanOrNull(v.fecha_inicio_contrato),
-		fecha_fin_contrato: cleanOrNull(v.fecha_fin_contrato),
 	}));
 
 export const trabajadorUpdateSchema = z
@@ -106,8 +138,8 @@ export const trabajadorUpdateSchema = z
 		// los envíe recibe un error en vez de creerse que se han guardado.
 		telefono: z.any().optional().nullable(),
 		puesto: z.any().optional().nullable(),
-		fecha_inicio_contrato: z.any().optional().nullable(),
-		fecha_fin_contrato: z.any().optional().nullable(),
+		fecha_inicio_contrato: zFechaDeContrato(MSG_INICIO_CONTRATO),
+		fecha_fin_contrato: zFechaDeContrato(MSG_FIN_CONTRATO),
 		// Vacío o ausente: el PIN no se cambia.
 		pin: z
 			.string()
@@ -118,14 +150,13 @@ export const trabajadorUpdateSchema = z
 		// Ausente o null: se queda el que tenga, como en la Main (`COALESCE`).
 		sin_pin: z.boolean().optional().nullable().transform((v) => v ?? null),
 	})
+	.superRefine(fechasDeContrato)
 	.transform((v) => ({
 		...v,
 		apellido: cleanOrNull(v.apellido),
 		estado: normalizeEstado(v.estado),
 		telefono: cleanOrNull(v.telefono),
 		puesto: cleanOrNull(v.puesto),
-		fecha_inicio_contrato: cleanOrNull(v.fecha_inicio_contrato),
-		fecha_fin_contrato: cleanOrNull(v.fecha_fin_contrato),
 	}));
 
 export const asignacionCreateSchema = z
