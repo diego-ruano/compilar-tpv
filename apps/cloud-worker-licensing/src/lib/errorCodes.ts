@@ -297,7 +297,10 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	email_en_curso: "El pedido se está enviando ahora mismo. Espera un momento y vuelve a intentarlo: no saldrá dos veces.",
 
 	// Licencia, base de la nube y códigos por correo
-	invalid_license_key_format: "La clave de licencia no tiene el formato correcto. Revísala.",
+	// LIC-INC-01: el mismo texto que la Main (`MSG_CLAVE_MAL_FORMADA`) y la pantalla
+	// (`clave_licencia_casos.json`).
+	invalid_license_key_format:
+		"La clave de licencia no tiene el formato correcto: son 20 letras y números, como TPV-XXXXX-XXXXX-XXXXX-XXXXX. Revísala.",
 	device_change_required:
 		"Esta licencia está activada en otro equipo. Para pasarla a éste hay que confirmar el cambio con el código enviado al correo de la compra.",
 	device_key_mismatch:

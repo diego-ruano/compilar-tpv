@@ -290,8 +290,8 @@ describe("AUD-34 · el tope no corta nada legítimo", () => {
 		for (const conLongitud of [true, false]) {
 			const r = await pedir("/v1/license/activate", cuerpo, peticion.headers, conLongitud);
 			// Pasa el tope, la firma (que cubre esos mismos bytes) y el validador: la clave no tiene la
-			// forma de una de verdad y la ruta contesta antes de leer ninguna fila.
-			expect({ status: r.status, error: r.cuerpo.error }).toEqual({ status: 404, error: "license_not_found" });
+			// forma de una de verdad y la ruta contesta antes de leer ninguna fila (LIC-INC-01).
+			expect({ status: r.status, error: r.cuerpo.error }).toEqual({ status: 400, error: "invalid_license_key_format" });
 		}
 		expect(consultas).toEqual([]);
 	});

@@ -53,7 +53,7 @@ import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
 import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
-import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
+import { CLAVE_DESCONOCIDA, licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import {
 	sendDeviceChangeCodeEmail,
 	sendDeviceChangedNoticeEmail,
@@ -318,8 +318,12 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 
 	const body = c.req.valid("json");
 	const activationKey = normalizeLicenseKey(body.activationKey);
+	// LIC-INC-01: una clave mal escrita no es una que no existe. Contestar a las dos con
+	// `license_not_found` hacía que el TPV dijera «No hay una licencia activa» a quien sólo se había
+	// comido una letra. El formato es público (`clave_licencia_casos.json`): decirlo no da pistas
+	// sobre qué claves existen. El texto lo pone `MENSAJES`, el mismo que da la Main sin ir a la red.
 	if (!activationKey) {
-		return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+		return c.json({ ok: false, error: "invalid_license_key_format" } satisfies ApiError, 400);
 	}
 	const { deviceId, devicePubKey } = body;
 	const deviceChangeCode = body.deviceChangeCode ?? "";
@@ -331,9 +335,15 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	const licHash = await licenseKeyHash(activationKey);
 	const lic = await getLicenseByHash(db, licHash);
 
-	// Mismo error para "no existe" que para un formato válido pero desconocido: no damos pistas
-	// sobre qué claves existen.
-	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	// Bien escrita pero desconocida. Con su propia frase: el genérico de `license_not_found` («No
+	// hay una licencia activa») es el de un equipo cuya licencia ha desaparecido, no el de una clave
+	// que se acaba de teclear.
+	if (!lic) {
+		return c.json(
+			{ ok: false, error: "license_not_found", message: CLAVE_DESCONOCIDA } satisfies ApiError,
+			404,
+		);
+	}
 	if (estaAnulada(lic)) {
 		return c.json({ ok: false, error: "license_revoked" } satisfies ApiError, 403);
 	}

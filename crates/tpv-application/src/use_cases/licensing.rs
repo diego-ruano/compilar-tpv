@@ -297,11 +297,10 @@ pub async fn request_device_change(
     svc: &dyn LicensingService,
     input: LicenseDeviceChangeInput,
 ) -> AppResult<()> {
-    let clave = input.activation_key.trim();
-    if clave.is_empty() {
-        return Err(AppError::validation("Escribe la clave de activación."));
-    }
-    svc.solicitar_cambio_dispositivo(clave).await
+    // LIC-INC-01: con la misma regla que al activar; la nube contesta igual a cualquier clave.
+    let clave = tpv_domain::licensing::validar_clave(&input.activation_key, "Escribe la clave de activación.")
+        .map_err(AppError::validation)?;
+    svc.solicitar_cambio_dispositivo(&clave).await
 }
 
 /// Gate de arranque / periódico: se apoya en la gracia offline si no hay red. Además, avisa a los
@@ -1312,7 +1311,7 @@ mod tests {
 
     fn entrada() -> LicenseActivateInput {
         LicenseActivateInput {
-            activation_key: "TPV-AAAA-BBBB-CCCC".into(),
+            activation_key: "TPV-AAAAA-BBBBB-CCCCC-DDDDD".into(),
             business_name: "Bar de Pruebas".into(),
             legal_name: None,
             phone: None,
@@ -1460,7 +1459,7 @@ mod tests {
                 &equipo,
                 ResultadoActivacion::Activada(Concesion { tenant_id: negocio.into(), tiempo_sumado: true, ..concesion(false) }),
             );
-            assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.is_err(), "{negocio}");
+            assert!(sumar_clave(&svc, &base, "TPV-AAAAA-BBBBB-CCCCC-DDDDD".into()).await.is_err(), "{negocio}");
             assert!(svc.respuesta.lock().unwrap().is_some(), "{negocio}");
         }
         assert_eq!(equipo.escrituras(), antes, "no se ha escrito nada");
@@ -1534,7 +1533,7 @@ mod tests {
 
         let equipo = Equipo::con_sello(Some("tenant-1")).con_licencia("tenant-1");
         let (svc, base) = sobre(&equipo, ResultadoActivacion::Activada(sumada("tenant-1")));
-        assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.unwrap().tiempo_sumado);
+        assert!(sumar_clave(&svc, &base, "TPV-AAAAA-BBBBB-CCCCC-DDDDD".into()).await.unwrap().tiempo_sumado);
         assert_eq!(equipo.escrituras(), ["credenciales", "estado"]);
 
         for (que, respuesta) in [
@@ -1543,7 +1542,7 @@ mod tests {
         ] {
             let equipo = Equipo::con_sello(Some("tenant-1")).con_licencia("tenant-1");
             let (svc, base) = sobre(&equipo, respuesta);
-            assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.is_err(), "{que}");
+            assert!(sumar_clave(&svc, &base, "TPV-AAAAA-BBBBB-CCCCC-DDDDD".into()).await.is_err(), "{que}");
             assert!(equipo.escrituras().is_empty(), "{que}");
         }
     }

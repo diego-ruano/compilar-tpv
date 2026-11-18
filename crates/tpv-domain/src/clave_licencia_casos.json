@@ -1,0 +1,29 @@
+{
+  "_leeme": "LIC-INC-01. La forma canonica de una clave de licencia, igual en los tres sitios que la leen: clave_canonica en crates/tpv-domain/src/licensing.rs (la Main, que la valida antes de mandarla), normalizeLicenseKey en apps/cloud-worker-licensing/src/domains/licensing/licenseKey.ts (la nube, que calcula su hash) y claveCanonica en apps/tpv-main/src/shared/lib/claveLicencia.ts (la pantalla, que avisa al escribir). Los tres tests la recorren: si uno cambia de criterio, se pone rojo hasta que se igualen. Al cambiar el criterio NO se tocan tres listas: se anade un caso aqui.",
+
+  "_mensaje": "Lo que se le dice a quien la escribe mal: el mismo texto en la Main (MSG_CLAVE_MAL_FORMADA), en el worker (MENSAJES.invalid_license_key_format) y en la pantalla.",
+  "mensaje": "La clave de licencia no tiene el formato correcto: son 20 letras y números, como TPV-XXXXX-XXXXX-XXXXX-XXXXX. Revísala.",
+
+  "_casos": "Cada caso es [lo que se escribe, la forma canonica o null si no es una clave, por que]. Formato: TPV y cuatro grupos de 5 simbolos del alfabeto base32 de Crockford (sin I, L, O ni U).",
+  "casos": [
+    ["TPV-ABCDE-FGHJK-MNPQR-STVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "la forma canonica se queda como esta"],
+    ["tpv-abcde-fghjk-mnpqr-stvwx", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "en minusculas"],
+    ["  TPV-ABCDE-FGHJK-MNPQR-STVWX  ", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "con espacios alrededor"],
+    ["TPV ABCDE FGHJK MNPQR STVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "con espacios en vez de guiones"],
+    ["TPV--ABCDE--FGHJK-MNPQRSTVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "con guiones de mas o de menos"],
+    ["ABCDE-FGHJK-MNPQR-STVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "sin el prefijo"],
+    ["ABCDEFGHJKMNPQRSTVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "sin prefijo ni guiones"],
+    ["TPV-0123O-1IL1i-89XYZ-00000", "TPV-01230-11111-89XYZ-00000", "las confusiones de Crockford: la O es un 0, y la I y la L son un 1"],
+    ["TPV.ABCDE/FGHJK_MNPQR:STVWX", "TPV-ABCDE-FGHJK-MNPQR-STVWX", "cualquier otro adorno se quita"],
+    ["TPV-ABCDE-FGHJK-MNPQR-STVWÉ", null, "una letra que no es ASCII se quita y faltan simbolos"],
+    ["TPV-ABCDE-FGHJK-MNPQR-STVW", null, "19 simbolos"],
+    ["TPV-ABCDE-FGHJK-MNPQR-STVWXY", null, "21 simbolos"],
+    ["TPV-ABCD-EFGH-JKMN", null, "el formato de una clave de prueba antigua, de 12 simbolos"],
+    ["TPV-ABCDE-FGHJK-MNPQR-STVWU", null, "la U no esta en el alfabeto"],
+    ["TPVAB-CDEFG-HJKMN-PQRST", null, "una clave cuyos simbolos empiezan por TPV, sin su prefijo: el TPV se toma por el prefijo y quedan 17"],
+    ["TPV-TPVAB-CDEFG-HJKMN-PQRST", "TPV-TPVAB-CDEFG-HJKMN-PQRST", "una clave cuyos simbolos empiezan por TPV, con su prefijo"],
+    ["XXXX-XXXX-XXXX", null, "lo que decia el ejemplo del campo"],
+    ["---", null, "solo adornos"],
+    ["", null, "vacia"]
+  ]
+}

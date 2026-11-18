@@ -14,6 +14,7 @@ import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome, Licens
 
 import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { avisoDeClave, claveCanonica, EJEMPLO_CLAVE } from "../../../shared/lib/claveLicencia";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import { CopiasSeguridad } from "./CopiasSeguridad";
@@ -71,6 +72,8 @@ function Fila({ label, children }: { label: string; children: React.ReactNode })
  */
 function AnadirClave({ onSumada }: { onSumada: () => void }) {
 	const [clave, setClave] = useState("");
+	// LIC-INC-01: una clave mal escrita se avisa al dejar el campo, sin esperar a pulsar.
+	const [claveTerminada, setClaveTerminada] = useState(false);
 	const [ocupado, setOcupado] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [sumada, setSumada] = useState<string | null>(null);
@@ -88,6 +91,7 @@ function AnadirClave({ onSumada }: { onSumada: () => void }) {
 					: "Tiempo añadido.",
 			);
 			setClave("");
+			setClaveTerminada(false);
 			onSumada();
 		} catch (e) {
 			setError(toAppError(e).message);
@@ -95,6 +99,8 @@ function AnadirClave({ onSumada }: { onSumada: () => void }) {
 			setOcupado(false);
 		}
 	}
+
+	const avisoClave = avisoDeClave(clave, claveTerminada);
 
 	return (
 		<Panel title="Añadir otra licencia" subtitle="Suma el tiempo de otra clave a la de este equipo">
@@ -104,19 +110,25 @@ function AnadirClave({ onSumada }: { onSumada: () => void }) {
 					<Input
 						value={clave}
 						onChange={(e) => setClave(e.target.value)}
-						placeholder="TPV-XXXXX-XXXXX-XXXXX-XXXXX"
+						onBlur={() => setClaveTerminada(true)}
+						placeholder={EJEMPLO_CLAVE}
 						autoComplete="off"
 						spellCheck={false}
 						disabled={ocupado}
 						className="mt-1 h-11 font-mono"
 					/>
 				</label>
+				{avisoClave ? (
+					<p className="text-sm text-danger" role="alert">
+						{avisoClave}
+					</p>
+				) : null}
 				<p className="text-xs text-fg-muted">
 					Para renovar, o para juntar aquí el tiempo de varias licencias compradas a la vez. Sólo
 					valen claves sin estrenar: una que ya se usa en otro local no se puede añadir.
 				</p>
 				<div>
-					<Button loading={ocupado} disabled={!clave.trim()} onClick={conAviso(anadir)}>
+					<Button loading={ocupado} disabled={claveCanonica(clave) === null} onClick={conAviso(anadir)}>
 						Añadir
 					</Button>
 				</div>

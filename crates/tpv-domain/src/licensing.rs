@@ -15,6 +15,59 @@ pub const GRACIA_OFFLINE_MS: i64 = 72 * 60 * 60 * 1000;
 pub const TOLERANCIA_RELOJ_MS: i64 = 2 * 60 * 1000;
 
 /* =========================================================
+   La clave de licencia
+========================================================= */
+
+/// El alfabeto de la clave: base32 de Crockford, sin I, L, O ni U.
+const ALFABETO_CLAVE: &str = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const GRUPOS_CLAVE: usize = 4;
+const SIMBOLOS_POR_GRUPO: usize = 5;
+
+/// LIC-INC-01 · Lo que se le dice a quien escribe una clave que no tiene la forma de una. El mismo
+/// texto en el worker (`invalid_license_key_format`) y en la pantalla (`clave_licencia_casos.json`).
+pub const MSG_CLAVE_MAL_FORMADA: &str =
+    "La clave de licencia no tiene el formato correcto: son 20 letras y números, como TPV-XXXXX-XXXXX-XXXXX-XXXXX. Revísala.";
+
+/// LIC-INC-01 · La forma canónica de una clave (`TPV-XXXXX-XXXXX-XXXXX-XXXXX`), o `None` si lo
+/// escrito no es una. Tolera minúsculas, espacios y guiones de más o de menos, el prefijo ausente y
+/// las confusiones de Crockford (O → 0, I y L → 1). Es la regla de `normalizeLicenseKey` del worker,
+/// que calcula el hash sobre esta forma; las dos, y la de la pantalla, recorren
+/// `clave_licencia_casos.json`.
+pub fn clave_canonica(entrada: &str) -> Option<String> {
+    let mut simbolos: String = entrada
+        .to_uppercase()
+        .chars()
+        .filter(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+        .collect();
+    if simbolos.starts_with("TPV") {
+        simbolos.drain(..3);
+    }
+    let simbolos: Vec<char> = simbolos
+        .chars()
+        .map(|c| match c {
+            'I' | 'L' => '1',
+            'O' => '0',
+            c => c,
+        })
+        .collect();
+    if simbolos.len() != GRUPOS_CLAVE * SIMBOLOS_POR_GRUPO || !simbolos.iter().all(|c| ALFABETO_CLAVE.contains(*c)) {
+        return None;
+    }
+    let grupos: Vec<String> = simbolos.chunks(SIMBOLOS_POR_GRUPO).map(|g| g.iter().collect()).collect();
+    Some(format!("TPV-{}", grupos.join("-")))
+}
+
+/// La clave que se manda a la nube, en su forma canónica, o el texto que hay que enseñar si no
+/// vale. `vacia` es el de cuando no se ha escrito nada.
+pub fn validar_clave(clave: &str, vacia: &str) -> Result<String, String> {
+    let clave = clave.trim();
+    if clave.is_empty() {
+        return Err(vacia.to_string());
+    }
+    clave_canonica(clave).ok_or_else(|| MSG_CLAVE_MAL_FORMADA.to_string())
+}
+
+/* =========================================================
    Activación
 ========================================================= */
 
@@ -32,7 +85,8 @@ pub struct SolicitudActivacion {
 }
 
 impl SolicitudActivacion {
-    /// Normaliza y valida. `clave` y `business_name` son obligatorios.
+    /// Normaliza y valida. `clave` y `business_name` son obligatorios, y la clave tiene que tener
+    /// la forma de una: una mal escrita se rechaza aquí, sin ir a la red (LIC-INC-01).
     pub fn validar(
         clave: String,
         business_name: String,
@@ -40,10 +94,7 @@ impl SolicitudActivacion {
         phone: Option<String>,
         country: Option<String>,
     ) -> Result<Self, String> {
-        let clave = clave.trim().to_string();
-        if clave.is_empty() {
-            return Err("Escribe la clave de activación.".to_string());
-        }
+        let clave = validar_clave(&clave, "Escribe la clave de activación.")?;
 
         let business_name = business_name.trim().to_string();
         if business_name.is_empty() {
@@ -63,10 +114,7 @@ impl SolicitudActivacion {
     /// RI-52: canjear una clave en un equipo que ya funciona. No lleva datos del negocio: no va a
     /// crear ninguno, y el servidor se niega a hacer otra cosa que sumar tiempo.
     pub fn para_sumar(clave: String) -> Result<Self, String> {
-        let clave = clave.trim().to_string();
-        if clave.is_empty() {
-            return Err("Escribe la clave que quieres añadir.".to_string());
-        }
+        let clave = validar_clave(&clave, "Escribe la clave que quieres añadir.")?;
         Ok(SolicitudActivacion {
             clave,
             business_name: String::new(),
@@ -781,17 +829,17 @@ mod tests {
     #[test]
     fn la_activacion_exige_clave_y_nombre_de_negocio() {
         assert!(SolicitudActivacion::validar("  ".into(), "Bar".into(), None, None, None).is_err());
-        assert!(SolicitudActivacion::validar("K".into(), "  ".into(), None, None, None).is_err());
+        assert!(SolicitudActivacion::validar(CLAVE.into(), "  ".into(), None, None, None).is_err());
 
         let s = SolicitudActivacion::validar(
-            " K ".into(),
+            " tpv-abcde-fghjk-mnpqr-stvwx ".into(),
             " Bar ".into(),
             Some("  ".into()),
             Some(" +34 600 ".into()),
             None,
         )
         .expect("válida");
-        assert_eq!(s.clave, "K");
+        assert_eq!(s.clave, CLAVE, "sale en su forma canónica");
         assert_eq!(s.business_name, "Bar");
         assert_eq!(s.legal_name, None);
         assert_eq!(s.phone.as_deref(), Some("+34 600"));
@@ -801,9 +849,37 @@ mod tests {
     #[test]
     fn el_canje_solo_pide_la_clave_y_lleva_la_marca() {
         assert!(SolicitudActivacion::para_sumar("  ".into()).is_err());
-        let s = SolicitudActivacion::para_sumar(" K ".into()).expect("válida");
-        assert_eq!(s.clave, "K");
+        let s = SolicitudActivacion::para_sumar(" ABCDE FGHJK MNPQR STVWX ".into()).expect("válida");
+        assert_eq!(s.clave, CLAVE);
         assert!(s.solo_sumar);
+    }
+
+    const CLAVE: &str = "TPV-ABCDE-FGHJK-MNPQR-STVWX";
+
+    /// LIC-INC-01 · Una clave mal escrita se rechaza antes de ir a la red, con el mismo texto que da
+    /// el worker. Antes sólo se miraba que no estuviera vacía, y la nube contestaba a una clave mal
+    /// escrita igual que a una que no existe: «No hay una licencia activa».
+    #[test]
+    fn una_clave_mal_escrita_se_rechaza_antes_de_ir_a_la_red() {
+        let mal = "TPV-ABCD-EFGH-JKMN";
+        let alta = SolicitudActivacion::validar(mal.into(), "Bar".into(), None, None, None);
+        assert_eq!(alta.unwrap_err(), MSG_CLAVE_MAL_FORMADA);
+        assert_eq!(SolicitudActivacion::para_sumar(mal.into()).unwrap_err(), MSG_CLAVE_MAL_FORMADA);
+        // Vacía no es «mal escrita»: se pide que se escriba.
+        assert_eq!(SolicitudActivacion::para_sumar(" ".into()).unwrap_err(), "Escribe la clave que quieres añadir.");
+    }
+
+    /// La forma canónica, contra la tabla que comparte con el worker y con la pantalla.
+    #[test]
+    fn la_clave_canonica_es_la_de_la_tabla_compartida() {
+        let tabla: serde_json::Value = serde_json::from_str(include_str!("clave_licencia_casos.json")).unwrap();
+        assert_eq!(tabla["mensaje"].as_str(), Some(MSG_CLAVE_MAL_FORMADA));
+        let casos = tabla["casos"].as_array().unwrap();
+        assert!(casos.len() > 10);
+        for caso in casos {
+            let (entrada, esperada, porque) = (caso[0].as_str().unwrap(), caso[1].as_str(), caso[2].as_str().unwrap());
+            assert_eq!(clave_canonica(entrada).as_deref(), esperada, "{porque}: {entrada:?}");
+        }
     }
 
     // ── AUD-06 · una base sólo se usa con la licencia de su negocio ─────────────────────────

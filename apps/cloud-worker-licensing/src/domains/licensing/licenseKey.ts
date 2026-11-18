@@ -30,9 +30,18 @@ export function generateLicenseKey(): string {
 }
 
 /**
+ * LIC-INC-01 · Lo que se le dice a quien activa con una clave bien escrita que no es de ninguna
+ * licencia. Una mal escrita es `invalid_license_key_format`, con su texto en `MENSAJES`.
+ */
+export const CLAVE_DESCONOCIDA = "No hay ninguna licencia con esa clave. Revísala.";
+
+/**
  * Forma canónica de lo que teclea el usuario. Tolera minúsculas, espacios, guiones de más
  * o de menos, el prefijo ausente y las confusiones clásicas de Crockford (I/L→1, O→0).
  * Devuelve `null` si no es una clave con nuestra forma.
+ *
+ * La misma regla en la Main (`clave_canonica`, `tpv-domain/src/licensing.rs`) y en la pantalla
+ * (`claveCanonica`): las tres recorren `crates/tpv-domain/src/clave_licencia_casos.json`.
  *
  * El hash SIEMPRE se calcula sobre esta forma canónica: si no, la misma clave escrita en
  * minúsculas no encontraría su fila.

@@ -41,6 +41,12 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 - **Formato**: `TPV-XXXXX-XXXXX-XXXXX-XXXXX` en base32 Crockford, con `crypto.getRandomValues`. En la
   base se guarda `sha256(clave)` (único, por donde se busca) y la clave cifrada con
   `LICENSE_STORE_KEY` (para reenviarla). Nunca en claro ni en logs.
+- **Lo que se teclea se pasa a la forma canónica** antes de nada: minúsculas, espacios, guiones de
+  más o de menos, el prefijo ausente y las confusiones de Crockford (O → 0, I y L → 1). La misma regla
+  en la Main (`clave_canonica`, `tpv-domain/src/licensing.rs`), que rechaza una clave mal escrita sin
+  ir a la red, en el worker (`normalizeLicenseKey`) y en la pantalla (`claveCanonica`), que avisa al
+  escribirla; las tres recorren `crates/tpv-domain/src/clave_licencia_casos.json`, que lleva también
+  el texto que se enseña (LIC-INC-01).
 - **Tabla `licenses`**: `status` (`issued`, `active`, `revoked`, `redeemed`), `disabled`, `plan`
   (`standard`), `term_months`, `origin` (`stripe` | `manual`), `issued_at_ms`, `activated_at_ms`,
   `expires_at_ms`, `main_device_id`, `tenant_id`, `customer_email` (obligatorio: es a donde va el
@@ -165,7 +171,10 @@ Rust y el worker comparten un vector con una clave fija
 (`crates/tpv-infra-licensing/src/firma_activacion_casos.json`): el mismo cuerpo, el mismo mensaje y
 la misma firma en los dos lados.
 
-No existe o no se reconoce → `license_not_found`; revocada → `license_revoked`; caducada **y pasada la
+Mal escrita → `invalid_license_key_format` (400), con el mismo texto que da la Main; bien escrita
+pero de ninguna licencia → `license_not_found` (404) con su propia frase («No hay ninguna licencia
+con esa clave. Revísala.»), no el genérico del código, que es el de un equipo que se ha quedado sin
+ella. Revocada → `license_revoked`; caducada **y pasada la
 gracia** → `license_expired`. **Una clave sin Main que no esté `issued` → `license_already_used`**
 (409, AUD-07): es la que un canje dejó `redeemed`, que tampoco tiene `main_device_id`. Se rechaza
 antes de elegir camino, sin negocio, base, fila de equipo, token ni DEK; al equipo que la canjeó se
