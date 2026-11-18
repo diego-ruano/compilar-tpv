@@ -609,8 +609,8 @@ export async function reservas(
 	const { start, end } = rangeBoundsReservas(range);
 	const b = bucketReservas(range);
 
-	// El JOIN con Mesas no es decorativo: una reserva cuya mesa ya no existe no cuenta como mesa
-	// ocupada, y dejarla dentro descuadraria el reparto reservadas/libres.
+	// Todas las reservas cuentan, tengan mesa o no (EST-INC-04): el criterio de la mesa es solo del
+	// reparto de mesas, mas abajo. Igual en la Main (`reservas_impl`).
 	const CTES = `
 		WITH
 		rng AS (SELECT ${start} AS start_dt, ${end} AS end_dt),
@@ -622,7 +622,6 @@ export async function reservas(
 				r.Estado,
 				datetime(r.Dia_YMD || ' ' || r.Hora) AS res_at
 			FROM Reservas r
-			JOIN Mesas m ON m.ID_Mesa = r.ID_Mesa
 		),
 		res_rng AS (
 			SELECT res.* FROM res, rng
@@ -633,7 +632,7 @@ export async function reservas(
 	// las graficas son de todo el rango: si se filtrara en todo, elegir "cena" cambiaria el total de
 	// reservas del dia, que no es lo que ese selector significa.
 	const turnoFilter =
-		turno === "COMIDA" ? "AND Turno='COMIDA'" : turno === "CENA" ? "AND Turno='CENA'" : "";
+		turno === "COMIDA" ? "AND rr.Turno='COMIDA'" : turno === "CENA" ? "AND rr.Turno='CENA'" : "";
 
 	const totalMesas = await one(db, "SELECT COUNT(*) AS n FROM Mesas WHERE Archivada_En IS NULL;");
 	const total = await one(db, `${CTES} SELECT COUNT(*) AS n FROM res_rng;`);
@@ -641,11 +640,14 @@ export async function reservas(
 		db,
 		`${CTES} SELECT COUNT(*) AS n FROM res_rng WHERE COALESCE(Estado,'')='CANCELADA';`,
 	);
+	// Las mesas reservadas son las del plano de hoy, como `totalMesas`: una reserva sin mesa, o con
+	// una que ya se archivo, cuenta como reserva pero no ocupa ninguna de ellas.
 	const mesasRes = await one(
 		db,
 		`${CTES}
-		 SELECT COUNT(DISTINCT ID_Mesa) AS n FROM res_rng
-		 WHERE COALESCE(Estado,'') <> 'CANCELADA' ${turnoFilter};`,
+		 SELECT COUNT(DISTINCT rr.ID_Mesa) AS n FROM res_rng rr
+		 JOIN Mesas m ON m.ID_Mesa = rr.ID_Mesa AND m.Archivada_En IS NULL
+		 WHERE COALESCE(rr.Estado,'') <> 'CANCELADA' ${turnoFilter};`,
 	);
 	const bucketRs = await db.execute(
 		`${CTES} SELECT ${b} AS label, COUNT(*) AS value FROM res_rng GROUP BY label ORDER BY label ASC;`,

@@ -929,6 +929,8 @@ impl SqliteStatsRepository {
             None => 0,
         };
 
+        // Todas las reservas cuentan, tengan mesa o no (EST-INC-04): el criterio de la mesa es sólo
+        // del reparto de mesas, más abajo.
         let ctes = format!(
             r#"
             WITH
@@ -941,7 +943,6 @@ impl SqliteStatsRepository {
                 r.Estado,
                 datetime(r.Dia_YMD || ' ' || r.Hora) AS res_at
               FROM Reservas r
-              JOIN Mesas m ON m.ID_Mesa = r.ID_Mesa
             ),
             res_rng AS (
               SELECT res.*
@@ -991,16 +992,19 @@ impl SqliteStatsRepository {
         // gráficas son de todo el rango: elegir «cena» no cambia el total de reservas del día.
         let turno_filter = match args.turno {
             StatsTurno::Todos => "".to_string(),
-            StatsTurno::Comida => "AND Turno='COMIDA'".to_string(),
-            StatsTurno::Cena => "AND Turno='CENA'".to_string(),
+            StatsTurno::Comida => "AND rr.Turno='COMIDA'".to_string(),
+            StatsTurno::Cena => "AND rr.Turno='CENA'".to_string(),
         };
 
+        // Las mesas reservadas son las del plano de hoy, como `total_mesas`: una reserva sin mesa,
+        // o con una que ya se archivó, cuenta como reserva pero no ocupa ninguna de ellas.
         let sql_mesas_res = format!(
             r#"
             {ctes}
-            SELECT COUNT(DISTINCT ID_Mesa)
-            FROM res_rng
-            WHERE COALESCE(Estado,'') <> 'CANCELADA'
+            SELECT COUNT(DISTINCT rr.ID_Mesa)
+            FROM res_rng rr
+            JOIN Mesas m ON m.ID_Mesa = rr.ID_Mesa AND m.Archivada_En IS NULL
+            WHERE COALESCE(rr.Estado,'') <> 'CANCELADA'
             {turno_filter};
             "#,
             ctes = ctes,

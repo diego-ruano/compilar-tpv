@@ -348,6 +348,7 @@ lecturas_de_contrato! {
     stats__productos_vendidos_por_categoria,
     stats__productos_nombre_que_es_un_id,
     stats__reservas,
+    stats__reservas_sin_mesa,
     stats__trabajadores,
     stats__clientes,
     stats__clientes_reserva_terminada,

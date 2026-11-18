@@ -1,0 +1,16 @@
+{
+  "descripcion": "Las reservas sin mesa cuentan (EST-INC-04): en el total, en las gráficas y en las cancelaciones, aunque no ocupen ninguna mesa del reparto. Una reserva en una mesa archivada también cuenta como reserva, pero esa mesa no está en el plano de hoy y no entra en las reservadas, igual que no entra en el total de mesas.",
+  "lectura": "stats.reservas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 2, 100, 0, 'rect', 80, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) VALUES ('mesa-vieja', 'zona-1', '9', 2, 200, 0, 'rect', 80, 70, '2000-01-01 00:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Ana');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-mesa', 'cli-1', 'mesa-1', date('now','localtime'), '13:30', 'COMIDA', 4, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-sin-mesa', 'cli-1', NULL, date('now','localtime'), '21:00', 'CENA', 2, 'PROXIMA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-sin-mesa-cancelada', 'cli-1', NULL, date('now','localtime'), '14:00', 'COMIDA', 2, 'CANCELADA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-mesa-archivada', 'cli-1', 'mesa-vieja', date('now','localtime'), '20:00', 'CENA', 2, 'PROXIMA');"
+  ],
+  "entrada": {}
+}
