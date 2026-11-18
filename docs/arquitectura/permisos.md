@@ -126,7 +126,12 @@ Valores iniciales:
 El catálogo sigue disponible para el servicio y el horario del equipo requiere sesión. Administrar
 permisos, personal y PIN, configuración del negocio, fiscalidad, licencia y dispositivos exige
 siempre el administrador vigente. La última cuenta administradora activa no se puede desactivar ni
-despojar de su rol (RI-62); el chequeo vive dentro de la transacción local y también en el Worker.
+despojar de su rol (RI-62); el chequeo vive dentro de la transacción local y también en el Worker,
+y la misma condición va dentro de las sentencias replicadas que la desactivan, le quitan el rol, la
+retiran o la borran (`dejaria_sin_administrador_sql` / `dejariaSinAdministrador`): la base que las
+aplica después lo vuelve a decidir con sus datos. Si dos equipos eliminan a la vez a los dos únicos
+administradores, cada base aplica sólo lo que le deja uno, y si no es el mismo, el contraste con la
+nube las iguala.
 
 El gestor está en **Configuración → Permisos**, sólo en Main. Guarda una edición por rol en una
 transacción replicable y rechaza una lista desconocida o duplicada. Compara las concesiones que se
@@ -277,7 +282,8 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
 - No deja el negocio sin administrador activo (RI-62, `ultimo_administrador`) y nadie se elimina a sí
   mismo («No puedes eliminar tu propia ficha. Pídeselo a otro administrador.», en el caso de uso, con
   el usuario de la sesión). En el worker, que la ficha siga en la plantilla y lo del administrador
-  son guardas del lote (SYNC-30).
+  son guardas del lote (SYNC-30). Cada sentencia de la tanda lleva además la condición del
+  administrador, para la base que la aplica después.
 - A uno retirado no se le pone un turno ni un día libre (`trabajador_no_encontrado`, dentro de la
   escritura en la Main y guarda del lote en el worker), y «Copiar semana anterior» y «Establecer
   predeterminado» no copian sus turnos pasados (`DE_LA_PLANTILLA`, el mismo SQL a los dos lados).

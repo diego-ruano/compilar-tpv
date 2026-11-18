@@ -994,6 +994,44 @@ describe("Eliminar a un trabajador", () => {
 		});
 	});
 
+	it("lo que se replica no deja sin administrador a la base que lo aplica, donde el otro ya no está", async () => {
+		// Dos administradores eliminados a la vez desde dos equipos: cada uno veía al otro activo. En
+		// la base que aplica lo de este equipo (la Main), Luis ya se ha ido: eliminar a Ana, desactivarla
+		// o quitarle el rol no hace nada allí.
+		const { eliminarTrabajador, updateTrabajador } = await import("../src/domains/trabajadores/trabajadores.commands");
+		await conNegocio("eliminar-replicado-ultimo-admin", USUARIOS, async (n) => {
+			const replicado = (built: any) => buildApplyBatch(built.command).replicated;
+			const eliminar = replicado(eliminarTrabajador("trab-ana", "ana"));
+			const edicion = (id_rol: string, estado: string) =>
+				replicado(
+					updateTrabajador(
+						"trab-ana",
+						{ ...anaCamarera, id_rol, estado, apellido: null, telefono: null, puesto: null, fecha_inicio_contrato: null, fecha_fin_contrato: null, sin_pin: null } as any,
+						null,
+					),
+				);
+			const desactivar = edicion(ADMIN, "Inactivo");
+			const quitarRol = edicion(CAMARERO, "Activo");
+			const aplicar = (sentencias: any[]) => {
+				for (const s of sentencias) n.sql.exec(s.sql, ...s.args);
+			};
+			const anaAdministradora = () =>
+				n.n(`SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = 'ana' AND Estado = 'Activo' AND Archivado_En IS NULL AND ID_Rol = '${ADMIN}'`);
+
+			n.sql.exec("UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 10:00:00' WHERE ID_Usuario = 'luis'");
+			aplicar(eliminar);
+			aplicar(desactivar);
+			aplicar(quitarRol);
+			expect(anaAdministradora()).toBe(1);
+			expect(n.n("SELECT COUNT(*) FROM Trabajadores WHERE ID_Trabajador = 'trab-ana'")).toBe(1);
+
+			// Con Luis activo, la misma edición sí se aplica.
+			n.sql.exec("UPDATE Usuarios SET Estado = 'Activo', Archivado_En = NULL WHERE ID_Usuario = 'luis'");
+			aplicar(quitarRol);
+			expect(anaAdministradora()).toBe(0);
+		});
+	});
+
 	it("el reintento de una que entró contesta lo mismo", async () => {
 		await conNegocio("eliminar-reintento", [...USUARIOS, FICHAJE_DE_ANA], async (n) => {
 			const clave = "clave-de-eliminar-a-ana";

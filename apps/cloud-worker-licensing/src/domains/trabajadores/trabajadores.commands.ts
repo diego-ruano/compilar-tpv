@@ -115,24 +115,26 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 /**
  * RI-62: ¿editar esta ficha deja el negocio sin ningún administrador activo? Sí cuando el usuario es
  * administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro. Sólo se mira
- * el paso de «hay» a «no hay». El porqué, en `SQL_DEJARIA_SIN_ADMINISTRADOR` de
- * `tpv-infra-sqlite/src/trabajadores.rs`: es la misma condición y tiene que seguir siéndolo. `?1` el
- * usuario, `?2` el rol nuevo y `?3` el estado nuevo.
+ * el paso de «hay» a «no hay». El porqué, en `dejaria_sin_administrador_sql` de
+ * `tpv-infra-sqlite/src/trabajadores.rs`: es la misma condición y tiene que seguir siéndolo. `u` el
+ * usuario, `rol` el rol nuevo y `estado` el estado nuevo, como marcadores o literales.
+ *
+ * Va en la guarda, que da el error, **y dentro de las sentencias replicadas** que desactivan,
+ * retiran o borran (`AND NOT …`): dos administradores eliminados a la vez desde dos equipos se veían
+ * activos el uno al otro, y cada base aplicaba lo que le llegaba sin volver a mirar. Con la
+ * condición dentro, cada base que la aplica lo vuelve a decidir con sus datos.
  */
-const DEJARIA_SIN_ADMINISTRADOR = `
-	EXISTS (
-		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
-		WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
-	)
-	AND NOT (
-		?3 = 'Activo'
-		AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
-	)
-	AND NOT EXISTS (
-		SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
-		WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
-	)
-`;
+function dejariaSinAdministrador(u: string, rol: string, estado: string): string {
+	return `(EXISTS (SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+			WHERE u.ID_Usuario = ${u} AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador')
+		AND NOT (${estado} = 'Activo'
+			AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ${rol} AND Nombre_Rol = 'Administrador'))
+		AND NOT EXISTS (SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+			WHERE u.ID_Usuario <> ${u} AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'))`;
+}
+
+/** Retirar o borrar al usuario `u` lo deja sin poder entrar: lo mismo que desactivarlo. */
+const quitarloDejariaSinAdministrador = (u: string) => dejariaSinAdministrador(u, "''", "'Inactivo'");
 
 /**
  * Lo deciden dos guardas, dentro del lote que escribe (SYNC-30), como la Main dentro de su
@@ -166,7 +168,7 @@ export function updateTrabajador(
 						Estado = ?5,
 						Sin_PIN = COALESCE(?6, Sin_PIN),
 						Password_Hash = ?7
-					WHERE ID_Usuario = ?8;
+					WHERE ID_Usuario = ?8 AND NOT ${dejariaSinAdministrador("?8", "?1", "?5")};
 				`,
 				args: [
 					input.id_rol,
@@ -190,7 +192,7 @@ export function updateTrabajador(
 						Apellido = ?4,
 						Estado = ?5,
 						Sin_PIN = COALESCE(?6, Sin_PIN)
-					WHERE ID_Usuario = ?7;
+					WHERE ID_Usuario = ?7 AND NOT ${dejariaSinAdministrador("?7", "?1", "?5")};
 				`,
 				args: [
 					input.id_rol,
@@ -211,7 +213,7 @@ export function updateTrabajador(
 				steps: [
 					{
 						kind: "guard",
-						sql: `SELECT NOT (${DEJARIA_SIN_ADMINISTRADOR});`,
+						sql: `SELECT NOT ${dejariaSinAdministrador("?1", "?2", "?3")};`,
 						args: [input.id_usuario, input.id_rol, input.estado],
 						error: "ultimo_administrador",
 						status: 409,
@@ -675,22 +677,29 @@ const retirado = (id: string) =>
  * Eliminar a un trabajador: se retira si tiene historia y se borra si no. Las mismas sentencias, en
  * el mismo orden y con los mismos argumentos, que `sql_quitar_trabajador` en la Main (`T` el
  * trabajador, `U` su usuario): cada una decide por su cuenta y quien las aplica vuelve a decidir con
- * sus datos. Lo que se compara entre los dos lados es el efecto (`tests/contract`).
+ * sus datos. Lo que se compara entre los dos lados es el efecto (`tests/contract`). RI-62: ninguna
+ * deja el negocio sin administrador activo (`AND NOT …` en cada una), también al aplicarla otra base.
  */
+const admin = quitarloDejariaSinAdministrador;
 const SQL_QUITAR_TRABAJADOR: [string, ("T" | "U")[]][] = [
 	[
 		`UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = datetime('now','localtime')
-		 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND ${HISTORIA_DEL_TRABAJADOR};`,
+		 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND ${HISTORIA_DEL_TRABAJADOR}
+		 AND NOT ${admin("?2")};`,
 		["T", "U"],
 	],
-	["DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1;", ["T"]],
-	["DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha >= date('now','localtime');", ["T"]],
-	["DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE';", ["T"]],
-	[`DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT ${retirado("?1")};`, ["U"]],
-	[`DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT ${retirado("?2")};`, ["T", "U"]],
+	[`DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1 AND NOT ${admin("?2")};`, ["T", "U"]],
+	[
+		`DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha >= date('now','localtime')
+		 AND NOT ${admin("?2")};`,
+		["T", "U"],
+	],
+	[`DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE' AND NOT ${admin("?2")};`, ["T", "U"]],
+	[`DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT ${retirado("?1")} AND NOT ${admin("?1")};`, ["U"]],
+	[`DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT ${retirado("?2")} AND NOT ${admin("?2")};`, ["T", "U"]],
 	[
 		`DELETE FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL
-		 AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1);`,
+		 AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1) AND NOT ${admin("?1")};`,
 		["U"],
 	],
 ];
@@ -719,7 +728,7 @@ export function eliminarTrabajador(idTrabajador: string, idUsuario: string): Bui
 					},
 					{
 						kind: "guard",
-						sql: `SELECT NOT (${DEJARIA_SIN_ADMINISTRADOR});`,
+						sql: `SELECT NOT ${dejariaSinAdministrador("?1", "?2", "?3")};`,
 						args: [idUsuario, "", "Inactivo"],
 						error: "ultimo_administrador",
 						status: 409,

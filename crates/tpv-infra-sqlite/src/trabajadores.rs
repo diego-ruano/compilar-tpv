@@ -64,22 +64,41 @@ async fn exigir_de_la_plantilla<C: Reader>(conn: &C, id_trabajador: &str) -> App
 /// Sólo se mira el paso de «hay» a «no hay»: si ya no había ninguno (una base rara), editar a
 /// cualquier otro sigue funcionando. Mismo SQL en el worker (`dejariaSinAdministrador`).
 ///
-/// ?1 = ID_Usuario editado, ?2 = su ID_Rol nuevo, ?3 = su Estado nuevo.
-const SQL_DEJARIA_SIN_ADMINISTRADOR: &str = r#"
-    SELECT
-      EXISTS (
-        SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
-        WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
-      )
-      AND NOT (
-        ?3 = 'Activo'
-        AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
-        WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
-      );
-"#;
+/// La expresión, con el usuario editado (`u`), su rol nuevo (`rol`) y su estado nuevo (`estado`)
+/// como marcadores o literales. Va en la comprobación de antes de escribir, que da el mensaje, **y
+/// dentro de las sentencias replicadas** que desactivan, retiran o borran (`AND NOT …`): dos
+/// administradores eliminados a la vez desde dos equipos se veían activos el uno al otro, y cada base
+/// aplicaba la sentencia que le llegaba sin volver a mirar. Con la condición dentro, cada base que la
+/// aplica lo vuelve a decidir con sus datos, como `SQL_QUITAR_PRODUCTO` con la historia.
+fn dejaria_sin_administrador_sql(u: &str, rol: &str, estado: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol \
+           WHERE u.ID_Usuario = {u} AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador') \
+         AND NOT ({estado} = 'Activo' \
+           AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = {rol} AND Nombre_Rol = 'Administrador')) \
+         AND NOT EXISTS (SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol \
+           WHERE u.ID_Usuario <> {u} AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'))"
+    )
+}
+
+/// Retirar o borrar al usuario `u` lo deja sin poder entrar: lo mismo que desactivarlo.
+fn quitarlo_dejaria_sin_administrador(u: &str) -> String {
+    dejaria_sin_administrador_sql(u, "''", "'Inactivo'")
+}
+
+/// Los datos de cuenta de una ficha (Usuarios). `?1` rol, `?2` correo, `?3` nombre, `?4` apellido,
+/// `?5` estado, `?6` `Sin_PIN` (sólo si llega: `COALESCE`), y con PIN nuevo `?7` su hash y `?8` el
+/// usuario; sin él, `?7` el usuario. Mismo SQL en el worker (`updateTrabajador`).
+fn sql_editar_usuario(con_pin: bool) -> String {
+    let (pin, u) = if con_pin { (", Password_Hash = ?7", "?8") } else { ("", "?7") };
+    format!(
+        "UPDATE Usuarios \
+            SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5, \
+                Sin_PIN = COALESCE(?6, Sin_PIN){pin} \
+          WHERE ID_Usuario = {u} AND Archivado_En IS NULL AND NOT {};",
+        dejaria_sin_administrador_sql(u, "?1", "?5")
+    )
+}
 
 const MSG_ULTIMO_ADMINISTRADOR: &str = "No se puede dejar el negocio sin ningún administrador \
      activo. Da antes el rol de Administrador a otra persona.";
@@ -92,7 +111,7 @@ async fn dejaria_sin_administrador<C: Reader>(
 ) -> AppResult<bool> {
     let mut rows = conn
         .query(
-            SQL_DEJARIA_SIN_ADMINISTRADOR,
+            &format!("SELECT {};", dejaria_sin_administrador_sql("?1", "?2", "?3")),
             vec![
                 Value::Text(id_usuario.to_string()),
                 Value::Text(id_rol.to_string()),
@@ -136,6 +155,10 @@ const HISTORIA_DEL_TRABAJADOR: &str = "(EXISTS (SELECT 1 FROM Fichajes WHERE ID_
 /// `ON DELETE CASCADE`. El worker manda exactamente estas (`SQL_QUITAR_TRABAJADOR` en
 /// `trabajadores.commands.ts`). Cada sentencia lleva sus argumentos: el trabajador (`T`) o su
 /// usuario (`U`).
+///
+/// RI-62: ninguna deja el negocio sin administrador activo (`AND NOT …` en cada una). Quien las
+/// aplica después lo vuelve a decidir: si allí el otro administrador ya no está, no hace nada. La
+/// primera, al retirarlo, lo deja `Inactivo`, y las siguientes ya no lo ven como administrador.
 pub(crate) enum ArgQuitar {
     T,
     U,
@@ -146,31 +169,59 @@ pub(crate) fn sql_quitar_trabajador() -> Vec<(String, &'static [ArgQuitar])> {
     let retirado = |id: &str| {
         format!("EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = {id} AND Archivado_En IS NOT NULL)")
     };
+    let admin = quitarlo_dejaria_sin_administrador;
     vec![
         (
             format!(
                 "UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = datetime('now','localtime') \
-                 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND {HISTORIA_DEL_TRABAJADOR};"
+                 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND {HISTORIA_DEL_TRABAJADOR} \
+                 AND NOT {};",
+                admin("?2")
             ),
             &[T, U],
         ),
-        ("DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1;".into(), &[T]),
         (
-            "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 \
-             AND Fecha >= date('now','localtime');"
-                .into(),
-            &[T],
+            format!("DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1 AND NOT {};", admin("?2")),
+            &[T, U],
         ),
         (
-            "DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE';".into(),
-            &[T],
+            format!(
+                "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 \
+                 AND Fecha >= date('now','localtime') AND NOT {};",
+                admin("?2")
+            ),
+            &[T, U],
         ),
-        (format!("DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT {};", retirado("?1")), &[U]),
-        (format!("DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT {};", retirado("?2")), &[T, U]),
         (
-            "DELETE FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL \
-             AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1);"
-                .into(),
+            format!(
+                "DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE' \
+                 AND NOT {};",
+                admin("?2")
+            ),
+            &[T, U],
+        ),
+        (
+            format!(
+                "DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT {} AND NOT {};",
+                retirado("?1"),
+                admin("?1")
+            ),
+            &[U],
+        ),
+        (
+            format!(
+                "DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT {} AND NOT {};",
+                retirado("?2"),
+                admin("?2")
+            ),
+            &[T, U],
+        ),
+        (
+            format!(
+                "DELETE FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL \
+                 AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1) AND NOT {};",
+                admin("?1")
+            ),
             &[U],
         ),
     ]
@@ -767,14 +818,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 .sin_pin
                 .map(|s| Value::Integer(i64::from(s)))
                 .unwrap_or(Value::Null);
+            // RI-62 también dentro de la sentencia, que es lo que se replica: quien la aplica después
+            // vuelve a mirar si deja el negocio sin administrador con sus datos.
             let usuarios = if let Some(hash) = password_hash {
                 db.execute(
-                    r#"
-                    UPDATE Usuarios
-                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4,
-                           Estado = ?5, Sin_PIN = COALESCE(?6, Sin_PIN), Password_Hash = ?7
-                     WHERE ID_Usuario = ?8 AND Archivado_En IS NULL;
-                    "#,
+                    &sql_editar_usuario(true),
                     vec![
                         Value::Text(cambios.id_rol.clone()),
                         Value::Text(cambios.email.clone()),
@@ -790,12 +838,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 .map_err(db_err)?
             } else {
                 db.execute(
-                    r#"
-                    UPDATE Usuarios
-                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5,
-                           Sin_PIN = COALESCE(?6, Sin_PIN)
-                     WHERE ID_Usuario = ?7 AND Archivado_En IS NULL;
-                    "#,
+                    &sql_editar_usuario(false),
                     vec![
                         Value::Text(cambios.id_rol.clone()),
                         Value::Text(cambios.email.clone()),
@@ -1968,6 +2011,68 @@ mod tests_edicion {
         // Con otro administrador activo, sí.
         alta(&db, &repo, "luis@bar.test", ADMIN, "Activo").await;
         assert!(!repo.eliminar_trabajador(&ana.id_trabajador).await.unwrap());
+    }
+
+    /// Dos administradores eliminados a la vez desde dos equipos: cada uno veía al otro activo y su
+    /// sentencia se aplicaba en la otra base sin volver a mirar, y el negocio se quedaba sin ninguno.
+    /// Las sentencias replicadas llevan la condición: en una base donde el otro ya no está, aplicar
+    /// lo que decidió el otro equipo (eliminar a Ana, desactivarla o quitarle el rol) no hace nada.
+    #[tokio::test]
+    async fn la_sentencia_replicada_no_deja_sin_administrador_la_base_que_la_aplica() {
+        use super::{sql_editar_usuario, sql_quitar_trabajador, ArgQuitar};
+
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let luis = alta(&db, &repo, "luis@bar.test", ADMIN, "Activo").await;
+        // Aquí ya se eliminó a Luis (con historia: queda retirado).
+        sembrar(
+            &db,
+            "UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 10:00:00' WHERE ID_Usuario = ?1;",
+            vec![Value::Text(luis.id_usuario.clone())],
+        )
+        .await;
+
+        // Llega la eliminación de Ana que decidió el otro equipo, cuando aún veía a Luis activo.
+        for (sql, args) in sql_quitar_trabajador() {
+            let valores = args
+                .iter()
+                .map(|a| match a {
+                    ArgQuitar::T => Value::Text(ana.id_trabajador.clone()),
+                    ArgQuitar::U => Value::Text(ana.id_usuario.clone()),
+                })
+                .collect::<Vec<_>>();
+            sembrar(&db, &sql, valores).await;
+        }
+        let ana_activa = "SELECT COUNT(*) FROM Usuarios u JOIN Trabajadores t ON t.ID_Usuario = u.ID_Usuario \
+             WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND u.Archivado_En IS NULL \
+             AND u.ID_Rol = '00000000-0000-7000-8000-000000000001';";
+        assert_eq!(contar(&db, ana_activa, &ana.id_usuario).await, 1, "Ana sigue de administradora");
+
+        // Ni desactivarla ni quitarle el rol desde la edición.
+        let editar = |rol: &str, estado: &str| {
+            vec![
+                Value::Text(rol.to_string()),
+                Value::Text(ana.email.clone()),
+                Value::Text("Ana".into()),
+                Value::Null,
+                Value::Text(estado.to_string()),
+                Value::Null,
+                Value::Text(ana.id_usuario.clone()),
+            ]
+        };
+        sembrar(&db, &sql_editar_usuario(false), editar(ADMIN, "Inactivo")).await;
+        sembrar(&db, &sql_editar_usuario(false), editar(CAMARERO, "Activo")).await;
+        assert_eq!(contar(&db, ana_activa, &ana.id_usuario).await, 1, "Ana sigue de administradora");
+
+        // Con otro administrador activo, la misma edición sí se aplica.
+        sembrar(
+            &db,
+            "UPDATE Usuarios SET Estado = 'Activo', Archivado_En = NULL WHERE ID_Usuario = ?1;",
+            vec![Value::Text(luis.id_usuario.clone())],
+        )
+        .await;
+        sembrar(&db, &sql_editar_usuario(false), editar(CAMARERO, "Activo")).await;
+        assert_eq!(contar(&db, ana_activa, &ana.id_usuario).await, 0, "con Luis activo, Ana deja de serlo");
     }
 
     #[tokio::test]
