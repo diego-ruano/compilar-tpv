@@ -12,6 +12,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::tickets::{
     FacturaDelCobro, FacturaDelTicket, TicketDePago, TicketsRepository,
 };
+use tpv_contracts::impresion::F3Negativa;
 use tpv_domain::dinero::Dinero;
 use tpv_domain::ticket::LineaVendida;
 
@@ -97,7 +98,7 @@ pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Fa
      ORDER BY Orden DESC LIMIT 1;";
 
 /// Las facturas de un pago, en el orden en que se expidieron. Va por `idx_regfact_pago`.
-const SQL_FACTURAS_DEL_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''),             COALESCE(Importe_Total, ''), Orden      FROM Registros_Facturacion      WHERE ID_Pago = ?1 AND Tipo = 'ALTA'      ORDER BY Orden ASC;";
+const SQL_FACTURAS_DEL_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''),             COALESCE(Importe_Total, ''), Orden, Referencias_Json      FROM Registros_Facturacion      WHERE ID_Pago = ?1 AND Tipo = 'ALTA'      ORDER BY Orden ASC;";
 
 /// Las F3 que no cuelgan de ningún pago: las que canjean varios tickets (y las que las corrigen).
 /// Sus cobros las encuentran por `FacturasSustituidas`.
@@ -175,10 +176,10 @@ impl TicketsRepository for SqliteTicketsRepository {
         // Todas las facturas del cobro: las suyas y las F3 que canjean su ticket con otros. Una
         // subsanación repite el número: cuenta una vez, con los datos de su última fila.
         let mut con_orden: Vec<(i64, FacturaDelCobro)> = Vec::new();
-        let mut anotar = |orden: i64, num: String, tipo: String, importe: Dinero| {
-            match con_orden.iter_mut().find(|(_, (n, _, _))| *n == num) {
-                Some(f) => *f = (f.0, (num, tipo, importe)),
-                None => con_orden.push((orden, (num, tipo, importe))),
+        let mut anotar = |orden: i64, num: String, tipo: String, importe: Dinero, contra: Option<F3Negativa>| {
+            match con_orden.iter_mut().find(|(_, (n, _, _, _))| *n == num) {
+                Some(f) => *f = (f.0, (num, tipo, importe, contra)),
+                None => con_orden.push((orden, (num, tipo, importe, contra))),
             }
         };
         let mut rows = conn
@@ -191,7 +192,14 @@ impl TicketsRepository for SqliteTicketsRepository {
             };
             let importe = Dinero::de_texto_fiscal(&t(2)?).unwrap_or(Dinero::CERO);
             let orden = v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0);
-            anotar(orden, t(0)?, t(1)?, importe);
+            let tipo = t(1)?;
+            let contra = if tipo == "F3" && importe.es_negativo() {
+                let refs = v_string(row.get_value(4).map_err(db_err)?);
+                Some(que_contrarresta(conn, orden, refs.as_deref()).await?)
+            } else {
+                None
+            };
+            anotar(orden, t(0)?, tipo, importe, contra);
         }
         if !numero_ticket.trim().is_empty() {
             let mut rows = conn.query(SQL_F3_SIN_PAGO, ()).await.map_err(db_err)?;
@@ -209,7 +217,12 @@ impl TicketsRepository for SqliteTicketsRepository {
                 )
                 .unwrap_or(Dinero::CERO);
                 let orden = v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0);
-                anotar(orden, num, "F3".to_string(), importe);
+                let contra = if importe.es_negativo() {
+                    Some(que_contrarresta(conn, orden, refs.as_deref()).await?)
+                } else {
+                    None
+                };
+                anotar(orden, num, "F3".to_string(), importe, contra);
             }
         }
         con_orden.sort_by_key(|(orden, _)| *orden);
@@ -283,6 +296,57 @@ async fn pago_de_ticket<R: Reader>(r: &R, num: &str) -> AppResult<Option<String>
     })
 }
 
+/// Qué contrarresta una `F3` en negativo (la `Orden` y las referencias son las suyas). Hay tres
+/// que se emiten así (`verifactu.rs`), y se distinguen por lo que sustituyen:
+///
+/// - una rectificativa: es la `F3` de la devolución de un ticket canjeado, tras su `R5`;
+/// - unos tickets que vuelve a sustituir, después, una `F3` positiva: es la corrección de los
+///   datos del cliente, que emite la negativa y la buena seguidas;
+/// - si no, un ticket dado de baja por error que salía en una `F3` de varios.
+async fn que_contrarresta<R: Reader>(
+    r: &R,
+    orden: i64,
+    referencias: Option<&str>,
+) -> AppResult<F3Negativa> {
+    let sustituidas = crate::verifactu::numeros_sustituidos(referencias);
+    for num in &sustituidas {
+        let mut rows = r
+            .query(
+                "SELECT COALESCE(Tipo_Factura, '') FROM Registros_Facturacion                  WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' ORDER BY Orden DESC LIMIT 1;",
+                vec![Value::Text(num.trim().to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        if let Some(row) = rows.next().await.map_err(db_err)? {
+            if v_string(row.get_value(0).map_err(db_err)?).is_some_and(|t| t.starts_with('R')) {
+                return Ok(F3Negativa::Devolucion);
+            }
+        }
+    }
+    let mut mismas = sustituidas;
+    mismas.sort();
+    let mut rows = r
+        .query(
+            "SELECT COALESCE(Importe_Total, ''), Referencias_Json FROM Registros_Facturacion              WHERE Tipo = 'ALTA' AND Tipo_Factura = 'F3' AND Orden > ?1 ORDER BY Orden ASC;",
+            vec![Value::Integer(orden)],
+        )
+        .await
+        .map_err(db_err)?;
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let importe = Dinero::de_texto_fiscal(&v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default())
+            .unwrap_or(Dinero::CERO);
+        if importe.es_negativo() {
+            continue;
+        }
+        let refs = v_string(row.get_value(1).map_err(db_err)?);
+        let mut suyas = crate::verifactu::numeros_sustituidos(refs.as_deref());
+        suyas.sort();
+        if suyas == mismas {
+            return Ok(F3Negativa::CorreccionDeDatos);
+        }
+    }
+    Ok(F3Negativa::BajaPorError)
+}
 
 /// La factura de un número, con el pago al que pertenece.
 async fn factura<R: Reader>(
@@ -677,7 +741,7 @@ mod tests {
 
         let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.factura.unwrap().num_serie, "T-000007", "sin pedir otra, la del pago");
-        let nums: Vec<&str> = t.facturas.iter().map(|(n, _, _)| n.as_str()).collect();
+        let nums: Vec<&str> = t.facturas.iter().map(|(n, _, _, _)| n.as_str()).collect();
         assert_eq!(nums, ["T-000007", "F-000001"]);
     }
 

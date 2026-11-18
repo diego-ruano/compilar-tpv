@@ -1223,12 +1223,35 @@ export type EstadoSocketHandy = {
 	rechazo: RechazoHandy | null,
 };
 
+/**  Por qué se emitió una `F3` en negativo. Se deduce de lo que sustituye. */
+export type F3Negativa =
+/**
+ *  Sustituye a la rectificativa (`R5`) de una devolución de un ticket canjeado: es la factura
+ *  completa de la devolución, con el cliente (FAQ de la AEAT, apartado 27, casos 2 y 3).
+ */
+"devolucion" |
+/**
+ *  Contrarresta una `F3` con los datos del cliente mal; tras ella va la buena con los mismos
+ *  tickets (FISCAL-02). No sale dinero.
+ */
+"correccion_de_datos" |
+/**
+ *  Saca de una `F3` de varios tickets el de un cobro dado de baja por error: los demás siguen
+ *  siendo ventas y esa `F3` no se puede anular.
+ */
+"baja_por_error";
+
 /**  Una factura de un cobro, para elegir qué papel se imprime. */
 export type FacturaDelCobro = {
 	num_serie: string,
 	/**  `F1` | `F2` | `F3` | `R1`..`R5`. */
 	tipo_factura: string,
 	importe: Dinero,
+	/**
+	 *  En una `F3` en negativo, qué contrarresta: hay tres que se emiten así y la pantalla tiene
+	 *  que llamar a cada una por lo que es. `None` en todas las demás.
+	 */
+	contrarresta: F3Negativa | null,
 };
 
 /**  Un comando que ha fallado, tal como lo cuenta la pantalla. */

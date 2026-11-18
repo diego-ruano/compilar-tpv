@@ -188,6 +188,24 @@ pub struct FacturaDelCobro {
     /// `F1` | `F2` | `F3` | `R1`..`R5`.
     pub tipo_factura: String,
     pub importe: Dinero,
+    /// En una `F3` en negativo, qué contrarresta: hay tres que se emiten así y la pantalla tiene
+    /// que llamar a cada una por lo que es. `None` en todas las demás.
+    pub contrarresta: Option<F3Negativa>,
+}
+
+/// Por qué se emitió una `F3` en negativo. Se deduce de lo que sustituye.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum F3Negativa {
+    /// Sustituye a la rectificativa (`R5`) de una devolución de un ticket canjeado: es la factura
+    /// completa de la devolución, con el cliente (FAQ de la AEAT, apartado 27, casos 2 y 3).
+    Devolucion,
+    /// Contrarresta una `F3` con los datos del cliente mal; tras ella va la buena con los mismos
+    /// tickets (FISCAL-02). No sale dinero.
+    CorreccionDeDatos,
+    /// Saca de una `F3` de varios tickets el de un cobro dado de baja por error: los demás siguen
+    /// siendo ventas y esa `F3` no se puede anular.
+    BajaPorError,
 }
 
 /// Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.

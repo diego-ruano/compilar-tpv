@@ -67,6 +67,11 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   cliente (`bloque_tipo_de_factura`); una `F3` dice qué factura sustituye. Un ticket canjeado se
   sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
   ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa-y-de-una-rectificativa)).
+- **Una `F3` en negativo se llama por lo que contrarresta** (`F3Negativa` en
+  `facturas_del_cobro`, deducido de lo que sustituye en `tickets.rs`): si sustituye a una
+  rectificativa, «Factura de la devolución»; si después la vuelve a emitir en positivo con los
+  mismos tickets, «Anulación de la factura (corrección de datos)»; si no, es la que saca de una `F3`
+  de varios un cobro dado de baja por error.
 - **Una `F3` de varios tickets** lleva las líneas de todos sus cobros y la lista de los que
   sustituye, sin método de pago ni origen (no es un cobro) y sin abrir el cajón. Se imprime desde
   cualquiera de esos cobros: cada uno la tiene en su lista de facturas. En Cuentas, «Factura de

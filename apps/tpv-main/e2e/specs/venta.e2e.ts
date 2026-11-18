@@ -208,7 +208,7 @@ describe("El camino del dinero", () => {
         // busca la reimpresión; `Num_Serie_Factura` es la identidad de la factura. En cuanto dejan
         // de ser el mismo dato, el papel deja de poder atarse a su registro.
         expect(ticket.facturas_del_cobro).toEqual([
-            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000 },
+            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000, contrarresta: null },
         ]);
 
         // El desglose es el DECLARADO en el registro, no un recálculo. La cuota es «lo que falta»
@@ -264,7 +264,7 @@ describe("El camino del dinero", () => {
         expect(serie2).toBe(serie1);
         expect(Number(n2)).toBe(Number(n1) + 1);
         expect(ticket.facturas_del_cobro).toEqual([
-            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000 },
+            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000, contrarresta: null },
         ]);
     });
 

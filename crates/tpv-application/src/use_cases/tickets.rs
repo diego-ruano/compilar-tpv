@@ -111,7 +111,12 @@ pub fn componer(
     let facturas_del_cobro = t
         .facturas
         .into_iter()
-        .map(|(num_serie, tipo_factura, importe)| FacturaDelCobro { num_serie, tipo_factura, importe })
+        .map(|(num_serie, tipo_factura, importe, contrarresta)| FacturaDelCobro {
+            num_serie,
+            tipo_factura,
+            importe,
+            contrarresta,
+        })
         .collect();
 
     PrintTicketPayload {
@@ -356,8 +361,8 @@ mod tests {
     fn las_facturas_del_cobro_viajan_en_orden() {
         let mut t = cobro(Some(factura()));
         t.facturas = vec![
-            ("2027/000007".into(), "F2".into(), Dinero::de_centimos(220)),
-            ("R2027/000001".into(), "R5".into(), Dinero::de_centimos(-220)),
+            ("2027/000007".into(), "F2".into(), Dinero::de_centimos(220), None),
+            ("R2027/000001".into(), "R5".into(), Dinero::de_centimos(-220), None),
         ];
         let p = componer(t, &negocio(), &ajustes(), false);
         let tipos: Vec<&str> = p.facturas_del_cobro.iter().map(|f| f.tipo_factura.as_str()).collect();

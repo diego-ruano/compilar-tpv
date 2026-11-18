@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 
 use crate::error::AppResult;
+use tpv_contracts::impresion::F3Negativa;
 use tpv_domain::dinero::Dinero;
 use tpv_domain::ticket::{LineaVendida, TramoIva};
 
@@ -35,8 +36,8 @@ pub struct FacturaDelTicket {
     pub rectifica: Option<(String, String)>,
 }
 
-/// Una factura de un cobro: `(número, tipo, importe total)`.
-pub type FacturaDelCobro = (String, String, Dinero);
+/// Una factura de un cobro: `(número, tipo, importe total, qué contrarresta si es una F3 negativa)`.
+pub type FacturaDelCobro = (String, String, Dinero, Option<F3Negativa>);
 
 /// Lo que hace falta para imprimir el ticket de un cobro.
 #[derive(Debug, Clone, PartialEq)]

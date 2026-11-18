@@ -62,9 +62,22 @@ export function etiquetaFactura(f: FacturaDelCobro): string {
         case "F1":
             return "Factura completa";
         case "F3":
-            // Una F3 en negativo sólo la emite la corrección de los datos del cliente: contrarresta
-            // la que tenía los datos mal (FISCAL-02). No es una devolución: no sale dinero.
-            return f.importe < 0 ? "Anulación de la factura (corrección de datos)" : "Factura completa (canje)";
+            if (f.importe >= 0) return "Factura completa (canje)";
+            // Hay tres F3 en negativo y cada una se llama por lo que contrarresta (lo dice el
+            // backend, por lo que sustituye).
+            switch (f.contrarresta) {
+                case "devolucion":
+                    // Sustituye a la R5 de la devolución de un ticket canjeado: sí sale dinero.
+                    return "Factura de la devolución";
+                case "correccion_de_datos":
+                    // Contrarresta la que tenía los datos del cliente mal (FISCAL-02): no sale dinero.
+                    return "Anulación de la factura (corrección de datos)";
+                case "baja_por_error":
+                    // Saca de una F3 de varios tickets el de un cobro dado de baja por error.
+                    return "Anulación del ticket en la factura (cobro dado de baja por error)";
+                default:
+                    return "Factura completa en negativo";
+            }
         default:
             return f.tipo_factura.startsWith("R") ? "Factura rectificativa" : f.tipo_factura;
     }

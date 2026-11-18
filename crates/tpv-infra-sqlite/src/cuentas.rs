@@ -4872,6 +4872,58 @@ mod tests_correccion_y_canje_multiple {
         assert_eq!(de_la_r5.cliente().unwrap()["NIF"], NIF_NUEVO);
         assert_cadena_sana(&db).await;
     }
+
+    // ── Cómo se llama cada F3 en negativo ─────────────────────────────────────────────────────
+
+    /// Las F3 negativas del cobro, con lo que contrarresta cada una.
+    async fn negativas(db: &Arc<Db>, id_pago: &str) -> Vec<Option<tpv_contracts::impresion::F3Negativa>> {
+        super::tests_baja_de_un_ticket_canjeado::papel(db, id_pago, None)
+            .await
+            .facturas_del_cobro
+            .into_iter()
+            .filter(|f| f.tipo_factura == "F3" && f.importe.es_negativo())
+            .map(|f| f.contrarresta)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn cada_F3_negativa_dice_lo_que_contrarresta() {
+        use tpv_contracts::impresion::F3Negativa;
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+
+        // La corrección de los datos del cliente: la negativa y la buena.
+        let (pago, _, f3) = ticket_canjeado(&db).await;
+        corregir(&db, &f3).await.unwrap();
+        assert_eq!(negativas(&db, &pago).await, vec![Some(F3Negativa::CorreccionDeDatos)]);
+        // La devolución, después: la F3 que sustituye a su R5 es la factura de la devolución.
+        dar_de_baja(&db, &pago, ClaseBaja::Devolucion).await.unwrap();
+        assert_eq!(
+            negativas(&db, &pago).await,
+            vec![Some(F3Negativa::CorreccionDeDatos), Some(F3Negativa::Devolucion)]
+        );
+        // Ninguna F3 positiva lleva qué contrarresta.
+        assert!(super::tests_baja_de_un_ticket_canjeado::papel(&db, &pago, None)
+            .await
+            .facturas_del_cobro
+            .iter()
+            .filter(|f| !f.importe.es_negativo())
+            .all(|f| f.contrarresta.is_none()));
+    }
+
+    #[tokio::test]
+    async fn la_F3_negativa_de_una_baja_por_error_en_una_F3_de_varios_lo_dice() {
+        use tpv_contracts::impresion::F3Negativa;
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, _) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+        canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        dar_de_baja(&db, &pago1, ClaseBaja::Error).await.unwrap();
+
+        assert_eq!(negativas(&db, &pago1).await, vec![Some(F3Negativa::BajaPorError)]);
+    }
 }
 
 #[cfg(test)]
