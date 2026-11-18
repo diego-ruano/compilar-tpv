@@ -8,6 +8,7 @@
     "ID_Grupo": null,
     "ID_Trabajador": "trab-1",
     "ID_Turno": "turno-m",
+    "Libre": false,
     "Nombre_Turno": "Manana",
     "Notas": null
   },
@@ -20,6 +21,7 @@
     "ID_Grupo": null,
     "ID_Trabajador": "trab-1",
     "ID_Turno": "turno-t",
+    "Libre": false,
     "Nombre_Turno": "Tarde",
     "Notas": null
   },
@@ -32,6 +34,7 @@
     "ID_Grupo": null,
     "ID_Trabajador": "trab-2",
     "ID_Turno": "turno-t",
+    "Libre": false,
     "Nombre_Turno": "Tarde",
     "Notas": "cierra"
   },
@@ -44,6 +47,7 @@
     "ID_Grupo": null,
     "ID_Trabajador": "trab-1",
     "ID_Turno": "turno-m",
+    "Libre": false,
     "Nombre_Turno": "Manana",
     "Notas": null
   }

@@ -114,6 +114,12 @@ trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), 
 	return c.json({ ok: true });
 });
 
+// Marcar libre el día de un trabajador: tapa la plantilla. Se quita borrando esa asignación.
+trabajadoresRoutes.post("/horarios/libre", cuerpo(S.horarioLibreSchema), async (c) => {
+	await apply(c, cmd.marcarLibre(c.req.valid("json")));
+	return c.json({ ok: true });
+});
+
 trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_asignacion_invalido");

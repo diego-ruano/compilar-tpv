@@ -12,7 +12,7 @@ use tauri::State;
 use tpv_application::use_cases::trabajadores as uc;
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
+    CopySemanaInput, HorarioLibreInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
     TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
@@ -153,6 +153,19 @@ pub async fn horarios_update_asignacion(
     state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::update_asignacion(repo.as_ref(), args).await?)
+}
+
+/// Marcar libre el día de un trabajador (tapa su horario predeterminado). Se quita con
+/// `horarios_delete_asignacion`.
+#[tauri::command]
+#[specta::specta]
+pub async fn horarios_marcar_libre(
+    state: State<'_, AppState>,
+    args: HorarioLibreInput,
+) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
+    let repo = state.trabajadores_repo().await?;
+    Ok(uc::marcar_libre(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

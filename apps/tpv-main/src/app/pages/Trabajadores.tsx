@@ -16,6 +16,7 @@ import {
   useDeleteAsignacion,
   useCopySemanaAsignaciones,
   useSetPredeterminadoDesdeSemana,
+  useMarcarLibre,
 } from "../../features/trabajadores/trabajadoresQueries";
 import EliminarTrabajadorModal from "../../features/trabajadores/EliminarTrabajadorModal";
 
@@ -268,7 +269,8 @@ async function generarHorarioPDFPorEmpleado(args: {
       drawText(page, etiquetaDia(i), tableLeft + 10, y + rowH - 22, 11, true);
       drawText(page, ymd, tableLeft + 10, y + rowH - 40, 9, false, rgb(0.45, 0.45, 0.45));
 
-      const list = byCell.get(`${t.ID_Trabajador}|${ymd}`) ?? [];
+      // El día libre se imprime como un día sin turno: «LIBRE».
+      const list = (byCell.get(`${t.ID_Trabajador}|${ymd}`) ?? []).filter((a) => !a.Libre);
 
       if (list.length === 0) {
         drawText(page, "LIBRE", tableLeft + col0W + 10, y + rowH - 24, 11, true, rgb(0.4, 0.4, 0.4));
@@ -335,6 +337,12 @@ async function generarHorarioPDFPorEmpleado(args: {
 ========================= */
 const SIN_PERMISO_HORARIOS = "Ya no puedes gestionar horarios";
 
+/**
+ * El turno LIBRE que siembra `0001_inicial.sql` (`ID_TURNO_LIBRE` en `tpv-domain`): un día libre es
+ * una asignación suya sin horas. No se ofrece en el editor de turnos.
+ */
+const ID_TURNO_LIBRE = "00000000-0000-7000-8000-000000000101";
+
 function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const auth = useAuth();
   // El permiso de gestionar horarios, no el rol de administrador: se llamaba `isAdmin`.
@@ -361,9 +369,11 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const deleteAsignacion = useDeleteAsignacion();
   const copySemana = useCopySemanaAsignaciones();
   const setPredeterminado = useSetPredeterminadoDesdeSemana();
+  const marcarLibreMut = useMarcarLibre();
 
+  // El turno LIBRE no se elige en el editor: un día libre no tiene horas, y se marca con «Libre».
   const turnos = useMemo<Turno[]>(
-    () => asArray<Turno>(turnosQuery.data ?? []),
+    () => asArray<Turno>(turnosQuery.data ?? []).filter((t) => t.ID_Turno !== ID_TURNO_LIBRE),
     [turnosQuery.data],
   );
   const asignaciones = useMemo<Asignacion[]>(
@@ -379,7 +389,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     guardarAsignacion.isPending ||
     deleteAsignacion.isPending ||
     copySemana.isPending ||
-    setPredeterminado.isPending;
+    setPredeterminado.isPending ||
+    marcarLibreMut.isPending;
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
@@ -634,6 +645,17 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       setError(toAppError(e).message);
     } finally {
       guardandoRef.current = false;
+    }
+  };
+
+  /** Marca libre el día: sustituye lo que tuviera y tapa la plantilla. */
+  const marcarLibre = async (id_trabajador: string, fecha: string) => {
+    if (!sigueConPermiso()) return;
+    setError(null);
+    try {
+      await marcarLibreMut.mutateAsync({ id_trabajador, fecha });
+    } catch (e) {
+      setError(`No se pudo marcar el día libre: ${toAppError(e).message}`);
     }
   };
 
@@ -914,11 +936,15 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                               >
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div className="flex min-w-0 flex-col break-words">
-                                    <div className="text-sm font-semibold">{a.Nombre_Turno}</div>
-                                    <div className="text-xs text-fg-muted">
-                                      {a.Area}
-                                      {showTime ? ` • ${showTime}` : ""}
-                                    </div>
+                                    <div className="text-sm font-semibold">{a.Libre ? "Libre" : a.Nombre_Turno}</div>
+                                    {a.Libre ? (
+                                      <div className="text-xs text-fg-muted">Día libre</div>
+                                    ) : (
+                                      <div className="text-xs text-fg-muted">
+                                        {a.Area}
+                                        {showTime ? ` • ${showTime}` : ""}
+                                      </div>
+                                    )}
 
                                     {isVirtual && (
                                       <div className="mt-1 text-[11px] text-fg-subtle">
@@ -929,6 +955,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
                                   {puedeGestionarHorarios && !isVirtual && (
                                     <div className="flex items-center gap-1">
+                                      {!a.Libre && (
                                       <button
                                         type="button"
                                         onClick={() => openEdit(a)}
@@ -936,10 +963,12 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                       >
                                         Editar
                                       </button>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={conAviso(() => borrarAsignacion(a.ID_Asignacion))}
                                         className="text-xs border border-danger text-danger rounded-lg px-2 py-1 hover:bg-danger hover:text-white transition-all"
+                                        title={a.Libre ? "Quitar el día libre (vuelve el horario predeterminado)" : "Borrar"}
                                       >
                                         X
                                       </button>
@@ -960,6 +989,16 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                             className="border border-border rounded-xl px-3 py-2 text-xs text-fg-muted hover:bg-accent hover:text-white transition-all"
                           >
                             + Anadir
+                          </button>
+                        )}
+                        {puedeGestionarHorarios && !list.some((a) => a.Libre) && (
+                          <button
+                            type="button"
+                            onClick={conAviso(() => marcarLibre(t.ID_Trabajador, d.ymd))}
+                            className="border border-border rounded-xl px-3 py-2 text-xs text-fg-muted hover:bg-surface-2 transition-all"
+                            title="Marcar el día libre: tapa el horario predeterminado"
+                          >
+                            Libre
                           </button>
                         )}
                       </div>

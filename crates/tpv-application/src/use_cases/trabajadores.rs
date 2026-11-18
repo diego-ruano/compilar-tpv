@@ -3,7 +3,7 @@
 
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
+    CopySemanaInput, HorarioLibreInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
     TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
@@ -151,6 +151,15 @@ pub async fn copy_semana_asignaciones(
     let overwrite = input.overwrite.unwrap_or(false);
 
     repo.copy_semana(from_monday, to_monday, overwrite).await
+}
+
+pub async fn marcar_libre(
+    repo: &dyn TrabajadoresRepository,
+    input: HorarioLibreInput,
+) -> AppResult<bool> {
+    let id_trabajador = requerido(&input.id_trabajador, "Falta el trabajador.").map_err(AppError::validation)?;
+    let fecha = dia_de_horario(&input.fecha, MSG_DIA_DEL_TURNO).map_err(AppError::validation)?;
+    repo.marcar_libre(&id_trabajador, fecha).await
 }
 
 pub async fn set_predeterminado_desde_semana(

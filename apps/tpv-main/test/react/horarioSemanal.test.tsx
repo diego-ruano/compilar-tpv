@@ -19,6 +19,7 @@ vi.mock("../../src/features/trabajadores/trabajadoresQueries", () => {
         useCopySemanaAsignaciones: () => mutacion(),
         useSetPredeterminadoDesdeSemana: () => mutacion(),
         useEliminarTrabajador: () => mutacion(),
+        useMarcarLibre: () => mutacion(),
     };
 });
 vi.mock("../../src/shared/stores/useAuth", () => ({ useAuth: () => ({ idUsuario: "u1" }) }));

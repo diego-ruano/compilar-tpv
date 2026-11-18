@@ -204,6 +204,13 @@ La validación del dominio y las guardas SQL rechazan solapes del mismo trabajad
 que cruzan medianoche; dos tramos pueden tocarse en su límite. La escritura y su outbox se confirman
 en una sola transacción. Un error conserva el formulario para corregirlo.
 
+En una semana presente o futura, una celda sin turno se rellena con el horario predeterminado; por
+eso borrar un turno no dejaba el día libre. «Libre» (`horariosMarcarLibre`, `POST
+/v1/trabajadores/horarios/libre`) sustituye lo que tuviera ese día por el día libre: una asignación
+del turno LIBRE sin horas (`Libre` en la fila), que es una celda real y tapa la plantilla. Su «X» la
+quita y el día vuelve a la plantilla; guardar un turno ese día también la quita. El turno LIBRE no se
+ofrece en el editor, y cuenta 0 horas (no entra en la puntualidad del cuadrante).
+
 El dinero es un entero de céntimos de la base a la pantalla
 ([../decisiones/0005-dinero-en-centimos.md](../decisiones/0005-dinero-en-centimos.md)). En el frontend:
 

@@ -50,6 +50,7 @@ import {
 	guardarAsignacion,
 	deleteAsignacion,
 	eliminarTrabajador,
+	marcarLibre,
 	setPredeterminadoDesdeSemana,
 	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
@@ -338,6 +339,8 @@ import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/r
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
 import goldenHorariosCopiar from "../../../tests/contract/golden/horarios/copiar_semana.json";
 import casoHorariosPredeterminado from "../../../tests/contract/casos/horarios/set_predeterminado_desde_semana.json";
+import casoMarcarLibre from "../../../tests/contract/casos/horarios/marcar_libre.json";
+import goldenMarcarLibre from "../../../tests/contract/golden/horarios/marcar_libre.json";
 import casoEliminarConHistoria from "../../../tests/contract/casos/trabajadores/eliminar_con_historia.json";
 import goldenEliminarConHistoria from "../../../tests/contract/golden/trabajadores/eliminar_con_historia.json";
 import casoEliminarSinHistoria from "../../../tests/contract/casos/trabajadores/eliminar_sin_historia.json";
@@ -512,6 +515,7 @@ const CASOS = [
 		caso: casoHorariosPredeterminado,
 		golden: goldenHorariosPredeterminado,
 	},
+	{ nombre: "horarios_marcar_libre", caso: casoMarcarLibre, golden: goldenMarcarLibre },
 	{ nombre: "trabajadores_eliminar_con_historia", caso: casoEliminarConHistoria, golden: goldenEliminarConHistoria },
 	{ nombre: "trabajadores_eliminar_sin_historia", caso: casoEliminarSinHistoria, golden: goldenEliminarSinHistoria },
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
@@ -1069,6 +1073,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			// comando (cada copia con su ID ya resuelto).
 			const filas = await filasSemana(db, caso.entrada.from_monday);
 			aplicar(hub, sql, copySemana(caso.entrada as any, filas));
+			return;
+		}
+		case "horarios.marcar_libre": {
+			aplicar(hub, sql, marcarLibre(caso.entrada as any));
 			return;
 		}
 		case "trabajadores.eliminar": {

@@ -1,0 +1,41 @@
+[
+  {
+    "Area": "barra",
+    "Fecha": "2099-01-05",
+    "Hora_Fin": "16:00",
+    "Hora_Inicio": "09:00",
+    "ID_Asignacion": "",
+    "ID_Grupo": null,
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-m",
+    "Libre": false,
+    "Nombre_Turno": "Manana",
+    "Notas": null
+  },
+  {
+    "Area": "Libre",
+    "Fecha": "2099-01-06",
+    "Hora_Fin": null,
+    "Hora_Inicio": null,
+    "ID_Asignacion": "libre-martes",
+    "ID_Grupo": null,
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "00000000-0000-7000-8000-000000000101",
+    "Libre": true,
+    "Nombre_Turno": "LIBRE",
+    "Notas": null
+  },
+  {
+    "Area": "Libre",
+    "Fecha": "2099-01-11",
+    "Hora_Fin": null,
+    "Hora_Inicio": null,
+    "ID_Asignacion": "",
+    "ID_Grupo": null,
+    "ID_Trabajador": "trab-2",
+    "ID_Turno": "00000000-0000-7000-8000-000000000101",
+    "Libre": true,
+    "Nombre_Turno": "LIBRE",
+    "Notas": null
+  }
+]

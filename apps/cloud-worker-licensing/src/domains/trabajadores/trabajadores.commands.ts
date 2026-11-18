@@ -3,7 +3,7 @@
 import { nuevoId } from "../../lib/ids";
 import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
-import type { FilaSemanaOrigen, GrupoAsignacion } from "./trabajadores.queries";
+import { ID_TURNO_LIBRE, type FilaSemanaOrigen, type GrupoAsignacion } from "./trabajadores.queries";
 import type { PredeterminadoItem } from "./trabajadores.queries";
 import type { AsignacionGuardarInput } from "@tpv/contracts";
 import type {
@@ -317,11 +317,19 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 }
 
 /** RI-85: resuelve el grupo y lo sustituye dentro de la misma transacción. */
+/**
+ * Lo que quita el día libre de un trabajador (?1) un día (?2): al guardarle un turno ese día. Mismo
+ * SQL que `SQL_QUITAR_LIBRE` en la Main.
+ */
+const SQL_QUITAR_LIBRE = `DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2
+	AND ID_Turno = '${ID_TURNO_LIBRE}' AND Hora_Inicio IS NULL;`;
+
 export function guardarAsignacion(input: AsignacionGuardarInput, existente: GrupoAsignacion | null = null): BuiltCommand {
 	const grupo = existente?.id_grupo ?? nuevoId();
 	const idPrincipal = input.id_asignacion ?? nuevoId();
 	const condicion = "EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?10 AND COALESCE(ID_Grupo, ID_Asignacion) = ?2 AND ID_Trabajador = ?3 AND Fecha = ?4)";
-	const steps: any[] = [];
+	// Un turno en un día libre lo deja de ser.
+	const steps: any[] = [{ kind: "execute", sql: SQL_QUITAR_LIBRE, args: [input.id_trabajador, input.fecha] }];
 	if (input.id_asignacion) {
 		// Conservamos el miembro principal: sirve de guarda en cada sentencia del batch.
 		// Si desapareció desde la lectura previa, no se borra ni se crea ninguna fila.
@@ -335,6 +343,45 @@ export function guardarAsignacion(input: AsignacionGuardarInput, existente: Grup
 		});
 	});
 	return { commandName: "horarios_guardar_asignacion", command: { type: "tenantDb.transaction", payload: { steps, resultKey: "guardado" } }, cloudPayload: input };
+}
+
+/**
+ * Marca libre el día `fecha` de un trabajador: quita lo que tuviera ese día y deja su día libre (el
+ * turno LIBRE sin horas), que tapa la plantilla. Como `marcar_libre` en la Main. Que el trabajador
+ * siga en la plantilla lo decide la guarda, dentro del lote (SYNC-30).
+ */
+export function marcarLibre(input: { id_trabajador: string; fecha: string }): BuiltCommand {
+	return {
+		commandName: "horarios_marcar_libre",
+		command: {
+			type: "tenantDb.transaction",
+			payload: {
+				steps: [
+					{ kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [nuevoId()] },
+					{
+						kind: "guard",
+						sql: `SELECT EXISTS (SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
+							WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL);`,
+						args: [input.id_trabajador],
+						error: "trabajador_no_encontrado",
+						status: 404,
+					},
+					{
+						kind: "execute",
+						sql: "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2;",
+						args: [input.id_trabajador, input.fecha],
+					},
+					{
+						kind: "execute",
+						sql: `INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo)
+							VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL);`,
+						args: [{ $ref: "id" }, input.id_trabajador, input.fecha, ID_TURNO_LIBRE, "Libre"],
+					},
+				],
+			},
+		},
+		cloudPayload: input,
+	};
 }
 
 /**

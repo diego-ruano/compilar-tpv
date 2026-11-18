@@ -19,7 +19,13 @@ use tpv_contracts::trabajadores::{
 use tpv_domain::login::hash_pin;
 use tpv_domain::trabajadores::{
     limpiar_opcional, AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
+    AREA_LIBRE, ID_TURNO_LIBRE,
 };
+
+/// Lo que quita el día libre de un trabajador (?1) un día (?2): al guardarle un turno ese día, o al
+/// volver a marcarlo libre. Mismo SQL en el worker (`SQL_QUITAR_LIBRE`).
+const SQL_QUITAR_LIBRE: &str = "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2 \
+     AND ID_Turno = '00000000-0000-7000-8000-000000000101' AND Hora_Inicio IS NULL;";
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
@@ -281,6 +287,11 @@ fn weekday_1_to_7_from_ymd(ymd: &str) -> Option<i64> {
     Some(n)
 }
 
+/// ¿Es el día libre de un trabajador? El turno LIBRE sin horas (`ID_TURNO_LIBRE`).
+fn es_libre(id_turno: &str, hora_inicio: &Option<String>) -> bool {
+    id_turno == ID_TURNO_LIBRE && hora_inicio.is_none()
+}
+
 fn hhmm_opt(t: &Option<String>) -> String {
     t.as_deref().unwrap_or("").chars().take(5).collect()
 }
@@ -515,7 +526,12 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 hora_fin: v_string(row.get_value(6).map_err(db_err)?),
                 notas: v_string(row.get_value(7).map_err(db_err)?),
                 nombre_turno: v_string(row.get_value(8).map_err(db_err)?).unwrap_or_default(),
+                libre: false,
             });
+        }
+        // El día libre (el turno LIBRE sin horas): es una celda real, así que tapa la plantilla.
+        for a in out.iter_mut() {
+            a.libre = es_libre(&a.id_turno, &a.hora_inicio);
         }
 
         let req_monday = NaiveDate::parse_from_str(&fecha_lunes, "%Y-%m-%d")
@@ -623,6 +639,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                             hora_fin: it.hora_fin.clone(),
                             notas: it.notas.clone(),
                             nombre_turno: it.nombre_turno.clone(),
+                            libre: es_libre(&it.id_turno, &it.hora_inicio),
                         });
                     }
                 }
@@ -882,7 +899,10 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 if nuevos.iter().any(|nuevo| nuevo.solapa(&intervalo)) { return Err(AppError::conflict("Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.")); }
             }
         }
+        let dia_libre = vec![Value::Text(primero.id_trabajador.clone()), Value::Text(primero.fecha.clone())];
         let resultado: AppResult<bool> = db.transaccion(async {
+            // Un turno en un día libre lo deja de ser.
+            db.execute(SQL_QUITAR_LIBRE, dia_libre).await.map_err(db_err)?;
             db.execute("DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = ?1;", vec![Value::Text(grupo.clone())]).await.map_err(db_err)?;
             for (indice, tramo) in tramos.into_iter().enumerate() {
                 let id = ids.get(indice).cloned().unwrap_or_else(new_id);
@@ -1018,6 +1038,46 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
 
         Ok(true)
+    }
+
+    async fn marcar_libre(&self, id_trabajador: &str, fecha: String) -> AppResult<bool> {
+        let db = self.db.write().await;
+        db.transaccion(async {
+            // De la plantilla (un eliminado con historia ya no).
+            let mut rows = db
+                .query(
+                    "SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario \
+                     WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL;",
+                    vec![Value::Text(id_trabajador.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            if rows.next().await.map_err(db_err)?.is_none() {
+                return Err(AppError::not_found("Ese trabajador ya no existe. Actualiza la lista."));
+            }
+            // Lo que tuviera ese día deja de estar: el libre lo sustituye.
+            db.execute(
+                "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2;",
+                vec![Value::Text(id_trabajador.to_string()), Value::Text(fecha.clone())],
+            )
+            .await
+            .map_err(db_err)?;
+            db.execute(
+                "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, NULL);",
+                vec![
+                    Value::Text(new_id()),
+                    Value::Text(id_trabajador.to_string()),
+                    Value::Text(fecha),
+                    Value::Text(ID_TURNO_LIBRE.into()),
+                    Value::Text(AREA_LIBRE.into()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(true)
+        })
+        .await
     }
 
     async fn copy_semana(
@@ -1361,6 +1421,68 @@ mod tests_horarios_agrupados {
         let mut siguiente = entrada(&[("02:00", "03:00")]);
         siguiente.fecha = "2026-10-10".into();
         guardar_asignacion(&repo, siguiente).await.unwrap();
+    }
+
+    /// Borrar el turno de un día de una semana con plantilla hacía volver el de la plantilla: no
+    /// había forma de dejar un día libre. El libre es una celda real (el turno LIBRE, sin horas).
+    #[tokio::test]
+    async fn el_dia_libre_tapa_la_plantilla_y_al_quitarlo_vuelve() {
+        use tpv_application::use_cases::trabajadores::marcar_libre;
+        use tpv_contracts::trabajadores::HorarioLibreInput;
+
+        let (db, repo) = preparar().await;
+        let hoy = Local::now().date_naive();
+        let lunes = hoy - Duration::days(i64::from(hoy.weekday().num_days_from_monday())) + Duration::days(7);
+        let lunes_s = lunes.format("%Y-%m-%d").to_string();
+        let martes = (lunes + Duration::days(1)).format("%Y-%m-%d").to_string();
+        db.write()
+            .await
+            .raw()
+            .execute(
+                "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin) \
+                 VALUES ('d', 't', 2, 1, '00000000-0000-7000-8000-000000000103', 'Sala', '09:00', '14:00');",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let del_martes = |v: Vec<AsignacionRow>| v.into_iter().filter(|a| a.fecha == martes).collect::<Vec<_>>();
+
+        let plantilla = del_martes(repo.get_asignaciones_semana(lunes_s.clone()).await.unwrap());
+        assert_eq!(plantilla.len(), 1);
+        assert!(plantilla[0].id_asignacion.is_empty() && !plantilla[0].libre, "sale la plantilla");
+
+        let libre = HorarioLibreInput { id_trabajador: "t".into(), fecha: martes.clone() };
+        marcar_libre(&repo, libre.clone()).await.unwrap();
+        let dia = del_martes(repo.get_asignaciones_semana(lunes_s.clone()).await.unwrap());
+        assert_eq!(dia.len(), 1, "el libre tapa la plantilla: {dia:?}");
+        assert!(dia[0].libre && !dia[0].id_asignacion.is_empty());
+        assert_eq!((dia[0].hora_inicio.as_deref(), dia[0].hora_fin.as_deref()), (None, None), "0 horas");
+
+        // Quitarlo devuelve el día a la plantilla.
+        repo.delete_asignacion(&dia[0].id_asignacion).await.unwrap();
+        let dia = del_martes(repo.get_asignaciones_semana(lunes_s.clone()).await.unwrap());
+        assert!(dia.len() == 1 && dia[0].id_asignacion.is_empty() && !dia[0].libre);
+
+        // Un turno en un día libre lo deja de ser.
+        marcar_libre(&repo, libre).await.unwrap();
+        let mut turno = entrada(&[("16:00", "20:00")]);
+        turno.fecha = martes.clone();
+        guardar_asignacion(&repo, turno).await.unwrap();
+        let dia = del_martes(repo.get_asignaciones_semana(lunes_s).await.unwrap());
+        assert!(dia.len() == 1 && !dia[0].libre, "{dia:?}");
+
+        // Y el esquema no admite un libre con horas.
+        let con_horas = db
+            .write()
+            .await
+            .raw()
+            .execute(
+                "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) \
+                 VALUES ('x', 't', '2026-10-20', '00000000-0000-7000-8000-000000000101', 'Libre', '09:00', '10:00');",
+                Vec::<Value>::new(),
+            )
+            .await;
+        assert!(con_horas.is_err());
     }
 }
 

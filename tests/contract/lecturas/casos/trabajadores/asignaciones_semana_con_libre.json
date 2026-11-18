@@ -1,0 +1,19 @@
+{
+  "descripcion": "Un día libre en una semana con plantilla. El libre es una asignación del turno LIBRE (el que siembra 0001, con su id fijo) SIN horas: es una celda real, así que el relleno del Horario_Predeterminado se la salta (el martes de Uno no sale su turno de mañana), y sale con Libre = true. Un libre de la plantilla (el domingo de Dos) se rellena como cualquier otra fila inventada, también con Libre = true. Lunes de 2099: una semana futura, que es cuando se rellena.",
+  "lectura": "trabajadores.asignaciones_semana",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolLecturaContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-m', 'Manana');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('libre-martes', 'trab-1', '2099-01-06', '00000000-0000-7000-8000-000000000101', 'Libre');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('def-1', 'trab-1', 1, 1, 'turno-m', 'barra', '09:00', '16:00');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('def-2', 'trab-1', 2, 1, 'turno-m', 'barra', '09:00', '16:00');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area) VALUES ('def-3', 'trab-2', 7, 1, '00000000-0000-7000-8000-000000000101', 'Libre');"
+  ],
+  "entrada": {
+    "fecha_lunes": "2099-01-05"
+  }
+}

@@ -216,13 +216,16 @@ CREATE INDEX IF NOT EXISTS idx_asig_grupo ON Asignacion_Turnos(ID_Grupo);
 
 -- RI-85: la regla se comprueba tambien en dominio. Esta guarda la aplica dentro de la
 -- transaccion, incluida la replica, sin una lectura previa que pueda quedarse vieja.
+-- El dia libre de un trabajador es una asignacion del turno LIBRE (sembrado abajo, con su id fijo)
+-- SIN horas: tapa el horario predeterminado de ese dia y cuenta 0 horas. Con horas no es un libre.
 CREATE TRIGGER IF NOT EXISTS asig_validar_insert BEFORE INSERT ON Asignacion_Turnos
 BEGIN
   SELECT RAISE(ABORT, 'horario_invalido') WHERE
     date(NEW.Fecha) IS NULL OR date(NEW.Fecha) <> NEW.Fecha OR
     (NEW.Hora_Inicio IS NULL) <> (NEW.Hora_Fin IS NULL) OR
     (NEW.Hora_Inicio IS NOT NULL AND (time(NEW.Hora_Inicio) IS NULL OR
-      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin)));
+      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin))) OR
+    (NEW.ID_Turno = '00000000-0000-7000-8000-000000000101' AND NEW.Hora_Inicio IS NOT NULL);
   SELECT RAISE(ABORT, 'horario_solapado') WHERE NEW.Hora_Inicio IS NOT NULL AND EXISTS (
     SELECT 1 FROM Asignacion_Turnos a WHERE a.ID_Trabajador = NEW.ID_Trabajador
       AND a.ID_Asignacion <> NEW.ID_Asignacion AND a.Hora_Inicio IS NOT NULL
@@ -239,7 +242,8 @@ BEGIN
     date(NEW.Fecha) IS NULL OR date(NEW.Fecha) <> NEW.Fecha OR
     (NEW.Hora_Inicio IS NULL) <> (NEW.Hora_Fin IS NULL) OR
     (NEW.Hora_Inicio IS NOT NULL AND (time(NEW.Hora_Inicio) IS NULL OR
-      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin)));
+      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin))) OR
+    (NEW.ID_Turno = '00000000-0000-7000-8000-000000000101' AND NEW.Hora_Inicio IS NOT NULL);
   SELECT RAISE(ABORT, 'horario_solapado') WHERE NEW.Hora_Inicio IS NOT NULL AND EXISTS (
     SELECT 1 FROM Asignacion_Turnos a WHERE a.ID_Trabajador = NEW.ID_Trabajador
       AND a.ID_Asignacion <> NEW.ID_Asignacion AND a.Hora_Inicio IS NOT NULL

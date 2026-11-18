@@ -308,6 +308,7 @@ lecturas_de_contrato! {
     tareas__asignados,
     trabajadores__asignaciones_semana,
     trabajadores__asignaciones_semana_con_predeterminado,
+    trabajadores__asignaciones_semana_con_libre,
     trabajadores__roles,
     trabajadores__permisos_usuario,
     trabajadores__todos,

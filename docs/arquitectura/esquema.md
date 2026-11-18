@@ -119,6 +119,10 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
   cocina, reservas, tareas y fichajes. Un `RAISE(ABORT)` corta también un `INSERT OR IGNORE`, que ante
   un `CHECK` se saltaría la fila en silencio. Cocina (líneas que no pasan por ella), fichajes y
   movimientos de caja admiten `NULL`. Las guardas de solape de `Asignacion_Turnos` (RI-85) van igual.
+- **El día libre de un trabajador** es una asignación del turno LIBRE que siembra `0001` (id fijo,
+  `ID_TURNO_LIBRE`) **sin horas**: los triggers de `Asignacion_Turnos` rechazan un LIBRE con horas
+  (`horario_invalido`). Tapa el horario predeterminado de ese día y cuenta 0 horas
+  ([frontend.md](frontend.md#el-dinero-en-pantalla)).
 - **«Línea cobrada»** se lee por la vista `v_lineas_cobradas` (pagos activos), no por `Pago_Detalles`
   ([caja.md](caja.md#dar-de-baja-un-cobro)). **«Línea por cobrar»**, por `v_lineas_por_cobrar`: ni
   cobrada ni devuelta entera por la baja (`DEVOLUCION`) de su cobro. Las dos se consultan con

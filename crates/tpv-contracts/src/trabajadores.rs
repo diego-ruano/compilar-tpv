@@ -101,6 +101,9 @@ pub struct AsignacionRow {
     pub notas: Option<String>,
     #[serde(rename = "Nombre_Turno")]
     pub nombre_turno: String,
+    /// Es el día libre del trabajador (el turno LIBRE, sin horas): tapa la plantilla.
+    #[serde(rename = "Libre", default)]
+    pub libre: bool,
 }
 
 /* =========================================================
@@ -187,6 +190,13 @@ pub struct AsignacionUpdateInput {
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct AsignacionDeleteInput {
     pub id_asignacion: String,
+}
+
+/// Marcar libre el día de un trabajador: sustituye lo que tuviera ese día.
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct HorarioLibreInput {
+    pub id_trabajador: String,
+    pub fecha: String,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

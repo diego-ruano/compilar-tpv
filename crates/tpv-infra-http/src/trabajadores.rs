@@ -198,6 +198,12 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         Ok(true)
     }
 
+    async fn marcar_libre(&self, id_trabajador: &str, fecha: String) -> AppResult<bool> {
+        let body = json!({ "id_trabajador": id_trabajador, "fecha": fecha });
+        let _: JsonValue = self.client.post_json("/v1/trabajadores/horarios/libre", &body).await?;
+        Ok(true)
+    }
+
     async fn copy_semana(
         &self,
         from_monday: String,

@@ -100,6 +100,18 @@ export function useCopySemanaAsignaciones() {
   });
 }
 
+/**
+ * Marca libre el día de un trabajador: tapa su horario predeterminado. Se quita con
+ * `useDeleteAsignacion`, y el día vuelve a la plantilla.
+ */
+export function useMarcarLibre() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: commands.horariosMarcarLibre,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: trabajadoresKeys.all }); },
+  });
+}
+
 /** Guarda la semana visible como horario predeterminado; invalida la feature si confirma. */
 export function useSetPredeterminadoDesdeSemana() {
   const qc = useQueryClient();

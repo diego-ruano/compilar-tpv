@@ -287,6 +287,17 @@ export async function turnos(db: Client): Promise<TurnoRow[]> {
 	return rows(rs) as TurnoRow[];
 }
 
+/**
+ * El turno LIBRE que siembra `0001_inicial.sql`, con el mismo id en la Main y en la nube
+ * (`ID_TURNO_LIBRE` en `tpv-domain/src/trabajadores.rs`). Un día libre es una asignación de este
+ * turno sin horas: tapa el horario predeterminado de ese día y cuenta 0 horas.
+ */
+export const ID_TURNO_LIBRE = "00000000-0000-7000-8000-000000000101";
+
+function esLibre(idTurno: string, horaInicio: string | null | undefined): boolean {
+	return idTurno === ID_TURNO_LIBRE && horaInicio == null;
+}
+
 export async function asignacionesSemana(
 	db: Client,
 	fechaLunes: string,
@@ -313,7 +324,8 @@ export async function asignacionesSemana(
 		args: [fechaLunes],
 	});
 
-	const out = rows(rs) as AsignacionRow[];
+	// El día libre (el turno LIBRE sin horas) es una celda real: tapa la plantilla. Como la Main.
+	const out: AsignacionRow[] = (rows(rs) as AsignacionRow[]).map((a) => ({ ...a, Libre: esLibre(a.ID_Turno, a.Hora_Inicio) }));
 	if (fechaLunes < currentMonday()) return out;
 
 	const realCells = new Set(
@@ -355,6 +367,7 @@ export async function asignacionesSemana(
 				Hora_Fin: d.Hora_Fin ?? null,
 				Notas: d.Notas ?? null,
 				Nombre_Turno: String(d.Nombre_Turno ?? ""),
+				Libre: esLibre(String(d.ID_Turno ?? ""), d.Hora_Inicio ?? null),
 			} as AsignacionRow);
 		}
 	}

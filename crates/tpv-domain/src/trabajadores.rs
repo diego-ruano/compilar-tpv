@@ -101,6 +101,15 @@ pub fn validar_contrato(
     Ok((inicio, fin))
 }
 
+/// El turno LIBRE que siembra `0001_inicial.sql`, con el mismo id en la Main y en la nube. Un día
+/// libre es una asignación de este turno **sin horas**: tapa el horario predeterminado de ese día
+/// (que sin ella volvía a salir al borrar el turno) y cuenta 0 horas. Se quita borrándola, y el día
+/// vuelve a la plantilla. Mismo id en el worker (`ID_TURNO_LIBRE`).
+pub const ID_TURNO_LIBRE: &str = "00000000-0000-7000-8000-000000000101";
+
+/// El área con la que se guarda un día libre (la columna no admite vacío).
+pub const AREA_LIBRE: &str = "Libre";
+
 /// Texto obligatorio: recorta y exige no vacío.
 pub use crate::texto::requerido;
 

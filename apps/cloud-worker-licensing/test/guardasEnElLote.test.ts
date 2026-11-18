@@ -986,3 +986,45 @@ describe("Eliminar a un trabajador", () => {
 		});
 	});
 });
+
+describe("Libre: el día libre de un trabajador", () => {
+	const LIBRE = "00000000-0000-7000-8000-000000000101";
+	const CON_TURNO = [
+		...USUARIOS,
+		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('turno', 'trab-ana', '2099-01-06', 'manana', 'Sala', '09:00', '14:00')",
+	];
+	const delDia = (n: Negocio) =>
+		n.sql.exec("SELECT ID_Turno, Hora_Inicio FROM Asignacion_Turnos WHERE ID_Trabajador = 'trab-ana' AND Fecha = '2099-01-06';").toArray();
+
+	it("sustituye lo que tuviera ese día por el turno LIBRE sin horas, y se replica", async () => {
+		await conNegocio("libre-marcar", CON_TURNO, async (n) => {
+			const r = await n.pedir("POST", "/v1/trabajadores/horarios/libre", { id_trabajador: "trab-ana", fecha: "2099-01-06" });
+			expect(r).toEqual({ status: 200, json: { ok: true } });
+			expect(delDia(n)).toEqual([{ ID_Turno: LIBRE, Hora_Inicio: null }]);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(1);
+		});
+	});
+
+	it("un turno guardado ese día lo deja de ser", async () => {
+		await conNegocio("libre-y-turno", USUARIOS, async (n) => {
+			await n.pedir("POST", "/v1/trabajadores/horarios/libre", { id_trabajador: "trab-ana", fecha: "2099-01-06" });
+			const r = await n.pedir("POST", "/v1/trabajadores/horarios/guardar", {
+				id_trabajador: "trab-ana",
+				fecha: "2099-01-06",
+				id_turno: "manana",
+				area: "Sala",
+				tramos: [{ hora_inicio: "09:00", hora_fin: "14:00" }],
+			});
+			expect(r.status).toBe(200);
+			expect(delDia(n)).toEqual([{ ID_Turno: "manana", Hora_Inicio: "09:00" }]);
+		});
+	});
+
+	it("de alguien que ya no está en la plantilla, trabajador_no_encontrado", async () => {
+		await conNegocio("libre-fuera", USUARIOS, async (n) => {
+			n.sql.exec("UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 00:00:00' WHERE ID_Usuario = 'ana'");
+			const r = await n.pedir("POST", "/v1/trabajadores/horarios/libre", { id_trabajador: "trab-ana", fecha: "2099-01-06" });
+			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+		});
+	});
+});

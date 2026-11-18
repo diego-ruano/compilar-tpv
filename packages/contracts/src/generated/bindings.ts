@@ -147,6 +147,8 @@ export type AsignacionRow = {
 	Hora_Fin: string | null,
 	Notas: string | null,
 	Nombre_Turno: string,
+	/**  Es el día libre del trabajador (el turno LIBRE, sin horas): tapa la plantilla. */
+	Libre?: boolean,
 };
 
 export type AsignacionUpdateInput = {
@@ -1329,6 +1331,12 @@ export type HistoricoPagina = {
 	filas: unknown[][],
 	/**  `None` = esta tabla está completa. Cualquier otra cosa es "sigue pidiendo desde aquí". */
 	siguiente_cursor: number | null,
+};
+
+/**  Marcar libre el día de un trabajador: sustituye lo que tuviera ese día. */
+export type HorarioLibreInput = {
+	id_trabajador: string,
+	fecha: string,
 };
 
 export type HorariosSemanaArgs = {

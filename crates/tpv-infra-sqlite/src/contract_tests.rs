@@ -391,6 +391,7 @@ casos_de_contrato! {
     login__punch_salida_turno_noche,
     horarios__copiar_semana,
     horarios__set_predeterminado_desde_semana,
+    horarios__marcar_libre,
     trabajadores__eliminar_con_historia,
     trabajadores__eliminar_sin_historia,
     horarios__create_asignacion,
@@ -954,6 +955,12 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("copiar semana");
+        }
+        "horarios.marcar_libre" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.marcar_libre(&s(&e["id_trabajador"]), s(&e["fecha"]))
+                .await
+                .expect("marcar libre");
         }
         "trabajadores.eliminar" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());

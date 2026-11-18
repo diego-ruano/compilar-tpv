@@ -45,6 +45,9 @@ pub trait TrabajadoresRepository: Send + Sync {
         cambios: AsignacionCambios,
     ) -> AppResult<bool>;
     async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool>;
+    /// Marca libre el día `fecha` del trabajador: quita lo que tuviera ese día y deja su día libre
+    /// (`ID_TURNO_LIBRE`, sin horas), que tapa la plantilla. Se quita con `delete_asignacion`.
+    async fn marcar_libre(&self, id_trabajador: &str, fecha: String) -> AppResult<bool>;
     /// Copia las asignaciones de una semana a otra (desplazando 7 días).
     async fn copy_semana(
         &self,

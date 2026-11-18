@@ -154,6 +154,8 @@ import casoHorSemana from "../../../tests/contract/lecturas/casos/trabajadores/a
 import goldenHorSemana from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana.json";
 import casoHorSemanaDef from "../../../tests/contract/lecturas/casos/trabajadores/asignaciones_semana_con_predeterminado.json";
 import goldenHorSemanaDef from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana_con_predeterminado.json";
+import casoHorSemanaLibre from "../../../tests/contract/lecturas/casos/trabajadores/asignaciones_semana_con_libre.json";
+import goldenHorSemanaLibre from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana_con_libre.json";
 import casoMesaLayout from "../../../tests/contract/lecturas/casos/mesas/layout.json";
 import goldenMesaLayout from "../../../tests/contract/lecturas/golden/mesas/layout.json";
 import casoMesaMetaAll from "../../../tests/contract/lecturas/casos/mesas/meta_all.json";
@@ -344,6 +346,11 @@ const CASOS = [
 		nombre: "trabajadores_asignaciones_semana_con_predeterminado",
 		caso: casoHorSemanaDef,
 		golden: goldenHorSemanaDef,
+	},
+	{
+		nombre: "trabajadores_asignaciones_semana_con_libre",
+		caso: casoHorSemanaLibre,
+		golden: goldenHorSemanaLibre,
 	},
 	{ nombre: "mesas_layout", caso: casoMesaLayout, golden: goldenMesaLayout },
 	{ nombre: "mesas_meta_all", caso: casoMesaMetaAll, golden: goldenMesaMetaAll },

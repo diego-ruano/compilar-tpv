@@ -2301,6 +2301,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::trabajadores::trabajadores_create,
             commands::trabajadores::trabajadores_update,
             commands::trabajadores::trabajadores_eliminar,
+            commands::trabajadores::horarios_marcar_libre,
             commands::trabajadores::turnos_get_all,
             commands::trabajadores::horarios_get_asignaciones_semana,
             commands::trabajadores::horarios_create_asignacion,

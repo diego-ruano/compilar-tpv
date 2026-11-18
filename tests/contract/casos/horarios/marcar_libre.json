@@ -1,0 +1,20 @@
+{
+  "descripcion": "Marcar libre un día: lo que el trabajador tuviera ese día (aquí un turno partido de dos tramos) se sustituye por su día libre, el turno LIBRE que siembra 0001 sin horas. Lo de otro día no se toca. El id del libre lo genera cada lado: se comprueba que existe y no viene vacío.",
+  "comando": "horarios.marcar_libre",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno', 'Activo');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-1', 'Mañana');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('asig-a', 'g', 'trab-1', '2099-01-06', 'turno-1', 'Sala', '09:00', '13:00');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('asig-b', 'g', 'trab-1', '2099-01-06', 'turno-1', 'Sala', '17:00', '21:00');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('asig-otro-dia', 'trab-1', '2099-01-07', 'turno-1', 'Sala', '09:00', '13:00');"
+  ],
+  "entrada": {
+    "id_trabajador": "trab-1",
+    "fecha": "2099-01-06"
+  },
+  "snapshot": {
+    "Asignacion_Turnos": "SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, ID_Grupo, CASE WHEN ID_Asignacion IS NOT NULL AND ID_Asignacion <> '' THEN 1 ELSE 0 END AS Tiene_Id FROM Asignacion_Turnos"
+  }
+}

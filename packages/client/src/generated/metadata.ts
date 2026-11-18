@@ -110,6 +110,7 @@ export const nombresComandos = {
     "trabajadores_create": "trabajadoresCreate",
     "trabajadores_update": "trabajadoresUpdate",
     "trabajadores_eliminar": "trabajadoresEliminar",
+    "horarios_marcar_libre": "horariosMarcarLibre",
     "turnos_get_all": "turnosGetAll",
     "horarios_get_asignaciones_semana": "horariosGetAsignacionesSemana",
     "horarios_create_asignacion": "horariosCreateAsignacion",
@@ -348,6 +349,7 @@ type Argumentos = {
     "trabajadores_create": { args: Parameters<Comandos["trabajadoresCreate"]>[0] };
     "trabajadores_update": { args: Parameters<Comandos["trabajadoresUpdate"]>[0] };
     "trabajadores_eliminar": { args: Parameters<Comandos["trabajadoresEliminar"]>[0] };
+    "horarios_marcar_libre": { args: Parameters<Comandos["horariosMarcarLibre"]>[0] };
     "turnos_get_all": {  };
     "horarios_get_asignaciones_semana": { args: Parameters<Comandos["horariosGetAsignacionesSemana"]>[0] };
     "horarios_create_asignacion": { args: Parameters<Comandos["horariosCreateAsignacion"]>[0] };

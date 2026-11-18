@@ -10,6 +10,7 @@ import type {
 	AsignacionGuardarInput,
 	AsignacionUpdateInput as ContractAsignacionUpdateInput,
 	CopySemanaInput as ContractCopySemanaInput,
+	HorarioLibreInput,
 	TrabajadorCreateInput as ContractTrabajadorCreateInput,
 	TrabajadorUpdateInput as ContractTrabajadorUpdateInput,
 } from "@tpv/contracts";
@@ -192,6 +193,14 @@ export const asignacionUpdateSchema = z
 		notas: cleanOrNull(v.notas),
 	}));
 
+/** Marcar libre el día de un trabajador. Los mismos textos que la Main. */
+export const horarioLibreSchema = z
+	.object({
+		id_trabajador: idField("Falta el trabajador."),
+		fecha: zDiaDeHorario("El día del turno no es válido."),
+	})
+	.strict();
+
 export const copySemanaSchema = z.object({
 	from_monday: zDiaDeHorario("La semana de origen no es válida."),
 	to_monday: zDiaDeHorario("La semana de destino no es válida."),
@@ -292,3 +301,4 @@ type _GTrabajadorUpdate = Assert<SameKeys<z.infer<typeof trabajadorUpdateSchema>
 type _GAsignacionCreate = Assert<SameKeys<z.infer<typeof asignacionCreateSchema>, AsignacionCreateInput>>;
 type _GAsignacionUpdate = Assert<SameKeys<z.infer<typeof asignacionUpdateSchema>, AsignacionUpdateInput>>;
 type _GCopySemana = Assert<SameKeys<z.infer<typeof copySemanaSchema>, CopySemanaInput>>;
+type _GHorarioLibre = Assert<SameKeys<z.infer<typeof horarioLibreSchema>, HorarioLibreInput>>;
