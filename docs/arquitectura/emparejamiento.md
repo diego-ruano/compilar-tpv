@@ -16,12 +16,19 @@ y la Main aprueba.
 | Dispositivos vinculados | `…/pairing/dispositivos.routes.ts` (`/v1/device/list`, `/revoke`) | Listar y revocar |
 | Proxy del TPV | `apps/tpv-main/src-tauri/src/commands/pairing.rs` (`tpv_server_post_json`) | Firma la petición; gate de Administrador salvo las anónimas |
 | Handy | `src/app/arranque/{EmparejarHandy.tsx,emparejamiento.ts,useEmparejamientoHandy.ts}` | La pantalla y la espera |
+| Lector de QR | `src/app/arranque/escanearQr.ts` (plugin `barcode-scanner`, sólo Android e iOS) | Leer con la cámara el QR de la Main |
 | Main | Configuración → Vincular Handy | Generar el código y aprobar |
 | Token | `crates/tpv-infra-licensing/src/{lib,device}.rs` · `crates/tpv-infra-http/src/client.rs` | Guardarlo y renovarlo |
 
 ## El flujo
 
-1. La Main crea un código (`/v1/pair/create`): 6 cifras, válido **10 minutos**.
+1. La Main crea un código (`/v1/pair/create`): 6 cifras, válido **10 minutos**. Lo enseña con su
+   secreto en un QR (`tpv://pair?code=…&secret=…`, `contenidoDelQr`). En la Handy, «Conecta este
+   Handy» lo lee con la cámara («Escanear el QR», sólo en móvil), lo acepta pegado o acepta las seis
+   cifras a mano; lo escaneado sigue el mismo camino que lo pegado. La cámara va detrás de la webview
+   (`windowed`) y la pantalla pinta encima sólo el visor, con su «Cancelar»: sin eso, en Android la
+   cámara tapaba la aplicación sin forma de salir. Sin permiso de la cámara, o cancelado, se avisa y
+   quedan las otras dos vías.
 2. La Handy lo reclama (`/v1/pair/claim`) con su `device_id` y su clave pública, y recibe un reto y
    cuánto le queda (`caducaEnMs`, en relativo: no depende de que los relojes coincidan). Un dispositivo
    ya aprobado puede volver a reclamar su propio código y recibe un reto nuevo, que es lo que salva a

@@ -378,3 +378,20 @@ body {
         max-height: 45%;
     }
 }
+
+/* =========================================================================
+   Lector de QR (vincular una Handy, `app/arranque/escanearQr.ts`)
+   =========================================================================
+   El plugin pone la cámara DETRÁS de la webview y la vuelve transparente: mientras se escanea, la
+   aplicación no pinta nada (ni sus fondos) salvo el visor, que lleva su «Cancelar». */
+html.escaneando-qr,
+html.escaneando-qr body {
+    background: transparent !important;
+}
+html.escaneando-qr body * {
+    visibility: hidden;
+}
+html.escaneando-qr .visor-qr,
+html.escaneando-qr .visor-qr * {
+    visibility: visible;
+}

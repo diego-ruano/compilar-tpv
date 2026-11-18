@@ -2591,6 +2591,12 @@ pub fn run() {
         // AUD-25: la ventana no navega fuera de la aplicación.
         .plugin(navegacion::plugin());
 
+    // El lector de QR con la cámara, para vincular una Handy escaneando el código de la Main. Sólo
+    // existe en móvil (Android e iOS): en escritorio ni se compila. Sus permisos, en
+    // `capabilities/mobile.json`.
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+
     // Sentry (bridge webview+core) es solo escritorio: el plugin arrastra el minidump (proceso
     // helper) y native-tls. En móvil el crate `sentry` (rustls) sigue capturando panics de Rust.
     #[cfg(desktop)]

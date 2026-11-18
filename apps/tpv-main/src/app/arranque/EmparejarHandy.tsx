@@ -1,15 +1,16 @@
 // src/app/arranque/EmparejarHandy.tsx
 //
-// La vinculación de un Handy con su Main: se pega el contenido del QR o se escribe el código, y se
-// espera a que la Main apruebe la solicitud.
+// La vinculación de un Handy con su Main: se escanea el QR con la cámara (en móvil), se pega su
+// contenido o se escribe el código, y se espera a que la Main apruebe la solicitud.
 
-import React, { useState } from "react";
-import { Fingerprint, Link2, QrCode, RotateCcw, ScanLine, ShieldCheck, Smartphone } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { Camera, Fingerprint, Link2, QrCode, RotateCcw, ScanLine, ShieldCheck, Smartphone } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import FondoDecorado from "./FondoDecorado";
 import type { EmparejamientoHandy } from "./useEmparejamientoHandy";
+import { avisoDelEscaneo, EscaneoQr, puedeEscanear } from "./escanearQr";
 
 export default function EmparejarHandy({
 	emparejamiento,
@@ -25,9 +26,61 @@ export default function EmparejarHandy({
 	const [contenidoQr, setContenidoQr] = useState("");
 	const [codigoManual, setCodigoManual] = useState("");
 
+	// El lector de QR con la cámara, sólo en móvil. Lo leído sigue el mismo camino que pegarlo.
+	const conCamara = puedeEscanear();
+	const escaneoRef = useRef<EscaneoQr | null>(null);
+	const [escaneando, setEscaneando] = useState(false);
+	const [avisoEscaneo, setAvisoEscaneo] = useState<string | null>(null);
+
+	async function escanear() {
+		setAvisoEscaneo(null);
+		const escaneo = new EscaneoQr();
+		escaneoRef.current = escaneo;
+		const r = await escaneo.leer(() => setEscaneando(true));
+		if (escaneoRef.current !== escaneo) return;
+		escaneoRef.current = null;
+		setEscaneando(false);
+		if (r.tipo === "leido") {
+			setContenidoQr(r.contenido);
+			emparejamiento.vincular(r.contenido, "");
+			return;
+		}
+		setAvisoEscaneo(avisoDelEscaneo(r));
+	}
+
+	// Si la pantalla se va a mitad de un escaneo, la cámara no se queda abierta detrás.
+	useEffect(
+		() => () => {
+			const escaneo = escaneoRef.current;
+			escaneoRef.current = null;
+			if (escaneo) void escaneo.cancelar().catch(() => {});
+		},
+		[],
+	);
+
 	return (
 		<div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">
 			<FondoDecorado />
+
+			{escaneando ? (
+				// Mientras se escanea la aplicación no se pinta (`Global.css`, `escaneando-qr`): la cámara
+				// está detrás. Sólo se ve esto.
+				<div className="visor-qr fixed inset-0 z-50 flex flex-col items-center justify-between p-6" role="dialog" aria-label="Escanear el QR">
+					<p className="rounded-xl bg-black/70 px-4 py-2 text-center text-sm font-semibold text-white">
+						Apunta al QR que enseña el TPV principal
+					</p>
+					<div className="size-64 rounded-3xl border-4 border-white/90" aria-hidden />
+					<Button
+						variant="secondary"
+						size="lg"
+						onClick={() => {
+							void escaneoRef.current?.cancelar().catch(() => {});
+						}}
+					>
+						Cancelar
+					</Button>
+				</div>
+			) : null}
 
 			<div className="relative w-full max-w-5xl">
 				<div className="mb-4 flex items-center justify-between gap-3">
@@ -62,7 +115,9 @@ export default function EmparejarHandy({
 									<div>
 										<p className="text-sm font-semibold text-fg">Usa el QR del TPV</p>
 										<p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
-											Pega aquí el contenido leído del código QR.
+											{conCamara
+												? "Escanéalo con la cámara, o pega aquí su contenido."
+												: "Pega aquí el contenido leído del código QR."}
 										</p>
 									</div>
 								</div>
@@ -125,6 +180,24 @@ export default function EmparejarHandy({
 								<p className="mt-2 text-xs text-fg-subtle">
 									Pega la dirección completa obtenida al escanear el QR.
 								</p>
+								{conCamara ? (
+									<Button
+										variant="secondary"
+										size="lg"
+										fullWidth
+										className="mt-3"
+										disabled={ocupado || escaneando}
+										leftIcon={<Camera className="size-5" aria-hidden />}
+										onClick={conAviso(escanear)}
+									>
+										Escanear el QR
+									</Button>
+								) : null}
+								{avisoEscaneo ? (
+									<p role="status" className="mt-2 rounded-xl border border-warning bg-warning-soft px-3 py-2 text-xs text-fg">
+										{avisoEscaneo}
+									</p>
+								) : null}
 							</div>
 
 							<div className="flex items-center gap-3">

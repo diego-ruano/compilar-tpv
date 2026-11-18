@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Claves de iOS que Tauri funde en el Info.plist de la aplicación al generar el proyecto (lo busca
+  junto a tauri.conf.json). No hay proyecto de iOS generado en el repositorio (gen/apple): se
+  aplicará cuando se cree con `pnpm tauri ios init`.
+
+  NSCameraUsageDescription: sin ella iOS no deja usar la cámara, y el lector de QR (barcode-scanner)
+  rechaza escanear. Es el texto que ve quien da el permiso.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSCameraUsageDescription</key>
+	<string>La cámara se usa para leer el código QR del TPV principal al vincular este dispositivo.</string>
+</dict>
+</plist>

@@ -33,6 +33,15 @@ const SIN_APROBACION =
 export type CodigoDeVinculacion = { pairCode: string; pairSecret: string };
 
 /**
+ * Lo que lleva el QR que enseña la Main en Configuración → Vincular Handy: la dirección
+ * `tpv://pair?…` con el código y su secreto. Es lo que la Handy lee al escanearlo, o lo que se
+ * pega, y lo que entiende `leerCodigoDeVinculacion`.
+ */
+export function contenidoDelQr(pairCode: string, pairSecret: string): string {
+	return `tpv://pair?code=${encodeURIComponent(pairCode)}&secret=${encodeURIComponent(pairSecret)}`;
+}
+
+/**
  * Lee un código de vinculación: las 6 cifras que se escriben a mano, o la dirección `tpv://pair?…`
  * que lleva el QR de la Main (con su secreto). `null` si no es ninguna de las dos.
  */

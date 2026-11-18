@@ -16,6 +16,7 @@ import {
 	useRevocarHandy,
 } from "../pairingQueries";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { contenidoDelQr } from "../../../app/arranque/emparejamiento";
 
 export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	// SYNC-17: la sección ya no se tapa (antes exigía el modo "online", que ya no existe). Vincular
@@ -36,7 +37,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 
 	const qrValue = useMemo(() => {
 		if (!pairCode || !pairSecret) return "";
-		return `tpv://pair?code=${encodeURIComponent(pairCode)}&secret=${encodeURIComponent(pairSecret)}`;
+		return contenidoDelQr(pairCode, pairSecret);
 	}, [pairCode, pairSecret]);
 
 	const expiresText = useMemo(() => {
@@ -143,7 +144,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 		<div className="relative flex flex-col gap-4">
 			<Panel
 				title="Vincular Handy"
-				subtitle="Da al Handy este código para que pida la vinculación, y apruébala aquí."
+				subtitle="Escanea este QR con el Handy (o escribe el código) para que pida la vinculación, y apruébala aquí."
 				right={
 					<GhostButton onClick={onRegenerate} disabled={loading || !hayNube} title={sinNubeTitle}>
 						{loading ? "Generando..." : "Generar nuevo"}
@@ -174,8 +175,8 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 						)}
 					>
 						En el Handy, abre la app y elige «Handy» (si ya estaba vinculado, pulsa
-						«← Vinculación»). En «Conecta este Handy», pega el contenido de este QR o
-						escribe el código.
+						«← Vinculación»). En «Conecta este Handy», pulsa «Escanear el QR» y apunta a
+						este código, o escribe el código.
 					</div>
 
 					{/* Sin conexión no hay código que dar. Se dice así, y NO se enseña el error de red
@@ -282,7 +283,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 									)}
 								>
 									<li>1) Abre la app en el Handy y elige «Handy». Si ya estaba vinculado, pulsa «← Vinculación».</li>
-									<li>2) En «Conecta este Handy», pega el contenido del QR o escribe el código de 6 cifras y pulsa «Vincular dispositivo».</li>
+									<li>2) En «Conecta este Handy», pulsa «Escanear el QR» y apunta a este código. Sin cámara, escribe el código de 6 cifras (o pega el contenido del QR) y pulsa «Vincular dispositivo».</li>
 									<li>3) Acepta aquí la solicitud, después de comprobar que la huella es la que enseña el Handy.</li>
 								</ol>
 

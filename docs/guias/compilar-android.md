@@ -17,6 +17,13 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
 - **Sus permisos van en `capabilities/desktop.json`**, con `"platforms": ["linux", "macOS", "windows"]`:
   en Android un permiso de un plugin que no está compilado rompe el build (`Permission updater:default
   not found`). Todo permiso de un plugin de escritorio va ahí.
+- **Y al revés, lo que sólo existe en móvil**: el lector de QR con la cámara
+  (`tauri-plugin-barcode-scanner`, para vincular una Handy escaneando el QR de la Main) va en
+  `[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]`, se registra con
+  `#[cfg(mobile)]` y sus permisos van en `capabilities/mobile.json` (`"platforms": ["android", "iOS"]`).
+  El permiso `CAMERA` de Android lo añade el manifiesto del propio plugin al fusionarse. En iOS, la
+  frase del permiso de la cámara (`NSCameraUsageDescription`) está en `src-tauri/Info.ios.plist`, que
+  Tauri funde en el `Info.plist` al generar el proyecto: no hay `gen/apple` en el repositorio.
 - **`rusqlite` se compila igual** (el `AppState` nombra los repositorios SQLite): con `bundled`
   compila su propio SQLite con el `clang` del NDK, como el resto del código C. No depende del SQLite
   del teléfono.
