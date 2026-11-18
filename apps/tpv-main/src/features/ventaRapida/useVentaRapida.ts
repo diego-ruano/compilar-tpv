@@ -67,6 +67,8 @@ const emitVrChanged = () => {
 type LoadTicketOpts = {
   keepSelection?: boolean;
   silentError?: boolean;
+  /** La recarga sigue a una escritura de este equipo (`escribirLinea`, la nota, los ingredientes). */
+  propia?: boolean;
 };
 
 function makeDetalleTicketId(idDetalle: string): string { return `detalle-${idDetalle}`; }
@@ -153,6 +155,9 @@ export function useVentaRapida() {
   );
 
   const clearTicketLocal = useCallback(() => {
+    // Otro ticket («Nuevo ticket», o el siguiente tras cobrar uno entero): lo de «Cobrar todo» era
+    // del anterior. Sin esto, lo que se añadía al nuevo se seleccionaba solo y se cobraba como todo.
+    cobrandoTodoRef.current = false;
     ticketRef.current = [];
     setTicket([]);
     setSeleccionadosLocal(new Set());
@@ -191,8 +196,9 @@ export function useVentaRapida() {
       setTicket(ui);
 
       if (opts?.keepSelection && cobrandoTodoRef.current) {
-        // SYN-INC-05: lo que haya añadido otro equipo entra en el cobro, y se dice.
-        const { seleccion, aviso } = reseleccionarTodo(seleccionadosRef.current, ui);
+        // SYN-INC-05: lo que haya añadido otro equipo entra en el cobro, y se dice. Lo que acaba de
+        // añadir el propio cajero también entra, sin avisarle de lo que ha hecho él.
+        const { seleccion, aviso } = reseleccionarTodo(seleccionadosRef.current, ui, { propia: opts.propia });
         setSeleccionadosLocal(seleccion);
         if (aviso) toast.warning(aviso.titulo, aviso.detalle);
       } else if (opts?.keepSelection) {
@@ -460,7 +466,7 @@ export function useVentaRapida() {
       if (recuperacion.pendientes.some(p => p.cobro.id_comanda === id)) { setOpenPendientes(true); return; }
       ++lecturaTicketRef.current;
       await vrUpdateNotaDetalle(detalleId, nota.trim());
-      await cargarComandaEnTicketPanel(id, { keepSelection: true });
+      await cargarComandaEnTicketPanel(id, { keepSelection: true, propia: true });
       emitVrChanged();
     });
   }, [cola, cargarComandaEnTicketPanel, recuperacion.pendientes]);
@@ -474,7 +480,7 @@ export function useVentaRapida() {
       if (recuperacion.pendientes.some(p => p.cobro.id_comanda === id)) { setOpenPendientes(true); return; }
       ++lecturaTicketRef.current;
       await mesasUpdateDetalleIngredientes({ idDetalle: detalleId, cambios });
-      await cargarComandaEnTicketPanel(id, { keepSelection: true });
+      await cargarComandaEnTicketPanel(id, { keepSelection: true, propia: true });
       emitVrChanged();
     });
   }, [cola, cargarComandaEnTicketPanel, recuperacion.pendientes]);
@@ -564,7 +570,7 @@ export function useVentaRapida() {
       try {
         await operacion(id);
         // Al ticket activo: añadir tras cobrarlo todo pasa a uno nuevo (ver `addProductoToTicket`).
-        await cargarComandaEnTicketPanel(idComandaActivaRef.current ?? id, { keepSelection: true });
+        await cargarComandaEnTicketPanel(idComandaActivaRef.current ?? id, { keepSelection: true, propia: true });
         emitVrChanged();
       } catch (e) { toast.error("No se pudo modificar el ticket", toAppError(e).message); }
     });

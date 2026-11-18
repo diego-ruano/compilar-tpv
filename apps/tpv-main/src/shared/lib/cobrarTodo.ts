@@ -25,16 +25,19 @@ export function pendientesDe(lineas: readonly LineaCobrable[]): Set<string> {
 /**
  * Con «Cobrar todo» activo, la selección tras una recarga: todo lo pendiente. `antes` es lo que
  * estaba seleccionado. Si lo pendiente no es lo mismo, devuelve también el aviso que hay que
- * enseñar, con el total nuevo.
+ * enseñar, con el total nuevo. `propia`: la recarga viene de una línea que se ha añadido, quitado
+ * o cambiado en este equipo; lo que haya cambiado lo ha hecho el propio cajero, y avisarle de que
+ * «han añadido algo a la cuenta» sería decirle lo que acaba de hacer.
  */
 export function reseleccionarTodo(
 	antes: ReadonlySet<string>,
 	lineas: readonly LineaCobrable[],
+	opts?: { propia?: boolean },
 ): { seleccion: Set<string>; aviso: AvisoCuentaCambiada | null } {
 	const seleccion = pendientesDe(lineas);
 	const anadidas = [...seleccion].some((id) => !antes.has(id));
 	const quitadas = [...antes].some((id) => !seleccion.has(id));
-	if (!anadidas && !quitadas) return { seleccion, aviso: null };
+	if ((!anadidas && !quitadas) || opts?.propia) return { seleccion, aviso: null };
 
 	if (seleccion.size === 0) {
 		return {

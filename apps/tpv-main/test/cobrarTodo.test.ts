@@ -31,6 +31,13 @@ describe("«Cobrar todo» tras una recarga", () => {
 		expect(aviso).toEqual({ titulo: "Han añadido algo a la cuenta", detalle: `El total es ahora ${eur(deCentimos(950))}.` });
 	});
 
+	it("una línea que añade el propio cajero entra en el cobro sin avisarle", () => {
+		const recargada = [...cuenta, linea("vino", 300)];
+		const { seleccion, aviso } = reseleccionarTodo(new Set(["cana", "tapa"]), recargada, { propia: true });
+		expect(seleccion).toEqual(new Set(["cana", "tapa", "vino"]));
+		expect(aviso).toBeNull();
+	});
+
 	it("una línea quitada en otro equipo sale del cobro y también se avisa", () => {
 		const recargada = [linea("cana", 250), linea("cafe", 150, true)];
 		const { seleccion, aviso } = reseleccionarTodo(new Set(["cana", "tapa"]), recargada);

@@ -28,7 +28,8 @@ vi.mock("../../src/shared/lib/imageUrl", () => ({ resolveImageUrl: async () => "
 vi.mock("../../src/shared/lib/conAviso", () => ({ conAviso: (fn: unknown) => fn }));
 vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: string }) => unknown) => fn({ mode: "tpv" }) }));
 vi.mock("../../src/shared/stores/useBusinessSettings", () => ({ useBusinessSettings: (fn: (s: { limite_simplif: number }) => unknown) => fn({ limite_simplif: 300000 }) }));
-vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn() }) }));
+const toast = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn() }));
+vi.mock("../../src/shared/toast", () => ({ useToast: () => toast }));
 vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/DatosFiscalesModal", () => ({ default: () => null }));
@@ -213,4 +214,19 @@ it("con la cuenta vacía, la enlaza sin preguntar", async () => {
     await llegarCon([]);
     await waitFor(() => expect(api.mesasComandaSetReservaIfNull).toHaveBeenCalledWith("comanda", "r"));
     expect(screen.queryByText("Esta mesa tiene una cuenta abierta")).not.toBeInTheDocument();
+});
+
+// SYN-INC-05: con «Cobrar todo», lo que añade el propio camarero entra en el cobro sin avisarle de
+// que «han añadido algo a la cuenta», que es para lo que cambia otro equipo.
+it("lo que añade el propio camarero mientras cobra todo entra en el cobro sin avisarle", async () => {
+    api.mesasAddDetalle.mockResolvedValueOnce([fila("1")]);
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cobrar todo" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Cobrar todo" }));
+    api.mesasAddDetalle.mockResolvedValueOnce([fila("1"), fila("2")]);
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    await waitFor(() => expect(api.mesasAddDetalle).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText("Total pendiente:").textContent).toContain("6,00"));
+    expect(toast.warning).not.toHaveBeenCalled();
 });

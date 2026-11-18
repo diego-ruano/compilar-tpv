@@ -185,7 +185,7 @@ export default function MesaComandaModal({
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleNota({ idDetalle, nota: nota.trim() || null });
-            await leerTicket(cId);
+            await leerTicket(cId, true);
             notifyChanged();
         });
     };
@@ -199,7 +199,7 @@ export default function MesaComandaModal({
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleIngredientes({ idDetalle, cambios });
-            await leerTicket(cId);
+            await leerTicket(cId, true);
             notifyChanged();
         });
     };
@@ -267,10 +267,13 @@ export default function MesaComandaModal({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mesaId, idUsuario, reservaMeta?.estado, reservaMeta?.idReserva]);
 
-    const aplicarTicket = useCallback((cId: string, t: TicketItem[]) => {
+    // `propia`: el ticket llega tras una escritura de este equipo (una línea, su nota o sus
+    // ingredientes). Con «Cobrar todo», lo que haya cambiado entra en el cobro sin avisar al cajero
+    // de lo que acaba de hacer él; el aviso es para lo que cambia otro equipo.
+    const aplicarTicket = useCallback((cId: string, t: TicketItem[], propia = false) => {
         if (comandaActualRef.current !== cId) return;
         if (cobrandoTodoRef.current) {
-            const { seleccion, aviso } = reseleccionarTodo(cobrandoTodoRef.current, t);
+            const { seleccion, aviso } = reseleccionarTodo(cobrandoTodoRef.current, t, { propia });
             cobrandoTodoRef.current = seleccion;
             setTicket(t.map(l => ({ ...l, seleccionado: seleccion.has(l.id) })));
             if (aviso) toast.warning(aviso.titulo, aviso.detalle);
@@ -282,10 +285,10 @@ export default function MesaComandaModal({
         });
     }, [toast]);
 
-    const leerTicket = useCallback(async (cId: string) => {
+    const leerTicket = useCallback(async (cId: string, propia = false) => {
         const lectura = ++lecturaTicketRef.current.version;
         const t = await loadTicketForComanda(cId);
-        if (lectura === lecturaTicketRef.current.version) aplicarTicket(cId, t);
+        if (lectura === lecturaTicketRef.current.version) aplicarTicket(cId, t, propia);
     }, [aplicarTicket]);
 
     const cicloVista = useRef({ valor: 0 });
@@ -426,7 +429,7 @@ export default function MesaComandaModal({
                 t = await addDetalle(destino, p, operador);
             }
             ++lecturaTicketRef.current.version;
-            aplicarTicket(destino, t);
+            aplicarTicket(destino, t, true);
             notifyChanged();
         });
     }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged, mesaId, reserva, ponerEnEspera]);
@@ -436,7 +439,7 @@ export default function MesaComandaModal({
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await removeOnePendingDetalle(idComanda, productoId);
-            await leerTicket(idComanda);
+            await leerTicket(idComanda, true);
             notifyChanged();
         });
     }, [idComanda, loadingTicket, cola, leerTicket, notifyChanged]);
@@ -509,7 +512,7 @@ export default function MesaComandaModal({
         try {
             await cola.ejecutar(async () => {
                 await deleteDetalleById(idDetalle);
-                await leerTicket(cId);
+                await leerTicket(cId, true);
                 notifyChanged();
             });
         } catch (e) {
