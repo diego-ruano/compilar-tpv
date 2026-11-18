@@ -269,7 +269,9 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
   avisos van después del cobro.
 - **Ningún interruptor remoto toca el camino del cobro.**
 - El arqueo deriva de `Pagos` con `Estado = 'ACTIVO'`; `Movimientos_Caja` es para investigar, nunca para
-  sumar. Toda lectura de «línea cobrada» va por `v_lineas_cobradas`.
+  sumar. Toda lectura de «línea cobrada» va por `v_lineas_cobradas`, y toda la de «línea por
+  cobrar» (qué se cobra, el pendiente, si se reabre o se puede quitar) por `v_lineas_por_cobrar`: una
+  línea devuelta entera por la baja de su cobro no está cobrada ni por cobrar.
 
 ### Frontend ([frontend.md](docs/arquitectura/frontend.md))
 
