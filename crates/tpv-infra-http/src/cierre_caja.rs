@@ -65,7 +65,7 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Preparar un cierre"))
     }
 
-    async fn comandas_abiertas(&self) -> AppResult<i64> {
+    async fn comandas_sin_cobrar(&self) -> AppResult<(i64, i64)> {
         Err(solo_main("Preparar un cierre"))
     }
 

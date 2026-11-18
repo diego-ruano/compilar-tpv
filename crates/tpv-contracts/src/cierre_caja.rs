@@ -98,8 +98,11 @@ pub struct PreparacionCierreDto {
     /// Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado.
     pub gastos_caja: Dinero,
     pub esperado: Dinero,
-    /// Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
-    pub comandas_abiertas: i64,
+    /// Mesas abiertas con algo sin cobrar ahora mismo (CAJ-INC-04). No impide cerrar: se avisa y
+    /// se sigue. Una mesa abierta sin nada pendiente no cuenta.
+    pub mesas_sin_cobrar: i64,
+    /// Tickets de barra abiertos con algo sin cobrar. Un ticket vacío no cuenta.
+    pub tickets_sin_cobrar: i64,
     /// A partir de cuánto descuadre hay que escribir un motivo.
     pub umbral_descuadre: Dinero,
     /// Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los

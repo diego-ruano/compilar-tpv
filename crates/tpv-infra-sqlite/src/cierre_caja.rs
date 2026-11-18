@@ -487,15 +487,35 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         })
     }
 
-    async fn comandas_abiertas(&self) -> AppResult<i64> {
+    async fn comandas_sin_cobrar(&self) -> AppResult<(i64, i64)> {
+        // CAJ-INC-04: sólo lo que de verdad queda por cobrar. Un ticket de barra vacío o una mesa
+        // abierta sin nada pendiente salían como «mesas sin cobrar»; y una mesa y un ticket de
+        // barra no son lo mismo para quien cierra.
         let db = self.db.read().await;
         let mut rows = db
-            .query("SELECT COUNT(*) FROM Comandas WHERE Estado = 'Abierta';", ())
+            .query(
+                r#"
+                SELECT
+                  COALESCE(SUM(CASE WHEN c.Canal = 'MESA' THEN 1 ELSE 0 END), 0),
+                  COALESCE(SUM(CASE WHEN c.Canal = 'BARRA' THEN 1 ELSE 0 END), 0)
+                FROM Comandas c
+                WHERE c.Estado = 'Abierta'
+                  AND EXISTS (
+                    SELECT 1 FROM Detalle_Comanda dc
+                    WHERE dc.ID_Comanda = c.ID_Comanda
+                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  );
+                "#,
+                (),
+            )
             .await
             .map_err(db_err)?;
         Ok(match rows.next().await.map_err(db_err)? {
-            Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-            None => 0,
+            Some(r) => (
+                v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+            ),
+            None => (0, 0),
         })
     }
 
@@ -1585,6 +1605,39 @@ mod tests {
         )
         .await;
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 2);
+    }
+
+    #[tokio::test]
+    async fn sin_cobrar_cuenta_solo_lo_que_queda_por_cobrar_y_separa_mesas_y_barra() {
+        // CAJ-INC-04. El aviso decía «3 mesas sin cobrar» con un ticket de barra vacío, una mesa
+        // ya cobrada que nadie había cerrado y una mesa de verdad.
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Salon');",
+                "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                   VALUES ('m1', 'z', '1', 4, 0, 0, 'rect', 10, 10), ('m2', 'z', '2', 4, 0, 0, 'rect', 10, 10);",
+                "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES
+                   ('mesa-pendiente', 'MESA', 'm1', '2026-05-10 20:00:00', 'Abierta'),
+                   ('mesa-cobrada', 'MESA', 'm2', '2026-05-10 20:00:00', 'Abierta'),
+                   ('barra-pendiente', 'BARRA', NULL, '2026-05-10 20:00:00', 'Abierta'),
+                   ('barra-vacia', 'BARRA', NULL, '2026-05-10 20:00:00', 'Abierta'),
+                   ('barra-pagada', 'BARRA', NULL, '2026-05-10 20:00:00', 'Pagada');",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Cantidad, Precio_Unitario) VALUES
+                   ('d1', 'mesa-pendiente', 1, 300), ('d2', 'mesa-cobrada', 1, 300),
+                   ('d3', 'barra-pendiente', 1, 300), ('d4', 'barra-pagada', 1, 300);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('p-m2', 'mesa-cobrada', '2026-05-10 21:00:00', 'Efectivo', 300, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('p-m2', 'd2');",
+            ],
+        )
+        .await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let prep = cierre_uc::preparar(&repo, Dinero::CERO, None).await.unwrap();
+
+        assert_eq!((prep.mesas_sin_cobrar, prep.tickets_sin_cobrar), (1, 1));
     }
 }
 

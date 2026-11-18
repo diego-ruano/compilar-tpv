@@ -106,8 +106,9 @@ pub trait CierreCajaRepository: Send + Sync {
     /// informativa — y es justamente el dato que no existía antes de CUENTA-07.
     async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, Dinero)>;
 
-    /// Cuántas comandas siguen abiertas. No impide cerrar: sólo se avisa.
-    async fn comandas_abiertas(&self) -> AppResult<i64>;
+    /// Cuántas comandas abiertas tienen algo sin cobrar: `(mesas, tickets de barra)` (CAJ-INC-04).
+    /// No impide cerrar: sólo se avisa.
+    async fn comandas_sin_cobrar(&self) -> AppResult<(i64, i64)>;
 
     /// DO-02 · ¿Falta por bajar, del histórico de una recuperación, algo de lo que suma el arqueo
     /// desde `desde` (los cobros y los gastos del periodo abierto; `None` = desde el principio)? Lo

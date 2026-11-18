@@ -35,7 +35,16 @@ export function aDenominaciones(
         .filter((d) => Number.isFinite(d.unidades) && d.unidades > 0);
 }
 
-/** Lo que hace falta saber antes de contar: desde cuándo, cuánto se espera y qué avisar. */
+/**
+ * CAJ-INC-04 · Lo que queda por cobrar al cerrar, en palabras: «2 mesas y 1 ticket sin cobrar».
+ * `null` si no queda nada.
+ */
+export function textoSinCobrar(mesas: number, tickets: number): string | null {
+    const partes: string[] = [];
+    if (mesas > 0) partes.push(`${mesas} ${mesas === 1 ? "mesa" : "mesas"}`);
+    if (tickets > 0) partes.push(`${tickets} ${tickets === 1 ? "ticket" : "tickets"}`);
+    return partes.length ? `${partes.join(" y ")} sin cobrar` : null;
+}
 
 
 /**

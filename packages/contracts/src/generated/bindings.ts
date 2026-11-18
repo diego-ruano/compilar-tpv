@@ -2173,8 +2173,13 @@ export type PreparacionCierreDto = {
 	/**  Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado. */
 	gastos_caja: Dinero,
 	esperado: Dinero,
-	/**  Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue. */
-	comandas_abiertas: number,
+	/**
+	 *  Mesas abiertas con algo sin cobrar ahora mismo (CAJ-INC-04). No impide cerrar: se avisa y
+	 *  se sigue. Una mesa abierta sin nada pendiente no cuenta.
+	 */
+	mesas_sin_cobrar: number,
+	/**  Tickets de barra abiertos con algo sin cobrar. Un ticket vacío no cuenta. */
+	tickets_sin_cobrar: number,
 	/**  A partir de cuánto descuadre hay que escribir un motivo. */
 	umbral_descuadre: Dinero,
 	/**

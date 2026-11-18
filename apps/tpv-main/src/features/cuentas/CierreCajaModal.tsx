@@ -22,7 +22,13 @@ import { cn } from "../../shared/lib/cn";
 import { esError, toAppError } from "@tpv/client";
 
 import DenomsGrid from "./DenomsGrid";
-import { aDenominaciones, cierreConfirmar, type CierreDto, type PreparacionCierreDto } from "./cierreApis";
+import {
+    aDenominaciones,
+    cierreConfirmar,
+    textoSinCobrar,
+    type CierreDto,
+    type PreparacionCierreDto,
+} from "./cierreApis";
 import {
     decCash,
     DEFAULT_DENOMS,
@@ -118,6 +124,9 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         [fondo, prep, totalContado, totalDejado],
     );
     const { esperado, descuadre, retirado } = arqueo;
+
+    // CAJ-INC-04: sólo lo que de verdad queda por cobrar, con las mesas y la barra por separado.
+    const sinCobrar = prep ? textoSinCobrar(prep.mesas_sin_cobrar, prep.tickets_sin_cobrar) : null;
 
     const umbral = prep?.umbral_descuadre ?? deCentimos(500);
     const exigeMotivo = descuadreExigeMotivo(descuadre, umbral);
@@ -248,11 +257,10 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 </Aviso>
                             ) : null}
 
-                            {prep.comandas_abiertas > 0 ? (
+                            {sinCobrar ? (
                                 <Aviso>
-                                    Hay {prep.comandas_abiertas}{" "}
-                                    {prep.comandas_abiertas === 1 ? "mesa sin cobrar" : "mesas sin cobrar"}. Su
-                                    cobro entrará en el próximo cierre. Puedes cerrar igualmente.
+                                    Hay {sinCobrar}. Su cobro entrará en el próximo cierre. Puedes
+                                    cerrar igualmente.
                                 </Aviso>
                             ) : null}
 

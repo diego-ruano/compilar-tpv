@@ -92,7 +92,9 @@ retirado  = contado − dejado
 - **El esperado se calcula en el backend**, nunca se recibe de la pantalla.
 - **Motivo obligatorio** si `|descuadre|` supera `Business_Settings.Umbral_Descuadre` (céntimos, 500
   por defecto); un umbral ≤ 0 lo pide siempre que haya descuadre. No se puede dejar más de lo contado.
-- **Las comandas abiertas se avisan y no bloquean.**
+- **Lo que queda por cobrar se avisa y no bloquea**: las mesas y los tickets de barra abiertos con
+  alguna línea sin cobrar, por separado («2 mesas y 1 ticket sin cobrar», CAJ-INC-04). Una mesa
+  abierta sin nada pendiente o un ticket vacío no cuentan.
 - **Lo del periodo que aún baja tras una recuperación se avisa y no bloquea** (DO-02,
   `historico_pendiente`). Una recuperación desde la nube trae lo que hay desde el último cierre no
   reabierto si cabe en la primera descarga; si no cabe, sólo lo imprescindible para trabajar, y lo
@@ -110,7 +112,7 @@ retirado  = contado − dejado
 ### La pantalla y el papel
 
 `CierreCajaModal` va en cuatro pasos: resumen del periodo (desde cuándo, fondo, cobros y gastos de
-caja, esperado, comandas abiertas), recuento del cajón por denominación, descuadre (con el motivo si
+caja, esperado, lo que queda sin cobrar), recuento del cajón por denominación, descuadre (con el motivo si
 hace falta) y qué se deja, también por denominación. El histórico de cierres vive en Cuentas, con el
 detalle, la reimpresión, la marca de rectificado y «deshacer» en el último.
 

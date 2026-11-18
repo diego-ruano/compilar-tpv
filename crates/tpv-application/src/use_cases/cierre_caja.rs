@@ -65,7 +65,7 @@ pub async fn preparar(
     let fondo_inicial = ultimo.as_ref().map(|c| c.dejado).unwrap_or(Dinero::CERO);
 
     let totales = repo.totales_desde(desde.as_deref()).await?;
-    let comandas_abiertas = repo.comandas_abiertas().await?;
+    let (mesas_sin_cobrar, tickets_sin_cobrar) = repo.comandas_sin_cobrar().await?;
     // Informativo, fuera del cálculo (CUENTA-07): el esperado sigue saliendo de los cobros
     // activos. Lo que aporta es contexto — un descuadre de 40 € con "3 anulaciones por 40 €" al
     // lado deja de ser un misterio.
@@ -87,7 +87,8 @@ pub async fn preparar(
         ventas_efectivo: calculo.ventas_efectivo,
         gastos_caja: calculo.gastos_caja,
         esperado: calculo.esperado,
-        comandas_abiertas,
+        mesas_sin_cobrar,
+        tickets_sin_cobrar,
         umbral_descuadre: umbral_o_defecto(umbral_descuadre),
         anulaciones,
         anulaciones_importe,
