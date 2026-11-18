@@ -31,8 +31,14 @@ flate2 = { workspace = true }
 
 # keyring (almacén del SO) sólo en escritorio: en Android no tiene almacén propio, así que allí se
 # sustituye por el almacén JNI Android Keystore + SharedPreferences (secret_store.rs).
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 keyring = { workspace = true }
+
+# iOS: keyring 4 no trae almacén por defecto para iOS (su `v1` devuelve error en esa plataforma), así
+# que se usa directamente el «protected data» de Apple, el llavero de la propia app (secret_store.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", features = ["protected"] }
 
 # Android: clases del framework (jni) para el almacen de secretos cifrado con Android Keystore. La
 # JavaVM la entrega JNI_OnLoad del cdylib de la app y el Context, MainActivity. Ver secret_store.rs.

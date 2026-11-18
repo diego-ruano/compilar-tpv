@@ -1,8 +1,11 @@
 //! Almacén de secretos por plataforma. Misma API que usaba `keyring::Entry`: get/set/delete de un
 //! valor `String` por par `(service, key)`. `device.rs` lo consume sin conocer la plataforma.
 //!
-//! - **Escritorio** (`not(target_os = "android")`): `keyring` (keychain del SO: Windows Credential
-//!   Manager, macOS Keychain, Secret Service en Linux). Comportamiento idéntico al anterior.
+//! - **Escritorio** (ni Android ni iOS): `keyring` (keychain del SO: Windows Credential Manager,
+//!   macOS Keychain, Secret Service en Linux). Comportamiento idéntico al anterior.
+//! - **iOS**: el «protected data» de Apple (`apple-native-keyring-store`), el llavero de la propia
+//!   app, que sólo se abre con el teléfono desbloqueado. keyring 4 no trae almacén por defecto para
+//!   iOS, así que se fija éste una vez y se usa con la misma API (`keyring_core::Entry`).
 //! - **Android**: SharedPreferences **privadas** de la app con los **valores cifrados AES-256-GCM**
 //!   usando una clave maestra **no exportable** del **Android Keystore** (respaldo hardware TEE/
 //!   StrongBox cuando el dispositivo lo tiene). Equivale a `EncryptedSharedPreferences` de AndroidX
@@ -44,7 +47,7 @@ impl std::fmt::Display for ErrorSecreto {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod imp {
     use keyring::{Entry, Error};
 
@@ -73,6 +76,50 @@ mod imp {
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
         let entry = Entry::new(service, key).map_err(|e| e.to_string())?;
         match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+#[cfg(target_os = "ios")]
+mod imp {
+    use std::sync::LazyLock;
+
+    use keyring_core::{Entry, Error};
+
+    use super::ErrorSecreto;
+
+    /// El almacén por defecto, fijado una sola vez: el «protected data» local del teléfono (no el de
+    /// iCloud), con la política por defecto «accesible con el teléfono desbloqueado».
+    static ALMACEN: LazyLock<Result<(), String>> = LazyLock::new(|| {
+        let almacen = apple_native_keyring_store::protected::Store::new().map_err(|e| e.to_string())?;
+        keyring_core::set_default_store(almacen);
+        Ok(())
+    });
+
+    fn entrada(service: &str, key: &str) -> Result<Entry, String> {
+        (*ALMACEN).clone()?;
+        Entry::new(service, key).map_err(|e| e.to_string())
+    }
+
+    /// Lo mismo que en escritorio: `NoEntry` es lo único que significa «no hay nada».
+    pub fn get(service: &str, key: &str) -> Result<Option<String>, ErrorSecreto> {
+        let entry = entrada(service, key).map_err(ErrorSecreto::NoDisponible)?;
+        match entry.get_password() {
+            Ok(v) => Ok(Some(v)),
+            Err(Error::NoEntry) => Ok(None),
+            Err(e) => Err(ErrorSecreto::NoDisponible(e.to_string())),
+        }
+    }
+
+    pub fn set(service: &str, key: &str, value: &str) -> Result<(), String> {
+        entrada(service, key)?.set_password(value).map_err(|e| e.to_string())
+    }
+
+    pub fn delete(service: &str, key: &str) -> Result<(), String> {
+        match entrada(service, key)?.delete_credential() {
             Ok(()) => Ok(()),
             Err(Error::NoEntry) => Ok(()),
             Err(e) => Err(e.to_string()),

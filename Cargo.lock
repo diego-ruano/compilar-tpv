@@ -5887,6 +5887,7 @@ name = "tpv-infra-licensing"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "apple-native-keyring-store",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -5895,6 +5896,7 @@ dependencies = [
  "hmac 0.12.1",
  "jni 0.21.1",
  "keyring",
+ "keyring-core",
  "rand 0.10.3",
  "reqwest 0.12.28",
  "serde",
