@@ -26,6 +26,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
+| [AND-01](#and-01--la-handy-de-android-registra-como-fallo-del-programa-que-no-tiene-updater) | 🔵 | La Handy de Android registra en cada arranque un fallo del programa porque no tiene updater | Sin empezar |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -361,6 +362,25 @@ grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) factur
 se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
 anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
 (`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
+
+---
+
+## Android
+
+### AND-01 · La Handy de Android registra como fallo del programa que no tiene updater
+
+`UpdateBanner` (`shared/ui/UpdateBanner.tsx`, montado en `AppBoot.tsx`) llama a
+`commands.updaterCheck()` al arrancar en todas las plataformas. En Android el comando
+`updater_check` (`src-tauri/src/lib.rs`) devuelve `Err("updater no disponible en esta plataforma")`,
+que sale como código `internal`, y `invocar` lo registra con gravedad «Programa»: en cada arranque de
+cada Handy de Android llega un fallo del programa a Sentry y a Axiom que no lo es. Visto en el
+emulador el 15-11-2026 (`updater_check falló (internal) … pantalla="/"`).
+
+**Qué falta:** que no se pida lo que no existe. O la pantalla no monta `UpdateBanner` fuera de
+escritorio (`import.meta.env.TAURI_ENV_PLATFORM`, como `ControlesVentana`), o el comando contesta
+`Ok(None)` en móvil (no hay nada que actualizar por esta vía: el APK nuevo se instala encima). Lo
+segundo arregla también a cualquier otra pantalla que lo pida. Mirar si `updater_status` (la otra
+rama `#[cfg(not(desktop))]`) se alcanza desde Configuración → Actualizaciones en la Handy.
 
 ---
 
