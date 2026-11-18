@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+// Y una carga que falla (la Handy no puede leer los pedidos) se avisa: salía «Sin pedidos».
 // «Cancelar pedido» cancelaba un borrador ya guardado sin preguntar, y cancelado no se puede editar
 // ni mandar. Ahora pregunta; un borrador nuevo sin guardar se cierra sin preguntar. Corre la sección
 // de verdad; sólo se sustituyen el IPC y el diálogo de confirmación.
@@ -9,13 +10,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import PedidosSection from "../../src/features/proveedores/PedidosSection";
 import { ToastProvider } from "../../src/shared/toast";
 
-const ipc = vi.hoisted(() => ({ llamadas: [] as string[], confirmar: vi.fn(async () => false) }));
+const ipc = vi.hoisted(() => ({ llamadas: [] as string[], confirmar: vi.fn(async () => false), falla: false }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: ipc.confirmar }));
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
 	invoke: async (comando: string) => {
 		ipc.llamadas.push(comando);
 		if (comando === "pedidos_proveedor_get_page") {
+			// Lo que contesta la Handy: los pedidos sólo los tiene la Main.
+			if (ipc.falla) {
+				throw { code: "validation", message: "Los pedidos a proveedores sólo se gestionan desde el TPV principal" };
+			}
 			return {
 				pedidos: [
 					{
@@ -74,4 +79,14 @@ it("un borrador nuevo sin guardar se cierra sin preguntar", async () => {
 	await waitFor(() => expect(screen.queryByRole("button", { name: /Cancelar pedido/ })).toBeNull());
 	expect(ipc.confirmar).not.toHaveBeenCalled();
 	expect(ipc.llamadas).not.toContain("pedidos_proveedor_cambiar_estado");
+});
+
+it("una carga que falla se dice, y no parece una lista vacía", async () => {
+	ipc.falla = true;
+	pintar();
+	expect(await screen.findByText("No se pudieron cargar los pedidos", { selector: "p" })).toBeTruthy();
+	expect(screen.getAllByText(/sólo se gestionan desde el TPV principal/).length).toBeGreaterThan(0);
+	expect(screen.queryByText("Sin pedidos")).toBeNull();
+	expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+	ipc.falla = false;
 });

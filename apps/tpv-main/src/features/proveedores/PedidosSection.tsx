@@ -102,6 +102,14 @@ export default function PedidosSection({ proveedores }: Props) {
   const pedidos = query.data?.pages.flatMap((p) => p.pedidos) ?? [];
   const total = query.data?.pages[0]?.total ?? 0;
 
+  // Una carga que falla se avisa: una lista sin cargar no puede parecer vacía (en la Handy, por
+  // ejemplo, los pedidos no se pueden leer, y salía «Sin pedidos»).
+  useEffect(() => {
+    if (query.isError) {
+      toast.error("No se pudieron cargar los pedidos", toAppError(query.error).message);
+    }
+  }, [query.isError, query.error, toast]);
+
   function abrirNuevoPedido() {
     const p = buildPedidoVacio();
     setPedidoAbierto(p);
@@ -270,6 +278,18 @@ export default function PedidosSection({ proveedores }: Props) {
         {query.isLoading ? (
           <div className="flex items-center justify-center py-6">
             <p className="text-sm text-fg-muted">Cargando pedidos…</p>
+          </div>
+        ) : query.isError && pedidos.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-8 text-center">
+            <p className="text-sm font-medium text-danger">No se pudieron cargar los pedidos</p>
+            <p className="px-4 text-xs text-fg-muted">{toAppError(query.error).message}</p>
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              className="mt-1 cursor-pointer rounded-xl border border-border bg-surface px-3 py-1.5 text-sm font-semibold text-fg transition hover:bg-surface-2"
+            >
+              Reintentar
+            </button>
           </div>
         ) : pedidos.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 py-8 text-center">
