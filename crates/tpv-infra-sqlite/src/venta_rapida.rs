@@ -338,6 +338,23 @@ impl SqliteVentaRapidaRepository {
 
 }
 
+/// ¿La línea `dc` sigue por cobrar? No está cobrada (`v_lineas_cobradas`) **ni la devolvió entera la
+/// baja de su cobro** (`Motivo_Baja = 'DEVOLUCION'`). Esa baja deja el cobro `ANULADO`, así que sus
+/// líneas salen de `v_lineas_cobradas`, pero no vuelven a cobrarse: el cliente se llevó la
+/// consumición y se le devolvió el dinero (caja.md). Sin esto, el ticket salía en «Ver tickets» como
+/// «SIN COBRAR», con su importe pendiente y el botón de cobrar. Lo mismo en el worker
+/// (`LINEA_POR_COBRAR`, `venta_rapida.queries.ts`).
+macro_rules! linea_por_cobrar {
+    () => {
+        "NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM Pago_Detalles pdv JOIN Pagos pv ON pv.ID_Pago = pdv.ID_Pago
+                    WHERE pdv.ID_Detalle = dc.ID_Detalle
+                      AND pv.Estado = 'ANULADO' AND pv.Motivo_Baja = 'DEVOLUCION'
+                  )"
+    };
+}
+
 /// Lo que queda por cobrar de un ticket (`c`): sus líneas sin cobrar, cada una redondeada como se
 /// cobra (CAJ-INC-03). Lo mismo en el worker (`PENDIENTE_DE_UN_TICKET`, `venta_rapida.queries.ts`).
 ///
@@ -345,12 +362,16 @@ impl SqliteVentaRapidaRepository {
 /// un ticket devuelto entero (cobro de 6,03 € y devolución de −6,03 €) restaba 0 y salía con
 /// «Pendiente 6,03 €». Por líneas, lo devuelto sigue cobrado (`v_lineas_cobradas`) y lo que vuelve
 /// a estar pendiente tras dar de baja un cobro por error, también se ve.
-const PENDIENTE_DE_UN_TICKET: &str = "COALESCE((
+const PENDIENTE_DE_UN_TICKET: &str = concat!(
+    "COALESCE((
                 SELECT SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER))
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-              ),0)";
+                  AND ",
+    linea_por_cobrar!(),
+    "
+              ),0)"
+);
 
 async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<String>> {
     if id_comanda.trim().is_empty() {
@@ -531,6 +552,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
         let lim = limit.unwrap_or(60).clamp(1, 200);
 
+        const LINEA_POR_COBRAR: &str = linea_por_cobrar!();
         let sql = format!(
             r#"
             SELECT
@@ -552,7 +574,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  AND {LINEA_POR_COBRAR}
               ),0) AS Pendientes_Pago
             FROM Comandas c
             WHERE c.Canal = ?2
@@ -1669,5 +1691,25 @@ mod tests_pendiente_de_un_ticket {
         );
         let (db, _dir) = con(&seed).await;
         assert_eq!(pendiente(&db).await, Dinero::de_centimos(603));
+    }
+
+    #[tokio::test]
+    async fn un_ticket_dado_de_baja_como_devolucion_entera_no_queda_por_cobrar() {
+        // La baja por DEVOLUCION deja el cobro ANULADO y sus líneas fuera de `v_lineas_cobradas`,
+        // pero no vuelven: el cliente se llevó la consumición y se le devolvió el dinero. Salía
+        // como «SIN COBRAR», con 6,03 € pendientes y el botón de cobrar.
+        let mut seed = TICKET_COBRADO.to_vec();
+        seed.push(
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+               VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        );
+        seed.push(
+            "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = '2026-05-10 13:30:00', Anulado_Por = 'u1',
+                    Motivo_Anulacion = 'no le gustó', Motivo_Baja = 'DEVOLUCION' WHERE ID_Pago = 'pago';",
+        );
+        let (db, _dir) = con(&seed).await;
+        let filas = SqliteVentaRapidaRepository::new(db.clone()).list_comandas_barra(None).await.unwrap();
+        assert_eq!(filas[0].Total_Pendiente, Dinero::CERO);
+        assert_eq!(filas[0].Pendientes_Pago, 0, "sin líneas por cobrar, sale como cobrado");
     }
 }

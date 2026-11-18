@@ -292,8 +292,10 @@ Reglas:
 - **El pendiente de un ticket sale de sus líneas sin cobrar** (las que no están en
   `v_lineas_cobradas`, cada una redondeada como se cobra), no de restar cobros al total: una
   devolución es un cobro negativo activo, y un ticket devuelto entero salía en «Ver tickets» con todo
-  su importe pendiente (CAJ-INC-03). La misma expresión en la Main y en el worker
-  (`PENDIENTE_DE_UN_TICKET`).
+  su importe pendiente (CAJ-INC-03). Tampoco cuentan las de un cobro dado de baja como
+  `DEVOLUCION`: su cobro queda `ANULADO` y salen de la vista, pero no vuelven a cobrarse. La misma
+  expresión en la Main y en el worker (`PENDIENTE_DE_UN_TICKET` y `Pendientes_Pago`, con
+  `linea_por_cobrar!` / `LINEA_POR_COBRAR`).
 - **En las estadísticas resta dinero, pero no es un cobro**: no cuenta como cobro de un camarero ni
   como mesa servida.
 - Al acabar, la pantalla abre su rectificativa en el modal de impresión, sin imprimirla.

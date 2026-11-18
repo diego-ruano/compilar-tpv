@@ -1,7 +1,8 @@
 {
-  "descripcion": "Los tickets de barra con lineas, cobrados o no, con sus tres contadores derivados: Total_Pendiente (las lineas sin cobrar, CAJ-INC-03), Pendientes_Cocina y Pendientes_Pago. El seed mete un ticket cobrado, uno a medias, uno devuelto entero (cobro de 6,03 y devolucion de -6,03: antes salia con 6,03 pendiente porque la devolucion es un cobro negativo activo) y uno sin lineas (no sale: el EXISTS lo descarta). Las comandas de MESA no son de este canal y no pueden colarse.",
+  "descripcion": "Los tickets de barra con lineas, cobrados o no, con sus tres contadores derivados: Total_Pendiente (las lineas sin cobrar, CAJ-INC-03), Pendientes_Cocina y Pendientes_Pago. El seed mete un ticket cobrado, uno a medias, uno devuelto entero (cobro de 6,03 y devolucion de -6,03: antes salia con 6,03 pendiente porque la devolucion es un cobro negativo activo) y uno sin lineas (no sale: el EXISTS lo descarta). Las comandas de MESA no son de este canal y no pueden colarse. Y uno dado de baja como DEVOLUCION entera (com-baja-devuelta): su cobro queda ANULADO y sus lineas fuera de v_lineas_cobradas, pero no vuelven, asi que no queda nada por cobrar.",
   "lectura": "venta_rapida.comandas_barra",
   "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
@@ -24,7 +25,11 @@
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-d1', 'com-devuelta', 'prod-bebida', 3, 201);",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-devuelta', '2026-05-10 13:10:00', 'Efectivo', 603, 'total');",
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-3', 'det-d1');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('dev-3', 'com-devuelta', '2026-05-10 13:20:00', 'Efectivo', -603, 'DEVOLUCION', 'pago-3', 'no le gusto');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('dev-3', 'com-devuelta', '2026-05-10 13:20:00', 'Efectivo', -603, 'DEVOLUCION', 'pago-3', 'no le gusto');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-baja-devuelta', 'BARRA', '2026-05-10 14:00:00', 'Pagada', 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b1', 'com-baja-devuelta', 'prod-bebida', 1, 300);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja) VALUES ('pago-4', 'com-baja-devuelta', '2026-05-10 14:10:00', 'Efectivo', 300, 'total', 'ANULADO', '2026-05-10 14:20:00', 'user-1', 'no le gusto', 'DEVOLUCION');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-4', 'det-b1');"
   ],
   "entrada": {
     "limit": 50

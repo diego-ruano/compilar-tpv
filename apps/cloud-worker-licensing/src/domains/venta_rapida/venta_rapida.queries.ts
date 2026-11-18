@@ -37,12 +37,24 @@ function rows(rs: any): any[] {
 // (CAJ-INC-03). Lo mismo en la Main (`PENDIENTE_DE_UN_TICKET`, `tpv-infra-sqlite/src/venta_rapida.rs`).
 // Antes era `Total_Comanda − SUM(cobros activos)`, y una devolución es un cobro negativo activo: un
 // ticket devuelto entero restaba 0 y salía con todo su importe pendiente.
+// ¿La línea `dc` sigue por cobrar? Ni cobrada ni devuelta entera por la baja de su cobro
+// (`Motivo_Baja = 'DEVOLUCION'`): esa baja deja el cobro ANULADO y sus líneas fuera de
+// `v_lineas_cobradas`, pero no vuelven a cobrarse. Lo mismo en la Main (`linea_por_cobrar!`).
+const LINEA_POR_COBRAR = `
+	NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+	AND NOT EXISTS (
+		SELECT 1 FROM Pago_Detalles pdv JOIN Pagos pv ON pv.ID_Pago = pdv.ID_Pago
+		WHERE pdv.ID_Detalle = dc.ID_Detalle
+			AND pv.Estado = 'ANULADO' AND pv.Motivo_Baja = 'DEVOLUCION'
+	)
+`;
+
 const PENDIENTE_DE_UN_TICKET = `
 	COALESCE((
 		SELECT SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER))
 		FROM Detalle_Comanda dc
 		WHERE dc.ID_Comanda = c.ID_Comanda
-			AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+			AND ${LINEA_POR_COBRAR}
 	),0)
 `;
 
@@ -177,7 +189,7 @@ export async function listComandas(db: Client, limit: number): Promise<ComandaBa
 					SELECT COUNT(*)
 					FROM Detalle_Comanda dc
 					WHERE dc.ID_Comanda = c.ID_Comanda
-						AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+						AND ${LINEA_POR_COBRAR}
 				),0) AS Pendientes_Pago
 			FROM Comandas c
 			WHERE c.Canal = ?2

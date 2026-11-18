@@ -1,6 +1,15 @@
 [
   {
     "Estado": "Pagada",
+    "Fecha_Hora_Apertura": "2026-05-10 14:00:00",
+    "ID_Comanda": "com-baja-devuelta",
+    "Pendientes_Cocina": 0,
+    "Pendientes_Pago": 0,
+    "Total_Comanda": 300,
+    "Total_Pendiente": 0
+  },
+  {
+    "Estado": "Pagada",
     "Fecha_Hora_Apertura": "2026-05-10 13:00:00",
     "ID_Comanda": "com-devuelta",
     "Pendientes_Cocina": 0,
