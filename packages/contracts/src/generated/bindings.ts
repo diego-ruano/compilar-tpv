@@ -810,11 +810,7 @@ export type ContactSettingsPatch_Serialize = {
 
 /**  REC-INC-01 · Una copia guardada fuera con «Guardar fuera…», y dónde ha quedado. */
 export type CopiaExportada = {
-	/**
-	 *  El destino está en el mismo disco que los datos del programa (o no se ha podido saber): la
-	 *  copia no protege de una avería ni de un robo del equipo, y la pantalla lo dice.
-	 */
-	mismo_disco: boolean,
+	donde: DondeQuedaLaCopia,
 };
 
 export type CopySemanaInput = {
@@ -1037,6 +1033,19 @@ export type DevolverLineasInput = {
 };
 
 export type Dinero = number & { readonly __centimos: unique symbol };
+
+/**  REC-INC-01 · Dónde ha quedado una copia guardada con «Guardar fuera…». */
+export type DondeQuedaLaCopia =
+/**
+ *  Sigue dentro de este ordenador: el mismo disco de los datos, otra partición, otro disco
+ *  interno, o no se ha podido saber. No protege de una avería ni de un robo del equipo, y la
+ *  pantalla lo dice.
+ */
+"en_este_equipo" |
+/**  En una unidad que se desconecta del ordenador: un USB, una tarjeta, un disco externo. */
+"extraible" |
+/**  En una carpeta de otro equipo de la red. */
+"en_la_red";
 
 export type EnsureImageArgs = {
 	/**  Ruta relativa tal cual se guarda en BD: `images/{subcarpeta}/{archivo}`. */

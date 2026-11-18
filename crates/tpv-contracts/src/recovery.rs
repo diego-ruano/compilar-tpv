@@ -37,7 +37,19 @@ pub struct LocalBackupInfo {
 /// REC-INC-01 · Una copia guardada fuera con «Guardar fuera…», y dónde ha quedado.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CopiaExportada {
-    /// El destino está en el mismo disco que los datos del programa (o no se ha podido saber): la
-    /// copia no protege de una avería ni de un robo del equipo, y la pantalla lo dice.
-    pub mismo_disco: bool,
+    pub donde: DondeQuedaLaCopia,
+}
+
+/// REC-INC-01 · Dónde ha quedado una copia guardada con «Guardar fuera…».
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DondeQuedaLaCopia {
+    /// Sigue dentro de este ordenador: el mismo disco de los datos, otra partición, otro disco
+    /// interno, o no se ha podido saber. No protege de una avería ni de un robo del equipo, y la
+    /// pantalla lo dice.
+    EnEsteEquipo,
+    /// En una unidad que se desconecta del ordenador: un USB, una tarjeta, un disco externo.
+    Extraible,
+    /// En una carpeta de otro equipo de la red.
+    EnLaRed,
 }

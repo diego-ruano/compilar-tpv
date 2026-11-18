@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use crate::ejecutor::{Connection, ErrorSql, Value};
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;
-use tpv_contracts::recovery::{CopiaExportada, LocalBackupInfo, RecoveryState, RecoveryStatus};
+use tpv_contracts::recovery::{CopiaExportada, DondeQuedaLaCopia, LocalBackupInfo, RecoveryState, RecoveryStatus};
 
 use crate::db::Db;
 use tpv_application::ports::licensing::BaseDelEquipo;
@@ -1064,9 +1064,10 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
 ///
 /// Sale tal como está guardada: comprimida (un `.db.gz`, que también abre 7-Zip).
 ///
-/// REC-INC-01: dice si el destino ha quedado en el mismo disco que los datos del programa. El
-/// diálogo deja guardarla en cualquier carpeta, y una copia en el mismo disco no protege de lo que
-/// protege una de fuera; la pantalla decía «Ya tienes un respaldo fuera de este ordenador» igual.
+/// REC-INC-01: dice dónde ha quedado la copia (ver [`DondeQuedaLaCopia`]). El diálogo deja
+/// guardarla en cualquier carpeta, y una copia que sigue dentro del ordenador (el mismo disco, otra
+/// partición, otro disco interno) no protege de lo que protege una de fuera; la pantalla decía
+/// «Ya tienes un respaldo fuera de este ordenador» igual.
 pub async fn export_backup(
     app_data_dir: &Path,
     id: &str,
@@ -1086,16 +1087,196 @@ pub async fn export_backup(
         }
     }
     copiar_fichero(&source, destino).await?;
-    Ok(CopiaExportada { mismo_disco: mismo_volumen(app_data_dir, destino) })
+    let donde = donde_queda(mismo_volumen(app_data_dir, destino), tipo_de_unidad(destino));
+    Ok(CopiaExportada { donde })
+}
+
+/// REC-INC-01 · Qué clase de unidad es la de una ruta, según el sistema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TipoDeUnidad {
+    /// Un disco de dentro del ordenador (o una partición de uno).
+    Fija,
+    /// Una unidad que se desconecta: un USB, una tarjeta, un disco externo.
+    Extraible,
+    /// Una carpeta compartida de otro equipo.
+    Red,
+    /// No se ha podido saber.
+    Desconocida,
+}
+
+/// REC-INC-01 · Dónde ha quedado la copia. Sólo sale de este equipo lo que se sabe que está en una
+/// unidad extraíble o en la red: otra partición del mismo disco, otro disco interno o lo que no se
+/// puede saber siguen en este ordenador, y el aviso prudente es «no te protege de una avería», no
+/// «estás a salvo».
+fn donde_queda(mismo_volumen: bool, tipo_del_destino: TipoDeUnidad) -> DondeQuedaLaCopia {
+    if mismo_volumen {
+        return DondeQuedaLaCopia::EnEsteEquipo;
+    }
+    match tipo_del_destino {
+        TipoDeUnidad::Extraible => DondeQuedaLaCopia::Extraible,
+        TipoDeUnidad::Red => DondeQuedaLaCopia::EnLaRed,
+        TipoDeUnidad::Fija | TipoDeUnidad::Desconocida => DondeQuedaLaCopia::EnEsteEquipo,
+    }
+}
+
+/// REC-INC-01 · El tipo de la unidad en la que está `ruta`, que tiene que existir.
+///
+/// En Unix (la Main no corre en Android: las copias son de la Main) no se mira: sale
+/// `Desconocida`, que es «en este equipo».
+fn tipo_de_unidad(ruta: &Path) -> TipoDeUnidad {
+    #[cfg(windows)]
+    {
+        let Some(raiz) = std::fs::canonicalize(ruta).ok().and_then(|r| raiz_del_volumen(&r)) else {
+            return TipoDeUnidad::Desconocida;
+        };
+        let tipo = unidades_windows::tipo_de_unidad(&raiz);
+        // Un disco externo por USB se presenta como fijo: lo delata el bus por el que va.
+        let bus = (tipo == unidades_windows::DRIVE_FIXED)
+            .then(|| unidades_windows::bus_de_la_unidad(&raiz))
+            .flatten();
+        clasificar_unidad_windows(tipo, bus)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ruta;
+        TipoDeUnidad::Desconocida
+    }
+}
+
+/// REC-INC-01 · Lo que dicen de una unidad `GetDriveTypeW` y, para una fija, el bus por el que va
+/// (`STORAGE_BUS_TYPE`, si se ha podido leer). Pura, para poder probarla con cualquier unidad.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn clasificar_unidad_windows(tipo: u32, bus: Option<u32>) -> TipoDeUnidad {
+    // `GetDriveTypeW`: 2 extraíble, 3 fija, 4 de red, 5 CD/DVD, 6 disco en memoria; 0 y 1, no se sabe.
+    // `STORAGE_BUS_TYPE`: 4 FireWire, 7 USB. El de una tarjeta (12 SD, 13 MMC) no cuenta: es también
+    // el del disco eMMC de dentro de muchos terminales, y una tarjeta en su lector ya sale extraíble.
+    match tipo {
+        2 | 5 => TipoDeUnidad::Extraible,
+        4 => TipoDeUnidad::Red,
+        3 => match bus {
+            Some(4 | 7) => TipoDeUnidad::Extraible,
+            _ => TipoDeUnidad::Fija,
+        },
+        6 => TipoDeUnidad::Fija,
+        _ => TipoDeUnidad::Desconocida,
+    }
+}
+
+/// REC-INC-01 · Las dos preguntas a Windows sobre una unidad, por FFI como en `printing.rs`.
+#[cfg(windows)]
+mod unidades_windows {
+    use std::ffi::c_void;
+
+    pub(super) const DRIVE_FIXED: u32 = 3;
+    const INVALID_HANDLE_VALUE: isize = -1;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    const OPEN_EXISTING: u32 = 3;
+    const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
+    /// Posición de `BusType` en `STORAGE_DEVICE_DESCRIPTOR`.
+    const OFFSET_BUS_TYPE: usize = 28;
+
+    /// `STORAGE_PROPERTY_QUERY` con `StorageDeviceProperty` y `PropertyStandardQuery` (los dos, 0).
+    #[repr(C)]
+    struct ConsultaDePropiedad {
+        property_id: u32,
+        query_type: u32,
+        additional_parameters: [u8; 1],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDriveTypeW(lprootpathname: *const u16) -> u32;
+        fn CreateFileW(
+            lpfilename: *const u16,
+            dwdesiredaccess: u32,
+            dwsharemode: u32,
+            lpsecurityattributes: *mut c_void,
+            dwcreationdisposition: u32,
+            dwflagsandattributes: u32,
+            htemplatefile: isize,
+        ) -> isize;
+        fn DeviceIoControl(
+            hdevice: isize,
+            dwiocontrolcode: u32,
+            lpinbuffer: *const c_void,
+            ninbuffersize: u32,
+            lpoutbuffer: *mut c_void,
+            noutbuffersize: u32,
+            lpbytesreturned: *mut u32,
+            lpoverlapped: *mut c_void,
+        ) -> i32;
+        fn CloseHandle(hobject: isize) -> i32;
+    }
+
+    fn ancha(texto: &str) -> Vec<u16> {
+        texto.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    /// `GetDriveTypeW` de la raíz (`C:` o `\\servidor\carpeta`, sin la barra final).
+    pub(super) fn tipo_de_unidad(raiz: &str) -> u32 {
+        let raiz = ancha(&format!("{raiz}\\"));
+        // SAFETY: cadena terminada en cero que vive durante la llamada.
+        unsafe { GetDriveTypeW(raiz.as_ptr()) }
+    }
+
+    /// El bus por el que va el disco de una unidad con letra (`C:`), o `None` si no se puede saber
+    /// (un recurso de red, un disco sin permiso para preguntarle). Se abre sin pedir acceso, que es
+    /// lo único que necesita esta consulta y no exige ser administrador.
+    pub(super) fn bus_de_la_unidad(raiz: &str) -> Option<u32> {
+        if raiz.len() != 2 || !raiz.ends_with(':') {
+            return None;
+        }
+        let dispositivo = ancha(&format!(r"\\.\{raiz}"));
+        // SAFETY: cadena terminada en cero; el handle se cierra antes de salir.
+        let handle = unsafe {
+            CreateFileW(
+                dispositivo.as_ptr(),
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null_mut(),
+                OPEN_EXISTING,
+                0,
+                0,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let consulta = ConsultaDePropiedad { property_id: 0, query_type: 0, additional_parameters: [0] };
+        // Alineado a 4 bytes: la respuesta es una estructura de `u32`.
+        let mut respuesta = [0u32; 256];
+        let mut devueltos: u32 = 0;
+        // SAFETY: los dos búferes viven durante la llamada y se pasan con su tamaño.
+        let ok = unsafe {
+            let ok = DeviceIoControl(
+                handle,
+                IOCTL_STORAGE_QUERY_PROPERTY,
+                &consulta as *const ConsultaDePropiedad as *const c_void,
+                std::mem::size_of::<ConsultaDePropiedad>() as u32,
+                respuesta.as_mut_ptr() as *mut c_void,
+                std::mem::size_of_val(&respuesta) as u32,
+                &mut devueltos,
+                std::ptr::null_mut(),
+            );
+            CloseHandle(handle);
+            ok
+        };
+        if ok == 0 || (devueltos as usize) < OFFSET_BUS_TYPE + 4 {
+            return None;
+        }
+        Some(respuesta[OFFSET_BUS_TYPE / 4])
+    }
 }
 
 /// REC-INC-01 · ¿Están `a` y `b` en el mismo volumen? Las dos rutas tienen que existir. Si no se
 /// puede saber, sí: el aviso prudente es «no te protege de una avería», no «estás a salvo».
 ///
-/// En Unix (Android) se compara el dispositivo. En Windows, la raíz del volumen: la unidad (`C:`,
-/// `E:`, la del USB) o el recurso de red (`\\servidor\carpeta`). Un volumen montado en una carpeta
-/// de otro sale como el mismo disco, que es el lado bueno de equivocarse.
-pub fn mismo_volumen(a: &Path, b: &Path) -> bool {
+/// En Unix se compara el dispositivo. En Windows, la raíz del volumen: la unidad (`C:`, `E:`, la
+/// del USB) o el recurso de red (`\\servidor\carpeta`). Un volumen montado en una carpeta de otro
+/// sale como el mismo disco, que es el lado bueno de equivocarse. Que no sea el mismo volumen no
+/// basta para que la copia esté fuera: eso lo dice el tipo de la unidad ([`donde_queda`]).
+fn mismo_volumen(a: &Path, b: &Path) -> bool {
     let (Ok(a), Ok(b)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) else {
         return true;
     };
@@ -2295,7 +2476,11 @@ mod tests {
         let exportada = export_backup(&dir, &backup.id, &fuera, Some("negocio-de-prueba")).await.unwrap();
         assert!(fuera.is_file(), "la carpeta destino se crea si no existía");
         // REC-INC-01: la «USB» de la prueba es una carpeta del mismo disco, y se dice.
-        assert!(exportada.mismo_disco, "una carpeta junto a los datos está en el mismo disco");
+        assert_eq!(
+            exportada.donde,
+            DondeQuedaLaCopia::EnEsteEquipo,
+            "una carpeta junto a los datos sigue en este equipo"
+        );
 
         std::fs::remove_file(dir.join(BACKUP_DIR).join(&backup.id)).unwrap();
         assert!(list_backups(&dir).unwrap().is_empty());
@@ -3135,7 +3320,7 @@ mod tests {
 
 #[cfg(test)]
 mod tests_mismo_disco {
-    //! REC-INC-01 · «Guardar fuera…» dice si la copia ha quedado en el mismo disco que los datos.
+    //! REC-INC-01 · «Guardar fuera…» dice si la copia ha quedado dentro de este equipo o fuera.
 
     use super::*;
 
@@ -3160,18 +3345,47 @@ mod tests_mismo_disco {
         assert_eq!(raiz(r"carpeta\relativa"), None);
     }
 
+    /// Otra partición u otro disco interno (`D:`) no es el mismo volumen, pero la copia sigue dentro
+    /// del ordenador: sólo una unidad extraíble o de red la saca de él.
+    #[test]
+    fn otra_unidad_fija_sigue_en_este_equipo() {
+        use DondeQuedaLaCopia::{EnEsteEquipo, EnLaRed};
+        use TipoDeUnidad::{Desconocida, Fija, Red};
+        assert_eq!(donde_queda(false, Fija), EnEsteEquipo, "otra partición u otro disco interno");
+        assert_eq!(donde_queda(false, Desconocida), EnEsteEquipo, "sin saberlo, el aviso prudente");
+        assert_eq!(donde_queda(false, TipoDeUnidad::Extraible), DondeQuedaLaCopia::Extraible);
+        assert_eq!(donde_queda(false, Red), EnLaRed);
+        for tipo in [Fija, TipoDeUnidad::Extraible, Red, Desconocida] {
+            assert_eq!(donde_queda(true, tipo), EnEsteEquipo, "en el volumen de los datos, sea cual sea: {tipo:?}");
+        }
+    }
+
+    /// Lo que devuelven `GetDriveTypeW` y el bus del disco, simulados.
+    #[test]
+    fn el_tipo_de_unidad_de_windows() {
+        let c = clasificar_unidad_windows;
+        assert_eq!(c(3, None), TipoDeUnidad::Fija, "un disco fijo del que no se sabe el bus");
+        assert_eq!(c(3, Some(11)), TipoDeUnidad::Fija, "SATA");
+        assert_eq!(c(3, Some(17)), TipoDeUnidad::Fija, "NVMe");
+        assert_eq!(c(3, Some(12)), TipoDeUnidad::Fija, "un eMMC de dentro del terminal");
+        assert_eq!(c(3, Some(7)), TipoDeUnidad::Extraible, "un disco externo por USB se presenta como fijo");
+        assert_eq!(c(3, Some(4)), TipoDeUnidad::Extraible, "FireWire");
+        assert_eq!(c(2, None), TipoDeUnidad::Extraible, "un pendrive");
+        assert_eq!(c(5, None), TipoDeUnidad::Extraible, "un CD o DVD");
+        assert_eq!(c(4, None), TipoDeUnidad::Red, "una unidad de red o \\\\servidor\\carpeta");
+        assert_eq!(c(6, None), TipoDeUnidad::Fija, "un disco en memoria");
+        assert_eq!(c(0, None), TipoDeUnidad::Desconocida);
+        assert_eq!(c(1, None), TipoDeUnidad::Desconocida, "una raíz que no existe");
+    }
+
+    /// Las llamadas a Windows de verdad: la carpeta temporal está en un disco interno, y una ruta
+    /// que no existe no se sabe dónde está.
     #[cfg(windows)]
     #[test]
-    fn en_windows_otra_unidad_no_es_el_mismo_disco() {
-        // La unidad de los datos y cualquier otra que exista en el equipo (un USB, otra partición).
-        let datos = std::env::temp_dir();
-        let unidad = raiz_del_volumen(&std::fs::canonicalize(&datos).unwrap()).unwrap();
-        let otra = (b'C'..=b'Z')
-            .map(|d| format!("{}:\\", d as char))
-            .find(|r| !r.starts_with(&unidad) && Path::new(r).exists());
-        match otra {
-            Some(otra) => assert!(!mismo_volumen(&datos, Path::new(&otra)), "{otra}"),
-            None => eprintln!("este equipo sólo tiene la unidad {unidad}: no hay otra con la que comparar"),
-        }
+    fn en_windows_la_carpeta_temporal_esta_en_un_disco_fijo() {
+        let temporal = std::env::temp_dir();
+        assert_eq!(tipo_de_unidad(&temporal), TipoDeUnidad::Fija, "{}", temporal.display());
+        let no_existe = temporal.join("tpv-rec-inc-01-no-existe").join("x.db.gz");
+        assert_eq!(tipo_de_unidad(&no_existe), TipoDeUnidad::Desconocida);
     }
 }

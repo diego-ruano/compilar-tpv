@@ -4,16 +4,25 @@ import React from "react";
 
 import { save } from "@tauri-apps/plugin-dialog";
 import { toAppError } from "@tpv/client";
-import type { LocalBackupInfo } from "@tpv/contracts";
+import type { DondeQuedaLaCopia, LocalBackupInfo } from "@tpv/contracts";
 
 import { useToast } from "../../../shared/toast";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 
-/** Lo que se dice cuando «Guardar fuera…» ha dejado la copia en el disco de los datos. */
-export const AVISO_MISMO_DISCO =
-	"Está en este mismo disco: no te protege de una avería. Cópiala a un USB o a otro equipo.";
+/**
+ * Lo que se dice cuando «Guardar fuera…» ha dejado la copia dentro del ordenador: el disco de los
+ * datos, otra partición u otro disco interno (REC-INC-01).
+ */
+export const AVISO_EN_ESTE_EQUIPO =
+	"Está en este equipo: no te protege de una avería. Cópiala a un USB o a otro equipo.";
+
+/** Lo que se dice cuando la copia ha salido del ordenador, según dónde haya quedado. */
+export const COPIA_FUERA: Record<Exclude<DondeQuedaLaCopia, "en_este_equipo">, string> = {
+	extraible: "Está en una unidad extraíble: te protege si el ordenador se avería.",
+	en_la_red: "Está en otro equipo de la red: te protege si este ordenador se avería.",
+};
 
 function tamanoTexto(bytes: number): string {
 	if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -82,12 +91,13 @@ export function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 			});
 			if (!destino) return;
 			const guardada = await commands.recoveryExportBackup(copia.id, destino);
-			// REC-INC-01: el diálogo deja elegir cualquier carpeta, también una de este mismo disco, y
-			// ésa no protege de lo que protege una copia de fuera. Se dice cuál de las dos es.
-			if (guardada.mismo_disco) {
-				toast.warning("Copia guardada", AVISO_MISMO_DISCO);
+			// REC-INC-01: el diálogo deja elegir cualquier carpeta, también una de este ordenador (el
+			// mismo disco, otra partición, otro disco interno), y ésa no protege de lo que protege una
+			// copia de fuera. Se dice dónde ha quedado.
+			if (guardada.donde === "en_este_equipo") {
+				toast.warning("Copia guardada", AVISO_EN_ESTE_EQUIPO);
 			} else {
-				toast.success("Copia guardada", "Está fuera de este disco: te protege si el ordenador se avería.");
+				toast.success("Copia guardada", COPIA_FUERA[guardada.donde]);
 			}
 		} catch (e) {
 			toast.error("No se pudo guardar la copia", toAppError(e).message);
