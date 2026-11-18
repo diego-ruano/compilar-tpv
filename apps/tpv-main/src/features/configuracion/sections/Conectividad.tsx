@@ -10,64 +10,12 @@ import { useAuth } from "../../../shared/stores/useAuth";
 
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
-import {
-	useEstadoSync,
-	type EstadoSync,
-} from "../../../shared/stores/useEstadoSync";
+import { useEstadoSync } from "../../../shared/stores/useEstadoSync";
+import { textoDeConexion } from "./textoConexion";
 import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 import { AvisoInterruptores } from "./AvisoInterruptores";
 import { ImagenesPendientes } from "./ImagenesPendientes";
-
-/**
- * SYNC-17: cómo se cuenta cada estado. Ya no hay nada que elegir aquí —la Main se conecta sola—,
- * así que este panel es informativo: dice qué está pasando y, cuando algo no va, qué significa.
- *
- * `tono` decide el color: `ok` verde, `neutro` gris (no pasa nada malo, simplemente no aplica),
- * `aviso` ámbar (transitorio, se está resolviendo) y `malo` rojo (no se va a arreglar solo).
- */
-const ESTADO_TEXTO: Record<
-	EstadoSync,
-	{ titulo: string; desc: string; tono: "ok" | "neutro" | "aviso" | "malo" }
-> = {
-	conectado: {
-		titulo: "Al día",
-		desc: "Los cambios se guardan en la nube y los dispositivos Handy pueden trabajar.",
-		tono: "ok",
-	},
-	conectando: {
-		titulo: "Conectando…",
-		desc: "Estableciendo la conexión con la nube.",
-		tono: "aviso",
-	},
-	reintentando: {
-		titulo: "Sin conexión",
-		desc: "Este TPV sigue funcionando con normalidad y guarda todo lo que hagas; se subirá solo en cuanto vuelva la conexión. Los Handy no pueden trabajar mientras tanto.",
-		tono: "aviso",
-	},
-	sin_identidad: {
-		titulo: "Sin licencia activada",
-		desc: "Todavía no hay una licencia activada en este dispositivo, así que no hay nada a lo que conectarse.",
-		tono: "neutro",
-	},
-	rechazado: {
-		titulo: "La nube ha rechazado la conexión",
-		desc: "El servidor no acepta este dispositivo: normalmente es la licencia (caducada o anulada) o que la licencia se ha trasladado a otro equipo. Revisa la licencia; esto no se arregla solo.",
-		tono: "malo",
-	},
-	pausada: {
-		titulo: "Sincronización desactivada",
-		desc: "Este dispositivo tiene la sincronización apagada a propósito. Todo se sigue guardando en local y se subirá si se vuelve a activar.",
-		tono: "neutro",
-	},
-	// AUD-19: la base de este equipo es anterior a lo que guarda la nube. No se arregla reconectando.
-	// SYNC-32: el TPV pasa a la pantalla de recuperación, que trae el estado actual de la nube.
-	detenida: {
-		titulo: "Sincronización detenida",
-		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Hay que recuperar el estado actual de la nube desde la pantalla de recuperación; lo que este equipo tenía sin subir se guarda aparte.",
-		tono: "malo",
-	},
-};
 
 function desdeHace(ms: number): string {
 	const d = Date.now() - ms;
@@ -82,7 +30,7 @@ function desdeHace(ms: number): string {
 // Estado real de la conexión. Sustituye al antiguo selector "offline/online": el usuario ya no
 // decide si quiere conexión (una pregunta que no puede responder bien y cuya respuesta se queda
 // vieja), solo ve la que hay.
-function EstadoConexion({ darkMode }: { darkMode: boolean }) {
+function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: number | null }) {
 	const estado = useEstadoSync((s) => s.estado);
 	const detalle = useEstadoSync((s) => s.detalle);
 	const desde = useEstadoSync((s) => s.desde);
@@ -94,7 +42,7 @@ function EstadoConexion({ darkMode }: { darkMode: boolean }) {
 		return () => window.clearInterval(id);
 	}, []);
 
-	const info = ESTADO_TEXTO[estado];
+	const info = textoDeConexion(estado, porSubir);
 	const color =
 		info.tono === "ok"
 			? "bg-success"
@@ -178,13 +126,16 @@ function HealthStat({
 	);
 }
 
-// SYNC-14: panel de salud de la sincronización (profundidad de outbox, checkpoint y ops en
-// cuarentena/fallando). Hace un fallo de convergencia VISIBLE en vez de invisible.
-export function SaludSync({ darkMode }: { darkMode: boolean }) {
+/**
+ * SYNC-14: la salud de la sincronización, releída cada 5 s. La leen el panel de salud y el estado
+ * de la conexión (lo que queda por subir).
+ */
+function useSaludSync(activa: boolean): { health: SyncHealth | null; err: string | null } {
 	const [health, setHealth] = React.useState<SyncHealth | null>(null);
 	const [err, setErr] = React.useState<string | null>(null);
 
 	React.useEffect(() => {
+		if (!activa) return;
 		let cancelled = false;
 		const tick = async () => {
 			try {
@@ -203,8 +154,19 @@ export function SaludSync({ darkMode }: { darkMode: boolean }) {
 			cancelled = true;
 			clearInterval(timer);
 		};
-	}, []);
+	}, [activa]);
 
+	return { health, err };
+}
+
+// SYNC-14: panel de salud de la sincronización (profundidad de outbox, checkpoint y ops en
+// cuarentena/fallando). Hace un fallo de convergencia VISIBLE en vez de invisible.
+export function SaludSync({ darkMode }: { darkMode: boolean }) {
+	const { health, err } = useSaludSync(true);
+	return <PanelSaludSync darkMode={darkMode} health={health} err={err} />;
+}
+
+function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: SyncHealth | null; err: string | null }) {
 	return (
 		<Panel
 			title="Salud de la sincronización"
@@ -544,19 +506,20 @@ function HistoricoPendiente({ darkMode }: { darkMode: boolean }) {
 
 export function Conectividad({ darkMode }: { darkMode: boolean }) {
 	const deviceMode = useMode((s) => s.mode);
+	const salud = useSaludSync(deviceMode === "tpv");
 
 	return (
 		<div className="flex flex-col gap-4">
 			<ImagenesPendientes />
 			{/* SYNC-17: estado real de la conexión (antes aquí vivía el selector offline/online). */}
-			{deviceMode === "tpv" && <EstadoConexion darkMode={darkMode} />}
+			{deviceMode === "tpv" && <EstadoConexion darkMode={darkMode} porSubir={salud.health?.outbox_pending ?? null} />}
 
 			{/* PROD-06: lo que soporte ha pausado desde la nube. Sólo se pinta si hay algo. */}
 			{deviceMode === "tpv" && <AvisoInterruptores />}
 
 			{/* SYNC-14: salud de la sincronización. Se muestra siempre en la Main: la cola de subida
 			    importa sobre todo cuando NO hay conexión, que es justo cuando antes se ocultaba. */}
-			{deviceMode === "tpv" && <SaludSync darkMode={darkMode} />}
+			{deviceMode === "tpv" && <PanelSaludSync darkMode={darkMode} health={salud.health} err={salud.err} />}
 
 			{/* SYNC-19: sólo se pinta si hay una recuperación completándose de fondo. */}
 			{deviceMode === "tpv" && <HistoricoPendiente darkMode={darkMode} />}
