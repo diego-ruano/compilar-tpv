@@ -1316,14 +1316,22 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, &[USUARIO]).await;
         let cuentas = SqliteCuentasRepository::new(db.clone());
-        let hoy = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let antes = como_hora_de_caja(chrono::Local::now());
-
-        let mut de_hoy = gasto(&hoy, 5.0, Some(true));
-        de_hoy.id_gasto = Some("g-hoy".into());
-        tpv_application::use_cases::cuentas::create_gasto(&cuentas, Some("u1"), de_hoy).await.unwrap();
-        let m = momento_caja(&db, "g-hoy").await.expect("un gasto de hoy lleva su hora");
-        assert!(m.starts_with(&hoy) && m.as_str() >= antes.as_str(), "{m} es la hora de apuntarlo");
+        // El reloj es el de verdad: si la medianoche cae entre que se mira «hoy» y se apunta el
+        // gasto, ese «hoy» ya es ayer y su hora sería la de las 12:00. Se vuelve a apuntar (mismo id:
+        // el alta pisa la fila) hasta que las dos lecturas del día coinciden.
+        let (hoy, m) = loop {
+            let hoy = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let antes = como_hora_de_caja(chrono::Local::now());
+            let mut de_hoy = gasto(&hoy, 5.0, Some(true));
+            de_hoy.id_gasto = Some("g-hoy".into());
+            tpv_application::use_cases::cuentas::create_gasto(&cuentas, Some("u1"), de_hoy).await.unwrap();
+            if chrono::Local::now().format("%Y-%m-%d").to_string() != hoy {
+                continue;
+            }
+            let m = momento_caja(&db, "g-hoy").await.expect("un gasto de hoy lleva su hora");
+            assert!(m.starts_with(&hoy) && m.as_str() >= antes.as_str(), "{m} es la hora de apuntarlo");
+            break (hoy, m);
+        };
 
         let mut de_ayer = gasto("2026-05-10", 5.0, Some(true));
         de_ayer.id_gasto = Some("g-otro".into());
