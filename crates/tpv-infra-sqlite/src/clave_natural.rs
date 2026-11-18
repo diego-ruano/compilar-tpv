@@ -111,6 +111,15 @@ fn vacio(v: &Value) -> bool {
     }
 }
 
+/// Un valor que una sentencia replicada no puede llevar tal cual (`db.rs::value_to_json`).
+fn no_se_replica(v: &Value) -> bool {
+    match v {
+        Value::Blob(_) => true,
+        Value::Real(x) => !x.is_finite(),
+        _ => false,
+    }
+}
+
 fn texto(v: &Value) -> Option<&str> {
     match v {
         Value::Text(t) => Some(t),
@@ -162,11 +171,20 @@ pub(crate) async fn fundir(
             continue;
         }
         let Some(de_aqui) = filas_de_aqui(conn, d, columnas, &locales).await? else { continue };
+        // Un valor que no se sabe replicar (un blob, un número no finito) llegaría arriba como `NULL`
+        // (`valor_a_json`): la ficha de aquí se borraría con él dentro. No se funde.
+        if de_aqui.iter().flatten().any(no_se_replica) {
+            tracing::warn!(
+                target: "tpv::sync",
+                tabla = d.tabla,
+                "la ficha de aquí tiene un valor que no se puede replicar: no se funde (SYN-INC-07)"
+            );
+            continue;
+        }
 
         let sentencias = sentencias_de_la_fusion(conn, d, columnas, &nube, &id_nube, &locales, &de_aqui).await?;
         w.transaccion(async {
             for s in &sentencias {
-                // Un valor que no se sabe escribir (un blob) no se cambia por NULL: no se funde.
                 let args = s
                     .args
                     .iter()

@@ -540,3 +540,21 @@ async fn si_la_handy_le_pone_el_correo_a_una_ficha_que_ya_estaba_aqui_tambien_se
 
     cerrar(db, dir, nube).await;
 }
+
+#[tokio::test]
+async fn una_ficha_de_aqui_con_un_valor_que_no_se_replica_no_se_funde() {
+    // Las notas de la Ana de aquí son un blob (no lo escribe la aplicación, pero puede estar): al
+    // replicarse llegaría arriba como NULL y se perdería con la ficha. No se funde, y la cuarentena
+    // se queda.
+    let (repo, db, dir, nube) = las_dos_anas("blob").await;
+    sembrar(&db, &format!("UPDATE Clientes SET Notas = x'00ff' WHERE ID_Cliente = '{ANA_MAIN}';")).await;
+
+    let ContrasteLocal::Hecho(r) = pasada(&repo, &nube).await else { panic!("no se ha fundido nada: se compara") };
+    assert!(r.aplazado, "{r:?}");
+    assert_eq!(en_cuarentena(&db).await, 1);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Clientes;").await, 1, "la de aquí sigue ahí");
+    assert_eq!(filas(&db, "SELECT ID_Cliente, Notas FROM Clientes;").await, vec![format!("{ANA_MAIN}|blob")]);
+    assert_eq!(repo.outbox_pending(10).await.unwrap().len(), 0, "no sube nada");
+
+    cerrar(db, dir, nube).await;
+}
