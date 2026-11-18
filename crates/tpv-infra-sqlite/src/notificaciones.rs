@@ -437,25 +437,10 @@ async fn activa_por_clave<C: Reader>(conn: &C, clave: &str) -> AppResult<Option<
     )))
 }
 
-#[async_trait]
-impl Notifier for SqliteNotificacionesRepository {
-    /// Emite, o actualiza la activa con la misma clave (RI-12).
-    ///
-    /// Antes, con clave, se devolvía la existente sin tocarla: el aviso de atraso fiscal se quedaba
-    /// con el texto y la severidad del primer escalón aunque llevara tres días sin remitir, y el del
-    /// certificado seguía diciendo «caduca en 30 días» con siete por delante. Ahora:
-    ///
-    /// - **Igual**: no se escribe nada (cada escritura sube a la nube, y quien emite lo hace en cada
-    ///   comprobación periódica).
-    /// - **Cambia lo que se ve de un vistazo** (severidad o título: el atraso que sube de escalón,
-    ///   «caduca en 7 días»): se actualiza, sube arriba (`Creada_En` = ahora) y se borran sus
-    ///   lecturas, para que vuelva a salir como no leída.
-    /// - **Cambia sólo el detalle** (cuerpo, acción, payload…): se actualiza sin molestar a nadie. El
-    ///   aviso de stock negativo lleva la cantidad en el cuerpo, y cada venta la cambia: si eso lo
-    ///   volviera a poner como no leído, saltaría en cada pasada en pleno servicio.
-    ///
-    /// Espejo de la ruta `POST /v1/notificaciones` del worker (`notificaciones.commands.ts::actualizar`).
-    async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String> {
+impl SqliteNotificacionesRepository {
+    /// `emitir`, y además si ha escrito algo: la Main lo usa para avisar a su pantalla sólo cuando
+    /// cambia (`src-tauri/src/notificador.rs`).
+    pub async fn emitir_y_decir_si_cambia(&self, nueva: NuevaNotificacion) -> AppResult<(String, bool)> {
         let (destino_tipo, destino_valor) = nueva.destino.to_columns();
 
         // Escritor único: mantener el guard sobre la búsqueda + la escritura hace la operación
@@ -466,7 +451,7 @@ impl Notifier for SqliteNotificacionesRepository {
             if let Some((id, actual)) = activa_por_clave(&db, clave).await? {
                 let nuevo = Contenido::de(&nueva);
                 if nuevo == actual {
-                    return Ok(id);
+                    return Ok((id, false));
                 }
                 let se_ve_distinto = nuevo.se_ve_distinto(&actual);
                 let fecha = if se_ve_distinto { ", Creada_En = datetime('now','localtime')" } else { "" };
@@ -493,7 +478,7 @@ impl Notifier for SqliteNotificacionesRepository {
                         .map_err(db_err)?;
                     }
                     Ok(())
-                }).await.map(|_| id);
+                }).await.map(|_| (id, true));
             }
         }
 
@@ -527,7 +512,30 @@ impl Notifier for SqliteNotificacionesRepository {
         .await
         .map_err(db_err)?;
 
-        Ok(id)
+        Ok((id, true))
+    }
+}
+
+#[async_trait]
+impl Notifier for SqliteNotificacionesRepository {
+    /// Emite, o actualiza la activa con la misma clave (RI-12).
+    ///
+    /// Antes, con clave, se devolvía la existente sin tocarla: el aviso de atraso fiscal se quedaba
+    /// con el texto y la severidad del primer escalón aunque llevara tres días sin remitir, y el del
+    /// certificado seguía diciendo «caduca en 30 días» con siete por delante. Ahora:
+    ///
+    /// - **Igual**: no se escribe nada (cada escritura sube a la nube, y quien emite lo hace en cada
+    ///   comprobación periódica).
+    /// - **Cambia lo que se ve de un vistazo** (severidad o título: el atraso que sube de escalón,
+    ///   «caduca en 7 días»): se actualiza, sube arriba (`Creada_En` = ahora) y se borran sus
+    ///   lecturas, para que vuelva a salir como no leída.
+    /// - **Cambia sólo el detalle** (cuerpo, acción, payload…): se actualiza sin molestar a nadie. El
+    ///   aviso de stock negativo lleva la cantidad en el cuerpo, y cada venta la cambia: si eso lo
+    ///   volviera a poner como no leído, saltaría en cada pasada en pleno servicio.
+    ///
+    /// Espejo de la ruta `POST /v1/notificaciones` del worker (`notificaciones.commands.ts::actualizar`).
+    async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String> {
+        self.emitir_y_decir_si_cambia(nueva).await.map(|(id, _)| id)
     }
 
     async fn resolver_por_clave(&self, clave_dedupe: &str) -> AppResult<bool> {

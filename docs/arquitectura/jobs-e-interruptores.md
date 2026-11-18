@@ -23,6 +23,11 @@ Todo lo que la Main hace «cada X tiempo» por su cuenta vive en un único runne
 El cuerpo tiene que ser **idempotente**: el motor puede adelantarlo si quedó vencido o repetirlo tras
 un fallo parcial.
 
+Un job que avisa lo hace con `state.notifier()`. En la Main, ese `Notifier` es el SQLite envuelto
+(`src-tauri/src/notificador.rs`): cuando un `emitir` o un `resolver_por_clave` cambia algo, emite
+`sync:cambio { tablas: ["notificaciones"] }` y la pantalla de Notificaciones lo ve sin cambiar de
+pantalla; lo que se emite igual en cada pasada no escribe ni avisa. No hace falta emitir nada más.
+
 ### Qué garantiza el motor
 
 - **Vencimiento en reloj de pared** contra `Last_Ok_Ms`: un job de 6 h se ejecuta igual en un equipo

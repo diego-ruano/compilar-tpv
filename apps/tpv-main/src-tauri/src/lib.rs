@@ -10,6 +10,7 @@ mod reservas_web;
 mod socket_handy;
 mod jobs;
 mod navegacion;
+mod notificador;
 mod printing;
 mod zoom;
 
@@ -434,6 +435,9 @@ pub(crate) struct AppState {
     /// PERM-CACHE: la autorización de la sesión, guardada entre gates. Sólo vale en la Handy y con
     /// el socket de avisos abierto (`use_cases::autorizacion_guardada`); en la Main no se usa.
     autorizacion: Arc<std::sync::Mutex<AutorizacionGuardada>>,
+    /// Cómo se entera la pantalla de la Main de un aviso que se crea o se resuelve aquí mismo
+    /// (`notificador.rs`). En la Handy no se usa.
+    avisar_notificaciones: notificador::AvisarPantalla,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -774,14 +778,33 @@ impl AppState {
         SqliteNotificacionesRepository,
         HttpNotificacionesRepository
     );
-    // El puerto de emisión `Notifier` lo implementa el MISMO adaptador (SQLite en Main, HTTP en
-    // Handy), así que también es mode-switched: en Handy `emitir` va por REST → DO → broadcast.
-    repo_accessor!(
-        notifier,
-        Notifier,
-        SqliteNotificacionesRepository,
-        HttpNotificacionesRepository
-    );
+    /// El puerto de emisión `Notifier`: en la Handy, el adaptador HTTP (`emitir` va por REST → DO
+    /// → broadcast, y el aviso le vuelve por el socket); en la Main, el SQLite envuelto para que su
+    /// pantalla se entere de lo que se crea o se resuelve aquí (`notificador.rs`).
+    pub(crate) async fn notifier(&self) -> Result<Arc<dyn Notifier>, String> {
+        match *self.mode.lock().await {
+            Some(DeviceMode::Tpv) => {
+                let conn = self
+                    .db
+                    .lock()
+                    .await
+                    .as_ref()
+                    .cloned()
+                    .ok_or_else(|| "DB no inicializada (modo TPV)".to_string())?;
+                Ok(Arc::new(notificador::NotifierDeLaMain::new(
+                    SqliteNotificacionesRepository::new(conn),
+                    self.avisar_notificaciones.clone(),
+                )) as Arc<dyn Notifier>)
+            }
+            Some(DeviceMode::Handy) => {
+                let client = self.cloud.lock().await.as_ref().cloned().ok_or_else(|| {
+                    "Cliente nube no inicializado (modo Handy)".to_string()
+                })?;
+                Ok(Arc::new(HttpNotificacionesRepository::new(client)) as Arc<dyn Notifier>)
+            }
+            None => Err("Modo de dispositivo no seleccionado".to_string()),
+        }
+    }
 
     /// La base local, para lo que **sólo existe en la Main**: los registros de facturación, el
     /// ticket de un cobro y los pedidos a proveedores.
@@ -2801,6 +2824,7 @@ pub fn run() {
                 sesion: Arc::new(Mutex::new(None)),
                 tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
                 autorizacion: Arc::default(),
+                avisar_notificaciones: notificador::avisar_con_evento(handle.clone()),
             });
 
             // Tareas periódicas de fondo (licencia, avisos, actualizaciones): las declara
@@ -3158,6 +3182,7 @@ mod tests_sesion_y_permisos {
             sesion: Arc::new(Mutex::new(None)),
             tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
             autorizacion: Arc::default(),
+            avisar_notificaciones: Arc::new(|| {}),
         }
     }
 
@@ -3354,6 +3379,7 @@ mod tests_autorizacion_guardada {
             sesion: Arc::new(Mutex::new(None)),
             tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
             autorizacion: Arc::default(),
+            avisar_notificaciones: Arc::new(|| {}),
         }
     }
 
@@ -3501,6 +3527,7 @@ mod tests_solo_en_la_main {
             sesion: Arc::new(Mutex::new(None)),
             tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
             autorizacion: Arc::default(),
+            avisar_notificaciones: Arc::new(|| {}),
         }
     }
 
