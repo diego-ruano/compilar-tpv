@@ -29,7 +29,8 @@
 //!   aquí entre medias). Así lo que se trae no es anterior al cambio en cuarentena (su `Seq` no pasa
 //!   del checkpoint) ni posterior a lo que esta Main ha aplicado: un cambio que aún no ha bajado no
 //!   se aplicaría encima otra vez al bajar (un `Stock - 1` dos veces).
-//! - **Sólo se escribe aquí**, por `raw()`, y nada en la nube: lo que se trae ya está arriba.
+//! - **Sólo se escribe aquí**, por `raw()`, y nada en la nube: lo que se trae ya está arriba. La excepción es fundir
+//!   una ficha de aquí en la de la nube (SYN-INC-07, `clave_natural.rs`), que sube por el outbox.
 //! - **Lo que está arriba** se escribe con `INSERT … ON CONFLICT(clave) DO UPDATE` (nunca `INSERT OR
 //!   REPLACE`, que borraría y dispararía las cascadas). **Lo que no está arriba** sólo se borra aquí
 //!   si el cambio lo borraba: que la nube no tenga una fila que el cambio insertó o cambió dice que

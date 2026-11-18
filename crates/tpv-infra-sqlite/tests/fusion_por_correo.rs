@@ -449,3 +449,94 @@ async fn un_proveedor_dado_de_alta_dos_veces_con_el_mismo_cif_se_funde_con_sus_p
 
     cerrar(db, dir, nube).await;
 }
+
+#[tokio::test]
+async fn si_la_ficha_de_la_nube_ya_no_esta_no_se_funde_nada_y_la_de_aqui_sube() {
+    // La Handy da de alta al proveedor con el CIF de uno de la Main y después lo borra: el alta sigue
+    // en cuarentena aquí, pero la nube ya no lo tiene. La cuarentena sale sin traer nada, no se funde
+    // nada, y el contraste sube el de la Main, que ya cabe arriba.
+    let (repo, db, dir) = base("proveedor-borrado").await;
+    let nube = NubeDeContraste::nueva("proveedor-borrado").await;
+    {
+        let w = db.write().await;
+        w.execute(
+            "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, CIF) VALUES (?1, 'Bebidas Sur', 'B11111111');",
+            vec![Value::Text(PROV_MAIN.into())],
+        )
+        .await
+        .unwrap();
+    }
+    let alta = vec![SqlStatement {
+        sql: "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, CIF) VALUES (?1, ?2, ?3);".into(),
+        args: vec![json!(PROV_HANDY), json!("Bebidas del Sur SL"), json!("B11111111")],
+    }];
+    nube.aplicar(&alta).await;
+    *nube.hasta_seq.lock().unwrap() = 1;
+    *nube.ultimo_ajeno.lock().unwrap() = 1;
+    assert_eq!(subir(&repo, &nube).await.len(), 2, "el alta y su reparación");
+    bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: alta }).await;
+    nube.sembrar(&format!("DELETE FROM Proveedores WHERE ID_Proveedor = '{PROV_HANDY}';")).await;
+
+    let ContrasteLocal::Hecho(r) = pasada(&repo, &nube).await else { panic!("se tenía que comparar") };
+    assert_eq!(en_cuarentena(&db).await, 0);
+    assert!(r.reparadas > 0, "{r:?}");
+    assert_eq!(filas(&db, "SELECT ID_Proveedor FROM Proveedores;").await, vec![PROV_MAIN.to_string()]);
+    assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
+    assert_eq!(apartadas(&db).await, 0);
+    let sql = "SELECT * FROM Proveedores ORDER BY ID_Proveedor;";
+    assert_eq!(filas(&nube.db, sql).await, filas(&db, sql).await);
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn si_la_handy_le_pone_el_correo_a_una_ficha_que_ya_estaba_aqui_tambien_se_funde_y_converge() {
+    // La Ana de la Handy ya estaba en las dos bases, sin correo. La Main da de alta a otra Ana con su
+    // correo y, a la vez, la Handy le pone ese correo a la suya: aquí ese cambio choca y acaba en
+    // cuarentena. La fusión rellena la de aquí sin tocar lo que ya tenía y, en la pasada siguiente,
+    // la cuarentena trae lo de la nube y las dos bases quedan iguales.
+    let (repo, db, dir) = base("ya-estaba").await;
+    let nube = NubeDeContraste::nueva("ya-estaba").await;
+    let ana_handy = format!(
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('{ANA_HANDY}', 'Ana García', '600111222', '2027-01-01 09:00:00');"
+    );
+    sembrar(&db, &ana_handy).await;
+    nube.sembrar(&ana_handy).await;
+
+    SqliteClientesRepository::new(db.clone())
+        .create(NuevoCliente {
+            id: Some(ANA_MAIN.into()),
+            nombre: "Ana".into(),
+            email: Some("ana@correo.es".into()),
+            telefono: None,
+            notas: Some("Alérgica al marisco".into()),
+        })
+        .await
+        .unwrap();
+    let correo = vec![SqlStatement {
+        sql: "UPDATE Clientes SET Email = ?2 WHERE ID_Cliente = ?1;".into(),
+        args: vec![json!(ANA_HANDY), json!("ANA@correo.es")],
+    }];
+    nube.aplicar(&correo).await;
+    *nube.hasta_seq.lock().unwrap() = 1;
+    *nube.ultimo_ajeno.lock().unwrap() = 1;
+    assert_eq!(subir(&repo, &nube).await.len(), 2, "el alta y su reparación");
+    bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: correo }).await;
+    assert_eq!(en_cuarentena(&db).await, 1);
+
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Clientes;").await, 1);
+    assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
+    assert_eq!(apartadas(&db).await, 0);
+
+    let ContrasteLocal::Hecho(r) = pasada(&repo, &nube).await else { panic!("se tenía que comparar") };
+    assert_eq!(en_cuarentena(&db).await, 0);
+    assert_eq!(r.descuadres, vec![], "{r:?}");
+    assert_eq!(
+        filas(&db, DE_ANA[0]).await,
+        vec![format!("{ANA_HANDY}|Ana García|600111222|ANA@correo.es|Alérgica al marisco|0|2027-01-01 09:00:00")]
+    );
+    assert_eq!(filas(&nube.db, DE_ANA[0]).await, filas(&db, DE_ANA[0]).await);
+
+    cerrar(db, dir, nube).await;
+}

@@ -903,7 +903,7 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   lleva nada que esta Main no haya aplicado ya: un cambio que aún no ha bajado no se le aplicaría
   encima otra vez. Si algo se mueve antes de aplicar, la pasada entera es `SeHaMovido` sin haber
   escrito nada.
-- **Sólo se escribe aquí**, por `raw()`; nada sube ni se borra en la nube. Lo que está arriba se
+- **Sólo se escribe aquí**, por `raw()`; nada sube ni se borra en la nube (salvo al fundir dos fichas, abajo). Lo que está arriba se
   escribe como está, con `INSERT … ON CONFLICT(clave) DO UPDATE`; lo que no está sólo se borra aquí si
   el cambio lo borraba (que la nube ya no tenga lo que el cambio insertó o cambió dice que se borró
   después, y ese borrado ya bajó o tiene su propia cuarentena), con sus cascadas, como arriba.
