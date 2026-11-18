@@ -485,8 +485,6 @@ async fn reconciliacion_pendiente(db: &Db) -> AppResult<bool> {
 /// replicarse, no es una escritura de negocio que haya que capturar. Y NO se aplica en local: la
 /// fila ya está bien aquí, lo que está mal es la copia de la nube.
 async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> {
-    use crate::sync_reparacion as rep;
-
     let mut rows = conn
         .query(
             "SELECT Statements_Json FROM _Sync_Outbox WHERE Op_Id = ?1 LIMIT 1;",
@@ -502,15 +500,59 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
         _ => return Ok(0),
     };
     let stmts: Vec<SqlStatement> = serde_json::from_str(&json).unwrap_or_default();
-    if stmts.is_empty() {
+    let sentencias = reparacion_de(conn, &stmts, op_id).await?;
+    if sentencias.is_empty() {
         return Ok(0);
+    }
+
+    let n = sentencias.len() as i64;
+    let nuevo_op = uuid::Uuid::now_v7().to_string();
+    let ahora = now_ms();
+    // Se anota de qué operación apartada viene: cuando esta reparación suba, aquélla deja de tener
+    // sentido y se retira (ver `outbox_confirmar_lote`). Sin el enlace, el aviso de cuarentena no se
+    // apagaría nunca aunque el problema ya estuviera resuelto.
+    conn.execute(
+        "INSERT INTO _Sync_Outbox \
+           (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) \
+         VALUES (?1, ?2, ?3, ?4, ?5);",
+        vec![
+            Value::Text(nuevo_op.clone()),
+            Value::Text(crate::sync_reparacion::COMANDO_REPARACION.to_string()),
+            Value::Text(serde_json::to_string(&sentencias).unwrap_or_else(|_| "[]".into())),
+            Value::Integer(ahora),
+            Value::Text(op_id.to_string()),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+    // Anti-eco, igual que cualquier escritura capturada: sin esto la reparación volvería por el
+    // catch-up y se aplicaría otra vez en local.
+    conn.execute(
+        "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, 0, ?2);",
+        vec![Value::Text(nuevo_op), Value::Integer(ahora)],
+    )
+    .await
+    .map_err(db_err)?;
+
+    tracing::info!("op {op_id} apartada: encoladas {n} fila(s) de reparación");
+    Ok(n)
+}
+
+/// Las sentencias de una reparación por estado de lo que tocaron `stmts` (las de una operación
+/// apartada, o las de varias juntas): cómo están ahora aquí esas filas y, si alguna cuelga de una
+/// comanda, la comanda entera, en una operación y padres primero. Vacía si no queda nada que
+/// mandar (lo que tocaban ya no está aquí). `op_id` sólo nombra lo que se repara en el registro.
+pub(crate) async fn reparacion_de(conn: &Connection, stmts: &[SqlStatement], op_id: &str) -> AppResult<Vec<SqlStatement>> {
+    use crate::sync_reparacion as rep;
+    if stmts.is_empty() {
+        return Ok(Vec::new());
     }
 
     // Las claves primarias se leen del esquema, no de una lista escrita a mano: ocho tablas las
     // tienen compuestas y una lista paralela se queda vieja en cuanto alguien añada la novena.
     let mut cache: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
-    for st in &stmts {
+    for st in stmts {
         for palabra in st.sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
             if !palabra.is_empty() && !cache.contains_key(palabra) {
                 let pks = rep::claves_primarias(conn, palabra).await.unwrap_or_default();
@@ -518,7 +560,7 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
             }
         }
     }
-    let analisis = rep::analizar(&stmts, &|t: &str| cache.get(t).cloned().unwrap_or_default());
+    let analisis = rep::analizar(stmts,&|t: &str| cache.get(t).cloned().unwrap_or_default());
 
     if analisis.incierto {
         tracing::warn!(
@@ -546,42 +588,7 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
             ),
         }
     }
-    let sentencias = sentencias_padres_primero(conn, &foraneas, filas).await?;
-    if sentencias.is_empty() {
-        return Ok(0);
-    }
-
-    let n = sentencias.len() as i64;
-    let nuevo_op = uuid::Uuid::now_v7().to_string();
-    let ahora = now_ms();
-    // Se anota de qué operación apartada viene: cuando esta reparación suba, aquélla deja de tener
-    // sentido y se retira (ver `outbox_confirmar_lote`). Sin el enlace, el aviso de cuarentena no se
-    // apagaría nunca aunque el problema ya estuviera resuelto.
-    conn.execute(
-        "INSERT INTO _Sync_Outbox \
-           (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) \
-         VALUES (?1, ?2, ?3, ?4, ?5);",
-        vec![
-            Value::Text(nuevo_op.clone()),
-            Value::Text(rep::COMANDO_REPARACION.to_string()),
-            Value::Text(serde_json::to_string(&sentencias).unwrap_or_else(|_| "[]".into())),
-            Value::Integer(ahora),
-            Value::Text(op_id.to_string()),
-        ],
-    )
-    .await
-    .map_err(db_err)?;
-    // Anti-eco, igual que cualquier escritura capturada: sin esto la reparación volvería por el
-    // catch-up y se aplicaría otra vez en local.
-    conn.execute(
-        "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, 0, ?2);",
-        vec![Value::Text(nuevo_op), Value::Integer(ahora)],
-    )
-    .await
-    .map_err(db_err)?;
-
-    tracing::info!("op {op_id} apartada: encoladas {n} fila(s) de reparación");
-    Ok(n)
+    sentencias_padres_primero(conn, &foraneas, filas).await
 }
 
 /// SYNC-31 · Las sentencias que dejan arriba estas filas como están aquí, en UNA operación y en el

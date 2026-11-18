@@ -535,6 +535,20 @@ pub(crate) async fn resolver(
         }
         quedan.retain(|(c, _)| !entran.iter().any(|x| std::ptr::eq(*x, *c)));
     }
+    // SYN-INC-07 · Lo que sigue chocando con un índice único puede ser la misma ficha dada de alta
+    // aquí y en una Handy (el correo de una clienta): la de aquí se funde en la de la nube, que se
+    // replica. La cuarentena sale en la pasada siguiente, con la fusión ya arriba. Lo que escribe
+    // mueve la marca: el contraste de esta pasada se deja (`SeHaMovido`).
+    for (c, motivo) in quedan.iter_mut() {
+        if !(motivo.starts_with("no_entra: ") && motivo.contains("unique")) {
+            continue;
+        }
+        match crate::clave_natural::fundir(&w, &c.tocadas, &arriba, &claves, &subida).await {
+            Ok(0) => {}
+            Ok(_) => *motivo = "fundida_en_la_de_la_nube".into(),
+            Err(e) => tracing::warn!(target: "tpv::sync", op_id = %c.op_id, error = %e, "no se ha podido fundir la ficha de aquí en la de la nube (SYN-INC-07)"),
+        }
+    }
     for (c, motivo) in &quedan {
         tracing::warn!(
             target: "tpv::sync",

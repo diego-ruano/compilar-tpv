@@ -149,6 +149,19 @@ const SQL_GASTO_DE_UNO: &str = r#"
     LIMIT 1;
 "#;
 
+/// El gasto de UN cliente (`?1`) re-derivado en la propia sentencia, por el mismo camino que
+/// `SQL_GASTO_DE_UNO`. Lo replica la fusión de dos fichas con el mismo correo (SYN-INC-07,
+/// `clave_natural.rs`): cada base lo calcula con sus cobros al aplicarlo, y así convergen (un agregado
+/// no se escribe como literal).
+pub(crate) const SQL_REDERIVAR_GASTO: &str = "UPDATE Clientes SET Total_Gastado = COALESCE((\
+        SELECT SUM(pg.Importe_Total) \
+        FROM Pagos pg \
+        JOIN Comandas co     ON co.ID_Comanda = pg.ID_Comanda \
+        LEFT JOIN Reservas r ON r.ID_Reserva  = co.ID_Reserva \
+        WHERE COALESCE(co.ID_Cliente, r.ID_Cliente) = ?1 \
+          AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'\
+    ), 0) WHERE ID_Cliente = ?1;";
+
 #[async_trait]
 impl ReconciliacionRepository for SqliteReconciliacionRepository {
     async fn lotes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<LoteDescuadrado>> {

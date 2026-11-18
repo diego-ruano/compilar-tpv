@@ -30,6 +30,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Cuarentenas de bajada | `crates/tpv-infra-sqlite/src/filas_tocadas.rs` · `cuarentenas_bajada.rs` | Qué filas toca un cambio de la nube que no entra; sus datos caducan y el contraste lo trae de la nube por estado (SYNC-36) |
+| Fichas con la misma clave natural | `crates/tpv-infra-sqlite/src/clave_natural.rs` | La misma clienta (o proveedor) dada de alta aquí y en una Handy: la de aquí se funde en la de la nube al salir la cuarentena (SYN-INC-07) |
 | El orden de la nube | `crates/tpv-infra-sqlite/src/convergencia.rs` | Lo que su orden dejó de otra forma aquí (una Handy escribió encima de algo de la Main sin subir) se apunta al aplicarlo y se trae de la nube en cuanto lo de aquí está subido (SYNC-29) |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
@@ -921,6 +922,34 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   transacción que se deshace siempre, sentencia a sentencia, y una fila que choca aparta a todas las
   cuarentenas que la tocan) y se repite con las demás, como mucho cuatro veces, como en la
   convergencia; lo que no entra se queda como estaba.
+- **Dos fichas de la misma persona se funden en la de la nube** (SYN-INC-07, `clave_natural.rs`). La
+  Main da de alta a una clienta y, antes de que suba, una Handy da de alta a la misma con el mismo
+  correo (o una reserva web recogida aquí trae el correo de la ficha que la Handy acaba de crear).
+  Arriba el alta de la Main choca con `ux_clientes_email` y se aparta, y su reparación por estado, que
+  es el mismo `INSERT … ON CONFLICT(clave)`, también; lo que cuelga de ella (una reserva, el cliente
+  de un cobro) choca con la foránea y se aparta. Aquí el alta de la Handy choca con la ficha de la
+  Main y acaba en cuarentena, y traerla sigue chocando. El correo dice que es la misma persona
+  (CLI-01), así que, cuando lo que se ha traído de una cuarentena sigue chocando con un índice único,
+  la ficha de aquí que tiene el mismo valor se funde en la de la nube, en una transacción por
+  `WriteGuard` que se replica: se le quitan sus valores únicos, se escribe la de la nube **rellenando
+  sólo sus huecos** con lo de la de aquí (el criterio de RES-01; arriba la sentencia lo vuelve a
+  decidir con lo que haya entonces, `COALESCE(NULLIF(<lo de arriba>, ''), excluded.…)`, y no pisa lo
+  que una Handy haya cambiado entretanto), todo lo que apunta a la de aquí pasa a la de la nube (las
+  foráneas se leen del esquema), el agregado (`Total_Gastado`) se re-deriva en el SQL y la de aquí
+  se borra. En la misma transacción se retira lo apartado de la subida que nombraba la ficha de
+  aquí: lo que sólo la escribía a ella se borra, y lo demás se repara por estado en una operación
+  que lo lleva en `Repara_Op_Id` y que sube delante de la fusión (la reserva y el cobro entran
+  apuntando a la ficha de la nube, que ya está arriba, y la fusión re-deriva el gasto con el cobro
+  dentro). Esa pasada del contraste se deja, porque la marca se ha movido; en la siguiente, con todo
+  subido, la cuarentena sale sola y el contraste vuelve a reparar (si la reparación no entrara, lo
+  sube el contraste y su plan lo retira). **Sólo se funde lo que esta Main escribió y la nube no
+  tiene**: la ficha de aquí tiene que estar escrita por algo apartado de la subida; si no, no se sabe
+  por qué es distinta y la cuarentena se queda. Vale igual para Proveedores (correo y CIF únicos, con
+  sus productos, lotes, pedidos y gastos). Un valor vacío no identifica a nadie y no se funde. Si la
+  de la nube ya no tiene ese valor, no hay choque y no se funde nada (la de aquí sube como siempre);
+  si la de aquí ya se fundió, tampoco. Una operación de subida apartada por el correo sin cuarentena
+  no se funde: la ficha de la nube con la que chocó baja siempre y choca aquí, y si arriba ya no
+  tiene ese correo, la de aquí sube sola con el contraste.
 - **Lo que no se puede traer, se queda**, con su motivo en la telemetría (`WARN`, sin datos): sus
   filas son inciertas o dudosas; toca lo mismo que algo apartado de la subida (la nube no tiene lo
   que esta Main escribió ahí, y traerla lo desharía aquí), o sus filas de una tabla salieron de esta

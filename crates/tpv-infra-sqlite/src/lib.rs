@@ -86,6 +86,8 @@ pub mod sync;
 // con su cuarentena: sus datos caducan y el contraste la cierra trayéndolas de la nube.
 pub(crate) mod filas_tocadas;
 pub(crate) mod cuarentenas_bajada;
+// SYN-INC-07: dos fichas con el mismo correo (aquí y en la nube) se funden en la de la nube.
+pub(crate) mod clave_natural;
 // El contraste con la nube por resúmenes: el lado de la Main (`/v1/sync/verificar/*`).
 pub(crate) mod contraste;
 // SYNC-29: el orden de la nube manda. Lo que su orden dejó de otra forma aquí se trae de ella.

@@ -1021,7 +1021,7 @@ async fn examinar_claves(
 ///
 /// SYNC-31: `repara` es la lista JSON de las operaciones apartadas que retira al subir
 /// (`Repara_Op_Id`, `outbox_confirmar_lote`).
-async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement], repara: Option<&str>) -> AppResult<()> {
+pub(crate) async fn encolar_operacion(conn: &Connection, sentencias: &[SqlStatement], repara: Option<&str>) -> AppResult<()> {
     let op = uuid::Uuid::now_v7().to_string();
     let ahora = now_ms();
     conn.execute(
@@ -1518,7 +1518,8 @@ pub(crate) async fn contrastar(
 
     // SYNC-36: lo que no entró de la bajada se trae de la nube por estado, con la foto de este
     // resumen, antes de mirar nada. Lo que entra cierra su cuarentena, y si no queda ninguna, la
-    // guarda deja reparar en esta misma pasada. Escribe sólo aquí, y no mueve la marca.
+    // guarda deja reparar en esta misma pasada. Escribe sólo aquí, y no mueve la marca, salvo si
+    // funde una ficha de aquí en la de la nube (SYN-INC-07): eso sube, y esta pasada se deja.
     if reparar && crate::cuarentenas_bajada::resolver(db, resumen.hasta_seq, marca, nube).await?.is_none() {
         return Ok(ContrasteLocal::SeHaMovido);
     }
