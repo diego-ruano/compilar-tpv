@@ -1,0 +1,14 @@
+{
+  "Lineas_Pedido_Proveedor": [],
+  "Pedidos_Proveedor": [
+    {
+      "Email_Destino": null,
+      "Estado": "borrador",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-1",
+      "ID_Proveedor": null,
+      "Nombre_Proveedor": null,
+      "Notas": "Lo de siempre"
+    }
+  ]
+}

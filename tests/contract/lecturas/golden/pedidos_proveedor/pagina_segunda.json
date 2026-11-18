@@ -1,0 +1,35 @@
+{
+  "pedidos": [
+    {
+      "email_destino": null,
+      "estado": "enviado",
+      "fecha_creacion": "2000-01-03 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-3",
+      "id_proveedor": null,
+      "lineas": [
+        {
+          "cantidad": 24.0,
+          "id_linea": "lin-3",
+          "nombre_producto": "Agua",
+          "precio_unitario": null,
+          "unidad": null
+        }
+      ],
+      "nombre_proveedor": null,
+      "notas": null
+    },
+    {
+      "email_destino": null,
+      "estado": "cancelado",
+      "fecha_creacion": "2000-01-02 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-4",
+      "id_proveedor": null,
+      "lineas": [],
+      "nombre_proveedor": null,
+      "notas": null
+    }
+  ],
+  "total": 5
+}

@@ -1,0 +1,14 @@
+{
+  "descripcion": "La primera página de pedidos, sin buscar: lo más reciente primero y, con la misma fecha, la clave mayor delante. Uno con el proveedor renombrado (sale el nombre de ahora), otro con el proveedor borrado (sale la copia) y otro sin proveedor; las líneas de cada uno en el orden en que se escribieron, con y sin precio y unidad, y los textos en blanco como null.",
+  "lectura": "pedidos_proveedor.pagina",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Email) VALUES ('prov-1', 'Cafés Ñandú SL', 'pedidos@nandu.test');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Creacion, Notas, Nombre_Proveedor) VALUES ('ped-a', 'prov-1', 'pedidos@nandu.test', 'borrador', '2000-01-02 10:00:00', 'Antes del viernes', 'Cafés Ñandú');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Creacion, Fecha_Envio, Notas, Nombre_Proveedor) VALUES ('ped-c', NULL, 'b@sur.test', 'enviado', '2000-01-02 10:00:00', '2/1/00 11:00', '  ', 'Bebidas Sur');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) VALUES ('ped-b', 'cancelado', '2000-01-01 09:00:00', 'Lo de siempre');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad) VALUES ('lin-z', 'ped-a', 'Café en grano', 2.5, 1890, 'kg');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad) VALUES ('lin-a', 'ped-a', 'Azúcar', 10, NULL, '');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad) VALUES ('lin-c', 'ped-c', 'Cerveza', 48, 95, 'botella');"
+  ],
+  "entrada": { "limit": 50, "offset": 0, "search": null }
+}

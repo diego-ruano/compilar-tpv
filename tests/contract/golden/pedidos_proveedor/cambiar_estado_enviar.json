@@ -1,0 +1,16 @@
+{
+  "Pedidos_Proveedor": [
+    {
+      "Estado": "enviado",
+      "Fecha_Envio": "18/11/26 12:34",
+      "ID_Pedido": "ped-1",
+      "Nombre_Proveedor": "Cafés Ñandú SL"
+    },
+    {
+      "Estado": "cancelado",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-2",
+      "Nombre_Proveedor": "Cafés Ñandú"
+    }
+  ]
+}

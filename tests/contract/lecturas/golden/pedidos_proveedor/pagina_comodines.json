@@ -1,0 +1,16 @@
+{
+  "pedidos": [
+    {
+      "email_destino": null,
+      "estado": "borrador",
+      "fecha_creacion": "2000-01-01 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-50",
+      "id_proveedor": null,
+      "lineas": [],
+      "nombre_proveedor": null,
+      "notas": "descuento 50%"
+    }
+  ],
+  "total": 1
+}

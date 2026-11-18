@@ -1,0 +1,26 @@
+{
+  "descripcion": "Edición de un borrador: cambia de proveedor (y con él la copia del nombre), de correo y de notas, y sus líneas se sustituyen enteras. Las líneas de otro pedido no se tocan.",
+  "comando": "pedidos_proveedor.actualizar",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-2', 'Bebidas Sur');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Creacion, Notas, Nombre_Proveedor) VALUES ('ped-1', 'prov-1', 'a@nandu.test', 'borrador', '2026-01-02 10:00:00', 'Primera', 'Cafés Ñandú');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad) VALUES ('lin-1', 'ped-1', 'Café en grano', 2, 1890, 'kg');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-2', 'prov-2', 'borrador', '2026-01-03 10:00:00', 'Bebidas Sur');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) VALUES ('lin-otro', 'ped-2', 'Agua', 24);"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "id_proveedor": "prov-2",
+    "email_destino": "b@sur.test",
+    "notas": null,
+    "lineas": [
+      { "id_linea": "lin-3", "nombre_producto": "Cerveza", "cantidad": 48, "precio_unitario": 95, "unidad": "botella" },
+      { "id_linea": "lin-4", "nombre_producto": "Tónica", "cantidad": 0, "precio_unitario": 0, "unidad": null }
+    ]
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Envio, Notas, Nombre_Proveedor FROM Pedidos_Proveedor",
+    "Lineas_Pedido_Proveedor": "SELECT ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad FROM Lineas_Pedido_Proveedor"
+  }
+}

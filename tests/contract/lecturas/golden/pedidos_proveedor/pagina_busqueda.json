@@ -1,0 +1,35 @@
+{
+  "pedidos": [
+    {
+      "email_destino": null,
+      "estado": "borrador",
+      "fecha_creacion": "2000-01-03 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-a",
+      "id_proveedor": "prov-1",
+      "lineas": [],
+      "nombre_proveedor": "Cafés Ñandú SL",
+      "notas": null
+    },
+    {
+      "email_destino": null,
+      "estado": "enviado",
+      "fecha_creacion": "2000-01-02 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-b",
+      "id_proveedor": null,
+      "lineas": [
+        {
+          "cantidad": 24.0,
+          "id_linea": "lin-1",
+          "nombre_producto": "Agua",
+          "precio_unitario": null,
+          "unidad": null
+        }
+      ],
+      "nombre_proveedor": "Ñandú Bebidas",
+      "notas": null
+    }
+  ],
+  "total": 2
+}

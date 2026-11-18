@@ -62,6 +62,7 @@ use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::login::LoginRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::notificaciones::NotificacionesRepository;
+use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::stats::StatsRepository;
@@ -84,6 +85,7 @@ use crate::inventario::SqliteInventarioRepository;
 use crate::login::SqliteLoginRepository;
 use crate::mesas::SqliteMesasRepository;
 use crate::notificaciones::SqliteNotificacionesRepository;
+use crate::pedidos_proveedor::SqlitePedidoProveedorRepository;
 use crate::proveedores::SqliteProveedoresRepository;
 use crate::reservas::SqliteReservasRepository;
 use crate::stats::SqliteStatsRepository;
@@ -332,6 +334,11 @@ lecturas_de_contrato! {
     notificaciones__listar,
     notificaciones__contar_no_leidas,
     notificaciones__papelera,
+    pedidos_proveedor__pagina,
+    pedidos_proveedor__pagina_busqueda,
+    pedidos_proveedor__pagina_comodines,
+    pedidos_proveedor__pagina_segunda,
+    pedidos_proveedor__pagina_techo,
     proveedores__todos,
     proveedores__categorias,
     proveedores__productos,
@@ -650,6 +657,14 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .listar_descartadas(&s(&e["id_usuario"]))
                 .await
                 .expect("papelera notificaciones");
+            serde_json::to_value(r).unwrap()
+        }
+        "pedidos_proveedor.pagina" => {
+            let repo = SqlitePedidoProveedorRepository::new(db.clone());
+            let r = repo
+                .get_page(e["limit"].as_i64().unwrap(), e["offset"].as_i64().unwrap(), opt_str(&e["search"]))
+                .await
+                .expect("página de pedidos");
             serde_json::to_value(r).unwrap()
         }
         "proveedores.todos" => {

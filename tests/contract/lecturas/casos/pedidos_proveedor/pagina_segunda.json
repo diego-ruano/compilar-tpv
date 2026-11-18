@@ -1,0 +1,13 @@
+{
+  "descripcion": "La segunda página de dos en dos: empieza donde acaba la primera, con el total de todos.",
+  "lectura": "pedidos_proveedor.pagina",
+  "seed": [
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-1', 'borrador', '2000-01-05 10:00:00');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-2', 'borrador', '2000-01-04 10:00:00');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-3', 'enviado', '2000-01-03 10:00:00');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-4', 'cancelado', '2000-01-02 10:00:00');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-5', 'borrador', '2000-01-01 10:00:00');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) VALUES ('lin-3', 'ped-3', 'Agua', 24);"
+  ],
+  "entrada": { "limit": 2, "offset": 2, "search": null }
+}

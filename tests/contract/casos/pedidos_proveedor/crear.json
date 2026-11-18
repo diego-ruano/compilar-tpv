@@ -1,0 +1,23 @@
+{
+  "descripcion": "Alta de un pedido en borrador con dos líneas (una sin precio ni unidad). La cabecera guarda la copia del nombre del proveedor, sacada de la base en la sentencia; las líneas quedan con su id y sus importes en céntimos. Un pedido de otro proveedor no se toca.",
+  "comando": "pedidos_proveedor.crear",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Email) VALUES ('prov-1', 'Cafés Ñandú', 'pedidos@nandu.test');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-2', 'Bebidas Sur');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-viejo', 'prov-2', 'enviado', '2026-01-01 10:00:00', 'Bebidas Sur');"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "id_proveedor": "prov-1",
+    "email_destino": "pedidos@nandu.test",
+    "notas": "Antes del viernes",
+    "lineas": [
+      { "id_linea": "lin-1", "nombre_producto": "Café en grano", "cantidad": 2.5, "precio_unitario": 1890, "unidad": "kg" },
+      { "id_linea": "lin-2", "nombre_producto": "Azúcar", "cantidad": 10, "precio_unitario": null, "unidad": null }
+    ]
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Envio, Notas, Nombre_Proveedor FROM Pedidos_Proveedor",
+    "Lineas_Pedido_Proveedor": "SELECT ID_Linea, ID_Pedido, Nombre_Producto, Cantidad, Precio_Unitario, Unidad FROM Lineas_Pedido_Proveedor"
+  }
+}

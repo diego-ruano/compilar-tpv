@@ -1,0 +1,15 @@
+{
+  "descripcion": "Se cancela un borrador cuyo proveedor se borró: se queda sin proveedor y conserva la copia del nombre que tenía.",
+  "comando": "pedidos_proveedor.cambiar_estado",
+  "seed": [
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-1', NULL, 'borrador', '2026-01-02 10:00:00', 'Bebidas Sur');"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "estado": "cancelado",
+    "fecha_envio": null
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, ID_Proveedor, Estado, Fecha_Envio, Nombre_Proveedor FROM Pedidos_Proveedor"
+  }
+}

@@ -49,6 +49,7 @@ import {
 	listar as listarNotificaciones,
 	listarPapelera,
 } from "../src/domains/notificaciones/notificaciones.queries";
+import { pagina as paginaDePedidos } from "../src/domains/pedidos_proveedor/pedidos_proveedor.queries";
 import {
 	getAll as proveedoresTodos,
 	getCategorias as proveedoresCategorias,
@@ -213,6 +214,16 @@ import casoNotifContar from "../../../tests/contract/lecturas/casos/notificacion
 import goldenNotifContar from "../../../tests/contract/lecturas/golden/notificaciones/contar_no_leidas.json";
 import casoNotifPapelera from "../../../tests/contract/lecturas/casos/notificaciones/papelera.json";
 import goldenNotifPapelera from "../../../tests/contract/lecturas/golden/notificaciones/papelera.json";
+import casoPedPagina from "../../../tests/contract/lecturas/casos/pedidos_proveedor/pagina.json";
+import goldenPedPagina from "../../../tests/contract/lecturas/golden/pedidos_proveedor/pagina.json";
+import casoPedBusqueda from "../../../tests/contract/lecturas/casos/pedidos_proveedor/pagina_busqueda.json";
+import goldenPedBusqueda from "../../../tests/contract/lecturas/golden/pedidos_proveedor/pagina_busqueda.json";
+import casoPedComodines from "../../../tests/contract/lecturas/casos/pedidos_proveedor/pagina_comodines.json";
+import goldenPedComodines from "../../../tests/contract/lecturas/golden/pedidos_proveedor/pagina_comodines.json";
+import casoPedSegunda from "../../../tests/contract/lecturas/casos/pedidos_proveedor/pagina_segunda.json";
+import goldenPedSegunda from "../../../tests/contract/lecturas/golden/pedidos_proveedor/pagina_segunda.json";
+import casoPedTecho from "../../../tests/contract/lecturas/casos/pedidos_proveedor/pagina_techo.json";
+import goldenPedTecho from "../../../tests/contract/lecturas/golden/pedidos_proveedor/pagina_techo.json";
 import casoProvTodos from "../../../tests/contract/lecturas/casos/proveedores/todos.json";
 import goldenProvTodos from "../../../tests/contract/lecturas/golden/proveedores/todos.json";
 import casoProvCategorias from "../../../tests/contract/lecturas/casos/proveedores/categorias.json";
@@ -406,6 +417,11 @@ const CASOS = [
 	{ nombre: "notificaciones_listar", caso: casoNotifListar, golden: goldenNotifListar },
 	{ nombre: "notificaciones_contar_no_leidas", caso: casoNotifContar, golden: goldenNotifContar },
 	{ nombre: "notificaciones_papelera", caso: casoNotifPapelera, golden: goldenNotifPapelera },
+	{ nombre: "pedidos_proveedor_pagina", caso: casoPedPagina, golden: goldenPedPagina },
+	{ nombre: "pedidos_proveedor_pagina_busqueda", caso: casoPedBusqueda, golden: goldenPedBusqueda },
+	{ nombre: "pedidos_proveedor_pagina_comodines", caso: casoPedComodines, golden: goldenPedComodines },
+	{ nombre: "pedidos_proveedor_pagina_segunda", caso: casoPedSegunda, golden: goldenPedSegunda },
+	{ nombre: "pedidos_proveedor_pagina_techo", caso: casoPedTecho, golden: goldenPedTecho },
 	{ nombre: "proveedores_todos", caso: casoProvTodos, golden: goldenProvTodos },
 	{ nombre: "proveedores_categorias", caso: casoProvCategorias, golden: goldenProvCategorias },
 	{ nombre: "proveedores_productos", caso: casoProvProductos, golden: goldenProvProductos },
@@ -658,6 +674,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return contarNoLeidas(db, e.id_usuario);
 		case "notificaciones.papelera":
 			return listarPapelera(db, e.id_usuario);
+		case "pedidos_proveedor.pagina":
+			return paginaDePedidos(db, e.limit, e.offset, e.search ?? null);
 		case "proveedores.todos":
 			return proveedoresTodos(db);
 		case "proveedores.categorias":

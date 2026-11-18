@@ -1,0 +1,23 @@
+{
+  "descripcion": "PROV-01: un pedido ya enviado no se edita. Los dos lados lo rechazan (conflict en la Main, la guarda pedido_no_editable en el worker) y no tocan ni la cabecera ni las líneas.",
+  "comando": "pedidos_proveedor.actualizar",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Fecha_Envio, Notas, Nombre_Proveedor) VALUES ('ped-1', 'prov-1', 'enviado', '2026-01-02 10:00:00', '2/1/26 11:00', 'Primera', 'Cafés Ñandú');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) VALUES ('lin-1', 'ped-1', 'Café en grano', 2);"
+  ],
+  "entrada": {
+    "rechazo": "conflict",
+    "id_pedido": "ped-1",
+    "id_proveedor": null,
+    "email_destino": null,
+    "notas": "Cambiada",
+    "lineas": [
+      { "id_linea": "lin-2", "nombre_producto": "Té", "cantidad": 1, "precio_unitario": null, "unidad": null }
+    ]
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, ID_Proveedor, Estado, Fecha_Envio, Notas, Nombre_Proveedor FROM Pedidos_Proveedor",
+    "Lineas_Pedido_Proveedor": "SELECT ID_Linea, ID_Pedido, Nombre_Producto FROM Lineas_Pedido_Proveedor"
+  }
+}

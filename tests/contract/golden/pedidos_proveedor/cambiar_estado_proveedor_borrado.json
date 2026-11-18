@@ -1,0 +1,11 @@
+{
+  "Pedidos_Proveedor": [
+    {
+      "Estado": "cancelado",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-1",
+      "ID_Proveedor": null,
+      "Nombre_Proveedor": "Bebidas Sur"
+    }
+  ]
+}

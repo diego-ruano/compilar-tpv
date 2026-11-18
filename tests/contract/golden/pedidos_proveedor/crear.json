@@ -1,0 +1,40 @@
+{
+  "Lineas_Pedido_Proveedor": [
+    {
+      "Cantidad": 2.5,
+      "ID_Linea": "lin-1",
+      "ID_Pedido": "ped-1",
+      "Nombre_Producto": "Café en grano",
+      "Precio_Unitario": 1890,
+      "Unidad": "kg"
+    },
+    {
+      "Cantidad": 10.0,
+      "ID_Linea": "lin-2",
+      "ID_Pedido": "ped-1",
+      "Nombre_Producto": "Azúcar",
+      "Precio_Unitario": null,
+      "Unidad": null
+    }
+  ],
+  "Pedidos_Proveedor": [
+    {
+      "Email_Destino": null,
+      "Estado": "enviado",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-viejo",
+      "ID_Proveedor": "prov-2",
+      "Nombre_Proveedor": "Bebidas Sur",
+      "Notas": null
+    },
+    {
+      "Email_Destino": "pedidos@nandu.test",
+      "Estado": "borrador",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-1",
+      "ID_Proveedor": "prov-1",
+      "Nombre_Proveedor": "Cafés Ñandú",
+      "Notas": "Antes del viernes"
+    }
+  ]
+}

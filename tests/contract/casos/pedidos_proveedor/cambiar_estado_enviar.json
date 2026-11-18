@@ -1,0 +1,17 @@
+{
+  "descripcion": "PROV-02: se envía un borrador. Guarda la fecha de envío y vuelve a copiar el nombre del proveedor, que se ha renombrado desde que se guardó el pedido. El pedido ya cancelado no cambia.",
+  "comando": "pedidos_proveedor.cambiar_estado",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú SL');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-1', 'prov-1', 'borrador', '2026-01-02 10:00:00', 'Cafés Ñandú');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-2', 'prov-1', 'cancelado', '2026-01-01 10:00:00', 'Cafés Ñandú');"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "estado": "enviado",
+    "fecha_envio": "18/11/26 12:34"
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, Estado, Fecha_Envio, Nombre_Proveedor FROM Pedidos_Proveedor"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "descripcion": "Buscar en la página de pedidos sin acentos ni mayúsculas: «NANDU» encuentra al proveedor «Cafés Ñandú SL» por su nombre de ahora y al pedido cuyo proveedor se borró por la copia «Ñandú Bebidas»; el que no lo menciona no sale. El total cuenta sólo los que casan.",
+  "lectura": "pedidos_proveedor.pagina",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú SL');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-a', 'prov-1', 'borrador', '2000-01-03 10:00:00', 'Otro nombre');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Nombre_Proveedor) VALUES ('ped-b', 'enviado', '2000-01-02 10:00:00', 'Ñandú Bebidas');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) VALUES ('ped-c', 'borrador', '2000-01-04 10:00:00', 'Pedido de limpieza');",
+    "INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) VALUES ('lin-1', 'ped-b', 'Agua', 24);"
+  ],
+  "entrada": { "limit": 50, "offset": 0, "search": "  NANDU " }
+}

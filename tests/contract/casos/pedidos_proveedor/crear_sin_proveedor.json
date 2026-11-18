@@ -1,0 +1,18 @@
+{
+  "descripcion": "Alta de un pedido sin proveedor y sin líneas, sólo con notas: la copia del nombre queda vacía.",
+  "comando": "pedidos_proveedor.crear",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú');"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "id_proveedor": null,
+    "email_destino": null,
+    "notas": "Lo de siempre",
+    "lineas": []
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Envio, Notas, Nombre_Proveedor FROM Pedidos_Proveedor",
+    "Lineas_Pedido_Proveedor": "SELECT ID_Linea, ID_Pedido FROM Lineas_Pedido_Proveedor"
+  }
+}

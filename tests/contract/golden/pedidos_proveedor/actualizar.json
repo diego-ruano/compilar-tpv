@@ -1,0 +1,48 @@
+{
+  "Lineas_Pedido_Proveedor": [
+    {
+      "Cantidad": 24.0,
+      "ID_Linea": "lin-otro",
+      "ID_Pedido": "ped-2",
+      "Nombre_Producto": "Agua",
+      "Precio_Unitario": null,
+      "Unidad": null
+    },
+    {
+      "Cantidad": 48.0,
+      "ID_Linea": "lin-3",
+      "ID_Pedido": "ped-1",
+      "Nombre_Producto": "Cerveza",
+      "Precio_Unitario": 95,
+      "Unidad": "botella"
+    },
+    {
+      "Cantidad": 0.0,
+      "ID_Linea": "lin-4",
+      "ID_Pedido": "ped-1",
+      "Nombre_Producto": "Tónica",
+      "Precio_Unitario": 0,
+      "Unidad": null
+    }
+  ],
+  "Pedidos_Proveedor": [
+    {
+      "Email_Destino": "b@sur.test",
+      "Estado": "borrador",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-1",
+      "ID_Proveedor": "prov-2",
+      "Nombre_Proveedor": "Bebidas Sur",
+      "Notas": null
+    },
+    {
+      "Email_Destino": null,
+      "Estado": "borrador",
+      "Fecha_Envio": null,
+      "ID_Pedido": "ped-2",
+      "ID_Proveedor": "prov-2",
+      "Nombre_Proveedor": "Bebidas Sur",
+      "Notas": null
+    }
+  ]
+}

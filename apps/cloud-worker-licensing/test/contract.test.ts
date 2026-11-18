@@ -100,6 +100,11 @@ import {
 	guardarProveedor,
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
+import {
+	actualizar as actualizarPedido,
+	cambiarEstado as cambiarEstadoPedido,
+	crear as crearPedido,
+} from "../src/domains/pedidos_proveedor/pedidos_proveedor.commands";
 import { cancelarReserva, deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
 import { estadoYOrigen, resolverCliente } from "../src/domains/reservas/reservas.queries";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
@@ -200,6 +205,20 @@ import casoProvEliminar from "../../../tests/contract/casos/proveedores/eliminar
 import goldenProvEliminar from "../../../tests/contract/golden/proveedores/eliminar.json";
 import casoProvVinculos from "../../../tests/contract/casos/proveedores/set_vinculos.json";
 import goldenProvVinculos from "../../../tests/contract/golden/proveedores/set_vinculos.json";
+import casoPedCrear from "../../../tests/contract/casos/pedidos_proveedor/crear.json";
+import goldenPedCrear from "../../../tests/contract/golden/pedidos_proveedor/crear.json";
+import casoPedCrearSinProv from "../../../tests/contract/casos/pedidos_proveedor/crear_sin_proveedor.json";
+import goldenPedCrearSinProv from "../../../tests/contract/golden/pedidos_proveedor/crear_sin_proveedor.json";
+import casoPedActualizar from "../../../tests/contract/casos/pedidos_proveedor/actualizar.json";
+import goldenPedActualizar from "../../../tests/contract/golden/pedidos_proveedor/actualizar.json";
+import casoPedActualizarEnviado from "../../../tests/contract/casos/pedidos_proveedor/actualizar_enviado.json";
+import goldenPedActualizarEnviado from "../../../tests/contract/golden/pedidos_proveedor/actualizar_enviado.json";
+import casoPedEnviar from "../../../tests/contract/casos/pedidos_proveedor/cambiar_estado_enviar.json";
+import goldenPedEnviar from "../../../tests/contract/golden/pedidos_proveedor/cambiar_estado_enviar.json";
+import casoPedProvBorrado from "../../../tests/contract/casos/pedidos_proveedor/cambiar_estado_proveedor_borrado.json";
+import goldenPedProvBorrado from "../../../tests/contract/golden/pedidos_proveedor/cambiar_estado_proveedor_borrado.json";
+import casoPedYaEnviado from "../../../tests/contract/casos/pedidos_proveedor/cambiar_estado_ya_enviado.json";
+import goldenPedYaEnviado from "../../../tests/contract/golden/pedidos_proveedor/cambiar_estado_ya_enviado.json";
 import casoResNuevo from "../../../tests/contract/casos/reservas/guardar_cliente_nuevo.json";
 import goldenResNuevo from "../../../tests/contract/golden/reservas/guardar_cliente_nuevo.json";
 import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cliente_existente.json";
@@ -407,6 +426,13 @@ const CASOS = [
 	{ nombre: "proveedores_guardar", caso: casoProvGuardar, golden: goldenProvGuardar },
 	{ nombre: "proveedores_eliminar", caso: casoProvEliminar, golden: goldenProvEliminar },
 	{ nombre: "proveedores_set_vinculos", caso: casoProvVinculos, golden: goldenProvVinculos },
+	{ nombre: "pedidos_proveedor_crear", caso: casoPedCrear, golden: goldenPedCrear },
+	{ nombre: "pedidos_proveedor_crear_sin_proveedor", caso: casoPedCrearSinProv, golden: goldenPedCrearSinProv },
+	{ nombre: "pedidos_proveedor_actualizar", caso: casoPedActualizar, golden: goldenPedActualizar },
+	{ nombre: "pedidos_proveedor_actualizar_enviado", caso: casoPedActualizarEnviado, golden: goldenPedActualizarEnviado },
+	{ nombre: "pedidos_proveedor_cambiar_estado_enviar", caso: casoPedEnviar, golden: goldenPedEnviar },
+	{ nombre: "pedidos_proveedor_cambiar_estado_proveedor_borrado", caso: casoPedProvBorrado, golden: goldenPedProvBorrado },
+	{ nombre: "pedidos_proveedor_cambiar_estado_ya_enviado", caso: casoPedYaEnviado, golden: goldenPedYaEnviado },
 	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
 	{ nombre: "reservas_guardar_sin_mesa", caso: casoResSinMesa, golden: goldenResSinMesa },
@@ -810,6 +836,26 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					producto_ids: caso.entrada.producto_ids,
 				} as any),
 			);
+			return;
+		}
+		case "pedidos_proveedor.crear": {
+			aplicar(hub, sql, crearPedido(caso.entrada as any));
+			return;
+		}
+		case "pedidos_proveedor.actualizar": {
+			const { id_pedido, rechazo, ...edicion } = caso.entrada;
+			try {
+				aplicar(hub, sql, actualizarPedido(id_pedido, edicion as any));
+				expect(rechazo, "el worker escribió lo que la Main rechaza").toBeUndefined();
+			} catch (e) {
+				// Lo que la Main rechaza con `conflict`, aquí lo rechaza la guarda del comando (SYNC-30).
+				if (!(rechazo === "conflict" && e instanceof GuardaIncumplida && e.code === "pedido_no_editable")) throw e;
+			}
+			return;
+		}
+		case "pedidos_proveedor.cambiar_estado": {
+			const { id_pedido, ...estado } = caso.entrada;
+			aplicar(hub, sql, cambiarEstadoPedido(id_pedido, estado as any));
 			return;
 		}
 		case "reservas.guardar": {

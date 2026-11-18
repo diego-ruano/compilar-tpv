@@ -1,0 +1,61 @@
+{
+  "pedidos": [
+    {
+      "email_destino": "b@sur.test",
+      "estado": "enviado",
+      "fecha_creacion": "2000-01-02 10:00:00",
+      "fecha_envio": "2/1/00 11:00",
+      "id_pedido": "ped-c",
+      "id_proveedor": null,
+      "lineas": [
+        {
+          "cantidad": 48.0,
+          "id_linea": "lin-c",
+          "nombre_producto": "Cerveza",
+          "precio_unitario": 95,
+          "unidad": "botella"
+        }
+      ],
+      "nombre_proveedor": "Bebidas Sur",
+      "notas": null
+    },
+    {
+      "email_destino": "pedidos@nandu.test",
+      "estado": "borrador",
+      "fecha_creacion": "2000-01-02 10:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-a",
+      "id_proveedor": "prov-1",
+      "lineas": [
+        {
+          "cantidad": 2.5,
+          "id_linea": "lin-z",
+          "nombre_producto": "Café en grano",
+          "precio_unitario": 1890,
+          "unidad": "kg"
+        },
+        {
+          "cantidad": 10.0,
+          "id_linea": "lin-a",
+          "nombre_producto": "Azúcar",
+          "precio_unitario": null,
+          "unidad": null
+        }
+      ],
+      "nombre_proveedor": "Cafés Ñandú SL",
+      "notas": "Antes del viernes"
+    },
+    {
+      "email_destino": null,
+      "estado": "cancelado",
+      "fecha_creacion": "2000-01-01 09:00:00",
+      "fecha_envio": null,
+      "id_pedido": "ped-b",
+      "id_proveedor": null,
+      "lineas": [],
+      "nombre_proveedor": null,
+      "notas": "Lo de siempre"
+    }
+  ],
+  "total": 3
+}

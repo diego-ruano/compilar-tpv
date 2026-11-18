@@ -1,0 +1,10 @@
+{
+  "Pedidos_Proveedor": [
+    {
+      "Estado": "enviado",
+      "Fecha_Envio": "2/1/26 11:00",
+      "ID_Pedido": "ped-1",
+      "Nombre_Proveedor": "Cafés Ñandú"
+    }
+  ]
+}

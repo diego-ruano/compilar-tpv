@@ -40,6 +40,7 @@ use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::login::LoginRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
+use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
@@ -68,6 +69,7 @@ use crate::inventario::SqliteInventarioRepository;
 use crate::login::SqliteLoginRepository;
 use crate::mesas::SqliteMesasRepository;
 use crate::notificaciones::SqliteNotificacionesRepository;
+use crate::pedidos_proveedor::SqlitePedidoProveedorRepository;
 use crate::proveedores::SqliteProveedoresRepository;
 use crate::reservas::SqliteReservasRepository;
 use crate::tareas::SqliteTareasRepository;
@@ -257,8 +259,28 @@ fn como_espera_el_caso<T: std::fmt::Debug>(e: &Json, r: tpv_application::error::
             matches!(r, Err(tpv_application::error::AppError::NotFound(_))),
             "se esperaba not_found: {r:?}"
         ),
+        // En el worker, la guarda del comando (SYNC-30).
+        Some("conflict") => assert!(
+            matches!(r, Err(tpv_application::error::AppError::Conflict(_))),
+            "se esperaba conflict: {r:?}"
+        ),
         Some(otro) => panic!("rechazo desconocido en el caso: {otro}"),
     }
+}
+
+/// Las líneas de un pedido del caso, ya válidas (el arnés entra por debajo de la validación).
+fn lineas_pedido(v: &Json) -> Vec<tpv_domain::pedidos_proveedor::LineaPedidoNueva> {
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|l| tpv_domain::pedidos_proveedor::LineaPedidoNueva {
+            id_linea: s(&l["id_linea"]),
+            nombre_producto: s(&l["nombre_producto"]),
+            cantidad: l["cantidad"].as_f64().unwrap(),
+            precio_unitario: dinero(&l["precio_unitario"]),
+            unidad: opt_str(&l["unidad"]),
+        })
+        .collect()
 }
 
 /// Genera **un `#[tokio::test]` por caso** (en vez de un solo bucle): cada caso con su propia BD,
@@ -326,6 +348,13 @@ casos_de_contrato! {
     proveedores__guardar,
     proveedores__eliminar,
     proveedores__set_vinculos,
+    pedidos_proveedor__crear,
+    pedidos_proveedor__crear_sin_proveedor,
+    pedidos_proveedor__actualizar,
+    pedidos_proveedor__actualizar_enviado,
+    pedidos_proveedor__cambiar_estado_enviar,
+    pedidos_proveedor__cambiar_estado_proveedor_borrado,
+    pedidos_proveedor__cambiar_estado_ya_enviado,
     reservas__guardar_cliente_nuevo,
     reservas__guardar_cliente_existente,
     reservas__guardar_sin_mesa,
@@ -666,6 +695,39 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "proveedores.eliminar" => {
             let repo = SqliteProveedoresRepository::new(db.clone());
             repo.eliminar(&s(&e["id_proveedor"])).await.expect("eliminar proveedor");
+        }
+        "pedidos_proveedor.crear" => {
+            let repo = SqlitePedidoProveedorRepository::new(db.clone());
+            repo.crear(
+                tpv_domain::pedidos_proveedor::PedidoProveedorNuevo {
+                    id_pedido: s(&e["id_pedido"]),
+                    id_proveedor: opt_str(&e["id_proveedor"]),
+                    email_destino: opt_str(&e["email_destino"]),
+                    notas: opt_str(&e["notas"]),
+                },
+                lineas_pedido(&e["lineas"]),
+            )
+            .await
+            .expect("crear pedido");
+        }
+        "pedidos_proveedor.actualizar" => {
+            let repo = SqlitePedidoProveedorRepository::new(db.clone());
+            let r = repo
+                .actualizar(
+                    &s(&e["id_pedido"]),
+                    opt_str(&e["id_proveedor"]),
+                    opt_str(&e["email_destino"]),
+                    opt_str(&e["notas"]),
+                    lineas_pedido(&e["lineas"]),
+                )
+                .await;
+            como_espera_el_caso(e, r);
+        }
+        "pedidos_proveedor.cambiar_estado" => {
+            let repo = SqlitePedidoProveedorRepository::new(db.clone());
+            repo.cambiar_estado(&s(&e["id_pedido"]), &s(&e["estado"]), opt_str(&e["fecha_envio"]))
+                .await
+                .expect("cambiar estado del pedido");
         }
         "proveedores.set_vinculos" => {
             let repo = SqliteProveedoresRepository::new(db.clone());

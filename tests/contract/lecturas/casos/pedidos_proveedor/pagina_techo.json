@@ -1,0 +1,12 @@
+{
+  "descripcion": "El techo de la página (2000 líneas entre todos sus pedidos): con pedidos de 1200 y 900 líneas, la primera página lleva sólo el primero, porque con el segundo pasaría. El total sigue contando los dos.",
+  "lectura": "pedidos_proveedor.pagina",
+  "seed": [
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-1', 'borrador', '2000-01-02 10:00:00');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('ped-2', 'borrador', '2000-01-01 10:00:00');",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1200) INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) SELECT 'ped-1-' || i, 'ped-1', 'Producto ' || i, 1 FROM n;",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 900) INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) SELECT 'ped-2-' || i, 'ped-2', 'Producto ' || i, 1 FROM n;"
+  ],
+  "entrada": { "limit": 50, "offset": 0, "search": null },
+  "omitir": ["lineas"]
+}

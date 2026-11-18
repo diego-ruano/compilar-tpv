@@ -1,0 +1,9 @@
+{
+  "descripcion": "Lo que se escribe en el buscador se busca tal cual (RI-52): «50%» encuentra el pedido con «descuento 50%» en las notas y no el de «pedir 500 cajas»; el estado también se busca.",
+  "lectura": "pedidos_proveedor.pagina",
+  "seed": [
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) VALUES ('ped-50', 'borrador', '2000-01-01 10:00:00', 'descuento 50%');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) VALUES ('ped-500', 'enviado', '2000-01-02 10:00:00', 'pedir 500 cajas');"
+  ],
+  "entrada": { "limit": 50, "offset": 0, "search": "50%" }
+}

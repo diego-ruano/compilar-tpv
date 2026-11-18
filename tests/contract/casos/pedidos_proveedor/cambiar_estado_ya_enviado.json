@@ -1,0 +1,16 @@
+{
+  "descripcion": "PROV-02: un pedido ya enviado no se cancela ni se vuelve a enviar. La sentencia no toca nada en ningún lado.",
+  "comando": "pedidos_proveedor.cambiar_estado",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Cafés Ñandú SL');",
+    "INSERT INTO Pedidos_Proveedor (ID_Pedido, ID_Proveedor, Estado, Fecha_Creacion, Fecha_Envio, Nombre_Proveedor) VALUES ('ped-1', 'prov-1', 'enviado', '2026-01-02 10:00:00', '2/1/26 11:00', 'Cafés Ñandú');"
+  ],
+  "entrada": {
+    "id_pedido": "ped-1",
+    "estado": "cancelado",
+    "fecha_envio": null
+  },
+  "snapshot": {
+    "Pedidos_Proveedor": "SELECT ID_Pedido, Estado, Fecha_Envio, Nombre_Proveedor FROM Pedidos_Proveedor"
+  }
+}
