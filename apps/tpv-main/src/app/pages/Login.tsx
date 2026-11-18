@@ -94,6 +94,16 @@ export default function Login() {
     // Solo visual: mostrar/ocultar el PIN en el display (no afecta a la lógica).
     const [showPin, setShowPin] = useState(false);
 
+    /**
+     * Borra lo tecleado y vuelve a ocultar el PIN (AUT-INC-01): «Mostrar PIN» es de quien lo
+     * pulsó. Se quedaba activo y el siguiente trabajador tecleaba su PIN a la vista.
+     */
+    const olvidarPin = () => {
+        pinRef.current = "";
+        setPin("");
+        setShowPin(false);
+    };
+
     // LOGIN-07: recuperar el PIN por correo. Sólo administradores y sólo en la Main: a los demás
     // se lo cambia un administrador desde Trabajadores, y la Handy no guarda PINs.
     const [recuperandoPin, setRecuperandoPin] = useState(false);
@@ -199,8 +209,8 @@ export default function Login() {
     }, []);
 
     useEffect(() => {
-        pinRef.current = "";
-        setPin("");
+        // Otro trabajador (o ninguno, con «Cambiar usuario»): ni su PIN ni el ojo abierto.
+        olvidarPin();
         setIsSubmitting(false);
         setPunchStatus(null);
 
@@ -329,8 +339,7 @@ export default function Login() {
 
             setPunchStatus(st);
 
-            pinRef.current = "";
-            setPin("");
+            olvidarPin();
 
             toast.success(
                 tipo === "entrada" ? "Entrada registrada" : "Salida registrada",
@@ -371,6 +380,8 @@ export default function Login() {
             if (!ok.rol || !ok.id_usuario) {
                 throw new Error("Login sin datos de sesión válidos");
             }
+            // Al volver al login (cerrar sesión), el PIN no sigue a la vista.
+            olvidarPin();
 
             // El setup inicial (cambiar PIN/email del admin) es responsabilidad de la MAIN.
             // En un Handy NO entramos al flujo de /setup: hacerlo provoca un bucle de
@@ -402,8 +413,7 @@ export default function Login() {
             void navigate(ok.rol === "Cocinero" ? "/Comandas" : "/", { replace: true });
         } catch (e) {
             toast.error("Acceso denegado", toAppError(e).message);
-            pinRef.current = "";
-            setPin("");
+            olvidarPin();
         } finally {
             accionEnCursoRef.current = false;
             setIsSubmitting(false);
