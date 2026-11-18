@@ -33,7 +33,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 });
 
 const { entregarToken, reclamarCodigo, soltarCodigo } = await import("../src/domains/pairing/pairing.handy");
-const { rechazarSolicitud } = await import("../src/domains/pairing/pairing.main");
+const { rechazarSolicitud, solicitudesPendientes } = await import("../src/domains/pairing/pairing.main");
 const { cancelSchema, claimSchema, fetchTokenSchema } = await import("../src/domains/pairing/pairing.schemas");
 const { pairingRoutes } = await import("../src/domains/pairing/pairing.routes");
 
@@ -635,6 +635,65 @@ describe("cancelar en la Handy", () => {
 
 			const otraVez = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
 			expect((await m.recoger(a, CODIGO, otraVez.body.nonceB64, T0 + 2 * MIN)).status).toBe(200);
+		});
+	});
+});
+
+describe("una solicitud de quien ya está vinculado", () => {
+	// La Handy se reinicia esperando la aprobación y vuelve con el vínculo que ya tenía: su
+	// solicitud se quedaba en la lista de la Main hasta caducar el código.
+	function vinculado(m: Mundo, d: Dispositivo, ultimaVez: number, extra: { revocado?: number; pub?: string } = {}) {
+		m.sql.exec(
+			`INSERT INTO devices (device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms, device_pubkey_b64)
+			 VALUES (?, ?, 'handy', ?, ?, ?, ?);`,
+			d.id,
+			TENANT,
+			T0 - 60 * MIN,
+			ultimaVez,
+			extra.revocado ?? null,
+			extra.pub ?? d.pub,
+		);
+	}
+	async function pendientes(m: Mundo, ahora: number): Promise<string[]> {
+		const r = await solicitudesPendientes(m.db, TENANT, ahora);
+		return ((r.cuerpo as any).items as any[]).map((i) => i.claimedDeviceId);
+	}
+
+	it("sale de la lista cuando el dispositivo vuelve a usar su vínculo", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("vinculado-vuelve", async (m) => {
+			vinculado(m, a, T0 - 30 * MIN);
+			await m.reclamar(a, CODIGO, T0 + MIN);
+			expect(await pendientes(m, T0 + MIN)).toEqual([a.id]);
+
+			// Se reinicia y su WebSocket conecta con el token de antes (`ws/canje.ts`).
+			m.sql.exec(`UPDATE devices SET last_seen_at_ms=? WHERE device_id=?;`, T0 + 2 * MIN, a.id);
+			expect(await pendientes(m, T0 + 3 * MIN)).toEqual([]);
+			const fila = m.solicitud(CODIGO);
+			expect(fila.status).toBe("pending");
+			expect(fila.claimed_by_device_id).toBeNull();
+		});
+	});
+
+	it("se queda si no ha vuelto a conectar: es como se vuelve a vincular un equipo que borró su vínculo", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("vinculado-sin-volver", async (m) => {
+			vinculado(m, a, T0 - 30 * MIN);
+			await m.reclamar(a, CODIGO, T0 + MIN);
+			expect(await pendientes(m, T0 + 3 * MIN)).toEqual([a.id]);
+		});
+	});
+
+	it("se queda si el dispositivo está revocado o la clave no es la suya", async () => {
+		const a = await dispositivo("handy-a", 1);
+		const b = await dispositivo("handy-b", 2);
+		const otro = await dispositivo("handy-otro", 3);
+		await conPlanoDeControl("vinculado-revocado", async (m) => {
+			vinculado(m, a, T0 + 2 * MIN, { revocado: T0 - 10 * MIN });
+			vinculado(m, b, T0 + 2 * MIN, { pub: otro.pub });
+			await m.reclamar(a, CODIGO, T0 + MIN);
+			await m.reclamar(b, OTRO_CODIGO, T0 + MIN, "10.0.0.2");
+			expect((await pendientes(m, T0 + 3 * MIN)).sort()).toEqual([a.id, b.id].sort());
 		});
 	});
 });

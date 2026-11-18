@@ -10,6 +10,7 @@
 
 import type { Client } from "@libsql/client/web";
 
+import { SQL_DEVICE_ACTIVO } from "../../lib/deviceAuth";
 import { rowsAffected } from "../../server/db";
 import { sha256HexStr } from "../../server/utils/crypto";
 import { bytesToB64 } from "../../server/utils/base64";
@@ -104,6 +105,39 @@ export async function solicitudesPendientes(
 			  AND status IN ('pending', 'approved');
 		`,
 		args: [tenantId, now],
+	});
+
+	// Una solicitud de un dispositivo que ya está vinculado y que ha vuelto a usar su vínculo
+	// DESPUÉS de reclamarla no la espera nadie: la Handy se reinició esperando la aprobación y
+	// volvió con el vínculo que ya tenía. Antes se quedaba en la lista de la Main hasta caducar el
+	// código, y aprobarla no servía para nada. Se suelta como la suelta «Cancelar» en la Handy.
+	//
+	// «Ha vuelto a usar su vínculo» es que su `last_seen_at_ms` es posterior al reclamo: lo apunta
+	// cada conexión de su WebSocket (`ws/canje.ts`), y sólo conecta quien tiene el token. Un equipo
+	// que borró su vínculo (Configuración → Dispositivo en la Handy) sigue con su fila activa aquí,
+	// pero no conecta, y su solicitud se queda: es como se vuelve a vincular. Tiene que ser la
+	// misma clave: otra clave con el mismo `device_id` no es ese equipo.
+	await db.execute({
+		sql: `
+			UPDATE pair_requests
+			SET claimed_at_ms=NULL,
+			    claimed_by_device_id=NULL,
+			    claimed_device_pubkey_b64=NULL,
+			    claimed_device_name=NULL
+			WHERE tenant_id=?
+			  AND status='pending'
+			  AND used_at_ms IS NULL
+			  AND claimed_by_device_id IS NOT NULL
+			  AND EXISTS (
+				SELECT 1 FROM devices d
+				WHERE d.tenant_id = pair_requests.tenant_id
+				  AND d.device_id = pair_requests.claimed_by_device_id
+				  AND d.${SQL_DEVICE_ACTIVO}
+				  AND d.device_pubkey_b64 = pair_requests.claimed_device_pubkey_b64
+				  AND d.last_seen_at_ms > pair_requests.claimed_at_ms
+			  );
+		`,
+		args: [tenantId],
 	});
 
 	const r = await db.execute({
