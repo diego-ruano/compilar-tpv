@@ -1,0 +1,21 @@
+{
+  "descripcion": "Edición de un gasto sin cambiarlo de día: conserva su Momento_Caja (el dinero salió cuando salió), como en la Main (CAJ-INC-01).",
+  "comando": "cuentas.update_gasto",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuciones SA');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja, Momento_Caja) VALUES ('gasto-1', '2026-01-01', 'Concepto viejo', 1000, 'Otros', 'prov-1', 1, '2026-01-01 09:15:00');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'No se toca', 550, 'Otros', NULL);"
+  ],
+  "entrada": {
+    "id_gasto": "gasto-1",
+    "fecha": "2026-01-01",
+    "tipo_gasto": "Personal",
+    "concepto": "Concepto nuevo",
+    "importe": 9999,
+    "proveedor_id": null,
+    "pagado_con_caja": false
+  },
+  "snapshot": {
+    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja, Momento_Caja FROM Cuentas_Gastos"
+  }
+}

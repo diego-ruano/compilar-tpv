@@ -28,6 +28,14 @@ function idStep(provided?: string | null) {
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
+/**
+ * CAJ-INC-01 · La hora de caja de un gasto que se apunta (o se cambia de día) para el día `?2`, la
+ * misma regla que `momento_caja_de_gasto` en la Main: si es de hoy, ahora (el dinero sale ahora);
+ * si es de otro día, ese día a las 12:00 (`HORA_DE_UN_GASTO`). La hora la pone quien escribe:
+ * `'now','localtime'` se fija con la de la Handy (`X-Client-Now`).
+ */
+const MOMENTO_CAJA_DEL_GASTO = `CASE WHEN date(?2) = date('now','localtime') THEN datetime('now','localtime') ELSE date(?2) || ' 12:00:00' END`;
+
 export function createGasto(input: CreateGastoInput): BuiltCommand {
 	const cloudPayload = {
 		id_gasto: input.id_gasto ?? null,
@@ -46,15 +54,16 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 		{
 			kind: "execute",
 			sql: `
-				INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja)
-				VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7)
+				INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja, Momento_Caja)
+				VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7, ${MOMENTO_CAJA_DEL_GASTO})
 				ON CONFLICT(ID_Gasto) DO UPDATE SET
 					Fecha = excluded.Fecha,
 					Concepto = excluded.Concepto,
 					Importe = excluded.Importe,
 					Tipo_Gasto = excluded.Tipo_Gasto,
 					ID_Proveedor = excluded.ID_Proveedor,
-					Pagado_Con_Caja = excluded.Pagado_Con_Caja;
+					Pagado_Con_Caja = excluded.Pagado_Con_Caja,
+					Momento_Caja = excluded.Momento_Caja;
 			`,
 			args: [
 				REF_ID,
@@ -101,7 +110,10 @@ export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltComm
 				sql: `
 					UPDATE Cuentas_Gastos
 					SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6,
-						Pagado_Con_Caja = ?7
+						Pagado_Con_Caja = ?7,
+						-- CAJ-INC-01: en el mismo día conserva su hora de caja; si cambia de día, la
+						-- del día nuevo. Como actualizar_gasto en la Main.
+						Momento_Caja = CASE WHEN date(?2) IS date(Fecha) THEN Momento_Caja ELSE ${MOMENTO_CAJA_DEL_GASTO} END
 					WHERE ID_Gasto = ?1;
 				`,
 				args: [

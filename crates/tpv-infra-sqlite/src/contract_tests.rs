@@ -363,6 +363,7 @@ casos_de_contrato! {
     mesas__kitchen_set_line_state,
     cuentas__create_gasto,
     cuentas__update_gasto,
+    cuentas__update_gasto_mismo_dia,
     cuentas__delete_gasto,
     cuentas__update_pago,
     cuentas__anular_pago,

@@ -290,6 +290,8 @@ import casoCuentasCrearGasto from "../../../tests/contract/casos/cuentas/create_
 import goldenCuentasCrearGasto from "../../../tests/contract/golden/cuentas/create_gasto.json";
 import casoCuentasUpdateGasto from "../../../tests/contract/casos/cuentas/update_gasto.json";
 import goldenCuentasUpdateGasto from "../../../tests/contract/golden/cuentas/update_gasto.json";
+import casoCuentasUpdateGastoMismoDia from "../../../tests/contract/casos/cuentas/update_gasto_mismo_dia.json";
+import goldenCuentasUpdateGastoMismoDia from "../../../tests/contract/golden/cuentas/update_gasto_mismo_dia.json";
 import casoCuentasDeleteGasto from "../../../tests/contract/casos/cuentas/delete_gasto.json";
 import goldenCuentasDeleteGasto from "../../../tests/contract/golden/cuentas/delete_gasto.json";
 import casoCuentasUpdatePago from "../../../tests/contract/casos/cuentas/update_pago.json";
@@ -454,6 +456,11 @@ const CASOS = [
 	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
 	{ nombre: "cuentas_create_gasto", caso: casoCuentasCrearGasto, golden: goldenCuentasCrearGasto },
 	{ nombre: "cuentas_update_gasto", caso: casoCuentasUpdateGasto, golden: goldenCuentasUpdateGasto },
+	{
+		nombre: "cuentas_update_gasto_mismo_dia",
+		caso: casoCuentasUpdateGastoMismoDia,
+		golden: goldenCuentasUpdateGastoMismoDia,
+	},
 	{ nombre: "cuentas_delete_gasto", caso: casoCuentasDeleteGasto, golden: goldenCuentasDeleteGasto },
 	{ nombre: "cuentas_update_pago", caso: casoCuentasUpdatePago, golden: goldenCuentasUpdatePago },
 	{ nombre: "cuentas_anular_pago", caso: casoCuentasAnularPago, golden: goldenCuentasAnularPago },

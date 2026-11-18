@@ -88,8 +88,9 @@ retirado  = contado − dejado
   ella cuenta a las 12:00 de su día. Es la misma expresión en el SQL del arqueo
   (`COALESCE(Momento_Caja, …)`) y en `momento_de_gasto_guardado`, que usa la rectificación. Así, el
   hielo pagado a la 01:20 cuenta en el cierre de la 01:30, y el gasto de la tarde apuntado al día
-  siguiente cae en el cierre de esa noche aunque se cierre de madrugada. El worker no escribe gastos
-  (las rutas de caja se vetan a la Handy).
+  siguiente cae en el cierre de esa noche aunque se cierre de madrugada. Las rutas de caja del worker
+  se vetan a la Handy, pero sus comandos de gasto (`createGasto`, `updateGasto`) siguen la misma
+  regla (`MOMENTO_CAJA_DEL_GASTO`), y los casos de contrato lo comparan.
 - **Lo que se deja en el cajón es el fondo del cierre siguiente.** El fondo sólo se acepta de la
   entrada en el **primer** cierre; en los demás lo manda el `Dejado` del anterior, para que nadie
   pueda reescribir el punto de partida y hacer desaparecer un descuadre.

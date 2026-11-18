@@ -6,6 +6,7 @@
       "ID_Gasto": "gasto-nuevo-1",
       "ID_Proveedor": "prov-1",
       "Importe": 4275,
+      "Momento_Caja": "2026-03-14 12:00:00",
       "Pagado_Con_Caja": 1,
       "Tipo_Gasto": "Suministros"
     }
