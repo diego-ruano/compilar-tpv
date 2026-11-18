@@ -6,7 +6,6 @@ FileText,
 Pencil,
 Printer,
 ReceiptText,
-Send,
 Trash2,
 Undo2,
 Wallet,
@@ -1152,14 +1151,6 @@ export default function Cuentas() {
                         >
                             <FileDown className="size-4" aria-hidden />
                             {savingPdf ? "Generando…" : "Guardar PDF"}
-                        </button>
-
-                        <button
-                            type="button"
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
-                        >
-                            <Send className="size-4" aria-hidden />
-                            Enviar a gestoría
                         </button>
 
                         <button
