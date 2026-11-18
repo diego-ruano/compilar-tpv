@@ -5,7 +5,10 @@ use tpv_contracts::pedidos_proveedor::{
     PedidosPageDto,
 };
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
-use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
+use tpv_domain::pedidos_proveedor::{
+    estado_nuevo, validar_lineas, LineaPedidoNueva, PedidoProveedorNuevo, MSG_FALTA_EL_PEDIDO,
+};
+use tpv_contracts::pedidos_proveedor::LineaPedidoInput;
 
 use crate::error::{AppError, AppResult};
 use crate::ports::notificaciones::Notifier;
@@ -40,20 +43,7 @@ pub async fn crear(
     )
     .map_err(AppError::validation)?;
 
-    let lineas: Result<Vec<LineaPedidoNueva>, _> = input
-        .lineas
-        .into_iter()
-        .map(|l| {
-            LineaPedidoNueva::validar(
-                l.id_linea,
-                l.nombre_producto,
-                l.cantidad,
-                l.precio_unitario,
-                l.unidad,
-            )
-        })
-        .collect();
-    let lineas = lineas.map_err(AppError::validation)?;
+    let lineas = lineas_validas(input.lineas)?;
 
     let id = repo.crear(pedido, lineas).await?;
 
@@ -78,35 +68,44 @@ pub async fn crear(
     Ok(id)
 }
 
+/// Las líneas que llegan, validadas como en el worker: su tope y cada una en su orden.
+fn lineas_validas(lineas: Vec<LineaPedidoInput>) -> AppResult<Vec<LineaPedidoNueva>> {
+    validar_lineas(
+        lineas
+            .into_iter()
+            .map(|l| LineaPedidoNueva {
+                id_linea: l.id_linea,
+                nombre_producto: l.nombre_producto,
+                cantidad: l.cantidad,
+                precio_unitario: l.precio_unitario,
+                unidad: l.unidad,
+            })
+            .collect(),
+    )
+    .map_err(AppError::validation)
+}
+
+/// Edita un borrador. Uno que ya se envió o se canceló no se toca, y se dice
+/// (`MSG_PEDIDO_NO_EDITABLE`, con `conflict`): lo decide el repositorio dentro de su escritura.
 pub async fn actualizar(
     repo: &dyn PedidoProveedorRepository,
     input: PedidosActualizarInput,
 ) -> AppResult<bool> {
-    let id = input.id_pedido.trim().to_string();
-    if id.is_empty() {
-        return Err(AppError::validation("Falta el pedido."));
-    }
-
-    let lineas: Result<Vec<LineaPedidoNueva>, _> = input
-        .lineas
-        .into_iter()
-        .map(|l| {
-            LineaPedidoNueva::validar(
-                l.id_linea,
-                l.nombre_producto,
-                l.cantidad,
-                l.precio_unitario,
-                l.unidad,
-            )
-        })
-        .collect();
-    let lineas = lineas.map_err(AppError::validation)?;
-
-    repo.actualizar(
-        &id,
+    // La cabecera se valida y se limpia igual que al crearlo.
+    let pedido = PedidoProveedorNuevo::validar(
+        input.id_pedido,
         input.id_proveedor,
         input.email_destino,
         input.notas,
+    )
+    .map_err(AppError::validation)?;
+    let lineas = lineas_validas(input.lineas)?;
+
+    repo.actualizar(
+        &pedido.id_pedido,
+        pedido.id_proveedor,
+        pedido.email_destino,
+        pedido.notas,
         lineas,
     )
     .await
@@ -119,13 +118,11 @@ pub async fn cambiar_estado(
 ) -> AppResult<bool> {
     let id = input.id_pedido.trim().to_string();
     if id.is_empty() {
-        return Err(AppError::validation("Falta el pedido."));
+        return Err(AppError::validation(MSG_FALTA_EL_PEDIDO));
     }
-    let estado = input.estado.trim().to_string();
-    if !matches!(estado.as_str(), "cancelado" | "enviado") {
-        return Err(AppError::validation("estado inválido (cancelado|enviado)"));
-    }
-    let cambiado = repo.cambiar_estado(&id, &estado, input.fecha_envio).await?;
+    let estado = estado_nuevo(&input.estado).map_err(AppError::validation)?;
+    let fecha_envio = tpv_domain::texto::limpiar_opcional(input.fecha_envio);
+    let cambiado = repo.cambiar_estado(&id, estado, fecha_envio).await?;
 
     // El pedido deja de estar en borrador (se envió o se canceló), así que el aviso "pendiente de
     // aprobar" que emitió `crear` ya no aplica: lo resolvemos. Sin esto la notificación se quedaba

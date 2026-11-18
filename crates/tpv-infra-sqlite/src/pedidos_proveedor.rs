@@ -1,7 +1,9 @@
-//! Adaptador SQLite del repositorio de pedidos a proveedores. Local-First (sin outbox).
+//! Adaptador SQLite del repositorio de pedidos a proveedores. Sus escrituras suben por el outbox
+//! (`WriteGuard::execute`), y el worker escribe lo mismo (`domains/pedidos_proveedor`, PED-HANDY):
+//! los arneses de contrato lo fijan.
 
 use crate::util::now_local_datetime;
-use crate::consultas::{db_err};
+use crate::consultas::{db_err, lista_json};
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -9,10 +11,12 @@ use async_trait::async_trait;
 use crate::ejecutor::Value;
 use crate::ejecutor::Row;
 
-use tpv_application::error::AppResult;
+use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;
 use tpv_contracts::pedidos_proveedor::{LineaPedidoDto, PedidoProveedorDto, PedidosPageDto};
-use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
+use tpv_domain::pedidos_proveedor::{
+    LineaPedidoNueva, PedidoProveedorNuevo, MSG_PEDIDO_NO_EDITABLE, TECHO_LINEAS_PAGINA,
+};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_dinero, opt_text, v_dinero, v_f64, v_string};
@@ -100,14 +104,16 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
             None => 0,
         };
 
-        // 2) Página de pedidos (LIMIT/OFFSET van tras los parámetros del WHERE).
+        // 2) Página de pedidos (LIMIT/OFFSET van tras los parámetros del WHERE), con cuántas líneas
+        //    lleva cada uno. Lo más reciente primero; la clave sólo desempata.
         let base = where_params.len();
         let sql_pedidos = format!(
             "SELECT p.ID_Pedido, p.ID_Proveedor, {NOMBRE_DEL_PROVEEDOR}, \
-                    p.Email_Destino, p.Estado, p.Fecha_Creacion, p.Fecha_Envio, p.Notas \
+                    p.Email_Destino, p.Estado, p.Fecha_Creacion, p.Fecha_Envio, p.Notas, \
+                    (SELECT COUNT(*) FROM Lineas_Pedido_Proveedor l WHERE l.ID_Pedido = p.ID_Pedido) \
              FROM Pedidos_Proveedor p \
              LEFT JOIN Proveedores pr ON pr.ID_Proveedor = p.ID_Proveedor{where_sql} \
-             ORDER BY p.Fecha_Creacion DESC LIMIT ?{} OFFSET ?{};",
+             ORDER BY p.Fecha_Creacion DESC, p.ID_Pedido DESC LIMIT ?{} OFFSET ?{};",
             base + 1,
             base + 2
         );
@@ -117,8 +123,19 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
 
         let mut rows = db.query(&sql_pedidos, page_params).await.map_err(db_err)?;
         let mut pedidos: Vec<PedidoProveedorDto> = Vec::new();
+        // El techo de la página (`TECHO_LINEAS_PAGINA`): se corta antes del pedido que lo pasaría,
+        // y siempre va al menos uno. El siguiente sale en la página de después. Igual en el worker.
+        let mut lineas_en_la_pagina = 0i64;
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
+            let lineas = match g(8)? {
+                Value::Integer(n) => n,
+                _ => 0,
+            };
+            if !pedidos.is_empty() && lineas_en_la_pagina + lineas > TECHO_LINEAS_PAGINA {
+                break;
+            }
+            lineas_en_la_pagina += lineas;
             pedidos.push(PedidoProveedorDto {
                 id_pedido: s(g(0)?),
                 id_proveedor: norm_opt_string(g(1)?),
@@ -136,19 +153,12 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
             return Ok(PedidosPageDto { pedidos, total });
         }
 
-        // 3) Líneas SOLO de los pedidos de esta página (IN con placeholders dinámicos), en vez
-        //    de recorrer toda la tabla Lineas_Pedido_Proveedor.
+        // 3) Líneas SOLO de los pedidos de esta página, con sus ids en un único parámetro JSON
+        //    (`lista_json`), como en el worker, y en el orden en que se escribieron.
         let ids: Vec<String> = pedidos.iter().map(|p| p.id_pedido.clone()).collect();
-        let placeholders = (1..=ids.len())
-            .map(|i| format!("?{i}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql_lineas = format!(
-            "SELECT ID_Pedido, ID_Linea, Nombre_Producto, Cantidad, Precio_Unitario, Unidad \
-             FROM Lineas_Pedido_Proveedor WHERE ID_Pedido IN ({placeholders}) ORDER BY rowid ASC;"
-        );
-        let lparams: Vec<Value> = ids.into_iter().map(Value::Text).collect();
-        let mut lrows = db.query(&sql_lineas, lparams).await.map_err(db_err)?;
+        let sql_lineas = "SELECT ID_Pedido, ID_Linea, Nombre_Producto, Cantidad, Precio_Unitario, Unidad \
+             FROM Lineas_Pedido_Proveedor WHERE ID_Pedido IN (SELECT value FROM json_each(?1)) ORDER BY rowid ASC;";
+        let mut lrows = db.query(sql_lineas, vec![lista_json(&ids)]).await.map_err(db_err)?;
         let mut lineas_map: HashMap<String, Vec<LineaPedidoDto>> = HashMap::new();
         while let Some(row) = lrows.next().await.map_err(db_err)? {
             let (id_pedido, linea) = map_linea(&row)?;
@@ -227,8 +237,9 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         let res: AppResult<bool> = conn.transaccion(async {
             // PROV-01: el guard `Estado='borrador'` debe cubrir TODA la operación, no solo el
             // header. Si el UPDATE no afecta filas, el pedido no existe o ya no es borrador
-            // (enviado/cancelado = inmutable): abortamos sin tocar las líneas y devolvemos un
-            // resultado veraz (Ok(false)) en vez del engañoso Ok(true).
+            // (enviado/cancelado = inmutable): abortamos sin tocar las líneas y se dice, con el
+            // texto de la guarda del worker (`pedido_no_editable`). Con `Ok(false)` la pantalla se
+            // cerraba como si se hubiera guardado.
             let affected = conn
                 .execute(
                     &format!(
@@ -248,7 +259,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                 .map_err(db_err)?;
 
             if affected == 0 {
-                return Ok(false);
+                return Err(AppError::conflict(MSG_PEDIDO_NO_EDITABLE));
             }
 
             conn.execute(
@@ -441,5 +452,90 @@ mod tests_nombre_del_proveedor {
         let Value::Text(json) = f.next().await.unwrap().unwrap().get_value(0).unwrap() else { panic!() };
         assert!(json.contains("Nombre_Proveedor") && json.contains("SELECT Nombre_Empresa FROM Proveedores"), "{json}");
         assert!(!json.contains("Ñandú"), "{json}");
+    }
+}
+
+#[cfg(test)]
+mod tests_pagina_y_edicion {
+    //! PED-HANDY: lo que el worker hace igual (`pedidosProveedor.test.ts` y los arneses de contrato).
+
+    use super::*;
+
+    async fn abrir(nombre: &str) -> (SqlitePedidoProveedorRepository, Arc<Db>) {
+        let dir = crate::test_temp::dir_temporal(nombre);
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqlitePedidoProveedorRepository::new(db.clone()), db)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sql: &str) {
+        db.write().await.raw().execute_batch(sql).await.unwrap();
+    }
+
+    fn nuevo(id: &str) -> PedidoProveedorNuevo {
+        PedidoProveedorNuevo { id_pedido: id.into(), id_proveedor: None, email_destino: None, notas: None }
+    }
+
+    #[tokio::test]
+    async fn editar_un_pedido_que_ya_no_es_borrador_se_dice_y_no_toca_sus_lineas() {
+        let (repo, db) = abrir("pedidos_no_editable").await;
+        sembrar(
+            &db,
+            "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('p-1', 'enviado', '2026-01-01 10:00:00'); \
+             INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) VALUES ('l-1', 'p-1', 'Tomate', 2);",
+        )
+        .await;
+        let otra = LineaPedidoNueva { id_linea: "l-2".into(), nombre_producto: "Cebolla".into(), cantidad: 1.0, precio_unitario: None, unidad: None };
+        let error = repo.actualizar("p-1", None, None, Some("cambio".into()), vec![otra]).await.unwrap_err();
+        assert!(matches!(error, AppError::Conflict(_)), "{error:?}");
+        assert_eq!(error.to_string(), MSG_PEDIDO_NO_EDITABLE);
+        let pagina = repo.get_page(50, 0, None).await.unwrap();
+        assert_eq!(pagina.pedidos[0].lineas.len(), 1);
+        assert_eq!(pagina.pedidos[0].lineas[0].nombre_producto, "Tomate");
+        assert!(pagina.pedidos[0].notas.is_none());
+        // El que no existe, igual.
+        assert!(matches!(repo.actualizar("p-x", None, None, None, vec![]).await, Err(AppError::Conflict(_))));
+    }
+
+    #[tokio::test]
+    async fn la_misma_fecha_la_desempata_la_clave() {
+        let (repo, db) = abrir("pedidos_desempate").await;
+        for id in ["p-a", "p-c", "p-b"] {
+            repo.crear(nuevo(id), vec![]).await.unwrap();
+        }
+        sembrar(&db, "UPDATE Pedidos_Proveedor SET Fecha_Creacion = '2026-01-01 10:00:00';").await;
+        let ids: Vec<String> = repo.get_page(50, 0, None).await.unwrap().pedidos.into_iter().map(|p| p.id_pedido).collect();
+        assert_eq!(ids, ["p-c", "p-b", "p-a"]);
+    }
+
+    /// Tres pedidos de 900 líneas: caben dos (1800), el tercero pasaría de 2000 y sale en la
+    /// página siguiente, que empieza donde acaba ésta. Uno solo más largo que el techo sale entero.
+    #[tokio::test]
+    async fn la_pagina_se_corta_en_su_techo_de_lineas() {
+        let (repo, db) = abrir("pedidos_techo").await;
+        let mut sql = String::new();
+        for (i, (id, lineas)) in [("p-1", 900), ("p-2", 900), ("p-3", 900), ("p-4", 2500)].iter().enumerate() {
+            sql.push_str(&format!(
+                "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion) VALUES ('{id}', 'borrador', '2026-01-0{} 10:00:00'); \
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < {lineas}) \
+                 INSERT INTO Lineas_Pedido_Proveedor (ID_Linea, ID_Pedido, Nombre_Producto, Cantidad) \
+                 SELECT '{id}-' || i, '{id}', 'Producto ' || i, 1 FROM n; ",
+                9 - i
+            ));
+        }
+        sembrar(&db, &sql).await;
+
+        let primera = repo.get_page(50, 0, None).await.unwrap();
+        assert_eq!(primera.total, 4);
+        let ids: Vec<&str> = primera.pedidos.iter().map(|p| p.id_pedido.as_str()).collect();
+        assert_eq!(ids, ["p-1", "p-2"]);
+        assert!(primera.pedidos.iter().all(|p| p.lineas.len() == 900));
+
+        let segunda = repo.get_page(50, 2, None).await.unwrap();
+        let ids: Vec<&str> = segunda.pedidos.iter().map(|p| p.id_pedido.as_str()).collect();
+        assert_eq!(ids, ["p-3"]);
+
+        let ultima = repo.get_page(50, 3, None).await.unwrap();
+        assert_eq!(ultima.pedidos.len(), 1);
+        assert_eq!(ultima.pedidos[0].lineas.len(), 2500);
     }
 }

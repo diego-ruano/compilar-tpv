@@ -9,9 +9,9 @@ use crate::error::AppResult;
 
 #[async_trait]
 pub trait PedidoProveedorRepository: Send + Sync {
-    /// Página de pedidos (PROV-03), ordenada por fecha de creación descendente. `search`
-    /// filtra por proveedor/email/notas/estado (LIKE case-insensitive). Devuelve la página
-    /// y el total de coincidencias.
+    /// Página de pedidos (PROV-03), ordenada por fecha de creación descendente (la clave desempata).
+    /// `search` filtra por proveedor/email/notas/estado, sin acentos ni mayúsculas. La página se corta
+    /// en `TECHO_LINEAS_PAGINA` líneas. Devuelve la página y el total de coincidencias.
     async fn get_page(
         &self,
         limit: i64,
@@ -23,6 +23,8 @@ pub trait PedidoProveedorRepository: Send + Sync {
         pedido: PedidoProveedorNuevo,
         lineas: Vec<LineaPedidoNueva>,
     ) -> AppResult<String>;
+    /// Edita un borrador. Uno que ya no lo es (o que no existe) no se toca: `conflict` con
+    /// `MSG_PEDIDO_NO_EDITABLE`.
     async fn actualizar(
         &self,
         id_pedido: &str,
@@ -31,6 +33,7 @@ pub trait PedidoProveedorRepository: Send + Sync {
         notas: Option<String>,
         lineas: Vec<LineaPedidoNueva>,
     ) -> AppResult<bool>;
+    /// Pasa un borrador a `estado`. `false` si no había un borrador con ese id.
     async fn cambiar_estado(
         &self,
         id_pedido: &str,
