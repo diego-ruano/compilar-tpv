@@ -47,6 +47,16 @@ fn map_linea(row: &Row) -> AppResult<(String, LineaPedidoDto)> {
     Ok((id_pedido, linea))
 }
 
+/// El nombre del proveedor de un pedido: el actual si el proveedor sigue, y si se borró
+/// (`ID_Proveedor` a NULL por su `ON DELETE SET NULL`), el que tenía al guardar o enviar el pedido.
+const NOMBRE_DEL_PROVEEDOR: &str = "COALESCE(pr.Nombre_Empresa, p.Nombre_Proveedor)";
+
+/// La copia del nombre del proveedor `param`, sacada de la propia base en la sentencia (en la nube,
+/// de la suya): un pedido guardado o enviado conserva a quién se le hizo aunque el proveedor se borre.
+fn nombre_de(param: &str) -> String {
+    format!("(SELECT Nombre_Empresa FROM Proveedores WHERE ID_Proveedor = {param})")
+}
+
 #[async_trait]
 impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
     async fn get_page(
@@ -67,7 +77,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                 let en = |col: &str| format!("instr({}, ?1) > 0", crate::busqueda::normalizada(col));
                 format!(
                     " WHERE {} OR {} OR {} OR {}",
-                    en("pr.Nombre_Empresa"),
+                    en(NOMBRE_DEL_PROVEEDOR),
                     en("p.Email_Destino"),
                     en("p.Notas"),
                     en("p.Estado")
@@ -93,7 +103,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         // 2) Página de pedidos (LIMIT/OFFSET van tras los parámetros del WHERE).
         let base = where_params.len();
         let sql_pedidos = format!(
-            "SELECT p.ID_Pedido, p.ID_Proveedor, pr.Nombre_Empresa, \
+            "SELECT p.ID_Pedido, p.ID_Proveedor, {NOMBRE_DEL_PROVEEDOR}, \
                     p.Email_Destino, p.Estado, p.Fecha_Creacion, p.Fecha_Envio, p.Notas \
              FROM Pedidos_Proveedor p \
              LEFT JOIN Proveedores pr ON pr.ID_Proveedor = p.ID_Proveedor{where_sql} \
@@ -165,9 +175,12 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         conn.transaccion(async {
             let fecha = now_local_datetime();
             conn.execute(
-                r#"INSERT INTO Pedidos_Proveedor
-                   (ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Creacion, Notas)
-                   VALUES (?1, ?2, ?3, 'borrador', ?4, ?5);"#,
+                &format!(
+                    "INSERT INTO Pedidos_Proveedor \
+                       (ID_Pedido, ID_Proveedor, Email_Destino, Estado, Fecha_Creacion, Notas, Nombre_Proveedor) \
+                     VALUES (?1, ?2, ?3, 'borrador', ?4, ?5, {});",
+                    nombre_de("?2")
+                ),
                 vec![
                     Value::Text(id.clone()),
                     opt_text(pedido.id_proveedor),
@@ -218,9 +231,12 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
             // resultado veraz (Ok(false)) en vez del engañoso Ok(true).
             let affected = conn
                 .execute(
-                    r#"UPDATE Pedidos_Proveedor
-                       SET ID_Proveedor = ?1, Email_Destino = ?2, Notas = ?3
-                       WHERE ID_Pedido = ?4 AND Estado = 'borrador';"#,
+                    &format!(
+                        "UPDATE Pedidos_Proveedor \
+                            SET ID_Proveedor = ?1, Email_Destino = ?2, Notas = ?3, Nombre_Proveedor = {} \
+                          WHERE ID_Pedido = ?4 AND Estado = 'borrador';",
+                        nombre_de("?1")
+                    ),
                     vec![
                         opt_text(id_proveedor),
                         opt_text(email_destino),
@@ -278,7 +294,13 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         let db = self.db.write().await;
         let affected = db
             .execute(
-                "UPDATE Pedidos_Proveedor SET Estado = ?1, Fecha_Envio = ?2 WHERE ID_Pedido = ?3 AND Estado = 'borrador';",
+                // Al enviarlo (o cancelarlo) se vuelve a copiar el nombre del proveedor, si sigue.
+                &format!(
+                    "UPDATE Pedidos_Proveedor \
+                        SET Estado = ?1, Fecha_Envio = ?2, Nombre_Proveedor = COALESCE({}, Nombre_Proveedor) \
+                      WHERE ID_Pedido = ?3 AND Estado = 'borrador';",
+                    nombre_de("Pedidos_Proveedor.ID_Proveedor")
+                ),
                 vec![
                     Value::Text(estado.to_string()),
                     opt_text(fecha_envio),
@@ -351,3 +373,73 @@ mod tests_busqueda {
     }
 }
 
+
+#[cfg(test)]
+mod tests_nombre_del_proveedor {
+    //! Al borrar un proveedor, sus pedidos se quedan sin él (`ON DELETE SET NULL`) y el nombre salía
+    //! de un JOIN: un pedido ya enviado pasaba a «Sin proveedor». Ahora el pedido guarda una copia
+    //! del nombre al guardarlo y al enviarlo, y se lee la del proveedor si sigue.
+
+    use super::*;
+
+    async fn abrir() -> (SqlitePedidoProveedorRepository, Arc<Db>) {
+        let dir = crate::test_temp::dir_temporal("pedidos_nombre");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('pr-1', 'Bebidas Sur'), ('pr-2', 'Cafés Ñandú');",
+            )
+            .await
+            .unwrap();
+        (SqlitePedidoProveedorRepository::new(db.clone()), db)
+    }
+
+    async fn nombre(repo: &SqlitePedidoProveedorRepository, id: &str) -> Option<String> {
+        let page = repo.get_page(50, 0, None).await.unwrap();
+        page.pedidos.into_iter().find(|p| p.id_pedido == id).and_then(|p| p.nombre_proveedor)
+    }
+
+    fn nuevo(id: &str, proveedor: &str) -> PedidoProveedorNuevo {
+        PedidoProveedorNuevo { id_pedido: id.into(), id_proveedor: Some(proveedor.into()), email_destino: None, notas: None }
+    }
+
+    #[tokio::test]
+    async fn un_pedido_enviado_sigue_diciendo_a_quien_se_le_pidio_aunque_se_borre_el_proveedor() {
+        let (repo, db) = abrir().await;
+        repo.crear(nuevo("p-1", "pr-2"), vec![]).await.unwrap();
+        // Se cambia de proveedor al editarlo, y se envía.
+        assert!(repo.actualizar("p-1", Some("pr-1".into()), None, None, vec![]).await.unwrap());
+        assert!(repo.cambiar_estado("p-1", "enviado", Some("15/1/27 10:00".into())).await.unwrap());
+        assert_eq!(nombre(&repo, "p-1").await.as_deref(), Some("Bebidas Sur"));
+
+        // Se renombra: sale el nombre de ahora.
+        db.write().await.raw().execute_batch("UPDATE Proveedores SET Nombre_Empresa = 'Bebidas del Sur SL' WHERE ID_Proveedor = 'pr-1';").await.unwrap();
+        assert_eq!(nombre(&repo, "p-1").await.as_deref(), Some("Bebidas del Sur SL"));
+
+        // Se borra (como hace la Main: el pedido se queda sin proveedor): sale la copia, y se busca
+        // por ella.
+        db.write()
+            .await
+            .raw()
+            .execute_batch("UPDATE Pedidos_Proveedor SET ID_Proveedor = NULL WHERE ID_Proveedor = 'pr-1'; DELETE FROM Proveedores WHERE ID_Proveedor = 'pr-1';")
+            .await
+            .unwrap();
+        assert_eq!(nombre(&repo, "p-1").await.as_deref(), Some("Bebidas Sur"));
+        let buscado = repo.get_page(50, 0, Some("bebidas sur".into())).await.unwrap();
+        assert_eq!(buscado.pedidos.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn la_copia_sube_en_la_misma_sentencia_y_no_como_un_literal() {
+        // En la nube la copia sale de su base al aplicar la sentencia, como aquí.
+        let (repo, db) = abrir().await;
+        repo.crear(nuevo("p-2", "pr-2"), vec![]).await.unwrap();
+        let r = db.read().await;
+        let mut f = r.conn().query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;", ()).await.unwrap();
+        let Value::Text(json) = f.next().await.unwrap().unwrap().get_value(0).unwrap() else { panic!() };
+        assert!(json.contains("Nombre_Proveedor") && json.contains("SELECT Nombre_Empresa FROM Proveedores"), "{json}");
+        assert!(!json.contains("Ñandú"), "{json}");
+    }
+}

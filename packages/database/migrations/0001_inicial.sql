@@ -410,6 +410,10 @@ ON Movimientos_Stock(ID_Producto);
 CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha
 ON Movimientos_Stock(Fecha);
 
+-- Nombre_Proveedor: el nombre del proveedor tal como era al guardar o enviar el pedido, copiado de
+-- Proveedores.Nombre_Empresa en la propia sentencia. Borrar el proveedor deja ID_Proveedor a NULL
+-- (ON DELETE SET NULL), y con esto el pedido ya enviado sigue diciendo a quien se le pidio, no "Sin
+-- proveedor". Se lee COALESCE(Proveedores.Nombre_Empresa, Nombre_Proveedor): el actual si sigue.
 CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
   ID_Pedido TEXT NOT NULL PRIMARY KEY,
   ID_Proveedor TEXT,
@@ -418,6 +422,7 @@ CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
   Fecha_Creacion TEXT NOT NULL,
   Fecha_Envio TEXT,
   Notas TEXT,
+  Nombre_Proveedor TEXT,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL,
   CHECK (Estado IN ('borrador', 'enviado', 'cancelado'))
 );
