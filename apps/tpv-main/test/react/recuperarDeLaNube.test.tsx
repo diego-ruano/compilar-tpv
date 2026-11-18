@@ -102,6 +102,9 @@ it("lo apartado de la bajada dice lo que hace la comprobación con la nube, sin 
     const aviso = await screen.findByText(/cambio\(s\) de la nube que no se pudieron aplicar/);
     expect(aviso.textContent).toMatch(/intenta\s+traerlos tal como están en la nube/);
     expect(aviso.textContent).toMatch(/mismo correo/);
+    // Los proveedores también se unen por su CIF, y dos fichas distintas no se unen.
+    expect(aviso.textContent).toMatch(/en los proveedores,\s+el mismo CIF/);
+    expect(aviso.textContent).toMatch(/si son dos fichas distintas, no las une/);
     expect(aviso.textContent).toMatch(/se queda\s+apartado/);
     expect(aviso.textContent).not.toMatch(/se arreglan solos/);
 });

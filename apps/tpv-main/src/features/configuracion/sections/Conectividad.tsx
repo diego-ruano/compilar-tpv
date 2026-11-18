@@ -213,9 +213,11 @@ function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: 
 					pueden diferir en esos registros y, mientras sigan apartados, la comprobación con la nube
 					no corrige nada más. Esa comprobación (tras el cierre de caja, o una vez al día) intenta
 					traerlos tal como están en la nube, y une en una las fichas de cliente o de proveedor que
-					se dieron de alta a la vez aquí y en una Handy con el mismo correo. Lo que choca con algo
-					que este TPV todavía no ha podido subir, o que esta versión no sabe guardar, se queda
-					apartado; si a la semana sigue así, aquí se ofrece traer el estado de la nube.
+					se dieron de alta a la vez aquí y en una Handy con el mismo correo (o, en los proveedores,
+					el mismo CIF); si son dos fichas distintas, no las une y avisa para que se resuelva a mano.
+					Lo que choca con algo que este TPV todavía no ha podido subir, o que esta versión no sabe
+					guardar, se queda apartado; si a la semana sigue así, aquí se ofrece traer el estado de la
+					nube.
 				</div>
 			)}
 
