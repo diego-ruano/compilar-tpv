@@ -302,7 +302,11 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
             },
             dataLabels: { enabled: false },
             grid: { strokeDashArray: 4 },
-            xaxis: { categories: rankingLabels, labels: { trim: true } },
+            // En una barra horizontal el eje de los valores es el X (EST-INC-03).
+            xaxis: {
+                categories: rankingLabels,
+                labels: { trim: true, formatter: (v: string | number) => eur(deCentimos(Number(v))) },
+            },
             yaxis: { labels: { maxWidth: 180 } },
             legend: legendClean,
             tooltip: {

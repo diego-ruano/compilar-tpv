@@ -191,9 +191,14 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
       stroke: { width: 0 },
       dataLabels: { enabled: false },
       grid: { strokeDashArray: 4 },
+      // En una barra horizontal el eje de los valores es el X (EST-INC-03).
       xaxis: {
         categories: provLabels,
-        labels: { trim: true, style: { fontSize: "12px" } },
+        labels: {
+          trim: true,
+          style: { fontSize: "12px" },
+          formatter: (v: string | number) => eur(deCentimos(Number(v))),
+        },
       },
       tooltip: {
         shared: false,

@@ -283,9 +283,14 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
             dataLabels: { enabled: false },
             grid: { strokeDashArray: 4 },
             legend: legendClean,
+            // En una barra horizontal el eje de los valores es el X (EST-INC-03).
             xaxis: {
                 categories: topLabels,
-                labels: { trim: true, style: { fontSize: "12px" } },
+                labels: {
+                    trim: true,
+                    style: { fontSize: "12px" },
+                    formatter: (v: string | number) => eur(deCentimos(Number(v))),
+                },
             },
             tooltip: {
                 fillSeriesColor: false,

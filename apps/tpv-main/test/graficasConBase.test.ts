@@ -520,6 +520,58 @@ describe("AUD-25: las gráficas se montan sobre apexBase y no escriben HTML por 
     });
 });
 
+// ── El eje de una barra horizontal de dinero ─────────────────────────────────────────────────
+//
+// EST-INC-03: en una barra horizontal el eje de valores es `xaxis`, no `yaxis`, y sin formateador
+// ApexCharts pinta el número tal cual: los céntimos (12000 en vez de 120,00 €). Una gráfica de
+// barras horizontales cuyo tooltip da el valor en euros tiene que dárselo también al eje.
+
+/** El valor de la propiedad `ruta` dentro de un objeto escrito, si está escrita tal cual. */
+function propiedadEn(objeto: ts.ObjectLiteralExpression, ruta: string[]): ts.Expression | undefined {
+    const [primero, ...resto] = ruta;
+    const p = objeto.properties.find((x): x is ts.PropertyAssignment => ts.isPropertyAssignment(x) && nombreDe(x.name) === primero);
+    if (!p) return undefined;
+    const valor = sinEnvoltorio(p.initializer);
+    if (resto.length === 0) return valor;
+    return ts.isObjectLiteralExpression(valor) ? propiedadEn(valor, resto) : undefined;
+}
+
+/** Las barras horizontales de dinero de un fichero cuyo eje de valores no sale en euros. */
+function ejesSinEuros(ruta: string, fuente: string): string[] {
+    const fichero = ts.createSourceFile(ruta, fuente, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const enEuros = (e: ts.Expression | undefined) => e !== undefined && /\beur\(/.test(e.getText(fichero));
+    const malas: string[] = [];
+    const mirar = (n: ts.Node) => {
+        if (ts.isObjectLiteralExpression(n)) {
+            const horizontal = propiedadEn(n, ["plotOptions", "bar", "horizontal"]);
+            if (horizontal?.kind === ts.SyntaxKind.TrueKeyword && enEuros(propiedadEn(n, ["tooltip", "y", "formatter"]))) {
+                if (!enEuros(propiedadEn(n, ["xaxis", "labels", "formatter"]))) {
+                    malas.push(`línea ${fichero.getLineAndCharacterOfPosition(n.getStart(fichero)).line + 1}`);
+                }
+            }
+        }
+        ts.forEachChild(n, mirar);
+    };
+    mirar(fichero);
+    return malas;
+}
+
+describe("EST-INC-03: una barra horizontal de dinero enseña euros en su eje", () => {
+    it.each(revisados(fuentes))("%s", (ruta) => {
+        expect(ejesSinEuros(ruta, fuentes[ruta]!)).toEqual([]);
+    });
+
+    it("ve el eje sin formato y deja pasar el que lo tiene", () => {
+        const opciones = (eje: string) =>
+            `const o = { plotOptions: { bar: { horizontal: true } }, xaxis: { categories: c${eje} }, tooltip: { y: { formatter: (v: number) => eur(deCentimos(v)) } } };`;
+        expect(ejesSinEuros("a.tsx", opciones(""))).toHaveLength(1);
+        expect(ejesSinEuros("a.tsx", opciones(", labels: { formatter: (v: string) => eur(deCentimos(Number(v))) }"))).toEqual([]);
+        // Una barra vertical o una que no es de dinero no entran.
+        expect(ejesSinEuros("a.tsx", opciones("").replace("horizontal: true", "horizontal: false"))).toEqual([]);
+        expect(ejesSinEuros("a.tsx", opciones("").replace("eur(deCentimos(v))", "`${v} h`"))).toEqual([]);
+    });
+});
+
 // ── El propio guardián ───────────────────────────────────────────────────────────────────────
 //
 // Es un programa y también se equivoca. Estos casos son las formas de saltárselo que se le han

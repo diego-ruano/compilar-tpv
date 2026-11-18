@@ -300,6 +300,10 @@ tabla o lleva algo que no sabe leer (una clave calculada, un objeto esparcido de
 no revisa, unas opciones fabricadas con una llamada). Caza lo corriente, no todo: sigue un nombre
 hasta su objeto sólo dentro del mismo fichero.
 
+En una barra horizontal el eje de los valores es `xaxis`, no `yaxis`: si la barra es de dinero,
+`xaxis.labels.formatter` le da formato con `eur`, o el eje enseña céntimos. El mismo test lo exige
+a toda barra horizontal cuyo tooltip dé el valor en euros.
+
 El resto de la interfaz lo pinta React como texto: no hay `dangerouslySetInnerHTML` ni
 `innerHTML`. Detrás hay una segunda capa, la política de navegación de la ventana, que cancela la
 salida del marco principal a otra web; qué cubre y qué no, en
