@@ -33,6 +33,9 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
         revision = foto.revision;
         const store = useEstadoSync.getState();
         store.marcar(foto.estado as EstadoSync, foto.detalle);
+        // Si los Handy siguen esperando a esta Main: lo dice Conectividad (`textoDeConexion`).
+        const retenidas = foto.handy_retenidas === true;
+        if (store.handyRetenidas !== retenidas) useEstadoSync.setState({ handyRetenidas: retenidas });
         // SYNC-32: la sesión se ha detenido porque esta base es anterior a lo que guarda la nube, y
         // el backend la ha pasado a recuperarse de la nube. La pantalla lo sabe releyendo el estado.
         if (foto.estado === "detenida") {

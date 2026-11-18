@@ -27,7 +27,7 @@ pub(crate) struct SyncNativo {
 }
 impl Default for SyncNativo {
     fn default() -> Self {
-        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0 }), ritmo: Arc::default(), pausa: AtomicBool::new(false), en_sesion: AtomicBool::new(false), traer: tokio::sync::Mutex::new(()) }
+        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0, handy_retenidas:false }), ritmo: Arc::default(), pausa: AtomicBool::new(false), en_sesion: AtomicBool::new(false), traer: tokio::sync::Mutex::new(()) }
     }
 }
 impl SyncNativo {
@@ -35,6 +35,9 @@ impl SyncNativo {
     fn publicar(&self, app: &AppHandle, estado: &str, detalle: Option<String>) {
         let mut foto = self.foto.lock().unwrap_or_else(|e| e.into_inner());
         foto.revision += 1; foto.estado = estado.into(); foto.detalle = detalle;
+        // `conectado` se publica justo después del saludo, que congela a las Handy; las suelta el
+        // `recovery_ready` de la sesión (`handy_retenidas`). Fuera de `conectado` no se aplica.
+        foto.handy_retenidas = estado == "conectado";
         let _ = app.emit("sync:estado", foto.clone());
     }
     pub fn reintentar(&self) { self.reintentar.notify_one(); self.despertar.notify_one(); }
@@ -114,6 +117,13 @@ impl ContextoReplicacion for Contexto {
         Ok(estado == if recuperando {RecoveryState::ReconciliationPending} else {RecoveryState::Ready})
     }
     fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> { self.app.state::<SyncNativo>().ritmo.clone() }
+    fn handy_retenidas(&self, retenidas: bool) {
+        let estado = self.app.state::<SyncNativo>();
+        let mut foto = estado.foto.lock().unwrap_or_else(|e| e.into_inner());
+        if foto.handy_retenidas == retenidas { return; }
+        foto.revision += 1; foto.handy_retenidas = retenidas;
+        let _ = self.app.emit("sync:estado", foto.clone());
+    }
 }
 
 async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<uc::FinDeSesion> {

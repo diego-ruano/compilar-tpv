@@ -1212,6 +1212,12 @@ export type EstadoReplicacion = {
 	detalle: string | null,
 	fase_recuperacion: string,
 	fallos_recuperacion: number,
+	/**
+	 *  Las Handy siguen retenidas: desde el saludo de esta sesión (que las congela) hasta que la
+	 *  Main, con el outbox vacío por primera vez, manda `recovery_ready`. Después, lo que quede por
+	 *  subir en uso normal no las retiene. Fuera de `conectado` no significa nada.
+	 */
+	handy_retenidas: boolean,
 };
 
 export type EstadoSocketHandy = {

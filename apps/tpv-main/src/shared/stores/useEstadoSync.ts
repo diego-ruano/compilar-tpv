@@ -108,6 +108,12 @@ type EstadoSyncStore = {
 	desde: number;
 	/** Contador que `useMainSocket` observa para reintentar ya (sin esperar al backoff). */
 	pulso: number;
+	/**
+	 * Las Handy siguen retenidas por esta sesión: desde el saludo hasta que la Main, con el outbox
+	 * vacío por primera vez, las suelta (`handy_retenidas` de `EstadoReplicacion`). Lo que quede por
+	 * subir después, en uso normal, no las retiene.
+	 */
+	handyRetenidas: boolean;
 
 	/** Carga la palanca desde AppData. Llamar una vez al arrancar. */
 	hidratar: () => Promise<void>;
@@ -156,6 +162,7 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	detalle: null,
 	desde: Date.now(),
 	pulso: 0,
+	handyRetenidas: false,
 
 	hidratar: async () => {
 		try {

@@ -199,8 +199,10 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en Configuración → Conectividad.
   Entre sus estados están `conectando`, `conectado`, `reintentando`, `sin_identidad`, `rechazado` y
   `pausada`. Desmontar la UI no detiene la réplica nativa. `conectado` con cambios por subir
-  (`sync_health.outbox_pending`) no se pinta como «Al día» sino como «Subiendo cambios (N)…», con
-  los Handy esperando a que la Main termine de volcar (`textoConexion.ts`).
+  (`sync_health.outbox_pending`) no se pinta como «Al día» sino como «Subiendo cambios (N)…»
+  (`textoConexion.ts`). Que los Handy esperan sólo se dice mientras los retiene esta sesión
+  (`EstadoReplicacion.handy_retenidas`: del saludo al primer `recovery_ready`, `ctx.handy_retenidas`
+  en `use_cases/replicacion.rs`); después, lo que se sube tras cada venta no los retiene.
 - **Con la sesión abierta, si sigue tocando conectar se mira como mucho cada 10 s**
   (`COMPROBAR_DISPONIBLE_CADA`, `use_cases/replicacion.rs`), no con cada mensaje del socket: es leer
   `device_config.json`, mirar si hay un traslado y dos consultas. Se mira al volver de cada espera

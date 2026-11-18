@@ -28,6 +28,13 @@ describe("presentación de la réplica nativa", () => {
         resolver({revision:1,estado:"reconectando",detalle:null,fase_recuperacion:"inactiva",fallos_recuperacion:0}); await asentar();
         expect(useEstadoSync.getState().estado).toBe("conectado"); socket.detener();
     });
+    it("se entera de si los Handy siguen esperando a esta Main, y de cuándo los suelta", async () => {
+        backend(); const socket = iniciarSocketMain(entrada)!; await asentar();
+        h.listeners.get("sync:estado")!({payload:{revision:5,estado:"conectado",detalle:null,fase_recuperacion:"inactiva",fallos_recuperacion:0,handy_retenidas:true}});
+        expect(useEstadoSync.getState().handyRetenidas).toBe(true);
+        h.listeners.get("sync:estado")!({payload:{revision:6,estado:"conectado",detalle:null,fase_recuperacion:"inactiva",fallos_recuperacion:0,handy_retenidas:false}});
+        expect(useEstadoSync.getState().handyRetenidas).toBe(false); socket.detener();
+    });
     it("refresca sólo las áreas afectadas y conserva el ticket seleccionado", async () => {
         backend(); const socket = iniciarSocketMain(entrada)!; await asentar();
         const invalidar = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();

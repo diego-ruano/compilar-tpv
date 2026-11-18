@@ -34,6 +34,7 @@ function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: n
 	const estado = useEstadoSync((s) => s.estado);
 	const detalle = useEstadoSync((s) => s.detalle);
 	const desde = useEstadoSync((s) => s.desde);
+	const handyRetenidas = useEstadoSync((s) => s.handyRetenidas);
 
 	// Repintado periódico: lo único que cambia solo es el "desde hace X".
 	const [, setTick] = React.useState(0);
@@ -42,7 +43,7 @@ function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: n
 		return () => window.clearInterval(id);
 	}, []);
 
-	const info = textoDeConexion(estado, porSubir);
+	const info = textoDeConexion(estado, porSubir, handyRetenidas);
 	const color =
 		info.tono === "ok"
 			? "bg-success"

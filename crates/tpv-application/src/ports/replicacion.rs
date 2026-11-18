@@ -75,6 +75,10 @@ pub trait ContextoReplicacion: Send + Sync {
     async fn sigue_disponible(&self, recuperando: bool) -> AppResult<bool>;
     /// El ritmo de la subida, el mismo para todas las sesiones de este proceso.
     fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida>;
+    /// Si las Handy siguen retenidas: desde el saludo (que las congela) hasta que esta sesión manda
+    /// `recovery_ready`. Lo enseña Conectividad, que sólo dice que los Handy esperan cuando es así;
+    /// un outbox con algo por subir en uso normal no los retiene.
+    fn handy_retenidas(&self, _retenidas: bool) {}
 }
 
 #[cfg(test)]

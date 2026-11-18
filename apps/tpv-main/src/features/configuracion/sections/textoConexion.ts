@@ -54,16 +54,31 @@ const ESTADO_TEXTO: Record<EstadoSync, TextoConexion> = {
 };
 
 /**
- * El texto del estado. Con conexión y cambios de este TPV por subir no está «al día»: la nube tiene
- * a los Handy esperando hasta que la Main termina de volcar lo que tenía pendiente, y decir que
- * pueden trabajar era mentira (`porSubir`, de `sync_health`; `null` si todavía no se sabe).
+ * El texto del estado. Con conexión y cambios de este TPV por subir no está «al día»
+ * (`porSubir`, de `sync_health`; `null` si todavía no se sabe). Que los Handy esperan sólo se dice
+ * cuando es así (`handyRetenidas`): la nube los retiene desde que esta Main conecta hasta que vuelca
+ * por primera vez lo que tenía pendiente. Después, lo que se sube tras cada venta o una operación
+ * que se reintenta no los retiene: decir que esperaban era mentira.
  */
-export function textoDeConexion(estado: EstadoSync, porSubir: number | null): TextoConexion {
-	if (estado === "conectado" && porSubir !== null && porSubir > 0) {
+export function textoDeConexion(
+	estado: EstadoSync,
+	porSubir: number | null,
+	handyRetenidas: boolean,
+): TextoConexion {
+	if (estado !== "conectado") return ESTADO_TEXTO[estado];
+	const hayPorSubir = porSubir !== null && porSubir > 0;
+	if (handyRetenidas) {
+		return {
+			titulo: hayPorSubir ? `Subiendo cambios (${porSubir})…` : "Poniéndose al día…",
+			desc: "Este TPV está poniendo al día la nube con lo que tenía pendiente. Los Handy esperan a que termine para poder trabajar.",
+			tono: "aviso",
+		};
+	}
+	if (hayPorSubir) {
 		return {
 			titulo: `Subiendo cambios (${porSubir})…`,
-			desc: "Este TPV está subiendo a la nube lo que tenía pendiente. Los Handy esperan a que termine para poder trabajar.",
-			tono: "aviso",
+			desc: "Este TPV está subiendo a la nube sus últimos cambios. Los dispositivos Handy pueden trabajar.",
+			tono: "ok",
 		};
 	}
 	return ESTADO_TEXTO[estado];

@@ -483,6 +483,8 @@ where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
 
 pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<FinDeSesion> {
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
+    // El saludo ha congelado a las Handy: quedan retenidas hasta el `recovery_ready` de esta sesión.
+    ctx.handy_retenidas(true);
     let mut sesion = Sesion::default();
     if ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?.anterior_al_log { return anterior_al_log(ctx).await; }
     let mut vacio = true;
@@ -497,6 +499,7 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             if salud.outbox_pending == 0 && salud.last_seq >= high_water && salud.failing == 0 && salud.quarantined == 0 && salud.subida_en_cuarentena == 0 {
                 ctx.completar_recuperacion(high_water).await?;
                 canal.enviar(json!({"type":"recovery_ready"})).await?;
+                ctx.handy_retenidas(false);
                 ctx.fase_recuperacion("completada");
                 // Lo que se reservó en la web mientras tanto.
                 ctx.reservas_web();
@@ -529,6 +532,7 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             if vacio {
                 canal.enviar(json!({"type":"recovery_ready"})).await?;
                 handy_por_soltar = false;
+                ctx.handy_retenidas(false);
             }
             ultimo_sondeo = Instant::now();
         }

@@ -201,7 +201,7 @@ async fn upload_image(
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }
-struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize> }
+struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize>, retenidas:Mutex<Vec<bool>> }
 #[async_trait]
 impl ContextoReplicacion for Contexto {
     async fn repositorio(&self) -> AppResult<Arc<dyn SyncRepository>> { Ok(self.repo.clone()) }
@@ -213,6 +213,7 @@ impl ContextoReplicacion for Contexto {
     async fn completar_recuperacion(&self, h:i64)->AppResult<()> { *self.completa.lock().unwrap()=Some(h);Ok(()) }
     async fn sigue_disponible(&self,_:bool)->AppResult<bool> { *self.comprobaciones.lock().unwrap()+=1; Ok(*self.sigue.lock().unwrap()) }
     fn ritmo_de_subida(&self)->Arc<RitmoDeSubida> { self.ritmo.clone() }
+    fn handy_retenidas(&self, retenidas:bool) { self.retenidas.lock().unwrap().push(retenidas); }
 }
 /// El acuse de un lote preparado sin `loteId` es el del último lote que ha salido: así los guiones
 /// no dependen de cómo nombra la Main sus lotes.
@@ -233,7 +234,7 @@ impl CanalReplicacion for Canal {
 }
 fn contexto(ops:Vec<OutboxEntry>)->Contexto {
     let repo=Arc::new(FakeRepo::default());*repo.pending.lock().unwrap()=ops;
-    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0)}
+    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0),retenidas:Mutex::new(vec![])}
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![]),cuerpos:Mutex::new(vec![])}}
@@ -570,8 +571,8 @@ fn disponible(ctx:Contexto)->Contexto {*ctx.sigue.lock().unwrap()=true;ctx}
 
 /// Un socket que apunta en orden lo que sale («>») y lo que entra («<»). `None` es una espera que
 /// vence, y agotado se cierra. Puede dejar una venta en el outbox al mandar el saludo: la que se
-/// confirma mientras la Main se autentica.
-struct Conversacion { entrantes:VecDeque<Option<Value>>, log:Vec<String>, enviados:Vec<Value>, al_saludar:Option<(Arc<FakeRepo>,OutboxEntry)> }
+/// confirma mientras la Main se autentica, o una al entregar un `despertar` (una venta en uso normal).
+struct Conversacion { entrantes:VecDeque<Option<Value>>, log:Vec<String>, enviados:Vec<Value>, al_saludar:Option<(Arc<FakeRepo>,OutboxEntry)>, al_despertar:Option<(Arc<FakeRepo>,OutboxEntry)> }
 #[async_trait]
 impl CanalReplicacion for Conversacion {
     async fn enviar(&mut self,m:Value)->AppResult<()> {
@@ -583,10 +584,11 @@ impl CanalReplicacion for Conversacion {
     async fn recibir(&mut self,_:Duration)->AppResult<Option<Value>> {
         let m=self.entrantes.pop_front().ok_or_else(||AppError::external("Socket cerrado"))?;
         if let Some(m)=&m { self.log.push(format!("<{}",m["type"].as_str().unwrap_or("?"))); }
+        if m.as_ref().is_some_and(|m|m["type"]=="despertar") { if let Some((repo,venta))=self.al_despertar.take() { repo.pending.lock().unwrap().push(venta); } }
         Ok(m.map(|m|con_su_lote(m,&self.enviados)))
     }
 }
-fn conversacion(entrantes:Vec<Option<Value>>)->Conversacion {Conversacion{entrantes:entrantes.into(),log:vec![],enviados:vec![],al_saludar:None}}
+fn conversacion(entrantes:Vec<Option<Value>>)->Conversacion {Conversacion{entrantes:entrantes.into(),log:vec![],enviados:vec![],al_saludar:None,al_despertar:None}}
 
 #[tokio::test]
 async fn toda_sesion_de_la_main_saluda_congelando_a_las_handy() {
@@ -637,6 +639,20 @@ async fn no_las_suelta_hasta_que_el_atraso_ha_subido_entero() {
     ]);
     assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
     assert_eq!(c.log,[">apply_lote","<main_status","<apply_lote_ack","<despertar",">apply_lote","<apply_lote_ack",">recovery_ready"]);
+    // Conectividad lo sabe: retenidas desde el saludo, sueltas con el `recovery_ready`.
+    assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false]);
+}
+
+#[tokio::test]
+async fn con_las_handy_ya_sueltas_lo_que_quede_por_subir_no_las_vuelve_a_retener() {
+    // Una venta en uso normal: sube con las Handy trabajando, y Conectividad no dice que esperan.
+    let ctx=disponible(contexto(vec![]));let n=nube(vec![pagina(vec![],0)]);
+    let repo=ctx.repo.clone();
+    let mut c=conversacion(vec![estado(),Some(json!({"type":"despertar"})),Some(acuse(vec![ok("venta",1)]))]);
+    c.al_despertar=Some((repo,op("venta")));
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(c.log,[">recovery_ready","<main_status","<despertar",">apply_lote","<apply_lote_ack"]);
+    assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false],"una vez sueltas, no vuelven a retenerse");
 }
 
 #[tokio::test]
@@ -717,6 +733,7 @@ async fn en_la_recuperacion_las_suelta_su_desbloqueo_una_sola_vez() {
     ejecutar(&ctx,&n,&mut c,true).await.unwrap();
     assert_eq!(c.enviados,vec![json!({"type":"recovery_ready"})]);
     assert_eq!(*ctx.completa.lock().unwrap(),Some(0));
+    assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false]);
 }
 
 // ── AUD-19 · un cursor por debajo de lo que la nube ya purgó ────────────────

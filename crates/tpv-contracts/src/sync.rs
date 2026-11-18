@@ -349,6 +349,10 @@ pub struct EstadoReplicacion {
     pub detalle: Option<String>,
     pub fase_recuperacion: String,
     pub fallos_recuperacion: u32,
+    /// Las Handy siguen retenidas: desde el saludo de esta sesión (que las congela) hasta que la
+    /// Main, con el outbox vacío por primera vez, manda `recovery_ready`. Después, lo que quede por
+    /// subir en uso normal no las retiene. Fuera de `conectado` no significa nada.
+    pub handy_retenidas: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
