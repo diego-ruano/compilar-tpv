@@ -9,9 +9,9 @@
   "ticket_medio_cliente": 2000,
   "top_clientes_gasto": {
     "labels": [
-      "Ana Gomez #cli-ana",
-      "Beto Ruiz #cli-beto",
-      "Carla Diaz #cli-carla"
+      "Ana Gomez",
+      "Beto Ruiz",
+      "Carla Diaz"
     ],
     "values": [
       3000,

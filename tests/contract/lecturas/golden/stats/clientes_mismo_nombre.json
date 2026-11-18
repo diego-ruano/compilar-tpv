@@ -1,0 +1,28 @@
+{
+  "no_recurrentes": 0,
+  "nuevos": 0,
+  "nuevos_por_bucket": {
+    "labels": [],
+    "values": []
+  },
+  "recurrentes": 0,
+  "ticket_medio_cliente": 0,
+  "top_clientes_gasto": {
+    "labels": [
+      "Ana",
+      "Ana (2)",
+      "Beto",
+      "Cliente",
+      "Cliente (2)",
+      "Ana (3)"
+    ],
+    "values": [
+      5000,
+      5000,
+      4000,
+      2000,
+      2000,
+      1000
+    ]
+  }
+}

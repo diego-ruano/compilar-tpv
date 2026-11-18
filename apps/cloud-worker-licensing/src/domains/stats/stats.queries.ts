@@ -1108,13 +1108,28 @@ export async function clientes(
 
 	const nombre =
 		"CASE WHEN COALESCE(trim(Nombre),'') <> '' THEN trim(Nombre) ELSE 'Cliente' END";
+	// El nombre solo: la clave solo desempata, sin ensenarse (antes salia "Ana #<UUID>"). Dos del
+	// top que se llaman igual se distinguen numerando del segundo en adelante ("Ana", "Ana (2)"),
+	// en el orden del ranking. Igual en la Main (`clientes_impl`).
 	const topRs = await db.execute(
-		`SELECT
-			(${nombre} || ' #' || CAST(ID_Cliente AS TEXT)) AS label,
-			COALESCE(Total_Gastado,0) AS value
-		 FROM Clientes
-		 ORDER BY COALESCE(Total_Gastado,0) DESC, label ASC
-		 LIMIT 10;`,
+		`WITH top AS (
+			SELECT
+				ID_Cliente AS id,
+				${nombre} AS nombre,
+				COALESCE(Total_Gastado,0) AS total
+			FROM Clientes
+			ORDER BY total DESC, nombre ASC, id ASC
+			LIMIT 10
+		 ),
+		 numerados AS (
+			SELECT top.*, ROW_NUMBER() OVER (PARTITION BY nombre ORDER BY total DESC, id ASC) AS n
+			FROM top
+		 )
+		 SELECT
+			CASE WHEN n > 1 THEN nombre || ' (' || n || ')' ELSE nombre END AS label,
+			total AS value
+		 FROM numerados
+		 ORDER BY total DESC, nombre ASC, id ASC;`,
 	);
 
 	const evo = rows(evoRs);

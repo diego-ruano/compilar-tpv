@@ -1766,14 +1766,29 @@ impl SqliteStatsRepository {
             let name_expr =
                 "CASE WHEN COALESCE(trim(Nombre),'') <> '' THEN trim(Nombre) ELSE 'Cliente' END";
 
+            // El nombre solo: la clave sólo desempata, sin enseñarse (antes salía «Ana #<UUID>»).
+            // Dos del top que se llaman igual se distinguen numerando del segundo en adelante
+            // («Ana», «Ana (2)»), en el orden del ranking. Igual en el worker (`clientes`).
             let sql_top = format!(
                 r#"
+                WITH top AS (
+                  SELECT
+                    ID_Cliente AS id,
+                    {name_expr} AS nombre,
+                    COALESCE(Total_Gastado,0) AS total
+                  FROM Clientes
+                  ORDER BY total DESC, nombre ASC, id ASC
+                  LIMIT 10
+                ),
+                numerados AS (
+                  SELECT top.*, ROW_NUMBER() OVER (PARTITION BY nombre ORDER BY total DESC, id ASC) AS n
+                  FROM top
+                )
                 SELECT
-                  ({name_expr} || ' #' || CAST(ID_Cliente AS TEXT)) AS nombre,
-                  COALESCE(Total_Gastado,0) AS total
-                FROM Clientes
-                ORDER BY COALESCE(Total_Gastado,0) DESC, nombre ASC
-                LIMIT 10;
+                  CASE WHEN n > 1 THEN nombre || ' (' || n || ')' ELSE nombre END AS etiqueta,
+                  total
+                FROM numerados
+                ORDER BY total DESC, nombre ASC, id ASC;
                 "#,
                 name_expr = name_expr
             );

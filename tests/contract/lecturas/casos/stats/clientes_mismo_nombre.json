@@ -1,0 +1,13 @@
+{
+  "descripcion": "El top de clientes por gasto enseña el nombre, sin la clave. Tres clientes se llaman Ana: se distinguen numerando del segundo en adelante en el orden del ranking, y entre dos con el mismo gasto desempata la clave (cli-1 antes que cli-2). Uno con el nombre en blanco y otro vacío salen como Cliente y Cliente (2).",
+  "lectura": "stats.clientes",
+  "seed": [
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-2', 'Ana', 5000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana', 5000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-3', 'Ana', 1000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-6', 'Beto', 4000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-4', '   ', 2000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-5', '', 2000);"
+  ],
+  "entrada": {}
+}
