@@ -150,11 +150,33 @@ export function avisoDeLineasDevueltas(h: AnulacionPagoDto): string | null {
     switch (h.lineas) {
         case "su_comanda":
             return `Sus consumiciones vuelven a estar pendientes en ${donde}, que se ha reabierto.`;
+        case "su_cuenta_abierta":
+            // Un cobro de parte de una cuenta que sigue abierta: no se ha cerrado, no se reabre.
+            return h.mesa
+                ? `Sus consumiciones vuelven a estar pendientes en la cuenta de ${donde}.`
+                : "Sus consumiciones vuelven a estar pendientes en su ticket.";
         case "la_abierta":
             return `La mesa se había vuelto a abrir: sus consumiciones se han añadido a la cuenta abierta de ${donde}.`;
         default:
             return null;
     }
+}
+
+/**
+ * Lo que se puede hacer en Cuentas con estos permisos, en una frase para la cabecera. En la Handy
+ * (`soloConsulta`) Cuentas es de consulta: cobrar, devolver, dar de baja, los gastos y los cierres
+ * se hacen en el TPV principal; reimprimir un ticket, sí.
+ */
+export function subtituloCuentas(p: { cobros: boolean; gastos: boolean; soloConsulta: boolean }): string {
+    if (p.cobros && p.gastos) return "Filtra ingresos y gastos por fecha o búsqueda.";
+    if (p.soloConsulta) {
+        if (p.cobros) return "Los cobros: consúltalos y reimprime un ticket.";
+        if (p.gastos) return "Los gastos: consúltalos.";
+        return "Repasa los cierres hechos.";
+    }
+    if (p.cobros) return "Los cobros: reimprime un ticket, devuélvelo o dalo de baja.";
+    if (p.gastos) return "Los gastos: apúntalos y corrígelos.";
+    return "Cierra la caja y repasa los cierres hechos.";
 }
 
 /** Las líneas de un cobro con lo que queda por devolver de cada una. */

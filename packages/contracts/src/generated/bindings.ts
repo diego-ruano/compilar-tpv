@@ -995,6 +995,8 @@ export type DestinoLineasBaja =
 "no_vuelven" |
 /**  A su comanda, que se ha reabierto. */
 "su_comanda" |
+/**  A su comanda, que seguía abierta: el cobro era de parte de una cuenta que no se ha cerrado. */
+"su_cuenta_abierta" |
 /**  A la comanda que ya estaba abierta en la misma mesa, con lo que tenía. */
 "la_abierta";
 

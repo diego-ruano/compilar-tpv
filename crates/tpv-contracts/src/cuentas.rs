@@ -260,6 +260,8 @@ pub enum DestinoLineasBaja {
     NoVuelven,
     /// A su comanda, que se ha reabierto.
     SuComanda,
+    /// A su comanda, que seguía abierta: el cobro era de parte de una cuenta que no se ha cerrado.
+    SuCuentaAbierta,
     /// A la comanda que ya estaba abierta en la misma mesa, con lo que tenía.
     LaAbierta,
 }

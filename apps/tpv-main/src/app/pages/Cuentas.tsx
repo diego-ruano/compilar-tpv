@@ -34,6 +34,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { cierreImprimir,cierreReabrir,type CierreResumenDto } from "../../features/cuentas/cierreApis";
 import {
 avisoDeLineasDevueltas,
+subtituloCuentas,
 cuentasGetEntradas,
 cuentasGetSalidas,
 esAnulado,
@@ -215,14 +216,6 @@ function SelloDevolucion({ entrada }: { entrada: EntradaDto }) {
         return <div className="mt-1 text-xs text-warning">Devuelto {eur((entrada.devuelto ?? CERO))}</div>;
     }
     return null;
-}
-
-/** Lo que se puede hacer en Cuentas con estos permisos, en una frase para la cabecera. */
-function subtituloCuentas(p: { cobros: boolean; gastos: boolean }): string {
-    if (p.cobros && p.gastos) return "Filtra ingresos y gastos por fecha o búsqueda.";
-    if (p.cobros) return "Los cobros: reimprime un ticket, devuélvelo o dalo de baja.";
-    if (p.gastos) return "Los gastos: apúntalos y corrígelos.";
-    return "Cierra la caja y repasa los cierres hechos.";
 }
 
 export default function Cuentas() {
@@ -908,7 +901,7 @@ export default function Cuentas() {
                         <div className="min-w-0">
                             <h1 className="text-xl font-bold text-fg sm:text-2xl">Cuentas</h1>
                             <p className="text-sm text-fg-muted">
-                                {subtituloCuentas({ cobros: cobrosPermitidos, gastos: admin })}
+                                {subtituloCuentas({ cobros: cobrosPermitidos, gastos: admin, soloConsulta: esHandy })}
                             </p>
                         </div>
                     </div>

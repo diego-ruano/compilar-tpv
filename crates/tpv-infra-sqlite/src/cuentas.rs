@@ -276,6 +276,8 @@ struct DondeVuelven {
     pendientes: bool,
     /// La mesa tiene otra comanda abierta (CAJ-INC-02).
     otra_abierta: bool,
+    /// La comanda del cobro sigue abierta: era un cobro de parte de una cuenta que no se ha cerrado.
+    sigue_abierta: bool,
     mesa: Option<String>,
 }
 
@@ -290,6 +292,7 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
                   AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
               ),
               a.ID_Comanda IS NOT NULL,
+              o.Estado = 'Abierta',
               m.Numero_Mesa
             FROM Comandas o
             LEFT JOIN Comandas a
@@ -303,7 +306,7 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
         .await
         .map_err(db_err)?;
     let Some(r) = rows.next().await.map_err(db_err)? else {
-        return Ok(DondeVuelven { pendientes: false, otra_abierta: false, mesa: None });
+        return Ok(DondeVuelven { pendientes: false, otra_abierta: false, sigue_abierta: false, mesa: None });
     };
     let si = |i: i32| -> AppResult<bool> {
         Ok(v_i64(r.get_value(i).map_err(db_err)?).unwrap_or(0) != 0)
@@ -311,7 +314,8 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
     Ok(DondeVuelven {
         pendientes: si(0)?,
         otra_abierta: si(1)?,
-        mesa: norm_opt_string(r.get_value(2).map_err(db_err)?),
+        sigue_abierta: si(2)?,
+        mesa: norm_opt_string(r.get_value(3).map_err(db_err)?),
     })
 }
 
@@ -1114,6 +1118,8 @@ impl CuentasRepository for SqliteCuentasRepository {
                 if donde.pendientes {
                     destino = if donde.otra_abierta {
                         DestinoLineasBaja::LaAbierta
+                    } else if donde.sigue_abierta {
+                        DestinoLineasBaja::SuCuentaAbierta
                     } else {
                         DestinoLineasBaja::SuComanda
                     };
@@ -1881,6 +1887,26 @@ mod tests_anulacion {
         assert_eq!(
             texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
             Some("Pagada".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn la_baja_de_un_cobro_parcial_de_una_mesa_abierta_no_dice_que_se_ha_reabierto() {
+        // La mesa nunca se cerró: el cobro era de una parte. Decía «…que se ha reabierto».
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(
+            &db,
+            &["UPDATE Comandas SET Estado = 'Abierta', Fecha_Hora_Cierre = NULL WHERE ID_Comanda = 'com';"],
+        )
+        .await;
+
+        let hecho = repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(hecho.lineas, DestinoLineasBaja::SuCuentaAbierta);
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Abierta".into())
         );
     }
 
