@@ -8,6 +8,7 @@ import { ArrowRight, Check, Database, Monitor, Smartphone, Wifi } from "lucide-r
 import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { cn } from "../../shared/lib/cn";
 import { conAviso } from "../../shared/lib/conAviso";
+import { useToqueDeliberado } from "../../shared/lib/toqueDeliberado";
 import type { DeviceMode } from "../../shared/stores/useMode";
 import { Badge, Card } from "../../shared/ui";
 import FondoDecorado from "./FondoDecorado";
@@ -28,6 +29,15 @@ export default function SelectorModo({
 	handyVinculada: boolean;
 	onElegir: (modo: DeviceMode) => Promise<void>;
 }) {
+	// INI-06: elegir un modo cambia el equipo; arrastrar la lista por encima de una tarjeta no es
+	// elegirla.
+	const toqueTpv = useToqueDeliberado();
+	const toqueHandy = useToqueDeliberado();
+	const elegir = (modo: DeviceMode, toque: ReturnType<typeof useToqueDeliberado>) => (e: React.MouseEvent) => {
+		if (!toque.esDeliberado(e)) return;
+		conAviso(() => onElegir(modo))();
+	};
+
 	return (
 		<div className="relative flex min-h-full w-full items-center justify-center overflow-hidden bg-bg px-4 py-6 font-sans text-fg sm:px-6 lg:px-10">
 			<FondoDecorado />
@@ -61,7 +71,9 @@ export default function SelectorModo({
 						<button
 							type="button"
 							disabled={ocupado}
-							onClick={conAviso(() => onElegir("tpv"))}
+							onPointerDown={toqueTpv.onPointerDown}
+							onPointerCancel={toqueTpv.onPointerCancel}
+							onClick={elegir("tpv", toqueTpv)}
 							className={cn(
 								"group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
 								"transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
@@ -102,7 +114,9 @@ export default function SelectorModo({
 						<button
 							type="button"
 							disabled={ocupado}
-							onClick={conAviso(() => onElegir("handy"))}
+							onPointerDown={toqueHandy.onPointerDown}
+							onPointerCancel={toqueHandy.onPointerCancel}
+							onClick={elegir("handy", toqueHandy)}
 							className={cn(
 								"group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
 								"transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
