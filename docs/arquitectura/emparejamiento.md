@@ -133,7 +133,7 @@ poder leer nunca, y lo arregla vincularla de nuevo.
 
 Mientras `handy_get_tenant` no ha contestado, la Handy no está «sin vincular»: el arranque enseña la
 pantalla de carga, no el formulario (`useEmparejamientoHandy` empieza en `leyendo`, SYN-INC-08). Y
-ese comando, como los demás de la vinculación, la licencia, el socket y la réplica que no son
-`async`, lleva `#[tauri::command(async)]`: un comando síncrono corre en el hilo principal, que en
+ese comando, como los demás de la vinculación, la licencia, el socket, la réplica, el modo del
+equipo y la impresora que no son `async`, lleva `#[tauri::command(async)]`: un comando síncrono corre en el hilo principal, que en
 Android es el de la interfaz, y leer el Keystore por JNI con el equipo sin red congelaba la pantalla
 hasta el ANR. Lo vigila `lib.rs::tests_hilo_de_la_interfaz`.

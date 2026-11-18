@@ -935,7 +935,7 @@ impl AppState {
 // Comandos: modo device + init main
 // ──────────────────────────────────────────────────────────────────────────────
 
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
     let app_data_dir = app
@@ -950,7 +950,7 @@ fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
 
 /// Lee la palanca de conectividad de `device_config.json`. `None` = nunca se tocó = `Auto`
 /// (el frontend asume `auto`): SYNC-17, conectar es el comportamiento por defecto.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppErrorDto> {
     let app_data_dir = app
@@ -971,7 +971,7 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
 /// proof y rechaza una licencia no activa) y, antes que eso, el gate de AppBoot ya bloquea la app
 /// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
 /// red a un camino que no la necesita.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, AppErrorDto> {
     let app_data_dir = app
@@ -1621,7 +1621,7 @@ fn impresora_de(cfg: &DeviceConfig, destino: &str) -> Option<String> {
 }
 
 /// Devuelve la impresora seleccionada para un destino (o `None`).
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn printer_get_selected(
     app: AppHandle,
@@ -1633,7 +1633,7 @@ fn printer_get_selected(
 }
 
 /// Persiste la impresora de un destino en `device_config.json` (nombre vacío => deselecciona).
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, AppErrorDto> {
     let dir = app_data_dir_of(&app)?;
@@ -1806,7 +1806,7 @@ async fn printer_print_arqueo(
 /// recorta el papel) en vez de una versión más amable. Vive aquí y no duplicado en TypeScript
 /// porque es la MISMA cuenta que usa el builder ESC/POS: dos copias acabarían discrepando, que es
 /// justo lo que hace que una previsualización deje de servir para nada.
-#[tauri::command]
+#[tauri::command(async)]
 #[specta::specta]
 fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorDto> {
     Ok(printing::cols_efectivas(
@@ -4123,7 +4123,8 @@ mod tests_hilo_de_la_interfaz {
                     .map(str::trim)
                     .find(|l| !l.is_empty() && !l.starts_with("#[") && !l.starts_with("//"))
                     .unwrap_or("");
-                if !firma.starts_with("pub") {
+                let es_funcion = ["pub ", "pub(crate) ", "async ", "fn "].iter().any(|p| firma.starts_with(p));
+                if !es_funcion {
                     continue;
                 }
                 vistos += 1;
