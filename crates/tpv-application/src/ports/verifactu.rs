@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 
 use crate::error::AppResult;
-use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal};
+use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, EstadoFiscal};
 
 /// El registro de facturación, en local.
 #[async_trait]
@@ -27,6 +27,11 @@ pub trait VerifactuRepository: Send + Sync {
         id_pagos: &[String],
         destinatario: tpv_domain::verifactu::Destinatario,
     ) -> AppResult<BloqueFiscal>;
+
+    /// Qué tickets de estos cobros se pueden canjear por una factura completa, y por qué no los que
+    /// no (DOC-INC-01). Son las mismas comprobaciones que hace `emitir_sustitutiva`, que rechaza
+    /// igual: esto es para no dejar marcarlos en la pantalla.
+    async fn facturas_canjeables(&self, id_pagos: &[String]) -> AppResult<Vec<CanjeableDto>>;
 
     /// Corrige el cliente de una factura completa ya expedida (una `F3` o una `F1`) y devuelve la
     /// factura nueva. Cómo se hace en cada caso está en el adaptador.

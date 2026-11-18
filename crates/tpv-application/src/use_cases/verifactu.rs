@@ -7,7 +7,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::ports::verifactu::VerifactuRepository;
-use tpv_contracts::verifactu::{BloqueFiscal, DestinatarioInput, EstadoFiscal};
+use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, DestinatarioInput, EstadoFiscal};
 
 /// ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal.
 pub async fn estado(repo: &dyn VerifactuRepository) -> AppResult<EstadoFiscal> {
@@ -34,6 +34,24 @@ pub async fn emitir_sustitutiva(
         ));
     }
     repo.emitir_sustitutiva(&ids, destinatario_de(destinatario)).await
+}
+
+/// Qué tickets de estos cobros se pueden canjear por una factura completa (DOC-INC-01). Una página de
+/// Cuentas como mucho: lo que se pide son las casillas que se ven.
+pub async fn facturas_canjeables(
+    repo: &dyn VerifactuRepository,
+    id_pagos: &[String],
+) -> AppResult<Vec<CanjeableDto>> {
+    let mut ids: Vec<String> = id_pagos
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    ids.dedup();
+    if ids.len() > 500 {
+        return Err(AppError::validation("Como mucho 500 cobros de una vez."));
+    }
+    repo.facturas_canjeables(&ids).await
 }
 
 /// Corrige los datos del cliente de una factura completa ya expedida (FISCAL-02).

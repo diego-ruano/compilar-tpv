@@ -38,3 +38,12 @@ pub struct EstadoFiscal {
     pub nif: Option<String>,
     pub razon_social: Option<String>,
 }
+
+/// Si el ticket de un cobro se puede canjear por una factura completa (DOC-INC-01). Lo pide
+/// Cuentas al elegir varios tickets para una factura, para no dejar marcar uno que se rechazaría.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CanjeableDto {
+    pub id_pago: String,
+    /// `None` = se puede canjear. Si no, por qué, corto: «Ya facturado: 2026/000026».
+    pub motivo: Option<String>,
+}

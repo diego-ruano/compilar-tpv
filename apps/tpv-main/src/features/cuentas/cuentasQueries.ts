@@ -7,7 +7,7 @@ import { commands } from "@tpv/client";
 // invalidan la clave de la feature.
 
 import { useCallback, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cierreListar } from "./cierreApis";
 import { cuentasAnularPago, cuentasCreateGasto, cuentasDeleteGasto, cuentasGetEntradas, cuentasGetResumen, cuentasGetSalidas, cuentasUpdateGasto, cuentasUpdatePago, CUENTAS_PAGE_SIZE, type CuentasListParams, type CursorCuentas } from "./cuentasApis";
 
@@ -73,6 +73,7 @@ export const cuentasKeys = {
         ["cuentas", "resumen", rango.del ?? null, rango.al ?? null, rango.q ?? null] as const,
     proveedores: () => ["cuentas", "proveedores"] as const,
     cierres: () => ["cuentas", "cierres"] as const,
+    canjeables: (ids: string[]) => ["cuentas", "canjeables", ...ids] as const,
 };
 
 /** Cuántos cierres enseña el histórico de Cuentas. */
@@ -117,6 +118,24 @@ export function useCierresCaja(enabled = true) {
         queryKey: cuentasKeys.cierres(),
         queryFn: () => cierreListar(CIERRES_A_LA_VISTA),
         enabled,
+    });
+}
+
+/**
+ * DOC-INC-01 · Qué tickets de estos cobros se pueden canjear por una factura completa, y por qué no
+ * los demás: `id_pago → motivo` (`null` = se puede). Lo pide Cuentas al elegir varios tickets para
+ * una factura, con los cobros de la página que se ve. Mientras llega la de otra página se queda la
+ * anterior: una casilla que aún no se sabe se deja marcar, y la emisión rechaza igual.
+ */
+export function useFacturasCanjeables(idPagos: string[], enabled: boolean) {
+    return useQuery({
+        queryKey: cuentasKeys.canjeables(idPagos),
+        queryFn: async () => {
+            const filas = await commands.verifactuFacturasCanjeables(idPagos);
+            return new Map(filas.map((f) => [f.id_pago, f.motivo]));
+        },
+        enabled: enabled && idPagos.length > 0,
+        placeholderData: keepPreviousData,
     });
 }
 

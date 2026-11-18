@@ -190,6 +190,7 @@ export const nombresComandos = {
     "vr_get_detalles_ver_ticket": "vrGetDetallesVerTicket",
     "verifactu_estado": "verifactuEstado",
     "verifactu_emitir_factura_de_tickets": "verifactuEmitirFacturaDeTickets",
+    "verifactu_facturas_canjeables": "verifactuFacturasCanjeables",
     "verifactu_corregir_factura": "verifactuCorregirFactura",
     "stats_mesas_get": "statsMesasGet",
     "stats_productos_list_categorias": "statsProductosListCategorias",
@@ -426,6 +427,7 @@ type Argumentos = {
     "vr_get_detalles_ver_ticket": { args: Parameters<Comandos["vrGetDetallesVerTicket"]>[0] };
     "verifactu_estado": {  };
     "verifactu_emitir_factura_de_tickets": { idPagos: Parameters<Comandos["verifactuEmitirFacturaDeTickets"]>[0]; destinatario: Parameters<Comandos["verifactuEmitirFacturaDeTickets"]>[1] };
+    "verifactu_facturas_canjeables": { idPagos: Parameters<Comandos["verifactuFacturasCanjeables"]>[0] };
     "verifactu_corregir_factura": { numFactura: Parameters<Comandos["verifactuCorregirFactura"]>[0]; destinatario: Parameters<Comandos["verifactuCorregirFactura"]>[1] };
     "stats_mesas_get": { range: Parameters<Comandos["statsMesasGet"]>[0] };
     "stats_productos_list_categorias": {  };

@@ -11,7 +11,7 @@ use tauri::State;
 
 use tpv_application::use_cases::verifactu as uc;
 use tpv_contracts::errors::AppErrorDto;
-use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal};
+use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, EstadoFiscal};
 
 use crate::{AppState, ADMIN};
 
@@ -45,6 +45,21 @@ pub async fn verifactu_emitir_factura_de_tickets(
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.verifactu_repo().await?;
     Ok(uc::emitir_sustitutiva(repo.as_ref(), &id_pagos, destinatario).await?)
+}
+
+/// Qué tickets de estos cobros se pueden canjear por una factura completa, y por qué no los que no
+/// (DOC-INC-01). Lo pide Cuentas al elegir varios tickets para una factura: así la casilla de uno ya
+/// facturado sale desactivada con el motivo, en vez de rechazarlo al final. Administrador, como
+/// emitirla.
+#[tauri::command]
+#[specta::specta]
+pub async fn verifactu_facturas_canjeables(
+    state: State<'_, AppState>,
+    id_pagos: Vec<String>,
+) -> Result<Vec<CanjeableDto>, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let repo = state.verifactu_repo().await?;
+    Ok(uc::facturas_canjeables(repo.as_ref(), &id_pagos).await?)
 }
 
 /// Corrige los datos del cliente de una factura completa ya expedida (una `F3` o una `F1`).

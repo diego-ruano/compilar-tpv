@@ -241,6 +241,11 @@ mover un céntimo entre base y cuota. Los tickets no se tocan. Con un solo ticke
 pago; con varios no cuelga de ninguno y sus cobros la encuentran por `FacturasSustituidas`. Tras
 emitirla se abre su papel para imprimir.
 
+Esas comprobaciones están en una función (`canjeable`) que usan la emisión y
+`verifactu_facturas_canjeables` (DOC-INC-01): al elegir varios tickets, Cuentas la pide con los
+cobros de la página y enseña desactivada, con el motivo («Ya facturado: 2026/000026»), la casilla de
+lo que la emisión rechazaría. La emisión rechaza igual.
+
 Canjear varios tickets en una `F3` lo permite la FAQ de desarrolladores (apartado 27, consulta
 vinculante V2543-06 de la DGT). Su fecha de operación es la del último ticket: es el criterio de
 las facturas recapitulativas ([FAQ del SII 2.31](https://sede.agenciatributaria.gob.es/static_files/Sede/Procedimiento_ayuda/G417/FicherosSuministros/V_1_1/FaqGral/FAQs_SII_30_12_2025.pdf)), porque la FAQ no fija

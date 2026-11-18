@@ -1,7 +1,6 @@
 import { commands } from "@tpv/client";
 import {
 Calculator,
-Check,
 FileDown,
 FileText,
 Pencil,
@@ -26,6 +25,7 @@ ProveedorMiniDto
 } from "@tpv/contracts";
 import { printerTicketDePago } from "../../features/configuracion/api/printerApis";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
+import CasillaTicket from "../../features/cuentas/CasillaTicket";
 import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
@@ -46,6 +46,7 @@ cuentasKeys,
 useAnularPago,
 useCierresCaja,
 useCuentasEntradas,
+useFacturasCanjeables,
 useCuentasProveedoresMini,
 useCuentasResumen,
 useCuentasSalidas,
@@ -118,25 +119,6 @@ function PrimaryButton({
     );
 }
 
-/** La casilla de un cobro cuando se eligen varios tickets para una sola factura. */
-function CasillaTicket({ marcada, onClick }: { marcada: boolean; onClick: () => void }) {
-    return (
-        <button
-            type="button"
-            title={marcada ? "Quitar de la factura" : "Añadir a la factura"}
-            aria-pressed={marcada}
-            onClick={onClick}
-            className={[
-                "h-9 w-9 rounded-xl border shadow-sm transition active:scale-[0.98] grid place-items-center",
-                marcada
-                    ? "border-accent bg-accent text-white"
-                    : "border-border bg-surface text-fg-muted hover:bg-surface-2",
-            ].join(" ")}
-        >
-            {marcada ? <Check className="size-4" aria-hidden /> : null}
-        </button>
-    );
-}
 
 function MiniIconButton({
     title,
@@ -525,6 +507,31 @@ export default function Cuentas() {
     // 27). `null` = no se está eligiendo. Se guardan las entradas y no sólo sus ids: la lista va
     // por páginas, y lo elegido en una no puede perderse al pasar a otra.
     const [seleccionTickets, setSeleccionTickets] = useState<Map<string, EntradaDto> | null>(null);
+    // DOC-INC-01: al elegir, qué tickets de la página se pueden facturar. Se pide al entrar en el
+    // modo y con cada página.
+    const idsFacturables = useMemo(
+        () => entradasDB.filter((e) => !esAnulado(e) && !esDevolucion(e)).map((e) => e.id),
+        [entradasDB],
+    );
+    const canjeablesQuery = useFacturasCanjeables(idsFacturables, seleccionTickets !== null);
+    // Uno marcado antes de saber que no se puede facturar se quita: la emisión lo rechazaría.
+    useEffect(() => {
+        const motivos = canjeablesQuery.data;
+        if (!motivos) return;
+        setSeleccionTickets((prev) => {
+            if (!prev || ![...prev.keys()].some((id) => motivos.get(id))) return prev;
+            return new Map([...prev].filter(([id]) => !motivos.get(id)));
+        });
+    }, [canjeablesQuery.data]);
+    useEffect(() => {
+        if (canjeablesQuery.isError) {
+            toast.error(
+                "No se pudo comprobar qué tickets se pueden facturar",
+                toAppError(canjeablesQuery.error).message,
+            );
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [canjeablesQuery.isError]);
     const alternarTicket = (e: EntradaDto) =>
         setSeleccionTickets((prev) => {
             if (!prev) return prev;
@@ -723,6 +730,7 @@ export default function Cuentas() {
             {esAnulado(e) || esDevolucion(e) ? null : seleccionTickets ? (
                 <CasillaTicket
                     marcada={seleccionTickets.has(e.id)}
+                    motivo={canjeablesQuery.data?.get(e.id)}
                     onClick={() => alternarTicket(e)}
                 />
             ) : (

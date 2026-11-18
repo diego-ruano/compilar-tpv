@@ -420,6 +420,16 @@ export type CambioZoomArgs = {
 	cambio: CambioZoom,
 };
 
+/**
+ *  Si el ticket de un cobro se puede canjear por una factura completa (DOC-INC-01). Lo pide
+ *  Cuentas al elegir varios tickets para una factura, para no dejar marcar uno que se rechazaría.
+ */
+export type CanjeableDto = {
+	id_pago: string,
+	/**  `None` = se puede canjear. Si no, por qué, corto: «Ya facturado: 2026/000026». */
+	motivo: string | null,
+};
+
 /**  Todas las categorías de ingredientes y todos los ingredientes, cada lista por nombre. */
 export type CatalogoIngredientesDto = {
 	categorias: CategoriaIngredienteDto[],

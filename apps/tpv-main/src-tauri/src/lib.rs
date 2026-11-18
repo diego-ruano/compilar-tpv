@@ -2367,6 +2367,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             // transacción, no por un comando propio.
             commands::verifactu::verifactu_estado,
             commands::verifactu::verifactu_emitir_factura_de_tickets,
+            commands::verifactu::verifactu_facturas_canjeables,
             commands::verifactu::verifactu_corregir_factura,
             // stats
             commands::stats::stats_mesas_get,

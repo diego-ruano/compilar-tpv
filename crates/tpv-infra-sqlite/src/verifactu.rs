@@ -24,7 +24,7 @@ use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;
-use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal};
+use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, EstadoFiscal};
 use tpv_domain::ticket::{self, LineaTicket, TramoIva};
 use tpv_domain::verifactu as vf;
 
@@ -1217,6 +1217,119 @@ fn sumar_desgloses<'a>(desgloses: impl IntoIterator<Item = &'a [TramoIva]>) -> V
     out
 }
 
+/// Por qué un ticket no se puede canjear por una factura completa (DOC-INC-01). Lo comprueba
+/// [`canjeable`], que usan la emisión y la pantalla que elige los tickets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NoCanjeable {
+    /// El cobro no tiene factura (es de antes de completar los datos fiscales) o el número no
+    /// existe.
+    SinFactura,
+    /// Es otro tipo de factura: una `F1` ya es completa y una `R5`, una rectificativa.
+    NoEsTicket(String),
+    /// Ya tiene una `F3` vigente, con este número.
+    YaFacturado(String),
+    Anulado,
+    Devuelto,
+}
+
+impl NoCanjeable {
+    /// El rechazo al emitir, con los textos de siempre.
+    fn error(&self, num: &str) -> AppError {
+        match self {
+            NoCanjeable::SinFactura => {
+                AppError::not_found(format!("No existe ninguna factura con el número {num}."))
+            }
+            NoCanjeable::NoEsTicket(tipo) => AppError::conflict(format!(
+                "La factura {num} es de tipo {tipo}: sólo un ticket (factura simplificada) se puede \
+                 canjear por una factura completa."
+            )),
+            NoCanjeable::YaFacturado(_) => {
+                AppError::conflict(format!("Del ticket {num} ya se emitió una factura completa."))
+            }
+            NoCanjeable::Anulado => AppError::conflict(format!(
+                "El ticket {num} está anulado: no hay venta que facturar."
+            )),
+            NoCanjeable::Devuelto => AppError::conflict(format!(
+                "El ticket {num} tiene una devolución: ya no se canjea por una factura."
+            )),
+        }
+    }
+
+    /// Lo que enseña la casilla desactivada de la pantalla, corto.
+    pub(crate) fn motivo(&self) -> String {
+        match self {
+            NoCanjeable::SinFactura => "Sin factura: es de antes de los datos fiscales".to_string(),
+            NoCanjeable::NoEsTicket(tipo) if tipo == "F1" => "Ya tiene factura completa".to_string(),
+            NoCanjeable::NoEsTicket(tipo) => format!("No es un ticket ({tipo})"),
+            NoCanjeable::YaFacturado(f3) => format!("Ya facturado: {f3}"),
+            NoCanjeable::Anulado => "Anulado".to_string(),
+            NoCanjeable::Devuelto => "Tiene una devolución".to_string(),
+        }
+    }
+}
+
+/// ¿Se puede canjear el ticket `num` por una factura completa? Su alta si sí; por qué no, si no.
+///
+/// Son las comprobaciones de la emisión ([`emitir_sustitutiva`]), aparte para que la pantalla las
+/// pida antes de dejar marcar un ticket (DOC-INC-01): se podía marcar uno ya facturado y enterarse
+/// al final, con el cliente delante.
+async fn canjeable<C: Reader>(db: &C, num: &str) -> AppResult<Result<Alta, NoCanjeable>> {
+    let Some(t) = ultima_alta(db, num).await? else {
+        return Ok(Err(NoCanjeable::SinFactura));
+    };
+    if t.tipo_factura != "F2" {
+        // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es
+        // una rectificativa: en ninguno de los dos casos hay nada que sustituir.
+        return Ok(Err(NoCanjeable::NoEsTicket(t.tipo_factura)));
+    }
+    // ¿Ya se canjeó? Se mira la F3 VIGENTE: una corregida con su F3 negativa deja de contar.
+    if let Some(f3) = f3_vigente(db, num).await? {
+        return Ok(Err(NoCanjeable::YaFacturado(f3.num_serie)));
+    }
+    // Una F3 canjea simplificadas «facturadas y declaradas» (clave F3 de la Orden
+    // HAC/1177/2024). Un ticket anulado ya no tiene efecto fiscal, y uno devuelto quedó a
+    // cero con su rectificativa: en los dos casos no queda venta que facturar al cliente.
+    if esta_anulada(db, num).await? {
+        return Ok(Err(NoCanjeable::Anulado));
+    }
+    if referenciado_por(db, "R5", "rectificadas", num).await? {
+        return Ok(Err(NoCanjeable::Devuelto));
+    }
+    Ok(Ok(t))
+}
+
+/// Qué tickets de estos cobros se pueden canjear por una factura completa, y por qué no los que no
+/// (DOC-INC-01). En el orden de `id_pagos`; un cobro que no existe no sale.
+pub async fn facturas_canjeables<C: Reader>(
+    conn: &C,
+    id_pagos: &[String],
+) -> AppResult<Vec<CanjeableDto>> {
+    let mut out = Vec::with_capacity(id_pagos.len());
+    for id in id_pagos {
+        let id = id.trim();
+        let num = {
+            let mut rows = conn
+                .query(
+                    "SELECT COALESCE(Numero_Ticket, '') FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
+                    vec![Value::Text(id.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                None => continue,
+            }
+        };
+        let motivo = if num.trim().is_empty() {
+            Some(NoCanjeable::SinFactura.motivo())
+        } else {
+            canjeable(conn, num.trim()).await?.err().map(|no| no.motivo())
+        };
+        out.push(CanjeableDto { id_pago: id.to_string(), motivo });
+    }
+    Ok(out)
+}
+
 /// Emite una **factura completa en sustitución** de uno o varios tickets ya expedidos (`F3`).
 ///
 /// Es la respuesta al *«¿me lo puedes hacer con IVA?»* del día siguiente: el cliente vuelve con el
@@ -1260,38 +1373,10 @@ pub async fn emitir_sustitutiva(
 
     let mut tickets: Vec<Alta> = Vec::with_capacity(nums.len());
     for num in &nums {
-        let Some(t) = ultima_alta(db, num).await? else {
-            return Err(AppError::not_found(format!("No existe ninguna factura con el número {num}.")));
-        };
-        if t.tipo_factura != "F2" {
-            // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es
-            // una rectificativa: en ninguno de los dos casos hay nada que sustituir.
-            return Err(AppError::conflict(format!(
-                "La factura {num} es de tipo {}: sólo un ticket (factura simplificada) se puede \
-                 canjear por una factura completa.",
-                t.tipo_factura
-            )));
+        match canjeable(db, num).await? {
+            Ok(t) => tickets.push(t),
+            Err(no) => return Err(no.error(num)),
         }
-        // ¿Ya se canjeó? Se mira la F3 VIGENTE: una corregida con su F3 negativa deja de contar.
-        if f3_vigente(db, num).await?.is_some() {
-            return Err(AppError::conflict(format!(
-                "Del ticket {num} ya se emitió una factura completa."
-            )));
-        }
-        // Una F3 canjea simplificadas «facturadas y declaradas» (clave F3 de la Orden
-        // HAC/1177/2024). Un ticket anulado ya no tiene efecto fiscal, y uno devuelto quedó a
-        // cero con su rectificativa: en los dos casos no queda venta que facturar al cliente.
-        if esta_anulada(db, num).await? {
-            return Err(AppError::conflict(format!(
-                "El ticket {num} está anulado: no hay venta que facturar."
-            )));
-        }
-        if referenciado_por(db, "R5", "rectificadas", num).await? {
-            return Err(AppError::conflict(format!(
-                "El ticket {num} tiene una devolución: ya no se canjea por una factura."
-            )));
-        }
-        tickets.push(t);
     }
 
     // El desglose es el de los tickets, con su signo: la F3 no cambia el importe, lo vuelve a
@@ -2253,6 +2338,11 @@ impl VerifactuRepository for SqliteVerifactuRepository {
             let nums = numeros_de_ticket(&g, id_pagos).await?;
             emitir_sustitutiva(&g, &nums, destinatario).await
         }).await
+    }
+
+    async fn facturas_canjeables(&self, id_pagos: &[String]) -> AppResult<Vec<CanjeableDto>> {
+        let g = self.db.read().await;
+        facturas_canjeables(&g, id_pagos).await
     }
 
     async fn corregir_factura(

@@ -3711,6 +3711,61 @@ mod tests_baja_de_un_ticket_canjeado {
         filas.iter().filter(|f| f.tipo == "ANULACION").collect()
     }
 
+    // ── Qué tickets se pueden facturar (DOC-INC-01) ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn la_pantalla_sabe_que_tickets_se_pueden_facturar_y_por_que_no_los_demas() {
+        // Antes se podía marcar un ticket ya canjeado y el rechazo llegaba al emitir, con el
+        // cliente delante. Lo que se le enseña es lo mismo que rechazaría la emisión.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (canjeado, _, f3) = ticket_canjeado(&db).await;
+        let (libre, _) = cobrar(&db, "com2", "det2").await;
+
+        let r = crate::verifactu::facturas_canjeables(
+            &db.read().await,
+            &[canjeado.clone(), libre.clone(), "no-existe".into()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            r,
+            vec![
+                tpv_contracts::verifactu::CanjeableDto {
+                    id_pago: canjeado.clone(),
+                    motivo: Some(format!("Ya facturado: {f3}")),
+                },
+                tpv_contracts::verifactu::CanjeableDto { id_pago: libre.clone(), motivo: None },
+            ]
+        );
+
+        // Y la emisión lo rechaza igual que siempre.
+        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone());
+        let err = tpv_application::ports::verifactu::VerifactuRepository::emitir_sustitutiva(
+            &e,
+            &[canjeado, libre],
+            cliente(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("ya se emitió una factura completa"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn un_ticket_anulado_no_se_puede_facturar_y_la_pantalla_lo_dice() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, _) = cobrar(&db, "com1", "det1").await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Error).await.unwrap();
+
+        let r = crate::verifactu::facturas_canjeables(&db.read().await, std::slice::from_ref(&id_pago))
+            .await
+            .unwrap();
+
+        assert_eq!(r[0].motivo.as_deref(), Some("Anulado"));
+    }
+
     // ── Baja por error ─────────────────────────────────────────────────────────────────────────
 
     #[tokio::test]
