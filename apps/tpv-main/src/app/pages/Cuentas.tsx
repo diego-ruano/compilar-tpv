@@ -1711,6 +1711,11 @@ export default function Cuentas() {
                 importe={sumar(...(facturaDe?.entradas ?? []).map((x) => x.importe))}
                 inicial={facturaDe?.inicial ?? null}
                 corrigiendo={facturaDe?.corregir ?? null}
+                accion={
+                    facturaDe?.corregir
+                        ? { texto: "Corregir factura", enCurso: "Corrigiendo…" }
+                        : { texto: "Emitir factura", enCurso: "Emitiendo…" }
+                }
                 limite={limite_simplif}
                 obligatorio={false}
                 guardando={f3Guardando}

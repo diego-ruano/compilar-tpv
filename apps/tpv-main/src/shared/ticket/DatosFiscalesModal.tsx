@@ -34,6 +34,7 @@ export default function DatosFiscalesModal({
     /** Datos de partida, si el cobro es de un cliente con ficha. */
     inicial,
     corrigiendo = null,
+    accion = { texto: "Cobrar y facturar", enCurso: "Cobrando…" },
 }: {
     open: boolean;
     onClose: () => void;
@@ -49,6 +50,11 @@ export default function DatosFiscalesModal({
      * corrige emitiendo otra (FISCAL-02), y el formulario lo dice.
      */
     corrigiendo?: string | null;
+    /**
+     * Lo que dice el botón, y mientras se hace. «Cobrar y facturar» es lo del TPV, que cobra a la
+     * vez; desde Cuentas el cobro ya está hecho y se emite o se corrige la factura.
+     */
+    accion?: { texto: string; enCurso: string };
 }) {
     const [nombre, setNombre] = useState("");
     const [nif, setNif] = useState("");
@@ -195,7 +201,7 @@ export default function DatosFiscalesModal({
                             !puede ? "cursor-not-allowed opacity-60" : "",
                         ].join(" ")}
                     >
-                        {guardando ? "Cobrando…" : "Cobrar y facturar"}
+                        {guardando ? accion.enCurso : accion.texto}
                     </button>
                 </div>
             </div>

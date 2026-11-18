@@ -55,14 +55,16 @@ export type CobroImprimible = {
 type Modo = "cobro" | "completo" | "pendiente" | "seleccion";
 
 /** Cómo se llama cada factura de un cobro en el modal. */
-function etiquetaFactura(f: FacturaDelCobro): string {
+export function etiquetaFactura(f: FacturaDelCobro): string {
     switch (f.tipo_factura) {
         case "F2":
             return "Ticket";
         case "F1":
             return "Factura completa";
         case "F3":
-            return f.importe < 0 ? "Factura de la devolución" : "Factura completa (canje)";
+            // Una F3 en negativo sólo la emite la corrección de los datos del cliente: contrarresta
+            // la que tenía los datos mal (FISCAL-02). No es una devolución: no sale dinero.
+            return f.importe < 0 ? "Anulación de la factura (corrección de datos)" : "Factura completa (canje)";
         default:
             return f.tipo_factura.startsWith("R") ? "Factura rectificativa" : f.tipo_factura;
     }
