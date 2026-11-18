@@ -860,7 +860,9 @@ export function useVentaRapida() {
 
       const ui = await cargarComandaEnTicketPanel(idComanda);
 
-      setSeleccionadosLocal(new Set(ui.filter((t) => !t.pagado).map((t) => t.id)));
+      // Cobrar un ticket desde la lista es cobrarlo entero: «Cobrar todo» (SYN-INC-05).
+      cobrandoTodoRef.current = true;
+      setSeleccionadosLocal(pendientesDe(ui));
       setPaso("metodo");
       setOpenVerTickets(false);
 
