@@ -10,11 +10,13 @@
 //! cualquier navegación:
 //!
 //! - Cubre el marco principal: en Windows, lo que WebView2 anuncia con `NavigationStarting`; en
-//!   Android, lo que la WebView pasa por `shouldOverrideUrlLoading`.
+//!   Android, lo que la WebView pasa por `shouldOverrideUrlLoading`; en iOS, lo que WKWebView
+//!   consulta con `decidePolicyForNavigationAction`, que incluye la carga inicial.
 //! - Los iframes no pasan por aquí: los para la CSP (`frame-src 'none'`).
-//! - La carga inicial no depende de esto: la hace Tauri con la dirección de la app, que sólo
-//!   consulta a los plugins cuando la webview ya está registrada, y Android no la pasa por
-//!   `shouldOverrideUrlLoading`.
+//! - En Windows y Android la carga inicial no depende de esto: la hace Tauri con la dirección de la
+//!   app, que sólo consulta a los plugins cuando la webview ya está registrada, y Android no la pasa
+//!   por `shouldOverrideUrlLoading`. En iOS sí pasa por aquí, y por eso su origen tiene que estar
+//!   admitido: sin él, la app se bloqueaba a sí misma y se quedaba en blanco.
 //! - Una dirección que Tauri no sepa interpretar no llega: Tauri la deja pasar.
 //!
 //! La app no navega a ningún otro sitio: no tiene enlaces externos ni ventanas secundarias. Un
@@ -27,6 +29,10 @@ use tauri::{Manager, Runtime, Url};
 /// El host desde el que Tauri sirve el frontend empaquetado en Windows y en Android
 /// (`http://tauri.localhost`, o `https://` con `useHttpsScheme`).
 const HOST_DE_TAURI: &str = "tauri.localhost";
+
+/// En iOS (y en macOS) Tauri no sirve la app por `http`, sino por su propio esquema:
+/// `tauri://localhost`. Sólo ahí es de la app; en Windows y Android ese esquema no lo es.
+const EN_APPLE: bool = cfg!(any(target_os = "ios", target_os = "macos"));
 
 /// Se registra como plugin porque es el único gancho de navegación que alcanza a una ventana
 /// declarada en `tauri.conf.json`.
@@ -50,10 +56,17 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
 
 /// ¿Es `url` una página de la propia aplicación? `url` llega ya resuelta contra la página actual.
 fn es_de_la_app(url: &Url, servidor_dev: Option<&Url>) -> bool {
+    es_de_la_app_en(url, servidor_dev, EN_APPLE)
+}
+
+/// La regla, con la plataforma como argumento para poder probar las dos en cualquier equipo.
+fn es_de_la_app_en(url: &Url, servidor_dev: Option<&Url>, en_apple: bool) -> bool {
     let de_tauri = matches!(url.scheme(), "http" | "https")
         && url.host_str() == Some(HOST_DE_TAURI)
         && url.port().is_none();
-    de_tauri || servidor_dev.is_some_and(|dev| mismo_origen(url, dev))
+    let de_tauri_en_apple =
+        en_apple && url.scheme() == "tauri" && url.host_str() == Some("localhost") && url.port().is_none();
+    de_tauri || de_tauri_en_apple || servidor_dev.is_some_and(|dev| mismo_origen(url, dev))
 }
 
 fn mismo_origen(a: &Url, b: &Url) -> bool {
@@ -125,6 +138,29 @@ mod tests {
         ] {
             assert!(!es_de_la_app(&desde_la_app(ajena), None), "{ajena} no es de la app");
         }
+    }
+
+    /// En iOS la app se sirve desde `tauri://localhost`, y la carga inicial pasa por la política: sin
+    /// admitirlo, la ventana se bloqueaba a sí misma y se quedaba en blanco. Sólo ese origen exacto.
+    #[test]
+    fn en_ios_la_app_se_sirve_desde_su_esquema_propio() {
+        let en_ios = |pagina: &str, enlace: &str| es_de_la_app_en(&desde(pagina, enlace), None, true);
+        for propia in ["", "/", "/login", "/estadisticas?rango=mes#clientes"] {
+            assert!(en_ios("tauri://localhost/", propia), "{propia} es de la app en iOS");
+        }
+        for ajena in [
+            "tauri://localhost:9/",
+            "tauri://localhost.evil.example/",
+            "tauri://evil.example/",
+            "tauri://localhost@a.example/",
+            "https://a.example/pin",
+            "data:text/html,<h1>PIN</h1>",
+            "about:blank",
+        ] {
+            assert!(!en_ios("tauri://localhost/", ajena), "{ajena} no es de la app en iOS");
+        }
+        // Fuera de Apple, ese esquema sigue sin ser de la app.
+        assert!(!es_de_la_app_en(&Url::parse("tauri://localhost/").unwrap(), None, false));
     }
 
     #[test]
