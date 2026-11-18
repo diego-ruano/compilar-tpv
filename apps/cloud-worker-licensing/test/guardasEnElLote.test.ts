@@ -1047,6 +1047,35 @@ describe("Libre: el día libre de un trabajador", () => {
 	});
 });
 
+describe("Un turno sólo se le pone a alguien de la plantilla", () => {
+	const RETIRAR = "UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 00:00:00' WHERE ID_Usuario = 'ana'";
+	const turnos = (n: Negocio) => n.n("SELECT COUNT(*) FROM Asignacion_Turnos WHERE ID_Trabajador = 'trab-ana'");
+
+	it("guardar un horario a un retirado, también si se retira entre la lectura y el lote, es trabajador_no_encontrado", async () => {
+		await conNegocio("turno-retirado-guardar", USUARIOS, async (n) => {
+			const r = await n.pedir(
+				"POST",
+				"/v1/trabajadores/horarios/guardar",
+				{ id_trabajador: "trab-ana", fecha: "2099-01-06", id_turno: "manana", area: "Sala", tramos: [{ hora_inicio: "09:00", hora_fin: "14:00" }] },
+				{ antesDelLote: [RETIRAR] },
+			);
+			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+			expect(turnos(n)).toBe(0);
+			expect(n.difundidos).toEqual([]);
+		});
+	});
+
+	it("crear una asignación a un retirado es trabajador_no_encontrado", async () => {
+		await conNegocio("turno-retirado-crear", [...USUARIOS, RETIRAR], async (n) => {
+			const r = await n.pedir("POST", "/v1/trabajadores/horarios/asignaciones", {
+				id_trabajador: "trab-ana", fecha: "2099-01-06", id_turno: "manana", area: "Sala", hora_inicio: "09:00", hora_fin: "14:00", notas: null,
+			});
+			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
+			expect(turnos(n)).toBe(0);
+		});
+	});
+});
+
 /* =========================================================
    El correo de un cliente (SYN-INC-07)
 ========================================================= */

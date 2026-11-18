@@ -1,5 +1,5 @@
 {
-  "descripcion": "Guardar una semana del cuadrante como horario predeterminado (RI-79). Sustituye el predeterminado de los trabajadores que aparecen en esa semana y no toca el de los demás. Fija el día de la semana (lunes = 1 … domingo = 7), el orden de los tramos de un mismo día y que las notas se guardan limpias (una vacía es NULL, sin espacios alrededor). Cada fila lleva su ID resuelto antes de escribir: el snapshot comprueba que ninguno viene vacío y que no se repiten; el ID en sí no se compara, porque lo genera cada lado.",
+  "descripcion": "Guardar una semana del cuadrante como horario predeterminado (RI-79). Sustituye el predeterminado de los trabajadores que aparecen en esa semana y no toca el de los demás. Fija el día de la semana (lunes = 1 … domingo = 7), el orden de los tramos de un mismo día y que las notas se guardan limpias (una vacía es NULL, sin espacios alrededor). Cada fila lleva su ID resuelto antes de escribir: el snapshot comprueba que ninguno viene vacío y que no se repiten; el ID en sí no se compara, porque lo genera cada lado. Un trabajador retirado (Archivado_En) con un turno en esa semana no recibe horario predeterminado.",
   "comando": "horarios.set_predeterminado_desde_semana",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
@@ -9,13 +9,16 @@
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-3', 'user-3');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Archivado_En) VALUES ('user-ret', 'rol-1', 'ret@x.com', 'h', 'Retirado', 'Inactivo', '2026-03-05 12:00:00');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-ret', 'user-ret');",
     "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('pred-viejo-1', 'trab-1', 2, 1, '00000000-0000-7000-8000-000000000103', 'Sala', '08:00', '12:00', 'Lo sustituye la semana');",
     "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('pred-ajeno', 'trab-3', 1, 1, '00000000-0000-7000-8000-000000000104', 'Barra', '16:00', '23:00', 'No esta en la semana: se queda');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-1', 'trab-1', '2026-03-02', '00000000-0000-7000-8000-000000000102', 'Sala', '17:00', '22:00', '');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-2', 'trab-1', '2026-03-02', '00000000-0000-7000-8000-000000000102', 'Sala', '09:00', '14:00', 'Mediodia');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-3', 'trab-1', '2026-03-08', '00000000-0000-7000-8000-000000000103', 'Cocina', '10:00', '14:00', '  Domingo  ');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-4', 'trab-2', '2026-03-04', '00000000-0000-7000-8000-000000000105', 'Barra', '20:00', '02:00', NULL);",
-    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-fuera', 'trab-1', '2026-03-09', '00000000-0000-7000-8000-000000000104', 'Sala', '16:00', '23:00', 'Lunes siguiente: fuera de la semana');"
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-fuera', 'trab-1', '2026-03-09', '00000000-0000-7000-8000-000000000104', 'Sala', '16:00', '23:00', 'Lunes siguiente: fuera de la semana');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-ret', 'trab-ret', '2026-03-03', '00000000-0000-7000-8000-000000000103', 'Sala', '09:00', '13:00', 'Del retirado: no pasa al predeterminado');"
   ],
   "entrada": {
     "fecha_lunes": "2026-03-02"

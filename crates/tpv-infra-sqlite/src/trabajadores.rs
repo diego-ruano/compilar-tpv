@@ -30,6 +30,31 @@ const SQL_QUITAR_LIBRE: &str = "DELETE FROM Asignacion_Turnos WHERE ID_Trabajado
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
 
+/// Las filas de un trabajador de la plantilla, sin los retirados (`Archivado_En`). «Copiar semana
+/// anterior» y «Establecer predeterminado» leen la semana con esto: copiada tal cual, una semana
+/// pasada resucitaba los turnos de un retirado, que no se ven ni se pueden borrar. Mismo SQL en el
+/// worker (`DE_LA_PLANTILLA` en `trabajadores.queries.ts`).
+const DE_LA_PLANTILLA: &str = "ID_Trabajador IN (SELECT t.ID_Trabajador FROM Trabajadores t \
+     JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario WHERE u.Archivado_En IS NULL)";
+
+/// Un turno o un día libre sólo se le pone a alguien de la plantilla: una pantalla vieja podía
+/// asignárselo a un retirado. Se mira dentro de la escritura, como la guarda
+/// `trabajador_no_encontrado` del worker.
+async fn exigir_de_la_plantilla<C: Reader>(conn: &C, id_trabajador: &str) -> AppResult<()> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario \
+             WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL;",
+            vec![Value::Text(id_trabajador.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    if rows.next().await.map_err(db_err)?.is_none() {
+        return Err(AppError::not_found("Ese trabajador ya no existe. Actualiza la lista."));
+    }
+    Ok(())
+}
+
 /// RI-62: ¿este cambio deja el negocio sin ningún administrador activo? Sí cuando el usuario que se
 /// edita es administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro.
 /// Con cero administradores se cierran Configuración, Cuentas, los cierres, Fiscal y el alta de
@@ -876,6 +901,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         validar_tramos(&tramos).map_err(AppError::validation)?;
         let db = self.db.write().await;
         let primero = &tramos[0];
+        exigir_de_la_plantilla(&db, &primero.id_trabajador).await?;
         let mut ids = Vec::new();
         let grupo = if let Some(id) = id_asignacion {
             let mut rows = db.query("SELECT COALESCE(ID_Grupo, ID_Asignacion), ID_Trabajador, Fecha FROM Asignacion_Turnos WHERE ID_Asignacion = ?1;", vec![Value::Text(id)]).await.map_err(db_err)?;
@@ -916,6 +942,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
         let db = self.db.write().await;
+        exigir_de_la_plantilla(&db, &data.id_trabajador).await?;
 
         // TRAB-04: no permitir asignar el mismo turno al mismo trabajador el mismo día dos veces.
         // (El área puede diferir; el duplicado que se bloquea es trabajador+fecha+turno.) El lock de
@@ -1044,17 +1071,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let db = self.db.write().await;
         db.transaccion(async {
             // De la plantilla (un eliminado con historia ya no).
-            let mut rows = db
-                .query(
-                    "SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario \
-                     WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL;",
-                    vec![Value::Text(id_trabajador.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            if rows.next().await.map_err(db_err)?.is_none() {
-                return Err(AppError::not_found("Ese trabajador ya no existe. Actualiza la lista."));
-            }
+            exigir_de_la_plantilla(&db, id_trabajador).await?;
             // Lo que tuviera ese día deja de estar: el libre lo sustituye.
             db.execute(
                 "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2;",
@@ -1109,11 +1126,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
         let mut srows = db
             .query(
-                r#"
-                SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo
-                FROM Asignacion_Turnos
-                WHERE Fecha >= date(?1) AND Fecha < date(?1, '+7 day');
-                "#,
+                &format!(
+                    "SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo \
+                     FROM Asignacion_Turnos \
+                     WHERE Fecha >= date(?1) AND Fecha < date(?1, '+7 day') AND {DE_LA_PLANTILLA};"
+                ),
                 vec![Value::Text(from_monday.clone())],
             )
             .await
@@ -1188,7 +1205,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let db = self.db.write().await;
 
         // 1) Recolectar el mapa (id_trabajador, weekday) -> items, leyendo la semana.
-        let sql = r#"
+        let sql = format!(
+            r#"
           SELECT
             a.ID_Trabajador,
             a.Fecha,
@@ -1200,11 +1218,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
           FROM Asignacion_Turnos a
           WHERE a.Fecha >= date(?1)
             AND a.Fecha < date(?1, '+7 day')
+            AND a.{DE_LA_PLANTILLA}
           ORDER BY a.ID_Trabajador ASC, a.Fecha ASC, a.Hora_Inicio ASC;
-        "#;
+        "#
+        );
 
         let mut rows = db
-            .query(sql, vec![Value::Text(fecha_lunes.clone())])
+            .query(&sql, vec![Value::Text(fecha_lunes.clone())])
             .await
             .map_err(db_err)?;
 
@@ -1483,6 +1503,77 @@ mod tests_horarios_agrupados {
             )
             .await;
         assert!(con_horas.is_err());
+    }
+
+    /// Un retirado (`Archivado_En`) conserva sus turnos pasados, que no se ven en el cuadrante ni se
+    /// pueden borrar desde él. Copiar esa semana o hacerla predeterminada no se los devuelve, y una
+    /// pantalla vieja no puede ponerle un turno nuevo.
+    #[tokio::test]
+    async fn copiar_o_hacer_predeterminada_una_semana_no_resucita_a_un_retirado() {
+        use tpv_domain::trabajadores::AsignacionNueva;
+
+        let (db, repo) = preparar().await;
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Archivado_En) \
+                 SELECT 'ur', ID_Rol, 'r@bar.test', 'h', 'Rita', 'Inactivo', '2026-10-08 12:00:00' FROM Roles WHERE Nombre_Rol = 'Camarero'; \
+                 INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('tr', 'ur'); \
+                 INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) \
+                 VALUES ('a-t', 't', '2026-10-06', '00000000-0000-7000-8000-000000000103', 'Sala', '09:00', '14:00'), \
+                        ('a-r', 'tr', '2026-10-07', '00000000-0000-7000-8000-000000000103', 'Sala', '09:00', '14:00');",
+            )
+            .await
+            .unwrap();
+        let de = |sql: &'static str| {
+            let db = db.clone();
+            async move {
+                let g = db.read().await;
+                let mut rows = g.query(sql, Vec::<Value>::new()).await.unwrap();
+                let mut out = Vec::new();
+                while let Some(r) = rows.next().await.unwrap() {
+                    out.push(v_string(r.get_value(0).unwrap()).unwrap_or_default());
+                }
+                out
+            }
+        };
+
+        repo.copy_semana("2026-10-05".into(), "2026-10-12".into(), false).await.unwrap();
+        assert_eq!(
+            de("SELECT ID_Trabajador FROM Asignacion_Turnos WHERE Fecha >= '2026-10-12' ORDER BY 1;").await,
+            vec!["t".to_string()],
+            "la copia lleva sólo a los de la plantilla"
+        );
+
+        repo.set_predeterminado_desde_semana("2026-10-05".into()).await.unwrap();
+        assert_eq!(
+            de("SELECT DISTINCT ID_Trabajador FROM Horario_Predeterminado ORDER BY 1;").await,
+            vec!["t".to_string()],
+            "el predeterminado lleva sólo a los de la plantilla"
+        );
+
+        let mut turno = entrada(&[("16:00", "20:00")]);
+        turno.id_trabajador = "tr".into();
+        let r = guardar_asignacion(&repo, turno).await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        let r = repo
+            .create_asignacion(AsignacionNueva {
+                id_trabajador: "tr".into(),
+                fecha: "2026-10-20".into(),
+                id_turno: "00000000-0000-7000-8000-000000000103".into(),
+                area: "Sala".into(),
+                hora_inicio: Some("09:00".into()),
+                hora_fin: Some("14:00".into()),
+                notas: None,
+            })
+            .await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        assert_eq!(
+            de("SELECT ID_Asignacion FROM Asignacion_Turnos WHERE ID_Trabajador = 'tr';").await,
+            vec!["a-r".to_string()],
+            "al retirado no se le ha puesto nada"
+        );
     }
 }
 

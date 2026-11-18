@@ -1,5 +1,5 @@
 {
-  "descripcion": "Copiar una semana del cuadrante a otra, con overwrite (TRAB-08). Cada copia lleva su propio ID resuelto ANTES de escribir: el snapshot comprueba que ninguno viene vacío y que no se repiten, que es lo que falla si el ID se genera dentro del SQL replicado. El ID en sí no se compara (Rust usa UUIDv7 y el worker UUIDv4, y los dos son válidos).",
+  "descripcion": "Copiar una semana del cuadrante a otra, con overwrite (TRAB-08). Cada copia lleva su propio ID resuelto ANTES de escribir: el snapshot comprueba que ninguno viene vacío y que no se repiten, que es lo que falla si el ID se genera dentro del SQL replicado. El ID en sí no se compara (Rust usa UUIDv7 y el worker UUIDv4, y los dos son válidos). Un trabajador retirado (Archivado_En) conserva su turno de la semana origen, pero la copia no se lo pone en la destino: no se veria ni se podria borrar.",
   "comando": "horarios.copiar_semana",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
@@ -7,10 +7,13 @@
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Archivado_En) VALUES ('user-ret', 'rol-1', 'ret@x.com', 'h', 'Retirado', 'Inactivo', '2026-03-05 12:00:00');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-ret', 'user-ret');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-1', 'trab-1', '2026-03-02', '00000000-0000-7000-8000-000000000104', 'Sala', '09:00', '17:00', 'Turno largo');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-2', 'trab-2', '2026-03-04', '00000000-0000-7000-8000-000000000105', 'Barra', '20:00', '02:00', NULL);",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-3', 'trab-1', '2026-03-08', '00000000-0000-7000-8000-000000000103', 'Cocina', '10:00', '14:00', 'Domingo');",
-    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-vieja', 'trab-2', '2026-03-10', '00000000-0000-7000-8000-000000000103', 'Sala', '08:00', '12:00', 'La pisa el overwrite');"
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-vieja', 'trab-2', '2026-03-10', '00000000-0000-7000-8000-000000000103', 'Sala', '08:00', '12:00', 'La pisa el overwrite');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-ret', 'trab-ret', '2026-03-03', '00000000-0000-7000-8000-000000000103', 'Sala', '09:00', '13:00', 'Del retirado: no se copia');"
   ],
   "entrada": {
     "from_monday": "2026-03-02",

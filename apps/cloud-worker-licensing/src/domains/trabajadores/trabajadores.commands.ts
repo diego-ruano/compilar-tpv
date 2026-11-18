@@ -256,6 +256,22 @@ export function updateTrabajador(
 }
 
 /**
+ * Un turno o un día libre sólo se le pone a alguien de la plantilla (un retirado, `Archivado_En`,
+ * ya no): una pantalla vieja podía asignárselo. Guarda del lote (SYNC-30), como
+ * `exigir_de_la_plantilla` en la Main.
+ */
+function guardaDeLaPlantilla(idTrabajador: string) {
+	return {
+		kind: "guard" as const,
+		sql: `SELECT EXISTS (SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
+			WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL);`,
+		args: [idTrabajador],
+		error: "trabajador_no_encontrado",
+		status: 404,
+	};
+}
+
+/**
  * TRAB-04: el mismo turno no se asigna dos veces al mismo trabajador el mismo día, aunque cambie el
  * área. Espejo de la comprobación de la Main. Lo decide la guarda, dentro del lote que la escribe
  * (SYNC-30): mirado antes, otro dispositivo podía asignarlo entre la lectura y el lote, y el
@@ -269,6 +285,7 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
+					guardaDeLaPlantilla(input.id_trabajador),
 					{
 						kind: "guard",
 						sql: "SELECT NOT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3);",
@@ -329,7 +346,10 @@ export function guardarAsignacion(input: AsignacionGuardarInput, existente: Grup
 	const idPrincipal = input.id_asignacion ?? nuevoId();
 	const condicion = "EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?10 AND COALESCE(ID_Grupo, ID_Asignacion) = ?2 AND ID_Trabajador = ?3 AND Fecha = ?4)";
 	// Un turno en un día libre lo deja de ser.
-	const steps: any[] = [{ kind: "execute", sql: SQL_QUITAR_LIBRE, args: [input.id_trabajador, input.fecha] }];
+	const steps: any[] = [
+		guardaDeLaPlantilla(input.id_trabajador),
+		{ kind: "execute", sql: SQL_QUITAR_LIBRE, args: [input.id_trabajador, input.fecha] },
+	];
 	if (input.id_asignacion) {
 		// Conservamos el miembro principal: sirve de guarda en cada sentencia del batch.
 		// Si desapareció desde la lectura previa, no se borra ni se crea ninguna fila.
@@ -358,14 +378,7 @@ export function marcarLibre(input: { id_trabajador: string; fecha: string }): Bu
 			payload: {
 				steps: [
 					{ kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [nuevoId()] },
-					{
-						kind: "guard",
-						sql: `SELECT EXISTS (SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
-							WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL);`,
-						args: [input.id_trabajador],
-						error: "trabajador_no_encontrado",
-						status: 404,
-					},
+					guardaDeLaPlantilla(input.id_trabajador),
 					{
 						kind: "execute",
 						sql: "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = ?2;",

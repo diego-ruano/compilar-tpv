@@ -278,6 +278,9 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
   mismo («No puedes eliminar tu propia ficha. Pídeselo a otro administrador.», en el caso de uso, con
   el usuario de la sesión). En el worker, que la ficha siga en la plantilla y lo del administrador
   son guardas del lote (SYNC-30).
+- A uno retirado no se le pone un turno ni un día libre (`trabajador_no_encontrado`, dentro de la
+  escritura en la Main y guarda del lote en el worker), y «Copiar semana anterior» y «Establecer
+  predeterminado» no copian sus turnos pasados (`DE_LA_PLANTILLA`, el mismo SQL a los dos lados).
 - Uno retirado no se edita (volver a ponerlo «Activo» lo devolvería al login) ni se recupera desde
   la aplicación. Conserva su correo y su DNI, que son únicos: a quien puede volver se le desactiva
   desde «Editar» en vez de eliminarlo, y el modal lo dice.

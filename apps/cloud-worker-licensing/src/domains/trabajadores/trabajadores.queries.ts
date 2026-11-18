@@ -30,6 +30,15 @@ function rows(rs: any): any[] {
 // distintas a cada lado. El ID tiene que ser un literal antes de escribir.
 export type GrupoAsignacion = { id_grupo: string; ids: string[] };
 
+/**
+ * Las filas de un trabajador de la plantilla, sin los retirados (`Archivado_En`). «Copiar semana
+ * anterior» y «Establecer predeterminado» leen la semana con esto: copiada tal cual, una semana
+ * pasada resucitaba los turnos de un retirado, que no se ven ni se pueden borrar. Mismo SQL que
+ * `DE_LA_PLANTILLA` en la Main.
+ */
+const DE_LA_PLANTILLA = `ID_Trabajador IN (SELECT t.ID_Trabajador FROM Trabajadores t
+	JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario WHERE u.Archivado_En IS NULL)`;
+
 export async function grupoAsignacion(db: Client, id: string): Promise<GrupoAsignacion | null> {
 	const resultado = await db.execute({ sql: "SELECT ID_Asignacion, COALESCE(ID_Grupo, ID_Asignacion) AS ID_Grupo FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1) ORDER BY Hora_Inicio, ID_Asignacion;", args: [id] });
 	const miembros = rows(resultado);
@@ -115,7 +124,8 @@ export async function filasSemana(
 				Notas AS notas
 			FROM Asignacion_Turnos
 			WHERE Fecha >= date(?1)
-				AND Fecha < date(?1, '+7 day');
+				AND Fecha < date(?1, '+7 day')
+				AND ${DE_LA_PLANTILLA};
 		`,
 		args: [fromMonday],
 	});
@@ -409,6 +419,7 @@ export async function predeterminadoDesdeSemanaItems(
 			FROM Asignacion_Turnos a
 			WHERE a.Fecha >= date(?1)
 				AND a.Fecha < date(?1, '+7 day')
+				AND a.${DE_LA_PLANTILLA}
 			ORDER BY a.ID_Trabajador ASC, a.Fecha ASC, a.Hora_Inicio ASC;
 		`,
 		args: [fechaLunes],
