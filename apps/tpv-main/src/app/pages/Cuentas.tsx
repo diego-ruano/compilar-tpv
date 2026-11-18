@@ -303,10 +303,16 @@ export default function Cuentas() {
     }, [proveedores]);
 
     const entradasDB = useMemo(() => cobrosPermitidos ? entradasQuery.data?.filas ?? [] : [], [entradasQuery.data, cobrosPermitidos]);
+    // Relee (otra página, otro rango, un cambio de otro equipo): los botones de página esperan y el
+    // pie lo dice, pero la lista se queda con lo de antes hasta que llega lo nuevo. El hueco con
+    // «Cargando…» sólo sale la primera vez, cuando no hay nada que enseñar: sustituir la lista en
+    // cada relectura la hacía parpadear.
     const loadingEntradas = entradasQuery.isFetching;
+    const primeraCargaEntradas = entradasQuery.isLoading;
 
     const salidasDB = useMemo(() => admin ? salidasQuery.data?.filas ?? [] : [], [salidasQuery.data, admin]);
     const loadingSalidas = salidasQuery.isFetching;
+    const primeraCargaSalidas = salidasQuery.isLoading;
 
     // Wrapper que conserva el nombre/uso previo: refresca proveedores bajo demanda.
     const ensureProveedores = async () => {
@@ -1050,7 +1056,7 @@ export default function Cuentas() {
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                                    {loadingEntradas ? (
+                                    {primeraCargaEntradas ? (
                                         <div className="p-4 text-sm text-fg-muted">Cargando entradas…</div>
                                     ) : entradasFiltradas.length ? (
                                         <div className="divide-y divide-border">
@@ -1156,7 +1162,7 @@ export default function Cuentas() {
                                 </div>
 
                                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                                    {loadingSalidas ? (
+                                    {primeraCargaSalidas ? (
                                         <div className="p-4 text-sm text-fg-muted">Cargando salidas…</div>
                                     ) : salidasFiltradas.length ? (
                                         <div className="divide-y divide-border">

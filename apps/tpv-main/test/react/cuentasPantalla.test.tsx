@@ -15,13 +15,20 @@ vi.mock("../../src/shared/lib/usePermisos", () => ({
 }));
 
 const HOY = new Date().toISOString().slice(0, 10);
-const datos = vi.hoisted(() => ({ cierres: [] as unknown[] }));
+const datos = vi.hoisted(() => ({
+	cierres: [] as unknown[],
+	/** Si está, las listas de entradas y salidas esperan a que se resuelva para contestar. */
+	espera: null as Promise<void> | null,
+	pedidas: 0,
+}));
 
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
 	invoke: async (comando: string) => {
 		switch (comando) {
 			case "cuentas_get_entradas":
+				datos.pedidas += 1;
+				if (datos.espera) await datos.espera;
 				return {
 					filas: [
 						{
@@ -39,6 +46,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 					siguiente: null,
 				};
 			case "cuentas_get_salidas":
+				if (datos.espera) await datos.espera;
 				return {
 					filas: [
 						{
@@ -95,6 +103,8 @@ beforeEach(() => {
 	sesion.rol = "Administrador";
 	useMode.setState({ mode: "tpv" });
 	datos.cierres = [];
+	datos.espera = null;
+	datos.pedidas = 0;
 });
 
 afterEach(() => cleanup());
@@ -192,4 +202,38 @@ it("el histórico de cierres: celdas con aire y, en estrecho, una ficha por cier
 	// La de la tabla sólo se ve en ancho, y la ficha sólo en estrecho.
 	expect(tabla?.parentElement?.className).toContain("hidden md:block");
 	expect(ficha?.parentElement?.className).toContain("md:hidden");
+});
+
+it("al releer las listas no se sustituyen por «Cargando…»: se queda lo de antes hasta que llega lo nuevo", async () => {
+	abrir();
+	expect((await screen.findAllByText("Barra")).length).toBeGreaterThan(0);
+	expect((await screen.findAllByText("Hielo")).length).toBeGreaterThan(0);
+	const antes = datos.pedidas;
+
+	let soltar!: () => void;
+	datos.espera = new Promise<void>((r) => {
+		soltar = r;
+	});
+	// Otro rango: otra clave, y las dos listas se vuelven a pedir.
+	const del = screen.getByText("Del").parentElement?.querySelector("input") as HTMLInputElement;
+	fireEvent.change(del, { target: { value: "2026-01-01" } });
+	await waitFor(() => expect(datos.pedidas).toBeGreaterThan(antes));
+
+	expect(screen.queryByText("Cargando entradas…")).toBeNull();
+	expect(screen.queryByText("Cargando salidas…")).toBeNull();
+	expect(screen.getAllByText("Barra").length).toBeGreaterThan(0);
+	expect(screen.getAllByText("Hielo").length).toBeGreaterThan(0);
+
+	soltar();
+});
+
+it("la primera carga sí enseña «Cargando…», porque todavía no hay nada", async () => {
+	let soltar!: () => void;
+	datos.espera = new Promise<void>((r) => {
+		soltar = r;
+	});
+	abrir();
+	expect(await screen.findByText("Cargando entradas…")).toBeTruthy();
+	soltar();
+	expect((await screen.findAllByText("Barra")).length).toBeGreaterThan(0);
 });

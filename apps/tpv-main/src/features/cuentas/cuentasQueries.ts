@@ -83,11 +83,16 @@ const CIERRES_A_LA_VISTA = 50;
    Lecturas (queries)
 ========================= */
 
+/**
+ * Al cambiar de página, de rango o de búsqueda la clave cambia: con `keepPreviousData` la lista
+ * enseña la de antes hasta que llega la nueva, en vez de quedarse vacía mientras tanto.
+ */
 export function useCuentasEntradas(params: ListParams, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.entradas(params),
         queryFn: () => cuentasGetEntradas({ ...rangoArgs(params), ...paginaArgs(params) }),
         enabled,
+        placeholderData: keepPreviousData,
     });
 }
 
@@ -96,6 +101,7 @@ export function useCuentasSalidas(params: ListParams, enabled = true) {
         queryKey: cuentasKeys.salidas(params),
         queryFn: () => cuentasGetSalidas({ ...rangoArgs(params), ...paginaArgs(params) }),
         enabled,
+        placeholderData: keepPreviousData,
     });
 }
 
