@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Mail,
   Phone,
-  Megaphone,
   Pencil,
   Users,
   CalendarDays,
@@ -539,19 +538,6 @@ export default function Clientes() {
                 >
                   <Pencil className="size-4" aria-hidden />
                   Editar
-                </button>
-
-                <button
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer sm:py-2"
-                  onClick={() =>
-                    toast.info(
-                      "Pendiente",
-                      "Enviar publicidad (pendiente de implementar)",
-                    )
-                  }
-                >
-                  <Megaphone className="size-4" aria-hidden />
-                  <span className="hidden sm:inline">Publicidad</span>
                 </button>
               </div>
             </div>
