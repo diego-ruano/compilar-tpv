@@ -4,8 +4,10 @@
         <meta charset="UTF-8" />
         <link rel="icon" type="image/svg+xml" href="/vite.svg" />
         <!-- Sin ampliar: el iPhone amplía al tocar un campo con letra de menos de 16 px y la pantalla se
-             queda movida; en una app de caja tampoco se pellizca para ampliar. -->
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+             queda movida; en una app de caja tampoco se pellizca para ampliar. `viewport-fit=cover`: en el
+             iPhone la página ocupa la pantalla entera y deja ella el hueco de las zonas seguras
+             (`.zona-segura` en Global.css, `src-tauri/src/vista_ios.rs`). -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
         <title>TPV Altaria Lights</title>
         <!--
           Anti-FOUC: aplica el tema al <html> ANTES del primer pintado, para

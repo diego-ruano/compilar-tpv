@@ -13,6 +13,8 @@ mod navegacion;
 mod notificador;
 mod printing;
 mod zoom;
+#[cfg(target_os = "ios")]
+mod vista_ios;
 
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -2656,6 +2658,9 @@ pub fn run() {
             if let Some(ventana) = handle.get_webview_window("main") {
                 zoom::aplicar(&ventana);
             }
+            // La webview de iOS a pantalla completa y sin desplazar la página entera.
+            #[cfg(target_os = "ios")]
+            vista_ios::ajustar(handle);
 
             // Espejo SÍNCRONO del modo: lo lee el firmante de telemetría desde su propio hilo (sin
             // contexto async). Se comparte con el `AppState` para mantenerlo al día en cada cambio.

@@ -67,6 +67,14 @@ body {
     overscroll-behavior: none;
 }
 
+/* La raíz de la app deja libres las zonas seguras del iPhone (la barra de estado, la isla, la barra
+   de inicio): con `viewport-fit=cover` la página llega hasta los bordes y el hueco lo pone ella, con
+   el fondo del tema. En escritorio y Android valen 0. */
+.zona-segura {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+        env(safe-area-inset-left);
+}
+
 html {
     overflow: hidden;
     /* Ni el iPhone agranda la letra al girar, ni un doble toque amplía la pantalla. */
@@ -222,7 +230,10 @@ body {
    ========================================================================= */
 :root {
     --modal-width: 42rem;
-    --modal-max-height: calc(100dvh - 2rem);
+    /* Sin meterse bajo la barra de estado ni la de inicio del iPhone (en el resto, 0). */
+    --modal-max-height: calc(
+        100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+    );
     --modal-control-height: 2.5rem;
     --modal-field-gap: 0.875rem;
     --modal-font-size: 0.875rem;
@@ -326,7 +337,9 @@ body {
 
 @media (max-width: 639px) {
     :root {
-        --modal-max-height: calc(100dvh - 1rem);
+        --modal-max-height: calc(
+            100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)
+        );
     }
 
     .fixed.inset-0 > [class~="bg-surface"],

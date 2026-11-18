@@ -80,3 +80,10 @@ tauri-plugin-single-instance = "2"
 # existe en móvil: en escritorio no se compila (y sus permisos van en `capabilities/mobile.json`).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "=2.4.6"
+
+# ───────────── Sólo iOS ─────────────
+# Para ajustar el `UIScrollView` de la WKWebView (`src/vista_ios.rs`). Las mismas versiones que ya
+# trae wry.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIResponder", "UIView", "UIScrollView"] }

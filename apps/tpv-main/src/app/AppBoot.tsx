@@ -242,7 +242,7 @@ export default function AppBoot({ router }: { router: any }) {
 	}
 
 	return (
-		<div className="w-screen h-screen flex flex-col overflow-hidden">
+		<div className="zona-segura w-screen h-screen flex flex-col overflow-hidden">
 			<UpdateBanner />
 			{arranque.avisoCaducidad ? <AvisoCaducidad aviso={arranque.avisoCaducidad} /> : null}
 			{/* El layout de la Main y el del Handy traen su propia barra de título (Titlebar, con el

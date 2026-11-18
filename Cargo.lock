@@ -5792,6 +5792,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "image",
+ "objc2",
+ "objc2-ui-kit",
  "rand 0.10.3",
  "serde",
  "serde_json",
