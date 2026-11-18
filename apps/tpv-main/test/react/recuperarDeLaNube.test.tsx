@@ -93,3 +93,15 @@ it("sin nada atascado no aparece", async () => {
     expect(await screen.findByText("Pendientes de subir")).toBeTruthy();
     expect(screen.queryByText("Hay cambios hechos desde las Handy que este TPV no ha podido aplicar")).toBeNull();
 });
+
+it("lo apartado de la bajada dice lo que hace la comprobación con la nube, sin prometer que se arregla solo", async () => {
+    // SYN-INC-07: decía que «normalmente se arreglan solos», y un correo repetido o una columna que
+    // esta versión no tiene se quedaban para siempre. Ahora dice qué intenta y qué se queda.
+    pintar({ ...SANA, bajada_atascada: 0 });
+
+    const aviso = await screen.findByText(/cambio\(s\) de la nube que no se pudieron aplicar/);
+    expect(aviso.textContent).toMatch(/intenta\s+traerlos tal como están en la nube/);
+    expect(aviso.textContent).toMatch(/mismo correo/);
+    expect(aviso.textContent).toMatch(/se queda\s+apartado/);
+    expect(aviso.textContent).not.toMatch(/se arreglan solos/);
+});

@@ -210,8 +210,12 @@ function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: 
 				<div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
 					Hay {health.quarantined} cambio(s) de la nube que no se pudieron aplicar en este TPV
 					tras varios intentos y se han apartado para no frenar al resto. Los datos de este TPV
-					pueden diferir en esos registros. Normalmente se arreglan solos en la comprobación
-					diaria con la nube; si alguno no puede, aquí se ofrece traer el estado de la nube.
+					pueden diferir en esos registros y, mientras sigan apartados, la comprobación con la nube
+					no corrige nada más. Esa comprobación (tras el cierre de caja, o una vez al día) intenta
+					traerlos tal como están en la nube, y une en una las fichas de cliente o de proveedor que
+					se dieron de alta a la vez aquí y en una Handy con el mismo correo. Lo que choca con algo
+					que este TPV todavía no ha podido subir, o que esta versión no sabe guardar, se queda
+					apartado; si a la semana sigue así, aquí se ofrece traer el estado de la nube.
 				</div>
 			)}
 
