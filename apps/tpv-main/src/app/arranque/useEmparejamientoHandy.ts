@@ -16,7 +16,10 @@ import {
 	cancelarEmparejamiento,
 	codigoParaVincular,
 	emparejarHandy,
+	guardarEspera,
 	identidadDelDispositivo,
+	olvidarEspera,
+	soltarEsperaAnterior,
 	type CodigoDeVinculacion,
 
 	type PedirALaNube,
@@ -64,6 +67,9 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	// Cada intento lleva su número. Cancelar lo sube, y así el intento que estaba esperando se
 	// entera en su siguiente vuelta y deja de tocar el estado — también si ya ha empezado otro.
 	const intentoRef = useRef(0);
+	// La espera que se quedó sin nadie la última vez, mientras se suelta en la nube. Un intento nuevo
+	// espera a que termine: soltarla después de reclamar el mismo código soltaría el reclamo nuevo.
+	const soltandoRef = useRef<Promise<unknown>>(Promise.resolve());
 
 	useEffect(() => {
 		let alive = true;
@@ -94,6 +100,14 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	 * por una Handy sin vincular.
 	 */
 	async function cargarEmparejamientoExistente() {
+		// Volver al vínculo guardado deja cualquier espera: la de este arranque (si se vuelve desde el
+		// selector) deja de tocar el estado, y la que se quedó sin nadie al cerrarse la aplicación
+		// esperando se suelta en la nube, para que no siga en la lista de la Main hasta caducar.
+		intentoRef.current++;
+		soltandoRef.current = soltarEsperaAnterior({ commands, pedirALaNube }).catch((e: unknown) =>
+			captureException(e, { fase: "soltar_espera_anterior" }),
+		);
+		setOcupado(false);
 		setError(null);
 		setEstado({ step: "leyendo" });
 		try {
@@ -140,12 +154,17 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		setError(null);
 
 		try {
+			await soltandoRef.current;
+			if (!esElActual()) return;
 			const emparejado = await emparejarHandy(codigo, {
 				commands,
 				pedirALaNube,
 				sigueVivo: esElActual,
 				alQuedarPendiente: (p) => {
-					if (esElActual()) setEstado({ step: "waiting_approval", ...p });
+					if (!esElActual()) return;
+					// Si la aplicación se cierra esperando, el próximo arranque la suelta.
+					guardarEspera(p);
+					setEstado({ step: "waiting_approval", ...p });
 				},
 			});
 			if (emparejado && esElActual()) setEstado({ step: "paired", ...emparejado });
@@ -154,7 +173,13 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 			setError(String(e?.message || e));
 			setEstado({ step: "idle" });
 		} finally {
-			if (esElActual()) setOcupado(false);
+			// Terminada (vinculada, rechazada o caducada) no la espera nadie ni hay nada que soltar.
+			// La que dejó de interesar porque se cerró la pantalla se queda apuntada: la suelta el
+			// próximo arranque.
+			if (esElActual()) {
+				olvidarEspera();
+				setOcupado(false);
+			}
 		}
 	}
 
@@ -181,6 +206,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		setOcupado(false);
 		setError(null);
 		setEstado({ step: "idle" });
+		olvidarEspera();
 
 		if (espera) {
 			// Sin aviso a propósito: la pantalla ya ha vuelto a la vinculación, que es lo que se pidió.

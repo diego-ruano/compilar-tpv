@@ -223,7 +223,7 @@ h1`);
 	it("cancelar suelta el código en la nube, firmado con el reto y marcado como cancelación", async () => {
 		const { estado, deps } = crearDobles();
 		await cancelarEmparejamiento(
-			{ pairCode: "123456", pairSecret: "", nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999 },
+			{ pairCode: "123456", nonceB64: "bm9uY2U=" },
 			deps,
 		);
 

@@ -39,12 +39,16 @@ y la Main aprueba.
    entonces cuando la Main recibe el aviso.
 5. Cancelar en la Handy (`/v1/pair/cancel`, acción `PAIR_CANCEL`) suelta el código en la nube, para que
    la solicitud no siga en la lista de la Main. Lo ya aprobado no se deshace cancelando: eso es revocar.
-6. Si la Handy se reinicia esperando y vuelve con el vínculo que ya tenía, nadie cancela: la Main
-   suelta sola, al pedir la lista (`/pending`), la solicitud de un dispositivo activo del negocio, con
-   la misma clave, que ha vuelto a conectar después de reclamarla (`last_seen_at_ms`, que apunta cada
-   conexión de su WebSocket). Uno que borró su vínculo no conecta, y su solicitud se queda: es como se
-   vuelve a vincular. La lista de la Main lo recoge en su siguiente lectura (al minuto, o al volver a
-   la ventana).
+6. Si la Handy se cierra o se reinicia esperando, nadie pulsa «Cancelar»: mientras espera, apunta la
+   espera (el código y su reto, sin el secreto) en el almacenamiento de la aplicación, y al volver a
+   abrirse, o al volver a su vínculo desde el selector, suelta la que encuentre como lo hace «Cancelar»
+   (`soltarEsperaAnterior`) y la olvida. Un código nuevo no se reclama hasta que se ha soltado la
+   anterior: con el mismo código, soltarla después soltaría el reclamo nuevo. Lo hace la Handy y no la
+   nube, porque desde la nube no se sabe si alguien espera: una Handy vinculada que pulsa
+   «← Vinculación» y vuelve a pedir el mismo negocio sigue conectada con su vínculo de antes mientras
+   espera, y soltar las solicitudes de quien ha vuelto a conectar (`last_seen_at_ms`) le quitaba a la
+   Main la que esa Handy esperaba. Si la Handy no se vuelve a abrir, o la nube no contesta, la
+   solicitud caduca con el código.
 
 Rust construye el mensaje y fija la hora y la identidad; el IPC acepta únicamente acción, código
 y reto, nunca texto libre (RI-20). La acción abre el mensaje como separación de dominio, distinta

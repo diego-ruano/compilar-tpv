@@ -216,7 +216,7 @@ export async function emparejarHandy(
  * es que la solicitud siga en la lista hasta que caduque el código.
  */
 export async function cancelarEmparejamiento(
-	espera: EsperaDeAprobacion,
+	espera: Pick<EsperaDeAprobacion, "pairCode" | "nonceB64">,
 	deps: Pick<DependenciasEmparejamiento, "commands" | "pedirALaNube">,
 ): Promise<void> {
 	const ident = await identidadDelDispositivo(deps.commands);
@@ -229,4 +229,71 @@ export async function cancelarEmparejamiento(
 		ts,
 		sigB64,
 	});
+}
+
+// ── La espera que se queda sin nadie ─────────────────────────────────────────────────────────
+//
+// Si la aplicación se cierra (o se reinicia) mientras espera la aprobación, nadie pulsa «Cancelar»
+// y la solicitud seguiría en la lista de la Main hasta que caducara el código. Por eso la espera se
+// guarda en el almacenamiento de la aplicación mientras dura, y la Handy, al volver a abrirse, suelta
+// la que encuentre. Lo hace ella y no la nube: desde la nube no se sabe si alguien la espera (una
+// Handy vinculada que vuelve a pedir el mismo negocio sigue conectada con su vínculo de antes).
+
+/** Lo que hace falta de una espera para soltarla después. El secreto del código no se guarda. */
+export type EsperaGuardada = Pick<EsperaDeAprobacion, "pairCode" | "nonceB64">;
+
+const CLAVE_ESPERA = "tpv:emparejamiento:espera:v1";
+
+/** El almacenamiento de la aplicación, o `null` si no está (entonces la espera no se recuerda). */
+export function almacenDeLaApp(): Storage | null {
+	try {
+		return typeof window === "undefined" ? null : window.localStorage;
+	} catch {
+		return null;
+	}
+}
+
+/** Apunta la espera en curso. Si no se puede, lo peor es lo de antes: la solicitud caduca sola. */
+export function guardarEspera(espera: EsperaGuardada, almacen: Storage | null = almacenDeLaApp()): void {
+	try {
+		almacen?.setItem(CLAVE_ESPERA, JSON.stringify({ pairCode: espera.pairCode, nonceB64: espera.nonceB64 }));
+	} catch {
+		/* sin almacenamiento: la solicitud caduca con el código */
+	}
+}
+
+/** Olvida la espera apuntada: terminó, se canceló o ya se ha soltado. */
+export function olvidarEspera(almacen: Storage | null = almacenDeLaApp()): void {
+	try {
+		almacen?.removeItem(CLAVE_ESPERA);
+	} catch {
+		/* nada que olvidar */
+	}
+}
+
+/** La espera apuntada, o `null` si no hay ninguna o no se puede leer. */
+export function esperaGuardada(almacen: Storage | null = almacenDeLaApp()): EsperaGuardada | null {
+	try {
+		const v = JSON.parse(almacen?.getItem(CLAVE_ESPERA) ?? "null") as Partial<EsperaGuardada> | null;
+		if (!v || typeof v.pairCode !== "string" || typeof v.nonceB64 !== "string") return null;
+		return { pairCode: v.pairCode, nonceB64: v.nonceB64 };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Suelta en la nube la solicitud de una espera que se quedó sin nadie (la aplicación se cerró
+ * esperando) y la olvida. Devuelve si había una. Se olvida antes de soltarla: si la nube no
+ * contesta, no se reintenta en cada arranque, y la solicitud caduca con el código.
+ */
+export async function soltarEsperaAnterior(
+	deps: Pick<DependenciasEmparejamiento, "commands" | "pedirALaNube">,
+	almacen: Storage | null = almacenDeLaApp(),
+): Promise<boolean> {
+	const anterior = esperaGuardada(almacen);
+	if (!anterior) return false;
+	olvidarEspera(almacen);
+	await cancelarEmparejamiento(anterior, deps);
+	return true;
 }
