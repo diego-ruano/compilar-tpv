@@ -60,6 +60,9 @@ export default function Proveedores() {
   const [proveedores, setProveedores] = useState<ProveedorUI[]>([]);
   const [proveedorActivo, setProveedorActivo] = useState<ProveedorUI | null>(null);
   const toast = useToast();
+  // Las acciones de gestión de proveedores (alta, edición, vínculos, borrar) sólo se enseñan con su
+  // permiso: con sólo `pedidos.gestionar` se veían activas y no hacían nada.
+  const gestionaProveedores = puede("proveedores.gestionar");
 
   // ---- TanStack Query: lecturas cacheadas + mutaciones (invalidan la feature) ----
   const proveedoresQuery = useProveedoresAll();
@@ -146,6 +149,18 @@ export default function Proveedores() {
     if (!proveedorActivo) return Promise.resolve();
     return productosProveedorQuery.refetch();
   }
+
+  // Quitarle a alguien el permiso con el editor del proveedor o el de vincular abiertos: se quedaban
+  // abiertos y guardar fallaba en el backend. Se cierran y se dice por qué.
+  useEffect(() => {
+    if (gestionaProveedores || (!modalProveedorOpen && !modalVincularOpen)) return;
+    setModalProveedorOpen(false);
+    setModalVincularOpen(false);
+    toast.warning(
+      "Ya no puedes gestionar proveedores",
+      "Te han quitado el permiso mientras editabas. Lo que no habías guardado no se ha guardado.",
+    );
+  }, [gestionaProveedores, modalProveedorOpen, modalVincularOpen, toast]);
 
   // Mapea las filas de la query de proveedores a UI (resuelve URLs de imagen, async)
   // y re-sincroniza el proveedor activo cuando cambia la lista.
@@ -519,15 +534,16 @@ export default function Proveedores() {
               />
             </div>
 
+            {gestionaProveedores && (
             <button
               type="button"
-              disabled={!puede("proveedores.gestionar")}
               onClick={abrirNuevoProveedorModal}
               className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto xs:shrink-0"
             >
               <Plus className="size-4" aria-hidden />
               <span>Nuevo proveedor</span>
             </button>
+            )}
           </div>
         ) : (
           <>
@@ -629,10 +645,10 @@ export default function Proveedores() {
                 </p>
               </div>
 
+              {gestionaProveedores && (
               <div className="mt-2 grid w-full max-w-[560px] grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
-                  disabled={!puede("proveedores.gestionar")}
                   onClick={abrirEditarProveedorModal}
                 >
                   <Pencil className="size-4" aria-hidden />
@@ -641,7 +657,6 @@ export default function Proveedores() {
 
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
-                  disabled={!puede("proveedores.gestionar")}
                   onClick={conAviso(abrirVincularProductos)}
                 >
                   <Link2 className="size-4" aria-hidden />
@@ -650,13 +665,13 @@ export default function Proveedores() {
 
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer xs:col-span-2"
-                  disabled={!puede("proveedores.gestionar")}
                   onClick={eliminarProveedor}
                 >
                   <Trash2 className="size-4" aria-hidden />
                   Eliminar proveedor
                 </button>
               </div>
+              )}
             </div>
           </div>
 
@@ -664,15 +679,16 @@ export default function Proveedores() {
             <div className="mb-4 flex flex-col items-stretch gap-3 xs:flex-row xs:items-center xs:justify-between">
               <h4 className="text-xl font-bold text-fg">Productos vinculados</h4>
 
+              {gestionaProveedores && (
               <button
                 type="button"
-                disabled={!puede("proveedores.gestionar")}
-                  onClick={conAviso(abrirVincularProductos)}
+                onClick={conAviso(abrirVincularProductos)}
                 className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center text-sm font-semibold leading-tight text-fg transition hover:bg-surface-2"
               >
                 <Link2 className="size-4" aria-hidden />
                 Gestionar vínculos
               </button>
+              )}
             </div>
 
             {productosProveedorFiltrados.length === 0 ? (
@@ -690,15 +706,16 @@ export default function Proveedores() {
                       }}
                     />
 
+                    {gestionaProveedores && (
                     <button
                       type="button"
-                      disabled={!puede("proveedores.gestionar")}
                       onClick={() => eliminarProductoDelProveedor(p.id_producto)}
                       className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
                     >
                       <Trash2 className="size-4" aria-hidden />
                       Quitar del proveedor
                     </button>
+                    )}
                   </div>
                 ))}
               </div>
