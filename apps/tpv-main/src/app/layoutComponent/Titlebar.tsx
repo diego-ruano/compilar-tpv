@@ -9,7 +9,7 @@ import ControlesZoom from "./ControlesZoom";
 
 /**
  * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio), tamaño de la
- * interfaz, toggle de tema y controles de ventana de Tauri (que en Android no salen).
+ * interfaz, toggle de tema y controles de ventana de Tauri (que en el móvil no salen).
  *
  * Es la única: también la del login, que la pone encima de su fondo con `className`. Una copia
  * aparte se queda sin lo que se añada aquí, como le pasó con el tamaño de la interfaz.

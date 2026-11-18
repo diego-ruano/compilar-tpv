@@ -9,7 +9,7 @@ import { commands } from "@tpv/client";
 import type { CambioZoom, ZoomVentana } from "@tpv/contracts";
 
 import { avisarDelFallo } from "../lib/conAviso";
-import { esAndroid } from "../lib/plataforma";
+import { esMovil } from "../lib/plataforma";
 
 type Estado = {
     zoom: ZoomVentana | null;
@@ -47,7 +47,7 @@ let iniciado = false;
 
 /** Lee el zoom actual y engancha los atajos y el refresco. Va una vez, al arrancar. */
 export function iniciarZoomVentana(): void {
-    if (esAndroid || iniciado) return;
+    if (esMovil || iniciado) return;
     iniciado = true;
     const { refrescar, cambiar } = useZoomVentana.getState();
 

@@ -3,14 +3,14 @@ import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconButton } from "../../shared/ui";
 import { conAviso } from "../../shared/lib/conAviso";
-import { esAndroid } from "../../shared/lib/plataforma";
+import { esMovil } from "../../shared/lib/plataforma";
 
 /**
  * Minimizar, maximizar y cerrar: la ventana de escritorio no tiene marco (`decorations: false`), así
- * que los pone la app. En Android no hay ventana que mover y el teléfono ya tiene los suyos.
+ * que los pone la app. En el móvil (Android o iPhone) no hay ventana que mover y el teléfono ya tiene los suyos.
  */
 function ControlesVentana() {
-    if (esAndroid) return null;
+    if (esMovil) return null;
     const ventana = getCurrentWindow();
 
     return (

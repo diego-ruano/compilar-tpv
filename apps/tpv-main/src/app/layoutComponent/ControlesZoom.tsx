@@ -2,17 +2,17 @@
 import { Minus, Plus, Search } from "lucide-react";
 import { IconButton } from "../../shared/ui";
 import { conAviso } from "../../shared/lib/conAviso";
-import { esAndroid } from "../../shared/lib/plataforma";
+import { esMovil } from "../../shared/lib/plataforma";
 import { useZoomVentana } from "../../shared/stores/useZoomVentana";
 
 /**
  * Tamaño de la interfaz: `−` y `+` lo fijan en este equipo, y la lupa lo devuelve al automático
- * (el que sale del monitor). Los límites los sabe `zoom.rs`. En Android no hay ventana que escalar.
+ * (el que sale del monitor). Los límites los sabe `zoom.rs`. En el móvil no hay ventana que escalar.
  */
 function ControlesZoom() {
     const zoom = useZoomVentana((s) => s.zoom);
     const cambiar = useZoomVentana((s) => s.cambiar);
-    if (esAndroid) return null;
+    if (esMovil) return null;
 
     const porcentaje = zoom ? `${zoom.porcentaje} %` : "…";
     const lupa = zoom?.automatico
