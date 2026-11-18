@@ -41,6 +41,9 @@ export class EscaneoQr {
 	constructor(private readonly cargar: () => Promise<Escaner> = () => import("@tauri-apps/plugin-barcode-scanner")) {}
 
 	async leer(alEmpezar: () => void): Promise<ResultadoEscaneo> {
+		// Al principio, no después de pedir el permiso: si la pantalla se cierra mientras el sistema
+		// pregunta, su «cancelar» llega antes que la respuesta y no puede perderse.
+		this.cancelado = false;
 		let escaner: Escaner;
 		try {
 			escaner = await this.cargar();
@@ -51,7 +54,9 @@ export class EscaneoQr {
 			return { tipo: "error", motivo: motivoDe(e) };
 		}
 
-		this.cancelado = false;
+		// Cancelado mientras se pedía el permiso: la cámara no se abre. Abierta, quedaría detrás de una
+		// aplicación transparente (`escaneando-qr`) y sin visor ni «Cancelar».
+		if (this.cancelado) return { tipo: "cancelado" };
 		alEmpezar();
 		document.documentElement.classList.add(CLASE_ESCANEANDO);
 		try {

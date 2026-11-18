@@ -21,7 +21,15 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
   (`tauri-plugin-barcode-scanner`, para vincular una Handy escaneando el QR de la Main) va en
   `[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]`, se registra con
   `#[cfg(mobile)]` y sus permisos van en `capabilities/mobile.json` (`"platforms": ["android", "iOS"]`).
-  El permiso `CAMERA` de Android lo añade el manifiesto del propio plugin al fusionarse. En iOS, la
+  El permiso `CAMERA` de Android lo añade el manifiesto del propio plugin al fusionarse, y con él la
+  cámara como requisito (`<uses-feature android:name="android.hardware.camera.any">`, obligatoria):
+  Google Play no ofrecería la app a un equipo sin cámara, que puede vincularse escribiendo el código.
+  `gen/android/app/src/main/AndroidManifest.xml` la sustituye por una no obligatoria
+  (`android:required="false"` con `tools:node="replace"`; sin él, al fusionar ganaría el `true` del
+  plugin) y declara también no obligatorias `android.hardware.camera` y `camera.autofocus`, que Play
+  deduce del permiso si no están. Se comprueba en el manifiesto fusionado del APK
+  (`app/build/intermediates/merged_manifests/…/AndroidManifest.xml`) o con
+  `aapt dump badging <apk>`, que lista los `uses-feature`. En iOS, la
   frase del permiso de la cámara (`NSCameraUsageDescription`) está en `src-tauri/Info.ios.plist`, que
   Tauri funde en el `Info.plist` al generar el proyecto: no hay `gen/apple` en el repositorio.
 - **`rusqlite` se compila igual** (el `AppState` nombra los repositorios SQLite): con `bundled`

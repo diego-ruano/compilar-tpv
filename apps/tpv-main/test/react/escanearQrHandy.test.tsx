@@ -106,6 +106,30 @@ describe("en el teléfono", () => {
         expect(document.documentElement.classList.contains("escaneando-qr")).toBe(false);
     });
 
+    it("cancelar mientras se pide el permiso no abre la cámara", async () => {
+        // La pantalla se cierra mientras el sistema pregunta por la cámara.
+        let responder: ((p: string) => void) | undefined;
+        const scan = vi.fn(async () => ({ content: "x" }));
+        const escaneo = new EscaneoQr(async () => ({
+            Format: { QRCode: "QR_CODE" } as never,
+            checkPermissions: async () => "prompt",
+            requestPermissions: () => new Promise((r) => { responder = r; }),
+            scan,
+            cancel: async () => {},
+        }) as never);
+        const alEmpezar = vi.fn();
+
+        const leyendo = escaneo.leer(alEmpezar);
+        await waitFor(() => expect(responder).toBeDefined());
+        await escaneo.cancelar();
+        responder!("granted");
+
+        expect(await leyendo).toEqual({ tipo: "cancelado" });
+        expect(scan).not.toHaveBeenCalled();
+        expect(alEmpezar).not.toHaveBeenCalled();
+        expect(document.documentElement.classList.contains("escaneando-qr")).toBe(false);
+    });
+
     it("un fallo de la cámara se cuenta, con su motivo", async () => {
         const r = await new EscaneoQr(async () => ({
             Format: { QRCode: "QR_CODE" } as never,

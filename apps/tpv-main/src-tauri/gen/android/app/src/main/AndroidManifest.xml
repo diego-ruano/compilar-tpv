@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- La cámara sólo sirve para escanear el QR de la Main al vincular, y sin ella se pega o se
+         escribe el código. El manifiesto de tauri-plugin-barcode-scanner la declara obligatoria
+         (`camera.any`), y Google Play no ofrecería la app a un equipo sin cámara: aquí se sustituye
+         por una no obligatoria (`tools:node="replace"`: al fusionar, `required` se combina con un
+         «o» y ganaría el `true` del plugin). Las otras dos son las que Play deduce del permiso
+         CAMERA si no se declaran. -->
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" tools:node="replace" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <!-- RI-76: sin el soporte de Android TV de la plantilla (la app salía en el lanzador de una tele)
          ni su FileProvider. wry sólo lo usa para hacer una foto con un <input capture>, que la app no
