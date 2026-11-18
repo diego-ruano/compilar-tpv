@@ -345,10 +345,19 @@ export function guardarAsignacion(input: AsignacionGuardarInput, existente: Grup
 	const grupo = existente?.id_grupo ?? nuevoId();
 	const idPrincipal = input.id_asignacion ?? nuevoId();
 	const condicion = "EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?10 AND COALESCE(ID_Grupo, ID_Asignacion) = ?2 AND ID_Trabajador = ?3 AND Fecha = ?4)";
-	// Un turno en un día libre lo deja de ser.
+	// Un turno en un día libre lo deja de ser. En una edición, con la misma condición que el resto del
+	// lote: si «Libre» quitó el turno que se edita entre la lectura y el lote, el día libre se queda
+	// (sin ella se borraba y la edición no insertaba nada: el día quedaba sin libre ni turno).
 	const steps: any[] = [
 		guardaDeLaPlantilla(input.id_trabajador),
-		{ kind: "execute", sql: SQL_QUITAR_LIBRE, args: [input.id_trabajador, input.fecha] },
+		input.id_asignacion
+			? {
+				kind: "execute",
+				sql: `${SQL_QUITAR_LIBRE.replace(/;$/, "")}
+					AND EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?3 AND COALESCE(ID_Grupo, ID_Asignacion) = ?4 AND ID_Trabajador = ?1 AND Fecha = ?2);`,
+				args: [input.id_trabajador, input.fecha, idPrincipal, grupo],
+			}
+			: { kind: "execute", sql: SQL_QUITAR_LIBRE, args: [input.id_trabajador, input.fecha] },
 	];
 	if (input.id_asignacion) {
 		// Conservamos el miembro principal: sirve de guarda en cada sentencia del batch.

@@ -1038,6 +1038,32 @@ describe("Libre: el día libre de un trabajador", () => {
 		});
 	});
 
+	it("una edición que llega después de «Libre» no le quita el libre al día", async () => {
+		await conNegocio("libre-y-edicion", CON_TURNO, async (n) => {
+			// Otro equipo marca el día libre entre la lectura de la edición y su lote.
+			const r = await n.pedir(
+				"POST",
+				"/v1/trabajadores/horarios/guardar",
+				{
+					id_asignacion: "turno",
+					id_trabajador: "trab-ana",
+					fecha: "2099-01-06",
+					id_turno: "manana",
+					area: "Sala",
+					tramos: [{ hora_inicio: "10:00", hora_fin: "15:00" }],
+				},
+				{
+					antesDelLote: [
+						"DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = 'trab-ana' AND Fecha = '2099-01-06'",
+						`INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('libre', 'trab-ana', '2099-01-06', '${LIBRE}', 'Libre')`,
+					],
+				},
+			);
+			expect(r.status).toBe(404);
+			expect(delDia(n)).toEqual([{ ID_Turno: LIBRE, Hora_Inicio: null }]);
+		});
+	});
+
 	it("de alguien que ya no está en la plantilla, trabajador_no_encontrado", async () => {
 		await conNegocio("libre-fuera", USUARIOS, async (n) => {
 			n.sql.exec("UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = '2026-01-01 00:00:00' WHERE ID_Usuario = 'ana'");
