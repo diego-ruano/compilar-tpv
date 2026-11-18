@@ -30,12 +30,13 @@ impl SqliteClientesRepository {
 }
 
 /// Traduce errores de las escrituras de cliente. Una violación del índice único de email
-/// (`ux_clientes_email`, sobre `lower(Email)`) se convierte en un error de validación con
-/// mensaje claro (CLI-04); el resto se propaga como error de repositorio.
+/// (`ux_clientes_email`, sobre `lower(Email)`) es un conflicto con el mismo texto que el worker
+/// (`email_duplicado`) y que la reserva que da de alta a un cliente (CLI-04, SYN-INC-07); el resto se
+/// propaga como error de repositorio.
 fn write_err(e: impl std::fmt::Display) -> AppError {
     let msg = e.to_string();
     if msg.contains("ux_clientes_email") {
-        AppError::validation("Ya existe un cliente con ese email.")
+        AppError::conflict(crate::reservas::MSG_EMAIL_DE_OTRO)
     } else {
         AppError::repository(msg)
     }
@@ -264,3 +265,36 @@ impl ClientesRepository for SqliteClientesRepository {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tpv_contracts::errors::ErrorCode;
+
+    #[tokio::test]
+    async fn un_correo_de_otro_cliente_se_rechaza_con_el_mismo_texto_que_el_worker() {
+        // SYN-INC-07: la Main decía «Ya existe un cliente con ese email.» y el worker y las reservas
+        // «Ya hay un cliente con ese correo.». Uno solo, y un conflicto como el 409 del worker.
+        let dir = crate::test_temp::dir_temporal("clientes-correo");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteClientesRepository::new(db.clone());
+        let ana = |id: &str, email: &str| NuevoCliente {
+            id: Some(id.into()),
+            nombre: "Ana".into(),
+            email: Some(email.into()),
+            telefono: None,
+            notas: None,
+        };
+        repo.create(ana("c1", "ana@bar.test")).await.unwrap();
+
+        let e = repo.create(ana("c2", "ANA@bar.test")).await.unwrap_err();
+        assert_eq!((e.code(), e.to_string()), (ErrorCode::Conflict, "Ya hay un cliente con ese correo.".to_string()));
+
+        repo.create(ana("c3", "bea@bar.test")).await.unwrap();
+        let e = repo
+            .update(Cliente { id: "c3".into(), nombre: "Bea".into(), email: Some("ana@bar.test".into()), telefono: None, notas: None })
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), "Ya hay un cliente con ese correo.");
+    }
+}

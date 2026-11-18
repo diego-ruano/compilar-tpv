@@ -86,7 +86,7 @@ pub(crate) async fn cliente_por<C: Reader>(
 }
 
 /// Mismo texto que `email_duplicado` en el worker (`lib/errorCodes.ts`).
-const MSG_EMAIL_DE_OTRO: &str = "Ya hay un cliente con ese correo.";
+pub(crate) const MSG_EMAIL_DE_OTRO: &str = "Ya hay un cliente con ese correo.";
 
 /// El `ID_Cliente` que lleva la reserva (RI-61). Antes esto buscaba por email y por teléfono y, si
 /// encontraba a alguien, le asignaba la reserva sin preguntar. Ahora la decisión llega tomada:
