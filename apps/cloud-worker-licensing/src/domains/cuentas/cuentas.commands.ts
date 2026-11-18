@@ -32,7 +32,7 @@ function idStep(provided?: string | null) {
  * CAJ-INC-01 · La hora de caja de un gasto que se apunta (o se cambia de día) para el día `?2`, la
  * misma regla que `momento_caja_de_gasto` en la Main: si es de hoy, ahora (el dinero sale ahora);
  * si es de otro día, ese día a las 12:00 (`HORA_DE_UN_GASTO`). La hora la pone quien escribe:
- * `'now','localtime'` se fija con la de la Handy (`X-Client-Now`).
+ * el «ahora» de la sentencia se fija con la hora de la Handy (`X-Client-Now`).
  */
 const MOMENTO_CAJA_DEL_GASTO = `CASE WHEN date(?2) = date('now','localtime') THEN datetime('now','localtime') ELSE date(?2) || ' 12:00:00' END`;
 
