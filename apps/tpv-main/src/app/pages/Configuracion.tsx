@@ -397,10 +397,14 @@ export default function Configuracion() {
                             </div>
                         </aside>
 
-                        {/* Content */}
+                        {/* Content. CFG-INC-03: columna flex. En estrecho lleva encima el selector de
+                            secciones, y el scroll ocupa lo que queda (`flex-1 min-h-0`). Con `h-full`
+                            medía el 100 % más el selector, y el `overflow-hidden` de fuera recortaba el final:
+                            en Android «Guardar cambios» quedaba fuera de la pantalla. */}
                         <section
+                            data-testid="cfg-contenido"
                             className={cn(
-                                "flex-1 min-w-0 min-h-0",
+                                "flex-1 min-w-0 min-h-0 flex flex-col",
                                 darkMode ? "bg-surface-2" : "bg-surface",
                             )}
                         >
@@ -453,7 +457,7 @@ export default function Configuracion() {
                             </div>
 
                             {/* Scroll interno */}
-                            <div className="h-full min-h-0 overflow-auto px-4 md:px-6 py-5">
+                            <div data-testid="cfg-scroll" className="flex-1 min-h-0 overflow-auto px-4 md:px-6 py-5">
                                 <div className="w-full">
                                     <div className="mb-4">
                                         <div
