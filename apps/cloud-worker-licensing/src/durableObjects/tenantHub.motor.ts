@@ -158,6 +158,16 @@ export class MotorTenantHub {
 	// a mandar.
 	private turnoDeEntrada: Promise<void> = Promise.resolve();
 
+	// SYN-INC-01: la hora a la que nació esta instancia (al crearse o al despertar). No es algo que
+	// recordar: es de esta instancia, y que se pierda al hibernar es lo que se busca. Da a cada Main
+	// un margen tras despertar, por si el sello del latido no sobrevive a la hibernación (`conLatido`).
+	private readonly despiertaDesdeMs = Date.now();
+
+	// SYN-INC-01: cuándo mandó cada socket su último mensaje, que también es señal de vida. Una caché:
+	// si se pierde al hibernar, mientras tanto no llegó ningún mensaje (despertarían al objeto) y
+	// cubre `despiertaDesdeMs`. No se escribe en el attachment, que sería escribir en cada mensaje.
+	private ultimoMensajeMs = new WeakMap<WebSocket, number>();
+
 	constructor(private state: DurableObjectState, private env: Env) {
 		// SYNC-16: el latido (cada 30 s por dispositivo) se responde EN EL EDGE, sin despertar al DO
 		// ni facturar duración. Es lo que hace que un hub con conexiones abiertas pero ociosas (la
@@ -1389,13 +1399,20 @@ export class MotorTenantHub {
 	 * borde sin despertar al DO pero deja apuntada la hora (`getWebSocketAutoResponseTimestamp`), o,
 	 * si todavía no ha mandado ninguno, la hora a la que se autenticó (`autenticadaMs`, en su
 	 * attachment: sobrevive a la hibernación).
+	 *
+	 * Cuentan también el último mensaje que mandó (`ultimoMensajeMs`) y la hora a la que despertó esta
+	 * instancia (`despiertaDesdeMs`): la documentación de Cloudflare no dice que el sello del latido
+	 * sobreviva a la hibernación, y sin ese margen un sello perdido al despertar vetaría a toda Main
+	 * ociosa en la primera escritura de una Handy. Tras despertar, una Main tiene 90 s para dar su
+	 * siguiente latido (cada 30 s), y una muerta se cierra entonces.
 	 */
 	private conLatido(ws: WebSocket, a: WsAttachment, ahora: number): boolean {
 		let latido = 0;
 		try {
 			latido = this.state.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
 		} catch { }
-		return ahora - Math.max(latido, a.autenticadaMs ?? 0) <= MAIN_SIN_LATIDO_MS;
+		const senal = Math.max(latido, a.autenticadaMs ?? 0, this.ultimoMensajeMs.get(ws) ?? 0, this.despiertaDesdeMs);
+		return ahora - senal <= MAIN_SIN_LATIDO_MS;
 	}
 
 	/**
@@ -1659,6 +1676,8 @@ export class MotorTenantHub {
 	 * --y con él el gate de autenticación-- lo guarda `despachar`.
 	 */
 	async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+		// SYN-INC-01: lo que manda una sesión es señal de vida, como su latido (`conLatido`).
+		this.ultimoMensajeMs.set(ws, Date.now());
 		return despachar(this.ctxMensajes(), ws, message);
 	}
 

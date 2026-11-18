@@ -235,12 +235,18 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   que pone el Worker) se rechaza con 401 `device_revoked`.
 - **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
-- **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
+- **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong` ni ningún otro mensaje, se cierra.
+  En la Main el latido no espera a la réplica: si la cola de lo recibido (8) está llena, el mensaje
+  que no cabe se retiene y se deja de leer el socket (TCP sigue frenando a la nube), pero el latido y
+  lo que sale siguen (`tpv-infra-http/src/websocket.rs`). Se reconecta al
   instante ante `online`, `focus` o `visibilitychange`, y si no, con espera creciente de 3 a 30 s.
 - **El DO tampoco espera al TCP** (SYN-INC-01): un corte sin cierre deja el socket «abierto» varios
   minutos. Una sesión de Main sólo cuenta como conectada si da señales de vida: su último latido
-  (`getWebSocketAutoResponseTimestamp`, que el borde apunta sin despertar al DO) o, antes del primero,
-  la hora a la que se autenticó (`autenticadaMs`, en su attachment), de hace 90 s como mucho. La que
+  (`getWebSocketAutoResponseTimestamp`, que el borde apunta sin despertar al DO), su último mensaje
+  (`ultimoMensajeMs`, una caché de la instancia) o, antes del primero, la hora a la que se autenticó
+  (`autenticadaMs`, en su attachment), de hace 90 s como mucho. Como la documentación de Cloudflare no
+  dice que el sello del latido sobreviva a la hibernación, cuenta también la hora a la que despertó la
+  instancia (`despiertaDesdeMs`): tras despertar, cada Main tiene 90 s para su siguiente latido. La que
   no las da se cierra (`cerrarMainsSinLatido`, código 4002 `main_sin_latido`, por `cerrar`: las Handy
   reciben `main_offline`) cuando hace falta saberlo: una escritura de una Handy (antes y dentro del
   turno) o un saludo. Sin alarma ni temporizador (`test/mainSinLatido.test.ts`).

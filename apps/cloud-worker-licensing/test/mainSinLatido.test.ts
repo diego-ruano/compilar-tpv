@@ -48,6 +48,8 @@ function preparar(hub: any): void {
 	hub.touchLastSeen = async () => {};
 	hub.emitSyncEvent = () => {};
 	laMainEs(hub, MAIN);
+	// El objeto lleva despierto un rato: el margen de después de despertar ya no cuenta.
+	hub.despiertaDesdeMs = Date.now() - HACE_MUCHO;
 }
 
 async function esperar(pred: () => boolean): Promise<boolean> {
@@ -121,6 +123,34 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 			expect(hub.state.getWebSocketAutoResponseTimestamp(main.servidor)).not.toBeNull();
 
 			expect(await intentar(hub, "op-con-latido")).toMatchObject({ ok: true });
+			expect(main.cierre).toBeNull();
+		});
+	});
+
+	it("un mensaje de la Main también es señal de vida, aunque no mande el latido", async () => {
+		// Una Main ocupada (un lote, un acuse) sigue viva aunque su latido se retrase.
+		await enElHub("latido-mensaje", async (hub: any) => {
+			preparar(hub);
+			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
+			conectar(hub, "handy-1", "handy", Date.now());
+
+			await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "ping" }));
+			expect(await intentar(hub, "op-con-mensaje")).toMatchObject({ ok: true });
+			expect(main.cierre).toBeNull();
+		});
+	});
+
+	it("recién despertado el objeto, una Main sin sello de latido tiene su margen", async () => {
+		// La documentación de Cloudflare no garantiza que el sello del latido sobreviva a la
+		// hibernación: sin el margen, la primera escritura tras despertar vetaría a una Main ociosa sana.
+		await enElHub("latido-al-despertar", async (hub: any) => {
+			preparar(hub);
+			hub.despiertaDesdeMs = Date.now();
+			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
+			conectar(hub, "handy-1", "handy", Date.now());
+			expect(hub.state.getWebSocketAutoResponseTimestamp(main.servidor)).toBeNull();
+
+			expect(await intentar(hub, "op-al-despertar")).toMatchObject({ ok: true });
 			expect(main.cierre).toBeNull();
 		});
 	});

@@ -90,12 +90,26 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
     let tarea = tokio::spawn(async move {
         let mut latido = tokio::time::interval(Duration::from_secs(30));
         latido.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut ultimo_pong = Instant::now();
+        // Lo último que se ha oído de la nube: un `pong` o cualquier mensaje.
+        let mut ultima_senal = Instant::now();
+        // El mensaje recibido que no cabe en la cola: quien lee (el bucle de la réplica) va por
+        // detrás. Mientras está aquí no se lee más del socket (TCP sigue frenando a la nube), pero el
+        // bucle no se queda esperando: el latido y lo que sale siguen. Esperar aquí dejaba sin latido
+        // a una Main sana, y el DO la cerraba a los 90 s (SYN-INC-01).
+        let mut retenido: Option<Value> = None;
         loop {
             tokio::select! {
                 _ = latido.tick() => {
-                    if ultimo_pong.elapsed() > Duration::from_secs(65) { break; }
+                    // Con un mensaje retenido no se lee el socket, así que no se sabe del `pong`: no
+                    // se da por muerta una conexión por eso.
+                    if retenido.is_none() && ultima_senal.elapsed() > Duration::from_secs(65) { break; }
                     if !timeout(Duration::from_secs(10), escritor.send(Message::Text(PING.into()))).await.is_ok_and(|r| r.is_ok()) { break; }
+                }
+                hueco = recibidos.reserve(), if retenido.is_some() => {
+                    let Ok(hueco) = hueco else { break; };
+                    if let Some(m) = retenido.take() { hueco.send(Ok(m)); }
+                    // Se vuelve a leer el socket: el plazo del `pong` cuenta desde ahora.
+                    ultima_senal = Instant::now();
                 }
                 // Un ping a demanda (`Latido::comprobar`), fuera del ritmo del latido.
                 _ = pedir.notified() => {
@@ -105,12 +119,17 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
                     let Some(msg) = msg else { break; };
                     if !timeout(Duration::from_secs(10), escritor.send(Message::Text(msg.to_string().into()))).await.is_ok_and(|r| r.is_ok()) { break; }
                 }
-                msg = lector.next() => {
+                msg = lector.next(), if retenido.is_none() => {
                     match msg {
                         Some(Ok(Message::Text(texto))) => {
                             let Ok(m) = serde_json::from_str::<Value>(&texto) else { break; };
-                            if m.get("type").and_then(Value::as_str) == Some("pong") { ultimo_pong = Instant::now(); pongs.send_replace(Pong::ahora()); continue; }
-                            if recibidos.send(Ok(m)).await.is_err() { break; }
+                            ultima_senal = Instant::now();
+                            if m.get("type").and_then(Value::as_str) == Some("pong") { pongs.send_replace(Pong::ahora()); continue; }
+                            match recibidos.try_send(Ok(m)) {
+                                Ok(()) => {}
+                                Err(mpsc::error::TrySendError::Full(Ok(m))) => retenido = Some(m),
+                                Err(_) => break,
+                            }
                         }
                         Some(Ok(Message::Ping(bytes))) => { if !timeout(Duration::from_secs(10), escritor.send(Message::Pong(bytes))).await.is_ok_and(|r| r.is_ok()) { break; } }
                         Some(Ok(Message::Pong(_))) => {},
@@ -121,6 +140,8 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
             }
         }
         let _ = timeout(Duration::from_secs(5), escritor.close()).await;
+        // Lo retenido llegó antes del cierre: se entrega antes de decir que se ha perdido.
+        if let Some(m) = retenido.take() { let _ = recibidos.send(Ok(m)).await; }
         let _ = recibidos.send(Err(AppError::external("Se perdió la conexión con la nube"))).await;
     });
     CanalWebSocket { salida, entrada, despertar, latido: pulso, tarea }
@@ -177,6 +198,27 @@ mod tests {
     async fn siguiente_ping(servidor: &mut WebSocketStream<DuplexStream>) {
         let ping = servidor.next().await.unwrap().unwrap();
         assert_eq!(ping.into_text().unwrap(), PING);
+    }
+
+    /// SYN-INC-01: con la réplica ocupada (no lee) y más de 8 mensajes de la nube, el bucle se quedaba
+    /// esperando a meter el noveno en la cola y dejaba de mandar el latido: el DO cerraba a esa Main
+    /// sana a los 90 s, en la primera escritura de una Handy.
+    #[tokio::test(start_paused = true)]
+    async fn con_la_cola_llena_sigue_mandando_el_latido_y_no_pierde_nada() {
+        let (mut cliente, mut servidor) = pareja().await;
+        siguiente_ping(&mut servidor).await;
+        for n in 0..20 {
+            servidor.send(Message::Text(json!({"type":"change","n":n}).to_string().into())).await.unwrap();
+        }
+        // Nadie lee del canal: la cola se llena. Tres latidos seguidos (90 s), sin `pong` que leer.
+        for _ in 0..3 {
+            tokio::time::advance(Duration::from_secs(30)).await;
+            timeout(Duration::from_secs(5), siguiente_ping(&mut servidor)).await.expect("el latido sigue con la cola llena");
+        }
+        // Y cuando la réplica lee, llega todo y en orden.
+        for n in 0..20 {
+            assert_eq!(cliente.recibir(Duration::from_secs(1)).await.unwrap().unwrap()["n"], n);
+        }
     }
 
     #[tokio::test(start_paused = true)]
