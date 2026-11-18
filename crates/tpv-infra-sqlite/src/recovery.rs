@@ -95,8 +95,23 @@ const DEL_NEGOCIO_EN_APPDATA: [&str; 6] = [
 ];
 const DEL_NEGOCIO_EN_APPDATA_POR_PREFIJO: [&str; 2] = [MIGRACION_PREFIX, "data.restore."];
 
-fn corrupta(e: impl std::fmt::Display) -> AppError {
-    AppError::coded(ErrorCode::BackupCorrupt, e.to_string())
+/// Lo que se le dice a quien elige, para traerlo, un archivo que no es una copia (un PDF, una foto).
+pub const MSG_NO_ES_UNA_COPIA: &str =
+    "Ese archivo no es una copia de seguridad del TPV. Elige uno guardado con «Guardar fuera…» (.db.gz).";
+
+/// Lo que se le dice cuando una copia no pasa la validación, sea por lo que sea.
+pub const MSG_COPIA_DANADA: &str = "La copia está dañada y no se puede usar.";
+
+/// Una copia que no se puede usar. Lo que se enseña es una frase; el detalle técnico (el error del
+/// motor, en inglés: «file is not a database») va sólo al registro, que es donde le sirve a soporte.
+fn corrupta(detalle: impl std::fmt::Display) -> AppError {
+    tracing::warn!(target: "tpv::recovery", %detalle, "copia de seguridad que no se puede usar");
+    AppError::coded(ErrorCode::BackupCorrupt, MSG_COPIA_DANADA)
+}
+
+/// Un archivo que no es una copia: ni una base de SQLite ni un gzip.
+fn no_es_una_copia() -> AppError {
+    AppError::validation(MSG_NO_ES_UNA_COPIA)
 }
 
 fn valor_i64(value: Value) -> Option<i64> {
@@ -137,6 +152,19 @@ async fn copiar_fichero(origen: &Path, destino: &Path) -> AppResult<()> {
 /// Los dos primeros bytes de todo fichero gzip (RFC 1952). Una base SQLite empieza por
 /// `SQLite format 3\0`, así que no hay confusión posible.
 const MAGIA_GZIP: [u8; 2] = [0x1f, 0x8b];
+/// La cabecera con la que empieza toda base de SQLite.
+const CABECERA_SQLITE: &[u8; 16] = b"SQLite format 3\0";
+
+/// ¿Empieza `path` como una base de SQLite? Un fichero más corto que la cabecera no lo es.
+fn es_base_sqlite(path: &Path) -> std::io::Result<bool> {
+    let mut cabecera = [0u8; 16];
+    let mut f = std::fs::File::open(path)?;
+    match f.read_exact(&mut cabecera) {
+        Ok(()) => Ok(&cabecera == CABECERA_SQLITE),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e),
+    }
+}
 
 fn es_gzip(path: &Path) -> std::io::Result<bool> {
     let mut cabecera = [0u8; 2];
@@ -1137,9 +1165,19 @@ pub async fn import_backup(
 
     // Se trae primero a un temporal (descomprimida si venía comprimida) y se valida ahí: es la
     // base que se va a guardar, y validar en el USB obligaría a descomprimir dos veces.
+    // Lo primero, que sea una copia: comprimida (gzip) o una base tal cual. Si no, el motor lo
+    // diría en inglés y como si la copia estuviera estropeada.
+    if !(es_gzip(origen).map_err(db_err)? || es_base_sqlite(origen).map_err(db_err)?) {
+        return Err(no_es_una_copia());
+    }
+
     let tmp = temporal(&dir, "import");
     let r = async {
         descomprimir(origen, &tmp).await?;
+        // Un gzip que no lleva dentro una base tampoco es una copia.
+        if !es_base_sqlite(&tmp).map_err(db_err)? {
+            return Err(no_es_una_copia());
+        }
         validate_backup(&tmp).await?;
         // AUD-06: una copia de otro negocio no entra en el almacén de éste.
         comprobar_procedencia_de_copia(&tmp, licencia)
@@ -2397,7 +2435,9 @@ mod tests {
         std::fs::write(&basura, b"esto no es una base de datos").unwrap();
 
         let err = import_backup(&dir, &basura, Some("negocio-de-prueba")).await.unwrap_err();
-        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        // No es una copia estropeada: no es una copia (se mira la cabecera antes de abrirla).
+        assert_eq!(err.code(), ErrorCode::Validation);
+        assert_eq!(err.to_string(), MSG_NO_ES_UNA_COPIA);
         assert!(list_backups(&dir).unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(dir);
@@ -2524,6 +2564,52 @@ mod tests {
         assert!(es_gzip(&dir.join(BACKUP_DIR).join(&importada.id)).unwrap());
 
         drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Restaurar un archivo que no es una copia (un PDF, o un gzip con otra cosa dentro) se rechaza
+    /// diciendo qué elegir, no con el error del motor en inglés («file is not a database»).
+    #[tokio::test]
+    async fn un_archivo_que_no_es_una_copia_se_rechaza_diciendo_que_elegir() {
+        let dir = test_dir("no_es_copia");
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("factura.pdf");
+        std::fs::write(&pdf, b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n").unwrap();
+        let pdf_comprimido = dir.join("factura.db.gz");
+        {
+            let mut gz = flate2::write::GzEncoder::new(std::fs::File::create(&pdf_comprimido).unwrap(), flate2::Compression::default());
+            gz.write_all(&std::fs::read(&pdf).unwrap()).unwrap();
+            gz.finish().unwrap();
+        }
+        let vacio = dir.join("vacio.db");
+        std::fs::write(&vacio, b"").unwrap();
+
+        for archivo in [&pdf, &pdf_comprimido, &vacio] {
+            let err = import_backup(&dir, archivo, Some("negocio-de-prueba")).await.unwrap_err();
+            assert_eq!(err.code(), ErrorCode::Validation, "{archivo:?}");
+            assert_eq!(err.to_string(), MSG_NO_ES_UNA_COPIA, "{archivo:?}");
+        }
+        assert!(MSG_NO_ES_UNA_COPIA.contains("«Guardar fuera…»"), "el texto del botón de Configuración");
+        assert!(list_backups(&dir).unwrap().is_empty(), "no entra nada en el almacén");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una base que empieza como una de SQLite pero está estropeada es una copia dañada, con una
+    /// frase en español; el detalle del motor queda en el registro.
+    #[tokio::test]
+    async fn una_copia_estropeada_lo_dice_sin_el_error_del_motor() {
+        let dir = test_dir("copia_estropeada");
+        std::fs::create_dir_all(&dir).unwrap();
+        let rota = dir.join("rota.db");
+        let mut bytes = CABECERA_SQLITE.to_vec();
+        bytes.extend(std::iter::repeat_n(0xAB, 8192));
+        std::fs::write(&rota, &bytes).unwrap();
+
+        let err = import_backup(&dir, &rota, Some("negocio-de-prueba")).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        assert_eq!(err.to_string(), MSG_COPIA_DANADA);
+
         let _ = std::fs::remove_dir_all(dir);
     }
 

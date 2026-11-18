@@ -229,6 +229,9 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   `recovery_import_backup`, que la
   guarda comprimida como `import-*` y **no caduca**. Se importa una copia comprimida o una base tal cual
   (una `.db` de antes, o la `data.db` rescatada de otro equipo): el formato se reconoce por el contenido.
+  Un archivo que no empieza como un gzip ni como una base de SQLite (un PDF), o un gzip sin una base
+  dentro, no es una copia y se dice qué elegir; una copia que no pasa la validación «está dañada y no
+  se puede usar», con el detalle del motor sólo en el registro.
 - **Una copia lleva el sello de su base** (AUD-06): con el de otro negocio que el de la licencia, ni
   se importa, ni se restaura, ni se saca del equipo, y lo dice («Esa copia es de otro negocio…»); sin licencia activada, una
   sellada tampoco. Una copia **sin sello** (anterior a los sellos) no dice de quién es: se acepta como

@@ -73,7 +73,7 @@ it("una copia que no se puede restaurar se rechaza diciendo por qué, y deja ele
             ];
         }
         if (comando === "recovery_restore_backup") {
-            throw { code: "backup_corrupt", message: "No se puede abrir la copia: file is not a database" };
+            throw { code: "backup_corrupt", message: "La copia está dañada y no se puede usar." };
         }
         return undefined;
     });
@@ -82,7 +82,7 @@ it("una copia que no se puede restaurar se rechaza diciendo por qué, y deja ele
 
     (await screen.findByRole("button", { name: /^Última copia: / })).click();
 
-    expect(await screen.findByText(/No se puede abrir la copia: file is not a database/)).toBeInTheDocument();
+    expect(await screen.findByText(/La copia está dañada y no se puede usar/)).toBeInTheDocument();
     expect(screen.queryByText("Recuperación en curso")).not.toBeInTheDocument();
     // Las copias siguen ahí para elegir otra, y la nube también.
     expect(screen.getByRole("button", { name: /^Última copia: / })).toBeEnabled();
