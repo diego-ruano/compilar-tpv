@@ -6,6 +6,7 @@
 // que contestaba «No hay una licencia activa». Ahora la clave mal escrita se avisa al dejar el campo,
 // con el texto que daría el backend, y «Limpiar» empieza de cero.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import ActivacionLicencia from "../../src/app/arranque/ActivacionLicencia";
@@ -21,7 +22,7 @@ afterEach(cleanup);
 
 async function montar() {
     render(
-        <ActivacionLicencia rechazoPrevio={null} volviendo={false} errorAlVolver={null} onVolver={async () => {}} onActivada={async () => {}} />,
+        <ActivacionLicencia rechazoPrevio={null} volviendo={false} errorAlVolver={null} onOlvidarErrorAlVolver={() => {}} onVolver={async () => {}} onActivada={async () => {}} />,
     );
     await waitFor(() => expect(document.getElementById("activation-license-key")).not.toBeNull());
     return document.getElementById("activation-license-key") as HTMLInputElement;
@@ -75,4 +76,29 @@ it("«Limpiar» quita también el error de la activación anterior", async () =>
 
     await waitFor(() => expect(screen.queryByText("No hay ninguna licencia con esa clave. Revísala.")).toBeNull());
     expect((document.getElementById("activation-license-key") as HTMLInputElement).value).toBe("");
+});
+
+// El error de «Volver» (no se pudo volver al selector) lo guarda la pantalla de arranque, no el
+// formulario: «Limpiar» se lo pide quitar, y la pantalla queda sin ningún error a la vista.
+it("«Limpiar» quita también el error de «Volver», que es de la pantalla de arranque", async () => {
+    const ERROR_AL_VOLVER = "No se ha podido volver al selector de modo.";
+    function ConArranque() {
+        const [errorAlVolver, setErrorAlVolver] = useState<string | null>(ERROR_AL_VOLVER);
+        return (
+            <ActivacionLicencia
+                rechazoPrevio={null}
+                volviendo={false}
+                errorAlVolver={errorAlVolver}
+                onOlvidarErrorAlVolver={() => setErrorAlVolver(null)}
+                onVolver={async () => {}}
+                onActivada={async () => {}}
+            />
+        );
+    }
+    render(<ConArranque />);
+    expect(await screen.findByText(ERROR_AL_VOLVER)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });

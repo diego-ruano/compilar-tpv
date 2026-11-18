@@ -43,12 +43,15 @@ export default function ActivacionLicencia({
 	rechazoPrevio,
 	volviendo,
 	errorAlVolver,
+	onOlvidarErrorAlVolver,
 	onVolver,
 	onActivada,
 }: {
 	rechazoPrevio: string | null;
 	volviendo: boolean;
 	errorAlVolver: string | null;
+	/** El error de «Volver» es de la pantalla de arranque: «Limpiar» le pide que lo quite. */
+	onOlvidarErrorAlVolver: () => void;
 	onVolver: () => Promise<void>;
 	/** La licencia ya está activa: la Main vuelve a leerla y a pedir el veredicto del gate. */
 	onActivada: () => Promise<void>;
@@ -412,6 +415,7 @@ export default function ActivacionLicencia({
 										setAct(FORMULARIO_VACIO);
 										setClaveTerminada(false);
 										setError(null);
+										onOlvidarErrorAlVolver();
 										setDeviceChangeHint(null);
 										setDeviceChangeCode("");
 									}}

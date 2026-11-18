@@ -35,7 +35,7 @@ async function rellenarYActivar(cambioDeEquipo: boolean, reinicia: boolean) {
     );
     const onActivada = vi.fn(async () => {});
     render(
-        <ActivacionLicencia rechazoPrevio={null} volviendo={false} errorAlVolver={null} onVolver={async () => {}} onActivada={onActivada} />,
+        <ActivacionLicencia rechazoPrevio={null} volviendo={false} errorAlVolver={null} onOlvidarErrorAlVolver={() => {}} onVolver={async () => {}} onActivada={onActivada} />,
     );
     for (const [campo, valor] of [
         ["activation-license-key", "TPV-AAAAA-BBBBB-CCCCC-DDDDD"],

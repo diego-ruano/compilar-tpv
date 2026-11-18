@@ -217,6 +217,7 @@ export default function AppBoot({ router }: { router: any }) {
 						rechazoPrevio={p.rechazoPrevio}
 						volviendo={dispositivo.ocupado}
 						errorAlVolver={dispositivo.error}
+						onOlvidarErrorAlVolver={dispositivo.olvidarError}
 						onVolver={dispositivo.volverAlSelector}
 						onActivada={async () => {
 							await licencia.refrescarLicencia();

@@ -99,5 +99,10 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 		}
 	}
 
-	return { ocupado, error, elegir, irAlSelector, volverAlSelector };
+	/** Quita el error de la vista: la pantalla que lo enseña empieza de cero («Limpiar»). */
+	function olvidarError() {
+		setError(null);
+	}
+
+	return { ocupado, error, elegir, irAlSelector, volverAlSelector, olvidarError };
 }
