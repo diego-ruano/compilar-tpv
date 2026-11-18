@@ -925,3 +925,33 @@ async fn una_base_anterior_a_la_nube_pasa_a_recuperarse_sin_traer_nada_por_clave
     assert!(ctx.repo.al_converger.lock().unwrap().is_empty());
     assert_eq!(*n.calls.lock().unwrap(),["/v1/sync/changes"]);
 }
+
+// ── SYNC-33 · una copia con el cursor por delante de la nube no es de su log ───────────
+
+#[tokio::test]
+async fn una_copia_por_delante_de_la_nube_no_se_reconcilia_ni_sube_nada() {
+    // La copia de otra instalación (o retocada) dice ir por el 1.000.000; la nube ha numerado 7.
+    let ctx=contexto(vec![op("de-la-copia")]);*ctx.repo.cursor.lock().unwrap()=1_000_000;
+    let n=nube(vec![pagina(vec![],7)]);let mut c=canal(vec![]);
+    let e=ejecutar(&ctx,&n,&mut c,true).await.unwrap_err();
+    assert_eq!(e.code(),tpv_contracts::errors::ErrorCode::Conflict);
+    assert_eq!(e.to_string(),MOTIVO_POR_DELANTE_DE_LA_NUBE);
+    assert!(c.enviados.is_empty(),"ni sube su outbox ni suelta a las Handy");
+    assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);
+    assert_eq!(*ctx.repo.cursor.lock().unwrap(),1_000_000);
+    assert!(ctx.completa.lock().unwrap().is_none(),"no se desbloquea");
+}
+
+#[tokio::test]
+async fn una_copia_buena_de_un_log_purgado_entero_si_se_reconcilia() {
+    // Sin movimiento en días, la purga se lleva el log: el final es 0, pero lo numerado llega al 50.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=50;
+    let n=nube(vec![json!({"items":[],"nextSince":50,"highWater":0,"purgadoHasta":50})]);
+    assert!(catch_up(&ctx,&n,true).await.is_ok());
+    // Y en el borde, al día con el log, tampoco.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=7;
+    assert!(catch_up(&ctx,&nube(vec![pagina(vec![],7)]),true).await.is_ok());
+    // En la sesión normal no se mira: sólo la recuperación pone en duda la base.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=1_000_000;
+    assert!(catch_up(&ctx,&nube(vec![pagina(vec![],7)]),false).await.is_ok());
+}

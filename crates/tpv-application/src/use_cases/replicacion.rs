@@ -180,6 +180,16 @@ fn falta_un_tramo(respuesta: &Value, since: i64, estricto: bool) -> AppResult<bo
     }
 }
 
+/// SYNC-33 · Lo que se dice de una copia cuyo cursor va por delante de la nube.
+pub const MOTIVO_POR_DELANTE_DE_LA_NUBE: &str = "Esta copia no encaja con lo que guarda la nube de este negocio: dice tener cambios que la nube no ha dado nunca. Recupera el estado actual de la nube.";
+
+/// SYNC-33 · El mayor `Seq` que la nube ha dado: el final de su log o, si la purga se lo ha llevado
+/// entero, hasta donde purgó. Ningún cursor de una base de este negocio puede pasar de ahí.
+fn numerado_por_la_nube(respuesta: &Value, high_water: i64) -> i64 {
+    let purgado = respuesta.get("purgadoHasta").and_then(Value::as_i64).unwrap_or(0);
+    high_water.max(purgado)
+}
+
 /// Una pasada de catch-up desde el checkpoint, en orden de `Seq`.
 ///
 /// AUD-18: empieza por el cambio en el que se detuvo la bajada, con las sentencias que se
@@ -198,6 +208,14 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             Some(hw) if hw >= 0 => high_water = hw,
             _ if estricto => return Err(AppError::external("La nube no informa del punto de sincronización")),
             _ => {}
+        }
+        // SYNC-33: una copia con el cursor por encima de todo lo que la nube ha numerado dice haber
+        // recibido cambios que esta nube no ha dado nunca: no es de su log (la copia de otra
+        // instalación, o una retocada). Se para antes de aplicar y de subir su outbox, que sería
+        // subir lo de otro como propio. Lo numerado es el final del log o, si la purga lo ha
+        // vaciado, hasta donde purgó.
+        if estricto && since > numerado_por_la_nube(&respuesta, high_water) {
+            return Err(AppError::conflict(MOTIVO_POR_DELANTE_DE_LA_NUBE));
         }
         // AUD-19: en cada página, porque la purga puede correr entre una y otra. Antes de aplicar
         // nada: lo conservado encima de un hueco daría por buena una base sin ese tramo.
