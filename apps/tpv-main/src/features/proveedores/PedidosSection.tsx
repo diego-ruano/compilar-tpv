@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ShoppingCart, Plus, ChevronRight } from "lucide-react";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import { useToast } from "../../shared/toast";
@@ -133,10 +134,17 @@ export default function PedidosSection({ proveedores }: Props) {
   }
 
   async function handleCancelar(id: string) {
+    // Un borrador nuevo sin guardar no existe todavía: se cierra sin preguntar.
     if (isNewPedido) {
       cerrarModal();
       return;
     }
+    // Uno guardado se cancela para siempre (no se puede reabrir ni mandar): se pregunta antes.
+    const seguir = await confirmDialog(
+      "El pedido quedará cancelado y ya no se podrá editar ni mandar al proveedor.",
+      { title: "¿Cancelar el pedido?", kind: "warning", okLabel: "Cancelar el pedido", cancelLabel: "Volver" },
+    );
+    if (!seguir) return;
     try {
       await cancelarMutation.mutateAsync(id);
       cerrarModal();
