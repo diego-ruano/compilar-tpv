@@ -17,9 +17,9 @@ import type {
 } from "@tpv/contracts";
 
 /** Lo más que lleva un pedido (`MAX_LINEAS` en la Main): lo que admite el correo al proveedor. */
-export const MAX_LINEAS = 500;
+const MAX_LINEAS = 500;
 /** Cuántos pedidos trae como mucho una página (`MAX_LIMIT` del caso de uso de la Main). */
-export const MAX_POR_PAGINA = 200;
+const MAX_POR_PAGINA = 200;
 
 // Los textos de `tpv_domain::pedidos_proveedor`.
 const MSG_FALTA_EL_PEDIDO = "Falta el pedido.";
