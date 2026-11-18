@@ -13,7 +13,7 @@ process.env.TZ = "Europe/Madrid";
 import { describe, expect, it } from "vitest";
 import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
 
-import { activacionCompleta, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
+import { activacionCompleta, estadoDelFormulario, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
 import { codigoParaVincular, leerCodigoDeVinculacion } from "../src/app/arranque/emparejamiento";
 import { decidirArranque, type EntradaArranque } from "../src/app/arranque/pantallaDeArranque";
 import { textoAvisoCaducidad, textoBloqueo, textoRechazoPrevio } from "../src/app/arranque/textosLicencia";
@@ -240,7 +240,7 @@ describe("el aviso de caducidad", () => {
 
 describe("el formulario de activación", () => {
 	const lleno = {
-		licenseKey: "ABCD-EFGH-IJKL",
+		licenseKey: "TPV-ABCDE-FGHJK-MNPQR-STVWX",
 		legal_name: "Bar La Plaza S.L.",
 		business_name: "Bar La Plaza",
 		phone: "+34 600 000 000",
@@ -264,6 +264,17 @@ describe("el formulario de activación", () => {
 		expect(activacionCompleta({ ...cambio, codigoCambio: "" })).toBe(false);
 		expect(activacionCompleta({ ...cambio, codigoCambio: "12345" })).toBe(false);
 		expect(activacionCompleta({ ...cambio, codigoCambio: "123456" })).toBe(true);
+	});
+
+	// LIC-INC-02: antes bastaba con que la clave no estuviera vacía, y se mandaba a la nube.
+	it("una clave que no tiene la forma de una no está lista, y la etiqueta lo dice", () => {
+		const mal = { ...listo, formulario: { ...lleno, licenseKey: "ABCD-EFGH-IJKL" } };
+		expect(activacionCompleta(mal)).toBe(false);
+		expect(estadoDelFormulario(mal)).toBe("Revisa la clave de licencia");
+		expect(estadoDelFormulario(listo)).toBe("Datos completos");
+		expect(estadoDelFormulario({ ...listo, formulario: FORMULARIO_VACIO })).toBe("Completa todos los campos");
+		// Escrita como sea, si es una clave vale.
+		expect(activacionCompleta({ ...listo, formulario: { ...lleno, licenseKey: "tpv abcde fghjk mnpqr stvwx" } })).toBe(true);
 	});
 });
 

@@ -12,7 +12,8 @@ import { Building2, KeyRound, MapPin, Phone, ShieldCheck, Store } from "lucide-r
 import { conAviso } from "../../shared/lib/conAviso";
 import { limpiarSesionLocal } from "../../shared/stores/useAuth";
 import { Badge, Button, Card, Input } from "../../shared/ui";
-import { activacionCompleta, FORMULARIO_VACIO } from "./activacion";
+import { activacionCompleta, estadoDelFormulario, FORMULARIO_VACIO } from "./activacion";
+import { avisoDeClave, EJEMPLO_CLAVE } from "../../shared/lib/claveLicencia";
 import FondoDecorado from "./FondoDecorado";
 import { textoRechazoPrevio } from "./textosLicencia";
 
@@ -53,6 +54,8 @@ export default function ActivacionLicencia({
 	onActivada: () => Promise<void>;
 }) {
 	const [act, setAct] = useState(FORMULARIO_VACIO);
+	// LIC-INC-02: una clave mal escrita se avisa al dejar el campo, sin esperar a pulsar «Activar».
+	const [claveTerminada, setClaveTerminada] = useState(false);
 	const [enviando, setEnviando] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -76,11 +79,13 @@ export default function ActivacionLicencia({
 	const enDeviceChange = deviceChangeHint !== null;
 	const ocupado = enviando || volviendo;
 
-	const activationValid = activacionCompleta({
+	const estadoFormulario = {
 		formulario: act,
 		enCambioDeEquipo: enDeviceChange,
 		codigoCambio: deviceChangeCode,
-	});
+	};
+	const activationValid = activacionCompleta(estadoFormulario);
+	const avisoClave = avisoDeClave(act.licenseKey, claveTerminada);
 
 	// Pide (o reenvía) el código de cambio de dispositivo al email de la licencia.
 	async function requestDeviceChangeCode() {
@@ -202,7 +207,7 @@ export default function ActivacionLicencia({
 						← Volver
 					</Button>
 					<Badge tone={activationValid ? "success" : "warning"}>
-						{activationValid ? "Datos completos" : "Completa todos los campos"}
+						{estadoDelFormulario(estadoFormulario)}
 					</Badge>
 				</div>
 
@@ -279,10 +284,17 @@ export default function ActivacionLicencia({
 									autoFocus
 									value={act.licenseKey}
 									onChange={(e) => setAct((s) => ({ ...s, licenseKey: e.target.value }))}
+									onBlur={() => setClaveTerminada(true)}
 									className="mt-2 h-12 px-4 font-mono uppercase tracking-wider"
-									placeholder="XXXX-XXXX-XXXX"
+									placeholder={EJEMPLO_CLAVE}
 									autoComplete="off"
+									aria-invalid={avisoClave ? true : undefined}
 								/>
+								{avisoClave ? (
+									<p className="mt-2 text-sm text-danger" role="alert">
+										{avisoClave}
+									</p>
+								) : null}
 							</div>
 
 							<div className="grid gap-4 sm:grid-cols-2">
@@ -396,7 +408,10 @@ export default function ActivacionLicencia({
 									size="lg"
 									disabled={ocupado}
 									onClick={() => {
+										// LIC-INC-02: limpiar es empezar de cero, también sin el error de antes.
 										setAct(FORMULARIO_VACIO);
+										setClaveTerminada(false);
+										setError(null);
 										setDeviceChangeHint(null);
 										setDeviceChangeCode("");
 									}}

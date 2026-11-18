@@ -38,7 +38,7 @@ async function rellenarYActivar(cambioDeEquipo: boolean, reinicia: boolean) {
         <ActivacionLicencia rechazoPrevio={null} volviendo={false} errorAlVolver={null} onVolver={async () => {}} onActivada={onActivada} />,
     );
     for (const [campo, valor] of [
-        ["activation-license-key", "TPV-AAAA-BBBB-CCCC"],
+        ["activation-license-key", "TPV-AAAAA-BBBBB-CCCCC-DDDDD"],
         ["activation-legal-name", "Bar de Pruebas S.L."],
         ["activation-business-name", "Bar de Pruebas"],
         ["activation-phone", "+34 600 000 000"],
