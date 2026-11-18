@@ -67,10 +67,8 @@ ventaRapidaRoutes.get("/productos/:idCategoria", async (c) => {
 });
 
 ventaRapidaRoutes.get("/comandas", consulta(S.listComandasSchema), async (c) => {
-	const { include_pagadas, limit } = c.req.valid("query");
-	return c.json(
-		await tenantQuery(c, (db) => q.listComandas(db, include_pagadas, limit)),
-	);
+	const { limit } = c.req.valid("query");
+	return c.json(await tenantQuery(c, (db) => q.listComandas(db, limit)));
 });
 
 ventaRapidaRoutes.get("/comandas/:id/lineas", async (c) => {

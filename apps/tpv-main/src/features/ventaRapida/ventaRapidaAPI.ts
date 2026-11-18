@@ -83,11 +83,9 @@ export async function vrSearchProductos(q: string, limit = 60): Promise<Producto
     return commands.vrSearchProductos({ query, limit });
 }
 
-export function vrListComandasBarra(opts: {
-    includePagadas: boolean;
-    limit?: number;
-}): Promise<ComandaBarraRow[]> {
-    return commands.vrListComandasBarra({ include_pagadas: opts.includePagadas, limit: opts.limit });
+/** Los tickets de barra con líneas, cobrados o no (CAJ-INC-03). */
+export function vrListComandasBarra(opts: { limit?: number }): Promise<ComandaBarraRow[]> {
+    return commands.vrListComandasBarra({ limit: opts.limit });
 }
 
 export function vrGetLineasComanda(idComanda: string): Promise<LineaComandaRow[]> {

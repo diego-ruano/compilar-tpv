@@ -569,7 +569,7 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 		case "mesas.cocina_pendiente":
 			return kitchenList(db);
 		case "venta_rapida.comandas_barra":
-			return listComandas(db, e.include_pagadas, e.limit);
+			return listComandas(db, e.limit);
 		case "venta_rapida.lineas_comanda":
 			return lineasBarra(db, e.id_comanda);
 		case "venta_rapida.categorias":

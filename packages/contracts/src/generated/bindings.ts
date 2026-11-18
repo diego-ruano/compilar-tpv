@@ -3818,7 +3818,6 @@ export type VrLineaAnadida = {
 };
 
 export type VrListComandasArgs = {
-	include_pagadas: boolean,
 	limit?: number | null,
 };
 

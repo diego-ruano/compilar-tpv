@@ -1,5 +1,5 @@
 {
-  "descripcion": "Los tickets de barra abiertos, con sus tres contadores derivados: Total_Pendiente (lo cobrable que queda), Pendientes_Cocina y Pendientes_Pago. Con include_pagadas en false solo deben salir las que tienen algo pendiente, asi que el seed mete un ticket totalmente cobrado (no debe salir), uno a medias (si) y uno sin lineas (tampoco: el EXISTS lo descarta). Las comandas de MESA no son de este canal y no pueden colarse.",
+  "descripcion": "Los tickets de barra con lineas, cobrados o no, con sus tres contadores derivados: Total_Pendiente (las lineas sin cobrar, CAJ-INC-03), Pendientes_Cocina y Pendientes_Pago. El seed mete un ticket cobrado, uno a medias, uno devuelto entero (cobro de 6,03 y devolucion de -6,03: antes salia con 6,03 pendiente porque la devolucion es un cobro negativo activo) y uno sin lineas (no sale: el EXISTS lo descarta). Las comandas de MESA no son de este canal y no pueden colarse.",
   "lectura": "venta_rapida.comandas_barra",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -19,10 +19,14 @@
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-a-medias', '2026-05-10 12:30:00', 'Efectivo', 300, 'parcial');",
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-a2');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-cobrada', '2026-05-10 11:30:00', 'Efectivo', 300, 'total');",
-    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2', 'det-c1');"
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2', 'det-c1');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-devuelta', 'BARRA', '2026-05-10 13:00:00', 'Pagada', 603);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-d1', 'com-devuelta', 'prod-bebida', 3, 201);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-devuelta', '2026-05-10 13:10:00', 'Efectivo', 603, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-3', 'det-d1');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('dev-3', 'com-devuelta', '2026-05-10 13:20:00', 'Efectivo', -603, 'DEVOLUCION', 'pago-3', 'no le gusto');"
   ],
   "entrada": {
-    "include_pagadas": false,
     "limit": 50
   }
 }

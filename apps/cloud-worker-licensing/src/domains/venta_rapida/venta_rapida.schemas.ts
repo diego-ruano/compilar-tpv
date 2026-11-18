@@ -60,13 +60,6 @@ function normalizeIds(values: unknown): string[] {
 
 
 export const listComandasSchema = z.object({
-	include_pagadas: z
-		.any()
-		.optional()
-		.transform((v) => {
-			const s = recortar(String(v ?? "")).toLowerCase();
-			return s === "true" || s === "1";
-		}),
 	limit: z.coerce.number().int().min(1).max(200).optional().default(60),
 });
 

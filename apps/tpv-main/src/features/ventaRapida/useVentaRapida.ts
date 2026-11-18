@@ -230,7 +230,7 @@ export function useVentaRapida() {
   }, []);
 
   const refreshComandasBarra = useCallback(
-    async (opts?: { includePagadas?: boolean; silent?: boolean }) => {
+    async (opts?: { silent?: boolean }) => {
       const silent = Boolean(opts?.silent);
 
       if (!silent) {
@@ -238,12 +238,7 @@ export function useVentaRapida() {
       }
 
       try {
-        const includePagadas = Boolean(opts?.includePagadas);
-
-        const rows = await vrListComandasBarra({
-          includePagadas,
-          limit: includePagadas ? 200 : 60,
-        });
+        const rows = await vrListComandasBarra({ limit: 200 });
         setComandasBarra(rows);
       } catch (e) {
         if (!silent) {
@@ -319,10 +314,7 @@ export function useVentaRapida() {
             if (syncRunIdRef.current !== runId) return;
 
             if (refreshComandas && openVerTickets) {
-              await refreshComandasBarra({
-                includePagadas: true,
-                silent: true,
-              });
+              await refreshComandasBarra({ silent: true });
             }
           } catch (e) {
             // Las cargas de dentro ya avisan de lo suyo: lo que llega aquí es un fallo de la pantalla.
@@ -349,7 +341,7 @@ export function useVentaRapida() {
       queueComandaRefresh(id, { refreshTicket: true, refreshComandas: true });
     } else if (info.touchedComanda) {
       // El cambio tocó otra comanda (o no hay ticket abierto): refrescar solo la barra.
-      void refreshComandasBarra({ silent: true, includePagadas: true });
+      void refreshComandasBarra({ silent: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncTick]);
@@ -760,7 +752,7 @@ export function useVentaRapida() {
 
 
     setOpenVerTickets(true);
-    await refreshComandasBarra({ includePagadas: true });
+    await refreshComandasBarra();
   }, [hasPendingTicketWrites, refreshComandasBarra, warnPendingTicketWrites]);
 
   const abrirTicketDesdeModal = useCallback(
@@ -806,7 +798,7 @@ export function useVentaRapida() {
           return;
         }
 
-        await refreshComandasBarra({ includePagadas: true });
+        await refreshComandasBarra();
 
         if (idComandaActivaRef.current === idComanda) {
           const idNew = await vrCreateComandaBarra(idTrabajadorAuth ?? null);

@@ -1,5 +1,14 @@
 [
   {
+    "Estado": "Pagada",
+    "Fecha_Hora_Apertura": "2026-05-10 13:00:00",
+    "ID_Comanda": "com-devuelta",
+    "Pendientes_Cocina": 0,
+    "Pendientes_Pago": 0,
+    "Total_Comanda": 603,
+    "Total_Pendiente": 0
+  },
+  {
     "Estado": "Abierta",
     "Fecha_Hora_Apertura": "2026-05-10 12:00:00",
     "ID_Comanda": "com-a-medias",
@@ -7,5 +16,14 @@
     "Pendientes_Pago": 1,
     "Total_Comanda": 1200,
     "Total_Pendiente": 900
+  },
+  {
+    "Estado": "Pagada",
+    "Fecha_Hora_Apertura": "2026-05-10 11:00:00",
+    "ID_Comanda": "com-cobrada",
+    "Pendientes_Cocina": 0,
+    "Pendientes_Pago": 0,
+    "Total_Comanda": 300,
+    "Total_Pendiente": 0
   }
 ]

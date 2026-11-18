@@ -16,11 +16,8 @@ pub trait VentaRapidaRepository: Send + Sync {
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaRow>>;
     async fn list_productos_by_categoria(&self, id_categoria: &str) -> AppResult<Vec<ProductoRow>>;
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>>;
-    async fn list_comandas_barra(
-        &self,
-        include_pagadas: bool,
-        limit: Option<i64>,
-    ) -> AppResult<Vec<ComandaBarraRow>>;
+    /// Los tickets de barra con líneas, cobrados o no, de más reciente a más antiguo.
+    async fn list_comandas_barra(&self, limit: Option<i64>) -> AppResult<Vec<ComandaBarraRow>>;
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<LineaComandaRow>>;
     async fn get_index_rows(&self, ids: Vec<String>) -> AppResult<Vec<IndexRow>>;
     async fn get_detalles_ver_ticket(

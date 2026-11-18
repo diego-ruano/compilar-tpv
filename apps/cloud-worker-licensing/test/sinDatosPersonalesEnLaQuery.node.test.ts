@@ -109,7 +109,6 @@ const EN_LA_QUERY = new Set([
 	"hora",
 	// filtros cerrados y cantidades
 	"historial",
-	"include_pagadas",
 	"personas",
 	"range",
 	"ranking",

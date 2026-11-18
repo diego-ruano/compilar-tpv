@@ -101,7 +101,6 @@ pub struct IndexRow {
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrListComandasArgs {
-    pub include_pagadas: bool,
     #[serde(default)]
     pub limit: Option<i64>,
 }

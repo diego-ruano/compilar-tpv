@@ -496,10 +496,7 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
         "venta_rapida.comandas_barra" => {
             let repo = SqliteVentaRapidaRepository::new(db.clone());
             let r = repo
-                .list_comandas_barra(
-                    e["include_pagadas"].as_bool().unwrap_or(false),
-                    e["limit"].as_i64(),
-                )
+                .list_comandas_barra(e["limit"].as_i64())
                 .await
                 .expect("comandas barra");
             serde_json::to_value(r).unwrap()

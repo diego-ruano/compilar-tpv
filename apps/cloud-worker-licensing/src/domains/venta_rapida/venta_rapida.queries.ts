@@ -33,20 +33,17 @@ function rows(rs: any): any[] {
 	});
 }
 
-// Solo los cobros ACTIVOS descuentan del pendiente (CUENTA-07): si un cobro anulado siguiera
-// restando, el ticket pareceria pagado y sus lineas -que han vuelto a estar pendientes- no se
-// podrian volver a cobrar.
-const PENDING_EXPR = `
-	CASE
-		WHEN (
-			COALESCE(c.Total_Comanda,0)
-			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)
-		) < 0 THEN 0
-		ELSE (
-			COALESCE(c.Total_Comanda,0)
-			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)
-		)
-	END
+// Lo que queda por cobrar de un ticket: sus líneas sin cobrar, cada una redondeada como se cobra
+// (CAJ-INC-03). Lo mismo en la Main (`PENDIENTE_DE_UN_TICKET`, `tpv-infra-sqlite/src/venta_rapida.rs`).
+// Antes era `Total_Comanda − SUM(cobros activos)`, y una devolución es un cobro negativo activo: un
+// ticket devuelto entero restaba 0 y salía con todo su importe pendiente.
+const PENDIENTE_DE_UN_TICKET = `
+	COALESCE((
+		SELECT SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER))
+		FROM Detalle_Comanda dc
+		WHERE dc.ID_Comanda = c.ID_Comanda
+			AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+	),0)
 `;
 
 export async function categorias(db: Client): Promise<CategoriaRow[]> {
@@ -157,22 +154,15 @@ export async function resolveTrabajadorId(
 	return id ? id : null;
 }
 
-export async function listComandas(
-	db: Client,
-	includePagadas: boolean,
-	limit: number,
-): Promise<ComandaBarraRow[]> {
-	const whereClause = includePagadas
-		? "EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)"
-		: `(${PENDING_EXPR}) > 0
-			AND EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)`;
+/** Los tickets de barra con líneas, cobrados o no, de más reciente a más antiguo. */
+export async function listComandas(db: Client, limit: number): Promise<ComandaBarraRow[]> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
 				c.ID_Comanda AS ID_Comanda,
 				c.Fecha_Hora_Apertura AS Fecha_Hora_Apertura,
 				c.Estado AS Estado,
-				${PENDING_EXPR} AS Total_Pendiente,
+				${PENDIENTE_DE_UN_TICKET} AS Total_Pendiente,
 				COALESCE(c.Total_Comanda,0) AS Total_Comanda,
 				COALESCE((
 					SELECT COUNT(*)
@@ -191,7 +181,7 @@ export async function listComandas(
 				),0) AS Pendientes_Pago
 			FROM Comandas c
 			WHERE c.Canal = ?2
-				AND (${whereClause})
+				AND EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)
 			ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
 			LIMIT ?1;
 		`,

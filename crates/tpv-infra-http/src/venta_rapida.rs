@@ -74,12 +74,8 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             .await
     }
 
-    async fn list_comandas_barra(
-        &self,
-        include_pagadas: bool,
-        limit: Option<i64>,
-    ) -> AppResult<Vec<ComandaBarraRow>> {
-        let mut q = vec![("include_pagadas", include_pagadas.to_string())];
+    async fn list_comandas_barra(&self, limit: Option<i64>) -> AppResult<Vec<ComandaBarraRow>> {
+        let mut q = Vec::new();
         if let Some(l) = limit {
             q.push(("limit", l.to_string()));
         }

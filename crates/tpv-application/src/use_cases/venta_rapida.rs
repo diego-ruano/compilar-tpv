@@ -48,8 +48,7 @@ pub async fn list_comandas_barra(
     repo: &dyn VentaRapidaRepository,
     args: VrListComandasArgs,
 ) -> AppResult<Vec<ComandaBarraRow>> {
-    repo.list_comandas_barra(args.include_pagadas, args.limit)
-        .await
+    repo.list_comandas_barra(args.limit).await
 }
 
 pub async fn get_lineas_comanda(
@@ -267,7 +266,7 @@ mod tests {
         async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaRow>> { panic!("no usado") }
         async fn list_productos_by_categoria(&self, _: &str) -> AppResult<Vec<ProductoRow>> { panic!("no usado") }
         async fn search_productos(&self, _: String, _: i64) -> AppResult<Vec<ProductoRow>> { panic!("no usado") }
-        async fn list_comandas_barra(&self, _: bool, _: Option<i64>) -> AppResult<Vec<ComandaBarraRow>> { panic!("no usado") }
+        async fn list_comandas_barra(&self, _: Option<i64>) -> AppResult<Vec<ComandaBarraRow>> { panic!("no usado") }
         async fn get_lineas_comanda(&self, _: &str) -> AppResult<Vec<LineaComandaRow>> { panic!("no usado") }
         async fn get_index_rows(&self, _: Vec<String>) -> AppResult<Vec<IndexRow>> { panic!("no usado") }
         async fn get_detalles_ver_ticket(&self, _: &str) -> AppResult<Vec<VerTicketsDetalleRow>> { panic!("no usado") }

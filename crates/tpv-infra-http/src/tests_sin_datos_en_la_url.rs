@@ -68,7 +68,6 @@ const EN_LA_QUERY: &[&str] = &[
     "fecha_lunes",
     "hasta",
     // filtros cerrados
-    "include_pagadas",
     "range",
     "ranking",
     "solo_no_leidas",

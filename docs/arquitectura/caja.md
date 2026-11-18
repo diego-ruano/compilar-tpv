@@ -284,6 +284,11 @@ Reglas:
 - **No se devuelve más de lo que queda**: ni de una línea, ni del cobro, que en total no devuelve
   nunca más de lo cobrado (`cabe_en_el_cobro`); ni de un cobro dado de baja, ni una devolución, ni lo
   que se cobró a 0 €. Un rechazo no deja nada escrito: todo va en una transacción.
+- **El pendiente de un ticket sale de sus líneas sin cobrar** (las que no están en
+  `v_lineas_cobradas`, cada una redondeada como se cobra), no de restar cobros al total: una
+  devolución es un cobro negativo activo, y un ticket devuelto entero salía en «Ver tickets» con todo
+  su importe pendiente (CAJ-INC-03). La misma expresión en la Main y en el worker
+  (`PENDIENTE_DE_UN_TICKET`).
 - **En las estadísticas resta dinero, pero no es un cobro**: no cuenta como cobro de un camarero ni
   como mesa servida.
 - Al acabar, la pantalla abre su rectificativa en el modal de impresión, sin imprimirla.

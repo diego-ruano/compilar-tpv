@@ -338,9 +338,19 @@ impl SqliteVentaRapidaRepository {
 
 }
 
-fn clamp_pending_sql(expr: &str) -> String {
-    format!("CASE WHEN ({e}) < 0 THEN 0 ELSE ({e}) END", e = expr)
-}
+/// Lo que queda por cobrar de un ticket (`c`): sus líneas sin cobrar, cada una redondeada como se
+/// cobra (CAJ-INC-03). Lo mismo en el worker (`PENDIENTE_DE_UN_TICKET`, `venta_rapida.queries.ts`).
+///
+/// Antes era `Total_Comanda − SUM(cobros activos)`, y una devolución es un cobro negativo activo:
+/// un ticket devuelto entero (cobro de 6,03 € y devolución de −6,03 €) restaba 0 y salía con
+/// «Pendiente 6,03 €». Por líneas, lo devuelto sigue cobrado (`v_lineas_cobradas`) y lo que vuelve
+/// a estar pendiente tras dar de baja un cobro por error, también se ve.
+const PENDIENTE_DE_UN_TICKET: &str = "COALESCE((
+                SELECT SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER))
+                FROM Detalle_Comanda dc
+                WHERE dc.ID_Comanda = c.ID_Comanda
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+              ),0)";
 
 async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<String>> {
     if id_comanda.trim().is_empty() {
@@ -516,30 +526,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         Ok(out)
     }
 
-    async fn list_comandas_barra(
-        &self,
-        include_pagadas: bool,
-        limit: Option<i64>,
-    ) -> AppResult<Vec<ComandaBarraRow>> {
+    async fn list_comandas_barra(&self, limit: Option<i64>) -> AppResult<Vec<ComandaBarraRow>> {
         let g = self.db.read().await;
         let db = &g;
         let lim = limit.unwrap_or(60).clamp(1, 200);
-
-        let pending_expr = clamp_pending_sql(
-            // Sólo los cobros ACTIVOS descuentan del pendiente (CUENTA-07): si un cobro anulado
-            // siguiera restando, el ticket parecería pagado y sus líneas —que han vuelto a estar
-            // pendientes— no se podrían volver a cobrar.
-            "COALESCE(c.Total_Comanda,0) - COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)",
-        );
-
-        let where_clause = if include_pagadas {
-            "EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)".to_string()
-        } else {
-            format!(
-                "({}) > 0 AND EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)",
-                pending_expr
-            )
-        };
 
         let sql = format!(
             r#"
@@ -547,7 +537,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
               c.ID_Comanda,
               c.Fecha_Hora_Apertura,
               c.Estado,
-              {pending_expr} AS Total_Pendiente,
+              {PENDIENTE_DE_UN_TICKET} AS Total_Pendiente,
               COALESCE(c.Total_Comanda,0) AS Total_Comanda,
               COALESCE((
                 SELECT COUNT(*)
@@ -566,12 +556,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
               ),0) AS Pendientes_Pago
             FROM Comandas c
             WHERE c.Canal = ?2
-              AND ({where_clause})
+              AND EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)
             ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
             LIMIT ?1;
-            "#,
-            pending_expr = pending_expr,
-            where_clause = where_clause
+            "#
         );
 
         let mut rows = db
@@ -1613,3 +1601,73 @@ mod tests_borrado_desde_la_handy {
     }
 }
 
+
+#[cfg(test)]
+mod tests_pendiente_de_un_ticket {
+    //! CAJ-INC-03: lo que «Ver tickets» enseña como pendiente sale de las líneas sin cobrar, no de
+    //! `Total_Comanda − SUM(cobros activos)`: una devolución es un cobro negativo activo.
+
+    use super::*;
+    use crate::ejecutor::Connection;
+
+    async fn con(sentencias: &[&str]) -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("barra_pendiente");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in sentencias {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    const TICKET_COBRADO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('caña', 'cat', 'Caña', 201);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2026-05-10 13:00:00', 'Pagada', 603);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'caña', 3, 201);",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('pago', 'com', '2026-05-10 13:10:00', 'Efectivo', 603, 'TOTAL');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+    ];
+
+    async fn pendiente(db: &Arc<Db>) -> Dinero {
+        let filas = SqliteVentaRapidaRepository::new(db.clone()).list_comandas_barra(None).await.unwrap();
+        assert_eq!(filas.len(), 1);
+        filas[0].Total_Pendiente
+    }
+
+    #[tokio::test]
+    async fn un_ticket_devuelto_entero_no_queda_pendiente() {
+        let mut seed = TICKET_COBRADO.to_vec();
+        seed.push(
+            "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                                ID_Pago_Origen, Motivo_Devolucion)
+               VALUES ('dev', 'com', '2026-05-10 13:20:00', 'Efectivo', -603, 'DEVOLUCION', 'pago', 'no le gustó');",
+        );
+        let (db, _dir) = con(&seed).await;
+        assert_eq!(pendiente(&db).await, Dinero::CERO);
+    }
+
+    #[tokio::test]
+    async fn dar_de_baja_el_cobro_por_error_deja_pendientes_sus_lineas() {
+        let mut seed = TICKET_COBRADO.to_vec();
+        seed.push(
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+               VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        );
+        seed.push(
+            "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = '2026-05-10 13:30:00', Anulado_Por = 'u1',
+                    Motivo_Anulacion = 'mesa equivocada', Motivo_Baja = 'ERROR' WHERE ID_Pago = 'pago';",
+        );
+        let (db, _dir) = con(&seed).await;
+        assert_eq!(pendiente(&db).await, Dinero::de_centimos(603));
+    }
+}
