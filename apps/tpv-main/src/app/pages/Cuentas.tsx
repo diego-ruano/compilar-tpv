@@ -819,6 +819,73 @@ export default function Cuentas() {
             </MiniIconButton>
         );
 
+    // Lo que comparten la fila del histórico de cierres y su ficha en pantalla estrecha. CAJA-01: la
+    // foto de esa noche no cambia nunca; si se corrigió un apunte de su periodo, lo que marca hoy va
+    // debajo.
+    const vistaDeCierre = (c: CierreResumenDto) => {
+        const esperadoHoy = c.rect_esperado ?? null;
+        const descuadreHoy = c.rect_descuadre ?? null;
+        const descuadreVigente = descuadreHoy ?? c.descuadre;
+        return {
+            esperado: (
+                <>
+                    {eur(c.esperado)}
+                    {esperadoHoy !== null ? <span className="block text-[11px]">hoy {eur(esperadoHoy)}</span> : null}
+                </>
+            ),
+            diferencia: (
+                <>
+                    {c.descuadre === 0 ? "—" : eur(c.descuadre)}
+                    {descuadreHoy !== null ? (
+                        <span className="block text-[11px] font-normal">
+                            hoy {descuadreHoy === 0 ? "cuadra" : eur(descuadreHoy)}
+                        </span>
+                    ) : null}
+                </>
+            ),
+            claseDiferencia: descuadreVigente === 0 ? "text-success" : "text-danger",
+        };
+    };
+    const sellosDeCierre = (c: CierreResumenDto) => (
+        <>
+            {c.reabierto_en ? (
+                <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-[11px] font-normal text-fg-muted">
+                    deshecho
+                </span>
+            ) : null}
+            {c.rect_esperado != null ? (
+                <span
+                    className="ml-2 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-normal text-warning"
+                    title="Se corrigió un apunte de este cierre después de cerrarlo. Imprímelo para ver qué cambió, quién y por qué."
+                >
+                    rectificado
+                </span>
+            ) : null}
+        </>
+    );
+    const accionesDeCierre = (c: CierreResumenDto) => (
+        <>
+            <button
+                type="button"
+                onClick={conAviso(() => imprimirCierre(c.id_cierre), "No se ha podido imprimir el arqueo")}
+                title="Imprimir el arqueo"
+                className="grid size-8 cursor-pointer place-items-center rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+            >
+                <Printer className="size-4" aria-hidden />
+            </button>
+            {puedeCerrarCaja && c.id_cierre === idUltimoCierre ? (
+                <button
+                    type="button"
+                    onClick={() => setCierreAReabrir(c.id_cierre)}
+                    title="Deshacer el cierre para volver a contar el cajón"
+                    className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-fg transition hover:bg-surface-2"
+                >
+                    Deshacer
+                </button>
+            ) : null}
+        </>
+    );
+
     // INC-20261031-023: la página se desplaza si no cabe, y las listas no bajan de un alto mínimo.
     // Antes era de alto fijo y sin desplazamiento: las listas se quedaban con lo que sobraba tras la
     // cabecera, el pie y el historial de cierres, y a 1280×800 no sobraba nada.
@@ -1246,88 +1313,43 @@ export default function Cuentas() {
                         Todavía no se ha cerrado la caja ninguna vez.
                     </p>
                 ) : (
-                    <div className="mt-3 overflow-x-auto">
-                        <table className="w-full min-w-[640px] text-sm">
+                    <>
+                    {/* En pantalla ancha, una tabla; en una estrecha, una ficha por cierre: la tabla
+                        no cabía y obligaba a desplazarse de lado. */}
+                    <div className="mt-3 hidden md:block">
+                        <table className="w-full text-sm">
                             <thead>
                                 <tr className="text-left text-xs font-semibold text-fg-muted">
-                                    <th className="py-2">Cuándo</th>
-                                    <th className="py-2">Quién</th>
-                                    <th className="py-2 text-right">Esperado</th>
-                                    <th className="py-2 text-right">Contado</th>
-                                    <th className="py-2 text-right">Diferencia</th>
-                                    <th className="py-2 text-right">Retirado</th>
-                                    <th className="py-2">Motivo</th>
-                                    <th className="py-2" />
+                                    <th className="px-2 py-2">Cuándo</th>
+                                    <th className="px-2 py-2">Quién</th>
+                                    <th className="px-2 py-2 text-right">Esperado</th>
+                                    <th className="px-2 py-2 text-right">Contado</th>
+                                    <th className="px-2 py-2 text-right">Diferencia</th>
+                                    <th className="px-2 py-2 text-right">Retirado</th>
+                                    <th className="px-2 py-2">Motivo</th>
+                                    <th className="px-2 py-2" />
                                 </tr>
                             </thead>
                             <tbody>
                                 {cierres.map((c) => {
-                                    // CAJA-01: la foto de esa noche no cambia nunca; si se corrigió un apunte
-                                    // de su periodo, lo que marca hoy va debajo.
-                                    const esperadoHoy = c.rect_esperado ?? null;
-                                    const descuadreHoy = c.rect_descuadre ?? null;
-                                    const descuadreVigente = descuadreHoy ?? c.descuadre;
+                                    const v = vistaDeCierre(c);
                                     return (
                                     <tr key={c.id_cierre} className="border-t border-border">
-                                        <td className="py-2 text-fg">
+                                        <td className="px-2 py-2 text-fg">
                                             {c.fecha_hora}
-                                            {c.reabierto_en ? (
-                                                <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-[11px] text-fg-muted">
-                                                    deshecho
-                                                </span>
-                                            ) : null}
-                                            {esperadoHoy !== null ? (
-                                                <span
-                                                    className="ml-2 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] text-warning"
-                                                    title="Se corrigió un apunte de este cierre después de cerrarlo. Imprímelo para ver qué cambió, quién y por qué."
-                                                >
-                                                    rectificado
-                                                </span>
-                                            ) : null}
+                                            {sellosDeCierre(c)}
                                         </td>
-                                        <td className="py-2 text-fg-muted">{c.usuario_nombre ?? "—"}</td>
-                                        <td className="py-2 text-right text-fg-muted">
-                                            {eur(c.esperado)}
-                                            {esperadoHoy !== null ? (
-                                                <span className="block text-[11px]">hoy {eur(esperadoHoy)}</span>
-                                            ) : null}
+                                        <td className="px-2 py-2 text-fg-muted">{c.usuario_nombre ?? "—"}</td>
+                                        <td className="px-2 py-2 text-right text-fg-muted">{v.esperado}</td>
+                                        <td className="px-2 py-2 text-right text-fg">{eur(c.contado)}</td>
+                                        <td className={cn("px-2 py-2 text-right font-semibold", v.claseDiferencia)}>
+                                            {v.diferencia}
                                         </td>
-                                        <td className="py-2 text-right text-fg">{eur(c.contado)}</td>
-                                        <td
-                                            className={cn(
-                                                "py-2 text-right font-semibold",
-                                                descuadreVigente === 0 ? "text-success" : "text-danger",
-                                            )}
-                                        >
-                                            {c.descuadre === 0 ? "—" : eur(c.descuadre)}
-                                            {descuadreHoy !== null ? (
-                                                <span className="block text-[11px] font-normal">
-                                                    hoy {descuadreHoy === 0 ? "cuadra" : eur(descuadreHoy)}
-                                                </span>
-                                            ) : null}
-                                        </td>
-                                        <td className="py-2 text-right text-fg-muted">{eur(c.retirado)}</td>
-                                        <td className="py-2 text-fg-muted">{c.motivo ?? ""}</td>
-                                        <td className="py-2">
+                                        <td className="px-2 py-2 text-right text-fg-muted">{eur(c.retirado)}</td>
+                                        <td className="px-2 py-2 text-fg-muted">{c.motivo ?? ""}</td>
+                                        <td className="px-2 py-2">
                                             <div className="flex items-center justify-end gap-1.5">
-                                                <button
-                                                    type="button"
-                                                    onClick={conAviso(() => imprimirCierre(c.id_cierre), "No se ha podido imprimir el arqueo")}
-                                                    title="Imprimir el arqueo"
-                                                    className="grid size-8 cursor-pointer place-items-center rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                                                >
-                                                    <Printer className="size-4" aria-hidden />
-                                                </button>
-                                                {puedeCerrarCaja && c.id_cierre === idUltimoCierre ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setCierreAReabrir(c.id_cierre)}
-                                                        title="Deshacer el cierre para volver a contar el cajón"
-                                                        className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-fg transition hover:bg-surface-2"
-                                                    >
-                                                        Deshacer
-                                                    </button>
-                                                ) : null}
+                                                {accionesDeCierre(c)}
                                             </div>
                                         </td>
                                     </tr>
@@ -1336,6 +1358,37 @@ export default function Cuentas() {
                             </tbody>
                         </table>
                     </div>
+                    <ul className="mt-3 grid gap-2 md:hidden">
+                        {cierres.map((c) => {
+                            const v = vistaDeCierre(c);
+                            return (
+                                <li key={c.id_cierre} className="rounded-xl border border-border p-3 text-sm">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <div className="font-semibold text-fg">
+                                                {c.fecha_hora}
+                                                {sellosDeCierre(c)}
+                                            </div>
+                                            <div className="text-xs text-fg-muted">{c.usuario_nombre ?? "—"}</div>
+                                        </div>
+                                        <div className="flex shrink-0 items-center gap-1.5">{accionesDeCierre(c)}</div>
+                                    </div>
+                                    <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                                        <dt className="text-xs text-fg-muted">Esperado</dt>
+                                        <dd className="text-right text-fg-muted">{v.esperado}</dd>
+                                        <dt className="text-xs text-fg-muted">Contado</dt>
+                                        <dd className="text-right text-fg">{eur(c.contado)}</dd>
+                                        <dt className="text-xs text-fg-muted">Diferencia</dt>
+                                        <dd className={cn("text-right font-semibold", v.claseDiferencia)}>{v.diferencia}</dd>
+                                        <dt className="text-xs text-fg-muted">Retirado</dt>
+                                        <dd className="text-right text-fg-muted">{eur(c.retirado)}</dd>
+                                    </dl>
+                                    {c.motivo ? <p className="mt-2 text-xs text-fg-muted">{c.motivo}</p> : null}
+                                </li>
+                            );
+                        })}
+                    </ul>
+                    </>
                 )}
             </div> : null}
             </>

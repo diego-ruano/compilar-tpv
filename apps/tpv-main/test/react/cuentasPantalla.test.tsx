@@ -15,6 +15,7 @@ vi.mock("../../src/shared/lib/usePermisos", () => ({
 }));
 
 const HOY = new Date().toISOString().slice(0, 10);
+const datos = vi.hoisted(() => ({ cierres: [] as unknown[] }));
 
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
@@ -66,7 +67,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 			case "inventario_list_proveedores_mini":
 				return [];
 			case "cierre_listar":
-				return [];
+				return datos.cierres;
 			default:
 				throw new Error(`comando inesperado: ${comando}`);
 		}
@@ -93,6 +94,7 @@ beforeEach(() => {
 	sesion.permisos = new Set(TODO);
 	sesion.rol = "Administrador";
 	useMode.setState({ mode: "tpv" });
+	datos.cierres = [];
 });
 
 afterEach(() => cleanup());
@@ -158,4 +160,36 @@ it("en la Main no sale la nota de la Handy", async () => {
 	expect((await screen.findAllByText("Hielo")).length).toBeGreaterThan(0);
 	expect(screen.queryByText(/se hacen en el TPV principal/)).toBeNull();
 	expect(screen.getByRole("button", { name: "Agregar gasto" })).toBeTruthy();
+});
+
+it("el histórico de cierres: celdas con aire y, en estrecho, una ficha por cierre en vez de la tabla ancha", async () => {
+	datos.cierres = [
+		{
+			id_cierre: "c1",
+			fecha_hora: "2026-11-17 23:40:00",
+			usuario_nombre: "Marta",
+			esperado: 15000,
+			contado: 14500,
+			descuadre: -500,
+			retirado: 14500,
+			motivo: "Faltaba cambio",
+			reabierto_en: null,
+			rect_esperado: null,
+			rect_descuadre: null,
+		},
+	];
+	abrir();
+	const fichas = await screen.findAllByText("2026-11-17 23:40:00");
+	expect(fichas).toHaveLength(2); // la fila de la tabla y la ficha
+	const tabla = document.querySelector("table");
+	expect(tabla?.className).not.toContain("min-w-");
+	for (const celda of Array.from(tabla?.querySelectorAll("th, td") ?? [])) {
+		expect(celda.className).toContain("px-2");
+	}
+	const ficha = fichas.map((n) => n.closest("li")).find((li) => li !== null);
+	expect(ficha?.textContent).toContain("Diferencia");
+	expect(ficha?.textContent).toContain("Faltaba cambio");
+	// La de la tabla sólo se ve en ancho, y la ficha sólo en estrecho.
+	expect(tabla?.parentElement?.className).toContain("hidden md:block");
+	expect(ficha?.parentElement?.className).toContain("md:hidden");
 });
