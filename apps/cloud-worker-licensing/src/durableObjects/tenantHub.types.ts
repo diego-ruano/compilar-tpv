@@ -30,6 +30,11 @@ export type WsAttachment = {
 	pubkeyB64: string | null;
 	/** Challenge pendiente. SYNC-07: se consume (a `null`) en el primer intento de verificación. */
 	challenge: { nonceB64: string; expiresAtMs: number } | null;
+	/**
+	 * SYN-INC-01: cuándo se autenticó (ms). Hasta su primer latido es su única señal de vida: una
+	 * Main que no da ninguna en 90 s deja de contar como conectada (`conLatido`).
+	 */
+	autenticadaMs?: number;
 	/** La Main ha restaurado una copia y todavía está reconciliándola. Bloquea las Handy. */
 	recovering?: boolean;
 	/**

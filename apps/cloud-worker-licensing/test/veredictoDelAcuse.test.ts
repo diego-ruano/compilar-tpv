@@ -58,6 +58,7 @@ function preparar(hub: any): Preparado {
 		deviceId: MAIN,
 		role: "tpv",
 		authed: true,
+		autenticadaMs: Date.now(),
 		pubkeyB64: null,
 		challenge: null,
 		recovering: false,

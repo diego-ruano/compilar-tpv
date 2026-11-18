@@ -34,7 +34,7 @@ function escuchar(cliente: WebSocket, servidor: WebSocket): Conexion {
 function conectar(hub: any, deviceId: string, role: "tpv" | "handy"): Conexion {
 	const par = new WebSocketPair();
 	hub.state.acceptWebSocket(par[1], [deviceId]);
-	par[1].serializeAttachment({ tenantId: TENANT, deviceId, role, authed: true, pubkeyB64: null, challenge: null, recovering: false });
+	par[1].serializeAttachment({ tenantId: TENANT, deviceId, role, authed: true, autenticadaMs: Date.now(), pubkeyB64: null, challenge: null, recovering: false });
 	return escuchar(par[0], par[1]);
 }
 

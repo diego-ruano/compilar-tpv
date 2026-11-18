@@ -207,6 +207,7 @@ function conectar(hub: any, deviceId: string, role: "tpv" | "handy" = "tpv", rec
 		deviceId,
 		role,
 		authed: true,
+		autenticadaMs: Date.now(),
 		pubkeyB64: null,
 		challenge: null,
 		recovering,

@@ -37,7 +37,7 @@ type Conexion = { cliente: WebSocket; servidor: WebSocket; recibidos: any[]; cie
 function conectar(hub: any, tenantId: string, deviceId: string, role: "tpv" | "handy"): Conexion {
 	const par = new WebSocketPair();
 	hub.state.acceptWebSocket(par[1], [deviceId]);
-	par[1].serializeAttachment({ tenantId, deviceId, role, authed: true, pubkeyB64: null, challenge: null, recovering: false });
+	par[1].serializeAttachment({ tenantId, deviceId, role, authed: true, autenticadaMs: Date.now(), pubkeyB64: null, challenge: null, recovering: false });
 	const c: Conexion = { cliente: par[0], servidor: par[1], recibidos: [], cierre: null };
 	par[0].accept();
 	par[0].addEventListener("message", (ev: MessageEvent) => c.recibidos.push(JSON.parse(String(ev.data))));

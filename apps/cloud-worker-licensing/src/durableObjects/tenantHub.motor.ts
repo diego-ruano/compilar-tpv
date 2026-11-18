@@ -95,6 +95,11 @@ const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // Vencido, es una lectura que no ha contestado: la tabla se queda como estaba.
 const PLAZO_LEER_MAIN_MS = 5_000;
 
+// SYN-INC-01: cuánto puede pasar una sesión de Main sin dar señales de vida antes de darla por ida.
+// La Main manda el latido cada 30 s y corta ella misma si en 65 s no le llega el `pong`
+// (`tpv-infra-http/src/websocket.rs`); con 90 s se le perdonan dos latidos perdidos.
+const MAIN_SIN_LATIDO_MS = 90_000;
+
 // ---- El lote de la Main (`apply_lote`) -------------------------------------
 // Un lote se aplica entero en un turno, sin ceder el control, así que lo que cabe en él se mide en
 // TRABAJO y no en tiempo: en producción el reloj no avanza mientras el objeto consume CPU, y un
@@ -839,6 +844,9 @@ export class MotorTenantHub {
 		// por ejemplo). Se congela igual que sin Main, con otro motivo. Se mira aquí, para no esperar
 		// en balde, y otra vez dentro del turno, que es lo que vale.
 		const exigirQueSePuedaEscribir = () => {
+			// SYN-INC-01: una Main que ya no da señales de vida no autoriza nada: se cierra, y las
+			// Handy se enteran (`main_offline`).
+			this.cerrarMainsSinLatido();
 			if (!this.isMainConnected()) {
 				throw new HubError("main_offline", 400);
 			}
@@ -1358,17 +1366,55 @@ export class MotorTenantHub {
 	 * hibernación aunque el estado del socket no fuera fiable al despertar.
 	 *
 	 * AUD-02: y del dispositivo que es la Main ahora (`esLaMain`), no de cualquier `tpv`.
+	 *
+	 * SYN-INC-01: y que dé señales de vida (`conLatido`). Un corte sin cierre deja el socket abierto
+	 * hasta que vence el TCP, varios minutos en los que una sesión sin nadie detrás autorizaría a las
+	 * Handy a escribir.
 	 */
 	private mainsAbiertas(except?: WebSocket): WsAttachment[] {
 		const out: WsAttachment[] = [];
 		const vigente = this.mainVigente();
+		const ahora = Date.now();
 		for (const ws of this.state.getWebSockets()) {
 			if (except && ws === except) continue;
 			if (ws.readyState !== 1) continue;
 			const a = this.att(ws);
-			if (a && this.esLaMain(a, vigente)) out.push(a);
+			if (a && this.esLaMain(a, vigente) && this.conLatido(ws, a, ahora)) out.push(a);
 		}
 		return out;
+	}
+
+	/**
+	 * SYN-INC-01 · ¿Ha dado señales de vida esta sesión hace poco? Su último latido, que contesta el
+	 * borde sin despertar al DO pero deja apuntada la hora (`getWebSocketAutoResponseTimestamp`), o,
+	 * si todavía no ha mandado ninguno, la hora a la que se autenticó (`autenticadaMs`, en su
+	 * attachment: sobrevive a la hibernación).
+	 */
+	private conLatido(ws: WebSocket, a: WsAttachment, ahora: number): boolean {
+		let latido = 0;
+		try {
+			latido = this.state.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+		} catch { }
+		return ahora - Math.max(latido, a.autenticadaMs ?? 0) <= MAIN_SIN_LATIDO_MS;
+	}
+
+	/**
+	 * SYN-INC-01 · Cierra las sesiones de Main que han dejado de dar señales de vida. Por `cerrar`,
+	 * como todo cierre que inicia el DO: queda fuera, y `sessionGone` les dice a las Handy que se han
+	 * quedado sin Main (`main_offline`). Se mira cuando hace falta saberlo (una escritura de una Handy
+	 * o un saludo), sin alarma ni temporizador: un negocio sin actividad no se despierta por esto. No
+	 * espera nada.
+	 */
+	private cerrarMainsSinLatido(): void {
+		const ahora = Date.now();
+		for (const ws of this.state.getWebSockets()) {
+			if (ws.readyState !== 1) continue;
+			const a = this.att(ws);
+			if (!a?.authed || a.fuera || a.role !== "tpv") continue;
+			if (this.conLatido(ws, a, ahora)) continue;
+			this.emitSyncEvent("main_sin_latido", { device_id: a.deviceId });
+			this.cerrar(ws, a, 4002, "main_sin_latido");
+		}
 	}
 
 	// ¿Hay alguna Main (rol tpv) autenticada y conectada ahora mismo?
@@ -1643,6 +1689,7 @@ export class MotorTenantHub {
 			enTurnoDeEntrada: (trabajo) => this.enTurnoDeEntrada(trabajo),
 			isMainConnected: (except) => this.isMainConnected(except),
 			isMainRecovering: () => this.isMainRecovering(),
+			cerrarMainsSinLatido: () => this.cerrarMainsSinLatido(),
 			aplicarLote: (params) => this.aplicarLote(params),
 		};
 	}

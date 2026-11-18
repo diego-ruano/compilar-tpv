@@ -232,6 +232,13 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
   instante ante `online`, `focus` o `visibilitychange`, y si no, con espera creciente de 3 a 30 s.
+- **El DO tampoco espera al TCP** (SYN-INC-01): un corte sin cierre deja el socket «abierto» varios
+  minutos. Una sesión de Main sólo cuenta como conectada si da señales de vida: su último latido
+  (`getWebSocketAutoResponseTimestamp`, que el borde apunta sin despertar al DO) o, antes del primero,
+  la hora a la que se autenticó (`autenticadaMs`, en su attachment), de hace 90 s como mucho. La que
+  no las da se cierra (`cerrarMainsSinLatido`, código 4002 `main_sin_latido`, por `cerrar`: las Handy
+  reciben `main_offline`) cuando hace falta saberlo: una escritura de una Handy (antes y dentro del
+  turno) o un saludo. Sin alarma ni temporizador (`test/mainSinLatido.test.ts`).
 - **Un socket abandonado no toca nada**: sustituir el canal cancela su transporte y la generación
   anterior deja de publicar estado o avisos. El DO echa al socket anterior de un
   dispositivo cuando conecta uno nuevo (`replaced`).
@@ -594,7 +601,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   checkpoint de las Main activas; un error al leerlo sale como error.
 - La Handy no aplica nada: refresca las claves de React Query de las tablas tocadas.
 - **Freeze**: si no hay ninguna Main conectada al DO, las Handy reciben `main_offline` y bloquean su
-  interfaz.
+  interfaz. Conectada es con el socket abierto y dando señales de vida (SYN-INC-01, arriba).
 - `Sync_Changes` se purga por encima de un suelo: lo de más de 7 días que todas las Main activas (las
   que reportaron checkpoint en los últimos 7 días) ya tienen, con 1000 de margen. Como mucho una purga
   por hora y por DO. Como mira también la antigüedad, y `Created_At_Ms` se fija antes de que el turno
@@ -982,7 +989,7 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 
 1. **Ningún estado de sesión en campos de la instancia**: al despertar está vacía. Lo que describe a un
    socket va en su *attachment* (`WsAttachment`: tenant, dispositivo, rol, autenticado, clave pública,
-   reto, recuperando y si se ha echado), serializado con `ws.serializeAttachment()` **tras cada
+   reto, recuperando, cuándo se autenticó y si se ha echado), serializado con `ws.serializeAttachment()` **tras cada
    cambio**. Y después de una espera se relee: mientras tanto pudo cambiar.
 2. **El censo es `state.getWebSockets()`**, con la etiqueta `deviceId`. Puede devolver sockets ya
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
@@ -1005,8 +1012,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la salida de una sesión (si se
    va la Main, las Handy tienen que saberlo) se contabiliza en `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
-   cierre que inicia el DO: la baja, la sesión que ya no es la Main, la anterior de un dispositivo que
-   reconecta, el saludo que falla, `webSocketError` y retirar el negocio (`borrarTodo`). Los dos
+   cierre que inicia el DO: la baja, la sesión que ya no es la Main, la Main sin latido, la anterior de
+   un dispositivo que reconecta, el saludo que falla, `webSocketError` y retirar el negocio (`borrarTodo`). Los dos
    dejan la sesión fuera antes de nada, y a una que ya está fuera no le vuelven a contar la salida.
    Todo cierre nuevo iniciado por el DO va por `cerrar`.
 

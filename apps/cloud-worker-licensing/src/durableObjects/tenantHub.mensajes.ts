@@ -92,6 +92,8 @@ export interface ContextoDeMensajes {
 
 	isMainConnected(except?: WebSocket): boolean;
 	isMainRecovering(): boolean;
+	/** SYN-INC-01: cierra (por `cerrar`) las sesiones de Main que ya no dan señales de vida. */
+	cerrarMainsSinLatido(): void;
 
 	/** El lote de la Main: sus operaciones en orden, en un turno, y el acuse dentro de él. */
 	aplicarLote(params: {
@@ -227,6 +229,8 @@ export async function atenderHelloSigned(
 					pubkeyB64,
 					challenge: null,
 					recovering: roleFinal === "tpv" && Boolean(msg.recovering),
+					// SYN-INC-01: su señal de vida hasta que mande el primer latido.
+					autenticadaMs: Date.now(),
 				});
 
 				ctx.send(ws, {
@@ -234,6 +238,10 @@ export async function atenderHelloSigned(
 					role: roleFinal,
 					authed: true,
 				});
+
+				// SYN-INC-01: lo que se le diga de la Main, con las que ya no dan señales de vida
+				// cerradas (y anunciadas a las Handy).
+				ctx.cerrarMainsSinLatido();
 
 				// Freeze por presencia de Main: informamos a este
 				// dispositivo de si hay Main conectada (una Handy recién

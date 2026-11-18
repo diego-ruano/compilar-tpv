@@ -63,6 +63,7 @@ function abrir(hub: any, tenant: string, deviceId: string, role: "tpv" | "handy"
 		deviceId,
 		role,
 		authed: true,
+		autenticadaMs: Date.now(),
 		pubkeyB64: null,
 		challenge: null,
 		recovering,
