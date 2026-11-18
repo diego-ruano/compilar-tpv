@@ -490,8 +490,13 @@ pub(crate) fn sql_mesas_top_ingresos(range: StatsRange) -> String {
 /// La sentencia de los clientes recurrentes: quién ha comprado en el rango y si ya había comprado
 /// antes de que empezara, que es lo que hace falta mirar en toda la historia y no sólo en el rango.
 ///
-/// `allp` (los cobros de comandas con reserva de un cliente) va `MATERIALIZED`: la leen tres CTE, y
-/// sin esa palabra SQLite la deshace dentro de cada una y recorre tres veces todos los cobros de la
+/// El cliente de un cobro es el de su comanda y, si la comanda no tiene, el de su reserva, como en
+/// la conciliación (`reconciliacion.rs`): el cobro lo deja en la comanda (RI-61) y cerrar la
+/// reserva desengancha la comanda de ella, así que, buscándolo sólo por la reserva, el gasto del
+/// cliente desaparecía en cuanto se iba de la mesa (EST-INC-01).
+///
+/// `allp` (los cobros de comandas de un cliente) va `MATERIALIZED`: la leen tres CTE, y sin esa
+/// palabra SQLite la deshace dentro de cada una y recorre tres veces todos los cobros de la
 /// historia. Así los recorre una. El resultado es el mismo; igual en el worker (`clientes` de
 /// `domains/stats/stats.queries.ts`), donde corre en el SQLite del Durable Object.
 pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
@@ -502,14 +507,13 @@ pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
         rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
         allp AS MATERIALIZED (
           SELECT
-            r.ID_Cliente AS id_cliente,
+            COALESCE(c.ID_Cliente, r.ID_Cliente) AS id_cliente,
             datetime(p.Fecha_Hora) AS paid_at,
             COALESCE(p.Importe_Total,0) AS imp
           FROM Pagos p
           JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-          JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-          WHERE c.ID_Reserva IS NOT NULL
-            AND r.ID_Cliente IS NOT NULL
+          LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+          WHERE COALESCE(c.ID_Cliente, r.ID_Cliente) IS NOT NULL
             AND p.Fecha_Hora IS NOT NULL
             AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
         ),

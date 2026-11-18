@@ -8,6 +8,7 @@ import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
 import { guardaComandaSinCobrar, guardaProductoEnLaCarta } from "./guardasDeLinea";
+import { SQL_DESVINCULAR_COMANDAS } from "../reservas/reservas.commands";
 import type { CobroDetallesPlan } from "./mesas.queries";
 import type {
 	AbrirComandaInput,
@@ -312,7 +313,8 @@ export function setReservaEstado(idReserva: string, estado: string, desde: strin
 	if (ESTADOS_QUE_CIERRAN_RESERVA.has(estado)) {
 		steps.push({
 			kind: "execute",
-			sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+			// La comanda se queda con el cliente de la reserva (EST-INC-01).
+			sql: SQL_DESVINCULAR_COMANDAS,
 			args: [idReserva],
 		});
 	}

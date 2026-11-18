@@ -350,6 +350,7 @@ lecturas_de_contrato! {
     stats__reservas,
     stats__trabajadores,
     stats__clientes,
+    stats__clientes_reserva_terminada,
     stats__proveedores,
     stats__proveedores_gasto_medio,
 }

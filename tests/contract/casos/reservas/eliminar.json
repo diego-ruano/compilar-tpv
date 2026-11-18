@@ -1,16 +1,18 @@
 {
-  "descripcion": "Borrado de una reserva: desvincula comandas (SET NULL) y borra la fila.",
+  "descripcion": "Borrado de una reserva: desvincula sus comandas (SET NULL), que se quedan con el cliente de la reserva si no tenían uno (EST-INC-01), y borra la fila.",
   "comando": "reservas.eliminar",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Clientes (ID_Cliente, Nombre, Created_At) VALUES ('cliente-1', 'Bob', '2026-01-01 00:00:00');",
-    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Created_At) VALUES ('reserva-1', 'cliente-1', 'mesa-1', '2026-02-01', '20:30', 'cena', 4, 'PROXIMA', '2026-01-01 00:00:00');"
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Created_At) VALUES ('reserva-1', 'cliente-1', 'mesa-1', '2026-02-01', '20:30', 'cena', 4, 'PROXIMA', '2026-01-01 00:00:00');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', 'reserva-1', '2026-02-01 20:35:00', 'Abierta');"
   ],
   "entrada": {
     "id_reserva": "reserva-1"
   },
   "snapshot": {
-    "Reservas": "SELECT ID_Reserva FROM Reservas"
+    "Reservas": "SELECT ID_Reserva FROM Reservas",
+    "Comandas": "SELECT ID_Comanda, ID_Reserva, ID_Cliente FROM Comandas"
   }
 }

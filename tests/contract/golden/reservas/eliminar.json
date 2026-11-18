@@ -1,3 +1,10 @@
 {
+  "Comandas": [
+    {
+      "ID_Cliente": "cliente-1",
+      "ID_Comanda": "comanda-1",
+      "ID_Reserva": null
+    }
+  ],
   "Reservas": []
 }

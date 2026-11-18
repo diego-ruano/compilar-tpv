@@ -2,13 +2,21 @@
   "Comandas": [
     {
       "Estado": "Abierta",
+      "ID_Cliente": "cli-1",
       "ID_Comanda": "comanda-1",
       "ID_Reserva": null
     },
     {
       "Estado": "Abierta",
+      "ID_Cliente": null,
       "ID_Comanda": "comanda-2",
       "ID_Reserva": "res-2"
+    },
+    {
+      "Estado": "Pagada",
+      "ID_Cliente": "cli-2",
+      "ID_Comanda": "comanda-3",
+      "ID_Reserva": null
     }
   ],
   "Reservas": [

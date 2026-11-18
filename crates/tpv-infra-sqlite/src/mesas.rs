@@ -848,8 +848,9 @@ impl MesasRepository for SqliteMesasRepository {
             .map_err(db_err)?;
 
             if matches!(estado, tpv_domain::estados::EstadoReserva::Finalizada | tpv_domain::estados::EstadoReserva::Cancelada | tpv_domain::estados::EstadoReserva::NoShow) {
+                // La comanda se queda con el cliente de la reserva (EST-INC-01).
                 db.execute(
-                    "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+                    crate::reservas::SQL_DESVINCULAR_COMANDAS,
                     vec![Value::Text(id_reserva.to_string())],
                 )
                 .await

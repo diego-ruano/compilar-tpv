@@ -85,7 +85,7 @@ describe("borrar una reserva", () => {
 	it("las demás: desvincular sus comandas y borrarla, sin condición", async () => {
 		expect((await pedir("DELETE", "tpv")).status).toBe(200);
 		expect(sentencias()).toEqual([
-			"UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+			"UPDATE Comandas SET ID_Cliente = COALESCE(ID_Cliente, (SELECT r.ID_Cliente FROM Reservas r WHERE r.ID_Reserva = ?1)), ID_Reserva = NULL WHERE ID_Reserva = ?1;",
 			"DELETE FROM Reservas WHERE ID_Reserva = ?1;",
 		]);
 	});

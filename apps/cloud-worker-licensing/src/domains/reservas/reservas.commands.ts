@@ -284,6 +284,16 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 }
 
 /**
+ * Desengancha la reserva de sus comandas (al borrarla, y al cerrarla desde la mesa). La comanda se
+ * queda con el cliente de la reserva si aún no tenía uno: el cobro ya lo fija (RI-61), pero una
+ * comanda que se cobra después perdería al cliente con la reserva y su gasto dejaría de verse en
+ * Estadísticas (EST-INC-01). La subconsulta lee la reserva antes de que el paso siguiente la borre.
+ * El mismo texto en la Main (`SQL_DESVINCULAR_COMANDAS`, `reservas.rs`).
+ */
+export const SQL_DESVINCULAR_COMANDAS =
+	"UPDATE Comandas SET ID_Cliente = COALESCE(ID_Cliente, (SELECT r.ID_Cliente FROM Reservas r WHERE r.ID_Reserva = ?1)), ID_Reserva = NULL WHERE ID_Reserva = ?1;";
+
+/**
  * Borra una reserva y desvincula sus comandas. Igual que la Main. Una reserva web no se borra
  * (docs/estudios/reservas-web.md §5.6): lo rechaza la ruta antes de construir esto.
  */
@@ -291,7 +301,7 @@ export function deleteReserva(idReserva: string): BuiltCommand {
 	const steps = [
 		{
 			kind: "execute" as const,
-			sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+			sql: SQL_DESVINCULAR_COMANDAS,
 			args: [idReserva],
 		},
 		{

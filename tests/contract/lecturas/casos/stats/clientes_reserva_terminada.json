@@ -1,0 +1,22 @@
+{
+  "descripcion": "El gasto de un cliente sigue contando cuando su reserva se cierra (EST-INC-01). Ana pagó con reserva y la reserva se terminó: la comanda conserva su cliente y ya no tiene reserva. Beto pagó y su comanda todavía cuelga de la reserva, sin cliente propio (como antes de RI-61). Carla pagó en una comanda con su cliente, sin reserva. La comanda de Dani no tiene ni cliente ni reserva y no cuenta.",
+  "lectura": "stats.clientes",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-ana', 'Ana Gomez', 3000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-beto', 'Beto Ruiz', 2000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-carla', 'Carla Diaz', 1000);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-ana', 'cli-ana', 'mesa-1', date('now','localtime'), '13:00', 'COMIDA', 2, 'FINALIZADA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-beto', 'cli-beto', 'mesa-1', date('now','localtime'), '15:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-ana', 'MESA', 'mesa-1', NULL, 'cli-ana', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('com-beto', 'MESA', 'mesa-1', 'res-beto', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-carla', 'MESA', 'mesa-1', 'cli-carla', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-dani', 'MESA', 'mesa-1', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-ana', 'com-ana', datetime('now','localtime','start of day'), 'Efectivo', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-beto', 'com-beto', datetime('now','localtime','start of day'), 'Efectivo', 2000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-carla', 'com-carla', datetime('now','localtime','start of day'), 'Tarjeta', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-dani', 'com-dani', datetime('now','localtime','start of day'), 'Efectivo', 9900, 'total');"
+  ],
+  "entrada": {}
+}

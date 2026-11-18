@@ -524,7 +524,8 @@ impl ReservasRepository for SqliteReservasRepository {
                 return Err(AppError::conflict(MSG_WEB_NO_SE_BORRA));
             }
             // La comanda pierde la reserva pero conserva su cliente (`ID_Cliente`, fijado al
-            // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61).
+            // cobrar, o el de la reserva si aún no lo tenía): el gasto del cliente no se descuadra
+            // por borrar la reserva (RI-61, EST-INC-01).
             conn.execute(SQL_DESVINCULAR_COMANDAS, id()).await.map_err(db_err)?;
             let borradas = conn.execute(SQL_BORRAR, id()).await.map_err(db_err)?;
             Ok(borradas > 0)
@@ -655,7 +656,13 @@ fn fila_de_reserva(row: &Row) -> AppResult<ReservaDto> {
 // decide antes, al escribir, y se replica sólo lo elegido.
 const SQL_ES_WEB: &str = "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Origen = 'WEB';";
 const SQL_CANCELAR: &str = "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;";
-const SQL_DESVINCULAR_COMANDAS: &str = "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;";
+/// Desengancha la reserva de sus comandas (al borrarla, y al cerrarla desde la mesa: FINALIZADA,
+/// CANCELADA o NO_SHOW). La comanda se queda con el cliente de la reserva si aún no tenía uno: el
+/// cobro ya lo fija (RI-61), pero una comanda que se cobra después, o que se cobró antes de eso,
+/// perdería al cliente con la reserva y su gasto dejaría de verse en Estadísticas (EST-INC-01).
+/// La subconsulta lee la reserva antes de que la sentencia siguiente la borre; el mismo texto en
+/// el worker (`deleteReserva`, `setReservaEstado`).
+pub(crate) const SQL_DESVINCULAR_COMANDAS: &str = "UPDATE Comandas SET ID_Cliente = COALESCE(ID_Cliente, (SELECT r.ID_Cliente FROM Reservas r WHERE r.ID_Reserva = ?1)), ID_Reserva = NULL WHERE ID_Reserva = ?1;";
 const SQL_BORRAR: &str = "DELETE FROM Reservas WHERE ID_Reserva = ?1;";
 
 /// Mismo texto en el worker (`reserva_web_no_se_borra`, `lib/errorCodes.ts`).

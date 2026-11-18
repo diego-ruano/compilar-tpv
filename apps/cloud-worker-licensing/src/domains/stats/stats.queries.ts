@@ -1056,8 +1056,10 @@ export async function clientes(
 	//
 	// Un cliente es "recurrente" si compro en este rango y ademas YA habia comprado antes de que el
 	// rango empezara. Por eso no basta con mirar el rango: hace falta la fecha de su PRIMER cobro de
-	// toda la historia (`firsts`) y compararla con el inicio de la ventana. El cliente se identifica
-	// por la reserva de la comanda, que es el unico hilo que ata un cobro a una persona.
+	// toda la historia (`firsts`) y compararla con el inicio de la ventana. El cliente de un cobro es
+	// el de su comanda y, si la comanda no tiene, el de su reserva, como en la conciliacion: el cobro
+	// lo deja en la comanda (RI-61) y cerrar la reserva desengancha la comanda de ella, asi que
+	// buscandolo solo por la reserva el gasto desaparecia cuando el cliente se iba (EST-INC-01).
 	//
 	// `allp` va MATERIALIZED: la leen tres CTE, y sin esa palabra SQLite la deshace dentro de cada
 	// una y recorre tres veces todos los cobros de la historia. Asi los recorre una. El resultado
@@ -1068,14 +1070,13 @@ export async function clientes(
 		 rng AS (SELECT ${start} AS start_dt, ${end} AS end_dt),
 		 allp AS MATERIALIZED (
 			SELECT
-				r.ID_Cliente AS id_cliente,
+				COALESCE(c.ID_Cliente, r.ID_Cliente) AS id_cliente,
 				datetime(p.Fecha_Hora) AS paid_at,
 				COALESCE(p.Importe_Total,0) AS imp
 			FROM Pagos p
 			JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-			JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-			WHERE c.ID_Reserva IS NOT NULL
-				AND r.ID_Cliente IS NOT NULL
+			LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+			WHERE COALESCE(c.ID_Cliente, r.ID_Cliente) IS NOT NULL
 				AND p.Fecha_Hora IS NOT NULL
 				AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 		 ),

@@ -238,9 +238,10 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
 - **El consumo de stock se escribe después del pago**: la FK de `ID_Pago` se comprueba sentencia a
   sentencia también al replicar.
 - **El gasto se acredita y se resta al cliente de la comanda** (`Comandas.ID_Cliente`), que se fija
-  al cobrar desde el de su reserva (RI-61). Así, borrar o reasignar la reserva después de cobrar no le
-  quita el gasto al cliente; la reconciliación cuenta igual (el de la comanda y, si no lo tiene, el de
-  la reserva).
+  al cobrar desde el de su reserva (RI-61), y también al desengancharla de la reserva (cerrarla desde
+  la mesa o borrarla) si aún no tenía uno. Así, borrar o reasignar la reserva después de cobrar no le
+  quita el gasto al cliente; la reconciliación y Estadísticas → Clientes cuentan igual (el de la
+  comanda y, si no lo tiene, el de la reserva).
 - **Un cobro anulado queda congelado**: no se edita (moverlo de fecha cambiaría de periodo una
   anulación) ni se «desanula» (se vuelve a cobrar).
 - **Borrar una comanda se niega si tiene cualquier cobro**, activo o anulado: `Pagos.ID_Comanda` va

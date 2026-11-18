@@ -255,6 +255,8 @@ import casoStatsCategorias from "../../../tests/contract/lecturas/casos/stats/ca
 import goldenStatsCategorias from "../../../tests/contract/lecturas/golden/stats/categorias.json";
 import casoStatsClientes from "../../../tests/contract/lecturas/casos/stats/clientes.json";
 import goldenStatsClientes from "../../../tests/contract/lecturas/golden/stats/clientes.json";
+import casoStatsClientesReservaTerminada from "../../../tests/contract/lecturas/casos/stats/clientes_reserva_terminada.json";
+import goldenStatsClientesReservaTerminada from "../../../tests/contract/lecturas/golden/stats/clientes_reserva_terminada.json";
 import casoStatsProductos from "../../../tests/contract/lecturas/casos/stats/productos.json";
 import goldenStatsProductos from "../../../tests/contract/lecturas/golden/stats/productos.json";
 import casoStatsVendidos from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
@@ -430,6 +432,11 @@ const CASOS = [
 		golden: goldenStatsNombreId,
 	},
 	{ nombre: "stats_clientes", caso: casoStatsClientes, golden: goldenStatsClientes },
+	{
+		nombre: "stats_clientes_reserva_terminada",
+		caso: casoStatsClientesReservaTerminada,
+		golden: goldenStatsClientesReservaTerminada,
+	},
 	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },
 	{ nombre: "stats_trabajadores", caso: casoStatsTrabajadores, golden: goldenStatsTrabajadores },
 	// Las búsquedas de texto: el % y el _ tal cual, y un texto de más de 50 bytes.
