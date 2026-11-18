@@ -889,24 +889,31 @@ fn es_de_lo_apartado(app_data_dir: &Path, origen: &Path) -> bool {
         })
 }
 
-/// AUD-06 · Una copia (ya descomprimida) sólo vale para la licencia de su negocio. Una sin sello es
-/// anterior a los sellos: se acepta como hasta ahora, y la pantalla avisa de que no se comprueba de
-/// qué negocio es.
+/// AUD-06 · Una copia (ya descomprimida) sólo vale para la licencia de su negocio.
+///
+/// SYNC-33: y una sin sello, tampoco. No dice de quién es: la de otra instalación con el sello
+/// quitado sería indistinguible de una propia, y al restaurarla el equipo adoptaría sus usuarios y
+/// su outbox. Toda base se sella al abrirse con la licencia, así que una copia de este negocio
+/// siempre lo lleva; sin sello sólo queda una de antes de activar la licencia, que no tiene nada
+/// que recuperar.
 fn comprobar_procedencia_de_copia(copia: &Path, licencia: Option<&str>) -> AppResult<()> {
     let sello = crate::sello::del_fichero(copia)?;
-    match (&sello, licencia) {
-        (Sello::Ninguno, _) => Ok(()),
-        (_, None) => Err(AppError::validation(
+    let Some(negocio) = licencia else {
+        return Err(AppError::validation(
             "Activa la licencia de este ordenador antes de restaurar una copia: sin ella no se puede comprobar que la copia sea de su negocio.",
+        ));
+    };
+    match procedencia(&sello, negocio) {
+        Procedencia::Suya => Ok(()),
+        Procedencia::SinSello => Err(AppError::validation(MSG_COPIA_SIN_SELLO)),
+        Procedencia::DeOtroNegocio | Procedencia::Desconocida => Err(AppError::validation(
+            "Esa copia es de otro negocio, no del de la licencia activada en este ordenador, y no se puede restaurar aquí.",
         )),
-        (_, Some(negocio)) => match procedencia(&sello, negocio) {
-            Procedencia::Suya | Procedencia::SinSello => Ok(()),
-            Procedencia::DeOtroNegocio | Procedencia::Desconocida => Err(AppError::validation(
-                "Esa copia es de otro negocio, no del de la licencia activada en este ordenador, y no se puede restaurar aquí.",
-            )),
-        },
     }
 }
+
+/// SYNC-33 · Lo que se dice de una copia sin sello.
+const MSG_COPIA_SIN_SELLO: &str = "Esa copia no dice de qué negocio es (se hizo antes de activar la licencia, o la ha cambiado otro programa), así que no se puede usar aquí. Elige otra copia o recupera el estado actual de la nube.";
 
 /// AUD-19 · Guarda en `backups/antes-de-la-nube-*` la copia restaurada que se reemplaza por la nube
 /// sin haberse reconciliado, con su outbox, que no se sube (ver `bootstrap_restaurar`).
@@ -1777,6 +1784,9 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
             .ok_or_else(|| AppError::internal("Ruta temporal de restauración inválida"))?;
         let db = Db::open(prepared_str).await.map_err(|e| al_preparar_la_copia(e.as_ref()))?;
         mark_reconciliation_pending(&db).await?;
+        if id.starts_with(IMPORT_PREFIX) {
+            vaciar_lo_pendiente_de_subir(&db).await?;
+        }
         ajustar_registro_de_fallos(&db).await?;
         // El resumen diario de las estadísticas que trae la copia se rehace entero: es una caché,
         // y así no depende de con qué versión se hizo la copia.
@@ -1787,6 +1797,9 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
         }
         db.cerrar().await.map_err(db_err)?;
         drop(db);
+        // AUD-22: ya migrada, sus disparadores y vistas son los de este programa, ni uno más.
+        let ruta = prepared.clone();
+        en_hilo_aparte(move || async move { comprobar_disparadores_y_vistas(&ruta) }).await?;
         validate_backup(&prepared).await
     }
     .await;
@@ -1798,6 +1811,67 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
     // sidecars ya no pertenecen a ningún proceso; no deben quedar acumulándose en AppData.
     discard_sidecars(&prepared);
     Ok(prepared)
+}
+
+/// AUD-22 · Una copia traída de fuera (`import-*`) no sube lo que tenía pendiente.
+///
+/// Su outbox lo escribió otro equipo, o alguien con un editor de SQLite: subirlo sería mandar a la
+/// nube, como operaciones de esta Main, sentencias que nadie ha hecho aquí. Las filas se quedan en la
+/// base; lo que la nube no tenga lo repara por estado el contraste (`verificar_nube`). Las copias
+/// que hace este equipo conservan su outbox: son suyas. `_Sync_Applied_Ops` no se toca: es lo que
+/// evita aplicar dos veces el eco de lo propio.
+async fn vaciar_lo_pendiente_de_subir(db: &Db) -> AppResult<()> {
+    let w = db.write().await;
+    let quitadas = w.raw().execute("DELETE FROM _Sync_Outbox;", ()).await.map_err(db_err)?;
+    if quitadas > 0 {
+        tracing::warn!(
+            target: "tpv::recovery",
+            operaciones = quitadas,
+            "la copia traída de fuera tenía operaciones sin subir: no se suben, las repara el contraste"
+        );
+    }
+    Ok(())
+}
+
+/// AUD-22 · Lo que se dice de una copia con disparadores o vistas que este programa no crea.
+pub const MSG_COPIA_RETOCADA: &str =
+    "Esta copia no es como las que hace el programa: se ha cambiado con otro programa y no se puede restaurar.";
+
+/// AUD-22 · Los disparadores y vistas de la copia, ya migrada, son exactamente los que crean las
+/// migraciones de este programa. Un disparador que ninguna migración crea sobrevive a todas y se
+/// dispara con las escrituras normales (p. ej., llenando el outbox de lo que nadie ha hecho).
+fn comprobar_disparadores_y_vistas(copia: &Path) -> AppResult<()> {
+    fn objetos(conn: &rusqlite::Connection) -> AppResult<std::collections::BTreeSet<(String, String, String)>> {
+        let mut stmt = conn
+            .prepare("SELECT type, name, COALESCE(sql, '') FROM sqlite_master WHERE type IN ('trigger', 'view');")
+            .map_err(|e| db_err(ErrorSql::from(e)))?;
+        let filas = stmt
+            .query_map([], |f| Ok((f.get::<_, String>(0)?, f.get::<_, String>(1)?, f.get::<_, String>(2)?)))
+            .map_err(|e| db_err(ErrorSql::from(e)))?;
+        let mut out = std::collections::BTreeSet::new();
+        for fila in filas {
+            let (tipo, nombre, sql) = fila.map_err(|e| db_err(ErrorSql::from(e)))?;
+            out.insert((tipo, nombre, sql.split_whitespace().collect::<Vec<_>>().join(" ")));
+        }
+        Ok(out)
+    }
+    let limpia = crate::ejecutor::abrir(":memory:").map_err(db_err)?;
+    crate::migrations::run(&limpia).map_err(|e| AppError::internal(format!("No se pudo preparar el esquema de referencia: {e}")))?;
+    let esperados = objetos(&limpia)?;
+    let conn = crate::ejecutor::abrir(copia).map_err(|e| corrupta(format!("No se puede abrir la copia: {e}")))?;
+    let tiene = objetos(&conn)?;
+    let ajenos: Vec<&str> = tiene.difference(&esperados).map(|(_, nombre, _)| nombre.as_str()).collect();
+    let faltan: Vec<&str> = esperados.difference(&tiene).map(|(_, nombre, _)| nombre.as_str()).collect();
+    if ajenos.is_empty() && faltan.is_empty() {
+        return Ok(());
+    }
+    tracing::warn!(
+        target: "tpv::recovery",
+        ajenos = ?ajenos,
+        faltan = ?faltan,
+        "copia con disparadores o vistas distintos de los de las migraciones"
+    );
+    Err(AppError::coded(ErrorCode::BackupCorrupt, MSG_COPIA_RETOCADA))
 }
 
 #[derive(Debug)]
@@ -1886,7 +1960,16 @@ mod tests {
         crate::test_temp::dir_temporal(&format!("recovery_{nombre}"))
     }
 
+    /// La base de un equipo con la licencia de `negocio-de-prueba`: con su admin y sellada, como
+    /// la deja la activación. Sus copias llevan el sello, que es lo que deja restaurarlas (SYNC-33).
     async fn db_operativa(dir: &Path) -> std::sync::Arc<Db> {
+        let db = db_sin_sello(dir).await;
+        sellar(&db, "negocio-de-prueba").await;
+        db
+    }
+
+    /// La base de un equipo antes de activar la licencia: con su admin y sin sello.
+    async fn db_sin_sello(dir: &Path) -> std::sync::Arc<Db> {
         std::fs::create_dir_all(dir).unwrap();
         crate::connection::init_main_db(dir, None).await.unwrap()
     }
@@ -2981,14 +3064,82 @@ mod tests {
         crate::sello::escribir(w.raw(), negocio).await.unwrap();
     }
 
+    /// AUD-22 · Lo que una copia traída de fuera tenía pendiente de subir no sube como de esta Main;
+    /// una copia de este equipo sí conserva lo suyo.
+    #[tokio::test]
+    async fn una_copia_traida_de_fuera_no_sube_su_outbox() {
+        let dir = test_dir("aud22_outbox");
+        let db = db_operativa(&dir).await;
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                r#"INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-ajena', 'main_op', '[{"sql":"DELETE FROM Clientes;","args":[]}]', 1);"#,
+            )
+            .await
+            .unwrap();
+        let copia = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        let fuera = dir.join("usb").join("copia.db.gz");
+        export_backup(&dir, &copia, &fuera, Some("negocio-de-prueba")).await.unwrap();
+        let importada = import_backup(&dir, &fuera, Some("negocio-de-prueba")).await.unwrap();
+
+        for (id, outbox) in [(&importada.id, 0), (&copia, 1)] {
+            let preparada = prepare_restore(&dir, id, Some("negocio-de-prueba")).await.unwrap();
+            let conn = crate::ejecutor::abrir(&preparada).unwrap();
+            let n: i64 = conn.query_row("SELECT COUNT(*) FROM _Sync_Outbox;", [], |f| f.get(0)).unwrap();
+            assert_eq!(n, outbox, "{id}");
+            drop(conn);
+            discard_prepared(&preparada);
+        }
+        db.cerrar().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-22 · Una copia con un disparador (o una vista) que ninguna migración crea no se restaura:
+    /// sobreviviría a todas y se dispararía con las escrituras normales.
+    #[tokio::test]
+    async fn una_copia_con_un_disparador_ajeno_no_se_restaura() {
+        let dir = test_dir("aud22_trigger");
+        let db = db_operativa(&dir).await;
+        let buena = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                r#"CREATE TRIGGER t_ajeno AFTER INSERT ON Zonas BEGIN INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-' || NEW.ID_Zona, 'main_op', '[]', 3); END;"#,
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let retocada = create_backup(&db, &dir).await.unwrap().unwrap().id;
+
+        let preparada = prepare_restore(&dir, &buena, Some("negocio-de-prueba")).await.unwrap();
+        discard_prepared(&preparada);
+        let err = prepare_restore(&dir, &retocada, Some("negocio-de-prueba")).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        assert_eq!(err.to_string(), MSG_COPIA_RETOCADA);
+
+        // Y una vista que no crea nadie, tampoco.
+        db.write().await.raw().execute_batch("DROP TRIGGER t_ajeno; CREATE VIEW v_ajena AS SELECT 1;").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let con_vista = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        let err = prepare_restore(&dir, &con_vista, Some("negocio-de-prueba")).await.unwrap_err();
+        assert_eq!(err.to_string(), MSG_COPIA_RETOCADA);
+
+        db.cerrar().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// Una copia es la base entera, así que lleva su sello, y sólo vale para la licencia de su
-    /// negocio: ni se restaura ni se importa con la de otro. Una sin sello (de antes de los sellos)
-    /// se sigue aceptando como hasta ahora.
+    /// negocio: ni se restaura ni se importa con la de otro. SYNC-33: una sin sello no dice de quién
+    /// es, así que tampoco, con ninguna licencia.
     #[tokio::test]
     async fn una_copia_sellada_solo_se_restaura_o_importa_con_la_licencia_de_su_negocio() {
         // Las copias, hechas en el equipo del negocio A: una de antes de los sellos y otra sellada.
         let de_a = test_dir("sello_de_las_copias_a");
-        let db_a = db_operativa(&de_a).await;
+        let db_a = db_sin_sello(&de_a).await;
         let sin_sello = create_backup(&db_a, &de_a).await.unwrap().unwrap().id;
         sellar(&db_a, "negocio-a").await;
         // Otro instante: las copias se nombran por su milisegundo.
@@ -3003,7 +3154,7 @@ mod tests {
 
         // Llevadas a un equipo cuya base no dice de quién es (recién instalado), con cada licencia.
         let dir = test_dir("sello_de_las_copias");
-        let db = db_operativa(&dir).await;
+        let db = db_sin_sello(&dir).await;
         let fuera = dir.join("usb");
         std::fs::create_dir_all(&fuera).unwrap();
         std::fs::create_dir_all(dir.join(BACKUP_DIR)).unwrap();
@@ -3012,8 +3163,9 @@ mod tests {
             std::fs::copy(de_a.join(BACKUP_DIR).join(copia), fuera.join(copia)).unwrap();
         }
         for (copia, licencia, vale) in [
-            (&sin_sello, Some("negocio-x"), true),
-            (&sin_sello, None, true),
+            (&sin_sello, Some("negocio-x"), false),
+            (&sin_sello, Some("negocio-a"), false),
+            (&sin_sello, None, false),
             (&sellada, Some("negocio-a"), true),
             (&sellada, Some("negocio-x"), false),
             (&sellada, None, false),
@@ -3036,6 +3188,14 @@ mod tests {
         assert!(err.to_string().contains("Esa copia es de otro negocio"), "{err}");
         let err = import_backup(&dir, &fuera.join(&sellada), None).await.unwrap_err();
         assert!(err.to_string().contains("Activa la licencia"), "{err}");
+        // SYNC-33: la sin sello, con la licencia que sea, dice por qué.
+        for licencia in ["negocio-a", "negocio-x"] {
+            let err = prepare_restore(&dir, &sin_sello, Some(licencia)).await.unwrap_err();
+            assert_eq!(err.code(), ErrorCode::Validation);
+            assert_eq!(err.to_string(), MSG_COPIA_SIN_SELLO);
+            let err = import_backup(&dir, &fuera.join(&sin_sello), Some(licencia)).await.unwrap_err();
+            assert_eq!(err.to_string(), MSG_COPIA_SIN_SELLO);
+        }
 
         // Y en el equipo de A, con la licencia de X ya vigente y la base de A sin apartar (porque algo
         // no se dejó mover), no se restaura ninguna: ni la de antes de los sellos.
@@ -3050,7 +3210,10 @@ mod tests {
         assert!(err.to_string().contains("Esa copia es de otro negocio"), "{err}");
         assert!(!usb.join("x.db.gz").exists());
         export_backup(&de_a, &sellada, &usb.join("a.db.gz"), Some("negocio-a")).await.unwrap();
-        export_backup(&de_a, &sin_sello, &usb.join("antigua.db.gz"), Some("negocio-x")).await.unwrap();
+        // Ni la sin sello: no dice de quién es.
+        let err = export_backup(&de_a, &sin_sello, &usb.join("antigua.db.gz"), Some("negocio-a")).await.unwrap_err();
+        assert_eq!(err.to_string(), MSG_COPIA_SIN_SELLO);
+        assert!(!usb.join("antigua.db.gz").exists());
 
         for (db, d) in [(db, dir), (db_a, de_a)] {
             db.cerrar().await.unwrap();
@@ -3066,7 +3229,7 @@ mod tests {
     #[tokio::test]
     async fn un_cambio_de_negocio_pendiente_no_cambia_nada_hasta_el_arranque() {
         let dir = test_dir("cambio_pendiente");
-        let db = db_operativa(&dir).await;
+        let db = db_sin_sello(&dir).await;
         sellar(&db, "negocio-a").await;
         let copia = create_backup(&db, &dir).await.unwrap().unwrap().id;
 
@@ -3104,7 +3267,7 @@ mod tests {
     #[tokio::test]
     async fn se_aparta_todo_lo_de_otro_negocio_y_la_purga_no_entra() {
         let dir = test_dir("apartar_otro_negocio");
-        let db = db_operativa(&dir).await;
+        let db = db_sin_sello(&dir).await;
         sellar(&db, "negocio-a").await;
         let diaria = create_backup(&db, &dir).await.unwrap().unwrap().id;
         db.cerrar().await.unwrap();
@@ -3205,7 +3368,7 @@ mod tests {
     #[tokio::test]
     async fn una_base_ilegible_se_aparta_entera_salvo_las_copias_selladas_con_la_licencia() {
         let dir = test_dir("base_ilegible");
-        let db = db_operativa(&dir).await;
+        let db = db_sin_sello(&dir).await;
         let sin_sello = create_backup(&db, &dir).await.unwrap().unwrap().id;
         sellar(&db, "negocio-a").await;
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -3273,7 +3436,7 @@ mod tests {
     #[tokio::test]
     async fn un_apartado_terminado_con_la_marca_puesta_no_se_lleva_la_base_nueva() {
         let dir = test_dir("apartado_terminado");
-        let db = db_operativa(&dir).await;
+        let db = db_sin_sello(&dir).await;
         sellar(&db, "negocio-a").await;
         db.cerrar().await.unwrap();
         drop(db);

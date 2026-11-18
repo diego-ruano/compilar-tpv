@@ -30,6 +30,8 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Reconciliar | `tpv-application/src/use_cases/replicacion.rs` + transporte nativo | Catch-up → outbox → catch-up, hasta converger |
 | Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
 | Copia anterior al log | `replicacion.rs::falta_un_tramo` + `purgadoHasta` de `/v1/sync/changes` | Le falta un tramo purgado: no se reconcilia (AUD-19) |
+| Copia por delante de la nube | `replicacion.rs::catch_up` (`numerado_por_la_nube`) | Su cursor pasa de lo que la nube ha numerado: no es de su log, no se reconcilia (SYNC-33) |
+| Copia traída de fuera | `recovery.rs::prepare_restore` (`vaciar_lo_pendiente_de_subir`, `comprobar_disparadores_y_vistas`) | No sube su outbox; con disparadores o vistas que no crean las migraciones, no se restaura (AUD-22) |
 | Traslado de licencia | `use_cases/licensing.rs::activate` + `recovery.rs::BaseLocal` (la marca) | La base de antes del traslado no se usa |
 | Base anterior a la nube | `use_cases/replicacion.rs::anterior_al_log` + `recovery.rs::marcar_anterior_a_la_nube` (la marca) | Una base cambiada por fuera del programa no se usa: se trae la nube (SYNC-32) |
 | El sello de la base (AUD-06) | `_Negocio` (`0002_negocio.sql`) · `crates/tpv-infra-sqlite/src/sello.rs` · `tpv_domain::licensing::que_hacer_con_la_base` | De qué negocio es cada base y cada copia; una base sólo se usa con la licencia de su negocio |
@@ -237,10 +239,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   se puede usar», con el detalle del motor sólo en el registro.
 - **Una copia lleva el sello de su base** (AUD-06): con el de otro negocio que el de la licencia, ni
   se importa, ni se restaura, ni se saca del equipo, y lo dice («Esa copia es de otro negocio…»); sin licencia activada, una
-  sellada tampoco. Una copia **sin sello** (anterior a los sellos) no dice de quién es: se acepta como
-  antes, la pantalla advierte de que no se comprueba, el daño se queda en local (restaurar no llena el
-  outbox) y se deshace recuperando de la nube; al abrirla se sella con la licencia que haya
-  ([SYNC-33](../pendientes.md#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es)). Lo apartado
+  sellada tampoco. Una copia **sin sello** no dice de quién es, así que tampoco se importa, ni se
+  restaura, ni se saca, con ninguna licencia (SYNC-33): la de otra instalación con el sello quitado
+  sería indistinguible de una propia. Toda base se sella al abrirse con la licencia, así que las copias
+  de un negocio lo llevan; sin sello sólo queda una de antes de activar. Lo apartado
   (`backups/antes-de-traslado-*` y `backups/negocio-anterior-*/`) no se importa, lleve sello o no.
   Y no se restaura nada mientras la base que hay en el equipo sea de otro negocio: primero se aparta.
 - Una copia inservible se rechaza diciendo por qué. Al restaurar, la copia ya validada se abre y se
@@ -309,6 +311,20 @@ guarda la nube: recupera el estado actual de la nube.». Es un ciclo fallido má
 pantalla ofrece las alternativas, la nube entre ellas; elegirla no sube el outbox de la copia (ver
 «Desde la nube»). Antes de elegir, la lista de copias enseña la antigüedad de cada una y avisa, sin
 impedirla, de las que pasan de 7 días.
+
+**Una copia por delante de lo que guarda la nube tampoco** (SYNC-33). Si su `Last_Seq` pasa de lo
+que la nube ha numerado (el final del log, `highWater`, o hasta donde purgó, `purgadoHasta`, si la
+purga lo ha vaciado), la copia dice haber recibido cambios que esta nube no ha dado nunca: es de otra
+instalación o la han retocado. El catch-up para antes de aplicar ni subir nada con «Esta copia no
+encaja con lo que guarda la nube de este negocio…». La sesión normal no lo mira.
+
+**Una copia traída de fuera no sube su outbox** (AUD-22). Al preparar una `import-*` se vacía
+`_Sync_Outbox`: esas sentencias las escribió otro equipo, o un editor de SQLite, y subirlas sería
+mandarlas como de esta Main. Las filas se quedan, y lo que falte arriba lo repara por estado el
+contraste. Las copias de este equipo conservan su outbox. Y ninguna copia se restaura si, ya migrada,
+sus disparadores o vistas no son exactamente los que crean las migraciones: uno que no crea ninguna
+sobreviviría a todas y se dispararía con las escrituras normales («Esta copia no es como las que hace
+el programa…»).
 
 Si `/v1/sync/changes` no dice `purgadoHasta` (un worker anterior a AUD-19), **ninguna
 reconciliación termina**, tampoco la que sigue a recuperar desde la nube: el modo recuperación
@@ -462,8 +478,6 @@ lleva el negocio con el que empezó.
 
 Lo que no hace:
 
-- **No reconoce una copia sin sello** (anterior a los sellos): se acepta con un aviso
-  ([SYNC-33](../pendientes.md#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es)).
 - Los cobros antiguos del navegador (`localStorage`, de antes de que los cobros a medias vivieran en
   la base) no dicen de qué negocio son: se importan sólo si su ticket está en la base, con todas sus
   líneas; los demás se apartan en el propio `localStorage` como desconocidos

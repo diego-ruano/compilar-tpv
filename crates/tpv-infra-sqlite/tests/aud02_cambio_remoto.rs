@@ -208,10 +208,15 @@ async fn el_escritor_no_adjunta_bases_y_las_copias_locales_siguen_funcionando() 
             .execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-aud02', 'Terraza');", ())
             .await
             .unwrap();
+        // Con su sello, como la deja la activación: sin él, la copia no se restaura (SYNC-33).
+        w.raw()
+            .execute("INSERT INTO _Negocio (Id, ID_Negocio) VALUES (1, 'negocio-aud02');", ())
+            .await
+            .unwrap();
     }
     let copia = recovery::create_backup(&db, &dir).await.unwrap().expect("la base está operativa: hay copia");
     assert_eq!(recovery::list_backups(&dir).unwrap().len(), 1);
-    let preparada = recovery::prepare_restore(&dir, &copia.id, None).await.unwrap();
+    let preparada = recovery::prepare_restore(&dir, &copia.id, Some("negocio-aud02")).await.unwrap();
     let bytes = std::fs::read(&preparada).unwrap();
     assert!(bytes.starts_with(b"SQLite format 3"), "la copia es una base SQLite");
     assert!(

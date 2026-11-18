@@ -14,14 +14,14 @@ con tests ejecutados, sobre `main` en `38a4c2db`.
   jsdom, nextest de Rust), consultó la documentación oficial cuando lo decidía la plataforma, valoró la
   gravedad y propuso el arreglo. No se ha cambiado código del proyecto ni se ha enviado tráfico a
   ningún despliegue.
-- **Resultado.** Ninguna se descartó. Siguen abiertas 12 de la auditoría: **10 confirmadas con un test**
+- **Resultado.** Ninguna se descartó. Siguen abiertas 11 de la auditoría: **9 confirmadas con un test**
   (contando AUD-45, que salió al investigar) y 2 sin resolver
   porque dependen de cómo se comporta una plataforma (AUD-31 y AUD-39).
 - **AUD-46 no sale de la auditoría ni es de seguridad**: es un fallo de coste que destapó la primera
   prueba de carga contra producción (10 de noviembre). Se apunta aquí con lo medido; su causa está
   **sin investigar**.
 - **Gravedad**, con la escala de la revisión integral: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵
-  baja/mejora. Ninguna bloqueante; una alta (AUD-46) y 12 medias. Cada sección
+  baja/mejora. Ninguna bloqueante; una alta (AUD-46) y 11 medias. Cada sección
   dice en una línea por qué.
 - **Los tests están guardados** en `C:\Users\diego\security-audit-skill\tpv-completa\run-1\investigacion\AUD-NN\tests\`,
   con la ruta que tendrían en el repositorio. Casi todos sirven de test de regresión al arreglar:
@@ -54,14 +54,12 @@ Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
 
 1. **Licencias, dispositivos y acceso** (AUD-45): una consulta del banco que revoca la licencia sin
    vuelta atrás.
-2. **Réplica** (AUD-22): una copia traída de fuera manda en la réplica: su outbox sube y su cursor
-   desbloquea.
-3. **Recursos compartidos sin cuota** (AUD-09, 12, 13, 31, 36, 38) y **correo**
+2. **Recursos compartidos sin cuota** (AUD-09, 12, 13, 31, 36, 38) y **correo**
    (AUD-39, 42): cualquiera o un solo negocio pueden gastar lo que es de todos (bases, códigos,
    copia diaria, CPU, cupo de correo). AUD-31 y AUD-39 siguen
    sin resolver: dependen de cómo responden los decodificadores de imagen de WebView2 y Android y el
    correo de Cloudflare.
-4. **Emparejamiento** (AUD-10, 11): oráculos y frenos del emparejamiento.
+3. **Emparejamiento** (AUD-10, 11): oráculos y frenos del emparejamiento.
 
 ## Tabla
 
@@ -73,7 +71,6 @@ Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
 | AUD-11 | 🟡 | Confirmado (test) | B | La espera por fallos del `claim` se reinicia y cuenta por IP exacta |
 | AUD-12 | 🟡 | Confirmado (test) | B | Los códigos de emparejamiento nunca se liberan |
 | AUD-13 | 🟡 | Confirmado (test) | B | Reclamar el propio código infla la base central y deja sin copia a todos |
-| AUD-22 | 🟡 | Confirmado (test) | D | Una copia traída de fuera manda en la réplica: su outbox sube y su cursor desbloquea |
 | AUD-46 | 🟠 | ? | F | El TenantHub no hiberna mientras hay una Main conectada |
 | AUD-31 | 🟡 | Sin resolver | F | La webview pinta logos e imágenes replicados sin comprobar su forma ni RI-07 |
 | AUD-36 | 🟡 | Confirmado (test) | F | Sin cuota por negocio en la organización de Turso compartida |
@@ -245,32 +242,6 @@ Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
 ## C · Dinero, caja y réplica
 
 ## D · El puesto local frente al personal
-
-### AUD-22 · Una copia traída de fuera manda en la réplica: su outbox sube y su cursor desbloquea
-
-- **Estado.** Confirmado con tests; el enlace del shell Tauri (`replicacion.rs::arrancar`), por código.
-- **Gravedad.** 🟡 Media: SQL arbitrario en la nube del negocio, pero sólo ante una Main en recuperación.
-- **Qué pasa.** Restaurar un archivo instala el fichero entero (sólo `quick_check` y usuarios): la Main
-  adopta sus usuarios, las operaciones de su outbox y encoladas (la reconciliación las sube como suyas y
-  el TenantHub ejecuta cualquier SQL, también DDL, con las Handy congeladas), su `Last_Seq` (por delante
-  del log desbloquea sin aplicar nada y deja a `verificar_nube` borrar arriba) y sus triggers, que
-  sobreviven a las migraciones y a «Recuperar el estado actual de la nube», que conserva el outbox.
-- **Dónde.** `RecuperarDatos.tsx:107` → `recovery.rs::prepare_restore` → `ejecutar` → `atenderApply`.
-- **Quién.** Quien esté ante la Main, sin PIN, mientras enseña la recuperación (sin usuarios, base
-  ilegible, lecturas de arranque fallidas o reconciliación `bloqueada`) con la base de cualquier
-  instalación de esta versión retocada; o, sin querer, quien restaura la copia de otro negocio.
-- **Cómo se ha comprobado.** `recovery_aud22_tests.rs`: quedan outbox 2, encoladas 1, `Last_Seq` 1e9 y el
-  trigger; `completar` pasa (nube en 7); una escritura dispara el trigger; `contrastar_claves_con` encola
-  un `DELETE`; `bootstrap_restaurar` conserva outbox y trigger. `replicacion_tests.rs`: `ejecutar` sube
-  la op y desbloquea. Worker: con la Handy congelada, el `apply` pone `Sin_PIN = 1` y crea un trigger.
-- **Arreglo.** (1) `recovery.rs::prepare_restore`, tras la l. 794, si el id es `import-*`: vaciar
-  `_Sync_Outbox` y `_Sync_Encoladas` (no `_Sync_Applied_Ops`: evita reaplicar el eco) y un `warn!`; lo
-  que falte arriba lo repara `verificar_nube`. (2) Ya migrada, `BackupCorrupt` si sus triggers o vistas
-  no son los de `migrations::run`. (3) `replicacion.rs::ejecutar` (l. 139): error antes de subir si el
-  checkpoint pasa del `highWater`; `commands/recovery.rs:294` (`completar`): `!=` en vez de `<`.
-  (4) Corregir recovery.rs:519 y recuperacion.md:113. Una copia retocada que converja pide marcar el
-  negocio.
-- **Test de regresión.** Los tres `aud22_regresion_*` (hoy fallan) deben pasar; el del worker, igual.
 
 ## E · Datos personales en registros y telemetría
 
