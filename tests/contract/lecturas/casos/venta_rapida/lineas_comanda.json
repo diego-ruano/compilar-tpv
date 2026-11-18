@@ -1,7 +1,8 @@
 {
-  "descripcion": "Lineas de un ticket de barra. Mismo tipo de consulta que la de mesas pero con OTRO conjunto de columnas y OTRO orden en el SELECT (aqui Pagado va antes que Nombre y no hay Pasa_Cocina), asi que las dos tienen que contrastarse por separado: son dos implementaciones duplicadas cada una.",
+  "descripcion": "Lineas de un ticket de barra. Mismo tipo de consulta que la de mesas pero con OTRO conjunto de columnas y OTRO orden en el SELECT (aqui Pagado va antes que Nombre y no hay Pasa_Cocina), asi que las dos tienen que contrastarse por separado: son dos implementaciones duplicadas cada una. Y det-dev, devuelta entera por la baja de su cobro (DEVOLUCION): ese cobro queda ANULADO, pero la linea no vuelve a estar por cobrar (v_lineas_por_cobrar), asi que sale como Pagado.",
   "lectura": "venta_rapida.lineas_comanda",
   "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-1', 'cat-1', 'Cerveza', 300, 21.0);",
     "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'BARRA', '2026-05-10 12:00:00', 'Abierta');",
@@ -9,7 +10,10 @@
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'com-barra', 'prod-1', 1, 300);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-barra', NULL, 'Suelto', 1, 100);",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-barra', '2026-05-10 12:30:00', 'Efectivo', 300, 'parcial');",
-    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');"
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-dev', 'com-barra', 'prod-1', 1, 300);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja) VALUES ('pago-dev', 'com-barra', '2026-05-10 12:40:00', 'Efectivo', 300, 'parcial', 'ANULADO', '2026-05-10 12:40:00', 'user-1', 'no le gusto', 'DEVOLUCION');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-dev', 'det-dev');"
   ],
   "entrada": {
     "id_comanda": "com-barra"

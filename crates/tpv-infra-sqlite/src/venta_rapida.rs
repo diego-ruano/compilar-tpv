@@ -99,7 +99,7 @@ impl SqliteVentaRapidaRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                 "#,
                 placeholders
             );
@@ -170,8 +170,8 @@ impl SqliteVentaRapidaRepository {
                             FROM Detalle_Comanda dc
                             WHERE dc.ID_Comanda = ?1
                               AND dc.ID_Detalle IN ({})
-                              AND NOT EXISTS (
-                                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                              AND EXISTS (
+                                SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
                               )
                             ORDER BY dc.ID_Detalle;
                             "#,
@@ -256,7 +256,7 @@ impl SqliteVentaRapidaRepository {
                     FROM Detalle_Comanda dc
                     WHERE dc.ID_Comanda = ?2
                       AND dc.ID_Detalle = ?3
-                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                     "#,
                     vec![
                         Value::Text(id_pago_final.clone()),
@@ -296,7 +296,7 @@ impl SqliteVentaRapidaRepository {
                     SELECT COUNT(*)
                     FROM Detalle_Comanda dc
                     WHERE dc.ID_Comanda = ?1
-                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                     "#,
                     vec![Value::Text(data.id_comanda.clone())],
                 )
@@ -338,40 +338,20 @@ impl SqliteVentaRapidaRepository {
 
 }
 
-/// ¿La línea `dc` sigue por cobrar? No está cobrada (`v_lineas_cobradas`) **ni la devolvió entera la
-/// baja de su cobro** (`Motivo_Baja = 'DEVOLUCION'`). Esa baja deja el cobro `ANULADO`, así que sus
-/// líneas salen de `v_lineas_cobradas`, pero no vuelven a cobrarse: el cliente se llevó la
-/// consumición y se le devolvió el dinero (caja.md). Sin esto, el ticket salía en «Ver tickets» como
-/// «SIN COBRAR», con su importe pendiente y el botón de cobrar. Lo mismo en el worker
-/// (`LINEA_POR_COBRAR`, `venta_rapida.queries.ts`).
-macro_rules! linea_por_cobrar {
-    () => {
-        "NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM Pago_Detalles pdv JOIN Pagos pv ON pv.ID_Pago = pdv.ID_Pago
-                    WHERE pdv.ID_Detalle = dc.ID_Detalle
-                      AND pv.Estado = 'ANULADO' AND pv.Motivo_Baja = 'DEVOLUCION'
-                  )"
-    };
-}
-
 /// Lo que queda por cobrar de un ticket (`c`): sus líneas sin cobrar, cada una redondeada como se
 /// cobra (CAJ-INC-03). Lo mismo en el worker (`PENDIENTE_DE_UN_TICKET`, `venta_rapida.queries.ts`).
 ///
 /// Antes era `Total_Comanda − SUM(cobros activos)`, y una devolución es un cobro negativo activo:
 /// un ticket devuelto entero (cobro de 6,03 € y devolución de −6,03 €) restaba 0 y salía con
-/// «Pendiente 6,03 €». Por líneas, lo devuelto sigue cobrado (`v_lineas_cobradas`) y lo que vuelve
-/// a estar pendiente tras dar de baja un cobro por error, también se ve.
-const PENDIENTE_DE_UN_TICKET: &str = concat!(
-    "COALESCE((
+/// «Pendiente 6,03 €». Por líneas (`v_lineas_por_cobrar`), lo devuelto en parte sigue cobrado, lo
+/// devuelto entero por la baja de su cobro no vuelve a cobrarse, y lo que vuelve a estar pendiente
+/// tras dar de baja un cobro por error, sí se ve.
+const PENDIENTE_DE_UN_TICKET: &str = "COALESCE((
                 SELECT SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER))
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND ",
-    linea_por_cobrar!(),
-    "
-              ),0)"
-);
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
+              ),0)";
 
 async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<String>> {
     if id_comanda.trim().is_empty() {
@@ -552,7 +532,6 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
         let lim = limit.unwrap_or(60).clamp(1, 200);
 
-        const LINEA_POR_COBRAR: &str = linea_por_cobrar!();
         let sql = format!(
             r#"
             SELECT
@@ -574,7 +553,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND {LINEA_POR_COBRAR}
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
               ),0) AS Pendientes_Pago
             FROM Comandas c
             WHERE c.Canal = ?2
@@ -621,8 +600,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
                   dc.Notas,
                   dc.Estado_Cocina,
-                  CASE WHEN EXISTS (
-                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                  CASE WHEN NOT EXISTS (
+                    SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado,
                   COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
                   dc.IVA_Percent,
@@ -747,7 +726,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   COALESCE(dc.Cantidad,1) AS Cantidad,
                   COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
                   COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
-                  CASE WHEN EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  CASE WHEN NOT EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                        THEN 1 ELSE 0 END AS Pagado,
                   dc.Notas,
                   dc.IVA_Percent,
@@ -904,7 +883,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   FROM Detalle_Comanda dc
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
-                    AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                    AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                   ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC
                   LIMIT 1
                 );
@@ -934,8 +913,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 DELETE FROM Detalle_Comanda
                 WHERE ID_Detalle = ?1
                   AND ID_Comanda = ?2
-                  AND NOT EXISTS (
-                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = ?1
+                  AND EXISTS (
+                    SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = ?1
                   );
                 "#,
                 vec![Value::Text(id_detalle.to_string()), Value::Text(id_comanda.to_string())],

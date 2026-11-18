@@ -1098,6 +1098,30 @@ FROM Pago_Detalles pd
 JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
 WHERE +p.Estado = 'ACTIVO';
 
+-- Que una linea este POR COBRAR no es solo "no esta cobrada": tampoco la devolvio entera la baja de
+-- su cobro (Motivo_Baja = 'DEVOLUCION'). Esa baja deja el cobro ANULADO, asi que sus lineas salen
+-- de v_lineas_cobradas, pero NO vuelven a cobrarse: el cliente se llevo la consumicion y se le
+-- devolvio el dinero. Sin esto, "Cobrar todo" las volvia a cobrar, anular por error otro cobro de
+-- la comanda las devolvia a la mesa, y Ver tickets y el plano las daban por pendientes.
+--
+-- Es la vista de toda lectura que pregunte "queda esto por cobrar?": elegir que lineas cobrar, el
+-- pendiente de una mesa o de un ticket, si una comanda se reabre, si una linea se puede quitar o
+-- editar, el aviso del cierre de caja. v_lineas_cobradas sigue siendo la de "esta cobrada por un
+-- cobro vigente?" (lo vendido, las estadisticas, AUD-14).
+--
+-- Se consulta con `EXISTS (... WHERE lp.ID_Detalle = X)`, como v_lineas_cobradas: asi SQLite la
+-- aplana y entra por la clave de Detalle_Comanda y por idx_pago_detalles_detalle. El `+` de
+-- `+p.Estado` y `+p.Motivo_Baja` es el de RI-02.
+CREATE VIEW IF NOT EXISTS v_lineas_por_cobrar AS
+SELECT dc.ID_Detalle AS ID_Detalle, dc.ID_Comanda AS ID_Comanda
+FROM Detalle_Comanda dc
+WHERE NOT EXISTS (
+  SELECT 1 FROM Pago_Detalles pd
+  JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+  WHERE pd.ID_Detalle = dc.ID_Detalle
+    AND (+p.Estado = 'ACTIVO' OR +p.Motivo_Baja = 'DEVOLUCION')
+);
+
 -- Lo que devuelve una DEVOLUCION de parte de un cobro (ver Pagos.ID_Pago_Origen): que linea y
 -- cuantas unidades, y por cuanto dinero. Pago_Detalles no sirve: no guarda cantidades, y una
 -- devolucion puede ser una cana de las tres de la linea. Y la devolucion no cobra la linea: si

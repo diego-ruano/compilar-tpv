@@ -40,5 +40,19 @@
     "Pagado": 0,
     "Pasa_Cocina": 0,
     "Precio_Unitario": 500
+  },
+  {
+    "Cambios_Ingredientes": null,
+    "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-1",
+    "ID_Detalle": "det-dev",
+    "ID_Producto": "prod-bebida",
+    "IVA_Percent": null,
+    "Nombre": "Cerveza",
+    "Notas": null,
+    "Pagado": 1,
+    "Pasa_Cocina": 0,
+    "Precio_Unitario": 300
   }
 ]

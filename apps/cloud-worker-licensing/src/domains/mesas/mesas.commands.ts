@@ -543,8 +543,8 @@ export function removeOnePendingDetalle(idComanda: string, idProducto: string): 
 								FROM Detalle_Comanda dc
 								WHERE dc.ID_Comanda = ?1
 									AND dc.ID_Producto = ?2
-									AND NOT EXISTS (
-										SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+									AND EXISTS (
+										SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 									)
 								ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC LIMIT 1
 							);
@@ -566,8 +566,8 @@ export function deleteDetalle(idDetalle: string, idComanda: string | null): Buil
 			sql: `
 				DELETE FROM Detalle_Comanda
 				WHERE ID_Detalle = ?1
-					AND NOT EXISTS (
-						SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+					AND EXISTS (
+						SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
 					);
 			`,
 			args: [idDetalle],
@@ -591,8 +591,8 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 					UPDATE Detalle_Comanda
 					SET Notas = ?2
 					WHERE ID_Detalle = ?1
-						AND NOT EXISTS (
-							SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+						AND EXISTS (
+							SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
 						);
 				`,
 				args: [idDetalle, nota],
@@ -614,8 +614,8 @@ export function updateDetalleIngredientes(idDetalle: string, cambios: string | n
 					UPDATE Detalle_Comanda
 					SET Cambios_Ingredientes = ?2
 					WHERE ID_Detalle = ?1
-						AND NOT EXISTS (
-							SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+						AND EXISTS (
+							SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
 						);
 				`,
 				args: [idDetalle, cambios],
@@ -729,8 +729,8 @@ export function cobrarDetalles(
 							FROM Detalle_Comanda dc
 							WHERE dc.ID_Comanda = ?2
 								AND dc.ID_Detalle IN (SELECT value FROM json_each(?3))
-								AND NOT EXISTS (
-									SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+								AND EXISTS (
+									SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 								);
 						`,
 						// DO-01: las líneas, en un solo parámetro (un array JSON).
@@ -755,7 +755,7 @@ export function cobrarDetalles(
 								AND NOT EXISTS (
 									SELECT 1
 									FROM Detalle_Comanda dc
-									WHERE dc.ID_Comanda = ?1 AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+									WHERE dc.ID_Comanda = ?1 AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 								);
 						`,
 						args: [input.id_comanda],

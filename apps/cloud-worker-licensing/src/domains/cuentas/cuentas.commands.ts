@@ -204,7 +204,7 @@ const COMANDA_DEL_COBRO = "(SELECT p.ID_Comanda FROM Pagos p WHERE p.ID_Pago = ?
  * CAJ-INC-02 · Devolver a la mesa las líneas de un cobro dado de baja por error cuando la mesa ya
  * tiene otra comanda abierta. Espejo de `SQL_DEVOLVER_LINEAS_A_LA_MESA` de la Main, con la comanda
  * leída del cobro. Van después de marcarlo `ANULADO` (sus líneas ya no están en
- * `v_lineas_cobradas`) y antes del `UPDATE` que reabre la original.
+ * `v_lineas_cobradas` y vuelven a `v_lineas_por_cobrar`) y antes del `UPDATE` que reabre la original.
  *
  * 1. Si la abierta está vacía (sin líneas, cobros ni reserva) y a la original le quedan líneas sin
  *    cobrar, se quita: así la original se puede reabrir.
@@ -223,7 +223,7 @@ const SQL_DEVOLVER_LINEAS_A_LA_MESA = [
 	  AND EXISTS (
 	    SELECT 1 FROM Detalle_Comanda dc
 	    WHERE dc.ID_Comanda = ${COMANDA_DEL_COBRO}
-	      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+	      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 	  );
 	`,
 	`
@@ -234,7 +234,7 @@ const SQL_DEVOLVER_LINEAS_A_LA_MESA = [
 	    WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO}
 	)
 	WHERE ID_Comanda = ${COMANDA_DEL_COBRO}
-	  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle)
+	  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle)
 	  AND EXISTS (
 	    SELECT 1 FROM Comandas o
 	    JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
@@ -416,7 +416,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 				      )
 				       AND NOT EXISTS (
 				        SELECT 1 FROM Comandas abierta
@@ -429,7 +429,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 				      )
 				       AND NOT EXISTS (
 				        SELECT 1 FROM Comandas abierta

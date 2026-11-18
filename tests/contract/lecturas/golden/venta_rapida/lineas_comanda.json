@@ -40,5 +40,19 @@
     "Notas": null,
     "Pagado": 0,
     "Precio_Unitario": 100
+  },
+  {
+    "Cambios_Ingredientes": null,
+    "Cantidad": 1.0,
+    "Categoria": "Bebidas",
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-barra",
+    "ID_Detalle": "det-dev",
+    "ID_Producto": "prod-1",
+    "IVA_Percent": null,
+    "Nombre": "Cerveza",
+    "Notas": null,
+    "Pagado": 1,
+    "Precio_Unitario": 300
   }
 ]

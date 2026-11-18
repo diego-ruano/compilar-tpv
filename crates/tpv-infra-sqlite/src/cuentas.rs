@@ -289,7 +289,7 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
               EXISTS (
                 SELECT 1 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = o.ID_Comanda
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
               ),
               a.ID_Comanda IS NOT NULL,
               a.ID_Reserva IS NULL
@@ -332,7 +332,7 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
 ///
 /// Las condiciones van dentro de cada sentencia, no en una lectura previa: se replican tal cual y
 /// el worker usa las mismas (`cuentas.commands.ts`). El cobro ya está `ANULADO`, así que sus
-/// líneas ya no están en `v_lineas_cobradas`.
+/// líneas vuelven a estar en `v_lineas_por_cobrar` (las devueltas enteras por otra baja, no).
 pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 3] = [
     r#"
     DELETE FROM Comandas
@@ -345,7 +345,7 @@ pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 3] = [
       AND EXISTS (
         SELECT 1 FROM Detalle_Comanda dc
         WHERE dc.ID_Comanda = ?1
-          AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+          AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
       );
     "#,
     r#"
@@ -356,7 +356,7 @@ pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 3] = [
         WHERE o.ID_Comanda = ?1
     )
     WHERE ID_Comanda = ?1
-      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle)
+      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle)
       AND EXISTS (
         SELECT 1 FROM Comandas o
         JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
@@ -1146,7 +1146,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                            AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             WHERE dc.ID_Comanda = Comandas.ID_Comanda
-                              AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                              AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                           )
                            AND NOT EXISTS (
                             SELECT 1 FROM Comandas abierta
@@ -1160,7 +1160,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                            AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             WHERE dc.ID_Comanda = Comandas.ID_Comanda
-                              AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                              AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                           )
                            AND NOT EXISTS (
                             SELECT 1 FROM Comandas abierta
@@ -1823,7 +1823,7 @@ mod tests_anulacion {
                 &db,
                 "SELECT COUNT(*) FROM Detalle_Comanda dc
                  WHERE dc.ID_Comanda='com'
-                   AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);"
+                   AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);"
             )
             .await,
             3.0,
@@ -3709,6 +3709,88 @@ mod tests_baja_de_un_ticket_canjeado {
 
     pub(super) fn anulaciones(filas: &[Fila]) -> Vec<&Fila> {
         filas.iter().filter(|f| f.tipo == "ANULACION").collect()
+    }
+
+    // ── Una línea devuelta entera no vuelve a estar por cobrar (v_lineas_por_cobrar) ──────────
+
+    /// Las líneas de un ticket de barra como las pinta la pantalla: `(id, pagada)`.
+    async fn lineas_del_ticket(db: &Arc<Db>, comanda: &str) -> Vec<(String, bool)> {
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        let mut v: Vec<(String, bool)> = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .get_lineas_comanda(comanda)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|l| (l.ID_Detalle, l.Pagado != 0))
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn cobrar_todo_tras_devolver_entero_un_cobro_cobra_solo_lo_nuevo() {
+        // La baja por DEVOLUCION deja el cobro ANULADO y su línea fuera de `v_lineas_cobradas`,
+        // pero el cliente se llevó la consumición y se le devolvió el dinero: no vuelve a cobrarse.
+        // Antes salía como pendiente, «Cobrar todo» la mandaba y se cobraba otra vez.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (devuelto, _) = cobrar(&db, "com1", "det1").await;
+        dar_de_baja(&db, &devuelto, ClaseBaja::Devolucion).await.unwrap();
+        // Y después se le añade algo al mismo ticket.
+        sembrar(
+            &db,
+            &["INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                 VALUES ('det-nueva', 'com1', 'prod', 1, 300, 10);"],
+        )
+        .await;
+
+        assert_eq!(
+            lineas_del_ticket(&db, "com1").await,
+            vec![("det-nueva".to_string(), false), ("det1".to_string(), true)],
+            "la devuelta no se ofrece para cobrar"
+        );
+
+        // «Cobrar todo» manda lo que la pantalla da por pendiente: sólo la nueva.
+        let (nuevo, _) = cobrar(&db, "com1", "det-nueva").await;
+        assert_eq!(
+            escalar(&db, &format!("SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago = '{nuevo}';")).await,
+            1.0
+        );
+
+        // Y si alguien la mandase, la base no la cobra.
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        let e = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: crate::util::new_id(),
+                id_comanda: "com1".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
+                importe_total: Dinero::CERO,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["det1".into()],
+                destinatario: None,
+            })
+            .await;
+        assert!(e.is_err(), "una línea devuelta entera no se vuelve a cobrar");
+    }
+
+    #[tokio::test]
+    async fn anular_por_error_otro_cobro_no_devuelve_a_la_mesa_la_linea_devuelta_entera() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        // Las dos líneas en el mismo ticket, cada una con su cobro.
+        sembrar(&db, &["UPDATE Detalle_Comanda SET ID_Comanda = 'com1' WHERE ID_Detalle = 'det2';"]).await;
+        let (devuelto, _) = cobrar(&db, "com1", "det1").await;
+        let (por_error, _) = cobrar(&db, "com1", "det2").await;
+        dar_de_baja(&db, &devuelto, ClaseBaja::Devolucion).await.unwrap();
+
+        dar_de_baja(&db, &por_error, ClaseBaja::Error).await.unwrap();
+
+        // Vuelve la del cobro anulado por error; la devuelta entera, no.
+        assert_eq!(
+            lineas_del_ticket(&db, "com1").await,
+            vec![("det1".to_string(), true), ("det2".to_string(), false)]
+        );
     }
 
     // ── Qué tickets se pueden facturar (DOC-INC-01) ──────────────────────────────────────────

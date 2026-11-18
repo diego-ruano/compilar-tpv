@@ -119,7 +119,9 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
   un `CHECK` se saltaría la fila en silencio. Cocina (líneas que no pasan por ella), fichajes y
   movimientos de caja admiten `NULL`. Las guardas de solape de `Asignacion_Turnos` (RI-85) van igual.
 - **«Línea cobrada»** se lee por la vista `v_lineas_cobradas` (pagos activos), no por `Pago_Detalles`
-  ([caja.md](caja.md#dar-de-baja-un-cobro)).
+  ([caja.md](caja.md#dar-de-baja-un-cobro)). **«Línea por cobrar»**, por `v_lineas_por_cobrar`: ni
+  cobrada ni devuelta entera por la baja (`DEVOLUCION`) de su cobro. Las dos se consultan con
+  `EXISTS (… WHERE ID_Detalle = X)` para que SQLite las aplane.
 - **Lo devuelto de una línea** se lee por la vista `v_unidades_devueltas` (devoluciones vigentes), no
   por `Devolucion_Lineas`. Un pago negativo con `ID_Pago_Origen` es una devolución de parte de un cobro
   ([caja.md](caja.md#devolver-parte-de-un-cobro)).

@@ -27,6 +27,7 @@ periodo (arqueo), la baja de un cobro y la devolución de parte de él. Sus tres
 | Devolución de parte de un cobro | `crates/tpv-infra-sqlite/src/cuentas.rs::devolver_lineas` → `Pagos` (negativo) + `Devolucion_Lineas` | Lo mismo, por la parte devuelta |
 | Historial | `crates/tpv-infra-sqlite/src/caja_movimientos.rs` → `Movimientos_Caja` | Una fila por hecho: `COBRO`, `ANULACION`, `DEVOLUCION`, `GASTO`, `GASTO_ANULADO` |
 | «Línea cobrada» | vista `v_lineas_cobradas` (`0001_inicial.sql`) | `Pago_Detalles` unida a pagos **activos** |
+| «Línea por cobrar» | vista `v_lineas_por_cobrar` | Ni cobrada ni devuelta entera por la baja (`DEVOLUCION`) de su cobro |
 | «Unidades devueltas» | vista `v_unidades_devueltas` | Lo devuelto de cada línea de un cobro por sus devoluciones **vigentes** |
 | Comandos | `src-tauri/src/commands/{cierre_caja,cuentas}.rs` | Exigen Administrador, salvo los cobros y sus bajas, que hace también el camarero ([permisos.md](permisos.md)); quién firma sale de la sesión |
 | Pantallas | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` · `DevolverModal.tsx` · `src/app/pages/Cuentas.tsx` | El cierre en cuatro pasos · el aviso antes de tocar un cierre hecho · devolver · el libro, el histórico y la baja |
@@ -223,6 +224,15 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
   cero.
 - **«Cobrada» es estar en `v_lineas_cobradas`**, no tener fila en `Pago_Detalles`: toda lectura que
   pregunte si una línea está cobrada va por la vista (las escrituras, contra la tabla).
+- **«Por cobrar» es estar en `v_lineas_por_cobrar`**, que no es lo contrario de «cobrada»: la línea
+  de un cobro dado de baja como `DEVOLUCION` sale de `v_lineas_cobradas` (su cobro queda
+  `ANULADO`), pero no vuelve a cobrarse, porque el cliente se llevó la consumición y se le devolvió el
+  dinero. Por esa vista van, en la Main y en el worker, elegir qué líneas cobrar («Cobrar todo»,
+  la barra y la mesa), el pendiente y las líneas sin cobrar de una mesa o un ticket (el plano, «Ver
+  tickets», el aviso del cierre), si una comanda se reabre al anular y qué líneas vuelven a la mesa
+  (`SQL_DEVOLVER_LINEAS_A_LA_MESA`), si una línea se puede quitar o editar, y el `Pagado` de cada
+  línea en pantalla. `v_lineas_cobradas` se queda para lo vendido de verdad: las estadísticas y la
+  guarda de AUD-14 (que ya se niega a borrar una comanda con cualquier cobro).
 - **La reconciliación de stock cuenta un consumo mientras su cobro esté activo** (`reconciliacion.rs`):
   las dos clases de baja reponen el stock.
 - **El consumo de stock se escribe después del pago**: la FK de `ID_Pago` se comprueba sentencia a
@@ -289,13 +299,10 @@ Reglas:
 - **No se devuelve más de lo que queda**: ni de una línea, ni del cobro, que en total no devuelve
   nunca más de lo cobrado (`cabe_en_el_cobro`); ni de un cobro dado de baja, ni una devolución, ni lo
   que se cobró a 0 €. Un rechazo no deja nada escrito: todo va en una transacción.
-- **El pendiente de un ticket sale de sus líneas sin cobrar** (las que no están en
-  `v_lineas_cobradas`, cada una redondeada como se cobra), no de restar cobros al total: una
-  devolución es un cobro negativo activo, y un ticket devuelto entero salía en «Ver tickets» con todo
-  su importe pendiente (CAJ-INC-03). Tampoco cuentan las de un cobro dado de baja como
-  `DEVOLUCION`: su cobro queda `ANULADO` y salen de la vista, pero no vuelven a cobrarse. La misma
-  expresión en la Main y en el worker (`PENDIENTE_DE_UN_TICKET` y `Pendientes_Pago`, con
-  `linea_por_cobrar!` / `LINEA_POR_COBRAR`).
+- **El pendiente de un ticket sale de sus líneas por cobrar** (`v_lineas_por_cobrar`, cada una
+  redondeada como se cobra), no de restar cobros al total: una devolución es un cobro negativo
+  activo, y un ticket devuelto entero salía en «Ver tickets» con todo su importe pendiente
+  (CAJ-INC-03). La misma expresión en la Main y en el worker (`PENDIENTE_DE_UN_TICKET`).
 - **En las estadísticas resta dinero, pero no es un cobro**: no cuenta como cobro de un camarero ni
   como mesa servida.
 - Al acabar, la pantalla abre su rectificativa en el modal de impresión, sin imprimirla.

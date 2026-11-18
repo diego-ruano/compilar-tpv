@@ -503,7 +503,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                   AND EXISTS (
                     SELECT 1 FROM Detalle_Comanda dc
                     WHERE dc.ID_Comanda = c.ID_Comanda
-                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                   );
                 "#,
                 (),

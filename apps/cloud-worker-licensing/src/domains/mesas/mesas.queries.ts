@@ -194,8 +194,8 @@ export async function lineas(
 				COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
 				COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
 				D.IVA_Percent AS IVA_Percent,
-				CASE WHEN EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
+				CASE WHEN NOT EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = D.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				D.Cambios_Ingredientes AS Cambios_Ingredientes
 			FROM Detalle_Comanda D
@@ -269,12 +269,12 @@ export async function mesasMetaAll(
 			(
 				SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
 				FROM Detalle_Comanda dc
-				WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+				WHERE dc.ID_Comanda = c.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 			) AS total_pendiente,
 			(
 				SELECT COUNT(*)
 				FROM Detalle_Comanda dc
-				WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+				WHERE dc.ID_Comanda = c.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 			) AS pendientes_pago,
 			(
 				SELECT COUNT(*)
@@ -282,7 +282,7 @@ export async function mesasMetaAll(
 				JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 				JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 				WHERE dc.ID_Comanda = c.ID_Comanda
-					AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+					AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
 					AND COALESCE(cat.Pasa_Cocina, 0) = 1
 					AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
 			) AS pendientes_cocina
@@ -496,8 +496,8 @@ export async function cobrarDetallesPlan(
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-				AND NOT EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				AND EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args,
@@ -511,8 +511,8 @@ export async function cobrarDetallesPlan(
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-				AND NOT EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				AND EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args,
@@ -571,8 +571,8 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 			p.Nombre AS Nombre_Producto,
 			dc.Notas AS Notas,
 			COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
-			CASE WHEN EXISTS (
-				SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+			CASE WHEN NOT EXISTS (
+				SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 			) THEN 1 ELSE 0 END AS Pagado,
 			dc.Cambios_Ingredientes AS Cambios_Ingredientes
 		FROM Comandas c

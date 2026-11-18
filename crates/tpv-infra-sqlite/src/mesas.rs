@@ -354,8 +354,8 @@ pub(crate) const SQL_LINEAS_COMANDA: &str = r#"
       COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
       COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
       D.IVA_Percent,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
+      CASE WHEN NOT EXISTS (
+        SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = D.ID_Detalle
       ) THEN 1 ELSE 0 END AS Pagado,
       D.Cambios_Ingredientes
     FROM Detalle_Comanda D
@@ -373,12 +373,12 @@ pub(crate) const SQL_MESAS_META_ALL: &str = r#"
       (
         SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
         FROM Detalle_Comanda dc
-        WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+        WHERE dc.ID_Comanda = c.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
       ) AS Total_Pendiente,
       (
         SELECT COUNT(*)
         FROM Detalle_Comanda dc
-        WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+        WHERE dc.ID_Comanda = c.ID_Comanda AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
       ) AS Pendientes_Pago,
       (
         SELECT COUNT(*)
@@ -386,7 +386,7 @@ pub(crate) const SQL_MESAS_META_ALL: &str = r#"
         JOIN Productos p ON p.ID_Producto = dc.ID_Producto
         JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
         WHERE dc.ID_Comanda = c.ID_Comanda
-          AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+          AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
           AND COALESCE(cat.Pasa_Cocina, 0) = 1
           AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
       ) AS Pendientes_Cocina
@@ -426,8 +426,8 @@ pub(crate) const SQL_COCINA_PENDIENTE: &str = r#"
       dc.ID_Detalle, COALESCE(dc.Cantidad,1) AS Cantidad,
       p.Nombre AS Nombre_Producto, dc.Notas,
       COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+      CASE WHEN NOT EXISTS (
+        SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
       ) THEN 1 ELSE 0 END AS Pagado,
       dc.Cambios_Ingredientes
     FROM Comandas c
@@ -1267,7 +1267,7 @@ impl MesasRepository for SqliteMesasRepository {
                   FROM Detalle_Comanda dc
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
-                    AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                    AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
                   ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC LIMIT 1
                 );
                 "#,
@@ -1303,8 +1303,8 @@ impl MesasRepository for SqliteMesasRepository {
                 r#"
                 DELETE FROM Detalle_Comanda
                 WHERE ID_Detalle = ?1
-                  AND NOT EXISTS (
-                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+                  AND EXISTS (
+                    SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
                   );
                 "#,
                 vec![Value::Text(id_detalle.to_string())],
@@ -1331,8 +1331,8 @@ impl MesasRepository for SqliteMesasRepository {
             UPDATE Detalle_Comanda
             SET Notas = ?2
             WHERE ID_Detalle = ?1
-              AND NOT EXISTS (
-                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+              AND EXISTS (
+                SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
               );
             "#,
             vec![
@@ -1360,8 +1360,8 @@ impl MesasRepository for SqliteMesasRepository {
             UPDATE Detalle_Comanda
             SET Cambios_Ingredientes = ?2
             WHERE ID_Detalle = ?1
-              AND NOT EXISTS (
-                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+              AND EXISTS (
+                SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = Detalle_Comanda.ID_Detalle
               );
             "#,
             vec![
@@ -1393,7 +1393,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                 "#;
             let count = select_one_i64(db, sql_count, count_args.clone())
                 .await?
@@ -1410,7 +1410,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                 "#;
             let total = select_one_dinero(db, sql_sum, count_args.clone())
                 .await?
@@ -1489,7 +1489,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?2
                   AND dc.ID_Detalle IN (SELECT value FROM json_each(?3))
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                 "#,
                 vec![
                     Value::Text(id_pago.clone()),
@@ -1539,7 +1539,7 @@ impl MesasRepository for SqliteMesasRepository {
                 r#"
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
-                WHERE dc.ID_Comanda = ?1 AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                WHERE dc.ID_Comanda = ?1 AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle);
                 "#,
                 vec![Value::Text(data.id_comanda.clone())],
             )

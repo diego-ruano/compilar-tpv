@@ -371,6 +371,7 @@ casos_de_contrato! {
     cuentas__anular_pago_con_devolucion_parcial,
     cuentas__anular_pago_mesa_reabierta_vacia,
     cuentas__anular_pago_mesa_reabierta_con_lineas,
+    cuentas__anular_pago_con_linea_devuelta,
     notificaciones__crear,
     notificaciones__crear_dedupe,
     notificaciones__crear_actualiza,

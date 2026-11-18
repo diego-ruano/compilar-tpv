@@ -1,7 +1,8 @@
 {
-  "descripcion": "Lineas de una comanda de mesa: lo que ve el camarero al abrir la mesa. Contrasta los tres COALESCE que deciden lo que se pinta cuando falta el dato (Cantidad, Precio_Unitario y el Nombre, que cae a Productos.Nombre y de ahi al literal 'Producto'), el flag Pagado calculado con un EXISTS sobre Pago_Detalles y el Pasa_Cocina heredado de la categoria. Una linea se quedo sin producto (ID_Producto NULL, que es lo que deja el ON DELETE SET NULL al retirar un articulo del catalogo) y solo conserva su Nombre_Producto: ahi es donde el LEFT JOIN se gana el sueldo, porque con un INNER esa linea desapareceria del ticket.",
+  "descripcion": "Lineas de una comanda de mesa: lo que ve el camarero al abrir la mesa. Contrasta los tres COALESCE que deciden lo que se pinta cuando falta el dato (Cantidad, Precio_Unitario y el Nombre, que cae a Productos.Nombre y de ahi al literal 'Producto'), el flag Pagado calculado con un EXISTS sobre Pago_Detalles y el Pasa_Cocina heredado de la categoria. Una linea se quedo sin producto (ID_Producto NULL, que es lo que deja el ON DELETE SET NULL al retirar un articulo del catalogo) y solo conserva su Nombre_Producto: ahi es donde el LEFT JOIN se gana el sueldo, porque con un INNER esa linea desapareceria del ticket. Y det-dev, devuelta entera por la baja de su cobro (DEVOLUCION): ese cobro queda ANULADO, pero la linea no vuelve a estar por cobrar (v_lineas_por_cobrar), asi que sale como Pagado.",
   "lectura": "mesas.lineas_comanda",
   "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
@@ -15,7 +16,10 @@
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-1', NULL, 'Producto retirado', 1, 500);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-4', 'com-otra', 'prod-bebida', 1, 300);",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 13:00:00', 'Efectivo', 300, 'parcial');",
-    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');"
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-dev', 'com-1', 'prod-bebida', 1, 300);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja) VALUES ('pago-dev', 'com-1', '2026-05-10 12:40:00', 'Efectivo', 300, 'parcial', 'ANULADO', '2026-05-10 12:40:00', 'user-1', 'no le gusto', 'DEVOLUCION');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-dev', 'det-dev');"
   ],
   "entrada": {
     "id_comanda": "com-1"

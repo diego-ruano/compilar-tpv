@@ -303,6 +303,8 @@ import casoCuentasAnularMesaVacia from "../../../tests/contract/casos/cuentas/an
 import goldenCuentasAnularMesaVacia from "../../../tests/contract/golden/cuentas/anular_pago_mesa_reabierta_vacia.json";
 import casoCuentasAnularMesaConLineas from "../../../tests/contract/casos/cuentas/anular_pago_mesa_reabierta_con_lineas.json";
 import goldenCuentasAnularMesaConLineas from "../../../tests/contract/golden/cuentas/anular_pago_mesa_reabierta_con_lineas.json";
+import casoCuentasAnularConDevuelta from "../../../tests/contract/casos/cuentas/anular_pago_con_linea_devuelta.json";
+import goldenCuentasAnularConDevuelta from "../../../tests/contract/golden/cuentas/anular_pago_con_linea_devuelta.json";
 import casoMesaSetReserva from "../../../tests/contract/casos/mesas/set_reserva_estado.json";
 import goldenMesaSetReserva from "../../../tests/contract/golden/mesas/set_reserva_estado.json";
 import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.json";
@@ -470,6 +472,11 @@ const CASOS = [
 		nombre: "cuentas_anular_pago_mesa_reabierta_con_lineas",
 		caso: casoCuentasAnularMesaConLineas,
 		golden: goldenCuentasAnularMesaConLineas,
+	},
+	{
+		nombre: "cuentas_anular_pago_con_linea_devuelta",
+		caso: casoCuentasAnularConDevuelta,
+		golden: goldenCuentasAnularConDevuelta,
 	},
 	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
 	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },

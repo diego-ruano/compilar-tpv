@@ -36,18 +36,9 @@ function rows(rs: any): any[] {
 // Lo que queda por cobrar de un ticket: sus líneas sin cobrar, cada una redondeada como se cobra
 // (CAJ-INC-03). Lo mismo en la Main (`PENDIENTE_DE_UN_TICKET`, `tpv-infra-sqlite/src/venta_rapida.rs`).
 // Antes era `Total_Comanda − SUM(cobros activos)`, y una devolución es un cobro negativo activo: un
-// ticket devuelto entero restaba 0 y salía con todo su importe pendiente.
-// ¿La línea `dc` sigue por cobrar? Ni cobrada ni devuelta entera por la baja de su cobro
-// (`Motivo_Baja = 'DEVOLUCION'`): esa baja deja el cobro ANULADO y sus líneas fuera de
-// `v_lineas_cobradas`, pero no vuelven a cobrarse. Lo mismo en la Main (`linea_por_cobrar!`).
-const LINEA_POR_COBRAR = `
-	NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-	AND NOT EXISTS (
-		SELECT 1 FROM Pago_Detalles pdv JOIN Pagos pv ON pv.ID_Pago = pdv.ID_Pago
-		WHERE pdv.ID_Detalle = dc.ID_Detalle
-			AND pv.Estado = 'ANULADO' AND pv.Motivo_Baja = 'DEVOLUCION'
-	)
-`;
+// ticket devuelto entero restaba 0 y salía con todo su importe pendiente. «Por cobrar» es
+// `v_lineas_por_cobrar`: lo devuelto entero por la baja de su cobro tampoco cuenta.
+const LINEA_POR_COBRAR = "EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)";
 
 const PENDIENTE_DE_UN_TICKET = `
 	COALESCE((
@@ -220,8 +211,8 @@ export async function lineas(
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
 				dc.Notas AS Notas,
 				dc.Estado_Cocina AS Estado_Cocina,
-				CASE WHEN EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				CASE WHEN NOT EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				dc.IVA_Percent AS IVA_Percent,
@@ -292,8 +283,8 @@ export async function detallesVerTicket(
 				COALESCE(dc.Cantidad,1) AS Cantidad,
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
 				COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
-				CASE WHEN EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				CASE WHEN NOT EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				dc.Notas AS Notas,
 				dc.IVA_Percent AS IVA_Percent,
@@ -340,8 +331,8 @@ export async function cobrarPlan(
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-				AND NOT EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				AND EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args: detalleArgs,
@@ -360,8 +351,8 @@ export async function cobrarPlan(
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
-				AND NOT EXISTS (
-					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				AND EXISTS (
+					SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle
 				)
 			ORDER BY dc.ID_Detalle;
 		`,
