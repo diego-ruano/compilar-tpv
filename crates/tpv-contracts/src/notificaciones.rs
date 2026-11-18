@@ -4,6 +4,16 @@
 //! el reparto a otros dispositivos lo hace la captura del outbox sobre las escrituras.
 
 use serde::{Deserialize, Serialize};
+
+/// El globito de la campana: cuántas no leídas tiene quien ha iniciado sesión y cuándo se creó la
+/// más reciente de las que puede ver, también las de la papelera (`Creada_En`, la hora del negocio).
+/// El aviso «Tienes una nueva notificación» sale cuando sube el número **y** avanza esa fecha:
+/// restaurar una de la papelera sube el número, pero no es nueva.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct NoLeidasDto {
+    pub count: i64,
+    pub ultima_creada_en: Option<String>,
+}
 /// Fila del centro de notificaciones **para un usuario concreto**: incluye `leida`, que se calcula
 /// respecto a ese usuario (una notificación "a todos" está leída para unos y no para otros).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

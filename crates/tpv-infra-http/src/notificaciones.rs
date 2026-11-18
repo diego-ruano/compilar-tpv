@@ -10,7 +10,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
-use tpv_contracts::notificaciones::NotificacionRow;
+use tpv_contracts::notificaciones::{NoLeidasDto, NotificacionRow};
 use tpv_domain::notificaciones::NuevaNotificacion;
 
 use crate::CloudClient;
@@ -29,6 +29,9 @@ impl HttpNotificacionesRepository {
 struct CountResp {
     #[serde(default)]
     count: i64,
+    /// Un worker anterior no la manda: sin ella, el aviso de una nueva no sale (no se sabe si lo es).
+    #[serde(default)]
+    ultima_creada_en: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -60,12 +63,12 @@ impl NotificacionesRepository for HttpNotificacionesRepository {
             .await
     }
 
-    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<i64> {
+    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<NoLeidasDto> {
         let r: CountResp = self
             .client
             .get_query("/v1/notificaciones/count", &[("usuario", id_usuario.to_string())])
             .await?;
-        Ok(r.count)
+        Ok(NoLeidasDto { count: r.count, ultima_creada_en: r.ultima_creada_en })
     }
 
     async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {

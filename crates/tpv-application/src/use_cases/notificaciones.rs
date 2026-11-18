@@ -9,7 +9,7 @@
 //! colar otro (restaurar lo que este usuario iba a borrar para siempre).
 
 use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, NotificacionIdInput, NotificacionRow, NotificacionesListArgs,
+    CrearNotificacionInput, NoLeidasDto, NotificacionIdInput, NotificacionRow, NotificacionesListArgs,
 };
 use tpv_domain::notificaciones::NuevaNotificacion;
 
@@ -34,10 +34,10 @@ pub async fn listar(
 pub async fn contar_no_leidas(
     repo: &dyn NotificacionesRepository,
     id_usuario: &str,
-) -> AppResult<i64> {
+) -> AppResult<NoLeidasDto> {
     let id_usuario = id_usuario.trim();
     if id_usuario.is_empty() {
-        return Ok(0);
+        return Ok(NoLeidasDto::default());
     }
     repo.contar_no_leidas(id_usuario).await
 }
@@ -157,7 +157,7 @@ mod tests {
         async fn listar(&self, _: &str, _: bool) -> AppResult<Vec<NotificacionRow>> {
             panic!("repo llamado")
         }
-        async fn contar_no_leidas(&self, _: &str) -> AppResult<i64> {
+        async fn contar_no_leidas(&self, _: &str) -> AppResult<NoLeidasDto> {
             panic!("repo llamado")
         }
         async fn marcar_leida(&self, _: &str, _: &str) -> AppResult<bool> {
@@ -204,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn contar_sin_usuario_devuelve_cero() {
-        assert_eq!(contar_no_leidas(&RepoQueNoDebeLlamarse, "").await.unwrap(), 0);
+        assert_eq!(contar_no_leidas(&RepoQueNoDebeLlamarse, "").await.unwrap(), NoLeidasDto::default());
     }
 
     #[tokio::test]
@@ -290,7 +290,7 @@ mod tests {
         async fn listar(&self, _: &str, _: bool) -> AppResult<Vec<NotificacionRow>> {
             panic!("no se comprueba con una lectura aparte")
         }
-        async fn contar_no_leidas(&self, _: &str) -> AppResult<i64> {
+        async fn contar_no_leidas(&self, _: &str) -> AppResult<NoLeidasDto> {
             panic!("no se cuenta nada")
         }
         async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {

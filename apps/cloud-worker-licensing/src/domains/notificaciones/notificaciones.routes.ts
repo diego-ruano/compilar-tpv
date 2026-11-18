@@ -45,10 +45,7 @@ notificacionesRoutes.get("/papelera", async (c) => {
 notificacionesRoutes.get("/count", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
 	if (uid == null) return badRequest(c, "id_usuario_invalido");
-	const count = await tenantQuery(c, (db) =>
-		q.contarNoLeidas(db, uid),
-	);
-	return c.json({ count });
+	return c.json(await tenantQuery(c, (db) => q.contarNoLeidas(db, uid)));
 });
 
 // Escrituras

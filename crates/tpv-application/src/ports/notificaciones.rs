@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::notificaciones::NotificacionRow;
+use tpv_contracts::notificaciones::{NoLeidasDto, NotificacionRow};
 use tpv_domain::notificaciones::NuevaNotificacion;
 
 use crate::error::AppResult;
@@ -21,7 +21,7 @@ pub trait NotificacionesRepository: Send + Sync {
     ) -> AppResult<Vec<NotificacionRow>>;
 
     /// Nº de notificaciones activas visibles y **no leídas** por `id_usuario` (para el badge).
-    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<i64>;
+    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<NoLeidasDto>;
 
     // AUD-26: las escrituras de abajo reciben el usuario (el de la sesión) y sólo actúan sobre una
     // notificación dirigida a él (a todos, a él o a su rol) y, en la papelera, en el estado que

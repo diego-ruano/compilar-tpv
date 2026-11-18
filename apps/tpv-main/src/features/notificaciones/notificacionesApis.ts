@@ -23,11 +23,9 @@ export async function notificacionesListar(params: {
   return rows ?? [];
 }
 
-/** Nº de no leídas de quien ha iniciado sesión (para el badge de la campana). */
-export async function notificacionesNoLeidas(): Promise<number> {
-  const n = await commands.notificacionesNoLeidas();
-  return Number(n ?? 0);
-}
+/** Las no leídas de quien ha iniciado sesión (el badge de la campana) y la fecha de la más reciente
+ *  que puede ver, papelera incluida (el aviso de una nueva). */
+export const notificacionesNoLeidas = commands.notificacionesNoLeidas;
 
 /** Marca una notificación como leída por quien ha iniciado sesión. */
 export const notificacionesMarcarLeida = commands.notificacionesMarcarLeida;

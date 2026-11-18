@@ -12,7 +12,7 @@
 use tauri::State;
 
 use tpv_application::use_cases::notificaciones as uc;
-use tpv_contracts::notificaciones::{NotificacionIdInput, NotificacionRow, NotificacionesListArgs};
+use tpv_contracts::notificaciones::{NoLeidasDto, NotificacionIdInput, NotificacionRow, NotificacionesListArgs};
 
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -32,7 +32,7 @@ pub async fn notificaciones_listar(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn notificaciones_no_leidas(state: State<'_, AppState>) -> Result<i64, AppErrorDto> {
+pub async fn notificaciones_no_leidas(state: State<'_, AppState>) -> Result<NoLeidasDto, AppErrorDto> {
     let id_usuario = state.sesion().await?.id_usuario;
     let repo = state.notificaciones_repo().await?;
     uc::contar_no_leidas(repo.as_ref(), &id_usuario)

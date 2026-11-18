@@ -56,7 +56,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
   const navigate = useNavigate();
 
   // Badge de la campana: nº de notificaciones no leídas del usuario logueado.
-  const noLeidas = useNoLeidasCount(idUsuario).data ?? 0;
+  const noLeidas = useNoLeidasCount(idUsuario).data?.count ?? 0;
 
   // Soporta controlado por layout (responsive) o "uncontrolled".
   const [openLocal, setOpenLocal] = useState(false);

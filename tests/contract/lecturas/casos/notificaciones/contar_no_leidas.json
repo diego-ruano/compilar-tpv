@@ -1,5 +1,5 @@
 {
-  "descripcion": "El numero del globito. Mismo seed que el centro: de las cuatro visibles, una esta leida, asi que tienen que salir tres. Un numero, pero es el que decide si el usuario ve que tiene algo pendiente.",
+  "descripcion": "El numero del globito y la fecha de la mas reciente que el usuario puede ver. Mismo seed que el centro: de las cuatro visibles, una esta leida, asi que tienen que salir tres. La fecha es la de la mas reciente suya, tambien en la papelera (una restaurada sube el numero pero no es nueva), y no la de una ajena aunque sea posterior.",
   "lectura": "notificaciones.contar_no_leidas",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",
@@ -14,6 +14,8 @@
     "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-mi-rol', 'turno', 'info', 'Para tu rol', 'rol', 'rol-lect', 'activa', '2026-05-13 10:00:00');",
     "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-resuelta', 'stock', 'info', 'Ya resuelta', 'todos', 'resuelta', '2026-05-09 10:00:00');",
     "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-papelera', 'stock', 'info', 'Descartada', 'todos', 'descartada', '2026-05-08 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-papelera-nueva', 'stock', 'info', 'Descartada hoy', 'todos', 'descartada', '2026-05-14 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-ajena-nueva', 'tarea', 'info', 'De otro, posterior', 'usuario', 'user-2', 'activa', '2026-05-15 10:00:00');",
     "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('n-todos', 'user-1', '2026-05-10 11:00:00');"
   ],
   "entrada": {

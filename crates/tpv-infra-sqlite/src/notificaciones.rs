@@ -15,7 +15,7 @@ use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
-use tpv_contracts::notificaciones::NotificacionRow;
+use tpv_contracts::notificaciones::{NoLeidasDto, NotificacionRow};
 use tpv_domain::notificaciones::NuevaNotificacion;
 
 use crate::db::{Db, Reader, Writer};
@@ -217,18 +217,26 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         self.filas(id_usuario, VISIBLE, filtro_no_leidas).await
     }
 
-    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<i64> {
+    /// Con la fecha de la más reciente que puede ver, también en la papelera (`NoLeidasDto`): el
+    /// aviso de una nueva sale si sube el número y avanza la fecha, y restaurar una de la papelera
+    /// sólo sube el número.
+    async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<NoLeidasDto> {
         let sql = format!(
             r#"
-            SELECT COUNT(*)
-            FROM Notificaciones n
-            WHERE {visible}
-              AND NOT EXISTS (
-                SELECT 1 FROM Notificacion_Lecturas l
-                WHERE l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
-              );
+            SELECT
+              (SELECT COUNT(*)
+                 FROM Notificaciones n
+                WHERE {visible}
+                  AND NOT EXISTS (
+                    SELECT 1 FROM Notificacion_Lecturas l
+                    WHERE l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
+                  )),
+              (SELECT MAX(n.Creada_En)
+                 FROM Notificaciones n
+                WHERE ({visible}) OR ({papelera}));
             "#,
-            visible = VISIBLE
+            visible = VISIBLE,
+            papelera = VISIBLE_PAPELERA
         );
 
         let db = self.db.read().await;
@@ -238,9 +246,12 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
             .map_err(db_err)?;
 
         let Some(row) = rows.next().await.map_err(db_err)? else {
-            return Ok(0);
+            return Ok(NoLeidasDto::default());
         };
-        Ok(v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0))
+        Ok(NoLeidasDto {
+            count: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+            ultima_creada_en: norm_opt_string(row.get_value(1).map_err(db_err)?),
+        })
     }
 
     async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
@@ -730,7 +741,7 @@ mod tests_cada_uno_lo_suyo {
 
         // El camarero, con su usuario, no ve el aviso del rol Administrador ni lo cuenta.
         assert!(ids_del_centro(&repo, CAMARERO).await.is_empty());
-        assert_eq!(uc::contar_no_leidas(&repo, CAMARERO).await.unwrap(), 0);
+        assert_eq!(uc::contar_no_leidas(&repo, CAMARERO).await.unwrap().count, 0);
         assert!(uc::listar_descartadas(&repo, CAMARERO).await.unwrap().is_empty());
 
         // Aunque conozca el id, no puede marcarlo: no es suyo. Ni recibo ni nada que suba.
@@ -743,13 +754,46 @@ mod tests_cada_uno_lo_suyo {
         );
         assert_eq!(uc::marcar_todas_leidas(&repo, CAMARERO).await.unwrap(), 0);
         assert_eq!(en_outbox(&db).await, antes, "lo negado no sube a la nube");
-        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), 1);
+        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap().count, 1);
 
         // El administrador, con el suyo, lo ve y lo marca; la segunda vez no hay nada que marcar.
         assert_eq!(ids_del_centro(&repo, ADMIN).await, std::slice::from_ref(&aviso));
         assert!(uc::marcar_leida(&repo, ADMIN, id(&aviso)).await.unwrap());
         assert!(!uc::marcar_leida(&repo, ADMIN, id(&aviso)).await.unwrap());
-        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), 0);
+        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap().count, 0);
+    }
+
+    #[tokio::test]
+    async fn restaurar_de_la_papelera_sube_el_numero_pero_no_la_fecha_de_la_mas_reciente() {
+        // El aviso «Tienes una nueva notificación» salta si sube el número Y avanza la fecha de la
+        // más reciente que el usuario puede ver, también en la papelera: restaurar una sube el
+        // número, pero no es nueva.
+        let (db, repo) = abrir().await;
+        let aviso = aviso_al_admin(&repo).await;
+        let creada = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
+        assert_eq!(creada.count, 1);
+        let fecha = creada.ultima_creada_en.clone().expect("la fecha de la más reciente");
+
+        assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        let en_la_papelera = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
+        assert_eq!((en_la_papelera.count, en_la_papelera.ultima_creada_en.as_deref()), (0, Some(fecha.as_str())));
+
+        assert!(uc::restaurar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), creada, "otra vez la misma: no es nueva");
+
+        // Una de verdad nueva (más tarde) sí la mueve; una que no es suya, no.
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) \
+                 VALUES ('ajena', 'tarea', 'info', 'De otro', 'usuario', 'otro', 'activa', '2999-01-01 00:00:00'), \
+                        ('nueva', 'tarea', 'info', 'Nueva', 'todos', NULL, 'activa', '2998-01-01 00:00:00');",
+            )
+            .await
+            .unwrap();
+        let ahora = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
+        assert_eq!((ahora.count, ahora.ultima_creada_en.as_deref()), (2, Some("2998-01-01 00:00:00")));
     }
 
     #[tokio::test]

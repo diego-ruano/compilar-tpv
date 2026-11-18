@@ -2017,6 +2017,17 @@ export type MisTareasRow = {
 };
 
 /**
+ *  El globito de la campana: cuántas no leídas tiene quien ha iniciado sesión y cuándo se creó la
+ *  más reciente de las que puede ver, también las de la papelera (`Creada_En`, la hora del negocio).
+ *  El aviso «Tienes una nueva notificación» sale cuando sube el número **y** avanza esa fecha:
+ *  restaurar una de la papelera sube el número, pero no es nueva.
+ */
+export type NoLeidasDto = {
+	count: number,
+	ultima_creada_en: string | null,
+};
+
+/**
  *  Identifica una notificación: para marcarla leída y para las acciones de la papelera
  *  (descartar, restaurar, eliminar).
  *
