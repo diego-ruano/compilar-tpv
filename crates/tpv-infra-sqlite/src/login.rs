@@ -851,7 +851,17 @@ impl LoginRepository for SqliteLoginRepository {
         turno_partido: bool,
     ) -> AppResult<()> {
         let db = self.db.write().await;
-        let fecha = fecha.unwrap_or_else(today_ymd);
+        // Sin fecha, la de la jornada en curso (un turno de noche que empezó ayer) o la de hoy. La
+        // pantalla ya no manda la de lo que tenía a la vista: si era una jornada que había
+        // caducado (marcar «Partido» antes de fichar, pasada la medianoche), se guardaba en el día
+        // de ayer y la de hoy se quedaba sin él.
+        let fecha = match fecha {
+            Some(f) => f,
+            None => match fichaje_en_curso(&db, id_usuario).await? {
+                Some((_, f)) => f,
+                None => today_ymd(),
+            },
+        };
 
         // El WriteGuard excluye cualquier otra escritura hasta guardar el cambio.
         let mut partes = db.query(
@@ -1148,6 +1158,35 @@ mod tests_fichajes_colgados {
         assert_eq!(status.partes.len(), 1);
         assert!(status.partes[0].entrada.is_some());
         assert!(status.partes[0].salida.is_none());
+    }
+
+    async fn partido_del_dia(db: &Db, fecha: &str) -> Option<i64> {
+        let g = db.read().await;
+        let mut rows = g
+            .query(
+                "SELECT Turno_Partido FROM Fichaje_Dia WHERE ID_Usuario = 'u1' AND Fecha = ?1;",
+                vec![Value::Text(fecha.into())],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().map(|r| v_i64(r.get_value(0).unwrap()).unwrap_or(0))
+    }
+
+    #[tokio::test]
+    async fn sin_fecha_el_turno_partido_va_a_la_jornada_en_curso_o_a_hoy() {
+        // La pantalla ya no manda la fecha de lo que tenía a la vista, que podía ser una jornada
+        // caducada: el día lo elige el repositorio.
+        let (db, _dir) = db_con_usuario().await;
+        let repo = SqliteLoginRepository::new(db.clone());
+        repo.set_turno_partido("u1", None, true).await.unwrap();
+        assert_eq!(partido_del_dia(&db, &today_ymd()).await, Some(1));
+
+        let (db, _dir) = db_con_usuario().await;
+        abierto_ayer_hace(&db, "noche", 3).await;
+        let repo = SqliteLoginRepository::new(db.clone());
+        repo.set_turno_partido("u1", None, true).await.unwrap();
+        assert_eq!(partido_del_dia(&db, &ayer()).await, Some(1));
+        assert_eq!(partido_del_dia(&db, &today_ymd()).await, None);
     }
 
     #[tokio::test]

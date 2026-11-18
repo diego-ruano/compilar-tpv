@@ -120,7 +120,13 @@ loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) =>
 	// quien pide (`X-Client-Now`, validada como en `tenantQuery`). Sin esa hora no se cae al reloj de
 	// la base, que es UTC (cerca de la medianoche, el día anterior): el mismo rechazo que da el DO a una
 	// escritura que pide «ahora» sin hora de quien escribe (SYNC-04), el de cuando el día salía del SQL.
-	const fecha = datos.fecha ?? diaDeQuienPide(c);
+	//
+	// Sin fecha, antes que «hoy» va la de la jornada en curso (un turno de noche que empezó ayer),
+	// como en la Main: la pantalla ya no manda la de lo que tenía a la vista, que podía ser una
+	// jornada caducada.
+	const fecha = datos.fecha
+		?? (await tenantQuery(c, (db) => q.getOpenPunch(db, datos.id_usuario)))?.fecha
+		?? diaDeQuienPide(c);
 	const r = await apply(c, cmd.setTurnoPartido(datos, fecha));
 	// Sin recuento (`null`: un reintento cuyo recuento no se guardó, AUD-26), se mira si quedó como se pidió el
 	// día que se escribió: el del primer intento, que el DO guardó con el resultado, y no el de hoy si

@@ -275,6 +275,25 @@ describe("turno partido: con el recuento, si se sabe; si no, por el estado", () 
 			expect(turnoPartido(sql)).toBe(1);
 		});
 	});
+
+	// La pantalla ya no manda la fecha de lo que tenía a la vista: con un turno de noche en curso
+	// que empezó ayer, sin fecha, el día es el de esa jornada y no el de «hoy» de quien pide.
+	it("sin fecha y con una jornada de noche en curso, se marca en el día de esa jornada", async () => {
+		relojA("2026-11-12T00:00:00Z");
+		await conHub("turno-partido-jornada-en-curso", "respuesta", async (sql, env) => {
+			sql.exec(
+				`INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
+				 VALUES ('fichaje-noche', ?, ?, 1, '${FECHA} 22:00:00', 'ABIERTO');`,
+				USUARIO,
+				FECHA,
+			);
+			const MARCAR = { id_usuario: USUARIO, turno_partido: true };
+			const r = await pedir("/v1/login/turno-partido", MARCAR, env, "op-turno-partido-en-curso", PASADA_MEDIANOCHE);
+			expect(r).toEqual({ status: 200, json: { ok: true } });
+			expect(turnoPartido(sql, FECHA)).toBe(1);
+			expect(turnoPartido(sql, "2026-11-12")).toBe(null);
+		});
+	});
 });
 
 describe("horarios: con el recuento, si se sabe; si no, por el estado", () => {

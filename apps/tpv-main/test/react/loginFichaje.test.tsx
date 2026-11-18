@@ -4,6 +4,7 @@
 // - AUT-INC-01: «Mostrar PIN» es de quien lo pulsó; el siguiente trabajador teclea oculto.
 // - TRA-INC-04: lo que hacen otros equipos (la réplica) se ve sin volver a tocar nada.
 // - AUT-INC-02: si la jornada es de ayer lo dice el backend.
+// - «Partido» no manda la fecha de lo que hay en pantalla: el día lo pone el backend.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -220,4 +221,22 @@ it("«Jornada de ayer» lo dice el backend, no el reloj del dispositivo (AUT-INC
 
     await elegir("Luis");
     await screen.findByText("Jornada de ayer");
+});
+
+it("marcar «Partido» con una jornada caducada a la vista no manda su fecha", async () => {
+    // Lo que había en pantalla era de ayer; pasada la medianoche se marca antes de fichar.
+    backend.estados.set("u-ana", sinFichar("1999-01-01"));
+    pintarLogin();
+    await elegir("Ana");
+    await screen.findAllByRole("button", { name: "Fichar entrada" });
+
+    const casilla = await waitFor(() => {
+        const c = screen.getAllByRole("checkbox")[0];
+        expect(c).toBeEnabled();
+        return c;
+    });
+    fireEvent.click(casilla);
+    await waitFor(() => expect(lecturas("set_turno_partido_hoy")).toBe(1));
+    const args = backend.llamadas.find((l) => l.comando === "set_turno_partido_hoy")!.args;
+    expect(args).toEqual({ id_usuario: "u-ana", turno_partido: true });
 });

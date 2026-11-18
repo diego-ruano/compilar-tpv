@@ -318,10 +318,12 @@ export default function Login() {
         accionEnCursoRef.current = true;
         try {
             setLoadingPunch(true);
+            // Sin fecha: el día lo pone el backend (la jornada en curso o la de hoy). La de
+            // `punchStatus` podía ser la de una jornada ya caducada: marcar «Partido» antes de fichar,
+            // pasada la medianoche, se guardaba en el día de ayer.
             await commands.setTurnoPartidoHoy({
                 id_usuario: selectedUserId,
                 turno_partido: checked,
-                fecha: punchStatus?.fecha,
             });
             await releerEstado(selectedUserId);
             toast.success(
