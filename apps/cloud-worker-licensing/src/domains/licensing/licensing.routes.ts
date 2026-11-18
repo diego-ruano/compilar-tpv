@@ -48,6 +48,7 @@ import {
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { avisarCambioDeLicencia } from "../../lib/hub";
+import { CORREO_SOPORTE } from "../../lib/soporte";
 import { avisarBasePerdida, esBasePerdida } from "../../lib/basePerdida";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
@@ -209,7 +210,7 @@ const filtroExterior: MiddlewareHandler<Ctx> = async (c, next) => {
 const ACTIVAR_SIN_FIRMA =
 	"Esta versión del programa ya no puede activar licencias. Actualízalo y vuelve a intentarlo.";
 const ACTIVAR_CON_FIRMA_MALA =
-	"No se ha podido comprobar la identidad de este equipo. Vuelve a intentarlo y, si se repite, contacta con soporte.";
+	`No se ha podido comprobar la identidad de este equipo. Vuelve a intentarlo y, si se repite, contacta con soporte en ${CORREO_SOPORTE}.`;
 
 /** El 401 de una activación sin prueba de posesión (AUD-01). El de la hora lleva la frase de la tabla. */
 function rechazoDeFirma(c: Context, error: string) {
@@ -599,7 +600,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 					ok: false,
 					error: "too_many_attempts",
 					message:
-						"Se han tecleado demasiados códigos incorrectos para esta licencia. Vuelve a intentarlo mañana o contacta con soporte.",
+						`Se han tecleado demasiados códigos incorrectos para esta licencia. Vuelve a intentarlo mañana o contacta con soporte en ${CORREO_SOPORTE}.`,
 				} satisfies ApiError,
 				429,
 			);

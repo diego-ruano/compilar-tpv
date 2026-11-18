@@ -6,6 +6,7 @@
 // llamada a soporte.
 
 import { diasNaturalesHasta } from "../../shared/lib/diasNaturales";
+import { CORREO_SOPORTE } from "../../shared/lib/soporte";
 import type { AvisoCaducidad } from "./pantallaDeArranque";
 
 export type Texto = { titulo: string; cuerpo: string };
@@ -43,7 +44,7 @@ export function textoBloqueo(motivo: string): Texto {
 	if (motivo === "device_replaced")
 		return {
 			titulo: "Licencia trasladada",
-			cuerpo: `Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes. Para usar aquí otra licencia, borra esta y vuelve a activar: ${LOS_DATOS_SE_APARTAN}`,
+			cuerpo: `Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte en ${CORREO_SOPORTE} cuanto antes. Para usar aquí otra licencia, borra esta y vuelve a activar: ${LOS_DATOS_SE_APARTAN}`,
 		};
 	if (motivo === "bad_signature")
 		return {
@@ -67,7 +68,7 @@ export function textoBloqueo(motivo: string): Texto {
 	if (motivo === "rejection_unverified")
 		return {
 			titulo: "El servidor de licencias no reconoce este equipo",
-			cuerpo: "Su respuesta no se ha podido verificar, así que este equipo ha seguido trabajando todo el tiempo que permite estar sin conexión. Contacta con soporte: no hace falta volver a teclear la clave, y en cuanto se resuelva basta con reintentar.",
+			cuerpo: `Su respuesta no se ha podido verificar, así que este equipo ha seguido trabajando todo el tiempo que permite estar sin conexión. Contacta con soporte en ${CORREO_SOPORTE}: no hace falta volver a teclear la clave, y en cuanto se resuelva basta con reintentar.`,
 		};
 	return {
 		titulo: "Licencia bloqueada",
@@ -103,7 +104,7 @@ export function textoRechazoPrevio(motivo: string | null): Texto | null {
 			titulo: "Esta licencia se activó en otro equipo",
 			cuerpo:
 				"Al moverla, este ordenador dejó de tener acceso. Si no has sido tú, contacta con " +
-				"soporte cuanto antes; si sí, puedes volver a traerla aquí con tu clave. Actives " +
+				`soporte en ${CORREO_SOPORTE} cuanto antes; si sí, puedes volver a traerla aquí con tu clave. Actives ` +
 				`la licencia que actives, ${LOS_DATOS_SE_APARTAN}`,
 		},
 	};

@@ -163,10 +163,16 @@ pub enum ResultadoActivacion {
 ========================================================= */
 
 const MSG_SIN_LICENCIA_A_LA_QUE_SUMAR: &str = "Este equipo no tiene una licencia a la que sumarle tiempo.";
-const MSG_CLAVE_NO_SUMADA: &str =
-    "Esa clave no se ha sumado a la licencia de este equipo. Aquí no se ha cambiado nada: contacta con soporte.";
-const MSG_SUMADA_A_OTRO_NEGOCIO: &str =
-    "Esa clave se ha sumado a la licencia de otro negocio, no a la de este equipo. Aquí no se ha cambiado nada: contacta con soporte.";
+const MSG_CLAVE_NO_SUMADA: &str = concat!(
+    "Esa clave no se ha sumado a la licencia de este equipo. Aquí no se ha cambiado nada: contacta con soporte en ",
+    crate::correo_soporte!(),
+    "."
+);
+const MSG_SUMADA_A_OTRO_NEGOCIO: &str = concat!(
+    "Esa clave se ha sumado a la licencia de otro negocio, no a la de este equipo. Aquí no se ha cambiado nada: contacta con soporte en ",
+    crate::correo_soporte!(),
+    "."
+);
 
 /// AUD-01 · ¿Se puede pedir esto a la nube? Se mira ANTES de mandar la clave.
 ///

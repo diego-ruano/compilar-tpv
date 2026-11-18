@@ -16,7 +16,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
-| [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
+| [OPS-02](#ops-02--soporte-sin-diagnóstico) | 🟡 | Sin paquete de diagnóstico exportable para soporte | Sin empezar |
 | [DO-TURSO](#do-turso--lo-que-queda-en-turso-de-las-bases-de-los-negocios) | 🟡 | Quedan en Turso la tabla `tenant_databases`, dos secretos y las bases de los negocios | A mano, tras desplegar y sin vuelta atrás |
 | [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
@@ -250,10 +250,10 @@ operadores españoles bloquean cuando hay fútbol: por eso la API y las reservas
 `workers.dev` (el porqué, junto a `CLOUD_API_BASE`). Con las imágenes pasaría lo mismo: la Handy se
 quedaría sin ellas en hora de partido. Hace falta otra salida o volver a decidir.
 
-### OPS-02 · Soporte sin canal ni diagnóstico
+### OPS-02 · Soporte sin diagnóstico
 
-Conectividad dice «contacta con soporte» sin decir cuál
-(`features/configuracion/sections/Conectividad.tsx`), y no hay ningún botón para sacar un paquete de
+Cada «contacta con soporte» lleva ya el correo (`correo_soporte!` en la Main, `lib/soporte.ts` en el
+worker y `shared/lib/soporte.ts` en la pantalla). Lo que falta es un botón para sacar un paquete de
 diagnóstico, que es lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
 
 ### DO-TURSO · Lo que queda en Turso de las bases de los negocios

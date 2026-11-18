@@ -470,8 +470,12 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                     severidad: Severidad::Error,
                     titulo: format!("El servidor de licencias no reconoce este equipo: quedan ~{horas} h"),
                     cuerpo: Some(
-                        "La respuesta no se ha podido verificar, así que de momento sigues trabajando. Contacta con soporte: si no se resuelve antes de que se acabe ese tiempo, la aplicación se bloqueará."
-                            .to_string(),
+                        concat!(
+                            "La respuesta no se ha podido verificar, así que de momento sigues trabajando. Contacta con soporte en ",
+                            tpv_domain::correo_soporte!(),
+                            ": si no se resuelve antes de que se acabe ese tiempo, la aplicación se bloqueará."
+                        )
+                        .to_string(),
                     ),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: None,

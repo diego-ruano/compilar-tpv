@@ -16,6 +16,7 @@ import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 import { AvisoInterruptores } from "./AvisoInterruptores";
 import { ImagenesPendientes } from "./ImagenesPendientes";
+import { CORREO_SOPORTE } from "../../../shared/lib/soporte";
 
 function desdeHace(ms: number): string {
 	const d = Date.now() - ms;
@@ -237,7 +238,7 @@ function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: 
 					Hay {health.subida_en_cuarentena} cambio(s) de este equipo que la nube ha rechazado y
 					que ya no se van a subir. El resto sigue copiándose con normalidad, pero esos datos
 					solo están aquí: si perdieras este equipo hoy, no volverían. Ya se ha avisado
-					automáticamente; contacta con soporte.
+					automáticamente; contacta con soporte en {CORREO_SOPORTE}.
 				</div>
 			)}
 		</Panel>
@@ -302,7 +303,7 @@ function RecuperarDeLaNube({ health }: { health: SyncHealth }) {
 			) : rechazados > 0 ? (
 				<p>
 					Este TPV tiene {rechazados} cambio(s) que la nube no ha aceptado y que sólo están aquí:
-					traer la nube los borraría. Contacta con soporte.
+					traer la nube los borraría. Contacta con soporte en {CORREO_SOPORTE}.
 				</p>
 			) : confirmando ? (
 				<div className="grid gap-2">

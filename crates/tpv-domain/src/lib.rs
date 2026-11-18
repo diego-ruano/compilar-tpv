@@ -8,6 +8,16 @@
 //! Cada módulo de negocio (mesas, venta rápida, inventario, caja…) publica sus
 //! entidades y validaciones puras.
 
+/// OPS-02 · El correo de soporte, que va en cada mensaje que manda a «contacta con soporte». Es una
+/// macro para poder componerlo con `concat!` en las constantes de texto. El mismo en el worker
+/// (`lib/soporte.ts`) y en la pantalla (`shared/lib/soporte.ts`).
+#[macro_export]
+macro_rules! correo_soporte {
+    () => {
+        "altarialights@gmail.com"
+    };
+}
+
 /// Lo que se teclea en un buscador, sin acentos ni mayúsculas, igual en la Main y en el worker.
 pub mod busqueda;
 pub mod cierre_caja;

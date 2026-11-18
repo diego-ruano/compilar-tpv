@@ -17,6 +17,8 @@
 
 import type { ErrorCode } from "@tpv/contracts";
 
+import { CORREO_SOPORTE } from "./soporte";
+
 /**
  * Códigos de negocio: el string que el worker ya emitía → código del catálogo.
  *
@@ -305,19 +307,19 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	device_change_required:
 		"Esta licencia está activada en otro equipo. Para pasarla a éste hay que confirmar el cambio con el código enviado al correo de la compra.",
 	device_key_mismatch:
-		"La identidad de este equipo no coincide con la registrada para la licencia. Contacta con soporte.",
+		`La identidad de este equipo no coincide con la registrada para la licencia. Contacta con soporte en ${CORREO_SOPORTE}.`,
 	// AUD-01: el equipo dice ser de un negocio y la nube lo tiene registrado en otro. Abrir el TPV
 	// comprueba la licencia, que es lo que devuelve su fila a su negocio si sigue siendo su Main.
 	device_tenant_mismatch:
-		"Este equipo consta en la nube en otro negocio. Cierra el TPV y vuelve a abrirlo para que compruebe su licencia; si sigue igual, contacta con soporte.",
+		`Este equipo consta en la nube en otro negocio. Cierra el TPV y vuelve a abrirlo para que compruebe su licencia; si sigue igual, contacta con soporte en ${CORREO_SOPORTE}.`,
 	// AUD-01: la fila del equipo no tiene clave registrada con la que comparar la que presenta.
 	device_key_missing:
-		"Este equipo está registrado sin su clave de identidad y no se puede comprobar que es él. Contacta con soporte.",
+		`Este equipo está registrado sin su clave de identidad y no se puede comprobar que es él. Contacta con soporte en ${CORREO_SOPORTE}.`,
 	tenant_db_provision_failed:
 		"No se ha podido preparar la base de datos en la nube. Inténtalo de nuevo en unos minutos.",
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
 	tenant_db_perdida:
-		"La base de datos de este negocio no está en la nube, donde debería estar. En este equipo no se ha borrado nada. Contacta con soporte antes de hacer nada más.",
+		`La base de datos de este negocio no está en la nube, donde debería estar. En este equipo no se ha borrado nada. Contacta con soporte en ${CORREO_SOPORTE} antes de hacer nada más.`,
 	tenant_db_migration_failed:
 		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
 	hub_overloaded:
@@ -336,7 +338,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// que ya salió bien, la ruta se lo dice con su propia frase (`fraseDeClaveYaCanjeada`); ésta es
 	// para quien la teclea en otro equipo, donde antes estrenaba un negocio nuevo.
 	license_already_used:
-		"Esa clave ya se ha sumado a otra licencia. Si era para otro local, contacta con soporte.",
+		`Esa clave ya se ha sumado a otra licencia. Si era para otro local, contacta con soporte en ${CORREO_SOPORTE}.`,
 
 	// Reserva desde la web: lo lee quien reserva, en el widget, que pinta `message` tal cual.
 	// Sin detalles a propósito (domains/reservas_web/puerta.ts): el motivo queda en el log.
