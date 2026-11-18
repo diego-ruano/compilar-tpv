@@ -440,6 +440,7 @@ pub async fn verificar_contra_la_nube(
     let resultado = match repo.contrastar_con_la_nube(resumen, marca, &paginas, reparar).await? {
         ContrasteLocal::Hecho(resultado) => resultado,
         ContrasteLocal::SeHaMovido => return Ok(Contraste::Aplazado),
+        ContrasteLocal::EscritoAqui(cambio) => return Ok(Contraste::EscritoAqui(cambio)),
     };
 
     let informe = json!({
@@ -533,6 +534,9 @@ pub enum Contraste {
     /// la nube estaba escribiendo o iba por delante de esta Main, o una de las dos bases se movió
     /// durante la pasada. No es un fallo: se reintenta en unos minutos.
     Aplazado,
+    /// SYN-INC-07 · Como `Aplazado`, pero porque se ha escrito aquí algo que sube (una fusión de
+    /// fichas, un aviso): lleva lo que la pantalla tiene que releer.
+    EscritoAqui(tpv_contracts::sync::CambioReplicado),
 }
 
 impl Contraste {
@@ -540,7 +544,7 @@ impl Contraste {
     pub fn hecho(self) -> Option<ResultadoVerificacion> {
         match self {
             Contraste::Hecho(r) => Some(r),
-            Contraste::HistoricoPendiente | Contraste::Aplazado => None,
+            Contraste::HistoricoPendiente | Contraste::Aplazado | Contraste::EscritoAqui(_) => None,
         }
     }
 }

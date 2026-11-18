@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::sync::{
-    BackfillEstado, BootstrapResultado, BootstrapSnapshot, ClavesPagina, FilasDeCubos,
+    BackfillEstado, BootstrapResultado, BootstrapSnapshot, CambioReplicado, ClavesPagina, FilasDeCubos,
     FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, ResumenNube,
     SqlStatement, SyncChange, SyncHealth,
 };
@@ -129,6 +129,11 @@ pub enum ContrasteLocal {
     /// No se ha comparado, o se ha dejado a medias sin tocar nada: esta base o la nube se han
     /// movido desde que se pidió el resumen. No es un fallo; se reintenta más tarde.
     SeHaMovido,
+    /// SYN-INC-07 · La salida de las cuarentenas ha escrito aquí (ha fundido una ficha de aquí en la
+    /// de la nube, o ha avisado de dos que no se pueden fundir), y eso sube: la pasada se deja, como
+    /// si se hubiese movido. Lleva lo que la pantalla de la Main tiene que releer, que no le llega
+    /// por la réplica.
+    EscritoAqui(CambioReplicado),
 }
 
 #[async_trait]

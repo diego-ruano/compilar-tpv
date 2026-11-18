@@ -948,7 +948,9 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   dentro). En la misma transacción se avisa a los administradores (`fichas_unidas`) de qué fichas se
   han unido, de lo que ha entrado de la de aquí y de lo que se ha quedado fuera porque la de la nube
   ya tenía otro valor (el nombre, el teléfono, el NIF…), para que quede rastro y se pueda corregir.
-  Esa pasada del contraste se deja, porque la marca se ha movido; en la siguiente, con todo
+  Esa pasada del contraste se deja, porque la marca se ha movido (`ContrasteLocal::EscritoAqui`, con
+  las tablas que se han escrito: el job `verificar_nube` se lo dice a la pantalla de la Main con
+  `sync:cambio`, que lo escrito aquí no le llega por la réplica, y despierta al motor para que suba); en la siguiente, con todo
   subido, la cuarentena sale sola y el contraste vuelve a reparar (si la reparación no entrara, lo
   sube el contraste y su plan lo retira). **Sólo se funde lo que esta Main escribió y la nube no
   tiene**, y las dos cosas se comprueban. Antes de fundir se le pide a la nube la ficha de aquí por su

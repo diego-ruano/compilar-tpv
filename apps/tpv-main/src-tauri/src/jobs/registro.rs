@@ -790,6 +790,15 @@ async fn verificar_nube(app: AppHandle) -> Result<(), String> {
             tracing::debug!(target: "tpv::jobs", ?motivo, "verificación: no toca");
             return Ok(());
         }
+        uc_verificacion::Vuelta::EscritoAqui(cambio) => {
+            // SYN-INC-07: la salida de las cuarentenas ha fundido una ficha (o avisado de dos que no
+            // se pueden fundir). La pantalla no se entera por la réplica: se le avisa como a la de un
+            // cambio que llega, y el motor lo sube ya. Se contrasta en la vuelta siguiente.
+            let _ = app.emit("sync:cambio", cambio);
+            app.state::<crate::replicacion::SyncNativo>().despertar.notify_one();
+            tracing::info!(target: "tpv::jobs", "verificación: se han fundido fichas o avisado de ellas; se compara en la vuelta siguiente");
+            return Ok(());
+        }
         uc_verificacion::Vuelta::Aplazada => {
             tracing::info!(
                 target: "tpv::jobs",

@@ -37,6 +37,9 @@ pub enum Vuelta {
     Aplazada,
     /// Se ha contrastado.
     Hecha(ResultadoVerificacion),
+    /// SYN-INC-07 · No se ha comparado porque antes se ha escrito aquí algo que sube (una fusión de
+    /// fichas, un aviso), como en `Aplazada`. Lleva lo que la pantalla tiene que releer.
+    EscritoAqui(tpv_contracts::sync::CambioReplicado),
 }
 
 /// Una vuelta del job: decide si toca y, si toca, contrasta y lo anota.
@@ -77,6 +80,10 @@ pub async fn verificar_si_toca(
         Ok(Contraste::Aplazado) => {
             estado.anotar(IntentoVerificacion::Aplazada, momento.ahora_ms).await?;
             Ok(Vuelta::Aplazada)
+        }
+        Ok(Contraste::EscritoAqui(cambio)) => {
+            estado.anotar(IntentoVerificacion::Aplazada, momento.ahora_ms).await?;
+            Ok(Vuelta::EscritoAqui(cambio))
         }
         // La cola del histórico se ha sembrado entre la lectura de arriba y ésta.
         Ok(Contraste::HistoricoPendiente) => Ok(Vuelta::NoToca(Espera::HistoricoPendiente)),

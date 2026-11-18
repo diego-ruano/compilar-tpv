@@ -162,7 +162,7 @@ async fn pasada(repo: &SqliteSyncRepository, nube: &NubeDeContraste, reparar: bo
 fn hecha(c: ContrasteLocal) -> ResultadoVerificacion {
     match c {
         ContrasteLocal::Hecho(r) => r,
-        ContrasteLocal::SeHaMovido => panic!("se tenía que comparar"),
+        ContrasteLocal::SeHaMovido | ContrasteLocal::EscritoAqui(_) => panic!("se tenía que comparar"),
     }
 }
 

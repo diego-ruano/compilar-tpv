@@ -198,7 +198,7 @@ async fn pasada(repo: &SqliteSyncRepository, nube: &NubeDeContraste) -> Resultad
     let resumen = nube.resumen_para(marca.checkpoint).await;
     match repo.contrastar_con_la_nube(resumen, marca, &Paginas(nube), true).await.unwrap() {
         ContrasteLocal::Hecho(r) => r,
-        ContrasteLocal::SeHaMovido => panic!("se tenía que comparar"),
+        ContrasteLocal::SeHaMovido | ContrasteLocal::EscritoAqui(_) => panic!("se tenía que comparar"),
     }
 }
 

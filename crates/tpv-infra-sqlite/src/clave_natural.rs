@@ -362,6 +362,16 @@ fn aviso_de_la_fusion(
     }
 }
 
+/// Lo que ha escrito [`fundir`]: cuántas fichas de aquí ha fundido, las sentencias de las fusiones y
+/// si ha escrito algún aviso. Con ello la Main avisa a su pantalla (`sync:cambio`): lo que escribe
+/// aquí no le llega por la réplica.
+#[derive(Debug, Default)]
+pub(crate) struct Fusion {
+    pub fundidas: usize,
+    pub escritas: Vec<SqlStatement>,
+    pub avisos: bool,
+}
+
 /// Funde en la de la nube las fichas de aquí que chocan con las filas que ha traído para una
 /// cuarentena de bajada (`tocadas`), si son de una tabla de [`DESCRIPCIONES`]. Devuelve cuántas ha
 /// fundido. Ver el encabezado.
@@ -372,9 +382,9 @@ pub(crate) async fn fundir(
     claves: &HashMap<String, Vec<String>>,
     subida: &tocadas::Estaticas,
     en_la_nube: &EnLaNube,
-) -> AppResult<usize> {
+) -> AppResult<Fusion> {
     let conn: &Connection = w.raw();
-    let mut fundidas = 0usize;
+    let mut hecho = Fusion::default();
     'filas: for f in tocadas.filas.iter().filter(|f| !f.borrada) {
         let Some(d) = DESCRIPCIONES.iter().find(|d| d.tabla == f.tabla) else { continue };
         if claves.get(d.tabla).map(Vec::as_slice) != Some(&[d.clave.to_owned()][..]) {
@@ -415,7 +425,8 @@ pub(crate) async fn fundir(
                     continue;
                 };
                 let aviso = aviso_de_fichas_distintas(d, columnas, &nube, &id_nube, l, &fila);
-                w.transaccion(crate::notificaciones::emitir_en(w, aviso)).await?;
+                let (_, escrito) = w.transaccion(crate::notificaciones::emitir_en(w, aviso)).await?;
+                hecho.avisos |= escrito;
             }
             tracing::warn!(
                 target: "tpv::sync",
@@ -464,7 +475,9 @@ pub(crate) async fn fundir(
             Ok(())
         })
         .await?;
-        fundidas += locales.len();
+        hecho.fundidas += locales.len();
+        hecho.escritas.extend(sentencias);
+        hecho.avisos = true;
         tracing::info!(
             target: "tpv::sync",
             tabla = d.tabla,
@@ -472,7 +485,7 @@ pub(crate) async fn fundir(
             "fichas de aquí fundidas en la de la nube por una clave natural repetida (SYN-INC-07)"
         );
     }
-    Ok(fundidas)
+    Ok(hecho)
 }
 
 /// Las fichas de aquí, otras que la de la nube, que tienen alguno de sus valores únicos.

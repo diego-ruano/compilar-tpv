@@ -268,8 +268,14 @@ async fn dos_altas_del_mismo_correo_acaban_en_una_ficha_con_todo_lo_suyo_y_el_co
     let (repo, db, dir, nube) = las_dos_anas("completa").await;
 
     // La pasada del contraste: la cuarentena no entra (el correo), y la ficha de aquí se funde en la
-    // de la nube. Eso sube, así que la pasada se deja sin comparar.
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    // de la nube. Eso sube, así que la pasada se deja sin comparar, y dice qué tiene que releer la
+    // pantalla de la Main, que no se entera por la réplica: la ficha, lo que apuntaba a ella y el aviso.
+    let ContrasteLocal::EscritoAqui(cambio) = pasada(&repo, &nube).await else { panic!("se tenía que fundir") };
+    let tablas = cambio.tablas.expect("se sabe qué tablas");
+    for t in ["clientes", "reservas", "comandas", "notificaciones"] {
+        assert!(tablas.iter().any(|x| x == t), "{t}: {tablas:?}");
+    }
+    assert!(cambio.comanda.touched_comanda);
     assert_eq!(
         filas(&db, DE_ANA[0]).await,
         vec![format!("{ANA_HANDY}|Ana García|600111222|ANA@correo.es|Alérgica al marisco|2500|2027-01-15 09:00:00")],
@@ -316,7 +322,7 @@ async fn si_la_reparacion_de_lo_que_colgaba_tampoco_entra_lo_sube_el_contraste()
     // reparaba, la fusión sube igual, y el contraste de la pasada siguiente sube lo que falta y lo
     // retira todo.
     let (repo, db, dir, nube) = las_dos_anas("contraste").await;
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     let reparacion = repo.outbox_pending(1).await.unwrap().remove(0);
     repo.outbox_mark_failed(&reparacion.op_id, "rechazada", true).await.unwrap();
     assert_eq!(subir(&repo, &nube).await, Vec::<String>::new(), "la fusión entra");
@@ -426,7 +432,7 @@ async fn un_proveedor_dado_de_alta_dos_veces_con_el_mismo_cif_se_funde_con_sus_p
     bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: alta }).await;
     assert_eq!(en_cuarentena(&db).await, 1);
 
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     assert_eq!(
         filas(&db, "SELECT ID_Proveedor, Nombre_Empresa, Contacto, Telefono, Email, CIF FROM Proveedores;").await,
         vec![format!("{PROV_HANDY}|Bebidas del Sur SL|Luis|955000111|pedidos@bebidassur.es|B11111111")]
@@ -524,7 +530,7 @@ async fn si_la_handy_le_pone_el_correo_a_una_ficha_que_ya_estaba_aqui_tambien_se
     bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: correo }).await;
     assert_eq!(en_cuarentena(&db).await, 1);
 
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Clientes;").await, 1);
     assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
     assert_eq!(apartadas(&db).await, 0);
@@ -565,7 +571,7 @@ async fn la_fusion_no_deshace_arriba_lo_que_una_handy_cambio_despues_de_la_foto(
     // teléfono a la Ana de la nube. Lo que la de la nube ya tenía no viaja en la fusión: arriba sigue
     // sin teléfono, y sólo se rellena lo que le faltaba (la nota de la de aquí).
     let (repo, db, dir, nube) = las_dos_anas("cambio-despues").await;
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     nube.sembrar(&format!("UPDATE Clientes SET Telefono = NULL WHERE ID_Cliente = '{ANA_HANDY}';")).await;
 
     assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
@@ -582,7 +588,7 @@ async fn la_fusion_no_resucita_arriba_una_ficha_que_una_handy_borro_despues_de_l
     // Antes de que la fusión suba, una Handy borra a la Ana de la nube: la fusión entra sin volver a
     // darla de alta.
     let (repo, db, dir, nube) = las_dos_anas("borrada-despues").await;
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     nube.sembrar(&format!("DELETE FROM Clientes WHERE ID_Cliente = '{ANA_HANDY}';")).await;
 
     // La reparación de la reserva y el cobro apunta a una ficha que ya no está: no entra. La fusión, sí.
@@ -626,8 +632,9 @@ async fn una_ficha_de_aqui_que_la_nube_tambien_tiene_no_se_funde_y_se_avisa() {
     bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: alta_de_la_handy() }).await;
     assert_eq!(en_cuarentena(&db).await, 1);
 
-    // El aviso sube: esta pasada se deja.
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    // El aviso sube: esta pasada se deja, y la pantalla relee las notificaciones.
+    let ContrasteLocal::EscritoAqui(cambio) = pasada(&repo, &nube).await else { panic!("se tenía que avisar") };
+    assert_eq!(cambio.tablas, Some(vec!["notificaciones".to_string()]));
     assert_eq!(
         filas(&db, "SELECT ID_Cliente, Nombre, Email FROM Clientes;").await,
         vec![format!("{PEDRO}|Pedro|ana@correo.es")],
@@ -663,7 +670,7 @@ async fn al_fundir_se_unen_las_notas_y_se_avisa_de_lo_que_se_queda_fuera() {
     sembrar(&db, &format!("UPDATE Clientes SET Telefono = '611000000' WHERE ID_Cliente = '{ANA_MAIN}';")).await;
     nube.sembrar(&format!("UPDATE Clientes SET Notas = 'Mesa junto a la ventana' WHERE ID_Cliente = '{ANA_HANDY}';")).await;
 
-    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::EscritoAqui(_)));
     assert_eq!(
         filas(&db, "SELECT ID_Cliente, Nombre, Telefono, Notas FROM Clientes;").await,
         vec![format!("{ANA_HANDY}|Ana García|600111222|Mesa junto a la ventana\nAlérgica al marisco")]

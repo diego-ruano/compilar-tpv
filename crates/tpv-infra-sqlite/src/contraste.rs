@@ -1520,8 +1520,18 @@ pub(crate) async fn contrastar(
     // resumen, antes de mirar nada. Lo que entra cierra su cuarentena, y si no queda ninguna, la
     // guarda deja reparar en esta misma pasada. Escribe sólo aquí, y no mueve la marca, salvo si
     // funde una ficha de aquí en la de la nube (SYN-INC-07): eso sube, y esta pasada se deja.
-    if reparar && crate::cuarentenas_bajada::resolver(db, resumen.hasta_seq, marca, nube).await?.is_none() {
-        return Ok(ContrasteLocal::SeHaMovido);
+    if reparar {
+        match crate::cuarentenas_bajada::resolver(db, resumen.hasta_seq, marca, nube).await? {
+            None => return Ok(ContrasteLocal::SeHaMovido),
+            Some(crate::cuarentenas_bajada::Salida { escrito_aqui: Some(cambio), .. }) => {
+                return Ok(ContrasteLocal::EscritoAqui(cambio));
+            }
+            Some(s) => {
+                if s.resueltas > 0 || s.quedan > 0 {
+                    tracing::debug!(target: "tpv::sync", resueltas = s.resueltas, quedan = s.quedan, "salida de las cuarentenas de bajada");
+                }
+            }
+        }
     }
 
     let resumen = Arc::new(resumen);

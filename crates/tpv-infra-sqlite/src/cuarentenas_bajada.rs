@@ -61,7 +61,7 @@ use serde_json::Value as Json;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::{MarcaLocal, PaginasDelContraste, PedidoPorClave};
 use tpv_contracts::errors::ErrorCode;
-use tpv_contracts::sync::SqlStatement;
+use tpv_contracts::sync::{CambioReplicado, SqlStatement};
 
 use crate::consultas::db_err;
 use crate::db::{Db, Writer};
@@ -306,10 +306,13 @@ pub(crate) fn clase_de_error(texto: Option<&str>) -> Option<String> {
 /* ===== La salida ===== */
 
 /// Lo que ha hecho una pasada con las cuarentenas de bajada.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Salida {
     pub resueltas: usize,
     pub quedan: usize,
+    /// SYN-INC-07 · Lo que ha escrito aquí, y sube, la fusión de fichas (o su aviso): lo que la
+    /// pantalla de la Main tiene que releer. `None` si no ha escrito nada.
+    pub escrito_aqui: Option<CambioReplicado>,
 }
 
 /// Una cuarentena de bajada, como se lee.
@@ -555,13 +558,20 @@ pub(crate) async fn resolver(
     // aquí y en una Handy (el correo de una clienta): la de aquí se funde en la de la nube, que se
     // replica. La cuarentena sale en la pasada siguiente, con la fusión ya arriba. Lo que escribe
     // mueve la marca: el contraste de esta pasada se deja (`SeHaMovido`).
+    let mut escritas: Vec<SqlStatement> = Vec::new();
+    let mut avisos = false;
     for (c, motivo) in quedan.iter_mut() {
         if !(motivo.starts_with("no_entra: ") && motivo.contains("unique")) {
             continue;
         }
         match crate::clave_natural::fundir(&w, &c.tocadas, &arriba, &claves, &subida, &en_la_nube).await {
-            Ok(0) => {}
-            Ok(_) => *motivo = "fundida_en_la_de_la_nube".into(),
+            Ok(f) => {
+                if f.fundidas > 0 {
+                    *motivo = "fundida_en_la_de_la_nube".into();
+                }
+                escritas.extend(f.escritas);
+                avisos |= f.avisos;
+            }
             Err(e) => tracing::warn!(target: "tpv::sync", op_id = %c.op_id, error = %e, "no se ha podido fundir la ficha de aquí en la de la nube (SYN-INC-07)"),
         }
     }
@@ -590,7 +600,18 @@ pub(crate) async fn resolver(
     )
     .await
     .map_err(db_err)?;
-    Ok(Some(Salida { resueltas, quedan: total - resueltas }))
+    // Lo que la pantalla tiene que releer: las tablas de las fusiones y, si hay aviso, las
+    // notificaciones.
+    let escrito_aqui = (!escritas.is_empty() || avisos).then(|| {
+        let mut cambio = tpv_application::use_cases::avisos_nube::aviso(&escritas);
+        if avisos {
+            if let Some(tablas) = cambio.tablas.as_mut() {
+                tablas.push("notificaciones".into());
+            }
+        }
+        cambio
+    });
+    Ok(Some(Salida { resueltas, quedan: total - resueltas, escrito_aqui }))
 }
 
 /// Las cuarentenas de bajada, por orden, sin sus sentencias, y cuántas hay.
