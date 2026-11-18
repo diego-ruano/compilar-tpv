@@ -413,6 +413,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn los_unicos_de_cada_descripcion_son_todos_los_indices_unicos_de_su_tabla() {
+        // La fusión sólo quita a la ficha de aquí los valores de `unicos`: si el esquema gana otro
+        // índice único en Clientes o en Proveedores y no se añade aquí, la de la nube no cabría y la
+        // fusión no entraría nunca. Y `sin_mayusculas` tiene que decir lo mismo que el índice.
+        let db = base("unicos").await;
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for d in DESCRIPCIONES {
+            let todos = conn
+                .query(
+                    "SELECT COUNT(*) FROM pragma_index_list(?1) WHERE \"unique\" = 1 AND origin <> 'pk';",
+                    vec![Value::Text(d.tabla.to_owned())],
+                )
+                .await
+                .unwrap()
+                .next()
+                .await
+                .unwrap()
+                .and_then(|f| f.get_value(0).ok());
+            assert_eq!(todos, Some(Value::Integer(d.unicos.len() as i64)), "{}: índices únicos del esquema", d.tabla);
+
+            let mut del_esquema: Vec<String> = crate::aparcar::indices_unicos(conn, d.tabla)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|i| {
+                    let mut c = i.decide;
+                    c.dedup();
+                    c.join("+")
+                })
+                .collect();
+            del_esquema.sort();
+            let mut descritos: Vec<String> = d.unicos.iter().map(|u| u.columna.to_owned()).collect();
+            descritos.sort();
+            assert_eq!(descritos, del_esquema, "{}", d.tabla);
+
+            let textos = conn
+                .query(
+                    "SELECT lower(group_concat(sql, ' ')) FROM sqlite_master WHERE type = 'index' AND tbl_name = ?1 AND sql IS NOT NULL;",
+                    vec![Value::Text(d.tabla.to_owned())],
+                )
+                .await
+                .unwrap()
+                .next()
+                .await
+                .unwrap()
+                .and_then(|f| f.get_value(0).ok());
+            let textos = match textos {
+                Some(Value::Text(t)) => t,
+                _ => String::new(),
+            };
+            for u in d.unicos {
+                let con_lower = textos.contains(&format!("lower({})", u.columna.to_lowercase()));
+                assert_eq!(u.sin_mayusculas, con_lower, "{}.{}: sin_mayusculas", d.tabla, u.columna);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn se_mueven_todas_las_foraneas_de_cada_tabla_y_ninguna_choca_con_un_indice_unico() {
         // Las foráneas se leen del esquema: si alguien añade una tabla que apunta a Clientes o a
         // Proveedores, la fusión la mueve sin tocar nada aquí. Esto fija las de hoy (las de 0001) y
