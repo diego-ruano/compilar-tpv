@@ -265,8 +265,6 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
     const query = useTrabajadoresStats(range);
 
     const data: TrabajadoresStatsResponse | null = query.data ?? null;
-    const loading = query.isFetching;
-
     useEffect(() => {
         if (query.isError) {
             toast.error("No se pudieron cargar las estadísticas de trabajadores", toAppError(query.error).message);
@@ -340,10 +338,6 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                         </span>{" "}
                         (según fichajes).
                     </p>
-                </div>
-
-                <div className="text-xs text-fg-subtle shrink-0">
-                    {loading ? "Cargando…" : "Actualizado"}
                 </div>
             </div>
 

@@ -68,14 +68,18 @@ function useLegendClean() {
 function ChartCard({
     title,
     subtitle,
-    loading,
+    cargando,
+    releyendo,
     emptyText,
     heightClass = "min-h-[320px]",
     children,
 }: {
     title: string;
     subtitle?: string;
-    loading?: boolean;
+    /** La primera carga, sin datos aún: un hueco, sin texto que aparezca y desaparezca. */
+    cargando?: boolean;
+    /** Se relee con los datos de antes en pantalla: se atenúan, no se sustituyen. */
+    releyendo?: boolean;
     emptyText?: string;
     heightClass?: string;
     children: React.ReactNode;
@@ -97,16 +101,10 @@ function ChartCard({
                 ) : null}
             </header>
 
-            <div className="mt-3 flex-1 min-h-0 overflow-hidden">
-                {loading ? (
-                    <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
-                        Cargando…
-                    </div>
-                ) : (
-                    children
-                )}
+            <div className={`mt-3 flex-1 min-h-0 overflow-hidden${releyendo ? " opacity-60" : ""}`}>
+                {cargando ? null : children}
 
-                {!loading && emptyText ? (
+                {!cargando && emptyText ? (
                     <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div>
                 ) : null}
             </div>
@@ -150,6 +148,9 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
     const data: ClientesStatsResponse | null =
         (query.data as ClientesStatsResponse | undefined) ?? null;
     const loading = query.isFetching;
+    // Sólo la primera carga deja el hueco; una relectura atenúa lo que hay (sin «Cargando…»).
+    const cargando = query.isPending;
+    const releyendo = query.isFetching && !query.isPending;
     const error = query.isError
         ? (query.error as any)?.message || String(query.error)
         : null;
@@ -319,9 +320,6 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                     </div>
 
                     <div className="flex items-center justify-between sm:justify-end gap-3">
-                        <span className="text-xs text-fg-subtle">
-                            {loading ? "Cargando…" : "Actualizado"}
-                        </span>
                         <button
                             onClick={() => void cargar()}
                             disabled={loading}
@@ -368,7 +366,8 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                 <ChartCard
                     title="Recurrentes vs no recurrentes"
                     subtitle="Distribución de clientes en el rango"
-                    loading={loading}
+                    cargando={cargando}
+                    releyendo={releyendo}
                     heightClass="min-h-[340px]"
                 >
                     {totalClientesRango <= 0 ? (
@@ -390,7 +389,8 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                 <ChartCard
                     title="Evolución de clientes nuevos"
                     subtitle="Clientes nuevos por hora/día/mes (según el rango)"
-                    loading={loading}
+                    cargando={cargando}
+                    releyendo={releyendo}
                     heightClass="min-h-[340px]"
                 >
                     {bucketLabels.length === 0 ? (
@@ -413,7 +413,8 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                     <ChartCard
                         title="Top clientes por gasto total"
                         subtitle="Quiénes han gastado más en total"
-                        loading={loading}
+                        cargando={cargando}
+                        releyendo={releyendo}
                         heightClass="min-h-[360px]"
                     >
                         {topLabels.length === 0 ? (

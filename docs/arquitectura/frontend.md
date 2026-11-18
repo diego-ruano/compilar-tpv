@@ -106,6 +106,11 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   `trabajadores` o `roles`, y el fichaje del seleccionado cuando cambian `fichajes` o
   `fichaje_dia` o un fichaje se rechaza, sin vaciar lo que hay en pantalla (TRA-INC-04). Cuando otro equipo cambia una tabla de ajustes se relee el store de esa tabla, no los tres
   (`shared/lib/recargarAjustes.ts`, en la Main y en la Handy).
+- **Una relectura no sustituye lo que hay en pantalla**: nada de condicionar el contenido a
+  `isFetching` ni de cambiarlo por un «Cargando…», que en una lectura de milisegundos se ve como un
+  parpadeo. Sólo la primera carga (`isPending`) deja el hueco, sin texto; al releer, los datos de
+  antes se quedan, como mucho atenuados, hasta que llegan los nuevos
+  (`test/react/estadisticasSinCargando.test.tsx`).
 - Otros stores (`shared/stores/`): `useAuth`, `useMode`, `useEstadoSync`, `useMainPresence`,
   `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`.
 

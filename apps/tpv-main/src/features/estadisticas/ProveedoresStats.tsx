@@ -31,14 +31,18 @@ function clamp(n: number, a: number, b: number) {
 function ChartCard({
   title,
   subtitle,
-  loading,
+  cargando,
+  releyendo,
   emptyText,
   heightClass = "min-h-[320px]",
   children,
 }: {
   title: string;
   subtitle?: string;
-  loading?: boolean;
+  /** La primera carga, sin datos aún: un hueco, sin texto que aparezca y desaparezca. */
+  cargando?: boolean;
+  /** Se relee con los datos de antes en pantalla: se atenúan, no se sustituyen. */
+  releyendo?: boolean;
   emptyText?: string;
   heightClass?: string;
   children: React.ReactNode;
@@ -56,16 +60,10 @@ function ChartCard({
         {subtitle ? <p className="text-sm text-fg-muted truncate">{subtitle}</p> : null}
       </header>
 
-      <div className="mt-3 flex-1 min-h-0 overflow-hidden">
-        {loading ? (
-          <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
-            Cargando…
-          </div>
-        ) : (
-          children
-        )}
+      <div className={`mt-3 flex-1 min-h-0 overflow-hidden${releyendo ? " opacity-60" : ""}`}>
+        {cargando ? null : children}
 
-        {!loading && emptyText ? <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div> : null}
+        {!cargando && emptyText ? <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div> : null}
       </div>
     </section>
   );
@@ -97,6 +95,9 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
 
   const data: ProveedoresStatsResponse | null = query.data ?? null;
   const loading = query.isFetching;
+  // Sólo la primera carga deja el hueco; una relectura atenúa lo que hay (sin «Cargando…»).
+  const cargando = query.isPending;
+  const releyendo = query.isFetching && !query.isPending;
   const error = query.isError
     ? (query.error as any)?.message || String(query.error)
     : null;
@@ -229,7 +230,6 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
           </div>
 
           <div className="flex items-center justify-between sm:justify-end gap-3">
-            <span className="text-xs text-fg-subtle">{loading ? "Cargando…" : "Actualizado"}</span>
             <button
               onClick={() => void cargar()}
               disabled={loading}
@@ -279,7 +279,8 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
         <ChartCard
           title="Evolución del gasto en proveedores"
           subtitle="Gasto por hora/día/mes (según el rango)"
-          loading={loading}
+          cargando={cargando}
+          releyendo={releyendo}
           heightClass="min-h-[340px]"
           emptyText={
             range === "hoy"
@@ -301,7 +302,8 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
         <ChartCard
           title="Reparto del gasto por proveedor"
           subtitle="Cuánto has gastado en cada proveedor"
-          loading={loading}
+          cargando={cargando}
+          releyendo={releyendo}
           heightClass="min-h-[340px]"
         >
           {provLabels.length === 0 ? (
@@ -319,7 +321,8 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
           <ChartCard
             title="Últimos gastos a proveedores"
             subtitle="Movimientos recientes"
-            loading={loading}
+            cargando={cargando}
+            releyendo={releyendo}
             heightClass="min-h-[260px]"
           >
             {ultimos.length === 0 ? (

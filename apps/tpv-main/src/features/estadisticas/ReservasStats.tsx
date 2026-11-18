@@ -289,7 +289,6 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                         Volumen, estados, distribución por rango y comportamiento por turnos.
                     </p>
                 </div>
-                <div className="text-xs text-fg-subtle">{loading ? "Cargando…" : "Actualizado"}</div>
             </div>
 
             {/* KPIs */}

@@ -157,10 +157,6 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
             Mejores/peores productos y rankings por unidades vendidas (según rango).
           </p>
         </div>
-
-        <div className="text-xs text-fg-subtle">
-          {loading || loadingCats ? "Cargando…" : "Actualizado"}
-        </div>
       </div>
 
       {/* KPIs */}
