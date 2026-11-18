@@ -1,0 +1,23 @@
+{
+  "descripcion": "Estadísticas → Proveedores no enseña la clave de un proveedor. Bebidas SL sigue en la ficha. Dos proveedores distintos se llaman Carnes SA: cada uno con su barra, el segundo numerado. Pescados Norte se borró y su gasto conserva el nombre, marcado como borrado. Otro proveedor se borró sin nombre: «Proveedor borrado». Uno con el nombre en blanco: «Proveedor sin nombre». Un gasto sin proveedor del tipo proveedor: «Sin proveedor». La fecha de cada gasto se omite: para entrar en el rango de hoy tiene que ser la de hoy.",
+  "lectura": "stats.proveedores",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-bebidas', 'Bebidas SL');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-carnes-a', 'Carnes SA');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-carnes-b', 'Carnes SA');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-blanco', '   ');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-bebidas', date('now','localtime'), 'Compras', 'Barriles', 20000, 'prov-bebidas');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-carnes-a', date('now','localtime'), 'Compras', 'Ternera', 9000, 'prov-carnes-a');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-carnes-b', date('now','localtime'), 'Compras', 'Cerdo', 4000, 'prov-carnes-b');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('g-pescados-1', date('now','localtime'), 'Compras', 'Merluza', 7000, 'Pescados Norte');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('g-pescados-2', date('now','localtime'), 'Compras', 'Rape', 5000, 'Pescados Norte');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('g-borrado-sin-nombre', date('now','localtime'), 'Compras', 'Hielo', 3000, '');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-blanco', date('now','localtime'), 'Compras', 'Pan', 2000, 'prov-blanco');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('g-sin', date('now','localtime'), 'Pago a proveedor', 'Varios', 1000);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('g-luz', date('now','localtime'), 'Suministros', 'Luz', 9900);"
+  ],
+  "entrada": {},
+  "omitir": [
+    "fecha"
+  ]
+}

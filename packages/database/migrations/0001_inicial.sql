@@ -803,6 +803,10 @@ ON Suelto_Consumos(ID_Producto);
 -- quien escribe: la hora de apuntarlo si es del mismo dia, o ese dia a las 12:00 si es de otro. Sin
 -- el, se toma su dia a las 12:00 (HORA_DE_UN_GASTO), y un gasto apuntado de madrugada caia despues
 -- del cierre de esa madrugada.
+--
+-- Nombre_Proveedor: el nombre del proveedor del gasto, copiado de Proveedores.Nombre_Empresa en la
+-- propia sentencia al borrar el proveedor, que deja ID_Proveedor a NULL. Asi el gasto sigue diciendo
+-- a quien se le pago (Estadisticas -> Proveedores) en vez de quedarse sin proveedor.
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT NOT NULL PRIMARY KEY,
   Fecha DATE NOT NULL,
@@ -812,6 +816,7 @@ CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Proveedor TEXT NULL,
   Pagado_Con_Caja INTEGER NOT NULL DEFAULT 0,
   Momento_Caja TEXT NULL,
+  Nombre_Proveedor TEXT NULL,
   CHECK (Pagado_Con_Caja IN (0, 1)),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL
 );

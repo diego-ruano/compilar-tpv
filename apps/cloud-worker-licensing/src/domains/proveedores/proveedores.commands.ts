@@ -111,9 +111,11 @@ export function eliminarProveedor(idProveedor: string): BuiltCommand {
 			sql: "UPDATE Pedidos_Proveedor SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
 			args: [idProveedor],
 		},
+		// El gasto se queda con el nombre del proveedor: Estadisticas -> Proveedores lo sigue contando
+		// como suyo, sin ensenar la clave. El mismo texto en la Main (`proveedores.rs`).
 		{
 			kind: "execute",
-			sql: "UPDATE Cuentas_Gastos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
+			sql: "UPDATE Cuentas_Gastos SET Nombre_Proveedor = (SELECT p.Nombre_Empresa FROM Proveedores p WHERE p.ID_Proveedor = ?1), ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
 			args: [idProveedor],
 		},
 		{

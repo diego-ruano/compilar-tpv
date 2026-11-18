@@ -1170,16 +1170,52 @@ export async function proveedores(
 	const { start, end } = rangeBounds(range);
 	const dt = "CASE WHEN cg.Fecha LIKE '%:%' THEN datetime(cg.Fecha) ELSE datetime(cg.Fecha || ' 00:00:00') END";
 	const b = bucket(range, dt);
-	const filter = "AND (cg.ID_Proveedor IS NOT NULL OR lower(COALESCE(cg.Tipo_Gasto,'')) LIKE '%proveedor%')";
-	// STAT-07: el nombre que se pinta. Un gasto con proveedor cuya ficha ya no esta (o tiene el
-	// nombre en blanco) sale como "Proveedor #id", no como "Sin proveedor": son dos cosas distintas
-	// y mezclarlas juntaria en una sola barra gastos que no son del mismo sitio.
-	const nombreProveedor = `
-		CASE
-			WHEN cg.ID_Proveedor IS NOT NULL THEN
-				COALESCE(NULLIF(trim(p.Nombre_Empresa),''), ('Proveedor #' || CAST(cg.ID_Proveedor AS TEXT)))
-			ELSE 'Sin proveedor'
-		END`;
+	// Un gasto es "de proveedor" si tiene ID_Proveedor, el nombre de un proveedor que se borro
+	// (Nombre_Proveedor) o su Tipo_Gasto lo indica.
+	const filter =
+		"AND (cg.ID_Proveedor IS NOT NULL OR cg.Nombre_Proveedor IS NOT NULL OR lower(COALESCE(cg.Tipo_Gasto,'')) LIKE '%proveedor%')";
+	// Los gastos de proveedor del rango, con el proveedor al que van (`clave`) y su nombre (`base`).
+	// La clave no se ensena nunca (antes salia "Proveedor #<id>"): uno que sigue en la ficha sale con
+	// su nombre; uno borrado, con el nombre que guardo el gasto al borrarlo y "(borrado)"; sin ficha
+	// ni nombre, "Proveedor borrado"; con el nombre en blanco, "Proveedor sin nombre". Se agrupa por
+	// la clave, no por el nombre: dos proveedores que se llaman igual (o dos borrados) no se suman en
+	// una barra, y del segundo en adelante se numeran en el orden del gasto ("Carnes SA (2)"). Igual
+	// en la Main (`proveedores_impl`).
+	const CTES = `
+		WITH
+		gp AS (
+			SELECT
+				cg.ID_Gasto AS id_gasto,
+				${dt} AS dt,
+				COALESCE(cg.Importe,0) AS importe,
+				COALESCE(cg.Concepto,'') AS concepto,
+				CASE
+					WHEN cg.ID_Proveedor IS NOT NULL THEN 'p:' || cg.ID_Proveedor
+					WHEN cg.Nombre_Proveedor IS NOT NULL THEN 'b:' || trim(cg.Nombre_Proveedor)
+					ELSE 's:'
+				END AS clave,
+				CASE
+					WHEN cg.ID_Proveedor IS NOT NULL AND p.ID_Proveedor IS NULL THEN 'Proveedor borrado'
+					WHEN cg.ID_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(p.Nombre_Empresa),''), 'Proveedor sin nombre')
+					WHEN cg.Nombre_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(cg.Nombre_Proveedor),'') || ' (borrado)', 'Proveedor borrado')
+					ELSE 'Sin proveedor'
+				END AS base
+			FROM Cuentas_Gastos cg
+			LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
+			WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
+		),
+		por_clave AS (
+			SELECT clave, base, SUM(importe) AS total FROM gp GROUP BY clave, base
+		),
+		numeradas AS (
+			SELECT clave, base, total,
+				ROW_NUMBER() OVER (PARTITION BY base ORDER BY total DESC, clave ASC) AS n
+			FROM por_clave
+		),
+		etiquetas AS (
+			SELECT clave, total, CASE WHEN n > 1 THEN base || ' (' || n || ')' ELSE base END AS etiqueta
+			FROM numeradas
+		)`;
 	// El denominador del porcentaje: TODO el gasto del rango, con proveedor o sin el.
 	const totalTodos = await one(
 		db,
@@ -1195,11 +1231,7 @@ export async function proveedores(
 	);
 	const top = await one(
 		db,
-		`SELECT ${nombreProveedor} AS nombre, COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
-		 FROM Cuentas_Gastos cg
-		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
-		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
-		 GROUP BY nombre ORDER BY total DESC, nombre ASC LIMIT 1;`,
+		`${CTES} SELECT etiqueta AS nombre, total FROM etiquetas ORDER BY total DESC, etiqueta ASC LIMIT 1;`,
 	);
 	const evoRs = await db.execute(
 		`SELECT ${b} AS label, SUM(cg.Importe) AS value
@@ -1208,18 +1240,15 @@ export async function proveedores(
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const barRs = await db.execute(
-		`SELECT ${nombreProveedor} AS label, COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS value
-		 FROM Cuentas_Gastos cg
-		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
-		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
-		 GROUP BY label ORDER BY value DESC, label ASC LIMIT 12;`,
+		`${CTES} SELECT etiqueta AS label, total AS value FROM etiquetas ORDER BY total DESC, etiqueta ASC LIMIT 12;`,
 	);
+	// Cada gasto con la misma etiqueta que su barra. La clave del gasto solo desempata dos del mismo
+	// instante.
 	const lastRs = await db.execute(
-		`SELECT strftime('%Y-%m-%d', ${dt}) AS fecha, ${nombreProveedor} AS proveedor, COALESCE(cg.Concepto,'') AS concepto, COALESCE(cg.Importe,0) AS importe
-		 FROM Cuentas_Gastos cg
-		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
-		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
-		 ORDER BY datetime(${dt}) DESC LIMIT 10;`,
+		`${CTES}
+		 SELECT strftime('%Y-%m-%d', gp.dt) AS fecha, e.etiqueta AS proveedor, gp.concepto AS concepto, gp.importe AS importe
+		 FROM gp JOIN etiquetas e ON e.clave = gp.clave
+		 ORDER BY datetime(gp.dt) DESC, gp.id_gasto DESC LIMIT 10;`,
 	);
 	const evo = rows(evoRs);
 	const bar = rows(barRs);

@@ -1,16 +1,20 @@
 {
-  "descripcion": "Borrado de proveedor: desvincula sus productos/lotes (SET NULL replicado explícito, DB-03) y borra la fila.",
+  "descripcion": "Borrado de proveedor: desvincula sus productos/lotes (SET NULL replicado explícito, DB-03) y borra la fila. Sus gastos se quedan sin proveedor pero con su nombre (Nombre_Proveedor), para que Estadísticas los siga contando como suyos; el gasto de otro proveedor no se toca.",
   "comando": "proveedores.eliminar",
   "seed": [
     "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuidora Sur');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre) VALUES ('prod-1', 'cat-1', 'prov-1', 'Cerveza');"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre) VALUES ('prod-1', 'cat-1', 'prov-1', 'Cerveza');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-2', 'Carnes SA');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('g-1', '2026-01-10', 'Barriles', 15000, 'Compras', 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('g-2', '2026-01-11', 'Carne', 8000, 'Compras', 'prov-2');"
   ],
   "entrada": {
     "id_proveedor": "prov-1"
   },
   "snapshot": {
     "Proveedores": "SELECT ID_Proveedor FROM Proveedores",
-    "Productos": "SELECT ID_Producto, ID_Proveedor FROM Productos"
+    "Productos": "SELECT ID_Producto, ID_Proveedor FROM Productos",
+    "Cuentas_Gastos": "SELECT ID_Gasto, ID_Proveedor, Nombre_Proveedor FROM Cuentas_Gastos"
   }
 }

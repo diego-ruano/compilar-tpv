@@ -1830,12 +1830,12 @@ impl SqliteStatsRepository {
 
         // Esquema fijo por migraciones: Cuentas_Gastos siempre tiene Fecha, Importe, ID_Proveedor,
         // Tipo_Gasto y Concepto, y existe la tabla Proveedores. Un gasto es "de proveedor" si tiene
-        // ID_Proveedor o su Tipo_Gasto lo indica.
+        // ID_Proveedor, el nombre de un proveedor que se borró (Nombre_Proveedor) o su Tipo_Gasto lo
+        // indica.
         let dt_expr = "CASE WHEN cg.Fecha LIKE '%:%' THEN datetime(cg.Fecha) ELSE datetime(cg.Fecha || ' 00:00:00') END";
         let bucket_expr = bucket_sql_datetime(args.range, dt_expr);
 
-        let supplier_filter =
-            "AND (cg.ID_Proveedor IS NOT NULL OR lower(cg.Tipo_Gasto) LIKE '%proveedor%')";
+        let supplier_filter = "AND (cg.ID_Proveedor IS NOT NULL OR cg.Nombre_Proveedor IS NOT NULL OR lower(cg.Tipo_Gasto) LIKE '%proveedor%')";
 
         let sql_total_all = format!(
             r#"
@@ -1904,39 +1904,72 @@ impl SqliteStatsRepository {
             0.0
         };
 
-        let name_expr = r#"
-            CASE
-              WHEN cg.ID_Proveedor IS NOT NULL THEN
-                COALESCE(NULLIF(trim(p.Nombre_Empresa),''), ('Proveedor #' || CAST(cg.ID_Proveedor AS TEXT)))
-              ELSE 'Sin proveedor'
-            END
-            "#;
-
-        let join_prov = "LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor";
-
-        let sql_top = format!(
+        // Los gastos de proveedor del rango, con el proveedor al que van (`clave`) y su nombre
+        // (`base`). La clave no se enseña nunca (antes salía «Proveedor #<id>»): un proveedor que
+        // sigue en la ficha sale con su nombre; uno borrado, con el nombre que guardó el gasto al
+        // borrarlo y «(borrado)»; sin ficha ni nombre, «Proveedor borrado»; con el nombre en blanco,
+        // «Proveedor sin nombre». Se agrupa por la clave, no por el nombre: dos proveedores que se
+        // llaman igual (o dos borrados) no se suman en una barra, y del segundo en adelante se
+        // numeran en el orden del gasto («Carnes SA (2)»). Igual en el worker (`proveedores`).
+        let ctes = format!(
             r#"
-            WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
-            SELECT
-              {name_expr} AS proveedor,
-              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
-            FROM Cuentas_Gastos cg
-            {join_prov}
-            , rng
-            WHERE cg.Fecha IS NOT NULL
-              AND {dt} >= rng.start_dt
-              AND {dt} <  rng.end_dt
-              {filter}
-            GROUP BY proveedor
-            ORDER BY total DESC, proveedor ASC
-            LIMIT 1;
+            WITH
+            rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+            gp AS (
+              SELECT
+                cg.ID_Gasto AS id_gasto,
+                {dt} AS dt,
+                COALESCE(cg.Importe,0) AS importe,
+                COALESCE(cg.Concepto,'') AS concepto,
+                CASE
+                  WHEN cg.ID_Proveedor IS NOT NULL THEN 'p:' || cg.ID_Proveedor
+                  WHEN cg.Nombre_Proveedor IS NOT NULL THEN 'b:' || trim(cg.Nombre_Proveedor)
+                  ELSE 's:'
+                END AS clave,
+                CASE
+                  WHEN cg.ID_Proveedor IS NOT NULL AND p.ID_Proveedor IS NULL THEN 'Proveedor borrado'
+                  WHEN cg.ID_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(p.Nombre_Empresa),''), 'Proveedor sin nombre')
+                  WHEN cg.Nombre_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(cg.Nombre_Proveedor),'') || ' (borrado)', 'Proveedor borrado')
+                  ELSE 'Sin proveedor'
+                END AS base
+              FROM Cuentas_Gastos cg
+              LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
+              , rng
+              WHERE cg.Fecha IS NOT NULL
+                AND {dt} >= rng.start_dt
+                AND {dt} <  rng.end_dt
+                {filter}
+            ),
+            por_clave AS (
+              SELECT clave, base, SUM(importe) AS total
+              FROM gp
+              GROUP BY clave, base
+            ),
+            numeradas AS (
+              SELECT clave, base, total,
+                ROW_NUMBER() OVER (PARTITION BY base ORDER BY total DESC, clave ASC) AS n
+              FROM por_clave
+            ),
+            etiquetas AS (
+              SELECT clave, total,
+                CASE WHEN n > 1 THEN base || ' (' || n || ')' ELSE base END AS etiqueta
+              FROM numeradas
+            )
             "#,
             start = start_expr,
             end = end_expr,
-            name_expr = name_expr,
-            join_prov = join_prov,
             dt = dt_expr,
             filter = supplier_filter
+        );
+
+        let sql_top = format!(
+            r#"
+            {ctes}
+            SELECT etiqueta, total
+            FROM etiquetas
+            ORDER BY total DESC, etiqueta ASC
+            LIMIT 1;
+            "#
         );
 
         let mut rows_top = db.query(&sql_top, ()).await.map_err(|e| e.to_string())?;
@@ -1985,27 +2018,12 @@ impl SqliteStatsRepository {
 
         let sql_bar = format!(
             r#"
-            WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
-            SELECT
-              {name_expr} AS proveedor,
-              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
-            FROM Cuentas_Gastos cg
-            {join_prov}
-            , rng
-            WHERE cg.Fecha IS NOT NULL
-              AND {dt} >= rng.start_dt
-              AND {dt} <  rng.end_dt
-              {filter}
-            GROUP BY proveedor
-            ORDER BY total DESC, proveedor ASC
+            {ctes}
+            SELECT etiqueta, total
+            FROM etiquetas
+            ORDER BY total DESC, etiqueta ASC
             LIMIT 12;
-            "#,
-            start = start_expr,
-            end = end_expr,
-            name_expr = name_expr,
-            join_prov = join_prov,
-            dt = dt_expr,
-            filter = supplier_filter
+            "#
         );
 
         let mut rows_b = db.query(&sql_bar, ()).await.map_err(|e| e.to_string())?;
@@ -2020,33 +2038,21 @@ impl SqliteStatsRepository {
                 .push(v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO));
         }
 
-        let concepto_expr = "COALESCE(cg.Concepto,'')";
-
+        // Los últimos gastos, cada uno con la misma etiqueta que su barra. La clave del gasto sólo
+        // desempata dos del mismo instante.
         let sql_last = format!(
             r#"
-            WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
+            {ctes}
             SELECT
-              strftime('%Y-%m-%d', {dt}) AS fecha,
-              {name_expr} AS proveedor,
-              {concepto_expr} AS concepto,
-              COALESCE(cg.Importe,0) AS importe
-            FROM Cuentas_Gastos cg
-            {join_prov}
-            , rng
-            WHERE cg.Fecha IS NOT NULL
-              AND {dt} >= rng.start_dt
-              AND {dt} <  rng.end_dt
-              {filter}
-            ORDER BY datetime({dt}) DESC
+              strftime('%Y-%m-%d', gp.dt) AS fecha,
+              e.etiqueta AS proveedor,
+              gp.concepto AS concepto,
+              gp.importe AS importe
+            FROM gp
+            JOIN etiquetas e ON e.clave = gp.clave
+            ORDER BY datetime(gp.dt) DESC, gp.id_gasto DESC
             LIMIT 10;
-            "#,
-            start = start_expr,
-            end = end_expr,
-            dt = dt_expr,
-            name_expr = name_expr,
-            concepto_expr = concepto_expr,
-            join_prov = join_prov,
-            filter = supplier_filter
+            "#
         );
 
         let mut rows_last = db.query(&sql_last, ()).await.map_err(|e| e.to_string())?;

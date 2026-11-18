@@ -238,8 +238,10 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
             )
             .await
             .map_err(db_err)?;
+            // El gasto se queda con el nombre del proveedor: Estadísticas → Proveedores lo sigue
+            // contando como suyo, sin enseñar la clave. El mismo texto en el worker.
             conn.execute(
-                "UPDATE Cuentas_Gastos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
+                "UPDATE Cuentas_Gastos SET Nombre_Proveedor = (SELECT p.Nombre_Empresa FROM Proveedores p WHERE p.ID_Proveedor = ?1), ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
                 vec![Value::Text(id_proveedor.to_string())],
             )
             .await

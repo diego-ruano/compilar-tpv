@@ -1,9 +1,25 @@
 {
+  "Cuentas_Gastos": [
+    {
+      "ID_Gasto": "g-1",
+      "ID_Proveedor": null,
+      "Nombre_Proveedor": "Distribuidora Sur"
+    },
+    {
+      "ID_Gasto": "g-2",
+      "ID_Proveedor": "prov-2",
+      "Nombre_Proveedor": null
+    }
+  ],
   "Productos": [
     {
       "ID_Producto": "prod-1",
       "ID_Proveedor": null
     }
   ],
-  "Proveedores": []
+  "Proveedores": [
+    {
+      "ID_Proveedor": "prov-2"
+    }
+  ]
 }

@@ -355,6 +355,7 @@ lecturas_de_contrato! {
     stats__clientes_mismo_nombre,
     stats__proveedores,
     stats__proveedores_gasto_medio,
+    stats__proveedores_sin_clave,
 }
 
 /// Corre la lectura del caso por su camino real (el repositorio SQLite que usa la Main) y devuelve

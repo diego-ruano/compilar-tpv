@@ -1,0 +1,80 @@
+{
+  "gasto_medio": 6375,
+  "gasto_por_proveedor": {
+    "labels": [
+      "Bebidas SL",
+      "Pescados Norte (borrado)",
+      "Carnes SA",
+      "Carnes SA (2)",
+      "Proveedor borrado",
+      "Proveedor sin nombre",
+      "Sin proveedor"
+    ],
+    "values": [
+      20000,
+      12000,
+      9000,
+      4000,
+      3000,
+      2000,
+      1000
+    ]
+  },
+  "gastos_evolucion": {
+    "labels": [
+      "00"
+    ],
+    "values": [
+      51000
+    ]
+  },
+  "num_gastos": 8,
+  "porcentaje_sobre_total_gastos": 83.74,
+  "proveedor_top": {
+    "nombre": "Bebidas SL",
+    "total": 20000
+  },
+  "total_gasto": 51000,
+  "ultimos_gastos": [
+    {
+      "concepto": "Varios",
+      "importe": 1000,
+      "proveedor": "Sin proveedor"
+    },
+    {
+      "concepto": "Rape",
+      "importe": 5000,
+      "proveedor": "Pescados Norte (borrado)"
+    },
+    {
+      "concepto": "Merluza",
+      "importe": 7000,
+      "proveedor": "Pescados Norte (borrado)"
+    },
+    {
+      "concepto": "Cerdo",
+      "importe": 4000,
+      "proveedor": "Carnes SA (2)"
+    },
+    {
+      "concepto": "Ternera",
+      "importe": 9000,
+      "proveedor": "Carnes SA"
+    },
+    {
+      "concepto": "Hielo",
+      "importe": 3000,
+      "proveedor": "Proveedor borrado"
+    },
+    {
+      "concepto": "Pan",
+      "importe": 2000,
+      "proveedor": "Proveedor sin nombre"
+    },
+    {
+      "concepto": "Barriles",
+      "importe": 20000,
+      "proveedor": "Bebidas SL"
+    }
+  ]
+}
