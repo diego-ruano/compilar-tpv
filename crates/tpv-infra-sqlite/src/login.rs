@@ -1105,14 +1105,50 @@ mod tests_fichajes_colgados {
             let w = db.write().await;
             exec_punch(&w, "u1", "salida").await.unwrap();
         }
-        let g = db.read().await;
-        let mut rows = g
-            .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+        let json = {
+            let g = db.read().await;
+            let mut rows = g
+                .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+                .await
+                .unwrap();
+            crate::mapping::v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap())
+                .unwrap_or_default()
+        };
+        let sentencias: Vec<tpv_contracts::sync::SqlStatement> = serde_json::from_str(&json).unwrap();
+
+        // En la base que la aplica, otra Handy ya ha puesto la salida de esa jornada.
+        let otra = "2000-01-01 08:00:00";
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "UPDATE Fichajes SET Hora_Salida = ?1 WHERE ID_Fichaje = 'jornada';",
+                vec![Value::Text(otra.into())],
+            )
             .await
             .unwrap();
-        let sql = crate::mapping::v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap())
-            .unwrap_or_default();
-        assert!(sql.contains("AND Hora_Salida IS NULL"), "{sql}");
+        let mut aplicadas = 0;
+        for s in sentencias.iter().filter(|s| s.sql.contains("UPDATE Fichajes")) {
+            let args = s
+                .args
+                .iter()
+                .map(|a| match a {
+                    serde_json::Value::Null => Value::Null,
+                    serde_json::Value::Number(n) => Value::Integer(n.as_i64().unwrap()),
+                    serde_json::Value::String(t) => Value::Text(t.clone()),
+                    otro => panic!("argumento inesperado: {otro}"),
+                })
+                .collect::<Vec<_>>();
+            w.raw().execute(&s.sql, args).await.unwrap();
+            aplicadas += 1;
+        }
+        assert!(aplicadas > 0, "la salida sube como un UPDATE de Fichajes: {json}");
+        let mut rows = w
+            .raw()
+            .query("SELECT Hora_Salida FROM Fichajes WHERE ID_Fichaje = 'jornada';", Vec::<Value>::new())
+            .await
+            .unwrap();
+        let salida = crate::mapping::v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap());
+        assert_eq!(salida.as_deref(), Some(otra), "la salida que ya estaba no cambia");
     }
 
     /* RI-05: el turno de noche, de la entrada a la salida. */
