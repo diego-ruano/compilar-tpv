@@ -9,26 +9,8 @@
              (`.zona-segura` en Global.css, `src-tauri/src/vista_ios.rs`). -->
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
         <title>TPV Altaria Lights</title>
-        <!--
-          Anti-FOUC: aplica el tema al <html> ANTES del primer pintado, para
-          que al recargar (Ctrl+R) no aparezca un destello blanco antes de que
-          React monte y el store useTheme añada la clase. Debe ir en el <head>
-          y ser síncrono (sin type="module") para bloquear el render inicial.
-        -->
-        <script>
-            (function () {
-                try {
-                    var dark =
-                        localStorage.getItem("tpv:theme") === "dark";
-                    var root = document.documentElement;
-                    if (dark) root.classList.add("dark");
-                    root.style.backgroundColor = dark ? "#0e0f13" : "#f3f8ff";
-                    root.style.colorScheme = dark ? "dark" : "light";
-                } catch (e) {
-                    /* localStorage no disponible: ignoramos */
-                }
-            })();
-        </script>
+        <!-- El tema antes del primer pintado (tema-inicial.js). -->
+        <script src="/tema-inicial.js"></script>
     </head>
 
     <body>
