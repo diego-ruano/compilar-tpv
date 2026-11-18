@@ -115,7 +115,9 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 - **Unos ajustes que no se han podido leer no se enseñan con sus valores por defecto** (CFG-INC-02):
   el store guarda el `error` y deja `ready` en `false` hasta la primera lectura buena; si falla una
   relectura, se queda con lo último leído y el error. La pantalla dice qué no se ha leído y por qué,
-  con «Reintentar», y no deja guardar encima. En la Handy, una respuesta del worker sin la zona
+  con «Reintentar», y no deja guardar encima. Cada lectura fallida bloquea sólo su ajuste, y sólo si
+  está entre los cambios (el correo de contacto sin leer no impide guardar el IVA), y lo que se queda
+  sin guardar se dice: un clic en «Guardar» nunca se ignora en silencio. En la Handy, una respuesta del worker sin la zona
   horaria (un worker anterior a ella) se lee con la del esquema (`tpv-infra-http/src/configuracion.rs`).
 - **Una relectura no sustituye lo que hay en pantalla**: nada de condicionar el contenido a
   `isFetching` ni de cambiarlo por un «Cargando…», que en una lectura de milisegundos se ve como un

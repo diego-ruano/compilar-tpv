@@ -82,6 +82,8 @@ function pintarNegocio(props: { listo: boolean; error: string | null; onReintent
             correoError={null}
             onReintentarCorreo={async () => {}}
             dirty
+            negocioCambiado
+            correoCambiado={false}
             saving={false}
             onSave={async () => {}}
             onReset={() => {}}

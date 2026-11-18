@@ -48,6 +48,8 @@ export function Negocio({
     error,
     onReintentar,
     dirty,
+    negocioCambiado,
+    correoCambiado,
     saving,
     onSave,
     onReset,
@@ -72,6 +74,9 @@ export function Negocio({
     onReintentar: () => Promise<void>;
     /** Cambios sin guardar en el borrador del negocio o en el correo. */
     dirty: boolean;
+    /** Cuál de los dos tiene cambios: una lectura fallida sólo impide guardar lo suyo (CFG-INC-02). */
+    negocioCambiado: boolean;
+    correoCambiado: boolean;
     saving: boolean;
     onSave: () => Promise<void>;
     onReset: () => void;
@@ -99,6 +104,10 @@ export function Negocio({
     useEffect(() => {
         refrescarEstado();
     }, [refrescarEstado]);
+
+    // CFG-INC-02: lo que no se ha podido leer no se guarda, pero sólo bloquea lo suyo: con el correo
+    // sin leer se puede guardar el resto. Lo que se queda sin guardar lo dice `onSave`.
+    const sePuedeGuardarAlgo = (negocioCambiado && error === null) || (correoCambiado && correoError === null);
 
     // Guarda y vuelve a preguntar el estado: `onSave` sólo persiste.
     const guardar = useCallback(async () => {
@@ -388,7 +397,7 @@ export function Negocio({
                 </GhostButton>
                 <PrimaryButton
                     onClick={conAviso(guardar)}
-                    disabled={!dirty || saving || nifMal || error !== null || correoError !== null}
+                    disabled={!sePuedeGuardarAlgo || saving || nifMal}
                 >
                     {saving ? "Guardando…" : "Guardar cambios"}
                 </PrimaryButton>

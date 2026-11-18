@@ -39,6 +39,35 @@ import { nifValido } from "../../shared/ticket/nif";
 
 const CAMPOS_CORREO = ["contact_email"] as const;
 
+/**
+ * CFG-INC-02: qué se guarda de lo cambiado en Negocio (y en Ticket, que guarda el mismo borrador), y
+ * por qué no se guarda lo demás. Lo que no se ha podido leer no se guarda: lo de la pantalla puede
+ * no ser lo guardado.
+ */
+function queSeGuarda(s: {
+    negocioCambiado: boolean;
+    negocioError: string | null;
+    correoCambiado: boolean;
+    correoError: string | null;
+}): { guardaNegocio: boolean; guardaCorreo: boolean; sinGuardar: string[] } {
+    const sinGuardar: string[] = [];
+    if (s.negocioCambiado && s.negocioError !== null) {
+        sinGuardar.push(
+            `No se han guardado los datos del negocio: no se han podido leer los guardados (${s.negocioError}). Pulsa «Reintentar» y vuelve a guardar.`,
+        );
+    }
+    if (s.correoCambiado && s.correoError !== null) {
+        sinGuardar.push(
+            `No se ha guardado el correo de contacto: no se ha podido leer el guardado (${s.correoError}). Pulsa «Reintentar» junto al correo, en Negocio, y vuelve a guardar.`,
+        );
+    }
+    return {
+        guardaNegocio: s.negocioCambiado && s.negocioError === null,
+        guardaCorreo: s.correoCambiado && s.correoError === null,
+        sinGuardar,
+    };
+}
+
 export default function Configuracion() {
     // ✅ stores (ya no “hydrate” aquí; el init se hace en AppBoot)
     const biz = useBusinessSettings();
@@ -191,19 +220,27 @@ export default function Configuracion() {
             await messageDialog(`${MSG_IVA}. Corrígelo en la sección Ticket.`, { kind: "error" });
             return;
         }
-        // CFG-INC-02: con una lectura fallida lo que hay en pantalla puede no ser lo guardado.
-        if (biz.error || contactError) return;
         // Y lo mismo con el NIF, que también va en el borrador: guardar uno que no vale deja el TPV
         // sin poder cobrar.
         if (draft.cif.trim() && !nifValido(draft.cif)) {
             await messageDialog("El NIF no es válido. Corrígelo en la sección Negocio.", { kind: "error" });
             return;
         }
+        // CFG-INC-02: con una lectura fallida lo que hay en pantalla puede no ser lo guardado, y ese
+        // ajuste no se guarda. Cada lectura fallida bloquea sólo lo suyo, y sólo si está entre los
+        // cambios: el correo que no se ha podido leer no impide guardar el IVA. Y lo que no se guarda
+        // se dice: antes el clic no hacía nada.
+        const { guardaNegocio, guardaCorreo, sinGuardar } = queSeGuarda({
+            negocioCambiado: dirty,
+            negocioError: biz.error,
+            correoCambiado: contactDirty,
+            correoError: contactError,
+        });
         try {
             setSavingBiz(true);
             // El correo va primero porque lo valida el backend: si no vale, no se guarda nada.
-            if (contactDirty) await contact.guardar(correo.cambios);
-            if (dirty) {
+            if (guardaCorreo) await contact.guardar(correo.cambios);
+            if (guardaNegocio) {
                 // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2):
                 // el que había cuando se tomó el borrador, que es el que se sustituye.
                 const prevLogo = base.logo_data_url;
@@ -222,7 +259,12 @@ export default function Configuracion() {
                     void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
                 }
             }
-            if (avisarGuardado) await messageDialog("Guardado");
+            if (sinGuardar.length > 0) {
+                const loDemas = guardaNegocio || guardaCorreo ? " Lo demás se ha guardado." : "";
+                await messageDialog(`${sinGuardar.join(" ")}${loDemas}`, { kind: "error" });
+            } else if (avisarGuardado) {
+                await messageDialog("Guardado");
+            }
         } catch (e) {
             await messageDialog(`No se ha podido guardar: ${toAppError(e).message}`, {
                 kind: "error",
@@ -542,6 +584,8 @@ export default function Configuracion() {
                                                 error={biz.error}
                                                 onReintentar={biz.init}
                                                 dirty={hayCambios}
+                                                negocioCambiado={dirty}
+                                                correoCambiado={contactDirty}
                                                 saving={savingBiz}
                                                 onSave={onSaveNegocio}
                                                 onReset={descartarNegocio}
