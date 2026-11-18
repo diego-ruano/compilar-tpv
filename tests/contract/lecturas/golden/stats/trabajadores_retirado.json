@@ -1,0 +1,26 @@
+{
+  "camareros": [
+    {
+      "cobros_realizados": 1,
+      "comandas_tomadas": 1,
+      "horas_trabajadas": 0.0,
+      "id_trabajador": "t-eva",
+      "nombre": "Eva Ruiz",
+      "puntualidad": null,
+      "rol": "Camarero",
+      "tareas_asignadas": 0,
+      "tareas_finalizadas": 0,
+      "ticket_medio": 2500
+    }
+  ],
+  "cocineros": [],
+  "limpieza": [],
+  "ranking_ventas": {
+    "labels": [
+      "Eva Ruiz"
+    ],
+    "values": [
+      2500
+    ]
+  }
+}

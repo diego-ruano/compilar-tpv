@@ -1,0 +1,15 @@
+{
+  "descripcion": "Un trabajador retirado (Usuarios.Archivado_En) sigue en las estadisticas del rango en que estuvo en la plantilla: la camarera Eva se retira hoy y conserva sus cobros, su ticket medio y su sitio en el ranking de hoy. El camarero Paco se retiro en 2020, antes de que empezara el rango, y ya no sale. Todo lo que filtra por rango va al INICIO DEL DIA, como en trabajadores.json, para que el golden no dependa de la hora.",
+  "lectura": "stats.trabajadores",
+  "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado, Archivado_En) VALUES ('u-eva', '00000000-0000-7000-8000-000000000002', 'eva@bar.com', 'h', 'Eva', 'Ruiz', 'Inactivo', datetime('now','localtime','start of day'));",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Archivado_En) VALUES ('u-paco', '00000000-0000-7000-8000-000000000002', 'paco@bar.com', 'h', 'Paco', 'Inactivo', '2020-01-01 10:00:00');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('t-eva', 'u-eva', 'Camarera');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('t-paco', 'u-paco', 'Camarero');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', 't-eva', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Trabajador_Cobrador) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day'), 'Efectivo', 2500, 'total', 't-eva');"
+  ],
+  "entrada": {}
+}

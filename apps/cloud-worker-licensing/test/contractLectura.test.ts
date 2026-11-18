@@ -299,6 +299,8 @@ import casoVrBuscarSinAcentos from "../../../tests/contract/lecturas/casos/venta
 import goldenVrBuscarSinAcentos from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_sin_acentos.json";
 import casoStatsTrabajadores from "../../../tests/contract/lecturas/casos/stats/trabajadores.json";
 import goldenStatsTrabajadores from "../../../tests/contract/lecturas/golden/stats/trabajadores.json";
+import casoStatsTrabajadoresRetirado from "../../../tests/contract/lecturas/casos/stats/trabajadores_retirado.json";
+import goldenStatsTrabajadoresRetirado from "../../../tests/contract/lecturas/golden/stats/trabajadores_retirado.json";
 import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/reservas.json";
 import goldenStatsReservas from "../../../tests/contract/lecturas/golden/stats/reservas.json";
 import casoStatsReservasSinMesa from "../../../tests/contract/lecturas/casos/stats/reservas_sin_mesa.json";
@@ -456,6 +458,7 @@ const CASOS = [
 	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },
 	{ nombre: "stats_reservas_sin_mesa", caso: casoStatsReservasSinMesa, golden: goldenStatsReservasSinMesa },
 	{ nombre: "stats_trabajadores", caso: casoStatsTrabajadores, golden: goldenStatsTrabajadores },
+	{ nombre: "stats_trabajadores_retirado", caso: casoStatsTrabajadoresRetirado, golden: goldenStatsTrabajadoresRetirado },
 	// Las búsquedas de texto: el % y el _ tal cual, y un texto de más de 50 bytes.
 	{ nombre: "cuentas_entradas_busqueda_comodines", caso: casoCtaEntradasComodines, golden: goldenCtaEntradasComodines },
 	{ nombre: "cuentas_entradas_busqueda_texto_largo", caso: casoCtaEntradasLargo, golden: goldenCtaEntradasLargo },

@@ -755,7 +755,9 @@ export async function trabajadores(
 		JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
 		WHERE r.Nombre_Rol IN ('Cocinero','Camarero','Limpieza')
-			AND u.Archivado_En IS NULL -- la plantilla, sin los eliminados (como la Main)
+			-- La plantilla del rango: los de ahora y los retirados después de que empezara, que
+			-- estuvieron en ella y tienen ahí sus ventas, horas y puntualidad (como la Main).
+			AND (u.Archivado_En IS NULL OR datetime(u.Archivado_En) >= ${start})
 		ORDER BY r.Nombre_Rol ASC, u.Nombre ASC;
 	`);
 	const base = rows(baseRs)

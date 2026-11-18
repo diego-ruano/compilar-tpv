@@ -352,6 +352,7 @@ lecturas_de_contrato! {
     stats__reservas,
     stats__reservas_sin_mesa,
     stats__trabajadores,
+    stats__trabajadores_retirado,
     stats__clientes,
     stats__clientes_reserva_terminada,
     stats__clientes_mismo_nombre,

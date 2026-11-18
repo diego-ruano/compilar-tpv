@@ -1163,26 +1163,27 @@ impl SqliteStatsRepository {
 
         let mut base: Vec<BaseW> = Vec::new();
 
-        let mut rows_w = db
-            .query(
-                r#"
-                SELECT
-                  t.ID_Trabajador,
-                  u.ID_Usuario,
-                  u.Nombre,
-                  u.Apellido,
-                  r.Nombre_Rol
-                FROM Trabajadores t
-                JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
-                JOIN Roles r ON r.ID_Rol = u.ID_Rol
-                WHERE r.Nombre_Rol IN ('Cocinero','Camarero','Limpieza')
-                  AND u.Archivado_En IS NULL -- la plantilla, sin los eliminados
-                ORDER BY r.Nombre_Rol ASC, u.Nombre ASC;
-                "#,
-                (),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+        // La plantilla del rango: los de ahora y los retirados después de que empezara, que
+        // estuvieron en ella y tienen ahí sus ventas, horas y puntualidad. Un retirado antes del
+        // rango ya no sale. El mismo criterio en el worker (`stats.queries.ts`).
+        let sql_base = format!(
+            r#"
+            SELECT
+              t.ID_Trabajador,
+              u.ID_Usuario,
+              u.Nombre,
+              u.Apellido,
+              r.Nombre_Rol
+            FROM Trabajadores t
+            JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
+            JOIN Roles r ON r.ID_Rol = u.ID_Rol
+            WHERE r.Nombre_Rol IN ('Cocinero','Camarero','Limpieza')
+              AND (u.Archivado_En IS NULL OR datetime(u.Archivado_En) >= {start})
+            ORDER BY r.Nombre_Rol ASC, u.Nombre ASC;
+            "#,
+            start = start_expr
+        );
+        let mut rows_w = db.query(&sql_base, ()).await.map_err(|e| e.to_string())?;
 
         while let Some(r) = rows_w.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();

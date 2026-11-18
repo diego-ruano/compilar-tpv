@@ -265,9 +265,10 @@ pide confirmación diciendo qué pasa. **Lo que tiene historia no se borra**: su
 (fichajes), cobros, anulaciones, comandas, movimientos de caja y de stock, cierres, aperturas del
 cajón, lo que preparó en cocina, las tareas hechas y los turnos ya pasados. Con algo de eso se
 **retira**: `Usuarios.Estado = 'Inactivo'` y `Archivado_En`, así que no entra ni ficha, sale de la
-plantilla, del selector de entrada, de las tareas, de los horarios y de las estadísticas de la
-plantilla, y lo firmado sigue a su nombre. Sin nada, se borra. En los dos casos se quitan sus turnos
-de hoy en adelante, su horario predeterminado y sus tareas pendientes.
+plantilla, del selector de entrada, de las tareas y de los horarios, y lo firmado sigue a su nombre.
+En las estadísticas de la plantilla sale en los rangos que empiezan antes de retirarlo, con lo que
+hizo (la misma condición en `stats.rs` y en `stats.queries.ts`). Sin nada, se borra. En los dos
+casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus tareas pendientes.
 
 - Una tanda de sentencias que deciden cada una por su cuenta, igual en la Main
   (`sql_quitar_trabajador`, dentro del `WriteGuard`) y en el worker (`SQL_QUITAR_TRABAJADOR`), como
