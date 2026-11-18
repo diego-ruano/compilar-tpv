@@ -129,6 +129,12 @@ Confirmar es **idempotente y atómico** (RI-58):
   transacción del escritor** (`cerrar_periodo`). La hora del cierre es también el límite superior de
   sus totales, y antes de soltar el escritor se espera a que cambie el segundo: un cobro guardado
   después nunca lleva la misma hora que el cierre, que no contaría ningún periodo.
+- **La preparación suma con el mismo límite** (`totales_desde`, hasta ahora), para que lo que enseña
+  la pantalla sea lo que se va a guardar (CAJ-INC-01). Y la confirmación lleva el esperado que vio la
+  pantalla (`esperado_visto`): si al recalcularlo dentro de la transacción sale otro —algo entró o
+  salió del cajón mientras se contaba—, se rechaza con un `conflict` («El esperado ha cambiado
+  mientras contabas: revísalo.») y la pantalla vuelve a preparar sin perder el recuento. Lo que se
+  guarda es siempre el cálculo del backend.
 - `idx_cierres_un_periodo` impide dos cierres vigentes con el mismo `Periodo_Desde`.
 
 ### Deshacer

@@ -160,6 +160,12 @@ pub struct ConfirmarCierreInput {
     pub dejado: Vec<DenominacionInput>,
     #[serde(default)]
     pub motivo: Option<String>,
+    /// CAJ-INC-01 · El esperado que enseñaba la pantalla al confirmar. **No se guarda**: lo que se
+    /// guarda es lo que recalcula el backend. Si no coincide —un cobro o un gasto entró mientras se
+    /// contaba—, se rechaza para que la pantalla vuelva a preparar y se cuente contra la cifra
+    /// buena. Ausente = no se comprueba.
+    #[serde(default)]
+    pub esperado_visto: Option<Dinero>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

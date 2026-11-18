@@ -19,7 +19,7 @@ import type { BackfillEstado } from "@tpv/contracts";
 import { ModalShell } from "../../shared/ui";
 import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 import { cn } from "../../shared/lib/cn";
-import { toAppError } from "@tpv/client";
+import { esError, toAppError } from "@tpv/client";
 
 import DenomsGrid from "./DenomsGrid";
 import { aDenominaciones, cierreConfirmar, type CierreDto, type PreparacionCierreDto } from "./cierreApis";
@@ -137,11 +137,21 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                 contado: aDenominaciones(denoms, contado),
                 dejado: aDenominaciones(denoms, dejado),
                 motivo: motivo,
+                esperadoVisto: esperado,
             });
             onCerrado?.(cierre);
             onClose();
         } catch (e) {
             setError(toAppError(e).message);
+            // CAJ-INC-01: algo entró o salió del cajón mientras se contaba. Se vuelve a preparar,
+            // sin perder el recuento, para que el descuadre se mire contra la cifra buena.
+            if (esError(e, "conflict")) {
+                try {
+                    setPrep(await commands.cierrePreparar());
+                } catch (e2) {
+                    setError(toAppError(e2).message);
+                }
+            }
         } finally {
             setGuardando(false);
         }

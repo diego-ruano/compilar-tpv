@@ -52,6 +52,8 @@ export function cierreConfirmar(payload: {
     contado: DenominacionInput[];
     dejado: DenominacionInput[];
     motivo?: string | null;
+    /** CAJ-INC-01: el esperado que se enseñaba. Si el backend recalcula otro, rechaza el cierre. */
+    esperadoVisto?: Dinero | null;
 }): Promise<CierreDto> {
     const args: ConfirmarCierreInput = {
         id_cierre: payload.idCierre,
@@ -59,6 +61,7 @@ export function cierreConfirmar(payload: {
         contado: payload.contado,
         dejado: payload.dejado,
         motivo: payload.motivo?.trim() || undefined,
+        esperado_visto: payload.esperadoVisto ?? undefined,
     };
     return commands.cierreConfirmar(args);
 }

@@ -206,6 +206,12 @@ async fn totales_entre<C: Reader>(
     })
 }
 
+/// Un instante en el formato con el que se guardan las horas de caja: el de
+/// `datetime('now','localtime')`.
+pub(crate) fn como_hora_de_caja(t: chrono::DateTime<chrono::Local>) -> String {
+    t.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 /// Cierra el periodo en **una sola transacción del escritor** (RI-58).
 ///
 /// Antes eran tres pasos sueltos: leer el último cierre y los totales por el pool de lectura,
@@ -219,7 +225,7 @@ async fn cerrar_periodo(db: &Db, id_cierre: &str, armar: ArmarCierre<'_>) -> App
     // La hora del cierre, que es también el límite superior de los totales. La pone quien escribe
     // (decisión 0004), con el mismo formato que `datetime('now','localtime')`.
     let inicio = chrono::Local::now();
-    let ahora = inicio.format("%Y-%m-%d %H:%M:%S").to_string();
+    let ahora = como_hora_de_caja(inicio);
 
     let res: AppResult<bool> = g.transaccion(async {
         // Confirmar dos veces es confirmar una: el id lo genera la pantalla al abrir el arqueo.
@@ -399,8 +405,13 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
     }
 
     async fn totales_desde(&self, desde: Option<&str>) -> AppResult<TotalesCaja> {
+        // CAJ-INC-01: hasta ahora, con el mismo límite que pondrá `cerrar_periodo` al confirmar.
+        // Sin él, la preparación contaba lo que tiene una hora posterior —el gasto de «hoy», que
+        // sin hora propia cuenta a las 12:00, cerrando de madrugada— y el cierre no: la pantalla
+        // enseñaba un esperado y se guardaba otro, y el periodo siguiente lo volvía a contar.
+        let ahora = como_hora_de_caja(chrono::Local::now());
         let db = self.db.read().await;
-        totales_entre(&db, desde, None).await
+        totales_entre(&db, desde, Some(&ahora)).await
     }
 
     /// Cuántas anulaciones ha habido en el periodo y por cuánto importe. **Informativo**: no entra
@@ -1315,7 +1326,64 @@ mod tests {
             contado: vec![tpv_contracts::cierre_caja::DenominacionInput { valor: eur(10.0), unidades: 2 }],
             dejado: vec![],
             motivo: motivo.map(str::to_string),
+            esperado_visto: None,
         }
+    }
+
+    /// Mañana, en el formato de `Cuentas_Gastos.Fecha`.
+    fn manana() -> String {
+        (chrono::Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string()
+    }
+
+    #[tokio::test]
+    async fn la_preparacion_suma_hasta_AHORA_como_el_cierre() {
+        // CAJ-INC-01. Un gasto de caja cuya hora de caja aún no ha llegado (mañana a las 12:00)
+        // no es de este periodo para el cierre, que corta en su propia hora. La preparación lo
+        // sumaba —no tenía límite superior— y enseñaba un esperado que luego no se guardaba.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        sembrar(
+            &db,
+            &[&format!(
+                "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, Pagado_Con_Caja)
+                 VALUES ('g-manana', '{}', 'Hielo', 500, 'Suministros', 1);",
+                manana()
+            )],
+        )
+        .await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let prep = cierre_uc::preparar(&repo, Dinero::CERO, None).await.unwrap();
+        assert_eq!(prep.gastos_caja, Dinero::CERO, "el gasto de mañana no es de este periodo");
+        assert_eq!(prep.esperado, eur(20.0));
+
+        let mut arqueo = arqueo_de_20("cierre-1", None);
+        arqueo.esperado_visto = Some(prep.esperado);
+        let c = cierre_uc::confirmar(&repo, Some("u1"), arqueo, Dinero::CERO).await.unwrap();
+        assert_eq!(c.esperado, prep.esperado, "se guarda lo que se enseñó");
+    }
+
+    #[tokio::test]
+    async fn si_el_esperado_cambio_mientras_se_contaba_no_se_cierra() {
+        // CAJ-INC-01, la red: la pantalla enseñó 20 € y, al confirmar, el backend suma 25 € (un
+        // cobro entró mientras se contaba). No se guarda nada y se pide revisar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+        sembrar(
+            &db,
+            &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                 VALUES ('p2', 'com', '2026-05-10 22:00:00', 'Efectivo', 500, 'TOTAL');"],
+        )
+        .await;
+
+        let mut arqueo = arqueo_de_20("cierre-1", Some("faltan 5"));
+        arqueo.esperado_visto = Some(eur(20.0));
+        let e = cierre_uc::confirmar(&repo, Some("u1"), arqueo, Dinero::CERO).await.unwrap_err();
+
+        assert_eq!(e.code(), ErrorCode::Conflict);
+        assert_eq!(e.to_string(), cierre_uc::ESPERADO_CAMBIADO);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 0);
     }
 
     #[tokio::test]

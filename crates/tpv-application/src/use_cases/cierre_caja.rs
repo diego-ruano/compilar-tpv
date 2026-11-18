@@ -28,6 +28,9 @@ fn a_denoms(input: &[tpv_contracts::cierre_caja::DenominacionInput]) -> Vec<Deno
         .collect()
 }
 
+/// CAJ-INC-01 · El esperado recalculado al confirmar no es el que enseñaba la pantalla.
+pub const ESPERADO_CAMBIADO: &str = "El esperado ha cambiado mientras contabas: revísalo.";
+
 fn umbral_o_defecto(umbral_descuadre: Dinero) -> Dinero {
     if umbral_descuadre > Dinero::CERO {
         umbral_descuadre
@@ -147,6 +150,16 @@ pub async fn confirmar(
             total_recuento(&contado_denoms),
             total_recuento(&dejado_denoms),
         );
+
+        // CAJ-INC-01: la red de la pantalla. Lo que se guarda sigue siendo este cálculo, pero si
+        // no es lo que se enseñó —algo entró o salió del cajón mientras se contaba—, el descuadre
+        // que se aceptó (y el motivo que se escribió para él) no es el que se guardaría. Antes que
+        // el motivo: con otro esperado, otro descuadre, y quizá otro motivo.
+        if let Some(visto) = input.esperado_visto {
+            if visto != calculo.esperado {
+                return Err(AppError::conflict(ESPERADO_CAMBIADO));
+            }
+        }
 
         let motivo =
             validar(&calculo, input.motivo.as_deref(), umbral).map_err(AppError::validation)?;
