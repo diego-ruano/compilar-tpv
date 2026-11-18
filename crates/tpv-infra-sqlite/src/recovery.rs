@@ -109,6 +109,92 @@ fn corrupta(detalle: impl std::fmt::Display) -> AppError {
     AppError::coded(ErrorCode::BackupCorrupt, MSG_COPIA_DANADA)
 }
 
+/// Lo que se dice cuando la copia, sana, trae el esquema de otra versión del programa.
+pub const MSG_COPIA_DE_OTRA_VERSION: &str =
+    "Esta copia es de otra versión del programa y no se puede restaurar en esta.";
+
+/// Lo que se dice cuando el disco de este equipo no deja preparar la copia para restaurarla.
+pub const MSG_SIN_DISCO_PARA_PREPARARLA: &str = "No se pudo preparar la copia: el disco de este ordenador no deja escribir (puede que esté lleno). La copia no se ha tocado: libera espacio y vuelve a intentarlo.";
+
+/// Lo que se dice cuando la copia no se pudo preparar por algo que no es ni ella ni el disco.
+pub const MSG_NO_SE_PUDO_PREPARAR: &str =
+    "No se pudo preparar la copia para restaurarla. La copia no se ha tocado: vuelve a intentarlo.";
+
+/// Por qué no se pudo abrir y poner al día la copia que se va a restaurar, que ya ha pasado la
+/// validación.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FalloAlPreparar {
+    /// El motor dice que el fichero está roto.
+    Danada,
+    /// Sus migraciones no son las de este programa: una ya aplicada es distinta, o una pendiente no
+    /// se le puede aplicar.
+    OtraVersion,
+    /// El disco de este equipo: lleno, sin permiso, un error de lectura o escritura.
+    Disco,
+    /// Otra cosa.
+    Otro,
+}
+
+/// El código de SQLite de un error de la cadena, venga del ejecutor o de rusqlite.
+fn codigo_sqlite(e: &(dyn std::error::Error + 'static)) -> Option<i32> {
+    if let Some(ErrorSql::SqliteFailure(codigo, _)) = e.downcast_ref::<ErrorSql>() {
+        return Some(*codigo);
+    }
+    match e.downcast_ref::<rusqlite::Error>()? {
+        rusqlite::Error::SqliteFailure(c, _) => Some(c.extended_code),
+        rusqlite::Error::SqlInputError { error, .. } => Some(error.extended_code),
+        _ => None,
+    }
+}
+
+/// Clasifica el fallo al abrir la copia preparada recorriendo la cadena de errores: el disco y una
+/// base rota mandan sobre la migración en la que ocurrieron (un disco lleno a mitad de migrar es el
+/// disco, no la versión).
+fn fallo_al_preparar(e: &(dyn std::error::Error + 'static)) -> FalloAlPreparar {
+    use rusqlite::ffi;
+    let mut de_una_migracion = false;
+    let mut actual = Some(e);
+    while let Some(error) = actual {
+        if let Some(codigo) = codigo_sqlite(error) {
+            match codigo & 0xff {
+                ffi::SQLITE_FULL
+                | ffi::SQLITE_IOERR
+                | ffi::SQLITE_CANTOPEN
+                | ffi::SQLITE_READONLY
+                | ffi::SQLITE_PERM => return FalloAlPreparar::Disco,
+                ffi::SQLITE_CORRUPT | ffi::SQLITE_NOTADB => return FalloAlPreparar::Danada,
+                _ => {}
+            }
+        }
+        if error.is::<std::io::Error>() {
+            return FalloAlPreparar::Disco;
+        }
+        if error.is::<crate::migrations::MigracionAlterada>() || error.is::<crate::migrations::MigracionFallida>() {
+            de_una_migracion = true;
+        }
+        actual = error.source();
+    }
+    if de_una_migracion {
+        FalloAlPreparar::OtraVersion
+    } else {
+        FalloAlPreparar::Otro
+    }
+}
+
+/// El error que se enseña cuando no se pudo abrir y poner al día la copia preparada. Antes todo era
+/// «la copia está dañada», y con eso se podía tirar una copia buena de otra versión o que sólo
+/// había topado con un disco lleno. El detalle técnico va sólo al registro.
+fn al_preparar_la_copia(e: &(dyn std::error::Error + 'static)) -> AppError {
+    let fallo = fallo_al_preparar(e);
+    tracing::warn!(target: "tpv::recovery", detalle = %e, ?fallo, "no se pudo preparar la copia para restaurarla");
+    match fallo {
+        FalloAlPreparar::Danada => AppError::coded(ErrorCode::BackupCorrupt, MSG_COPIA_DANADA),
+        FalloAlPreparar::OtraVersion => AppError::validation(MSG_COPIA_DE_OTRA_VERSION),
+        FalloAlPreparar::Disco => AppError::external(MSG_SIN_DISCO_PARA_PREPARARLA),
+        FalloAlPreparar::Otro => AppError::internal(MSG_NO_SE_PUDO_PREPARAR),
+    }
+}
+
 /// Un archivo que no es una copia: ni una base de SQLite ni un gzip.
 fn no_es_una_copia() -> AppError {
     AppError::validation(MSG_NO_ES_UNA_COPIA)
@@ -1689,9 +1775,7 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
         let prepared_str = prepared
             .to_str()
             .ok_or_else(|| AppError::internal("Ruta temporal de restauración inválida"))?;
-        let db = Db::open(prepared_str)
-            .await
-            .map_err(|e| corrupta(format!("No se puede preparar la copia: {e}")))?;
+        let db = Db::open(prepared_str).await.map_err(|e| al_preparar_la_copia(e.as_ref()))?;
         mark_reconciliation_pending(&db).await?;
         ajustar_registro_de_fallos(&db).await?;
         // El resumen diario de las estadísticas que trae la copia se rehace entero: es una caché,
@@ -1935,6 +2019,69 @@ mod tests {
         drop(conn);
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una copia sana con el esquema de otra versión (una migración aplicada que no es la de este
+    /// programa) no es una copia dañada: decirlo así invitaba a tirar una copia buena.
+    #[tokio::test]
+    async fn una_copia_de_otra_version_no_se_da_por_danada() {
+        let dir = test_dir("otra_version");
+        let db = db_operativa(&dir).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute("UPDATE _migrations SET hash = 'de-otra-version' WHERE name = '0001_inicial.sql';", ())
+                .await
+                .unwrap();
+        }
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+
+        let err = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Validation);
+        assert_eq!(err.to_string(), MSG_COPIA_DE_OTRA_VERSION);
+        let temporales = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("data.restore."))
+            .count();
+        assert_eq!(temporales, 0, "el temporal se descarta");
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo que el motor dice al abrir la copia preparada decide la frase: el disco y una base rota
+    /// mandan sobre la migración en la que pasaron.
+    #[test]
+    fn el_fallo_al_preparar_la_copia_dice_lo_que_ha_pasado() {
+        use crate::migrations::{MigracionAlterada, MigracionFallida};
+        use rusqlite::ffi;
+        let del_motor = |codigo: i32| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(rusqlite::Error::SqliteFailure(ffi::Error::new(codigo), None))
+        };
+        let en_migracion = |causa: Box<dyn std::error::Error + Send + Sync>| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(MigracionFallida { nombre: "0002_x.sql".into(), causa })
+        };
+        let clase = |e: Box<dyn std::error::Error + Send + Sync>| fallo_al_preparar(e.as_ref());
+
+        assert_eq!(clase(Box::new(MigracionAlterada { nombre: "0001_inicial.sql".into() })), FalloAlPreparar::OtraVersion);
+        assert_eq!(clase(en_migracion(del_motor(ffi::SQLITE_ERROR))), FalloAlPreparar::OtraVersion, "no such column");
+        assert_eq!(clase(en_migracion(del_motor(ffi::SQLITE_FULL))), FalloAlPreparar::Disco, "disco lleno al migrar");
+        assert_eq!(clase(en_migracion(del_motor(ffi::SQLITE_IOERR_WRITE))), FalloAlPreparar::Disco, "código extendido");
+        assert_eq!(
+            clase(Box::new(ErrorSql::SqliteFailure(ffi::SQLITE_CANTOPEN, "unable to open database file".into()))),
+            FalloAlPreparar::Disco,
+            "del ejecutor, al abrir"
+        );
+        assert_eq!(clase(Box::new(std::io::Error::other("sin espacio"))), FalloAlPreparar::Disco);
+        assert_eq!(clase(del_motor(ffi::SQLITE_NOTADB)), FalloAlPreparar::Danada);
+        assert_eq!(clase(en_migracion(del_motor(ffi::SQLITE_CORRUPT))), FalloAlPreparar::Danada);
+        assert_eq!(clase("otra cosa".into()), FalloAlPreparar::Otro);
+
+        let mensaje = |e: Box<dyn std::error::Error + Send + Sync>| al_preparar_la_copia(e.as_ref()).to_string();
+        assert_eq!(mensaje(del_motor(ffi::SQLITE_FULL)), MSG_SIN_DISCO_PARA_PREPARARLA);
+        assert_eq!(mensaje(del_motor(ffi::SQLITE_NOTADB)), MSG_COPIA_DANADA);
+        assert_eq!(mensaje("otra cosa".into()), MSG_NO_SE_PUDO_PREPARAR);
     }
 
     #[tokio::test]

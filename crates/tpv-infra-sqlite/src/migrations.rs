@@ -52,6 +52,47 @@ static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/da
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
+/// Una migración ya aplicada en la base no es la que lleva este programa (hash distinto). Es un tipo
+/// propio para que quien abre una base ajena (restaurar una copia) pueda distinguirlo de una base
+/// rota: es una base de otra versión del programa.
+#[derive(Debug)]
+pub struct MigracionAlterada {
+    pub(crate) nombre: String,
+}
+
+impl std::fmt::Display for MigracionAlterada {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "La migración '{}' fue modificada después de aplicarse (hash distinto). \
+             Nunca edites una migración ya publicada: crea una nueva.",
+            self.nombre
+        )
+    }
+}
+
+impl std::error::Error for MigracionAlterada {}
+
+/// Una migración pendiente no se pudo aplicar a la base. `causa` es el error del motor, y se
+/// conserva como `source()` para que quien lo recibe sepa si fue el disco (lleno, sin permiso).
+#[derive(Debug)]
+pub struct MigracionFallida {
+    pub(crate) nombre: String,
+    pub(crate) causa: BoxErr,
+}
+
+impl std::fmt::Display for MigracionFallida {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "La migración '{}' no se pudo aplicar: {}", self.nombre, self.causa)
+    }
+}
+
+impl std::error::Error for MigracionFallida {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.causa.as_ref())
+    }
+}
+
 /// Lista de migraciones `(nombre, contenido)` ordenada por nombre (0001, 0002, …).
 fn migration_files() -> Vec<(String, String)> {
     let mut files: Vec<(String, String)> = MIGRATIONS_DIR
@@ -184,11 +225,7 @@ fn apply_pending(conn: &Connection, applied: &HashMap<String, String>) -> Result
 
         if let Some(prev) = applied.get(&name) {
             if *prev != hash {
-                return Err(format!(
-                    "La migración '{name}' fue modificada después de aplicarse (hash distinto). \
-                     Nunca edites una migración ya publicada: crea una nueva."
-                )
-                .into());
+                return Err(MigracionAlterada { nombre: name }.into());
             }
             continue;
         }
@@ -212,9 +249,9 @@ fn apply_pending(conn: &Connection, applied: &HashMap<String, String>) -> Result
                 conn.execute_batch("COMMIT;")?;
                 tracing::info!(target: "tpv::migrations", migracion = %name, "migración aplicada");
             }
-            Err(e) => {
+            Err(causa) => {
                 let _ = conn.execute_batch("ROLLBACK;");
-                return Err(e);
+                return Err(MigracionFallida { nombre: name, causa }.into());
             }
         }
     }

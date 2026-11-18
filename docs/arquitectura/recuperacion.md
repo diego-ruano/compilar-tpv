@@ -243,7 +243,12 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   ([SYNC-33](../pendientes.md#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es)). Lo apartado
   (`backups/antes-de-traslado-*` y `backups/negocio-anterior-*/`) no se importa, lleve sello o no.
   Y no se restaura nada mientras la base que hay en el equipo sea de otro negocio: primero se aparta.
-- Una copia inservible se rechaza diciendo por qué.
+- Una copia inservible se rechaza diciendo por qué. Al restaurar, la copia ya validada se abre y se
+  pone al día con las migraciones; si eso falla, lo que dice el motor decide la frase: una base rota
+  «está dañada»; una migración aplicada distinta de la de este programa, o una pendiente que no se le
+  puede aplicar, es una copia «de otra versión del programa»; un disco lleno, sin permiso o con un
+  error de lectura o escritura es el disco de este ordenador, y la copia no se ha tocado. El detalle
+  técnico va sólo al registro.
 - Al restaurar, `_Sync_Failed` queda coherente con el checkpoint de la copia (AUD-18): lo que va por
   encima se borra, porque el catch-up de la reconciliación lo vuelve a traer y a intentar en orden. Su
   marcador de `_Sync_Applied_Ops`, si lo tiene, se va con él sólo si lo puso una cuarentena que no
