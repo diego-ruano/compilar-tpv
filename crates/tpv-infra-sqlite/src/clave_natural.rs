@@ -99,12 +99,14 @@ pub(crate) const DESCRIPCIONES: &[Descripcion] = &[
     },
 ];
 
-/// ¿Un valor que no identifica a nadie? Vacío o nulo: el índice de Clientes no los cuenta, y dos
-/// proveedores sin correo no son el mismo.
+/// ¿Un valor que no identifica a nadie, o un hueco que se puede rellenar? `NULL` o `''`, tal cual:
+/// el índice de Clientes no los cuenta (`Email <> ''`), dos proveedores sin correo no son el mismo,
+/// y es lo que la sentencia replicada trata como hueco (`NULLIF(col, '')`). Un texto de sólo
+/// espacios no está vacío para ninguno de los tres: si aquí lo fuera, aquí se rellenaría y arriba no.
 fn vacio(v: &Value) -> bool {
     match v {
         Value::Null => true,
-        Value::Text(t) => t.trim().is_empty(),
+        Value::Text(t) => t.is_empty(),
         _ => false,
     }
 }
@@ -393,6 +395,17 @@ mod tests {
     use std::sync::Arc;
 
     use crate::db::Db;
+
+    #[test]
+    fn vacio_es_lo_mismo_que_el_hueco_de_la_sentencia_y_del_indice() {
+        // La sentencia replicada rellena con `NULLIF(col, '')`, y el índice de Clientes sólo deja
+        // fuera `NULL` y `''`: un texto de espacios no es un hueco para ellos, ni aquí.
+        assert!(vacio(&Value::Null));
+        assert!(vacio(&Value::Text(String::new())));
+        assert!(!vacio(&Value::Text("   ".into())));
+        assert!(!vacio(&Value::Text("\t".into())));
+        assert!(!vacio(&Value::Integer(0)));
+    }
 
     async fn base(nombre: &str) -> Arc<Db> {
         let dir = crate::test_temp::dir_temporal(&format!("clave-natural-{nombre}"));
