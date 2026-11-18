@@ -16,6 +16,60 @@ use tpv_domain::trabajadores::{
 
 use crate::CloudClient;
 
+/// El cuerpo del alta. Se desestructura sin `..` para que un campo nuevo de `TrabajadorNuevo`
+/// no compile hasta decidir si viaja: `sin_pin` se quedaba fuera y la Handy daba de alta con PIN a
+/// quien se marcaba «Entra sin PIN» (TRA-INC-02).
+fn cuerpo_alta(data: TrabajadorNuevo) -> JsonValue {
+    let TrabajadorNuevo {
+        id_rol, email, pin, nombre, apellido, estado, dni, telefono, puesto, iban,
+        numero_seguridad_social, fecha_inicio_contrato, fecha_fin_contrato, sin_pin,
+    } = data;
+    json!({
+        "id_rol": id_rol,
+        "email": email,
+        // RI-63: el PIN, no su hash: lo hashea el worker, como la Main en su SQLite.
+        "pin": pin,
+        "nombre": nombre,
+        "apellido": apellido,
+        "estado": estado,
+        "dni": dni,
+        "telefono": telefono,
+        "puesto": puesto,
+        "iban": iban,
+        "numero_seguridad_social": numero_seguridad_social,
+        "fecha_inicio_contrato": fecha_inicio_contrato,
+        "fecha_fin_contrato": fecha_fin_contrato,
+        "sin_pin": sin_pin,
+    })
+}
+
+/// El cuerpo de la edición, con el mismo criterio que el alta (TRA-INC-02). `sin_pin` a `null`
+/// deja el que tenga (`COALESCE` en el worker).
+fn cuerpo_edicion(id_trabajador: &str, cambios: TrabajadorCambios) -> JsonValue {
+    let TrabajadorCambios {
+        id_usuario, id_rol, email, nombre, apellido, estado, dni, telefono, puesto, iban,
+        numero_seguridad_social, fecha_inicio_contrato, fecha_fin_contrato, pin, sin_pin,
+    } = cambios;
+    json!({
+        "id_trabajador": id_trabajador,
+        "id_usuario": id_usuario,
+        "id_rol": id_rol,
+        "email": email,
+        "nombre": nombre,
+        "apellido": apellido,
+        "estado": estado,
+        "dni": dni,
+        "telefono": telefono,
+        "puesto": puesto,
+        "iban": iban,
+        "numero_seguridad_social": numero_seguridad_social,
+        "fecha_inicio_contrato": fecha_inicio_contrato,
+        "fecha_fin_contrato": fecha_fin_contrato,
+        "pin": pin,
+        "sin_pin": sin_pin,
+    })
+}
+
 pub struct HttpTrabajadoresRepository {
     client: Arc<CloudClient>,
 }
@@ -53,22 +107,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
     }
 
     async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool> {
-        let body = json!({
-            "id_rol": data.id_rol,
-            "email": data.email,
-            // RI-63: el PIN, no su hash: lo hashea el worker, como la Main en su SQLite.
-            "pin": data.pin,
-            "nombre": data.nombre,
-            "apellido": data.apellido,
-            "estado": data.estado,
-            "dni": data.dni,
-            "telefono": data.telefono,
-            "puesto": data.puesto,
-            "iban": data.iban,
-            "numero_seguridad_social": data.numero_seguridad_social,
-            "fecha_inicio_contrato": data.fecha_inicio_contrato,
-            "fecha_fin_contrato": data.fecha_fin_contrato,
-        });
+        let body = cuerpo_alta(data);
         let _: JsonValue = self.client.post_json("/v1/trabajadores", &body).await?;
         Ok(true)
     }
@@ -78,23 +117,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool> {
-        let body = json!({
-            "id_trabajador": id_trabajador,
-            "id_usuario": cambios.id_usuario,
-            "id_rol": cambios.id_rol,
-            "email": cambios.email,
-            "nombre": cambios.nombre,
-            "apellido": cambios.apellido,
-            "estado": cambios.estado,
-            "dni": cambios.dni,
-            "telefono": cambios.telefono,
-            "puesto": cambios.puesto,
-            "iban": cambios.iban,
-            "numero_seguridad_social": cambios.numero_seguridad_social,
-            "fecha_inicio_contrato": cambios.fecha_inicio_contrato,
-            "fecha_fin_contrato": cambios.fecha_fin_contrato,
-            "pin": cambios.pin,
-        });
+        let body = cuerpo_edicion(id_trabajador, cambios);
         let _: JsonValue = self
             .client
             .put_json(&format!("/v1/trabajadores/{id_trabajador}"), &body)
@@ -192,5 +215,41 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
             .post_json("/v1/trabajadores/horarios/predeterminado-desde-semana", &body)
             .await?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn alta(sin_pin: bool) -> TrabajadorNuevo {
+        TrabajadorNuevo {
+            id_rol: "r".into(), email: "a@b.es".into(), pin: "1234".into(), nombre: "Ana".into(),
+            apellido: None, estado: "Activo".into(), dni: None, telefono: None, puesto: None,
+            iban: None, numero_seguridad_social: None, fecha_inicio_contrato: None,
+            fecha_fin_contrato: None, sin_pin,
+        }
+    }
+
+    fn edicion(sin_pin: Option<bool>) -> TrabajadorCambios {
+        TrabajadorCambios {
+            id_usuario: "u".into(), id_rol: "r".into(), email: "a@b.es".into(), nombre: "Ana".into(),
+            apellido: None, estado: "Activo".into(), dni: None, telefono: None, puesto: None,
+            iban: None, numero_seguridad_social: None, fecha_inicio_contrato: None,
+            fecha_fin_contrato: None, pin: None, sin_pin,
+        }
+    }
+
+    #[test]
+    fn el_alta_lleva_entra_sin_pin() {
+        assert_eq!(cuerpo_alta(alta(true))["sin_pin"], json!(true));
+        assert_eq!(cuerpo_alta(alta(false))["sin_pin"], json!(false));
+    }
+
+    #[test]
+    fn la_edicion_lleva_entra_sin_pin_y_null_si_no_se_toca() {
+        assert_eq!(cuerpo_edicion("t", edicion(Some(true)))["sin_pin"], json!(true));
+        assert_eq!(cuerpo_edicion("t", edicion(Some(false)))["sin_pin"], json!(false));
+        assert_eq!(cuerpo_edicion("t", edicion(None))["sin_pin"], JsonValue::Null);
     }
 }
