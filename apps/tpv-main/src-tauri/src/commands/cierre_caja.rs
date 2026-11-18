@@ -57,9 +57,11 @@ pub async fn cierre_confirmar(
 
     let u = umbral(&state).await;
     let repo = state.cierre_caja_repo().await?;
+    // Para resolver el aviso de caja sin cerrar al cerrarla; sin él el cierre entra igual.
+    let notifier = state.notifier().await.ok();
     // El id llega en `args` (RI-58): lo genera la pantalla al abrir el arqueo, para que confirmar
     // dos veces sea confirmar una. Sigue siendo un literal anterior al INSERT, nunca la sentencia.
-    Ok(uc::confirmar(repo.as_ref(), Some(&sesion.id_usuario), args, u).await?)
+    Ok(uc::confirmar(repo.as_ref(), notifier.as_deref(), Some(&sesion.id_usuario), args, u).await?)
 }
 
 #[tauri::command]

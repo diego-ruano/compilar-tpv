@@ -1486,8 +1486,51 @@ mod tests {
 
         let mut arqueo = arqueo_de_20("cierre-1", None);
         arqueo.esperado_visto = Some(prep.esperado);
-        let c = cierre_uc::confirmar(&repo, Some("u1"), arqueo, Dinero::CERO).await.unwrap();
+        let c = cierre_uc::confirmar(&repo, None, Some("u1"), arqueo, Dinero::CERO).await.unwrap();
         assert_eq!(c.esperado, prep.esperado, "se guarda lo que se enseñó");
+    }
+
+    #[tokio::test]
+    async fn cerrar_la_caja_resuelve_el_aviso_de_caja_sin_cerrar() {
+        use tpv_application::ports::notificaciones::Notifier;
+        use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad};
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+        let notifier = crate::notificaciones::SqliteNotificacionesRepository::new(db.clone());
+        notifier
+            .emitir(NuevaNotificacion {
+                tipo: "caja_sin_cerrar".into(),
+                severidad: Severidad::Aviso,
+                titulo: "La caja lleva 1 día(s) sin cerrarse".into(),
+                cuerpo: None,
+                destino: Destino::Todos,
+                accion: None,
+                payload: None,
+                clave_dedupe: Some(cierre_uc::CLAVE_CAJA_ABIERTA.into()),
+                expira_en: None,
+            })
+            .await
+            .unwrap();
+        let activos = || async {
+            let r = db.read().await;
+            let mut filas = r
+                .query("SELECT COUNT(*) FROM Notificaciones WHERE Clave_Dedupe = 'caja_sin_cerrar' AND Estado = 'activa';", ())
+                .await
+                .unwrap();
+            crate::mapping::v_f64(filas.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0.0)
+        };
+
+        // Un cierre que no entra no lo toca.
+        let mut visto_otro = arqueo_de_20("cierre-1", None);
+        visto_otro.esperado_visto = Some(eur(99.0));
+        cierre_uc::confirmar(&repo, Some(&notifier), Some("u1"), visto_otro, Dinero::CERO).await.unwrap_err();
+        assert_eq!(activos().await, 1.0);
+
+        cierre_uc::confirmar(&repo, Some(&notifier), Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+            .await
+            .unwrap();
+        assert_eq!(activos().await, 0.0, "con la caja cerrada, el aviso no sigue en Notificaciones");
     }
 
     #[tokio::test]
@@ -1506,7 +1549,7 @@ mod tests {
 
         let mut arqueo = arqueo_de_20("cierre-1", Some("faltan 5"));
         arqueo.esperado_visto = Some(eur(20.0));
-        let e = cierre_uc::confirmar(&repo, Some("u1"), arqueo, Dinero::CERO).await.unwrap_err();
+        let e = cierre_uc::confirmar(&repo, None, Some("u1"), arqueo, Dinero::CERO).await.unwrap_err();
 
         assert_eq!(e.code(), ErrorCode::Conflict);
         assert_eq!(e.to_string(), cierre_uc::ESPERADO_CAMBIADO);
@@ -1521,10 +1564,10 @@ mod tests {
         sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
         let repo = SqliteCierreCajaRepository::new(db.clone());
 
-        let a = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+        let a = cierre_uc::confirmar(&repo, None, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
             .await
             .unwrap();
-        let b = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+        let b = cierre_uc::confirmar(&repo, None, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
             .await
             .unwrap();
 
@@ -1548,7 +1591,7 @@ mod tests {
         .await;
         let repo = SqliteCierreCajaRepository::new(db.clone());
 
-        let c = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+        let c = cierre_uc::confirmar(&repo, None, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
             .await
             .unwrap();
 
@@ -1565,7 +1608,7 @@ mod tests {
         let mut faltan_15 = arqueo_de_20("cierre-1", None);
         faltan_15.contado = vec![tpv_contracts::cierre_caja::DenominacionInput { valor: eur(5.0), unidades: 1 }];
 
-        let e = cierre_uc::confirmar(&repo, Some("u1"), faltan_15, Dinero::CERO).await.unwrap_err();
+        let e = cierre_uc::confirmar(&repo, None, Some("u1"), faltan_15, Dinero::CERO).await.unwrap_err();
 
         assert_eq!(e.code(), ErrorCode::Validation);
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 0);

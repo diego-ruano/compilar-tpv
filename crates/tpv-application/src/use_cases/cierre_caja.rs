@@ -120,8 +120,13 @@ pub async fn preparar(
 /// la misma transacción del escritor: antes los totales se leían por el pool de lectura y el
 /// `INSERT` iba después, con su propia hora, y un cobro confirmado entre las dos cosas caía dentro
 /// del periodo cerrado pero fuera de sus cifras.
+///
+/// Con la caja cerrada, el aviso de caja sin cerrar (`CLAVE_CAJA_ABIERTA`) se resuelve aquí mismo,
+/// con `notifier`; si no, seguía en Notificaciones hasta la siguiente pasada del job. Su fallo no
+/// toca el cierre, que ya está guardado: la pasada siguiente del job lo resuelve igual.
 pub async fn confirmar(
     repo: &dyn CierreCajaRepository,
+    notifier: Option<&dyn Notifier>,
     id_usuario: Option<&str>,
     input: ConfirmarCierreInput,
     umbral_descuadre: Dinero,
@@ -185,6 +190,10 @@ pub async fn confirmar(
 
     repo.cerrar_periodo(&id_cierre, &armar).await?;
 
+    if let Some(notifier) = notifier {
+        let _ = notifier.resolver_por_clave(CLAVE_CAJA_ABIERTA).await;
+    }
+
     repo.detalle(&id_cierre)
         .await?
         .ok_or_else(|| AppError::repository("el cierre no se pudo releer tras guardarlo"))
@@ -243,7 +252,8 @@ pub const CLAVE_CAJA_ABIERTA: &str = "caja_sin_cerrar";
 /// exactamente cuando el aviso sirve, y así también salta en un TPV que lleva días encendido.
 ///
 /// Idempotente por la clave de dedupe: mientras el aviso siga activo no se emite otro, por muchas
-/// pasadas que haga el motor. Al cerrar la caja se resuelve solo.
+/// pasadas que haga el motor. Al cerrar la caja lo resuelve `confirmar`, y si no pudo, la pasada
+/// siguiente de este job.
 pub async fn avisar_si_lleva_mucho_abierta(
     repo: &dyn CierreCajaRepository,
     notifier: &dyn Notifier,

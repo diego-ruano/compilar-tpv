@@ -32,7 +32,7 @@ periodo (arqueo), la baja de un cobro y la devolución de parte de él. Sus tres
 | Comandos | `src-tauri/src/commands/{cierre_caja,cuentas}.rs` | Exigen Administrador, salvo los cobros y sus bajas, que hace también el camarero ([permisos.md](permisos.md)); quién firma sale de la sesión |
 | Pantallas | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` · `DevolverModal.tsx` · `src/app/pages/Cuentas.tsx` | El cierre en cuatro pasos · el aviso antes de tocar un cierre hecho · devolver · el libro, el histórico y la baja |
 | Papel | `src-tauri/src/printing.rs::build_arqueo` (`printer_print_arqueo`) | Documento interno |
-| Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si el periodo lleva más de 20 h abierto |
+| Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si el periodo lleva más de 20 h abierto. La resuelve el propio cierre al entrar (`cierre_caja::confirmar`; si falla, el cierre entra igual y la resuelve la pasada siguiente del job) |
 | La Handy | `crates/tpv-infra-http/src/cierre_caja.rs` + worker `domains/cuentas/` (`soloLaMainEscribeCaja`) | Lee; las escrituras se rechazan en los dos sitios |
 
 ---
