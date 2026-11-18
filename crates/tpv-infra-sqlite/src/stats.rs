@@ -1909,9 +1909,11 @@ impl SqliteStatsRepository {
         // (`base`). La clave no se enseña nunca (antes salía «Proveedor #<id>»): un proveedor que
         // sigue en la ficha sale con su nombre; uno borrado, con el nombre que guardó el gasto al
         // borrarlo y «(borrado)»; sin ficha ni nombre, «Proveedor borrado»; con el nombre en blanco,
-        // «Proveedor sin nombre». Se agrupa por la clave, no por el nombre: dos proveedores que se
-        // llaman igual (o dos borrados) no se suman en una barra, y del segundo en adelante se
-        // numeran en el orden del gasto («Carnes SA (2)»). Igual en el worker (`proveedores`).
+        // «Proveedor sin nombre». Se agrupa por la clave, no por el nombre: dos proveedores de la
+        // ficha que se llaman igual no se suman en una barra, y del segundo en adelante se numeran en
+        // el orden del gasto («Carnes SA (2)»). Uno borrado ya no tiene clave: su gasto sólo guarda el
+        // nombre (`'b:'` y el nombre), así que dos borrados con el mismo nombre sí se suman en una
+        // barra. Está aceptado: no hay con qué distinguirlos. Igual en el worker (`proveedores`).
         let ctes = format!(
             r#"
             WITH
