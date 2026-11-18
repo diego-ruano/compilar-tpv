@@ -26,6 +26,12 @@ function Menu() {
 
 const pintar = () => render(<QueryClientProvider client={queryClient}><Menu /></QueryClientProvider>);
 const lecturas = () => invoke.mock.calls.filter(([comando]) => comando === "permisos_sesion").length;
+/** El `refetchInterval` que tiene ahora la consulta de los permisos de `u-1`. */
+function intervalo(): number | false | undefined {
+    const consulta = queryClient.getQueryCache().find({ queryKey: ["permisos", "sesion", "u-1"] });
+    const opcion = consulta?.observers[0]?.options.refetchInterval;
+    return typeof opcion === "function" ? opcion(consulta as never) : (opcion ?? false);
+}
 
 beforeEach(() => {
     queryClient.clear();
@@ -49,8 +55,26 @@ it("no se releen por reloj", async () => {
 
     const consulta = queryClient.getQueryCache().find({ queryKey: ["permisos", "sesion", "u-1"] });
     expect(consulta?.observers).toHaveLength(1);
-    expect(consulta?.observers[0].options.refetchInterval ?? false).toBe(false);
+    expect(intervalo()).toBe(false);
     expect(lecturas()).toBe(1);
+});
+
+it("si una relectura falla, se sigue con los últimos leídos y se reintenta sola", async () => {
+    pintar();
+    await screen.findByText("puede ajustar existencias");
+
+    // Se va la red (en Android, al volver a primer plano): la relectura falla.
+    invoke.mockImplementation(async (comando: string) => {
+        if (comando === "permisos_sesion") throw { code: "external", message: "Sin conexión" };
+        return undefined;
+    });
+    await queryClient.invalidateQueries({ queryKey: ["permisos"] }).catch(() => {});
+    await waitFor(() => expect(queryClient.getQueryState(["permisos", "sesion", "u-1"])?.status).toBe("error"), { timeout: 5_000 });
+
+    // Lo que se pinta sigue siendo lo de antes, no «sin permisos».
+    expect(screen.getByText("puede ajustar existencias")).toBeTruthy();
+    // Y mientras falle, la relectura tiene reloj.
+    expect(intervalo()).toBe(15_000);
 });
 
 it("un cambio de usuarios, roles o concesiones que llega de otro equipo los relee", async () => {
