@@ -175,7 +175,7 @@ fn montar(config: TelemetryConfig, depuracion: bool) -> Result<(), TelemetryErro
         .unwrap_or_else(|_| EnvFilter::new(default_directive));
 
     // ── Capa 2: fichero local rotado por días (7 ficheros ≈ 7 días). ──
-    let logs_dir = config.app_data_dir.join("logs");
+    let logs_dir = config.logs_dir.clone().unwrap_or_else(|| config.app_data_dir.join("logs"));
     std::fs::create_dir_all(&logs_dir).ok();
     let appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)

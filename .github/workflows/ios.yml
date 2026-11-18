@@ -64,6 +64,16 @@ jobs:
         working-directory: apps/tpv-main
         run: pnpm tauri ios init --ci
 
+      # `ios init` deja los iconos de Tauri: van los de la app, que ya están en icons/ios con los
+      # mismos nombres que el AppIcon que genera.
+      - name: Iconos de la app
+        working-directory: apps/tpv-main/src-tauri
+        run: |
+          DESTINO=gen/apple/Assets.xcassets/AppIcon.appiconset
+          test -d "$DESTINO" || { echo "No está $DESTINO"; find gen/apple -name "*.appiconset"; exit 1; }
+          cp icons/ios/*.png "$DESTINO"/
+          ls "$DESTINO"
+
       - name: Compilar sin firmar
         working-directory: apps/tpv-main
         run: pnpm tauri ios build --no-sign --ci

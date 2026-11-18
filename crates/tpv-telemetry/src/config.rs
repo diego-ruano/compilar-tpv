@@ -85,6 +85,9 @@ pub struct TelemetryConfig {
     pub console: bool,
     /// Subida a la nube (se rellena en la Fase 4).
     pub ingest: IngestConfig,
+    /// Dónde va el fichero de registro, si no es `logs/` bajo `app_data_dir`. En iOS va a
+    /// Documentos, que es lo único que se puede leer del teléfono sin un Mac (la app Archivos).
+    pub logs_dir: Option<PathBuf>,
 }
 
 impl TelemetryConfig {
@@ -98,6 +101,7 @@ impl TelemetryConfig {
             console: environment == Environment::Dev,
             environment,
             ingest: IngestConfig::default(),
+            logs_dir: None,
         }
     }
 }

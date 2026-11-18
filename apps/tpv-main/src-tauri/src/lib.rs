@@ -2710,6 +2710,12 @@ pub fn run() {
                     enabled: true,
                     signer: Some(signer),
                 };
+                // iOS: el registro, en Documentos/registros, que se ve en la app Archivos
+                // (`UIFileSharingEnabled`, Info.ios.plist). Sin un Mac no hay otra forma de leerlo.
+                #[cfg(target_os = "ios")]
+                {
+                    tcfg.logs_dir = handle.path().document_dir().ok().map(|d| d.join("registros"));
+                }
                 if let Err(e) = tpv_telemetry::init(tcfg) {
                     eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}");
                     // sin `tracing` todavía: es lo que está fallando

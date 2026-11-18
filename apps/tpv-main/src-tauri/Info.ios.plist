@@ -7,10 +7,18 @@
 
   NSCameraUsageDescription: sin ella iOS no deja usar la cámara, y el lector de QR (barcode-scanner)
   rechaza escanear. Es el texto que ve quien da el permiso.
+
+  UIFileSharingEnabled y LSSupportsOpeningDocumentsInPlace: la carpeta Documentos de la app se ve
+  en la app Archivos del iPhone. Ahí va el registro (Documentos/registros), que sin un Mac es la
+  única forma de leer qué ha pasado en el teléfono.
 -->
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>La cámara se usa para leer el código QR del TPV principal al vincular este dispositivo.</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 </dict>
 </plist>
