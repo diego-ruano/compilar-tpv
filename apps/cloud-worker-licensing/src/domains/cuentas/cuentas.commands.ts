@@ -206,26 +206,13 @@ const COMANDA_DEL_COBRO = "(SELECT p.ID_Comanda FROM Pagos p WHERE p.ID_Pago = ?
  * leída del cobro. Van después de marcarlo `ANULADO` (sus líneas ya no están en
  * `v_lineas_cobradas` y vuelven a `v_lineas_por_cobrar`) y antes del `UPDATE` que reabre la original.
  *
- * 1. Si la abierta está vacía (sin líneas, cobros ni reserva) y a la original le quedan líneas sin
- *    cobrar, se quita: así la original se puede reabrir.
- * 2. Si no, las líneas sin cobrar de la original pasan a la abierta.
- * 3. El total de la abierta se re-deriva de sus líneas.
+ * 1. Las líneas sin cobrar de la original pasan a la abierta, aunque esté vacía.
+ * 2. El total de la abierta se re-deriva de sus líneas.
+ *
+ * La abierta no se quita nunca, ni vacía: otro equipo puede tenerla en pantalla y añadirle una
+ * línea que, sin ella, no entraría en ninguna parte.
  */
 const SQL_DEVOLVER_LINEAS_A_LA_MESA = [
-	`
-	DELETE FROM Comandas
-	WHERE Estado = 'Abierta'
-	  AND ID_Comanda <> ${COMANDA_DEL_COBRO}
-	  AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO})
-	  AND ID_Reserva IS NULL
-	  AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda)
-	  AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = Comandas.ID_Comanda)
-	  AND EXISTS (
-	    SELECT 1 FROM Detalle_Comanda dc
-	    WHERE dc.ID_Comanda = ${COMANDA_DEL_COBRO}
-	      AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
-	  );
-	`,
 	`
 	UPDATE Detalle_Comanda
 	SET ID_Comanda = (
@@ -397,8 +384,8 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			args: [idPago, idUsuario, motivo],
 		},
 		// 4-ter) CAJ-INC-02: si la mesa se volvió a abrir entretanto, la original no puede reabrirse.
-		//        Si la abierta está vacía (sin líneas, cobros ni reserva), se quita; si no, las
-		//        líneas sin cobrar pasan a ella. Las mismas sentencias que la Main
+		//        Las líneas sin cobrar pasan a la abierta, aunque esté vacía (no se quita: otro
+		//        equipo puede estar añadiéndole algo). Las mismas sentencias que la Main
 		//        (`SQL_DEVOLVER_LINEAS_A_LA_MESA` en `tpv-infra-sqlite/src/cuentas.rs`).
 		...(devuelveLasLineas
 			? SQL_DEVOLVER_LINEAS_A_LA_MESA.map((sql) => ({ kind: "execute", sql, args: [idPago] }))

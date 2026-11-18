@@ -7,7 +7,7 @@ import { nuevoId } from "../../lib/ids";
 import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
-import { guardaComandaSinCobrar, guardaProductoEnLaCarta } from "./guardasDeLinea";
+import { guardaComandaAbierta, guardaProductoEnLaCarta } from "./guardasDeLinea";
 import { SQL_DESVINCULAR_COMANDAS } from "../reservas/reservas.commands";
 import type { CobroDetallesPlan } from "./mesas.queries";
 import type {
@@ -452,8 +452,9 @@ export function addLinea(
 	nombreProducto: string | null,
 	precio: Dinero,
 ): BuiltCommand {
-	// SYNC-30: el producto en la carta y la comanda sin cobrar, mirados dentro del lote.
-	const steps: any[] = [guardaProductoEnLaCarta(input.id_producto), guardaComandaSinCobrar(input.id_comanda)];
+	// SYNC-30: el producto en la carta y la comanda abierta (CAJ-INC-02: y que exista), mirados
+	// dentro del lote.
+	const steps: any[] = [guardaProductoEnLaCarta(input.id_producto), guardaComandaAbierta(input.id_comanda)];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
 	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
 	const idDetalle = nuevoId();

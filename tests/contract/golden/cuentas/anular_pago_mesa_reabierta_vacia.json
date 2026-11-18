@@ -1,15 +1,21 @@
 {
   "Comandas": [
     {
+      "Estado": "Pagada",
+      "Fecha_Hora_Cierre": "2026-01-01 13:00:00",
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 300
+    },
+    {
       "Estado": "Abierta",
       "Fecha_Hora_Cierre": null,
-      "ID_Comanda": "comanda-1",
-      "Total_Comanda": 900
+      "ID_Comanda": "comanda-2",
+      "Total_Comanda": 600
     }
   ],
   "Detalle_Comanda": [
     {
-      "ID_Comanda": "comanda-1",
+      "ID_Comanda": "comanda-2",
       "ID_Detalle": "det-a"
     },
     {

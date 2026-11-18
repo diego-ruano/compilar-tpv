@@ -206,9 +206,12 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
 
 - **Las líneas vuelven a la mesa aunque se haya vuelto a abrir** (CAJ-INC-02). Sólo puede haber una
-  comanda abierta por mesa (`idx_comandas_una_abierta_por_mesa`), y abrir la mesa crea una vacía. Si
-  la abierta está vacía (sin líneas, cobros ni reserva), se quita y se reabre la original; si no, las
-  líneas sin cobrar de la original pasan a la abierta y los dos `Total_Comanda` se re-derivan. Lo
+  comanda abierta por mesa (`idx_comandas_una_abierta_por_mesa`), y abrir la mesa crea una vacía. Las
+  líneas sin cobrar de la original pasan a la abierta, aunque esté vacía, y los dos `Total_Comanda`
+  se re-derivan. La abierta no se quita nunca: otro equipo (una Handy) puede tenerla en pantalla, y
+  la línea que le añadiese no entraría en ninguna parte. Por lo mismo, una línea sólo entra en una
+  comanda que existe y está abierta (`exigir_comanda_abierta`; en el worker, la guarda
+  `guardaComandaAbierta`): una que ya no está se rechaza con su aviso, no se pierde en silencio. Lo
   cobrado por otro cobro activo se queda donde está. El ticket anulado se sigue reimprimiendo igual:
   sus líneas salen de `Pago_Detalles`, no de la comanda. Son las mismas sentencias en la Main y en el
   worker (`SQL_DEVOLVER_LINEAS_A_LA_MESA`), y la baja devuelve adónde fueron para que Cuentas lo diga.

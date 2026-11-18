@@ -1,5 +1,5 @@
 {
-  "descripcion": "CAJ-INC-02. La mesa se volvio a abrir despues del cobro (comanda-2, vacia: abrir la mesa la crea). La original no podia reabrirse por idx_comandas_una_abierta_por_mesa y sus lineas se quedaban en una comanda cerrada, sin cobrar. Ahora la abierta vacia se quita y la original se reabre. det-b sigue cobrada por pago-2 (activo).",
+  "descripcion": "CAJ-INC-02. La mesa se volvio a abrir despues del cobro (comanda-2, vacia: abrir la mesa la crea). La original no podia reabrirse por idx_comandas_una_abierta_por_mesa y sus lineas se quedaban en una comanda cerrada, sin cobrar. Ahora det-a pasa a la abierta aunque este vacia: no se quita, porque otro equipo puede tenerla en pantalla y anadirle una linea. det-b sigue cobrada por pago-2 (activo) y la original sigue cerrada.",
   "comando": "cuentas.anular_pago",
   "seed": [
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",

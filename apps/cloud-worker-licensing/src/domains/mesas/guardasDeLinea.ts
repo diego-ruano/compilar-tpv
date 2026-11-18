@@ -27,6 +27,22 @@ export function guardaComandaSinCobrar(idComanda: string): TxStep {
 	};
 }
 
+/**
+ * CAJ-INC-02: la comanda de la mesa existe y está abierta. Una pantalla puede quedarse con una que
+ * ya no está; sin esta guarda la sentencia de la línea no insertaba nada y la ruta contestaba bien,
+ * sin la línea. La de barra no la usa: allí la comanda se crea en el mismo lote que su primera
+ * línea. Espejo de `exigir_comanda_abierta` en la Main, con el mismo aviso.
+ */
+export function guardaComandaAbierta(idComanda: string): TxStep {
+	return {
+		kind: "guard",
+		sql: "SELECT EXISTS (SELECT 1 FROM Comandas WHERE ID_Comanda = ?1 AND Estado = 'Abierta');",
+		args: [idComanda],
+		error: "comanda_cobrada",
+		status: 409,
+	};
+}
+
 /** RI-54: el producto no está archivado. Una pantalla con la carta de antes en caché lo ofrece. */
 export function guardaProductoEnLaCarta(idProducto: string): TxStep {
 	return {

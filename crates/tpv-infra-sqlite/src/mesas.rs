@@ -97,25 +97,27 @@ pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str
     }
 }
 
-/// Lo que se enseña al intentar añadir una línea a una comanda ya cobrada. El mismo texto que
-/// `comanda_cobrada` en el worker (`lib/errorCodes.ts`).
+/// Lo que se enseña al intentar añadir una línea a una comanda que ya no está abierta. El mismo
+/// texto que `comanda_cobrada` en el worker (`lib/errorCodes.ts`).
 pub(crate) const COMANDA_COBRADA: &str =
-    "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.";
+    "Esa cuenta ya no está abierta: se ha cobrado o cerrado. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.";
 
 /// INC-20261030-016: una comanda cobrada no admite líneas nuevas. Una pantalla que se quedó con la
 /// comanda de antes del cobro (otro equipo la cobró, o se cobró y se volvió a abrir la mesa) metía
 /// la línea en la comanda ya `Pagada`: la mesa aparecía libre, la comanda nueva no la enseñaba y
 /// nadie la iba a cobrar. Se comprueba dentro de la transacción que escribe la línea.
 ///
-/// Una comanda que no existe pasa: la rechaza la FK del `INSERT`, como siempre.
+/// CAJ-INC-02: una comanda que no existe tampoco la admite, con el mismo aviso. Antes pasaba y la
+/// rechazaba la FK del `INSERT` con el error del motor; en la nube (`guardaComandaAbierta`), la
+/// línea no entraba y la ruta contestaba bien, sin línea.
 pub(crate) async fn exigir_comanda_abierta<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<()> {
-    let cobrada = select_one_i64(
+    let abierta = select_one_i64(
         conn,
-        "SELECT Estado <> 'Abierta' FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
+        "SELECT EXISTS (SELECT 1 FROM Comandas WHERE ID_Comanda = ?1 AND Estado = 'Abierta');",
         vec![Value::Text(id_comanda.to_string())],
     )
     .await?;
-    if cobrada == Some(1) {
+    if abierta != Some(1) {
         return Err(AppError::conflict(COMANDA_COBRADA));
     }
     Ok(())
@@ -2024,6 +2026,18 @@ mod tests_comanda_cobrada {
         let e = repo.add_linea_comanda("mesa_cobrada", "cafe", 1.0, None).await.unwrap_err();
         assert!(es_la_comanda_cobrada(&e), "{e:?}");
         assert_eq!(lineas_de(&db, "mesa_cobrada").await, 0);
+    }
+
+    #[tokio::test]
+    async fn mesas_no_anade_una_linea_a_una_comanda_que_ya_no_existe() {
+        // CAJ-INC-02: la pantalla se quedó con una comanda que ya no está; antes la rechazaba la FK
+        // con el texto del motor.
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        let e = repo.add_linea_comanda("no-existe", "cafe", 1.0, None).await.unwrap_err();
+        assert!(es_la_comanda_cobrada(&e), "{e:?}");
+        assert_eq!(lineas_de(&db, "no-existe").await, 0);
     }
 
     #[tokio::test]

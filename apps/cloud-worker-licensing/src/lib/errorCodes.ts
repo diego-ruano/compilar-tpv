@@ -260,7 +260,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// INC-20261030-010: el mismo texto que da la Main (`MSG_TAREA_NO_ASIGNADA`).
 	tarea_no_asignada: "Esa tarea ya no está asignada a ti. Actualiza la lista.",
 	// INC-20261030-016: el mismo texto que da la Main (`COMANDA_COBRADA`).
-	comanda_cobrada: "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.",
+	comanda_cobrada:
+		"Esa cuenta ya no está abierta: se ha cobrado o cerrado. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.",
 	// RES-INC-03: el mismo texto que la Main (`MSG_RESERVA_CAMBIADA_AL_EDITAR`).
 	reserva_cambiada_al_editar:
 		"Esta reserva ha cambiado en otro equipo mientras la editabas. Cierra el formulario y vuelve a abrirla.",

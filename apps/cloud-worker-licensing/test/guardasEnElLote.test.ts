@@ -666,6 +666,22 @@ describe("SYNC-30 · una línea de un producto que se acaba de archivar, o en un
 		});
 	});
 
+	// CAJ-INC-02: la Handy tiene en pantalla una comanda de mesa que ya no está. Antes la guarda la
+	// dejaba pasar, la línea no entraba y la ruta contestaba `ok` sin ella: el producto se perdía.
+	it("en la mesa, en una comanda que ya no existe", async () => {
+		await conNegocio("linea-mesa-quitada", CARTA, async (n) => {
+			expect(
+				await n.pedir("POST", "/v1/mesas/lineas", deMesa, {
+					antesDelLote: ["DELETE FROM Comandas WHERE ID_Comanda = 'de-mesa'"],
+				}),
+			).toEqual({
+				status: 409,
+				json: { ok: false, error: "comanda_cobrada" },
+			});
+			expect(lineasDe(n, "de-mesa")).toBe(0);
+		});
+	});
+
 	it("en la barra", async () => {
 		await conNegocio("linea-barra", CARTA, async (n) => {
 			expect(await n.pedir("POST", "/v1/venta-rapida/lineas", deBarra, { antesDelLote: [ARCHIVAR] })).toEqual({

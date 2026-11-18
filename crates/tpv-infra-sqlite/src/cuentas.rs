@@ -270,18 +270,12 @@ struct CobroGuardado {
     es_devolucion: bool,
 }
 
-/// La otra comanda abierta en la mesa de la del cobro (CAJ-INC-02).
-struct OtraAbierta {
-    /// Sin líneas, sin cobros y sin reserva: se abrió y no se ha tocado, así que se puede quitar y
-    /// reabrir la original. Con reserva no se quita: se perdería el enlace de la mesa con ella.
-    vacia: bool,
-}
-
 /// Lo que decide adónde vuelven las líneas de un cobro dado de baja por error.
 struct DondeVuelven {
     /// A la comanda le quedan líneas sin cobrar (ya sin el cobro que se da de baja).
     pendientes: bool,
-    otra_abierta: Option<OtraAbierta>,
+    /// La mesa tiene otra comanda abierta (CAJ-INC-02).
+    otra_abierta: bool,
     mesa: Option<String>,
 }
 
@@ -296,9 +290,6 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
                   AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
               ),
               a.ID_Comanda IS NOT NULL,
-              a.ID_Reserva IS NULL
-                AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = a.ID_Comanda)
-                AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = a.ID_Comanda),
               m.Numero_Mesa
             FROM Comandas o
             LEFT JOIN Comandas a
@@ -312,46 +303,33 @@ async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<Don
         .await
         .map_err(db_err)?;
     let Some(r) = rows.next().await.map_err(db_err)? else {
-        return Ok(DondeVuelven { pendientes: false, otra_abierta: None, mesa: None });
+        return Ok(DondeVuelven { pendientes: false, otra_abierta: false, mesa: None });
     };
     let si = |i: i32| -> AppResult<bool> {
         Ok(v_i64(r.get_value(i).map_err(db_err)?).unwrap_or(0) != 0)
     };
     Ok(DondeVuelven {
         pendientes: si(0)?,
-        otra_abierta: if si(1)? { Some(OtraAbierta { vacia: si(2)? }) } else { None },
-        mesa: norm_opt_string(r.get_value(3).map_err(db_err)?),
+        otra_abierta: si(1)?,
+        mesa: norm_opt_string(r.get_value(2).map_err(db_err)?),
     })
 }
 
 /// CAJ-INC-02 · Devolver a la mesa las líneas de un cobro dado de baja por error cuando la mesa ya
 /// tiene otra comanda abierta. `?1` es la comanda del cobro; van antes del `UPDATE` que la reabre.
 ///
-/// 1. Si la abierta está vacía (sin líneas, sin cobros y sin reserva) y a la original le quedan
-///    líneas sin cobrar, se borra: así la original se puede reabrir.
-/// 2. Si no, las líneas sin cobrar de la original pasan a la abierta. Las cobradas por otro cobro
-///    activo se quedan: son de su ticket.
-/// 3. El total de la abierta se re-deriva de sus líneas (el de la original lo re-deriva el `UPDATE`
+/// 1. Las líneas sin cobrar de la original pasan a la abierta, aunque esté vacía. Las cobradas por
+///    otro cobro activo se quedan: son de su ticket.
+/// 2. El total de la abierta se re-deriva de sus líneas (el de la original lo re-deriva el `UPDATE`
 ///    que la reabre).
+///
+/// La abierta no se borra nunca, ni vacía: otro equipo puede tenerla en pantalla y añadirle una
+/// línea que, sin ella, no entraría en ninguna parte (o entraría en un lado y no en el otro).
 ///
 /// Las condiciones van dentro de cada sentencia, no en una lectura previa: se replican tal cual y
 /// el worker usa las mismas (`cuentas.commands.ts`). El cobro ya está `ANULADO`, así que sus
 /// líneas vuelven a estar en `v_lineas_por_cobrar` (las devueltas enteras por otra baja, no).
-pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 3] = [
-    r#"
-    DELETE FROM Comandas
-    WHERE Estado = 'Abierta'
-      AND ID_Comanda <> ?1
-      AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ?1)
-      AND ID_Reserva IS NULL
-      AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda)
-      AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = Comandas.ID_Comanda)
-      AND EXISTS (
-        SELECT 1 FROM Detalle_Comanda dc
-        WHERE dc.ID_Comanda = ?1
-          AND EXISTS (SELECT 1 FROM v_lineas_por_cobrar lp WHERE lp.ID_Detalle = dc.ID_Detalle)
-      );
-    "#,
+pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 2] = [
     r#"
     UPDATE Detalle_Comanda
     SET ID_Comanda = (
@@ -1125,18 +1103,19 @@ impl CuentasRepository for SqliteCuentasRepository {
             //
             //    CAJ-INC-02: si la mesa se volvió a abrir entretanto, la original no puede reabrirse
             //    (`idx_comandas_una_abierta_por_mesa`) y las líneas se quedaban en una comanda
-            //    cerrada, sin cobrar y sin verse en la mesa. Si la abierta está vacía, se borra y se
-            //    reabre la original; si no, las líneas sin cobrar pasan a la abierta. Las mismas
-            //    sentencias que el worker (`SQL_DEVOLVER_LINEAS_A_LA_MESA`).
+            //    cerrada, sin cobrar y sin verse en la mesa. Las líneas sin cobrar pasan a la abierta,
+            //    aunque esté vacía: no se borra, que otro equipo puede estar añadiéndole algo. Las
+            //    mismas sentencias que el worker (`SQL_DEVOLVER_LINEAS_A_LA_MESA`).
             let mut destino = DestinoLineasBaja::NoVuelven;
             let mut mesa = None;
             if clase.devuelve_las_lineas() && !id_comanda.is_empty() {
                 let donde = a_donde_vuelven(conn, &id_comanda).await?;
                 mesa = donde.mesa;
                 if donde.pendientes {
-                    destino = match donde.otra_abierta {
-                        Some(OtraAbierta { vacia: false }) => DestinoLineasBaja::LaAbierta,
-                        _ => DestinoLineasBaja::SuComanda,
+                    destino = if donde.otra_abierta {
+                        DestinoLineasBaja::LaAbierta
+                    } else {
+                        DestinoLineasBaja::SuComanda
                     };
                 }
                 for sql in SQL_DEVOLVER_LINEAS_A_LA_MESA {
@@ -1881,22 +1860,27 @@ mod tests_anulacion {
     }
 
     #[tokio::test]
-    async fn si_la_mesa_se_reabrio_y_esta_vacia_se_quita_y_vuelve_la_original() {
+    async fn si_la_mesa_se_reabrio_y_esta_vacia_las_pendientes_pasan_a_ella_sin_quitarla() {
         // CAJ-INC-02. Abrir la mesa crea una comanda vacía; con ella abierta la original no podía
         // reabrirse (`idx_comandas_una_abierta_por_mesa`) y las líneas se quedaban en una comanda
-        // cerrada, sin cobrar y fuera de la mesa.
+        // cerrada, sin cobrar y fuera de la mesa. La vacía no se quita: otro equipo (una Handy)
+        // puede tenerla en pantalla, y la línea que le añadiese no entraría en ninguna parte.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_DE_MESA).await;
         sembrar(&db, &[MESA_REABIERTA]).await;
 
         let hecho = repo(&db).anular_pago(args("pago")).await.unwrap();
 
-        assert_eq!(hecho.lineas, DestinoLineasBaja::SuComanda);
+        assert_eq!(hecho.lineas, DestinoLineasBaja::LaAbierta);
         assert_eq!(hecho.mesa.as_deref(), Some("4"));
-        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='com2';").await, 0.0);
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com2';").await,
+            Some("Abierta".into())
+        );
+        assert_eq!(lineas_de(&db, "com2").await, vec!["det-lote", "det-pendiente", "det-suelto"]);
         assert_eq!(
             texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
-            Some("Abierta".into())
+            Some("Pagada".into())
         );
     }
 
