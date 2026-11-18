@@ -270,6 +270,8 @@ lecturas_de_contrato! {
     cuentas__salidas,
     cuentas__salidas_busqueda_comodines,
     cuentas__salidas_busqueda_sin_acentos,
+    cuentas__salidas_proveedor_borrado,
+    cuentas__salidas_proveedor_borrado_busqueda,
     cuentas__resumen,
     cuentas__resumen_busqueda_comodines,
     cuentas__resumen_busqueda_sin_acentos,

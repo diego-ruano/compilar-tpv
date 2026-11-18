@@ -6,6 +6,7 @@
       "id": "gasto-2",
       "importe": 9055,
       "pagado_con_caja": false,
+      "proveedor_borrado": null,
       "proveedor_id": null,
       "tipo_gasto": "Suministros"
     },
@@ -15,6 +16,7 @@
       "id": "gasto-1",
       "importe": 15000,
       "pagado_con_caja": false,
+      "proveedor_borrado": null,
       "proveedor_id": "prov-1",
       "tipo_gasto": "Compras"
     }

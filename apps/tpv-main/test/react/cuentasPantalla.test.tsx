@@ -58,6 +58,16 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 							proveedor_id: null,
 							pagado_con_caja: true,
 						},
+						{
+							id: "g2",
+							fecha_hora: HOY,
+							tipo_gasto: "Proveedor",
+							concepto: "Merluza",
+							importe: 7000,
+							proveedor_id: null,
+							pagado_con_caja: false,
+							proveedor_borrado: "Pescados Norte (borrado)",
+						},
 					],
 					siguiente: null,
 				};
@@ -163,6 +173,14 @@ it("en la Handy, Cuentas es de consulta: lo dice arriba y no ofrece lo que se re
 	expect(await screen.findByText("Gasto")).toBeTruthy();
 	expect(screen.queryByRole("button", { name: "Guardar cambios" })).toBeNull();
 	expect(screen.getByRole("button", { name: "Cerrar" })).toBeTruthy();
+});
+
+// El commit que guarda el nombre de un proveedor borrado en su gasto (Cuentas_Gastos.Nombre_Proveedor)
+// lo usó en Estadísticas, pero Cuentas enseñaba ese gasto como si no fuera de ningún proveedor.
+it("un gasto cuyo proveedor se borró sigue diciendo de quién era", async () => {
+	abrir();
+	expect((await screen.findAllByText("Merluza")).length).toBeGreaterThan(0);
+	expect(screen.getAllByText((_, nodo) => nodo?.childNodes.length === 1 && /Pescados Norte \(borrado\)/.test(nodo.textContent ?? "")).length).toBeGreaterThan(0);
 });
 
 it("en la Main no sale la nota de la Handy", async () => {

@@ -1,0 +1,17 @@
+{
+  "descripcion": "Buscar el nombre de un proveedor que se borró encuentra su gasto, como antes de borrarlo: la búsqueda mira el nombre que conserva el gasto (Cuentas_Gastos.Nombre_Proveedor).",
+  "lectura": "cuentas.salidas",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Bebidas SL');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('gasto-1', '2026-05-02', 'Proveedor', 'Cajas de cerveza', 15000, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('gasto-2', '2026-05-03', 'Proveedor', 'Merluza', 7000, 'Pescados Norte');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-4', '2026-05-05', 'Suministros', 'Luz', 9055);"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "pescados",
+    "page": null,
+    "page_size": null
+  }
+}

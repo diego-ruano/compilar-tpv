@@ -3159,6 +3159,14 @@ export type SalidaDto = {
 	proveedor_id: string | null,
 	/**  El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo. */
 	pagado_con_caja?: boolean,
+	/**
+	 *  El proveedor de un gasto cuyo proveedor se borró: al borrarlo, el gasto se queda sin
+	 *  `proveedor_id` y con su nombre (`Cuentas_Gastos.Nombre_Proveedor`). Es la etiqueta que se
+	 *  enseña, la misma que en Estadísticas → Proveedores: «Pescados Norte (borrado)», o
+	 *  «Proveedor borrado» si no tenía nombre. `None` si tiene proveedor en la ficha o no lo ha
+	 *  tenido nunca. Sin él, Cuentas enseñaba ese gasto como si no fuera de ningún proveedor.
+	 */
+	proveedor_borrado?: string | null,
 };
 
 export type SalonInput = {

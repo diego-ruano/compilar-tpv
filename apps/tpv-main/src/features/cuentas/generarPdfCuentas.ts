@@ -3,6 +3,7 @@ import type { EntradaDto, SalidaDto } from "./cuentasApis";
 import { esAnulado } from "./cuentasApis";
 import { CERO, eur, restar, sumar } from "../../shared/lib/dinero";
 import { textoPdf } from "../../shared/lib/textoPdf";
+import { proveedorDelGasto } from "./proveedorDelGasto";
 
 type ContextoPdf = { page: PDFPage; y: number };
 type DatosPdfCuentas = {
@@ -214,12 +215,8 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
         ctx = write(ctx, tipo === "dia" ? "Sin salidas hoy." : "Sin salidas para este rango/filtro.", { color: gray });
     } else {
         for (const s of salidasFull) {
-            const provName = s.proveedor_id ? proveedoresMap.get(s.proveedor_id) : null;
-
-            const conceptoPdf =
-                s.tipo_gasto === "Proveedor" && (provName || s.proveedor_id)
-                    ? `${s.concepto} (Prov: ${provName ?? s.proveedor_id})`
-                    : s.concepto;
+            const proveedor = proveedorDelGasto(s, (id) => proveedoresMap.get(id) ?? id);
+            const conceptoPdf = proveedor ? `${s.concepto} (Prov: ${proveedor})` : s.concepto;
 
             ctx = writeRow(ctx, [
                 { text: tipo === "dia" ? s.fecha_hora.slice(0, 10) : s.fecha_hora, ...COLUMNAS_SALIDAS.fecha },

@@ -1,0 +1,15 @@
+{
+  "filas": [
+    {
+      "concepto": "Merluza",
+      "fecha_hora": "2026-05-03",
+      "id": "gasto-2",
+      "importe": 7000,
+      "pagado_con_caja": false,
+      "proveedor_borrado": "Pescados Norte (borrado)",
+      "proveedor_id": null,
+      "tipo_gasto": "Proveedor"
+    }
+  ],
+  "siguiente": null
+}

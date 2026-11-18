@@ -287,6 +287,10 @@ import casoCtaEntradasSinAcentos from "../../../tests/contract/lecturas/casos/cu
 import goldenCtaEntradasSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_sin_acentos.json";
 import casoCtaSalidasSinAcentos from "../../../tests/contract/lecturas/casos/cuentas/salidas_busqueda_sin_acentos.json";
 import goldenCtaSalidasSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/salidas_busqueda_sin_acentos.json";
+import casoCtaSalidasProvBorrado from "../../../tests/contract/lecturas/casos/cuentas/salidas_proveedor_borrado.json";
+import goldenCtaSalidasProvBorrado from "../../../tests/contract/lecturas/golden/cuentas/salidas_proveedor_borrado.json";
+import casoCtaSalidasProvBorradoBusq from "../../../tests/contract/lecturas/casos/cuentas/salidas_proveedor_borrado_busqueda.json";
+import goldenCtaSalidasProvBorradoBusq from "../../../tests/contract/lecturas/golden/cuentas/salidas_proveedor_borrado_busqueda.json";
 import casoCtaResumenSinAcentos from "../../../tests/contract/lecturas/casos/cuentas/resumen_busqueda_sin_acentos.json";
 import goldenCtaResumenSinAcentos from "../../../tests/contract/lecturas/golden/cuentas/resumen_busqueda_sin_acentos.json";
 import casoMesaBuscarSinAcentos from "../../../tests/contract/lecturas/casos/mesas/buscar_productos_sin_acentos.json";
@@ -463,6 +467,12 @@ const CASOS = [
 	{ nombre: "venta_rapida_buscar_productos_texto_largo", caso: casoVrBuscarLargo, golden: goldenVrBuscarLargo },
 	{ nombre: "cuentas_entradas_busqueda_sin_acentos", caso: casoCtaEntradasSinAcentos, golden: goldenCtaEntradasSinAcentos },
 	{ nombre: "cuentas_salidas_busqueda_sin_acentos", caso: casoCtaSalidasSinAcentos, golden: goldenCtaSalidasSinAcentos },
+	{ nombre: "cuentas_salidas_proveedor_borrado", caso: casoCtaSalidasProvBorrado, golden: goldenCtaSalidasProvBorrado },
+	{
+		nombre: "cuentas_salidas_proveedor_borrado_busqueda",
+		caso: casoCtaSalidasProvBorradoBusq,
+		golden: goldenCtaSalidasProvBorradoBusq,
+	},
 	{ nombre: "cuentas_resumen_busqueda_sin_acentos", caso: casoCtaResumenSinAcentos, golden: goldenCtaResumenSinAcentos },
 	{ nombre: "mesas_buscar_productos_sin_acentos", caso: casoMesaBuscarSinAcentos, golden: goldenMesaBuscarSinAcentos },
 	{ nombre: "venta_rapida_buscar_productos_sin_acentos", caso: casoVrBuscarSinAcentos, golden: goldenVrBuscarSinAcentos },

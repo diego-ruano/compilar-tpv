@@ -1,0 +1,18 @@
+{
+  "descripcion": "Cuentas enseña el proveedor de un gasto cuyo proveedor se borró, con la misma etiqueta que Estadísticas: Pescados Norte se borró y su gasto conserva el nombre («Pescados Norte (borrado)»); otro se borró sin nombre («Proveedor borrado»). Bebidas SL sigue en la ficha y un gasto sin proveedor no lleva etiqueta. Buscar «pescados» encuentra el del borrado: ese caso es salidas_proveedor_borrado_busqueda.",
+  "lectura": "cuentas.salidas",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Bebidas SL');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('gasto-1', '2026-05-02', 'Proveedor', 'Cajas de cerveza', 15000, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('gasto-2', '2026-05-03', 'Proveedor', 'Merluza', 7000, 'Pescados Norte');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, Nombre_Proveedor) VALUES ('gasto-3', '2026-05-04', 'Proveedor', 'Hielo', 3000, '  ');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-4', '2026-05-05', 'Suministros', 'Luz', 9055);"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": null,
+    "page": null,
+    "page_size": null
+  }
+}

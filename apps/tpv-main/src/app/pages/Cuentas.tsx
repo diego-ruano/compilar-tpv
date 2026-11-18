@@ -14,6 +14,7 @@ X,
 } from "lucide-react";
 import React,{ useEffect,useMemo,useState } from "react";
 import FormularioGasto from "../../features/cuentas/FormularioGasto";
+import { proveedorDelGasto } from "../../features/cuentas/proveedorDelGasto";
 
 import { toAppError } from "@tpv/client";
 import type {
@@ -1167,10 +1168,7 @@ export default function Cuentas() {
                                     ) : salidasFiltradas.length ? (
                                         <div className="divide-y divide-border">
                                             {salidasFiltradas.map((s) => {
-                                                const provText =
-                                                    s.tipo_gasto === "Proveedor" && s.proveedor_id
-                                                        ? proveedorLabel(s.proveedor_id)
-                                                        : null;
+                                                const provText = proveedorDelGasto(s, proveedorLabel);
 
                                                 return (
                                                     <div key={s.id} className="p-4 sm:p-0">
@@ -1576,11 +1574,10 @@ export default function Cuentas() {
                                         <span className="font-semibold">Importe:</span>{" "}
                                         {eur(confirmAccion.gasto.importe)}
                                     </div>
-                                    {confirmAccion.gasto.tipo_gasto === "Proveedor" &&
-                                        confirmAccion.gasto.proveedor_id ? (
+                                    {proveedorDelGasto(confirmAccion.gasto, proveedorLabel) ? (
                                         <div>
                                             <span className="font-semibold">Proveedor:</span>{" "}
-                                            {proveedorLabel(confirmAccion.gasto.proveedor_id)}
+                                            {proveedorDelGasto(confirmAccion.gasto, proveedorLabel)}
                                         </div>
                                     ) : null}
                                 </div>

@@ -207,7 +207,10 @@ const ENTRADAS_Q_EXPR: &str =
     "fechaHora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT)";
 
 /// Subquery interno de **salidas** (gastos) con el nombre del proveedor incluido para poder
-/// buscarlo. Devuelve el SQL y los parámetros del rango de fechas.
+/// buscarlo (también el de uno que se borró). Devuelve el SQL y los parámetros del rango de fechas.
+///
+/// `proveedorBorrado` es la etiqueta de un proveedor borrado, la misma que en Estadísticas
+/// (`stats.rs`), y la misma expresión que en el worker (`cuentas.queries.ts`).
 fn salidas_inner(
     del: Option<String>,
     al: Option<String>,
@@ -225,7 +228,8 @@ fn salidas_inner(
           g.Importe AS importe,
           g.ID_Proveedor AS proveedorId,
           g.Pagado_Con_Caja AS pagadoConCaja,
-          IFNULL(pr.Nombre_Empresa, '') AS proveedorNombre
+          IFNULL(pr.Nombre_Empresa, IFNULL(g.Nombre_Proveedor, '')) AS proveedorNombre,
+          CASE WHEN g.ID_Proveedor IS NULL AND g.Nombre_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(g.Nombre_Proveedor), '') || ' (borrado)', 'Proveedor borrado') END AS proveedorBorrado
         FROM Cuentas_Gastos g
         LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
         {where_rango}
@@ -541,7 +545,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         let q_clause = q_filter(&mut params, filtro.q, SALIDAS_Q_EXPR);
         let (limit_clause, page_size) = limite(&mut params, filtro.page_size);
         let sql = format!(
-            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId, pagadoConCaja, orden \
+            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId, pagadoConCaja, orden, proveedorBorrado \
              FROM ({inner}) AS g {q_clause} ORDER BY orden DESC, id DESC {limit_clause};"
         );
 
@@ -560,6 +564,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 fecha: v_string(row.get_value(7).map_err(db_err)?).unwrap_or_default(),
                 id: id.clone(),
             };
+            let proveedor_borrado = norm_opt_string(row.get_value(8).map_err(db_err)?);
             out.push((
                 SalidaDto {
                     id,
@@ -569,6 +574,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                     importe,
                     proveedor_id: prov,
                     pagado_con_caja,
+                    proveedor_borrado,
                 },
                 cursor,
             ));

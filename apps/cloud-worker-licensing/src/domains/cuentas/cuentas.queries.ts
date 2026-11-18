@@ -162,7 +162,9 @@ const salidasInner = (whereRango: string) => `
 		g.Importe AS importe,
 		g.ID_Proveedor AS proveedor_id,
 		g.Pagado_Con_Caja AS pagado_con_caja,
-		IFNULL(pr.Nombre_Empresa, '') AS proveedor_nombre
+		IFNULL(pr.Nombre_Empresa, IFNULL(g.Nombre_Proveedor, '')) AS proveedor_nombre,
+		-- La etiqueta de un proveedor que se borró, la misma que en Estadísticas y en la Main.
+		CASE WHEN g.ID_Proveedor IS NULL AND g.Nombre_Proveedor IS NOT NULL THEN COALESCE(NULLIF(trim(g.Nombre_Proveedor), '') || ' (borrado)', 'Proveedor borrado') END AS proveedor_borrado
 	FROM Cuentas_Gastos g
 	LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
 	${whereRango}
@@ -215,7 +217,7 @@ export async function salidas(
 	const { qClause, limitClause } = applyFilters(args, q, SALIDAS_Q_EXPR, pageSize);
 	const rs = await db.execute({
 		sql: `
-			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id, pagado_con_caja, orden
+			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id, pagado_con_caja, orden, proveedor_borrado
 			FROM (${salidasInner(whereSql)}) AS g
 			${qClause}
 			ORDER BY orden DESC, id DESC
