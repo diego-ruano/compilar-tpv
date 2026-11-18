@@ -27,6 +27,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{HeaderMap, DATE};
 use reqwest::{RequestBuilder, Response};
+use tpv_application::error::AppError;
 
 /// Cuánto hay que sumarle al reloj del sistema para tener la hora de la nube. Es del PROCESO y no de
 /// un adaptador: los adaptadores se construyen en cada comando y lo que aprende uno lo tiene que
@@ -70,6 +71,30 @@ pub async fn enviar(peticion: RequestBuilder) -> reqwest::Result<Response> {
     let resp = peticion.send().await.map_err(reqwest::Error::without_url)?;
     anotar_respuesta(resp.headers(), enviada, reloj_del_sistema_ms());
     Ok(resp)
+}
+
+/// AUD-28 · CFG-INC-04 — la petición no ha llegado a tener respuesta: sin red, DNS, TLS, tiempo
+/// agotado.
+///
+/// El mensaje dice qué pasa y qué hacer, en español (`AppError::sin_conexion`), y entre paréntesis
+/// la CLASE del fallo, de una lista cerrada ([`clase_del_fallo`]), no el texto de reqwest. Ese texto
+/// está en inglés («error sending request»), no le dice nada a quien está delante —vincular una Handy
+/// sin red lo enseñaba tal cual— y lleva la URL entera; el mensaje es `external` y sube a Axiom. Lo
+/// usan los dos transportes: el de la licencia, el emparejamiento y las imágenes (este crate) y el
+/// `CloudClient` de la Handy (`tpv-infra-http`).
+pub fn fallo_de_transporte(e: reqwest::Error) -> AppError {
+    AppError::sin_conexion(clase_del_fallo(&e))
+}
+
+/// La clase de un fallo de transporte, para el paréntesis del mensaje (ver [`fallo_de_transporte`]).
+pub fn clase_del_fallo(e: &reqwest::Error) -> &'static str {
+    if e.is_timeout() {
+        "tiempo de espera agotado"
+    } else if e.is_connect() {
+        "no se pudo abrir la conexión"
+    } else {
+        "la petición no llegó a completarse"
+    }
 }
 
 /// Actualiza el desfase con la cabecera `Date` de una respuesta. Sin cabecera, o con una que no se

@@ -269,21 +269,20 @@ la URL de la petición, ni una ruta de AppData**. Lo que falla al hablar con el 
 
 | Fallo | Lo que dice | Lo que no lleva |
 |---|---|---|
-| La petición no tiene respuesta (sin red, DNS, TLS, tiempo agotado) | En la Handy (`tpv-infra-http`), «No se ha podido conectar con el servidor. Comprueba la conexión a internet.» y, entre paréntesis, la clase del fallo: `tiempo de espera agotado`, `no se pudo abrir la conexión` o `la petición no llegó a completarse`. En licencias y emparejamiento, el texto de reqwest sin la URL | La URL (ni la query ni la ruta) |
+| La petición no tiene respuesta (sin red, DNS, TLS, tiempo agotado) | «No se ha podido conectar con el servidor. Comprueba la conexión a internet.» y, entre paréntesis, la clase del fallo: `tiempo de espera agotado`, `no se pudo abrir la conexión` o `la petición no llegó a completarse`. Igual en la Handy (`tpv-infra-http`) que en la licencia, el emparejamiento y las imágenes (CFG-INC-04) | La URL (ni la query ni la ruta), ni el texto de reqwest, que está en inglés |
 | Un 2xx que no encaja en su DTO, entero o un trozo | `bad_json: la respuesta de la nube no encaja en <tipo> (<clase de serde>, línea …, columna …)`; en licencias, con su operación delante (`activate_bad_json`, `invalid_json` en `/status`, `bad_refresh_response`, `bad_pair_create_response`) | El cuerpo ni el texto de serde, que cita el valor que no encaja. El de la activación y el de `/status` llevan el token de sesión y la DEK de los datos del personal |
 | Un 2xx de la activación sin la licencia | «La respuesta del servidor de licencias no trae la licencia concedida (ok=false | sin token | sin negocio).» | El cuerpo |
 | Un rechazo (no 2xx) que el worker explica | Su `message` o su `error` (`AppError::from_api_body`) | — |
 | Un rechazo sin el JSON de la API (la página de un intermediario) | `http_<status>`, con lo que falló delante cuando lo cuenta el adaptador (`activate_failed_http_502`, `image_download_http_404`: `AppError::rechazo`) y, sólo si el cuerpo entero es el `error code: NNNN` de Cloudflare, ese código (`http_530:cloudflare_1016`). Lo que el cuerpo diga del caso va al código del error, no al texto | El cuerpo: una página de error puede repetir la petición que se le hizo |
 
-- La clase del fallo sale de `fallo_de_transporte`, y el tipo y la posición, de `no_encaja` /
+- La clase del fallo sale de `reloj::fallo_de_transporte` (`tpv-infra-licensing`, que usan los dos transportes), y el tipo y la posición, de `no_encaja` /
   `leer_campo` (`client.rs`) y de `no_encaja` en `tpv-infra-licensing`: bastan para dar con el
   campo. La ruta no se conserva: el evento del fallo ya lleva el comando, la pantalla y lo que tardó,
   y nada impide que una ruta lleve un texto.
 - **`reloj::enviar`** (`tpv-infra-licensing`), por donde salen las peticiones de la Handy y las de
-  licencia, emparejamiento e imágenes, devuelve el error de reqwest sin su URL (`without_url`): quien
-  ponga su texto en un mensaje pone `error sending request`, sin destino. La petición del código de
-  traslado de licencia, que no pasa por ahí, le quita la URL ella misma; la subida de la telemetría no
-  compone ningún mensaje con su error.
+  licencia, emparejamiento e imágenes (también la del código de traslado de licencia), devuelve el
+  error de reqwest sin su URL (`without_url`), y ninguna pone su texto en un mensaje: el mensaje sale
+  de `fallo_de_transporte`. La subida de la telemetría no compone ningún mensaje con su error.
 - **Un fichero de AppData se nombra por su nombre** (`license_state.json`, `device_config.json`,
   `interruptores.json`, `images/logo`), nunca por su ruta, que lleva el usuario de Windows; el
   `io::Error` no la cita. No hay un registro sólo local: todo lo que se escribe con `tracing` a
@@ -343,7 +342,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Cableado del escritorio | `apps/tpv-main/src-tauri/src/lib.rs` |
 | Sentry de la Webview | `apps/tpv-main/src/shared/observability/sentry.ts` (más el error boundary y el listener global) |
 | Fallos de comandos | `packages/client/src/transporte.ts`, `shared/observability/fallosDeComandos.ts`, `commands/telemetria.rs` |
-| Mensajes de error (AUD-28) | `crates/tpv-infra-licensing/src/reloj.rs` (`enviar`), `crates/tpv-infra-http/src/client.rs` (`fallo_de_transporte`, `no_encaja`, `leer_campo`), `crates/tpv-infra-licensing/src/lib.rs` (`no_encaja`, `leer_activacion`, `leer_status`, `fallo_de_fichero`), `crates/tpv-application/src/error.rs` (`from_api_body`, `rechazo`), `apps/tpv-main/src-tauri/src/imagenes.rs` (`para_registro`) |
+| Mensajes de error (AUD-28) | `crates/tpv-infra-licensing/src/reloj.rs` (`enviar`, `fallo_de_transporte`), `crates/tpv-infra-http/src/client.rs` (`no_encaja`, `leer_campo`), `crates/tpv-infra-licensing/src/lib.rs` (`no_encaja`, `leer_activacion`, `leer_status`, `fallo_de_fichero`), `crates/tpv-application/src/error.rs` (`from_api_body`, `rechazo`), `apps/tpv-main/src-tauri/src/imagenes.rs` (`para_registro`) |
 | Sentry del worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` |
 | Axiom | `apps/cloud-worker-licensing/src/observability/axiom.ts` |
 | Ingesta | `apps/cloud-worker-licensing/src/domains/telemetry/telemetry.routes.ts` |

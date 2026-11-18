@@ -418,14 +418,14 @@ async fn post_crudo(
 ) -> AppResult<RespuestaPost> {
     let resp = reloj::enviar(client.post(url).headers(headers).timeout(plazo).body(cuerpo))
         .await
-        .map_err(AppError::sin_conexion)?;
+        .map_err(reloj::fallo_de_transporte)?;
 
     let status = resp.status().as_u16();
     let cuerpo = resp
         .bytes()
         .await
         .map(|b| b.to_vec())
-        .map_err(|e| e.without_url().to_string());
+        .map_err(|e| reloj::clase_del_fallo(&e).to_string());
     Ok(RespuestaPost { status, cuerpo })
 }
 
@@ -462,7 +462,7 @@ async fn peticion_con_prueba(
                 .header("X-Device-Sig", sig),
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| reloj::clase_del_fallo(&e).to_string())?;
 
         let http = resp.status().as_u16();
         let texto = resp.text().await.unwrap_or_default();
@@ -526,7 +526,7 @@ async fn enviar_activacion(intento: ActivacionFirmada<'_>) -> AppResult<(u16, St
             .body(intento.cuerpo.to_vec()),
     )
     .await
-    .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
+    .map_err(reloj::fallo_de_transporte)?;
 
     let http = resp.status().as_u16();
     let texto = resp.text().await.unwrap_or_default();
@@ -1189,13 +1189,14 @@ impl LicensingService for LicensingAdapter {
         // existe. Basta con no fallar en el transporte.
         let body = serde_json::json!({ "activationKey": clave, "deviceId": device_id });
 
-        http_client()?
-            .post(api_url("/v1/license/device-change/request"))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ext(format!("No se pudo pedir el código: {}", e.without_url())))?;
+        reloj::enviar(
+            http_client()?
+                .post(api_url("/v1/license/device-change/request"))
+                .header(CONTENT_TYPE, "application/json")
+                .json(&body),
+        )
+        .await
+        .map_err(reloj::fallo_de_transporte)?;
 
         Ok(())
     }
@@ -1549,7 +1550,7 @@ impl PairingAdapter {
             rb = rb.body(cuerpo.to_vec());
         }
 
-        let resp = reloj::enviar(rb).await.map_err(AppError::sin_conexion)?;
+        let resp = reloj::enviar(rb).await.map_err(reloj::fallo_de_transporte)?;
         let status = resp.status().as_u16();
         let bytes = resp
             .bytes()
@@ -2904,5 +2905,55 @@ mod tests_transporte_de_volcados {
         for ruta in ["/v1/sync/changes", "/v1/sync/salud", "/v1/ws/ticket", "/v1/license/status", "/v1/sync/bootstrap-otra", "/v1/sync/verificar"] {
             assert_eq!(plazo_de(ruta), normal, "{ruta}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_sin_red {
+    //! CFG-INC-04: sin red, lo que se enseña dice qué pasa y qué hacer, en español, y entre
+    //! paréntesis sólo la clase del fallo. Antes iba el texto de reqwest («error sending request»):
+    //! vincular una Handy sin red lo enseñaba tal cual en la Main.
+
+    use super::*;
+    use tokio::net::TcpSocket;
+
+    const FRASE: &str = "No se ha podido conectar con el servidor. Comprueba la conexión a internet.";
+
+    fn en_espanol(mensaje: &str, clase: &str) {
+        assert_eq!(mensaje, format!("{FRASE} ({clase})"));
+        for ingles in ["error sending", "request", "connect", "tcp", "os error"] {
+            assert!(!mensaje.to_lowercase().contains(ingles), "{ingles}: {mensaje}");
+        }
+    }
+
+    /// Un puerto en el que no escucha nadie: enlazado por el test y sin `listen`, el sistema
+    /// rechaza la conexión y nadie más lo ocupa mientras tanto.
+    fn sin_nadie() -> (TcpSocket, String) {
+        let reservado = TcpSocket::new_v4().unwrap();
+        reservado.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let base = format!("http://{}", reservado.local_addr().unwrap());
+        (reservado, base)
+    }
+
+    /// El POST firmado de la Main y la Handy: emparejamiento, licencia, ticket del WebSocket.
+    #[tokio::test]
+    async fn el_post_firmado() {
+        let (_reservado, base) = sin_nadie();
+        let e = post_crudo(&Client::new(), &format!("{base}/v1/pair/create"), HeaderMap::new(), "{}".into(), Duration::from_secs(5))
+            .await
+            .err()
+            .expect("sin nadie escuchando no hay respuesta");
+        en_espanol(&e.to_string(), "no se pudo abrir la conexión");
+    }
+
+    /// Lo que usa cada sitio que habla con la nube por su cuenta (activar, pedir el cambio de
+    /// equipo, las imágenes): la misma frase.
+    #[tokio::test]
+    async fn cualquier_envio() {
+        let (_reservado, base) = sin_nadie();
+        let e = reloj::enviar(Client::new().get(format!("{base}/v1/images/x")))
+            .await
+            .expect_err("sin nadie escuchando no hay respuesta");
+        en_espanol(&reloj::fallo_de_transporte(e).to_string(), "no se pudo abrir la conexión");
     }
 }

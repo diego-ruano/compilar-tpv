@@ -477,30 +477,11 @@ impl CloudClient {
 /// `una_vez` para que el test del fallo de transporte pase por lo mismo que producción sin firmar
 /// con la identidad del equipo.
 async fn mandar(rb: RequestBuilder) -> AppResult<(u16, String)> {
-    let resp = reloj::enviar(rb).await.map_err(fallo_de_transporte)?;
+    let resp = reloj::enviar(rb).await.map_err(reloj::fallo_de_transporte)?;
     let status = resp.status().as_u16();
     let text = resp.text().await.unwrap_or_default();
 
     Ok((status, text))
-}
-
-/// AUD-28 — la petición no ha llegado a tener respuesta: sin red, DNS, TLS, tiempo agotado.
-///
-/// El detalle que va entre paréntesis es la CLASE del fallo, de una lista cerrada, y no el texto de
-/// reqwest. Ese texto lleva la URL entera, y el mensaje es `external` y sube a Axiom: lo que viaje en
-/// la URL (desde AUD-27 sólo identificadores, fechas y filtros; antes, el teléfono y el correo de una
-/// búsqueda) no tiene por qué salir del equipo con él. `reloj::enviar` ya le quita la URL al error,
-/// y aquí además no se escribe: la clase (con el comando, la pantalla y lo que tardó, que van en el
-/// evento) es lo que hace falta para diagnosticar un corte, y no puede llevar un dato.
-fn fallo_de_transporte(e: reqwest::Error) -> AppError {
-    let clase = if e.is_timeout() {
-        "tiempo de espera agotado"
-    } else if e.is_connect() {
-        "no se pudo abrir la conexión"
-    } else {
-        "la petición no llegó a completarse"
-    };
-    AppError::sin_conexion(clase)
 }
 
 /// AUD-28 — una respuesta de la nube que no encaja en el tipo que se esperaba.
