@@ -1045,6 +1045,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					punchSalida({
 						id_usuario: caso.entrada.id_usuario,
 						id_fichaje: enCurso.id_fichaje,
+						fecha: enCurso.fecha,
 					}),
 				);
 			}

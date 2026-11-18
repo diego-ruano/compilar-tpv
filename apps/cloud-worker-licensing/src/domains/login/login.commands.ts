@@ -2,6 +2,7 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
+import { INICIO_MAS_ANTIGUO } from "./login.queries";
 
 export type BuiltCommand = {
 	commandName: string;
@@ -64,22 +65,80 @@ export function setTurnoPartido(
 // La hora del fichaje no viaja en el cuerpo de la petición: se escribe `datetime('now','localtime')`
 // y la resuelve el Durable Object al aplicar, con el reloj local del equipo que ficha (CFG-04). La
 // fecha la calcula la ruta con ese mismo reloj (REV-03), para que las dos digan lo mismo.
+//
+// TRA-INC-04: si una entrada o una salida toca lo deciden las guardas de cada comando, dentro del
+// lote (SYNC-30), y no una lectura de la ruta antes de `apply`: entre las dos puede fichar el mismo
+// trabajador en otra Handy o en la Main, y el reintento de un fichaje que ya entró se encontraba a
+// sí mismo («Tienes un fichaje abierto», «No hay fichaje abierto»). Las frases son las de la Main
+// (`exec_punch`, en `tpv-infra-sqlite/src/login.rs`), con un 409 (AUD-47).
+
+/** Las frases con las que se rechaza un fichaje: las mismas que la Main. */
+export const FRASES_FICHAJE = {
+	abierto: "Tienes un fichaje abierto. Ficha salida antes de fichar entrada.",
+	parteUnoAbierta: "La Parte 1 no está cerrada. Ficha salida primero.",
+	partidoCompleto: "Ya has completado el turno partido hoy.",
+	sinPartido: "Hoy no tienes turno partido. Ya has fichado el día.",
+	// Lo que la ruta leyó ya no es lo que hay: otro equipo ha fichado entre medias.
+	cambiado: "El fichaje ha cambiado en otro equipo. Vuelve a intentarlo.",
+	salidaYaFichada: "La salida ya está fichada.",
+	sinAbierto: "No hay fichaje abierto para cerrar (primero ficha entrada).",
+} as const;
+
+/** La jornada en curso de `?1` (RI-05: `INICIO_MAS_ANTIGUO`), como `getOpenPunch`. */
+const EN_CURSO = `SELECT 1 FROM Fichajes
+	WHERE ID_Usuario = ?1 AND Estado = 'ABIERTO' AND Hora_Entrada IS NOT NULL
+		AND Hora_Salida IS NULL AND Hora_Entrada >= ${INICIO_MAS_ANTIGUO}`;
+
+/** Una jornada de `?1` de las mismas horas que ya tiene la salida puesta. */
+const CERRADA_HACE_POCO = `SELECT 1 FROM Fichajes
+	WHERE ID_Usuario = ?1 AND Hora_Salida IS NOT NULL AND Hora_Entrada >= ${INICIO_MAS_ANTIGUO}`;
+
+/** ¿El turno partido de `?1` el día `?2`? */
+const PARTIDO = `COALESCE((SELECT Turno_Partido FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND Fecha = ?2), 0)`;
+const PARTE = (n: 1 | 2) => `SELECT 1 FROM Fichajes WHERE ID_Usuario = ?1 AND Fecha = ?2 AND Parte = ${n}`;
+
+function guarda(sql: string, args: unknown[], frase: string) {
+	return { kind: "guard", sql, args, error: frase, status: 409 };
+}
+
 export function punchEntrada(input: {
 	id_usuario: string;
 	fecha: string;
 	parte: number;
 }): BuiltCommand {
+	const { id_usuario: usuario, fecha, parte } = input;
 	// TRAB-07: el UUID se genera aqui, en un paso `value`, y entra en el INSERT. `ID_Fichaje` es
 	// TEXT PRIMARY KEY sin DEFAULT y en SQLite una PK de texto ADMITE NULL: omitirla no daba error,
 	// creaba el fichaje sin clave y luego la salida (WHERE ID_Fichaje = ?) no casaba ninguna fila,
 	// asi que la jornada no cerraba nunca. Es el patron de docs/arquitectura/sincronizacion.md para toda TEXT PRIMARY KEY.
 	const steps: any[] = [
-		{
-			kind: "value",
-			saveAs: "id_fichaje",
-			sql: "SELECT ?1;",
-			args: [nuevoId()],
-		},
+		{ kind: "value", saveAs: "id_fichaje", sql: "SELECT ?1;", args: [nuevoId()] },
+		// El día de la jornada, con el resultado: el reintento lo recupera aunque llegue pasada la
+		// medianoche, y la ruta devuelve el estado de ESE día.
+		{ kind: "value", saveAs: "fecha", sql: "SELECT ?1;", args: [fecha] },
+		// En el orden en que lo mira la Main. RI-05: el abierto que bloquea puede ser de ayer.
+		guarda(`SELECT NOT EXISTS (${EN_CURSO});`, [usuario], FRASES_FICHAJE.abierto),
+		guarda(
+			`SELECT NOT EXISTS (${PARTE(1)} AND Hora_Salida IS NULL);`,
+			[usuario, fecha],
+			FRASES_FICHAJE.parteUnoAbierta,
+		),
+		guarda(
+			`SELECT NOT (${PARTIDO} = 1 AND EXISTS (${PARTE(2)}));`,
+			[usuario, fecha],
+			FRASES_FICHAJE.partidoCompleto,
+		),
+		guarda(
+			`SELECT NOT (${PARTIDO} = 0 AND EXISTS (${PARTE(1)}));`,
+			[usuario, fecha],
+			FRASES_FICHAJE.sinPartido,
+		),
+		// La parte que eligió la ruta sigue siendo la que toca.
+		guarda(
+			`SELECT ?3 = CASE WHEN EXISTS (${PARTE(1)}) THEN 2 ELSE 1 END;`,
+			[usuario, fecha, parte],
+			FRASES_FICHAJE.cambiado,
+		),
 		{
 			kind: "execute",
 			sql: `
@@ -88,41 +147,65 @@ export function punchEntrada(input: {
 				)
 				VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), NULL, 'ABIERTO', 0);
 			`,
-			args: [{ $ref: "id_fichaje" }, input.id_usuario, input.fecha, input.parte],
+			args: [{ $ref: "id_fichaje" }, usuario, { $ref: "fecha" }, parte],
 		},
 	];
 
 	return {
 		commandName: "punch",
-		command: {
-			type: "tenantDb.transaction",
-			payload: { steps, resultKey: "id_fichaje" },
-		},
-		cloudPayload: { ...input, tipo: "entrada" },
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		// La petición tal cual, sin lo que la ruta lee de la base: es lo que firma el reintento como
+		// el mismo, y el de una entrada que ya entró leería otra parte.
+		cloudPayload: { id_usuario: usuario, tipo: "entrada" },
 	};
 }
 
+/**
+ * La salida de la jornada en curso, `id_fichaje`, que la ruta ha leído (`null` si no había ninguna:
+ * el lote lo dice con su frase, o el gate contesta lo guardado si es el reintento de una que ya
+ * entró). `fecha` es la de esa jornada, la que se devuelve.
+ */
 export function punchSalida(input: {
 	id_usuario: string;
-	id_fichaje: string;
+	id_fichaje: string | null;
+	fecha: string;
 }): BuiltCommand {
+	const { id_usuario: usuario, id_fichaje: fichaje, fecha } = input;
+	const steps: any[] = [
+		{ kind: "value", saveAs: "fecha", sql: "SELECT ?1;", args: [fecha] },
+		// Sin jornada en curso: si la salida la acaba de fichar otro equipo, se dice eso, y no que
+		// fiche primero la entrada.
+		guarda(
+			`SELECT EXISTS (${EN_CURSO}) OR NOT EXISTS (${CERRADA_HACE_POCO});`,
+			[usuario],
+			FRASES_FICHAJE.salidaYaFichada,
+		),
+		guarda(`SELECT EXISTS (${EN_CURSO});`, [usuario], FRASES_FICHAJE.sinAbierto),
+		// La que leyó la ruta sigue abierta.
+		guarda(
+			`SELECT EXISTS (SELECT 1 FROM Fichajes WHERE ID_Fichaje = ?1 AND ID_Usuario = ?2 AND Hora_Salida IS NULL);`,
+			[fichaje ?? "", usuario],
+			FRASES_FICHAJE.salidaYaFichada,
+		),
+		{
+			kind: "execute",
+			// Con `Hora_Salida IS NULL` también en la sentencia: quien la aplica después (la Main) no
+			// pisa una salida que ya tenga.
+			sql: `
+				UPDATE Fichajes
+				SET Hora_Salida = datetime('now','localtime'),
+					Estado = 'CERRADO',
+					Cerrado_Automatico = 0,
+					Cierre_Motivo = NULL,
+					Incidencia = NULL
+				WHERE ID_Fichaje = ?1 AND Hora_Salida IS NULL;
+			`,
+			args: [fichaje ?? ""],
+		},
+	];
 	return {
 		commandName: "punch",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: `
-					UPDATE Fichajes
-					SET Hora_Salida = datetime('now','localtime'),
-						Estado = 'CERRADO',
-						Cerrado_Automatico = 0,
-						Cierre_Motivo = NULL,
-						Incidencia = NULL
-					WHERE ID_Fichaje = ?1;
-				`,
-				args: [input.id_fichaje],
-			},
-		},
-		cloudPayload: { ...input, tipo: "salida" },
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { id_usuario: usuario, tipo: "salida" },
 	};
 }

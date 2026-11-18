@@ -110,6 +110,26 @@ async fn fichaje_en_curso<C: Reader>(
     Ok(Some((id, fecha)))
 }
 
+/// ¿Tiene el usuario una jornada de las mismas horas (ver [`INICIO_MAS_ANTIGUO`]) con la salida ya
+/// puesta? Es lo que hay cuando otro equipo ha fichado la salida que esta pantalla todavía ofrecía.
+async fn salida_reciente<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<bool> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT EXISTS (SELECT 1 FROM Fichajes \
+                 WHERE ID_Usuario = ?1 AND Hora_Salida IS NOT NULL \
+                   AND Hora_Entrada >= {INICIO_MAS_ANTIGUO});"
+            ),
+            vec![Value::Text(id_usuario.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(match rows.next().await.map_err(db_err)? {
+        Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+        None => false,
+    })
+}
+
 /// TRAB-01: cierre automático de jornadas colgadas. Si un trabajador ficha entrada y olvida la
 /// salida, su fichaje queda `ABIERTO` indefinidamente y corrompe las horas trabajadas que lee
 /// `stats`. Esta función cierra los fichajes ABIERTOS que ya **no son jornada en curso** (entrada
@@ -537,11 +557,18 @@ pub(crate) async fn exec_punch<C: Writer>(
             // RI-05: la jornada en curso, aunque empezara ayer. El estado que se devuelve es el
             // de SU día, que es el que se acaba de completar.
             let Some((id_f, fecha_jornada)) = fichaje_en_curso(conn, id_usuario).await? else {
+                // TRA-INC-04: si la salida la acaba de fichar otro equipo (una Handy), se dice eso;
+                // «primero ficha entrada» confundía a quien ya había entrado.
+                if salida_reciente(conn, id_usuario).await? {
+                    return Err(AppError::conflict("La salida ya está fichada."));
+                }
                 return Err(AppError::conflict(
                     "No hay fichaje abierto para cerrar (primero ficha entrada).",
                 ));
             };
 
+            // `Hora_Salida IS NULL` también en la sentencia: quien la aplica después (la nube) no
+            // pisa una salida que ya tenga, como en el worker (`punchSalida`).
             conn.execute(
                 r#"
                 UPDATE Fichajes
@@ -550,7 +577,7 @@ pub(crate) async fn exec_punch<C: Writer>(
                     Cerrado_Automatico = 0,
                     Cierre_Motivo = NULL,
                     Incidencia = NULL
-                WHERE ID_Fichaje = ?1;
+                WHERE ID_Fichaje = ?1 AND Hora_Salida IS NULL;
                 "#,
                 vec![Value::Text(id_f), Value::Text(hora_evento.clone())],
             )
@@ -1009,6 +1036,67 @@ mod tests_fichajes_colgados {
         assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
         assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
         assert_eq!(outbox(&db).await, 0);
+    }
+
+    #[tokio::test]
+    async fn la_salida_que_ya_ficho_otro_equipo_lo_dice_y_no_se_pisa() {
+        // TRA-INC-04: la Handy fichó la salida y la pantalla de la Main todavía la ofrecía.
+        let (db, _dir) = db_con_usuario().await;
+        abierto_hace(&db, "jornada", 3).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "UPDATE Fichajes SET Hora_Salida = '2000-01-01 00:00:00', Estado = 'CERRADO' \
+                     WHERE ID_Fichaje = 'jornada';",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await
+        };
+        match r {
+            Err(AppError::Conflict(m)) => assert_eq!(m, "La salida ya está fichada."),
+            otro => panic!("{otro:?}"),
+        }
+        assert_eq!(outbox(&db).await, 0, "no sube nada");
+
+        // Sin ninguna jornada de estas horas, la frase de siempre.
+        let (db, _dir) = db_con_usuario().await;
+        let r = {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await
+        };
+        match r {
+            Err(AppError::Conflict(m)) => {
+                assert_eq!(m, "No hay fichaje abierto para cerrar (primero ficha entrada).")
+            }
+            otro => panic!("{otro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn la_salida_que_sube_no_pisa_una_que_ya_este_puesta() {
+        // Lo que sube por el outbox lo aplica la nube con sus datos: si allí la salida ya está
+        // puesta (otra Handy), la sentencia no la cambia.
+        let (db, _dir) = db_con_usuario().await;
+        abierto_hace(&db, "jornada", 3).await;
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await.unwrap();
+        }
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        let sql = crate::mapping::v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap())
+            .unwrap_or_default();
+        assert!(sql.contains("AND Hora_Salida IS NULL"), "{sql}");
     }
 
     /* RI-05: el turno de noche, de la entrada a la salida. */

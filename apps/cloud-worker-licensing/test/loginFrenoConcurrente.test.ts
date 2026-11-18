@@ -18,6 +18,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
+import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
@@ -51,12 +52,25 @@ vi.mock("../src/lib/tenantClient", async (original) => {
 	};
 });
 
+// El arnés no tiene TenantHub: la salida que llega con el PIN bueno la rechaza aquí lo que
+// rechazaría su guarda sin jornada que cerrar (TRA-INC-04: lo decide el lote, no la ruta).
+vi.mock("../src/lib/rutas", async (original) => {
+	const { HubError } = await import("../src/lib/hub");
+	return {
+		...(await (original as any)()),
+		apply: async () => {
+			throw new HubError("No hay fichaje abierto para cerrar (primero ficha entrada).", 409);
+		},
+	};
+});
+
 const { loginRoutes } = await import("../src/domains/login/login.routes");
 const q = await import("../src/domains/login/login.queries");
 const { hashPin } = await import("../src/domains/login/login.crypto");
 
 const app = new Hono();
 app.route("/v1/login", loginRoutes);
+app.onError((e: any, c) => c.json(cuerpoDeErrorConStatus(e), e.status ?? 500));
 
 const PIN_BUENO = "4321";
 /** Veinte PIN distintos y todos malos. */
@@ -137,7 +151,7 @@ async function intentar(
 	cabeceras: Record<string, string> = {},
 ): Promise<Respuesta> {
 	// El fichaje va de salida: con el PIN bueno la ruta pasa el freno y contesta que no hay jornada
-	// que cerrar, sin llegar al TenantHub, que este arnés no tiene.
+	// que cerrar (el `apply` de mentira de arriba).
 	const cuerpo = ruta === "login" ? { id_usuario: id, pin } : { id_usuario: id, pin, tipo: "salida" };
 	const res = await app.request(`/v1/login/${ruta}`, {
 		method: "POST",

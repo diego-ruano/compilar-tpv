@@ -65,7 +65,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
                     const keys = featureKeysPorTablas(cambio.tablas);
                     if (keys === null) void queryClient.invalidateQueries();
                     else for (const key of keys) void queryClient.invalidateQueries({ queryKey: claveDeConsulta(key) });
-                    useSyncSignal.getState().bump(cambio.comanda);
+                    useSyncSignal.getState().bump(cambio.comanda, cambio.tablas);
                     // Sólo el store de la tabla que ha cambiado: cada uno es una petición a la nube.
                     recargarAjustes(cambio.tablas);
                 }),

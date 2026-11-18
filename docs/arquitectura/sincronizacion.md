@@ -1073,8 +1073,13 @@ archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivad
 se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está como se pide, y el
 rechazo lo cuenta con lo que hay ahora); cambiar una reserva cerrada (`reserva_cerrada`) o que ha
 cambiado desde que se abrió el formulario (`reserva_cambiada_al_editar`: la edición trae la reserva
-como la vio, RES-INC-03), y reservar para hoy una mesa con una comanda abierta
-(`mesa_con_comanda_hoy`). Lo prueba `test/guardasEnElLote.test.ts`, con una escritura
+como la vio, RES-INC-03), reservar para hoy una mesa con una comanda abierta
+(`mesa_con_comanda_hoy`), y fichar (TRA-INC-04, `login.commands.ts`): la entrada, con las cuatro
+frases de la Main en su orden y que la parte que eligió la ruta siga siendo la que toca; la salida,
+que la jornada que leyó la ruta siga sin salida, y si no la hay, «La salida ya está fichada.» cuando
+otro equipo acaba de fichar una (en la Main, lo mismo en `exec_punch`). La sentencia de la salida
+lleva también `Hora_Salida IS NULL`, en los dos lados, para que quien la aplique después no pise
+una salida que ya tenga. Lo prueba `test/guardasEnElLote.test.ts`, con una escritura
 que entra entre la lectura de la ruta y su lote.
 
 Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las que todavía deciden
@@ -1092,9 +1097,7 @@ cierre por periodo, nombres de zona, mesa y producto, correos de cliente), lo qu
 darse de alta (borrar una reserva web, que no se borra nunca), lo que la sentencia ya hace por sí
 misma con su condición (las altas puras, las notificaciones, el turno partido, el guardado de un
 horario, borrar un ticket), y lo que en una carrera no escribe nada distinto, sólo contesta otra
-cosa: finalizar una tarea que entretanto se le desasigna no toca ninguna fila. Tampoco el fichaje:
-lo hace la persona por sí misma, y dos entradas suyas en el mismo instante desde dos equipos no es
-algo que pase usando el programa.
+cosa: finalizar una tarea que entretanto se le desasigna no toca ninguna fila.
 
 Lo que llega a la Main es la sentencia, que la Main aplica con sus datos: puede tener sin subir lo
 que la nube no vio ([SYNC-29](#el-orden-de-la-nube-manda-sync-29)). Por eso la regla que no puede

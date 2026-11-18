@@ -21,6 +21,7 @@ import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useToast } from "../../shared/toast";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
+import { tocaAlgunaTabla, useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { Button, IconButton } from "../../shared/ui";
 
 
@@ -181,8 +182,29 @@ export default function Login() {
 
     const showBottomBlock = Boolean(selectedUser);
 
-    const refreshPunch = async (uid: string) => {
+    // TRA-INC-04: lo que se ve aquí lo cambian también otros equipos (fichar en una Handy, dar de
+    // baja a alguien en la Main), y el login no va por React Query: escucha la réplica
+    // (`useSyncSignal`) y relee sin vaciar lo que hay en pantalla. Cada lectura lleva su turno: la
+    // que llega tarde, detrás de otra o de un fichaje, no pisa lo más reciente.
+    const selectedUserIdRef = useRef(selectedUserId);
+    const lecturaUsuariosRef = useRef(0);
+    const lecturaEstadoRef = useRef(0);
+
+    const cargarUsuarios = async () => {
+        const turno = ++lecturaUsuariosRef.current;
+        const arr = (await commands.listLoginUsers()) ?? [];
+        if (turno !== lecturaUsuariosRef.current) return;
+        setUsers(arr);
+        // Quien ya no puede entrar (desactivado, eliminado) deja de estar seleccionado.
+        const elegido = selectedUserIdRef.current;
+        if (elegido && !arr.some((u) => u.id_usuario === elegido)) setSelectedUserId(null);
+    };
+
+    /** El fichaje de `uid`, si cuando llega sigue siendo el seleccionado y lo último pedido. */
+    const releerEstado = async (uid: string) => {
+        const turno = ++lecturaEstadoRef.current;
         const st = await commands.getTodayPunchStatus({ id_usuario: uid });
+        if (turno !== lecturaEstadoRef.current || selectedUserIdRef.current !== uid) return;
         setPunchStatus(st);
     };
 
@@ -192,9 +214,7 @@ export default function Login() {
         void (async () => {
             try {
                 setLoadingUsers(true);
-                const arr = await commands.listLoginUsers();
-                if (!mounted) return;
-                setUsers(arr ?? []);
+                await cargarUsuarios();
             } catch (e) {
                 toast.error("No se pudieron cargar los usuarios", toAppError(e).message);
             } finally {
@@ -208,7 +228,25 @@ export default function Login() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    useEffect(
+        () =>
+            useSyncSignal.subscribe((s, antes) => {
+                if (s.tick === antes.tick) return;
+                // Una relectura que falla deja lo que hay en pantalla; la siguiente lo vuelve a
+                // intentar, y tocar un nombre lo lee otra vez.
+                if (tocaAlgunaTabla(s.tablas, ["usuarios", "trabajadores", "roles"])) {
+                    void cargarUsuarios().catch(() => {});
+                }
+                const uid = selectedUserIdRef.current;
+                if (uid && tocaAlgunaTabla(s.tablas, ["fichajes", "fichaje_dia"])) {
+                    void releerEstado(uid).catch(() => {});
+                }
+            }),
+        [],
+    );
+
     useEffect(() => {
+        selectedUserIdRef.current = selectedUserId;
         // Otro trabajador (o ninguno, con «Cambiar usuario»): ni su PIN ni el ojo abierto.
         olvidarPin();
         setIsSubmitting(false);
@@ -220,11 +258,7 @@ export default function Login() {
         void (async () => {
             try {
                 setLoadingPunch(true);
-                const st = await commands.getTodayPunchStatus({
-                    id_usuario: selectedUserId,
-                });
-                if (!mounted) return;
-                setPunchStatus(st);
+                await releerEstado(selectedUserId);
             } catch (e) {
                 if (!mounted) return;
                 setPunchStatus(null);
@@ -288,7 +322,7 @@ export default function Login() {
                 turno_partido: checked,
                 fecha: punchStatus?.fecha,
             });
-            await refreshPunch(selectedUserId);
+            await releerEstado(selectedUserId);
             toast.success(
                 "Turno actualizado",
                 checked ? "Marcado como turno partido." : "Turno partido desactivado.",
@@ -337,6 +371,8 @@ export default function Login() {
                 tipo,
             });
 
+            // Lo que contesta el fichaje manda sobre una relectura que viniera de camino.
+            lecturaEstadoRef.current++;
             setPunchStatus(st);
 
             olvidarPin();
@@ -347,6 +383,9 @@ export default function Login() {
             );
         } catch (e) {
             toast.error("No se pudo fichar", toAppError(e).message);
+            // TRA-INC-04: un 409 suele ser que otro equipo ya ha fichado; sin releer, la pantalla
+            // seguía ofreciendo el mismo botón.
+            void releerEstado(selectedUserId!).catch(() => {});
         } finally {
             accionEnCursoRef.current = false;
             setIsSubmitting(false);

@@ -334,34 +334,30 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 	//
 	// RI-05: la fecha del estado que se devuelve es la de la jornada fichada. Una entrada abre la de
 	// hoy; una salida cierra la jornada en curso, que en un turno de noche empezó ayer.
-	let fecha: string;
-	if (datos.tipo === "entrada") {
-		fecha = await tenantQuery(c, (db) => q.hoy(db));
-		const parte = await tenantQuery(c, (db) =>
-			q.nextPunchPart(db, datos.id_usuario, fecha),
-		);
-		await apply(
-			c,
-			cmd.punchEntrada({
+	//
+	// TRA-INC-04: lo que se lee aquí sólo construye el comando (qué parte, qué fichaje). Si el
+	// fichaje toca lo deciden sus guardas dentro del lote (SYNC-30), con la frase de la Main; y el
+	// reintento de uno que ya entró contesta lo guardado, con el día que se guardó.
+	const leida = datos.tipo === "entrada"
+		? await tenantQuery(c, async (db) => {
+			const dia = await q.hoy(db);
+			return { fecha: dia, parte: await q.parteSiguiente(db, datos.id_usuario, dia), abierto: null };
+		})
+		: await tenantQuery(c, async (db) => {
+			const abierto = await q.getOpenPunch(db, datos.id_usuario);
+			return { fecha: abierto?.fecha ?? (await q.hoy(db)), parte: 0, abierto };
+		});
+	const r = await apply(
+		c,
+		datos.tipo === "entrada"
+			? cmd.punchEntrada({ id_usuario: datos.id_usuario, fecha: leida.fecha, parte: leida.parte })
+			: cmd.punchSalida({
 				id_usuario: datos.id_usuario,
-				fecha,
-				parte,
+				id_fichaje: leida.abierto?.id_fichaje ?? null,
+				fecha: leida.fecha,
 			}),
-		);
-	} else {
-		const open = await tenantQuery(c, (db) => q.getOpenPunch(db, datos.id_usuario));
-		if (!open) {
-			return c.json({ error: "No hay fichaje abierto para cerrar (primero ficha entrada)." }, 409);
-		}
-		fecha = open.fecha;
-		await apply(
-			c,
-			cmd.punchSalida({
-				id_usuario: datos.id_usuario,
-				id_fichaje: open.id_fichaje,
-			}),
-		);
-	}
+	);
+	const fecha = typeof r?.fecha === "string" ? r.fecha : leida.fecha;
 
 	return c.json(
 		await tenantQuery(c, (db) =>

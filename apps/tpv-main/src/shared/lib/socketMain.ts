@@ -56,7 +56,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
                 const keys = featureKeysPorTablas(payload.tablas);
                 if (keys === null) void queryClient.invalidateQueries();
                 else for (const key of keys) void queryClient.invalidateQueries({ queryKey: claveDeConsulta(key) });
-                useSyncSignal.getState().bump(payload.comanda);
+                useSyncSignal.getState().bump(payload.comanda, payload.tablas);
                 // El store de la tabla que una Handy ha cambiado (también los datos de contacto).
                 recargarAjustes(payload.tablas);
             }),

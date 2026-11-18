@@ -22,7 +22,8 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { HubError } from "../src/lib/errorHttp";
+import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
+import { GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
 
@@ -40,7 +41,8 @@ const { default: worker } = await import("../src/index");
 const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { hashPin } = await import("../src/domains/login/login.crypto");
-const { nextPunchPart } = await import("../src/domains/login/login.queries");
+const { getOpenPunch, parteSiguiente } = await import("../src/domains/login/login.queries");
+const { punchEntrada, punchSalida } = await import("../src/domains/login/login.commands");
 const { serverNowFixed } = await import("../src/durableObjects/tenantHub.tiempo");
 
 beforeEach(() => {
@@ -51,22 +53,36 @@ const ABIERTO = "Tienes un fichaje abierto. Ficha salida antes de fichar entrada
 const PARTE_1_SIN_CERRAR = "La Parte 1 no está cerrada. Ficha salida primero.";
 const PARTIDO_COMPLETO = "Ya has completado el turno partido hoy.";
 const SIN_TURNO_PARTIDO = "Hoy no tienes turno partido. Ya has fichado el día.";
+// TRA-INC-04: la salida que ya fichó otro equipo no se confunde con no haber entrado.
+const SALIDA_YA_FICHADA = "La salida ya está fichada.";
+const SIN_ABIERTO = "No hay fichaje abierto para cerrar (primero ficha entrada).";
 
 describe("AUD-47 · las frases son las de la Main", () => {
 	it("cada una está, tal cual, en exec_punch", () => {
 		// Rust parte la llamada en varias líneas cuando no cabe: se quita el relleno de alrededor
 		// del literal para comparar la llamada entera.
 		const main = fuenteDeLaMain.replace(/\(\s+"/g, '("').replace(/",?\s+\)/g, '")');
-		for (const frase of [ABIERTO, PARTE_1_SIN_CERRAR, PARTIDO_COMPLETO, SIN_TURNO_PARTIDO]) {
+		for (const frase of [ABIERTO, PARTE_1_SIN_CERRAR, PARTIDO_COMPLETO, SIN_TURNO_PARTIDO, SALIDA_YA_FICHADA, SIN_ABIERTO]) {
 			expect(main, frase).toContain(`AppError::conflict("${frase}")`);
 		}
 	});
 });
 
-describe("AUD-47 · nextPunchPart rechaza con un 409 y su frase", () => {
+describe("AUD-47 · TRA-INC-04 · las guardas del fichaje rechazan con un 409 y su frase", () => {
 	const HOY = "2099-05-10";
 
-	/** Lo que contesta `nextPunchPart` para hoy, con el esquema del negocio en el SQLite de un DO y un usuario. */
+	/** El lote de un comando contra el SQLite del DO, como lo aplica el motor (guardas incluidas). */
+	function aplicarLote(hub: any, built: any) {
+		loteEnBruto(hub.state.storage, [
+			{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] },
+			...buildApplyBatch(built.command).middle,
+		]);
+	}
+
+	/**
+	 * La entrada de hoy en la parte que elige la ruta (`parteSiguiente`), con el esquema del negocio
+	 * en el SQLite de un DO y un usuario.
+	 */
 	async function conFichajes(nombre: string, sembrar: (sql: any) => void) {
 		return enElHub(`aud47-consulta-${nombre}`, async (hub: any) => {
 			const sql = hub.state.storage.sql;
@@ -76,8 +92,10 @@ describe("AUD-47 · nextPunchPart rechaza con un 409 y su frase", () => {
 				 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', 'x', 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
 			);
 			sembrar(sql);
+			const parte = await parteSiguiente(clienteSobre(sql) as any, "u-1", HOY);
 			try {
-				return { parte: await nextPunchPart(clienteSobre(sql) as any, "u-1", HOY) };
+				aplicarLote(hub, punchEntrada({ id_usuario: "u-1", fecha: HOY, parte }));
+				return { parte };
 			} catch (e) {
 				return { error: e };
 			}
@@ -85,7 +103,7 @@ describe("AUD-47 · nextPunchPart rechaza con un 409 y su frase", () => {
 	}
 
 	const esUn409 = (r: any, frase: string) => {
-		expect(r.error).toBeInstanceOf(HubError);
+		expect(r.error).toBeInstanceOf(GuardaIncumplida);
 		expect(r.error).toMatchObject({ status: 409, code: frase, message: frase });
 	};
 
@@ -151,6 +169,63 @@ describe("AUD-47 · nextPunchPart rechaza con un 409 y su frase", () => {
 		});
 		esUn409(r, SIN_TURNO_PARTIDO);
 	});
+
+	it("la salida que otro equipo ficha entre la lectura de la ruta y el lote no se pisa", async () => {
+		await enElHub("tra-inc-04-salida-cruzada", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			sql.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', 'x', 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
+			);
+			sql.exec(
+				`INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
+				 VALUES ('f-1', 'u-1', date('now','localtime'), 1, datetime('now','localtime','-2 hours'), 'ABIERTO');`,
+			);
+			// Lo que lee la ruta.
+			const abierto = await getOpenPunch(clienteSobre(sql) as any, "u-1");
+			expect(abierto?.id_fichaje).toBe("f-1");
+			const built = punchSalida({ id_usuario: "u-1", id_fichaje: abierto!.id_fichaje, fecha: abierto!.fecha });
+
+			// Entre medias, la salida llega de otra Handy.
+			sql.exec(
+				`UPDATE Fichajes SET Hora_Salida = datetime('now','localtime','-1 hours'), Estado = 'CERRADO' WHERE ID_Fichaje = 'f-1';`,
+			);
+			const antes = sql.exec(`SELECT Hora_Salida FROM Fichajes WHERE ID_Fichaje = 'f-1';`).one().Hora_Salida;
+
+			let error: unknown = null;
+			try {
+				aplicarLote(hub, built);
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toBeInstanceOf(GuardaIncumplida);
+			expect(error).toMatchObject({ status: 409, message: SALIDA_YA_FICHADA });
+			expect(sql.exec(`SELECT Hora_Salida FROM Fichajes WHERE ID_Fichaje = 'f-1';`).one().Hora_Salida).toBe(antes);
+
+			// Y lo que se replica a la Main tampoco pisa una salida que ya tenga.
+			const [update] = buildApplyBatch(built.command).replicated;
+			expect(update.sql).toMatch(/WHERE ID_Fichaje = \?1 AND Hora_Salida IS NULL/);
+		});
+	});
+
+	it("sin jornada en curso ni salida reciente, la frase de siempre", async () => {
+		await enElHub("tra-inc-04-sin-entrada", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			sql.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', 'x', 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
+			);
+			let error: unknown = null;
+			try {
+				aplicarLote(hub, punchSalida({ id_usuario: "u-1", id_fichaje: null, fecha: HOY }));
+			} catch (e) {
+				error = e;
+			}
+			expect(error).toMatchObject({ status: 409, message: SIN_ABIERTO });
+		});
+	});
 });
 
 const TENANT = "tenant-aud47";
@@ -162,7 +237,8 @@ const PIN = "4321";
 type Caso = {
 	/** Los fichajes del usuario, leídos de la base del negocio (el SQLite de su TenantHub). */
 	filas: () => Promise<any[]>;
-	fichar: (tipo: "entrada" | "salida") => Promise<Response>;
+	/** Con `clave`, la `X-Idempotency-Key` de un reintento. */
+	fichar: (tipo: "entrada" | "salida", clave?: string) => Promise<Response>;
 };
 
 /** Un negocio con un camarero, su licencia viva, una Handy emparejada y la Main conectada. */
@@ -215,7 +291,7 @@ async function escenario<R>(nombre: string, prueba: (c: Caso) => Promise<R>): Pr
 		);
 
 		/** Una petición firmada como la del cliente Rust, con la hora real del equipo. */
-		const fichar = async (tipo: "entrada" | "salida") => {
+		const fichar = async (tipo: "entrada" | "salida", clave: string = crypto.randomUUID()) => {
 			const token = await firmarSesion(env, { tenantId, deviceId: HANDY, licHash: LIC_HASH }, { rol: "handy" });
 			const ruta = "/v1/login/punch";
 			const cuerpo = new TextEncoder().encode(JSON.stringify({ id_usuario: "u-1", pin: PIN, tipo }));
@@ -228,7 +304,7 @@ async function escenario<R>(nombre: string, prueba: (c: Caso) => Promise<R>): Pr
 					authorization: `Bearer ${token}`,
 					"X-Device-Ts": String(ts),
 					"X-Device-Sig": firma,
-					"X-Idempotency-Key": crypto.randomUUID(),
+					"X-Idempotency-Key": clave,
 					"X-Client-Now": serverNowFixed(),
 					"content-type": "application/json",
 				},
@@ -273,6 +349,45 @@ describe("AUD-47 · POST /v1/login/punch con una entrada que no toca", () => {
 			expect(await r.json()).toEqual({ ok: false, code: "conflict", error: ABIERTO });
 
 			expect(await filas()).toEqual([{ Parte: 1, cerrado: 0, Estado: "ABIERTO" }]);
+		});
+	});
+});
+
+describe("TRA-INC-04 · POST /v1/login/punch cuando fichan dos equipos", () => {
+	it("la salida que ya fichó otro equipo: 409 «La salida ya está fichada.», sin tocar la jornada", async () => {
+		await escenario("salida-dos-veces", async ({ filas, fichar }) => {
+			expect((await fichar("entrada")).status).toBe(200);
+			expect((await fichar("salida")).status).toBe(200);
+
+			const r = await fichar("salida");
+			expect(r.status).toBe(409);
+			expect(await r.json()).toEqual({ ok: false, code: "conflict", error: SALIDA_YA_FICHADA });
+			expect(await filas()).toEqual([{ Parte: 1, cerrado: 1, Estado: "CERRADO" }]);
+		});
+	});
+
+	it("el reintento de una entrada que ya entró contesta lo mismo, no «Tienes un fichaje abierto»", async () => {
+		await escenario("reintento-entrada", async ({ filas, fichar }) => {
+			const clave = crypto.randomUUID();
+			const primera = await fichar("entrada", clave);
+			expect(primera.status).toBe(200);
+			const reintento = await fichar("entrada", clave);
+			expect(reintento.status).toBe(200);
+			expect(await reintento.json()).toEqual(await primera.json());
+			expect(await filas()).toEqual([{ Parte: 1, cerrado: 0, Estado: "ABIERTO" }]);
+		});
+	});
+
+	it("el reintento de una salida que ya entró contesta lo mismo, no «No hay fichaje abierto»", async () => {
+		await escenario("reintento-salida", async ({ filas, fichar }) => {
+			expect((await fichar("entrada")).status).toBe(200);
+			const clave = crypto.randomUUID();
+			const primera = await fichar("salida", clave);
+			expect(primera.status).toBe(200);
+			const reintento = await fichar("salida", clave);
+			expect(reintento.status).toBe(200);
+			expect(await reintento.json()).toEqual(await primera.json());
+			expect(await filas()).toEqual([{ Parte: 1, cerrado: 1, Estado: "CERRADO" }]);
 		});
 	});
 });

@@ -2,11 +2,13 @@
 // La pantalla de fichar y entrar (`Login.tsx`), con un backend de mentira en lugar del IPC.
 //
 // - AUT-INC-01: «Mostrar PIN» es de quien lo pulsó; el siguiente trabajador teclea oculto.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+// - TRA-INC-04: lo que hacen otros equipos (la réplica) se ve sin volver a tocar nada.
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import Login from "../../src/app/pages/Login";
+import { useSyncSignal } from "../../src/shared/stores/useSyncSignal";
 import { ToastProvider } from "../../src/shared/toast";
 
 type Parte = { parte: number; entrada: string | null; salida: string | null; estado: string | null };
@@ -132,4 +134,74 @@ it("«Mostrar PIN» no pasa al siguiente trabajador ni sobrevive al fichaje (AUT
     await pulsar("Fichar entrada");
     await screen.findAllByRole("button", { name: "Fichar salida" });
     await screen.findByRole("button", { name: "Mostrar PIN" });
+});
+
+/** Llega un cambio replicado que ha tocado `tablas`. */
+function llegaCambio(tablas: string[]) {
+    act(() =>
+        useSyncSignal
+            .getState()
+            .bump({ ids: [], touchedComanda: false, uncertain: false, touchedCatalog: false }, tablas),
+    );
+}
+
+const lecturas = (comando: string) => backend.llamadas.filter((l) => l.comando === comando).length;
+
+it("un trabajador dado de alta en otro equipo aparece sin «Cargando» (TRA-INC-04)", async () => {
+    pintarLogin();
+    await screen.findAllByRole("button", { name: /Ana/ });
+
+    backend.usuarios = [
+        ...backend.usuarios,
+        { id_usuario: "u-marta", nombre: "Marta", apellido: null, nombre_rol: "Cocinero", sin_pin: false },
+    ];
+    // Un cambio de otra cosa no relee la lista.
+    llegaCambio(["productos"]);
+    expect(lecturas("list_login_users")).toBe(1);
+
+    llegaCambio(["usuarios"]);
+    await screen.findAllByRole("button", { name: /Marta/ });
+    expect(screen.queryByText("Cargando usuarios...")).toBeNull();
+});
+
+it("quien deja de poder entrar deja de estar seleccionado (TRA-INC-04)", async () => {
+    pintarLogin();
+    await elegir("Luis");
+    await screen.findAllByRole("button", { name: "Fichar entrada" });
+
+    backend.usuarios = backend.usuarios.filter((u) => u.id_usuario !== "u-luis");
+    llegaCambio(["usuarios"]);
+    await waitFor(() => expect(screen.queryAllByRole("button", { name: /Luis/ })).toHaveLength(0));
+    expect(screen.getByText("Sin usuario")).toBeInTheDocument();
+});
+
+it("la entrada fichada en otro equipo cambia el botón a «Fichar salida» (TRA-INC-04)", async () => {
+    pintarLogin();
+    await elegir("Ana");
+    await screen.findAllByRole("button", { name: "Fichar entrada" });
+    const antes = lecturas("get_today_punch_status");
+
+    backend.estados.set("u-ana", conEntrada());
+    llegaCambio(["comandas"]);
+    expect(lecturas("get_today_punch_status")).toBe(antes);
+
+    llegaCambio(["fichajes"]);
+    await screen.findAllByRole("button", { name: "Fichar salida" });
+    // Sin pasar por «Cargando...» mientras relee.
+    expect(screen.queryByText("Cargando...")).toBeNull();
+});
+
+it("tras un fichaje rechazado relee el estado y deja de ofrecer el botón de antes (TRA-INC-04)", async () => {
+    pintarLogin();
+    await elegir("Ana");
+    await screen.findAllByRole("button", { name: "Fichar entrada" });
+
+    // Otra Handy ya ha fichado la entrada y el aviso todavía no ha llegado.
+    backend.estados.set("u-ana", conEntrada());
+    backend.punch = () => {
+        throw { code: "conflict", message: "Tienes un fichaje abierto. Ficha salida antes de fichar entrada." };
+    };
+    await teclear("1234");
+    await pulsar("Fichar entrada");
+    await screen.findAllByRole("button", { name: "Fichar salida" });
 });

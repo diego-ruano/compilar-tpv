@@ -4,7 +4,6 @@ import type { Client } from "@libsql/client/web";
 
 import type { LoginOk, PunchStatus, UserListItem } from "@tpv/contracts";
 
-import { HubError } from "../../lib/errorHttp";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -204,7 +203,7 @@ export async function reservarIntento(
  * El porqué de las 16 h, en `INICIO_MAS_ANTIGUO` de `tpv-infra-sqlite/src/login.rs`: es el mismo
  * valor y tiene que seguir siéndolo.
  */
-const INICIO_MAS_ANTIGUO = "datetime('now','localtime','-16 hours')";
+export const INICIO_MAS_ANTIGUO = "datetime('now','localtime','-16 hours')";
 
 /** «Hoy» de quien pregunta (REV-03: `tenantQuery` fija su hora antes de ejecutar). */
 export async function hoy(db: Client): Promise<string> {
@@ -300,24 +299,17 @@ export async function getOpenPunch(
 }
 
 /**
- * AUD-47: una entrada que no toca es un 409 con la frase que da la Main (`exec_punch`, en
- * `tpv-infra-sqlite/src/login.rs`). A un `Error` a secas `onError` contesta con un 500
- * `internal_error`, y quien ficha dos veces leería que el servidor ha fallado.
+ * La parte que abriría una entrada ese día: la 2 si ya hay una 1. Sólo construye el comando: si la
+ * entrada toca o no lo deciden las guardas de `punchEntrada`, dentro del lote (TRA-INC-04, SYNC-30).
+ * Leer aquí y rechazar antes de `apply` contestaba «Tienes un fichaje abierto» al reintento de una
+ * entrada que ya había entrado.
  */
-function entradaRechazada(frase: string): HubError {
-	return new HubError(frase, 409);
-}
-
-export async function nextPunchPart(db: Client, idUsuario: string, fecha: string) {
-	// RI-05: el abierto que bloquea puede ser de ayer (un turno de noche sin cerrar).
-	if (await getOpenPunch(db, idUsuario)) {
-		throw entradaRechazada("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");
-	}
-	const status = await punchStatusForDate(db, idUsuario, fecha);
-	const p1 = status.partes.find((p) => p.parte === 1);
-	if (!p1) return 1;
-	if (!p1.salida) throw entradaRechazada("La Parte 1 no está cerrada. Ficha salida primero.");
-	if (status.turno_partido === 1 && !status.partes.some((p) => p.parte === 2)) return 2;
-	if (status.turno_partido === 1) throw entradaRechazada("Ya has completado el turno partido hoy.");
-	throw entradaRechazada("Hoy no tienes turno partido. Ya has fichado el día.");
+export async function parteSiguiente(db: Client, idUsuario: string, fecha: string): Promise<number> {
+	const rs = await db.execute({
+		sql: `SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM Fichajes WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=1
+		) THEN 2 ELSE 1 END AS parte;`,
+		args: [idUsuario, fecha],
+	});
+	return Number(rows(rs)[0]?.parte ?? 1);
 }

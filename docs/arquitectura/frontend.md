@@ -101,7 +101,10 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 - **Fuera a propósito**: la parte transaccional del POS (comanda, cobro y cocina en mesas; toda la venta
   rápida, cuyo arranque mezcla el catálogo con el estado de la comanda), la configuración (se carga una
   vez en stores de Zustand: `useBusinessSettings`, `useTicketSettings`, `useContactSettings`) y el
-  login. Cuando otro equipo cambia una tabla de ajustes se relee el store de esa tabla, no los tres
+  login. Lo que no está en React Query escucha `useSyncSignal`, que lleva las comandas y las tablas
+  del último cambio replicado: el login relee la lista de usuarios cuando cambian `usuarios`,
+  `trabajadores` o `roles`, y el fichaje del seleccionado cuando cambian `fichajes` o
+  `fichaje_dia` o un fichaje se rechaza, sin vaciar lo que hay en pantalla (TRA-INC-04). Cuando otro equipo cambia una tabla de ajustes se relee el store de esa tabla, no los tres
   (`shared/lib/recargarAjustes.ts`, en la Main y en la Handy).
 - Otros stores (`shared/stores/`): `useAuth`, `useMode`, `useEstadoSync`, `useMainPresence`,
   `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`.
