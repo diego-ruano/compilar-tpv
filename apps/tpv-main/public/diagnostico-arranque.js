@@ -6,11 +6,13 @@
 // pintado nada, los enseña en pantalla con la versión del navegador. Sin esto, en un iPhone sin Mac
 // una pantalla en blanco no dice nada. Si la app arranca, no hace nada.
 (function () {
-    var errores = [];
+    // También lo lee el diagnóstico de la pantalla (cinco toques en el logo, en el móvil).
+    var errores = (window.__erroresTpv = []);
     window.addEventListener(
         "error",
         function (e) {
             var origen = e.target && (e.target.src || e.target.href);
+            if (errores.length > 50) errores.shift();
             if (origen) errores.push("No ha cargado: " + origen);
             else errores.push((e.message || "Error") + (e.filename ? " (" + e.filename + ":" + e.lineno + ":" + e.colno + ")" : ""));
         },

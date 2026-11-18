@@ -1,4 +1,5 @@
 // src/app/layoutComponent/Titlebar.tsx
+import { useRef, useState } from "react";
 import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
@@ -6,6 +7,8 @@ import { cn } from "../../shared/lib/cn";
 import { ThemeToggle } from "../../shared/ui";
 import ControlesVentana from "./ControlesVentana";
 import ControlesZoom from "./ControlesZoom";
+import DiagnosticoPantalla from "./DiagnosticoPantalla";
+import { esMovil } from "../../shared/lib/plataforma";
 
 /**
  * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio), tamaño de la
@@ -20,6 +23,18 @@ function Titlebar({ className }: { className?: string }) {
     // hay que resolverla, no meterla tal cual en el `src`.
     const logoSrc = useImageUrl(logo_data_url);
 
+    // En el móvil, cinco toques seguidos en el logo abren el diagnóstico de la pantalla.
+    const [diagnostico, setDiagnostico] = useState(false);
+    const toques = useRef<number[]>([]);
+    const tocarLogo = () => {
+        const ahora = Date.now();
+        toques.current = [...toques.current.filter((t) => ahora - t < 2000), ahora];
+        if (toques.current.length >= 5) {
+            toques.current = [];
+            setDiagnostico(true);
+        }
+    };
+
     return (
         <div className={cn("flex shrink-0 items-center justify-between border-b border-border bg-surface", className)}>
             {/* `min-w-0`: con la ventana estrecha encoge el nombre, no empuja los botones fuera. */}
@@ -32,6 +47,7 @@ function Titlebar({ className }: { className?: string }) {
                     className="size-6 rounded-md object-cover"
                     data-tauri-drag-region
                     alt="logo"
+                    onClick={esMovil ? tocarLogo : undefined}
                 />
                 <p
                     data-tauri-drag-region
@@ -46,6 +62,7 @@ function Titlebar({ className }: { className?: string }) {
                 <ThemeToggle size="sm" />
                 <ControlesVentana />
             </div>
+            {diagnostico ? <DiagnosticoPantalla onCerrar={() => setDiagnostico(false)} /> : null}
         </div>
     );
 }
