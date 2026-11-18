@@ -77,6 +77,10 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	}, [secsLeft, expiresAtMs]);
 
 	const onRegenerate = () => void regenerarCodigo();
+	// CFG-INC-04: el código lo emite la nube. Sin conexión los dos botones se apagan y dicen por qué:
+	// antes se podían pulsar, el fallo no salía (el aviso de «Necesitas conexión» tapa el error) y
+	// parecía que no hacían nada.
+	const sinNubeTitle = hayNube ? undefined : "Sin conexión a internet no se puede pedir un código nuevo.";
 	const onShowCode = () => void messageDialog(`Código: ${pairCode}`);
 
 	const pendientes = usePairPendientes();
@@ -141,7 +145,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 				title="Vincular Handy"
 				subtitle="Escanea este QR con el dispositivo que quieras emparejar."
 				right={
-					<GhostButton onClick={onRegenerate} disabled={loading}>
+					<GhostButton onClick={onRegenerate} disabled={loading || !hayNube} title={sinNubeTitle}>
 						{loading ? "Generando..." : "Generar nuevo"}
 					</GhostButton>
 				}
@@ -292,7 +296,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 								</div>
 
 								<div className="mt-4 flex flex-wrap items-center gap-2">
-									<PrimaryButton onClick={onRegenerate} disabled={loading}>
+									<PrimaryButton onClick={onRegenerate} disabled={loading || !hayNube} title={sinNubeTitle}>
 										{loading ? "Generando..." : "Regenerar código"}
 									</PrimaryButton>
 
