@@ -666,7 +666,7 @@ export const commands = {
 	configGetContactSettings: () => __TAURI_INVOKE<ContactSettings>("config_get_contact_settings"),
 	configPatchContactSettings: (args: ContactSettingsPatchInput_Deserialize) => __TAURI_INVOKE<string>("config_patch_contact_settings", { args }),
 	/**
-	 *  SEC-01: exige Administrador. Mandar un pedido compromete dinero con un proveedor y sale
+	 *  SEC-01: exige `pedidos.gestionar`. Mandar un pedido compromete dinero con un proveedor y sale
 	 *  firmado con el correo del negocio; «Proveedores y Pedidos» ya era una sección suya en el
 	 *  menú, y esto es el candado que le faltaba detrás.
 	 */
