@@ -30,10 +30,11 @@ impl HttpCierreCajaRepository {
     }
 }
 
-fn solo_main(que: &str) -> AppError {
-    AppError::conflict(format!(
-        "{que} sólo se puede hacer desde la Main: el cajón y el recuento están allí"
-    ))
+/// El «no» de la caja en una Handy, con el mismo texto que el worker (`caja_solo_en_main`): sea quien
+/// sea el que lo diga, se lee igual. Antes cada escritura decía la suya, y la de dar de alta un gasto
+/// hablaba de «Corregir un apunte de caja».
+fn solo_main() -> AppError {
+    AppError::conflict(crate::cuentas::CAJA_SOLO_EN_MAIN)
 }
 
 #[async_trait]
@@ -62,11 +63,11 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
     // ── De aquí abajo, cosas de la Main ──────────────────────────────────────────
 
     async fn totales_desde(&self, _desde: Option<&str>) -> AppResult<TotalesCaja> {
-        Err(solo_main("Preparar un cierre"))
+        Err(solo_main())
     }
 
     async fn comandas_sin_cobrar(&self) -> AppResult<(i64, i64)> {
-        Err(solo_main("Preparar un cierre"))
+        Err(solo_main())
     }
 
     /// Nada: la Handy lee de la nube, que tiene el histórico entero.
@@ -75,30 +76,91 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
     }
 
     async fn anulaciones_desde(&self, _desde: Option<&str>) -> AppResult<(i64, Dinero)> {
-        Err(solo_main("Preparar un cierre"))
+        Err(solo_main())
     }
 
     async fn cerrar_periodo(&self, _id_cierre: &str, _armar: ArmarCierre<'_>) -> AppResult<()> {
-        Err(solo_main("Cerrar la caja"))
+        Err(solo_main())
     }
 
     async fn reabrir(&self, _id_cierre: &str, _id_usuario: Option<&str>) -> AppResult<bool> {
-        Err(solo_main("Deshacer un cierre"))
+        Err(solo_main())
     }
 
     async fn cierre_de_momento(&self, _momento: &str) -> AppResult<Option<CierreDto>> {
-        Err(solo_main("Corregir un apunte de caja"))
+        Err(solo_main())
     }
 
     async fn apunte(&self, _tipo: ApunteCaja, _id: &str) -> AppResult<Option<ApunteGuardado>> {
-        Err(solo_main("Corregir un apunte de caja"))
+        Err(solo_main())
     }
 
     async fn devoluciones_de(&self, _id_pago: &str) -> AppResult<Vec<ApunteGuardado>> {
-        Err(solo_main("Corregir un apunte de caja"))
+        Err(solo_main())
     }
 
     async fn guardar_rectificacion(&self, _r: RectificacionNueva) -> AppResult<()> {
-        Err(solo_main("Rectificar un cierre"))
+        Err(solo_main())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Lo que una Handy oye al intentar escribir en la caja es lo mismo, lo diga este adaptador o el
+    //! worker: antes dar de alta un gasto decía «Corregir un apunte de caja sólo se puede hacer desde
+    //! la Main…».
+
+    use super::*;
+    use crate::cuentas::{HttpCuentasRepository, CAJA_SOLO_EN_MAIN};
+    use tpv_application::use_cases::rectificacion_caja as rect;
+    use tpv_contracts::cuentas::CreateGastoInput;
+
+    /// Un host que no existe: si algo saliera a la red, el error sería de red, no el de la caja.
+    fn repos() -> (HttpCuentasRepository, HttpCierreCajaRepository) {
+        let cliente = Arc::new(CloudClient::new("http://127.0.0.1:1", std::env::temp_dir()).unwrap());
+        (HttpCuentasRepository::new(cliente.clone()), HttpCierreCajaRepository::new(cliente))
+    }
+
+    #[tokio::test]
+    async fn dar_de_alta_un_gasto_desde_la_handy_dice_lo_mismo_que_el_worker() {
+        let (cuentas, cierres) = repos();
+        let e = rect::crear_gasto(
+            &cuentas,
+            &cierres,
+            "u1",
+            CreateGastoInput {
+                id_gasto: None,
+                fecha: "2026-05-10".into(),
+                tipo_gasto: "Suministros".into(),
+                concepto: "Hielo".into(),
+                importe: Dinero::de_centimos(500),
+                proveedor_id: None,
+                pagado_con_caja: Some(true),
+            },
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e.to_string(), CAJA_SOLO_EN_MAIN);
+    }
+
+    #[tokio::test]
+    async fn cerrar_y_deshacer_un_cierre_desde_la_handy_dicen_lo_mismo() {
+        let (_, cierres) = repos();
+        let e = cierres.totales_desde(None).await.unwrap_err();
+        assert_eq!(e.to_string(), CAJA_SOLO_EN_MAIN);
+        let e = cierres.reabrir("c1", None).await.unwrap_err();
+        assert_eq!(e.to_string(), CAJA_SOLO_EN_MAIN);
+        let e = cierres.cerrar_periodo("c1", &|_| unreachable!()).await.unwrap_err();
+        assert_eq!(e.to_string(), CAJA_SOLO_EN_MAIN);
+    }
+
+    #[test]
+    fn el_texto_es_el_del_worker() {
+        let worker = include_str!("../../../apps/cloud-worker-licensing/src/lib/errorCodes.ts");
+        assert!(
+            worker.contains(&format!("caja_solo_en_main: \"{CAJA_SOLO_EN_MAIN}\"")),
+            "el texto de `caja_solo_en_main` del worker ya no es «{CAJA_SOLO_EN_MAIN}»"
+        );
     }
 }

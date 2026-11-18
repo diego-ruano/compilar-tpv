@@ -27,6 +27,10 @@ impl HttpCuentasRepository {
 }
 
 /// Lo que se busca, o `None` si no hay nada escrito.
+/// Lo que dice una Handy que intenta escribir en la caja: el mismo texto que el worker
+/// (`caja_solo_en_main` en `lib/errorCodes.ts`), lo diga quien lo diga.
+pub(crate) const CAJA_SOLO_EN_MAIN: &str = "La caja sólo se gestiona desde el TPV principal.";
+
 fn busqueda(q: Option<&String>) -> Option<&String> {
     q.filter(|s| !s.trim().is_empty())
 }
@@ -158,11 +162,11 @@ impl CuentasRepository for HttpCuentasRepository {
     /// facturas. No hay ruta en el worker, así que el «no» se dice aquí, con el mismo texto que
     /// el worker usa para el resto de la caja.
     async fn lineas_devolubles(&self, _id_pago: &str) -> AppResult<Option<CobroDevolubleDto>> {
-        Err(AppError::conflict("La caja sólo se gestiona desde el TPV principal."))
+        Err(AppError::conflict(CAJA_SOLO_EN_MAIN))
     }
 
     async fn devolver_lineas(&self, _args: DevolverLineasArgs) -> AppResult<DevolucionDto> {
-        Err(AppError::conflict("La caja sólo se gestiona desde el TPV principal."))
+        Err(AppError::conflict(CAJA_SOLO_EN_MAIN))
     }
 
     /// Anular es cosa de la Main; el worker rechaza esta escritura desde una Handy. Se manda

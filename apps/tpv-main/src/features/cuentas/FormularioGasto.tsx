@@ -14,8 +14,10 @@ function reducir(campos: Campos, cambio: Cambio): Campos {
 }
 
 /** Estado del formulario aislado de las tablas; crear y editar comparten la misma validación. */
-export default function FormularioGasto({ gasto, fechaInicial, proveedores, errorProveedores, onCerrar, onGuardado, conAvisoDeCierre }: {
+export default function FormularioGasto({ gasto, fechaInicial, proveedores, errorProveedores, onCerrar, onGuardado, conAvisoDeCierre, soloLectura = false }: {
     gasto: SalidaDto | null; fechaInicial: string; proveedores: ProveedorMiniDto[]; errorProveedores: string | null;
+    /** En la Handy: se mira, no se guarda (la caja se toca en el TPV principal). */
+    soloLectura?: boolean;
     onCerrar: () => void; onGuardado: () => void;
     conAvisoDeCierre: (cambio: CambioCajaInput, hacer: (motivo: string | null) => Promise<void>) => Promise<void>;
 }) {
@@ -54,8 +56,9 @@ export default function FormularioGasto({ gasto, fechaInicial, proveedores, erro
     return <ModalShell open onClose={cerrar}>
         <div className="absolute inset-0 bg-black/40" onClick={cerrar} />
         <section className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface p-6 shadow-xl">
-            <h3 className="text-lg font-semibold text-fg">{gasto ? "Editar gasto" : "Añadir gasto"}</h3>
-            <fieldset disabled={guardando} className="mt-5 grid gap-3">
+            <h3 className="text-lg font-semibold text-fg">{soloLectura ? "Gasto" : gasto ? "Editar gasto" : "Añadir gasto"}</h3>
+            {soloLectura && <p className="mt-1 text-sm text-fg-muted">Los gastos se apuntan y se corrigen en el TPV principal.</p>}
+            <fieldset disabled={guardando || soloLectura} className="mt-5 grid gap-3">
                 <label className="text-xs font-semibold text-fg-muted">Fecha<input className={clase} type="date" value={campos.fecha} onChange={e => dispatch({ campo: "fecha", valor: e.target.value })} /></label>
                 <label className="text-xs font-semibold text-fg-muted">Tipo<select className={clase} value={campos.tipo_gasto} onChange={e => dispatch({ campo: "tipo_gasto", valor: e.target.value })}>
                     {["Suministros", "Luz", "Agua", "Alquiler", "Nomina", "Proveedor", "Mantenimiento", "Otros"].map(t => <option key={t}>{t}</option>)}
@@ -70,7 +73,7 @@ export default function FormularioGasto({ gasto, fechaInicial, proveedores, erro
                 </label>
             </fieldset>
             {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
-            <div className="mt-6 flex justify-end gap-3"><button disabled={guardando} onClick={cerrar}>Cancelar</button><button disabled={guardando} onClick={() => void guardar()} className="rounded-xl bg-accent px-4 py-2 font-semibold text-white">{guardando ? "Guardando…" : gasto ? "Guardar cambios" : "Guardar gasto"}</button></div>
+            <div className="mt-6 flex justify-end gap-3">{soloLectura ? <button onClick={cerrar}>Cerrar</button> : <><button disabled={guardando} onClick={cerrar}>Cancelar</button><button disabled={guardando} onClick={() => void guardar()} className="rounded-xl bg-accent px-4 py-2 font-semibold text-white">{guardando ? "Guardando…" : gasto ? "Guardar cambios" : "Guardar gasto"}</button></>}</div>
         </section>
     </ModalShell>;
 }

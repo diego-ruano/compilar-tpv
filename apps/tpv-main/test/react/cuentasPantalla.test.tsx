@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import Cuentas from "../../src/app/pages/Cuentas";
+import { useMode } from "../../src/shared/stores/useMode";
 import { ToastProvider } from "../../src/shared/toast";
 
 const sesion = vi.hoisted(() => ({ permisos: new Set<string>(), rol: "Administrador" }));
@@ -91,6 +92,7 @@ const TODO = ["cuentas.cobros", "cuentas.gastos", "caja.cerrar"];
 beforeEach(() => {
 	sesion.permisos = new Set(TODO);
 	sesion.rol = "Administrador";
+	useMode.setState({ mode: "tpv" });
 });
 
 afterEach(() => cleanup());
@@ -131,4 +133,29 @@ it("el editor de un gasto se cierra si se retira el permiso", async () => {
 	repintar();
 
 	await waitFor(() => expect(screen.queryByText("Añadir gasto")).toBeNull());
+});
+
+it("en la Handy, Cuentas es de consulta: lo dice arriba y no ofrece lo que se rechazaría", async () => {
+	useMode.setState({ mode: "handy" });
+	abrir();
+	expect(await screen.findByText("Cobros, devoluciones, gastos y cierres se hacen en el TPV principal.")).toBeTruthy();
+	expect((await screen.findAllByText("Hielo")).length).toBeGreaterThan(0);
+	expect(screen.queryByRole("button", { name: "Agregar gasto" })).toBeNull();
+	expect(screen.queryByRole("button", { name: "Cerrar caja" })).toBeNull();
+	expect(screen.queryByRole("button", { name: "Factura de varios tickets" })).toBeNull();
+	for (const titulo of ["Anular", "Devolver (todo o una parte)", "Editar", "Borrar", "Factura con NIF (emitir o corregir)"]) {
+		expect(screen.queryAllByTitle(titulo)).toHaveLength(0);
+	}
+	// El gasto se puede mirar, no guardar.
+	fireEvent.click(screen.getAllByTitle("Ver")[0]);
+	expect(await screen.findByText("Gasto")).toBeTruthy();
+	expect(screen.queryByRole("button", { name: "Guardar cambios" })).toBeNull();
+	expect(screen.getByRole("button", { name: "Cerrar" })).toBeTruthy();
+});
+
+it("en la Main no sale la nota de la Handy", async () => {
+	abrir();
+	expect((await screen.findAllByText("Hielo")).length).toBeGreaterThan(0);
+	expect(screen.queryByText(/se hacen en el TPV principal/)).toBeNull();
+	expect(screen.getByRole("button", { name: "Agregar gasto" })).toBeTruthy();
 });

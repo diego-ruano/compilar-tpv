@@ -44,7 +44,10 @@ periodo (arqueo), la baja de un cobro y la devolución de parte de él. Sus tres
   [permisos.md](permisos.md).
 - **Escribe sólo la Main.** La Handy ve ingresos, gastos y cierres (el worker sirve
   `GET /v1/cuentas/cierres`, `…/cierres/ultimo` y `…/cierres/:id`), pero toda escritura de caja se
-  rechaza en su adaptador HTTP y otra vez en el worker. El worker autentica por dispositivo, no por
+  rechaza en su adaptador HTTP y otra vez en el worker, con el mismo texto («La caja sólo se gestiona
+  desde el TPV principal.», `caja_solo_en_main`). En la Handy, Cuentas es de consulta: una nota
+  arriba lo dice, no ofrece cobros, devoluciones, gastos ni cierres, y el gasto se abre sólo para
+  mirarlo. El worker autentica por dispositivo, no por
   usuario: el filtro por rol dentro de la Handy es de la aplicación.
 - Quién cierra, deshace, anula, devuelve o corrige **lo pone la sesión**: `ConfirmarCierreInput`,
   `CierreIdInput`, `AnularPagoInput` y `DevolverLineasInput` no llevan `id_usuario`.

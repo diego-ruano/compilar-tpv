@@ -1,6 +1,7 @@
 import { commands } from "@tpv/client";
 import {
 Calculator,
+Eye,
 FileDown,
 FileText,
 Pencil,
@@ -73,6 +74,7 @@ import { conAviso } from "../../shared/lib/conAviso";
 import { CERO,eur,restar,sumar } from "../../shared/lib/dinero";
 import { esAdmin } from "../../shared/lib/permisos";
 import { usePermisos } from "../../shared/lib/usePermisos";
+import { useMode } from "../../shared/stores/useMode";
 
 function todayYMD() {
     const d = new Date();
@@ -230,8 +232,14 @@ export default function Cuentas() {
     const admin = puede("cuentas.gastos");
     const cobrosPermitidos = puede("cuentas.cobros");
     const exportarPermitido = admin && cobrosPermitidos;
-    const fiscal = esAdmin(rol);
     const cierresPermitidos = puede("caja.cerrar");
+    // En la Handy, Cuentas es de consulta: cobrar, devolver, los gastos y los cierres se hacen en el
+    // TPV principal, que tiene el cajón y la impresora. Lo rechazarían su adaptador y el worker
+    // (`caja_solo_en_main`), así que ni se ofrece.
+    const esHandy = useMode((st) => st.mode) === "handy";
+    const escribeCaja = !esHandy;
+    const fiscal = esAdmin(rol) && escribeCaja;
+    const puedeCerrarCaja = cierresPermitidos && escribeCaja;
 
     const [busqueda, setBusqueda] = useState("");
     const [del, setDel] = useState(() => todayYMD());
@@ -734,7 +742,7 @@ export default function Cuentas() {
             <MiniIconButton title="Reimprimir ticket" onClick={() => reimprimirTicket(e)}>
                 <Printer className="size-4" aria-hidden />
             </MiniIconButton>
-            {esAnulado(e) || esDevolucion(e) ? null : seleccionTickets ? (
+            {esAnulado(e) || esDevolucion(e) || !escribeCaja ? null : seleccionTickets ? (
                 <CasillaTicket
                     marcada={seleccionTickets.has(e.id)}
                     motivo={canjeablesQuery.data?.get(e.id)}
@@ -788,10 +796,28 @@ export default function Cuentas() {
         setSeleccionTickets(null);
     }, [fiscal]);
     useEffect(() => {
-        if (cierresPermitidos) return;
+        if (puedeCerrarCaja) return;
         setOpenCierre(false);
         setCierreAReabrir(null);
-    }, [cierresPermitidos]);
+    }, [puedeCerrarCaja]);
+
+    // Las acciones de un gasto, iguales en la fila de móvil y en la de escritorio. En la Handy sólo
+    // se mira.
+    const accionesDeGasto = (s: SalidaDto) =>
+        escribeCaja ? (
+            <>
+                <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
+                    <Pencil className="size-4" aria-hidden />
+                </MiniIconButton>
+                <MiniIconButton title="Borrar" variant="danger" onClick={() => borrarGasto(s)}>
+                    <Trash2 className="size-4" aria-hidden />
+                </MiniIconButton>
+            </>
+        ) : (
+            <MiniIconButton title="Ver" onClick={conAviso(() => abrirEditarGasto(s))}>
+                <Eye className="size-4" aria-hidden />
+            </MiniIconButton>
+        );
 
     // INC-20261031-023: la página se desplaza si no cabe, y las listas no bajan de un alto mínimo.
     // Antes era de alto fijo y sin desplazamiento: las listas se quedaban con lo que sobraba tras la
@@ -879,6 +905,11 @@ export default function Cuentas() {
                         {pdfError}
                     </div>
                 )}
+                {esHandy ? (
+                    <div className="rounded-2xl border border-border bg-surface-2 px-4 py-2 text-sm text-fg-muted">
+                        Cobros, devoluciones, gastos y cierres se hacen en el TPV principal.
+                    </div>
+                ) : null}
             </div>
 
             {/* PANELES */}
@@ -1041,9 +1072,11 @@ export default function Cuentas() {
                                     <h2 className="text-lg font-semibold text-fg">Salidas</h2>
                                     <p className="text-sm text-fg-muted">Gastos del negocio.</p>
                                 </div>
+                                {escribeCaja ? (
                                 <PrimaryButton onClick={conAviso(abrirModalGasto)} className="shrink-0">
                                     Agregar gasto
                                 </PrimaryButton>
+                                ) : null}
                             </div>
 
                             <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
@@ -1084,16 +1117,7 @@ export default function Cuentas() {
                                                                     {eur(s.importe)}
                                                                 </div>
                                                                 <div className="flex gap-2">
-                                                                    <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
-                                                                        <Pencil className="size-4" aria-hidden />
-                                                                    </MiniIconButton>
-                                                                    <MiniIconButton
-                                                                        title="Borrar"
-                                                                        variant="danger"
-                                                                        onClick={() => borrarGasto(s)}
-                                                                    >
-                                                                        <Trash2 className="size-4" aria-hidden />
-                                                                    </MiniIconButton>
+                                                                    {accionesDeGasto(s)}
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -1113,16 +1137,7 @@ export default function Cuentas() {
                                                                 {eur(s.importe)}
                                                             </div>
                                                             <div className="col-span-3 flex justify-end gap-2">
-                                                                <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
-                                                                    <Pencil className="size-4" aria-hidden />
-                                                                </MiniIconButton>
-                                                                <MiniIconButton
-                                                                    title="Borrar"
-                                                                    variant="danger"
-                                                                    onClick={() => borrarGasto(s)}
-                                                                >
-                                                                    <Trash2 className="size-4" aria-hidden />
-                                                                </MiniIconButton>
+                                                                {accionesDeGasto(s)}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1165,7 +1180,7 @@ export default function Cuentas() {
                         ) : null}
                     </div>
 
-            {exportarPermitido || cierresPermitidos ? (
+            {exportarPermitido || puedeCerrarCaja || cierresPermitidos ? (
             <>
             {/* FOOTER: sólo lo que se puede hacer con estos permisos. Un botón desactivado que
                 parece activo no dice nada. */}
@@ -1186,7 +1201,7 @@ export default function Cuentas() {
                         </button>
                         ) : null}
 
-                        {cierresPermitidos ? (
+                        {puedeCerrarCaja ? (
                         <button
                             type="button"
                             onClick={() => setOpenCierre(true)}
@@ -1303,7 +1318,7 @@ export default function Cuentas() {
                                                 >
                                                     <Printer className="size-4" aria-hidden />
                                                 </button>
-                                                {c.id_cierre === idUltimoCierre ? (
+                                                {puedeCerrarCaja && c.id_cierre === idUltimoCierre ? (
                                                     <button
                                                         type="button"
                                                         onClick={() => setCierreAReabrir(c.id_cierre)}
@@ -1327,6 +1342,7 @@ export default function Cuentas() {
             ) : null}
 
             {formularioGasto && <FormularioGasto
+                soloLectura={!escribeCaja}
                 key={formularioGasto.gasto?.id ?? "nuevo"} gasto={formularioGasto.gasto} fechaInicial={todayYMD()}
                 proveedores={proveedores} errorProveedores={errProveedores} conAvisoDeCierre={conAvisoDeCierre}
                 onCerrar={() => setFormularioGasto(null)} onGuardado={() => void recargarCierres()}
