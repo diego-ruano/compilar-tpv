@@ -332,9 +332,12 @@ async function generarHorarioPDFPorEmpleado(args: {
 /* =========================
    HorarioSemanal component (RESPONSIVE)
 ========================= */
+const SIN_PERMISO_HORARIOS = "Ya no puedes gestionar horarios";
+
 function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const auth = useAuth();
-  const isAdmin = usePermisos().puede("horarios.gestionar");
+  // El permiso de gestionar horarios, no el rol de administrador: se llamaba `isAdmin`.
+  const puedeGestionarHorarios = usePermisos().puede("horarios.gestionar");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -348,7 +351,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const turnosQuery = useTurnos();
   const trabajadorIdQuery = useTrabajadorIdByUsuario(
     auth.idUsuario,
-    !isAdmin && !!auth.idUsuario,
+    !puedeGestionarHorarios && !!auth.idUsuario,
   );
   const asignacionesQuery = useAsignacionesSemana(lunesYMD);
 
@@ -412,10 +415,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   }, [weekStart]);
 
   const trabajadoresVisibles = useMemo(() => {
-    if (isAdmin) return trabajadoresSafe;
+    if (puedeGestionarHorarios) return trabajadoresSafe;
     if (!myTrabajadorId) return [];
     return trabajadoresSafe.filter((t) => t.ID_Trabajador === myTrabajadorId);
-  }, [isAdmin, trabajadoresSafe, myTrabajadorId]);
+  }, [puedeGestionarHorarios, trabajadoresSafe, myTrabajadorId]);
 
   const asignacionesByCell = useMemo(() => {
     const map = new Map<string, Asignacion[]>();
@@ -442,7 +445,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   }, [turnosQuery.isError, asignacionesQuery.isError]);
 
   const copiarSemanaAnterior = async () => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
 
     const to_monday = toYMD(weekStart);
     const from_monday = toYMD(addDays(weekStart, -7));
@@ -462,7 +465,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const establecerPredeterminado = async () => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
 
     const lunes = toYMD(weekStart);
     const ok = await confirmDialog(
@@ -486,7 +489,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const guardarPDF = async () => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
     setError(null);
 
     try {
@@ -520,7 +523,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const openCreate = (idTrab: string, fecha: string) => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
 
     setModalMode("create");
     setSelectedTrabajadorId(idTrab);
@@ -542,7 +545,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const openEdit = (a: Asignacion) => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
 
     if (!a.ID_Asignacion) {
       toast.info("Predeterminado", "Este turno viene del horario predeterminado. Crea uno real para editarlo.");
@@ -572,6 +575,22 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
   const closeModal = () => { if (!guardandoRef.current) setModalOpen(false); };
 
+  // Quitarle a alguien el permiso con el editor abierto: al guardar no pasaba nada, en silencio.
+  // El editor se cierra y se dice por qué; el backend rechazaría el guardado igualmente.
+  useEffect(() => {
+    if (puedeGestionarHorarios || !modalOpen) return;
+    setModalOpen(false);
+    toast.warning(SIN_PERMISO_HORARIOS, "Te han quitado el permiso mientras editabas. Lo que no habías guardado no se ha guardado.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puedeGestionarHorarios, modalOpen]);
+
+  /** Antes de cada acción de gestión: sin el permiso, se dice en vez de no hacer nada. */
+  const sigueConPermiso = () => {
+    if (puedeGestionarHorarios) return true;
+    toast.warning(SIN_PERMISO_HORARIOS, "Pide a un administrador que te dé el permiso de horarios.");
+    return false;
+  };
+
   const validateRange = (ini: string, fin: string) => {
     if (!ini || !fin) return "Debes indicar hora inicio y hora fin.";
     if (!esHora(ini) || !esHora(fin)) return "Hora invalida (usa HH:mm).";
@@ -583,7 +602,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     if (guardandoRef.current) return;
     setError(null);
 
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
     if (!selectedTrabajadorId || !selectedFecha) return;
     if (!id_turno) return setError("Selecciona un turno");
 
@@ -618,7 +637,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const borrarAsignacion = async (id_asignacion: string) => {
-    if (!isAdmin) return;
+    if (!sigueConPermiso()) return;
 
     if (!id_asignacion) {
       toast.info("Predeterminado", "Este turno es predeterminado. Crea uno real y luego podrás borrarlo.");
@@ -641,7 +660,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         <div className="flex flex-col">
           <h3 className="text-lg sm:text-xl font-bold">HORARIO SEMANAL</h3>
           <p className="text-sm text-fg-muted">
-            {isAdmin
+            {puedeGestionarHorarios
               ? "Arriba tienes trabajadores. Aqui puedes asignar turnos por semana."
               : "Tu horario de esta semana (solo lectura)."}
           </p>
@@ -655,7 +674,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               xl:flex-nowrap
             "
           >
-            {isAdmin && (
+            {puedeGestionarHorarios && (
               <>
                 <button
                   type="button"
@@ -752,7 +771,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                         <div className="text-[11px] text-fg-muted truncate">{d.ymd}</div>
                       </div>
 
-                      {isAdmin && (
+                      {puedeGestionarHorarios && (
                         <button
                           type="button"
                           onClick={() => openCreate(t.ID_Trabajador, d.ymd)}
@@ -768,7 +787,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                     <div className="mt-2 flex flex-col gap-2">
                       {list.length === 0 ? (
                         <div className="text-[11px] text-fg-subtle">
-                          {isAdmin ? "Sin asignación" : "—"}
+                          {puedeGestionarHorarios ? "Sin asignación" : "—"}
                         </div>
                       ) : (
                         list.map((a) => {
@@ -803,7 +822,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                   )}
                                 </div>
 
-                                {isAdmin && !isVirtual && (
+                                {puedeGestionarHorarios && !isVirtual && (
                                   <div className="shrink-0">
                                     <div className="grid grid-cols-2 gap-1">
                                       <button
@@ -875,7 +894,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                     <div key={d.ymd} className="min-w-0 p-2 border-l border-border">
                       <div className="flex flex-col gap-2">
                         {list.length === 0 ? (
-                          <div className="text-xs text-fg-subtle">{isAdmin ? "Sin asignacion" : "—"}</div>
+                          <div className="text-xs text-fg-subtle">{puedeGestionarHorarios ? "Sin asignacion" : "—"}</div>
                         ) : (
                           list.map((a) => {
                             const effIni = hhmm(a.Hora_Inicio);
@@ -907,7 +926,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                     )}
                                   </div>
 
-                                  {isAdmin && !isVirtual && (
+                                  {puedeGestionarHorarios && !isVirtual && (
                                     <div className="flex items-center gap-1">
                                       <button
                                         type="button"
@@ -933,7 +952,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                           })
                         )}
 
-                        {isAdmin && (
+                        {puedeGestionarHorarios && (
                           <button
                             type="button"
                             onClick={() => openCreate(t.ID_Trabajador, d.ymd)}
