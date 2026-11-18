@@ -59,7 +59,7 @@ export default function EmparejarHandy({
 	);
 
 	return (
-		<div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">
+		<div className="relative flex min-h-full w-full items-center justify-center overflow-hidden bg-bg p-4 text-fg sm:p-6 lg:p-10">
 			<FondoDecorado />
 
 			{escaneando ? (

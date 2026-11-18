@@ -11,3 +11,6 @@ const plataforma = import.meta.env.TAURI_ENV_PLATFORM;
  * cerrar: el sistema ya pone lo suyo.
  */
 export const esMovil = plataforma === "android" || plataforma === "ios";
+
+/** ¿Es el iPhone (o el iPad)? */
+export const esIos = plataforma === "ios";

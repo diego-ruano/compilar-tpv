@@ -8,6 +8,7 @@ import { appRouter } from "./Router";
 import { queryClient } from "../shared/lib/queryClient";
 import { initTheme } from "../shared/stores/useTheme";
 import { iniciarZoomVentana } from "../shared/stores/useZoomVentana";
+import { iniciarVistaIos } from "../shared/lib/vistaIos";
 import { initSentry } from "../shared/observability/sentry";
 import { iniciarRegistroDeFallos } from "../shared/observability/fallosDeComandos";
 
@@ -21,6 +22,8 @@ iniciarRegistroDeFallos();
 initTheme();
 // El zoom ya lo ha aplicado Rust al abrir la ventana; esto lee el porcentaje y engancha Ctrl +/−.
 iniciarZoomVentana();
+// En el iPhone, la página quieta: sin rebotes ni desplazamientos laterales (vistaIos.ts).
+iniciarVistaIos();
 
 const container = document.getElementById("root");
 

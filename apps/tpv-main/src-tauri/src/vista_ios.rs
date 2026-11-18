@@ -12,6 +12,11 @@
 // Aquí se apaga ese ajuste: la página ocupa la pantalla entera (`viewport-fit=cover` en
 // `index.html`) y deja ella el hueco de las zonas seguras con `env(safe-area-inset-*)`
 // (`Global.css`). Una sola fuente para los márgenes: si lo hicieran las dos, saldrían dobles.
+//
+// Y el `UIScrollView` de la webview no se desplaza con el dedo: lo que se desplaza son los
+// contenedores de la app, que WebKit mueve con sus propios desplazables (siguen funcionando con
+// éste apagado; es lo mismo que hace WebKit cuando el <html> lleva `overflow: hidden`). WebKit aún
+// puede moverlo para enseñar un campo bajo el teclado; al cerrarlo lo devuelve `vistaIos.ts`.
 
 use tauri::{Manager, Runtime};
 
@@ -39,6 +44,7 @@ pub fn ajustar<R: Runtime, M: Manager<R>>(app: &M) {
         desplazable.setBounces(false);
         desplazable.setAlwaysBounceVertical(false);
         desplazable.setAlwaysBounceHorizontal(false);
+        desplazable.setScrollEnabled(false);
     });
     if let Err(e) = ajuste {
         tracing::warn!(error = %e, "[TPV] iOS: no se pudo ajustar la webview");

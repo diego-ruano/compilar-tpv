@@ -75,6 +75,19 @@ body {
         env(safe-area-inset-left);
 }
 
+/* iPhone (`plataforma-ios`, lo pone `shared/lib/vistaIos.ts`).
+   - En iOS un contenedor con desplazamiento rebota al llegar al final, y si ocupa la pantalla entera
+     parece que se arrastra la app. `contain` sólo corta el paso al de fuera; el rebote lo quita `none`.
+   - `overflow-y: auto` deja también `overflow-x` en auto: un píxel de más de ancho y la pantalla se
+     arrastra de lado. Lo que tiene que moverse de lado lo dice con `overflow-x-auto`. */
+html.plataforma-ios :where(.overflow-y-auto, .overflow-auto, .overflow-y-scroll, .overscroll-contain) {
+    overscroll-behavior: none !important;
+}
+html.plataforma-ios .overflow-y-auto:not(.overflow-x-auto, .overflow-x-scroll),
+html.plataforma-ios .overflow-y-scroll:not(.overflow-x-auto, .overflow-x-scroll) {
+    overflow-x: hidden;
+}
+
 html {
     overflow: hidden;
     /* Ni el iPhone agranda la letra al girar, ni un doble toque amplía la pantalla. */
