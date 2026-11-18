@@ -231,16 +231,22 @@ export async function turnoPartidoDe(db: Client, idUsuario: string, fecha: strin
  * sin empezar y se fichaba una entrada nueva.
  */
 export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
+	const dia = await hoy(db);
 	const enCurso = await getOpenPunch(db, idUsuario);
-	const fecha = enCurso ? enCurso.fecha : await hoy(db);
-	return punchStatusForDate(db, idUsuario, fecha);
+	return punchStatusForDate(db, idUsuario, enCurso ? enCurso.fecha : dia, dia);
 }
 
+/**
+ * El estado de la jornada de `fecha`. `diaDeHoy` es el «hoy» con el que se eligió esa jornada (sin
+ * él, el de quien pregunta): dice si es una anterior (AUT-INC-02), como en la Main.
+ */
 export async function punchStatusForDate(
 	db: Client,
 	idUsuario: string,
 	fecha: string,
+	diaDeHoy?: string,
 ): Promise<PunchStatus> {
+	const dia = diaDeHoy ?? (await hoy(db));
 	const turnoRs = await db.execute({
 		sql: `
 			SELECT Turno_Partido AS turno_partido
@@ -265,6 +271,8 @@ export async function punchStatusForDate(
 	});
 	return {
 		fecha,
+		// Los dos son `YYYY-MM-DD`: comparar el texto es comparar los días.
+		jornada_anterior: fecha < dia,
 		turno_partido: Number(rows(turnoRs)[0]?.turno_partido ?? 0),
 		partes: rows(partesRs).map((r) => ({
 			parte: Number(r.parte ?? 1),

@@ -216,10 +216,13 @@ async fn get_turno_partido_for<C: Reader>(
     Ok(0)
 }
 
+/// El estado de la jornada de `fecha`. `hoy` es el día con el que se eligió esa jornada: dice si
+/// es una anterior (AUT-INC-02).
 async fn build_punch_status<C: Reader>(
     conn: &C,
     id_usuario: &str,
     fecha: &str,
+    hoy: &str,
 ) -> AppResult<PunchStatus> {
     let turno_partido = get_turno_partido_for(conn, id_usuario, fecha).await?;
 
@@ -270,6 +273,7 @@ async fn build_punch_status<C: Reader>(
         fecha: fecha.to_string(),
         turno_partido,
         partes,
+        jornada_anterior: fecha < hoy,
     })
 }
 
@@ -552,7 +556,7 @@ pub(crate) async fn exec_punch<C: Writer>(
             .await
             .map_err(db_err)?;
 
-            build_punch_status(conn, id_usuario, &fecha).await
+            build_punch_status(conn, id_usuario, &fecha, &fecha).await
         } else {
             // RI-05: la jornada en curso, aunque empezara ayer. El estado que se devuelve es el
             // de SU día, que es el que se acaba de completar.
@@ -584,7 +588,7 @@ pub(crate) async fn exec_punch<C: Writer>(
             .await
             .map_err(db_err)?;
 
-            build_punch_status(conn, id_usuario, &fecha_jornada).await
+            build_punch_status(conn, id_usuario, &fecha_jornada, &fecha).await
         }
     }).await;
 
@@ -697,11 +701,12 @@ impl LoginRepository for SqliteLoginRepository {
     /// hoy, a la 01:30 un turno de noche aparecía sin empezar y se fichaba una entrada nueva.
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
         let db = self.db.read().await;
+        let hoy = today_ymd();
         let fecha = match fichaje_en_curso(&db, id_usuario).await? {
             Some((_, fecha)) => fecha,
-            None => today_ymd(),
+            None => hoy.clone(),
         };
-        build_punch_status(&db, id_usuario, &fecha).await
+        build_punch_status(&db, id_usuario, &fecha, &hoy).await
     }
 
     async fn intentos_fallidos(&self, id_usuario: &str) -> AppResult<i64> {
@@ -940,6 +945,7 @@ mod tests_fichajes_colgados {
         assert!(acceder().await.is_ok(), "la jornada partida cerrada permite acceder");
         assert!(repo.set_turno_partido("u1", None, false).await.is_err());
         assert_eq!(repo.get_today_punch_status("u1").await.unwrap().partes.len(), 2, "el login no ficha");
+        assert!(!repo.get_today_punch_status("u1").await.unwrap().jornada_anterior, "la de hoy no es de ayer");
     }
 
     /// Un fichaje abierto que entró hace `horas` horas. La hora se calcula en SQL, relativa a
@@ -1120,6 +1126,7 @@ mod tests_fichajes_colgados {
         assert_eq!(estado(&db, "noche").await, ("CERRADO".into(), 0));
         // El estado devuelto es el de la jornada que se cierra, no el de hoy (que está vacío).
         assert_eq!(status.fecha, ayer());
+        assert!(status.jornada_anterior);
         assert_eq!(status.partes.len(), 1);
         assert!(status.partes[0].salida.is_some());
     }
@@ -1137,6 +1144,7 @@ mod tests_fichajes_colgados {
             .unwrap();
 
         assert_eq!(status.fecha, ayer());
+        assert!(status.jornada_anterior, "AUT-INC-02: la pantalla dice «Jornada de ayer» por esto");
         assert_eq!(status.partes.len(), 1);
         assert!(status.partes[0].entrada.is_some());
         assert!(status.partes[0].salida.is_none());

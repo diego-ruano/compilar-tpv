@@ -1,4 +1,5 @@
 {
+  "jornada_anterior": false,
   "partes": [
     {
       "entrada": "2099-01-01 09:00:00",

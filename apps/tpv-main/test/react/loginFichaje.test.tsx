@@ -3,6 +3,7 @@
 //
 // - AUT-INC-01: «Mostrar PIN» es de quien lo pulsó; el siguiente trabajador teclea oculto.
 // - TRA-INC-04: lo que hacen otros equipos (la réplica) se ve sin volver a tocar nada.
+// - AUT-INC-02: si la jornada es de ayer lo dice el backend.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -204,4 +205,19 @@ it("tras un fichaje rechazado relee el estado y deja de ofrecer el botón de ant
     await teclear("1234");
     await pulsar("Fichar entrada");
     await screen.findAllByRole("button", { name: "Fichar salida" });
+});
+
+it("«Jornada de ayer» lo dice el backend, no el reloj del dispositivo (AUT-INC-02)", async () => {
+    // Una jornada de hoy del negocio que, para el reloj de este dispositivo, es de otro día.
+    backend.estados.set("u-ana", { ...conEntrada("1999-01-01"), jornada_anterior: false });
+    backend.estados.set("u-luis", { ...conEntrada("1999-01-01"), jornada_anterior: true });
+    pintarLogin();
+
+    await elegir("Ana");
+    await screen.findAllByRole("button", { name: "Fichar salida" });
+    expect(screen.getByText("Fichaje de hoy")).toBeInTheDocument();
+    expect(screen.queryByText("Jornada de ayer")).toBeNull();
+
+    await elegir("Luis");
+    await screen.findByText("Jornada de ayer");
 });

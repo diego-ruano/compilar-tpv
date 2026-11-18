@@ -1,5 +1,4 @@
 import { commands } from "@tpv/client";
-import { todayLocalYmd } from "../../features/login/fechaJornada";
 import type { UserListItem as DbUser, PunchStatus } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -143,8 +142,10 @@ export default function Login() {
     );
 
     const turnoPartido = punchStatus?.turno_partido === 1;
-    // RI-05: con un turno de noche en curso, el estado es el de la jornada que empezó ayer.
-    const jornadaDeAyer = Boolean(punchStatus?.fecha) && punchStatus?.fecha !== todayLocalYmd();
+    // RI-05: con un turno de noche en curso, el estado es el de la jornada que empezó ayer. Lo dice
+    // el backend con el «hoy» con el que eligió la jornada (AUT-INC-02): el reloj del dispositivo,
+    // en otra zona o cerca de medianoche, decía «Jornada de ayer» de la de hoy.
+    const jornadaDeAyer = punchStatus?.jornada_anterior === true;
 
     const hasEntrada1 = Boolean(p1?.entrada);
     const hasSalida1 = Boolean(p1?.salida);

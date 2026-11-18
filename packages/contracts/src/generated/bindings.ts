@@ -2705,6 +2705,13 @@ export type PunchStatus = {
 	fecha: string,
 	turno_partido: number,
 	partes: PunchParte[],
+	/**
+	 *  La jornada es de un día anterior al de hoy (un turno de noche en curso). Lo decide el
+	 *  backend con el mismo «hoy» con el que eligió la jornada, no la pantalla con el reloj del
+	 *  dispositivo, que en otra zona o cerca de medianoche decía «Jornada de ayer» de la de hoy
+	 *  (AUT-INC-02).
+	 */
+	jornada_anterior: boolean,
 };
 
 export type PunchStatusArgs = {

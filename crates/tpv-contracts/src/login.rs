@@ -43,6 +43,11 @@ pub struct PunchStatus {
     pub fecha: String,
     pub turno_partido: i64,
     pub partes: Vec<PunchParte>,
+    /// La jornada es de un día anterior al de hoy (un turno de noche en curso). Lo decide el
+    /// backend con el mismo «hoy» con el que eligió la jornada, no la pantalla con el reloj del
+    /// dispositivo, que en otra zona o cerca de medianoche decía «Jornada de ayer» de la de hoy
+    /// (AUT-INC-02).
+    pub jornada_anterior: bool,
 }
 
 /* =========================================================
