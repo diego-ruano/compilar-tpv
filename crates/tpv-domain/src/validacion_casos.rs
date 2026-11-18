@@ -169,6 +169,57 @@ fn cambios_ingredientes(e: &Value) -> Result<Value, String> {
     Ok(json!({ "cambios": forma_guardada(&cambios) }))
 }
 
+/// Un pedido a un proveedor, al crearlo y al editarlo: la cabecera y después sus líneas.
+fn pedido(e: &Value) -> Result<Value, String> {
+    use crate::pedidos_proveedor::{validar_lineas, LineaPedidoNueva, PedidoProveedorNuevo};
+    let p = PedidoProveedorNuevo::validar(
+        texto(e, "id_pedido"),
+        texto_opcional(e, "id_proveedor"),
+        texto_opcional(e, "email_destino"),
+        texto_opcional(e, "notas"),
+    )?;
+    let lineas = validar_lineas(
+        e["lineas"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|l| LineaPedidoNueva {
+                id_linea: texto(l, "id_linea"),
+                nombre_producto: texto(l, "nombre_producto"),
+                cantidad: l["cantidad"].as_f64().unwrap_or(f64::NAN),
+                precio_unitario: l["precio_unitario"].as_i64().map(Dinero::de_centimos),
+                unidad: texto_opcional(l, "unidad"),
+            })
+            .collect(),
+    )?;
+    let lineas: Vec<Value> = lineas
+        .into_iter()
+        .map(|l| {
+            json!({
+                "id_linea": l.id_linea,
+                "nombre_producto": l.nombre_producto,
+                "cantidad": l.cantidad,
+                "precio_unitario": l.precio_unitario.map(|d| d.centimos()),
+                "unidad": l.unidad,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "id_pedido": p.id_pedido,
+        "id_proveedor": p.id_proveedor,
+        "email_destino": p.email_destino,
+        "notas": p.notas,
+        "lineas": lineas,
+    }))
+}
+
+/// El estado al que pasa un pedido, y su fecha de envío recortada.
+fn pedido_estado(e: &Value) -> Result<Value, String> {
+    let estado = crate::pedidos_proveedor::estado_nuevo(&texto(e, "estado"))?;
+    let fecha_envio = crate::texto::limpiar_opcional(texto_opcional(e, "fecha_envio"));
+    Ok(json!({ "estado": estado, "fecha_envio": fecha_envio }))
+}
+
 /// Los días de un horario: cada campo pasa por `dia_de_horario` con la frase que le da su caso de
 /// uso de trabajadores.
 fn dias_de_horario(e: &Value, campos: &[(&str, &str)]) -> Result<Value, String> {
@@ -230,6 +281,8 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "categoria_ingrediente" => categoria_ingrediente(entrada),
         "ingrediente" => ingrediente(entrada),
         "cambios_ingredientes" => cambios_ingredientes(entrada),
+        "pedido" => pedido(entrada),
+        "pedido_estado" => pedido_estado(entrada),
         "trabajador" => trabajador(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
@@ -238,9 +291,16 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
 /// Los números se comparan como números: para `serde_json`, el `21` del JSON y un `21.0` no son
 /// iguales.
 fn mismo_valor(a: &Value, b: &Value) -> bool {
-    match (a.as_f64(), b.as_f64()) {
-        (Some(x), Some(y)) => x == y,
-        _ => a == b,
+    match (a, b) {
+        // También dentro de una lista o de un objeto (las líneas de un pedido).
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| mismo_valor(p, q)),
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| mismo_valor(v, w)))
+        }
+        _ => match (a.as_f64(), b.as_f64()) {
+            (Some(x), Some(y)) => x == y,
+            _ => a == b,
+        },
     }
 }
 

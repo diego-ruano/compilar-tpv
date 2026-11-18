@@ -17,7 +17,7 @@ const fuentes = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "def
 /** Los dominios del negocio, los que tienen su espejo en la Main; los de la base central, no. */
 const DOMINIOS = [
 	"clientes", "configuracion", "cuentas", "inventario", "login", "mesas", "notificaciones",
-	"proveedores", "reservas", "reservas_web", "stats", "tareas", "trabajadores", "venta_rapida",
+	"pedidos_proveedor", "proveedores", "reservas", "reservas_web", "stats", "tareas", "trabajadores", "venta_rapida",
 ];
 
 const vigilados = Object.keys(fuentes).filter(

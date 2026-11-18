@@ -48,6 +48,7 @@ import { inventarioRoutes } from "./domains/inventario/inventario.routes";
 import { loginRoutes } from "./domains/login/login.routes";
 import { mesasRoutes } from "./domains/mesas/mesas.routes";
 import { notificacionesRoutes } from "./domains/notificaciones/notificaciones.routes";
+import { pedidosProveedorRoutes } from "./domains/pedidos_proveedor/pedidos_proveedor.routes";
 import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { reservasWebMainRoutes } from "./domains/reservas_web/main.routes";
@@ -185,6 +186,7 @@ app.route("/v1/inventario", inventarioRoutes);
 app.route("/v1/login", loginRoutes);
 app.route("/v1/mesas", mesasRoutes);
 app.route("/v1/notificaciones", notificacionesRoutes);
+app.route("/v1/pedidos-proveedor", pedidosProveedorRoutes);
 app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/reservas", reservasRoutes);
 // Reservas desde la web (docs/estudios/reservas-web.md): lo que pide la Main.

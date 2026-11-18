@@ -279,6 +279,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	ingrediente_repetido: "Ya hay un ingrediente con ese nombre en esa categoría.",
 	categoria_ingrediente_no_existe:
 		"Esa categoría de ingredientes ya no existe. Vuelve a abrir la lista de ingredientes.",
+	// PED-HANDY: el mismo texto que la Main (`MSG_PEDIDO_NO_EDITABLE`).
+	pedido_no_editable: "Ese pedido ya se ha enviado o cancelado y no se puede cambiar. Cierra el formulario.",
 	producto_en_comanda_abierta:
 		"No se puede borrar: el producto está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
 	// RI-55: un ajuste de existencias que llega tarde. La ruta lo acompaña de lo que hay ahora.
@@ -400,6 +402,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"id_mesa_invalido",
 	"id_notificacion_invalido",
 	"id_pago_invalido",
+	"id_pedido_invalido",
 	"id_producto_invalido",
 	"id_proveedor_invalido",
 	"id_reserva_invalido",

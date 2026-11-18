@@ -180,6 +180,7 @@ const URL_AJENAS: Record<string, string> = {
 const LECTURAS_POR_POST: Record<string, string[]> = {
 	"domains/cuentas/cuentas.routes.ts": ["/entradas", "/salidas", "/resumen"],
 	"domains/mesas/mesas.routes.ts": ["/productos/search"],
+	"domains/pedidos_proveedor/pedidos_proveedor.routes.ts": ["/pagina"],
 	"domains/reservas/reservas.routes.ts": ["/buscar-cliente"],
 	"domains/venta_rapida/venta_rapida.routes.ts": ["/productos/search", "/index-rows"],
 };
