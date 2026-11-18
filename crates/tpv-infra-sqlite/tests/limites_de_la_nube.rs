@@ -121,6 +121,7 @@ async fn cobrar_una_mesa_de_120_lineas_sube_en_sentencias_que_la_nube_admite() {
     assert_eq!(ids.len(), N);
     SqliteMesasRepository::new(db.clone())
         .cobrar_detalles(CobroDetalles {
+            todo: false,
             id_comanda: "comanda-1".into(),
             metodo: MetodoPago::Tarjeta,
             tipo: "TOTAL".into(),

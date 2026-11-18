@@ -34,6 +34,7 @@ MesaMetaOut
 import { conAviso } from "../../shared/lib/conAviso";
 import { captureException } from "../../shared/observability/sentry";
 import { abs,CERO,eur } from "../../shared/lib/dinero";
+import { pendientesDe,reseleccionarTodo } from "../../shared/lib/cobrarTodo";
 import {
 cambioDelCobro,
 DENOMS_COBRO,
@@ -74,6 +75,10 @@ export default function MesaComandaModal({
     const comandaActualRef = useRef<string | null>(null);
     const lecturaTicketRef = useRef({ version: 0 });
     const cobroEnCursoRef = useRef(false);
+    // SYN-INC-05: lo seleccionado por «Cobrar todo», mientras no se ha cobrado. Con él puesto, cada
+    // lectura del ticket vuelve a seleccionar todo lo pendiente, avisa si ha cambiado y el cobro va
+    // con `todo: true`. `null` = no se está cobrando todo.
+    const cobrandoTodoRef = useRef<Set<string> | null>(null);
     useEffect(() => {
         const lecturas = lecturaTicketRef.current;
         comandaActualRef.current = open ? idComanda : null;
@@ -229,6 +234,7 @@ export default function MesaComandaModal({
         let cancelado = false;
         const lecturas = lecturaTicketRef.current;
         comandaActualRef.current = null;
+        cobrandoTodoRef.current = null;
         ++lecturaTicketRef.current.version;
         ponerEnEspera([]);
         setTicket([]);
@@ -263,11 +269,18 @@ export default function MesaComandaModal({
 
     const aplicarTicket = useCallback((cId: string, t: TicketItem[]) => {
         if (comandaActualRef.current !== cId) return;
+        if (cobrandoTodoRef.current) {
+            const { seleccion, aviso } = reseleccionarTodo(cobrandoTodoRef.current, t);
+            cobrandoTodoRef.current = seleccion;
+            setTicket(t.map(l => ({ ...l, seleccionado: seleccion.has(l.id) })));
+            if (aviso) toast.warning(aviso.titulo, aviso.detalle);
+            return;
+        }
         setTicket(prev => {
             const seleccion = new Set(prev.filter(l => l.seleccionado).map(l => l.id));
             return t.map(l => ({ ...l, seleccionado: !l.pagado && seleccion.has(l.id) }));
         });
-    }, []);
+    }, [toast]);
 
     const leerTicket = useCallback(async (cId: string) => {
         const lectura = ++lecturaTicketRef.current.version;
@@ -375,6 +388,7 @@ export default function MesaComandaModal({
             const t = await loadTicketForComanda(abierta);
             if (cancelado || comandaActualRef.current !== anterior) return;
             comandaActualRef.current = abierta;
+            cobrandoTodoRef.current = null;
             setIdComanda(abierta);
             setTicket(t);
             notifyChanged();
@@ -463,18 +477,22 @@ export default function MesaComandaModal({
     );
 
     const seleccionaTodoPendiente = () => {
+        cobrandoTodoRef.current = pendientesDe(ticket);
         setTicket((prev) =>
             prev.map((t) => (t.pagado ? t : { ...t, seleccionado: true })),
         );
     };
 
     const limpiarSeleccion = () => {
+        cobrandoTodoRef.current = null;
         setTicket((prev) =>
             prev.map((t) => (t.pagado ? t : { ...t, seleccionado: false })),
         );
     };
 
     const toggleSeleccion = (idDetalle: string) => {
+        // Elegir a mano es cobrar una parte: ya no es «Cobrar todo».
+        cobrandoTodoRef.current = null;
         setTicket((prev) =>
             prev.map((t) =>
                 t.id === idDetalle && !t.pagado
@@ -542,18 +560,21 @@ export default function MesaComandaModal({
         cobroEnCursoRef.current = true;
         setCobrandoFactura(true);
         ++lecturaTicketRef.current.version;
+        const todo = cobrandoTodoRef.current !== null;
 
         try {
             const idPago = await mesasCobrarDetalles({
                 idComanda,
                 metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
                 tipo:
-                    ids.length === ticket.filter((t) => !t.pagado).length
+                    todo || ids.length === ticket.filter((t) => !t.pagado).length
                         ? "TOTAL"
                         : "FRACCIONADO",
                 detalleIds: ids,
                 destinatario: destinatario ?? undefined,
+                todo,
             });
+            cobrandoTodoRef.current = null;
 
             // El ticket de este cobro: imprimir saca el de su factura, con sus líneas y no las de
             // la mesa entera (RI-29).
@@ -582,6 +603,13 @@ export default function MesaComandaModal({
             if (esError(e, "factura_completa_requerida")) {
                 setErrorFactura(null);
                 setPideFactura({ metodo, obligatorio: true });
+                return;
+            }
+            // SYN-INC-05: la cuenta ha cambiado mientras se cobraba todo. Se dice por qué y se relee
+            // el ticket, que vuelve a seleccionarlo todo y avisa del total nuevo.
+            if (todo && esError(e, "conflict")) {
+                toast.error("No se pudo cobrar", toAppError(e).message);
+                await leerTicket(idComanda).catch((err: unknown) => captureException(err, { fase: "releer_tras_cobrar_todo" }));
                 return;
             }
             // Si el fallo llega con el formulario abierto, se enseña DENTRO: cerrarlo perdería los

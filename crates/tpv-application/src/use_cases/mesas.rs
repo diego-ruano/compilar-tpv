@@ -259,6 +259,7 @@ pub async fn cobrar_detalles(
         detalle_ids: ids,
         id_usuario: opt_id(Some(id_usuario.to_string())),
         destinatario: destinatario_de(input.destinatario),
+        todo: input.todo,
     };
     repo.cobrar_detalles(data).await
 }

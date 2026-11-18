@@ -1114,6 +1114,7 @@ mod tests_total_negativo {
             "u1",
             None,
             VrCobrarFraccionadoInput {
+                todo: false,
                 id_pago: ID.into(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
@@ -1152,6 +1153,7 @@ mod tests_total_negativo {
         let (db, _dir) = preparar().await;
         let repo = SqliteVentaRapidaRepository::new(db.clone());
         repo.guardar_cobro_pendiente(CobroFraccionado {
+            todo: false,
             id_pago: ID.into(),
             id_comanda: "com".into(),
             metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -1224,6 +1226,7 @@ mod tests_cobro_repetido {
     async fn cobrar(db: &Arc<Db>, id_pago: &str, comanda: &str, detalle: &str) -> AppResult<String> {
         SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(CobroFraccionado {
+                todo: false,
                 id_pago: id_pago.into(),
                 id_comanda: comanda.into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -1271,6 +1274,59 @@ mod tests_cobro_repetido {
         let reintento = cobrar(&db, ID, "com", "det").await.unwrap();
         assert_eq!(reintento, primero, "el número es el del ticket que ya salió");
         assert_eq!(rastro(&db).await, tras_el_cobro, "ni pago, ni factura, ni stock, ni número nuevos");
+    }
+
+    /// SYN-INC-05: otro equipo añade una línea al ticket mientras aquí se cobra (llega por la réplica).
+    async fn anaden_una_linea(db: &Arc<Db>) {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-nueva', 'com', 'prod', 1, 300, 10);",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn cobrar_todo(db: &Arc<Db>, detalles: &[&str]) -> AppResult<String> {
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        repo.cobrar_fraccionado(CobroFraccionado {
+            todo: true,
+            id_pago: ID.into(),
+            id_comanda: "com".into(),
+            metodo: tpv_domain::pago::MetodoPago::Efectivo,
+            importe_total: Dinero::CERO,
+            id_usuario_cobrador: Some("u1".into()),
+            id_trabajador_cobrador: None,
+            detalles: detalles.iter().map(|d| d.to_string()).collect(),
+            destinatario: None,
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn cobrar_todo_con_una_linea_anadida_mientras_tanto_no_cobra_la_cuenta_vieja() {
+        let (db, _dir) = preparar().await;
+        anaden_una_linea(&db).await;
+        let antes = rastro(&db).await;
+
+        let e = cobrar_todo(&db, &["det"]).await.unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+        assert_eq!(e.to_string(), crate::consultas::HAN_ANADIDO_ALGO);
+        assert_eq!(rastro(&db).await, antes, "ni pago, ni factura, ni número");
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        assert!(repo.listar_cobros_pendientes().await.unwrap().is_empty(), "no queda un cobro pendiente que no se hizo");
+
+        // Con la cuenta entera, entra.
+        assert!(!cobrar_todo(&db, &["det", "det-nueva"]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn el_cobro_fraccionado_no_mira_lo_demas_de_la_cuenta() {
+        let (db, _dir) = preparar().await;
+        anaden_una_linea(&db).await;
+        assert!(!cobrar(&db, ID, "com", "det").await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1354,6 +1410,7 @@ mod tests_cobro_repetido {
         let (db, _dir) = preparar().await;
         let repo = SqliteVentaRapidaRepository::new(db.clone());
         let datos = |id: &str| CobroFraccionado {
+            todo: false,
             id_pago: id.into(), id_comanda: "com".into(), metodo: tpv_domain::pago::MetodoPago::Efectivo, importe_total: Dinero::de_centimos(300),
             id_usuario_cobrador: Some("u1".into()), id_trabajador_cobrador: None, detalles: vec!["det".into()],
             destinatario: Some(tpv_domain::verifactu::Destinatario { nombre_razon: "Señor Prueba".into(), nif: "12345678Z".into(), direccion: None }),
@@ -1494,6 +1551,7 @@ mod tests_borrado_desde_la_handy {
         let (db, _dir) = preparar("borrado_handy_cobrado").await;
         SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(CobroFraccionado {
+                todo: false,
                 id_pago: PAGO.into(),
                 id_comanda: "ticket".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,

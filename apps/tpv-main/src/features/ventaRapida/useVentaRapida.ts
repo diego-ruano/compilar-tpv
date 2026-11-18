@@ -31,6 +31,7 @@ Dinero,
 LineaComandaRow,
 } from "@tpv/contracts";
 import { CERO, escalar } from "../../shared/lib/dinero";
+import { pendientesDe, reseleccionarTodo } from "../../shared/lib/cobrarTodo";
 import {
 cambioDelCobro,
 DENOMS_COBRO,
@@ -102,6 +103,9 @@ export function useVentaRapida() {
 
   const [seleccionados, setSeleccionados] = useState<Set<string>>(() => new Set());
   const seleccionadosRef = useRef<Set<string>>(new Set());
+  // SYN-INC-05: «Cobrar todo» pulsado y sin cobrar todavía. Mientras lo está, cada recarga del ticket
+  // vuelve a seleccionar todo lo pendiente (`reseleccionarTodo`) y el cobro va con `todo: true`.
+  const cobrandoTodoRef = useRef(false);
 
   const [openVerTickets, setOpenVerTickets] = useState(false);
   const [comandasBarra, setComandasBarra] = useState<ComandaBarraRow[]>([]);
@@ -186,7 +190,12 @@ export function useVentaRapida() {
 
       setTicket(ui);
 
-      if (opts?.keepSelection) {
+      if (opts?.keepSelection && cobrandoTodoRef.current) {
+        // SYN-INC-05: lo que haya añadido otro equipo entra en el cobro, y se dice.
+        const { seleccion, aviso } = reseleccionarTodo(seleccionadosRef.current, ui);
+        setSeleccionadosLocal(seleccion);
+        if (aviso) toast.warning(aviso.titulo, aviso.detalle);
+      } else if (opts?.keepSelection) {
         setSeleccionadosLocal((prev) => {
           const next = new Set<string>();
 
@@ -199,12 +208,14 @@ export function useVentaRapida() {
           return next;
         });
       } else {
+        // Otro ticket, o el mismo recién cobrado: lo de «Cobrar todo» se acaba aquí.
+        cobrandoTodoRef.current = false;
         setSeleccionadosLocal(new Set());
       }
 
       return ui;
     },
-    [setSeleccionadosLocal],
+    [setSeleccionadosLocal, toast],
   );
 
   useEffect(() => {
@@ -486,19 +497,14 @@ export function useVentaRapida() {
     [ticket, seleccionados],
   );
 
+  /** «Cobrar todo»: todo lo pendiente, y lo que se añada mientras se cobra (SYN-INC-05). */
   const seleccionaTodoPendiente = useCallback(() => {
-    const currentTicket = ticketRef.current;
-
-    setSeleccionadosLocal(
-      new Set(
-        currentTicket
-          .filter((t) => !t.pagado)
-          .map((t) => t.id),
-      ),
-    );
+    cobrandoTodoRef.current = true;
+    setSeleccionadosLocal(pendientesDe(ticketRef.current));
   }, [setSeleccionadosLocal]);
 
   const limpiarSeleccion = useCallback(() => {
+    cobrandoTodoRef.current = false;
     setSeleccionadosLocal(new Set());
   }, [setSeleccionadosLocal]);
 
@@ -508,6 +514,8 @@ export function useVentaRapida() {
 
       if (!it || it.pagado) return;
 
+      // Elegir a mano es cobrar una parte: ya no es «Cobrar todo».
+      cobrandoTodoRef.current = false;
       setSeleccionadosLocal((prev) => {
         const next = new Set(prev);
 
@@ -604,6 +612,14 @@ export function useVentaRapida() {
         setOpenPendientes(false);
         setPideFactura({ clase: "obligatorio", idPago, importe });
         setErrorFactura(null);
+      } else if (esError(e, "conflict") && cobrandoTodoRef.current) {
+        // SYN-INC-05: la cuenta ha cambiado mientras se cobraba todo. No queda cobro pendiente: se
+        // relee el ticket, que vuelve a seleccionarlo todo y dice el total nuevo.
+        setErrorFactura(toAppError(e).message);
+        toast.error("No se pudo cobrar", toAppError(e).message);
+        if (idComandaActivaRef.current === idComanda) {
+          await cargarComandaEnTicketPanel(idComanda, { keepSelection: true, silentError: true });
+        }
       } else {
         setErrorFactura(toAppError(e).message);
         toast.error("No se pudo cobrar", `${toAppError(e).message} El cobro queda pendiente de resolver.`);
@@ -628,6 +644,7 @@ export function useVentaRapida() {
     await confirmarCobro(idPago, idComanda, importe, () => commands.vrCobrarFraccionado({
       id_pago: idPago, id_comanda: idComanda, metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
       importe_total: importe, detalles: seleccion.map(t => t.detalleId), destinatario,
+      todo: cobrandoTodoRef.current,
     }));
   }, [hasPendingTicketWrites, warnPendingTicketWrites, quiereFactura, recuperacion.pendientes, confirmarCobro]);
 

@@ -294,6 +294,8 @@ export async function mesasCobrarDetalles(params: {
      * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
      */
     destinatario?: DestinatarioInput;
+    /** SYN-INC-05: «Cobrar todo»: no entra si queda algo por cobrar fuera de `detalleIds`. */
+    todo?: boolean;
     /** Devuelve el id del pago (cadena vacía si no había nada que cobrar): con él se pide su ticket. */
 }): Promise<string> {
     const idComanda = params.idComanda.trim();
@@ -308,6 +310,7 @@ export async function mesasCobrarDetalles(params: {
         detalle_ids: detalleIds,
         // REV-17: quién cobra lo pone el backend desde la sesión (SEC-01).
         destinatario: params.destinatario,
+        todo: params.todo ?? false,
     };
     return commands.cobrarDetalles(args);
 }

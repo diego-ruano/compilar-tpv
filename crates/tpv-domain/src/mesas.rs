@@ -70,6 +70,9 @@ pub struct CobroDetalles {
     /// esto viene vacío, el cobro se rechaza con `factura_completa_requerida` y la pantalla pide
     /// los datos: no es un fallo, es un dato que falta.
     pub destinatario: Option<crate::verifactu::Destinatario>,
+    /// SYN-INC-05: «Cobrar todo»: sólo entra si `detalle_ids` son todas las líneas por cobrar de la
+    /// comanda.
+    pub todo: bool,
 }
 
 #[cfg(test)]

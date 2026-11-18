@@ -281,14 +281,15 @@ export type AddLineaInput = Pick<
  * Cobrar es de la Main (`soloLaMainCobra`): esta ruta está vetada a una Handy, así que aquí no llega
  * nadie. Y aunque llegara, emitir una factura completa exige escribir en `Registros_Facturacion`,
  * que es justo lo que el veto de `applyViaHub` impide desde la nube — la cadena de huellas vive en
- * el SIF del obligado, y la nube es copia, no fuente.
+ * el SIF del obligado, y la nube es copia, no fuente. Lo mismo vale para `todo` (SYN-INC-05:
+ * «Cobrar todo» no entra si la cuenta ha crecido): sólo tiene sentido donde se cobra.
  *
- * Se quita del tipo local con `Omit` en vez de declararlo en el zod y tirarlo: un campo validado que
- * nadie lee es una promesa que el código no cumple.
+ * Se quitan del tipo local con `Omit` en vez de declararlos en el zod y tirarlos: un campo validado
+ * que nadie lee es una promesa que el código no cumple.
  */
 export type CobrarDetallesInput = Omit<
 	ContractMesasCobrarDetallesInput,
-	"id_usuario" | "destinatario"
+	"id_usuario" | "destinatario" | "todo"
 > & {
 	id_usuario: string | null;
 };

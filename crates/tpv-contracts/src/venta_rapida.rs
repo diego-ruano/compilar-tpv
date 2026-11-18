@@ -197,6 +197,11 @@ pub struct VrCobrarFraccionadoInput {
     /// el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
     #[serde(default)]
     pub destinatario: Option<DestinatarioInput>,
+    /// SYN-INC-05: «Cobrar todo». Si va a `true`, el cobro sólo entra si las líneas que lleva son
+    /// todas las que quedan por cobrar de la comanda: si mientras se cobraba otro equipo añadió una,
+    /// se rechaza (`Conflict`) en vez de cobrar la cuenta vieja y dejar la nueva línea suelta.
+    #[serde(default)]
+    pub todo: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

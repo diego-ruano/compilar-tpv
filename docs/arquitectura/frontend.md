@@ -111,6 +111,16 @@ ordena adiciones, retiradas y notas; los cobros tienen una guardia síncrona y f
 Main confirma contra SQLite sin esperar a la réplica. Handy confirma contra el Worker.
 Las lecturas tardías de una comanda anterior se descartan.
 
+**«Cobrar todo» cobra todo lo que queda**, no lo que la pantalla veía al pulsar (SYN-INC-05). Mientras
+se elige el método, la réplica puede traer una línea que otro equipo ha añadido: con «Cobrar todo»
+pulsado y sin cobrar, cada recarga del ticket vuelve a seleccionar todo lo pendiente y avisa con el
+total nuevo (`shared/lib/cobrarTodo.ts`, en la barra y en la mesa). Elegir una línea a mano, cancelar
+o cambiar de ticket lo deja en un cobro normal. El cobro va con `todo: true`, y el backend lo rechaza
+(`Conflict`, «Han añadido algo a la cuenta mientras cobrabas…») si a la comanda le queda algo en
+`v_lineas_por_cobrar` fuera de la lista, con la escritura tomada y antes de apuntar nada
+(`consultas::exigir_que_se_cobre_todo`). El fraccionado no cambia. Cobrar es sólo de la Main: el
+worker no lee `todo`.
+
 Abrir una mesa es un paso (`mesas_abrir_o_retomar`, `POST /v1/mesas/comandas/abrir-o-retomar`): la
 comanda abierta, creada si no hay ninguna y con el trabajador de la sesión si le faltaba, y sus
 líneas. En la Handy eran cuatro viajes seguidos con la mesa en blanco. Poner el trabajador a una

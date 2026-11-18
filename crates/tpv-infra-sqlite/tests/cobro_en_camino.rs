@@ -143,6 +143,7 @@ async fn el_cobro_rechazado(nombre: &str) -> (Arc<SqliteSyncRepository>, Arc<Db>
 
     SqliteVentaRapidaRepository::new(db.clone())
         .cobrar_fraccionado(CobroFraccionado {
+            todo: false,
             id_pago: PAGO.into(),
             id_comanda: "ticket".into(),
             metodo: tpv_domain::pago::MetodoPago::Efectivo,

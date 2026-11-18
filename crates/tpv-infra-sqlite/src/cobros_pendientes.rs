@@ -41,11 +41,19 @@ pub async fn preparar(g: &WriteGuard<'_>, data: CobroFraccionado) -> AppResult<C
     if existentes.iter().any(|p| p.cobro.id_comanda == data.id_comanda && p.cobro.detalles.iter().any(|d| data.detalles.contains(d))) {
         return Err(AppError::conflict("Estas líneas tienen un cobro pendiente. Resuélvelo desde Cobros pendientes"));
     }
+    // SYN-INC-05: con la escritura tomada, que es la que lleva después el cobro: entre esto y el
+    // cobro no entra nada. Sólo al apuntar el cobro: al reintentar uno pendiente no se vuelve a
+    // mirar, porque es la intención que ya se apuntó con esas líneas, y lo añadido después se cobra
+    // aparte.
+    if data.todo {
+        crate::consultas::exigir_que_se_cobre_todo(g, &data.id_comanda, &data.detalles).await?;
+    }
     let pendiente = CobroPendienteDto {
         cobro: VrCobrarFraccionadoInput {
             id_pago: data.id_pago, id_comanda: data.id_comanda, metodo: data.metodo.to_string(),
             importe_total: data.importe_total, detalles: data.detalles,
             destinatario: data.destinatario.map(|d| DestinatarioInput { nombre_razon: d.nombre_razon, nif: d.nif, domicilio: d.direccion }),
+            todo: data.todo,
         },
         // Los apuntes históricos internos pueden no tener cobrador. El IPC siempre aporta la sesión.
         id_usuario: data.id_usuario_cobrador,

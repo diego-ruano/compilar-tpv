@@ -2046,6 +2046,7 @@ mod tests_anulacion {
         // aquí es que ese camino lo haga, no que la tabla admita filas.
         crate::mesas::SqliteMesasRepository::new(db.clone())
             .cobrar_detalles(tpv_domain::mesas::CobroDetalles {
+                todo: false,
                 id_comanda: "com".into(),
                 detalle_ids: vec!["det-pendiente".into()],
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -2599,6 +2600,7 @@ mod tests_factura_completa {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -2746,6 +2748,7 @@ mod tests_factura_completa {
         let repo = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone());
         for det in ["d1", "d2"] {
             repo.cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -2997,6 +3000,7 @@ mod tests_anular_vs_devolver {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -3653,6 +3657,7 @@ mod tests_baja_de_un_ticket_canjeado {
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: id_pago.clone(),
                 id_comanda: comanda.into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -3761,6 +3766,7 @@ mod tests_baja_de_un_ticket_canjeado {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         let e = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: crate::util::new_id(),
                 id_comanda: "com1".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -4164,6 +4170,7 @@ mod tests_baja_de_un_ticket_canjeado {
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: id_pago.clone(),
                 id_comanda: comanda.into(),
                 metodo: tpv_domain::pago::MetodoPago::Tarjeta,
@@ -4952,6 +4959,7 @@ mod tests_devolucion_parcial {
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: id_pago.clone(),
                 id_comanda: "com".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,
@@ -5214,6 +5222,7 @@ mod tests_devolucion_parcial {
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                todo: false,
                 id_pago: id_pago.clone(),
                 id_comanda: "com".into(),
                 metodo: tpv_domain::pago::MetodoPago::Efectivo,

@@ -1404,6 +1404,10 @@ impl MesasRepository for SqliteMesasRepository {
                     "Algunos detalles no existen, no pertenecen a la comanda o ya están pagados.",
                 ));
             }
+            // SYN-INC-05: «Cobrar todo» cobra todo lo que queda, no lo que la pantalla veía al pulsar.
+            if data.todo {
+                crate::consultas::exigir_que_se_cobre_todo(db, &data.id_comanda, &ids).await?;
+            }
 
             let sql_sum = r#"
                 SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0)
@@ -2093,6 +2097,7 @@ mod tests_cobro_negativo {
 
     fn cobro(detalle: &str) -> CobroDetalles {
         CobroDetalles {
+            todo: false,
             id_comanda: "com".into(),
             metodo: MetodoPago::Efectivo,
             tipo: "FRACCIONADO".into(),
@@ -2137,6 +2142,39 @@ mod tests_cobro_negativo {
             contar(&db, &format!("SELECT Importe_Total FROM Pagos WHERE ID_Pago = '{id_pago}' AND Estado = 'ACTIVO';")).await,
             0
         );
+    }
+
+    #[tokio::test]
+    async fn cobrar_todo_la_mesa_con_una_linea_anadida_mientras_tanto_no_cobra_la_cuenta_vieja() {
+        // SYN-INC-05: la pantalla pulsa «Cobrar todo» con el agua; mientras, otra Handy pide otra.
+        let (db, _dir) = db_sembrada().await;
+        {
+            let w = db.write().await;
+            for sql in [
+                "DELETE FROM Detalle_Comanda WHERE ID_Detalle = 'det-ajuste';",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-agua-2', 'com', 'agua', 1, 0, 10);",
+            ] {
+                w.raw().execute(sql, Vec::<Value>::new()).await.unwrap();
+            }
+        }
+        let repo = SqliteMesasRepository::new(db.clone());
+        let todo = |ids: &[&str]| CobroDetalles {
+            todo: true,
+            tipo: "TOTAL".into(),
+            detalle_ids: ids.iter().map(|d| d.to_string()).collect(),
+            ..cobro("det-agua")
+        };
+
+        let e = repo.cobrar_detalles(todo(&["det-agua"])).await.unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+        assert_eq!(e.to_string(), crate::consultas::HAN_ANADIDO_ALGO);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Pagos;").await, 0);
+        assert_eq!(contar(&db, "SELECT COALESCE(MAX(Ultimo), 0) FROM Serie_Facturacion;").await, 0);
+
+        // Con la cuenta entera, entra.
+        repo.cobrar_detalles(todo(&["det-agua", "det-agua-2"])).await.expect("la cuenta entera se cobra");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM v_lineas_por_cobrar;").await, 0);
     }
 }
 

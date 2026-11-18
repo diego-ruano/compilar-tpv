@@ -405,6 +405,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "venta_rapida.cobrar_fraccionado" => {
             let repo = SqliteVentaRapidaRepository::new(db.clone());
             repo.cobrar_fraccionado(CobroFraccionado {
+                todo: false,
                 id_pago: crate::util::new_id(),
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
                 metodo: tpv_domain::pago::normalize_metodo(e["metodo"].as_str().unwrap()).unwrap(),
@@ -422,6 +423,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "mesas.cobrar_detalles" => {
             let repo = SqliteMesasRepository::new(db.clone());
             repo.cobrar_detalles(CobroDetalles {
+                todo: false,
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
                 metodo: tpv_domain::pago::normalize_metodo(e["metodo"].as_str().unwrap()).unwrap(),
                 tipo: e["tipo"].as_str().unwrap().to_string(),

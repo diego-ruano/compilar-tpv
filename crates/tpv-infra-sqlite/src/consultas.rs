@@ -104,3 +104,28 @@ pub(crate) fn update_total_comanda_sql() -> &'static str {
 pub(crate) fn lista_json(ids: &[String]) -> Value {
     Value::Text(serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()))
 }
+
+/// SYN-INC-05 · Lo que se dice cuando «Cobrar todo» llega con la cuenta crecida.
+pub(crate) const HAN_ANADIDO_ALGO: &str =
+    "Han añadido algo a la cuenta mientras cobrabas. Revisa el total y vuelve a cobrar.";
+
+/// SYN-INC-05 · «Cobrar todo» cobra todo: si a la comanda le queda alguna línea por cobrar que no va
+/// en `detalles`, se rechaza con `Conflict`. La pantalla manda la lista de lo que veía al pulsar, y
+/// mientras tanto otro equipo pudo añadir una línea (le llega por la réplica): cobrar la lista vieja
+/// cerraría la cuenta con esa línea suelta. Se llama con la escritura tomada, en el mismo paso que el
+/// cobro, para que nada entre entre la comprobación y el cobro.
+pub(crate) async fn exigir_que_se_cobre_todo<C: Reader>(conn: &C, id_comanda: &str, detalles: &[String]) -> AppResult<()> {
+    let fuera = select_one_i64(
+        conn,
+        "SELECT COUNT(*) FROM v_lineas_por_cobrar lp
+         WHERE lp.ID_Comanda = ?1
+           AND lp.ID_Detalle NOT IN (SELECT value FROM json_each(?2));",
+        vec![Value::Text(id_comanda.to_string()), lista_json(detalles)],
+    )
+    .await?
+    .unwrap_or(0);
+    if fuera > 0 {
+        return Err(AppError::conflict(HAN_ANADIDO_ALGO));
+    }
+    Ok(())
+}

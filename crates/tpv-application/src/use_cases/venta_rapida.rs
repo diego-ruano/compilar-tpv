@@ -216,6 +216,7 @@ pub fn datos_cobro(
         id_trabajador_cobrador: limpio(id_trabajador),
         detalles,
         destinatario: destinatario_de(input.destinatario),
+        todo: input.todo,
     };
 
     Ok(data)
@@ -309,6 +310,7 @@ mod tests {
     async fn cobrar_fraccionado_normaliza_metodo_ids_y_detalles() {
         let repo = FakeRepo::default();
         let input = VrCobrarFraccionadoInput {
+            todo: false,
             id_pago: " 0192F7A4-3B1C-7D2E-8F00-123456789ABC ".into(),
             id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: eur(12.5),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
@@ -358,6 +360,7 @@ mod tests {
     async fn cobrar_fraccionado_rechaza_importe_no_finito_y_detalles_vacios() {
         let repo = FakeRepo::default();
         let invalido = |importe, detalles| VrCobrarFraccionadoInput {
+            todo: false,
             id_pago: "0192f7a4-3b1c-7d2e-8f00-123456789abc".into(),
             id_comanda: "c1".into(), metodo: "efectivo".into(), importe_total: importe,
             detalles,

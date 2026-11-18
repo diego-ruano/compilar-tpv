@@ -130,6 +130,7 @@ impl Base {
             &repo,
             "u1",
             MesasCobrarDetallesInput {
+                todo: false,
                 id_comanda: "cn".into(),
                 metodo: "Efectivo".into(),
                 tipo: "TOTAL".into(),
@@ -265,6 +266,7 @@ async fn la_mesa_rechaza_el_total_negativo_igual_que_la_barra() {
         "u1",
         None,
         VrCobrarFraccionadoInput {
+            todo: false,
             id_pago: tpv_infra_sqlite::util::new_id(),
             id_comanda: "cn".into(),
             metodo: "Efectivo".into(),
@@ -283,6 +285,7 @@ async fn la_mesa_rechaza_el_total_negativo_igual_que_la_barra() {
         "u1",
         None,
         VrCobrarFraccionadoInput {
+            todo: false,
             id_pago: tpv_infra_sqlite::util::new_id(),
             id_comanda: "cn".into(),
             metodo: "Efectivo".into(),
