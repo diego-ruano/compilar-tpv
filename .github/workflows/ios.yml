@@ -1,0 +1,93 @@
+# La Handy para iPhone, SIN FIRMAR, para probarla instalándola con Sideloadly desde Windows.
+#
+# Sólo un Mac compila para iOS, así que corre en una máquina macOS de GitHub. No hay proyecto de iOS
+# en el repositorio (gen/apple se genera con `tauri ios init`, que también pide un Mac): se genera en
+# cada ejecución. `tauri ios build --no-sign` deja el archivo sin firmar y aquí se empaqueta como
+# `.ipa`; lo firma Sideloadly con el Apple ID de quien lo instala (con uno gratuito, dura 7 días).
+#
+# Se lanza al subir una etiqueta `ios-*` desde cualquier rama (`git tag ios-3 && git push origin
+# ios-3`): un flujo que sólo existe fuera de `main` no se puede lanzar a mano desde GitHub.
+# Los minutos de macOS cuentan diez veces en un repositorio privado: no se lanza en cada push.
+
+name: iOS sin firmar (pruebas)
+
+on:
+  push:
+    tags: ["ios-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: Compilar la Handy para iPhone
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # El proyecto que genera `tauri ios init` sólo lo abre Xcode 16 o posterior: el más nuevo
+      # de la imagen, y su versión en el registro.
+      - name: Elegir Xcode
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
+
+      - uses: dtolnay/rust-toolchain@4b9dce445545e3cfd00877041d9dcdf2acd29f36 # 1.93.1
+        with:
+          toolchain: 1.93.1
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: ios
+
+      - name: Herramientas del proyecto de iOS
+        run: |
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          pod --version || brew install cocoapods
+
+      - name: Generar el proyecto de iOS
+        working-directory: apps/tpv-main
+        run: pnpm tauri ios init --ci
+
+      - name: Compilar sin firmar
+        working-directory: apps/tpv-main
+        run: pnpm tauri ios build --no-sign --ci
+
+      # El `.ipa` es el `.app` del archivo dentro de una carpeta `Payload`, comprimido.
+      - name: Empaquetar el .ipa
+        working-directory: apps/tpv-main/src-tauri/gen/apple
+        run: |
+          find build -maxdepth 3 \( -name "*.xcarchive" -o -name "*.ipa" -o -name "*.app" \) -print
+          ARCHIVO="$(find build -maxdepth 2 -name '*.xcarchive' | head -1)"
+          test -n "$ARCHIVO" || { echo "No se ha generado ningún .xcarchive"; exit 1; }
+          APP="$(find "$ARCHIVO/Products/Applications" -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP" || { echo "El archivo no lleva ninguna .app"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$APP/Info.plist"
+          rm -rf ipa && mkdir -p ipa/Payload
+          cp -R "$APP" ipa/Payload/
+          (cd ipa && zip -qry "$GITHUB_WORKSPACE/TPV-Handy-sin-firmar.ipa" Payload)
+          ls -la "$GITHUB_WORKSPACE/TPV-Handy-sin-firmar.ipa"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: TPV-Handy-iOS-${{ github.ref_name }}
+          path: TPV-Handy-sin-firmar.ipa
+          retention-days: 14
+          if-no-files-found: error
