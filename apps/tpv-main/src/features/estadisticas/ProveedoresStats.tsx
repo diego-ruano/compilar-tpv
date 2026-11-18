@@ -33,7 +33,6 @@ function ChartCard({
   subtitle,
   cargando,
   releyendo,
-  emptyText,
   heightClass = "min-h-[320px]",
   children,
 }: {
@@ -43,7 +42,6 @@ function ChartCard({
   cargando?: boolean;
   /** Se relee con los datos de antes en pantalla: se atenúan, no se sustituyen. */
   releyendo?: boolean;
-  emptyText?: string;
   heightClass?: string;
   children: React.ReactNode;
 }) {
@@ -62,8 +60,6 @@ function ChartCard({
 
       <div className={`mt-3 flex-1 min-h-0 overflow-hidden${releyendo ? " opacity-60" : ""}`}>
         {cargando ? null : children}
-
-        {!cargando && emptyText ? <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div> : null}
       </div>
     </section>
   );
@@ -282,11 +278,6 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
           cargando={cargando}
           releyendo={releyendo}
           heightClass="min-h-[340px]"
-          emptyText={
-            range === "hoy"
-              ? "Nota: si Cuentas_Gastos.Fecha es DATE (sin hora), en 'Hoy' todo cae en la hora 00."
-              : undefined
-          }
         >
           {evoLabels.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
