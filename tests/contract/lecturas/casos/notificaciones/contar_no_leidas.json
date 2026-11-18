@@ -1,5 +1,5 @@
 {
-  "descripcion": "El numero del globito y la fecha de la mas reciente que el usuario puede ver. Mismo seed que el centro: de las cuatro visibles, una esta leida, asi que tienen que salir tres. La fecha es la de la mas reciente suya, tambien en la papelera (una restaurada sube el numero pero no es nueva), y no la de una ajena aunque sea posterior.",
+  "descripcion": "El numero del globito y la fecha de la mas reciente que el usuario puede ver. Mismo seed que el centro: de las cuatro visibles, una esta leida, asi que tienen que salir tres. La fecha es la de la mas reciente suya, tambien en la papelera (una restaurada sube el numero pero no es nueva), y no la de una ajena aunque sea posterior. El total es el de las que puede ver, tambien las de la papelera (una nueva lo sube aunque no mueva la fecha).",
   "lectura": "notificaciones.contar_no_leidas",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",

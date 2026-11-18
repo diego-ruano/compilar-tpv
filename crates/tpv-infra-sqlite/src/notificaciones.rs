@@ -217,9 +217,9 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         self.filas(id_usuario, VISIBLE, filtro_no_leidas).await
     }
 
-    /// Con la fecha de la más reciente que puede ver, también en la papelera (`NoLeidasDto`): el
-    /// aviso de una nueva sale si sube el número y avanza la fecha, y restaurar una de la papelera
-    /// sólo sube el número.
+    /// Con cuántas puede ver y la fecha de la más reciente, también en la papelera (`NoLeidasDto`):
+    /// el aviso de una nueva sale si sube el número y llega una que no estaba (sube el total o avanza
+    /// la fecha), y restaurar una de la papelera sólo sube el número.
     async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<NoLeidasDto> {
         let sql = format!(
             r#"
@@ -232,6 +232,9 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
                     WHERE l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
                   )),
               (SELECT MAX(n.Creada_En)
+                 FROM Notificaciones n
+                WHERE ({visible}) OR ({papelera})),
+              (SELECT COUNT(*)
                  FROM Notificaciones n
                 WHERE ({visible}) OR ({papelera}));
             "#,
@@ -250,6 +253,7 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         };
         Ok(NoLeidasDto {
             count: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+            total: v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0),
             ultima_creada_en: norm_opt_string(row.get_value(1).map_err(db_err)?),
         })
     }
@@ -783,6 +787,7 @@ mod tests_cada_uno_lo_suyo {
         assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
         let en_la_papelera = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
         assert_eq!((en_la_papelera.count, en_la_papelera.ultima_creada_en.as_deref()), (0, Some(fecha.as_str())));
+        assert_eq!(en_la_papelera.total, 1, "la de la papelera también la ve");
 
         assert!(uc::restaurar(&repo, ADMIN, id(&aviso)).await.unwrap());
         assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), creada, "otra vez la misma: no es nueva");
@@ -800,6 +805,20 @@ mod tests_cada_uno_lo_suyo {
             .unwrap();
         let ahora = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
         assert_eq!((ahora.count, ahora.ultima_creada_en.as_deref()), (2, Some("2998-01-01 00:00:00")));
+        assert_eq!(ahora.total, 2);
+
+        // Una nueva con el reloj atrasado (o del mismo segundo) no mueve la fecha, pero sí el total.
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) \
+                 VALUES ('atrasada', 'tarea', 'info', 'Atrasada', 'todos', NULL, 'activa', '2000-01-01 00:00:00');",
+            )
+            .await
+            .unwrap();
+        let despues = uc::contar_no_leidas(&repo, ADMIN).await.unwrap();
+        assert_eq!((despues.count, despues.total, despues.ultima_creada_en.as_deref()), (3, 3, Some("2998-01-01 00:00:00")));
     }
 
     #[tokio::test]

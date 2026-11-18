@@ -112,15 +112,15 @@ async function filas(
 }
 
 /**
- * El globito de la campana (`NoLeidasDto`): cuántas no leídas y cuándo se creó la más reciente que
- * el usuario puede ver, también en la papelera. El aviso de una nueva sale si sube el número y avanza
- * la fecha: restaurar una de la papelera sube el número, pero no es nueva. Espejo de
- * `contar_no_leidas` en la Main.
+ * El globito de la campana (`NoLeidasDto`): cuántas no leídas, cuántas puede ver el usuario en total
+ * y cuándo se creó la más reciente de ésas, también en la papelera. El aviso de una nueva sale si sube
+ * el número y llega una que no estaba (sube el total o avanza la fecha): restaurar una de la papelera
+ * sube el número, pero no es nueva. Espejo de `contar_no_leidas` en la Main.
  */
 export async function contarNoLeidas(
 	db: Client,
 	idUsuario: string,
-): Promise<{ count: number; ultima_creada_en: string | null }> {
+): Promise<{ count: number; total: number; ultima_creada_en: string | null }> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -133,12 +133,15 @@ export async function contarNoLeidas(
 					)) AS n,
 				(SELECT MAX(n.Creada_En)
 				   FROM Notificaciones n
-				  WHERE (${VISIBLE}) OR (${VISIBLE_PAPELERA})) AS ultima;
+				  WHERE (${VISIBLE}) OR (${VISIBLE_PAPELERA})) AS ultima,
+				(SELECT COUNT(*)
+				   FROM Notificaciones n
+				  WHERE (${VISIBLE}) OR (${VISIBLE_PAPELERA})) AS total;
 		`,
 		args: [idUsuario],
 	});
 	const fila = rows(rs)[0];
-	return { count: Number(fila?.n ?? 0), ultima_creada_en: fila?.ultima ?? null };
+	return { count: Number(fila?.n ?? 0), total: Number(fila?.total ?? 0), ultima_creada_en: fila?.ultima ?? null };
 }
 
 /** IDs visibles y no leídos por el usuario (para marcar todas: el route los resuelve antes de aplicar). */

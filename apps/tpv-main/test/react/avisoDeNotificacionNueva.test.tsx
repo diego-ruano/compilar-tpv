@@ -12,7 +12,7 @@ import { hayUnaNueva, useNotificacionesToast } from "../../src/features/notifica
 import { useAuth } from "../../src/shared/stores/useAuth";
 import { ToastProvider } from "../../src/shared/toast";
 
-const globito = vi.hoisted(() => ({ ahora: { count: 1, ultima_creada_en: "2027-01-15 10:00:00" } as NoLeidasDto }));
+const globito = vi.hoisted(() => ({ ahora: { count: 1, total: 1, ultima_creada_en: "2027-01-15 10:00:00" } as NoLeidasDto }));
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
 	invoke: async (comando: string) => (comando === "notificaciones_no_leidas" ? globito.ahora : null),
@@ -29,7 +29,7 @@ function Campana() {
 }
 
 it("decide por el número y por la fecha de la más reciente", () => {
-	const n = (count: number, ultima: string | null): NoLeidasDto => ({ count, ultima_creada_en: ultima });
+	const n = (count: number, ultima: string | null, total = 0): NoLeidasDto => ({ count, total, ultima_creada_en: ultima });
 	expect(hayUnaNueva(n(1, "2027-01-15 10:00:00"), n(2, "2027-01-15 10:05:00"))).toBe(true);
 	expect(hayUnaNueva(n(0, null), n(1, "2027-01-15 10:05:00"))).toBe(true);
 	// Restaurar una de la papelera: sube el número, la fecha no se mueve.
@@ -38,6 +38,10 @@ it("decide por el número y por la fecha de la más reciente", () => {
 	expect(hayUnaNueva(n(2, "2027-01-15 10:05:00"), n(1, "2027-01-15 10:05:00"))).toBe(false);
 	// Un worker anterior no manda la fecha: no se sabe si es nueva.
 	expect(hayUnaNueva(n(1, null), n(2, null))).toBe(false);
+	// Dos en el mismo segundo, o una de un equipo con el reloj atrasado: la fecha no avanza, pero
+	// sube el total de las que puede ver. Restaurar de la papelera no lo sube.
+	expect(hayUnaNueva(n(1, "2027-01-15 10:05:00", 3), n(2, "2027-01-15 10:05:00", 4))).toBe(true);
+	expect(hayUnaNueva(n(1, "2027-01-15 10:05:00", 3), n(2, "2027-01-15 10:05:00", 3))).toBe(false);
 });
 
 it("restaurar de la papelera no avisa y una nueva sí", async () => {
@@ -59,16 +63,16 @@ it("restaurar de la papelera no avisa y una nueva sí", async () => {
 	await releer();
 
 	// La descarta (0) y la restaura (1 otra vez, la misma fecha): no es nueva.
-	globito.ahora = { count: 0, ultima_creada_en: "2027-01-15 10:00:00" };
+	globito.ahora = { count: 0, total: 1, ultima_creada_en: "2027-01-15 10:00:00" };
 	await releer();
-	globito.ahora = { count: 1, ultima_creada_en: "2027-01-15 10:00:00" };
+	globito.ahora = { count: 1, total: 1, ultima_creada_en: "2027-01-15 10:00:00" };
 	await releer();
 	// El aviso se pinta en el siguiente turno: se le da tiempo antes de mirar que no está.
 	await act(() => new Promise((r) => setTimeout(r, 100)));
 	expect(screen.queryByText("Tienes una nueva notificación")).toBeNull();
 
 	// Llega una de verdad.
-	globito.ahora = { count: 2, ultima_creada_en: "2027-01-15 10:30:00" };
+	globito.ahora = { count: 2, total: 2, ultima_creada_en: "2027-01-15 10:30:00" };
 	await releer();
 	expect(await screen.findByText("Tienes una nueva notificación")).toBeTruthy();
 });

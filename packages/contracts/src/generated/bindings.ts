@@ -2051,13 +2051,19 @@ export type MisTareasRow = {
 };
 
 /**
- *  El globito de la campana: cuántas no leídas tiene quien ha iniciado sesión y cuándo se creó la
- *  más reciente de las que puede ver, también las de la papelera (`Creada_En`, la hora del negocio).
- *  El aviso «Tienes una nueva notificación» sale cuando sube el número **y** avanza esa fecha:
- *  restaurar una de la papelera sube el número, pero no es nueva.
+ *  El globito de la campana: cuántas no leídas tiene quien ha iniciado sesión, cuántas puede ver en
+ *  total (también las de la papelera) y cuándo se creó la más reciente de ésas (`Creada_En`, la hora
+ *  del negocio). El aviso «Tienes una nueva notificación» sale cuando sube el número de no leídas
+ *  **y** llega una que no estaba: sube el total, o avanza esa fecha. Restaurar una de la papelera
+ *  sube el número, pero ni el total ni la fecha: no es nueva.
  */
 export type NoLeidasDto = {
 	count: number,
+	/**
+	 *  Cuántas puede ver, también en la papelera. Una nueva lo sube aunque se haya creado en el mismo
+	 *  segundo que la anterior o con un reloj atrasado, que no mueven la fecha.
+	 */
+	total: number,
 	ultima_creada_en: string | null,
 };
 

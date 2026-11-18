@@ -1,11 +1,13 @@
 // src/features/notificaciones/useNotificacionesToast.ts
 //
 // Muestra un toast cuando LLEGA una notificación nueva para el usuario logueado. Se apoya en el
-// globito de la campana (`useNoLeidasCount`): el número de no leídas y la fecha de la más reciente
-// que el usuario puede ver, también en la papelera. Avisa cuando SUBE el número **y** AVANZA esa
-// fecha respecto a lo anterior. Restaurar una de la papelera sube el número, pero la fecha no se
-// mueve: no es nueva (antes avisaba de «una nueva notificación» que era la de siempre). Cubre tanto
-// las que llegan de otro equipo (el `change` invalida el contador) como las emitidas aquí.
+// globito de la campana (`useNoLeidasCount`): el número de no leídas, cuántas puede ver el usuario
+// en total y la fecha de la más reciente de ésas, también en la papelera. Avisa cuando SUBE el número
+// **y** llega una que no estaba: sube el total, o avanza la fecha. Restaurar una de la papelera sube
+// el número, pero ni el total ni la fecha: no es nueva (antes avisaba de «una nueva notificación» que
+// era la de siempre). Con el total, avisa también de una creada en el mismo segundo que la anterior
+// o en un equipo con el reloj atrasado, que no mueven la fecha. Cubre tanto las que llegan de otro
+// equipo (el `change` invalida el contador) como las emitidas aquí.
 //
 // Se monta una sola vez en el shell (App.tsx). Es no-op sin sesión.
 
@@ -16,10 +18,12 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { useToast } from "../../shared/toast";
 import { useNoLeidasCount } from "./notificacionesQueries";
 
-/** ¿Hay una nueva desde `antes`? Sube el número y la más reciente es posterior (las fechas son
- *  `YYYY-MM-DD HH:MM:SS`, que se ordenan como texto). */
+/** ¿Hay una nueva desde `antes`? Sube el número y llega una que no estaba: sube el total de las que
+ *  puede ver, o la más reciente es posterior (las fechas son `YYYY-MM-DD HH:MM:SS`, que se ordenan
+ *  como texto). */
 export function hayUnaNueva(antes: NoLeidasDto, ahora: NoLeidasDto): boolean {
   if (ahora.count <= antes.count) return false;
+  if (ahora.total > antes.total) return true;
   if (ahora.ultima_creada_en == null) return false;
   return antes.ultima_creada_en == null || ahora.ultima_creada_en > antes.ultima_creada_en;
 }

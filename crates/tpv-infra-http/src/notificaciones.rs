@@ -32,6 +32,9 @@ struct CountResp {
     /// Un worker anterior no la manda: sin ella, el aviso de una nueva no sale (no se sabe si lo es).
     #[serde(default)]
     ultima_creada_en: Option<String>,
+    /// Ídem: sin él, el aviso decide sólo por la fecha.
+    #[serde(default)]
+    total: i64,
 }
 
 #[derive(Deserialize)]
@@ -68,7 +71,7 @@ impl NotificacionesRepository for HttpNotificacionesRepository {
             .client
             .get_query("/v1/notificaciones/count", &[("usuario", id_usuario.to_string())])
             .await?;
-        Ok(NoLeidasDto { count: r.count, ultima_creada_en: r.ultima_creada_en })
+        Ok(NoLeidasDto { count: r.count, total: r.total, ultima_creada_en: r.ultima_creada_en })
     }
 
     async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
