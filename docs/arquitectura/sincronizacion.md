@@ -932,9 +932,13 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   (CLI-01), así que, cuando lo que se ha traído de una cuarentena sigue chocando con un índice único,
   la ficha de aquí que tiene el mismo valor se funde en la de la nube, en una transacción por
   `WriteGuard` que se replica: se le quitan sus valores únicos, se escribe la de la nube **rellenando
-  sólo sus huecos** con lo de la de aquí (el criterio de RES-01; arriba la sentencia lo vuelve a
-  decidir con lo que haya entonces, `COALESCE(NULLIF(<lo de arriba>, ''), excluded.…)`, y no pisa lo
-  que una Handy haya cambiado entretanto), todo lo que apunta a la de aquí pasa a la de la nube (las
+  sólo sus huecos** con lo de la de aquí (el criterio de RES-01). Aquí se escribe entera, como la
+  trajo la foto, con un `INSERT … SELECT … WHERE EXISTS` que sólo escribe donde la de aquí está todavía
+  (arriba no está, así que no resucita una ficha que una Handy haya borrado después de la foto); y un
+  `UPDATE` rellena los huecos con lo de la de aquí y nada más, `COALESCE(NULLIF(col, ''), ?)`: lo que
+  la de la nube ya tenía no viaja, y arriba no vuelve al valor de la foto lo que una Handy haya
+  cambiado o vaciado entretanto. Vacío es `NULL` o `''`, tal cual, también al decidir qué es un
+  hueco aquí. Después, todo lo que apunta a la de aquí pasa a la de la nube (las
   foráneas se leen del esquema), el agregado (`Total_Gastado`) se re-deriva en el SQL y la de aquí
   se borra. En la misma transacción se retira lo apartado de la subida que nombraba la ficha de
   aquí: lo que sólo la escribía a ella se borra, y lo demás se repara por estado en una operación

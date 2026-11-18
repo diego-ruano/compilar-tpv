@@ -558,3 +558,38 @@ async fn una_ficha_de_aqui_con_un_valor_que_no_se_replica_no_se_funde() {
 
     cerrar(db, dir, nube).await;
 }
+
+#[tokio::test]
+async fn la_fusion_no_deshace_arriba_lo_que_una_handy_cambio_despues_de_la_foto() {
+    // La fusión se escribe aquí con la foto de la nube; antes de que suba, una Handy le quita el
+    // teléfono a la Ana de la nube. Lo que la de la nube ya tenía no viaja en la fusión: arriba sigue
+    // sin teléfono, y sólo se rellena lo que le faltaba (la nota de la de aquí).
+    let (repo, db, dir, nube) = las_dos_anas("cambio-despues").await;
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    nube.sembrar(&format!("UPDATE Clientes SET Telefono = NULL WHERE ID_Cliente = '{ANA_HANDY}';")).await;
+
+    assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
+    assert_eq!(
+        filas(&nube.db, "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes;").await,
+        vec![format!("{ANA_HANDY}|Ana García|NULL|ANA@correo.es|Alérgica al marisco")]
+    );
+
+    cerrar(db, dir, nube).await;
+}
+
+#[tokio::test]
+async fn la_fusion_no_resucita_arriba_una_ficha_que_una_handy_borro_despues_de_la_foto() {
+    // Antes de que la fusión suba, una Handy borra a la Ana de la nube: la fusión entra sin volver a
+    // darla de alta.
+    let (repo, db, dir, nube) = las_dos_anas("borrada-despues").await;
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    nube.sembrar(&format!("DELETE FROM Clientes WHERE ID_Cliente = '{ANA_HANDY}';")).await;
+
+    // La reparación de la reserva y el cobro apunta a una ficha que ya no está: no entra. La fusión, sí.
+    let rechazos = subir(&repo, &nube).await;
+    assert!(rechazos.iter().all(|e| e.contains("FOREIGN KEY")), "{rechazos:?}");
+    assert_eq!(repo.outbox_pending(10).await.unwrap().len(), 0, "la fusión ha subido");
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Clientes;").await, 0, "no se ha resucitado");
+
+    cerrar(db, dir, nube).await;
+}

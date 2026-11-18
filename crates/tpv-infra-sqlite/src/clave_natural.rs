@@ -22,9 +22,11 @@
 //!
 //! 1. Se le quitan a la ficha de aquí sus valores únicos (el correo), para que la de la nube quepa.
 //! 2. Se escribe la de la nube **rellenando sólo sus huecos** con lo de la de aquí, el criterio de
-//!    RES-01: un dato que la de la nube ya tiene no se cambia. Arriba, la sentencia lo vuelve a
-//!    decidir con lo que haya entonces (`COALESCE(NULLIF(<lo de arriba>, ''), excluded.<lo traído>)`),
-//!    así que no pisa lo que una Handy haya cambiado mientras tanto.
+//!    RES-01: un dato que la de la nube ya tiene no se cambia. Aquí se escribe entera, como la trajo
+//!    la foto (un `INSERT` que sólo escribe donde la de aquí está todavía, y arriba no está); arriba
+//!    sólo un `UPDATE` de los huecos, con lo de la de aquí y nada más (`COALESCE(NULLIF(col, ''), ?)`).
+//!    Así no se pisa lo que una Handy haya cambiado o vaciado después de la foto, ni se resucita la
+//!    ficha si la ha borrado.
 //! 3. Todo lo que apunta a la de aquí pasa a apuntar a la de la nube: las foráneas se leen del
 //!    esquema (`sync_reparacion::foraneas`), no de una lista escrita a mano.
 //! 4. Lo que es un agregado de la ficha (`Total_Gastado`) se re-deriva en el SQL, con lo que haya en
@@ -274,6 +276,16 @@ async fn sentencias_de_la_fusion(
     }
 
     // 2. La de la nube, con sus huecos rellenos con lo de las de aquí (la primera que lo tenga).
+    //    Son dos sentencias, porque aquí y arriba hay que hacer cosas distintas con la misma:
+    //
+    //    - El `INSERT` la escribe como la trajo la foto, con los huecos ya rellenos. Sólo escribe donde
+    //      está todavía la de aquí (`WHERE EXISTS`): aquí, que es donde falta (su alta está en
+    //      cuarentena). Arriba la de aquí no está (la nube no la tiene: ver [`fundir`]), así que no
+    //      escribe nada y no resucita una ficha que una Handy haya borrado después de la foto.
+    //    - El `UPDATE` rellena sólo los huecos, y sólo lleva lo de la de aquí: lo que la de la nube ya
+    //      tenía no viaja, así que arriba no vuelve al valor de la foto un campo que una Handy haya
+    //      cambiado o vaciado entretanto. Si la ficha ya no está, no toca nada.
+    let mut huecos: Vec<(usize, Json)> = Vec::new();
     let valores: Vec<Json> = columnas
         .iter()
         .enumerate()
@@ -282,22 +294,42 @@ async fn sentencias_de_la_fusion(
             if c.eq_ignore_ascii_case(d.clave) || es(c, d.derivadas) || !vacio(arriba) {
                 return json(arriba);
             }
-            de_aqui.iter().map(|f| &f[i]).find(|v| !vacio(v)).map_or_else(|| json(arriba), json)
+            match de_aqui.iter().map(|f| &f[i]).find(|v| !vacio(v)) {
+                Some(v) => {
+                    huecos.push((i, json(v)));
+                    json(v)
+                }
+                None => json(arriba),
+            }
         })
         .collect();
     let lista = columnas.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
     let marcas = (1..=columnas.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
-    let rellenar = columnas
-        .iter()
-        .filter(|c| !c.eq_ignore_ascii_case(d.clave) && !es(c, d.derivadas))
-        .map(|c| format!("{c} = COALESCE(NULLIF({t}.{c}, ''), excluded.{c})", c = cita(c), t = cita(d.tabla)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let accion = if rellenar.is_empty() { "DO NOTHING".to_owned() } else { format!("DO UPDATE SET {rellenar}") };
+    let mut args = valores;
+    args.push(Json::String(locales[0].clone()));
     sentencias.push(SqlStatement {
-        sql: format!("INSERT INTO {} ({lista}) VALUES ({marcas}) ON CONFLICT({}) {accion};", cita(d.tabla), cita(d.clave)),
-        args: valores,
+        sql: format!(
+            "INSERT INTO {t} ({lista}) SELECT {marcas} WHERE EXISTS (SELECT 1 FROM {t} WHERE {k} = ?{n}) ON CONFLICT({k}) DO NOTHING;",
+            t = cita(d.tabla),
+            k = cita(d.clave),
+            n = columnas.len() + 1
+        ),
+        args,
     });
+    if !huecos.is_empty() {
+        let rellenar = huecos
+            .iter()
+            .enumerate()
+            .map(|(j, (i, _))| format!("{c} = COALESCE(NULLIF({c}, ''), ?{n})", c = cita(&columnas[*i]), n = j + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut args: Vec<Json> = huecos.into_iter().map(|(_, v)| v).collect();
+        args.push(Json::String(id_nube.to_owned()));
+        sentencias.push(SqlStatement {
+            sql: format!("UPDATE {} SET {rellenar} WHERE {} = ?{};", cita(d.tabla), cita(d.clave), args.len()),
+            args,
+        });
+    }
 
     // 3. Lo que apunta a las de aquí, a la de la nube.
     let foraneas = crate::sync_reparacion::foraneas(conn).await.map_err(db_err)?;
