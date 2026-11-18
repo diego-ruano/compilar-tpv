@@ -593,3 +593,64 @@ async fn la_fusion_no_resucita_arriba_una_ficha_que_una_handy_borro_despues_de_l
 
     cerrar(db, dir, nube).await;
 }
+
+const PEDRO: &str = "0193a5f0-0000-7000-8000-0000000000c1";
+
+#[tokio::test]
+async fn una_ficha_de_aqui_que_la_nube_tambien_tiene_no_se_funde_y_se_avisa() {
+    // Pedro ya estaba en las dos bases, con su historia. Una Handy da de alta a Ana con su correo y,
+    // antes de que baje, en la Main se le pone ese mismo correo a Pedro: arriba la edición choca y se
+    // aparta, y aquí el alta de Ana choca y acaba en cuarentena. Pedro no es un alta que no subió:
+    // fundirlo en Ana uniría a dos personas. No se funde, la cuarentena se queda y se avisa a los
+    // administradores.
+    let (repo, db, dir) = base("dos-personas").await;
+    let nube = NubeDeContraste::nueva("dos-personas").await;
+    let pedro = format!(
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('{PEDRO}', 'Pedro', '600999888', '2026-06-01 10:00:00');"
+    );
+    sembrar(&db, &pedro).await;
+    nube.sembrar(&pedro).await;
+    {
+        let w = db.write().await;
+        w.execute(
+            "UPDATE Clientes SET Email = ?2 WHERE ID_Cliente = ?1;",
+            vec![Value::Text(PEDRO.into()), Value::Text("ana@correo.es".into())],
+        )
+        .await
+        .unwrap();
+    }
+    nube.aplicar(&alta_de_la_handy()).await;
+    *nube.hasta_seq.lock().unwrap() = 1;
+    *nube.ultimo_ajeno.lock().unwrap() = 1;
+    assert!(subir(&repo, &nube).await.iter().all(|e| e.contains("ux_clientes_email")));
+    bajar(&repo, &SyncChange { op_id: "op-handy".into(), seq: 1, statements: alta_de_la_handy() }).await;
+    assert_eq!(en_cuarentena(&db).await, 1);
+
+    // El aviso sube: esta pasada se deja.
+    assert!(matches!(pasada(&repo, &nube).await, ContrasteLocal::SeHaMovido));
+    assert_eq!(
+        filas(&db, "SELECT ID_Cliente, Nombre, Email FROM Clientes;").await,
+        vec![format!("{PEDRO}|Pedro|ana@correo.es")],
+        "Pedro sigue siendo Pedro"
+    );
+    assert_eq!(en_cuarentena(&db).await, 1);
+    let aviso = filas(&db, "SELECT Tipo, Destino_Tipo, Destino_Valor, Accion, Titulo, Cuerpo FROM Notificaciones;").await;
+    assert_eq!(aviso.len(), 1, "{aviso:?}");
+    assert!(
+        aviso[0].starts_with("fichas_distintas|rol|00000000-0000-7000-8000-000000000001|ver_clientes|Hay dos clientes distintos con el mismo correo|"),
+        "{aviso:?}"
+    );
+    assert!(aviso[0].contains("«Pedro»") && aviso[0].contains("«Ana García»") && aviso[0].contains("(ANA@correo.es)"), "{aviso:?}");
+    let sube = repo.outbox_pending(10).await.unwrap();
+    assert_eq!(sube.len(), 1, "sólo el aviso: {sube:?}");
+    assert!(sube[0].statements.iter().all(|s| s.sql.contains("Notificaciones")), "{sube:?}");
+    assert_eq!(subir(&repo, &nube).await, Vec::<String>::new());
+
+    // La pasada siguiente no vuelve a escribir el aviso: compara, sin reparar (la cuarentena sigue).
+    let ContrasteLocal::Hecho(r) = pasada(&repo, &nube).await else { panic!("se tenía que comparar") };
+    assert!(r.aplazado, "{r:?}");
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Notificaciones;").await, 1);
+    assert_eq!(repo.outbox_pending(10).await.unwrap().len(), 0);
+
+    cerrar(db, dir, nube).await;
+}

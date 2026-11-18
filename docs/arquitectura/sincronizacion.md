@@ -947,8 +947,14 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   dentro). Esa pasada del contraste se deja, porque la marca se ha movido; en la siguiente, con todo
   subido, la cuarentena sale sola y el contraste vuelve a reparar (si la reparación no entrara, lo
   sube el contraste y su plan lo retira). **Sólo se funde lo que esta Main escribió y la nube no
-  tiene**: la ficha de aquí tiene que estar escrita por algo apartado de la subida; si no, no se sabe
-  por qué es distinta y la cuarentena se queda. Vale igual para Proveedores (correo y CIF únicos, con
+  tiene**, y las dos cosas se comprueban. Antes de fundir se le pide a la nube la ficha de aquí por su
+  clave, con la misma foto que lo traído (`clave_natural::candidatas`): si la tiene, no es un alta que
+  no subió sino otra ficha que ya estaba arriba y a la que aquí se le ha puesto el correo de otra;
+  fundirlas uniría a dos personas sin vuelta atrás, así que no se funden, la cuarentena se queda y se
+  avisa a los administradores (`fichas_distintas`, una vez por pareja) de que hay dos fichas
+  distintas con el mismo correo o CIF que resolver a mano. Si no se sabe, tampoco se funde. Y la de
+  aquí tiene que estar escrita por algo apartado de la subida; si no, no se sabe por qué es distinta y
+  la cuarentena se queda. Vale igual para Proveedores (correo y CIF únicos, con
   sus productos, lotes, pedidos y gastos). Un valor vacío no identifica a nadie y no se funde. Si la
   de la nube ya no tiene ese valor, no hay choque y no se funde nada (la de aquí sube como siempre);
   si la de aquí ya se fundió, tampoco. Una operación de subida apartada por el correo sin cuarentena

@@ -39,21 +39,30 @@
 //! retira cuando esa operación sube. En la pasada siguiente la cuarentena sale sola (lo que trae de la
 //! nube ya cabe) y, sin cuarentenas, el contraste vuelve a reparar.
 //!
-//! **Sólo se funde lo que esta Main escribió y la nube no tiene**: la ficha de aquí tiene que estar
-//! escrita por algo apartado de la subida (`Estaticas::claves`). Con todo subido —la salida de las
-//! cuarentenas sólo corre así— una ficha de aquí con el correo de otra de la nube es eso o algo que no
-//! se sabe explicar, y lo que no se sabe explicar no se toca: la cuarentena se queda, y a la semana se
-//! avisa (`bajada_atascada`).
+//! **Sólo se funde lo que esta Main escribió y la nube no tiene**, y las dos cosas se comprueban:
+//!
+//! - **La nube no la tiene.** Antes de fundir se le pide la ficha de aquí por su clave, con la misma
+//!   foto que lo traído ([`candidatas`], `cuarentenas_bajada::resolver`). Si la tiene, no es un alta
+//!   que no subió: es otra ficha que ya existía arriba (con su historia) y a la que aquí se le ha
+//!   puesto el correo de otra, y fundirlas uniría a dos personas distintas sin vuelta atrás. No se
+//!   funde: la cuarentena se queda y se avisa a los administradores de que hay dos fichas distintas
+//!   con el mismo correo (o CIF) que hay que resolver a mano. Si no se sabe (la nube no la sabe
+//!   buscar), tampoco se funde.
+//! - **Esta Main la escribió**: la ficha de aquí tiene que estar escrita por algo apartado de la
+//!   subida (`Estaticas::claves`). Con todo subido —la salida de las cuarentenas sólo corre así— una
+//!   ficha de aquí con el correo de otra de la nube es eso o algo que no se sabe explicar, y lo que no
+//!   se sabe explicar no se toca: la cuarentena se queda, y a la semana se avisa (`bajada_atascada`).
 //!
 //! Es idempotente: si la de aquí ya se fundió, no hay choque y no hay nada que fundir; si la de la
 //! nube ya no está, la salida no la trae y tampoco. Las fichas de Proveedores (correo y CIF únicos)
 //! siguen la misma descripción ([`DESCRIPCIONES`]).
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value as Json;
 use tpv_application::error::AppResult;
 use tpv_contracts::sync::SqlStatement;
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::consultas::db_err;
 use crate::cuarentenas_bajada::Traida;
@@ -67,6 +76,8 @@ pub(crate) struct Unico {
     pub columna: &'static str,
     /// El índice no distingue mayúsculas (`lower(Email)`): se compara igual.
     pub sin_mayusculas: bool,
+    /// Cómo se le llama en un aviso.
+    pub etiqueta: &'static str,
 }
 
 /// Cómo se funden dos filas de una tabla que chocan por una clave natural.
@@ -80,6 +91,12 @@ pub(crate) struct Descripcion {
     pub derivadas: &'static [&'static str],
     /// Las sentencias que las re-derivan en la fila que se queda (`?1`).
     pub rederivar: &'static [&'static str],
+    /// La columna con el nombre de la ficha, para los avisos.
+    pub nombre: &'static str,
+    /// Cómo se llaman las fichas en un aviso («clientes»).
+    pub fichas: &'static str,
+    /// La acción del aviso: la pantalla de esas fichas.
+    pub accion: &'static str,
 }
 
 /// Las tablas cuyas fichas se funden. Clientes (el correo) y Proveedores (el correo y el CIF), las
@@ -88,16 +105,25 @@ pub(crate) const DESCRIPCIONES: &[Descripcion] = &[
     Descripcion {
         tabla: "Clientes",
         clave: "ID_Cliente",
-        unicos: &[Unico { columna: "Email", sin_mayusculas: true }],
+        unicos: &[Unico { columna: "Email", sin_mayusculas: true, etiqueta: "correo" }],
         derivadas: &["Total_Gastado"],
         rederivar: &[crate::reconciliacion::SQL_REDERIVAR_GASTO],
+        nombre: "Nombre",
+        fichas: "clientes",
+        accion: "ver_clientes",
     },
     Descripcion {
         tabla: "Proveedores",
         clave: "ID_Proveedor",
-        unicos: &[Unico { columna: "Email", sin_mayusculas: false }, Unico { columna: "CIF", sin_mayusculas: false }],
+        unicos: &[
+            Unico { columna: "Email", sin_mayusculas: false, etiqueta: "correo" },
+            Unico { columna: "CIF", sin_mayusculas: false, etiqueta: "CIF" },
+        ],
         derivadas: &[],
         rederivar: &[],
+        nombre: "Nombre_Empresa",
+        fichas: "proveedores",
+        accion: "ver_proveedores",
     },
 ];
 
@@ -134,6 +160,109 @@ fn canonica(tabla: &str, id: &str) -> Option<String> {
     tocadas::canonica_de(&FilaTocada { tabla: tabla.to_owned(), clave: vec![Json::String(id.to_owned())], borrada: false })
 }
 
+/// Si la nube tiene cada ficha de aquí que chocaría con lo traído, por la forma canónica de su
+/// clave. La que no está, no se sabe (la nube no la ha sabido buscar).
+pub(crate) type EnLaNube = HashMap<String, bool>;
+
+/// Las fichas de aquí que chocan por un valor único con alguna fila traída de una tabla de
+/// [`DESCRIPCIONES`], por tabla: las que hay que pedir a la nube, con la misma foto, para saber si
+/// las tiene antes de fundir (ver el encabezado).
+pub(crate) async fn candidatas(
+    conn: &Connection,
+    arriba: &HashMap<String, Traida>,
+    claves: &HashMap<String, Vec<String>>,
+) -> AppResult<BTreeMap<String, Vec<String>>> {
+    let mut salida = BTreeMap::new();
+    for d in DESCRIPCIONES {
+        if claves.get(d.tabla).map(Vec::as_slice) != Some(&[d.clave.to_owned()][..]) {
+            continue;
+        }
+        let Some(traida) = arriba.get(d.tabla).filter(|t| !t.sin_buscar) else { continue };
+        let Some(i_clave) = traida.columnas.iter().position(|x| x.eq_ignore_ascii_case(d.clave)) else { continue };
+        let mut ids: Vec<String> = Vec::new();
+        for fila in traida.filas.values() {
+            let Some(nube) = fila.iter().map(crate::convergencia::celda).collect::<Option<Vec<Value>>>() else { continue };
+            let Some(id_nube) = nube.get(i_clave).and_then(texto) else { continue };
+            for l in las_que_chocan(conn, d, &traida.columnas, &nube, id_nube).await? {
+                if !ids.contains(&l) {
+                    ids.push(l);
+                }
+            }
+        }
+        if !ids.is_empty() {
+            salida.insert(d.tabla.to_owned(), ids);
+        }
+    }
+    Ok(salida)
+}
+
+/// Anota si la nube tiene cada una de `ids` de `tabla`, con lo que ha traído al pedirlas.
+pub(crate) fn anotar(en_la_nube: &mut EnLaNube, tabla: &str, ids: &[String], traida: &Traida) {
+    if traida.sin_buscar {
+        return;
+    }
+    for id in ids {
+        if let Some(k) = canonica(tabla, id) {
+            let la_tiene = traida.filas.contains_key(&k);
+            en_la_nube.insert(k, la_tiene);
+        }
+    }
+}
+
+/// El aviso a los administradores de que la ficha de aquí `id_aqui` y la de la nube son distintas y
+/// tienen el mismo valor único: no se funden, y hay que resolverlo a mano.
+fn aviso_de_fichas_distintas(
+    d: &Descripcion,
+    columnas: &[String],
+    nube: &[Value],
+    id_nube: &str,
+    id_aqui: &str,
+    de_aqui: &[Value],
+) -> NuevaNotificacion {
+    let posicion = |c: &str| columnas.iter().position(|x| x.eq_ignore_ascii_case(c));
+    let nombre = |fila: &[Value]| {
+        posicion(d.nombre)
+            .and_then(|i| fila.get(i))
+            .and_then(texto)
+            .filter(|t| !t.trim().is_empty())
+            .map_or_else(|| "Una ficha sin nombre".to_owned(), |t| format!("«{t}»"))
+    };
+    let mismos: Vec<(&str, String)> = d
+        .unicos
+        .iter()
+        .filter_map(|u| {
+            let i = posicion(u.columna)?;
+            let (a, b) = (texto(nube.get(i)?)?, texto(de_aqui.get(i)?)?);
+            let igual = if u.sin_mayusculas { a.to_lowercase() == b.to_lowercase() } else { a == b };
+            (igual && !a.is_empty()).then(|| (u.etiqueta, a.to_owned()))
+        })
+        .collect();
+    let etiquetas = if mismos.is_empty() {
+        d.unicos.iter().map(|u| u.etiqueta).collect::<Vec<_>>().join(" o ")
+    } else {
+        mismos.iter().map(|(e, _)| *e).collect::<Vec<_>>().join(" y ")
+    };
+    let valores = mismos.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(", ");
+    let detalle = if valores.is_empty() { String::new() } else { format!(" ({valores})") };
+    NuevaNotificacion {
+        tipo: "fichas_distintas".into(),
+        severidad: Severidad::Aviso,
+        titulo: format!("Hay dos {} distintos con el mismo {etiquetas}", d.fichas),
+        cuerpo: Some(format!(
+            "{} en el TPV principal y {} en las Handy tienen el mismo {etiquetas}{detalle}, pero son dos \
+             fichas distintas y no se unen solas. Mientras sigan así, los cambios de esas fichas no pasan del \
+             TPV principal a las Handy ni al revés. Revísalas y corrige el {etiquetas} de la que lo tenga mal.",
+            nombre(de_aqui),
+            nombre(nube),
+        )),
+        destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+        accion: Some(d.accion.into()),
+        payload: None,
+        clave_dedupe: Some(format!("fichas_distintas:{}:{id_aqui}:{id_nube}", d.tabla)),
+        expira_en: None,
+    }
+}
+
 /// Funde en la de la nube las fichas de aquí que chocan con las filas que ha traído para una
 /// cuarentena de bajada (`tocadas`), si son de una tabla de [`DESCRIPCIONES`]. Devuelve cuántas ha
 /// fundido. Ver el encabezado.
@@ -143,10 +272,11 @@ pub(crate) async fn fundir(
     arriba: &HashMap<String, Traida>,
     claves: &HashMap<String, Vec<String>>,
     subida: &tocadas::Estaticas,
+    en_la_nube: &EnLaNube,
 ) -> AppResult<usize> {
     let conn: &Connection = w.raw();
     let mut fundidas = 0usize;
-    for f in tocadas.filas.iter().filter(|f| !f.borrada) {
+    'filas: for f in tocadas.filas.iter().filter(|f| !f.borrada) {
         let Some(d) = DESCRIPCIONES.iter().find(|d| d.tabla == f.tabla) else { continue };
         if claves.get(d.tabla).map(Vec::as_slice) != Some(&[d.clave.to_owned()][..]) {
             continue;
@@ -163,7 +293,39 @@ pub(crate) async fn fundir(
         if locales.is_empty() {
             continue;
         }
-        // Sólo lo que esta Main escribió y la nube no tiene (ver el encabezado).
+        // Sólo lo que la nube no tiene (ver el encabezado). Si tiene la de aquí, son dos fichas
+        // distintas: se avisa y no se funden.
+        let mut distintas: Vec<&String> = Vec::new();
+        for l in &locales {
+            match canonica(d.tabla, l).and_then(|k| en_la_nube.get(&k).copied()) {
+                Some(true) => distintas.push(l),
+                Some(false) => {}
+                None => {
+                    tracing::warn!(
+                        target: "tpv::sync",
+                        tabla = d.tabla,
+                        "no se sabe si la nube tiene la ficha de aquí que choca con la suya: no se funden (SYN-INC-07)"
+                    );
+                    continue 'filas;
+                }
+            }
+        }
+        if !distintas.is_empty() {
+            for l in distintas {
+                let Some(fila) = filas_de_aqui(conn, d, columnas, std::slice::from_ref(l)).await?.and_then(|mut v| v.pop()) else {
+                    continue;
+                };
+                let aviso = aviso_de_fichas_distintas(d, columnas, &nube, &id_nube, l, &fila);
+                w.transaccion(crate::notificaciones::emitir_en(w, aviso)).await?;
+            }
+            tracing::warn!(
+                target: "tpv::sync",
+                tabla = d.tabla,
+                "una ficha de la nube choca con otra distinta que la nube también tiene: no se funden, se avisa (SYN-INC-07)"
+            );
+            continue;
+        }
+        // Y sólo lo que esta Main escribió (ver el encabezado).
         if locales.iter().any(|l| canonica(d.tabla, l).is_none_or(|k| !subida.claves.contains(&k))) {
             tracing::warn!(
                 target: "tpv::sync",

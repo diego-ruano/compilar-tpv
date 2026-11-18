@@ -452,79 +452,85 @@ impl SqliteNotificacionesRepository {
     /// `emitir`, y además si ha escrito algo: la Main lo usa para avisar a su pantalla sólo cuando
     /// cambia (`src-tauri/src/notificador.rs`).
     pub async fn emitir_y_decir_si_cambia(&self, nueva: NuevaNotificacion) -> AppResult<(String, bool)> {
-        let (destino_tipo, destino_valor) = nueva.destino.to_columns();
-
         // Escritor único: mantener el guard sobre la búsqueda + la escritura hace la operación
         // race-free en la Main (no puede colarse otra emisión con la misma clave entre medias).
         let db = self.db.write().await;
+        db.transaccion(emitir_en(&db, nueva)).await
+    }
+}
 
-        if let Some(clave) = nueva.clave_dedupe.as_deref() {
-            if let Some((id, actual)) = activa_por_clave(&db, clave).await? {
-                let nuevo = Contenido::de(&nueva);
-                if nuevo == actual {
-                    return Ok((id, false));
-                }
-                let se_ve_distinto = nuevo.se_ve_distinto(&actual);
-                let fecha = if se_ve_distinto { ", Creada_En = datetime('now','localtime')" } else { "" };
-                let mut valores = nuevo.valores();
-                valores.push(Value::Text(id.clone()));
+/// `emitir` con el escritor de quien llama y dentro de su transacción, que tiene que haber abierto:
+/// lo usa también quien avisa de algo en la misma transacción en que lo hace (SYN-INC-07, la fusión
+/// de fichas). Devuelve el id y si ha escrito algo.
+pub(crate) async fn emitir_en<W: Writer>(db: &W, nueva: NuevaNotificacion) -> AppResult<(String, bool)> {
+    let (destino_tipo, destino_valor) = nueva.destino.to_columns();
 
-                return db.transaccion(async {
+    if let Some(clave) = nueva.clave_dedupe.as_deref() {
+        if let Some((id, actual)) = activa_por_clave(db, clave).await? {
+            let nuevo = Contenido::de(&nueva);
+            if nuevo == actual {
+                return Ok((id, false));
+            }
+            let se_ve_distinto = nuevo.se_ve_distinto(&actual);
+            let fecha = if se_ve_distinto { ", Creada_En = datetime('now','localtime')" } else { "" };
+            let mut valores = nuevo.valores();
+            valores.push(Value::Text(id.clone()));
+
+            return async {
+                db.execute(
+                    &format!(
+                        "UPDATE Notificaciones SET Severidad = ?1, Titulo = ?2, Cuerpo = ?3, \
+                         Tipo = ?4, Destino_Tipo = ?5, Destino_Valor = ?6, Accion = ?7, \
+                         Payload = ?8, Expira_En = ?9{fecha} WHERE ID_Notificacion = ?10;"
+                    ),
+                    valores,
+                )
+                .await
+                .map_err(db_err)?;
+                if se_ve_distinto {
                     db.execute(
-                        &format!(
-                            "UPDATE Notificaciones SET Severidad = ?1, Titulo = ?2, Cuerpo = ?3, \
-                             Tipo = ?4, Destino_Tipo = ?5, Destino_Valor = ?6, Accion = ?7, \
-                             Payload = ?8, Expira_En = ?9{fecha} WHERE ID_Notificacion = ?10;"
-                        ),
-                        valores,
+                        "DELETE FROM Notificacion_Lecturas WHERE ID_Notificacion = ?1;",
+                        vec![Value::Text(id.clone())],
                     )
                     .await
                     .map_err(db_err)?;
-                    if se_ve_distinto {
-                        db.execute(
-                            "DELETE FROM Notificacion_Lecturas WHERE ID_Notificacion = ?1;",
-                            vec![Value::Text(id.clone())],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                    }
-                    Ok(())
-                }).await.map(|_| (id, true));
-            }
+                }
+                Ok::<(), AppError>(())
+            }.await.map(|_| (id, true));
         }
-
-        let id = new_id();
-        db.execute(
-            r#"
-            INSERT INTO Notificaciones (
-                ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo,
-                Destino_Tipo, Destino_Valor, Accion, Payload, Clave_Dedupe,
-                Creada_En, Expira_En
-            ) VALUES (
-                ?1, ?2, ?3, ?4, ?5,
-                ?6, ?7, ?8, ?9, ?10,
-                datetime('now','localtime'), ?11
-            );
-            "#,
-            vec![
-                Value::Text(id.clone()),
-                Value::Text(nueva.tipo),
-                Value::Text(nueva.severidad.as_str().to_string()),
-                Value::Text(nueva.titulo),
-                opt_text(nueva.cuerpo),
-                Value::Text(destino_tipo.to_string()),
-                opt_text(destino_valor),
-                opt_text(nueva.accion),
-                opt_text(nueva.payload),
-                opt_text(nueva.clave_dedupe),
-                opt_text(nueva.expira_en),
-            ],
-        )
-        .await
-        .map_err(db_err)?;
-
-        Ok((id, true))
     }
+
+    let id = new_id();
+    db.execute(
+        r#"
+        INSERT INTO Notificaciones (
+            ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo,
+            Destino_Tipo, Destino_Valor, Accion, Payload, Clave_Dedupe,
+            Creada_En, Expira_En
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5,
+            ?6, ?7, ?8, ?9, ?10,
+            datetime('now','localtime'), ?11
+        );
+        "#,
+        vec![
+            Value::Text(id.clone()),
+            Value::Text(nueva.tipo),
+            Value::Text(nueva.severidad.as_str().to_string()),
+            Value::Text(nueva.titulo),
+            opt_text(nueva.cuerpo),
+            Value::Text(destino_tipo.to_string()),
+            opt_text(destino_valor),
+            opt_text(nueva.accion),
+            opt_text(nueva.payload),
+            opt_text(nueva.clave_dedupe),
+            opt_text(nueva.expira_en),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+
+    Ok((id, true))
 }
 
 #[async_trait]

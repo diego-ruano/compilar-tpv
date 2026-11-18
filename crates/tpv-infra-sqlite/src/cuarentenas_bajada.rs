@@ -470,6 +470,21 @@ pub(crate) async fn resolver(
         }
     }
 
+    // SYN-INC-07 · Las fichas de aquí con las que chocaría lo traído: se le pregunta a la nube si las
+    // tiene, con la misma foto. Sólo se funde una que no tiene (`clave_natural::fundir`).
+    let candidatas = {
+        let r = db.read().await;
+        crate::clave_natural::candidatas(r.conn(), &arriba, &claves).await?
+    };
+    let mut en_la_nube = crate::clave_natural::EnLaNube::new();
+    for (tabla, ids) in &candidatas {
+        let pedidas: Vec<Vec<Json>> = ids.iter().map(|id| vec![Json::String(id.clone())]).collect();
+        match traer(nube, tabla, &pedidas, claves.get(tabla).map(Vec::as_slice).unwrap_or_default(), hasta_seq).await? {
+            Some(t) => crate::clave_natural::anotar(&mut en_la_nube, tabla, ids, &t),
+            None => return Ok(None),
+        }
+    }
+
     // Con el escritor cogido: la base tiene que seguir como estaba al pedir el resumen.
     let w = db.write().await;
     let conn: &Connection = w.raw();
@@ -544,7 +559,7 @@ pub(crate) async fn resolver(
         if !(motivo.starts_with("no_entra: ") && motivo.contains("unique")) {
             continue;
         }
-        match crate::clave_natural::fundir(&w, &c.tocadas, &arriba, &claves, &subida).await {
+        match crate::clave_natural::fundir(&w, &c.tocadas, &arriba, &claves, &subida, &en_la_nube).await {
             Ok(0) => {}
             Ok(_) => *motivo = "fundida_en_la_de_la_nube".into(),
             Err(e) => tracing::warn!(target: "tpv::sync", op_id = %c.op_id, error = %e, "no se ha podido fundir la ficha de aquí en la de la nube (SYN-INC-07)"),
