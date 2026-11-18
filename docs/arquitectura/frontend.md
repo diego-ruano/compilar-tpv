@@ -252,7 +252,8 @@ capacidades; Configuración → Permisos edita roles desde Main. No se releen po
 pueden haber cambiado: un cambio replicado de usuarios, roles o concesiones, una conexión nueva de la
 Handy, al montar una pantalla que los usa y al volver a la aplicación. El gate de verdad está en los comandos ([permisos.md](permisos.md)).
 Una relectura que falla no desmonta la aplicación: se sigue con los últimos permisos leídos y se
-reintenta sola; un usuario desactivado con la sesión abierta vuelve al login, que dice por qué
+reintenta sola; un usuario desactivado con la sesión abierta, o una sesión que el backend ya no
+reconoce (`permiso_denegado` al leer sus propios permisos), vuelve al login, que dice por qué
 ([permisos.md](permisos.md#capacidades-por-rol-ri-70)). La sesión se
 cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `logout` al arrancar.
 

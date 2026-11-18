@@ -153,6 +153,9 @@ leído nunca (`shared/lib/permisos.ts::estadoPermisos`). **Un usuario desactivad
 abierta** no recibe «no tienes permiso», que lo dejaba sin salida: `usuario_inactivo` («Tu usuario ya
 no está activo. Habla con un administrador.»), con el mismo texto en la Main (el repositorio SQLite) y
 en el worker (`GET /v1/trabajadores/permisos/:id`), y la pantalla cierra la sesión y el login lo dice.
+Lo mismo si esa lectura contesta `permiso_denegado` (el backend ya no tiene la sesión, o el usuario
+ya no existe): seguir con los permisos viejos era trabajar con una sesión que cada comando rechaza.
+El login dice «Tu sesión ya no es válida en este equipo. Vuelve a entrar.» (`motivoDeCierre`).
 
 ### Arranque y recuperación
 

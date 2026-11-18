@@ -9,7 +9,7 @@ import { useContactSettings } from "../shared/stores/useContactSettings";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
-import { esAdmin, estadoPermisos } from "../shared/lib/permisos";
+import { esAdmin, estadoPermisos, motivoDeCierre } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 
 import Login from "./pages/Login";
@@ -60,9 +60,12 @@ function AppInner() {
     const permisos = usePermisos();
     const toast = useToast();
     const decision = estadoPermisos({ isError: permisos.isError, error: permisos.error, hayDatos: permisos.data !== undefined });
-    // El usuario ya no está activo (lo desactivaron con la sesión abierta): fuera, y el login dice por qué.
+    // El usuario ya no está activo (lo desactivaron con la sesión abierta) o el backend ya no reconoce
+    // la sesión: fuera, y el login dice por qué.
     useEffect(() => {
-        if (decision === "cerrar_sesion" && role) useAuth.getState().logout(toAppError(permisos.error).message);
+        if (decision === "cerrar_sesion" && role) {
+            useAuth.getState().logout(motivoDeCierre(permisos.error, toAppError(permisos.error).message));
+        }
     }, [decision, role, permisos.error]);
     // Una relectura que falla con permisos ya leídos no desmonta nada: se avisa una vez por racha, y
     // `usePermisos` la reintenta sola.

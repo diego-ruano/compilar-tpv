@@ -9,10 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { estadoPermisos } from "../src/shared/lib/permisos";
+import { estadoPermisos, motivoDeCierre, MSG_SESION_NO_VALIDA } from "../src/shared/lib/permisos";
 
 const sinRed = { code: "external", message: "No hay conexión" };
 const inactivo = { code: "usuario_inactivo", message: "Tu usuario ya no está activo. Habla con un administrador." };
+const sinSesion = { code: "permiso_denegado", message: "Inicia sesión para hacer esto" };
 
 describe("los permisos de la sesión", () => {
 	it("mientras no han contestado nunca, se espera sin pintar nada", () => {
@@ -34,5 +35,14 @@ describe("los permisos de la sesión", () => {
 	it("si el usuario ya no está activo, se cierra la sesión, tuviera permisos leídos o no", () => {
 		expect(estadoPermisos({ isError: true, error: inactivo, hayDatos: true })).toBe("cerrar_sesion");
 		expect(estadoPermisos({ isError: true, error: inactivo, hayDatos: false })).toBe("cerrar_sesion");
+		expect(motivoDeCierre(inactivo, inactivo.message)).toBe(inactivo.message);
+	});
+
+	it("si el backend ya no reconoce la sesión, se cierra en vez de seguir con los permisos viejos", () => {
+		// Antes se seguía pintando con los últimos leídos y se reintentaba cada 15 s para siempre.
+		expect(estadoPermisos({ isError: true, error: sinSesion, hayDatos: true })).toBe("cerrar_sesion");
+		expect(estadoPermisos({ isError: true, error: sinSesion, hayDatos: false })).toBe("cerrar_sesion");
+		// El login no dice «Inicia sesión para hacer esto», que es para quien intenta una acción.
+		expect(motivoDeCierre(sinSesion, sinSesion.message)).toBe(MSG_SESION_NO_VALIDA);
 	});
 });

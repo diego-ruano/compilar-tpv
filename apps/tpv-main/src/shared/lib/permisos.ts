@@ -47,8 +47,11 @@ export function esPermisoDenegado(e: unknown): boolean {
  *
  * - `esperar`: todavía no ha contestado nunca. No se pinta nada (es casi instantáneo, y un
  *   «Cargando permisos…» sólo parpadearía).
- * - `cerrar_sesion`: el usuario ya no está activo (lo desactivaron con la sesión abierta). Se
- *   cierra, y el login dice por qué.
+ * - `cerrar_sesion`: el usuario ya no está activo (lo desactivaron con la sesión abierta), o el
+ *   backend dice que la sesión no vale (`permiso_denegado` al leer los permisos de la propia
+ *   sesión: ya no la tiene, o el usuario ya no existe). Se cierra, y el login dice por qué
+ *   (`motivoDeCierre`). Seguir con los permisos viejos era trabajar con una sesión que el backend
+ *   rechaza en cada comando, reintentando cada 15 s sin fin.
  * - `sin_permisos`: no se han podido leer nunca. Sin ellos no se sabe qué enseñar: la pantalla de
  *   error, con reintentar y cerrar sesión.
  * - `trabajar`: hay permisos que usar. También si la última relectura ha fallado (sin red, la
@@ -58,8 +61,20 @@ export function esPermisoDenegado(e: unknown): boolean {
 export type EstadoPermisos = "esperar" | "cerrar_sesion" | "sin_permisos" | "trabajar";
 
 export function estadoPermisos(q: { isError: boolean; error: unknown; hayDatos: boolean }): EstadoPermisos {
-    if (q.isError && esError(q.error, "usuario_inactivo")) return "cerrar_sesion";
+    if (q.isError && (esError(q.error, "usuario_inactivo") || esPermisoDenegado(q.error))) return "cerrar_sesion";
     if (q.hayDatos) return "trabajar";
     if (q.isError) return "sin_permisos";
     return "esperar";
+}
+
+/** Lo que dice el login cuando el backend ya no reconoce la sesión. */
+export const MSG_SESION_NO_VALIDA = "Tu sesión ya no es válida en este equipo. Vuelve a entrar.";
+
+/**
+ * Lo que el login dice al cerrar la sesión por `cerrar_sesion`: el motivo del backend si el usuario
+ * ya no está activo; si la sesión no vale, `MSG_SESION_NO_VALIDA` (el texto de `permiso_denegado` es
+ * para quien intenta una acción, como «Inicia sesión para hacer esto», y no explica el cierre).
+ */
+export function motivoDeCierre(error: unknown, mensaje: string): string {
+    return esError(error, "usuario_inactivo") ? mensaje : MSG_SESION_NO_VALIDA;
 }
