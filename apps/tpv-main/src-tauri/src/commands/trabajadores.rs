@@ -13,8 +13,8 @@ use tpv_application::use_cases::trabajadores as uc;
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
     CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
-    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
-    TrabajadorUpdateInput, TurnoRow,
+    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
+    TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
 use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
@@ -104,6 +104,23 @@ pub async fn trabajadores_update(
     // usuario nuevo no es el de ninguna sesión.
     state.olvidar_autorizacion();
     Ok(guardado?)
+}
+
+/// Eliminar a un trabajador: se borra si no tiene historia y, si la tiene, se retira (sus fichajes,
+/// cobros y comandas se conservan). Administrador, como la edición; quién lo pide sale de la sesión.
+#[tauri::command]
+#[specta::specta]
+pub async fn trabajadores_eliminar(
+    state: State<'_, AppState>,
+    args: TrabajadorEliminarInput,
+) -> Result<TrabajadorEliminado, AppErrorDto> {
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let repo = state.trabajadores_repo().await?;
+    let hecho = uc::eliminar_trabajador(repo.as_ref(), args, &sesion.id_usuario).await;
+    // PERM-CACHE: como la edición, deja a un usuario sin poder entrar, y a la Handy que lo hace no le
+    // vuelve su propio cambio como aviso.
+    state.olvidar_autorizacion();
+    Ok(hecho?)
 }
 
 /* Escrituras */

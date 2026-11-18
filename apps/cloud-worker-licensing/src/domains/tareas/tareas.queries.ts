@@ -36,8 +36,10 @@ export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise
 	if (ids.length === 0) return true;
 	// DO-01: la lista, en un solo parámetro (un array JSON), como en la Main.
 	const rs = await db.execute({
-		sql: `SELECT COUNT(DISTINCT ID_Trabajador) AS n FROM Trabajadores
-		      WHERE ID_Trabajador IN (SELECT value FROM json_each(?1));`,
+		// Un eliminado con historia (`Archivado_En`) ya no se puede asignar, como en la Main.
+		sql: `SELECT COUNT(DISTINCT t.ID_Trabajador) AS n FROM Trabajadores t
+		      JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
+		      WHERE t.ID_Trabajador IN (SELECT value FROM json_each(?1)) AND u.Archivado_En IS NULL;`,
 		args: [JSON.stringify(ids)],
 	});
 	const n = Number(rows(rs)[0]?.n ?? 0);

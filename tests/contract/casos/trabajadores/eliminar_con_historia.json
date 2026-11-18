@@ -1,0 +1,24 @@
+{
+  "descripcion": "Eliminar a un trabajador con historia (un fichaje): se retira (Estado Inactivo y Archivado_En) y conserva su fichaje; se le quitan los turnos de hoy en adelante y el horario predeterminado, y el turno que ya pasó se queda.",
+  "comando": "trabajadores.eliminar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno', 'Activo');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-1', 'Mañana');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado) VALUES ('fich-1', 'user-1', '2000-01-01', 1, '2000-01-01 09:00:00', '2000-01-01 17:00:00', 'CERRADO');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-pasada', 'trab-1', '2000-01-01', 'turno-1', 'Sala');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-futura', 'trab-1', '2099-01-01', 'turno-1', 'Sala');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, ID_Turno, Area) VALUES ('def-1', 'trab-1', 1, 'turno-1', 'Sala');"
+  ],
+  "entrada": {
+    "id_trabajador": "trab-1"
+  },
+  "snapshot": {
+    "Usuarios": "SELECT ID_Usuario, Estado, CASE WHEN Archivado_En IS NOT NULL THEN 1 ELSE 0 END AS Retirado FROM Usuarios",
+    "Trabajadores": "SELECT ID_Trabajador, ID_Usuario FROM Trabajadores",
+    "Fichajes": "SELECT ID_Fichaje, ID_Usuario FROM Fichajes",
+    "Asignacion_Turnos": "SELECT ID_Asignacion FROM Asignacion_Turnos",
+    "Horario_Predeterminado": "SELECT ID_Default FROM Horario_Predeterminado"
+  }
+}

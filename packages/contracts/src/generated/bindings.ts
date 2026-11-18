@@ -3546,6 +3546,19 @@ export type TrabajadorDetailRow = {
 	Sin_PIN?: boolean,
 };
 
+/**
+ *  Cómo ha quedado. `retirado`: tenía historia (fichajes, cobros, comandas…), así que sigue en la
+ *  base con `Archivado_En`, sin poder entrar y fuera de las listas; si no, se ha borrado.
+ */
+export type TrabajadorEliminado = {
+	retirado: boolean,
+};
+
+/**  Eliminar a un trabajador: se borra si no tiene historia y se retira si la tiene. */
+export type TrabajadorEliminarInput = {
+	id_trabajador: string,
+};
+
 export type TrabajadorIdByUsuarioArgs = {
 	id_usuario: string,
 };

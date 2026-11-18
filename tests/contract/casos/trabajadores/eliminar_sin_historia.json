@@ -1,0 +1,29 @@
+{
+  "descripcion": "Eliminar a un trabajador sin historia: se borran su ficha, su usuario, su turno partido marcado, sus turnos futuros, su horario predeterminado y sus tareas pendientes; el otro trabajador no se toca.",
+  "comando": "trabajadores.eliminar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno', 'Activo');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos', 'Activo');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-1', 'Mañana');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-futura', 'trab-1', '2099-01-01', 'turno-1', 'Sala');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-otro', 'trab-2', '2099-01-01', 'turno-1', 'Sala');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, ID_Turno, Area) VALUES ('def-1', 'trab-1', 1, 'turno-1', 'Sala');",
+    "INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido) VALUES ('user-1', '2099-01-01', 1);",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea-1', 'Barrer', '2000-01-01 10:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At) VALUES ('tarea-1', 'trab-1', '2000-01-01 10:00:00');"
+  ],
+  "entrada": {
+    "id_trabajador": "trab-1"
+  },
+  "snapshot": {
+    "Usuarios": "SELECT ID_Usuario, Estado, CASE WHEN Archivado_En IS NOT NULL THEN 1 ELSE 0 END AS Retirado FROM Usuarios",
+    "Trabajadores": "SELECT ID_Trabajador, ID_Usuario FROM Trabajadores",
+    "Asignacion_Turnos": "SELECT ID_Asignacion FROM Asignacion_Turnos",
+    "Horario_Predeterminado": "SELECT ID_Default FROM Horario_Predeterminado",
+    "Fichaje_Dia": "SELECT ID_Usuario FROM Fichaje_Dia",
+    "Tarea_Asignaciones": "SELECT ID_Tarea, ID_Trabajador FROM Tarea_Asignaciones"
+  }
+}

@@ -753,6 +753,7 @@ export async function trabajadores(
 		JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
 		WHERE r.Nombre_Rol IN ('Cocinero','Camarero','Limpieza')
+			AND u.Archivado_En IS NULL -- la plantilla, sin los eliminados (como la Main)
 		ORDER BY r.Nombre_Rol ASC, u.Nombre ASC;
 	`);
 	const base = rows(baseRs)

@@ -55,8 +55,10 @@ async fn apply_set_asignaciones_core<C: Writer>(
     if !ids_trabajadores.is_empty() {
         let encontrados = select_one_i64(
             conn,
-            "SELECT COUNT(DISTINCT ID_Trabajador) FROM Trabajadores \
-             WHERE ID_Trabajador IN (SELECT value FROM json_each(?1));",
+            // Un eliminado con historia (`Archivado_En`) ya no se puede asignar.
+            "SELECT COUNT(DISTINCT t.ID_Trabajador) FROM Trabajadores t \
+             JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario \
+             WHERE t.ID_Trabajador IN (SELECT value FROM json_each(?1)) AND u.Archivado_En IS NULL;",
             vec![lista_json(ids_trabajadores)],
         )
         .await?

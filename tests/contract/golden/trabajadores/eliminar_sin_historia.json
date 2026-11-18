@@ -1,0 +1,23 @@
+{
+  "Asignacion_Turnos": [
+    {
+      "ID_Asignacion": "asig-otro"
+    }
+  ],
+  "Fichaje_Dia": [],
+  "Horario_Predeterminado": [],
+  "Tarea_Asignaciones": [],
+  "Trabajadores": [
+    {
+      "ID_Trabajador": "trab-2",
+      "ID_Usuario": "user-2"
+    }
+  ],
+  "Usuarios": [
+    {
+      "Estado": "Activo",
+      "ID_Usuario": "user-2",
+      "Retirado": 0
+    }
+  ]
+}

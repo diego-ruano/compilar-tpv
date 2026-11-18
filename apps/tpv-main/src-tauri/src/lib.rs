@@ -2300,6 +2300,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::trabajadores::trabajadores_get_trabajador_id_by_usuario,
             commands::trabajadores::trabajadores_create,
             commands::trabajadores::trabajadores_update,
+            commands::trabajadores::trabajadores_eliminar,
             commands::trabajadores::turnos_get_all,
             commands::trabajadores::horarios_get_asignaciones_semana,
             commands::trabajadores::horarios_create_asignacion,
@@ -3500,6 +3501,9 @@ mod tests_autorizacion_guardada {
         let trabajadores = include_str!("commands/trabajadores.rs");
         let editar = trabajadores.split("pub async fn trabajadores_update(").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(editar.contains("state.olvidar_autorizacion()"), "la edición de un trabajador tira lo guardado");
+        let eliminar = trabajadores.split("pub async fn trabajadores_eliminar(").nth(1).unwrap().split("
+}").next().unwrap();
+        assert!(eliminar.contains("state.olvidar_autorizacion()"), "eliminar a un trabajador tira lo guardado");
     }
 }
 

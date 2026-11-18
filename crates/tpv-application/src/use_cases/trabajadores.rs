@@ -4,8 +4,8 @@
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
     CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
-    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
-    TrabajadorUpdateInput, TurnoRow,
+    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
+    TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
 use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
@@ -242,6 +242,29 @@ pub async fn update_trabajador(
     };
 
     repo.update_trabajador(&input.id_trabajador, cambios).await
+}
+
+/// Lo que se dice al intentar eliminar la propia ficha: el mismo texto en la Main y en la Handy.
+pub const MSG_ELIMINAR_PROPIA_FICHA: &str =
+    "No puedes eliminar tu propia ficha. Pídeselo a otro administrador.";
+
+/// Eliminar a un trabajador (lo borra o, si tiene historia, lo retira: ver el puerto).
+/// `id_usuario_sesion` sale de la sesión: nadie se elimina a sí mismo, que le cerraría la sesión
+/// a mitad y, si es el único que sabe la clave de algo, lo dejaría sin dueño.
+pub async fn eliminar_trabajador(
+    repo: &dyn TrabajadoresRepository,
+    input: TrabajadorEliminarInput,
+    id_usuario_sesion: &str,
+) -> AppResult<TrabajadorEliminado> {
+    let id_trabajador = input.id_trabajador.trim();
+    if id_trabajador.is_empty() {
+        return Err(AppError::validation("Falta el trabajador."));
+    }
+    if repo.get_id_by_usuario(id_usuario_sesion).await?.as_deref() == Some(id_trabajador) {
+        return Err(AppError::conflict(MSG_ELIMINAR_PROPIA_FICHA));
+    }
+    let retirado = repo.eliminar_trabajador(id_trabajador).await?;
+    Ok(TrabajadorEliminado { retirado })
 }
 
 #[cfg(test)]

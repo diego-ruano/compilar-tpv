@@ -49,12 +49,14 @@ import {
 	createAsignacion,
 	guardarAsignacion,
 	deleteAsignacion,
+	eliminarTrabajador,
 	setPredeterminadoDesdeSemana,
 	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
 import {
 	filasSemana,
 	predeterminadoDesdeSemanaItems,
+	usuarioDeTrabajador,
 } from "../src/domains/trabajadores/trabajadores.queries";
 import {
 	patchBusiness,
@@ -336,6 +338,10 @@ import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/r
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
 import goldenHorariosCopiar from "../../../tests/contract/golden/horarios/copiar_semana.json";
 import casoHorariosPredeterminado from "../../../tests/contract/casos/horarios/set_predeterminado_desde_semana.json";
+import casoEliminarConHistoria from "../../../tests/contract/casos/trabajadores/eliminar_con_historia.json";
+import goldenEliminarConHistoria from "../../../tests/contract/golden/trabajadores/eliminar_con_historia.json";
+import casoEliminarSinHistoria from "../../../tests/contract/casos/trabajadores/eliminar_sin_historia.json";
+import goldenEliminarSinHistoria from "../../../tests/contract/golden/trabajadores/eliminar_sin_historia.json";
 import goldenHorariosPredeterminado from "../../../tests/contract/golden/horarios/set_predeterminado_desde_semana.json";
 import casoLoginPunchEntrada from "../../../tests/contract/casos/login/punch_entrada.json";
 import goldenLoginPunchEntrada from "../../../tests/contract/golden/login/punch_entrada.json";
@@ -506,6 +512,8 @@ const CASOS = [
 		caso: casoHorariosPredeterminado,
 		golden: goldenHorariosPredeterminado,
 	},
+	{ nombre: "trabajadores_eliminar_con_historia", caso: casoEliminarConHistoria, golden: goldenEliminarConHistoria },
+	{ nombre: "trabajadores_eliminar_sin_historia", caso: casoEliminarSinHistoria, golden: goldenEliminarSinHistoria },
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
 	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
 	{
@@ -1061,6 +1069,12 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			// comando (cada copia con su ID ya resuelto).
 			const filas = await filasSemana(db, caso.entrada.from_monday);
 			aplicar(hub, sql, copySemana(caso.entrada as any, filas));
+			return;
+		}
+		case "trabajadores.eliminar": {
+			// Igual que la ruta: el usuario de la ficha se lee antes, y con él se construye el comando.
+			const idUsuario = (await usuarioDeTrabajador(db, caso.entrada.id_trabajador)) ?? "";
+			aplicar(hub, sql, eliminarTrabajador(caso.entrada.id_trabajador, idUsuario));
 			return;
 		}
 		case "horarios.set_predeterminado_desde_semana": {

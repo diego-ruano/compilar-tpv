@@ -258,6 +258,29 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
   su nombre pasa sus gates, y lo que se firma en una fila queda a su nombre.
 - La edición sólo cambia `Sin_PIN` si llega (`COALESCE(?, Sin_PIN)`, igual en la Main y en el worker).
 
+### Eliminar a un trabajador
+
+«Eliminar» en Trabajadores (administrador, `trabajadores_eliminar`, `DELETE /v1/trabajadores/:id`)
+pide confirmación diciendo qué pasa. **Lo que tiene historia no se borra**: su registro de jornada
+(fichajes), cobros, anulaciones, comandas, movimientos de caja y de stock, cierres, aperturas del
+cajón, lo que preparó en cocina, las tareas hechas y los turnos ya pasados. Con algo de eso se
+**retira**: `Usuarios.Estado = 'Inactivo'` y `Archivado_En`, así que no entra ni ficha, sale de la
+plantilla, del selector de entrada, de las tareas, de los horarios y de las estadísticas de la
+plantilla, y lo firmado sigue a su nombre. Sin nada, se borra. En los dos casos se quitan sus turnos
+de hoy en adelante, su horario predeterminado y sus tareas pendientes.
+
+- Una tanda de sentencias que deciden cada una por su cuenta, igual en la Main
+  (`sql_quitar_trabajador`, dentro del `WriteGuard`) y en el worker (`SQL_QUITAR_TRABAJADOR`), como
+  la de un producto: quien las aplica después vuelve a decidir con sus datos. Lo contrastan
+  `tests/contract/casos/trabajadores/`.
+- No deja el negocio sin administrador activo (RI-62, `ultimo_administrador`) y nadie se elimina a sí
+  mismo («No puedes eliminar tu propia ficha. Pídeselo a otro administrador.», en el caso de uso, con
+  el usuario de la sesión). En el worker, que la ficha siga en la plantilla y lo del administrador
+  son guardas del lote (SYNC-30).
+- Uno retirado no se edita (volver a ponerlo «Activo» lo devolvería al login) ni se recupera desde
+  la aplicación. Conserva su correo y su DNI, que son únicos: a quien puede volver se le desactiva
+  desde «Editar» en vez de eliminarlo, y el modal lo dice.
+
 ### Recuperar el PIN
 
 | Pieza | Archivo |

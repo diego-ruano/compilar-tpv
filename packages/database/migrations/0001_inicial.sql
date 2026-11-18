@@ -148,6 +148,9 @@ CREATE TABLE IF NOT EXISTS Usuarios (
   Requiere_Setup INTEGER DEFAULT 0,
   -- 1 = entra sin PIN: el login y el fichaje no se lo piden. Conserva su Password_Hash.
   Sin_PIN INTEGER NOT NULL DEFAULT 0 CHECK (Sin_PIN IN (0, 1)),
+  -- Eliminado con historia (fichajes, cobros, comandas...): se retira en vez de borrarse. Sale de
+  -- todas las listas y no puede entrar (Estado = 'Inactivo'), y lo que firmó se conserva.
+  Archivado_En DATETIME,
   FOREIGN KEY (ID_Rol) REFERENCES Roles(ID_Rol)
 );
 

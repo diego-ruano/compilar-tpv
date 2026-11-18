@@ -218,7 +218,9 @@ export function updateTrabajador(
 					},
 					{
 						kind: "guard",
-						sql: "SELECT EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1) AND EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Trabajador = ?2);",
+						// Una ficha eliminada con historia (`Archivado_En`) tampoco se edita: volver a ponerla
+						// «Activo» la devolvería al login. Como la Main.
+						sql: "SELECT EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL) AND EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Trabajador = ?2);",
 						args: [input.id_usuario, idTrabajador],
 						error: "trabajador_no_encontrado",
 						status: 404,
@@ -577,5 +579,88 @@ export function setPredeterminadoDesdeSemana(
 			payload: { steps, resultKey: "ok" },
 		},
 		cloudPayload: { fecha_lunes: fechaLunes, items },
+	};
+}
+
+/**
+ * ¿Tiene historia el trabajador `?1` (su usuario, `?2`)? Mismo SQL que `HISTORIA_DEL_TRABAJADOR` en
+ * `tpv-infra-sqlite/src/trabajadores.rs`: lo que firmó o registró y hay que conservar. Lo que sólo
+ * es plan (turnos de hoy en adelante, el horario predeterminado, tareas pendientes) no cuenta.
+ */
+const HISTORIA_DEL_TRABAJADOR = `(EXISTS (SELECT 1 FROM Fichajes WHERE ID_Usuario = ?2)
+	OR EXISTS (SELECT 1 FROM Pagos WHERE ID_Usuario_Cobrador = ?2 OR Anulado_Por = ?2 OR ID_Trabajador_Cobrador = ?1)
+	OR EXISTS (SELECT 1 FROM Comandas WHERE ID_Trabajador = ?1)
+	OR EXISTS (SELECT 1 FROM Movimientos_Caja WHERE ID_Usuario = ?2 OR ID_Trabajador = ?1)
+	OR EXISTS (SELECT 1 FROM Movimientos_Stock WHERE ID_Usuario = ?2)
+	OR EXISTS (SELECT 1 FROM Cierres_Caja WHERE ID_Usuario = ?2 OR Reabierto_Por = ?2)
+	OR EXISTS (SELECT 1 FROM Cierre_Rectificaciones WHERE ID_Usuario = ?2)
+	OR EXISTS (SELECT 1 FROM Aperturas_Cajon WHERE ID_Usuario = ?2)
+	OR EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Usuario_Cocinero = ?2)
+	OR EXISTS (SELECT 1 FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado <> 'PENDIENTE')
+	OR EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha < date('now','localtime')))`;
+
+const retirado = (id: string) =>
+	`EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ${id} AND Archivado_En IS NOT NULL)`;
+
+/**
+ * Eliminar a un trabajador: se retira si tiene historia y se borra si no. Las mismas sentencias, en
+ * el mismo orden y con los mismos argumentos, que `sql_quitar_trabajador` en la Main (`T` el
+ * trabajador, `U` su usuario): cada una decide por su cuenta y quien las aplica vuelve a decidir con
+ * sus datos. Lo que se compara entre los dos lados es el efecto (`tests/contract`).
+ */
+const SQL_QUITAR_TRABAJADOR: [string, ("T" | "U")[]][] = [
+	[
+		`UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = datetime('now','localtime')
+		 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND ${HISTORIA_DEL_TRABAJADOR};`,
+		["T", "U"],
+	],
+	["DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1;", ["T"]],
+	["DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha >= date('now','localtime');", ["T"]],
+	["DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE';", ["T"]],
+	[`DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT ${retirado("?1")};`, ["U"]],
+	[`DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT ${retirado("?2")};`, ["T", "U"]],
+	[
+		`DELETE FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL
+		 AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1);`,
+		["U"],
+	],
+];
+
+/**
+ * Lo deciden dos guardas, dentro del lote (SYNC-30), como la Main dentro de su transacción: que la
+ * ficha siga en la plantilla (`trabajador_no_encontrado`; una ya retirada tampoco) y que no deje el
+ * negocio sin administrador activo (RI-62: eliminarlo es dejarlo `Inactivo`, así que el rol nuevo no
+ * cuenta). `idUsuario` es el que leyó la ruta; vacío si ya no estaba.
+ */
+export function eliminarTrabajador(idTrabajador: string, idUsuario: string): BuiltCommand {
+	const valor = (a: "T" | "U") => (a === "T" ? idTrabajador : idUsuario);
+	return {
+		commandName: "trabajadores_eliminar",
+		command: {
+			type: "tenantDb.transaction",
+			payload: {
+				steps: [
+					{
+						kind: "guard",
+						sql: `SELECT EXISTS (SELECT 1 FROM Trabajadores t JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
+							WHERE t.ID_Trabajador = ?1 AND u.ID_Usuario = ?2 AND u.Archivado_En IS NULL);`,
+						args: [idTrabajador, idUsuario],
+						error: "trabajador_no_encontrado",
+						status: 404,
+					},
+					{
+						kind: "guard",
+						sql: `SELECT NOT (${DEJARIA_SIN_ADMINISTRADOR});`,
+						args: [idUsuario, "", "Inactivo"],
+						error: "ultimo_administrador",
+						status: 409,
+					},
+					...SQL_QUITAR_TRABAJADOR.map(([sql, args]) => ({ kind: "execute", sql, args: args.map(valor) })),
+				],
+			},
+		},
+		// La petición tal cual: el usuario es lo que leyó la ruta, y el reintento de una que ya
+		// entró ya no lo encuentra.
+		cloudPayload: { id_trabajador: idTrabajador },
 	};
 }

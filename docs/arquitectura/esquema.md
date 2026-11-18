@@ -110,9 +110,10 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
   comanda abierta por mesa; los tickets de barra no compiten porque los `NULL` son distintos en un índice
   único. Un canal nuevo sólo amplía el `CHECK`.
 - **Lo que tiene historia se archiva, no se borra** (RI-54): un producto con ventas o consumos
-  (`Productos.Archivado_En`) y una mesa o zona con comandas o reservas (`Archivada_En`). Lo archivado
-  sale de la carta, del inventario, del plano y de las reservas nuevas, y sigue en estadísticas,
-  tickets y reconciliación. Sus `UNIQUE` de nombre sólo cuentan entre los activos (índices parciales,
+  (`Productos.Archivado_En`), una mesa o zona con comandas o reservas (`Archivada_En`) y un
+  trabajador con fichajes o algo firmado (`Usuarios.Archivado_En`, [permisos.md](permisos.md#eliminar-a-un-trabajador)). Lo archivado
+  sale de la carta, del inventario, del plano, de la plantilla y de las reservas nuevas, y sigue en
+  estadísticas, tickets y reconciliación. Sus `UNIQUE` de nombre sólo cuentan entre los activos (índices parciales,
   y los `ON CONFLICT` llevan su `WHERE`). Una lista nueva de catálogo filtra `Archivado_En IS NULL`.
 - **Los valores de dominio cerrados son triggers, no `CHECK`** (RI-48): métodos de pago y estados de
   cocina, reservas, tareas y fichajes. Un `RAISE(ABORT)` corta también un `INSERT OR IGNORE`, que ante

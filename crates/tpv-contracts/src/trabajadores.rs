@@ -112,6 +112,19 @@ pub struct TrabajadorDetailArgs {
     pub id_trabajador: String,
 }
 
+/// Eliminar a un trabajador: se borra si no tiene historia y se retira si la tiene.
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct TrabajadorEliminarInput {
+    pub id_trabajador: String,
+}
+
+/// Cómo ha quedado. `retirado`: tenía historia (fichajes, cobros, comandas…), así que sigue en la
+/// base con `Archivado_En`, sin poder entrar y fuera de las listas; si no, se ha borrado.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TrabajadorEliminado {
+    pub retirado: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorIdByUsuarioArgs {
     pub id_usuario: String,

@@ -921,3 +921,68 @@ describe("INV-INC-03 · una categoría con el nombre de otra", () => {
 		});
 	});
 });
+
+describe("Eliminar a un trabajador", () => {
+	const FICHAJE_DE_ANA =
+		"INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado) VALUES ('f1', 'ana', '2026-01-01', 1, '2026-01-01 09:00:00', '2026-01-01 17:00:00', 'CERRADO')";
+	const CON_PLAN = [
+		...USUARIOS,
+		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('futura', 'trab-ana', '2099-01-01', 'manana', 'Sala')",
+		"INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, ID_Turno, Area) VALUES ('d1', 'trab-ana', 1, 'manana', 'Sala')",
+	];
+
+	it("sin historia se borra, con su plan", async () => {
+		await conNegocio("eliminar-sin-historia", CON_PLAN, async (n) => {
+			const r = await n.pedir("DELETE", "/v1/trabajadores/trab-ana");
+			expect(r).toEqual({ status: 200, json: { retirado: false } });
+			expect(n.n("SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = 'ana'")).toBe(0);
+			expect(n.n("SELECT COUNT(*) FROM Trabajadores")).toBe(0);
+			expect(n.n("SELECT COUNT(*) FROM Asignacion_Turnos")).toBe(0);
+			expect(n.n("SELECT COUNT(*) FROM Horario_Predeterminado")).toBe(0);
+			// Y la Main recibe las mismas sentencias.
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(1);
+		});
+	});
+
+	it("con historia se retira: no puede entrar, sale de las listas y su fichaje sigue", async () => {
+		await conNegocio("eliminar-con-historia", [...CON_PLAN, FICHAJE_DE_ANA], async (n) => {
+			const r = await n.pedir("DELETE", "/v1/trabajadores/trab-ana");
+			expect(r).toEqual({ status: 200, json: { retirado: true } });
+			expect(n.n("SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = 'ana' AND Estado = 'Inactivo' AND Archivado_En IS NOT NULL")).toBe(1);
+			expect(n.n("SELECT COUNT(*) FROM Fichajes")).toBe(1);
+			expect(n.n("SELECT COUNT(*) FROM Asignacion_Turnos")).toBe(0);
+
+			const lista = await n.pedir("GET", "/v1/trabajadores");
+			expect(lista.json).toEqual([]);
+			// Ni se edita ni se vuelve a eliminar.
+			expect(await n.pedir("PUT", "/v1/trabajadores/trab-ana", { ...anaCamarera, id_rol: ADMIN })).toEqual({
+				status: 404,
+				json: { ok: false, error: "trabajador_no_encontrado" },
+			});
+			expect(await n.pedir("DELETE", "/v1/trabajadores/trab-ana")).toEqual({
+				status: 404,
+				json: { ok: false, error: "trabajador_no_encontrado" },
+			});
+		});
+	});
+
+	it("si el otro administrador deja de serlo entre la lectura y el lote, Ana no se elimina", async () => {
+		await conNegocio("eliminar-ultimo-admin", USUARIOS, async (n) => {
+			const r = await n.pedir("DELETE", "/v1/trabajadores/trab-ana", undefined, {
+				antesDelLote: ["UPDATE Usuarios SET Estado = 'Inactivo' WHERE ID_Usuario = 'luis'"],
+			});
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "ultimo_administrador" } });
+			expect(n.n("SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = 'ana' AND Archivado_En IS NULL")).toBe(1);
+		});
+	});
+
+	it("el reintento de una que entró contesta lo mismo", async () => {
+		await conNegocio("eliminar-reintento", [...USUARIOS, FICHAJE_DE_ANA], async (n) => {
+			const clave = "clave-de-eliminar-a-ana";
+			const primera = await n.pedir("DELETE", "/v1/trabajadores/trab-ana", undefined, { clave });
+			expect(primera).toEqual({ status: 200, json: { retirado: true } });
+			expect(await n.pedir("DELETE", "/v1/trabajadores/trab-ana", undefined, { clave })).toEqual(primera);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(1);
+		});
+	});
+});

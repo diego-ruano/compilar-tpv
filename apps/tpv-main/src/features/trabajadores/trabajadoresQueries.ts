@@ -110,3 +110,17 @@ export function useSetPredeterminadoDesdeSemana() {
     },
   });
 }
+
+/**
+ * Elimina a un trabajador: el backend lo borra si no tiene historia y lo retira si la tiene
+ * (`retirado`). Invalida la feature: sale de la lista y de los horarios.
+ */
+export function useEliminarTrabajador() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id_trabajador: string) => commands.trabajadoresEliminar({ id_trabajador }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+    },
+  });
+}

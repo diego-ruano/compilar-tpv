@@ -27,6 +27,10 @@ pub trait TrabajadoresRepository: Send + Sync {
         id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool>;
+    /// Elimina a un trabajador: lo borra si no tiene historia y, si la tiene, lo retira
+    /// (`Usuarios.Archivado_En`). Devuelve si se ha retirado. No deja el negocio sin
+    /// administrador activo (RI-62).
+    async fn eliminar_trabajador(&self, id_trabajador: &str) -> AppResult<bool>;
     /// Asignaciones de la semana del lunes dado, rellenando con el horario
     /// predeterminado para semanas presentes/futuras (filas con `id_asignacion = 0`).
     async fn get_asignaciones_semana(&self, fecha_lunes: String) -> AppResult<Vec<AsignacionRow>>;

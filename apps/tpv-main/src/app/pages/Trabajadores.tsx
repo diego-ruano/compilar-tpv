@@ -17,6 +17,7 @@ import {
   useCopySemanaAsignaciones,
   useSetPredeterminadoDesdeSemana,
 } from "../../features/trabajadores/trabajadoresQueries";
+import EliminarTrabajadorModal from "../../features/trabajadores/EliminarTrabajadorModal";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { captureException } from "../../shared/observability/sentry";
@@ -1110,7 +1111,8 @@ function Trabajadores() {
   const location = useLocation();
   const auth = useAuth();
   const isAdmin = esAdmin(usePermisos().rol);
-  const toast = useToast();
+  // A quién se va a eliminar (el modal de confirmación abierto).
+  const [aEliminar, setAEliminar] = useState<TrabajadorRow | null>(null);
 
   // Lista de trabajadores vía TanStack Query (caché). Las mutaciones de horarios y el
   // alta/edición invalidan la feature; aquí además refrescamos al navegar a la página.
@@ -1223,7 +1225,7 @@ function Trabajadores() {
 
                     <button
                       type="button"
-                      onClick={() => toast.info("Por implementar", "Dar de baja (pendiente)")}
+                      onClick={() => setAEliminar(t)}
                       className="
                         min-w-0 w-full justify-center whitespace-normal break-words text-center leading-tight
                         border-2 border-danger text-danger rounded-xl
@@ -1232,7 +1234,7 @@ function Trabajadores() {
                         xs:w-auto sm:px-4 sm:py-2 sm:text-sm
                       "
                     >
-                      Dar de baja
+                      Eliminar
                     </button>
                   </div>
                 </div>
@@ -1241,6 +1243,8 @@ function Trabajadores() {
           ))
         )}
       </div>
+
+      <EliminarTrabajadorModal trabajador={aEliminar} onCerrar={() => setAEliminar(null)} />
 
       <HorarioSemanal trabajadores={trabajadoresSafe} />
     </div>

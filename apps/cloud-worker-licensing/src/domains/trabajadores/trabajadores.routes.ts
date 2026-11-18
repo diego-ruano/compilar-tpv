@@ -79,6 +79,18 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	return c.json({ ok: true });
 });
 
+// Eliminar a un trabajador: se borra si no tiene historia y se retira si la tiene (`retirado`).
+// Que la ficha siga en la plantilla y que no deje el negocio sin administrador lo deciden las
+// guardas del comando (SYNC-30); lo que se lee aquí sólo lo construye y dice cómo ha quedado.
+trabajadoresRoutes.delete("/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_trabajador_invalido");
+	const idUsuario = (await tenantQuery(c, (db) => q.usuarioDeTrabajador(db, id))) ?? "";
+	await apply(c, cmd.eliminarTrabajador(id, idUsuario));
+	const retirado = idUsuario !== "" && (await tenantQuery(c, (db) => q.usuarioExiste(db, idUsuario)));
+	return c.json({ retirado });
+});
+
 trabajadoresRoutes.post("/horarios/asignaciones", cuerpo(S.asignacionCreateSchema), async (c) => {
 	const datos = c.req.valid("json");
 	// TRAB-04: el mismo turno para el mismo trabajador y día (aunque cambie el área) lo rechaza la

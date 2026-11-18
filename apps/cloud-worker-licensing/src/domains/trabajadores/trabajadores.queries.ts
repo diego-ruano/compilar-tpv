@@ -187,6 +187,7 @@ export async function all(db: Client): Promise<TrabajadorRow[]> {
 		FROM Trabajadores t
 		JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
+		WHERE u.Archivado_En IS NULL -- un eliminado con historia ya no es de la plantilla
 		ORDER BY u.Nombre ASC;
 	`);
 	return rows(rs) as TrabajadorRow[];
@@ -219,7 +220,7 @@ export async function detail(
 				u.Sin_PIN AS Sin_PIN
 			FROM Trabajadores t
 			JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
-			WHERE t.ID_Trabajador = ?1
+			WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL
 			LIMIT 1;
 		`,
 		args: [idTrabajador],
@@ -237,6 +238,25 @@ export async function detail(
  * esta consulta **no encontraba nunca a nadie**. Es el puente que usan el fichaje y la asignacion
  * de una comanda a su camarero. Resto de un tiempo en que los ids eran enteros.
  */
+/** El usuario de una ficha, esté o no retirada (`null` si no existe). Para construir `eliminarTrabajador`. */
+export async function usuarioDeTrabajador(db: Client, idTrabajador: string): Promise<string | null> {
+	const rs = await db.execute({
+		sql: "SELECT ID_Usuario AS id FROM Trabajadores WHERE ID_Trabajador = ?1;",
+		args: [idTrabajador],
+	});
+	const id = rows(rs)[0]?.id;
+	return id == null ? null : String(id);
+}
+
+/** ¿Sigue en la base ese usuario? Tras eliminarlo, es que tenía historia y se ha retirado. */
+export async function usuarioExiste(db: Client, idUsuario: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1) AS hay;",
+		args: [idUsuario],
+	});
+	return Number(rows(rs)[0]?.hay ?? 0) === 1;
+}
+
 export async function idByUsuario(
 	db: Client,
 	idUsuario: string,

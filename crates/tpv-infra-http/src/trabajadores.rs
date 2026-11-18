@@ -8,7 +8,7 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
-    AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
+    AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorRow, TurnoRow,
 };
 use tpv_domain::trabajadores::{
     AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
@@ -123,6 +123,14 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
             .put_json(&format!("/v1/trabajadores/{id_trabajador}"), &body)
             .await?;
         Ok(true)
+    }
+
+    async fn eliminar_trabajador(&self, id_trabajador: &str) -> AppResult<bool> {
+        let r: TrabajadorEliminado = self
+            .client
+            .delete_json(&format!("/v1/trabajadores/{id_trabajador}"))
+            .await?;
+        Ok(r.retirado)
     }
 
     async fn get_asignaciones_semana(&self, fecha_lunes: String) -> AppResult<Vec<AsignacionRow>> {

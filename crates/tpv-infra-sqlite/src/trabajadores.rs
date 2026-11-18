@@ -55,15 +55,17 @@ const MSG_ULTIMO_ADMINISTRADOR: &str = "No se puede dejar el negocio sin ningún
 
 async fn dejaria_sin_administrador<C: Reader>(
     conn: &C,
-    cambios: &TrabajadorCambios,
+    id_usuario: &str,
+    id_rol: &str,
+    estado: &str,
 ) -> AppResult<bool> {
     let mut rows = conn
         .query(
             SQL_DEJARIA_SIN_ADMINISTRADOR,
             vec![
-                Value::Text(cambios.id_usuario.clone()),
-                Value::Text(cambios.id_rol.clone()),
-                Value::Text(cambios.estado.clone()),
+                Value::Text(id_usuario.to_string()),
+                Value::Text(id_rol.to_string()),
+                Value::Text(estado.to_string()),
             ],
         )
         .await
@@ -72,6 +74,75 @@ async fn dejaria_sin_administrador<C: Reader>(
         Some(row) => v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
         None => false,
     })
+}
+
+/// ¿Tiene historia el trabajador ?1 (su usuario, ?2)? Lo que firmó o registró y hay que conservar:
+/// su registro de jornada (fichajes), cobros, anulaciones y devoluciones, comandas, movimientos de
+/// caja y de stock, cierres y sus rectificaciones, aperturas del cajón, lo que preparó en cocina,
+/// las tareas que ya hizo y los turnos que ya pasaron (las horas del cuadrante). Lo que sólo es plan
+/// (turnos de hoy en adelante, el horario predeterminado, tareas pendientes) no cuenta.
+const HISTORIA_DEL_TRABAJADOR: &str = "(EXISTS (SELECT 1 FROM Fichajes WHERE ID_Usuario = ?2) \
+    OR EXISTS (SELECT 1 FROM Pagos WHERE ID_Usuario_Cobrador = ?2 OR Anulado_Por = ?2 OR ID_Trabajador_Cobrador = ?1) \
+    OR EXISTS (SELECT 1 FROM Comandas WHERE ID_Trabajador = ?1) \
+    OR EXISTS (SELECT 1 FROM Movimientos_Caja WHERE ID_Usuario = ?2 OR ID_Trabajador = ?1) \
+    OR EXISTS (SELECT 1 FROM Movimientos_Stock WHERE ID_Usuario = ?2) \
+    OR EXISTS (SELECT 1 FROM Cierres_Caja WHERE ID_Usuario = ?2 OR Reabierto_Por = ?2) \
+    OR EXISTS (SELECT 1 FROM Cierre_Rectificaciones WHERE ID_Usuario = ?2) \
+    OR EXISTS (SELECT 1 FROM Aperturas_Cajon WHERE ID_Usuario = ?2) \
+    OR EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Usuario_Cocinero = ?2) \
+    OR EXISTS (SELECT 1 FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado <> 'PENDIENTE') \
+    OR EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha < date('now','localtime')))";
+
+/// Eliminar a un trabajador: **se retira si tiene historia y se borra si no**, como un producto
+/// (RI-54, `SQL_QUITAR_PRODUCTO`), en una tanda de sentencias que deciden cada una por su cuenta,
+/// sin leer antes. La primera lo retira si tiene historia (`Estado = 'Inactivo'` y `Archivado_En`:
+/// no puede entrar y sale de las listas, y lo que firmó sigue apuntándole); las tres siguientes
+/// quitan lo que sólo era plan, en los dos casos; las últimas borran, sólo si no ha quedado
+/// retirado. Lo que viaja a la nube (o llega de ella) son estas sentencias, y quien las aplica
+/// vuelve a decidir con sus datos: si allí ya tiene historia, se queda retirado.
+///
+/// Las FK se resuelven a mano y en orden, como `SQL_QUITAR_PRODUCTO`. `Intentos_Login` cae con
+/// `ON DELETE CASCADE`. El worker manda exactamente estas (`SQL_QUITAR_TRABAJADOR` en
+/// `trabajadores.commands.ts`). Cada sentencia lleva sus argumentos: el trabajador (`T`) o su
+/// usuario (`U`).
+pub(crate) enum ArgQuitar {
+    T,
+    U,
+}
+
+pub(crate) fn sql_quitar_trabajador() -> Vec<(String, &'static [ArgQuitar])> {
+    use ArgQuitar::{T, U};
+    let retirado = |id: &str| {
+        format!("EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = {id} AND Archivado_En IS NOT NULL)")
+    };
+    vec![
+        (
+            format!(
+                "UPDATE Usuarios SET Estado = 'Inactivo', Archivado_En = datetime('now','localtime') \
+                 WHERE ID_Usuario = ?2 AND Archivado_En IS NULL AND {HISTORIA_DEL_TRABAJADOR};"
+            ),
+            &[T, U],
+        ),
+        ("DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1;".into(), &[T]),
+        (
+            "DELETE FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 \
+             AND Fecha >= date('now','localtime');"
+                .into(),
+            &[T],
+        ),
+        (
+            "DELETE FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1 AND Estado = 'PENDIENTE';".into(),
+            &[T],
+        ),
+        (format!("DELETE FROM Fichaje_Dia WHERE ID_Usuario = ?1 AND NOT {};", retirado("?1")), &[U]),
+        (format!("DELETE FROM Trabajadores WHERE ID_Trabajador = ?1 AND NOT {};", retirado("?2")), &[T, U]),
+        (
+            "DELETE FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL \
+             AND NOT EXISTS (SELECT 1 FROM Trabajadores WHERE ID_Usuario = ?1);"
+                .into(),
+            &[U],
+        ),
+    ]
 }
 
 pub struct SqliteTrabajadoresRepository {
@@ -259,6 +330,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
           FROM Trabajadores t
           JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
           JOIN Roles r ON r.ID_Rol = u.ID_Rol
+          WHERE u.Archivado_En IS NULL -- un eliminado con historia ya no es de la plantilla
           ORDER BY u.Nombre ASC;
         "#;
 
@@ -311,7 +383,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                   u.Sin_PIN
                 FROM Trabajadores t
                 JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
-                WHERE t.ID_Trabajador = ?1
+                WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL
                 LIMIT 1;
                 "#,
                 vec![Value::Text(id_trabajador.to_string())],
@@ -639,11 +711,12 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let res: AppResult<bool> = db.transaccion(async {
             // RI-62: dentro de la transacción y con el cerrojo de escritura, así que nadie puede
             // degradar al otro administrador entre la comprobación y el UPDATE.
-            if dejaria_sin_administrador(&db, &cambios).await? {
+            if dejaria_sin_administrador(&db, &cambios.id_usuario, &cambios.id_rol, &cambios.estado).await? {
                 return Err(AppError::conflict(MSG_ULTIMO_ADMINISTRADOR));
             }
 
-            // RI-63: un id que no existe era un `Ok(true)` sin tocar nada.
+            // RI-63: un id que no existe era un `Ok(true)` sin tocar nada. Uno eliminado con historia
+            // (`Archivado_En`) tampoco se edita: volver a ponerlo «Activo» lo devolvería al login.
             let sin_fila = || AppError::not_found("Ese trabajador ya no existe. Actualiza la lista.");
 
             // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega uno nuevo, y `Sin_PIN`
@@ -658,7 +731,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     UPDATE Usuarios
                        SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4,
                            Estado = ?5, Sin_PIN = COALESCE(?6, Sin_PIN), Password_Hash = ?7
-                     WHERE ID_Usuario = ?8;
+                     WHERE ID_Usuario = ?8 AND Archivado_En IS NULL;
                     "#,
                     vec![
                         Value::Text(cambios.id_rol.clone()),
@@ -679,7 +752,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     UPDATE Usuarios
                        SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5,
                            Sin_PIN = COALESCE(?6, Sin_PIN)
-                     WHERE ID_Usuario = ?7;
+                     WHERE ID_Usuario = ?7 AND Archivado_En IS NULL;
                     "#,
                     vec![
                         Value::Text(cambios.id_rol.clone()),
@@ -728,6 +801,57 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }).await;
 
         res
+    }
+
+    async fn eliminar_trabajador(&self, id_trabajador: &str) -> AppResult<bool> {
+        let db = self.db.write().await;
+        db.transaccion(async {
+            // Su usuario y su rol, si sigue en la plantilla.
+            let (id_usuario, id_rol) = {
+                let mut rows = db
+                    .query(
+                        "SELECT u.ID_Usuario, u.ID_Rol FROM Trabajadores t                          JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario                          WHERE t.ID_Trabajador = ?1 AND u.Archivado_En IS NULL;",
+                        vec![Value::Text(id_trabajador.to_string())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                let Some(row) = rows.next().await.map_err(db_err)? else {
+                    return Err(AppError::not_found("Ese trabajador ya no existe. Actualiza la lista."));
+                };
+                (
+                    v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                    v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                )
+            };
+
+            // RI-62: dentro de la transacción, como la edición. Eliminarlo es dejarlo sin poder
+            // entrar: lo mismo que desactivarlo con el rol que tiene.
+            if dejaria_sin_administrador(&db, &id_usuario, &id_rol, "Inactivo").await? {
+                return Err(AppError::conflict(MSG_ULTIMO_ADMINISTRADOR));
+            }
+
+            for (sql, args) in sql_quitar_trabajador() {
+                let valores = args
+                    .iter()
+                    .map(|a| match a {
+                        ArgQuitar::T => Value::Text(id_trabajador.to_string()),
+                        ArgQuitar::U => Value::Text(id_usuario.clone()),
+                    })
+                    .collect::<Vec<_>>();
+                db.execute(&sql, valores).await.map_err(db_err)?;
+            }
+
+            // Si su usuario sigue ahí es que tenía historia: se ha retirado.
+            let mut rows = db
+                .query(
+                    "SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1;",
+                    vec![Value::Text(id_usuario.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            Ok(rows.next().await.map_err(db_err)?.is_some())
+        })
+        .await
     }
 
     async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool> {
@@ -1523,6 +1647,133 @@ mod tests_edicion {
 
         let r = editar(&repo, &fantasma, CAMARERO, "Activo").await;
         assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+    }
+
+    /* Eliminar a un trabajador: se borra sin historia y se retira con ella. */
+
+    async fn contar(db: &Arc<Db>, sql: &str, id: &str) -> i64 {
+        let conn = db.read().await;
+        let mut rows = conn.query(sql, vec![Value::Text(id.to_string())]).await.unwrap();
+        crate::mapping::v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sql: &str, args: Vec<Value>) {
+        let w = db.write().await;
+        w.raw().execute(sql, args).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sin_historia_se_borra_con_su_plan_y_sube_a_la_nube() {
+        let (db, repo, _dir) = abrir().await;
+        alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let pepe = alta(&db, &repo, "pepe@bar.test", CAMARERO, "Activo").await;
+        // Sólo plan: un turno de mañana, su horario predeterminado y una tarea pendiente.
+        sembrar(&db, "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('m', 'Mañana');", vec![]).await;
+        sembrar(
+            &db,
+            "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) \
+             VALUES ('a1', ?1, date('now','localtime','+1 day'), 'm', 'Sala');",
+            vec![Value::Text(pepe.id_trabajador.clone())],
+        )
+        .await;
+        sembrar(
+            &db,
+            "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, ID_Turno, Area) \
+             VALUES ('d1', ?1, 1, 'm', 'Sala');",
+            vec![Value::Text(pepe.id_trabajador.clone())],
+        )
+        .await;
+        sembrar(
+            &db,
+            "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('t1', 'Barrer', '2026-01-01 10:00:00');",
+            vec![],
+        )
+        .await;
+        sembrar(
+            &db,
+            "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At) VALUES ('t1', ?1, '2026-01-01 10:00:00');",
+            vec![Value::Text(pepe.id_trabajador.clone())],
+        )
+        .await;
+        let antes = contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Command_Name <> ?1;", "").await;
+
+        assert!(!repo.eliminar_trabajador(&pepe.id_trabajador).await.unwrap(), "no tenía historia: se borra");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = ?1;", &pepe.id_usuario).await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Trabajadores WHERE ID_Trabajador = ?1;", &pepe.id_trabajador).await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Asignacion_Turnos WHERE ID_Trabajador = ?1;", &pepe.id_trabajador).await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Tarea_Asignaciones WHERE ID_Trabajador = ?1;", &pepe.id_trabajador).await, 0);
+        // Lo borrado se replica: va por el outbox, en una operación.
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Command_Name <> ?1;", "").await, antes + 1);
+    }
+
+    #[tokio::test]
+    async fn con_historia_se_retira_conservando_lo_que_firmo() {
+        let (db, repo, _dir) = abrir().await;
+        alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let pepe = alta(&db, &repo, "pepe@bar.test", CAMARERO, "Activo").await;
+        sembrar(
+            &db,
+            "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado) \
+             VALUES ('f1', ?1, '2026-01-01', 1, '2026-01-01 09:00:00', '2026-01-01 17:00:00', 'CERRADO');",
+            vec![Value::Text(pepe.id_usuario.clone())],
+        )
+        .await;
+
+        assert!(repo.eliminar_trabajador(&pepe.id_trabajador).await.unwrap(), "tenía fichajes: se retira");
+        // Sigue en la base, sin poder entrar y fuera de las listas.
+        assert_eq!(
+            contar(
+                &db,
+                "SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = ?1 AND Estado = 'Inactivo' AND Archivado_En IS NOT NULL;",
+                &pepe.id_usuario
+            )
+            .await,
+            1
+        );
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Fichajes WHERE ID_Usuario = ?1;", &pepe.id_usuario).await, 1);
+        assert!(repo.get_all().await.unwrap().iter().all(|t| t.id_trabajador != pepe.id_trabajador));
+        assert!(repo.get_detail(&pepe.id_trabajador).await.unwrap().is_none());
+
+        // Ni se edita (volver a ponerlo «Activo» lo devolvería al login) ni se elimina otra vez.
+        let r = editar(&repo, &pepe, CAMARERO, "Activo").await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        let r = repo.eliminar_trabajador(&pepe.id_trabajador).await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn no_se_elimina_al_ultimo_administrador() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let r = repo.eliminar_trabajador(&ana.id_trabajador).await;
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Usuarios WHERE ID_Usuario = ?1 AND Archivado_En IS NULL;", &ana.id_usuario).await,
+            1
+        );
+
+        // Con otro administrador activo, sí.
+        alta(&db, &repo, "luis@bar.test", ADMIN, "Activo").await;
+        assert!(!repo.eliminar_trabajador(&ana.id_trabajador).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn nadie_se_elimina_a_si_mismo() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        alta(&db, &repo, "luis@bar.test", ADMIN, "Activo").await;
+        let r = tpv_application::use_cases::trabajadores::eliminar_trabajador(
+            &repo,
+            tpv_contracts::trabajadores::TrabajadorEliminarInput { id_trabajador: ana.id_trabajador.clone() },
+            &ana.id_usuario,
+        )
+        .await;
+        match r {
+            Err(AppError::Conflict(m)) => {
+                assert_eq!(m, tpv_application::use_cases::trabajadores::MSG_ELIMINAR_PROPIA_FICHA)
+            }
+            otro => panic!("{otro:?}"),
+        }
     }
 }
 
