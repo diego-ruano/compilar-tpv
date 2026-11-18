@@ -41,3 +41,25 @@ export function entraEnCuentas(role: string | null | undefined): boolean {
 export function esPermisoDenegado(e: unknown): boolean {
     return esError(e, "permiso_denegado");
 }
+
+/**
+ * Qué hace la aplicación con la lectura de los permisos de la sesión:
+ *
+ * - `esperar`: todavía no ha contestado nunca. No se pinta nada (es casi instantáneo, y un
+ *   «Cargando permisos…» sólo parpadearía).
+ * - `cerrar_sesion`: el usuario ya no está activo (lo desactivaron con la sesión abierta). Se
+ *   cierra, y el login dice por qué.
+ * - `sin_permisos`: no se han podido leer nunca. Sin ellos no se sabe qué enseñar: la pantalla de
+ *   error, con reintentar y cerrar sesión.
+ * - `trabajar`: hay permisos que usar. También si la última relectura ha fallado (sin red, la
+ *   Handy al recuperarla): se sigue con los últimos leídos, porque quien decide es el backend en
+ *   cada comando, y desmontar la aplicación se llevaba por delante lo que hubiera abierto.
+ */
+export type EstadoPermisos = "esperar" | "cerrar_sesion" | "sin_permisos" | "trabajar";
+
+export function estadoPermisos(q: { isError: boolean; error: unknown; hayDatos: boolean }): EstadoPermisos {
+    if (q.isError && esError(q.error, "usuario_inactivo")) return "cerrar_sesion";
+    if (q.hayDatos) return "trabajar";
+    if (q.isError) return "sin_permisos";
+    return "esperar";
+}

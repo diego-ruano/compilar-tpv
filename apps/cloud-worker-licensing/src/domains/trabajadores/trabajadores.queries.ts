@@ -2,6 +2,7 @@
 
 import type { Client } from "@libsql/client/web";
 import { recortar } from "../../lib/texto";
+import { HubError } from "../../lib/errorHttp";
 
 import type {
 	AsignacionRow,
@@ -412,9 +413,13 @@ export async function predeterminadoDesdeSemanaItems(
 }
 
 // RI-70: consulta de configuración para el gate nativo de la Handy; no autentica a la persona.
+//
+// Un usuario que ya no está activo no tiene permisos, y se dice (`usuario_inactivo`, con el mismo
+// texto que la Main): la pantalla cierra la sesión en vez de quedarse en un «no tienes permiso».
 export async function permisosUsuario(db: Client, id: string): Promise<import("@tpv/contracts").AutorizacionUsuario | null> {
-    const rs = await db.execute({sql:"SELECT r.Nombre_Rol, p.Permiso FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 AND u.Estado='Activo' ORDER BY p.Permiso",args:[id]});
+    const rs = await db.execute({sql:"SELECT r.Nombre_Rol, p.Permiso, u.Estado FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 ORDER BY p.Permiso",args:[id]});
     const filas = rows(rs);
     if (!filas.length) return null;
+    if (filas.some((f) => f.Estado !== "Activo")) throw new HubError("usuario_inactivo", 403);
     return {rol:String(filas[0].Nombre_Rol),permisos:filas.filter((f) => f.Permiso != null).map((f) => String(f.Permiso))};
 }

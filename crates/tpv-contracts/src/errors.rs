@@ -96,7 +96,17 @@ pub enum ErrorCode {
     /// igualmente», que reenvía la misma reserva con `forzar_solape`. Con los solapes prohibidos
     /// el rechazo es un `Conflict` normal: no hay nada que ofrecer.
     ReservaSolapada,
+    /// El usuario de la sesión **ya no está activo**: un administrador lo ha desactivado con la
+    /// sesión abierta.
+    ///
+    /// Tiene código propio porque la UI **hace algo distinto**: cierra la sesión y el login dice por
+    /// qué. Con `PermisoDenegado` la aplicación se quedaba en una pantalla de error sin salida.
+    UsuarioInactivo,
 }
+
+/// Lo que se dice cuando el usuario de la sesión ya no está activo. El mismo texto en la Main y en el
+/// worker (`MENSAJES.usuario_inactivo` en `lib/errorCodes.ts`).
+pub const USUARIO_INACTIVO: &str = "Tu usuario ya no está activo. Habla con un administrador.";
 
 impl ErrorCode {
     /// Catálogo generado desde el enum; no hay listas paralelas (RI-48).
@@ -134,6 +144,7 @@ impl ErrorCode {
                 "Este importe necesita factura completa: hacen falta el NIF y el nombre del cliente"
             }
             ErrorCode::ReservaSolapada => "La reserva se pisa con otra de la misma mesa",
+            ErrorCode::UsuarioInactivo => USUARIO_INACTIVO,
         }
     }
 
@@ -193,6 +204,7 @@ impl ErrorCode {
             "datos_fiscales_incompletos" => ErrorCode::DatosFiscalesIncompletos,
             "factura_completa_requerida" => ErrorCode::FacturaCompletaRequerida,
             "reserva_solapada" => ErrorCode::ReservaSolapada,
+            "usuario_inactivo" => ErrorCode::UsuarioInactivo,
             _ => ErrorCode::External,
         }
     }

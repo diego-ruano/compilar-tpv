@@ -20,6 +20,11 @@ export type AuthState = {
     idTrabajador: string | null;
     requiresSetup: boolean;
     email: string | null;
+    /**
+     * Por qué se cerró la sesión sin que nadie lo pidiera, para que el login lo diga (p. ej. el
+     * usuario ya no está activo). `null` si no hay nada que decir. Lo borra el siguiente login.
+     */
+    motivoCierre: string | null;
 
     // Acciones
     setSession: (data: {
@@ -31,7 +36,8 @@ export type AuthState = {
         email: string | null;
     }) => void;
 
-    logout: () => void;
+    /** `motivo`: lo que el login tiene que decir al volver (ver `motivoCierre`). */
+    logout: (motivo?: string) => void;
 };
 
 export const useAuth = create<AuthState>((set) => ({
@@ -41,6 +47,7 @@ export const useAuth = create<AuthState>((set) => ({
     idTrabajador: null,
     requiresSetup: false,
     email: null,
+    motivoCierre: null,
 
     setSession: ({
         role,
@@ -57,10 +64,12 @@ export const useAuth = create<AuthState>((set) => ({
             idTrabajador,
             requiresSetup,
             email,
+            motivoCierre: null,
         }),
 
-    logout: () => {
+    logout: (motivo) => {
         limpiarSesionLocal();
+        useAuth.setState({ motivoCierre: motivo ?? null });
 
         // El store se limpia SIEMPRE y primero: es lo que devuelve la UI al login, y no puede
         // quedar colgado esperando al IPC. El aviso al backend va detrás y sin `await` —quien

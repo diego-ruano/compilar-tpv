@@ -1,9 +1,12 @@
 import { commands } from "@tpv/client";
-// RI-70: el backend devuelve las concesiones efectivas; sin respuesta se deniega.
+// RI-70: el backend devuelve las concesiones efectivas; sin ninguna respuesta se deniega.
 import { useQuery } from "@tanstack/react-query";
 
 import type { AutorizacionUsuario } from "@tpv/contracts";
 import { useAuth } from "../stores/useAuth";
+
+/** Cada cuánto se reintenta leer los permisos mientras la lectura falla. */
+const REINTENTO_MS = 15_000;
 
 /**
  * Los permisos de la sesión, para lo que la pantalla enseña o esconde. Quien decide es el backend,
@@ -24,8 +27,14 @@ export function usePermisos() {
         enabled: !!usuario,
         staleTime: 0,
         refetchOnWindowFocus: true,
+        // Si la relectura falla (sin red, la Handy recuperándola), se vuelve a intentar sola hasta
+        // que conteste. Mientras contesta bien no hay reloj: se relee por lo de arriba.
+        refetchInterval: (q) => (q.state.status === "error" ? REINTENTO_MS : false),
     });
-    const actual = query.isError ? undefined : query.data;
+    // Una relectura que falla no borra lo que ya se sabía: se sigue pintando con los últimos
+    // permisos leídos, que es para lo único que valen aquí (quien decide es el backend, en cada
+    // comando). Antes se tomaban por ninguno y la aplicación se desmontaba entera.
+    const actual = query.data;
     return {
         ...query,
         rol: actual?.rol ?? "",

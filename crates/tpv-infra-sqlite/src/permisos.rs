@@ -18,10 +18,15 @@ async fn concesiones<C: Reader>(db: &C, id_rol: &str) -> AppResult<Vec<String>> 
 impl PermisosRepository for SqlitePermisosRepository {
     async fn usuario(&self, id_usuario: &str) -> AppResult<Option<AutorizacionUsuario>> {
         let db = self.db.read().await;
-        // Una consulta: el rol y sus permisos pertenecen al mismo snapshot SQLite.
-        let mut filas = db.query("SELECT r.Nombre_Rol, p.Permiso FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 AND u.Estado='Activo' ORDER BY p.Permiso", vec![Value::Text(id_usuario.into())]).await.map_err(err)?;
+        // Una consulta: el rol y sus permisos pertenecen al mismo snapshot SQLite. Un usuario que
+        // ya no está activo no tiene permisos, y se dice (`usuario_inactivo`): la pantalla cierra
+        // la sesión en vez de quedarse en un «no tienes permiso» sin salida.
+        let mut filas = db.query("SELECT r.Nombre_Rol, p.Permiso, u.Estado FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 ORDER BY p.Permiso", vec![Value::Text(id_usuario.into())]).await.map_err(err)?;
         let mut u = None;
         while let Some(f) = filas.next().await.map_err(err)? {
+            if !matches!(f.get_value(2).map_err(err)?, Value::Text(ref estado) if estado == "Activo") {
+                return Err(tpv_application::use_cases::permisos::usuario_inactivo());
+            }
             let datos = u.get_or_insert(AutorizacionUsuario { rol:f.get::<String>(0).map_err(err)?, permisos:Vec::new() });
             if let Value::Text(p) = f.get_value(1).map_err(err)? { datos.permisos.push(p); }
         }
@@ -119,7 +124,12 @@ mod tests {
         let input = GuardarPermisosInput {id_rol:CAMARERO.into(),permisos_vistos:vec![],permisos:vec![]};
         assert_eq!(repo.guardar("camarero",input.clone()).await.unwrap_err().code(),ErrorCode::PermisoDenegado);
         db.write().await.raw().execute("UPDATE Usuarios SET Estado='Inactivo' WHERE ID_Usuario='admin'",()).await.unwrap();
-        assert!(repo.usuario("admin").await.unwrap().is_none());
+        // No es «no tienes permiso», que dejaba la pantalla sin salida: es que ya no está
+        // activo, con su código, y la pantalla cierra la sesión.
+        let e = repo.usuario("admin").await.unwrap_err();
+        assert_eq!(e.code(), ErrorCode::UsuarioInactivo);
+        assert_eq!(e.to_string(), tpv_contracts::errors::USUARIO_INACTIVO);
+        assert!(repo.usuario("no-existe").await.unwrap().is_none(), "el que no existe sigue sin autorización");
         assert_eq!(repo.guardar("admin",input).await.unwrap_err().code(),ErrorCode::PermisoDenegado);
         let malas = GuardarPermisosInput {id_rol:CAMARERO.into(),permisos_vistos:vec![],permisos:vec!["usuarios.promover".into()]};
         assert_eq!(repo.guardar("admin",malas).await.unwrap_err().code(),ErrorCode::Validation);

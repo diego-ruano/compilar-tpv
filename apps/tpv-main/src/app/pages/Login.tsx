@@ -67,6 +67,8 @@ const LOGIN_TIPS = [
 
 export default function Login() {
     const setSession = useAuth((s) => s.setSession);
+    // Por qué se cerró la sesión sin que nadie lo pidiera (el usuario ya no está activo).
+    const motivoCierre = useAuth((s) => s.motivoCierre);
     const navigate = useNavigate();
     const toast = useToast();
     const deviceMode = useMode((s) => s.mode);
@@ -542,6 +544,12 @@ export default function Login() {
                                 </div>
                             )}
                         </div>
+
+                        {motivoCierre ? (
+                            <p role="alert" className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger">
+                                {motivoCierre}
+                            </p>
+                        ) : null}
 
                         {/* Carrusel de usuarios (móvil) */}
                         <div className="mt-2 sm:hidden">

@@ -222,7 +222,10 @@ El dinero es un entero de céntimos de la base a la pantalla
 `usePermisos` consulta las concesiones efectivas de Rust. La NavBar, rutas y acciones reflejan esas
 capacidades; Configuración → Permisos edita roles desde Main. No se releen por reloj, sino cuando
 pueden haber cambiado: un cambio replicado de usuarios, roles o concesiones, una conexión nueva de la
-Handy, al montar una pantalla que los usa y al volver a la aplicación. El gate de verdad está en los comandos ([permisos.md](permisos.md)). La sesión se
+Handy, al montar una pantalla que los usa y al volver a la aplicación. El gate de verdad está en los comandos ([permisos.md](permisos.md)).
+Una relectura que falla no desmonta la aplicación: se sigue con los últimos permisos leídos y se
+reintenta sola; un usuario desactivado con la sesión abierta vuelve al login, que dice por qué
+([permisos.md](permisos.md#capacidades-por-rol-ri-70)). La sesión se
 cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `logout` al arrancar.
 
 ## CSP

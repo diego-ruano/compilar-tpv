@@ -1157,7 +1157,15 @@ export type ErrorCode =
  *  igualmente», que reenvía la misma reserva con `forzar_solape`. Con los solapes prohibidos
  *  el rechazo es un `Conflict` normal: no hay nada que ofrecer.
  */
-"reserva_solapada";
+"reserva_solapada" |
+/**
+ *  El usuario de la sesión **ya no está activo**: un administrador lo ha desactivado con la
+ *  sesión abierta.
+ *
+ *  Tiene código propio porque la UI **hace algo distinto**: cierra la sesión y el login dice por
+ *  qué. Con `PermisoDenegado` la aplicación se quedaba en una pantalla de error sin salida.
+ */
+"usuario_inactivo";
 
 export type EstadoColaImagenes = {
 	pendientes: number,

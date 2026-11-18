@@ -141,6 +141,14 @@ lo invalida todo), al montar una pantalla que los usa y al volver a la aplicaci�
 backend, en cada comando. Al cerrar sesión se limpia la caché de consultas para no mostrar a la
 siguiente persona información de la sesión anterior.
 
+Si una relectura falla (sin red, la Handy al recuperarla), la aplicación no se desmonta: sigue
+pintando con los últimos permisos leídos, avisa una vez y la relectura se reintenta sola cada 15 s
+hasta que contesta. La pantalla de error, con «Reintentar» y «Cerrar sesión», sólo sale si no se han
+leído nunca (`shared/lib/permisos.ts::estadoPermisos`). **Un usuario desactivado con la sesión
+abierta** no recibe «no tienes permiso», que lo dejaba sin salida: `usuario_inactivo` («Tu usuario ya
+no está activo. Habla con un administrador.»), con el mismo texto en la Main (el repositorio SQLite) y
+en el worker (`GET /v1/trabajadores/permisos/:id`), y la pantalla cierra la sesión y el login lo dice.
+
 ### Arranque y recuperación
 
 No piden sesión los comandos de login, setup inicial, fichaje, recuperación del PIN y recuperación

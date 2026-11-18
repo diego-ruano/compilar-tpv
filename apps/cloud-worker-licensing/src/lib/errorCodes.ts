@@ -47,6 +47,7 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	datos_fiscales_incompletos: "datos_fiscales_incompletos",
 	factura_completa_requerida: "factura_completa_requerida",
 	reserva_solapada: "reserva_solapada",
+	usuario_inactivo: "usuario_inactivo",
 	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
 	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
 	escritura_solo_en_main: "permiso_denegado",
@@ -132,6 +133,7 @@ const CODIGOS: Record<ErrorCode, true> = {
 	datos_fiscales_incompletos: true,
 	factura_completa_requerida: true,
 	reserva_solapada: true,
+	usuario_inactivo: true,
 };
 
 export function esCodigoDelCatalogo(valor: unknown): valor is ErrorCode {
@@ -165,6 +167,8 @@ const SOLO_EN_LA_MAIN = "Esto sólo se puede hacer desde el TPV principal.";
 
 export const MENSAJES: Readonly<Record<string, string>> = {
 	permiso_denegado: "No tienes permiso para esta acción.",
+	// El mismo texto que la Main (`tpv_contracts::errors::USUARIO_INACTIVO`).
+	usuario_inactivo: "Tu usuario ya no está activo. Habla con un administrador.",
 	// Emparejamiento de una Handy
 	invalid_pair_code: "El código de vinculación son 6 cifras.",
 	invalid_pair_secret: "El QR no es válido. Vuelve a escanearlo o escribe el código a mano.",

@@ -9,7 +9,7 @@ import { useContactSettings } from "../shared/stores/useContactSettings";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
-import { esAdmin } from "../shared/lib/permisos";
+import { esAdmin, estadoPermisos } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 
 import Login from "./pages/Login";
@@ -17,15 +17,61 @@ const SetupInicial = lazy(() => import("./pages/SetUpInicial"));
 const RecuperarDatos = lazy(() => import("./pages/RecuperarDatos"));
 
 // ✅ importa tu provider
-import { ToastProvider } from "../shared/toast";
+import { ToastProvider, useToast } from "../shared/toast";
 
 import { usePermisos } from "../shared/lib/usePermisos";
 import { toAppError } from "@tpv/client";
 import { captureException } from "../shared/observability/sentry";
 
+/**
+ * No se han podido leer nunca los permisos de la sesión: sin ellos no se sabe qué enseñar. Se
+ * reintenta solo (`usePermisos`); aquí, el motivo y las dos salidas.
+ */
+function PermisosNoLeidos({ motivo, onReintentar }: { motivo: string; onReintentar: () => void }) {
+    return (
+        <div className="flex min-h-full w-full items-center justify-center bg-bg p-6 text-fg">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-sm">
+                <h1 className="text-xl font-bold">No se han podido leer tus permisos</h1>
+                <p className="mt-2 text-sm text-fg-muted">{motivo}</p>
+                <p className="mt-1 text-sm text-fg-muted">Se vuelve a intentar solo en unos segundos.</p>
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+                    <button
+                        type="button"
+                        onClick={onReintentar}
+                        className="flex-1 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white hover:bg-accent-hover"
+                    >
+                        Reintentar
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => useAuth.getState().logout()}
+                        className="flex-1 rounded-xl border border-border bg-surface px-4 py-3 text-sm font-semibold text-fg hover:bg-surface-2"
+                    >
+                        Cerrar sesión
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function AppInner() {
     const role = useAuth((s) => s.role);
     const permisos = usePermisos();
+    const toast = useToast();
+    const decision = estadoPermisos({ isError: permisos.isError, error: permisos.error, hayDatos: permisos.data !== undefined });
+    // El usuario ya no está activo (lo desactivaron con la sesión abierta): fuera, y el login dice por qué.
+    useEffect(() => {
+        if (decision === "cerrar_sesion" && role) useAuth.getState().logout(toAppError(permisos.error).message);
+    }, [decision, role, permisos.error]);
+    // Una relectura que falla con permisos ya leídos no desmonta nada: se avisa una vez por racha, y
+    // `usePermisos` la reintenta sola.
+    const relecturaFallida = decision === "trabajar" && permisos.isError;
+    useEffect(() => {
+        if (relecturaFallida) toast.warning("No se han podido actualizar tus permisos", toAppError(permisos.error).message);
+        // Sólo al empezar la racha: el aviso no se repite en cada reintento.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [relecturaFallida]);
     const requiresSetup = useAuth((s) => s.requiresSetup);
     const location = useLocation();
     const navegacion = useNavigation();
@@ -122,8 +168,8 @@ function AppInner() {
     const path = location.pathname.toLowerCase();
     // Leer los permisos de la sesión es casi instantáneo: un «Cargando permisos…» ahí sólo parpadea
     // entre el login y la aplicación. Mientras tanto no se pinta nada, como al arrancar.
-    if (permisos.isPending) return null;
-    if (permisos.isError) return <div className="p-4"><p>{toAppError(permisos.error).message}</p><button onClick={() => void permisos.refetch()}>Reintentar</button><button onClick={() => useAuth.getState().logout()}>Cerrar sesión</button></div>;
+    if (decision === "esperar" || decision === "cerrar_sesion") return null;
+    if (decision === "sin_permisos") return <PermisosNoLeidos motivo={toAppError(permisos.error).message} onReintentar={() => void permisos.refetch()} />;
     const destino = permisos.puede("servicio.vender") ? "/VentaRapida" : permisos.puede("servicio.cocina") ? "/Comandas" : permisos.puede("tareas.propias") ? "/Tareas" : "/Inventario";
     if ((path === "/" || path === "/ventarapida") && !permisos.puede("servicio.vender")) return <Navigate to={destino} replace />;
     const reglas: [string, boolean][] = [
