@@ -190,7 +190,7 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 | | `ERROR` — «este cobro nunca debió existir» | `DEVOLUCION` — «le devuelvo el dinero al cliente» |
 |---|---|---|
 | Stock | Se repone lo que consumió **ese** cobro (`Lote_Consumos.ID_Pago`, `Suelto_Consumos.ID_Pago`) | Igual: lo devuelto vuelve al almacén, y lo que ya no se pueda vender se ajusta desde el inventario |
-| Líneas | Vuelven a la comanda, que se reabre si no hay otra abierta en esa mesa | No vuelven |
+| Líneas | Vuelven a la mesa: se reabre su comanda o, si la mesa se volvió a abrir, van a la cuenta abierta (abajo) | No vuelven |
 | Gasto del cliente | Se resta al cliente de la comanda (sin bajar de 0) | Se resta |
 | `Pagos` | `Estado = 'ANULADO'`, `Anulado_En`, `Anulado_Por`, `Motivo_Anulacion`, `Motivo_Baja = 'ERROR'` | Igual, con `Motivo_Baja = 'DEVOLUCION'` |
 | Historial | `Movimientos_Caja` tipo `ANULACION` | Tipo `DEVOLUCION` |
@@ -199,6 +199,13 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 
 Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
 
+- **Las líneas vuelven a la mesa aunque se haya vuelto a abrir** (CAJ-INC-02). Sólo puede haber una
+  comanda abierta por mesa (`idx_comandas_una_abierta_por_mesa`), y abrir la mesa crea una vacía. Si
+  la abierta está vacía (sin líneas, cobros ni reserva), se quita y se reabre la original; si no, las
+  líneas sin cobrar de la original pasan a la abierta y los dos `Total_Comanda` se re-derivan. Lo
+  cobrado por otro cobro activo se queda donde está. El ticket anulado se sigue reimprimiendo igual:
+  sus líneas salen de `Pago_Detalles`, no de la comanda. Son las mismas sentencias en la Main y en el
+  worker (`SQL_DEVOLVER_LINEAS_A_LA_MESA`), y la baja devuelve adónde fueron para que Cuentas lo diga.
 - **El guardia anti-doble-abono es el `Estado`.** Las trazas de consumo se conservan, así que lo único
   que impide reponer el stock dos veces es que `anular_pago` salga antes si el pago ya está anulado.
   Si el `UPDATE` no afecta a ninguna fila, tampoco se emite registro fiscal.

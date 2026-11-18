@@ -1,0 +1,30 @@
+{
+  "Comandas": [
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 900
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-a"
+    },
+    {
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-b"
+    }
+  ],
+  "Pagos": [
+    {
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "Estado": "ACTIVO",
+      "ID_Pago": "pago-2"
+    }
+  ]
+}

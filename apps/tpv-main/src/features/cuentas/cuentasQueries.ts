@@ -185,8 +185,8 @@ export function useAnularPago() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: cuentasAnularPago,
-        onSuccess: (ok) => {
-            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
+        onSuccess: (hecho) => {
+            if (hecho.anulado) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }

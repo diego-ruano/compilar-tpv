@@ -8,6 +8,7 @@ import { commands } from "@tpv/client";
 
 
 import type {
+    AnulacionPagoDto,
     AnularPagoInput,
     CambioCajaInput,
     CobroDevolubleDto,
@@ -131,11 +132,29 @@ export function cuentasUpdatePago(p: ConMotivo<UpdatePagoInput>): Promise<boolea
  * exactamente lo mismo que faltaba en el cajón y el descuadre salía cero.
  *
  * El motivo es obligatorio; quién anula NO se manda —lo pone la sesión del backend (SEC-01)—.
- * `clase` es una `ClaseBaja`; ausente = `"ERROR"`.
+ * `clase` es una `ClaseBaja`; ausente = `"ERROR"`. Devuelve también adónde volvieron las líneas
+ * (CAJ-INC-02), para decirlo.
  */
-export async function cuentasAnularPago(args: AnularPagoInput): Promise<boolean> {
-    const r = await commands.cuentasAnularPago(args);
-    return r !== false;
+export function cuentasAnularPago(args: AnularPagoInput): Promise<AnulacionPagoDto> {
+    return commands.cuentasAnularPago(args);
+}
+
+/**
+ * CAJ-INC-02 · Lo que se le dice a quien da de baja un cobro sobre sus líneas, o `null` si no hay
+ * nada que decir (una devolución, o no quedaba nada sin cobrar).
+ */
+export function avisoDeLineasDevueltas(h: AnulacionPagoDto): string | null {
+    if (!h.anulado) return null;
+    // Como en el ticket: a un número a secas se le antepone «Mesa».
+    const donde = h.mesa ? (/^\d+$/.test(h.mesa) ? `la Mesa ${h.mesa}` : h.mesa) : "su ticket";
+    switch (h.lineas) {
+        case "su_comanda":
+            return `Sus consumiciones vuelven a estar pendientes en ${donde}, que se ha reabierto.`;
+        case "la_abierta":
+            return `La mesa se había vuelto a abrir: sus consumiciones se han añadido a la cuenta abierta de ${donde}.`;
+        default:
+            return null;
+    }
 }
 
 /** Las líneas de un cobro con lo que queda por devolver de cada una. */

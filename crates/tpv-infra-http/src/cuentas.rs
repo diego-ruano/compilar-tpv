@@ -10,7 +10,7 @@ use tpv_application::ports::cuentas::{
     AnularPagoArgs, CuentasFiltro, CuentasRepository, DevolverLineasArgs,
 };
 use tpv_contracts::cuentas::{
-    CobroDevolubleDto, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    AnulacionPagoDto, CobroDevolubleDto, DestinoLineasBaja, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -167,14 +167,14 @@ impl CuentasRepository for HttpCuentasRepository {
 
     /// Anular es cosa de la Main; el worker rechaza esta escritura desde una Handy. Se manda
     /// igualmente para que el "no" venga de donde el usuario no manda.
-    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool> {
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<AnulacionPagoDto> {
         let body = json!({ "id_usuario": args.id_usuario, "motivo": args.motivo });
         let id_pago = args.id_pago;
         let _: JsonValue = self
             .client
             .post_json(&format!("/v1/cuentas/pagos/{id_pago}/anular"), &body)
             .await?;
-        Ok(true)
+        Ok(AnulacionPagoDto { anulado: true, lineas: DestinoLineasBaja::NoVuelven, mesa: None })
     }
 }
 

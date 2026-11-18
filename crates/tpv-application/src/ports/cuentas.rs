@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::cuentas::{
-    CobroDevolubleDto, CursorCuentas, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    AnulacionPagoDto, CobroDevolubleDto, CursorCuentas, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -140,9 +140,10 @@ pub trait CuentasRepository: Send + Sync {
     async fn estado_pago(&self, id_pago: &str) -> AppResult<Option<String>>;
 
     /// Anula un cobro **sin borrarlo** (CUENTA-07): repone el stock y resta el gasto del cliente
-    /// (las dos clases), marca el pago y deja el movimiento en `Movimientos_Caja`. `true` si el
-    /// pago existía.
-    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool>;
+    /// (las dos clases), marca el pago y deja el movimiento en `Movimientos_Caja`. `anulado` si el
+    /// pago existía y seguía activo; en una baja por error, dice también adónde volvieron sus
+    /// líneas (CAJ-INC-02).
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<AnulacionPagoDto>;
 
     /// Las líneas de un cobro con lo que queda por devolver de cada una. `None` si no existe.
     async fn lineas_devolubles(&self, id_pago: &str) -> AppResult<Option<CobroDevolubleDto>>;

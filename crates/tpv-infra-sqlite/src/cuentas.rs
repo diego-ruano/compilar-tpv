@@ -14,7 +14,7 @@ use tpv_application::ports::cuentas::{
 };
 use tpv_application::use_cases::cuentas::error_de_devolucion;
 use tpv_contracts::cuentas::{
-    CobroDevolubleDto, CursorCuentas, DevolucionDto, EntradaDto, LineaDevolubleDto,
+    AnulacionPagoDto, CobroDevolubleDto, DestinoLineasBaja, CursorCuentas, DevolucionDto, EntradaDto, LineaDevolubleDto,
     PaginaEntradas, PaginaSalidas, ResumenCajaDto, SalidaDto,
 };
 use tpv_domain::cuentas::{
@@ -265,6 +265,115 @@ struct CobroGuardado {
     numero_ticket: Option<String>,
     es_devolucion: bool,
 }
+
+/// La otra comanda abierta en la mesa de la del cobro (CAJ-INC-02).
+struct OtraAbierta {
+    /// Sin líneas, sin cobros y sin reserva: se abrió y no se ha tocado, así que se puede quitar y
+    /// reabrir la original. Con reserva no se quita: se perdería el enlace de la mesa con ella.
+    vacia: bool,
+}
+
+/// Lo que decide adónde vuelven las líneas de un cobro dado de baja por error.
+struct DondeVuelven {
+    /// A la comanda le quedan líneas sin cobrar (ya sin el cobro que se da de baja).
+    pendientes: bool,
+    otra_abierta: Option<OtraAbierta>,
+    mesa: Option<String>,
+}
+
+async fn a_donde_vuelven<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<DondeVuelven> {
+    let mut rows = conn
+        .query(
+            r#"
+            SELECT
+              EXISTS (
+                SELECT 1 FROM Detalle_Comanda dc
+                WHERE dc.ID_Comanda = o.ID_Comanda
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+              ),
+              a.ID_Comanda IS NOT NULL,
+              a.ID_Reserva IS NULL
+                AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = a.ID_Comanda)
+                AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = a.ID_Comanda),
+              m.Numero_Mesa
+            FROM Comandas o
+            LEFT JOIN Comandas a
+              ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
+            LEFT JOIN Mesas m ON m.ID_Mesa = o.ID_Mesa
+            WHERE o.ID_Comanda = ?1
+            LIMIT 1;
+            "#,
+            vec![Value::Text(id_comanda.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(r) = rows.next().await.map_err(db_err)? else {
+        return Ok(DondeVuelven { pendientes: false, otra_abierta: None, mesa: None });
+    };
+    let si = |i: i32| -> AppResult<bool> {
+        Ok(v_i64(r.get_value(i).map_err(db_err)?).unwrap_or(0) != 0)
+    };
+    Ok(DondeVuelven {
+        pendientes: si(0)?,
+        otra_abierta: if si(1)? { Some(OtraAbierta { vacia: si(2)? }) } else { None },
+        mesa: norm_opt_string(r.get_value(3).map_err(db_err)?),
+    })
+}
+
+/// CAJ-INC-02 · Devolver a la mesa las líneas de un cobro dado de baja por error cuando la mesa ya
+/// tiene otra comanda abierta. `?1` es la comanda del cobro; van antes del `UPDATE` que la reabre.
+///
+/// 1. Si la abierta está vacía (sin líneas, sin cobros y sin reserva) y a la original le quedan
+///    líneas sin cobrar, se borra: así la original se puede reabrir.
+/// 2. Si no, las líneas sin cobrar de la original pasan a la abierta. Las cobradas por otro cobro
+///    activo se quedan: son de su ticket.
+/// 3. El total de la abierta se re-deriva de sus líneas (el de la original lo re-deriva el `UPDATE`
+///    que la reabre).
+///
+/// Las condiciones van dentro de cada sentencia, no en una lectura previa: se replican tal cual y
+/// el worker usa las mismas (`cuentas.commands.ts`). El cobro ya está `ANULADO`, así que sus
+/// líneas ya no están en `v_lineas_cobradas`.
+pub(crate) const SQL_DEVOLVER_LINEAS_A_LA_MESA: [&str; 3] = [
+    r#"
+    DELETE FROM Comandas
+    WHERE Estado = 'Abierta'
+      AND ID_Comanda <> ?1
+      AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ?1)
+      AND ID_Reserva IS NULL
+      AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda)
+      AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = Comandas.ID_Comanda)
+      AND EXISTS (
+        SELECT 1 FROM Detalle_Comanda dc
+        WHERE dc.ID_Comanda = ?1
+          AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+      );
+    "#,
+    r#"
+    UPDATE Detalle_Comanda
+    SET ID_Comanda = (
+        SELECT a.ID_Comanda FROM Comandas o
+        JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
+        WHERE o.ID_Comanda = ?1
+    )
+    WHERE ID_Comanda = ?1
+      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle)
+      AND EXISTS (
+        SELECT 1 FROM Comandas o
+        JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
+        WHERE o.ID_Comanda = ?1
+      );
+    "#,
+    r#"
+    UPDATE Comandas
+    SET Total_Comanda = (
+        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(d.Cantidad,1) * COALESCE(d.Precio_Unitario,0)) AS INTEGER)), 0)
+        FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda
+    )
+    WHERE Estado = 'Abierta'
+      AND ID_Comanda <> ?1
+      AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ?1);
+    "#,
+];
 
 async fn cobro_guardado<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Option<CobroGuardado>> {
     let mut rows = conn
@@ -796,7 +905,7 @@ impl CuentasRepository for SqliteCuentasRepository {
     /// guardia es el `Estado`**: si el pago ya está `ANULADO` se sale antes de tocar el stock. El
     /// caso de uso lo comprueba también, pero la comprobación que cuenta es ésta, porque está
     /// DENTRO de la transacción.
-    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool> {
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<AnulacionPagoDto> {
         let AnularPagoArgs {
             id_pago,
             id_usuario,
@@ -805,11 +914,11 @@ impl CuentasRepository for SqliteCuentasRepository {
         } = args;
         let g = self.db.write().await;
         let conn = &g;
-        let res: AppResult<bool> = conn.transaccion(async {
+        let res: AppResult<AnulacionPagoDto> = conn.transaccion(async {
             // 1) Comanda, importe y ESTADO del pago, antes de tocar nada.
             let Some(cobro) = cobro_guardado(conn, &id_pago).await? else {
                 // El pago no existe: nada que revertir.
-                return Ok(false);
+                return Ok(AnulacionPagoDto::nada());
             };
             let (id_comanda, importe, metodo) =
                 (cobro.id_comanda.clone(), cobro.importe, cobro.metodo.clone());
@@ -817,7 +926,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             // El guardia. Ver la nota de arriba: sin esto, cada pulsación del botón abonaría el
             // stock y descontaría el gasto del cliente otra vez.
             if cobro.anulado {
-                return Ok(false);
+                return Ok(AnulacionPagoDto::nada());
             }
 
             // Una devolución de parte de un cobro no se da de baja por separado: la deshace la baja
@@ -1007,7 +1116,28 @@ impl CuentasRepository for SqliteCuentasRepository {
             //
             //    Sólo en una anulación POR ERROR. En una devolución la mesa está cerrada y la
             //    consumición se la llevó el cliente: reabrirla pondría las líneas otra vez a cobrar.
+            //
+            //    CAJ-INC-02: si la mesa se volvió a abrir entretanto, la original no puede reabrirse
+            //    (`idx_comandas_una_abierta_por_mesa`) y las líneas se quedaban en una comanda
+            //    cerrada, sin cobrar y sin verse en la mesa. Si la abierta está vacía, se borra y se
+            //    reabre la original; si no, las líneas sin cobrar pasan a la abierta. Las mismas
+            //    sentencias que el worker (`SQL_DEVOLVER_LINEAS_A_LA_MESA`).
+            let mut destino = DestinoLineasBaja::NoVuelven;
+            let mut mesa = None;
             if clase.devuelve_las_lineas() && !id_comanda.is_empty() {
+                let donde = a_donde_vuelven(conn, &id_comanda).await?;
+                mesa = donde.mesa;
+                if donde.pendientes {
+                    destino = match donde.otra_abierta {
+                        Some(OtraAbierta { vacia: false }) => DestinoLineasBaja::LaAbierta,
+                        _ => DestinoLineasBaja::SuComanda,
+                    };
+                }
+                for sql in SQL_DEVOLVER_LINEAS_A_LA_MESA {
+                    conn.execute(sql, vec![Value::Text(id_comanda.clone())])
+                        .await
+                        .map_err(db_err)?;
+                }
                 conn.execute(
                     r#"
                     UPDATE Comandas
@@ -1062,7 +1192,10 @@ impl CuentasRepository for SqliteCuentasRepository {
                 crate::verifactu::emitir_baja_de_pago(conn, &id_pago, clase, &ids).await?;
             }
 
-            Ok(affected > 0)
+            if affected == 0 {
+                return Ok(AnulacionPagoDto::nada());
+            }
+            Ok(AnulacionPagoDto { anulado: true, lineas: destino, mesa })
         }).await;
 
         res
@@ -1473,7 +1606,7 @@ mod tests_anulacion {
         )
         .await;
 
-        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap().anulado);
 
         // RI-39: aunque se haya leído ACTIVO antes de anular, el repositorio vuelve a comprobarlo.
         let err = repo(&db).actualizar_pago("pago", PagoData {
@@ -1502,7 +1635,7 @@ mod tests_anulacion {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_DE_MESA).await;
 
-        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap().anulado);
 
         assert_eq!(
             escalar(&db, "SELECT COUNT(*) FROM Pagos WHERE ID_Pago='pago';").await,
@@ -1596,10 +1729,10 @@ mod tests_anulacion {
         sembrar(&db, VENTA_DE_MESA).await;
         let devolucion = || AnularPagoArgs { clase: ClaseBaja::Devolucion, ..args("pago") };
 
-        assert!(repo(&db).anular_pago(devolucion()).await.unwrap());
-        assert!(!repo(&db).anular_pago(devolucion()).await.unwrap());
+        assert!(repo(&db).anular_pago(devolucion()).await.unwrap().anulado);
+        assert!(!repo(&db).anular_pago(devolucion()).await.unwrap().anulado);
         assert!(
-            !repo(&db).anular_pago(args("pago")).await.unwrap(),
+            !repo(&db).anular_pago(args("pago")).await.unwrap().anulado,
             "ni una anulación por error después"
         );
 
@@ -1622,9 +1755,9 @@ mod tests_anulacion {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_DE_MESA).await;
 
-        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap().anulado);
         assert!(
-            !repo(&db).anular_pago(args("pago")).await.unwrap(),
+            !repo(&db).anular_pago(args("pago")).await.unwrap().anulado,
             "la segunda no hace nada, y lo dice"
         );
 
@@ -1654,7 +1787,7 @@ mod tests_anulacion {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_DE_MESA).await;
 
-        assert!(!repo(&db).anular_pago(args("fantasma")).await.unwrap());
+        assert!(!repo(&db).anular_pago(args("fantasma")).await.unwrap().anulado);
     }
 
     /* ── El gasto del cliente ─────────────────────────────────────────────────────────── */
@@ -1720,25 +1853,148 @@ mod tests_anulacion {
         );
     }
 
+    /// La mesa se volvió a abrir después del cobro: `com2`, abierta.
+    const MESA_REABIERTA: &str = "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado)
+        VALUES ('com2', 'MESA', 'mesa', '2026-01-02 14:00:00', 'Abierta');";
+
+    /// Las líneas de la comanda `id`, en orden.
+    async fn lineas_de(db: &Arc<Db>, id: &str) -> Vec<String> {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT ID_Detalle FROM Detalle_Comanda WHERE ID_Comanda = ?1 ORDER BY ID_Detalle;",
+                vec![Value::Text(id.into())],
+            )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            out.push(crate::mapping::v_string(row.get_value(0).unwrap()).unwrap());
+        }
+        out
+    }
+
     #[tokio::test]
-    async fn no_se_reabre_si_la_mesa_ya_tiene_otra_comanda_abierta() {
-        // Dos comandas abiertas para la misma mesa violarían el índice único y dejarían la sala
-        // enseñando dos tickets vivos donde hay uno.
+    async fn si_la_mesa_se_reabrio_y_esta_vacia_se_quita_y_vuelve_la_original() {
+        // CAJ-INC-02. Abrir la mesa crea una comanda vacía; con ella abierta la original no podía
+        // reabrirse (`idx_comandas_una_abierta_por_mesa`) y las líneas se quedaban en una comanda
+        // cerrada, sin cobrar y fuera de la mesa.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(&db, &[MESA_REABIERTA]).await;
+
+        let hecho = repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(hecho.lineas, DestinoLineasBaja::SuComanda);
+        assert_eq!(hecho.mesa.as_deref(), Some("4"));
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='com2';").await, 0.0);
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Abierta".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn si_la_mesa_se_reabrio_con_lineas_las_pendientes_pasan_a_la_abierta() {
+        // CAJ-INC-02. La mesa ya tiene otra cuenta en marcha: lo que el cobro anulado cubría se
+        // añade a ella, y la original se queda cerrada con lo que siga cobrado.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_DE_MESA).await;
         sembrar(
             &db,
-            &["INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado)
-               VALUES ('com2', 'MESA', 'mesa', '2026-01-02 14:00:00', 'Abierta');"],
+            &[
+                MESA_REABIERTA,
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+                   VALUES ('det-nueva', 'com2', 'prod', 1, 250);",
+                "UPDATE Comandas SET Total_Comanda = 250 WHERE ID_Comanda = 'com2';",
+            ],
+        )
+        .await;
+
+        let hecho = repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(hecho.lineas, DestinoLineasBaja::LaAbierta);
+        assert_eq!(lineas_de(&db, "com").await, Vec::<String>::new());
+        assert_eq!(
+            lineas_de(&db, "com2").await,
+            vec!["det-lote", "det-nueva", "det-pendiente", "det-suelto"]
+        );
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Pagada".into())
+        );
+        // Los totales se re-derivan de las líneas, en las dos.
+        assert_eq!(escalar(&db, "SELECT Total_Comanda FROM Comandas WHERE ID_Comanda='com';").await, 0.0);
+        assert_eq!(escalar(&db, "SELECT Total_Comanda FROM Comandas WHERE ID_Comanda='com2';").await, 1450.0);
+        // El ticket anulado se sigue reimprimiendo con sus dos líneas: va por `Pago_Detalles`.
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Pago_Detalles pd JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
+                  WHERE pd.ID_Pago = 'pago';"
+            )
+            .await,
+            2.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_linea_que_sigue_cobrada_por_otro_cobro_no_se_mueve() {
+        // Sólo vuelve lo que el cobro anulado dejó sin cobrar; lo que paga otro ticket activo es de
+        // aquella comanda y de aquel ticket.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(
+            &db,
+            &[
+                MESA_REABIERTA,
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+                   VALUES ('det-nueva', 'com2', 'prod', 1, 250);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago-b', 'com', '2026-01-02 13:05:00', 'Efectivo', 300, 'PARCIAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-b', 'det-pendiente');",
+            ],
         )
         .await;
 
         repo(&db).anular_pago(args("pago")).await.unwrap();
 
-        assert_eq!(
-            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
-            Some("Pagada".into())
-        );
+        assert_eq!(lineas_de(&db, "com").await, vec!["det-pendiente"]);
+        assert_eq!(escalar(&db, "SELECT Total_Comanda FROM Comandas WHERE ID_Comanda='com';").await, 300.0);
+    }
+
+    #[tokio::test]
+    async fn una_comanda_vacia_con_reserva_no_se_quita_las_lineas_pasan_a_ella() {
+        // La mesa se abrió para una reserva: quitar esa comanda perdería el enlace con la reserva.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado)
+               VALUES ('com2', 'MESA', 'mesa', 'res', '2026-01-02 14:00:00', 'Abierta');"],
+        )
+        .await;
+
+        let hecho = repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(hecho.lineas, DestinoLineasBaja::LaAbierta);
+        assert_eq!(lineas_de(&db, "com2").await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_no_devuelve_las_lineas_aunque_la_mesa_este_abierta() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(&db, &[MESA_REABIERTA]).await;
+
+        let hecho = repo(&db)
+            .anular_pago(AnularPagoArgs { clase: ClaseBaja::Devolucion, ..args("pago") })
+            .await
+            .unwrap();
+
+        assert_eq!(hecho.lineas, DestinoLineasBaja::NoVuelven);
+        assert_eq!(lineas_de(&db, "com2").await, Vec::<String>::new());
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='com2';").await, 1.0);
     }
 
     /* ── El historial de caja ─────────────────────────────────────────────────────────── */
@@ -3088,11 +3344,11 @@ mod tests_anular_vs_devolver {
             clase: c,
         };
 
-        assert!(repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap());
+        assert!(repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap().anulado);
         let registros = escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await;
 
         assert!(
-            !repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap(),
+            !repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap().anulado,
             "la segunda vez devuelve false"
         );
         assert_eq!(
@@ -3441,6 +3697,7 @@ mod tests_baja_de_un_ticket_canjeado {
                 clase,
             })
             .await
+            .map(|h| h.anulado)
     }
 
     /// Un cobro con su ticket canjeado: `(id_pago, número del ticket, número de la F3)`.

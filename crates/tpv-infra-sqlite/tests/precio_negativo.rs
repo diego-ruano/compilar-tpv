@@ -242,7 +242,7 @@ async fn un_cobro_con_una_linea_en_negativo_se_devuelve_entero_y_no_por_partes()
     )
     .await
     .expect("la devolución entera sale");
-    assert!(hecho);
+    assert!(hecho.anulado);
     assert_eq!(
         b.num(&format!("SELECT Importe FROM Movimientos_Caja WHERE ID_Pago = '{id_pago}' AND Tipo = 'DEVOLUCION';")).await,
         1000.0

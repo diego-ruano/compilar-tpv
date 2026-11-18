@@ -32,6 +32,7 @@ import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
 import { useQueryClient } from "@tanstack/react-query";
 import { cierreImprimir,cierreReabrir,type CierreResumenDto } from "../../features/cuentas/cierreApis";
 import {
+avisoDeLineasDevueltas,
 cuentasGetEntradas,
 cuentasGetSalidas,
 esAnulado,
@@ -659,8 +660,12 @@ export default function Cuentas() {
                     // motivo por un descuadre que no va a ocurrir.
                     { tipo: "anular_pago", id_pago: idPago, clase },
                     async () => {
-                        await anularPago.mutateAsync({ id_pago: idPago, motivo, clase });
+                        const hecho = await anularPago.mutateAsync({ id_pago: idPago, motivo, clase });
                         setConfirmAccion(null);
+                        // CAJ-INC-02: adónde han ido sus consumiciones, que puede no ser su mesa
+                        // de antes si se volvió a abrir.
+                        const aviso = avisoDeLineasDevueltas(hecho);
+                        if (aviso) toast.info("Cobro dado de baja", aviso);
                         void recargarCierres();
                         if (clase === "DEVOLUCION") void ofrecerRectificativa(idPago);
                     },

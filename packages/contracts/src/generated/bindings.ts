@@ -46,6 +46,15 @@ export type AlergenoMiniDto = {
 	Ruta_Imagen: string | null,
 };
 
+/**  Lo que ha hecho la baja de un cobro. */
+export type AnulacionPagoDto = {
+	/**  `false` si el cobro no existía o ya estaba dado de baja: no se ha hecho nada. */
+	anulado: boolean,
+	lineas: DestinoLineasBaja,
+	/**  El nombre de la mesa de la comanda, para decir adónde volvieron. `None` en la barra. */
+	mesa: string | null,
+};
+
 /**
  *  Anular un cobro (CUENTA-07). **No lleva `id_usuario`**: quién anula sale de la sesión del
  *  backend (SEC-01). Una anulación firmada con el nombre que le pase la pantalla es una auditoría
@@ -955,6 +964,18 @@ export type DestinatarioTicket_Serialize = {
 export type DestinoArgs = {
 	destino?: string | null,
 };
+
+/**  Adónde fueron las líneas de un cobro dado de baja (CAJ-INC-02). */
+export type DestinoLineasBaja =
+/**
+ *  No vuelven: es una devolución (el cliente se llevó la consumición), no se ha dado de baja
+ *  nada o no quedaba nada sin cobrar.
+ */
+"no_vuelven" |
+/**  A su comanda, que se ha reabierto. */
+"su_comanda" |
+/**  A la comanda que ya estaba abierta en la misma mesa, con lo que tenía. */
+"la_abierta";
 
 export type DeviceFirmarEmparejamientoArgs = {
 	accion: AccionEmparejamiento,

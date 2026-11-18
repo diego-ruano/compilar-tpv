@@ -15,7 +15,7 @@ use tpv_application::use_cases::cuentas as uc;
 use tpv_application::use_cases::rectificacion_caja as rect;
 use tpv_contracts::cierre_caja::{CambioCajaInput, ImpactoCajaDto};
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
+    AnulacionPagoDto, AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
     DevolucionDto, DevolverLineasInput, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
     UpdateGastoInput, UpdatePagoInput,
 };
@@ -196,7 +196,7 @@ pub async fn cuentas_devolver_lineas(
 pub async fn cuentas_anular_pago(
     state: State<'_, AppState>,
     args: AnularPagoInput,
-) -> Result<bool, AppErrorDto> {
+) -> Result<AnulacionPagoDto, AppErrorDto> {
     let sesion = state.exigir_permiso("cuentas.cobros").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;

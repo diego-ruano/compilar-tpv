@@ -197,6 +197,62 @@ const yaRepuesto = (a: string) =>
 	`WHERE dc.ID_Detalle = ${a}.ID_Detalle` +
 	`), 3), 0)`;
 
+/** La comanda del cobro que se da de baja (`?1` es el cobro). */
+const COMANDA_DEL_COBRO = "(SELECT p.ID_Comanda FROM Pagos p WHERE p.ID_Pago = ?1)";
+
+/**
+ * CAJ-INC-02 · Devolver a la mesa las líneas de un cobro dado de baja por error cuando la mesa ya
+ * tiene otra comanda abierta. Espejo de `SQL_DEVOLVER_LINEAS_A_LA_MESA` de la Main, con la comanda
+ * leída del cobro. Van después de marcarlo `ANULADO` (sus líneas ya no están en
+ * `v_lineas_cobradas`) y antes del `UPDATE` que reabre la original.
+ *
+ * 1. Si la abierta está vacía (sin líneas, cobros ni reserva) y a la original le quedan líneas sin
+ *    cobrar, se quita: así la original se puede reabrir.
+ * 2. Si no, las líneas sin cobrar de la original pasan a la abierta.
+ * 3. El total de la abierta se re-deriva de sus líneas.
+ */
+const SQL_DEVOLVER_LINEAS_A_LA_MESA = [
+	`
+	DELETE FROM Comandas
+	WHERE Estado = 'Abierta'
+	  AND ID_Comanda <> ${COMANDA_DEL_COBRO}
+	  AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO})
+	  AND ID_Reserva IS NULL
+	  AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda)
+	  AND NOT EXISTS (SELECT 1 FROM Pagos x WHERE x.ID_Comanda = Comandas.ID_Comanda)
+	  AND EXISTS (
+	    SELECT 1 FROM Detalle_Comanda dc
+	    WHERE dc.ID_Comanda = ${COMANDA_DEL_COBRO}
+	      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+	  );
+	`,
+	`
+	UPDATE Detalle_Comanda
+	SET ID_Comanda = (
+	    SELECT a.ID_Comanda FROM Comandas o
+	    JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
+	    WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO}
+	)
+	WHERE ID_Comanda = ${COMANDA_DEL_COBRO}
+	  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle)
+	  AND EXISTS (
+	    SELECT 1 FROM Comandas o
+	    JOIN Comandas a ON a.ID_Mesa = o.ID_Mesa AND a.Estado = 'Abierta' AND a.ID_Comanda <> o.ID_Comanda
+	    WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO}
+	  );
+	`,
+	`
+	UPDATE Comandas
+	SET Total_Comanda = (
+	    SELECT IFNULL(SUM(CAST(ROUND(COALESCE(d.Cantidad,1) * COALESCE(d.Precio_Unitario,0)) AS INTEGER)), 0)
+	    FROM Detalle_Comanda d WHERE d.ID_Comanda = Comandas.ID_Comanda
+	)
+	WHERE Estado = 'Abierta'
+	  AND ID_Comanda <> ${COMANDA_DEL_COBRO}
+	  AND ID_Mesa = (SELECT o.ID_Mesa FROM Comandas o WHERE o.ID_Comanda = ${COMANDA_DEL_COBRO});
+	`,
+];
+
 // Anula un pago SIN borrarlo (CUENTA-07): devuelve el stock (por lote y suelto), resta el gasto
 // del cliente, marca la fila de `Pagos` y deja el movimiento en `Movimientos_Caja`. Las líneas y
 // sus `Pago_Detalles` se **conservan** (Opción A): son lo que permite reimprimir el ticket anulado,
@@ -340,6 +396,13 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago, idUsuario, motivo],
 		},
+		// 4-ter) CAJ-INC-02: si la mesa se volvió a abrir entretanto, la original no puede reabrirse.
+		//        Si la abierta está vacía (sin líneas, cobros ni reserva), se quita; si no, las
+		//        líneas sin cobrar pasan a ella. Las mismas sentencias que la Main
+		//        (`SQL_DEVOLVER_LINEAS_A_LA_MESA` en `tpv-infra-sqlite/src/cuentas.rs`).
+		...(devuelveLasLineas
+			? SQL_DEVOLVER_LINEAS_A_LA_MESA.map((sql) => ({ kind: "execute", sql, args: [idPago] }))
+			: []),
 		// 5) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las cubría
 		//    ya no está activo—, así que se reabre si no hay otra comanda abierta para la mesa.
 		//

@@ -243,3 +243,33 @@ pub struct AnularPagoInput {
     #[serde(default)]
     pub clase: Option<String>,
 }
+
+/// Adónde fueron las líneas de un cobro dado de baja (CAJ-INC-02).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DestinoLineasBaja {
+    /// No vuelven: es una devolución (el cliente se llevó la consumición), no se ha dado de baja
+    /// nada o no quedaba nada sin cobrar.
+    NoVuelven,
+    /// A su comanda, que se ha reabierto.
+    SuComanda,
+    /// A la comanda que ya estaba abierta en la misma mesa, con lo que tenía.
+    LaAbierta,
+}
+
+/// Lo que ha hecho la baja de un cobro.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AnulacionPagoDto {
+    /// `false` si el cobro no existía o ya estaba dado de baja: no se ha hecho nada.
+    pub anulado: bool,
+    pub lineas: DestinoLineasBaja,
+    /// El nombre de la mesa de la comanda, para decir adónde volvieron. `None` en la barra.
+    pub mesa: Option<String>,
+}
+
+impl AnulacionPagoDto {
+    /// No se ha hecho nada.
+    pub fn nada() -> Self {
+        AnulacionPagoDto { anulado: false, lineas: DestinoLineasBaja::NoVuelven, mesa: None }
+    }
+}

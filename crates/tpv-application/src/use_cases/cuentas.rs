@@ -5,7 +5,7 @@
 
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
+    AnulacionPagoDto, AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
     DevolucionDto, DevolverLineasInput, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
     UpdateGastoInput, UpdatePagoInput,
 };
@@ -173,16 +173,16 @@ pub async fn anular_pago(
     repo: &dyn CuentasRepository,
     id_usuario: &str,
     input: AnularPagoInput,
-) -> AppResult<bool> {
+) -> AppResult<AnulacionPagoDto> {
     let id_pago = input.id_pago.trim();
     if id_pago.is_empty() {
-        return Ok(false);
+        return Ok(AnulacionPagoDto::nada());
     }
 
-    // Un pago que no existe no es un error de permiso ni de motivo: es `false`, igual que antes.
-    // Preguntar por el motivo de algo que no se va a hacer sólo haría escribir para nada.
+    // Un pago que no existe no es un error de permiso ni de motivo: es no hacer nada, igual que
+    // antes. Preguntar por el motivo de algo que no se va a hacer sólo haría escribir para nada.
     let Some(estado) = repo.estado_pago(id_pago).await? else {
-        return Ok(false);
+        return Ok(AnulacionPagoDto::nada());
     };
 
     let motivo = puede_anularse(&estado, input.motivo.as_deref()).map_err(|r| match r {

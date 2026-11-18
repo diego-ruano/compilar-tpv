@@ -29,7 +29,7 @@
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cierre_caja::{CambioCajaInput, CierreDto, ImpactoCajaDto, ImpactoCierreDto};
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CreateGastoInput, DeleteGastoInput, UpdateGastoInput, UpdatePagoInput,
+    AnulacionPagoDto, AnularPagoInput, CreateGastoInput, DeleteGastoInput, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cierre_caja::{
     calcular, fecha_de_apunte, momento_caja_de_gasto, momento_de_gasto, momento_de_gasto_guardado,
@@ -512,7 +512,7 @@ pub async fn anular_pago(
     cierres: &dyn CierreCajaRepository,
     id_usuario: &str,
     input: AnularPagoInput,
-) -> AppResult<bool> {
+) -> AppResult<AnulacionPagoDto> {
     let cambio = CambioCajaInput::AnularPago {
         id_pago: input.id_pago.clone(),
         // REV-08: la clase decide a qué cierre le toca el cambio. Una devolución no toca el de la
@@ -536,11 +536,11 @@ pub async fn anular_pago(
         _ => "Cobro anulado".to_string(),
     };
 
-    let ok = cuentas_uc::anular_pago(cuentas, id_usuario, input).await?;
-    if ok {
+    let hecho = cuentas_uc::anular_pago(cuentas, id_usuario, input).await?;
+    if hecho.anulado {
         rectificar(cierres, afectados, id_usuario, &descripcion, motivo).await?;
     }
-    Ok(ok)
+    Ok(hecho)
 }
 
 pub async fn crear_gasto(
