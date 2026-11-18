@@ -46,6 +46,12 @@ type BusinessSettingsState = BusinessSettings & {
      * como guardado lo que no lo está.
      */
     guardarYa: () => Promise<void>;
+    /**
+     * CFG-INC-01: guarda sólo estos campos, ya, y no los pone en el store hasta que están guardados.
+     * Es lo que usa Configuración → Negocio, que manda únicamente lo que ha cambiado su borrador:
+     * los demás campos se quedan como estén, también si otro equipo los acaba de cambiar.
+     */
+    guardar: (patch: Partial<BusinessSettings>) => Promise<void>;
 
     // opcionales (por comodidad)
     setBusinessName: (v: string) => void;
@@ -126,6 +132,14 @@ export const useBusinessSettings = create<BusinessSettingsState>(
                 void get().init();
                 throw e;
             }
+        },
+
+        guardar: async (patch) => {
+            if (!Object.keys(patch).length) return;
+            const vigente = contexto;
+            pending = { ...pending, ...patch };
+            await get().guardarYa();
+            if (vigente === contexto) set(patch);
         },
 
         setBusinessName: (v) => get().setMany({ business_name: v }),

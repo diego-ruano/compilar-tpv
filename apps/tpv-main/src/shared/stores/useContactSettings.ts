@@ -19,6 +19,8 @@ type ContactSettingsState = ContactSettings & {
     setMany: (patch: Partial<ContactSettings>) => void;
     /** Escribe ya y falla si no se guarda (ver `guardarYa` en useBusinessSettings). */
     guardarYa: () => Promise<void>;
+    /** Guarda sólo estos campos, ya, y los pone en el store cuando están guardados (CFG-INC-01). */
+    guardar: (patch: Partial<ContactSettings>) => Promise<void>;
 };
 
 let timer: number | null = null;
@@ -68,6 +70,14 @@ export const useContactSettings = create<ContactSettingsState>((set, get) => ({
             conAviso(escribirPendiente, "No se han podido guardar los datos de contacto"),
             400,
         );
+    },
+
+    guardar: async (patch) => {
+        if (!Object.keys(patch).length) return;
+        const vigente = contexto;
+        pending = { ...pending, ...patch };
+        await get().guardarYa();
+        if (vigente === contexto) set(patch);
     },
 
     guardarYa: async () => {

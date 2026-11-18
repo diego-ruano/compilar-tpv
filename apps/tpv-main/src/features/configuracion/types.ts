@@ -34,15 +34,14 @@ export type BusinessDraft = {
 	razon_social: string;
 };
 
-export function shallowEqualDraft(a: BusinessDraft, b: BusinessDraft) {
-	return (
-		a.business_name === b.business_name &&
-		a.logo_data_url === b.logo_data_url &&
-		a.direccion === b.direccion &&
-		a.telefono === b.telefono &&
-		a.cif === b.cif &&
-		a.mensaje_footer === b.mensaje_footer &&
-		Number(a.iva_percent) === Number(b.iva_percent) &&
-		a.razon_social === b.razon_social
-	);
-}
+/** Los campos del borrador, en el orden del formulario. */
+export const BUSINESS_DRAFT_CAMPOS: readonly (keyof BusinessDraft)[] = [
+	"business_name",
+	"logo_data_url",
+	"direccion",
+	"telefono",
+	"cif",
+	"mensaje_footer",
+	"iva_percent",
+	"razon_social",
+];

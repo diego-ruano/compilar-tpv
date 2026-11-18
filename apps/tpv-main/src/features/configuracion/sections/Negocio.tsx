@@ -28,12 +28,16 @@ import { useEstadoFiscal } from "../../../shared/stores/useEstadoFiscal";
 import { useMode } from "../../../shared/stores/useMode";
 import { nifValido } from "../../../shared/ticket/nif";
 import { CorreoRecuperacion } from "./CorreoRecuperacion";
+import { CambioDeOtroEquipo } from "../ui/CambioDeOtroEquipo";
+import type { Choques } from "../borrador";
 
 export function Negocio({
     darkMode,
     inputTone,
     draft,
     setDraft,
+    choques,
+    choqueCorreo,
     correo,
     setCorreo,
     correoCargando,
@@ -46,6 +50,9 @@ export function Negocio({
     inputTone: string;
     draft: BusinessDraft;
     setDraft: React.Dispatch<React.SetStateAction<BusinessDraft>>;
+    /** CFG-INC-01: lo que otro equipo ha puesto en un campo que aquí también se ha cambiado. */
+    choques: Choques<BusinessDraft>;
+    choqueCorreo: string | undefined;
     correo: string;
     setCorreo: (v: string) => void;
     correoCargando: boolean;
@@ -144,6 +151,7 @@ export function Negocio({
                             placeholder="Ej: Bar La Plaza"
                             className={inputTone}
                         />
+                        <CambioDeOtroEquipo valor={choques.business_name} />
                     </Field>
 
                     <Field label="Razón social" hint="Quien factura: «Francisco García SL»">
@@ -155,6 +163,7 @@ export function Negocio({
                             placeholder="Nombre o razón social del obligado"
                             className={inputTone}
                         />
+                        <CambioDeOtroEquipo valor={choques.razon_social} />
                     </Field>
 
                     <Field label="NIF / CIF" hint="El de quien factura">
@@ -171,6 +180,7 @@ export function Negocio({
                                 Ese NIF no es válido: revisa la letra o el dígito de control.
                             </span>
                         ) : null}
+                        <CambioDeOtroEquipo valor={choques.cif} />
                     </Field>
 
                     <Field label="Teléfono" hint="Opcional">
@@ -185,6 +195,7 @@ export function Negocio({
                             placeholder="+34 600 000 000"
                             className={inputTone}
                         />
+                        <CambioDeOtroEquipo valor={choques.telefono} />
                     </Field>
 
                     <Field label="Dirección" hint="Opcional">
@@ -199,6 +210,7 @@ export function Negocio({
                             placeholder="C/ Ejemplo 12, 46000 Valencia"
                             className={inputTone}
                         />
+                        <CambioDeOtroEquipo valor={choques.direccion} />
                     </Field>
 
                     <Field label="Correo de contacto" hint="Para los pedidos a proveedores; no sale en el ticket">
@@ -211,6 +223,7 @@ export function Negocio({
                             disabled={correoCargando}
                             className={inputTone}
                         />
+                        <CambioDeOtroEquipo valor={choqueCorreo} />
                     </Field>
                 </div>
 
@@ -308,6 +321,10 @@ export function Negocio({
                             Cambios del logo se guardan al pulsar “Guardar
                             cambios”.
                         </div>
+                        <CambioDeOtroEquipo
+                            valor={choques.logo_data_url}
+                            texto={choques.logo_data_url ? "En otro equipo han cambiado el logo." : "En otro equipo han quitado el logo."}
+                        />
                     </div>
                 </div>
             </Panel>

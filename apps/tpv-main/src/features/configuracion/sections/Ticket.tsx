@@ -13,6 +13,7 @@ import { payloadDePrecuenta, printerImprimirPrecuenta } from "../api/printerApis
 import { conAviso } from "../../../shared/lib/conAviso";
 import { deCentimos } from "../../../shared/lib/dinero";
 import { MSG_IVA } from "../../../shared/lib/iva";
+import { CambioDeOtroEquipo } from "../ui/CambioDeOtroEquipo";
 
 type TicketWidthOpt = {
     value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
@@ -68,6 +69,8 @@ export function Ticket({
     // ✅ NUEVO: mensaje final (sale del draft del negocio)
     footerMessage,
     onFooterMessageChange,
+    choqueIva,
+    choqueFooter,
 
     ticket,
     setSetting,
@@ -83,6 +86,9 @@ export function Ticket({
 
     footerMessage: string;
     onFooterMessageChange: (v: string) => void;
+    /** CFG-INC-01: lo que otro equipo ha puesto en el IVA o el mensaje mientras se editaban aquí. */
+    choqueIva?: number;
+    choqueFooter?: string;
 
     ticket: any;
     setSetting: (k: any, v: any) => void;
@@ -146,6 +152,7 @@ export function Ticket({
                                 {MSG_IVA}.
                             </p>
                         )}
+                        <CambioDeOtroEquipo valor={choqueIva} />
                     </Field>
 
                     <div className="rounded-xl border border-border bg-surface-2 px-4 py-3">
@@ -305,6 +312,7 @@ export function Ticket({
                                 placeholder="Ej: Gracias por su visita"
                                 className={inputTone}
                             />
+                            <CambioDeOtroEquipo valor={choqueFooter} />
                         </Field>
                     </div>
                 ) : null}

@@ -1,7 +1,7 @@
 import { commands, toAppError } from "@tpv/client";
 // src/pages/Configuracion.tsx
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 
@@ -18,6 +18,7 @@ import type {
     SectionKey,
 } from "../../features/configuracion/types";
 import { useBusinessDraft } from "../../features/configuracion/hooks/useBusinessDraft";
+import { useBorrador } from "../../features/configuracion/hooks/useBorrador";
 
 // UI
 import { Badge } from "../../features/configuracion/ui/Badge";
@@ -36,6 +37,8 @@ import { MSG_IVA } from "../../shared/lib/iva";
 import { nifValido } from "../../shared/ticket/nif";
 
 
+const CAMPOS_CORREO = ["contact_email"] as const;
+
 export default function Configuracion() {
     // ✅ stores (ya no “hydrate” aquí; el init se hace en AppBoot)
     const biz = useBusinessSettings();
@@ -52,8 +55,11 @@ export default function Configuracion() {
     const contactReady = useContactSettings((s) => s.ready);
     const contactInit = useContactSettings((s) => s.init);
 
-    const [contact_email, setContactEmail] = useState("");
-    const contactDirty = contactReady && contact_email !== contact.contact_email;
+    // CFG-INC-01: el correo, como el resto de Negocio, es un borrador sobre lo guardado.
+    const correo = useBorrador({ contact_email: contact.contact_email }, CAMPOS_CORREO);
+    const contact_email = correo.borrador.contact_email;
+    const setContactEmail = (v: string) => correo.cambiar({ contact_email: v });
+    const contactDirty = contactReady && correo.dirty;
 
     const darkMode = useTheme((s) => s.theme === "dark");
 
@@ -71,15 +77,6 @@ export default function Configuracion() {
     useEffect(() => {
         if (seccionSolicitada) setSection(seccionSolicitada);
     }, [seccionSolicitada]);
-
-    // Sincroniza el draft con el store la primera vez que carga
-    const contactSyncedRef = useRef(false);
-    useEffect(() => {
-        if (!contactReady || contactSyncedRef.current) return;
-        contactSyncedRef.current = true;
-        setContactEmail(contact.contact_email);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [contactReady]);
 
     // Carga lazy al entrar en la sección (cubre modo Handy y TPV sin AppBoot)
     useEffect(() => {
@@ -176,7 +173,7 @@ export default function Configuracion() {
     };
 
     // Draft + dirty (hook) (tu hook ya no depende de hydrate)
-    const { draft, setDraft, dirty, resetDraft, setIvaFromRaw, ivaTexto, ivaValido } =
+    const { draft, setDraft, base, dirty, cambios, choques, resetDraft, setIvaFromRaw, ivaTexto, ivaValido } =
         useBusinessDraft(biz);
 
     // Save negocio
@@ -199,31 +196,22 @@ export default function Configuracion() {
         try {
             setSavingBiz(true);
             // El correo va primero porque lo valida el backend: si no vale, no se guarda nada.
-            if (contactDirty) {
-                contact.setMany({ contact_email });
-                await contact.guardarYa();
-            }
+            if (contactDirty) await contact.guardar(correo.cambios);
             if (dirty) {
-                // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
-                const prevLogo = biz.logo_data_url;
-                (biz as any).setMany({
-                    business_name: draft.business_name,
-                    logo_data_url: draft.logo_data_url,
-                    direccion: draft.direccion,
-                    telefono: draft.telefono,
-                    cif: draft.cif,
-                    mensaje_footer: draft.mensaje_footer,
-                    iva_percent: draft.iva_percent,
-                    razon_social: draft.razon_social,
-                });
-                // Se espera a que esté escrito: «Guardado» sólo sale si se ha guardado, y Fiscal vuelve
-                // a preguntar si faltan los datos cuando ya están en la base.
-                await biz.guardarYa();
+                // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2):
+                // el que había cuando se tomó el borrador, que es el que se sustituye.
+                const prevLogo = base.logo_data_url;
+                // CFG-INC-01: sólo lo que se ha cambiado aquí. Mandarlo todo devolvía a su valor de
+                // antes lo que otro equipo hubiera cambiado mientras tanto. Se espera a que esté
+                // escrito: «Guardado» sólo sale si se ha guardado, y Fiscal vuelve a preguntar si
+                // faltan los datos cuando ya están en la base.
+                await biz.guardar(cambios);
                 // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
                 if (
+                    "logo_data_url" in cambios &&
                     prevLogo &&
                     prevLogo.startsWith("images/logo/") &&
-                    prevLogo !== draft.logo_data_url
+                    prevLogo !== cambios.logo_data_url
                 ) {
                     void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
                 }
@@ -245,7 +233,7 @@ export default function Configuracion() {
     const hayCambios = dirty || contactDirty;
     const descartarNegocio = () => {
         resetDraft();
-        setContactEmail(contact.contact_email);
+        correo.descartar();
     };
 
     // El código de emparejamiento (y su ciclo de vida) vive en `usePairCode`: esta página se
@@ -533,6 +521,8 @@ export default function Configuracion() {
                                                 inputTone={inputTone}
                                                 draft={draft}
                                                 setDraft={setDraft}
+                                                choques={choques}
+                                                choqueCorreo={correo.choques.contact_email}
                                                 correo={contact_email}
                                                 setCorreo={setContactEmail}
                                                 correoCargando={!contactReady}
@@ -580,6 +570,8 @@ export default function Configuracion() {
                                                 footerMessage={
                                                     draft.mensaje_footer
                                                 }
+                                                choqueIva={choques.iva_percent}
+                                                choqueFooter={choques.mensaje_footer}
                                                 onFooterMessageChange={(v) =>
                                                     setDraft((d) => ({
                                                         ...d,
