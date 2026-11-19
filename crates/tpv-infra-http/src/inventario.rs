@@ -178,6 +178,14 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
+    async fn borrar_categoria(&self, id_categoria: &str) -> AppResult<()> {
+        let _: JsonValue = self
+            .client
+            .delete_json(&format!("/v1/inventario/categorias/{id_categoria}"))
+            .await?;
+        Ok(())
+    }
+
     async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
         self.guardar_producto(actor,p,true,true).await
     }

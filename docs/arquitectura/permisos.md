@@ -92,7 +92,7 @@ proceso de réplica y los jobs no necesitan una sesión personal.
 | Grupo | Capacidades configurables |
 |---|---|
 | Servicio | Comandas/venta/cobro, cocina, reservas, tareas propias |
-| Inventario | Editar catálogo, precios e IVA, borrar/archivar productos, recibir mercancía, editar lotes, ajustar existencias |
+| Inventario | Editar catálogo, precios e IVA, borrar productos y categorías, recibir mercancía, editar lotes, ajustar existencias |
 | Gestión | Proveedores, pedidos y su correo, administrar tareas, horarios, plano, estadísticas, clientes, recalcular gasto |
 | Caja | Cobros y devoluciones, gastos/totales/edición de pagos, cierre/reapertura de caja |
 

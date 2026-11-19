@@ -26,11 +26,13 @@
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 import m0002 from "../../../../packages/database/migrations/0002_negocio.sql";
 import m0003 from "../../../../packages/database/migrations/0003_ingredientes.sql";
+import m0004 from "../../../../packages/database/migrations/0004_producto_sin_categoria.sql";
 
 export const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
 	{ name: "0002_negocio.sql", sql: m0002 },
 	{ name: "0003_ingredientes.sql", sql: m0003 },
+	{ name: "0004_producto_sin_categoria.sql", sql: m0004 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */

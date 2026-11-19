@@ -3,9 +3,11 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
 en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
 `packages/database/migrations/`, aplicados en orden.
-Hoy son tres: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
-(AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)), y
-`0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)).
+Hoy son cuatro: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
+(AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)),
+`0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)), y
+`0004_producto_sin_categoria.sql`, que deja a un producto sin categoría
+([abajo](#borrar-una-categoría-de-productos-0004)).
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
@@ -115,6 +117,8 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
   sale de la carta, del inventario, del plano, de la plantilla y de las reservas nuevas, y sigue en
   estadísticas, tickets y reconciliación. Sus `UNIQUE` de nombre sólo cuentan entre los activos (índices parciales,
   y los `ON CONFLICT` llevan su `WHERE`). Una lista nueva de catálogo filtra `Archivado_En IS NULL`.
+  Una categoría de productos no se archiva: se borra, y sus productos archivados se quedan sin ella
+  ([abajo](#borrar-una-categoría-de-productos-0004)).
 - **Los valores de dominio cerrados son triggers, no `CHECK`** (RI-48): métodos de pago y estados de
   cocina, reservas, tareas y fichajes. Un `RAISE(ABORT)` corta también un `INSERT OR IGNORE`, que ante
   un `CHECK` se saltaría la fila en silencio. Cocina (líneas que no pasan por ella), fichajes y
@@ -209,6 +213,22 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
 - **Tras restaurar la base se vacía**: `bootstrap_restaurar` y la copia que se va a instalar
   (`prepare_restore`) borran el resumen y apuntan como sucios todos los días con cobros
   (`estadisticas_diarias::reiniciar`).
+
+## Borrar una categoría de productos (`0004`)
+
+Borrar una categoría se lleva sus productos, y a cada uno le pasa lo mismo que al quitarlo solo: se
+archiva si tiene historia y se borra si no. Los archivados se quedan **sin categoría**
+(`Productos.ID_Categoria` admite `NULL` desde `0004`, que reconstruye la tabla) y la categoría se borra,
+así que su nombre queda libre. Lo impide sólo que alguno de sus productos esté en una comanda abierta.
+
+- Un archivado sin categoría no sale en ninguna lista. Las estadísticas ya no contaban un producto
+  archivado dentro de ninguna categoría, así que sus ventas siguen en los totales igual que antes. Su
+  ficha se lee con la categoría vacía (`""`) en la Main y en el worker.
+- Son las sentencias de `SQL_QUITAR_CATEGORIA` (`tpv-infra-sqlite/src/inventario.rs`), las mismas en el
+  worker (`borrarCategoria`). Todas llevan la condición de la comanda abierta: se aplican todas o
+  ninguna, también al volver a evaluarlas el otro lado. En el worker la decide además una guarda
+  (`categoria_en_comanda_abierta`).
+- Se hace en Inventario, dentro de la categoría, con el permiso `catalogo.borrar`.
 
 ## Los ingredientes (`0003`)
 

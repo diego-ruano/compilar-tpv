@@ -67,6 +67,7 @@ import {
 import {
 	ajustarLote,
 	ajustarStockSuelto,
+	borrarCategoria,
 	createCategoria,
 	createLote,
 	deleteProducto,
@@ -297,6 +298,8 @@ import casoInvUpsertSinListaIngr from "../../../tests/contract/casos/inventario/
 import goldenInvUpsertSinListaIngr from "../../../tests/contract/golden/inventario/upsert_producto_sin_lista_de_ingredientes.json";
 import casoInvDeleteConIngr from "../../../tests/contract/casos/inventario/delete_producto_con_ingredientes.json";
 import goldenInvDeleteConIngr from "../../../tests/contract/golden/inventario/delete_producto_con_ingredientes.json";
+import casoInvBorrarCategoria from "../../../tests/contract/casos/inventario/borrar_categoria.json";
+import goldenInvBorrarCategoria from "../../../tests/contract/golden/inventario/borrar_categoria.json";
 import casoMesaUpdateIngr from "../../../tests/contract/casos/mesas/update_detalle_ingredientes.json";
 import goldenMesaUpdateIngr from "../../../tests/contract/golden/mesas/update_detalle_ingredientes.json";
 import casoMesaQuitarIngr from "../../../tests/contract/casos/mesas/update_detalle_ingredientes_quitar.json";
@@ -477,6 +480,7 @@ const CASOS = [
 	{ nombre: "inventario_upsert_producto_con_ingredientes", caso: casoInvUpsertConIngr, golden: goldenInvUpsertConIngr },
 	{ nombre: "inventario_upsert_producto_sin_lista_de_ingredientes", caso: casoInvUpsertSinListaIngr, golden: goldenInvUpsertSinListaIngr },
 	{ nombre: "inventario_delete_producto_con_ingredientes", caso: casoInvDeleteConIngr, golden: goldenInvDeleteConIngr },
+	{ nombre: "inventario_borrar_categoria", caso: casoInvBorrarCategoria, golden: goldenInvBorrarCategoria },
 	{ nombre: "mesas_update_detalle_ingredientes", caso: casoMesaUpdateIngr, golden: goldenMesaUpdateIngr },
 	{ nombre: "mesas_update_detalle_ingredientes_quitar", caso: casoMesaQuitarIngr, golden: goldenMesaQuitarIngr },
 	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
@@ -787,6 +791,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "inventario.borrar_ingrediente": {
 			aplicar(hub, sql, borrarIngrediente(caso.entrada.id_ingrediente));
+			return;
+		}
+		case "inventario.borrar_categoria": {
+			aplicar(hub, sql, borrarCategoria(caso.entrada.id_categoria));
 			return;
 		}
 		case "inventario.delete_producto": {

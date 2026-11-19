@@ -72,10 +72,6 @@ export function useInventario() {
     await resumenQuery.refetch();
   };
 
-  // Compat: el consumidor sigue pudiendo "limpiar" productos al volver atrás.
-  // Con caché, la lista se deriva de la query; este setter es un no-op intencionado.
-  const setProductos = (_: ProductoDisplay[] | ((prev: ProductoDisplay[]) => ProductoDisplay[])) => {};
-
   return {
     categorias,
     categoriaSeleccionada,
@@ -86,7 +82,6 @@ export function useInventario() {
     titulo,
 
     setCategoriaSeleccionada,
-    setProductos,
 
     cargarCategorias,
     cargarProductos,

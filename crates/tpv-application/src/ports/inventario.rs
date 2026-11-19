@@ -35,6 +35,9 @@ pub trait InventarioRepository: Send + Sync {
     // valida el worker en sus rutas.
     async fn create_categoria(&self, cat: CategoriaUpsert) -> AppResult<()>;
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()>;
+    /// Borra una categoría con sus productos: cada uno se archiva si tiene historia (y se queda sin
+    /// categoría) o se borra si no. Nada, si alguno está en una comanda abierta.
+    async fn borrar_categoria(&self, id_categoria: &str) -> AppResult<()>;
     /// Upsert de producto + alérgenos. Devuelve el id de producto.
     ///
     /// El stock suelto sólo se escribe al **crear** (con su movimiento de alta); editando la ficha

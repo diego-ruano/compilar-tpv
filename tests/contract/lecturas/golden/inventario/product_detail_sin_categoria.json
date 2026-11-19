@@ -1,0 +1,17 @@
+{
+  "alergenos": [],
+  "producto": {
+    "Cantidad_Pedido_Esperada": null,
+    "ID_Categoria": "",
+    "ID_Producto": "prod-archivado",
+    "ID_Proveedor": null,
+    "IVA_Percent": null,
+    "Nombre": "Mosto",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 120,
+    "Ruta_Imagen": null,
+    "Stock_Minimo": 0.0,
+    "Stock_Suelto": null,
+    "Unidad_Medida": null
+  }
+}

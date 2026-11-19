@@ -153,6 +153,14 @@ inventarioRoutes.post("/categorias", cuerpo(S.upsertCategoriaSchema), async (c) 
 	return c.json({ id_categoria: id });
 });
 
+inventarioRoutes.delete("/categorias/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_categoria_invalido");
+	// Que ningún producto suyo esté en una comanda abierta lo decide la guarda del comando.
+	await apply(c, cmd.borrarCategoria(id));
+	return c.json({ ok: true });
+});
+
 inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_usuario: S.autorStockSchema, conservar_precio: z.boolean().optional() })), async (c) => {
 	const datos = c.req.valid("json");
 	// RI-55: el stock suelto sólo cuenta al crear; por eso hay que saber si existe.

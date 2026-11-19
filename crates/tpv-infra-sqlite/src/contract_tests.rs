@@ -342,6 +342,7 @@ casos_de_contrato! {
     inventario__upsert_producto_con_ingredientes,
     inventario__upsert_producto_sin_lista_de_ingredientes,
     inventario__delete_producto_con_ingredientes,
+    inventario__borrar_categoria,
     configuracion__patch_business,
     configuracion__patch_contact,
     configuracion__patch_ticket,
@@ -620,6 +621,10 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "inventario.borrar_ingrediente" => {
             let repo = SqliteInventarioRepository::new(db.clone());
             repo.borrar_ingrediente(&s(&e["id_ingrediente"])).await.expect("borrar ingrediente");
+        }
+        "inventario.borrar_categoria" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.borrar_categoria(&s(&e["id_categoria"])).await.expect("borrar categoria");
         }
         "inventario.delete_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());

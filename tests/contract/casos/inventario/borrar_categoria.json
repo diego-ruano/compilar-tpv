@@ -1,0 +1,38 @@
+{
+  "descripcion": "Borrar una categoría con sus productos: el vendido se archiva y se queda sin categoría con su línea, su lote y su consumo; el que nunca se vendió se borra con su lote, sus movimientos, sus alérgenos y sus ingredientes; el archivado de antes se suelta; la categoría desaparece y la de al lado no se toca. Archivado_En es una fecha y se compara como «tiene o no».",
+  "comando": "inventario.borrar_categoria",
+  "seed": [
+    "INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('cat-leche', 'Leche');",
+    "INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('ing-avena', 'cat-leche', 'Avena');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-bar', 'Bar');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-cocina', 'Cocina');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-vendido', 'cat-bar', 'Rioja', 1200);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-nuevo', 'cat-bar', 'Te', 150, 2);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('prod-viejo', 'cat-bar', 'Mosto', 120, '2026-01-01 09:00:00');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cocina', 'cat-cocina', 'Tortilla', 900);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-vendido', 'prod-vendido', 'L1', 3, '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-nuevo', 'prod-nuevo', 'L2', 5, '2026-01-01 10:00:00');",
+    "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha) VALUES ('mov-lote', 'lote-nuevo', 'ALTA', 5, 5, '2026-01-01 10:00:00');",
+    "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Fecha) VALUES ('mov-suelto', 'prod-nuevo', 'ALTA', 2, 2, '2026-01-01 10:00:00');",
+    "INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('prod-nuevo', '00000000-0000-7000-8000-000000000201');",
+    "INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('prod-nuevo', 'ing-avena');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'comanda-1', 'prod-vendido', 'Rioja', 2, 1200);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'comanda-1', '2026-01-01 12:30:00', 'Efectivo', 2400, 'TOTAL');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-1');",
+    "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-1', 'lote-vendido', 'pago-1', 2);"
+  ],
+  "entrada": {
+    "id_categoria": "cat-bar"
+  },
+  "snapshot": {
+    "Categorias_Producto": "SELECT ID_Categoria FROM Categorias_Producto",
+    "Productos": "SELECT ID_Producto, ID_Categoria, Archivado_En IS NOT NULL AS Archivado FROM Productos",
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
+    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
+    "Movimientos_Stock": "SELECT ID_Movimiento FROM Movimientos_Stock",
+    "Producto_Alergenos": "SELECT ID_Producto FROM Producto_Alergenos",
+    "Producto_Ingredientes": "SELECT ID_Producto, ID_Ingrediente FROM Producto_Ingredientes",
+    "Detalle_Comanda": "SELECT ID_Detalle, ID_Producto FROM Detalle_Comanda"
+  }
+}

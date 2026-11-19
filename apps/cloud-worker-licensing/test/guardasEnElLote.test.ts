@@ -841,6 +841,39 @@ describe("SYNC-35 · quitar un producto del catálogo", () => {
 	});
 });
 
+describe("borrar una categoría con sus productos", () => {
+	const CATEGORIA = [
+		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar')",
+		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('cafe', 'cat', 'Café', 130)",
+		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('te', 'cat', 'Té', 150)",
+		"INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('abierta', 'BARRA', '2026-11-14 10:00:00', 'Abierta')",
+	];
+	const LINEA =
+		"INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('l1', 'abierta', 'te', 1, 150)";
+	const categorias = (n: Negocio) => n.n("SELECT COUNT(*) FROM Categorias_Producto WHERE ID_Categoria = 'cat'");
+	const productos = (n: Negocio) => n.n("SELECT COUNT(*) FROM Productos WHERE ID_Categoria = 'cat'");
+
+	it("con un producto en una comanda abierta, también si la línea entra entre la lectura y el lote, no se toca nada", async () => {
+		await conNegocio("categoria-en-uso", CATEGORIA, async (n) => {
+			const r = await n.pedir("DELETE", "/v1/inventario/categorias/cat", undefined, { antesDelLote: [LINEA] });
+			expect(r).toEqual({ status: 409, json: { ok: false, error: "categoria_en_comanda_abierta" } });
+			expect([categorias(n), productos(n)]).toEqual([1, 2]);
+			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(0);
+		});
+	});
+
+	it("se lleva sus productos, y el reintento contesta ok aunque su resultado no se guardara", async () => {
+		await conNegocio("categoria-reintento", CATEGORIA, async (n) => {
+			const clave = "clave-de-la-categoria-borrada";
+			const ok = { status: 200, json: { ok: true } };
+			expect(await n.pedir("DELETE", "/v1/inventario/categorias/cat", undefined, { clave })).toEqual(ok);
+			expect([categorias(n), n.n("SELECT COUNT(*) FROM Productos")]).toEqual([0, 0]);
+			sinResultadoGuardado(n, clave);
+			expect(await n.pedir("DELETE", "/v1/inventario/categorias/cat", undefined, { clave })).toEqual(ok);
+		});
+	});
+});
+
 /* =========================================================
    El ajuste de existencias (RI-55): lo visto lo decide la guarda
 ========================================================= */

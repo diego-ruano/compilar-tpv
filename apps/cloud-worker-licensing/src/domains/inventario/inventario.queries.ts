@@ -32,9 +32,10 @@ function rows(rs: any): any[] {
 }
 
 // IVA_Percent va en la lista: es una columna del DTO como cualquier otra, y dejarla fuera hacia que
-// la Handy viera todos los productos como si heredaran el IVA del negocio.
+// la Handy viera todos los productos como si heredaran el IVA del negocio. Un archivado de una
+// categoría borrada no tiene categoría: llega como "", igual que en la Main, y no como null.
 const PRODUCTO_BASE_COLS =
-	"ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent";
+	"ID_Producto, COALESCE(ID_Categoria, '') AS ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent";
 
 export async function listCategorias(db: Client): Promise<CategoriaInvDto[]> {
 	const rs = await db.execute(

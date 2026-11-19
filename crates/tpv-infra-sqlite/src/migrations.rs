@@ -434,6 +434,46 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `0004_producto_sin_categoria.sql` reconstruye `Productos` en una base con datos: las hijas
+    /// con `ON DELETE CASCADE` (lotes, alérgenos, ingredientes) y las líneas vendidas no se pierden
+    /// con el `DROP`, y después un producto ya puede quedarse sin categoría.
+    #[test]
+    fn reconstruir_productos_conserva_lo_que_cuelga_de_ellos() {
+        let (conn, dir) = open_temp();
+        run(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('p', 'cat', 'Cafe', 130);
+             INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+               VALUES ('lote', 'p', 'L-1', 4, '2026-01-01 10:00:00');
+             INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('p', '00000000-0000-7000-8000-000000000201');
+             INSERT INTO Categorias_Ingrediente (ID_Categoria_Ingrediente, Nombre) VALUES ('ci', 'Leche');
+             INSERT INTO Ingredientes (ID_Ingrediente, ID_Categoria_Ingrediente, Nombre) VALUES ('i', 'ci', 'Avena');
+             INSERT INTO Producto_Ingredientes (ID_Producto, ID_Ingrediente) VALUES ('p', 'i');
+             INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('c', 'BARRA', '2026-01-02 12:00:00', 'Pagada');
+             INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
+               VALUES ('d', 'c', 'p', 'Cafe', 1, 130);
+             DELETE FROM _migrations WHERE name = '0004_producto_sin_categoria.sql';",
+        )
+        .unwrap();
+
+        run(&conn).expect("la reconstrucción se aplica sobre una base con datos");
+
+        for (que, sql, esperado) in [
+            ("lotes", "SELECT COUNT(*) FROM Lotes_Producto WHERE ID_Producto = 'p';", 1),
+            ("alérgenos", "SELECT COUNT(*) FROM Producto_Alergenos WHERE ID_Producto = 'p';", 1),
+            ("ingredientes", "SELECT COUNT(*) FROM Producto_Ingredientes WHERE ID_Producto = 'p';", 1),
+            ("líneas vendidas", "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Producto = 'p';", 1),
+            ("stock de la vista", "SELECT Stock_Actual FROM v_inventario_producto_stock WHERE ID_Producto = 'p';", 4),
+        ] {
+            assert_eq!(scalar_i64(&conn, sql), esperado, "{que}");
+        }
+        conn.execute_batch("UPDATE Productos SET ID_Categoria = NULL WHERE ID_Producto = 'p';").unwrap();
+
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// 2) Idempotencia: re-ejecutar no falla, no duplica filas y NO re-aplica (no toca applied_at).
     #[test]
     fn smoke_idempotent() {

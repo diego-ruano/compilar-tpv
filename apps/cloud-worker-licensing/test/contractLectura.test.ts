@@ -204,6 +204,8 @@ import goldenInvCatalogoIngr from "../../../tests/contract/lecturas/golden/inven
 import casoInvIngrProducto from "../../../tests/contract/lecturas/casos/inventario/ingredientes_de_producto.json";
 import goldenInvIngrProducto from "../../../tests/contract/lecturas/golden/inventario/ingredientes_de_producto.json";
 import goldenInvDetalle from "../../../tests/contract/lecturas/golden/inventario/product_detail.json";
+import casoInvDetalleSinCat from "../../../tests/contract/lecturas/casos/inventario/product_detail_sin_categoria.json";
+import goldenInvDetalleSinCat from "../../../tests/contract/lecturas/golden/inventario/product_detail_sin_categoria.json";
 import casoLoginUsuarios from "../../../tests/contract/lecturas/casos/login/usuarios.json";
 import goldenLoginUsuarios from "../../../tests/contract/lecturas/golden/login/usuarios.json";
 import casoLoginPunch from "../../../tests/contract/lecturas/casos/login/punch_status.json";
@@ -410,6 +412,7 @@ const CASOS = [
 	{ nombre: "inventario_alergenos", caso: casoInvAlergenos, golden: goldenInvAlergenos },
 	{ nombre: "inventario_lotes_por_producto", caso: casoInvLotes, golden: goldenInvLotes },
 	{ nombre: "inventario_product_detail", caso: casoInvDetalle, golden: goldenInvDetalle },
+	{ nombre: "inventario_product_detail_sin_categoria", caso: casoInvDetalleSinCat, golden: goldenInvDetalleSinCat },
 	{ nombre: "inventario_catalogo_ingredientes", caso: casoInvCatalogoIngr, golden: goldenInvCatalogoIngr },
 	{ nombre: "inventario_ingredientes_de_producto", caso: casoInvIngrProducto, golden: goldenInvIngrProducto },
 	{ nombre: "login_usuarios", caso: casoLoginUsuarios, golden: goldenLoginUsuarios },

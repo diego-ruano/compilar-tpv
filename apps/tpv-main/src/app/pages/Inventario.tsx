@@ -14,6 +14,7 @@ import AddCategoryModal from "../../features/inventario/ui/AddCategoryModal";
 import { AddProductModal } from "../../features/inventario/ui/AddProductModal";
 import ProductDetailModal from "../../features/inventario/ProductDetailModal";
 import IngredientesModal from "../../features/inventario/ui/IngredientesModal";
+import BorrarCategoriaModal from "../../features/inventario/ui/BorrarCategoriaModal";
 
 import { useDeleteProducto } from "../../features/inventario/inventarioQueries";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -30,7 +31,6 @@ export default function Inventario() {
         menosCantidad,
         titulo,
         setCategoriaSeleccionada,
-        setProductos,
         cargarCategorias,
         cargarProductos,
         cargarResumenInventario,
@@ -41,6 +41,7 @@ export default function Inventario() {
     const [openAddCategory, setOpenAddCategory] = useState(false);
     const [openAddProduct, setOpenAddProduct] = useState(false);
     const [openIngredientes, setOpenIngredientes] = useState(false);
+    const [openBorrarCategoria, setOpenBorrarCategoria] = useState(false);
 
     const [openProductDetail, setOpenProductDetail] = useState(false);
     const [productDetailId, setProductDetailId] = useState<string | null>(null);
@@ -70,12 +71,10 @@ export default function Inventario() {
                 <InventoryHeader
                     titulo={titulo}
                     categoriaSeleccionada={categoriaSeleccionada}
-                    onBack={() => {
-                        setCategoriaSeleccionada(null);
-                        setProductos([]);
-                    }}
+                    onBack={() => setCategoriaSeleccionada(null)}
                     onNewCategory={() => setOpenAddCategory(true)}
                     onIngredientes={() => setOpenIngredientes(true)}
+                    onDeleteCategory={() => setOpenBorrarCategoria(true)}
                     onNewProduct={() => {
                         setProductIdToEdit(null);
                         setOpenAddProduct(true);
@@ -100,6 +99,16 @@ export default function Inventario() {
                 )}
 
                 <IngredientesModal open={openIngredientes} onClose={() => setOpenIngredientes(false)} />
+
+                <BorrarCategoriaModal
+                    categoria={openBorrarCategoria ? categoriaSeleccionada : null}
+                    numProductos={productos.length}
+                    onClose={() => setOpenBorrarCategoria(false)}
+                    onBorrada={() => {
+                        setOpenBorrarCategoria(false);
+                        setCategoriaSeleccionada(null);
+                    }}
+                />
 
                 <AddCategoryModal
                     open={openAddCategory}

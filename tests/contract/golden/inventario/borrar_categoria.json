@@ -1,0 +1,46 @@
+{
+  "Categorias_Producto": [
+    {
+      "ID_Categoria": "cat-cocina"
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "ID_Detalle": "det-1",
+      "ID_Producto": "prod-vendido"
+    }
+  ],
+  "Lote_Consumos": [
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-1",
+      "ID_Lote": "lote-vendido"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-vendido",
+      "Stock_Disponible": 3.0
+    }
+  ],
+  "Movimientos_Stock": [],
+  "Producto_Alergenos": [],
+  "Producto_Ingredientes": [],
+  "Productos": [
+    {
+      "Archivado": 1,
+      "ID_Categoria": null,
+      "ID_Producto": "prod-vendido"
+    },
+    {
+      "Archivado": 1,
+      "ID_Categoria": null,
+      "ID_Producto": "prod-viejo"
+    },
+    {
+      "Archivado": 0,
+      "ID_Categoria": "cat-cocina",
+      "ID_Producto": "prod-cocina"
+    }
+  ]
+}

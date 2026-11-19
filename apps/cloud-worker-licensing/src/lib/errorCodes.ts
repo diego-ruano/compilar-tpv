@@ -281,6 +281,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"Esa categoría de ingredientes ya no existe. Vuelve a abrir la lista de ingredientes.",
 	// PED-HANDY: el mismo texto que la Main (`MSG_PEDIDO_NO_EDITABLE`).
 	pedido_no_editable: "Ese pedido ya se ha enviado o cancelado y no se puede cambiar. Cierra el formulario.",
+	// El mismo texto que la Main (`MSG_CATEGORIA_EN_COMANDA_ABIERTA`).
+	categoria_en_comanda_abierta:
+		"No se puede borrar: algún producto de esta categoría está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
 	producto_en_comanda_abierta:
 		"No se puede borrar: el producto está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
 	// RI-55: un ajuste de existencias que llega tarde. La ruta lo acompaña de lo que hay ahora.

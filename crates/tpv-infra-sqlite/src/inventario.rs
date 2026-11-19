@@ -171,6 +171,66 @@ pub(crate) const SQL_QUITAR_PRODUCTO: &[&str] = &[
     "DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
 ];
 
+/// Algún producto de la categoría `?1` está en una comanda abierta.
+macro_rules! categoria_en_comanda_abierta {
+    () => {
+        "EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda \
+         JOIN Productos pc ON pc.ID_Producto = dc.ID_Producto WHERE pc.ID_Categoria = ?1 AND c.Estado = 'Abierta')"
+    };
+}
+
+/// La sentencia, sólo si ningún producto de la categoría `?1` está en una comanda abierta.
+macro_rules! si_ninguno_en_comanda_abierta {
+    ($sql:literal) => {
+        concat!($sql, " AND NOT ", categoria_en_comanda_abierta!(), ";")
+    };
+}
+
+/// El mismo texto que el worker (`categoria_en_comanda_abierta`).
+pub const MSG_CATEGORIA_EN_COMANDA_ABIERTA: &str =
+    "No se puede borrar: algún producto de esta categoría está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.";
+
+/// Borrar una categoría de productos con sus productos: a cada uno le pasa lo mismo que con
+/// [`SQL_QUITAR_PRODUCTO`] (se archiva si tiene historia y se borra si no), los archivados se quedan
+/// sin categoría (`0004_producto_sin_categoria.sql`) y la categoría se borra.
+///
+/// Todas llevan la misma condición, que ningún producto de la categoría esté en una comanda abierta:
+/// o se aplican todas o ninguna, también al volver a evaluarlas el otro lado al replicar. El worker
+/// manda exactamente éstas (`inventario.commands.ts::borrarCategoria`).
+pub(crate) const SQL_QUITAR_CATEGORIA: &[&str] = &[
+    si_ninguno_en_comanda_abierta!(
+        "UPDATE Productos SET Archivado_En = datetime('now','localtime') \
+         WHERE ID_Categoria = ?1 AND Archivado_En IS NULL AND (\
+           EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Producto = Productos.ID_Producto) \
+           OR EXISTS (SELECT 1 FROM Suelto_Consumos s WHERE s.ID_Producto = Productos.ID_Producto) \
+           OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote \
+                      WHERE l.ID_Producto = Productos.ID_Producto))"
+    ),
+    si_ninguno_en_comanda_abierta!(
+        "DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT l.ID_Lote FROM Lotes_Producto l \
+         JOIN Productos p ON p.ID_Producto = l.ID_Producto WHERE p.ID_Categoria = ?1 AND p.Archivado_En IS NULL)"
+    ),
+    si_ninguno_en_comanda_abierta!(
+        "DELETE FROM Movimientos_Stock WHERE ID_Producto IN \
+         (SELECT ID_Producto FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL)"
+    ),
+    si_ninguno_en_comanda_abierta!(
+        "DELETE FROM Lotes_Producto WHERE ID_Producto IN \
+         (SELECT ID_Producto FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL)"
+    ),
+    si_ninguno_en_comanda_abierta!(
+        "DELETE FROM Producto_Ingredientes WHERE ID_Producto IN \
+         (SELECT ID_Producto FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL)"
+    ),
+    si_ninguno_en_comanda_abierta!(
+        "DELETE FROM Producto_Alergenos WHERE ID_Producto IN \
+         (SELECT ID_Producto FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL)"
+    ),
+    si_ninguno_en_comanda_abierta!("DELETE FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL"),
+    si_ninguno_en_comanda_abierta!("UPDATE Productos SET ID_Categoria = NULL WHERE ID_Categoria = ?1"),
+    si_ninguno_en_comanda_abierta!("DELETE FROM Categorias_Producto WHERE ID_Categoria = ?1"),
+];
+
 #[async_trait]
 impl InventarioRepository for SqliteInventarioRepository {
     async fn catalogo_ingredientes(&self) -> AppResult<CatalogoIngredientesDto> {
@@ -533,6 +593,30 @@ impl InventarioRepository for SqliteInventarioRepository {
             }
             Ok(())
         }).await
+    }
+
+    async fn borrar_categoria(&self, id_categoria: &str) -> AppResult<()> {
+        // Comprobar y borrar bajo el mismo escritor (RI-39), como `delete_producto`.
+        let g = self.db.write().await;
+        let conn = &g;
+        let en_uso = select_one_i64(
+            conn,
+            concat!("SELECT ", categoria_en_comanda_abierta!(), ";"),
+            vec![Value::Text(id_categoria.to_string())],
+        )
+        .await?
+        .unwrap_or(0)
+            != 0;
+        if en_uso {
+            return Err(AppError::validation(MSG_CATEGORIA_EN_COMANDA_ABIERTA));
+        }
+        conn.transaccion(async {
+            for sql in SQL_QUITAR_CATEGORIA {
+                conn.execute(sql, vec![Value::Text(id_categoria.to_string())]).await.map_err(db_err)?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
@@ -1258,6 +1342,142 @@ mod tests_borrado_de_producto {
         repo.delete_producto("nuevo").await.unwrap();
 
         assert!(existe(&db, "vendido").await);
+    }
+}
+
+#[cfg(test)]
+mod tests_borrado_de_categoria {
+    //! Borrar una categoría se lleva sus productos: los vendidos se archivan y se quedan sin
+    //! categoría, los demás se borran, y la categoría desaparece. Nada, si alguno está en una
+    //! comanda abierta.
+
+    use super::*;
+    use crate::db::Db;
+    use crate::ejecutor::Connection;
+    use tpv_application::ports::inventario::InventarioRepository;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("borrado_categoria");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> Vec<String> {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let mut out = Vec::new();
+        while let Some(f) = rows.next().await.unwrap() {
+            out.push(crate::mapping::v_string(f.get_value(0).unwrap()).unwrap_or_else(|| "NULL".into()));
+        }
+        out
+    }
+
+    /// `Bar` con un producto vendido, uno sin vender con su lote y uno archivado de antes; y
+    /// `Cocina`, que no se toca.
+    const CATALOGO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('bar', 'Bar');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cocina', 'Cocina');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('vendido', 'bar', 'Cafe', 130);",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('nuevo', 'bar', 'Te', 150);",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En)
+           VALUES ('viejo', 'bar', 'Mosto', 120, '2026-01-01 09:00:00');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('tortilla', 'cocina', 'Tortilla', 900);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+           VALUES ('lote', 'nuevo', 'L-1', 10, '2026-01-01 10:00:00');",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'vendido', 'Cafe', 1, 130);",
+    ];
+
+    const UNA_COMANDA_ABIERTA: &[&str] = &[
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('viva', 'BARRA', '2026-01-02 13:00:00', 'Abierta');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det-vivo', 'viva', 'nuevo', 'Te', 1, 150);",
+    ];
+
+    const PRODUCTOS: &str =
+        "SELECT ID_Producto || ':' || COALESCE(ID_Categoria, 'sin') || ':' || (Archivado_En IS NOT NULL) FROM Productos ORDER BY ID_Producto;";
+
+    #[tokio::test]
+    async fn se_lleva_sus_productos_y_conserva_las_ventas() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.borrar_categoria("bar").await.unwrap();
+
+        assert_eq!(texto(&db, "SELECT ID_Categoria FROM Categorias_Producto;").await, vec!["cocina"]);
+        assert_eq!(
+            texto(&db, PRODUCTOS).await,
+            vec!["tortilla:cocina:0", "vendido:sin:1", "viejo:sin:1"],
+            "el vendido se archiva, el archivado de antes se suelta y el nuevo se borra"
+        );
+        assert!(texto(&db, "SELECT ID_Lote FROM Lotes_Producto;").await.is_empty(), "con su lote");
+        assert_eq!(texto(&db, "SELECT ID_Producto FROM Detalle_Comanda;").await, vec!["vendido"]);
+        // La ficha de un archivado sin categoría se sigue leyendo.
+        assert_eq!(repo.get_producto("vendido").await.unwrap().unwrap().id_categoria, "");
+    }
+
+    #[tokio::test]
+    async fn el_nombre_queda_libre() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.borrar_categoria("bar").await.unwrap();
+
+        repo.create_categoria(
+            CategoriaUpsert::validar(None, "Bar".into(), String::new(), String::new(), true, false).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn con_un_producto_en_una_comanda_abierta_no_se_toca_nada() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        let err = repo.borrar_categoria("bar").await.unwrap_err();
+
+        assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+        assert_eq!(err.to_string(), MSG_CATEGORIA_EN_COMANDA_ABIERTA);
+        assert_eq!(texto(&db, "SELECT ID_Categoria FROM Categorias_Producto ORDER BY 1;").await, vec!["bar", "cocina"]);
+        assert_eq!(
+            texto(&db, PRODUCTOS).await,
+            vec!["nuevo:bar:0", "tortilla:cocina:0", "vendido:bar:0", "viejo:bar:1"]
+        );
+        assert_eq!(texto(&db, "SELECT ID_Lote FROM Lotes_Producto;").await, vec!["lote"]);
+    }
+
+    #[tokio::test]
+    async fn el_sql_replicado_tampoco_toca_nada_con_una_comanda_abierta() {
+        // La otra punta vuelve a evaluar cada sentencia al aplicar la réplica.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
+        {
+            let w = db.write().await;
+            w.execute_batch("BEGIN;").await.unwrap();
+            for sql in SQL_QUITAR_CATEGORIA {
+                assert_eq!(w.execute(sql, vec![Value::Text("bar".into())]).await.unwrap(), 0, "{sql}");
+            }
+            w.execute_batch("COMMIT;").await.unwrap();
+        }
+        assert_eq!(texto(&db, "SELECT COUNT(*) FROM Productos WHERE ID_Categoria = 'bar';").await, vec!["3"]);
     }
 }
 

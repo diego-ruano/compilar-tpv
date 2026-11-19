@@ -51,6 +51,11 @@ export const inventarioAPI = {
         await commands.inventarioDeleteProducto({ id_producto });
     },
 
+    /** Borra la categoría con sus productos (los que ya se han vendido se archivan). */
+    async borrarCategoria(id_categoria: string): Promise<void> {
+        await commands.inventarioBorrarCategoria({ id_categoria });
+    },
+
     /** Alta o edición; devuelve el id del producto. */
     async upsertProducto(args: UpsertProductoInput): Promise<string> {
         const r = await commands.inventarioUpsertProducto(args);

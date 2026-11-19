@@ -327,6 +327,7 @@ lecturas_de_contrato! {
     inventario__alergenos,
     inventario__lotes_por_producto,
     inventario__product_detail,
+    inventario__product_detail_sin_categoria,
     inventario__catalogo_ingredientes,
     inventario__ingredientes_de_producto,
     login__usuarios,

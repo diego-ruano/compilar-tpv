@@ -7,7 +7,7 @@ pub const CATALOGO: &[(&str, &str, &str)] = &[
     ("tareas.propias", "Ver y finalizar tareas propias", "Servicio"),
     ("catalogo.editar", "Crear y editar productos y categorías", "Inventario"),
     ("catalogo.precios", "Cambiar precios e IVA de productos", "Inventario"),
-    ("catalogo.borrar", "Borrar o archivar productos", "Inventario"),
+    ("catalogo.borrar", "Borrar productos y categorías", "Inventario"),
     ("stock.recibir", "Recibir mercancía", "Inventario"),
     ("stock.editar_lotes", "Editar datos de lotes", "Inventario"),
     ("stock.ajustar", "Ajustar existencias", "Inventario"),

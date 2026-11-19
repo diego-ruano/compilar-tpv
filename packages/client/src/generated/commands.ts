@@ -286,6 +286,8 @@ export const commands = {
 	inventarioListAlergenos: () => __TAURI_INVOKE<AlergenoInvDto[]>("inventario_list_alergenos"),
 	inventarioGetProductDetail: (args: IdProductoArgs) => __TAURI_INVOKE<ProductDetailResponse>("inventario_get_product_detail", { args }),
 	inventarioDeleteProducto: (args: IdProductoArgs) => __TAURI_INVOKE<string>("inventario_delete_producto", { args }),
+	/**  Borra una categoría con sus productos (los que tienen historia se archivan). */
+	inventarioBorrarCategoria: (args: IdCategoriaArgs) => __TAURI_INVOKE<string>("inventario_borrar_categoria", { args }),
 	inventarioUpsertProducto: (args: UpsertProductoInput) => __TAURI_INVOKE<UpsertProductoResult>("inventario_upsert_producto", { args }),
 	inventarioListLotesByProducto: (args: IdProductoArgs) => __TAURI_INVOKE<LoteDto[]>("inventario_list_lotes_by_producto", { args }),
 	inventarioCreateLote: (args: CreateLoteInput) => __TAURI_INVOKE<string>("inventario_create_lote", { args }),

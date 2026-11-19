@@ -1,7 +1,7 @@
 // components/inventario/InventoryHeader.tsx
 import React from "react";
 import { usePermisos } from "../../../shared/lib/usePermisos";
-import { Package, ArrowLeft, Plus, FolderPlus, Salad } from "lucide-react";
+import { Package, ArrowLeft, Plus, FolderPlus, Salad, Trash2 } from "lucide-react";
 
 export default function InventoryHeader({
     titulo,
@@ -10,6 +10,7 @@ export default function InventoryHeader({
     onNewCategory,
     onNewProduct,
     onIngredientes,
+    onDeleteCategory,
 }: {
     titulo: string;
     categoriaSeleccionada: any | null;
@@ -18,6 +19,8 @@ export default function InventoryHeader({
     onNewProduct: () => void;
     /** Abre la lista de ingredientes (por categorías). */
     onIngredientes: () => void;
+    /** Pide confirmación para borrar la categoría abierta. */
+    onDeleteCategory: () => void;
 }) {
     const { puede } = usePermisos();
     return (
@@ -69,16 +72,29 @@ export default function InventoryHeader({
                         </button>
                     </div>
                 ) : (
-                    <button
-                        type="button"
-                        disabled={!puede("catalogo.editar") || !puede("catalogo.precios")}
-                        title={puede("catalogo.editar") && puede("catalogo.precios") ? undefined : "No tienes permiso para crear productos"}
-                        onClick={onNewProduct}
-                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed xs:w-auto"
-                    >
-                        <Plus className="size-4" aria-hidden />
-                        <span className="hidden xs:inline">Nuevo producto</span>
-                    </button>
+                    <div className="flex w-full shrink-0 gap-2 xs:w-auto">
+                        <button
+                            type="button"
+                            disabled={!puede("catalogo.borrar")}
+                            title={puede("catalogo.borrar") ? undefined : "No tienes permiso para eliminar categorías"}
+                            onClick={onDeleteCategory}
+                            aria-label="Eliminar categoría"
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed xs:flex-none"
+                        >
+                            <Trash2 className="size-4" aria-hidden />
+                            <span className="hidden xs:inline">Eliminar categoría</span>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!puede("catalogo.editar") || !puede("catalogo.precios")}
+                            title={puede("catalogo.editar") && puede("catalogo.precios") ? undefined : "No tienes permiso para crear productos"}
+                            onClick={onNewProduct}
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed xs:flex-none"
+                        >
+                            <Plus className="size-4" aria-hidden />
+                            <span className="hidden xs:inline">Nuevo producto</span>
+                        </button>
+                    </div>
                 )}
             </div>
         </div>

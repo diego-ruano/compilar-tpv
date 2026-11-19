@@ -17,7 +17,7 @@ afterEach(() => { cleanup(); permisos.concedidos.clear(); });
 
 const cabecera = (categoria: unknown) => (
     <InventoryHeader titulo="Inventario" categoriaSeleccionada={categoria} onBack={() => {}}
-        onNewCategory={() => {}} onNewProduct={() => {}} onIngredientes={() => {}} />
+        onNewCategory={() => {}} onNewProduct={() => {}} onIngredientes={() => {}} onDeleteCategory={() => {}} />
 );
 
 it("sin permiso, el botón desactivado dice por qué al pasar por encima", () => {
@@ -30,6 +30,9 @@ it("sin permiso, el botón desactivado dice por qué al pasar por encima", () =>
     permisos.concedidos.add("catalogo.editar"); // sin precios no se puede dar de alta un producto
     render(cabecera({ ID_Categoria: "beb" }));
     expect(screen.getByRole("button", { name: "Nuevo producto" })).toHaveAttribute("title", "No tienes permiso para crear productos");
+    const eliminar = screen.getByRole("button", { name: "Eliminar categoría" });
+    expect(eliminar).toBeDisabled();
+    expect(eliminar).toHaveAttribute("title", "No tienes permiso para eliminar categorías");
 });
 
 it("con permiso, no lleva el aviso", () => {

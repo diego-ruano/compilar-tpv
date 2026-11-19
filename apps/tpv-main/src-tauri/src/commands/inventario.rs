@@ -92,6 +92,19 @@ pub async fn inventario_delete_producto(
     Ok(uc::delete_producto(repo.as_ref(), args.id_producto).await?)
 }
 
+/// Borra una categoría con sus productos (los que tienen historia se archivan).
+#[tauri::command]
+#[specta::specta]
+pub async fn inventario_borrar_categoria(
+    state: State<'_, AppState>,
+    args: IdCategoriaArgs,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.borrar").await?;
+    let repo = state.inventario_repo().await?;
+    uc::borrar_categoria(repo.as_ref(), args.id_categoria).await?;
+    Ok("OK".to_string())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn inventario_upsert_producto(

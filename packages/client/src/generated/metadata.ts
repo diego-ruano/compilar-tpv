@@ -78,6 +78,7 @@ export const nombresComandos = {
     "inventario_list_alergenos": "inventarioListAlergenos",
     "inventario_get_product_detail": "inventarioGetProductDetail",
     "inventario_delete_producto": "inventarioDeleteProducto",
+    "inventario_borrar_categoria": "inventarioBorrarCategoria",
     "inventario_upsert_producto": "inventarioUpsertProducto",
     "inventario_list_lotes_by_producto": "inventarioListLotesByProducto",
     "inventario_create_lote": "inventarioCreateLote",
@@ -317,6 +318,7 @@ type Argumentos = {
     "inventario_list_alergenos": {  };
     "inventario_get_product_detail": { args: Parameters<Comandos["inventarioGetProductDetail"]>[0] };
     "inventario_delete_producto": { args: Parameters<Comandos["inventarioDeleteProducto"]>[0] };
+    "inventario_borrar_categoria": { args: Parameters<Comandos["inventarioBorrarCategoria"]>[0] };
     "inventario_upsert_producto": { args: Parameters<Comandos["inventarioUpsertProducto"]>[0] };
     "inventario_list_lotes_by_producto": { args: Parameters<Comandos["inventarioListLotesByProducto"]>[0] };
     "inventario_create_lote": { args: Parameters<Comandos["inventarioCreateLote"]>[0] };

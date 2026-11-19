@@ -73,6 +73,14 @@ pub async fn create_categoria(repo: &R, input: UpsertCategoriaInput) -> AppResul
     Ok("OK".to_string())
 }
 
+pub async fn borrar_categoria(repo: &R, id_categoria: String) -> AppResult<()> {
+    let id = id_categoria.trim();
+    if id.is_empty() {
+        return Err(AppError::validation("Falta la categoría."));
+    }
+    repo.borrar_categoria(id).await
+}
+
 pub async fn delete_producto(repo: &R, id_producto: String) -> AppResult<String> {
     if id_producto.trim().is_empty() {
         return Err(AppError::validation("Falta el producto."));

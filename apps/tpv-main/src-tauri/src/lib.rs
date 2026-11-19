@@ -2266,6 +2266,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::inventario::inventario_list_alergenos,
             commands::inventario::inventario_get_product_detail,
             commands::inventario::inventario_delete_producto,
+            commands::inventario::inventario_borrar_categoria,
             commands::inventario::inventario_upsert_producto,
             commands::inventario::inventario_list_lotes_by_producto,
             commands::inventario::inventario_create_lote,

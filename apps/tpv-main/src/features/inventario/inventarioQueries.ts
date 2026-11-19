@@ -190,6 +190,15 @@ export function useCreateCategoria() {
   });
 }
 
+/** Borrado de una categoría con sus productos; invalida la caché de inventario al confirmar. */
+export function useBorrarCategoria() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (idCategoria: string) => inventarioAPI.borrarCategoria(idCategoria),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
 /** Alta/edición de producto; devuelve el id y invalida la caché de inventario. */
 export function useUpsertProducto() {
   const qc = useQueryClient();

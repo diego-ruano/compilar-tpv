@@ -301,6 +301,53 @@ export function deleteProducto(idProducto: string): BuiltCommand {
 	};
 }
 
+/** Ningún producto de la categoría `?1` está en una comanda abierta. */
+const CATEGORIA_SIN_COMANDA_ABIERTA = `NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+	JOIN Productos pc ON pc.ID_Producto = dc.ID_Producto WHERE pc.ID_Categoria = ?1 AND c.Estado = 'Abierta')`;
+
+// Espejo de `SQL_QUITAR_CATEGORIA` (tpv-infra-sqlite/src/inventario.rs): a cada producto lo mismo que
+// `SQL_QUITAR_PRODUCTO`, los archivados se quedan sin categoría y la categoría se borra. Todas llevan
+// la misma condición, así que se aplican todas o ninguna.
+const SQL_QUITAR_CATEGORIA = [
+	`UPDATE Productos SET Archivado_En = datetime('now','localtime')
+		WHERE ID_Categoria = ?1 AND Archivado_En IS NULL AND (
+			EXISTS (SELECT 1 FROM Detalle_Comanda d WHERE d.ID_Producto = Productos.ID_Producto)
+			OR EXISTS (SELECT 1 FROM Suelto_Consumos s WHERE s.ID_Producto = Productos.ID_Producto)
+			OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote
+				WHERE l.ID_Producto = Productos.ID_Producto)) AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+	`DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT l.ID_Lote FROM Lotes_Producto l
+		JOIN Productos p ON p.ID_Producto = l.ID_Producto WHERE p.ID_Categoria = ?1 AND p.Archivado_En IS NULL)
+		AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+	...["Movimientos_Stock", "Lotes_Producto", "Producto_Ingredientes", "Producto_Alergenos"].map(
+		(tabla) => `DELETE FROM ${tabla} WHERE ID_Producto IN
+			(SELECT ID_Producto FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL)
+			AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+	),
+	`DELETE FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+	`UPDATE Productos SET ID_Categoria = NULL WHERE ID_Categoria = ?1 AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+	`DELETE FROM Categorias_Producto WHERE ID_Categoria = ?1 AND ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+];
+
+/** Borrar una categoría con sus productos. Lo impide que alguno esté en una comanda abierta, y lo
+ *  decide la guarda dentro del lote (SYNC-30), como en `deleteProducto`. */
+export function borrarCategoria(idCategoria: string): BuiltCommand {
+	const steps = [
+		{
+			kind: "guard",
+			sql: `SELECT ${CATEGORIA_SIN_COMANDA_ABIERTA};`,
+			args: [idCategoria],
+			error: "categoria_en_comanda_abierta",
+			status: 409,
+		},
+		...SQL_QUITAR_CATEGORIA.map((sql) => ({ kind: "execute", sql, args: [idCategoria] })),
+	];
+	return {
+		commandName: "inventario_borrar_categoria",
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { id_categoria: idCategoria },
+	};
+}
+
 export function createLote(input: CreateLoteInput, idUsuario: string): BuiltCommand {
 	// RI-26: toda cantidad de stock se guarda redondeada a milésimas, como en la Main.
 	const stock = redondearCantidad(input.stock_disponible ?? 0);

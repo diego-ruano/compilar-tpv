@@ -1,0 +1,10 @@
+{
+  "descripcion": "La ficha de un producto archivado de una categoría ya borrada: no tiene categoría y la Main y la Handy la leen igual, con la categoría vacía y no null.",
+  "lectura": "inventario.product_detail",
+  "seed": [
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Archivado_En) VALUES ('prod-archivado', NULL, 'Mosto', 120, '2026-01-01 09:00:00');"
+  ],
+  "entrada": {
+    "id_producto": "prod-archivado"
+  }
+}
