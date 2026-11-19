@@ -21,7 +21,7 @@ export default function ProductsSection({
                     No hay productos en esta categoría.
                 </p>
             ) : (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] items-start gap-2 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(105px,1fr))] items-start gap-2 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
                     {productos.map((p) => (
                         <Product
                             key={p.ID_Producto}

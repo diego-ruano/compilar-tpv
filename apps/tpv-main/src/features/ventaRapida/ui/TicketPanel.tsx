@@ -197,19 +197,19 @@ export default function TicketPanel({
       "
     >
       <div className="min-h-0">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="flex items-center gap-2 text-base font-bold text-fg sm:text-lg">
+        <div className="flex flex-row items-center justify-between gap-2">
+          <h3 className="flex shrink-0 items-center gap-2 text-base font-bold text-fg sm:text-lg">
             <ReceiptText className="size-5 text-accent" aria-hidden />
             Ticket
           </h3>
 
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
               onClick={() => setPrintOpen(true)}
               disabled={ticket.length === 0}
               className={cn(
-                "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
+                "flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition sm:gap-2 sm:px-3",
                 ticket.length === 0
                   ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
                   : "border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer",
@@ -220,7 +220,7 @@ export default function TicketPanel({
               Imprimir
             </button>
 
-            <div className="text-xs font-semibold text-fg-muted sm:text-sm">
+            <div className="min-w-0 text-xs font-semibold text-fg-muted max-sm:truncate sm:text-sm">
               Total pendiente:{" "}
               <span className="text-fg">{eur(totalPendiente)}</span>
             </div>
@@ -228,7 +228,7 @@ export default function TicketPanel({
         </div>
       </div>
 
-      <div className="mt-3 flex min-h-0 flex-col items-stretch gap-2 sm:flex-row">
+      <div className="mt-3 flex min-h-0 flex-row items-stretch gap-2">
         <button
           className={cn(
             "flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98]",

@@ -99,7 +99,7 @@ describe("la Handy", () => {
         const { result } = renderHook(() => useEmparejamientoHandy("handy"));
         await waitFor(() => expect(result.current.estado.step).toBe("paired"));
 
-        // «← Vinculación» y otro código del mismo negocio.
+        // De vuelta a la vinculación y otro código del mismo negocio.
         act(() => result.current.volverAVincular());
         act(() => result.current.vincular("", "654321"));
         await waitFor(() => expect(result.current.estado.step).toBe("waiting_approval"));

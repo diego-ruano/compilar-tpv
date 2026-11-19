@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 // src/features/configuracion/sections/Dispositivo.tsx
 //
 // Sección de Configuración para el Handy: desvincular este dispositivo. Hace un "reset de
@@ -12,6 +12,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
 import { Panel } from "../ui/Panel";
 import { GhostButton } from "../ui/Buttons";
+import { limpiarSesionLocal } from "../../../shared/stores/useAuth";
 import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
 
@@ -35,9 +36,12 @@ export function Dispositivo({ darkMode }: { darkMode: boolean }) {
 			// device_reset_mode: persiste modo=None, suelta backends y borra el token Handy del
 			// keyring (la identidad ed25519 / device_id NO se tocan).
 			await commands.deviceResetMode();
+			// Rust ya ha cerrado su sesión; se retira también la de la pantalla, para que al volver a
+			// elegir Handy se pida el PIN.
+			limpiarSesionLocal();
 			setMode(null); // AppBoot vuelve al selector de modo.
-		} catch (e: any) {
-			setErr(String(e?.message || e));
+		} catch (e: unknown) {
+			setErr(toAppError(e).message);
 			setBusy(false);
 		}
 	}

@@ -12,7 +12,7 @@ export default function CategoriesSection({
 }) {
     return (
         <div className="rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(135px,1fr))] items-start gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] sm:gap-4 lg:gap-5">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(105px,1fr))] items-start gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] sm:gap-4 lg:gap-5">
                 {categorias.map((item) => (
                     <Category
                         key={item.ID_Categoria}

@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 // AUD-23: el «← Volver» de la vinculación de una Handy desvinculaba sin PIN.
 //
-// «← Vinculación» (siempre a la vista, también encima del login) y «← Ir a vinculación» (en la
-// espera de la Main) sólo cambian de pantalla, pero el «← Volver» de la vinculación llamaba a
+// «← Ir a vinculación» (en la espera de la Main) sólo cambia de pantalla, pero el «← Volver» de la
+// vinculación llamaba a
 // `device_reset_mode`, cuyo gate deja pasar sin sesión: cualquiera con la tableta en la mano la
 // dejaba sin token ni negocio, y había que volver a vincularla desde la Main. Ahora ir al selector y
 // borrar el vínculo son dos cosas: «← Volver» enseña el selector sin tocar nada guardado, «Handy»
@@ -214,7 +214,7 @@ async function entrarComoCamarero() {
 	expect(backend.sesion).toEqual({ id_usuario: "u-cam", rol: "Camarero" });
 }
 
-/** «← Vinculación» (o «← Ir a vinculación», o «Vincular de nuevo») y después «← Volver». */
+/** «← Ir a vinculación» (o «Vincular de nuevo») y después «← Volver». */
 async function alSelector(primero: string) {
 	await pulsar(primero);
 	expect(await screen.findByText("Conecta este Handy")).toBeInTheDocument();
@@ -246,66 +246,14 @@ afterEach(() => {
 
 /* ── Con el vínculo vivo, «← Volver» va al selector sin borrar nada, y «Handy» vuelve a él ────── */
 
-it("desde el login, sin sesión, «← Volver» va al selector sin desvincular, y «Handy» vuelve al login", async () => {
+it("con la Handy trabajando no hay atajo a la vinculación: ni en el login ni con sesión", async () => {
 	arrancarHandy({ mainOnline: true });
 	await enElLogin();
+	expect(screen.queryByRole("button", { name: /Vinculación/ })).toBeNull();
 
-	await alSelector("← Vinculación");
-	nadaBorrado();
-	expect(backend.modo).toBe("handy"); // ni el modo guardado
-	// La tarjeta de Handy dice que vuelve al vínculo, no que haya que vincularla.
-	expect(await screen.findByText(/Vuelve a la vinculación de este equipo\./)).toBeInTheDocument();
-	expect(screen.queryByText(/Necesitarás vincularlo después/)).toBeNull();
-
-	await elegir("Handy");
-	await enElLogin();
-	nadaBorrado();
-});
-
-it("tras «Cerrar sesión», lo mismo", async () => {
-	arrancarHandy({ mainOnline: true });
-	await enElLogin();
 	await entrarComoCamarero();
-	await pulsar("Cerrar sesión");
-	await enElLogin();
-	await waitFor(() => expect(backend.sesion).toBeNull());
-
-	await alSelector("← Vinculación");
+	expect(screen.queryByRole("button", { name: /Vinculación/ })).toBeNull();
 	nadaBorrado();
-
-	await elegir("Handy");
-	await enElLogin();
-});
-
-it("tras 10 minutos sin tocarla (cierre por inactividad), tampoco la desvinculan", async () => {
-	arrancarHandy({ mainOnline: true });
-	await enElLogin();
-	await entrarComoCamarero();
-
-	// El temporizador de inactividad se reprograma con la primera actividad: desde aquí, falso.
-	vi.useFakeTimers({ shouldAdvanceTime: true });
-	fireEvent.pointerDown(window);
-	act(() => vi.advanceTimersByTime(10 * 60_000 + 1_000));
-	await enElLogin();
-	await waitFor(() => expect(backend.sesion).toBeNull());
-	vi.useRealTimers();
-
-	await alSelector("← Vinculación");
-	nadaBorrado();
-});
-
-it("con sesión de camarero, «← Volver» la cierra y va al selector; el vínculo sigue", async () => {
-	arrancarHandy({ mainOnline: true });
-	await enElLogin();
-	await entrarComoCamarero();
-
-	await alSelector("← Vinculación");
-	nadaBorrado();
-	await waitFor(() => expect(backend.sesion).toBeNull());
-	expect(useAuth.getState().role).toBe("");
-
-	await elegir("Handy");
-	await enElLogin();
 });
 
 it("desde la espera a pantalla completa, «← Volver» va al selector y «Handy» vuelve a la espera", async () => {
@@ -314,6 +262,10 @@ it("desde la espera a pantalla completa, «← Volver» va al selector y «Handy
 
 	await alSelector("← Ir a vinculación");
 	nadaBorrado();
+	expect(backend.modo).toBe("handy"); // ni el modo guardado
+	// La tarjeta de Handy dice que vuelve al vínculo, no que haya que vincularla.
+	expect(await screen.findByText(/Vuelve a la vinculación de este equipo./)).toBeInTheDocument();
+	expect(screen.queryByText(/Necesitarás vincularlo después/)).toBeNull();
 
 	await elegir("Handy");
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
@@ -427,8 +379,9 @@ it("si el almacén no contesta, no se toma por una Handy sin vincular: lo dice y
 
 /* ── Desvincular de verdad: Configuración → Dispositivo ────────────────────────────────────── */
 
-it("desde Configuración → Dispositivo, el administrador la desvincula tras confirmar", async () => {
+it("desde Configuración → Dispositivo, el administrador la desvincula tras confirmar y sale de la sesión", async () => {
 	backend.sesion = { id_usuario: "u-adm", rol: "Administrador" };
+	useAuth.setState({ role: "Administrador", idUsuario: "u-adm", nombre: "Ana" });
 	backend.modo = "handy";
 	backend.llavero = { ...VINCULADA };
 	backend.resets = [];
@@ -442,6 +395,9 @@ it("desde Configuración → Dispositivo, el administrador la desvincula tras co
 	expect(backend.resets).toEqual([{ sesion: { id_usuario: "u-adm", rol: "Administrador" }, resultado: "OK" }]);
 	expect(backend.llavero).toBeNull();
 	expect(backend.modo).toBeNull();
+	// La sesión de la pantalla también: al volver a elegir Handy se pide el PIN.
+	expect(useAuth.getState().role).toBe("");
+	expect(useAuth.getState().idUsuario).toBeNull();
 });
 
 /* ── El modelo ─────────────────────────────────────────────────────────────────────────────── */

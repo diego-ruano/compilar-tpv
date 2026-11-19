@@ -60,8 +60,10 @@ it("el título no se parte, las acciones pasan a su lado sólo desde sm y la cab
 	const cabecera = titulo.closest("div.rounded-2xl") as HTMLElement;
 	expect(cabecera.className).toContain("sm:flex-row");
 	expect(cabecera.className).not.toContain("xs:flex-row");
-	// El botón flotante del menú ocupa 52 px desde la izquierda hasta `lg`.
-	expect(cabecera.className).toMatch(/(^| )pl-14( |$)/);
+	// El botón flotante del menú ocupa 52 px desde la izquierda de `sm` a `lg`; en el teléfono el
+	// menú va en la barra de título y no hace falta el hueco.
+	expect(cabecera.className).not.toMatch(/(^| )pl-14( |$)/);
+	expect(cabecera.className).toContain("sm:pl-14");
 	expect(cabecera.className).toContain("lg:pl-4");
 
 	// «Marcar todas» no se parte; en lo más estrecho queda el icono, con su nombre.

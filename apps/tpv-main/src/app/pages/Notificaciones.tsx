@@ -117,9 +117,10 @@ export default function Notificaciones() {
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto overscroll-contain bg-bg p-2 pt-3 [scrollbar-gutter:stable] sm:gap-4 sm:p-4 sm:pt-4 lg:p-6 lg:pt-5">
       {/* HEADER. El título no se parte nunca: en el móvil las acciones van debajo y pasan a su lado
-          desde `sm`, cuando caben. Hasta `lg` el botón flotante del menú (`layout.tsx`, arriba a la
-          izquierda) queda encima de la cabecera: el margen de la izquierda le deja su sitio. */}
-      <div className="flex w-full shrink-0 flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 pl-14 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:pl-14 lg:pl-4">
+          desde `sm`, cuando caben. De `sm` a `lg` el botón flotante del menú (`layout.tsx`, arriba a
+          la izquierda) queda encima de la cabecera: el margen de la izquierda le deja su sitio. En
+          el teléfono el menú va en la barra de título. */}
+      <div className="flex w-full shrink-0 flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-4 sm:pl-14 lg:pl-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
             <Bell className="size-6" aria-hidden />

@@ -11,8 +11,8 @@ type Props = {
 
 const Placeholder = (
   <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-surface-2 text-fg-subtle">
-    <ImageOff className="size-6" aria-hidden />
-    <span className="text-xs font-semibold">Sin imagen</span>
+    <ImageOff className="size-5 sm:size-6" aria-hidden />
+    <span className="text-[11px] font-semibold sm:text-xs">Sin imagen</span>
   </div>
 );
 
@@ -29,14 +29,14 @@ export default function Product({ img, name, onSelect }: Props) {
           />
         </div>
 
-        <div className="flex flex-col gap-2 p-2.5 sm:p-4">
-          <h5 className="line-clamp-2 text-base font-bold text-fg sm:text-lg">{name}</h5>
+        <div className="flex flex-col gap-1.5 p-2 sm:gap-2 sm:p-4">
+          <h5 className="line-clamp-2 text-xs font-bold text-fg sm:text-lg">{name}</h5>
 
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-fg-muted sm:text-sm">Ver detalles</p>
+            <p className="text-[11px] font-semibold text-fg-muted sm:text-sm">Ver detalles</p>
 
-            <span className="inline-flex size-8 items-center justify-center rounded-xl border border-border text-fg-muted transition-all duration-200 group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg sm:size-9">
-              <ChevronRight className="size-5" aria-hidden />
+            <span className="inline-flex size-6 items-center justify-center rounded-lg border border-border text-fg-muted transition-all duration-200 group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg sm:size-9 sm:rounded-xl">
+              <ChevronRight className="size-4 sm:size-5" aria-hidden />
             </span>
           </div>
         </div>

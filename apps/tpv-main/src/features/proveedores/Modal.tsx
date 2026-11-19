@@ -17,6 +17,7 @@ export default function Modal({
 	widthClass?: string;
 }) {
 	const panelRef = useRef<HTMLDivElement | null>(null);
+	const raizRef = useRef<HTMLDivElement | null>(null);
 
 	// ✅ Mantener siempre el último onClose sin re-disparar efectos
 	const onCloseRef = useRef(onClose);
@@ -43,8 +44,13 @@ export default function Modal({
 	useEffect(() => {
 		if (!open) return;
 
+		// Con otra encima (el selector de productos sobre el pedido), Escape cierra sólo la de arriba:
+		// la última del documento.
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") onCloseRef.current();
+			if (e.key !== "Escape") return;
+			const dialogos = document.querySelectorAll('[role="dialog"]');
+			if (dialogos[dialogos.length - 1] !== raizRef.current) return;
+			onCloseRef.current();
 		};
 
 		window.addEventListener("keydown", onKey);
@@ -55,6 +61,7 @@ export default function Modal({
 
 	return (
 		<div
+			ref={raizRef}
 			style={{ zIndex }}
 			className="fixed inset-0 flex items-center justify-center overflow-y-auto p-2 sm:p-4"
 			aria-modal="true"

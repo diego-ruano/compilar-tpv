@@ -178,23 +178,13 @@ export default function AppBoot({ router }: { router: any }) {
 				);
 
 			case "handy_app":
-				// En modo Handy mostramos siempre un botón flotante para volver a la zona de
-				// vinculación (re-emparejar / cambiar de TPV). Solo se renderiza aquí, en la rama
-				// Handy: en modo TPV este botón no existe.
+				// Desvincular la Handy para volver a vincularla es de Configuración → Dispositivo.
 				return (
 					<div className="relative h-full w-full">
 						{/* INC-20261030-014: con la espera encima, `inert` deja la aplicación montada
 						    pero fuera de alcance, también del teclado y del lector de pantalla. */}
 						<div className="h-full w-full" inert={p.espera !== null}>
 							<RouterProvider router={router} />
-
-							<button
-								type="button"
-								onClick={emparejamiento.volverAVincular}
-								className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
-							>
-								← Vinculación
-							</button>
 						</div>
 
 						{p.espera ? (

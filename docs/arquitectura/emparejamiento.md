@@ -45,7 +45,7 @@ y la Main aprueba.
    (`soltarEsperaAnterior`) y la olvida. Un código nuevo no se reclama hasta que se ha soltado la
    anterior: con el mismo código, soltarla después soltaría el reclamo nuevo. Lo hace la Handy y no la
    nube, porque desde la nube no se sabe si alguien espera: una Handy vinculada que pulsa
-   «← Vinculación» y vuelve a pedir el mismo negocio sigue conectada con su vínculo de antes mientras
+   «← Ir a vinculación» y vuelve a pedir el mismo negocio sigue conectada con su vínculo de antes mientras
    espera, y soltar las solicitudes de quien ha vuelto a conectar (`last_seen_at_ms`) le quitaba a la
    Main la que esa Handy esperaba. Si la Handy no se vuelve a abrir, o la nube no contesta, la
    solicitud caduca con el código.
@@ -129,8 +129,8 @@ la sesión y las cachés de presentación del vínculo anterior se retiran, sin 
 
 Ir al selector de modo y borrar el vínculo son dos cosas (AUD-23):
 
-- **«← Volver»** en la vinculación (a la que llevan «← Vinculación», siempre a la vista, también
-  encima del login, y «← Ir a vinculación», en la espera) cierra la sesión y enseña el selector **sin
+- **«← Volver»** en la vinculación (a la que lleva «← Ir a vinculación», en la espera de la Main o
+  con la Handy rechazada) cierra la sesión y enseña el selector **sin
   tocar nada guardado**: ni el token, ni el negocio, ni el modo de `device_config.json` (si la
   aplicación se reinicia ahí, vuelve a la Handy). No pide nada, tampoco con la Main desaparecida o la
   nube rechazando a la Handy. Desde el selector:
@@ -139,9 +139,10 @@ Ir al selector de modo y borrar el vínculo son dos cosas (AUD-23):
   - **«TPV»** sigue el camino de la activación de la licencia, con el vínculo de Handy todavía en el
     almacén; si se vuelve atrás desde la activación, «Handy» lo recupera;
   - el **código de otra Main** lo sustituye (`handy_set_token`), igual que desde la vinculación.
-- **Desvincular** es Configuración → Dispositivo, en la propia Handy (administrador y confirmación):
-  `device_reset_mode` borra el token y el negocio del almacén y vuelve al selector; la identidad del
-  equipo se conserva.
+- **Desvincular** es Configuración → Dispositivo, en la propia Handy (administrador y confirmación),
+  y es el único camino a la vinculación con la Handy trabajando: la aplicación no tiene otro atajo.
+  `device_reset_mode` borra el token y el negocio del almacén, pone el modo a cero y cierra la sesión;
+  la pantalla retira también la suya y vuelve al selector. La identidad del equipo se conserva.
 
 `handy_get_tenant` sólo contesta «no hay» cuando consta: si el almacén no responde es un error, y la
 vinculación lo enseña en vez de pedir un código como a una Handy sin vincular. Un valor que no se

@@ -28,7 +28,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-bg text-fg">
       {/* Barra superior reutilizable */}
-      <Titlebar />
+      <Titlebar onAbrirMenu={toggleSidebar} />
 
       {/* Contenido */}
       <div className="relative flex min-h-0 flex-1">
@@ -69,13 +69,14 @@ function Layout({ children }: { children: React.ReactNode }) {
           />
         </div>
 
-        {/* Botón flotante SOLO en móvil para abrir cuando está cerrado */}
+        {/* Botón flotante para abrir el menú cuando está cerrado, en la tableta. En el teléfono
+            va en la barra de título. */}
         <button
           type="button"
           onClick={toggleSidebar}
           className={[
             "lg:hidden",
-            sidebarOpen ? "hidden" : "flex",
+            sidebarOpen ? "hidden" : "hidden sm:flex",
             "absolute left-3 top-3 z-50",
             "h-10 w-10 items-center justify-center",
             "rounded-xl border border-border bg-surface text-fg shadow-md",

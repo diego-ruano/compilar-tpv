@@ -303,33 +303,33 @@ export default function Clientes() {
   // La invalidación en las mutaciones recachea la lista automáticamente.
 
   return (
-    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+    <div className="flex min-h-full w-full flex-col items-center gap-3 bg-bg p-3 pt-3 sm:gap-4 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
       {/* ================= LISTA ================= */}
       {vista === "list" && (
         <>
           {/* HEADER: título, filtros y, a la derecha, buscar y crear. Si no cabe en una línea, baja
-              por bloques; en el móvil, buscar y crear ocupan su propia línea. */}
-          <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
-                <Users className="size-6" aria-hidden />
+              por bloques; en el móvil, buscar y crear ocupan su propia línea, y todo va más junto. */}
+          <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border border-border bg-surface p-2.5 shadow-sm sm:gap-y-3 sm:p-4">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent sm:size-11 sm:rounded-2xl">
+                <Users className="size-5 sm:size-6" aria-hidden />
               </div>
               <div className="min-w-0">
-                <h2 className="text-xl font-bold text-fg sm:text-2xl">Clientes</h2>
-                <p className="text-sm text-fg-muted">
+                <h2 className="text-lg font-bold text-fg max-sm:leading-tight sm:text-2xl">Clientes</h2>
+                <p className="text-xs text-fg-muted sm:text-sm">
                   {clientes.length} {clientes.length === 1 ? "cliente" : "clientes"} en total
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               {RANKINGS.map((r) => (
                 <button
                   key={r.key}
                   type="button"
                   onClick={() => setRanking(r.key)}
                   className={cn(
-                    "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    "cursor-pointer rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition sm:px-3 sm:py-2 sm:text-sm",
                     ranking === r.key
                       ? "border-accent bg-accent text-accent-fg shadow-sm"
                       : "border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg",
@@ -370,26 +370,27 @@ export default function Clientes() {
                 <p className="text-xs text-fg-muted">No hay clientes con ese filtro.</p>
               </div>
             ) : (
-              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+              // En el teléfono, dos por fila.
+              <div className="grid w-full grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
                 {clientesFiltrados.map((c) => {
                   return (
                     <button
                       key={c.ID_Cliente}
                       type="button"
                       onClick={() => abrirDetalleCliente(c)}
-                      className="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-surface p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md active:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="group relative flex min-w-0 cursor-pointer flex-col rounded-2xl border border-border bg-surface p-2.5 text-left shadow-sm sm:p-4 transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md active:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {c.ReservasPendientes > 0 && (
-                        <span className="absolute -right-2 -top-2 z-10 rounded-full bg-accent px-2 py-1 text-xs font-bold text-accent-fg shadow-sm">
+                        <span className="absolute -right-1.5 -top-2 z-10 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-fg shadow-sm sm:-right-2 sm:px-2 sm:py-1 sm:text-xs">
                           {c.ReservasPendientes} pendiente
                           {c.ReservasPendientes === 1 ? "" : "s"}
                         </span>
                       )}
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3">
                         <div
                           className={cn(
-                            "grid size-12 shrink-0 place-items-center rounded-full text-base font-bold",
+                            "grid size-9 shrink-0 place-items-center rounded-full text-sm font-bold sm:size-12 sm:text-base",
                             avatarColor(c.ID_Cliente),
                           )}
                         >
@@ -397,7 +398,7 @@ export default function Clientes() {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="truncate font-bold text-fg">{c.Nombre || "—"}</p>
+                          <p className="truncate text-sm font-bold text-fg sm:text-base">{c.Nombre || "—"}</p>
                           <p className="flex items-center gap-1.5 truncate text-xs text-fg-muted">
                             {c.Email ? (
                               <>
@@ -421,21 +422,23 @@ export default function Clientes() {
                         />
                       </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-border bg-surface-2 p-2.5">
+                      {/* En el teléfono cada dato va en su línea, etiqueta y cifra: en dos columnas
+                          el importe se cortaba. */}
+                      <div className="mt-2 grid grid-cols-1 gap-1 sm:mt-4 sm:grid-cols-2 sm:gap-2">
+                        <div className="flex items-center justify-between gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 sm:block sm:rounded-xl sm:p-2.5">
                           <div className="flex items-center gap-1.5 text-fg-subtle">
                             <CalendarDays className="size-3.5" aria-hidden />
                             <span className="text-[11px] font-medium">Reservas</span>
                           </div>
-                          <p className="mt-0.5 text-base font-bold text-fg">{c.TotalReservas}</p>
+                          <p className="text-sm font-bold text-fg sm:mt-0.5 sm:text-base">{c.TotalReservas}</p>
                         </div>
 
-                        <div className="rounded-xl border border-border bg-surface-2 p-2.5">
+                        <div className="flex items-center justify-between gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 sm:block sm:rounded-xl sm:p-2.5">
                           <div className="flex items-center gap-1.5 text-fg-subtle">
                             <Wallet className="size-3.5" aria-hidden />
                             <span className="text-[11px] font-medium">Gastado</span>
                           </div>
-                          <p className="mt-0.5 truncate text-base font-bold text-fg">
+                          <p className="min-w-0 truncate text-sm font-bold text-fg sm:mt-0.5 sm:text-base">
                             {eur(c.TotalGastado)}
                           </p>
                         </div>

@@ -171,16 +171,18 @@ export function gestosEn(b: WebdriverIO.Browser) {
      * Pulsa una opción del menú lateral (un enlace, cerrar sesión).
      *
      * En la Main el menú está a la vista y se pulsa como lo haría el dedo. En el teléfono está
-     * plegado fuera de la pantalla: se intenta con su botón flotante, y si la opción sigue sin
+     * plegado fuera de la pantalla: se intenta con su botón (en la barra de título en el teléfono,
+     * flotante en la tableta: se pulsa el que esté a la vista), y si la opción sigue sin
      * entrar, se pulsa por el DOM, que es el clic que escucha react-router. Lo que prueban los
      * recorridos es la pantalla de destino, no la animación del menú.
      */
     async function pulsarDelMenu(xpath: string, descripcion: string): Promise<void> {
         if (!(await aLaVista(xpath))) {
-            const abrirMenu = b.$('//button[@aria-label="Abrir menú"]');
-            if ((await abrirMenu.isExisting()) && (await abrirMenu.isDisplayed())) {
+            for (const abrirMenu of await b.$$('//button[@aria-label="Abrir menú"]')) {
+                if (!(await abrirMenu.isDisplayed())) continue;
                 await abrirMenu.click().catch(() => {});
                 await b.waitUntil(() => aLaVista(xpath), { timeout: 5_000 }).catch(() => {});
+                break;
             }
         }
         if (await aLaVista(xpath)) {

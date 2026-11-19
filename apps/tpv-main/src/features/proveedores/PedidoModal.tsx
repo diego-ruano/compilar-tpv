@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Trash2, Plus, Send, XCircle, Mail } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Trash2, Plus, Send, XCircle, Mail, LayoutGrid } from "lucide-react";
 import Modal from "./Modal";
+import SelectorProductosPedido, { claveDeNombre } from "./SelectorProductosPedido";
 import { cn } from "../../shared/lib/cn";
-import type { Dinero, LineaPedidoDto, PedidoProveedorDto, ProveedorDto } from "@tpv/contracts";
+import type { Dinero, LineaPedidoDto, PedidoProveedorDto, ProductoProveedorDto, ProveedorDto } from "@tpv/contracts";
 import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
 import { CampoDinero } from "../../shared/ui/CampoDinero";
 
@@ -46,6 +47,8 @@ export default function PedidoModal({
   // Líneas cuyo precio escrito no se entiende como importe: mientras haya alguna no se guarda ni
   // se manda, porque el precio llegaría vacío sin que nadie lo viera.
   const [preciosIlegibles, setPreciosIlegibles] = useState<ReadonlySet<string>>(new Set());
+  const [eligiendo, setEligiendo] = useState(false);
+  const nombresEnElPedido = useMemo(() => new Set(lineas.map((l) => claveDeNombre(l.nombre_producto))), [lineas]);
 
   useEffect(() => {
     if (!pedido) return;
@@ -74,6 +77,23 @@ export default function PedidoModal({
     setLineas((prev) => [
       ...prev,
       { id_linea: crypto.randomUUID(), nombre_producto: "", cantidad: 1, precio_unitario: null, unidad: null },
+    ]);
+  }
+
+  /**
+   * Lo elegido del catálogo entra como líneas: el nombre, la unidad y lo que se suele pedir. El
+   * precio de compra no lo sabe el catálogo (el suyo es el de venta), así que se deja vacío.
+   */
+  function anadirDelCatalogo(productos: ProductoProveedorDto[]) {
+    setLineas((prev) => [
+      ...prev,
+      ...productos.map((p) => ({
+        id_linea: crypto.randomUUID(),
+        nombre_producto: p.nombre,
+        cantidad: p.cantidad_pedido_esperada ?? 1,
+        precio_unitario: null,
+        unidad: p.unidad_medida,
+      })),
     ]);
   }
 
@@ -187,20 +207,30 @@ export default function PedidoModal({
         <div className="mb-2 flex flex-col items-stretch gap-2 xs:flex-row xs:items-center xs:justify-between">
           <label className="text-sm font-semibold text-fg">Líneas del pedido</label>
           {esEditable && (
-            <button
-              type="button"
-              onClick={addLinea}
-              className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 whitespace-normal break-words rounded-lg bg-accent px-2.5 py-1.5 text-center text-xs font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover xs:w-auto"
-            >
-              <Plus className="size-3.5" />
-              Añadir línea
-            </button>
+            <div className="grid grid-cols-2 gap-2 xs:flex">
+              <button
+                type="button"
+                onClick={() => setEligiendo(true)}
+                className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 whitespace-normal break-words rounded-lg border border-border bg-surface px-2.5 py-1.5 text-center text-xs font-semibold leading-tight text-fg shadow-sm transition hover:bg-surface-2 xs:w-auto"
+              >
+                <LayoutGrid className="size-3.5" />
+                Elegir de categorías
+              </button>
+              <button
+                type="button"
+                onClick={addLinea}
+                className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 whitespace-normal break-words rounded-lg bg-accent px-2.5 py-1.5 text-center text-xs font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover xs:w-auto"
+              >
+                <Plus className="size-3.5" />
+                Añadir línea
+              </button>
+            </div>
           )}
         </div>
 
         {lineas.length === 0 ? (
           <div className="rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm text-fg-muted">
-            Sin líneas.{esEditable && " Añade productos al pedido."}
+            Sin líneas.{esEditable && " Elige productos de tus categorías o escribe una línea."}
           </div>
         ) : (
           <div className="touch-pan-x overflow-x-auto overscroll-x-contain rounded-xl border border-border pb-1 [scrollbar-gutter:stable]">
@@ -272,6 +302,13 @@ export default function PedidoModal({
           </div>
         )}
       </div>
+
+      <SelectorProductosPedido
+        open={eligiendo}
+        onClose={() => setEligiendo(false)}
+        yaEnElPedido={nombresEnElPedido}
+        onAnadir={anadirDelCatalogo}
+      />
 
       {/* Acciones */}
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -20,9 +20,9 @@ export default function ProveedorCard({
 			onClick={onClick}
 			className="group w-full min-w-0 text-left"
 		>
-			<div className="rounded-2xl border border-border bg-surface p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
+			<div className="rounded-2xl border border-border bg-surface p-2 shadow-sm sm:p-3 transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
 				{/* IMAGEN */}
-				<div className="flex h-20 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
+				<div className="flex h-16 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-20">
 					<ImageWithFallback
 						src={proveedor.urlImagen}
 						alt={proveedor.nombre_empresa}
@@ -39,12 +39,12 @@ export default function ProveedorCard({
 				</div>
 
 				{/* NOMBRE + VER DETALLE */}
-				<div className="mt-2 flex items-center justify-between gap-1">
-					<h5 className="min-w-0 truncate text-base font-semibold tracking-tight text-fg">
+				<div className="mt-1.5 flex items-center justify-between gap-1 sm:mt-2">
+					<h5 className="min-w-0 truncate text-sm font-semibold tracking-tight text-fg sm:text-base">
 						{proveedor.nombre_empresa}
 					</h5>
 					<div className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-fg-muted transition group-hover:text-accent">
-						<span>Ver detalle</span>
+						<span className="hidden sm:inline">Ver detalle</span>
 						<ArrowRight
 							className="size-3.5 transition group-hover:translate-x-0.5"
 							aria-hidden

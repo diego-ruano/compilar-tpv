@@ -15,6 +15,7 @@ import { useElementSize } from "../../features/mesas/useElementSize";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useEsTelefono } from "../../shared/lib/useEsTelefono";
 import { useMode } from "../../shared/stores/useMode";
 import { useToast } from "../../shared/toast";
 import { toAppError } from "@tpv/client";
@@ -92,12 +93,18 @@ export default function Mesas() {
     );
 
     // En la Handy se encajan sólo las mesas: en una pantalla estrecha, con el salón entero salen
-    // diminutas. Lo que sobre del contorno se corta por los bordes.
+    // diminutas. Lo que sobre del contorno se corta por los bordes. En un teléfono, sin pasar del
+    // tamaño real: un salón con pocas mesas se ampliaba hasta el triple y cada una ocupaba media
+    // pantalla.
     const soloMesas = useMode((s) => s.mode) === "handy";
+    const esTelefono = useEsTelefono();
     const view = useMemo(() => {
         if (!activeSalon) return { x: 0, y: 0, scale: 1 };
-        return fitTransform(activeSalon, mapSize.width, mapSize.height, 26, { soloMesas });
-    }, [activeSalon, mapSize.width, mapSize.height, soloMesas]);
+        return fitTransform(activeSalon, mapSize.width, mapSize.height, esTelefono ? 16 : 26, {
+            soloMesas,
+            escalaMaxima: esTelefono ? 1 : undefined,
+        });
+    }, [activeSalon, mapSize.width, mapSize.height, soloMesas, esTelefono]);
 
     const handleOpenMesa = useCallback((mesaId: string, mesaNombre: string) => {
         setMesaSel({ mesaId, mesaNombre });
@@ -117,17 +124,21 @@ export default function Mesas() {
                 <KitchenBoard idUsuarioCocinero={idUsuario} />
             ) : (
                 <>
-                    <div className="flex h-[clamp(32rem,calc(100dvh-8rem),52rem)] min-h-0 w-full shrink-0 flex-col rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4 lg:h-auto lg:flex-1 lg:p-6">
+                    {/* En el teléfono el mapa llena lo que queda de pantalla bajo la cabecera, y
+                        «Salones» va en la misma línea que sus pestañas. */}
+                    <div className="flex h-[max(24rem,calc(100dvh-11rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] min-h-0 w-full shrink-0 flex-col rounded-2xl border border-border bg-surface p-2 shadow-sm sm:h-[clamp(32rem,calc(100dvh-8rem),52rem)] sm:p-4 lg:h-auto lg:flex-1 lg:p-6">
                         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                            <h2 className="whitespace-nowrap text-lg font-bold leading-none text-fg">
-                                Salones
-                            </h2>
+                            <div className="flex min-w-0 items-center gap-2 sm:contents">
+                                <h2 className="whitespace-nowrap text-base font-bold leading-none text-fg sm:text-lg">
+                                    Salones
+                                </h2>
 
-                            <SalonTabs
-                                salons={salons}
-                                activeSalonId={activeSalonId}
-                                onChangeSalon={setActiveSalonId}
-                            />
+                                <SalonTabs
+                                    salons={salons}
+                                    activeSalonId={activeSalonId}
+                                    onChangeSalon={setActiveSalonId}
+                                />
+                            </div>
 
                             <Legend />
                         </div>

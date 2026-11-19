@@ -30,11 +30,12 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <div className="order-1 lg:order-none flex-1 min-w-0 min-h-0">{children}</div>;
 }
 
+// En el teléfono caben tres por fila (un iPhone grande da unos 380 px de rejilla).
 const gridClass =
-  "grid gap-2 sm:gap-3 grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]";
+  "grid gap-2 sm:gap-3 grid-cols-[repeat(auto-fill,minmax(105px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]";
 
 const gridCats =
-  "grid gap-2 sm:gap-3 grid-cols-[repeat(auto-fill,minmax(135px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]";
+  "grid gap-2 sm:gap-3 grid-cols-[repeat(auto-fill,minmax(105px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]";
 
 function sameCategorias(
   a?: CategoriaDisplay[] | null,

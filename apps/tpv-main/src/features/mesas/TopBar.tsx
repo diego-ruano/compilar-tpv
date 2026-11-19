@@ -10,17 +10,18 @@ export default function TopBar({
     canEditMesas = true,
     isCocinero = false,
 }: TopBarProps) {
+    // En el teléfono, más estrecha: deja la altura al mapa.
     return (
-        <div className="flex w-full shrink-0 flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm xs:flex-row xs:items-center xs:justify-between sm:p-4">
-            <div className="flex min-w-0 items-center gap-3">
-                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
-                    {isCocinero ? <ChefHat className="size-6" aria-hidden /> : <LayoutGrid className="size-6" aria-hidden />}
+        <div className="flex w-full shrink-0 flex-col items-stretch gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm xs:flex-row xs:items-center xs:justify-between sm:gap-3 sm:p-4">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                <div className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent sm:size-11 sm:rounded-2xl">
+                    {isCocinero ? <ChefHat className="size-5 sm:size-6" aria-hidden /> : <LayoutGrid className="size-5 sm:size-6" aria-hidden />}
                 </div>
                 <div className="min-w-0">
-                    <h2 className="text-xl font-bold text-fg sm:text-2xl">
+                    <h2 className="text-lg font-bold text-fg max-sm:leading-tight sm:text-2xl">
                         {isCocinero ? "Comandas" : "Mesas"}
                     </h2>
-                    <p className="text-sm text-fg-muted">
+                    <p className="hidden text-sm text-fg-muted sm:block">
                         {isCocinero ? "Comandas pendientes de cocina." : "Selecciona una mesa para gestionar su comanda."}
                     </p>
                 </div>
@@ -29,7 +30,7 @@ export default function TopBar({
             {canEditMesas ? (
                 <Link
                     to="/Mesas/editar"
-                    className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 xs:w-auto"
+                    className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-1.5 text-sm font-semibold sm:py-2 text-fg transition hover:bg-surface-2 xs:w-auto"
                 >
                     <Pencil className="size-4" aria-hidden />
                     <span className="hidden sm:inline">Editar/Crear mapa de salones</span>

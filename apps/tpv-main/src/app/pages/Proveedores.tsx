@@ -590,7 +590,7 @@ export default function Proveedores() {
               </div>
             ) : (
               <div className="max-h-88 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
-                <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+                <div className="grid w-full grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
                   {proveedoresFiltrados.map((p) => (
                     <ProveedorCard key={p.id_proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
                   ))}

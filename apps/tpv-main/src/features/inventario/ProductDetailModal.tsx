@@ -189,6 +189,31 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   if (!open) return null;
   if (!productId) return null;
 
+  // Los botones de un lote, en la tabla y en las tarjetas del teléfono.
+  const botonesLote = (l: any) => (
+    <>
+      <button
+        type="button"
+        className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
+        disabled={!puede("stock.ajustar")}
+        onClick={() => setAjustando({ lote: l })}
+      >
+        Ajustar
+      </button>
+      <button
+        type="button"
+        className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
+        disabled={!puede("stock.editar_lotes")}
+        onClick={() => {
+          setEditingLote(l);
+          setAddLoteOpen(true);
+        }}
+      >
+        Editar
+      </button>
+    </>
+  );
+
   return (
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-2 sm:p-3"
@@ -204,12 +229,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
           type="button"
           onClick={onClose}
           aria-label="Cerrar"
-          className="absolute top-3 right-3 grid size-9 place-items-center rounded-xl border border-border text-fg-muted hover:bg-surface-2 hover:text-fg transition cursor-pointer"
+          className="absolute top-2 right-2 grid size-9 place-items-center sm:top-3 sm:right-3 rounded-xl border border-border text-fg-muted hover:bg-surface-2 hover:text-fg transition cursor-pointer"
         >
           <X className="size-4" aria-hidden />
         </button>
 
-        <div className="shrink-0 border-b border-border px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
+        <div className="shrink-0 border-b border-border px-12 py-3 sm:px-6 sm:pb-4 sm:pt-6">
           <h2 className="text-center text-lg font-extrabold text-fg sm:text-xl">{title}</h2>
         </div>
 
@@ -223,7 +248,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
           ) : (
             <>
               <div className="flex items-center gap-3 sm:gap-4">
-                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2 sm:size-20">
+                <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2 sm:size-20">
                   <ImageWithFallback
                     src={imgUrl}
                     alt={p.Nombre}
@@ -263,8 +288,8 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 *:min-w-0 *:wrap-break-word">
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 *:min-w-0 *:wrap-break-word">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Boxes className="size-4 text-accent" aria-hidden />
                     Stock total
@@ -272,7 +297,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   <p className="mt-1 text-xl font-extrabold text-fg">{String(stockTotal)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <TriangleAlert className="size-4 text-accent" aria-hidden />
                     Mínimo
@@ -280,7 +305,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   <p className="mt-1 text-xl font-extrabold text-fg">{numOrDash(p.Stock_Minimo)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Tag className="size-4 text-accent" aria-hidden />
                     Precio
@@ -290,7 +315,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <ShoppingCart className="size-4 text-accent" aria-hidden />
                     Pedido esp.
@@ -300,7 +325,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <CalendarClock className="size-4 text-accent" aria-hidden />
                     FEFO (caducidad)
@@ -311,7 +336,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Clock className="size-4 text-accent" aria-hidden />
                     Última entrada
@@ -319,7 +344,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   <p className="mt-1 text-xl font-extrabold text-fg">{formatDateTimeES(ultimaEntrada?.Fecha_Entrada ?? null)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                <div className="rounded-2xl border border-border bg-surface-2 p-3 max-sm:col-span-2 sm:p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Boxes className="size-4 text-accent" aria-hidden />
                     Stock suelto
@@ -339,11 +364,11 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               </div>
 
               {/* Alérgenos */}
-              <div className="mt-5">
+              <div className="mt-4 sm:mt-5">
                 <button
                   type="button"
                   onClick={() => setAlergOpen((v) => !v)}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-4 py-3 font-extrabold text-fg transition hover:bg-surface-2"
+                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-3 py-2.5 font-extrabold text-fg transition hover:bg-surface-2 sm:px-4 sm:py-3"
                 >
                   <span className="flex items-center gap-2">
                     <ShieldAlert className="size-5 text-accent" aria-hidden />
@@ -387,11 +412,11 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               </div>
 
               {/* ✅ Lotes */}
-              <div className="mt-5">
+              <div className="mt-3 sm:mt-5">
                 <button
                   type="button"
                   onClick={() => setLotesOpen((v) => !v)}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-4 py-3 font-extrabold text-fg transition hover:bg-surface-2"
+                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-3 py-2.5 font-extrabold text-fg transition hover:bg-surface-2 sm:px-4 sm:py-3"
                 >
                   <span className="flex items-center gap-2">
                     <Layers className="size-5 text-accent" aria-hidden />
@@ -407,7 +432,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 </button>
 
                 <div className={["overflow-hidden transition-all duration-300", lotesOpen ? "max-h-[560px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"].join(" ")}>
-                  <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <div className="rounded-2xl border border-border bg-surface-2 p-3 sm:p-4">
                     <div className="mb-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm font-semibold text-fg-muted">
                         Gestiona entradas de almacén (FEFO sale de aquí)
@@ -430,7 +455,30 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     {!lotes?.length ? (
                       <p className="text-sm text-fg-muted text-center py-4">No hay lotes para este producto.</p>
                     ) : (
-                      <div className="overflow-x-auto rounded-2xl border border-border bg-surface [scrollbar-gutter:stable]">
+                      <>
+                      {/* En el teléfono cada lote es una tarjeta: la tabla pide 680 px y obligaba a
+                          desplazarse de lado. */}
+                      <div className="flex max-h-[320px] flex-col gap-2 overflow-y-auto sm:hidden">
+                        {lotes.map((l: any) => {
+                          const isFefo = fefo?.ID_Lote === l.ID_Lote;
+                          return (
+                            <div key={l.ID_Lote} className={`rounded-xl border border-border p-3 text-sm ${isFefo ? "bg-accent-soft" : "bg-surface"}`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="min-w-0 truncate font-extrabold text-fg">
+                                  {l.Codigo_Lote}
+                                  {isFefo && <span className="ml-2 text-xs font-extrabold text-accent">FEFO</span>}
+                                </span>
+                                <span className="shrink-0 font-extrabold text-fg">{String(l.Stock_Disponible ?? 0)}</span>
+                              </div>
+                              <div className="mt-1 text-xs text-fg-muted">
+                                Caduca: {formatDateES(l.Caducidad)} · Entrada: {formatDateTimeES(l.Fecha_Entrada)}
+                              </div>
+                              <div className="mt-2 grid grid-cols-2 gap-2">{botonesLote(l)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="hidden overflow-x-auto rounded-2xl border border-border bg-surface [scrollbar-gutter:stable] sm:block">
                        <div className="min-w-[680px]">
                         <div className="grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-extrabold text-fg-muted">
                           <div className="col-span-3">Lote</div>
@@ -453,25 +501,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                                 <div className="col-span-1 text-right font-extrabold">{String(l.Stock_Disponible ?? 0)}</div>
                                 <div className="col-span-4 pl-6 text-fg-muted">{formatDateTimeES(l.Fecha_Entrada)}</div>
                                 <div className="col-span-2 flex items-center justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
-                                    disabled={!puede("stock.ajustar")}
-                      onClick={() => setAjustando({ lote: l })}
-                                  >
-                                    Ajustar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
-                                    disabled={!puede("stock.editar_lotes")}
-                        onClick={() => {
-                                      setEditingLote(l);
-                                      setAddLoteOpen(true);
-                                    }}
-                                  >
-                                    Editar
-                                  </button>
+                                  {botonesLote(l)}
                                 </div>
                               </div>
                             );
@@ -479,6 +509,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                         </div>
                        </div>
                       </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -488,13 +519,14 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   ficha sabe hacerlo (Inventario, Proveedores). Desde Mesas y la venta rápida no
                   llegaba ninguno: «Editar» no abría nada, y «Eliminar» pedía confirmación y
                   cerraba la ficha como si lo hubiera borrado. */}
-              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:gap-3 *:sm:flex-1">
+              {/* En el teléfono, las tres en una fila. */}
+              <div className="mt-4 flex flex-row gap-2 sm:mt-5 sm:gap-3 *:min-w-0 *:flex-1">
                 {onEdit ? (
                 <button
                   type="button"
                   disabled={!puede("catalogo.editar")}
                   onClick={() => onEdit(p.ID_Producto)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-3 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-2xl bg-accent px-2 py-2.5 text-sm font-extrabold sm:gap-2 sm:py-3 sm:text-base text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                 >
                   <Pencil className="size-4" aria-hidden />
                   Editar
@@ -508,7 +540,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     setEditingLote(null);
                     setAddLoteOpen(true);
                   }}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface py-3 font-extrabold text-fg transition hover:bg-surface-2 cursor-pointer"
+                  className="inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-2xl border border-border bg-surface px-2 py-2.5 text-sm font-extrabold sm:gap-2 sm:py-3 sm:text-base text-fg transition hover:bg-surface-2 cursor-pointer"
                 >
                   <Plus className="size-4" aria-hidden />
                   Añadir lote
@@ -519,10 +551,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   type="button"
                   disabled={!puede("catalogo.borrar")}
                   onClick={() => setConfirmDelete(true)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer"
+                  aria-label="Eliminar producto"
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-2xl border border-danger/30 bg-danger-soft px-2 py-2.5 text-sm font-extrabold text-danger transition hover:opacity-90 cursor-pointer sm:gap-2 sm:py-3 sm:text-base"
                 >
                   <Trash2 className="size-4" aria-hidden />
-                  Eliminar producto
+                  <span className="sm:hidden">Eliminar</span>
+                  <span className="hidden sm:inline">Eliminar producto</span>
                 </button>
                 ) : null}
               </div>

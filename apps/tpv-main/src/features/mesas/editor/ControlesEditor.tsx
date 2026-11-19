@@ -20,7 +20,7 @@ export function IconButton({
     variant?: BtnVariant;
 }) {
     const base =
-        "h-10 min-w-0 justify-center px-3 sm:px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-sm transition inline-flex items-center gap-2 select-none";
+        "h-10 min-w-0 justify-center px-2 sm:px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-sm transition inline-flex items-center gap-1.5 sm:gap-2 select-none";
     const variants: Record<BtnVariant, string> = {
         neutral: disabled
             ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"

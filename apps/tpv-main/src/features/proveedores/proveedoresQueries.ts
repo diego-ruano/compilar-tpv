@@ -9,7 +9,8 @@ import { commands } from "@tpv/client";
 //
 // Nota: `proveedoresGetProductosAll` se deja como llamada directa en el consumidor (carga
 // puntual on-demand al abrir el modal de vincular, con post-proceso/preselección y re-invocación
-// imperativa). No aporta cache envolverla en un hook.
+// imperativa). No aporta cache envolverla en un hook. El selector de productos del pedido sí la
+// lee con un hook (`useProductosParaPedir`): sólo lista, y así tiene su error y su carga.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -21,6 +22,7 @@ export const proveedoresKeys = {
   list: () => ["proveedores", "list"] as const,
   categorias: () => ["proveedores", "categorias"] as const,
   productos: (idProveedor: string) => ["proveedores", "productos", idProveedor] as const,
+  paraPedir: () => ["proveedores", "para-pedir"] as const,
 };
 
 /** Lista de proveedores (cacheada). */
@@ -36,6 +38,20 @@ export function useProveedoresCategorias() {
   return useQuery({
     queryKey: proveedoresKeys.categorias(),
     queryFn: () => commands.proveedoresGetCategorias(),
+  });
+}
+
+/**
+ * Todos los productos del catálogo, para elegir lo que se pide (`SelectorProductosPedido`). Sólo se
+ * lee con el selector abierto, y cada vez que se abre: un producto dado de alta en Inventario no
+ * invalida estas claves.
+ */
+export function useProductosParaPedir(abierto: boolean) {
+  return useQuery({
+    queryKey: proveedoresKeys.paraPedir(),
+    queryFn: () => commands.proveedoresGetProductosAll(),
+    enabled: abierto,
+    staleTime: 0,
   });
 }
 

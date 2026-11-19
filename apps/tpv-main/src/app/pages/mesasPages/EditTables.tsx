@@ -25,6 +25,8 @@ mesasSaveLayout,
 } from "../../../features/mesas/mesasApi";
 import { mesasKeys } from "../../../features/mesas/mesasQueries";
 import { cn } from "../../../shared/lib/cn";
+import { useEsTelefono } from "../../../shared/lib/useEsTelefono";
+import { fitTransform } from "../../../features/mesas/geometry";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { queryClient } from "../../../shared/lib/queryClient";
 import { useTheme } from "../../../shared/stores/useTheme";
@@ -133,6 +135,7 @@ export default function EditTables() {
     const PADDING = 12;
     const WORLD_W = 4000;
     const WORLD_H = 4000;
+    const ZOOM_MAX = 2.5;
 
     const [salons, setSalons] = useState<Salon[]>([]);
     const salonsRef = useRef<Salon[]>([]);
@@ -149,6 +152,8 @@ export default function EditTables() {
     const [viewPos, setViewPos] = useState({ x: 0, y: 0 });
 
     const isPanningRef = useRef(false);
+    // Zoom con dos dedos: la distancia, el centro y la vista de cuando se pusieron.
+    const pinchRef = useRef<{ dist: number; centro: { x: number; y: number }; escala: number; pos: { x: number; y: number } } | null>(null);
     const panStartRef = useRef<{ x: number; y: number } | null>(null);
     const viewStartPosRef = useRef<{ x: number; y: number } | null>(null);
     const isDraggingSomethingRef = useRef(false);
@@ -454,9 +459,71 @@ export default function EditTables() {
         modoEditor.dispatch({ tipo: "colocar", mesa: t });
     }
 
+    // En el teléfono, a escala 1 sólo se ve un trozo del salón y no hay rueda para alejarse: la
+    // vista se encaja al salón entero al abrirlo y al cambiar de zona, y «Ajustar» vuelve a eso.
+    const esTelefono = useEsTelefono();
+    // En el teléfono el salón entero no cabe por encima de 0,55.
+    const ZOOM_MIN = esTelefono ? 0.2 : 0.55;
+
+    function encajarSalon() {
+        if (!activeSalon) return;
+        // El plano compartido quiere el radio de una mesa cuadrada como `null`, no ausente.
+        const salon = { ...activeSalon, tables: activeSalon.tables.map((t) => ({ ...t, radius: t.radius ?? null })) };
+        const v = fitTransform(salon, canvasSize.width, canvasSize.height, 16, { escalaMaxima: 1 });
+        setViewScale(v.scale);
+        setViewPos({ x: v.x, y: v.y });
+    }
+
     function resetZoom() {
+        if (esTelefono) {
+            encajarSalon();
+            return;
+        }
         setViewScale(1);
         setViewPos({ x: 0, y: 0 });
+    }
+
+    useEffect(() => {
+        if (esTelefono) encajarSalon();
+        // Sólo al cambiar de zona o de hueco: mover una mesa no puede mover la vista.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [esTelefono, activeSalonId, canvasSize.width, canvasSize.height]);
+
+    /** Los dos dedos, en coordenadas del lienzo. */
+    function dedosEnElLienzo(touches: TouchList) {
+        const caja = stageRef.current?.container?.().getBoundingClientRect();
+        if (!caja || touches.length < 2) return null;
+        const a = { x: touches[0].clientX - caja.left, y: touches[0].clientY - caja.top };
+        const b = { x: touches[1].clientX - caja.left, y: touches[1].clientY - caja.top };
+        return {
+            dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+            centro: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        };
+    }
+
+    function onStageTouchMove(e: any) {
+        const dedos = dedosEnElLienzo(e.evt.touches);
+        if (!dedos) return;
+        e.evt.preventDefault();
+        // Con el segundo dedo se deja de arrastrar el fondo.
+        isPanningRef.current = false;
+        if (!pinchRef.current) {
+            pinchRef.current = { ...dedos, escala: viewScale, pos: { ...viewPos } };
+            return;
+        }
+        const inicio = pinchRef.current;
+        const escala = clamp(inicio.escala * (dedos.dist / inicio.dist), ZOOM_MIN, ZOOM_MAX);
+        // El punto del salón que estaba bajo los dedos sigue bajo ellos.
+        const mundo = {
+            x: (inicio.centro.x - inicio.pos.x) / inicio.escala,
+            y: (inicio.centro.y - inicio.pos.y) / inicio.escala,
+        };
+        setViewScale(escala);
+        setViewPos({ x: dedos.centro.x - mundo.x * escala, y: dedos.centro.y - mundo.y * escala });
+    }
+
+    function onStageTouchEnd(e: any) {
+        if ((e.evt.touches?.length ?? 0) < 2) pinchRef.current = null;
     }
 
     function getStagePointerScreen() {
@@ -511,8 +578,8 @@ export default function EditTables() {
         const direction = e.evt.deltaY > 0 ? -1 : 1;
         const newScale = clamp(
             oldScale * (direction > 0 ? scaleBy : 1 / scaleBy),
-            0.55,
-            2.5,
+            ZOOM_MIN,
+            ZOOM_MAX,
         );
 
         const worldPoint = screenToWorld(pointer);
@@ -641,9 +708,12 @@ export default function EditTables() {
                 </div>
             </Modal>
 
-            <div className="grid min-h-full w-full grid-cols-1 gap-3 p-2 sm:p-3 lg:h-full lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] lg:gap-4 lg:p-4">
-                <div className="flex h-[min(72dvh,46rem)] min-h-[32rem] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-surface p-3 shadow-sm sm:gap-4 sm:p-4 lg:h-auto lg:min-h-0">
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            {/* En el teléfono el panel se deshace (`contents`) y sus piezas van en este orden:
+                cabecera, zonas, mapa y herramientas. Así el mapa queda a la vista y los botones
+                que piden tocarlo, justo debajo. */}
+            <div className="grid min-h-full w-full grid-cols-1 gap-2 p-2 sm:gap-3 sm:p-3 lg:h-full lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] lg:gap-4 lg:p-4">
+                <div className="flex h-[min(72dvh,46rem)] min-h-[32rem] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-surface p-3 shadow-sm max-sm:contents sm:gap-4 sm:p-4 lg:h-auto lg:min-h-0">
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 max-sm:order-1 max-sm:rounded-2xl max-sm:border max-sm:border-border max-sm:bg-surface max-sm:p-2 max-sm:shadow-sm">
                         <div className="min-w-0 justify-self-start">
                             <IconButton
                                 icon="←"
@@ -668,7 +738,7 @@ export default function EditTables() {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-auto pr-1">
+                    <div className="flex-1 overflow-auto pr-1 max-sm:order-2 max-sm:max-h-44 max-sm:rounded-2xl max-sm:border max-sm:border-border max-sm:bg-surface max-sm:p-2 max-sm:shadow-sm">
                         {loadingDb ? (
                             <div className="h-full grid place-items-center text-fg-muted">
                                 Cargando…
@@ -699,7 +769,7 @@ export default function EditTables() {
                                     <div
                                         key={s.id}
                                         className={cn(
-                                            "rounded-2xl border p-3 flex flex-col gap-2",
+                                            "rounded-2xl border p-2 flex flex-col gap-2 sm:p-3",
                                             s.id === activeSalonId
                                                 ? "border-accent bg-accent-soft"
                                                 : "border-border bg-surface",
@@ -764,12 +834,12 @@ export default function EditTables() {
                         )}
                     </div>
 
-                    <div className="border-t border-border pt-4 flex flex-col gap-2">
+                    <div className="border-t border-border pt-4 flex flex-col gap-2 max-sm:order-4 max-sm:rounded-2xl max-sm:border max-sm:bg-surface max-sm:p-2 max-sm:shadow-sm">
                         <div className="text-sm font-bold text-fg">
                             Herramientas
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-2 sm:gap-2">
                             <IconButton
                                 icon="➕"
                                 variant="accent"
@@ -823,7 +893,7 @@ export default function EditTables() {
                                 onClick={resetZoom}
                                 disabled={!activeSalon || deleteTableArmed}
                             >
-                                Reset zoom
+                                {esTelefono ? "Ajustar" : "Reset zoom"}
                             </IconButton>
 
                             <IconButton
@@ -987,7 +1057,7 @@ export default function EditTables() {
                     </div>
                 </div>
 
-                <div className="h-[clamp(26rem,72dvh,52rem)] min-w-0 overflow-hidden rounded-2xl border border-border bg-surface shadow-sm lg:h-auto">
+                <div className="h-[clamp(26rem,72dvh,52rem)] min-w-0 overflow-hidden rounded-2xl border border-border bg-surface shadow-sm max-sm:order-3 max-sm:h-[max(22rem,58dvh)] lg:h-auto">
                     <div className="flex h-full w-full min-h-0 flex-col p-2 sm:p-3">
                         <div
                             ref={canvasBoxRef}
@@ -1010,6 +1080,8 @@ export default function EditTables() {
                                     onPointerUp={onStagePointerUp}
                                     onPointerLeave={onStagePointerUp}
                                     onPointerCancel={onStagePointerUp}
+                                    onTouchMove={onStageTouchMove}
+                                    onTouchEnd={onStageTouchEnd}
                                     style={{
                                         cursor:
                                             addPointArmed ||
@@ -1068,7 +1140,9 @@ export default function EditTables() {
                         </div>
 
                         <div className="mt-2 text-[11px] text-fg-muted sm:mt-3 sm:text-xs">
-                            • Zoom con rueda. • Mover mapa arrastrando el fondo. •
+                            <span className="hidden sm:inline">• Zoom con rueda.</span>
+                            <span className="sm:hidden">• Zoom con dos dedos.</span>
+                            {" "}• Mover mapa arrastrando el fondo. •
                             Deshacer revierte mesas y paredes.
                             {esMain ? " • Punto azul: se puede reservar desde la web." : null}
                         </div>

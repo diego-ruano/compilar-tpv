@@ -379,6 +379,14 @@ body {
     min-height: min(44rem, var(--modal-max-height));
 }
 
+/* Los tickets de Venta rápida, en el teléfono, dejan fondo arriba y abajo: con la lista larga
+   ocupaban la pantalla entera y no quedaba dónde tocar para cerrarla. */
+@media (max-width: 639px) {
+    .fixed.inset-0 > [data-modal="ver-tickets"] {
+        max-height: min(82dvh, var(--modal-max-height)) !important;
+    }
+}
+
 /* La modal fiscal conserva nombres de utilidad legacy (`primary`), pero el tema actual
    expone el color corporativo como `accent`. */
 .fixed.inset-0 button[class~="bg-primary"] {

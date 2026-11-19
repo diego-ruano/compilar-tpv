@@ -174,8 +174,9 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 							darkMode ? "text-fg-muted" : "text-fg-muted",
 						)}
 					>
-						En el Handy, abre la app y elige «Handy» (si ya estaba vinculado, pulsa
-						«← Vinculación»). En «Conecta este Handy», pulsa «Escanear el QR» y apunta a
+						En el Handy, abre la app y elige «Handy» (si ya estaba vinculado, en su
+						Configuración, «Dispositivo», pulsa «Desvincular este dispositivo»). En
+						«Conecta este Handy», pulsa «Escanear el QR» y apunta a
 						este código, o escribe el código.
 					</div>
 
@@ -282,7 +283,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 										darkMode ? "text-fg-muted" : "text-fg-muted",
 									)}
 								>
-									<li>1) Abre la app en el Handy y elige «Handy». Si ya estaba vinculado, pulsa «← Vinculación».</li>
+									<li>1) Abre la app en el Handy y elige «Handy». Si ya estaba vinculado, en su Configuración, «Dispositivo», pulsa antes «Desvincular este dispositivo».</li>
 									<li>2) En «Conecta este Handy», pulsa «Escanear el QR» y apunta a este código. Sin cámara, escribe el código de 6 cifras (o pega el contenido del QR) y pulsa «Vincular dispositivo».</li>
 									<li>3) Acepta aquí la solicitud, después de comprobar que la huella es la que enseña el Handy.</li>
 								</ol>

@@ -35,16 +35,17 @@ export default function VentaRapida() {
     // En escritorio el ticket ocupa toda la altura de la derecha y la cabecera se queda sobre el
     // catálogo: la rejilla interior pasa a `contents` para que sus dos paneles se coloquen aquí.
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-bg text-fg lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(360px,38vw)] lg:grid-rows-[auto_auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-surface py-3 pl-16 pr-3 sm:flex-row sm:items-center sm:justify-between sm:pl-16 sm:pr-4 lg:col-start-1 lg:row-start-1 lg:px-4">
+      {/* En el teléfono el título y los dos botones van en la misma línea. */}
+      <div className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 sm:gap-3 sm:py-3 sm:pl-16 sm:pr-4 lg:col-start-1 lg:row-start-1 lg:px-4">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-extrabold text-fg sm:text-xl">Venta rápida</h1>
+          <h1 className="truncate text-base font-extrabold text-fg sm:text-xl">Venta rápida</h1>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={conAviso(nuevoTicket)}
-            className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
+            className="inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border bg-surface px-2.5 py-2 text-xs font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer xs:text-sm sm:gap-2 sm:px-3"
           >
             <Plus className="size-4" aria-hidden />
             Nuevo ticket
@@ -54,7 +55,7 @@ export default function VentaRapida() {
             type="button"
             onClick={conAviso(abrirVerTickets)}
             className={cn(
-              "inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
+              "inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border bg-surface px-2.5 py-2 text-xs font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer xs:text-sm sm:gap-2 sm:px-3",
               loadingComandas && "opacity-60",
             )}
           >

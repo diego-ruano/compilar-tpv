@@ -12,7 +12,7 @@ export type CategoryCardProps = {
 const Placeholder = (
   <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-surface-2 text-fg-subtle">
     <ImageOff className="size-6" aria-hidden />
-    <span className="text-xs font-semibold">Sin imagen</span>
+    <span className="text-[11px] font-semibold sm:text-xs">Sin imagen</span>
   </div>
 );
 
@@ -21,14 +21,14 @@ function CategoryCard({ c, onSelect }: CategoryCardProps) {
     <button
       onClick={() => onSelect(c)}
       className="
-        group rounded-2xl border border-border bg-surface p-2.5 text-left shadow-sm
+        group min-w-0 rounded-2xl border border-border bg-surface p-2 text-left shadow-sm
         transition hover:border-border-strong hover:bg-surface-2 active:scale-[0.99]
         cursor-pointer sm:p-3
       "
       type="button"
       title={c.Nombre}
     >
-      <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-28">
+      <div className="flex h-20 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-28">
         <ImageWithFallback
           src={c.urlImagen}
           alt={c.Nombre}
@@ -37,7 +37,7 @@ function CategoryCard({ c, onSelect }: CategoryCardProps) {
         />
       </div>
 
-      <p className="mt-2 truncate text-sm font-bold text-fg sm:text-base">{c.Nombre}</p>
+      <p className="mt-1.5 truncate text-xs font-bold text-fg sm:mt-2 sm:text-base">{c.Nombre}</p>
     </button>
   );
 }

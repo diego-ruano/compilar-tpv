@@ -1,6 +1,6 @@
 // src/features/ventaRapida/ui/VerTicketsModal.tsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen, X } from "lucide-react";
 import { cn } from "../utils";
 
 import type { ComandaBarraRow, IndexRow, VerTicketsDetalleRow } from "@tpv/contracts";
@@ -228,7 +228,7 @@ export default function VerTicketsModal({
 
   const pill = (active: boolean) =>
     cn(
-      "h-9 px-3 rounded-xl border text-sm font-semibold transition cursor-pointer",
+      "h-8 px-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer sm:h-9 sm:px-3 sm:text-sm",
       active
         ? "bg-accent text-accent-fg border-accent shadow-sm"
         : "bg-surface border-border hover:bg-surface-2 text-fg-muted",
@@ -246,12 +246,16 @@ export default function VerTicketsModal({
       {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía.
           INC-20261030-020: en columna, y la lista se desplaza con el alto que queda. Con una lista
           de 70vh dentro de un panel que no se desplaza, en una pantalla baja (Android en horizontal)
-          su final quedaba cortado por el borde del panel. */}
-      <div className="absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-1.5rem)] flex-col [--modal-width:68rem] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-3 sm:items-center sm:p-4">
+          su final quedaba cortado por el borde del panel. En el teléfono no llega a los bordes
+          (`data-modal`, Global.css): queda fondo arriba y abajo para cerrarla tocándolo. */}
+      <div
+        data-modal="ver-tickets"
+        className="absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-1.5rem)] flex-col [--modal-width:68rem] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl"
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-fg sm:text-lg">Tickets (Barra) · Hoy</h3>
-            <p className="text-xs text-fg-muted sm:text-sm">
+            <p className="hidden text-xs text-fg-muted sm:block sm:text-sm">
               Filtra, busca, despliega detalles, abre, cobra o elimina.
             </p>
           </div>
@@ -259,15 +263,17 @@ export default function VerTicketsModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
+            aria-label="Cerrar"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer sm:px-3"
           >
-            Cerrar
+            <X className="size-4 sm:hidden" aria-hidden />
+            <span className="hidden sm:inline">Cerrar</span>
           </button>
         </div>
 
         <div className="border-b border-border p-3 sm:p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 className={pill(filtro === "RECIENTES")}
@@ -314,7 +320,7 @@ export default function VerTicketsModal({
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+        <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-4">
           {rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-bg p-8 text-center">
               <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
@@ -327,7 +333,7 @@ export default function VerTicketsModal({
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 gap-2 sm:gap-3">
                 {rows.map(({ c, when, totalPendiente, total, est }) => {
                   // INC-05: se puede cobrar mientras quede alguna línea sin cobrar, aunque sea de 0,00 €.
                   const cobrable = esMain && est === "SIN COBRAR";
@@ -345,40 +351,42 @@ export default function VerTicketsModal({
                       key={c.ID_Comanda}
                       className="overflow-hidden rounded-2xl border border-border bg-surface"
                     >
-                      <div className="flex flex-col justify-between gap-3 p-3 sm:flex-row sm:items-center sm:p-4">
+                      <div className="flex flex-col justify-between gap-2 p-2.5 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", badge)}>
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-bold sm:py-1 sm:text-xs", badge)}>
                               {est}
                             </span>
                             <p className="text-sm text-fg-muted">{when}</p>
                           </div>
 
-                          <p className="mt-2 text-sm text-fg-muted">
+                          <p className="mt-1.5 text-sm text-fg-muted sm:mt-2">
                             Pendiente: <span className="font-bold text-fg">{eur(totalPendiente)}</span>
                             <span className="mx-2 text-fg-subtle">·</span>
                             Total: <span className="font-semibold text-fg">{eur(total)}</span>
                           </p>
                         </div>
 
-                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                        {/* En el teléfono, las cuatro acciones en una sola fila. */}
+                        <div className="grid shrink-0 grid-cols-[1fr_1fr_1fr_auto] gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-2">
                           <button
                             type="button"
                             onClick={() => void toggleDetalles(c.ID_Comanda)}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
+                            className="inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-xl border border-border bg-surface px-2 py-2 text-xs font-semibold text-fg transition hover:bg-surface-2 cursor-pointer sm:gap-1.5 sm:px-3 sm:text-sm"
                           >
                             {isExpanded ? (
                               <ChevronUp className="size-4" aria-hidden />
                             ) : (
                               <ChevronDown className="size-4" aria-hidden />
                             )}
-                            {isExpanded ? "Ocultar detalles" : "Más detalles"}
+                            <span className="sm:hidden">{isExpanded ? "Ocultar" : "Detalles"}</span>
+                            <span className="hidden sm:inline">{isExpanded ? "Ocultar detalles" : "Más detalles"}</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => onOpenTicket(String(c.ID_Comanda))}
-                            className="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
+                            className="rounded-xl bg-accent px-2 py-2 text-xs font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer sm:px-3 sm:text-sm"
                           >
                             Abrir
                           </button>
@@ -387,7 +395,7 @@ export default function VerTicketsModal({
                             type="button"
                             onClick={conAviso(() => onCobrarTicket(String(c.ID_Comanda)))}
                             className={cn(
-                              "rounded-xl px-3 py-2 text-sm font-semibold transition",
+                              "rounded-xl px-2 py-2 text-xs font-semibold transition sm:px-3 sm:text-sm",
                               cobrable
                                 ? "border border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer"
                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
@@ -401,17 +409,18 @@ export default function VerTicketsModal({
                           <button
                             type="button"
                             onClick={() => onDeleteTicket(String(c.ID_Comanda))}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
+                            aria-label="Eliminar"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border px-2.5 py-2 text-sm font-semibold text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer sm:px-3"
                           >
                             <Trash2 className="size-4" aria-hidden />
-                            Eliminar
+                            <span className="hidden sm:inline">Eliminar</span>
                           </button>
                         </div>
                       </div>
 
                       {isExpanded ? (
-                        <div className="px-3 pb-3 sm:px-4 sm:pb-4">
-                          <div className="rounded-xl border border-border bg-bg p-3">
+                        <div className="px-2.5 pb-2.5 sm:px-4 sm:pb-4">
+                          <div className="rounded-xl border border-border bg-bg p-2 sm:p-3">
                             {loadingThis ? (
                               <p className="text-sm text-fg-muted">Cargando productos…</p>
                             ) : detalles.length === 0 ? (
@@ -434,7 +443,7 @@ export default function VerTicketsModal({
                                   return (
                                     <div
                                       key={d.ID_Detalle}
-                                      className="flex items-start justify-between gap-3 rounded-xl border border-border bg-surface p-3"
+                                      className="flex items-start justify-between gap-3 rounded-xl border border-border bg-surface p-2.5 sm:p-3"
                                     >
                                       <div className="min-w-0">
                                         <div className="flex flex-wrap items-center gap-2">

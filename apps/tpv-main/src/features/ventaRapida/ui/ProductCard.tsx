@@ -24,7 +24,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
   return (
     <div
       className={cn(
-        "rounded-2xl border bg-surface p-2.5 text-left shadow-sm transition sm:p-3",
+        "min-w-0 rounded-2xl border bg-surface p-2 text-left shadow-sm transition sm:p-3",
         hasQty ? "border-accent ring-1 ring-accent/30" : "border-border",
       )}
     >
@@ -44,16 +44,16 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
           <ImageWithFallback
             src={p.urlImagen}
             alt={p.Nombre}
-            className="h-24 w-full rounded-xl border border-border object-cover sm:h-28"
+            className="h-20 w-full rounded-xl border border-border object-cover sm:h-28"
             fallback={
-              <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
+              <div className="flex h-20 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
                 <ImageOff className="size-6" aria-hidden />
               </div>
             }
           />
 
           {hasQty && (
-            <span className="absolute left-2 top-2 grid min-w-6 place-items-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-bold text-accent-fg shadow-sm">
+            <span className="absolute left-1.5 top-1.5 grid sm:left-2 sm:top-2 min-w-6 place-items-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-bold text-accent-fg shadow-sm">
               {qty}
             </span>
           )}
@@ -65,7 +65,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
               e.stopPropagation();
               handleInfo();
             }}
-            className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-surface/90 text-fg-muted shadow-sm backdrop-blur transition hover:bg-surface hover:text-fg cursor-pointer"
+            className="absolute right-1.5 top-1.5 grid size-7 place-items-center sm:right-2 sm:top-2 sm:size-8 rounded-full border border-border bg-surface/90 text-fg-muted shadow-sm backdrop-blur transition hover:bg-surface hover:text-fg cursor-pointer"
             title="Info"
             aria-label="Información del producto"
           >
@@ -73,8 +73,9 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
           </button>
         </div>
 
-        <div className="mt-2 flex min-w-0 items-start justify-between gap-2">
-          <p className="min-w-0 truncate text-sm font-semibold leading-tight text-fg sm:text-base">
+        {/* En el teléfono el precio va debajo del nombre: en tres columnas no caben juntos. */}
+        <div className="mt-1.5 flex min-w-0 flex-col gap-0.5 sm:mt-2 sm:flex-row sm:items-start sm:justify-between sm:gap-2">
+          <p className="min-w-0 truncate text-xs font-semibold leading-tight text-fg sm:text-base">
             {p.Nombre}
           </p>
           <span className="whitespace-nowrap text-xs font-bold text-fg sm:text-sm">
@@ -83,7 +84,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-2">
+      <div className="mt-2 flex items-center justify-between gap-1 sm:mt-3 sm:gap-2">
         <button
           type="button"
           onClick={(e) => {
@@ -91,7 +92,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
             handleRemove();
           }}
           className={cn(
-            "grid size-10 place-items-center rounded-xl border border-border bg-surface text-fg transition hover:bg-surface-2 sm:size-11 cursor-pointer",
+            "grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-surface text-fg transition hover:bg-surface-2 sm:size-11 sm:rounded-xl cursor-pointer",
             qty === 0 && "cursor-not-allowed opacity-40",
           )}
           disabled={qty === 0}
@@ -100,9 +101,9 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
           <Minus className="size-4" aria-hidden />
         </button>
 
-        <div className="flex-1 rounded-xl border border-border bg-surface-2 py-1.5 text-center">
-          <p className="text-[11px] text-fg-subtle">Cantidad</p>
-          <p className="text-base font-bold text-fg sm:text-lg">{qty}</p>
+        <div className="min-w-0 flex-1 rounded-lg border border-border bg-surface-2 py-1 text-center sm:rounded-xl sm:py-1.5">
+          <p className="hidden text-[11px] text-fg-subtle sm:block">Cantidad</p>
+          <p className="text-sm font-bold text-fg sm:text-lg">{qty}</p>
         </div>
 
         <button
@@ -111,7 +112,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
             e.stopPropagation();
             handleAdd();
           }}
-          className="grid size-10 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover sm:size-11 cursor-pointer"
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover sm:size-11 sm:rounded-xl cursor-pointer"
           aria-label="Añadir uno"
         >
           <Plus className="size-4" aria-hidden />

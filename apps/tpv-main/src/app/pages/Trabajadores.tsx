@@ -1020,8 +1020,13 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                             + Anadir
                           </button>
                         )}
-                        {/* Un día que ya ha pasado no se marca libre: borraría los turnos que tuvo. */}
-                        {puedeGestionarHorarios && d.ymd >= hoyYmd && !list.some((a) => a.Libre) && (
+                        {/* Un día que ya ha pasado no se marca libre si tuvo turnos: los borraría. Sin
+                            ninguno sí (un trabajador recién dado de alta, a mitad de semana): si no,
+                            los días de antes de hoy no se podían dejar libres para guardar la semana
+                            como su horario predeterminado. */}
+                        {puedeGestionarHorarios &&
+                          (d.ymd >= hoyYmd || turnosQueQuitaElLibre(list).length === 0) &&
+                          !list.some((a) => a.Libre) && (
                           <button
                             type="button"
                             onClick={conAviso(() => marcarLibre(t, d.ymd, list))}

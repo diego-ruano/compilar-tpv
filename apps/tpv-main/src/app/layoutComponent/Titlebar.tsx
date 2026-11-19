@@ -1,10 +1,11 @@
 // src/app/layoutComponent/Titlebar.tsx
 import { useRef, useState } from "react";
+import { Menu } from "lucide-react";
 import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { cn } from "../../shared/lib/cn";
-import { ThemeToggle } from "../../shared/ui";
+import { IconButton, ThemeToggle } from "../../shared/ui";
 import ControlesVentana from "./ControlesVentana";
 import ControlesZoom from "./ControlesZoom";
 import DiagnosticoPantalla from "./DiagnosticoPantalla";
@@ -16,8 +17,11 @@ import { esMovil } from "../../shared/lib/plataforma";
  *
  * Es la única: también la del login, que la pone encima de su fondo con `className`. Una copia
  * aparte se queda sin lo que se añada aquí, como le pasó con el tamaño de la interfaz.
+ *
+ * Con `onAbrirMenu` (la de la aplicación), en el teléfono lleva el menú a la izquierda, el logo y el
+ * nombre en el centro y el tema a la derecha. Más ancho, el menú es el botón flotante del layout.
  */
-function Titlebar({ className }: { className?: string }) {
+function Titlebar({ className, onAbrirMenu }: { className?: string; onAbrirMenu?: () => void }) {
     const { business_name, logo_data_url } = useBusinessSettings();
     // `logo_data_url` es una ruta relativa (el nombre es herencia de cuando sí era un data URL):
     // hay que resolverla, no meterla tal cual en el `src`.
@@ -37,9 +41,19 @@ function Titlebar({ className }: { className?: string }) {
 
     return (
         <div className={cn("flex shrink-0 items-center justify-between border-b border-border bg-surface", className)}>
+            {onAbrirMenu ? (
+                <div className="flex w-11 shrink-0 justify-center sm:hidden">
+                    <IconButton size="sm" label="Abrir menú" onClick={onAbrirMenu}>
+                        <Menu className="size-5" aria-hidden />
+                    </IconButton>
+                </div>
+            ) : null}
             {/* `min-w-0`: con la ventana estrecha encoge el nombre, no empuja los botones fuera. */}
             <div
-                className="flex min-w-0 flex-1 items-center gap-2 p-1.5 sm:gap-3"
+                className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 p-1.5 sm:gap-3",
+                    onAbrirMenu && "max-sm:justify-center",
+                )}
                 data-tauri-drag-region
             >
                 <img
@@ -57,7 +71,13 @@ function Titlebar({ className }: { className?: string }) {
                 </p>
             </div>
 
-            <div className="flex w-fit items-center gap-1 p-1 px-1.5">
+            <div
+                className={cn(
+                    "flex w-fit items-center gap-1 p-1 px-1.5",
+                    // Mismo ancho que el menú, para que el nombre quede en el centro.
+                    onAbrirMenu && "max-sm:min-w-11 max-sm:shrink-0 max-sm:justify-center max-sm:px-0",
+                )}
+            >
                 <ControlesZoom />
                 <ThemeToggle size="sm" />
                 <ControlesVentana />

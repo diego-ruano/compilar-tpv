@@ -939,21 +939,23 @@ export default function Reservas() {
                     key={clave}
                     onClick={() => seleccionarDia(fecha)}
                     className={[
-                      "relative h-[clamp(2.75rem,9vw,5rem)] rounded-lg border p-1.5 text-left transition sm:rounded-xl sm:p-2",
+                      // En el teléfono la celda es una columna (número arriba, recuento abajo): con
+                      // el recuento por encima, en una celda tan baja tapaba el número.
+                      "relative flex h-12 flex-col justify-between rounded-lg border p-1 text-left transition sm:block sm:h-[clamp(2.75rem,9vw,5rem)] sm:rounded-xl sm:p-2",
                       esMes ? "bg-surface" : "bg-surface-2 text-fg-subtle",
                       esSel ? "border-accent ring-2 ring-ring" : "border-border",
                       "hover:bg-surface-2",
                     ].join(" ")}
                     title={clave}
                   >
-                    <div className="flex items-center justify-between text-sm font-bold">
+                    <div className="flex items-center justify-between text-xs font-bold sm:text-sm">
                       <span>{fecha.getDate()}</span>
                       {esHoy && <span className="h-2 w-2 rounded-full bg-accent" />}
                     </div>
 
                     {total > 0 && (
-                      <div className="absolute bottom-1 left-1 inline-flex items-center rounded-md bg-accent-soft px-1.5 py-0.5 text-[10px] font-extrabold text-accent">
-                        {total} res
+                      <div className="inline-flex items-center self-start rounded-md bg-accent-soft px-1 text-[10px] font-extrabold leading-4 text-accent sm:absolute sm:bottom-1 sm:left-1 sm:px-1.5 sm:py-0.5 sm:leading-normal">
+                        {total}<span className="hidden sm:inline">&nbsp;res</span>
                       </div>
                     )}
                   </button>
@@ -1260,7 +1262,7 @@ export default function Reservas() {
                 // RES-MEJ-01: la tarjeta pone las acciones al lado según el ancho de la lista, no de la
                 // ventana: con el calendario al lado (xl), a la lista le quedaba poco y el nombre se
                 // reducía a «Q…». Por debajo de 48rem, las acciones van debajo.
-                <div className="@container h-full overflow-y-auto space-y-3 pr-2">
+                <div className="@container h-full overflow-y-auto space-y-2 pr-1 sm:space-y-3 sm:pr-2">
                   {reservasDelDia.map((r) => {
                     // Cancelada, terminada o sin presentarse: se queda a la vista, atenuada.
                     const viva = ocupaMesa(r.estado);
@@ -1269,27 +1271,27 @@ export default function Reservas() {
                       key={r.id_reserva}
                       data-reserva={r.id_reserva}
                       aria-current={r.id_reserva === resaltada ? "true" : undefined}
-                      className={`flex flex-col items-stretch gap-3 rounded-2xl border bg-surface p-3 shadow-sm md:p-4 @3xl:flex-row @3xl:justify-between @3xl:gap-4 ${
+                      className={`flex flex-col items-stretch gap-2 rounded-2xl border bg-surface p-2.5 shadow-sm sm:gap-3 sm:p-3 md:p-4 @3xl:flex-row @3xl:justify-between @3xl:gap-4 ${
                         r.id_reserva === resaltada ? "border-accent ring-2 ring-accent" : "border-border"
                       }`}
                     >
-                      <div className={`flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4 ${viva ? "" : "opacity-60"}`}>
-                        <div className={`flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center ${viva ? "" : "grayscale"}`}>
-                          <div className="text-[11px] font-semibold tracking-wider text-white/70">
+                      <div className={`flex min-w-0 flex-col gap-2 xs:flex-row xs:gap-3 sm:gap-4 ${viva ? "" : "opacity-60"}`}>
+                        <div className={`flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-1.5 text-white xs:w-[76px] xs:flex-col xs:justify-center xs:px-2 sm:w-[92px] sm:px-3 sm:py-2 ${viva ? "" : "grayscale"}`}>
+                          <div className="hidden text-[11px] font-semibold tracking-wider text-white/70 sm:block">
                             HORA
                           </div>
                           <div className="text-lg font-extrabold tracking-wide">{r.hora}</div>
                           <div className="text-[11px] font-semibold text-white/80">
                             hasta {horaFin(r.hora, r.duracion_min ?? duracionDefecto)}
                           </div>
-                          <div className="mt-1 rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-white">
+                          <div className="rounded-md border border-white/30 bg-white/15 px-1.5 py-0.5 text-[10px] font-extrabold tracking-widest text-white xs:mt-1 sm:px-2">
                             {turnoLabel(r.turno)}
                           </div>
                         </div>
 
                         <div className="min-w-0 py-0.5">
                           <div className="flex min-w-0 items-center gap-2">
-                            <div className="truncate text-lg font-extrabold text-fg">
+                            <div className="truncate text-base font-extrabold text-fg sm:text-lg">
                               {r.nombre_cliente}
                             </div>
                             {/* Reservas desde la web (docs/estudios/reservas-web.md): la hizo el cliente. */}
@@ -1301,33 +1303,33 @@ export default function Reservas() {
                             ) : null}
                           </div>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                              <Users className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 sm:mt-2 sm:gap-2">
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-fg sm:px-3 sm:py-1 sm:text-sm">
+                              <Users className="mr-1 size-3.5 text-fg-muted sm:mr-1.5 sm:size-4" aria-hidden />
                               {r.comensales} comensales
                             </span>
 
                             {r.telefono_cliente ? (
-                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                                <Phone className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-fg sm:px-3 sm:py-1 sm:text-sm">
+                                <Phone className="mr-1 size-3.5 text-fg-muted sm:mr-1.5 sm:size-4" aria-hidden />
                                 {r.telefono_cliente}
                               </span>
                             ) : null}
 
                             {r.email_cliente ? (
-                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                                <Mail className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-fg sm:px-3 sm:py-1 sm:text-sm">
+                                <Mail className="mr-1 size-3.5 text-fg-muted sm:mr-1.5 sm:size-4" aria-hidden />
                                 {r.email_cliente}
                               </span>
                             ) : null}
 
-                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                              <Armchair className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2 py-0.5 text-xs font-semibold text-fg sm:px-3 sm:py-1 sm:text-sm">
+                              <Armchair className="mr-1 size-3.5 text-fg-muted sm:mr-1.5 sm:size-4" aria-hidden />
                               {r.id_mesa ? `${r.nombre_zona} · ${r.numero_mesa}` : "Sin mesa"}
                             </span>
                           </div>
 
-                          <div className="mt-2">
+                          <div className="mt-1.5 sm:mt-2">
                             <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${claseEstado(r.estado)}`}>
                               {etiquetaEstado(r.estado)}
                             </span>
@@ -1335,12 +1337,13 @@ export default function Reservas() {
                         </div>
                       </div>
 
-                      <div className="grid shrink-0 grid-cols-2 gap-2 @3xl:flex @3xl:items-center">
+                      {/* En el teléfono, las acciones en una sola fila. */}
+                      <div className="grid shrink-0 grid-cols-2 gap-2 max-sm:flex max-sm:gap-1.5 max-sm:*:flex-1 @3xl:flex @3xl:items-center">
                         {/* Una reserva cerrada ya no se cambia. */}
                         {viva ? (
                           <button
                             onClick={() => abrirFormulario(r)}
-                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-1.5 text-xs font-extrabold tracking-wider text-fg transition hover:bg-surface-2 sm:px-3 sm:py-2 sm:tracking-widest md:px-4"
                           >
                             <Pencil className="size-3.5" aria-hidden />
                             MODIFICAR
@@ -1352,7 +1355,7 @@ export default function Reservas() {
                           <button
                             type="button"
                             onClick={() => setConfirmar({ accion: "cancelar", reserva: r })}
-                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-2 py-1.5 text-xs font-extrabold tracking-wider text-fg transition hover:bg-surface-2 sm:px-3 sm:py-2 sm:tracking-widest md:px-4"
                           >
                             <Ban className="size-3.5" aria-hidden />
                             CANCELAR
@@ -1364,7 +1367,7 @@ export default function Reservas() {
                           <button
                             type="button"
                             onClick={() => setConfirmar({ accion: "borrar", reserva: r })}
-                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90 md:px-4"
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-2 py-1.5 text-xs font-extrabold tracking-wider text-danger transition hover:opacity-90 sm:px-3 sm:py-2 sm:tracking-widest md:px-4"
                           >
                             <Trash2 className="size-3.5" aria-hidden />
                             BORRAR
