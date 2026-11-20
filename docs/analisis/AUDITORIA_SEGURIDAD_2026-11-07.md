@@ -14,14 +14,10 @@ con tests ejecutados, sobre `main` en `38a4c2db`.
   jsdom, nextest de Rust), consultó la documentación oficial cuando lo decidía la plataforma, valoró la
   gravedad y propuso el arreglo. No se ha cambiado código del proyecto ni se ha enviado tráfico a
   ningún despliegue.
-- **Resultado.** Ninguna se descartó. Siguen abiertas 11 de la auditoría: **9 confirmadas con un test**
-  (contando AUD-45, que salió al investigar) y 2 sin resolver
-  porque dependen de cómo se comporta una plataforma (AUD-31 y AUD-39).
-- **AUD-46 no sale de la auditoría ni es de seguridad**: es un fallo de coste que destapó la primera
-  prueba de carga contra producción (10 de noviembre). Se apunta aquí con lo medido; su causa está
-  **sin investigar**.
+- **Resultado.** Ninguna se descartó. Siguen abiertas 9 de la auditoría: **7 confirmadas con un test**
+  y 2 sin resolver porque dependen de cómo se comporta una plataforma (AUD-31 y AUD-39).
 - **Gravedad**, con la escala de la revisión integral: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵
-  baja/mejora. Ninguna bloqueante; una alta (AUD-46) y 11 medias. Cada sección
+  baja/mejora. Ninguna bloqueante ni alta; 9 medias. Cada sección
   dice en una línea por qué.
 - **Los tests están guardados** en `C:\Users\diego\security-audit-skill\tpv-completa\run-1\investigacion\AUD-NN\tests\`,
   con la ruta que tendrían en el repositorio. Casi todos sirven de test de regresión al arreglar:
@@ -46,32 +42,23 @@ historial y aislamiento entre negocios por token en las rutas de negocio. La inv
 todas las pistas, pero rebaja muchas: bastantes exigen sacar de la app la credencial de un equipo
 emparejado, o controlar la Main, y casi ninguna expone datos de otros negocios.
 
-**La alta** (AUD-46) no es de seguridad y es lo más importante de lo que queda: el Durable Object de
-cada negocio no hiberna mientras su Main está conectada, se use o no, y lo incluido en el plan de
-Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
-
 **Las medias, por bloques:**
 
-1. **Licencias, dispositivos y acceso** (AUD-45): una consulta del banco que revoca la licencia sin
-   vuelta atrás.
-2. **Recursos compartidos sin cuota** (AUD-09, 12, 13, 31, 36, 38) y **correo**
+1. **Recursos compartidos sin cuota** (AUD-12, 13, 31, 36, 38) y **correo**
    (AUD-39, 42): cualquiera o un solo negocio pueden gastar lo que es de todos (bases, códigos,
    copia diaria, CPU, cupo de correo). AUD-31 y AUD-39 siguen
    sin resolver: dependen de cómo responden los decodificadores de imagen de WebView2 y Android y el
    correo de Cloudflare.
-3. **Emparejamiento** (AUD-10, 11): oráculos y frenos del emparejamiento.
+2. **Emparejamiento** (AUD-10, 11): oráculos y frenos del emparejamiento.
 
 ## Tabla
 
 | ID | Gravedad | Estado | Bloque | Pista |
 |---|---|---|---|---|
-| AUD-09 | 🟡 | Confirmado (test) | A | La primera activación crea una base de Turso por cada petición simultánea |
-| AUD-45 | 🟡 | Confirmado (test) | A | Una consulta del banco (inquiry) revoca la licencia y nada la devuelve |
 | AUD-10 | 🟡 | Confirmado (test) | B | `fetch-token` dice sin freno qué códigos de emparejamiento están vivos |
 | AUD-11 | 🟡 | Confirmado (test) | B | La espera por fallos del `claim` se reinicia y cuenta por IP exacta |
 | AUD-12 | 🟡 | Confirmado (test) | B | Los códigos de emparejamiento nunca se liberan |
 | AUD-13 | 🟡 | Confirmado (test) | B | Reclamar el propio código infla la base central y deja sin copia a todos |
-| AUD-46 | 🟠 | ? | F | El TenantHub no hiberna mientras hay una Main conectada |
 | AUD-31 | 🟡 | Sin resolver | F | La webview pinta logos e imágenes replicados sin comprobar su forma ni RI-07 |
 | AUD-36 | 🟡 | Confirmado (test) | F | Sin cuota por negocio en la organización de Turso compartida |
 | AUD-38 | 🟡 | Confirmado (test) | F | Un anónimo agota las altas web de un negocio |
@@ -79,59 +66,6 @@ Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
 | AUD-42 | 🟡 | Confirmado (test) | G | Los topes del código de cambio de correo se saltan con peticiones simultáneas |
 
 ## A · Licencias, identidad y aislamiento entre negocios
-
-### AUD-09 · La primera activación crea una base de Turso por cada petición simultánea
-
-- **Estado.** Confirmado con un test en workerd (base central en SQLite con su esquema; Turso, un doble).
-- **Gravedad.** 🟡 media. Sin acceso ni efecto en los negocios activos, pero una compra deja decenas o
-  cientos de bases: con el plan Free de Turso (100 bases; `copiaBaseCentral.ts:6` da a entender que es el
-  suyo) bloquea toda primera activación; con uno de pago (sin techo desde el 2026-05-03), es basura.
-- **Qué pasa.** Cada petición lee la licencia sin reservarla, estrena `tenantId` y crea tenant `active`,
-  dispositivo, base, token, fila de `tenant_databases` y esquema; luego el `UPDATE` condicionado elige
-  una y las demás reciben 409 `device_replaced` sin compensar. Nada lo borra (ni la purga ni
-  `pruebas/retirar` de `main`). Si falla tras crear la base, la clave no se gasta: otra por reintento.
-- **Dónde.** `licensing.routes.ts:203`, `:385`, `:410`, `:434-453`; `licensing.helpers.ts:501-518`.
-- **Quién.** Quien tenga una clave sin estrenar: hay que comprarla. Sólo frena `LIMITADOR_LICENCIA`
-  (10/min por IP exacta, aproximado y por centro de datos): con varias IP cabe toda la ráfaga, pero una
-  sola por clave comprada: en workerd local, cortar la conexión a mitad no deja la clave sin gastar
-  (Cloudflare dice que «puede» cortarse).
-- **Cómo se ha comprobado.** `aud09PrimeraActivacion.test.ts` (Turso falso, 50 ms): 5 a la vez → 1×200,
-  4×409, 5 bases, tenants y dispositivos, 4 sin licencia; con el limitador local, 12 desde una IP → 10
-  bases; con el token caído, 3 reintentos → 3 bases sin fila y la clave `issued`. Falta, del responsable
-  en Turso: el plan, cuántas bases hay y las consultas de huérfanos del plan de validación.
-- **Arreglo.** `licenseStore.ts`: `reservarTenantDeLaLicencia` (`UPDATE licenses SET tenant_id=? WHERE
-  license_id=? AND tenant_id IS NULL AND main_device_id IS NULL` y `SELECT` del que quede; `null` si ya
-  hay Main) y, en `licensing.routes.ts:385`, usarlo en la primera activación (409 si `null`). En
-  `tursoCreateDatabase` (`licensing.helpers.ts:478`), el 409 de Turso por nombre repetido lee la base
-  (`GET …/databases/{nombre}`) y sigue. Ajustar REV-15 (`:441-451`), `licencias.md:138` y su test.
-- **Test de regresión.** El mismo, con el Turso falso dando 409 al nombre repetido: la ráfaga deja una
-  sola base y un tenant, y los reintentos con el token caído reutilizan esa base.
-
-### AUD-45 · Una consulta del banco (inquiry) revoca la licencia y nada la devuelve
-
-- **Estado.** Confirmado con test, por el worker entero (`src/index.ts`) y con eventos firmados con HMAC.
-- **Gravedad.** 🟡 Media: deja sin TPV a un bar que pagó y cuyo dinero no se ha movido, y no se cura
-  sola; sin atacante, rara (sobre todo Amex y Discover; Klarna, si el enlace la admite) y reversible.
-- **Qué pasa.** Llega como `charge.dispute.created` con estado `warning_*`, sin retirar fondos. El
-  webhook la trata como un contracargo: revoca el alta y marca el cobro `dispute`. Si no escala, se
-  cierra `warning_closed` (con tarjeta, a los 120 días; no hay «ganada») y nada se restaura. La Handy
-  recibe 403 `license_revoked` en un minuto y la Main se bloquea en su comprobación (≤ 6 h), sin perder
-  datos (RI-09). Desrevocar a mano no quita la marca: un reembolso total posterior ya no revoca.
-- **Dónde.** `stripe.routes.ts:506-508` (abre sin mirar `status`), `:512-516` (sólo `won`), `:91-95`
-  (sin `funds_withdrawn`); `admin.routes.ts:264`; `stripeReversal.test.ts:52` abre con `warning_*`.
-- **Quién.** El banco emisor, a menudo porque el titular no reconoce el cargo; Visa y Mastercard ya no
-  usan esta fase. Nadie gana nada provocándolo: es servicio perdido para un cliente, no un ataque.
-- **Cómo se ha comprobado.** `aud45ConsultaDelBanco.test.ts` (workerd, esquema de producción): consulta
-  abierta → `revoked`, Main y Handy vetadas; `warning_closed` → igual; `funds_withdrawn` → `ignored`. Sus
-  5 de regresión fallan hoy y pasan con el parche, solo o junto al de AUD-08 (ya en `main`); las suites existentes
-  y sus copias con los arreglos, 97/97. Falta que el responsable vea en modo test (`4000000000001976`,
-  `escalate_inquiry_evidence`) que al escalar llega `funds_withdrawn` (Stripe lo dice para Klarna).
-- **Arreglo.** En `decidirReversion` (`stripe.routes.ts:506-516`): `warning_*` sólo se audita;
-  `charge.dispute.funds_withdrawn` (en `EVENTOS_DE_REVERSION` y en el Dashboard) revierte como la
-  apertura, y `closed` `lost` lo pendiente. `licencias.md:80-92` y `:378`; `stripeReversal.test.ts:52`
-  a `needs_response`. Casa con el de AUD-08, ya en `main`: lo que añade va en `revertirCobros`. Lo ya revocado: desrevocar y limpiar la marca del cobro.
-- **Test de regresión.** Los 4 casos «AUD-45» que el parche añade a `stripeReversal.test.ts` (hoy fallan)
-  y el bloque «regresión» de `aud45ConsultaDelBanco.test.ts`.
 
 ## B · Emparejamiento de Handys
 
@@ -246,77 +180,6 @@ Cloudflare sólo da así para dos o tres bares. Falta investigar la causa.
 ## E · Datos personales en registros y telemetría
 
 ## F · Disponibilidad y coste del servicio compartido
-
-### AUD-46 · El TenantHub no hiberna mientras hay una Main conectada
-
-- **Estado.** Medido en producción con el generador de carga, el 10 de noviembre de 2026. **La causa
-  está sin investigar: falta una investigación a fondo.** No sale de la auditoría ni es de seguridad.
-- **Gravedad.** 🟠 Alta, la mayor de las abiertas. No rompe nada, pero cada negocio con el programa
-  abierto gasta duración del Durable Object todo el rato, venda o no, y es el primer límite de la
-  plataforma con mucha diferencia: los de peticiones y filas están en millones al mes.
-- **Qué pasa.** Con una Main y una Handy conectadas al WebSocket y sin tráfico, el `TenantHub` del
-  negocio figura activo los 60 s de cada minuto y factura 7,68 GB·s por minuto (461 por hora), sin
-  recibir ninguna invocación: los pings los contesta la auto-respuesta. Según Cloudflare, un DO con los
-  sockets entregados por `acceptWebSocket` hiberna al poco de quedarse sin eventos, y hibernado no
-  factura duración. Lo que cuesta, si a la Main real le pasa lo mismo:
-  - Los 400.000 GB·s incluidos al mes dan para unas 868 horas de Main conectada **entre todos los
-    negocios**. Un bar con el PC siempre encendido (720 h) se lleva el 83 %; uno que abre 12 horas al
-    día, el 41 %.
-  - Pasado lo incluido, 12,50 $ por millón de GB·s: unos 2 $ al mes por cada bar de 12 horas.
-
-  Además, el cierre limpio del cliente no se completó: tras su `close(1000)`, Cloudflare siguió contando
-  las dos conexiones, y el DO activo, 40 minutos más, hasta que murió el proceso del cliente. En local
-  (`wrangler dev`) ese mismo cierre termina al momento.
-- **Dónde.** Sin localizar. Lo que se sabe del código, sin haber investigado:
-  - El DO entrega los sockets con `acceptWebSocket` (`tenantHub.rutas.ts:118`, SYNC-16) y registra la
-    auto-respuesta del ping (`tenantHub.motor.ts:136`).
-  - En `durableObjects/` no hay `setTimeout` ni `setInterval`, y las únicas alarmas son las de la cola
-    (SYNC-18), que estaba vacía.
-  - `webSocketClose` no llama a `ws.close()` (`tenantHub.motor.ts:1479-1488`). Con fecha de
-    compatibilidad desde el 2026-04-07 Cloudflare contesta sola al cierre, y `wrangler.json` lleva
-    `2026-05-29`; falta ver con cuál está desplegado el worker.
-
-  Por dónde empezar, todo sin comprobar:
-  - `fetchConPlazo` (`server/db/clients.ts:32-90`): el único temporizador que usa el DO, 15 s por
-    petición a Turso, que se suelta al terminar de leer el cuerpo.
-  - El cliente de libsql que el DO guarda en caché 6 horas (`tenantHub.motor.ts:82`) y lo que deje
-    abierto.
-  - `Sentry.instrumentDurableObjectWithSentry`, que envuelve el DO (`index.ts:76`).
-  - Los `waitUntil` del DO: el envío a Axiom de `emitSyncEvent` (`tenantHub.motor.ts:1188`) y la purga
-    del log (`:680`).
-- **Quién.** Nadie lo provoca: le pasaría a todo negocio con la Main abierta. La medida es con la Main y
-  la Handy sintéticas del generador, que hablan el mismo protocolo y mandan el mismo ping que la app;
-  falta confirmarlo con la Main real.
-- **Cómo se ha comprobado.** Tanda `20261110-132959` de `node scripts/carga/carga.mjs --nube` contra el
-  worker desplegado, con el negocio de pruebas `90b7195d-d0a7-4913-8aa4-5ff1ea4bf570` (ya retirado). Los
-  datos son del GraphQL de analítica de Cloudflare, `durableObjectsPeriodicGroups` y
-  `durableObjectsInvocationsAdaptiveGroups`, filtrados por el namespace de `TenantHub` y por `name` = el
-  negocio, minuto a minuto (UTC):
-
-  | Minutos | Qué hacía la tanda | Invocaciones | Activo | GB·s | Conexiones |
-  |---|---|---|---|---|---|
-  | 12:30 | Alta, semilla y emparejamiento | 16 | 60 s | 7,68 | 2 |
-  | 12:31–12:33 | Nada: sólo los pings, cada 30 s | 0 | 60 s cada minuto | 7,68 cada minuto | 2 |
-  | 12:34 | La carga: 10 escrituras de la Handy y 3 de la Main | 13 | 60 s | 7,68 | 2 |
-  | 12:35 | `close(1000)` de los dos sockets | 2 | 60 s | 7,68 | 2 |
-  | 12:36–13:14 | Nada: ni pings; el cliente esperaba el cierre | 0 | 60 s cada minuto | 7,68 cada minuto | 2 |
-  | 13:15 | Muere el proceso del cliente | 0 | 57 s | 7,34 | 0 |
-  | 13:16 | — | 0 | 0 s | 0 | 0 |
-
-  En total, 353 GB·s en 46 minutos, con invocaciones sólo en tres. El informe de la tanda, sus ficheros,
-  las dos consultas y su salida están en
-  `C:\Users\diego\security-audit-skill\tpv-completa\run-1\investigacion\AUD-46\`. El generador sale ahora
-  con `process.exit` al terminar, para no dejar el DO despierto esperando el cierre.
-- **Qué falta investigar.**
-  1. Confirmarlo con la Main real: la misma consulta con el negocio de desarrollo, o el panel de
-     Cloudflare (Durable Objects → TenantHub → Metrics).
-  2. Aislar la pieza que lo mantiene despierto. `wrangler dev` no mide duración, así que hay que medirlo
-     desplegado: quitar o apagar una a una las candidatas de «Dónde» y repetir la medida.
-  3. Acotarlo: si pasa con una sola conexión, si pasa antes de la primera escritura (sin cliente de
-     Turso creado) y cuánto tarda en dormirse tras la última invocación.
-  4. El cierre: por qué en producción el cliente no recibe la respuesta a su `close` y en local sí.
-- **Test de regresión.** La tanda `--nube` mide la ventana «sesión abierta sin tráfico», entre la
-  preparación y la carga (`scripts/carga/coste.mjs`): arreglado, tiene que dar 0 s activos y 0 GB·s.
 
 ### AUD-31 · La webview pinta logos e imágenes replicados sin comprobar su forma ni RI-07
 
@@ -460,19 +323,16 @@ Lo que no se decide desde el repositorio ni con tests locales. Nada de esto pide
 producción: son paneles, consultas de sólo lectura o pruebas en un entorno propio.
 
 - **Turso** (panel y consultas de sólo lectura en la base central): el plan de la organización y si tiene
-  excedentes (AUD-09, AUD-36); cuántas bases hay y cuáles quedaron huérfanas (AUD-09); cuántas filas tiene `pair_requests` y
+  excedentes (AUD-36); cuántas filas tiene `pair_requests` y
   cuántos códigos caducan sin reclamar (AUD-10, AUD-12).
 - **Cloudflare** (panel): los campos del job de Logpush, su retención y quién lo lee, y el ajuste
-  `observability.redact_query_string` (los tres, en `observabilidad.md`); cuántas resoluciones de Turnstile pasan sin casilla (AUD-38); el
-  cupo y el ritmo de Email Service (AUD-38, AUD-42); y la duración del `TenantHub` de un negocio
-  con la Main real abierta y sin vender (AUD-46).
+  `observability.redact_query_string` (los tres, en `observabilidad.md`); cuántas resoluciones de Turnstile pasan sin casilla (AUD-38); y el
+  cupo y el ritmo de Email Service (AUD-38, AUD-42).
 - **Un worker de pruebas propio con `send_email`** y sólo buzones propios: qué hace Cloudflare con una
   lista o un CR/LF en `to` (AUD-39).
 - **Axiom**: que el worker desplegado tenga `AXIOM_TOKEN`, y la retención y el acceso de
   `tpv-device-logs` y `cloudflare-logpush` (`observabilidad.md`), y que lo que ya se ingirió con datos
   de clientes en los errores de la Handy se borre o caduque; si ya ha habido abuso de las altas web (AUD-38).
-- **Stripe** (Dashboard y modo test): si el webhook recibe `charge.dispute.*` (AUD-45), y que al escalar
-  una consulta llega `charge.dispute.funds_withdrawn` (AUD-45).
 - **Equipos y entornos reales**: si WebView2 y la WebView de Android aguantan una imagen de dimensiones enormes, en una máquina virtual y un emulador sin
   red (AUD-31); y qué IP entrega `workers.dev` en IPv6 (AUD-11).
 
