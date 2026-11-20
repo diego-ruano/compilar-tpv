@@ -16,6 +16,7 @@
 //   GET /v1/admin/releases                → las últimas versiones, con su canal
 //   POST /v1/admin/releases/promote       → pasa una versión de beta a stable
 //   POST /v1/admin/pruebas/retirar        → borra los negocios de pruebas del E2E con su base (`pruebas.ts`)
+//   POST /v1/admin/negocios-huerfanos     → lista (o, con `borrar`, retira) los negocios sin licencia (AUD-09, `huerfanos.ts`)
 //   /v1/admin/reservas-web/:tenantId      → dominios y clave de la reserva web (`reservas_web/admin.routes.ts`)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
@@ -38,6 +39,7 @@ import {
 	issueLicense,
 	listLicenses,
 	markKeyEmailSent,
+	negocioActivadoDe,
 	quitarMarcasDeDisputa,
 	recifrarConLaActual,
 	reactivateLicense,
@@ -47,6 +49,7 @@ import {
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { retirarNegociosDePrueba } from "./pruebas";
+import { retirarNegociosHuerfanos } from "./huerfanos";
 import { cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
@@ -247,8 +250,9 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	// la licencia anulada, nadie) y echa a la que no lo sea. Así, si llega tarde, después de deshacer
 	// la anulación, no echa a la Main que ha vuelto a serlo. Si ya estaba revocada (una disputa, otra
 	// anulación), quién es la Main no cambia y no hay nada que avisar.
+	// AUD-09: el negocio sólo si la licencia se activó; una sin estrenar puede tenerlo reservado.
 	if (lic.status !== "revoked") {
-		await avisarCambioDeLicencia(c.env, String(lic.tenant_id || ""));
+		await avisarCambioDeLicencia(c.env, negocioActivadoDe(lic));
 	}
 
 	return c.json({ ok: true, licenseId, status: "revoked" });
@@ -617,5 +621,23 @@ adminRoutes.post("/pruebas/retirar", async (c) => {
 	const db = getDb(c.env);
 	const retirada = await retirarNegociosDePrueba(db, c.env);
 	await auditAdmin(db, "pruebas_retirar", null, retirada);
+	return c.json({ ok: true, ...retirada });
+});
+
+/* ── AUD-09 · Negocios que ninguna licencia apunta ───────────────────────────
+ *
+ * Los que dejaban las activaciones que perdían la carrera por una clave, con su base aprovisionada.
+ * Sin `borrar: true` sólo los lista; con él, vacía su TenantHub y los da por borrados. Qué cuenta
+ * como huérfano, y qué no, está en `huerfanos.ts`.
+ */
+const huerfanosSchema = z.object({
+	borrar: z.boolean().optional(),
+});
+
+adminRoutes.post("/negocios-huerfanos", cuerpo(huerfanosSchema), async (c) => {
+	const { borrar } = c.req.valid("json");
+	const db = getDb(c.env);
+	const retirada = await retirarNegociosHuerfanos(db, c.env, { borrar: borrar === true, ahoraMs: Date.now() });
+	if (retirada.borrar) await auditAdmin(db, "huerfanos_retirar", null, retirada);
 	return c.json({ ok: true, ...retirada });
 });

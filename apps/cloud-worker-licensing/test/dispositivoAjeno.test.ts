@@ -268,9 +268,9 @@ describe("AUD-01 · el alta del dispositivo va con su clave, en una sola sentenc
 });
 
 describe("REV-15 · dos equipos activando la misma clave a la vez", () => {
-	// La carrera de verdad no se puede montar desde la ruta: para cuando la segunda petición lee la
-	// licencia, la primera ya la ha marcado, y entonces entra por el camino de «cambio de equipo».
-	// Lo que hay que fijar es el adjudicador, que es donde estaba el fallo: el `UPDATE` iba
+	// La carrera de verdad, por la ruta y con varias peticiones que leen la licencia sin estrenar
+	// antes de que ninguna escriba, está en `activacionesALaVez.test.ts` (AUD-09). Aquí se fija el
+	// adjudicador, que es donde estaba el fallo de REV-15: el `UPDATE` iba
 	// condicionado a que la licencia siguiera sin activar —correcto— pero **nadie miraba si había
 	// afectado a alguna fila**, así que la perdedora seguía hasta el final y se llevaba un token y
 	// la DEK de un tenant que la licencia no apunta. Dos equipos creyéndose la Main del mismo

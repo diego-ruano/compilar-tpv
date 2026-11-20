@@ -254,6 +254,10 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 
   Lo cubre `test/retirarUnNegocio.test.ts`.
 
+  Un negocio que ninguna licencia apunta (`/v1/admin/negocios-huerfanos`, AUD-09:
+  [licencias.md](licencias.md#anular-desde-la-administración)) sólo se vacía su `TenantHub`: no ha
+  tenido nunca una Main con token, así que no tiene agenda ni imágenes.
+
 ## Cómo se escribe una ruta
 
 - **Una ruta no lee su propio cuerpo.** Lo valida `lib/validacion.ts` —`cuerpo(schema)`,

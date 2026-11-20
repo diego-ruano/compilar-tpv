@@ -42,6 +42,7 @@ import {
 	licenciaVivaDelDispositivo,
 	eraLaMainDeOtroNegocio,
 	reasignarCobrosDeLaClave,
+	reservarNegocioDeLaClave,
 	sigueSiendoLaLicenciaDelEquipo,
 	upsertTenantInfo,
 	type LicenseRow,
@@ -623,8 +624,35 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		}
 	}
 
+	// REV-15 · AUD-07 · La clave ha dejado de estar sin estrenar mientras ésta seguía: o la ha
+	// activado otro equipo, o la ha canjeado otro. A la perdedora se le dice lo mismo que a cualquier
+	// equipo que llega tarde a una licencia ya activada: está en otro sitio. Si la clave sigue sin
+	// Main, no está en otro equipo: está usada.
+	const carreraPerdida = async () => {
+		const ganada = await getLicenseByHash(db, licHash);
+		if (ganada && !ganada.main_device_id) {
+			return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
+		}
+		return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 409);
+	};
+
 	// ── Tenant + dispositivo ────────────────────────────────────────────────
-	const tenantId = lic.tenant_id || crypto.randomUUID();
+	//
+	// AUD-09 · El negocio de una clave sin estrenar sale de su licencia, reservado en una sola
+	// sentencia ANTES de crear nada (`reservarNegocioDeLaClave`). Se estrenaba uno por petición
+	// (`crypto.randomUUID()`), y como el negocio y su base se crean antes de apuntar la licencia, una
+	// ráfaga de activaciones de la misma clave —o cada reintento tras un fallo— dejaba negocios,
+	// filas de equipo y TenantHub aprovisionados que ninguna licencia apuntaba ni nada borraba. Así,
+	// todas caen en el mismo negocio y en el mismo objeto, cuyo alta es idempotente. Reservar no es
+	// nacer (`lib/basePerdida.ts`): eso sigue siendo `activated_at_ms`.
+	let tenantId: string;
+	if (esPrimeraActivacion) {
+		const reservado = await reservarNegocioDeLaClave(db, lic.license_id, crypto.randomUUID(), now);
+		if (!reservado) return carreraPerdida();
+		tenantId = reservado;
+	} else {
+		tenantId = lic.tenant_id || crypto.randomUUID();
+	}
 
 	// AUD-06: una clave sin estrenar abre un negocio nuevo, y si este equipo era la Main de otro
 	// negocio con licencia (anulada, o trasladada a otro equipo), lo que tiene en su base local son
@@ -662,7 +690,11 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// Da de alta el dispositivo con su clave, o muda su fila, en UNA sentencia (AUD-01): la
 		// fila nace con clave, y una que ya existe sólo se toca si la registrada es ésta. Si no
 		// lo es, lanza `device_key_mismatch` sin haber escrito la fila.
-		await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
+		//
+		// AUD-09: en la primera activación, no aquí sino cuando la licencia ya es de este equipo
+		// (abajo). El negocio es el mismo para todas las peticiones de la clave, así que el equipo
+		// que pierde la carrera habría dejado su fila en el negocio del que gana, como un `tpv` más.
+		if (!esPrimeraActivacion) await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
 	} catch (e: any) {
 		const rechazo = rechazoPorLaClave(c, e);
 		if (rechazo) return rechazo;
@@ -674,15 +706,6 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		const sinBase = await baseDelNegocio(c, db, tenantId, deviceId);
 		if (sinBase) return sinBase;
 	}
-
-	await upsertTenantInfo(db, tenantId, {
-		displayName: tenantInfo.displayName ?? null,
-		legalName: tenantInfo.legalName ?? null,
-		// LOGIN-08: la activación ya no pregunta un correo. El de recuperación es el de la compra
-		// hasta que alguien lo cambie verificándolo; ver `domains/login/correoRecuperacion.ts`.
-		phone: tenantInfo.phone ?? null,
-		country: tenantInfo.country ?? null,
-	});
 
 	// ── Licencia: arrancar el reloj o mover el Main ─────────────────────────
 	let expiresAtMs = lic.expires_at_ms;
@@ -701,21 +724,25 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// licencia no apunta. Dos equipos creyéndose la Main del mismo negocio, cada uno con su
 		// base, y ninguno de los dos enterándose.
 		//
-		// A la perdedora se le dice lo mismo que a cualquier equipo que llega tarde a una licencia
-		// ya activada: está en otro sitio. Lo que sí queda detrás es la base del negocio que se
-		// aprovisionó unas líneas más arriba, vacía y sin dueño; moverlo todo por delante del
-		// aprovisionamiento lo evitaría, pero dejaría la licencia atada a un equipo cuya base falló
-		// al crearse, y eso es peor que una base de sobra.
-		if (activada === null) {
-			// AUD-07: o la ha activado otro equipo, o la ha canjeado otro mientras éste aprovisionaba
-			// su base. En el segundo caso la clave sigue sin Main: no está en otro equipo, está usada.
-			const ganada = await getLicenseByHash(db, licHash);
-			if (ganada && !ganada.main_device_id) {
-				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
-			}
-			return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 409);
-		}
+		// AUD-09: la perdedora no deja nada detrás. El negocio y su base son los reservados en la
+		// licencia, los mismos que los de la ganadora (crearlos otra vez no hace nada), y ni su
+		// equipo ni los datos del negocio se escriben hasta ganar. La base sigue yendo antes que la
+		// licencia: apuntarla primero dejaría la licencia atada a un equipo cuya base falló al
+		// crearse (DO-PERDIDA).
+		if (activada === null) return carreraPerdida();
 		expiresAtMs = activada;
+
+		// AUD-09: el alta del equipo, ya con la licencia suya. Si este paso falla, la licencia ya
+		// apunta a este equipo y su reintento entra como el del mismo equipo, que da de alta la fila
+		// (`ensureDevice`). Sólo un cambio de su clave registrada entre la comprobación del principio
+		// y aquí —una aprobación de emparejamiento del mismo `device_id`— lo rechazaría.
+		try {
+			await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
+		} catch (e: any) {
+			const rechazo = rechazoPorLaClave(c, e);
+			if (rechazo) return rechazo;
+			throw e;
+		}
 	} else if (esCambioDeEquipo) {
 		await reassignMainDevice(db, {
 			licenseId: lic.license_id,
@@ -736,6 +763,17 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// No bloquea la activación: el correo es entrega, no autorización.
 		c.executionCtx.waitUntil(sendDeviceChangedNoticeEmail(env, { to: lic.customer_email }));
 	}
+
+	// AUD-09: los datos del negocio, después de la licencia. Iban antes, y en una carrera por la
+	// misma clave las perdedoras escribían los suyos en el negocio de la ganadora.
+	await upsertTenantInfo(db, tenantId, {
+		displayName: tenantInfo.displayName ?? null,
+		legalName: tenantInfo.legalName ?? null,
+		// LOGIN-08: la activación ya no pregunta un correo. El de recuperación es el de la compra
+		// hasta que alguien lo cambie verificándolo; ver `domains/login/correoRecuperacion.ts`.
+		phone: tenantInfo.phone ?? null,
+		country: tenantInfo.country ?? null,
+	});
 
 	const token = await firmarSesion(env, { tenantId, deviceId, licHash });
 

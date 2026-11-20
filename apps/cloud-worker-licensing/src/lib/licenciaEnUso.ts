@@ -88,7 +88,9 @@ async function calcular(
 	const lic = await getLicenseByHash(db, licHash);
 	if (!lic) return "license_not_found";
 	// AUD-03: y tiene que ser de este negocio. Una licencia ajena —u otra fila sin negocio, como una
-	// clave sin estrenar o ya canjeada— no dice nada de la de éste.
+	// clave ya canjeada— no dice nada de la de éste. Una sin estrenar puede llevar ya el negocio que
+	// le reservó una activación (AUD-09), pero nunca se ha firmado un token con ella: el de la Main
+	// sale de la activación que la gana, y entonces ya no está sin estrenar.
 	if (lic.tenant_id !== tenantId) return "license_not_found";
 
 	const esMain = lic.main_device_id === deviceId;

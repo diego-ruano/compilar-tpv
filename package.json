@@ -23,6 +23,7 @@
     "license:shorten": "node scripts/tpv-license.mjs shorten",
     "license:resend": "node scripts/tpv-license.mjs resend",
     "license:recifrar": "node scripts/tpv-license.mjs recifrar",
+    "license:huerfanos": "node scripts/tpv-license.mjs huerfanos",
     "license:keypair": "node scripts/generate-license-keypair.mjs",
     "interruptor:apagar": "node scripts/tpv-license.mjs interruptor-apagar",
     "interruptor:encender": "node scripts/tpv-license.mjs interruptor-encender",

@@ -39,8 +39,6 @@ let basesCreadas: string[] = [];
 let correos: Array<{ to: string; subject: string; text: string }> = [];
 /** Lo que la ruta deja en `waitUntil` (los correos). */
 let pendientes: Promise<unknown>[] = [];
-/** El TenantHub no contesta: la activación se corta al aprovisionar la base, después de dar de alta el equipo. */
-let fallaElAprovisionamiento = false;
 
 vi.mock("../src/server/db", async (original) => ({
 	...(await (original as any)()),
@@ -50,7 +48,6 @@ vi.mock("../src/server/db", async (original) => ({
 vi.mock("../src/domains/licensing/licensing.helpers", async (original) => ({
 	...(await (original as any)()),
 	provisionTenantDatabase: async (_db: any, _env: any, tenantId: string) => {
-		if (fallaElAprovisionamiento) throw new Error("hub_no_contesta");
 		basesCreadas.push(tenantId);
 	},
 }));
@@ -340,7 +337,6 @@ beforeEach(() => {
 	basesCreadas = [];
 	correos = [];
 	pendientes = [];
-	fallaElAprovisionamiento = false;
 });
 
 afterEach(() => {
@@ -770,20 +766,24 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			const k = await emitir(c, "bar@ejemplo.test", "lic-nueva");
 			const datos = { activationKey: k.clave, deviceId: "equipo-nuevo", devicePubKey: equipo.pub };
 
-			// Lo que se le manda a la base central mientras dura la activación.
+			// Lo que se le manda a la base central mientras dura la activación. La activación se corta
+			// justo después de dar de alta el equipo: en la primera, eso es ya con la licencia suya
+			// (AUD-09), al guardar los datos del negocio.
 			const sentencias: string[] = [];
+			let cortar = true;
 			clienteActual = {
 				...c.db,
 				execute: async (q: any) => {
-					sentencias.push(String(typeof q === "string" ? q : q.sql));
+					const texto = String(typeof q === "string" ? q : q.sql);
+					sentencias.push(texto);
+					if (cortar && /UPDATE tenants\s+SET display_name/.test(texto)) throw new Error("corte_simulado");
 					return c.db.execute(q);
 				},
 			};
 
-			// La activación se corta justo después de dar de alta el equipo.
-			fallaElAprovisionamiento = true;
 			const cortada = await activar(datos);
-			expect([cortada.status, cortada.body.error]).toEqual([500, "tenant_db_provision_failed"]);
+			expect(cortada.status).toBe(500);
+			cortar = false;
 
 			const escrituras = sentencias.filter((s) => /\b(INSERT INTO|UPDATE)\s+devices\b/i.test(s));
 			expect(escrituras).toHaveLength(1);
@@ -796,7 +796,6 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			expect([ajeno.status, ajeno.body.error]).toEqual([409, "device_key_mismatch"]);
 
 			// …y el reintento del equipo entra.
-			fallaElAprovisionamiento = false;
 			const bien = await activar(datos);
 			expect(bien.status).toBe(200);
 			expect(fila(c, "equipo-nuevo")).toEqual({

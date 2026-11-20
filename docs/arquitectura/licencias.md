@@ -297,14 +297,32 @@ otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su 
 
 ### 2. Primera activación
 
-Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
-aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase` → `aprovisionar`: el
-DO crea el esquema y el administrador inicial) y guarda los datos del negocio. Después
+Primero **reserva el negocio en la licencia** (`reservarNegocioDeLaClave`, AUD-09): una sola
+sentencia que, si la clave sigue sin estrenar (`issued`, sin Main y sin anular), le pone un
+`tenant_id` nuevo si no tenía ninguno y devuelve el que tenga. Así todas las peticiones de la misma
+clave —una ráfaga, un doble envío, los reintentos tras un fallo— caen en el mismo negocio y en el
+mismo `TenantHub`, y ninguna estrena uno propio que la licencia no apunte. Si la clave ya no está sin
+estrenar, contesta como quien pierde la carrera (abajo). Reservar no es nacer: el negocio nace cuando
+la licencia se activa (`activated_at_ms`).
+
+Después crea el tenant (`ensureTenantExistsMinimal`) y aprovisiona su base en el `TenantHub` del
+negocio (`provisionTenantDatabase` → `aprovisionar`: el DO crea el esquema y el administrador
+inicial; es idempotente, y con la base ya creada sólo dice que estaba). Entonces
 `activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
 `main_device_id`, condicionado a que siga sin activar **y sin estrenar** (`main_device_id IS NULL
-AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_replaced`; si lo que pasó
-es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
-aprovisionada para el perdedor se queda vacía.
+AND status = 'issued'`) y a que el negocio sea el reservado: si otro equipo ganó la carrera,
+contesta `device_replaced`; si lo que pasó es que otro la canjeó mientras éste aprovisionaba su
+base, `license_already_used` (AUD-07). Sólo quien gana da de alta el dispositivo con su clave
+pública (`ensureDevice`) y guarda los datos del negocio: el negocio es el mismo para todas, y la
+perdedora no deja ni su fila de equipo ni sus datos en el de la ganadora. Un fallo a medias deja la
+clave sin estrenar con su negocio reservado (y quizá su base ya creada), y el reintento, de ese
+equipo o de otro, vuelve a ese negocio. Si el fallo llega después de apuntar la licencia, el
+reintento del mismo equipo entra como el de un equipo que vuelve a su licencia y da de alta su fila.
+
+Un canje suelta el negocio que la clave tuviera reservado (`tenant_id = NULL`): ya no va a nacer. Si
+una activación cortada lo llegó a crear, se queda sin licencia que lo apunte; esos negocios, y los
+que dejaban las carreras antes de la reserva, se buscan y se retiran desde la administración
+([abajo](#anular-desde-la-administración)).
 
 **La base va antes que la licencia, y sólo para un negocio que no ha nacido** (DO-PERDIDA). Una
 licencia con `activated_at_ms` es la prueba de que la base de su negocio existió, y con eso se
@@ -321,8 +339,9 @@ nuevo; pero su base local es la del anterior. Si el equipo era la Main (`role = 
 negocio con alguna licencia (esté como esté) y sin retirar, la respuesta lleva `cambioDeEquipo: true`,
 igual que un traslado; una Handy no guarda base, y no cuenta. Es un aviso: lo que protege a la Main es el sello de su base (abajo), que no depende de
 que esta respuesta llegue.
-No cuentan como negocio anterior el que deja a medias una primera activación fallida (dio de alta el
-equipo y no llegó a tener licencia) ni el retirado (`status = 'deleted'`, lo que deja cada tanda del
+No cuentan como negocio anterior el que deja a medias una primera activación fallida (no llegó a
+tener una licencia activada: sólo cuenta una con `activated_at_ms`, porque una clave sin estrenar
+puede tenerlo reservado) ni el retirado (`status = 'deleted'`, lo que deja cada tanda del
 E2E, cuyo equipo estrena la siguiente con la carpeta de datos borrada). Sólo se mira en la primera
 activación: el equipo que vuelve a la licencia de su negocio conserva su base aunque su fila haya
 pasado por otro.
@@ -606,6 +625,7 @@ que siguieran vivas.
 | Extender | `POST …/:id/extend` | `pnpm license:extend -- --id … --months 12` |
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
 | Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |
+| Negocios sin licencia (AUD-09) | `POST /v1/admin/negocios-huerfanos` (`{ "borrar": true }` para retirarlos) | `pnpm license:huerfanos [-- --borrar]` |
 
 Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar anula las
 licencias de pruebas, borra lo que guarda en la nube cada negocio de pruebas (su `TenantHub`, su
@@ -623,7 +643,20 @@ dentro de su transacción que la licencia sigue viva, así que una clave de verd
 se retira o entró antes (y el negocio ya no es de pruebas: ni se anula ni se borra) o ya no encuentra
 licencia y no se gasta. Y un negocio sólo se borra si todas sus licencias siguen anuladas cuando le
 llega el turno: si alguien desanula una mientras tanto, se deja como está. Cada llamada retira siete como mucho (son varias peticiones salientes por
-negocio) y dice si quedan más.
+negocio) y dice si quedan más. Un negocio que una licencia de pruebas sólo tenía reservado y que no
+llegó a tener fila en `tenants` se da por borrado con una fila nueva, para que no vuelva a salir.
+
+**Negocios huérfanos** (AUD-09, `domains/admin/huerfanos.ts`): los que ninguna licencia apunta,
+esté como esté, sin retirar y creados hace más de un día. Los dejaban las activaciones que perdían
+la carrera por una clave, o que se reintentaban, cuando cada petición estrenaba su negocio; hoy sólo
+sale uno si una clave reservada se canjea después de que una activación cortada creara su negocio.
+**Sin `borrar: true` sólo los lista**, con cuántas filas de `devices` apuntan a cada uno; con él,
+vacía su `TenantHub` (`borrarTodo`) y lo da por borrado, volviendo a mirar cada negocio justo antes.
+No toca el de una licencia viva, caducada, anulada o trasladada, ni el que una clave sin estrenar
+tiene reservado, ni los del E2E (llevan su licencia), ni uno recién creado (puede ser una activación
+en curso). Ningún otro camino crea negocios, así que uno sin licencia sólo sale de ahí o de que se
+haya borrado a mano en la base central la licencia de uno de verdad: por eso se mira la lista antes
+de borrar. Cada llamada retira doce como mucho y dice si quedan más.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
 y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.

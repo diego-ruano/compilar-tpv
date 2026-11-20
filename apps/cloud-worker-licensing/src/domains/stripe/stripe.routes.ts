@@ -61,6 +61,7 @@ import {
 	markKeyEmailSent,
 	markLicensePaymentReversed,
 	markWebhookProcessed,
+	negocioActivadoDe,
 	reactivateLicense,
 	recordLicensePayment,
 	revokeLicense,
@@ -242,8 +243,9 @@ async function avisarDeLasAnuladas(
 		try {
 			const lic = await getLicenseById(db, license_id);
 			if (!lic) continue;
-			// Una licencia que no llegó a activarse no tiene negocio ni Main: no hay a quién avisar.
-			await avisarCambioDeLicencia(env, String(lic.tenant_id || ""));
+			// Una licencia que no llegó a activarse no tiene Main: no hay a quién avisar, aunque
+			// tenga reservado el negocio en el que iba a nacer (AUD-09).
+			await avisarCambioDeLicencia(env, negocioActivadoDe(lic));
 		} catch (e) {
 			capturarError(e, "stripe.notify_hub");
 		}

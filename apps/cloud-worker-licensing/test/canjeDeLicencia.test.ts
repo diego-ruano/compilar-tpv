@@ -592,29 +592,63 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 	});
 
 	it("el reintento de un estreno que falló a medias no es de otro negocio", async () => {
-		// El primer intento da de alta el equipo en el negocio que acaba de crear y falla después: la
-		// fila queda en un negocio que no llegó a tener licencia. Si eso contara, el equipo nuevo que
-		// reintenta acabaría en la pantalla de recuperación.
+		// El primer intento crea el negocio y su base y falla al apuntar la licencia. AUD-09: el
+		// negocio queda reservado en la clave y el equipo sin dar de alta (eso espera a ganar la
+		// licencia), así que el reintento vuelve al mismo negocio sin nada que apartar. Si contara
+		// como otro, el equipo nuevo que reintenta acabaría en la pantalla de recuperación.
 		const r = await escenario("aud06-reintento", async (e) => {
 			const nueva = await e.emitir(12);
 
-			clienteActual = conCorte(e.db, /UPDATE tenants\s+SET display_name/);
+			clienteActual = conCorte(e.db, /UPDATE licenses\s+SET status='active'/);
 			const fallo = await e.activar(nueva.clave);
 			const trasElFallo = { negocio: negocioDelEquipo(e), clave: await e.leer(nueva.id) };
 
 			clienteActual = e.db;
 			const bien = await e.activar(nueva.clave);
-			return { fallo, trasElFallo, bien };
+			return { fallo, trasElFallo, bien, negocio: negocioDelEquipo(e) };
 		});
 
 		expect(r.fallo.status).toBe(500);
-		expect(r.trasElFallo.clave.status).toBe("issued");
-		// La fila del equipo ya estaba dada de alta en el negocio del primer intento.
-		expect(r.trasElFallo.negocio).not.toBeNull();
+		expect(r.trasElFallo.clave).toMatchObject({ status: "issued", main_device_id: null, activated_at_ms: null });
+		expect(r.trasElFallo.clave.tenant_id).toBeTruthy();
+		expect(r.trasElFallo.negocio).toBeNull();
 		expect(r.bien.status).toBe(200);
-		expect(r.bien.body.tenantId).not.toBe(r.trasElFallo.negocio);
+		expect(r.bien.body.tenantId).toBe(r.trasElFallo.clave.tenant_id);
 		expect(r.bien.body.cambioDeEquipo).toBe(false);
+		expect(r.negocio).toBe(r.bien.body.tenantId);
+		// La misma base las dos veces: el alta del TenantHub es idempotente.
+		expect(basesCreadas).toEqual([r.bien.body.tenantId, r.bien.body.tenantId]);
 	});
+
+	for (const como of ["sin estrenar", "canjeada después"] as const) {
+		it(`la fila en un negocio que una clave ${como} sólo tenía reservado no cuenta`, async () => {
+			// AUD-09: lo que dejaba un estreno a medias antes de que el equipo esperase a ganar la
+			// licencia para darse de alta: su fila en el negocio que la clave tiene reservado y sin
+			// activar. Ese negocio no ha nacido (`activated_at_ms`), así que su base no es de nadie.
+			// Y una clave canjeada después lo arrastraba con su `tenant_id` (ahora el canje lo suelta).
+			const r = await escenario(`aud09-reservada-${como === "sin estrenar" ? "issued" : "redeemed"}`, async (e) => {
+				const reservada = await e.emitir(12);
+				e.sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('negocio-reservado', 'active');`);
+				e.sql.exec(
+					`UPDATE licenses SET tenant_id='negocio-reservado', status=? WHERE license_id=?;`,
+					como === "sin estrenar" ? "issued" : "redeemed",
+					reservada.id,
+				);
+				e.sql.exec(
+					`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64)
+					 VALUES (?, 'negocio-reservado', 'tpv', ?);`,
+					EQUIPO,
+					CLAVE_EQUIPO,
+				);
+				const nueva = await e.emitir(12);
+				return e.activar(nueva.clave);
+			});
+
+			expect(r.status).toBe(200);
+			expect(r.body.tenantId).not.toBe("negocio-reservado");
+			expect(r.body.cambioDeEquipo).toBe(false);
+		});
+	}
 
 	it("un negocio retirado no cuenta: su equipo estrena el siguiente sin nada que apartar", async () => {
 		// Lo que deja cada tanda del E2E (`admin/pruebas.ts`): el negocio dado por borrado y su

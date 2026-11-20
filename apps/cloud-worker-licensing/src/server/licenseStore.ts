@@ -209,6 +209,11 @@ export async function sigueSiendoLaLicenciaDelEquipo(
  * hay en vez de creando otra—. Y mirar `rowsAffected` es la lección de REV-15: una condición de
  * carrera que nadie comprueba no es una condición de carrera, y aquí dos intentos a la vez
  * sumarían el doble de meses.
+ *
+ * AUD-09: la clave canjeada suelta el negocio que tuviera reservado (`reservarNegocioDeLaClave`):
+ * ya no va a nacer, y una clave canjeada no lleva negocio. Si una activación lo llegó a crear, se
+ * queda sin licencia que lo apunte, que es lo que busca la retirada de negocios huérfanos
+ * (`domains/admin/huerfanos.ts`).
  */
 export async function canjearLicencia(
 	db: Sql,
@@ -220,6 +225,7 @@ export async function canjearLicencia(
 		`UPDATE licenses
         SET status = 'redeemed',
             redeemed_into_license_id = ?,
+            tenant_id = NULL,
             updated_at_ms = ?
       WHERE license_id = ?
         AND status = 'issued'
@@ -422,10 +428,61 @@ export async function issueLicense(
 }
 
 /**
+ * AUD-09 · El negocio en el que va a nacer una clave sin estrenar, reservado en la propia licencia.
+ *
+ * La primera activación crea el negocio y su base ANTES de apuntar la licencia (la base va antes,
+ * DO-PERDIDA), así que el identificador del negocio no puede salir de cada petición: lo estrenaba
+ * cada una, y una ráfaga de activaciones de la misma clave, o cada reintento tras un fallo, dejaba
+ * un negocio, una fila de equipo y un TenantHub aprovisionado que nada borraba. Aquí se elige UNA
+ * vez, en una sola sentencia: la primera petición deja el suyo (`tenantNuevo`) y las demás reciben
+ * ése (`COALESCE`), así que todas acaban en el mismo negocio y en el mismo objeto, cuyo alta es
+ * idempotente.
+ *
+ * Sólo mientras la clave siga sin estrenar (`issued`, sin Main y sin anular). Devuelve `null` si ya
+ * no lo está: otro equipo la ha activado o canjeado, o se ha anulado.
+ *
+ * Reservar no es nacer: el negocio nace cuando su licencia se activa (`activated_at_ms`,
+ * `lib/basePerdida.ts`), y hasta entonces su base todavía se puede crear.
+ */
+export async function reservarNegocioDeLaClave(
+	db: Sql,
+	licenseId: string,
+	tenantNuevo: string,
+	ahoraMs: number,
+): Promise<string | null> {
+	const r = await exec(
+		db,
+		`UPDATE licenses
+        SET tenant_id = COALESCE(tenant_id, ?),
+            updated_at_ms = ?
+      WHERE license_id = ?
+        AND status = 'issued'
+        AND main_device_id IS NULL
+        AND disabled = 0
+      RETURNING tenant_id;`,
+		[tenantNuevo, ahoraMs, licenseId],
+	);
+	const reservado = String((r.rows?.[0] as any)?.tenant_id ?? "").trim();
+	return reservado || null;
+}
+
+/**
+ * AUD-09 · El negocio de una licencia que ya se activó, o `""` si no tiene ninguno o sólo lo tiene
+ * reservado (`reservarNegocioDeLaClave`). Es a quién avisar cuando la licencia cambia: el TenantHub
+ * de un negocio que no ha nacido no tiene Main ni socket que cerrar.
+ */
+export function negocioActivadoDe(lic: Pick<LicenseRow, "tenant_id" | "activated_at_ms">): string {
+	return lic.activated_at_ms ? String(lic.tenant_id || "") : "";
+}
+
+/**
  * 1ª activación: arranca el reloj y liga la licencia a su tenant y a su Main.
  *
  * Condicionada en SQL a que siga sin activar (`main_device_id IS NULL`), para que dos activaciones
  * simultáneas no puedan pisarse. Devuelve `null` si **no** ganó esa carrera (REV-15).
+ *
+ * AUD-09: y a que el negocio sea el reservado, si lo hay. Todas las peticiones de la misma clave
+ * reciben el mismo (`reservarNegocioDeLaClave`); esto sólo impide que una pise otra reserva.
  *
  * AUD-07: y a que siga sin estrenar (`status = 'issued'`). Un canje deja la clave `redeemed` con
  * `main_device_id` a NULL, y sin esta condición la misma clave estrenaba después un negocio nuevo
@@ -455,9 +512,10 @@ export async function activateLicenseFirstTime(
         activated_at_ms=?,
         expires_at_ms=?,
         updated_at_ms=?
-    WHERE license_id=? AND main_device_id IS NULL AND status = 'issued';
+    WHERE license_id=? AND main_device_id IS NULL AND status = 'issued'
+      AND (tenant_id IS NULL OR tenant_id = ?);
     `,
-		[args.tenantId, args.deviceId, now, expiresAt, now, args.licenseId],
+		[args.tenantId, args.deviceId, now, expiresAt, now, args.licenseId, args.tenantId],
 	);
 
 	return Number((r as any)?.rowsAffected ?? 0) > 0 ? expiresAt : null;
@@ -1533,8 +1591,9 @@ export async function exigirClaveSiEsDeOtroNegocio(
  * (también anulada o caducada), y sin retirar? Es lo que deja en el equipo una base de ese negocio.
  *
  * Quedan fuera:
- * - el negocio que deja a medias una primera activación que falló después de dar de alta el
- *   dispositivo: no llegó a tener licencia, así que ningún equipo guarda datos suyos;
+ * - el negocio que deja a medias una primera activación que falló: no llegó a tener licencia, o
+ *   sólo una que lo tiene reservado y no se activó (`activated_at_ms`, AUD-09), y si después se
+ *   canjeó, ni eso. Ningún equipo guarda datos suyos;
  * - el retirado (`status = 'deleted'`, `domains/admin/pruebas.ts`), que es lo que deja cada tanda
  *   del E2E: su equipo conserva la identidad y estrena la tanda siguiente con la carpeta de datos
  *   recién borrada;
@@ -1548,7 +1607,7 @@ export async function eraLaMainDeOtroNegocio(db: Sql, deviceId: string, tenantId
 		db,
 		`SELECT 1
 		   FROM devices d
-		   JOIN licenses l ON l.tenant_id = d.tenant_id
+		   JOIN licenses l ON l.tenant_id = d.tenant_id AND l.activated_at_ms IS NOT NULL
 		   JOIN tenants t ON t.tenant_id = d.tenant_id
 		  WHERE d.device_id = ? AND d.tenant_id = ? AND d.role = 'tpv' AND t.status <> 'deleted'
 		  LIMIT 1;`,
@@ -1699,7 +1758,8 @@ export async function auditAdmin(
 		| "reserva_web_dominio_poner"
 		| "reserva_web_dominio_quitar"
 		| "reserva_web_revocar_clave"
-		| "pruebas_retirar",
+		| "pruebas_retirar"
+		| "huerfanos_retirar",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

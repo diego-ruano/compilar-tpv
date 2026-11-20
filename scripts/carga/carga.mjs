@@ -195,19 +195,16 @@ async function retirarLaTanda(ctx) {
     console.log("  · Retirar el negocio de pruebas");
     const r = await conReintentos(registro, "La retirada", () => retirarPruebas(ctx.admin));
     estado.fallosRetirada = r.fallos;
-    const fallo = r.fallos.find(f => f.tenantId === estado.tenantId);
+    // Sin respuesta de la activación no se sabe su negocio: cualquier fallo puede ser el suyo.
+    const fallo = estado.tenantId ? r.fallos.find(f => f.tenantId === estado.tenantId) : r.fallos[0];
     const sigue = (await conReintentos(registro, "Listar las licencias", () => licenciasDePruebasVivas(ctx.admin))).some(l => l.licenseId === estado.licenseId);
     if (sigue) {
       estado.motivoSinRetirar = "La licencia sigue sin anular después de retirar.";
     } else if (fallo) {
-      estado.motivoSinRetirar = `La licencia quedó anulada, pero no se pudo borrar lo del negocio ${estado.tenantId} (${fallo.error}). «pnpm carga --retirar --si» lo reintenta.`;
-    } else if (!estado.tenantId && estado.activacion === "en curso") {
-      // AUD-09: el worker crea la base antes de apuntar el negocio en la licencia; si la activación
-      // no contestó, la retirada no la ve.
-      estado.motivoSinRetirar =
-        "La licencia quedó anulada, pero la activación no llegó a contestar: si alcanzó a crear la base, queda en el TenantHub de un negocio que la retirada no ve. " +
-        `El negocio sale de tpv-control con SELECT tenant_id FROM devices WHERE device_id = '${estado.mainDeviceId}'; no hay ruta que borre ese objeto, que ocupa lo que una base recién creada.`;
+      estado.motivoSinRetirar = `La licencia quedó anulada, pero no se pudo borrar lo del negocio ${fallo.tenantId} (${fallo.error}). «pnpm carga --retirar --si» lo reintenta.`;
     } else {
+      // AUD-09: aunque la activación no contestara, la licencia lleva su negocio reservado desde antes
+      // de crear la base, así que la retirada lo ha visto y lo ha borrado con ella.
       estado.retirado = true;
     }
   } catch (e) {

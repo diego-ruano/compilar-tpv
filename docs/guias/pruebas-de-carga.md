@@ -126,9 +126,9 @@ la organización al empezar, que va en el informe.
 
 **Limpieza:** `/v1/admin/pruebas/retirar` anula la licencia y borra lo que el negocio guarda en la
 nube: su base en el `TenantHub`, su agenda de reservas web y sus imágenes. El negocio sólo se da por
-retirado si la licencia quedó anulada y la retirada no devolvió fallos para él. Si la activación no
-llegó a contestar, la base que pudiera haber creado no la ve la retirada: el informe dice cómo
-encontrar el negocio, y no hay ruta que borre ese objeto. Quedan, como con los E2E, las filas de
+retirado si la licencia quedó anulada y la retirada no devolvió fallos para él. Aunque la
+activación no llegue a contestar, la licencia lleva su negocio reservado desde antes de crear la base
+(AUD-09), así que la retirada también la ve. Quedan, como con los E2E, las filas de
 `devices` de los dos equipos sintéticos, la del negocio en `tenants` (dada por borrada) y la licencia
 anulada.
 

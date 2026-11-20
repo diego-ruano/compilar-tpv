@@ -12,10 +12,15 @@
 // Quién ha nacido lo dice la base central, sin tocar su esquema: **un negocio nace cuando se activa
 // su primera licencia**, y la activación crea la base ANTES de apuntar la licencia
 // (`/v1/license/activate`: `provisionTenantDatabase` y después `activateLicenseFirstTime`, que es
-// quien pone `tenant_id`, `main_device_id` y `activated_at_ms` en la fila). Así que una licencia de
-// ese negocio con `activated_at_ms` es la prueba de que su base llegó a existir. No dice si la base
-// guardaba ventas o sólo el administrador inicial: eso la base central no lo sabe, y por eso la
-// regla no depende de ello.
+// quien pone `main_device_id` y `activated_at_ms` en la fila). Así que una licencia de ese negocio
+// con `activated_at_ms` es la prueba de que su base llegó a existir. No dice si la base guardaba
+// ventas o sólo el administrador inicial: eso la base central no lo sabe, y por eso la regla no
+// depende de ello.
+//
+// El `tenant_id` no basta: una clave sin estrenar lo lleva desde que una activación lo reserva,
+// antes de crear la base (`reservarNegocioDeLaClave`, AUD-09), para que los reintentos y las
+// peticiones simultáneas caigan en el mismo negocio. Ese negocio todavía no ha nacido, y su base se
+// puede crear (o volver a crear, si una activación fallida la dejó a medias).
 //
 // Lo que sale de ahí, en un solo sitio cada cosa:
 //

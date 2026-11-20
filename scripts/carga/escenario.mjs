@@ -79,12 +79,8 @@ export async function prepararNegocio(ctx) {
   const main = new Equipo({ nombre: "main", rol: "main", base: ctx.base, identidad: nuevaIdentidad(), registro });
   ctx.main = main;
   anunciar(ctx, "activar", "Activar la licencia en la Main (crea la base del negocio en su TenantHub)");
-  // Antes de activar: el worker crea la fila de `devices` antes que la base, así que si la activación
-  // falla a medias, este id lleva al negocio (y a la base de su TenantHub) que la retirada no ve.
-  ctx.estado.mainDeviceId = main.identidad.deviceId;
-  ctx.estado.activacion = "en curso";
-  ctx.guardarEstado();
-  // Sin reintentos: si falla después de crear la base, repetir estrenaría otra (AUD-09).
+  // Si falla a medias no queda nada que la retirada no vea: la licencia lleva su negocio reservado
+  // desde antes de crear la base, y repetir vuelve a ese negocio (AUD-09).
   const activacion = exigir(
     await main.pedir("POST", "/v1/license/activate", {
       cuerpo: {
@@ -104,7 +100,6 @@ export async function prepararNegocio(ctx) {
   main.token = activacion.token;
   main.tenantId = activacion.tenantId;
   ctx.estado.tenantId = activacion.tenantId;
-  ctx.estado.activacion = "hecha";
   ctx.guardarEstado();
 
   anunciar(ctx, "socket-main", "Conectar la Main al TenantHub");

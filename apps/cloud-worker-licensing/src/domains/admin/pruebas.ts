@@ -166,10 +166,16 @@ export async function retirarNegociosDePrueba(
 			retirada.bases++;
 			await agendaDe(env, tenantId).borrarTodo();
 			retirada.imagenes += await borrarImagenesDelNegocio(env.IMAGES, tenantId);
-			await exec(db, `UPDATE tenants SET status = 'deleted', updated_at_ms = ? WHERE tenant_id = ?;`, [
-				Date.now(),
-				tenantId,
-			]);
+			// Con su fila aunque no la tenga: una clave sin estrenar lleva el negocio que le reservó una
+			// activación (AUD-09), y si ésta se cortó antes de crearlo, sin fila `deleted` volvería a
+			// salir en cada llamada.
+			const ahora = Date.now();
+			await exec(
+				db,
+				`INSERT INTO tenants (tenant_id, status, created_at_ms, updated_at_ms) VALUES (?, 'deleted', ?, ?)
+				 ON CONFLICT(tenant_id) DO UPDATE SET status = 'deleted', updated_at_ms = excluded.updated_at_ms;`,
+				[tenantId, ahora, ahora],
+			);
 			retirada.negocios++;
 		} catch (e: any) {
 			retirada.fallos.push({ tenantId, error: String(e?.message || e) });

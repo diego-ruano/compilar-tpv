@@ -10,6 +10,7 @@
 //   pnpm license:shorten  -- --id <licenseId> --months 24   (puede dejarla CADUCADA)
 //   pnpm license:resend -- --id <licenseId>          (reenvía/recupera la clave por email)
 //   pnpm license:recifrar                             (termina una rotación de LICENSE_STORE_KEY, RI-73)
+//   pnpm license:huerfanos -- [--borrar]              (negocios sin licencia, AUD-09; sin --borrar sólo lista)
 //
 // Y los interruptores remotos de emergencia (PROD-06), que van por el mismo token:
 //
@@ -327,6 +328,49 @@ async function recifrar() {
 	}
 }
 
+/**
+ * AUD-09 · Los negocios que ninguna licencia apunta, con su base en el TenantHub: los dejaban las
+ * activaciones que perdían la carrera por una clave. Sin `--borrar` sólo los lista; con él, los
+ * retira (vacía su TenantHub y los da por borrados), llamando a la ruta hasta que no quede ninguno.
+ * Qué cuenta como huérfano: `apps/cloud-worker-licensing/src/domains/admin/huerfanos.ts`.
+ */
+async function huerfanos(args) {
+	const borrar = args.borrar === true;
+	const vistos = new Map();
+	const fallos = new Map();
+	let retirados = 0;
+	for (;;) {
+		const r = await api("POST", "/v1/admin/negocios-huerfanos", { borrar });
+		for (const h of r.huerfanos) vistos.set(h.tenantId, h);
+		retirados += r.retirados;
+		for (const f of r.fallos) fallos.set(f.tenantId, f);
+		// Sin borrar, la lista no avanza: se enseña la primera página. Borrando, se sigue mientras
+		// queden y la llamada haya retirado alguno.
+		if (!borrar || !r.quedan || r.retirados === 0) {
+			if (!borrar && r.quedan) console.log("\n  (hay más de los que caben en una llamada)");
+			break;
+		}
+	}
+	if (!vistos.size) {
+		console.log("\n  ✔ No hay negocios sin licencia.\n");
+		return;
+	}
+	console.table([...vistos.values()].map((h) => ({ negocio: h.tenantId, creado: h.creadoEn, equipos: h.equipos })));
+	if (!borrar) {
+		console.log(
+			`\n  ${vistos.size} negocios sin licencia. Revisa la lista y, si son todos de activaciones que perdieron, retíralos con:\n` +
+				"    pnpm license:huerfanos -- --borrar\n",
+		);
+		return;
+	}
+	console.log(`\n  ✔ ${retirados} negocios retirados: su TenantHub vaciado y dados por borrados.`);
+	if (fallos.size) {
+		console.log(`\n  ✖ ${fallos.size} no se pudieron retirar (se quedan como estaban; vuelve a lanzarlo):`);
+		console.table([...fallos.values()]);
+	}
+	console.log("");
+}
+
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
 
 async function pilotoMarcar(args, piloto) {
@@ -429,6 +473,7 @@ const comandos = {
 	shorten,
 	resend,
 	recifrar,
+	huerfanos,
 	"interruptor-apagar": interruptorApagar,
 	"interruptor-encender": interruptorEncender,
 	"interruptor-lista": interruptorLista,
@@ -455,6 +500,7 @@ if (!comandos[cmd]) {
     shorten  --id <licenseId> --months <1-120>   (puede dejarla CADUCADA)
     resend  --id <licenseId>
     recifrar                 (termina una rotación de LICENSE_STORE_KEY)
+    huerfanos [--borrar]     (negocios sin licencia; sin --borrar sólo los lista)
 
   Interruptores (pnpm interruptor:<comando>):
     apagar    --nombre <interruptor> --horas <n> --motivo "…" [--tenant <id>] [--desde x.y.z] [--hasta x.y.z]
