@@ -86,19 +86,41 @@ Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
 
 ### Deshacer un cobro
 
-Eventos `charge.refunded`, `charge.dispute.created` y `charge.dispute.closed` (hay que suscribirlos
-en el endpoint del Dashboard de Stripe). Todo en una transacción:
+Eventos `charge.refunded`, `charge.dispute.created`, `charge.dispute.funds_withdrawn` y
+`charge.dispute.closed` (hay que suscribirlos en el endpoint del Dashboard de Stripe). Todo en una
+transacción:
 
 Un cargo puede tener varios cobros, uno por licencia de la compra, y cada uno se trata por su
 cuenta:
 
 | Caso | Efecto |
 |---|---|
-| Reembolso total o disputa abierta de un **alta** | Licencia revocada, y se avisa al `TenantHub` como al [anular desde la administración](#anular-desde-la-administración). Si ya lo estaba, no se toca ni se avisa; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
+| Reembolso total o disputa **formal** de un **alta** | Licencia revocada, y se avisa al `TenantHub` como al [anular desde la administración](#anular-desde-la-administración). Si ya lo estaba, no se toca ni se avisa; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
 | … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
+| **Consulta del banco** (disputa `warning_*`) o disputa `prevented` | Nada; queda en `admin_audit` como `consulta_sin_efecto` con las licencias de la compra (AUD-45). Si escala, se trata como una disputa formal |
 | Reembolso parcial | Nada; queda en `admin_audit` con la licencia de cada cobro de la compra. Stripe no dice cuál se devuelve: se corrige a mano ([abajo](#reembolso-parcial-lo-que-se-hace-a-mano)) |
 | Disputa **ganada** | Se deshace lo que revirtió esa disputa, y sólo eso (AUD-08): vuelve el alta cuyo cobro es `dispute` y los meses de la renovación. A un cobro `dispute_ya_revocada` sólo se le quita la marca, y una licencia sin cobro registrado (anterior a LIC-07) no se toca: si la revocó la disputa, se desrevoca a mano |
+| Disputa **perdida** | Se queda lo revertido, y se revierte lo que siga sin revertir: una consulta que escaló sin que llegara `funds_withdrawn` |
+| Consulta cerrada sin escalar (`warning_closed`) | Nada |
 | Cargo sin licencia atribuible | Nada; se audita |
+
+**Disputa formal o consulta.** Una disputa es formal si su `status` es `needs_response`,
+`under_review`, `lost`, `appeal_needs_response` o `appeal_under_review` (lista blanca,
+`ESTADOS_DE_DISPUTA_FORMAL`): en ellas el dinero ya ha salido. Cualquier otro estado no corta el
+servicio. La consulta del banco (*inquiry*, sobre todo de American Express, Discover y Klarna) es
+la fase previa a un contracargo: el banco pide información, el dinero no se mueve y, si no escala
+en 120 días, Stripe la cierra `warning_closed`, sin «ganada» que deshaga nada
+([docs.stripe.com/disputes/how-disputes-work#inquiries](https://docs.stripe.com/disputes/how-disputes-work#inquiries)).
+Si escala, la consulta «se convierte en una disputa completa»
+([docs.stripe.com/testing](https://docs.stripe.com/testing), `escalate_inquiry_evidence`): el
+mismo objeto Dispute pasa a un estado formal, y Stripe lo avisa con `charge.dispute.funds_withdrawn`
+([docs.stripe.com/payments/klarna/disputes](https://docs.stripe.com/payments/klarna/disputes)). El
+código no depende de que sea el mismo `du_…`: atribuye por el PaymentIntent. Una
+disputa formal trae `created` y `funds_withdrawn`, en cualquier orden: revierte el primero que
+llegue, y el segundo encuentra el cobro ya marcado (`already_reversed`) y no resta dos veces los
+meses de una renovación. Si `funds_withdrawn` no llega, la consulta escalada se revierte al
+cerrarse `lost`. `charge.dispute.updated` no se usa: salta con cada prueba que se envía, y Stripe
+no lo da como señal de escalado.
 
 Una revocación a mano no la deshace ninguna disputa: ni la que se abre después ni la que ya estaba
 abierta, porque revocar pasa sus cobros `dispute` a `dispute_ya_revocada`
@@ -124,6 +146,50 @@ auditoría del reembolso la lista dos veces: se acorta, no se revoca.
 El cargo se atribuye por el historial de cobros, luego por el último cobro de la licencia y, como
 último recurso, por el cliente de Stripe **sólo si tiene una única licencia**. La auditoría anota los
 días que llevaba activada.
+
+#### Reparar lo que revocó una consulta del banco
+
+Hasta AUD-45 el webhook trataba una consulta como una disputa formal: revocaba el alta (o restaba los
+meses de la renovación), marcaba el cobro `dispute` y, al cerrarse `warning_closed`, no deshacía
+nada. Lo que quedó así se encuentra en la base central (en Turso, sólo lectura) con la auditoría de la
+reversión y el evento que la hizo, que guarda el estado con el que llegó la disputa:
+
+```sql
+SELECT a.license_id,
+       json_extract(a.detail, '$.accion')                AS accion,       -- revocada | meses_restados
+       json_extract(a.detail, '$.term_months')           AS term_months,
+       json_extract(w.payload_json, '$.data.object.id')  AS dispute_id,
+       json_extract(w.payload_json, '$.data.object.status') AS estado,
+       l.status, a.at_ms
+FROM admin_audit a
+JOIN webhook_events w ON w.event_uid = json_extract(a.detail, '$.event_uid')
+JOIN licenses l       ON l.license_id = a.license_id
+WHERE a.action = 'dispute'
+  AND json_extract(a.detail, '$.accion') IN ('revocada', 'meses_restados')
+  AND substr(json_extract(w.payload_json, '$.data.object.status'), 1, 8) = 'warning_'
+ORDER BY a.at_ms;
+```
+
+Sale de la auditoría y no de `license_payments` para que aparezcan también las licencias sin cobro
+registrado (anteriores a LIC-07). Lo prueba `test/consultaDelBanco.test.ts`.
+
+Por cada fila, antes de tocar nada, se mira la disputa (`dispute_id`) en el Dashboard de Stripe: si
+ahora es formal (`needs_response`, `under_review`, `lost`…), escaló y la reversión vale; no se
+repara. Si sigue siendo consulta o está `warning_closed`:
+
+- **`revocada`** (un alta), si la licencia sigue `revoked` y nadie la ha revocado a mano después
+  (en `admin_audit`, ninguna fila `revoke` de esa licencia posterior a `at_ms`):
+  `pnpm license:unrevoke -- --id …`. Desrevocar le quita al alta la marca `dispute`, así que un
+  reembolso total posterior del cargo vuelve a revocarla, y si la consulta escala después,
+  `funds_withdrawn` la revierte como a cualquier disputa formal.
+- **`meses_restados`** (una renovación): desrevocar no la toca. Primero se le quita la marca al
+  cobro, en Turso
+  (`UPDATE license_payments SET reversed_at_ms = NULL, reversed_reason = NULL, reversed_event_uid = NULL
+  WHERE license_id = ? AND kind = 'renewal' AND reversed_reason = 'dispute' AND reversed_event_uid = ?`,
+  con el `event_uid` de la fila), y después se le devuelven los meses,
+  `pnpm license:extend -- --id … --months <term_months>`. En ese orden: con la marca puesta, si la
+  consulta escalara, `funds_withdrawn` no restaría los meses devueltos, y ganarla los sumaría otra
+  vez.
 
 ## Activar
 
@@ -536,7 +602,7 @@ que siguieran vivas.
 | Listar | `GET /v1/admin/licenses` | `pnpm license:list` |
 | Reenviar la clave | `POST …/:id/resend-key` | `pnpm license:resend` |
 | Revocar | `POST …/:id/revoke` | `pnpm license:revoke -- --id …` |
-| Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`; una clave canjeada, a `redeemed`) | `pnpm license:unrevoke` |
+| Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`; una clave canjeada, a `redeemed`). Le quita al alta la marca de una disputa, `dispute` o `dispute_ya_revocada`, para que un reembolso total posterior la vuelva a revocar (AUD-45); la de una renovación se queda, porque desrevocar no devuelve sus meses | `pnpm license:unrevoke -- --id …` |
 | Extender | `POST …/:id/extend` | `pnpm license:extend -- --id … --months 12` |
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
 | Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |
@@ -663,7 +729,8 @@ claves de licencia no tienen arreglo sin la clave buena.
 
 Stripe: un producto con un Price *one-time* por duración, cada uno con `metadata.term_months`, el
 enlace de compra con «recopilar email», y el webhook en
-`https://tpv-api.altarialights.workers.dev/v1/stripe/webhook` con los cinco eventos de arriba. Pagar
+`https://tpv-api.altarialights.workers.dev/v1/stripe/webhook` con los seis eventos de arriba (los dos de
+[Comprar](#comprar) y los cuatro de [Deshacer un cobro](#deshacer-un-cobro)). Pagar
 con Checkout alojado deja los datos de tarjeta fuera de nuestros servidores.
 
 ## Al tocar esto

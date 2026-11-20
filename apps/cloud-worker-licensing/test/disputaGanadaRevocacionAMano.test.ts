@@ -454,7 +454,8 @@ describe("AUD-08 · cómo queda el cobro", () => {
 			return { revocar, cobro: e.cobros(lic)[0], final: estado(await e.leer(lic), "device-main") };
 		});
 		expect(r.revocar).toBe(500);
-		expect(r.cobro.reversed_reason).toBe("dispute");
+		// Sin marca: se la quitó desrevocar (AUD-45), y la revocación fallida no le ha puesto ninguna.
+		expect(r.cobro.reversed_reason).toBeNull();
 		expect(r.final).toEqual(ACTIVA);
 	});
 });

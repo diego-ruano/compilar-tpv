@@ -29,7 +29,13 @@
 //                         renovación): todas las licencias de la compra
 //   · reembolso PARCIAL → no toca ninguna licencia; queda auditado (es un ajuste, no una
 //                         devolución: Stripe no dice de cuál de las licencias, y eso se decide a mano)
-//   · disputa abierta   → se revierte ya, que el dinero ya no está
+//   · disputa FORMAL    → se revierte en cuanto se abre o salen los fondos (`funds_withdrawn`), una
+//                         sola vez: el dinero ya no está
+//   · consulta del banco (inquiry: disputa `warning_*`) o disputa `prevented` → no se toca ninguna
+//                         licencia, sólo se audita: no sale dinero y casi siempre se cierra sin más
+//                         (`warning_closed`). Si escala a contracargo, es el mismo objeto Dispute con
+//                         estado formal y llega `funds_withdrawn`; si ese evento falta, la revierte el
+//                         cierre `lost` (AUD-45)
 //   · disputa GANADA    → se deshace la reversión que hizo ella, y sólo ésa (AUD-08)
 
 import { Hono } from "hono";
@@ -101,7 +107,26 @@ const EVENTOS_DE_PAGO = new Set([
 const EVENTOS_DE_REVERSION = new Set([
 	"charge.refunded",
 	"charge.dispute.created",
+	// AUD-45: es el que avisa de que una consulta del banco ha escalado a contracargo
+	// (docs.stripe.com/payments/klarna/disputes, «Use the charge.dispute.funds_withdrawn event to
+	// track when an inquiry dispute escalates to a chargeback dispute»).
+	"charge.dispute.funds_withdrawn",
 	"charge.dispute.closed",
+]);
+
+/**
+ * AUD-45 · Los estados de una disputa FORMAL, la que retira el dinero (docs.stripe.com/api/disputes/object,
+ * `status`). Lista blanca a propósito: una consulta del banco (`warning_needs_response`,
+ * `warning_under_review`, `warning_closed`), una disputa `prevented` (no llegó a contracargo) o un
+ * estado que Stripe añada mañana no cortan el servicio. `lost` entra porque hay disputas que se abren
+ * ya perdidas (las que no se pueden impugnar), y las de apelación porque vienen de una perdida.
+ */
+const ESTADOS_DE_DISPUTA_FORMAL = new Set([
+	"needs_response",
+	"under_review",
+	"lost",
+	"appeal_needs_response",
+	"appeal_under_review",
 ]);
 
 stripeRoutes.post("/webhook", async (c) => {
@@ -565,15 +590,68 @@ async function decidirReversion(db: Sql, event: any): Promise<Record<string, unk
 		return revertirCobros(db, obj, { reason: "refund", eventUid });
 	}
 
-	if (event?.type === "charge.dispute.created") {
+	const estado = String(obj?.status || "");
+
+	// AUD-45: una consulta del banco (inquiry) llega como una disputa `warning_*`: el dinero no sale
+	// y, si no escala, se cierra `warning_closed`, sin «ganada» que deshaga nada
+	// (docs.stripe.com/disputes/how-disputes-work#inquiries). Revocar ahí cortaba el servicio a quien
+	// había pagado, para siempre. Sólo se revierte una disputa formal; si una consulta escala, es el
+	// mismo objeto Dispute que pasa a `needs_response` y llega `funds_withdrawn`.
+	if (event?.type === "charge.dispute.created" || event?.type === "charge.dispute.funds_withdrawn") {
+		if (!ESTADOS_DE_DISPUTA_FORMAL.has(estado)) return auditarConsulta(db, obj, eventUid);
+
+		// Una disputa formal trae los dos eventos (se abre y salen los fondos), en cualquier orden y
+		// con reintentos: lo que revirtió el primero no lo vuelve a revertir el segundo, ni resta
+		// dos veces los meses de una renovación.
+		if (event.type === "charge.dispute.funds_withdrawn") {
+			const cobros = await localizarCobros(db, obj);
+			if (cobros.length > 0 && !quedaPorRevertir(cobros)) {
+				return { reversed: false, reason: "already_reversed", license_id: cobros[0].license.license_id };
+			}
+		}
 		return revertirCobros(db, obj, { reason: "dispute", eventUid });
 	}
 
-	// charge.dispute.closed: solo importa haberla ganado. Perdida o aceptada, la reversión de la
-	// apertura se queda como está.
-	if (String(obj?.status || "") !== "won") {
-		return { restored: false, reason: String(obj?.status || "unknown") };
-	}
+	if (event?.type !== "charge.dispute.closed") return { reversed: false, reason: "ignored" };
 
-	return restaurarCobros(db, obj, eventUid);
+	// charge.dispute.closed: ganada, se deshace lo que revirtió. Perdida, la reversión se queda, y se
+	// revierte lo que siga pendiente: una consulta que escaló sin que llegara `funds_withdrawn`
+	// (AUD-45). `warning_closed` es una consulta que no escaló: no hay nada que hacer.
+	if (estado === "won") return restaurarCobros(db, obj, eventUid);
+	if (estado === "lost" && quedaPorRevertir(await localizarCobros(db, obj))) {
+		return revertirCobros(db, obj, { reason: "dispute", eventUid });
+	}
+	return { restored: false, reason: estado || "unknown" };
+}
+
+/**
+ * AUD-45 · ¿Queda algún cobro del cargo sin revertir? Uno con su cobro registrado, si no lleva la
+ * marca; una licencia anterior a LIC-07 (sin cobro), si no está revocada.
+ */
+function quedaPorRevertir(cobros: Cobro[]): boolean {
+	return cobros.some(({ license, pago }) =>
+		pago ? !pago.reversed_at_ms : !(license.status === "revoked" || toBool01(license.disabled)),
+	);
+}
+
+/**
+ * AUD-45 · Una consulta del banco, o una disputa que no llegó a contracargo (`prevented`), no toca
+ * ninguna licencia: queda constancia, como un reembolso parcial, con todas las de la compra.
+ */
+async function auditarConsulta(
+	db: Sql,
+	obj: any,
+	eventUid: string,
+): Promise<Record<string, unknown>> {
+	const estado = String(obj?.status || "");
+	const cobros = await localizarCobros(db, obj);
+	await auditAdmin(db, "dispute", cobros[0]?.license.license_id ?? null, {
+		event_uid: eventUid,
+		accion: "consulta_sin_efecto",
+		status: estado || null,
+		dispute: String(obj?.id || "") || null,
+		licencias: cobros.map((c) => c.license.license_id),
+		payment_intent: String(obj?.payment_intent || "") || null,
+	});
+	return { reversed: false, reason: "not_a_chargeback", status: estado || null };
 }

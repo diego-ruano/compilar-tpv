@@ -314,7 +314,7 @@ const cargoDevuelto = (paymentIntent: string) => ({
 const disputaAbierta = (paymentIntent: string) => ({
 	type: "charge.dispute.created",
 	id: `evt_disputa_${paymentIntent}`,
-	data: { object: { object: "dispute", id: "dp_1", payment_intent: paymentIntent, status: "warning_needs_response" } },
+	data: { object: { object: "dispute", id: "dp_1", payment_intent: paymentIntent, status: "needs_response" } },
 });
 
 /** Una licencia comprada por Stripe, con su cobro de alta, activada o no. */

@@ -38,6 +38,7 @@ import {
 	issueLicense,
 	listLicenses,
 	markKeyEmailSent,
+	quitarMarcasDeDisputa,
 	recifrarConLaActual,
 	reactivateLicense,
 	revokeLicense,
@@ -263,6 +264,9 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
  *
  * A qué estado vuelve lo decide `reactivateLicense`: `issued` si nunca se activó, `active` si sí.
  * Una caducidad de por medio la resuelve el gate por `expires_at_ms`, aquí no se toca.
+ *
+ * AUD-45: le quita además al alta la marca de una disputa (`quitarMarcasDeDisputa`), para que un
+ * reembolso total posterior la vuelva a revocar. Las renovaciones conservan la suya.
  */
 adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
 	const db = getDb(c.env);
@@ -274,7 +278,12 @@ adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
 		return c.json({ ok: false, error: "license_not_revoked", status: lic.status }, 409);
 	}
 
-	await reactivateLicense(db, licenseId);
+	// AUD-45: con la marca de disputa del alta, un reembolso total posterior ya no la revocaría
+	// (`already_reversed`). Es la reparación de una licencia que revocó una consulta del banco.
+	await enTransaccion(db, async (tx) => {
+		await reactivateLicense(tx, licenseId);
+		await quitarMarcasDeDisputa(tx, licenseId);
+	});
 	// La acción se registra como `reactivate`: es la misma operación que cierra una disputa ganada
 	// en Stripe, y tener dos nombres para un mismo hecho parte la auditoría en dos.
 	await auditAdmin(db, "reactivate", licenseId, { keyShort: lic.key_short, via: "admin" });

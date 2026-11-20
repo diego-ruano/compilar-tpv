@@ -774,6 +774,33 @@ export async function atribuirRevocacionAMano(db: Sql, licenseId: string): Promi
 }
 
 /**
+ * AUD-45 · Desrevocar a mano deshace también la marca de disputa del alta (`dispute` o
+ * `dispute_ya_revocada`). Si no, el cobro seguía figurando como revertido y un reembolso total
+ * posterior del mismo cargo se quedaba en `already_reversed` sin revocar nada; es lo que pasaba
+ * al reparar una licencia que había revocado una consulta del banco. Va en la misma transacción
+ * que `reactivateLicense`.
+ *
+ * Sólo las altas, como `atribuirRevocacionAMano`: desrevocar no devuelve los meses que una disputa
+ * le restó a una renovación, así que quitarle la marca dejaría que otro reembolso o disputa del
+ * mismo cargo se los restara otra vez, y que ganarla no se los devolviera. Las marcas `refund`
+ * tampoco: un reembolso total no se repite.
+ *
+ * Una disputa formal que siga abierta vuelve a revertir el alta si se pierde (`closed lost`): el
+ * dinero se ha ido. Ganarla ya no tiene nada que deshacer.
+ */
+export async function quitarMarcasDeDisputa(db: Sql, licenseId: string): Promise<void> {
+	await exec(
+		db,
+		`
+    UPDATE license_payments
+    SET reversed_at_ms = NULL, reversed_reason = NULL, reversed_event_uid = NULL
+    WHERE license_id = ? AND kind = 'issue' AND reversed_reason IN ('dispute', ?);
+    `,
+		[licenseId, DISPUTA_SIN_REVOCAR],
+	);
+}
+
+/**
  * LIC-07: la única licencia de un cliente de Stripe, o `null` si no hay exactamente una.
  *
  * Último recurso para atribuir un reembolso cuyo cargo no está en `license_payments` (una

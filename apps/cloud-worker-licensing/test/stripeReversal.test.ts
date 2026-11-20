@@ -49,7 +49,8 @@ const cargoDevuelto = (paymentIntent: string, total = 12000, devuelto = 12000) =
 	},
 });
 
-const disputa = (paymentIntent: string, tipo: "created" | "closed", status = "warning_needs_response") => ({
+// Una disputa FORMAL: una consulta del banco (`warning_*`) no toca la licencia (AUD-45).
+const disputa = (paymentIntent: string, tipo: "created" | "closed", status = "needs_response") => ({
 	type: `charge.dispute.${tipo}`,
 	id: `evt_disputa_${tipo}_${paymentIntent}`,
 	data: {
