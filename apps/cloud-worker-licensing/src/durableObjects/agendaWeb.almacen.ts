@@ -270,10 +270,15 @@ export function cancelacionesHechas(sql: SqlStorage, ids: Iterable<string>, ahor
 		.toArray().length;
 }
 
-/** Altas apuntadas desde `desdeMs`, en cualquier estado: el tope por negocio. */
+/**
+ * Altas apuntadas desde `desdeMs`: el tope por negocio. Cuentan todas menos las que su autor anuló
+ * antes de que la Main las tuviera (AUD-38): ésas no llegan al TPV ni ocupan mesa, y contarlas dejaba
+ * a cualquiera agotar el tope del día reservando y cancelando. Lo que la Main tiene o tendrá
+ * (pendiente, entregada, vista, fallida) sigue contando aunque luego se cancele en el TPV.
+ */
 export function altasDesde(sql: SqlStorage, desdeMs: number): number {
 	const fila = sql
-		.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'alta' AND creada_ms >= ?;`, desdeMs)
+		.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'alta' AND estado <> 'anulada' AND creada_ms >= ?;`, desdeMs)
 		.toArray()[0] as any;
 	return Number(fila?.n ?? 0);
 }

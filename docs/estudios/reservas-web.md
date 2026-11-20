@@ -362,8 +362,9 @@ mismo.
 1. Validar la entrada (§4.2) y el día y la hora (1 y 3).
 2. Leer de Turso lo del día y comprobar la mesa elegida (2 a 4).
 3. Topes exactos: 10 reservas activas por correo (las de Turso desde hoy con ese correo, más las
-   pendientes con su `email_hash`) y un tope de altas por negocio en 24 h. Son el control exacto que
-   va detrás del limitador por IP, como pide `lib/limitador.ts`.
+   pendientes con su `email_hash`) y un tope de altas por negocio en 24 h, que no cuenta las que su
+   autor anuló antes de que la Main las tuviera: ni llegan al TPV ni ocupan mesa (AUD-38). Son el
+   control exacto que va detrás del limitador por IP, como pide `lib/limitador.ts`.
 4. **En un bloque síncrono sobre el SQLite de la agenda, sin ningún `await` en medio:** volver a
    comprobar el punto 5 e insertar la petición y el enlace. Dos altas a la vez para la misma mesa:
    gana una y la otra recibe `mesa_no_disponible`. Lo que se lee de Turso puede tener un segundo de

@@ -425,6 +425,48 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("las altas que su autor anula antes de que la Main las tenga no gastan el tope del negocio (AUD-38)", async () => {
+		await conAgenda("agenda-tope-anuladas", async (motor, sql) => {
+			// Un alta de verdad, cancelada antes de que la Main la recoja: queda `anulada`.
+			const r = await motor.reservar({ tenantId: T, alta: alta({ email: "x0@atacante.test" }) });
+			expect(r.ok).toBe(true);
+			expect(await motor.cancelar({ tenantId: T, token: r.token })).toMatchObject({ ok: true });
+			// Y el resto hasta el tope, igual de anuladas.
+			const ahora = Date.now();
+			for (let i = 1; i < MAX_ALTAS_DIA_NEGOCIO; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, dia_ymd, hora, comensales, creada_local, creada_ms, estado, cerrada_ms)
+					 VALUES (?, 'alta', ?, '2000-01-01', '13:00', 2, '2000-01-01 00:00:00', ?, 'anulada', ?);`,
+					`p${i}`,
+					`r${i}`,
+					ahora - 1000,
+					ahora - 500,
+				);
+			}
+			const anuladas = sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'alta' AND estado = 'anulada';`).toArray()[0] as any;
+			expect(anuladas.n).toBe(MAX_ALTAS_DIA_NEGOCIO);
+			expect(await motor.reservar({ tenantId: T, alta: alta({ email: "legitimo@correo.es" }) })).toMatchObject({ ok: true });
+		});
+	});
+
+	it("lo que ha llegado o llegará a la Main sigue contando para el tope, en cualquier otro estado (AUD-38)", async () => {
+		await conAgenda("agenda-tope-vivas", async (motor, sql) => {
+			const ahora = Date.now();
+			const estados = ["pendiente", "entregada", "vista", "fallida"];
+			for (let i = 0; i < MAX_ALTAS_DIA_NEGOCIO; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, dia_ymd, hora, comensales, creada_local, creada_ms, estado)
+					 VALUES (?, 'alta', ?, '2000-01-01', '13:00', 2, '2000-01-01 00:00:00', ?, ?);`,
+					`p${i}`,
+					`r${i}`,
+					ahora - 1000,
+					estados[i % estados.length],
+				);
+			}
+			expect(await motor.reservar({ tenantId: T, alta: alta() })).toEqual({ ok: false, error: "tope_reservas_negocio", status: 429 });
+		});
+	});
+
 	it("cancelar antes de que la Main la tenga la anula aquí y deja libre la mesa", async () => {
 		await conAgenda("agenda-cancelar-pendiente", async (motor, sql) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
