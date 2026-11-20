@@ -18,10 +18,29 @@ function cleanOptional(v: unknown): string | null {
 
 const optStr = z.string().nullish().transform(cleanOptional);
 
-// Misma regla que el dominio Rust (`validate_email_basic`): longitud mínima, contiene
-// '@' y '.', sin espacios. Se mantiene idéntica para no divergir entre Main y worker.
-export function isValidEmail(e: string): boolean {
-	return e.length >= 6 && e.includes("@") && e.includes(".") && !e.includes(" ");
+/**
+ * Lo que no cabe en UNA dirección: espacios (Unicode, como `char::is_whitespace`), caracteres de
+ * control (`char::is_control`), y lo que separa una lista (`,` `;`), abre un nombre (`<` `>`), un
+ * comentario (`(` `)`), una IP (`[` `]`), una cita (`"` `\`) o un grupo (`:`).
+ */
+const NO_CABE_EN_UNA_DIRECCION = /[\p{White_Space}\p{Cc},;<>()[\]":\\]/u;
+
+/**
+ * Un correo, y uno solo (AUD-39): entre 6 y 254 caracteres, una única `@` con algo delante y un
+ * dominio con un punto que no lo empieza ni lo acaba, y nada de `NO_CABE_EN_UNA_DIRECCION`. La
+ * dirección va al `to` de los correos: una lista o un salto de línea serían varios destinatarios o
+ * una cabecera más. Admite lo legítimo: `+`, subdominios, mayúsculas, letras no ASCII y dominios
+ * internacionales. La misma regla que `validate_email_basic` en Rust (que la Main usa al revalidar);
+ * los casos, en `crates/tpv-domain/src/validacion_casos.json`. No es `z.email()`: ése sólo admite ASCII.
+ */
+export function isValidEmail(email: string): boolean {
+	const e = recortar(email);
+	const largo = [...e].length;
+	if (largo < 6 || largo > 254 || NO_CABE_EN_UNA_DIRECCION.test(e)) return false;
+	const arroba = e.indexOf("@");
+	if (arroba <= 0 || e.indexOf("@", arroba + 1) !== -1) return false;
+	const dominio = e.slice(arroba + 1);
+	return dominio.includes(".") && !dominio.startsWith(".") && !dominio.endsWith(".");
 }
 
 // Email opcional (CLI-04): vacío/ausente => null; si hay valor se normaliza a minúsculas

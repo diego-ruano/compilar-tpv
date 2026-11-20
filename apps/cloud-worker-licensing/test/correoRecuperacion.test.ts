@@ -219,7 +219,8 @@ describe("correo de recuperación · lo que no se puede", () => {
 
 	it("no acepta un correo mal escrito", async () => {
 		await escenario(async (e) => {
-			for (const malo of ["no-es-un-correo", "a@b", "con espacio@bar.test"]) {
+			// AUD-39: ni una lista ni un nombre con la dirección: el código iría a todas.
+			for (const malo of ["no-es-un-correo", "a@b", "con espacio@bar.test", "yo@bar.test,otro@bar.test", "Yo<yo@bar.test>"]) {
 				expect((await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: malo })).status).toBe(400);
 			}
 			expect(e.correos).toHaveLength(0);

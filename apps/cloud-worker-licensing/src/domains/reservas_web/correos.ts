@@ -23,6 +23,7 @@ import type { Client } from "@libsql/client/web";
 import type { Env } from "../../env";
 import { getDb, type Sql } from "../../server/db";
 import { capturarError } from "../../observability/errors";
+import { isValidEmail } from "../clientes/clientes.schemas";
 
 /** Por negocio y día: las 200 altas de la agenda, con su cancelación y algún cambio, caben de sobra. */
 export const TOPE_DIARIO_NEGOCIO = 600;
@@ -105,6 +106,13 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	// topes.
 	if (SALTO_O_CONTROL.test(para)) {
 		console.warn("[reservas-web] correo sin enviar: la dirección lleva caracteres de control:", correo.tipo);
+		return "fallido";
+	}
+	// AUD-39: y una sola dirección. Las rutas ya lo exigen, pero la del cliente puede venir de la Main
+	// por la réplica, que no pasa por ninguna validación. Una lista sería un solo envío para los topes
+	// y otro destinatario para el de cada dirección, que va por la cadena literal.
+	if (!isValidEmail(para)) {
+		console.warn("[reservas-web] correo sin enviar: la dirección no es una sola dirección de correo:", correo.tipo);
 		return "fallido";
 	}
 	const db = getDb(env);

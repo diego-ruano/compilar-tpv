@@ -36,6 +36,7 @@ import {
 	sendRecoveryEmailCodeEmail,
 } from "../licensing/licenseEmails";
 import { emailHint } from "../licensing/licensing.helpers";
+import { isValidEmail } from "../clientes/clientes.schemas";
 import {
 	anularCodigo,
 	comprobarCodigo,
@@ -62,8 +63,12 @@ function normalizar(correo: unknown): string {
 	return recortar(String(correo ?? "")).toLowerCase();
 }
 
+/**
+ * La regla de un correo, la misma que la Main (`validate_email_basic`) al pedir el cambio. La de
+ * antes dejaba pasar una lista («a@b.es,c@d.es») o un nombre con la dirección entre ángulos (AUD-39).
+ */
 function pareceCorreo(correo: string): boolean {
-	return correo.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo);
+	return isValidEmail(correo);
 }
 
 function clave(ctx: ContextoCorreo): EmailCodeKey {

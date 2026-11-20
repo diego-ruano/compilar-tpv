@@ -8,9 +8,8 @@
 // negocio escribía cabeceras en correos de nuestro dominio a quien reservara en su web. Se limpia
 // donde se compone el correo, no al guardar: lo que la Main sube no pasa por ninguna validación.
 //
-// Y la dirección: la del alta la escribe un visitante cualquiera, y la regla de un correo (la misma
-// que en la Main) no mira los caracteres de control. Una con un salto de línea no es una dirección:
-// no se envía.
+// Y la dirección: la del alta la escribe un visitante cualquiera. Una con un salto de línea, o una
+// lista, no es una dirección: el alta no entra (AUD-39), y si llegara al correo, no se envía.
 //
 // De punta a punta: el nombre lo fija una Handy por la ruta real y el TenantHub real; la
 // confirmación la dispara un visitante por la ruta pública, sobre la agenda de verdad (la puerta
@@ -245,17 +244,22 @@ describe("AUD-40 · la confirmación que dispara un visitante", () => {
 		});
 	});
 
-	it("con un salto de línea en su correo, la reserva se hace pero el correo no sale", async () => {
-		await conNegocio("aud40-publico-para", async (sql) => {
-			// La regla de un correo (la de la Main) pide una arroba, un punto y ningún espacio: esto pasa.
-			const res = await alta("ana@correo.test\r\nbcc:otro@prueba.test");
-			expect(res.status).toBe(200);
-			const cuerpo = (await res.json()) as any;
-			expect(cuerpo.codigo).toBeTruthy();
-			expect(cuerpo.correo_enviado).toBe(false);
-			expect(enviadosWeb).toEqual([]);
-			// Ni gasta cupo: no se ha reservado su sitio en los topes.
-			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n).toBe(0);
+	// AUD-39: la regla de un correo pedía una arroba, un punto y ningún espacio, y esto pasaba: la
+	// reserva se hacía con esa cadena como destinatario. Ahora una sola dirección, o nada.
+	for (const [i, [caso, correo]] of ([
+		["un salto de línea con otra cabecera", "ana@correo.test\r\nbcc:otro@prueba.test"],
+		["una lista", "ana@correo.test,otro@prueba.test"],
+		["un nombre y la dirección entre ángulos", "Ana<ana@correo.test>"],
+	] as const).entries()) {
+		it(`con ${caso} en su correo, ni se reserva ni sale nada (AUD-39)`, async () => {
+			await conNegocio(`aud39-publico-${i}`, async (sql) => {
+				const res = await alta(correo);
+				expect(res.status).toBe(400);
+				expect(JSON.stringify(await res.json())).toContain("El correo no es válido");
+				expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).one().n).toBe(0);
+				expect(enviadosWeb).toEqual([]);
+				expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n).toBe(0);
+			});
 		});
-	});
+	}
 });

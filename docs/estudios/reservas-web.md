@@ -321,7 +321,10 @@ otro no compila.
 La entrada del alta tiene su dominio en
 [validacion_casos.json](../../crates/tpv-domain/src/validacion_casos.json) (`reserva_web`): el schema
 del worker y la validación de `tpv-domain`, que la Main repite al registrarla, aceptan y rechazan lo
-mismo.
+mismo. El correo es **una sola dirección** (`isValidEmail` / `validate_email_basic`, con sus casos en
+el dominio `cliente` de la misma tabla): una `@`, un dominio con punto, y ni espacios, ni caracteres
+de control, ni `,;<>()[]":\`. Va al `to` de los correos, donde una lista o un salto de línea serían
+varios destinatarios o una cabecera más (AUD-39). Admite `+`, subdominios y letras no ASCII.
 
 ### 4.3 La agenda (`AgendaWeb`)
 
@@ -478,6 +481,9 @@ Desde el worker, con el binding `EMAIL`:
   veces, muchos a la vez no pasan de los topes, uno que falló se puede repetir y uno que está saliendo
   por otro lado es «en curso», que se repite. Sin la base central no se envía: no se sabría si ya
   salió.
+- **El destinatario se vuelve a mirar al enviar**: con un carácter de control (AUD-40) o si no es
+  una sola dirección (AUD-39), no sale ni gasta cupo. La del cliente puede llegar de la Main por la
+  réplica, que no pasa por ninguna validación.
 - **Un correo que falla no deshace la reserva**: se registra y la reserva sigue confirmada.
   `enviarCorreoReservaWeb` no lanza nunca.
 - Todo en `domains/reservas_web/correos.ts`.

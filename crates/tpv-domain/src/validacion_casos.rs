@@ -8,6 +8,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::clientes::{Cliente, NuevoCliente};
 use crate::configuracion::validate_iva_percent;
 use crate::ingredientes::{cambios_de_linea, forma_guardada, CategoriaIngredienteGuardar, IngredienteGuardar};
 use crate::dinero::Dinero;
@@ -287,6 +288,28 @@ fn trabajador(e: &Value) -> Result<Value, String> {
     Ok(json!({ "fecha_inicio_contrato": inicio, "fecha_fin_contrato": fin }))
 }
 
+/// El cliente, al darlo de alta y al editarlo: lo mismo en los dos. Fija la regla de un correo
+/// (`validate_email_basic`), que comparten el alta web y el correo de recuperación (AUD-39).
+fn cliente(e: &Value) -> Result<Value, String> {
+    let alta = NuevoCliente::validar(
+        None,
+        texto(e, "nombre"),
+        texto_opcional(e, "email"),
+        texto_opcional(e, "telefono"),
+        texto_opcional(e, "notas"),
+    );
+    let edicion = Cliente::validar_edicion(
+        "c1".into(),
+        texto(e, "nombre"),
+        texto_opcional(e, "email"),
+        texto_opcional(e, "telefono"),
+        texto_opcional(e, "notas"),
+    );
+    assert_eq!(alta.as_ref().err(), edicion.as_ref().err(), "el alta y la edición del cliente no dicen lo mismo");
+    let c = alta?;
+    Ok(json!({ "nombre": c.nombre, "email": c.email, "telefono": c.telefono, "notas": c.notas }))
+}
+
 /// El plano que se guarda (MESAS-01): sus zonas y los nombres de sus mesas, recortados como se guardan.
 fn plano(e: &Value) -> Result<Value, String> {
     let vistas: Vec<crate::mesas::ZonaDelPlano<'_>> = e["salons"]
@@ -322,6 +345,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         ),
         "horario_semana" => dias_de_horario(entrada, &[("fecha_lunes", MSG_SEMANA)]),
         "reserva_web" => reserva_web(entrada),
+        "cliente" => cliente(entrada),
         "reserva_estado_mesa" => crate::reservas::estado_desde_la_mesa(&texto(entrada, "estado"))
             .map(|e| json!({ "estado": e.como_texto() })),
         "plano" => plano(entrada),

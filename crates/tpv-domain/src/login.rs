@@ -38,9 +38,30 @@ pub fn pin_de_teclado(input: &str) -> Result<String, String> {
     Ok(p.to_string())
 }
 
+/// Lo que no cabe en **una** dirección: separa una lista (`,` `;`), abre un nombre (`<` `>`), un
+/// comentario (`(` `)`), una IP (`[` `]`), una cita (`"` `\`) o un grupo (`:`).
+const NO_CABE_EN_UNA_DIRECCION: &[char] = &[',', ';', '<', '>', '(', ')', '[', ']', '"', ':', '\\'];
+
+/// Un correo, y uno solo (AUD-39): entre 6 y 254 caracteres, una única `@` con algo delante y un
+/// dominio con un punto que no lo empieza ni lo acaba, y ningún espacio (Unicode), carácter de
+/// control ni de los que separan o adornan direcciones. La dirección va al `to` de los correos:
+/// una lista o un salto de línea serían varios destinatarios o una cabecera más. Admite lo
+/// legítimo: `+`, subdominios, mayúsculas, letras no ASCII y dominios internacionales. Espejo de
+/// `isValidEmail` en el worker (`clientes.schemas.ts`); los casos, en `validacion_casos.json`.
 pub fn validate_email_basic(email: &str) -> bool {
     let e = email.trim();
-    e.len() >= 6 && e.contains('@') && e.contains('.') && !e.contains(' ')
+    if !(6..=254).contains(&e.chars().count()) {
+        return false;
+    }
+    if e.chars().any(|c| c.is_whitespace() || c.is_control() || NO_CABE_EN_UNA_DIRECCION.contains(&c)) {
+        return false;
+    }
+    let Some((local, dominio)) = e.split_once('@') else { return false };
+    !local.is_empty()
+        && !dominio.contains('@')
+        && dominio.contains('.')
+        && !dominio.starts_with('.')
+        && !dominio.ends_with('.')
 }
 
 /// RI-83: haber fichado la entrada permite acceder también después de la salida final.
@@ -294,6 +315,26 @@ mod tests {
     fn email_basico_acepta_y_rechaza_casos_representativos() {
         for email in ["a@b.es", " usuario@example.com ", "A.B+tag@EXAMPLE.COM"] { assert!(validate_email_basic(email)); }
         for email in ["", "a@b", "abcdef", "a b@c.es", "@.com", "a@.c"] { assert!(!validate_email_basic(email), "deberia rechazar {email}"); }
+    }
+
+    /// AUD-39: lo que llegaba al `to` de los correos de reservas web. El resto de casos, en
+    /// `validacion_casos.json` (dominio `cliente`), que lee también el worker.
+    #[test]
+    fn email_basico_es_una_sola_direccion() {
+        for email in [
+            "ana@correo.test,otra@correo.test",
+            "ana@correo.test;otra@correo.test",
+            "<ana@correo.test>,<otra@correo.test>",
+            "ana@correo.test\r\nbcc:otra@correo.test",
+            "ana@correo.test\totra@correo.test",
+            "ana@otra@correo.test",
+            "pepe<ana@correo.test>",
+        ] {
+            assert!(!validate_email_basic(email), "deberia rechazar {email:?}");
+        }
+        for email in ["ana+reservas@sub.correo.es", "José@añoranza.es", "o'brien@correo.ie"] {
+            assert!(validate_email_basic(email), "deberia aceptar {email:?}");
+        }
     }
 
     #[test]

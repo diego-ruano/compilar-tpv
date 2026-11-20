@@ -409,3 +409,41 @@ describe("las cabeceras, en una línea (AUD-40)", () => {
 		expect(falso.enviados).toHaveLength(0);
 	});
 });
+
+// AUD-39 · El destinatario es una sola dirección. Una lista en `to` contaba como un solo envío y
+// como otro destinatario para el tope (que va por la cadena literal): con «ana» en su tope, la lista
+// que la incluía salía. Lo que llegue aquí (la dirección de un cliente que la Main subió por la
+// réplica, sin pasar por ninguna validación) se mira otra vez con la misma regla.
+describe("el destinatario, una sola dirección (AUD-39)", () => {
+	const NO_SON_UNA = [
+		"ana@correo.es,otra@correo.es",
+		"ana@correo.es;otra@correo.es",
+		"<ana@correo.es>,<otra@correo.es>",
+		"pepe<ana@correo.es>",
+		"ana@otra@correo.es",
+		"ana@correo.es\totra@correo.es",
+		"grupo:ana@correo.es;",
+	];
+
+	it("una lista o algo que no es una dirección no se envía ni gasta cupo", async () => {
+		const falso = correoFalso();
+		const r = await conBase("para-lista", async (sql) => {
+			const resultados = [];
+			for (const [i, para] of NO_SON_UNA.entries()) {
+				resultados.push(await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: `rw:confirmacion:l${i}`, para })));
+			}
+			return { resultados, filas: sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n };
+		});
+		expect(r).toEqual({ resultados: NO_SON_UNA.map(() => "fallido"), filas: 0 });
+		expect(falso.enviados).toHaveLength(0);
+	});
+
+	it("una dirección con + y subdominio, en mayúsculas, sí sale", async () => {
+		const falso = correoFalso();
+		const r = await conBase("para-buena", () =>
+			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ para: " Ana+Reservas@Sub.Correo.ES " })),
+		);
+		expect(r).toBe("enviado");
+		expect(falso.enviados.map((m) => m.to)).toEqual(["ana+reservas@sub.correo.es"]);
+	});
+});
