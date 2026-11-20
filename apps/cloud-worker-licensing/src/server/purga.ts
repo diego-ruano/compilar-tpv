@@ -4,12 +4,11 @@
 //
 // Tablas que crecerían sin techo si nadie las borrara, y a las que hace crecer alguien de fuera:
 //
-//   · `pair_claim_fallos` — una fila por IP que falla un emparejamiento. Sólo se borraba al
-//     emparejar BIEN, así que un barrido de códigos dejaba su rastro para siempre. Con IPv6 una
-//     sola persona tiene billones de direcciones: cada petición barata dejaba una fila permanente.
-//     No era un problema de velocidad (esa tabla se lee siempre por su clave primaria, así que da
-//     igual lo grande que sea): era almacenamiento sin límite a partir de una entrada que no
-//     controlamos.
+//   · `pair_claim_fallos` — una fila por IP (por /64 en IPv6) que falla un emparejamiento. Nada
+//     más la borra (AUD-11: emparejar bien ya no), así que sin esto un barrido de códigos dejaba
+//     su rastro para siempre, y quien tiene muchas redes, una fila permanente por cada una. No era
+//     un problema de velocidad (esa tabla se lee siempre por su clave primaria, así que da igual lo
+//     grande que sea): era almacenamiento sin límite a partir de una entrada que no controlamos.
 //   · `email_sends` — una fila por correo enviado, y el tope de REV-14 sólo mira las últimas 24 h.
 //   · `license_otp_eventos` (RI-68) — una fila por código de cambio de equipo enviado o fallado, y
 //     sus topes sólo miran las últimas 24 h.

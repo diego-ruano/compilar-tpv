@@ -9,11 +9,17 @@
 //   3 fallos → 30 segundos · 6 → 5 minutos · 9 o más → 30 minutos cada tres
 //
 // Con eso, un error de dedo no se nota y un barrido de 10^6 códigos es imposible (unos 144 al
-// día). Emparejar bien borra la cuenta, y un día sin fallar también.
+// día). La cuenta se olvida tras un día sin fallar, y sólo así.
+//
+// AUD-11: emparejar bien ya NO la borra. Lo hacía, y reclamar un código propio (cualquier negocio
+// con licencia los emite, y el propio reclamo pendiente o aprobado se puede repetir) bastaba para
+// ponerla a cero entre cada dos fallos: un barrido sin espera. Quien se equivoca dos veces y acierta
+// sigue sin notarlo; si se vuelve a equivocar, espera 30 segundos.
 //
 // Va por IP y no por dispositivo porque el `deviceId` lo elige quien hace la petición. El precio es
 // que todas las Handy de un bar salen por la misma IP: si un camarero falla tres veces, los demás
-// esperan 30 segundos. Vincular es algo que se hace pocas veces, así que se asume.
+// esperan 30 segundos. Vincular es algo que se hace pocas veces, así que se asume. En IPv6 la
+// «IP» es el /64 entero (`claveDeFreno`, AUD-11): cada equipo elige los 64 bits de abajo.
 //
 // Es aparte del tope por código (8 intentos sobre el mismo código, `pairClaim.ts`), que protege un
 // código concreto contra muchas IPs a la vez.
@@ -24,7 +30,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { exec } from "../../server/db";
-import { pasaElLimitador } from "../../lib/limitador";
+import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
 
 export const FALLOS_POR_TRAMO = 3;
 /** Pasado este tiempo sin fallar, la cuenta vuelve a empezar. */
@@ -48,7 +54,9 @@ export function textoDeEspera(segundos: number): string {
 
 /** Segundos que le quedan a esta IP para poder volver a intentarlo (0 si puede ya). */
 export async function segundosDeEspera(db: Client, ip: string, ahoraMs: number): Promise<number> {
-	const r = await exec(db, `SELECT bloqueado_hasta_ms FROM pair_claim_fallos WHERE ip = ? LIMIT 1;`, [ip]);
+	const r = await exec(db, `SELECT bloqueado_hasta_ms FROM pair_claim_fallos WHERE ip = ? LIMIT 1;`, [
+		claveDeFreno(ip),
+	]);
 	const hasta = Number((r.rows?.[0] as any)?.bloqueado_hasta_ms ?? 0);
 	return hasta > ahoraMs ? Math.ceil((hasta - ahoraMs) / 1000) : 0;
 }
@@ -57,7 +65,8 @@ export async function segundosDeEspera(db: Client, ip: string, ahoraMs: number):
  * Anota un fallo y devuelve la espera que impone (0 si ninguna). El contador se lee y se sube en
  * la misma sentencia: dos fallos simultáneos desde la misma IP cuentan dos.
  */
-export async function anotarFallo(db: Client, ip: string, ahoraMs: number): Promise<number> {
+export async function anotarFallo(db: Client, ipDeLaPeticion: string, ahoraMs: number): Promise<number> {
+	const ip = claveDeFreno(ipDeLaPeticion);
 	const r = await exec(
 		db,
 		`INSERT INTO pair_claim_fallos (ip, fallos, ultimo_fallo_ms, bloqueado_hasta_ms)
@@ -75,10 +84,6 @@ export async function anotarFallo(db: Client, ip: string, ahoraMs: number): Prom
 		await exec(db, `UPDATE pair_claim_fallos SET bloqueado_hasta_ms = ? WHERE ip = ?;`, [ahoraMs + espera, ip]);
 	}
 	return espera;
-}
-
-export async function olvidarFallos(db: Client, ip: string): Promise<void> {
-	await exec(db, `DELETE FROM pair_claim_fallos WHERE ip = ?;`, [ip]);
 }
 
 /**
@@ -117,5 +122,5 @@ export const PETICIONES_POR_MINUTO = 20;
  *     si desapareciera no habría ningún síntoma.
  */
 export async function pasaElFiltroExterior(env: { LIMITADOR_CLAIM?: RateLimit }, ip: string): Promise<boolean> {
-	return pasaElLimitador(env?.LIMITADOR_CLAIM, ip, "pairing");
+	return pasaElLimitador(env?.LIMITADOR_CLAIM, claveDeFreno(ip), "pairing");
 }

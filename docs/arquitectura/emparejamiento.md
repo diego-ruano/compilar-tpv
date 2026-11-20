@@ -58,9 +58,12 @@ revés.
 ## Las reglas
 
 - **Freno por IP** (`pairing.intentos.ts`): cada 3 fallos, una espera de 30 s, luego 5 min, luego
-  30 min; se olvidan al emparejar bien o tras un día sin fallar. Delante, un tope de 20 peticiones por
-  minuto y por IP antes de tocar la base. Por IP y no por dispositivo porque el `deviceId` lo elige
-  quien llama (el precio: las Handy de un bar comparten la cuenta). La espera se mira **antes** de leer
+  30 min; se olvidan tras un día sin fallar, y sólo así: emparejar bien **no** borra la cuenta
+  (AUD-11), porque el reclamo del propio código se puede repetir y la ponía a cero a voluntad.
+  Delante, un tope de 20 peticiones por minuto y por IP antes de tocar la base. Por IP y no por
+  dispositivo porque el `deviceId` lo elige quien llama (el precio: las Handy de un bar comparten la
+  cuenta). En IPv6 la cuenta es del **/64** (`claveDeFreno`, en `lib/limitador.ts`), en la tabla y en
+  el filtro exterior: los 64 bits de abajo los elige cada equipo. La espera se mira **antes** de leer
   el código, o un intento bloqueado seguiría diciendo si existe. Una petición mal formada no cuenta: la
   rechaza el validador, que va detrás del filtro exterior.
 - **A quien no lo reclamó, un código no existe** (AUD-10). `fetch-token` y `cancel` son anónimas y no

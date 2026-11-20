@@ -48,6 +48,7 @@ import {
 	pasaElFiltroExterior,
 	textoDeEspera,
 } from "../src/domains/pairing/pairing.intentos";
+import { claveDeFreno } from "../src/lib/limitador";
 import configuracionDelWorker from "../wrangler.json";
 import { mensajeFirmado, type AccionFirmada } from "../src/domains/pairing/pairing.firma";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
@@ -233,15 +234,43 @@ describe("la espera por fallos", () => {
 		});
 	});
 
-	it("emparejar bien borra la cuenta", async () => {
+	it("emparejar bien no borra la cuenta (AUD-11)", async () => {
+		// Antes la borraba, y reclamar un código propio (que cualquier negocio con licencia emite sin
+		// tope) bastaba para poner a cero la espera entre cada dos fallos: un barrido sin freno.
 		const a = await dispositivo("handy-a", 1);
 		await conPlanoDeControl("olvido-exito", async (m) => {
 			await m.reclamar(a, "000001", T0);
 			await m.reclamar(a, "000002", T0);
 			expect((await m.reclamar(a, CODIGO, T0)).status).toBe(200);
-			// Si la cuenta siguiera en 2, este sería el tercer fallo.
-			expect((await m.reclamar(a, "000003", T0)).status).toBe(404);
-			expect((await m.reclamar(a, "000004", T0)).status).toBe(404);
+			const tercero = await m.reclamar(a, "000003", T0);
+			expect(tercero.status).toBe(429);
+			expect(tercero.body.reintentarEnSegundos).toBe(30);
+		});
+	});
+
+	it("reclamar una y otra vez el propio código pendiente no reinicia la espera (AUD-11)", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("propio-pendiente", async (m) => {
+			const estados: number[] = [];
+			for (const codigo of ["000001", CODIGO, "000002", CODIGO, "000003"]) {
+				estados.push((await m.reclamar(a, codigo, T0)).status);
+			}
+			expect(estados).toEqual([404, 200, 404, 200, 429]);
+			expect(m.sql.exec(`SELECT fallos FROM pair_claim_fallos;`).toArray()).toEqual([{ fallos: 3 }]);
+		});
+	});
+
+	it("ni el propio código ya aprobado (AUD-11)", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("propio-aprobado", async (m) => {
+			expect((await m.reclamar(a, CODIGO, T0)).status).toBe(200);
+			m.aprobar(CODIGO, a, T0);
+			const estados: Array<string | number> = [];
+			for (const codigo of ["000001", CODIGO, "000002", CODIGO, "000003"]) {
+				const r = await m.reclamar(a, codigo, T0);
+				estados.push(r.status === 200 ? r.body.state : r.status);
+			}
+			expect(estados).toEqual([404, "approved", 404, "approved", 429]);
 		});
 	});
 
@@ -257,13 +286,83 @@ describe("la espera por fallos", () => {
 		});
 	});
 
-	it("cada IP lleva su cuenta", async () => {
+	it("cada IPv4 lleva su cuenta", async () => {
 		const a = await dispositivo("handy-a", 1);
 		await conPlanoDeControl("por-ip", async (m) => {
 			for (const codigo of ["000001", "000002", "000003"]) await m.reclamar(a, codigo, T0, "10.0.0.1");
 			expect((await m.reclamar(a, CODIGO, T0, "10.0.0.1")).status).toBe(429);
 			expect((await m.reclamar(a, CODIGO, T0, "10.0.0.2")).status).toBe(200);
 		});
+	});
+
+	it("en IPv6 la cuenta es del /64 entero, no de cada dirección (AUD-11)", async () => {
+		// Una conexión IPv6 recibe un /64 y elige a su gusto los 64 bits de abajo: contar por
+		// dirección daba a cada uno 2^64 cuentas nuevas. Se escriben de formas distintas a propósito.
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("por-64", async (m) => {
+			const estados: number[] = [];
+			for (const [codigo, ip] of [
+				["000001", "2001:db8:0:1::1"],
+				["000002", "2001:DB8:0:1:ffff:ffff:ffff:2"],
+				["000003", "2001:0db8:0000:0001:0:0:0:3"],
+			]) {
+				estados.push((await m.reclamar(a, codigo, T0, ip)).status);
+			}
+			expect(estados).toEqual([404, 404, 429]);
+			expect((await m.reclamar(a, CODIGO, T0, "2001:db8:0:1::abcd")).status).toBe(429);
+			// Otro /64 lleva la suya.
+			expect((await m.reclamar(a, CODIGO, T0, "2001:db8:0:2::1")).status).toBe(200);
+			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM pair_claim_fallos;`).toArray()[0].n).toBe(1);
+		});
+	});
+
+	it("por la ruta, el filtro exterior también cuenta el /64 (AUD-11)", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("ruta-64", async (m) => {
+			dbDePruebas = m.db;
+			const claves: string[] = [];
+			const env = {
+				...ENV,
+				LIMITADOR_CLAIM: {
+					limit: ({ key }: { key: string }) => {
+						claves.push(key);
+						return Promise.resolve({ success: true });
+					},
+				},
+			};
+			for (const ip of ["2001:db8:0:7::1", "2001:db8:0:7:1:2:3:4"]) {
+				const cuerpo = { pairCode: "000001", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" };
+				expect((await elWorker.fetch(peticion("claim", cuerpo, ip), env)).status).toBe(404);
+			}
+			expect(claves).toEqual(["2001:db8:0:7::/64", "2001:db8:0:7::/64"]);
+			expect(m.sql.exec(`SELECT ip, fallos FROM pair_claim_fallos;`).toArray()).toEqual([
+				{ ip: "2001:db8:0:7::/64", fallos: 2 },
+			]);
+		});
+	});
+
+	it("la clave del freno: la IPv4 tal cual, la IPv6 por su /64 escrita como se escriba (AUD-11)", () => {
+		expect(claveDeFreno("198.51.100.7")).toBe("198.51.100.7");
+		expect(claveDeFreno(" 198.51.100.7 ")).toBe("198.51.100.7");
+		for (const ip of [
+			"2001:db8:0:1::1",
+			"2001:0DB8:0000:0001:0000:0000:0000:0001",
+			"2001:db8:0:1:ffff:ffff:ffff:ffff",
+			"[2001:db8:0:1::abcd]",
+			"2001:db8:0:1::abcd%eth0",
+			"2001:db8:0:1:0:0:198.51.100.7",
+		]) {
+			expect(claveDeFreno(ip), ip).toBe("2001:db8:0:1::/64");
+		}
+		expect(claveDeFreno("2001:db8::1")).toBe("2001:db8:0:0::/64");
+		expect(claveDeFreno("::1")).toBe("0:0:0:0::/64");
+		// Una IPv4 escrita como IPv6 es esa IPv4: comparte cuenta con ella.
+		expect(claveDeFreno("::ffff:198.51.100.7")).toBe("198.51.100.7");
+		expect(claveDeFreno("::FFFF:c633:6407")).toBe("198.51.100.7");
+		// Lo que no es una dirección se queda como está: frena a esa cadena, como antes.
+		for (const raro of ["unknown", "1:2:3", "1::2::3", "2001:db8:0:1::1:2:3:4:5", "fe80::zz"]) {
+			expect(claveDeFreno(raro), raro).toBe(raro);
+		}
 	});
 
 	it("una petición mal formada no cuenta como fallo: es un cliente roto, no alguien probando", async () => {

@@ -21,7 +21,7 @@ import { sha256HexStr } from "../../server/utils/crypto";
 import { bytesToB64 } from "../../server/utils/base64";
 import { avisarSolicitudALaMain } from "./pairing.avisos";
 import { comprobarFirmaDelReclamante, relojFueraDeMargen, sanitizeB64 } from "./pairing.firma";
-import { anotarFallo, olvidarFallos, segundosDeEspera, textoDeEspera } from "./pairing.intentos";
+import { anotarFallo, segundosDeEspera, textoDeEspera } from "./pairing.intentos";
 import { fallo, ok, type Resultado } from "./pairing.resultado";
 import type { cancelSchema, claimSchema, fetchTokenSchema } from "./pairing.schemas";
 
@@ -196,7 +196,7 @@ export async function reclamarCodigo(
 		if (sanitizeB64(String(pr.claimed_device_pubkey_b64 || "")) !== devicePubKey) {
 			return contarFallo(fallo(401, "device_pubkey_mismatch"));
 		}
-		await olvidarFallos(db, clientIp);
+		// AUD-11: acertar no borra los fallos de esta IP (ver `pairing.intentos.ts`).
 		return nuevoReto(db, deviceId, pr, now, "approved");
 	}
 
@@ -234,7 +234,8 @@ export async function reclamarCodigo(
 		return contarFallo(fallo(409, "pair_claim_race_or_invalid_state"));
 	}
 
-	await olvidarFallos(db, clientIp);
+	// AUD-11: tampoco aquí se borran los fallos de esta IP. Este reclamo se puede repetir sin gastar
+	// nada (es el reintento del propio dispositivo), y borrarlos ponía la espera a cero a voluntad.
 	await avisarSolicitudALaMain(env, String(pr.tenant_id || ""));
 
 	return nuevoReto(db, deviceId, pr, now, "pending_approval");
