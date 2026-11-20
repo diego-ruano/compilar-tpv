@@ -33,7 +33,9 @@ vi.mock("../src/server/db", async (importOriginal) => {
 });
 
 const { entregarToken, reclamarCodigo, soltarCodigo } = await import("../src/domains/pairing/pairing.handy");
-const { rechazarSolicitud, solicitudesPendientes } = await import("../src/domains/pairing/pairing.main");
+const { aprobarSolicitud, crearCodigo, rechazarSolicitud, solicitudesPendientes } = await import(
+	"../src/domains/pairing/pairing.main"
+);
 const { cancelSchema, claimSchema, fetchTokenSchema } = await import("../src/domains/pairing/pairing.schemas");
 const { pairingRoutes } = await import("../src/domains/pairing/pairing.routes");
 
@@ -596,9 +598,11 @@ describe("cancelar en la Handy", () => {
 			const primera = await m.cancelar(a, CODIGO, body.nonceB64, T0 + MIN);
 			expect(primera.body.liberado).toBe(true);
 
-			// Soltado el código ya no hay reclamante: la repetición ni llega a mirar la firma.
+			// Soltado el código ya no hay reclamante: la repetición ni llega a mirar la firma, y se
+			// contesta como a un código que no existe (AUD-10).
 			const repetida = await soltarCodigo(m.db, ENV, cancelSchema.parse(primera.cuerpo), T0 + MIN);
-			expect(repetida.status).toBe(403);
+			expect(repetida.status).toBe(404);
+			expect(repetida.cuerpo.error).toBe("pair_code_not_found");
 
 			// Y con el claim todavía en pie (aprobado), es el reto gastado lo que la para.
 			const otra = await m.reclamar(a, CODIGO, T0 + MIN);
@@ -616,7 +620,7 @@ describe("cancelar en la Handy", () => {
 		await conPlanoDeControl("cancelar-ajeno", async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 
-			expect((await m.cancelar(b, CODIGO, body.nonceB64, T0)).body.error).toBe("device_mismatch");
+			expect((await m.cancelar(b, CODIGO, body.nonceB64, T0)).body.error).toBe("pair_code_not_found");
 			expect((await m.cancelar(a, CODIGO, body.nonceB64, T0, "PAIR_FETCH")).body.error).toBe(
 				"bad_device_signature",
 			);
@@ -635,6 +639,126 @@ describe("cancelar en la Handy", () => {
 
 			const otraVez = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
 			expect((await m.recoger(a, CODIGO, otraVez.body.nonceB64, T0 + 2 * MIN)).status).toBe(200);
+		});
+	});
+});
+
+describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
+	// `fetch-token` y `cancel` son anónimas y no tienen freno (la Handy pregunta cada 1,5 s). Antes
+	// contestaban según el estado del código ANTES de mirar quién preguntaba: con una prueba
+	// inventada, 404 si no existía y `not_approved` si estaba vivo y pendiente, que es justo lo que
+	// necesita quien quiere adelantarse a la Handy en el `claim`. Y `approve` le decía a la Main de
+	// cualquier negocio si un código se había emitido alguna vez.
+	const C = {
+		libre: "300001",
+		reclamado: "300002",
+		caducado: "300003",
+		usado: "300004",
+		rechazado: "300005",
+		aprobado: "300006",
+	} as const;
+
+	function sembrar(m: Mundo, quien: Dispositivo) {
+		const codigo = (pairCode: string, status: string, expira: number, reclamado: boolean, usado: number | null = null) =>
+			m.sql.exec(
+				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms,
+				                            expires_at_ms, claimed_at_ms, claimed_by_device_id, claimed_device_pubkey_b64, used_at_ms)
+				 VALUES (?, 'sin-secreto', ?, 'main-1', ?, ?, ?, ?, ?, ?, ?);`,
+				pairCode,
+				TENANT,
+				status,
+				expira - 10 * MIN,
+				expira,
+				reclamado ? T0 - MIN : null,
+				reclamado ? quien.id : null,
+				reclamado ? quien.pub : null,
+				usado,
+			);
+		codigo(C.libre, "pending", T0 + 9 * MIN, false);
+		codigo(C.reclamado, "pending", T0 + 9 * MIN, true);
+		codigo(C.caducado, "pending", T0 - MIN, true);
+		codigo(C.usado, "used", T0 + 5 * MIN, true, T0 - 2 * MIN);
+		codigo(C.rechazado, "rejected", T0 + 9 * MIN, true);
+		codigo(C.aprobado, "approved", T0 + 9 * MIN, true);
+	}
+
+	/** Lo que manda quien no ha reclamado nada: ni reto ni firma de verdad. */
+	const sinPrueba = (pairCode: string, deviceId: string) => ({
+		pairCode,
+		deviceId,
+		nonceB64: "bm9uY2U=",
+		sigB64: "x",
+		ts: T0,
+	});
+
+	it("fetch-token y cancel contestan lo mismo a un código vivo, muerto o inexistente", async () => {
+		const handy = await dispositivo("handy-del-bar", 1);
+		await conPlanoDeControl("oraculo", async (m) => {
+			sembrar(m, handy);
+			const antes = m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray();
+
+			const visto = new Set<string>();
+			for (const codigo of ["000100", ...Object.values(C)]) {
+				const datos = sinPrueba(codigo, "atacante");
+				const ft = await entregarToken(m.db, ENV, fetchTokenSchema.parse(datos), T0);
+				const cc = await soltarCodigo(m.db, ENV, cancelSchema.parse(datos), T0);
+				visto.add(`${ft.status} ${ft.cuerpo.error}`);
+				visto.add(`${cc.status} ${cc.cuerpo.error}`);
+			}
+			expect([...visto]).toEqual(["404 pair_code_not_found"]);
+			expect(m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray()).toEqual(antes);
+		});
+	});
+
+	it("con el deviceId de la Handy pero sin su firma, lo que falla es la prueba, nunca el estado", async () => {
+		// Quien conoce el `deviceId` de la Handy (no es un secreto dentro del local) tampoco sabe en
+		// qué estado está su código: la firma se mira antes que el estado.
+		const handy = await dispositivo("handy-del-bar", 1);
+		await conPlanoDeControl("oraculo-con-id", async (m) => {
+			sembrar(m, handy);
+			const visto = new Set<string>();
+			// Todos los que ha reclamado ella; el libre no es suyo y sale como inexistente (arriba).
+			for (const codigo of Object.values(C).filter((c) => c !== C.libre)) {
+				const datos = sinPrueba(codigo, handy.id);
+				const ft = await entregarToken(m.db, ENV, fetchTokenSchema.parse(datos), T0);
+				const cc = await soltarCodigo(m.db, ENV, cancelSchema.parse(datos), T0);
+				visto.add(`${ft.status} ${ft.cuerpo.error}`);
+				visto.add(`${cc.status} ${cc.cuerpo.error}`);
+			}
+			expect([...visto]).toEqual(["404 challenge_not_found"]);
+		});
+	});
+
+	it("approve contesta a la Main de otro negocio como si el código no existiera, igual que reject", async () => {
+		const handy = await dispositivo("handy-del-bar", 1);
+		await conPlanoDeControl("oraculo-approve", async (m) => {
+			sembrar(m, handy);
+			const antes = m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray();
+			for (const codigo of ["000100", ...Object.values(C)]) {
+				expect(await aprobarSolicitud(m.db, "otro-negocio", codigo, T0)).toEqual({
+					status: 404,
+					cuerpo: { ok: false, error: "pair_code_not_found" },
+				});
+			}
+			expect(m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray()).toEqual(antes);
+			// La de su negocio sí la aprueba.
+			expect((await aprobarSolicitud(m.db, TENANT, C.reclamado, T0)).status).toBe(200);
+		});
+	});
+
+	it("la Handy que lo reclamó, con su firma, sigue enterándose de todo", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("oraculo-legitimo", async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).body.error).toBe("not_approved");
+			await rechazarSolicitud(m.db, TENANT, CODIGO, T0 + MIN);
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).body.error).toBe("pair_rejected");
+
+			const otro = await m.reclamar(a, OTRO_CODIGO, T0);
+			expect((await aprobarSolicitud(m.db, TENANT, OTRO_CODIGO, T0 + MIN)).status).toBe(200);
+			expect((await m.recoger(a, OTRO_CODIGO, otro.body.nonceB64, T0 + MIN)).status).toBe(200);
+			// Recogido el token, el reto está gastado.
+			expect((await m.recoger(a, OTRO_CODIGO, otro.body.nonceB64, T0 + MIN)).body.error).toBe("challenge_used");
 		});
 	});
 });

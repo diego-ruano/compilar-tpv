@@ -170,9 +170,11 @@ export async function aprobarSolicitud(
 	});
 
 	const pr = prRes.rows?.[0] as any | undefined;
-	if (!pr) return fallo(404, "pair_code_not_found");
 
-	if (String(pr.tenant_id || "") !== tenantId) return fallo(401, "wrong_tenant");
+	// AUD-10: un código de otro negocio se contesta igual que uno que no existe, como en
+	// `rechazarSolicitud`. Antes era `wrong_tenant`, y la Main de cualquier negocio sabía así qué
+	// códigos se habían emitido alguna vez.
+	if (!pr || String(pr.tenant_id || "") !== tenantId) return fallo(404, "pair_code_not_found");
 	if (pr.used_at_ms) return fallo(409, "already_used");
 
 	if (Number(pr.expires_at_ms || 0) < now) {

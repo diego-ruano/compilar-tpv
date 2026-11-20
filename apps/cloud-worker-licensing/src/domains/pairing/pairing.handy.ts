@@ -276,18 +276,13 @@ export async function entregarToken(
 	});
 
 	const pr = prRes.rows?.[0] as any | undefined;
-	if (!pr) return fallo(404, "pair_code_not_found");
-	if (pr.used_at_ms) return fallo(409, "already_used");
-	if (Number(pr.expires_at_ms || 0) < now) return fallo(410, "pair_code_expired");
 
-	const status = String(pr.status || "");
-
-	// Rechazada en la Main: la Handy tiene que enterarse en la siguiente consulta, no seguir
-	// esperando una aprobación que no va a llegar.
-	if (status === "rejected") return fallo(409, "pair_rejected");
-	if (status !== "approved") return fallo(409, "not_approved");
-
-	if (String(pr.claimed_by_device_id || "") !== deviceId) return fallo(403, "device_mismatch");
+	// AUD-10: esta ruta es anónima y no tiene freno (la Handy pregunta cada 1,5 s), así que no puede
+	// decir nada de un código a quien no lo ha reclamado. Antes miraba el estado antes que la firma, y
+	// con una prueba inventada contestaba 404 si el código no existía y `not_approved` si estaba vivo
+	// y pendiente: el oráculo para adelantarse a la Handy en el `claim`. Ahora, a quien no es el
+	// reclamante se le contesta como a un código que no existe, y la firma va antes que el estado.
+	if (!pr || String(pr.claimed_by_device_id || "") !== deviceId) return fallo(404, "pair_code_not_found");
 
 	const tenantId = String(pr.tenant_id || "").trim();
 	const pubB64Raw = String(pr.claimed_device_pubkey_b64 || "").trim();
@@ -306,6 +301,16 @@ export async function entregarToken(
 		ahoraMs: now,
 	});
 	if (problema) return fallo(problema.status, problema.error);
+
+	if (pr.used_at_ms) return fallo(409, "already_used");
+	if (Number(pr.expires_at_ms || 0) < now) return fallo(410, "pair_code_expired");
+
+	const status = String(pr.status || "");
+
+	// Rechazada en la Main: la Handy tiene que enterarse en la siguiente consulta, no seguir
+	// esperando una aprobación que no va a llegar.
+	if (status === "rejected") return fallo(409, "pair_rejected");
+	if (status !== "approved") return fallo(409, "not_approved");
 
 	// REV-07: y la firma de arriba prueba que tiene la clave que ACABA DE MANDAR, no la que este
 	// `device_id` tuviera registrada. Sin este corte, el upsert de más abajo pisaba `tenant_id`
@@ -451,9 +456,8 @@ export async function soltarCodigo(
 		args: [pairCode],
 	});
 	const pr = prRes.rows?.[0] as any | undefined;
-	if (!pr) return fallo(404, "pair_code_not_found");
-
-	if (String(pr.claimed_by_device_id || "") !== deviceId) return fallo(403, "device_mismatch");
+	// AUD-10: como en `entregarToken`, quien no es el reclamante no sabe si el código existe.
+	if (!pr || String(pr.claimed_by_device_id || "") !== deviceId) return fallo(404, "pair_code_not_found");
 
 	const problema = await comprobarFirmaDelReclamante(db, {
 		accion: "PAIR_CANCEL",

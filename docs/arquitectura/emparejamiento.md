@@ -63,6 +63,11 @@ revés.
   quien llama (el precio: las Handy de un bar comparten la cuenta). La espera se mira **antes** de leer
   el código, o un intento bloqueado seguiría diciendo si existe. Una petición mal formada no cuenta: la
   rechaza el validador, que va detrás del filtro exterior.
+- **A quien no lo reclamó, un código no existe** (AUD-10). `fetch-token` y `cancel` son anónimas y no
+  tienen freno (la Handy pregunta cada 1,5 s), así que no pueden servir para saber qué códigos viven:
+  si no hay código o el `deviceId` no es el del reclamante, contestan `pair_code_not_found`, y la firma
+  se comprueba **antes** que el estado (pendiente, rechazado, gastado, caducado). `approve` contesta lo
+  mismo a la Main de otro negocio, como `reject`.
 - **El identificador del error es contrato** con la Handy, que no tiene sesión ni dónde mirar: estas
   rutas usan `cuerpoConIdentificador`.
 - **Una ruta anónima nueva** hay que eximirla también en el proxy (`PAIRING_SIN_SESION` en
