@@ -315,7 +315,10 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
   cambie. En la pantalla del PIN inicial se puede elegir otro; se confirma con un código antes de
   guardar el PIN o se salta, y mientras no se confirme manda el de la compra. Cambiarlo después exige un código enviado al
   correo **nuevo** y avisa al anterior y al de la compra; volver al de la compra no pide código.
-- **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con la cuenta atrás en pantalla.
+- **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con la cuenta atrás en pantalla, y **cinco
+  por hora** (`MAX_ENVIOS_POR_VENTANA`), por equipo y propósito. Los dos se deciden en la misma
+  sentencia que guarda el código (`reserveEmailCodeSend`), así que tampoco se los saltan peticiones
+  simultáneas (AUD-42).
 - El **traslado de la licencia** va siempre al correo de la compra ([licencias.md](licencias.md)).
 - RI-60: el correo comercial vive en `Contact_Settings.Contact_Email`; la recuperación usa la base
   central. No hay un segundo campo de recuperación en el esquema del negocio.

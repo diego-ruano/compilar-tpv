@@ -17,7 +17,8 @@
 //     sumarlo después dejaría pasar a la vez a todas las peticiones concurrentes.
 //   · Cinco minutos entre envíos y un tope por hora: el botón no puede ser un cañón contra un buzón.
 //     La espera viaja en la respuesta (`reenvioSegundos`) para que la pantalla cuente atrás, pero
-//     quien la hace cumplir es esto.
+//     quien la hace cumplir es esto. Y como el intento, el envío se RESERVA en una sola sentencia
+//     (AUD-42): leer, decidir y escribir después dejaba pasar a todas las peticiones simultáneas.
 
 import type { Client } from "@libsql/client/web";
 import { recortar } from "../../lib/texto";
@@ -28,10 +29,11 @@ import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
 	consumeEmailCode,
 	getEmailCode,
-	putEmailCode,
 	reserveEmailCodeAttempt,
+	reserveEmailCodeSend,
 	voidEmailCode,
 	type EmailCodeKey,
+	type EmailCodeRow,
 } from "../../server/licenseStore";
 import { generateOtpCode, OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "../licensing/licensing.helpers";
 
@@ -91,42 +93,20 @@ export async function emitirCodigo(
 	const mal = sinSecreto(env);
 	if (mal) return { ok: false, respuesta: mal };
 
-	const previo = await getEmailCode(db, k);
-
-	if (previo && !previo.consumed_at_ms && ahora - previo.created_at_ms < REENVIO_MIN_MS) {
-		const minutos = Math.ceil((REENVIO_MIN_MS - (ahora - previo.created_at_ms)) / 60_000);
-		return {
-			ok: false,
-			respuesta: fallo(
-				429,
-				"espera_reenvio",
-				`Acabamos de enviarte un código. Podrás pedir otro en ${minutos} ${minutos === 1 ? "minuto" : "minutos"}.`,
-			),
-		};
-	}
-
-	const ventanaViva = !!previo && ahora - previo.window_started_ms < VENTANA_ENVIOS_MS;
-	if (previo && ventanaViva && previo.sends_in_window >= MAX_ENVIOS_POR_VENTANA) {
-		return {
-			ok: false,
-			respuesta: fallo(
-				429,
-				"demasiadas_solicitudes",
-				"Se han pedido demasiados códigos. Vuelve a intentarlo dentro de una hora.",
-			),
-		};
-	}
-
+	// AUD-42: la espera y el tope se deciden en la misma sentencia que guarda el código. Si no toca,
+	// no se escribe nada y no se envía; la lectura de después sólo elige qué decirle.
 	const codigo = generateOtpCode();
-	await putEmailCode(db, {
+	const reservado = await reserveEmailCodeSend(db, {
 		...k,
 		subject: sujeto,
 		codeHash: await huella(env, k, sujeto, codigo),
 		expiresAtMs: ahora + OTP_TTL_MS,
 		nowMs: ahora,
-		sendsInWindow: previo && ventanaViva ? previo.sends_in_window + 1 : 1,
-		windowStartedMs: previo && ventanaViva ? previo.window_started_ms : ahora,
+		esperaMs: REENVIO_MIN_MS,
+		ventanaMs: VENTANA_ENVIOS_MS,
+		maxEnvios: MAX_ENVIOS_POR_VENTANA,
 	});
+	if (!reservado) return { ok: false, respuesta: porQueNoSeEnvia(await getEmailCode(db, k), ahora) };
 
 	return {
 		ok: true,
@@ -134,6 +114,23 @@ export async function emitirCodigo(
 		minutos: Math.round(OTP_TTL_MS / 60_000),
 		reenvioSegundos: Math.round(REENVIO_MIN_MS / 1000),
 	};
+}
+
+/** Por qué no toca enviar otro código, con la cuenta atrás si es la espera. */
+function porQueNoSeEnvia(previo: EmailCodeRow | null, ahora: number): RespuestaCodigo {
+	const ventanaViva = !!previo && ahora - previo.window_started_ms < VENTANA_ENVIOS_MS;
+	const enEspera = !!previo && !previo.consumed_at_ms && ahora - previo.created_at_ms < REENVIO_MIN_MS;
+	if (previo && ventanaViva && previo.sends_in_window >= MAX_ENVIOS_POR_VENTANA && !enEspera) {
+		return fallo(429, "demasiadas_solicitudes", "Se han pedido demasiados códigos. Vuelve a intentarlo dentro de una hora.");
+	}
+	// La espera, o lo que haya cambiado entre la reserva y esta lectura: la cuenta atrás entera.
+	const transcurrido = enEspera ? ahora - previo!.created_at_ms : 0;
+	const minutos = Math.max(1, Math.ceil((REENVIO_MIN_MS - transcurrido) / 60_000));
+	return fallo(
+		429,
+		"espera_reenvio",
+		`Acabamos de enviarte un código. Podrás pedir otro en ${minutos} ${minutos === 1 ? "minuto" : "minutos"}.`,
+	);
 }
 
 /**

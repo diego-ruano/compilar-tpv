@@ -269,3 +269,44 @@ describe("correo de recuperación · lo que no se puede", () => {
 		});
 	});
 });
+
+// AUD-42: la espera de cinco minutos y el tope por hora se decidían sobre una lectura y se escribía
+// después, sin condición. Diez peticiones a la vez mandaban diez códigos a diez direcciones.
+describe("correo de recuperación · peticiones a la vez", () => {
+	const aLaVez = (e: Escenario, n: number, ahora: number, prefijo: string) =>
+		Promise.all(
+			Array.from({ length: n }, (_, i) =>
+				solicitarCambioCorreo(e.db, e.env as any, { ...e.ctx({ ahora }), correo: `${prefijo}${i}@victima.test` }),
+			),
+		);
+
+	it("diez a la vez mandan un solo código, y el que vale es el de ese correo", async () => {
+		await escenario(async (e) => {
+			const rs = await aLaVez(e, 10, T0, "v");
+			expect(rs.filter((r) => r.status === 200)).toHaveLength(1);
+			expect(rs.filter((r) => r.status === 429 && r.body.error === "espera_reenvio")).toHaveLength(9);
+			expect(e.correos).toHaveLength(1);
+
+			const c = await confirmarCambioCorreo(e.db, e.env as any, { ...e.ctx({ ahora: T0 + 1_000 }), codigo: e.ultimoCodigo() }, e.diferir);
+			expect(c.status).toBe(200);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(e.correos[0].to);
+			await Promise.all(e.avisos);
+		});
+	});
+
+	it("con el tope de la hora a punto de llenarse, una ráfaga deja pasar una", async () => {
+		await escenario(async (e) => {
+			for (let i = 0; i < 4; i++) {
+				const r = await solicitarCambioCorreo(e.db, e.env as any, { ...e.ctx({ ahora: T0 + i * 5 * MINUTO }), correo: `s${i}@bar.test` });
+				expect(r.status).toBe(200);
+			}
+			const rs = await aLaVez(e, 10, T0 + 4 * 5 * MINUTO, "v");
+			expect(rs.filter((r) => r.status === 200)).toHaveLength(1);
+			expect(e.correos).toHaveLength(5);
+
+			const otra = await solicitarCambioCorreo(e.db, e.env as any, { ...e.ctx({ ahora: T0 + 5 * 5 * MINUTO }), correo: NUEVO });
+			expect(otra.status).toBe(429);
+			expect(otra.body.error).toBe("demasiadas_solicitudes");
+		});
+	});
+});

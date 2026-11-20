@@ -1360,34 +1360,47 @@ export async function getEmailCode(db: Sql, k: EmailCodeKey): Promise<EmailCodeR
 	};
 }
 
-/** Guarda el código (sólo su HMAC). Pedir otro sustituye al anterior y reinicia los intentos. */
-export async function putEmailCode(
+/**
+ * Guarda el código (sólo su HMAC) si toca enviar otro, y lo decide en la MISMA sentencia (AUD-42):
+ * que el anterior esté usado o anulado o tenga ya `esperaMs`, y que la ventana de `ventanaMs` haya
+ * pasado o lleve menos de `maxEnvios`. El contador y la ventana se calculan en SQL sobre la fila que
+ * hay. Leer, decidir y escribir después dejaba pasar a todas las peticiones que leyeran antes de la
+ * primera escritura: diez a la vez mandaban diez códigos. Pedir otro sustituye al anterior y
+ * reinicia los intentos. Devuelve `false` si no toca (y no escribe nada): quien llama no envía.
+ */
+export async function reserveEmailCodeSend(
 	db: Sql,
 	args: EmailCodeKey & {
 		subject: string;
 		codeHash: string;
 		expiresAtMs: number;
 		nowMs: number;
-		sendsInWindow: number;
-		windowStartedMs: number;
+		esperaMs: number;
+		ventanaMs: number;
+		maxEnvios: number;
 	},
-): Promise<void> {
-	await exec(
+): Promise<boolean> {
+	const r = await exec(
 		db,
 		`
     INSERT INTO email_codes (
       tenant_id, device_id, purpose, subject, code_hash, attempts, expires_at_ms, consumed_at_ms,
       created_at_ms, sends_in_window, window_started_ms
-    ) VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, ?)
+    ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, ?7, 1, ?7)
     ON CONFLICT(tenant_id, device_id, purpose) DO UPDATE SET
-      subject=excluded.subject,
-      code_hash=excluded.code_hash,
-      attempts=0,
-      expires_at_ms=excluded.expires_at_ms,
-      consumed_at_ms=NULL,
-      created_at_ms=excluded.created_at_ms,
-      sends_in_window=excluded.sends_in_window,
-      window_started_ms=excluded.window_started_ms;
+      subject = excluded.subject,
+      code_hash = excluded.code_hash,
+      attempts = 0,
+      expires_at_ms = excluded.expires_at_ms,
+      consumed_at_ms = NULL,
+      created_at_ms = excluded.created_at_ms,
+      sends_in_window = CASE WHEN ?7 - email_codes.window_started_ms < ?9
+                             THEN email_codes.sends_in_window + 1 ELSE 1 END,
+      window_started_ms = CASE WHEN ?7 - email_codes.window_started_ms < ?9
+                               THEN email_codes.window_started_ms ELSE ?7 END
+    WHERE (email_codes.consumed_at_ms IS NOT NULL OR ?7 - email_codes.created_at_ms >= ?8)
+      AND (?7 - email_codes.window_started_ms >= ?9 OR email_codes.sends_in_window < ?10)
+    RETURNING sends_in_window;
     `,
 		[
 			args.tenantId,
@@ -1397,10 +1410,12 @@ export async function putEmailCode(
 			args.codeHash,
 			args.expiresAtMs,
 			args.nowMs,
-			args.sendsInWindow,
-			args.windowStartedMs,
+			args.esperaMs,
+			args.ventanaMs,
+			args.maxEnvios,
 		],
 	);
+	return (r.rows?.length ?? 0) > 0;
 }
 
 /**

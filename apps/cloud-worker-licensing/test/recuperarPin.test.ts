@@ -305,6 +305,37 @@ describe("recuperar el PIN · el buzón del titular no es un cañón", () => {
 			expect(otra.status).toBe(200);
 		});
 	});
+
+	// AUD-42: la espera y el tope se decidían sobre una lectura y se escribía después; toda petición que
+	// leyera antes de esa escritura pasaba y mandaba su código.
+	it("diez peticiones a la vez mandan un solo código; las demás esperan", async () => {
+		await escenario(async (e) => {
+			const rs = await Promise.all(Array.from({ length: 10 }, () => solicitarCodigoPin(e.db, e.env, e.ctx())));
+			expect(rs.filter((r) => r.status === 200)).toHaveLength(1);
+			expect(rs.filter((r) => r.status === 429 && r.body.error === "espera_reenvio")).toHaveLength(9);
+			expect(e.correos.map((c) => c.to)).toEqual([CORREO]);
+			expect((await getEmailCode(e.db, CLAVE_PIN))?.sends_in_window).toBe(1);
+			// El que salió es el que vale.
+			expect((await e.verificar(e.ultimoCodigo())).status).toBe(200);
+		});
+	});
+
+	it("una ráfaga con el tope a punto de llenarse deja pasar una, no la ráfaga entera", async () => {
+		await escenario(async (e) => {
+			for (let i = 0; i < MAX_ENVIOS_POR_VENTANA - 1; i++) {
+				expect((await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: T0 + i * REENVIO_MIN_MS }))).status).toBe(200);
+			}
+			const ahora = T0 + (MAX_ENVIOS_POR_VENTANA - 1) * REENVIO_MIN_MS;
+			const rs = await Promise.all(Array.from({ length: 10 }, () => solicitarCodigoPin(e.db, e.env, e.ctx({ ahora }))));
+			expect(rs.filter((r) => r.status === 200)).toHaveLength(1);
+			expect(e.correos).toHaveLength(MAX_ENVIOS_POR_VENTANA);
+			expect((await getEmailCode(e.db, CLAVE_PIN))?.sends_in_window).toBe(MAX_ENVIOS_POR_VENTANA);
+
+			const sexta = await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: ahora + REENVIO_MIN_MS }));
+			expect(sexta.status).toBe(429);
+			expect(sexta.body.error).toBe("demasiadas_solicitudes");
+		});
+	});
 });
 
 describe("recuperar el PIN · aislamiento entre negocios", () => {
