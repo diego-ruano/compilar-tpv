@@ -56,3 +56,23 @@ export function bytesUtf8(texto: string): number {
 	}
 	return bytes;
 }
+
+/**
+ * AUD-36 · Lo más largo que se guarda en un texto libre (unas notas, la nota de una reserva, la
+ * información de un proveedor), en caracteres, después de recortarlo. Una Handy podía guardar megas
+ * en cada uno. El mismo tope y el mismo mensaje en la Main (`tpv_domain::texto::texto_libre`), con
+ * sus casos en `validacion_casos.json`.
+ */
+export const MAX_TEXTO_LIBRE = 4000;
+export const MSG_TEXTO_DEMASIADO_LARGO = "Ese texto es demasiado largo: como mucho 4.000 caracteres.";
+
+/**
+ * ¿Cabe en un texto libre? Lo que no es un texto lo decide quien lo valida. Cuenta caracteres
+ * (puntos de código, como `chars().count()` en Rust) y deja de contar en cuanto se pasa.
+ */
+export function cabeEnTextoLibre(valor: unknown): boolean {
+	if (typeof valor !== "string") return true;
+	let n = 0;
+	for (const _ of recortar(valor)) if (++n > MAX_TEXTO_LIBRE) return false;
+	return true;
+}

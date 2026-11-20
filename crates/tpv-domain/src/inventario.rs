@@ -319,7 +319,8 @@ impl LoteNuevo {
             fecha_entrada,
             coste_unitario,
             id_proveedor,
-            notas: limpia(notas),
+            // AUD-36: con un máximo, como en el worker.
+            notas: crate::texto::texto_libre(notas)?,
         })
     }
 }

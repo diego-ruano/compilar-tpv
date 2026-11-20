@@ -196,6 +196,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	forbidden_not_main: SOLO_EN_LA_MAIN,
 	forbidden_not_tpv: SOLO_EN_LA_MAIN,
 	too_many_attempts: "Demasiados intentos fallidos. Espera un poco antes de volver a intentarlo.",
+	// AUD-36: lo que puede escribir el negocio en la nube en una hora (`tenantHub.presupuesto.ts`).
+	presupuesto_agotado: "Este negocio ha guardado demasiados cambios en la nube en la última hora. Vuelve a intentarlo dentro de un rato.",
 	pair_rejected: "El TPV principal ha rechazado la vinculación. Si es un error, genera un código nuevo en el TPV principal.",
 
 	// Autorización del dispositivo
@@ -453,6 +455,9 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"line_items_paginados",
 	"malformed_signature",
 	"missing_apply_fields",
+	// AUD-36: veredictos del lote de la Main; viajan en su acuse y no los ve nadie.
+	"sentencia_no_admitida",
+	"operacion_demasiado_grande",
 	"missing_challenge",
 	"missing_client_now",
 	"missing_command_name",

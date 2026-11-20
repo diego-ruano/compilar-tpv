@@ -103,7 +103,8 @@ impl PedidoProveedorNuevo {
             id_pedido: id,
             id_proveedor: limpia(id_proveedor),
             email_destino: limpia(email_destino),
-            notas: limpia(notas),
+            // AUD-36: con un máximo, como en el worker.
+            notas: crate::texto::texto_libre(notas)?,
         })
     }
 }

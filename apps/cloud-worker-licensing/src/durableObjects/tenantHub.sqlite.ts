@@ -24,6 +24,7 @@ import type { Client, ResultSet } from "@libsql/client/web";
 import { MIGRATIONS, normalize, sha256Hex } from "../server/tenantMigrations";
 import { HubError } from "../lib/errorHttp";
 import type { Guarda } from "./tenantHub.types";
+import { operacionDemasiadoGrande, type TopeDeOperacion } from "./tenantHub.presupuesto";
 
 /**
  * Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. En un
@@ -37,6 +38,8 @@ export type FilasEnBruto = {
 	rows: unknown[][];
 	rowsAffected: number;
 	lastInsertRowid: number | null;
+	/** AUD-36: las filas que ha escrito la sentencia, con las de sus índices y triggers (`rowsWritten`). */
+	filasEscritas?: number;
 };
 
 const VACIO: FilasEnBruto = { columns: [], rows: [], rowsAffected: 0, lastInsertRowid: null };
@@ -88,7 +91,7 @@ export function ejecutarEnBruto(sql: SqlStorage, s: Sentencia): FilasEnBruto {
 		rowsAffected = Number(r.c);
 		if (verbo === "INSERT" || verbo === "REPLACE" || verbo === "WITH") lastInsertRowid = Number(r.r);
 	}
-	return { columns, rows, rowsAffected, lastInsertRowid };
+	return { columns, rows, rowsAffected, lastInsertRowid, filasEscritas: cursor.rowsWritten };
 }
 
 function esFkRota(e: unknown): boolean {
@@ -121,18 +124,30 @@ function esFkRota(e: unknown): boolean {
 export function loteEnBruto(
 	storage: DurableObjectStorage,
 	sentencias: Sentencia[],
-	opciones: { alAplazar?: () => boolean } = {},
+	opciones: { alAplazar?: () => boolean; tope?: TopeDeOperacion } = {},
 ): FilasEnBruto[] {
 	const sql = storage.sql;
+	const { tope } = opciones;
 	const pideAplazar = sentencias.some((s) => APLAZAR_FK.test(partes(s).texto));
 
 	const correr = (aplazar: boolean): FilasEnBruto[] =>
 		storage.transactionSync(() => {
 			if (aplazar) sql.exec("PRAGMA defer_foreign_keys = ON;");
+			// AUD-36: lo que lleva escrito este intento, para pararlo en cuanto se pasa de su tope.
+			const tamanoAntes = tope ? sql.databaseSize : 0;
+			let filasDelIntento = 0;
 			try {
 				const salida = sentencias.map((s) => {
 					if (APLAZAR_FK.test(partes(s).texto)) return VACIO;
 					const filas = ejecutarEnBruto(sql, s);
+					if (tope) {
+						const escritas = filas.filasEscritas ?? 0;
+						filasDelIntento += escritas;
+						tope.medida.filas += escritas;
+						if (filasDelIntento > tope.filas || sql.databaseSize - tamanoAntes > tope.bytes) {
+							throw operacionDemasiadoGrande();
+						}
+					}
 					if (typeof s !== "string" && s.guarda) exigirGuarda(s.guarda, filas);
 					return filas;
 				});

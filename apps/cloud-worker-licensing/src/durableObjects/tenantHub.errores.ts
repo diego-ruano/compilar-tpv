@@ -68,6 +68,10 @@ const CODIGOS_PERMANENTES: ReadonlySet<string> = new Set([
 	"missing_ref",
 	"bad_ref_value",
 	"value_step_no_evaluable_en_batch",
+	// AUD-36: lo que la Main no puede haber escrito (`tenantHub.replicable.ts`), y una operación que
+	// escribe más de lo que cabe en una (`tenantHub.presupuesto.ts`). La misma operación dará lo mismo.
+	"sentencia_no_admitida",
+	"operacion_demasiado_grande",
 ]);
 
 /**
@@ -87,6 +91,9 @@ const CODIGOS_PASAJEROS: ReadonlySet<string> = new Set([
 	"not_authenticated",
 	// Su `Op_Id` chocó y la fila aún no se deja leer: la siguiente vuelta la encuentra.
 	"idempotency_operation_processing",
+	// AUD-36: el negocio ha gastado lo que puede escribir en esta hora (`tenantHub.presupuesto.ts`).
+	// La operación es buena y entra en la hora siguiente.
+	"presupuesto_agotado",
 ]);
 
 /**

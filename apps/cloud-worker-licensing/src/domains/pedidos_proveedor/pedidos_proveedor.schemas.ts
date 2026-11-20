@@ -7,7 +7,7 @@
 import * as z from "zod";
 
 import { zDineroNoNegativoCon } from "../../lib/dinero";
-import { recortar } from "../../lib/texto";
+import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	PedidosActualizarInput,
@@ -50,7 +50,8 @@ export const pedidoCrearSchema = z.object({
 	id_pedido: z.string().overwrite(recortar).min(1, MSG_FALTA_EL_PEDIDO),
 	id_proveedor: optStr,
 	email_destino: optStr,
-	notas: optStr,
+	// AUD-36: con un máximo, como en la Main.
+	notas: optStr.refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO),
 	lineas: z.array(lineaSchema).max(MAX_LINEAS, MSG_DEMASIADAS_LINEAS),
 });
 

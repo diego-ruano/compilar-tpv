@@ -338,6 +338,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   espacio. El `.trim()` de JavaScript quita además U+FEFF y deja U+0085, y un texto valía en un lado y
   no en el otro (VALID-01). `test/recortarComoLaMain.test.ts` lo vigila en todos los ficheros de los
   dominios del negocio.
+- **Un texto libre tiene un máximo** (AUD-36): las notas de un cliente, de un lote y de un pedido, la
+  nota de una reserva y la información de un proveedor, como mucho 4.000 caracteres ya recortados
+  (`cabeEnTextoLibre`, `lib/texto.ts`; en la Main, `tpv_domain::texto::texto_libre`), con sus casos en
+  `validacion_casos.json`. Lo que escribe el negocio entero en una hora tiene además su presupuesto
+  en el TenantHub ([sincronizacion.md](sincronizacion.md#el-lote-en-el-tenanthub-aplicarlote)): agotado,
+  una escritura de la Handy contesta `presupuesto_agotado` (429).
 - **Lo que llega antes de saber quién llama no pasa por nada que cueste más que recorrerlo**
   (AUD-33). Este motor de expresiones regulares retrocede: una repetición anclada al final que puede
   empezar en cada posición de un tramo (`"+$`, `\s+$`) lo recorre entero desde cada una, y tarda el

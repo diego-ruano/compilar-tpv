@@ -52,6 +52,14 @@ import {
 } from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
 import { esBaseLlena, esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
+import { exigirOperacionDeLaMain } from "./tenantHub.replicable";
+import {
+	apuntarGasto,
+	presupuestoAgotado,
+	presupuestoAgotadoError,
+	topeDeUnaOperacion,
+	type TopeDeOperacion,
+} from "./tenantHub.presupuesto";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
@@ -903,10 +911,23 @@ export class MotorTenantHub {
 			// última, se mira la tabla, y de ahí a aplicar la escritura no hay ninguna más.
 			await this.comprobarMain();
 			exigirQueSePuedaEscribir();
+			// AUD-36: el presupuesto de escritura del negocio en esta hora, el mismo que gasta la Main.
+			const ahora = nowMs();
+			if (presupuestoAgotado(this.state.storage, ahora)) {
+				this.avisarUnaVez("presupuesto_agotado", presupuestoAgotadoError(), "sync.presupuesto");
+				throw presupuestoAgotadoError();
+			}
+			const tamanoAntes = this.state.storage.sql.databaseSize;
 
 			let batchResults: any[];
 			try {
 				batchResults = await db.batch(batchStmts as any, "write");
+				apuntarGasto(
+					this.state.storage,
+					ahora,
+					batchResults.reduce((n: number, r: any) => n + Number(r?.rowsAffected ?? 0), 0),
+					this.state.storage.sql.databaseSize - tamanoAntes,
+				);
 			} catch (e: any) {
 				if (isUniqueOpIdViolation(e)) {
 					// Reintento idempotente: la op ya estaba aplicada. Recuperamos result + seq.
@@ -1058,6 +1079,8 @@ export class MotorTenantHub {
 		const preparadas = await Promise.all(
 			ops.map(async (o): Promise<LotePreparado | { fallo: unknown }> => {
 				try {
+					// AUD-36: sólo lo que puede haber escrito la Main (`tenantHub.replicable.ts`).
+					exigirOperacionDeLaMain(o.cmd);
 					const escritura: EscrituraPreparada = {
 						opId: o.opId,
 						commandName: o.commandName,
@@ -1112,10 +1135,22 @@ export class MotorTenantHub {
 			}
 			bytes += tamano;
 
+			// AUD-36: el presupuesto de escritura del negocio en esta hora. Agotado, ni ésta ni las de
+			// detrás: la Main las conserva y las vuelve a mandar (`transitorio`), y sigue cobrando.
+			const ahora = nowMs();
+			if (presupuestoAgotado(this.state.storage, ahora)) {
+				parado = true;
+				resultados.push({ opId: o.opId, ok: false, error: "presupuesto_agotado", permanente: false, transitorio: true });
+				this.avisarUnaVez("presupuesto_agotado", presupuestoAgotadoError(), "sync.presupuesto");
+				return;
+			}
+			const tope = topeDeUnaOperacion();
+			const tamanoAntes = this.state.storage.sql.databaseSize;
+
 			const preparada = preparadas[i];
 			try {
 				if ("fallo" in preparada) throw preparada.fallo;
-				const { seq, yaEstaba } = this.aplicarPreparada(preparada, () => aplazadas++ < LOTE_MAX_APLAZADAS);
+				const { seq, yaEstaba } = this.aplicarPreparada(preparada, () => aplazadas++ < LOTE_MAX_APLAZADAS, tope);
 				resultados.push(yaEstaba ? { opId: o.opId, ok: true, seq, yaEstaba } : { opId: o.opId, ok: true, seq });
 			} catch (e: any) {
 				// No cabía aplazar otra más en este turno: ni ésta ni las de detrás se han tocado.
@@ -1141,6 +1176,11 @@ export class MotorTenantHub {
 				// El outbox de la Main está ordenado y sus operaciones se apoyan unas en otras: sólo
 				// se salta lo que no va a entrar nunca.
 				if (!permanente) parado = true;
+			} finally {
+				// AUD-36: lo escrito, también lo de un intento que se deshizo; lo que ha crecido, sólo
+				// lo confirmado.
+				const crecido = this.state.storage.sql.databaseSize - tamanoAntes;
+				apuntarGasto(this.state.storage, ahora, tope.medida.filas, crecido);
 			}
 		});
 		return resultados;
@@ -1153,10 +1193,11 @@ export class MotorTenantHub {
 	private aplicarPreparada(
 		{ escritura, lote }: LotePreparado,
 		alAplazar: () => boolean,
+		tope?: TopeDeOperacion,
 	): { seq: number; yaEstaba?: true } {
 		let filas: FilasEnBruto[];
 		try {
-			filas = this.loteLocal(lote.stmts, alAplazar);
+			filas = this.loteLocal(lote.stmts, alAplazar, tope);
 		} catch (e) {
 			if (!isUniqueOpIdViolation(e)) throw e;
 			const previa = this.aplicadaAntes(escritura);
@@ -1181,8 +1222,8 @@ export class MotorTenantHub {
 	 * El lote atómico de una operación contra la base de este DO, en el acto y sin esperas. Método, y
 	 * no una llamada directa, para que un test le ponga delante el fallo que quiera.
 	 */
-	private loteLocal(sentencias: SentenciaDelLote[], alAplazar: () => boolean): FilasEnBruto[] {
-		return loteEnBruto(this.state.storage, sentencias, { alAplazar });
+	private loteLocal(sentencias: SentenciaDelLote[], alAplazar: () => boolean, tope?: TopeDeOperacion): FilasEnBruto[] {
+		return loteEnBruto(this.state.storage, sentencias, { alAplazar, tope });
 	}
 
 	/**

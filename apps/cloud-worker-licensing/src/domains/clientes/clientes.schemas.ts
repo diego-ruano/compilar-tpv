@@ -2,7 +2,7 @@
 
 import * as z from "zod";
 
-import { recortar } from "../../lib/texto";
+import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateClienteInput as ContractCreateClienteInput,
@@ -35,6 +35,9 @@ const optEmail = z
 	})
 	.refine((v) => v === null || isValidEmail(v), { message: "El correo no es válido." });
 
+// AUD-36: con un máximo, como en la Main.
+const notas = optStr.refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO);
+
 export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
 	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
@@ -42,14 +45,14 @@ export const createClienteSchema = z.object({
 	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del cliente."),
 	email: optEmail,
 	telefono: optStr,
-	notas: optStr,
+	notas: notas,
 });
 
 export const updateClienteSchema = z.object({
 	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del cliente."),
 	email: optEmail,
 	telefono: optStr,
-	notas: optStr,
+	notas: notas,
 });
 
 type NullableClienteFields = "email" | "telefono" | "notas";

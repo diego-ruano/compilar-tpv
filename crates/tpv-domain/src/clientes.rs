@@ -83,7 +83,8 @@ impl NuevoCliente {
             nombre,
             email: normaliza_email(email)?,
             telefono: limpia_opcional(telefono),
-            notas: limpia_opcional(notas),
+            // AUD-36: con un máximo, como en el worker.
+            notas: crate::texto::texto_libre(notas)?,
         })
     }
 }
@@ -110,7 +111,8 @@ impl Cliente {
             nombre,
             email: normaliza_email(email)?,
             telefono: limpia_opcional(telefono),
-            notas: limpia_opcional(notas),
+            // AUD-36: con un máximo, como en el worker.
+            notas: crate::texto::texto_libre(notas)?,
         })
     }
 }

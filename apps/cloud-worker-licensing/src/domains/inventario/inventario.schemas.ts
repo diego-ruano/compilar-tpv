@@ -11,7 +11,7 @@ import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
 import { zIva } from "../../lib/iva";
 import { esImagenGuardable, MSG_IMAGEN_NO_VALIDA } from "../images/rutaDeImagen";
 
-import { recortar } from "../../lib/texto";
+import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	GuardarCategoriaIngredienteInput as ContractGuardarCategoriaIngredienteInput,
@@ -122,6 +122,9 @@ function fechasDeLote(
 // RI-28: contexto del adaptador Rust; la sesión personal del Worker está aplazada.
 export const autorStockSchema = z.string().overwrite(recortar).min(1);
 
+// AUD-36: las notas de un lote, con un máximo, como en la Main.
+const notasDeLote = optStr.refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO);
+
 // Los campos del DTO, sin las reglas entre campos: es lo que compara el drift-guard de abajo.
 const createLoteCampos = z.object({
 	id_lote: optId,
@@ -132,7 +135,7 @@ const createLoteCampos = z.object({
 	fecha_entrada: optStr,
 	coste_unitario: costeOpcional,
 	id_proveedor: idStr.nullish(),
-	notas: optStr,
+	notas: notasDeLote,
 });
 
 // El cuerpo entero de la ruta, autor incluido: un schema con reglas entre campos ya no se puede
@@ -149,7 +152,7 @@ const updateLoteCampos = z.object({
 	fecha_entrada: optStr,
 	coste_unitario: costeOpcional,
 	id_proveedor: idStr.nullish(),
-	notas: optStr,
+	notas: notasDeLote,
 });
 
 export const updateLoteSchema = updateLoteCampos.superRefine(fechasDeLote);

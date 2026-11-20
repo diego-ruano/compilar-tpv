@@ -3,7 +3,7 @@
 import * as z from "zod";
 
 import { normalizarDia, zDia } from "../../lib/fechas";
-import { recortar } from "../../lib/texto";
+import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ReservaBuscarClienteArgs,
@@ -97,7 +97,8 @@ export const reservaSaveSchema = z
 			.optional()
 			.nullable(),
 		forzar_solape: z.boolean().optional().nullable(),
-		nota: z.any().optional().nullable(),
+		// AUD-36: con un máximo, como en la Main.
+		nota: z.any().refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO).optional().nullable(),
 		// El estado no viaja (como en la Main): una nueva nace PROXIMA y una que se edita conserva el
 		// suyo. Una clave `estado` se descarta sin más.
 		id_mesa: z.any().optional().nullable(),

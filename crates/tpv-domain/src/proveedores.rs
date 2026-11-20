@@ -57,7 +57,8 @@ impl ProveedorValidado {
             telefono: limpia(telefono),
             email: limpia(email),
             cif: limpia(cif),
-            informacion_adicional: limpia(informacion_adicional),
+            // AUD-36: con un máximo, como en el worker.
+            informacion_adicional: crate::texto::texto_libre(informacion_adicional)?,
             nombre_imagen: limpia(nombre_imagen),
             ruta_imagen,
         })

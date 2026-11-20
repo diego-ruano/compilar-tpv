@@ -303,7 +303,8 @@ const MAX_BYTES_DE_SQL_EN_LA_NUBE: usize = 100_000;
 fn no_cabe_en_la_nube(sql: &str, parametros: usize) -> Option<String> {
     if parametros > MAX_PARAMETROS_EN_LA_NUBE {
         return Some(format!(
-            "{parametros} parámetros (la nube admite {MAX_PARAMETROS_EN_LA_NUBE} por sentencia)"
+            "{parametros} parámetros (la nube admite {MAX_PARAMETROS_EN_LA_NUBE} por sentencia; una \
+             lista de tamaño variable va en un solo parámetro JSON, `consultas::lista_json`)"
         ));
     }
     if sql.len() > MAX_BYTES_DE_SQL_EN_LA_NUBE {
@@ -312,7 +313,143 @@ fn no_cabe_en_la_nube(sql: &str, parametros: usize) -> Option<String> {
             sql.len()
         ));
     }
-    None
+    // AUD-36: y lo que el TenantHub no deja entrar por su forma.
+    no_la_admite_la_nube(sql).map(|motivo| format!("una sentencia que la nube no admite ({motivo})"))
+}
+
+/// AUD-36 · Por qué el TenantHub rechazaría esta sentencia por su forma, o `None` si la admite: una
+/// escritura (`INSERT`, `UPDATE`, `DELETE`, `REPLACE`), una sola, sobre una tabla del negocio, sin
+/// CTE recursivas, `zeroblob` ni `randomblob`. Lo mismo que `tenantHub.replicable.ts`, con los
+/// mismos casos (`replicable_casos.json`).
+///
+/// Lo que sube la Main es SQL crudo, y la nube no ejecuta otra cosa: un `CREATE TABLE`, una CTE
+/// recursiva que genera millones de filas o una escritura en las tablas del propio objeto
+/// (`Sync_Changes`, `_Main_Vigente`) no las manda nunca una Main de verdad. Si alguien escribiera
+/// aquí una sentencia así, la nube la apartaría; esto hace que reviente en los tests.
+fn no_la_admite_la_nube(sql: &str) -> Option<&'static str> {
+    enum Pieza {
+        Palabra(String),
+        Nombre(String),
+        Simbolo(char),
+    }
+    let c: Vec<char> = sql.chars().collect();
+    let n = c.len();
+    let mut piezas = Vec::new();
+    let (mut i, mut cerrada) = (0, false);
+    while i < n {
+        let ch = c[i];
+        // El espacio de SQLite: el mismo que en el TenantHub.
+        if ch.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if ch == '-' && c.get(i + 1) == Some(&'-') {
+            i = (i..n).find(|&j| c[j] == '\n').map_or(n, |j| j + 1);
+            continue;
+        }
+        if ch == '/' && c.get(i + 1) == Some(&'*') {
+            i = (i + 2..n.saturating_sub(1)).find(|&j| c[j] == '*' && c[j + 1] == '/').map_or(n, |j| j + 2);
+            continue;
+        }
+        if cerrada {
+            return Some("varias_sentencias");
+        }
+        if ch == ';' {
+            cerrada = true;
+            i += 1;
+            continue;
+        }
+        if matches!(ch, '\'' | '"' | '`' | '[') {
+            let cierre = if ch == '[' { ']' } else { ch };
+            let (mut j, mut texto) = (i + 1, String::new());
+            while j < n {
+                if c[j] == cierre {
+                    // Una comilla doblada es una comilla dentro (no en los corchetes).
+                    if cierre != ']' && c.get(j + 1) == Some(&cierre) {
+                        texto.push(cierre);
+                        j += 2;
+                        continue;
+                    }
+                    break;
+                }
+                texto.push(c[j]);
+                j += 1;
+            }
+            if ch != '\'' {
+                piezas.push(Pieza::Nombre(texto));
+            }
+            i = j + 1;
+            continue;
+        }
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let inicio = i;
+            i += 1;
+            while i < n && (c[i].is_ascii_alphanumeric() || c[i] == '_' || c[i] == '$') {
+                i += 1;
+            }
+            piezas.push(Pieza::Palabra(c[inicio..i].iter().collect()));
+            continue;
+        }
+        piezas.push(Pieza::Simbolo(ch));
+        i += 1;
+    }
+
+    let es = |p: Option<&Pieza>, cuales: &[&str]| {
+        matches!(p, Some(Pieza::Palabra(w)) if cuales.iter().any(|c| w.eq_ignore_ascii_case(c)))
+    };
+    if !es(piezas.first(), &["INSERT", "UPDATE", "DELETE", "REPLACE"]) {
+        return Some("no_es_escritura");
+    }
+    if piezas.iter().any(|p| es(Some(p), &["RECURSIVE", "ZEROBLOB", "RANDOMBLOB"])) {
+        return Some("construccion_no_admitida");
+    }
+
+    // La tabla en la que escribe: lo que va tras `INTO`, `UPDATE [OR …]` o `FROM`.
+    let tabla = (|| {
+        let verbo = match &piezas[0] {
+            Pieza::Palabra(w) => w.to_ascii_uppercase(),
+            _ => return None,
+        };
+        let mut i = 1;
+        if matches!(verbo.as_str(), "INSERT" | "UPDATE") && es(piezas.get(i), &["OR"]) {
+            i += 2;
+        }
+        let exige = match verbo.as_str() {
+            "INSERT" | "REPLACE" => Some("INTO"),
+            "DELETE" => Some("FROM"),
+            _ => None,
+        };
+        if let Some(palabra) = exige {
+            if !es(piezas.get(i), &[palabra]) {
+                return None;
+            }
+            i += 1;
+        }
+        let nombre = |p: Option<&Pieza>| match p {
+            Some(Pieza::Palabra(w) | Pieza::Nombre(w)) => Some(w.clone()),
+            _ => None,
+        };
+        let primero = nombre(piezas.get(i))?;
+        if matches!(piezas.get(i + 1), Some(Pieza::Simbolo('.'))) {
+            // `esquema.tabla`: sólo el esquema del negocio.
+            if !primero.eq_ignore_ascii_case("main") {
+                return None;
+            }
+            return nombre(piezas.get(i + 2));
+        }
+        Some(primero)
+    })();
+    match tabla {
+        Some(t)
+            if !t.starts_with('_')
+                && !t.to_ascii_lowercase().starts_with("sqlite_")
+                && !t.eq_ignore_ascii_case("Applied_Operations")
+                && !t.eq_ignore_ascii_case("Sync_Changes") =>
+        {
+            None
+        }
+        _ => Some("tabla_no_replicable"),
+    }
 }
 
 /// De qué sentencia se habla, sin sus datos: el verbo y la tabla. Se corta en el primer paréntesis,
@@ -612,10 +749,7 @@ impl<'a> WriteGuard<'a> {
             // del cliente queda anotado, y la operación acabará apartada y reparada por estado.
             let sentencia = cabeza_de_la_sentencia(&sql);
             #[cfg(debug_assertions)]
-            panic!(
-                "SQL replicable que la nube rechazaría: {motivo}. Una lista de tamaño variable va en \
-                 un solo parámetro JSON (`consultas::lista_json`). Sentencia: {sentencia}"
-            );
+            panic!("SQL replicable que la nube rechazaría: {motivo}. Sentencia: {sentencia}");
             #[cfg(not(debug_assertions))]
             tracing::error!(
                 target: "tpv::sync",
@@ -1476,6 +1610,42 @@ mod tests {
         assert_eq!(no_cabe_en_la_nube(&justo, 0), None, "100 KB justos entran");
         let motivo = no_cabe_en_la_nube(&format!("{justo} "), 0).expect("un byte más, no");
         assert!(motivo.starts_with("100001 bytes"), "{motivo}");
+    }
+
+    // ── AUD-36: lo que el TenantHub deja entrar por su forma ───────────────────────────────────
+
+    /// Los mismos casos que `test/replicableComoLaMain.test.ts` en el worker: si los dos lados no
+    /// dijeran lo mismo, una escritura legítima de la Main acabaría apartada en el equipo del cliente.
+    #[test]
+    fn la_forma_replicable_cuadra_con_la_del_tenant_hub() {
+        let tabla: serde_json::Value = serde_json::from_str(include_str!("replicable_casos.json")).unwrap();
+        let casos = tabla["casos"].as_array().unwrap();
+        assert!(casos.len() > 20);
+        for caso in casos {
+            let sql = caso["sql"].as_str().unwrap();
+            assert_eq!(no_la_admite_la_nube(sql), caso["motivo"].as_str(), "{}: {sql}", caso["nombre"]);
+        }
+        // Y el aviso de DO-01 lo dice, como cualquier sentencia que la nube no admite.
+        assert!(no_cabe_en_la_nube("CREATE TABLE Relleno (x BLOB);", 0).is_some());
+    }
+
+    /// AUD-36: una escritura capturada que la nube no admitiría revienta en desarrollo, como DO-01;
+    /// en el cliente entra (nunca impide la venta) y la nube la apartará.
+    #[tokio::test]
+    async fn una_escritura_en_una_tabla_del_equipo_revienta_al_capturarla_en_desarrollo() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let resultado = tokio::spawn(async move {
+            let w = db.write().await;
+            w.execute("DELETE FROM _Sync_Outbox WHERE 1 = 0;", ()).await
+        })
+        .await;
+        if cfg!(debug_assertions) {
+            let fallo = resultado.expect_err("en desarrollo tiene que reventar");
+            let texto = fallo.into_panic().downcast::<String>().map(|s| *s).unwrap_or_default();
+            assert!(texto.contains("la nube no admite (tabla_no_replicable)"), "{texto}");
+        } else {
+            resultado.expect("en el cliente no revienta").expect("y la escritura entra");
+        }
     }
 
     #[test]

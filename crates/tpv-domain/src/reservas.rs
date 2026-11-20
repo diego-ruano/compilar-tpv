@@ -280,7 +280,8 @@ impl ReservaValidada {
             turno,
             comensales,
             duracion_min,
-            nota: limpia(nota),
+            // AUD-36: con un máximo, como en el worker.
+            nota: crate::texto::texto_libre(nota)?,
             cliente,
             visto: None,
         })

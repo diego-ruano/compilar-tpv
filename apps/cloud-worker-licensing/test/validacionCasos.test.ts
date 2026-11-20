@@ -24,6 +24,7 @@ import {
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
 import { proveedorSaveSchema } from "../src/domains/proveedores/proveedores.schemas";
+import { createClienteSchema, updateClienteSchema } from "../src/domains/clientes/clientes.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import { validarConMensaje } from "../src/lib/validacion";
 import {
@@ -108,6 +109,13 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	// AUD-31: la imagen de una categoría y la de un proveedor.
 	categoria: (e) => validarConMensaje(upsertCategoriaSchema, e),
 	proveedor: (e) => validarConMensaje(proveedorSaveSchema, e),
+	// AUD-36: las notas de un cliente; el alta y la edición tienen que decir lo mismo.
+	cliente: async (e) => {
+		const alta: Resultado = await validarConMensaje(createClienteSchema, e);
+		const edicion: Resultado = await validarConMensaje(updateClienteSchema, e);
+		expect({ success: edicion.success, mensaje: edicion.mensaje }).toEqual({ success: alta.success, mensaje: alta.mensaje });
+		return alta;
+	},
 	negocio: async (e) => {
 		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
 		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;

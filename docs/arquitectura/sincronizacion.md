@@ -405,8 +405,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     el que empieza el mensaje de un `Error` (`missing_ref:total`). Es permanente lo que dice que la
     operación está mal escrita (`hora_no_determinista`, `missing_client_now`, sin identidad, el mismo
     `Op_Id` con otro contenido, o que no se deja montar: sin pasos, sin SQL, con una referencia a un
-    paso que no está) y pasajero lo que habla de cómo está la nube y no de la operación (sin base, el
-    esquema del negocio sin cuadrar, sin Main, la sesión que ya no es la de la Main). Lo que un
+    paso que no está, o que no es lo que manda una Main o escribe más de lo que cabe en una,
+    `sentencia_no_admitida` y `operacion_demasiado_grande`, AUD-36) y pasajero lo que habla de cómo
+    está la nube y no de la operación (sin base, el esquema del negocio sin cuadrar, sin Main, la
+    sesión que ya no es la de la Main, el presupuesto de la hora gastado). Lo que un
     fallo nuestro lleva detrás de su identificador es un trozo de la operación (el SQL de un paso),
     y no se lee como una frase del runtime.
   - **Después, si el mensaje es de SQLite, por su código.** El SQLite del DO cierra sus mensajes
@@ -447,6 +449,27 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   de entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su
   hash, sus sentencias): lo que falla ahí es el veredicto de esa operación, como un rechazo
   permanente.
+- **Sólo entra lo que puede haber escrito la Main** (AUD-36, `tenantHub.replicable.ts`): una
+  transacción de pasos `execute`, y cada uno una escritura (`INSERT`, `UPDATE`, `DELETE`,
+  `REPLACE`), una sola sentencia, sobre una tabla del negocio (ni `Applied_Operations`, ni
+  `Sync_Changes`, ni las que empiezan por `_`, como `_Main_Vigente`), sin CTE recursivas, `zeroblob`
+  ni `randomblob`. Es lo que captura `WriteGuard` (`is_write_sql`) y nada del SQL del negocio usa
+  lo demás. Lo otro es `sentencia_no_admitida`, permanente. La Main vigila lo mismo al capturar
+  (`db.rs::no_la_admite_la_nube`, con el aviso de DO-01: revienta en desarrollo y se anota en el
+  cliente, nunca bloquea una venta), y los dos lados leen los mismos casos
+  (`crates/tpv-infra-sqlite/src/replicable_casos.json`): una escritura legítima no puede acabar
+  apartada por esto sin que antes revienten los tests de la Main.
+- **Lo que escribe una operación tiene tope, y el negocio, presupuesto por hora** (AUD-36,
+  `tenantHub.presupuesto.ts`). Una operación de la Main que escribe más de 100.000 filas (con las de
+  sus índices y triggers) o hace crecer la base más de 32 MiB se deshace entera, sentencia a
+  sentencia dentro de su transacción (`loteEnBruto`), y es `operacion_demasiado_grande`, permanente.
+  Lo que escriben en una hora la Main y sus Handy, juntas, va a `_Presupuesto_Escritura` (una fila en
+  el SQL del DO): con 500.000 filas o 256 MiB gastados, la operación de la Main sale
+  `presupuesto_agotado` y `transitorio` (la conserva, la reenvía y sigue cobrando) y la escritura de
+  una Handy contesta 429; se avisa una vez por instancia (Sentry y `presupuesto_agotado` en Axiom).
+  Cuentan también las filas de un intento que se deshizo. El outbox de un servicio real (300
+  operaciones) escribe 2.579 filas y la que más, 106 (`test/presupuestoDeEscritura.test.ts`); una
+  reparación por estado son 500 sentencias de una fila.
 - **En el turno del log, la única espera es la comprobación por actividad** (AUD-02, si toca: hasta
   5 s, y lo que va detrás en el turno espera con ella). Después ya no hay ninguna: se vuelve a mirar
   que la sesión siga siendo la de la Main y se aplican en orden. **Cada operación es una

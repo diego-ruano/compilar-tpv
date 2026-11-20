@@ -131,6 +131,18 @@ fn negocio(e: &Value) -> Result<Value, String> {
     Ok(json!({ "iva_percent": iva, "reserva_no_vino_min": no_vino }))
 }
 
+/// AUD-36 · La ficha de un cliente (sus notas): el alta y la edición tienen que decir lo mismo.
+fn cliente(e: &Value) -> Result<Value, String> {
+    let campos = || (texto(e, "nombre"), texto_opcional(e, "email"), texto_opcional(e, "telefono"), texto_opcional(e, "notas"));
+    let (nombre, email, telefono, notas) = campos();
+    let alta = crate::clientes::NuevoCliente::validar(None, nombre, email, telefono, notas);
+    let (nombre, email, telefono, notas) = campos();
+    let edicion = crate::clientes::Cliente::validar_edicion("c1".into(), nombre, email, telefono, notas);
+    assert_eq!(alta.as_ref().err(), edicion.as_ref().err(), "el alta y la edición de un cliente dicen lo mismo");
+    let c = alta?;
+    Ok(json!({ "nombre": c.nombre, "notas": c.notas }))
+}
+
 /// AUD-31 · Una categoría de productos (su imagen).
 fn categoria(e: &Value) -> Result<Value, String> {
     let c = CategoriaUpsert::validar(
@@ -321,6 +333,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "trabajador" => trabajador(entrada),
         "categoria" => categoria(entrada),
         "proveedor" => proveedor(entrada),
+        "cliente" => cliente(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }
