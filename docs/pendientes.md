@@ -16,7 +16,8 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
-| [OPS-02](#ops-02--soporte-sin-diagnóstico) | 🟡 | Sin paquete de diagnóstico exportable para soporte | Sin empezar |
+| [RW-ALTAS](#rw-altas--el-tope-de-altas-web-y-de-correos-de-un-negocio-se-agota-con-altas-falsas) | 🟡 | Altas web falsas que no se anulan agotan el tope del negocio y su cupo de correos | Sin empezar |
+| [DO-SUBIDA](#do-subida--una-main-con-sus-datos-no-los-sube-enteros-a-una-nube-vacía) | 🟡 | Una Main con sus datos no los sube enteros a una nube vacía | Sin empezar |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
@@ -244,11 +245,21 @@ operadores españoles bloquean cuando hay fútbol: por eso la API y las reservas
 `workers.dev` (el porqué, junto a `CLOUD_API_BASE`). Con las imágenes pasaría lo mismo: la Handy se
 quedaría sin ellas en hora de partido. Hace falta otra salida o volver a decidir.
 
-### OPS-02 · Soporte sin diagnóstico
+### RW-ALTAS · El tope de altas web y de correos de un negocio se agota con altas falsas
 
-Cada «contacta con soporte» lleva ya el correo (`correo_soporte!` en la Main, `lib/soporte.ts` en el
-worker y `shared/lib/soporte.ts` en la pantalla). Lo que falta es un botón para sacar un paquete de
-diagnóstico, que es lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
+Las altas web anuladas por su autor ya no cuentan para el tope diario (AUD-38), pero 200 altas falsas
+que nadie anula lo agotan igual, y con ellas el negocio deja de recibir reservas web ese día. El techo
+siguiente, 600 correos por negocio y día (`TOPE_DIARIO_NEGOCIO` en `domains/reservas_web/correos.ts`),
+cae con unos 300 ciclos de alta y cancelación: las altas entran sin confirmar el correo. Cada alta pide
+un token de Turnstile, que en modo gestionado sólo enseña la casilla si el riesgo lo pide.
+
+### DO-SUBIDA · Una Main con sus datos no los sube enteros a una nube vacía
+
+Si soporte le da a un negocio una base vacía (`pnpm negocio:base-vacia`, DO-PERDIDA), su Main sube
+lo que tenga en el outbox, y el resto depende del contraste periódico con la nube, que va por tandas
+con tope por pasada. En una base vacía puede tardar varias pasadas, y falta comprobar que suba también
+las filas antiguas fuera de su ventana reciente. Lo que haría falta: una subida completa a petición,
+desde la recuperación, que vuelque la base de la Main en la nube vacía.
 
 ---
 

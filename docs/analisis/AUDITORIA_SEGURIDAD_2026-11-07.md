@@ -14,11 +14,8 @@ con tests ejecutados, sobre `main` en `38a4c2db`.
   jsdom, nextest de Rust), consultó la documentación oficial cuando lo decidía la plataforma, valoró la
   gravedad y propuso el arreglo. No se ha cambiado código del proyecto ni se ha enviado tráfico a
   ningún despliegue.
-- **Resultado.** Ninguna se descartó. Siguen abiertas 9 de la auditoría: **7 confirmadas con un test**
-  y 2 sin resolver porque dependen de cómo se comporta una plataforma (AUD-31 y AUD-39).
-- **Gravedad**, con la escala de la revisión integral: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵
-  baja/mejora. Ninguna bloqueante ni alta; 9 medias. Cada sección
-  dice en una línea por qué.
+- **Resultado.** Ninguna se descartó y **todas están arregladas**: no queda ninguna abierta. El ID de
+  cada una está en un comentario junto a su arreglo (`git grep -n "AUD-"`).
 - **Los tests están guardados** en `C:\Users\diego\security-audit-skill\tpv-completa\run-1\investigacion\AUD-NN\tests\`,
   con la ruta que tendrían en el repositorio. Casi todos sirven de test de regresión al arreglar:
   hoy demuestran el fallo o fallan donde comprueban el arreglo.
@@ -42,136 +39,15 @@ historial y aislamiento entre negocios por token en las rutas de negocio. La inv
 todas las pistas, pero rebaja muchas: bastantes exigen sacar de la app la credencial de un equipo
 emparejado, o controlar la Main, y casi ninguna expone datos de otros negocios.
 
-**Las medias, por bloques:**
-
-1. **Recursos compartidos sin cuota** (AUD-12, 13, 31, 36, 38) y **correo**
-   (AUD-39, 42): cualquiera o un solo negocio pueden gastar lo que es de todos (bases, códigos,
-   copia diaria, CPU, cupo de correo). AUD-31 y AUD-39 siguen
-   sin resolver: dependen de cómo responden los decodificadores de imagen de WebView2 y Android y el
-   correo de Cloudflare.
-2. **Emparejamiento** (AUD-10, 11): oráculos y frenos del emparejamiento.
+No queda ninguna pista abierta.
 
 ## Tabla
 
-| ID | Gravedad | Estado | Bloque | Pista |
-|---|---|---|---|---|
-| AUD-10 | 🟡 | Confirmado (test) | B | `fetch-token` dice sin freno qué códigos de emparejamiento están vivos |
-| AUD-11 | 🟡 | Confirmado (test) | B | La espera por fallos del `claim` se reinicia y cuenta por IP exacta |
-| AUD-12 | 🟡 | Confirmado (test) | B | Los códigos de emparejamiento nunca se liberan |
-| AUD-13 | 🟡 | Confirmado (test) | B | Reclamar el propio código infla la base central y deja sin copia a todos |
-| AUD-31 | 🟡 | Sin resolver | F | La webview pinta logos e imágenes replicados sin comprobar su forma ni RI-07 |
-| AUD-36 | 🟡 | Confirmado (test) | F | Sin cuota por negocio en la organización de Turso compartida |
-| AUD-38 | 🟡 | Confirmado (test) | F | Un anónimo agota las altas web de un negocio |
-| AUD-39 | 🟡 | Sin resolver | G | El destinatario de los correos de reservas web admite listas y CR/LF |
-| AUD-42 | 🟡 | Confirmado (test) | G | Los topes del código de cambio de correo se saltan con peticiones simultáneas |
+Vacía: todas las pistas están arregladas.
 
 ## A · Licencias, identidad y aislamiento entre negocios
 
 ## B · Emparejamiento de Handys
-
-### AUD-10 · `fetch-token` dice sin freno qué códigos de emparejamiento están vivos
-
-- **Estado.** Confirmado con un test por la ruta.
-- **Gravedad.** 🟡 Media: no se elige negocio y el token exige que el dueño acepte una solicitud ajena.
-- **Qué pasa.** Con una prueba inventada, `fetch-token` contesta 404 si el código no existe y 409
-  `not_approved` si está vivo y pendiente (410, 409 o 403 en los otros estados) antes de mirar la
-  firma, sin limitador, espera por IP ni intentos. Un `claim` sin secreto se adelanta entonces a la
-  Handy y, si el dueño pulsa «Aceptar», da un token de Handy de 30 días. `cancel` y `approve` (con
-  cualquier Main) sólo dicen si el código se emitió alguna vez: `pair_requests` no se purga.
-- **Dónde.** `pairing.handy.ts:279-290` (firma en :298) y `:440-442`; `pairing.main.ts:167-169`.
-- **Quién.** Cualquiera de internet; en `approve`, la Main de cualquier negocio.
-- **Cómo se ha comprobado.** `test/aud10OraculoEmparejamiento.test.ts`, 4 casos en verde: con el
-  limitador agotado, 100 sondas a códigos inexistentes dan 404 y los vivos y pendientes se separan de
-  los caducados, gastados, rechazados y aprobados, a una lectura por sonda y sin anotar fallos ni
-  intentos; una IP bloqueada por el `claim` sigue viendo qué código vive; la cadena acaba en un JWT
-  `handy` y un alta en `devices` (aprobación simulada). En `workers.dev` (INFRA-04) no caben reglas
-  propias y el BIC sólo frena los User-Agent de biblioteca. Falta que el responsable mida, leyendo la base
-  central, cuántos códigos caducan sin reclamar.
-- **Arreglo.** Tras leer el código, `!pr || claimed_by_device_id !== deviceId` → 404
-  `pair_code_not_found` en `entregarToken` (y la firma antes de los estados) y en `soltarCodigo`; en
-  `aprobarSolicitud`, 404 al de otro negocio, como `rechazarSolicitud`. Quitar `device_mismatch` y
-  `wrong_tenant` de `MENSAJES` (`lib/errorCodes.ts:163,170`). Ni limitador ni espera en `fetch-token`
-  (la Handy pregunta cada 1,5 s y sólo tolera `not_approved`) ni exigir el secreto del QR.
-- **Test de regresión.** Los casos 1 y 3 del test, invertidos, en `emparejamiento.test.ts`: sin firma
-  válida o desde otro negocio, siempre 404 `pair_code_not_found`; cambian las esperas de :530 y :548.
-
-### AUD-11 · La espera por fallos del `claim` se reinicia y cuenta por IP exacta
-
-- **Estado.** Confirmado con test; la mitad IPv6, confirmada en código y respaldada por docs oficiales.
-- **Gravedad.** 🟡 Media.
-- **Qué pasa.** La espera por tramos de `/v1/pair/claim` es «el control de verdad» contra barrer los
-  10⁶ códigos (~144/día por IP). Dos fugas: (1) todo claim con éxito borra la fila de la IP
-  (`olvidarFallos`), y eso pasa al reclamar un código propio pendiente (`:237`, no gasta `attempts`),
-  el ya aprobado (`:199`) o el primero de uno nuevo (`crearCodigo` sin tope); (2) la clave es la cadena
-  exacta de `CF-Connecting-IP`, y en IPv6 cada dirección de un /64 cuenta aparte.
-- **Dónde.** `pairing.intentos.ts:81`; `pairing.handy.ts:199,237`; `pairing.avisos.ts:28`,
-  `lib/limitador.ts:23`; sin tope en `pairing.main.ts:46`.
-- **Quién.** La fuga (1), un negocio con licencia; la (2), cualquiera con un /64 IPv6. Ninguna logra el
-  alta: la Main la aprueba a mano por huella y el código vive 10 min. Daño real: oráculo de existencia,
-  estorbar un emparejamiento legítimo (409 a la Handy buena) y coste de lecturas.
-- **Cómo se ha comprobado.** `aud11.defecto.test.ts` (8 casos, SQL real): 20 fallos + 10 reclamos
-  propios sin un 429; 100 direcciones de un /64 = 200 fallos sin 429; con cupo 20, ~13 lecturas
-  reales/min frente a ~3 sin el truco; el barrido /64 gana el claim del código vivo ajeno. La entrega
-  de la IPv6 /128 se apoya en docs (workers.dev publica AAAA; Pseudo IPv4 Off por defecto); una sonda
-  en vivo lo cerraría.
-- **Arreglo.** Quitar las dos `olvidarFallos` de `pairing.handy.ts` (`:199`, `:237`; el olvido de 24 h
-  basta) y un `claveDeFreno(ip)` que agrupe IPv6 por /64, usado en
-  `segundosDeEspera`/`anotarFallo`/`olvidarFallos` y en `pasaElFiltroExterior`. Sólo ensancha la clave
-  (un bar ya comparte IP): no bloquea a nadie ni exige tope en `/create`.
-- **Test de regresión.** Los casos de `aud11.defecto.test.ts` con el veredicto invertido, en `describe`
-  «la espera por fallos» de `test/emparejamiento.test.ts`; **actualizar** allí «emparejar bien borra la
-  cuenta» (`:234`) y «cada IP lleva su cuenta» (`:258`), que hoy fijan el defecto.
-
-### AUD-12 · Los códigos de emparejamiento nunca se liberan
-
-- **Estado.** Confirmado con tests.
-- **Gravedad.** 🟡 media.
-- **Qué pasa.** `pair_code` es clave primaria global (10⁶ números), nada borra `pair_requests` y una
-  fila ajena caducada hace meses ocupa su número como una viva; `/create` no tiene tope ni limitador.
-  Una Main puede ir gastándolos: al 99 % fallan 9 de cada 10 llamadas de todos (~1,21 millones de
-  peticiones) y al 99,9 %, 99 de cada 100 (~1,45 millones); dura hasta limpiar a mano. Antes, a ~122.000
-  filas, la copia diaria no cabe (AUD-13). El uso normal también gasta: «Vincular Handy» abierta, 6/h.
-- **Dónde.** `pairing.routes.ts:83` → `pairing.main.ts:62-88`; `purga.ts:68` no incluye la tabla.
-- **Quién.** La Main de un negocio con licencia, también en gracia. Las Handys vinculadas y la venta
-  siguen; lo que falla es vincular una Handy nueva o revincularla, en cualquier negocio.
-- **Cómo se ha comprobado.** `aud12CodigosEmparejamiento.test.ts`, 13 en verde: con el sorteo fijado,
-  una fila caducada ajena, en cualquier estado, da 500 y sin ella 200 con ese número; 200 creaciones
-  seguidas dejan 200 vivos; la purga no toca filas de hace 400 días; por la ruta, con `tenantAuth`
-  real y los cuatro limitadores llenos, 100 × 200 sin consultarlos. `aud12VincularHandyRitmo`: 7
-  códigos en una hora. Falta la ocupación real: el responsable, `SELECT COUNT(*) FROM pair_requests`.
-- **Arreglo.** `server/purga.ts`: `DELETE FROM pair_requests WHERE expires_at_ms < ?1` (24 h de
-  retención; por caducidad, no por estado: lo que nadie toca sigue `pending`), contado en `Purgado` y
-  en el log del cron. `pairing.main.ts:68-83`: el tope en la misma sentencia, `INSERT … SELECT … WHERE
-  (SELECT COUNT(*) FROM pair_requests WHERE tenant_id = ?3 AND expires_at_ms >= ?5) < 20 ON
-  CONFLICT(pair_code) DO NOTHING`; sin fila y con 20 vivos, 429 `too_many_attempts` con «Usa el código
-  de la pantalla o espera unos minutos». Nadie vincula 20 Handys en 10 min; regla en `emparejamiento.md`.
-- **Test de regresión.** Los dos casos del arreglo de ese fichero, a `purgaBaseCentral.test.ts` y a
-  `emparejamiento.test.ts` (el número purgado vuelve a salir; el 21.º vivo da 429 y, caducados, 200).
-
-### AUD-13 · Reclamar el propio código infla la base central y deja sin copia a todos
-
-- **Estado.** Confirmado con un test local: por la ruta, con la purga, el techo real y el cron de verdad.
-- **Gravedad.** 🟡 Media.
-- **Qué pasa.** `claimSchema` no limita `deviceId` ni `deviceName`, y el mismo dispositivo reclama su
-  código pendiente sin cupo: cada vez entra en `device_challenges` una fila con el `deviceId` entero, sin
-  sumar intentos, y nada la borra. La copia diaria (PROD-02) aborta pasados 64 Mi caracteres: unas 1 340
-  reclamaciones de 50 000 caracteres la paran para todos los negocios, cada día, hasta borrar las filas
-  a mano. El servicio sigue y el PITR cubre 24 h. Cada una ocupa además ~150 KB en SQLite del espacio de
-  Turso común: en el plan Free, rebasarlo bloquea todas las bases (el sumidero de AUD-36).
-- **Dónde.** `pairing.routes.ts:60` → `pairing.handy.ts:68` → `purga.ts:68` → `copiaBaseCentral.ts:99`.
-- **Quién.** Un negocio con licencia: su Main crea un código cada 10 min y un script lo reclama al ritmo
-  del único freno, 20 por minuto e IP (poco más de una hora desde una). El código lleva su `tenant_id`.
-- **Cómo se ha comprobado.** `aud13CrecimientoEmparejamiento.test.ts`, por la ruta: 20 reclamaciones dan
-  200 y dejan 20 filas de 50 000 caracteres que la purga no toca (la 21.ª de esa IP, 429; desde otra,
-  200); cada una cuesta L + 204 en el volcado. Con 1 340, el `scheduled` real no sube copia ni suena su
-  latido y registra `copia_demasiado_grande`. Con 1 MiB por reclamación bastarían 64, si Turso lo acepta.
-- **Arreglo.** `.max(200)` en `deviceId` y `deviceName` (`pairing.schemas.ts:53,57`, como
-  `licensing.schemas.ts:3,21`), con `invalid_deviceId` en `SIN_MENSAJE_PROPIO` (`errorCodes.ts`); y en
-  `purga.ts:68`, `DELETE FROM device_challenges WHERE expires_at_ms < ?1` con `ahoraMs` (el reto caduca
-  con su código), con su contador en `Purgado` y en el log de `index.ts:290`. Hacen falta los dos: sin
-  tope, el abuso cabe en los 10 min previos al cron; sin purga, se acumula. Ninguna Handy real lo nota.
-- **Test de regresión.** Por la ruta, un `deviceId` de 201 caracteres da 400 sin dejar fila; un reto
-  caducado se purga y uno vivo no; y el caso del techo real acaba con copia y con los dos latidos.
 
 ## C · Dinero, caja y réplica
 
@@ -181,137 +57,7 @@ emparejado, o controlar la Main, y casi ninguna expone datos de otros negocios.
 
 ## F · Disponibilidad y coste del servicio compartido
 
-### AUD-31 · La webview pinta logos e imágenes replicados sin comprobar su forma ni RI-07
-
-- **Estado.** Sin resolver: la causa está confirmada con tests; el efecto depende del decodificador.
-- **Gravedad.** 🟡 media; 🟠 si WebView2 o Android WebView mueren con una imagen de dimensiones enormes,
-  porque el valor se replica a todos los equipos y se pinta en cada arranque, también en el login.
-- **Qué pasa.** `resolveImageUrl` devuelve tal cual `data:`, URL absolutas y lo que empieza por «/», y
-  hace URL `asset:` de una ruta que Rust rechaza. Los bytes de R2 no pasan por RI-07 en quien los pinta:
-  la Main los escribe sin `imagenes::procesar` y la Handy los lee de r2.dev. La CSP deja pasar `data:`.
-  Nadie trata la caída del renderizador: wry 0.55.1 no sobrescribe `onRenderProcessGone` (Android cierra
-  la app) ni atiende `ProcessFailed` (WebView2 deja una página de error y la recuperación es de la app).
-- **Dónde.** `configuracion.schemas.ts:16`, `inventario.schemas.ts:39,53` → `imageUrl.ts:64-80,97-109`;
-  `lib.rs:1231-1236` (`images_ensure_local`); `images.routes.ts:120` (sólo firma y 5 MB).
-- **Quién.** Quien saque las credenciales de una Handy (en Windows, del Administrador de credenciales;
-  en Android, del Keystore): las rutas sólo piden `tenantAuth`. Por la interfaz está cerrado.
-- **Cómo se ha comprobado.** `aud31ImagenSinForma.test.ts` en `tpv-main` (5 en verde: `data:`, `https:`,
-  `//` y `http://asset.localhost` salen tal cual y `data.db` sale como `asset:appdata/data.db`) y en el
-  worker (16 en verde: schemas y builders guardan esos valores y `applyViaHub` llega al `TenantHub`).
-  Falta si los decodificadores acotan una imagen así: el responsable, en VM Windows y emulador sin red.
-- **Arreglo.** (1) `imageUrl.ts`: aceptar sólo la forma de `REL_PATH_RE` y `/alergenos/<nombre>.png`;
-  lo demás, o un fallo de `imagesEnsureLocal`, da `""`. (2) `lib.rs:1232-1235`: `imagenes::procesar`
-  antes de `fs::write`; si falla, `Ok(false)`. (3) PUT `/v1/images`: rechazar si la cabecera declara más
-  de 8192 px por lado o 24 Mpx. (4) Exigir esa forma en schemas y Main (`configuracion.rs:248`,
-  `inventario.rs:38,124`), con casos en `validacion_casos.json`. Acotar `data:` por peso no basta.
-- **Test de regresión.** Los dos tests con la expectativa invertida, un PNG de 8193×1 rechazado en el
-  PUT y un test de fuente que exija `procesar` en `images_ensure_local`.
-
-### AUD-36 · Sin cuota por negocio en la organización de Turso compartida
-
-- **Estado.** Confirmado: test en el DO; el bloqueo de los demás negocios lo documenta Turso.
-- **Gravedad.** 🟡 Media: pide una Main con licencia y se revierte (plan, revocar), pero alcanza a todos.
-- **Qué pasa.** El DO ejecuta lo que la Main manda por el WebSocket (DDL, CTE recursivas, `zeroblob`)
-  sin presupuesto por negocio de filas, bytes ni frecuencia, y su cola guarda lo que llegue. Las bases
-  se crean sin `size_limit` en `altarialights`, la organización de la central, y los topes de Turso son
-  suyos: en Free o sin excedentes, pasar uno bloquea todas sus bases (ni Handy ni réplica en ningún
-  negocio) hasta el mes siguiente, y `/health` sólo lee; con excedentes, ~1 $ por millón de filas.
-- **Dónde.** `tenantHub.mensajes.ts:362-497` → `tenantHub.motor.ts:401-428`; `tenantHub.cola.ts:150`
-  → `motor.ts:610-641`; `licensing.helpers.ts:468` (474 en `main`); `wrangler.json:104-105`.
-- **Quién.** La Main de un negocio con licencia: su dueño o quien controle el PC (`_Sync_Outbox` va sin
-  firma), o una versión con un bucle. También una Handy por REST, con textos sin máximo (`notas`).
-- **Cómo se ha comprobado.** `test/aud36SinCuota.test.ts` (workerd; la base, el SQLite del DO), 5/5 sin
-  rechazo: tras un `CREATE TABLE`, un `apply` de 262 B escribe 5.000 filas y 5 MB; 20 seguidos, 100.000
-  filas en 0,6 s; dos `bulk_apply` de 500 dejan 3,4 MB en la cola; el alta va sin `size_limit`. Bloqueo:
-  turso.tech/pricing. Falta el plan y si hay excedentes (el código cita el «plan Free»): panel de Turso.
-- **Arreglo.** (1) Presupuesto por negocio en el SQLite del DO (`_Presupuesto`, no en un campo): filas
-  (`rowsAffected` tras `db.batch`, `motor.ts:428` y `:641`) e intentos por hora, mirado antes de
-  `buildApplyBatch` (`:401`, `:610`); pasado, `presupuesto_agotado` 429 `transitorio` (la Main sigue
-  cobrando y conserva la operación) y aviso a Sentry. (2) `atenderBulkApply` (`mensajes.ts:311`): como
-  mucho 200 operaciones por trozo, las que ya manda la Main. (3) `size_limit` en `tursoCreateDatabase` y
-  `PATCH …/configuration` a las bases que ya hay. (4) La central, en otra organización de Turso.
-- **Test de regresión.** Ese test, como `presupuestoPorNegocio.test.ts`: el `apply` que pasa el tope da
-  `presupuesto_agotado` sin escribir, el trozo de 501 `bulk_ack ok:false` y el alta lleva `size_limit`.
-
-### AUD-38 · Un anónimo agota las altas web de un negocio
-
-- **Estado.** Confirmado con tests.
-- **Gravedad.** 🟡 Media: un negocio sin reservas web, cada día y sin enterarse; ni cobros ni datos.
-- **Qué pasa.** `altasDesde` cuenta todas las altas de 24 h, también las que su autor anula antes de
-  que la Main las recoja. Con la Main apagada, reservar y cancelar 200 veces el mismo hueco agota el
-  tope sin dejar nada en el TPV ni ocupar mesa: toda alta legítima, tras elegir mesa y pasar Turnstile,
-  recibe 429 `tope_reservas_negocio` («…Llama para reservar.») durante 24 h. La purga no las borra, y
-  si la Main las recibe y el restaurante las cancela, siguen contando. Nadie lo reinicia desde el
-  código; el operador sólo a mano, con Data Studio del panel sobre el SQLite de la agenda.
-- **Dónde.** `apps/cloud-worker-licensing/src/durableObjects/agendaWeb.almacen.ts:273-279`, usado en
-  `agendaWeb.motor.ts:404`; la anulación, en `agendaWeb.motor.ts:512` y `agendaWeb.almacen.ts:394-403`.
-- **Quién.** Cualquiera: la clave está en la web del restaurante. Necesita un token de Turnstile por
-  alta (el widget lo da; en modo gestionado sólo hay casilla si el riesgo lo pide) y los enlaces: los
-  topes de correo van por dirección literal y con alias `+n` basta un buzón. Unos 20 min desde una IPv4.
-- **Cómo se ha comprobado.** `aud38TopeNegocio` (el test del plan y tres variantes) y
-  `aud38RutaTopeNegocio` (por `/reservas` y `/cancelar`, con `email_sends`): 40 alias × 5 ciclos, 400
-  correos a un buzón, 200 anuladas, nada para la Main, la mesa libre y el 429 con su frase. Falta, para
-  el responsable: los tokens sin casilla, la cuota de correo de la cuenta y si ya ha pasado (Axiom).
-- **Arreglo.** En `altasDesde`, `AND estado <> 'anulada'` (una anulada no llega a la Main ni ocupa
-  mesa), con `AUD-38` en el comentario; probado con `vi.mock`: el alta legítima entra y lo entregado
-  sigue contando. A `pendientes.md`: 200 altas vivas falsas lo agotan igual, y el techo siguiente,
-  600 correos por negocio, cae con ≥300 ciclos (entran sin confirmación; corregir `correos.ts:27`).
-- **Test de regresión.** En `agendaWeb.test.ts`, junto al de la línea 364 (que sigue dando 429): 200
-  altas canceladas sin `pendientes` y el alta legítima da `ok`, como en `aud38ArregloPropuesto`.
-
 ## G · Correo desde el dominio del operador
-
-### AUD-39 · El destinatario de los correos de reservas web admite listas y CR/LF
-
-- **Estado.** Sin resolver: lo del TPV, comprobado con tests; lo que hace Cloudflare con la cadena, no.
-- **Gravedad.** 🟡 media si Cloudflare reparte la lista o deja pasar el CR LF; 🔵 baja si las rechaza.
-- **Qué pasa.** `isValidEmail` y `validate_email_basic` piden seis caracteres, alguna `@`, un punto y
-  ningún U+0020: pasan «a@x.es,b@y.es», `;`, `<…>`, varias `@`, TAB y CR LF. La cadena es el `to` de
-  la confirmación y de la cancelación, y el tope de 10 por destinatario la cuenta tal cual: cada lista
-  u orden es otro contador y un solo envío de los 600 diarios del negocio (en la prueba, 24 en una).
-- **Dónde.** `clientes.schemas.ts:23-25` y `login.rs:41-44` (la Main revalida igual y la guarda en
-  `Clientes.Email`) → `publico.routes.ts:191` → `correos.ts:101-116`, sin el `correoValido` de `:61`.
-- **Quién.** Un anónimo con la clave pública del negocio y un token de Turnstile por alta (200 por
-  negocio y día); con su buzón en la lista recibe el enlace, y cancelar manda otro y libera la mesa.
-  En juego, la reputación y el cupo de la cuenta de correo, que comparten licencias, PIN y pedidos.
-- **Cómo se ha comprobado.** `aud39Publico.test.ts` y `aud39Correos.test.ts` (8 en verde): lista o CR
-  LF → 200 y `EMAIL.send` recibe la cadena entera; con «ana» en su tope, la lista sale; la Handy acepta
-  listas sin tope de largo; en Rust (`tests/aud39_correo.rs`), la Main igual. Cloudflare documenta `to`
-  como cadena o array y `E_VALIDATION_ERROR` por formato, pero no qué hace con una lista en una cadena:
-  falta que el responsable, con un worker de pruebas y buzones suyos, mande `to` «a@d,b@d», «a@d;b@d»,
-  «a@d» CR LF «Bcc:b@d» y «x<a@d>», y anote el `.code` o quién lo recibe.
-- **Arreglo.** Una sola dirección en las dos reglas: una `@` exacta y ni espacios Unicode, ni
-  controles, ni `,;<>()[]":\` (TS `/[\p{White_Space}\p{Cc},;<>()[\]":\\]/u`; Rust `is_whitespace`,
-  `is_control` y la lista), con sus casos tras `validacion_casos.json:170`; y en `correos.ts:101`,
-  `if (!isValidEmail(para)) return "fallido";` antes de `reservar`. No `z.email()`: es sólo ASCII.
-- **Test de regresión.** Esos casos (`validacionCasos.test.ts`, `validacion_casos.rs`); lista y CR LF:
-  400 sin fila en `peticiones` y `fallido` sin `send` ni fila en `email_sends` (`reservasWeb*.test.ts`).
-
-### AUD-42 · Los topes del código de cambio de correo se saltan con peticiones simultáneas
-
-- **Estado.** Confirmado con test.
-- **Gravedad.** 🟡 media. Probabilidad baja: hacen falta la clave y el token de una Main con licencia.
-  Pero sale del remitente común, y la cuota diaria de Email Service es de la cuenta: si se agota, ese
-  día no salen claves, OTP de traslado, códigos del PIN, pedidos ni reservas de ningún negocio.
-- **Qué pasa.** `emitirCodigo` decide la espera de 5 min y el tope de 5 por hora sobre una lectura, y
-  escribe después, en otra petición a Turso, un upsert sin condición. Toda petición que lee antes de
-  esa escritura pasa y manda la plantilla fija a la dirección que trae. El tope cuenta ráfagas: 5 por
-  hora, y en cada una cabe lo que llegue en una vuelta a Turso. Recuperar el PIN, igual, al del negocio.
-- **Dónde.** `login.routes.ts:241` → `correoRecuperacion.ts:151` → `codigosPorCorreo.ts:94-129` →
-  `licenseStore.ts:1126` → `licenseEmails.ts:29`. Ningún limitador cubre `/v1/login`.
-- **Quién.** Quien controle una Main con licencia: el titular (clave del equipo y token están en su
-  Windows) o un programa malicioso en ella. Desde la interfaz no: el botón se desactiva mientras espera.
-- **Cómo se ha comprobado.** `aud42EnviosSimultaneos.test.ts`, esquema real y EMAIL falso: 10 a la vez
-  → 10 × 200 y 10 correos a 10 direcciones, `sends_in_window` = 1; 4 seguidas y 10 a la vez → 14
-  correos; 5 ráfagas de 10 → 50 en 20 min. Con 400 ms por sentencia pasan las que llegan en una vuelta.
-  Falta el tamaño real (latencia a Turso, cuota de la cuenta): lo ve el responsable en Cloudflare.
-- **Arreglo.** En `licenseStore.ts:1125-1166`, `putEmailCode` reserva en una sentencia, como
-  `reserveEmailCodeAttempt`: contador y ventana con `CASE` en SQL y `DO UPDATE … WHERE (consumed_at_ms
-  IS NOT NULL OR ?ahora - created_at_ms >= ?espera) AND (?ahora - window_started_ms >= ?ventana OR
-  sends_in_window < ?tope) RETURNING`. Si no vuelve fila, `codigosPorCorreo.ts:120-129` da 429
-  `espera_reenvio` y no envía (94-118 queda para la cuenta atrás). Con sólo el tope saldrían cinco.
-- **Test de regresión.** Los casos de 10 a la vez del test, en `correoRecuperacion.test.ts` y
-  `recuperarPin.test.ts`: hoy fallan; con el arreglo inyectado pasan, y los 25 existentes también.
 
 ## H · Publicación y CI
 
@@ -322,19 +68,11 @@ emparejado, o controlar la Main, y casi ninguna expone datos de otros negocios.
 Lo que no se decide desde el repositorio ni con tests locales. Nada de esto pide tráfico de ataque contra
 producción: son paneles, consultas de sólo lectura o pruebas en un entorno propio.
 
-- **Turso** (panel y consultas de sólo lectura en la base central): el plan de la organización y si tiene
-  excedentes (AUD-36); cuántas filas tiene `pair_requests` y
-  cuántos códigos caducan sin reclamar (AUD-10, AUD-12).
 - **Cloudflare** (panel): los campos del job de Logpush, su retención y quién lo lee, y el ajuste
-  `observability.redact_query_string` (los tres, en `observabilidad.md`); cuántas resoluciones de Turnstile pasan sin casilla (AUD-38); y el
-  cupo y el ritmo de Email Service (AUD-38, AUD-42).
-- **Un worker de pruebas propio con `send_email`** y sólo buzones propios: qué hace Cloudflare con una
-  lista o un CR/LF en `to` (AUD-39).
+  `observability.redact_query_string` (los tres, en `observabilidad.md`).
 - **Axiom**: que el worker desplegado tenga `AXIOM_TOKEN`, y la retención y el acceso de
   `tpv-device-logs` y `cloudflare-logpush` (`observabilidad.md`), y que lo que ya se ingirió con datos
-  de clientes en los errores de la Handy se borre o caduque; si ya ha habido abuso de las altas web (AUD-38).
-- **Equipos y entornos reales**: si WebView2 y la WebView de Android aguantan una imagen de dimensiones enormes, en una máquina virtual y un emulador sin
-  red (AUD-31); y qué IP entrega `workers.dev` en IPv6 (AUD-11).
+  de clientes en los errores de la Handy se borre o caduque.
 
 ## Riesgos conocidos que esta auditoría matiza
 
@@ -347,7 +85,6 @@ producción: son paneles, consultas de sólo lectura o pruebas en un entorno pro
   el tenant y el dispositivo locales, y su mensaje canónico une campos con `|` sin escapar (un `deviceId`
   con `|` admite otra lectura de los mismos bytes). Pasar a `reqwest` 0.13, que confía en el almacén del
   sistema, cambiaría esa conclusión.
-- **SEC-SESION** se queda corto en AUD-31, que con la credencial de una Handy afecta a la Main.
 
 ## Endurecimiento (no son hallazgos)
 
