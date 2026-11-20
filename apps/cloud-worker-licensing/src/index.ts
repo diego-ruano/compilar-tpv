@@ -17,6 +17,11 @@ import { latir, latirA } from "./observability/latido";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
 // para capturar las excepciones de su ciclo de vida (apply idempotente, WebSocket, broadcast).
+//
+// AUD-46: hasta `@sentry/cloudflare` 10.66, este envoltorio dejaba en cada evento del DO un vaciado
+// por `waitUntil` que se esperaba a sí mismo (getsentry/sentry-javascript#22328), y el objeto no
+// hibernaba nunca con un socket abierto: un negocio con la Main conectada facturaba duración las
+// 24 horas. `test/elHubPuedeHibernar.test.ts` falla si vuelve.
 import { TenantHub as TenantHubClass } from "./durableObjects/tenantHub";
 export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 	sentryOptions,

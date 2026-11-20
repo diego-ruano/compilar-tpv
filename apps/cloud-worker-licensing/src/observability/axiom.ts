@@ -11,6 +11,9 @@ import type { Env } from "../env";
 import { scrub, scrubDeep } from "./scrub";
 import { acotar } from "./tope";
 
+/** Lo más que espera una ingesta a Axiom (AUD-46). */
+const PLAZO_INGESTA_MS = 15_000;
+
 /*
  * ⚠️ REGLA DE ESTE FICHERO: los reporteros DEVUELVEN la promesa de la entrega, y quien los llama
  * tiene que mantenerla viva.
@@ -68,6 +71,9 @@ export async function ingestToAxiom(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(payload),
+			// AUD-46: el TenantHub entrega esto por `waitUntil`, y un DO no hiberna mientras le
+			// quede una sin terminar. Vencido, es un fallo de ingesta como cualquier otro.
+			signal: AbortSignal.timeout(PLAZO_INGESTA_MS),
 		});
 		if (!resp.ok) {
 			console.warn(

@@ -78,6 +78,11 @@ import type {
 // Absorbe los pings (cada 30 s) sin perder utilidad de presencia (granularidad de minutos basta).
 const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
 
+// AUD-46: `last_seen` va por `waitUntil`, y un DO no hiberna mientras le quede una promesa de
+// `waitUntil` sin terminar: una base central que no contesta lo tendría despierto, facturando
+// duración, lo que tardara en soltarla. Vencido, ese `last_seen` se pierde y lo pone el siguiente.
+const PLAZO_LAST_SEEN_MS = 10_000;
+
 // ---- SYNC-12: purga del log de sync en la nube ------------------------------
 // `Sync_Changes` y `Applied_Operations` crecían sin límite; el catch-up escanea `Sync_Changes`
 // cada reconexión. Purgamos con SUELO por el checkpoint mínimo de las Main activas (nunca borramos
@@ -432,7 +437,7 @@ export class MotorTenantHub {
 		const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
 		if (now - last < LAST_SEEN_THROTTLE_MS) return;
 		this.lastSeenPushedAtMs.set(deviceId, now);
-		const dbCentral = this.getCentralDb();
+		const dbCentral = this.getCentralDb(PLAZO_LAST_SEEN_MS);
 		await dbCentral.execute({
 			sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
 			args: [now, tenantId, deviceId],
