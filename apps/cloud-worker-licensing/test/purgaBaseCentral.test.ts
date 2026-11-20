@@ -130,6 +130,39 @@ describe("purga de la base central", () => {
 		expect(envios).toEqual(["de-hoy"]);
 	});
 
+	it("de los códigos de emparejamiento se va lo caducado hace más de un día, en cualquier estado (AUD-12)", async () => {
+		// Por caducidad y no por estado: un código que nadie toca se queda en 'pending' para siempre.
+		// Antes no se borraba ninguno, y cada número gastado lo estaba para siempre.
+		const { RETENCION_CODIGOS_MS } = await import("../src/server/purga");
+		const r = await escenario("codigos", async (e) => {
+			e.sql.exec(`DELETE FROM pair_requests;`);
+			const codigo = (pairCode: string, status: string, expiraMs: number) =>
+				e.sql.exec(
+					`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
+					 VALUES (?, 'x', 'tenant-1', 'main-1', ?, ?, ?);`,
+					pairCode,
+					status,
+					expiraMs - 10 * 60_000,
+					expiraMs,
+				);
+			codigo("000001", "pending", AHORA - 400 * 24 * 60 * 60_000);
+			codigo("000002", "used", AHORA - RETENCION_CODIGOS_MS - 1);
+			codigo("000003", "rejected", AHORA - RETENCION_CODIGOS_MS - 1);
+			codigo("000004", "expired", AHORA - RETENCION_CODIGOS_MS + 1);
+			codigo("000005", "pending", AHORA + 5 * 60_000);
+
+			const purgado = await purgarBaseCentral(e.db, AHORA);
+			const quedan = e.sql
+				.exec(`SELECT pair_code FROM pair_requests ORDER BY pair_code;`)
+				.toArray()
+				.map((f: any) => String(f.pair_code));
+			return { quedan, purgado };
+		});
+
+		expect(r.quedan).toEqual(["000004", "000005"]);
+		expect(r.purgado.codigosDeEmparejamiento).toBe(3);
+	});
+
 	it("un fallo en una tabla no impide purgar la otra", async () => {
 		// Son tablas sin relación: que una falle no puede dejar a la otra creciendo. Se rompe la
 		// primera, que es la que va delante.

@@ -12,6 +12,9 @@
 //   · `email_sends` — una fila por correo enviado, y el tope de REV-14 sólo mira las últimas 24 h.
 //   · `license_otp_eventos` (RI-68) — una fila por código de cambio de equipo enviado o fallado, y
 //     sus topes sólo miran las últimas 24 h.
+//   · `pair_requests` (AUD-12) — una fila por código de vinculación. Su número es la clave primaria y
+//     sólo hay un millón para todos los negocios: una fila caducada hace meses lo ocupaba igual que
+//     una viva, y nada lo liberaba.
 //
 // Lo que NO se purga, para que no parezca un olvido: `Ws_Tickets` ya se limpia sola al usarse
 // (`ws.routes.ts`), y `email_codes` está acotada por su clave (tenant, dispositivo, propósito),
@@ -47,10 +50,20 @@ export const RETENCION_FALLOS_MS = 24 * 60 * 60 * 1000;
  */
 export const RETENCION_ENVIOS_MS = 90 * 24 * 60 * 60 * 1000;
 
+/**
+ * Cuánto se conserva un código de vinculación después de caducar (AUD-12).
+ *
+ * Un código vive diez minutos. El día de más es para que una Handy o una Main que llegan tarde
+ * lean «ha caducado» y no «no existe», y para poder mirar qué pasó con una vinculación de hoy. Se
+ * mira la caducidad y no el estado: un código que nadie toca se queda en 'pending' para siempre.
+ */
+export const RETENCION_CODIGOS_MS = 24 * 60 * 60 * 1000;
+
 export type Purgado = {
 	fallosDeEmparejamiento: number;
 	trazasDeCorreo: number;
 	eventosDeCodigo: number;
+	codigosDeEmparejamiento: number;
 };
 
 function borradas(r: any): number {
@@ -58,14 +71,19 @@ function borradas(r: any): number {
 }
 
 /**
- * Borra lo caducado de las dos tablas y devuelve cuánto se llevó de cada una.
+ * Borra lo caducado de cada tabla y devuelve cuánto se llevó de cada una.
  *
  * Cada borrado va en su propio `try`: son tablas sin relación, y que una falle no puede dejar a la
  * otra creciendo. Por lo mismo esto NO propaga: es mantenimiento, y un fallo suyo no puede tumbar
  * al resto del cron (los avisos de caducidad sí le importan a alguien que está esperando).
  */
 export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): Promise<Purgado> {
-	const purgado: Purgado = { fallosDeEmparejamiento: 0, trazasDeCorreo: 0, eventosDeCodigo: 0 };
+	const purgado: Purgado = {
+		fallosDeEmparejamiento: 0,
+		trazasDeCorreo: 0,
+		eventosDeCodigo: 0,
+		codigosDeEmparejamiento: 0,
+	};
 
 	try {
 		const r = await exec(db, `DELETE FROM pair_claim_fallos WHERE ultimo_fallo_ms < ?1;`, [
@@ -97,6 +115,16 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 	} catch (e: any) {
 		capturarError(e, "purge.license_otp_events");
 		console.error("[purga] license_otp_eventos falló:", String(e?.message || e));
+	}
+
+	try {
+		const r = await exec(db, `DELETE FROM pair_requests WHERE expires_at_ms < ?1;`, [
+			ahoraMs - RETENCION_CODIGOS_MS,
+		]);
+		purgado.codigosDeEmparejamiento = borradas(r);
+	} catch (e: any) {
+		capturarError(e, "purge.pair_requests");
+		console.error("[purga] pair_requests falló:", String(e?.message || e));
 	}
 
 	return purgado;

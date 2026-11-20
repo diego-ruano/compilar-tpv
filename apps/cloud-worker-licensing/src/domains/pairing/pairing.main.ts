@@ -21,6 +21,23 @@ const VIDA_DEL_CODIGO_MS = 10 * 60 * 1000;
 /** Cuántas veces se reintenta si el código de 6 cifras ya existe. */
 const INTENTOS_DE_CODIGO = 10;
 
+/**
+ * AUD-12: cuántos códigos vivos puede tener a la vez un negocio.
+ *
+ * Los números son un millón y los compartimos todos los negocios: `pair_code` es la clave primaria
+ * de la base central. Sin tope, la Main de un negocio podía ir gastándolos hasta que a todos los
+ * demás les fallaran casi todas las creaciones. Nadie vincula veinte Handy en diez minutos: la
+ * pantalla pide uno al abrirse, otro cuando caduca o lo reclama una Handy, y otro al pulsar
+ * «Regenerar».
+ */
+export const CODIGOS_VIVOS_POR_NEGOCIO = 20;
+
+function demasiadosCodigos(): Resultado {
+	return fallo(429, "too_many_attempts", {
+		message: "Hay demasiados códigos de vinculación sin usar. Usa el que se ve en la pantalla o espera unos minutos.",
+	});
+}
+
 function seisCifrasAlAzar(): string {
 	const bytes = new Uint8Array(4);
 	crypto.getRandomValues(bytes);
@@ -42,6 +59,11 @@ function seisCifrasAlAzar(): string {
  * es la misma clasificación por cadenas que se ha quitado del resto del fichero — y que al
  * primer cambio de redacción en libsql habría convertido una colisión (normal: hay un millón de
  * códigos y los vivos duran diez minutos) en un 500.
+ *
+ * AUD-12: el tope de códigos vivos del negocio va DENTRO de la misma sentencia, no en una lectura
+ * previa: en la base central cada escritura va con el cerrojo del escritor, así que el recuento y el
+ * alta no se cruzan con otra creación simultánea. Los números se liberan con la purga diaria
+ * (`server/purga.ts`), un día después de caducar.
  */
 export async function crearCodigo(
 	db: Client,
@@ -64,7 +86,8 @@ export async function crearCodigo(
 
 		// `ON CONFLICT DO NOTHING` sobre la clave primaria: si el código está cogido no inserta y
 		// **no lanza**, así que la colisión se reconoce por `rowsAffected`. Es además atómico, que
-		// un `WHERE NOT EXISTS` no sería.
+		// un `WHERE NOT EXISTS` no sería. El `WHERE` del `SELECT` es el tope (y es también lo que
+		// deja a SQLite leer el `ON CONFLICT` como tal y no como la condición de un JOIN).
 		const r = await db.execute({
 			sql: `
 				INSERT INTO pair_requests (
@@ -76,13 +99,24 @@ export async function crearCodigo(
 					created_at_ms,
 					expires_at_ms
 				)
-				VALUES (?, ?, ?, ?, 'pending', ?, ?)
+				SELECT ?1, ?2, ?3, ?4, 'pending', ?5, ?6
+				WHERE (
+					SELECT COUNT(*) FROM pair_requests WHERE tenant_id = ?3 AND expires_at_ms >= ?5
+				) < ?7
 				ON CONFLICT(pair_code) DO NOTHING;
 			`,
-			args: [pairCode, secretHash, tenantId, deviceId, now, expiresAtMs],
+			args: [pairCode, secretHash, tenantId, deviceId, now, expiresAtMs, CODIGOS_VIVOS_POR_NEGOCIO],
 		});
 
 		if (rowsAffected(r) > 0) return ok({ pairCode, pairSecret, expiresAtMs });
+
+		// No ha entrado: o el número estaba cogido (se sortea otro) o el negocio está en su tope (no
+		// tiene sentido sortear más). Sólo se pregunta cuál cuando ha fallado, que es lo raro.
+		const vivos = await db.execute({
+			sql: `SELECT COUNT(*) AS n FROM pair_requests WHERE tenant_id = ? AND expires_at_ms >= ?;`,
+			args: [tenantId, now],
+		});
+		if (Number((vivos.rows?.[0] as any)?.n ?? 0) >= CODIGOS_VIVOS_POR_NEGOCIO) return demasiadosCodigos();
 	}
 
 	return fallo(500, "pair_code_generation_failed");

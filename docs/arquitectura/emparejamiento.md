@@ -66,6 +66,11 @@ revés.
   el filtro exterior: los 64 bits de abajo los elige cada equipo. La espera se mira **antes** de leer
   el código, o un intento bloqueado seguiría diciendo si existe. Una petición mal formada no cuenta: la
   rechaza el validador, que va detrás del filtro exterior.
+- **Los números se comparten y se liberan** (AUD-12). `pair_code` es la clave primaria de la base
+  central: un millón de números para todos los negocios. Un negocio no tiene más de **20 códigos vivos**
+  a la vez (`CODIGOS_VIVOS_POR_NEGOCIO`, comprobado dentro del mismo `INSERT`); el 21.º contesta 429
+  `too_many_attempts` («Usa el que se ve en la pantalla o espera unos minutos»). La purga diaria
+  (`server/purga.ts`) borra los códigos caducados hace más de un día, en cualquier estado.
 - **A quien no lo reclamó, un código no existe** (AUD-10). `fetch-token` y `cancel` son anónimas y no
   tienen freno (la Handy pregunta cada 1,5 s), así que no pueden servir para saber qué códigos viven:
   si no hay código o el `deviceId` no es el del reclamante, contestan `pair_code_not_found`, y la firma

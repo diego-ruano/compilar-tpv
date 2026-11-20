@@ -513,8 +513,9 @@ se registra a nivel ERROR, que la integración existente con Sentry captura una 
 `scheduled` en `src/index.ts`. Cada tarea va en su `try` y ninguna propaga:
 
 1. **Avisos de caducidad** de licencias ([licencias.md](licencias.md#avisos-de-caducidad)).
-2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo y
-   eventos del código de cambio de equipo.
+2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo,
+   eventos del código de cambio de equipo y códigos de emparejamiento caducados hace más de un día,
+   que liberan su número (AUD-12).
 3. **Copia de la base central a R2** (`server/copiaBaseCentral.ts`) y, sólo si se subió, su latido
    (`BETTERSTACK_HEARTBEAT_COPIAS_URL`).
 4. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea

@@ -965,3 +965,66 @@ describe("el filtro exterior del claim", () => {
 		expect(pasado).toBe(404);
 	});
 });
+
+describe("crear códigos (AUD-12)", () => {
+	/**
+	 * Fija lo que devuelve `crypto.getRandomValues`: el secreto (32 bytes) se rellena con 7 y cada
+	 * sorteo de 4 bytes da el siguiente número de `numeros` (n < 2^24, así que n % 10^6 = n).
+	 */
+	function fijarSorteo(numeros: number[]) {
+		let i = 0;
+		return vi.spyOn(crypto, "getRandomValues").mockImplementation(((a: any) => {
+			if (a.length === 4) {
+				const n = numeros[Math.min(i++, numeros.length - 1)];
+				a[0] = 0;
+				a[1] = (n >> 16) & 0xff;
+				a[2] = (n >> 8) & 0xff;
+				a[3] = n & 0xff;
+				return a;
+			}
+			return a.fill(7);
+		}) as any);
+	}
+
+	it("un número que la purga ha liberado vuelve a salir", async () => {
+		const { purgarBaseCentral, RETENCION_CODIGOS_MS } = await import("../src/server/purga");
+		await conPlanoDeControl("numero-liberado", async (m) => {
+			m.sql.exec(
+				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
+				 VALUES ('000123', 'x', 'otro-negocio', 'main-otro', 'used', ?, ?);`,
+				T0 - RETENCION_CODIGOS_MS - 20 * MIN,
+				T0 - RETENCION_CODIGOS_MS - 10 * MIN,
+			);
+			const sorteo = fijarSorteo([123]);
+			try {
+				expect((await crearCodigo(m.db, ENV, TENANT, "main-1", T0)).status).toBe(500);
+				await purgarBaseCentral(m.db, T0);
+				const r = await crearCodigo(m.db, ENV, TENANT, "main-1", T0);
+				expect(r.status).toBe(200);
+				expect(r.cuerpo.pairCode).toBe("000123");
+			} finally {
+				sorteo.mockRestore();
+			}
+		});
+	});
+
+	it("un negocio no tiene más de 20 vivos a la vez; caducados, vuelve a crear, y a otro no le afecta", async () => {
+		await conPlanoDeControl("tope", async (m) => {
+			// El plano de control trae ya dos códigos vivos del negocio.
+			for (let i = 0; i < 18; i++) {
+				expect((await crearCodigo(m.db, ENV, TENANT, "main-1", T0 + i)).status).toBe(200);
+			}
+			const vigesimoprimero = await crearCodigo(m.db, ENV, TENANT, "main-1", T0 + 30);
+			expect(vigesimoprimero.status).toBe(429);
+			expect(vigesimoprimero.cuerpo).toMatchObject({ ok: false, error: "too_many_attempts" });
+			expect(vigesimoprimero.cuerpo.message).toMatch(/espera unos minutos/);
+			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM pair_requests WHERE tenant_id = ?;`, TENANT).toArray()[0].n).toBe(20);
+
+			expect((await crearCodigo(m.db, ENV, "otro-negocio", "main-otro", T0 + 30)).status).toBe(200);
+
+			// Pasados sus diez minutos, los veinte ya no cuentan.
+			expect((await crearCodigo(m.db, ENV, TENANT, "main-1", T0 + 10 * MIN + 30)).status).toBe(200);
+		});
+	});
+});
+

@@ -60,7 +60,8 @@ async function programado(env: Env): Promise<void> {
 		const r = await purgarBaseCentral(getDb(env));
 		console.log(
 			`[cron] purga: ${r.fallosDeEmparejamiento} fallos de emparejamiento, ` +
-				`${r.trazasDeCorreo} trazas de correo, ${r.eventosDeCodigo} eventos de código de cambio de equipo`,
+				`${r.trazasDeCorreo} trazas de correo, ${r.eventosDeCodigo} eventos de código de cambio de equipo, ` +
+				`${r.codigosDeEmparejamiento} códigos de emparejamiento`,
 		);
 	} catch (err) {
 		capturarError(err, "cron.purge");
