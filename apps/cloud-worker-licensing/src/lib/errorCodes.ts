@@ -439,6 +439,9 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"ingest_failed",
 	"initial_admin_role_missing",
 	"invalid_devicePubKey",
+	// AUD-13: un `deviceId` o un nombre de más de 200 caracteres. La app manda un UUID y un nombre vacío.
+	"invalid_deviceId",
+	"invalid_deviceName",
 	"invalid_json",
 	// AUD-32: una `X-Idempotency-Key` sin su forma. La Handy manda siempre un UUIDv7.
 	"invalid_op_id",

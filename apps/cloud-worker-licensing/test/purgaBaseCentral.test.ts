@@ -163,6 +163,33 @@ describe("purga de la base central", () => {
 		expect(r.purgado.codigosDeEmparejamiento).toBe(3);
 	});
 
+	it("de los retos de emparejamiento se va lo caducado y se queda lo vivo (AUD-13)", async () => {
+		// El reto vive lo que su código: caducado, ya no sirve para nada (`challenge_expired`).
+		const r = await escenario("retos", async (e) => {
+			e.sql.exec(`DELETE FROM device_challenges;`);
+			const reto = (deviceId: string, expiraMs: number) =>
+				e.sql.exec(
+					`INSERT INTO device_challenges (device_id, nonce_b64, expires_at_ms, created_at_ms) VALUES (?, 'n', ?, ?);`,
+					deviceId,
+					expiraMs,
+					expiraMs - 10 * 60_000,
+				);
+			reto("caducado-hace-un-mes", AHORA - 30 * 24 * 60 * 60_000);
+			reto("recien-caducado", AHORA - 1);
+			reto("vivo", AHORA + 1);
+
+			const purgado = await purgarBaseCentral(e.db, AHORA);
+			const quedan = e.sql
+				.exec(`SELECT device_id FROM device_challenges ORDER BY device_id;`)
+				.toArray()
+				.map((f: any) => String(f.device_id));
+			return { quedan, purgado };
+		});
+
+		expect(r.quedan).toEqual(["vivo"]);
+		expect(r.purgado.retosDeEmparejamiento).toBe(2);
+	});
+
 	it("un fallo en una tabla no impide purgar la otra", async () => {
 		// Son tablas sin relación: que una falle no puede dejar a la otra creciendo. Se rompe la
 		// primera, que es la que va delante.

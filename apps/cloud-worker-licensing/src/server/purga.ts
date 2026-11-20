@@ -15,6 +15,9 @@
 //   · `pair_requests` (AUD-12) — una fila por código de vinculación. Su número es la clave primaria y
 //     sólo hay un millón para todos los negocios: una fila caducada hace meses lo ocupaba igual que
 //     una viva, y nada lo liberaba.
+//   · `device_challenges` (AUD-13) — un reto por cada reclamo de un código, que el propio
+//     dispositivo puede repetir sin gastar nada mientras su código vive. Caduca con su código, y
+//     caducado ya no sirve para nada (`challenge_expired`).
 //
 // Lo que NO se purga, para que no parezca un olvido: `Ws_Tickets` ya se limpia sola al usarse
 // (`ws.routes.ts`), y `email_codes` está acotada por su clave (tenant, dispositivo, propósito),
@@ -64,6 +67,7 @@ export type Purgado = {
 	trazasDeCorreo: number;
 	eventosDeCodigo: number;
 	codigosDeEmparejamiento: number;
+	retosDeEmparejamiento: number;
 };
 
 function borradas(r: any): number {
@@ -83,6 +87,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		trazasDeCorreo: 0,
 		eventosDeCodigo: 0,
 		codigosDeEmparejamiento: 0,
+		retosDeEmparejamiento: 0,
 	};
 
 	try {
@@ -125,6 +130,15 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 	} catch (e: any) {
 		capturarError(e, "purge.pair_requests");
 		console.error("[purga] pair_requests falló:", String(e?.message || e));
+	}
+
+	// Sin retención: un reto caducado no lo puede usar nadie, y lo que pesa lo elige quien reclama.
+	try {
+		const r = await exec(db, `DELETE FROM device_challenges WHERE expires_at_ms < ?1;`, [ahoraMs]);
+		purgado.retosDeEmparejamiento = borradas(r);
+	} catch (e: any) {
+		capturarError(e, "purge.device_challenges");
+		console.error("[purga] device_challenges falló:", String(e?.message || e));
 	}
 
 	return purgado;

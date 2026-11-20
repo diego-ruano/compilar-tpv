@@ -33,6 +33,25 @@ function esClaveEd25519(b64: string): boolean {
 	}
 }
 
+/**
+ * AUD-13: lo más largo que se acepta como `deviceId` o como nombre del dispositivo. El `deviceId`
+ * de la app es un UUID (36 caracteres) y el nombre va vacío; los dos se guardan en la base central,
+ * y el `deviceId` además en un reto nuevo con cada reclamo, que se puede repetir sin gastar nada.
+ * Sin tope, unas 1 340 reclamaciones de 50 000 caracteres dejaban la copia diaria de la base central
+ * por encima de su techo. El mismo número que `licensing.schemas.ts`.
+ */
+const TOPE_IDENTIFICADOR = 200;
+
+/**
+ * El `deviceId` de las tres rutas anónimas. El tope va delante del recorte, como el de la clave
+ * (AUD-33): mira la cadena tal como llega.
+ */
+const identificadorDelDispositivo = z
+	.string({ message: "missing_deviceId" })
+	.max(TOPE_IDENTIFICADOR, { message: "invalid_deviceId" })
+	.trim()
+	.min(1, { message: "missing_deviceId" });
+
 const codigoDeSeisCifras = z
 	.string({ message: "invalid_pair_code" })
 	.trim()
@@ -60,7 +79,7 @@ export const claimSchema = z.object({
 	// seguridad recae en la espera por fallos, en que el claim se adjudique al primero y en la
 	// aprobación manual de la Main (ver `pairing.handy.ts`).
 	pairSecret: z.string().trim().optional().default(""),
-	deviceId: textoObligatorio("missing_deviceId"),
+	deviceId: identificadorDelDispositivo,
 	// El tope va también DELANTE del `transform`. Con cualquier fallo antes, zod no lo llama: una clave
 	// de 44 caracteres pasa, y un cuerpo de comillas o de espacios no llega a `sanitizeB64`.
 	devicePubKey: z
@@ -70,18 +89,18 @@ export const claimSchema = z.object({
 		.min(1, { message: "missing_devicePubKey" })
 		.transform(sanitizeB64)
 		.refine(esClaveEd25519, { message: "invalid_devicePubKey" }),
-	deviceName: z.string().trim().optional().default(""),
+	deviceName: z.string().max(TOPE_IDENTIFICADOR, { message: "invalid_deviceName" }).trim().optional().default(""),
 });
 
 export const fetchTokenSchema = z.object({
 	pairCode: textoObligatorio("missing_pairCode"),
-	deviceId: textoObligatorio("missing_deviceId"),
+	deviceId: identificadorDelDispositivo,
 	...pruebaDelReclamante,
 });
 
 export const cancelSchema = z.object({
 	pairCode: textoObligatorio("missing_pairCode"),
-	deviceId: textoObligatorio("missing_deviceId"),
+	deviceId: identificadorDelDispositivo,
 	...pruebaDelReclamante,
 });
 

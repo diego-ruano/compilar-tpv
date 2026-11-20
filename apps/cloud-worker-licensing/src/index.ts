@@ -61,7 +61,7 @@ async function programado(env: Env): Promise<void> {
 		console.log(
 			`[cron] purga: ${r.fallosDeEmparejamiento} fallos de emparejamiento, ` +
 				`${r.trazasDeCorreo} trazas de correo, ${r.eventosDeCodigo} eventos de código de cambio de equipo, ` +
-				`${r.codigosDeEmparejamiento} códigos de emparejamiento`,
+				`${r.codigosDeEmparejamiento} códigos de emparejamiento, ${r.retosDeEmparejamiento} retos de emparejamiento`,
 		);
 	} catch (err) {
 		capturarError(err, "cron.purge");

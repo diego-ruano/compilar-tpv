@@ -71,6 +71,11 @@ revés.
   a la vez (`CODIGOS_VIVOS_POR_NEGOCIO`, comprobado dentro del mismo `INSERT`); el 21.º contesta 429
   `too_many_attempts` («Usa el que se ve en la pantalla o espera unos minutos»). La purga diaria
   (`server/purga.ts`) borra los códigos caducados hace más de un día, en cualquier estado.
+- **Lo que una Handy deja en la base central tiene techo** (AUD-13). El `deviceId` y el nombre no pasan
+  de 200 caracteres (`invalid_deviceId`, `invalid_deviceName`): cada reclamo, que el propio dispositivo
+  puede repetir sin gastar nada, guarda un reto con su `deviceId` en `device_challenges`. La purga
+  diaria borra los retos caducados, que caducan con su código. Sin las dos cosas, una Main y un script
+  dejaban la copia diaria de la base central por encima de su techo.
 - **A quien no lo reclamó, un código no existe** (AUD-10). `fetch-token` y `cancel` son anónimas y no
   tienen freno (la Handy pregunta cada 1,5 s), así que no pueden servir para saber qué códigos viven:
   si no hay código o el `deviceId` no es el del reclamante, contestan `pair_code_not_found`, y la firma
