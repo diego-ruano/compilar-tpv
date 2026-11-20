@@ -6,6 +6,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import RecuperarDatos from "../../src/app/pages/RecuperarDatos";
 import { useEstadoSync } from "../../src/shared/stores/useEstadoSync";
+// OPS-02: el error lleva el botón del diagnóstico, que avisa con toasts (en la app, los de `App`).
+import { ToastProvider } from "../../src/shared/toast";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -40,7 +42,7 @@ it("enseña la antigüedad de cada copia y avisa, sin impedirla, de la que pasa 
             : undefined,
     );
 
-    render(<RecuperarDatos />);
+    render(<ToastProvider><RecuperarDatos /></ToastProvider>);
 
     const reciente = await screen.findByRole("button", { name: /^Última copia: .*\(hace 2 días\)$/ });
     const casiSiete = screen.getByRole("button", { name: /^Copia: .*\(hace 6 días\)$/ });
@@ -78,7 +80,7 @@ it("una copia que no se puede restaurar se rechaza diciendo por qué, y deja ele
         return undefined;
     });
 
-    render(<RecuperarDatos />);
+    render(<ToastProvider><RecuperarDatos /></ToastProvider>);
 
     (await screen.findByRole("button", { name: /^Última copia: / })).click();
 
@@ -99,7 +101,7 @@ it("una copia anterior al log acaba ofreciendo la nube, con el motivo a la vista
     });
     invoke.mockImplementation(async (comando: string) => (comando === "recovery_list_backups" ? [] : undefined));
 
-    render(<RecuperarDatos />);
+    render(<ToastProvider><RecuperarDatos /></ToastProvider>);
 
     expect(await screen.findByText("La recuperación no ha podido completarse")).toBeInTheDocument();
     expect(screen.getByText(/Esta copia es anterior a lo que guarda la nube/)).toBeInTheDocument();
@@ -116,7 +118,7 @@ it("si ni lo imprescindible para trabajar cabe en la descarga, lo dice y señala
         return undefined;
     });
 
-    render(<RecuperarDatos />);
+    render(<ToastProvider><RecuperarDatos /></ToastProvider>);
 
     (await screen.findByRole("button", { name: "Recuperar el estado actual de la nube" })).click();
 
@@ -135,7 +137,7 @@ it("con la base anterior a lo que guarda la nube lo explica y sólo ofrece la nu
             : undefined,
     );
 
-    render(<RecuperarDatos />);
+    render(<ToastProvider><RecuperarDatos /></ToastProvider>);
 
     expect(
         await screen.findByText(/se han cambiado por fuera del programa .* son anteriores a lo que guarda la nube/),

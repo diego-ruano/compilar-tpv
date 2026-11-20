@@ -18,6 +18,7 @@ import { useEstadoSync } from "../../shared/stores/useEstadoSync";
 import { Badge, Button, Card } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
 import { CORREO_SOPORTE } from "../../shared/lib/soporte";
+import { BotonDiagnostico } from "../../shared/ui/BotonDiagnostico";
 
 type Origen = "local" | "cloud" | "empty";
 
@@ -358,6 +359,11 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                                         : `No se pueden traer los datos de la nube: lo imprescindible para volver a trabajar (la carta, el personal, los clientes, las reservas y lo que sigue abierto) ocupa más de lo que se puede descargar de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, contacta con soporte en ${CORREO_SOPORTE}.`
                                                     : error.message}
                                             </span>
+                                        </div>
+                                        {/* OPS-02: si hay que llamar a soporte, lo que necesitará saber
+                                            de este equipo, también sin internet y sin iniciar sesión. */}
+                                        <div>
+                                            <BotonDiagnostico variant="ghost" size="sm" />
                                         </div>
                                         {puedeCrearVacia && (
                                             <Button

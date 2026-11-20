@@ -19,9 +19,10 @@
 //! **Lo que no puede hacer:** reconocer un nombre o una dirección. Por eso un mensaje de error no se
 //! compone con ellos; esto es la red, no la regla.
 //!
-//! **Alcance:** sólo el camino a la nube. El fichero local rotado (`<AppData>/logs/tpv.log`) es la
-//! fuente de verdad para soporte y conserva el detalle completo sin depurar (es el propio equipo del
-//! usuario, no un tercero).
+//! **Alcance:** lo que sale del equipo: el camino a la nube y el paquete de diagnóstico para soporte
+//! (OPS-02, `diagnostico.rs`). El fichero local rotado (`<AppData>/logs/tpv.log`) es la fuente de
+//! verdad para soporte y conserva el detalle completo sin depurar (es el propio equipo del usuario,
+//! no un tercero); lo que el paquete saca de él pasa antes por aquí.
 //!
 //! **Coste:** regex/RegexSet compilados una vez (`OnceLock`), preselección de reglas y resultado
 //! prestado si no cambia. El spool se filtra en su hilo propio; Sentry en su `before_send`.

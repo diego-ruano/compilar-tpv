@@ -6,6 +6,7 @@ pub mod clientes;
 pub mod configuracion;
 pub mod correo_recuperacion;
 pub mod cuentas;
+pub mod diagnostico;
 pub mod field_cipher;
 pub mod inventario;
 pub mod jobs;

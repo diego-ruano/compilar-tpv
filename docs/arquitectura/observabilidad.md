@@ -6,6 +6,7 @@
 | **Axiom** | Telemetría estructurada: logs de los dispositivos reenviados por el worker y eventos de salud de la sincronización |
 | **Better Stack** | Vigilancia desde fuera: la sonda de `/health` y los latidos del cron |
 | Fichero local | `<AppData>/logs/tpv.log`, 7 días: la fuente de verdad para soporte |
+| Paquete de diagnóstico | Lo que soporte necesita de un equipo cuando la telemetría no ha salido: un fichero que guarda la persona ([abajo](#el-paquete-de-diagnóstico-ops-02)) |
 
 La copia previa a migrar y las migraciones confirmadas se registran con `tracing` (target
 `tpv::migrations`): éxitos a INFO y copia fallida a WARN. Incluyen nombre de fichero/migración,
@@ -306,6 +307,63 @@ la URL de la petición, ni una ruta de AppData**. Lo que falla al hablar con el 
   con `.send()` o `execute` en vez de con `reloj::enviar`. No sigue un valor de una variable a otra
   ni entra en una función aparte: no sustituye a los tests de comportamiento.
 
+## El paquete de diagnóstico (OPS-02)
+
+Cuando el bar no tiene internet, lo que ha pasado en el equipo no ha llegado a Axiom ni a Sentry.
+**«Guardar diagnóstico…»** compone un fichero JSON (`diagnostico-tpv-<fecha>-<hora>.json`) que la
+persona guarda donde quiera y manda a soporte como pueda. Es texto legible a propósito: se puede
+abrir y ver qué lleva antes de mandarlo.
+
+**Dónde está.** En Configuración → Actualizaciones y soporte (sólo el administrador entra en
+Configuración, con candado de ruta), junto a los dos avisos de Conectividad que dicen «contacta con
+soporte», y en el error de la pantalla de recuperación, antes del login. El comando,
+`diagnostico_generar_paquete`, **no pide sesión**: es para cuando algo va mal, también cuando no se
+puede entrar, y en una Handy sin red el gate no podría comprobar los permisos de nadie. No escribe
+nada, y lo que lee es lo mismo que enseñan sin gate `sync_health`, `jobs_status` e
+`interruptores_apagados`. Está en las exenciones de `tests_exenciones_del_gate`.
+
+**Cómo se guarda.** La pantalla pide el paquete, abre el diálogo de guardado
+(`@tauri-apps/plugin-dialog`) y lo escribe con `writeFile`, como los PDF: no hace falta ningún
+permiso nuevo, y la webview sigue sin poder leer AppData. En Android el diálogo es el selector de
+documentos del sistema (`ACTION_CREATE_DOCUMENT`), que devuelve un `content://` en el que
+`plugin-fs` escribe; se puede guardar en Descargas o mandar directamente desde ahí.
+
+**Qué lleva**, cada parte por su cuenta (`apps/tpv-main/src-tauri/src/diagnostico.rs`):
+
+| Parte | Qué | Por qué se puede sacar |
+|---|---|---|
+| `aplicacion` | Versión, variante (`windows-modern`, `win7`, `android`), release y commit, entorno, identificador, sistema, arquitectura y versión de la Webview | Es lo que ya lleva cada evento de Sentry |
+| `equipo` | Modo (Main, Handy o sin elegir), conectividad, a qué destinos hay impresora asignada (no su nombre, que lo pone quien la instala) y el zoom | Ajustes de este equipo, sin nombres |
+| `identidad` | `tenant_id` y `device_id` | Son los identificadores opacos que lleva cada evento de Axiom y de Sentry ([Correlación](#correlación)), y con los que soporte encuentra el negocio en la base central. Identifican una licencia y un equipo, no a una persona. La clave pública del equipo no va |
+| `licencia` | `license_state.json` | No tiene secretos: el token vive en el almacén de secretos del sistema, y la clave de activación no se guarda |
+| `interruptores` | Cuál está apagado y hasta cuándo | Sin el `motivo`, que es texto libre de soporte y no sale del equipo |
+| `tareas_de_fondo` | `jobs_status`: cuándo corrió cada job, sus fallos y su último error | El error pasa por el filtro |
+| `motor_de_replicacion`, `replicacion`, `historico`, `recuperacion` | `sync_estado`, `sync_health` (outbox, último `seq`, cuarentenas en las dos direcciones), el histórico y el estado de recuperación. Sólo la Main | Son cuentas: ninguna operación del outbox ni de una cuarentena, que llevan los datos |
+| `base_local` | `PRAGMA quick_check` (hasta 20 problemas), tamaño, páginas libres, modo del diario, versión de SQLite y migraciones aplicadas. Sólo la Main | Lee sólo `PRAGMA` y `_migrations` (`tpv-infra-sqlite::diagnostico`): ninguna tabla de negocio |
+| `copias_locales` | Fecha, tamaño y si es importada de cada copia. Sólo la Main | — |
+| `cola_de_telemetria` | Segmentos, bytes y fecha del más antiguo de la cola hacia Axiom | Desde esa fecha no ha salido nada |
+| `registro` | Lo último del `tpv.log`: como mucho 1 MiB de los ficheros más recientes y 4.000 líneas, de 2 KiB cada una | Sólo las líneas de INFO o más, las mismas que salen a Axiom (`forward.rs`), filtradas igual |
+
+**Lo que lo cubre todo** (`tpv_application::use_cases::diagnostico`):
+
+- **Ninguna parte tumba el paquete.** Cada una se lee por su cuenta, con 30 s de espera: si falla,
+  no contesta o entra en pánico, el paquete sale igual, esa parte lleva el motivo en `error`, y la
+  pantalla dice cuántas faltan. La pantalla sólo avisa de un fallo si no se ha podido guardar.
+- **Todo pasa por el filtro de datos personales** (OBS-01, `tpv_telemetry::diagnostico::filtrar_para_soporte`):
+  los datos de cada parte y el texto de sus errores, también las claves de secretos (`token`, `pin`…).
+  Además se tapa el usuario de las rutas de carpeta personal (`C:\Users\<usuario>`, `/home/…`,
+  `/Users/…`), con espacios incluidos: no debería haber ninguna (AUD-28), pero el registro local no
+  se filtra al escribirlo. Esta regla es sólo del paquete, no de las tres copias del filtro.
+- **Tamaño acotado**: 64 KiB por parte (el registro, 1,5 MiB) y 2 MiB el paquete. Lo que no cabe se
+  quita entero y se dice; un JSON recortado a medias no se podría leer.
+
+El filtro no reconoce nombres: lo que impide que salgan es que **no se lee ninguna tabla de negocio**
+y que el registro sólo trae lo que ya sale a Axiom, cuyos mensajes no se componen con datos
+([AUD-28](#qué-lleva-un-mensaje-de-error-aud-28)). Lo prueban
+`diagnostico.rs::el_paquete_de_una_main_no_lleva_datos_personales` (una Main con un cliente en la
+base y en el outbox, el error de un job y un registro con datos personales; ninguno sale) y los tests
+de `tpv-telemetry::diagnostico` y `tpv-infra-sqlite::diagnostico`.
+
 ## Lo que registra Cloudflare de cada petición
 
 La plataforma registra cada invocación del worker por su cuenta, sin que su código intervenga: **el
@@ -342,6 +400,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Cableado del escritorio | `apps/tpv-main/src-tauri/src/lib.rs` |
 | Sentry de la Webview | `apps/tpv-main/src/shared/observability/sentry.ts` (más el error boundary y el listener global) |
 | Fallos de comandos | `packages/client/src/transporte.ts`, `shared/observability/fallosDeComandos.ts`, `commands/telemetria.rs` |
+| Paquete de diagnóstico (OPS-02) | `tpv-application/src/use_cases/diagnostico.rs`, `tpv-telemetry/src/diagnostico.rs`, `tpv-infra-sqlite/src/diagnostico.rs`, `apps/tpv-main/src-tauri/src/diagnostico.rs`, `commands/diagnostico.rs`, `src/shared/ui/BotonDiagnostico.tsx` |
 | Mensajes de error (AUD-28) | `crates/tpv-infra-licensing/src/reloj.rs` (`enviar`, `fallo_de_transporte`), `crates/tpv-infra-http/src/client.rs` (`no_encaja`, `leer_campo`), `crates/tpv-infra-licensing/src/lib.rs` (`no_encaja`, `leer_activacion`, `leer_status`, `fallo_de_fichero`), `crates/tpv-application/src/error.rs` (`from_api_body`, `rechazo`), `apps/tpv-main/src-tauri/src/imagenes.rs` (`para_registro`) |
 | Sentry del worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` |
 | Axiom | `apps/cloud-worker-licensing/src/observability/axiom.ts` |

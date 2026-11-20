@@ -19,6 +19,8 @@ import { Panel } from "../ui/Panel";
 import { Badge } from "../ui/Badge";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
+import { BotonDiagnostico } from "../../../shared/ui/BotonDiagnostico";
+import { CORREO_SOPORTE } from "../../../shared/lib/soporte";
 
 /** Espejo de `UpdateInfo` (src-tauri/src/lib.rs). */
 type UpdateInfo = {
@@ -210,6 +212,19 @@ export function Actualizaciones({ darkMode }: { darkMode: boolean }) {
 					</div>
 				</Panel>
 			) : null}
+
+			{/* OPS-02: lo que se manda a soporte cuando algo no va bien, también sin internet. */}
+			<Panel title="Soporte" subtitle={`Si algo no va bien, escribe a ${CORREO_SOPORTE}.`}>
+				<p className="text-sm text-fg-muted">
+					Guarda un diagnóstico de este equipo y mándalo con tu correo: dice qué versión
+					tiene, cómo va la copia a la nube, las tareas de fondo y lo último que ha
+					registrado. Sirve también sin internet. No lleva datos de clientes, personal ni
+					ventas, ni claves: es un texto que puedes abrir y leer antes de mandarlo.
+				</p>
+				<div className="mt-4">
+					<BotonDiagnostico />
+				</div>
+			</Panel>
 		</div>
 	);
 }

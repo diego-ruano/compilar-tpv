@@ -17,6 +17,7 @@ import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 import { AvisoInterruptores } from "./AvisoInterruptores";
 import { ImagenesPendientes } from "./ImagenesPendientes";
 import { CORREO_SOPORTE } from "../../../shared/lib/soporte";
+import { BotonDiagnostico } from "../../../shared/ui/BotonDiagnostico";
 
 function desdeHace(ms: number): string {
 	const d = Date.now() - ms;
@@ -239,6 +240,10 @@ function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: 
 					que ya no se van a subir. El resto sigue copiándose con normalidad, pero esos datos
 					solo están aquí: si perdieras este equipo hoy, no volverían. Ya se ha avisado
 					automáticamente; contacta con soporte en {CORREO_SOPORTE}.
+					{/* OPS-02: con el diagnóstico, que lleva el estado de la réplica de este equipo. */}
+					<div className="mt-2">
+						<BotonDiagnostico size="sm" />
+					</div>
 				</div>
 			)}
 		</Panel>
@@ -301,10 +306,16 @@ function RecuperarDeLaNube({ health }: { health: SyncHealth }) {
 					que se sincronice y vuelve aquí.
 				</p>
 			) : rechazados > 0 ? (
-				<p>
-					Este TPV tiene {rechazados} cambio(s) que la nube no ha aceptado y que sólo están aquí:
-					traer la nube los borraría. Contacta con soporte en {CORREO_SOPORTE}.
-				</p>
+				<div className="grid gap-2">
+					<p>
+						Este TPV tiene {rechazados} cambio(s) que la nube no ha aceptado y que sólo están
+						aquí: traer la nube los borraría. Contacta con soporte en {CORREO_SOPORTE}.
+					</p>
+					{/* OPS-02 */}
+					<div>
+						<BotonDiagnostico size="sm" />
+					</div>
+				</div>
 			) : confirmando ? (
 				<div className="grid gap-2">
 					<p>

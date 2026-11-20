@@ -146,8 +146,9 @@ export default function Configuracion() {
         },
         {
             key: "ACTUALIZACIONES",
-            title: "Actualizaciones",
-            desc: "Versión instalada y novedades",
+            title: "Actualizaciones y soporte",
+            // OPS-02: el diagnóstico para soporte está en esta sección.
+            desc: "Versión instalada, novedades y diagnóstico",
         },
     ], [isMain]);
 

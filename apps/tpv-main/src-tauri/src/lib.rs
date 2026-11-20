@@ -3,6 +3,7 @@
 //! cdylib `libtpv_lib.so` arranca por el `#[tauri::mobile_entry_point]` de este mismo `run()`.
 
 mod commands;
+mod diagnostico;
 mod interruptores;
 mod imagenes;
 mod replicacion;
@@ -2443,6 +2444,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::jobs::interruptores_apagados,
             // registro de los fallos de comandos que ve la pantalla
             commands::telemetria::telemetria_fallo_de_comando,
+            // OPS-02: el paquete de diagnóstico para soporte
+            commands::diagnostico::diagnostico_generar_paquete,
             // tamaño de la interfaz (zoom de la ventana)
             commands::ventana::ventana_zoom_estado,
             commands::ventana::ventana_zoom_cambiar,
@@ -3755,6 +3758,11 @@ mod tests_exenciones_del_gate {
             "commands/telemetria.rs",
             include_str!("commands/telemetria.rs"),
             "registra también los fallos de antes del login, que son los que más cuesta averiguar",
+        ),
+        (
+            "commands/diagnostico.rs",
+            include_str!("commands/diagnostico.rs"),
+            "el diagnóstico es para cuando algo va mal, también cuando no se puede entrar (OPS-02)",
         ),
         (
             "commands/ventana.rs",

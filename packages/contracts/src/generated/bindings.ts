@@ -2176,6 +2176,19 @@ export type PairCreateResult = {
 	expiresAtMs: number,
 };
 
+/**
+ *  El paquete ya compuesto. Nunca es un error: lo que no se ha podido leer va dentro, explicado, y
+ *  su nombre en `secciones_con_error`.
+ */
+export type PaqueteDiagnostico = {
+	/**  Nombre propuesto para el fichero (`diagnostico-tpv-20261120-1030.json`). */
+	nombre_fichero: string,
+	/**  El fichero entero: JSON legible, ya filtrado de datos personales y acotado de tamaño. */
+	contenido: string,
+	/**  Las partes que no se han podido leer (su motivo va dentro del paquete). */
+	secciones_con_error: string[],
+};
+
 export type PedidoProveedorDto = {
 	id_pedido: string,
 	id_proveedor: string | null,

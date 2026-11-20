@@ -16,9 +16,9 @@ thiserror = { workspace = true }
 
 regex = { workspace = true }
 # AUD-06: el turno de las activaciones (`use_cases::licensing::ACTIVACIONES`), un cerrojo asíncrono.
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 # Runtime async para los #[tokio::test] de los casos de uso. Solo se compila al testear;
 # no entra en el binario de producción.
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

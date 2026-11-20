@@ -14,6 +14,7 @@ pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
+pub mod diagnostico;
 pub mod email_config;
 pub mod impresion;
 pub mod errors;

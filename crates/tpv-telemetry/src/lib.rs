@@ -25,6 +25,7 @@
 //! `init` NUNCA debe tumbar la app: si falla, el shell registra el error y continúa sin telemetría.
 
 mod context;
+pub mod diagnostico;
 mod capture;
 pub mod event;
 mod forward;
@@ -177,6 +178,8 @@ fn montar(config: TelemetryConfig, depuracion: bool) -> Result<(), TelemetryErro
     // ── Capa 2: fichero local rotado por días (7 ficheros ≈ 7 días). ──
     let logs_dir = config.logs_dir.clone().unwrap_or_else(|| config.app_data_dir.join("logs"));
     std::fs::create_dir_all(&logs_dir).ok();
+    // OPS-02: el paquete de diagnóstico lee de aquí el final del registro y lo que espera en la cola.
+    diagnostico::fijar_carpetas(logs_dir.clone(), config.app_data_dir.join("telemetry-spool"));
     let appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("tpv")
