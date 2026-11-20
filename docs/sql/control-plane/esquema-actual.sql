@@ -43,21 +43,6 @@ CREATE TABLE tenants (
 
 CREATE INDEX idx_tenants_status ON tenants(status);
 
-CREATE TABLE tenant_databases (
-  tenant_id             TEXT PRIMARY KEY,
-  turso_db_name         TEXT,
-  turso_url             TEXT,
-  turso_auth_token_enc  TEXT,  -- token cifrado (AES-GCM base64)
-  created_at_ms         INTEGER NOT NULL DEFAULT (unixepoch()*1000),
-  rotated_at_ms         INTEGER, token_expires_at_ms INTEGER, provisioning_status TEXT NOT NULL DEFAULT 'ready'
-  CHECK (provisioning_status IN ('creating','ready','error')), last_error TEXT,
-
-  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_tenantdb_status ON tenant_databases(provisioning_status);
-CREATE INDEX idx_tenantdb_tokenexp ON tenant_databases(token_expires_at_ms);
-
 CREATE TABLE tenant_recovery_emails (
   tenant_id      TEXT PRIMARY KEY,
   email          TEXT NOT NULL,
