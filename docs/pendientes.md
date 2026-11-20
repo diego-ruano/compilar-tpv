@@ -25,7 +25,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
-| [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -345,44 +344,6 @@ grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) factur
 se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
 anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
 (`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
-
----
-
-## Comprobar a mano
-
-### INC-20261030-019 · La Handy Windows sólo cambia el nombre del negocio al recibir el foco
-
-En las pruebas E2E del 30-10-2026, al cambiar el nombre del negocio en la Main, la Handy Android lo
-cambió sola y la Handy Windows siguió con el anterior hasta que se le dio el foco. Probablemente no
-es un fallo: durante la prueba su ventana estaba tapada por otra, y Windows deja de repintar una
-ventana tapada. El código que recibe el aviso es el mismo en las dos Handy.
-
-Dar el foco a la ventana no vuelve a leer nada: con la conexión abierta, `reintentar` sólo manda un
-ping, y si contesta no se reconecta ni se relee (`src-tauri/src/socket_handy.rs`). Si el nombre
-cambia al pulsar en la ventana es porque se repinta.
-
-**Cómo comprobarlo:**
-
-1. Arranca la Main y la Handy Windows, con la Handy vinculada y con sesión iniciada en Mesas, para
-   que se vea el nombre del negocio en la cabecera.
-2. Coloca la ventana de la Handy Windows **a la vista y sin nada encima**: no minimizada, sin la VM
-   ni ninguna otra ventana tapándola. Lo mejor es un segundo monitor, o la VM de la Main en una
-   ventana pequeña al lado.
-3. En la Main: Configuración → Negocio → campo «Nombre». Escribe un nombre de prueba y pulsa
-   «Guardar cambios». Apunta la hora.
-4. **Sin tocar la Handy Windows** (ni clic, ni teclado, ni pasar a su ventana), mira su cabecera
-   durante unos 10 segundos.
-5. Vuelve a poner el nombre original en la Main y guarda.
-
-**Qué hacer con el resultado:**
-
-- **Si el nombre cambió solo:** no es un fallo; borra esta entrada.
-- **Si no cambió, o sólo al pulsar en la ventana:** la Handy Windows no está recibiendo los avisos en
-  vivo, o no los pinta con la ventana sin foco. Busca en Axiom, a esa hora, los avisos `se
-  interrumpió el socket de avisos` y `el socket de avisos no contestó al volver a primer plano`
-  (`tpv::handy`) de ese equipo, y repite con otro cambio (p. ej. el precio de un producto, mirando la
-  carta en la Handy) para ver si le pasa a todo o sólo a los ajustes del negocio. Con eso se
-  investiga.
 
 ---
 
