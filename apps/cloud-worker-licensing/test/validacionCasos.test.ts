@@ -20,8 +20,10 @@ import {
 	guardarCategoriaIngredienteSchema,
 	guardarIngredienteSchema,
 	updateLoteSchema,
+	upsertCategoriaSchema,
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
+import { proveedorSaveSchema } from "../src/domains/proveedores/proveedores.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import { validarConMensaje } from "../src/lib/validacion";
 import {
@@ -103,6 +105,9 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 		});
 		return alta;
 	},
+	// AUD-31: la imagen de una categoría y la de un proveedor.
+	categoria: (e) => validarConMensaje(upsertCategoriaSchema, e),
+	proveedor: (e) => validarConMensaje(proveedorSaveSchema, e),
 	negocio: async (e) => {
 		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
 		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;

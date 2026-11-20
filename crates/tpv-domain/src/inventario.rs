@@ -31,11 +31,13 @@ impl CategoriaUpsert {
         if nombre.is_empty() {
             return Err("Escribe el nombre de la categoría.".into());
         }
+        // AUD-31: una ruta de `save_image` o nada; vacía sigue siendo «sin imagen» ("").
+        let ruta_imagen = crate::imagenes::validar_ruta_imagen(Some(ruta_imagen))?.unwrap_or_default();
         Ok(CategoriaUpsert {
             id: id_categoria.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre,
             nombre_imagen: nombre_imagen.trim().to_string(),
-            ruta_imagen: ruta_imagen.trim().to_string(),
+            ruta_imagen,
             vendible,
             pasa_cocina,
         })
@@ -122,6 +124,8 @@ impl ProductoUpsert {
         if let Some(iva) = iva_percent {
             crate::configuracion::validate_iva_percent(iva)?;
         }
+        // AUD-31: una ruta de `save_image` o nada.
+        let ruta_imagen = crate::imagenes::validar_ruta_imagen(ruta_imagen)?;
         Ok(ProductoUpsert {
             id: id_producto.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_categoria,
@@ -131,7 +135,7 @@ impl ProductoUpsert {
             stock_minimo,
             unidad_medida: limpia(unidad_medida),
             nombre_imagen: limpia(nombre_imagen),
-            ruta_imagen: limpia(ruta_imagen),
+            ruta_imagen,
             cantidad_pedido_esperada,
             stock_suelto: stock_suelto.filter(|v| v.is_finite()),
             iva_percent,
@@ -426,11 +430,15 @@ mod tests {
     #[test]
     fn categoria_exige_nombre_y_normaliza_campos() {
         assert!(CategoriaUpsert::validar(None, " ".into(), "".into(), "".into(), true, false).is_err());
-        let c = CategoriaUpsert::validar(Some(" c1 ".into()), " Bebidas ".into(), " foto.jpg ".into(), " images/foto.jpg ".into(), true, false).unwrap();
+        let ruta = "images/categorias/0190f3a1-7b2c-4d4e-8f00-123456789abc.jpg";
+        let c = CategoriaUpsert::validar(Some(" c1 ".into()), " Bebidas ".into(), " foto.jpg ".into(), format!(" {ruta} "), true, false).unwrap();
         assert_eq!(c.id.as_deref(), Some("c1"));
         assert_eq!(c.nombre, "Bebidas");
         assert_eq!(c.nombre_imagen, "foto.jpg");
-        assert_eq!(c.ruta_imagen, "images/foto.jpg");
+        assert_eq!(c.ruta_imagen, ruta);
+        // AUD-31: lo que no sale de `save_image` no se guarda.
+        assert!(CategoriaUpsert::validar(None, "Bebidas".into(), "".into(), "images/foto.jpg".into(), true, false).is_err());
+        assert_eq!(CategoriaUpsert::validar(None, "Bebidas".into(), "".into(), " ".into(), true, false).unwrap().ruta_imagen, "");
         assert!(c.vendible && !c.pasa_cocina);
     }
 

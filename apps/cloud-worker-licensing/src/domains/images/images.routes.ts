@@ -64,6 +64,53 @@ export function tipoImagen(bytes: Uint8Array): string | null {
     return null;
 }
 
+// AUD-31: las cotas de RI-07 en la Main (`imagenes::decodificar`): 8192 px de lado y 24 Mpx. Lo que se
+// sube a R2 lo pinta la Handy tal cual desde r2.dev y lo baja la Main; la app sube siempre lo que ya ha
+// reconstruido `imagenes::procesar` (1024 px como mucho), así que esto sólo para a quien sube otra cosa
+// con las credenciales de un dispositivo.
+const MAX_LADO = 8192;
+const MAX_PIXELES = 24_000_000;
+
+/**
+ * AUD-31 · Las dimensiones que declara la cabecera de un PNG (`IHDR`) o de un JPEG (su `SOF`), sin
+ * decodificar nada. `null` si no se encuentran: una imagen así no se sube.
+ */
+export function dimensionesDeImagen(bytes: Uint8Array): { ancho: number; alto: number } | null {
+    const u16 = (i: number) => (bytes[i] << 8) | bytes[i + 1];
+    const u32 = (i: number) => ((bytes[i] << 24) >>> 0) + (bytes[i + 1] << 16) + (bytes[i + 2] << 8) + bytes[i + 3];
+    if (tipoImagen(bytes) === "image/png") {
+        // La firma (8), la longitud del primer trozo (4) y su tipo, que tiene que ser IHDR.
+        if (bytes.length < 24 || String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return null;
+        return { ancho: u32(16), alto: u32(20) };
+    }
+    if (tipoImagen(bytes) === "image/jpeg") {
+        let i = 2;
+        while (i + 3 < bytes.length) {
+            if (bytes[i] !== 0xff) return null;
+            const marca = bytes[i + 1];
+            // Relleno (0xFF repetido) y marcas sin longitud.
+            if (marca === 0xff) { i++; continue; }
+            if (marca === 0x01 || (marca >= 0xd0 && marca <= 0xd8)) { i += 2; continue; }
+            // Fin de la imagen o principio de los datos sin haber dicho su tamaño.
+            if (marca === 0xd9 || marca === 0xda) return null;
+            // SOF0–SOF15, salvo DHT (C4), JPG (C8) y DAC (CC): longitud, precisión, alto y ancho.
+            if (marca >= 0xc0 && marca <= 0xcf && marca !== 0xc4 && marca !== 0xc8 && marca !== 0xcc) {
+                if (i + 8 >= bytes.length) return null;
+                return { alto: u16(i + 5), ancho: u16(i + 7) };
+            }
+            i += 2 + u16(i + 2);
+        }
+        return null;
+    }
+    return null;
+}
+
+/** AUD-31 · ¿Cabe en las cotas de RI-07? Un JPEG o un PNG que dice cuánto mide y no se pasa. */
+export function dentroDeLasCotas(bytes: Uint8Array): boolean {
+    const d = dimensionesDeImagen(bytes);
+    return !!d && d.ancho > 0 && d.alto > 0 && d.ancho <= MAX_LADO && d.alto <= MAX_LADO && d.ancho * d.alto <= MAX_PIXELES;
+}
+
 // ───────────────── LECTURA (pública, cacheada en el edge) ─────────────────
 
 imagesRoutes.get("/:tenant/*", async (c) => {
@@ -123,8 +170,13 @@ imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ 
 	if (!body.byteLength) return c.json({ error: "empty_body" }, 400);
 	if (body.byteLength > MAX_BYTES) return c.json({ error: "image_too_large" }, 413);
 
-	const contentType = tipoImagen(new Uint8Array(body));
+	const bytes = new Uint8Array(body);
+	const contentType = tipoImagen(bytes);
 	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
+	// AUD-31: lo que la Main no decodificaría (`imagenes::decodificar`) tampoco lo pinta la Handy desde
+	// r2.dev: ni WebP (AUD-30) ni una cabecera de más de 8192 px de lado o 24 Mpx.
+	if (contentType === "image/webp") return c.json({ error: "bad_image_path" }, 400);
+	if (!dentroDeLasCotas(bytes)) return c.json({ error: "image_too_large" }, 413);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
 	const key = prefijoDelNegocio(c.get("tenantId")) + relPath;
 

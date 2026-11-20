@@ -12,7 +12,7 @@ use crate::configuracion::validate_iva_percent;
 use crate::ingredientes::{cambios_de_linea, forma_guardada, CategoriaIngredienteGuardar, IngredienteGuardar};
 use crate::dinero::Dinero;
 use crate::inventario::{
-    LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
+    CategoriaUpsert, LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
 };
 use crate::reservas::{ReservaEntrada, ReservaValidada};
 use crate::reservas_web::{AltaWebEntrada, AltaWebValidada};
@@ -122,7 +122,42 @@ fn no_vino_opcional(e: &Value) -> Result<Option<i64>, String> {
 }
 
 fn negocio(e: &Value) -> Result<Value, String> {
-    Ok(json!({ "iva_percent": iva_opcional(e)?, "reserva_no_vino_min": no_vino_opcional(e)? }))
+    let iva = iva_opcional(e)?;
+    let no_vino = no_vino_opcional(e)?;
+    // AUD-31: el logo, como lo mira `patch_business`: un texto que no es una ruta de la app no entra.
+    if let Some(logo) = e.get("logo_data_url").and_then(Value::as_str) {
+        crate::imagenes::validar_ruta_imagen(Some(logo.to_string()))?;
+    }
+    Ok(json!({ "iva_percent": iva, "reserva_no_vino_min": no_vino }))
+}
+
+/// AUD-31 · Una categoría de productos (su imagen).
+fn categoria(e: &Value) -> Result<Value, String> {
+    let c = CategoriaUpsert::validar(
+        texto_opcional(e, "id_categoria"),
+        texto(e, "nombre"),
+        texto(e, "nombre_imagen"),
+        texto(e, "ruta_imagen"),
+        e["vendible"].as_bool().unwrap_or(false),
+        e["pasa_cocina"].as_bool().unwrap_or(false),
+    )?;
+    Ok(json!({ "nombre": c.nombre }))
+}
+
+/// AUD-31 · Un proveedor (su imagen).
+fn proveedor(e: &Value) -> Result<Value, String> {
+    let p = crate::proveedores::ProveedorValidado::validar(crate::proveedores::ProveedorEntrada {
+        id_proveedor: texto_opcional(e, "id_proveedor"),
+        nombre_empresa: texto(e, "nombre_empresa"),
+        contacto: texto_opcional(e, "contacto"),
+        telefono: texto_opcional(e, "telefono"),
+        email: texto_opcional(e, "email"),
+        cif: texto_opcional(e, "cif"),
+        informacion_adicional: texto_opcional(e, "informacion_adicional"),
+        nombre_imagen: texto_opcional(e, "nombre_imagen"),
+        ruta_imagen: texto_opcional(e, "ruta_imagen"),
+    })?;
+    Ok(json!({ "nombre_empresa": p.nombre_empresa }))
 }
 
 fn producto(e: &Value) -> Result<Value, String> {
@@ -284,6 +319,8 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "pedido" => pedido(entrada),
         "pedido_estado" => pedido_estado(entrada),
         "trabajador" => trabajador(entrada),
+        "categoria" => categoria(entrada),
+        "proveedor" => proveedor(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

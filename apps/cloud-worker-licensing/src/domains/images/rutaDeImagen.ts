@@ -15,5 +15,25 @@
 // Va aparte de `images.routes.ts` para que la lea `test/sinDatosPersonalesEnLaQuery.node.test.ts`,
 // que corre en Node.
 
+import { recortar } from "../../lib/texto";
+
 export const RUTA_DE_IMAGEN =
 	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG]|[wW][eE][bB][pP])$/;
+
+/**
+ * AUD-31 · Lo que dice quien guarda una imagen que no tiene esa forma: el mismo texto en la Main
+ * (`tpv_domain::imagenes::MSG_IMAGEN_NO_VALIDA`), con su caso en `validacion_casos.json`.
+ */
+export const MSG_IMAGEN_NO_VALIDA = "La imagen no es válida: vuelve a elegirla.";
+
+/**
+ * AUD-31 · ¿Se puede guardar este valor en una columna de imagen (`Ruta_Imagen`, `Logo_DataUrl`)?
+ * Vacío (sin imagen) o, recortado, una ruta con la forma de `RUTA_DE_IMAGEN`. Ni un `data:`, ni una
+ * URL, ni una ruta de otra carpeta: el valor se replica y lo pinta cada equipo del negocio, también
+ * en la pantalla de entrada, y lo que no sale de `save_image` no se pinta (`imageUrl.ts`). Lo mismo
+ * que la Main (`tpv_domain::imagenes::validar_ruta_imagen`).
+ */
+export function esImagenGuardable(valor: string | null | undefined): boolean {
+	const r = recortar(valor ?? "");
+	return r === "" || RUTA_DE_IMAGEN.test(r);
+}

@@ -1411,6 +1411,17 @@ async fn images_ensure_local(
     let svc = PairingAdapter::new(app_data_dir.clone());
     match uc_pairing::download_image(&svc, mode_str, &rel_path).await {
         Ok(Some(bytes)) => {
+            // AUD-31: lo que baja de R2 pasa por RI-07 antes de llegar al disco, como lo que se guarda
+            // aquí (`save_image`): JPEG o PNG, dentro de sus cotas, y reconstruido. Lo que no pasa no se
+            // escribe, y la pantalla pinta el marcador (`imageUrl.ts` recibe `false`).
+            let bytes = match imagenes::procesar(&bytes) {
+                Ok((reconstruida, _)) => reconstruida,
+                Err(e) => {
+                    tracing::warn!(target: "tpv::imagenes", ruta = %imagenes::para_registro(&rel_path), error = %e,
+                        "imagen de R2 que no pasa RI-07: no se guarda");
+                    return Ok(false);
+                }
+            };
             let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
             // AUD-28: sin la ruta de AppData ni el nombre que alguien le dio a la imagen.
             fs::write(&file_path, bytes).map_err(|e| {
@@ -3721,6 +3732,41 @@ mod tests_imagenes_heredadas {
 }
 
 #[cfg(test)]
+mod tests_imagen_bajada_de_r2 {
+    //! AUD-31 · Lo que baja de R2 pasa por RI-07 antes de escribirse en disco.
+    //!
+    //! `images_ensure_local` necesita una app de Tauri y red; lo que se vigila es el propio fuente: que
+    //! los bytes bajados se reconstruyan con `imagenes::procesar` antes del `fs::write` y que, si no
+    //! pasan, no se escriba nada y se conteste `false` (la pantalla pinta el marcador).
+
+    fn cuerpo_de_images_ensure_local() -> &'static str {
+        let fuente = include_str!("lib.rs");
+        let desde = fuente.find("async fn images_ensure_local(").expect("images_ensure_local");
+        let resto = &fuente[desde..];
+        // Acaba en la primera llave de cierre en la primera columna (LF o CRLF).
+        &resto[..resto.find("\n}").expect("fin de la función")]
+    }
+
+    #[test]
+    fn la_imagen_bajada_se_reconstruye_antes_de_escribirla() {
+        let cuerpo = cuerpo_de_images_ensure_local();
+        let procesar = cuerpo.find("imagenes::procesar(&bytes)").expect("lo bajado pasa por imagenes::procesar");
+        let escribir = cuerpo.find("fs::write(").expect("fs::write");
+        assert!(procesar < escribir, "procesar va antes de escribir");
+        assert!(cuerpo[procesar..escribir].contains("return Ok(false);"), "si no pasa RI-07, no se escribe y se contesta false");
+    }
+
+    #[test]
+    fn lo_que_no_es_una_imagen_no_pasa_ri_07() {
+        // Lo que podría haber en el bucket con las credenciales de un dispositivo.
+        let webp: &[u8] = b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0";
+        for bytes in [&b"<svg onload=alert(1)>"[..], webp] {
+            assert!(crate::imagenes::procesar(bytes).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests_exenciones_del_gate {
     //! Los comandos que NUNCA pueden exigir sesión (SEC-01).
     //!
@@ -3795,6 +3841,9 @@ mod tests_exenciones_del_gate {
             let csp = config["app"]["security"][campo].as_str().unwrap();
             let connect = csp.split(';').find(|s| s.trim().starts_with("connect-src")).unwrap();
             assert!(!connect.contains("workers.dev") && !connect.contains("altarialights.com") && !connect.contains("wss:"));
+            // AUD-31: ninguna imagen de la app es un `data:`; uno que llegara replicado no se pinta.
+            let img = csp.split(';').find(|s| s.trim().starts_with("img-src")).unwrap();
+            assert!(!img.split_whitespace().any(|t| t == "data:"), "{campo}: img-src sin data:");
         }
     }
 

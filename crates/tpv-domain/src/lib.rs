@@ -31,6 +31,8 @@ pub mod cuentas;
 pub mod dinero;
 /// Fechas que llegan como texto: un único criterio de validez (RI-78).
 pub mod fechas;
+/// AUD-31 · La forma de una imagen guardada en una fila del negocio.
+pub mod imagenes;
 /// Ingredientes de los productos y lo que se pide distinto en una línea (sin precio ni stock).
 pub mod ingredientes;
 pub mod inventario;

@@ -34,6 +34,11 @@ pub async fn patch_business(
             validate_iva_percent(v).map_err(AppError::validation)?;
         }
     }
+    // AUD-31: el logo es una ruta de `save_image` (`images/logo/{uuid}.png`) o nada: se replica y
+    // lo pinta cada equipo, también en la pantalla de entrada. Lo mismo que el worker.
+    if let Some(serde_json::Value::String(logo)) = patch.get("logo_data_url") {
+        tpv_domain::imagenes::validar_ruta_imagen(Some(logo.clone())).map_err(AppError::validation)?;
+    }
     repo.patch_business(&patch).await?;
     Ok("OK".to_string())
 }
@@ -124,6 +129,15 @@ mod tests {
     async fn patch_business_rechaza_iva_negativo_y_booleano() {
         for patch in [serde_json::json!({"iva_percent": -0.01}), serde_json::json!({"iva_percent": true})] {
             assert!(matches!(patch_business(&RepoQueNoDebeLlamarse, patch).await, Err(AppError::Validation(_))));
+        }
+    }
+
+    // AUD-31: un logo que no es una ruta de `save_image` no se guarda (lo pintaría cada equipo).
+    #[tokio::test]
+    async fn patch_business_rechaza_un_logo_sin_la_forma_de_la_app() {
+        for logo in ["data:image/png;base64,AAAA", "https://example.invalid/x.png", "data.db"] {
+            let patch = serde_json::json!({"logo_data_url": logo});
+            assert!(matches!(patch_business(&RepoQueNoDebeLlamarse, patch).await, Err(AppError::Validation(_))), "{logo}");
         }
     }
 

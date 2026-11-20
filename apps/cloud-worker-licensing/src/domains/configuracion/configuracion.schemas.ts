@@ -7,13 +7,16 @@ import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { BusinessSettingsPatch, TicketSettingsPatch, ContactSettingsPatch } from "@tpv/contracts";
 import { zDinero, zDineroNoNegativo } from "../../lib/dinero";
 import { zIva } from "../../lib/iva";
+import { esImagenGuardable, MSG_IMAGEN_NO_VALIDA } from "../images/rutaDeImagen";
 
 const MSG_NO_VINO = "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva";
 
 // RI-87: la Handy valida las mismas claves y tipos que el IPC de la Main.
 // Ausente conserva; null sólo borra el logo. strict impide ignorar una clave mal escrita.
 const negocio = z.object({
-    business_name: z.string().optional(), logo_data_url: z.string().nullable().optional(),
+    business_name: z.string().optional(),
+    // AUD-31: el logo es una ruta de `save_image` (`images/logo/{uuid}.png`), como en la Main.
+    logo_data_url: z.string().refine(esImagenGuardable, MSG_IMAGEN_NO_VALIDA).nullable().optional(),
     direccion: z.string().optional(), telefono: z.string().optional(), cif: z.string().optional(),
     mensaje_footer: z.string().optional(), iva_percent: zIva.optional(),
     umbral_descuadre: zDineroNoNegativo.optional(), razon_social: z.string().optional(),

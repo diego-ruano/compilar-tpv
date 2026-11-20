@@ -4,6 +4,7 @@ import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
 
 import { recortar } from "../../lib/texto";
+import { esImagenGuardable, MSG_IMAGEN_NO_VALIDA } from "../images/rutaDeImagen";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ProveedorSaveInput as ContractProveedorSaveInput,
@@ -36,7 +37,8 @@ export const proveedorSaveSchema = z.object({
 	cif: optStr,
 	informacion_adicional: optStr,
 	nombre_imagen: optStr,
-	ruta_imagen: optStr,
+	// AUD-31: una ruta de `save_image` o nada, como en la Main (`validar_ruta_imagen`).
+	ruta_imagen: z.string().refine(esImagenGuardable, MSG_IMAGEN_NO_VALIDA).nullish().transform(cleanOptional),
 });
 
 export const setVinculosSchema = z.object({

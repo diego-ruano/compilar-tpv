@@ -9,6 +9,7 @@ import * as z from "zod";
 import { zDineroNoNegativoCon } from "../../lib/dinero";
 import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
 import { zIva } from "../../lib/iva";
+import { esImagenGuardable, MSG_IMAGEN_NO_VALIDA } from "../images/rutaDeImagen";
 
 import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -25,6 +26,8 @@ import type {
 
 const optNum = z.number().finite().nullish();
 const optStr = z.string().nullish();
+// AUD-31: una imagen es una ruta de `save_image` o nada, como en la Main (`validar_ruta_imagen`).
+const rutaImagen = z.string().refine(esImagenGuardable, MSG_IMAGEN_NO_VALIDA);
 const idStr = z.string().overwrite(recortar).min(1);
 /** Un id que tiene que venir y, si no, lo que dice la Main (VALID-03). */
 const idCon = (mensaje: string) => z.string().overwrite(recortar).min(1, mensaje);
@@ -46,7 +49,7 @@ export const upsertCategoriaSchema = z.object({
 	id_categoria: optId,
 	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre de la categoría."),
 	nombre_imagen: z.string().default(""),
-	ruta_imagen: z.string().default(""),
+	ruta_imagen: rutaImagen.default(""),
 	vendible: z.boolean(),
 	pasa_cocina: z.boolean(),
 });
@@ -60,7 +63,7 @@ export const upsertProductoSchema = z.object({
 	stock_minimo: optNum,
 	unidad_medida: optStr,
 	nombre_imagen: optStr,
-	ruta_imagen: optStr,
+	ruta_imagen: rutaImagen.nullish(),
 	cantidad_pedido_esperada: optNum,
 	stock_suelto: optNum,
 	// RI-78: ausente o `null` es «el del negocio»; fuera de 0–100 se rechaza, como en la Main.

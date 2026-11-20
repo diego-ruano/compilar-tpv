@@ -61,10 +61,6 @@ async function getHandyTenant(): Promise<string> {
   return handyTenantPromise;
 }
 
-function isAbsoluteUrl(u: string): boolean {
-  return /^(https?:|asset:|tauri:|blob:|data:)/i.test(u);
-}
-
 /**
  * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en la URL
  * pública de `r2.dev`, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el UUID que le
@@ -76,10 +72,22 @@ const RUTA_DE_IMAGEN =
   /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG]|[wW][eE][bB][pP])$/;
 
 /**
- * Resuelve una `Ruta_Imagen` (relativa) a una URL utilizable para `<img src>`.
- * Si ya viene como URL absoluta, la devuelve tal cual. Cadena vacía → "".
- * Una ruta que empieza por «/» es de la propia aplicación (`public/`, como los iconos de los
- * alérgenos del seed) y también se devuelve tal cual, en la Main y en la Handy.
+ * AUD-31: un icono de alérgeno de la propia app (`public/alergenos/`), la única imagen que no es una
+ * ruta de `save_image`: la ponen las filas de `Alergenos` que trae el esquema.
+ */
+const ICONO_DE_ALERGENO = /^\/alergenos\/[a-z0-9_]+\.png$/;
+
+/**
+ * Resuelve una `Ruta_Imagen` (relativa) a una URL utilizable para `<img src>`. Cadena vacía → "".
+ * Un icono de alérgeno de la propia aplicación (`/alergenos/…`, `public/`) se devuelve tal cual, en la
+ * Main y en la Handy.
+ *
+ * AUD-31: **sólo se pinta lo que tiene la forma que genera la app.** El valor llega replicado (el
+ * logo, la imagen de un producto) y lo puede escribir quien tenga las credenciales de una Handy;
+ * se pinta en cada equipo y en cada arranque, también en la pantalla de entrada. Un `data:`, una URL
+ * o la ruta de otro fichero dan "", que es el marcador neutro: el `<img>` no se pinta o pinta el
+ * suyo. En la Main, además, lo que Rust no confirma en disco (`images_ensure_local`, que también
+ * pasa por RI-07 lo que baja de R2) da "".
  */
 export async function resolveImageUrl(
   ruta: string | null | undefined,
@@ -87,13 +95,13 @@ export async function resolveImageUrl(
   const vigente = contexto;
   const r = String(ruta ?? "").trim();
   if (!r) return "";
-  if (isAbsoluteUrl(r) || r.startsWith("/")) return r;
+  if (ICONO_DE_ALERGENO.test(r)) return r;
+  if (!RUTA_DE_IMAGEN.test(r)) return "";
 
   const cached = urlCache.get(r);
   if (cached) return cached;
 
   if (useMode.getState().mode === "handy") {
-    if (!RUTA_DE_IMAGEN.test(r)) return "";
     const tenant = await getHandyTenant();
     if (!tenant || vigente !== contexto) return "";
     const url = `${CDN_IMAGES_BASE}/${tenant}/${r}`;
@@ -103,13 +111,17 @@ export async function resolveImageUrl(
 
   // Main: fichero local en AppData. Si falta (imagen creada en otra Handy: la fila llegó por
   // sync, pero el binario solo vive en R2), se baja de R2 a disco de forma perezosa. Es
-  // best-effort: si no se puede (offline / aún no subida), seguimos y el <img> hará fallback.
+  // best-effort: si no se puede (offline / aún no subida / no pasa RI-07), "" y el <img> degrada
+  // al marcador; la próxima resolución lo vuelve a intentar.
   let present = false;
   try {
     present = await commands.imagesEnsureLocal({ rel_path: r });
   } catch {
     /* ignorado: el UI degrada al placeholder y reintenta en la próxima recarga */
   }
+  // AUD-31: sin el fichero en disco no hay URL. Antes salía la del protocolo `asset:` igualmente,
+  // también la de una ruta que Rust había rechazado.
+  if (!present) return "";
 
   // HIG-04: esta función se promete best-effort, y la mayoría de quien la llama la espera dentro de
   // un `void (async () => …)()` sin `catch`. Si resolver la carpeta de AppData fallara, la promesa
@@ -121,10 +133,10 @@ export async function resolveImageUrl(
   } catch {
     return "";
   }
-  // Solo memoizamos cuando el fichero ya está en disco: así, si aún no estaba, la próxima
-  // resolución vuelve a intentar `images_ensure_local` (bajada de R2).
+  // Sólo se llega aquí con el fichero ya en disco: si aún no estaba, no se ha memoizado nada y la
+  // próxima resolución vuelve a intentar `images_ensure_local` (bajada de R2).
   if (vigente !== contexto) return "";
-  if (present) urlCache.set(r, url);
+  urlCache.set(r, url);
   return url;
 }
 

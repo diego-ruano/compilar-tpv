@@ -269,7 +269,7 @@ cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `
 |---|---|---|
 | `script-src` | `'self'` | Sólo el bundle. La `devCsp` añade `'unsafe-inline'` para el preámbulo de react-refresh |
 | `connect-src` | `'self' ipc: http://ipc.localhost` | Sólo el IPC: el REST y el WebSocket los hace Rust. La `devCsp` añade `ws:` para el HMR |
-| `img-src` | `'self' asset: …asset.localhost <bucket r2.dev> blob: data:` | `asset:` para las imágenes locales de la Main; el bucket para las de la Handy |
+| `img-src` | `'self' asset: …asset.localhost <bucket r2.dev> blob:` | `asset:` para las imágenes locales de la Main; el bucket para las de la Handy; `blob:` para la vista previa de una imagen antes de guardarla. Sin `data:` (AUD-31): ninguna imagen de la app lo es, y `resolveImageUrl` sólo pinta una ruta de `save_image` ([worker.md](worker.md#imágenes)) |
 | `style-src` | `'self'` | Ver abajo |
 | `object-src`, `frame-src` | `'none'` | Sin plugins ni iframes |
 

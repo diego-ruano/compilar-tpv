@@ -48,6 +48,8 @@ impl ProveedorValidado {
         if nombre.is_empty() {
             return Err("Escribe el nombre del proveedor.".into());
         }
+        // AUD-31: una ruta de `save_image` o nada.
+        let ruta_imagen = crate::imagenes::validar_ruta_imagen(ruta_imagen)?;
         Ok(ProveedorValidado {
             id: id_proveedor.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre_empresa: nombre,
@@ -57,7 +59,7 @@ impl ProveedorValidado {
             cif: limpia(cif),
             informacion_adicional: limpia(informacion_adicional),
             nombre_imagen: limpia(nombre_imagen),
-            ruta_imagen: limpia(ruta_imagen),
+            ruta_imagen,
         })
     }
 }
