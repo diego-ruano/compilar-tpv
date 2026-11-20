@@ -3,6 +3,8 @@ import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
 import type {
 	ApplyParams,
+	BaseDevuelta,
+	CopiaRestaurada,
 	EstadoDeLaBase,
 	IdentidadDelWorker,
 	ResultadoAplicacion,
@@ -99,6 +101,22 @@ export class TenantHub extends DurableObject<Env> {
 		modo: ModoDeVuelta;
 	}): Promise<ResultadoDeAdministracion<VueltaAplicada>> {
 		return this.motor.trasVolver(params);
+	}
+
+	/**
+	 * DO-PERDIDA · Darle base a un objeto vacío de un negocio que ya nació (administración,
+	 * `domains/admin/basesDeNegocios.ts`): una vacía, o la de una copia diaria de R2.
+	 */
+	crearBaseVacia(params: { tenantId: string; modo: ModoDeVuelta }): Promise<ResultadoDeAdministracion<BaseDevuelta>> {
+		return this.motor.crearBaseVacia(params);
+	}
+
+	restaurarDesdeCopia(params: {
+		tenantId: string;
+		clave: string;
+		modo: ModoDeVuelta;
+	}): Promise<ResultadoDeAdministracion<CopiaRestaurada>> {
+		return this.motor.restaurarDesdeCopia(params);
 	}
 
 	revocarDispositivo(deviceId: string): Promise<void> {

@@ -77,3 +77,21 @@ export type VueltaAplicada = {
 	purgadoHasta: number | null;
 };
 
+/**
+ * DO-PERDIDA · Cómo quedó un objeto vacío al darle base desde la administración (`crearBaseVacia`,
+ * `restaurarDesdeCopia`): el log, abierto como tras una vuelta a un instante (`abrirLogTrasVolver`).
+ */
+export type BaseDevuelta = {
+	/** El `Seq` del cambio vacío que abre el log. */
+	inicio: number;
+	/** Lo purgado (sólo con `nube`), o `null`. */
+	purgadoHasta: number | null;
+};
+
+/** DO-PERDIDA · Lo que entró de la copia (`restaurarDesdeCopia`). */
+export type CopiaRestaurada = BaseDevuelta & {
+	clave: string;
+	filas: number;
+	/** Tablas con alguna fila. */
+	tablas: number;
+};

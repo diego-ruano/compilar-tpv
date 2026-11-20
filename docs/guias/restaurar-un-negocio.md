@@ -7,7 +7,7 @@ atrás, y las dos son de administración (`ADMIN_API_TOKEN`, con el CLI de `scri
 | | Qué cubre | Cuánto atrás | Cómo |
 |---|---|---|---|
 | **Vuelta a un instante** (PITR de Cloudflare) | Una base estropeada (un borrado por error, un fallo del programa que escribió mal) con el objeto vivo | Cualquier instante de los últimos 30 días | `pnpm negocio:instante` |
-| **Copia diaria en R2** | El objeto perdido: otro espacio de nombres, un `borrarTodo`, el proveedor | Las 30 últimas madrugadas | Por ahora, sólo bajarla y mirarla (abajo) |
+| **Copia diaria en R2** | El objeto perdido: otro espacio de nombres, un `borrarTodo`, el proveedor | Las 30 últimas madrugadas | `pnpm negocio:restaurar-copia` |
 
 Lo que hacen por dentro: [worker.md](../arquitectura/worker.md#las-copias-de-la-base-de-cada-negocio-do-03).
 Lo que pasa después en la Main: [recuperacion.md](../arquitectura/recuperacion.md#cuando-la-nube-vuelve-atrás-do-03).
@@ -80,3 +80,42 @@ No trae el log de la réplica, ni el sello del negocio, ni el resumen de las est
 intentos de PIN: sólo lo que es del negocio. Tampoco las vistas ni los disparadores, que son del
 esquema y los ponen las migraciones.
 
+## Un negocio que ha perdido su base (DO-PERDIDA)
+
+Un negocio que ya nació (alguna licencia suya se activó) y cuyo objeto está vacío recibe
+`tenant_db_perdida` en cada petición, y ni la activación ni la Main le crean una base vacía en su
+lugar: puede que su base esté en otro objeto (el despliegue apunta a otro espacio de nombres o a otra
+jurisdicción), y entonces lo que hay que arreglar es el despliegue. `negocio:estado` dice si nació y
+si su objeto tiene base. Si de verdad se ha perdido, hay dos salidas, y las dos sólo funcionan con un
+negocio nacido y su objeto vacío (con base contestan `tenant_db_already_provisioned`: una base no se
+pisa).
+
+**Devolverle su copia**, la más reciente o la de un día:
+
+```bash
+pnpm negocio:restaurar-copia -- --tenant <tenantId> [--dia AAAA-MM-DD] --modo main --motivo "…"
+```
+
+Mientras se carga, la base no atiende (`tenant_db_restaurando`, como en la vuelta a un instante). Si
+la copia no vale, el objeto se queda vacío y contesta por qué: `copia_cortada` (le falta el final),
+`copia_de_otra_version` (es de un esquema que este worker no sabe poner: un worker anterior a la
+copia) o `copia_no_valida`; prueba con la de otro día.
+
+**Crearle una base vacía**, con su administrador inicial, como la del alta:
+
+```bash
+pnpm negocio:base-vacia -- --tenant <tenantId> --modo main --motivo "…"
+```
+
+En las dos, el log de la réplica se abre por encima de lo que la Main pueda haber visto, como tras una
+vuelta a un instante, y `--modo` dice quién manda después:
+
+- **`main`**: la Main sigue con su base, se pone al día y sube lo que tenga pendiente; lo que la nube
+  no tenga y la Main ya había subido lo repara su contraste en su siguiente momento tranquilo
+  ([sincronizacion.md](../arquitectura/sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)),
+  con sus topes por pasada: a una base vacía puede llevarle varias.
+- **`nube`**: cada Main aparta su base en `backups/antes-de-la-nube-*` y se trae la nube. Con una copia,
+  pierde lo que hizo después de esa madrugada; con una base vacía, todo.
+
+Si una de las dos se corta a mitad (el objeto se reinicia), la base se queda cerrada: repite la misma
+orden, que vacía lo que quedó y empieza otra vez.

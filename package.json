@@ -39,7 +39,9 @@
     "release:promocionar": "node scripts/tpv-license.mjs release-promocionar",
     "negocio:estado": "node scripts/tpv-license.mjs negocio-estado",
     "negocio:copiar": "node scripts/tpv-license.mjs negocio-copiar",
-    "negocio:instante": "node scripts/tpv-license.mjs negocio-instante"
+    "negocio:instante": "node scripts/tpv-license.mjs negocio-instante",
+    "negocio:restaurar-copia": "node scripts/tpv-license.mjs negocio-restaurar-copia",
+    "negocio:base-vacia": "node scripts/tpv-license.mjs negocio-base-vacia"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -24,6 +24,8 @@ import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
 import type {
 	ApplyParams,
+	BaseDevuelta,
+	CopiaRestaurada,
 	EstadoDeLaBase,
 	IdentidadDelWorker,
 	ResultadoAplicacion,
@@ -35,8 +37,10 @@ import {
 	volcarNegocio,
 	subirCopia,
 	siguienteCopiaMs,
+	prefijoDeCopias,
 	type CopiaHecha,
 } from "./tenantHub.copia";
+import { cargarCopia, CopiaInservible, lineasDe } from "./tenantHub.restaurar";
 import {
 	abrirLogTrasVolver,
 	CLAVE_VUELTA_EN_CURSO,
@@ -196,6 +200,9 @@ export class MotorTenantHub {
 	// DO-03: esta instancia ya ha visto armada la alarma de la copia diaria. Una caché: al despertar,
 	// se vuelve a mirar.
 	private copiaProgramada = false;
+	// DO-PERDIDA: esta instancia le está dando base a un objeto vacío (`darBase`). Es lo que está en
+	// vuelo; si la instancia se pierde a mitad, lo dice la marca del almacenamiento.
+	private dandoBase = false;
 
 	// AUD-18: la cola de lo que está confirmando y difundiendo ahora mismo (ver `enTurnoDelLog`). Es
 	// lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo hiberna sin nada en
@@ -476,6 +483,121 @@ export class MotorTenantHub {
 			ahoraMs: Date.now(),
 		});
 		return { ok: true, aprovisionado: true, ...log };
+	}
+
+	/**
+	 * DO-PERDIDA · Una base vacía para un negocio que ya nació y la ha perdido
+	 * (`/v1/admin/negocios/base-vacia`). Es el alta (`aprovisionar`: el esquema, el sello y el
+	 * administrador inicial), y además abre el log por encima de lo que la Main pueda haber visto,
+	 * como tras una vuelta a un instante. Que el negocio nació lo mira la ruta en la base central.
+	 */
+	async crearBaseVacia(params: {
+		tenantId: string;
+		modo: ModoDeVuelta;
+	}): Promise<ResultadoDeAdministracion<BaseDevuelta>> {
+		return this.darBase(params.tenantId, "base_vacia", params.modo, async () => {
+			await this.crearBase(params.tenantId);
+			return {};
+		});
+	}
+
+	/**
+	 * DO-PERDIDA · Devuelve a un objeto vacío la base de una copia diaria de R2
+	 * (`/v1/admin/negocios/restaurar-copia`, `tenantHub.restaurar.ts`), y abre el log como
+	 * `crearBaseVacia`. La copia tiene que ser de este negocio. Si no vale (cortada, de un esquema
+	 * que este worker no sabe poner), el objeto se queda vacío y se dice por qué.
+	 */
+	async restaurarDesdeCopia(params: {
+		tenantId: string;
+		clave: string;
+		modo: ModoDeVuelta;
+	}): Promise<ResultadoDeAdministracion<CopiaRestaurada>> {
+		const { tenantId, clave } = params;
+		if (!tenantId || !clave.startsWith(prefijoDeCopias(tenantId))) {
+			return { ok: false, error: "copia_de_otro_negocio", status: 400 };
+		}
+		try {
+			return await this.darBase(tenantId, "copia", params.modo, async () => {
+				const objeto = await this.env.COPIAS_NEGOCIOS.get(clave);
+				if (!objeto) throw new HubError("copia_no_encontrada", 404);
+				const storage = this.state.storage;
+				const cargada = await cargarCopia(storage, lineasDe(objeto.body), async () => {
+					await this.migrarEnExclusiva();
+					apuntarNegocio(storage, tenantId);
+				});
+				return { clave, ...cargada };
+			});
+		} catch (e) {
+			if (e instanceof CopiaInservible) return { ok: false, error: e.codigo, status: 422 };
+			throw e;
+		}
+	}
+
+	/**
+	 * DO-PERDIDA · Lo común a dar base a un objeto vacío desde la administración.
+	 *
+	 * - **Sólo a un objeto vacío**: con base, `tenant_db_already_provisioned`. Una base no se pisa.
+	 * - **Con la base cerrada mientras tanto**: la marca de vuelta en curso (`CLAVE_VUELTA_EN_CURSO`,
+	 *   la misma que la vuelta a un instante) hace que `getTenantDb` conteste `tenant_db_restaurando`,
+	 *   porque `llenar` espera a la red (la copia llega de R2 por trozos) con la base a medias y, al
+	 *   cargarla, con las claves foráneas apagadas. Las sesiones se cierran por `cerrar`.
+	 * - **Todo o nada**: si `llenar` falla, el objeto se vacía otra vez (`vaciarObjeto`), y si la
+	 *   instancia se pierde a mitad, la marca se queda puesta y la base cerrada; la siguiente llamada
+	 *   a esto la ve sin nadie que la esté llenando y vacía lo que dejó antes de empezar.
+	 * - **El log se abre por encima** (`abrirLogTrasVolver`, con `seqAntes` = 0: un objeto vacío no
+	 *   recuerda hasta dónde numeró, y para eso está `SALTO_DE_SEQ`). La Main tiene un checkpoint de
+	 *   la base perdida; sin esto se quedaría sin los cambios que la nueva numere por debajo.
+	 */
+	private async darBase<T extends object>(
+		tenantId: string,
+		operacion: "base_vacia" | "copia",
+		modo: ModoDeVuelta,
+		llenar: () => Promise<T>,
+	): Promise<ResultadoDeAdministracion<T & BaseDevuelta>> {
+		if (this.dandoBase) return { ok: false, error: "tenant_db_restaurando", status: 503 };
+		this.dandoBase = true;
+		try {
+			const ajeno = this.negocioAjeno(tenantId, operacion === "copia" ? "restaurarDesdeCopia" : "crearBaseVacia");
+			if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+			this.tenantIdVisto ??= tenantId;
+			const storage = this.state.storage;
+			const marca = (await storage.get(CLAVE_VUELTA_EN_CURSO)) as { darBase?: string } | undefined;
+			if (marca && !marca.darBase) return { ok: false, error: "tenant_db_restaurando", status: 503 };
+			if (marca) {
+				// Una de éstas que se quedó a medias en otra instancia.
+				this.emitSyncEvent("base_a_medias", { operacion: marca.darBase });
+				await this.vaciarObjeto();
+			}
+			if (baseAprovisionada(storage.sql)) return { ok: false, error: "tenant_db_already_provisioned", status: 409 };
+
+			await storage.put(CLAVE_VUELTA_EN_CURSO, { darBase: operacion, desdeMs: Date.now() });
+			this.vueltaEnCurso = true;
+			this.baseLocal = null;
+			for (const ws of this.state.getWebSockets()) this.cerrar(ws, this.att(ws), 4003, "nube_devuelta");
+			let lleno: T;
+			let log: BaseDevuelta;
+			try {
+				lleno = await llenar();
+				log = abrirLogTrasVolver(storage, {
+					seqAntes: 0,
+					modo,
+					opId: `nube-devuelta-${nuevoId()}`,
+					ahoraMs: Date.now(),
+				});
+				await storage.delete(CLAVE_VUELTA_EN_CURSO);
+			} catch (e) {
+				await this.vaciarObjeto();
+				if (e instanceof HubError) return { ok: false, error: e.code, status: e.status };
+				throw e;
+			}
+			this.vueltaEnCurso = false;
+			this.copiaProgramada = false;
+			await this.programarCopia();
+			this.emitSyncEvent("base_devuelta", { operacion, modo, inicio: log.inicio });
+			return { ok: true, ...lleno, ...log };
+		} finally {
+			this.dandoBase = false;
+		}
 	}
 
 	/**

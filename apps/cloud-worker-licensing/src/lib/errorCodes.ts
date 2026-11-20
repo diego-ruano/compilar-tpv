@@ -510,6 +510,13 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"vuelta_no_disponible",
 	"vuelta_sin_aplicar",
 	"instante_fuera_de_plazo",
+	// DO-PERDIDA · Darle base a un objeto vacío (`/v1/admin/negocios/restaurar-copia` y `base-vacia`).
+	"negocio_sin_nacer",
+	"copia_no_encontrada",
+	"copia_cortada",
+	"copia_de_otra_version",
+	"copia_no_valida",
+	"copia_de_otro_negocio",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",

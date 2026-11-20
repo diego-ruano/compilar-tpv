@@ -341,7 +341,7 @@ function fkActivas(sql: SqlStorage): boolean {
  * confirmación (`storage.sync()`) y se repite. Y como es de la conexión, lo que se deja puesto lo
  * hereda todo lo que venga detrás en este objeto. Comprobado en `test/sondaSqliteDo.test.ts`.
  */
-async function ponerFk(storage: DurableObjectStorage, activas: boolean): Promise<void> {
+export async function ponerFk(storage: DurableObjectStorage, activas: boolean): Promise<void> {
 	const sql = storage.sql;
 	const orden = `PRAGMA foreign_keys = ${activas ? "ON" : "OFF"};`;
 	if (fkActivas(sql) === activas) return;

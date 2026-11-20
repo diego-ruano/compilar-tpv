@@ -170,8 +170,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
     que para su outbox es pasajero.
 
   Otro camino que activara una licencia tendría que crear antes la base. Lo cubre
-  `test/basePerdida.test.ts`; lo que queda sin salida, en
-  [DO-PERDIDA](../pendientes.md#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte).
+  `test/basePerdida.test.ts`. La salida de una base perdida de verdad es de soporte, a sabiendas:
+  devolverle su copia diaria o crearle una vacía
+  ([las copias de cada negocio](#las-copias-de-la-base-de-cada-negocio-do-03)).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
   piden en Europa occidental, para que nazcan ahí aunque quien los llame primero esté en otro sitio,
@@ -453,7 +454,7 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `leerParaLaWeb`,
 `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado),
 `avisarEmparejamiento` y los de administración de su base (DO-03: `estadoDeLaBase`, `copiarAhora`,
-`prepararVuelta`, `reiniciar` y `trasVolver`). Su única alarma es la de la copia diaria. El adaptador moderno extiende `DurableObject`; los
+`prepararVuelta`, `reiniciar` y `trasVolver`; DO-PERDIDA: `crearBaseVacia` y `restaurarDesdeCopia`). Su única alarma es la de la copia diaria. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
 otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
@@ -627,6 +628,32 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
 - No existe en local ni en los tests (workerd: «does not implement point-in-time recovery»), y la
   ruta contesta 501 `vuelta_no_disponible`. Lo demás se prueba con un doble de la plataforma
   (`test/copiasDeNegocios.test.ts`).
+
+**Darle base a un objeto vacío** (DO-PERDIDA, `/v1/admin/negocios/restaurar-copia` y `base-vacia`):
+lo que la activación y `/v1/sync/initialize-empty` no hacen con un negocio que ya nació, hecho a
+sabiendas por soporte. Las dos rutas miran en la base central que el negocio nació
+(`negocio_sin_nacer`, 409), y el objeto, que está vacío (`tenant_db_already_provisioned`, 409).
+
+- **`restaurarDesdeCopia`** (`durableObjects/tenantHub.restaurar.ts`) lee la copia de R2 según llega,
+  descomprimida y por líneas, sin tenerla entera en memoria. Antes de tocar nada mira que la copia
+  sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí; si no,
+  `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
+  ejecuta sólo los `INSERT` de la copia en tablas del negocio, de 500 en 500 por transacción y con
+  las claves foráneas apagadas (la copia va tabla a tabla, no padres primero). Al acabar mira que esté
+  entera (su línea de fin, con las mismas filas; si no, `copia_cortada`) y `foreign_key_check`
+  (`copia_no_valida`). Los disparadores saltan al cargar: los de validación aceptan lo que ya
+  aceptaron, y los del resumen diario sólo apuntan días.
+- **`crearBaseVacia`** es el alta (`aprovisionar`: esquema, sello y administrador inicial).
+- **Las dos cierran la base mientras tanto** con la misma marca que la vuelta a un instante
+  (`tenant_db_restaurando`), porque esperan a la red con la base a medias y las claves foráneas
+  apagadas, y echan a las sesiones. **Todo o nada**: si algo falla, el objeto se vacía otra vez
+  (también la alarma); si el objeto se reinicia a mitad, la marca se queda y la base cerrada, y la
+  siguiente llamada a cualquiera de las dos vacía lo que quedó antes de empezar.
+- **El log se abre por encima** (`abrirLogTrasVolver` con `seqAntes` = 0: el objeto vacío no recuerda
+  hasta dónde numeró, y para eso está `SALTO_DE_SEQ`), con el mismo `modo` que la vuelta a un
+  instante. Luego, la copia diaria armada.
+
+Lo cubre `test/basePerdidaSalidas.test.ts`.
 
 ## Los tests no salen a la red
 

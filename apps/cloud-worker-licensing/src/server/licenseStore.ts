@@ -1777,7 +1777,10 @@ export async function auditAdmin(
 		| "huerfanos_retirar"
 		// DO-03: la base de un negocio, a mano (`domains/admin/basesDeNegocios.ts`).
 		| "negocio_copiar"
-		| "negocio_volver_a_instante",
+		| "negocio_volver_a_instante"
+		// DO-PERDIDA: base a un objeto vacío de un negocio que ya nació.
+		| "negocio_restaurar_copia"
+		| "negocio_base_vacia",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

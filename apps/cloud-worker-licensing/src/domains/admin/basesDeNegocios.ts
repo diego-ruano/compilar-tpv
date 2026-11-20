@@ -8,6 +8,13 @@
 //   POST /v1/admin/negocios/estado    → si nació, si tiene base, su próxima copia y sus copias en R2
 //   POST /v1/admin/negocios/copiar    → la copia de hoy, ahora
 //   POST /v1/admin/negocios/instante  → devuelve su TenantHub a un instante (o a un marcador)
+//   POST /v1/admin/negocios/restaurar-copia → DO-PERDIDA: a un objeto vacío, la base de una copia de R2
+//   POST /v1/admin/negocios/base-vacia      → DO-PERDIDA: a un objeto vacío, una base nueva y vacía
+//
+// Las dos de DO-PERDIDA son la salida de un negocio que ya nació y cuya base no está en su objeto
+// (`lib/basePerdida.ts`): la activación y `/v1/sync/initialize-empty` se niegan a crearla, a
+// propósito, y esto es hacerlo a sabiendas. Sólo con un negocio nacido y un objeto vacío.
+//
 // Todo va por POST con el negocio en el cuerpo, como el resto de la administración que lleva datos.
 // Lo que cambia algo deja rastro en `admin_audit` (con el motivo) y en Axiom (sin él: es texto
 // libre).
@@ -23,7 +30,8 @@ import { cuerpo } from "../../lib/validacion";
 import { ingestToAxiom } from "../../observability/axiom";
 import { auditAdmin } from "../../server/licenseStore";
 import { getDb } from "../../server/db";
-import { listarCopias } from "../../durableObjects/tenantHub.copia";
+import { claveDeCopia, listarCopias } from "../../durableObjects/tenantHub.copia";
+import { zDia } from "../../lib/fechas";
 import { VENTANA_DE_VUELTA_MS, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
 import type { VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
 
@@ -199,3 +207,74 @@ function soloLoAplicado(t: VueltaAplicada) {
 	return { aprovisionado: t.aprovisionado, inicio: t.inicio, purgadoHasta: t.purgadoHasta };
 }
 
+// ---- DO-PERDIDA · Darle base a un objeto vacío -------------------------------------------------
+
+const baseSchema = z.object({ tenantId: zNegocio, modo: zModo, motivo: zMotivo });
+
+const restaurarSchema = z.object({
+	tenantId: zNegocio,
+	/** El día de la copia (`AAAA-MM-DD`). Sin él, la más reciente. */
+	dia: zDia("El día de la copia va como AAAA-MM-DD.").optional(),
+	modo: zModo,
+	motivo: zMotivo,
+});
+
+/** Un negocio que no ha nacido no tiene base que haya perdido: la crea la activación de su licencia. */
+function sinNacer(tenantId: string) {
+	return {
+		ok: false as const,
+		error: "negocio_sin_nacer",
+		message: `El negocio ${tenantId} no ha activado nunca una licencia: su base la crea la activación, no esto.`,
+	};
+}
+
+/** Lo que tiene que pasar después en los equipos, según quién manda. */
+function queHacerTrasDarBase(modo: ModoDeVuelta): string[] {
+	return [
+		...(modo === "nube"
+			? [
+					"Manda la nube. Cada Main del negocio verá al conectar que su base es anterior a la nube y sólo ofrecerá «Recuperar el estado actual de la nube»: lo suyo se queda en su equipo, en backups/antes-de-la-nube-*.",
+				]
+			: [
+					"Manda la Main: sigue con su base, se pone al día por encima del log nuevo y sube lo que tenga pendiente. Lo que la nube no tenga y la Main ya había subido lo repara su contraste, en su siguiente momento tranquilo.",
+				]),
+		"Las Handy y la Main reconectan solas.",
+	];
+}
+
+/**
+ * La base de una copia diaria de R2, a un objeto vacío (`MotorTenantHub.restaurarDesdeCopia`). Sin
+ * `dia`, la más reciente. Si la copia no vale, el objeto se queda vacío y se dice por qué.
+ */
+basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c) => {
+	const env = c.env;
+	const { tenantId, dia, modo, motivo } = c.req.valid("json");
+	if (!(await negocioNacido(getDb(env), tenantId))) return c.json(sinNacer(tenantId), 409);
+
+	const clave = dia ? claveDeCopia(tenantId, dia) : (await listarCopias(env.COPIAS_NEGOCIOS, tenantId))[0]?.clave;
+	if (!clave) {
+		return c.json({ ok: false, error: "copia_no_encontrada", message: "Este negocio no tiene ninguna copia." }, 404);
+	}
+	const r = await hubDe(env, tenantId).restaurarDesdeCopia({ tenantId, clave, modo });
+	if (!r.ok) return c.json({ ok: false, error: r.error, clave }, r.status as 409);
+
+	const resultado = { tenantId, modo, clave: r.clave, filas: r.filas, tablas: r.tablas, inicio: r.inicio, purgadoHasta: r.purgadoHasta };
+	await auditAdmin(getDb(env), "negocio_restaurar_copia", null, { ...resultado, motivo });
+	await rastro(env, "base_restaurada_de_copia", resultado);
+	return c.json({ ok: true, ...resultado, queHacer: queHacerTrasDarBase(modo) });
+});
+
+/** Una base nueva y vacía, a un objeto vacío de un negocio nacido (`MotorTenantHub.crearBaseVacia`). */
+basesDeNegociosRoutes.post("/base-vacia", cuerpo(baseSchema), async (c) => {
+	const env = c.env;
+	const { tenantId, modo, motivo } = c.req.valid("json");
+	if (!(await negocioNacido(getDb(env), tenantId))) return c.json(sinNacer(tenantId), 409);
+
+	const r = await hubDe(env, tenantId).crearBaseVacia({ tenantId, modo });
+	if (!r.ok) return c.json({ ok: false, error: r.error }, r.status as 409);
+
+	const resultado = { tenantId, modo, inicio: r.inicio, purgadoHasta: r.purgadoHasta };
+	await auditAdmin(getDb(env), "negocio_base_vacia", null, { ...resultado, motivo });
+	await rastro(env, "base_vacia_creada", resultado);
+	return c.json({ ok: true, ...resultado, queHacer: queHacerTrasDarBase(modo) });
+});

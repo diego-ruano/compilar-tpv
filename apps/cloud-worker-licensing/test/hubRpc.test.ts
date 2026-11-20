@@ -29,6 +29,8 @@ describe("TenantHub RPC", () => {
 			"ejecutarRuta",
 			// DO-03: la copia diaria (su alarma) y la administración de la base: estado, copia y vuelta a un instante.
 			"alarm", "copiarAhora", "estadoDeLaBase", "prepararVuelta", "reiniciar", "trasVolver",
+			// DO-PERDIDA: darle base a un objeto vacío de un negocio que ya nació.
+			"crearBaseVacia", "restaurarDesdeCopia",
 		].sort());
 	});
 

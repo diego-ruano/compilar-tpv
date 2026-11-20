@@ -41,6 +41,10 @@
 //   pnpm negocio:copiar   -- --tenant <tenantId>   (la copia de hoy a R2, ahora)
 //   pnpm negocio:instante -- --tenant <tenantId> --instante 2026-11-20T10:30:00+01:00 --modo nube|main --motivo "…"
 //                            (o --marcador <m> en vez de --instante, para deshacer una vuelta)
+//   pnpm negocio:restaurar-copia -- --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"
+//                            (DO-PERDIDA: un objeto vacío, con la base de su copia de R2; sin --dia, la última)
+//   pnpm negocio:base-vacia      -- --tenant <tenantId> --modo nube|main --motivo "…"
+//                            (DO-PERDIDA: un objeto vacío de un negocio nacido, con una base nueva y vacía)
 //
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
@@ -452,6 +456,32 @@ async function negocioInstante(args) {
 	console.log("");
 }
 
+/** DO-PERDIDA · Lo que sigue tras darle base a un objeto vacío. */
+function trasDarBase(r) {
+	console.log(`    Log abierto en el Seq ${r.inicio}${r.purgadoHasta ? `, purgado hasta ${r.purgadoHasta}` : ""}.
+`);
+	for (const paso of r.queHacer) console.log(`    · ${paso}`);
+	console.log("");
+}
+
+async function negocioRestaurarCopia(args) {
+	const tenantId = negocioDe(args);
+	const cuerpo = { tenantId, modo: modoDe(args), motivo: motivoDe(args) };
+	if (args.dia) cuerpo.dia = String(args.dia);
+	const r = await api("POST", "/v1/admin/negocios/restaurar-copia", cuerpo);
+	console.log(`
+  ✔ ${tenantId} tiene otra vez su base: ${r.clave}, ${r.filas} filas en ${r.tablas} tablas.`);
+	trasDarBase(r);
+}
+
+async function negocioBaseVacia(args) {
+	const tenantId = negocioDe(args);
+	const r = await api("POST", "/v1/admin/negocios/base-vacia", { tenantId, modo: modoDe(args), motivo: motivoDe(args) });
+	console.log(`
+  ✔ ${tenantId} tiene una base nueva y vacía, con su administrador inicial.`);
+	trasDarBase(r);
+}
+
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
 
 async function pilotoMarcar(args, piloto) {
@@ -570,6 +600,8 @@ const comandos = {
 	"negocio-estado": negocioEstado,
 	"negocio-copiar": negocioCopiar,
 	"negocio-instante": negocioInstante,
+	"negocio-restaurar-copia": negocioRestaurarCopia,
+	"negocio-base-vacia": negocioBaseVacia,
 };
 
 if (!comandos[cmd]) {
@@ -610,6 +642,8 @@ if (!comandos[cmd]) {
     estado    --tenant <tenantId>
     copiar    --tenant <tenantId>          (la copia de hoy a R2, ahora)
     instante  --tenant <tenantId> (--instante <fecha ISO> | --marcador <m>) --modo nube|main --motivo "…"
+    restaurar-copia --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"   (a un objeto vacío)
+    base-vacia      --tenant <tenantId> --modo nube|main --motivo "…"                      (a un objeto vacío)
 `);
 	process.exit(1);
 }
