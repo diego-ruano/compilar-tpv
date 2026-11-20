@@ -2058,6 +2058,10 @@ fn updater_del_equipo(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, 
 }
 
 /// Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
+///
+/// En móvil no hay updater: el APK nuevo se instala encima. Contesta `None` («nada que
+/// actualizar por esta vía») y no un error, porque `UpdateBanner` lo pide al arrancar en todas las
+/// plataformas y un `Err` llegaba a Sentry como fallo del programa en cada arranque (AND-01).
 #[tauri::command]
 #[specta::specta]
 async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, AppErrorDto> {
@@ -2068,7 +2072,7 @@ async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, AppErrorDto
     #[cfg(not(desktop))]
     {
         let _ = app;
-        Err("updater no disponible en esta plataforma".into())
+        Ok(None)
     }
 }
 
