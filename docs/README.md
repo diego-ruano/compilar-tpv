@@ -50,6 +50,8 @@ Tres reglas:
 - [publicar-version.md](guias/publicar-version.md): sacar y retirar una versión; CI.
 - [compilar-android.md](guias/compilar-android.md): el build de la Handy.
 - [pruebas-de-carga.md](guias/pruebas-de-carga.md): el generador de carga, en local y contra la nube.
+- [restaurar-un-negocio.md](guias/restaurar-un-negocio.md): la base de un negocio en la nube: sus copias y
+  devolverla a un instante.
 
 ## Estudios
 

@@ -34,3 +34,46 @@ export type ApplyParams = {
 export type ResultadoAplicacion =
 	| { ok: true; data: ValorJson }
 	| { ok: false; error: string; status: number; details?: { message: string } };
+
+/**
+ * DO-03 · Lo que contestan las operaciones de administración de la base del negocio (copias, vuelta a
+ * un instante). Como `ResultadoAplicacion`: lo que se rechaza es un dato, con el estado HTTP.
+ */
+export type ResultadoDeAdministracion<T> = ({ ok: true } & T) | { ok: false; error: string; status: number };
+
+/** DO-03 · Cómo está la base de un negocio, para soporte (`/v1/admin/negocios/estado`). */
+export type EstadoDeLaBase = {
+	aprovisionado: boolean;
+	/** El negocio apuntado en su sello (DO-NEGOCIO), o `null`. */
+	negocio: string | null;
+	/** Cuándo toca la siguiente copia diaria (la alarma del objeto), o `null` si no hay ninguna armada. */
+	proximaCopiaMs: number | null;
+	/** Si hay una vuelta a un instante preparada y sin aplicar. */
+	vueltaEnCurso: boolean;
+	/** El `Seq` más alto que sabe la base (`seqMasAlto`). */
+	seq: number;
+	/** Sesiones autenticadas ahora mismo. */
+	sesiones: number;
+};
+
+/** DO-03 · Lo que deja preparado la primera mitad de la vuelta a un instante (`prepararVuelta`). */
+export type VueltaPreparada = {
+	/** El marcador al que se vuelve. */
+	destino: string;
+	/** El marcador de ahora, antes de volver. */
+	actual: string;
+	/** El marcador con el que se deshace la vuelta (el de justo antes de aplicarla). */
+	deshacer: string;
+	/** El `Seq` más alto antes de volver: lo que la nube había numerado. */
+	seqAntes: number;
+	aprovisionadoAntes: boolean;
+};
+
+/** DO-03 · Cómo quedó la base tras volver (`trasVolver`). */
+export type VueltaAplicada = {
+	aprovisionado: boolean;
+	/** El `Seq` del cambio vacío que abre el log, o `null` sin base. */
+	inicio: number | null;
+	purgadoHasta: number | null;
+};
+

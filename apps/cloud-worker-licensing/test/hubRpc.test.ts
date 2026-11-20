@@ -27,6 +27,8 @@ describe("TenantHub RPC", () => {
 			"leerParaLaWeb", "aprovisionar", "estaAprovisionado", "borrarTodo",
 			// Una ruta de negocio entera, ejecutada junto a la base (`lib/enElHub.ts`).
 			"ejecutarRuta",
+			// DO-03: la copia diaria (su alarma) y la administración de la base: estado, copia y vuelta a un instante.
+			"alarm", "copiarAhora", "estadoDeLaBase", "prepararVuelta", "reiniciar", "trasVolver",
 		].sort());
 	});
 

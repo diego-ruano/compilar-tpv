@@ -86,6 +86,8 @@ const CODIGOS_PASAJEROS: ReadonlySet<string> = new Set([
 	// las ventas de un negocio entero las dejaría fuera de la nube.
 	"tenant_db_migration_failed",
 	"migration_altered",
+	// DO-03: la base vuelve a un instante o se restaura de una copia: en unos minutos vuelve a estar.
+	"tenant_db_restaurando",
 	"main_offline",
 	"main_volcando",
 	"not_authenticated",

@@ -1774,7 +1774,10 @@ export async function auditAdmin(
 		| "reserva_web_dominio_quitar"
 		| "reserva_web_revocar_clave"
 		| "pruebas_retirar"
-		| "huerfanos_retirar",
+		| "huerfanos_retirar"
+		// DO-03: la base de un negocio, a mano (`domains/admin/basesDeNegocios.ts`).
+		| "negocio_copiar"
+		| "negocio_volver_a_instante",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

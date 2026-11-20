@@ -29,11 +29,11 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
 (escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): los
-DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (público por `r2.dev`) y `tpv-copias-control`
-(privado), `send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA`
+DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (público por `r2.dev`), `tpv-copias-control`
+(privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA`
 (`lib/limitador.ts`) y el cron diario `0 7 * * *`.
 
-RI-46: los bindings de R2 son exclusivamente `IMAGES` y `COPIAS`. En desarrollo local, R2 y
+RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`. En desarrollo local, R2 y
 `EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
 el mismo `wrangler.json` con el entorno pisado ([los tests no salen a la red](#los-tests-no-salen-a-la-red))
@@ -451,8 +451,9 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 ## Sincronización y firmas
 
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `leerParaLaWeb`,
-`aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
-`avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
+`aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado),
+`avisarEmparejamiento` y los de administración de su base (DO-03: `estadoDeLaBase`, `copiarAhora`,
+`prepararVuelta`, `reiniciar` y `trasVolver`). Su única alarma es la de la copia diaria. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
 otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
@@ -563,6 +564,69 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
   de `wrangler.json` y desplegar, **deprisa**: mientras el worker apunte a una base sin esas filas, cada
   TPV que compruebe su licencia la borra. Las licencias activadas después del punto restaurado hay que
   rehacerlas a mano.
+
+## Las copias de la base de cada negocio (DO-03)
+
+La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la administración
+(`domains/admin/basesDeNegocios.ts`, `pnpm negocio:*`; el procedimiento, en
+[restaurar-un-negocio.md](../guias/restaurar-un-negocio.md)). Lo que cambia algo queda en
+`admin_audit` con su motivo, y en Axiom sin él.
+
+**La copia diaria** (`durableObjects/tenantHub.copia.ts`):
+
+- **Cada TenantHub se copia a sí mismo, con su alarma**, entre las 3:00 y las 5:00 UTC (cada negocio
+  a su minuto, sacado de su nombre). No hay un bucle en el cron: con miles de negocios no cabría en su
+  plazo, y cada objeto tiene su base al lado. El alta arma la alarma, y un objeto con base que no la
+  tenga (uno de antes, o uno vuelto a un instante) la arma en su primer acceso a la base. Sin base o
+  sin negocio apuntado no copia ni se vuelve a armar, y `borrarTodo` la quita.
+- **Es una foto**: lee y comprime sin esperas (gzip a trozos con `node:zlib`, en un solo miembro, que
+  es lo que abre el `DecompressionStream` del runtime), así que ninguna escritura se intercala. Sólo
+  la subida espera a la red. Mientras lee ocupa el hilo del negocio: por eso va de madrugada.
+- **Sólo las tablas del negocio** (`esTablaDeNegocio`): ni las que empiezan por `_`, ni el log de la
+  réplica, ni los intentos de PIN, ni vistas ni disparadores.
+- **Un volcado SQL comprimido**, legible sin nuestro código (`gunzip -c | sqlite3`), con una
+  sentencia de datos por línea (un salto de línea dentro de un texto va como `char(10)`), las
+  migraciones de la base en la cabecera y una línea de fin con las filas.
+- **Bucket propio y privado**: `tpv-copias-negocios` (`COPIAS_NEGOCIOS`),
+  `negocios/<negocio>/<AAAA-MM-DD>.sql.gz`. No es el de la base central: lleva los datos personales
+  de los clientes de cada bar, un token de R2 que lea uno no lee el otro, y la retención es otra.
+- **Se guardan 30 por negocio y lo decide el código** (`COPIAS_QUE_SE_GUARDAN`, al subir cada una),
+  no una regla por antigüedad: ésa borraría también las últimas de un objeto perdido, que ya no hace
+  copias nuevas, y es justo cuando hacen falta. La regla de ciclo de vida del bucket (90 días) es la
+  red de lo que nadie poda: las copias de un negocio retirado.
+- **Un techo**: 64 MiB comprimida (`TOPE_COMPRIMIDO`), que se monta en memoria. Pasado, falla en voz
+  alta; lo que toca entonces es archivar lo antiguo (DB-14).
+- **No propaga**: si falla, Sentry (`hub.copia_diaria`) y Axiom (`copia_diaria_fallida`), y se repite
+  en una hora. Lo que sale bien deja `copia_diaria` en Axiom con la clave, las filas y los bytes, y
+  nada de los datos. Es la falta de ese evento lo que hay que vigilar.
+- **No deja al objeto despierto** (AUD-46): la alarma espera todo lo suyo, y lo único que deja en
+  `waitUntil` es la traza de Axiom, que tiene plazo (`test/elHubPuedeHibernar.test.ts`).
+
+**La vuelta a un instante** (`durableObjects/tenantHub.instante.ts`), con la API de Cloudflare
+(`getBookmarkForTime`, `onNextSessionRestoreBookmark` y `ctx.abort()`,
+[sqlite-storage-api](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#pitr-point-in-time-recovery-api)):
+
+- **Tres llamadas desde la ruta**, cada una con un stub nuevo: `prepararVuelta` (lee lo que la nube
+  había numerado, deja la vuelta para el siguiente arranque, cierra la base con una marca en el
+  almacenamiento, echa a las sesiones y devuelve el marcador con el que se deshace), `reiniciar`
+  (`ctx.abort()`: la llamada falla siempre, y es lo esperado) y `trasVolver`.
+- **Mientras tanto la base no atiende** (`tenant_db_restaurando`, 503 `external`, pasajero para el
+  outbox de la Main): lo que entrara se perdería al volver. Volver se lleva la marca, que es de
+  después; si sigue ahí, el objeto no ha vuelto (`vuelta_sin_aplicar`) y la ruta lo reinicia otra vez.
+- **El log se abre por encima de todo lo numerado** (`abrirLogTrasVolver`). La nube vuelta numeraría
+  otra vez desde el `Seq` del instante, y la Main, que pide desde su checkpoint, se saltaría para
+  siempre lo nuevo con un número que ya ha visto. Se escribe un cambio vacío (`nube_devuelta`, sin
+  sentencias) con el `Seq` más alto que se sabía más `SALTO_DE_SEQ` (diez millones: cubre también un
+  objeto que lo ha perdido todo y no recuerda hasta dónde numeró). Con `modo: "nube"`, además, lo
+  purgado se pone justo debajo, por encima de cualquier checkpoint, y cada Main aparta su base y se
+  trae la nube (SYNC-32); con `main`, la Main sigue y el contraste repara la nube
+  ([recuperacion.md](recuperacion.md#cuando-la-nube-vuelve-atrás-do-03)).
+- **Vuelve todo lo guardado**, también la tabla de quién es la Main (se vuelve a leer en el saludo),
+  las bajas apuntadas para el canje del socket (la base central sigue rechazando el ticket de un
+  dispositivo dado de baja) y quizá la alarma, que se vuelve a armar en el primer acceso.
+- No existe en local ni en los tests (workerd: «does not implement point-in-time recovery»), y la
+  ruta contesta 501 `vuelta_no_disponible`. Lo demás se prueba con un doble de la plataforma
+  (`test/copiasDeNegocios.test.ts`).
 
 ## Los tests no salen a la red
 

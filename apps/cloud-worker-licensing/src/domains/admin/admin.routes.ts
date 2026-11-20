@@ -18,6 +18,7 @@
 //   POST /v1/admin/pruebas/retirar        → borra los negocios de pruebas del E2E con su base (`pruebas.ts`)
 //   POST /v1/admin/negocios-huerfanos     → lista (o, con `borrar`, retira) los negocios sin licencia (AUD-09, `huerfanos.ts`)
 //   /v1/admin/reservas-web/:tenantId      → dominios y clave de la reserva web (`reservas_web/admin.routes.ts`)
+//   POST /v1/admin/negocios/*             → la base de un negocio: estado, copias, vuelta a un instante (DO-03, `basesDeNegocios.ts`)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -53,6 +54,7 @@ import { retirarNegociosHuerfanos } from "./huerfanos";
 import { cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
+import { basesDeNegociosRoutes } from "./basesDeNegocios";
 import {
 	maxHoras,
 	olvidarInterruptoresCacheados,
@@ -67,6 +69,7 @@ adminRoutes.use("*", requireAdmin);
 
 // Detrás del mismo `requireAdmin`: el `use("*")` de arriba cubre también lo que se monta aquí.
 adminRoutes.route("/reservas-web", reservasWebAdminRoutes);
+adminRoutes.route("/negocios", basesDeNegociosRoutes);
 
 /** Las tres duraciones del producto. Un plazo fuera de aquí es un error de tecleo. */
 const TERMS = [1, 3, 12] as const;

@@ -488,6 +488,30 @@ Lo que no hace:
   el cambio lo aplica el siguiente arranque, y hasta entonces no se activa otra licencia ni se purga
   nada.
 
+## Cuando la nube vuelve atrás (DO-03)
+
+Lo de arriba es la Main que pierde su base. Al revés también pasa: soporte devuelve la base de la
+nube a un instante anterior ([worker.md](worker.md#las-copias-de-la-base-de-cada-negocio-do-03),
+[restaurar-un-negocio.md](../guias/restaurar-un-negocio.md)). La Main no cambia nada para ello: el
+worker deja el log de la réplica de forma que lo que ya hace la Main la lleve al sitio.
+
+- **Ninguna Main se salta nada.** La nube vuelta numeraría otra vez desde el `Seq` del instante, por
+  debajo del checkpoint de la Main, que pide «desde mi checkpoint». Por eso, al volver, la nube abre
+  el log con un cambio vacío muy por encima de todo lo que llegó a numerar: lo nuevo llega siempre
+  por encima del checkpoint de cualquier Main.
+- **Con `nube` (la nube del instante es la buena)**, lo purgado queda justo debajo de ese cambio, por
+  encima de cualquier checkpoint. La Main lo ve en su sesión normal como una base anterior a la nube
+  ([arriba](#una-base-anterior-a-lo-que-guarda-la-nube-sync-32)): para sin aplicar ni subir nada,
+  aparta su base con su outbox en `backups/antes-de-la-nube-*` y sólo ofrece traer la nube. Una Main
+  a mitad de reconciliar para con «Esta copia es anterior a lo que guarda la nube» y ofrece lo mismo.
+  Lo que hizo después del instante, cobros incluidos, se queda en esa copia apartada.
+- **Con `main` (la Main es la buena)**, lo purgado no se toca. La Main se pone al día por encima del
+  cambio vacío y sube su outbox; lo que había subido después del instante y la nube ha perdido lo
+  repara el contraste (`verificar_nube`, [sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)),
+  que hace la nube igual que la Main en su siguiente momento tranquilo. Lo que la Main había subido
+  y la nube ha perdido no vuelve a subir por el outbox: ya salió de él con su acuse.
+- **Las Handy** no guardan base: se las echa al volver, reconectan solas y leen la nube que haya.
+
 ## Lo que vuelve y lo que no
 
 - Vuelve todo lo que llegó a la nube, incluida la **PII del personal**: viaja cifrada por el outbox, el

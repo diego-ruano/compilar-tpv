@@ -14,7 +14,7 @@
 // cambia es el `ctx` que recibe el objeto al construirse, para apuntar cada promesa que se le pasa a
 // `waitUntil` y saber si termina.
 
-import { env as entorno } from "cloudflare:test";
+import { env as entorno, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
@@ -121,5 +121,28 @@ describe("el TenantHub no se queda despierto con un socket abierto (AUD-46)", ()
 		await vi.waitFor(() => expect(pendientes.size).toBe(0), { timeout: 3_000, interval: 50 });
 
 		cliente.close(1000, "fin");
+	});
+
+	it("DO-03: la alarma de la copia diaria tampoco deja nada sin terminar", async () => {
+		const tenant = "negocio-hiberna-copia";
+		const ns = env.TenantHub as DurableObjectNamespace;
+		const stub = ns.get(ns.idFromName(tenant)) as any;
+		await stub.aprovisionar(tenant);
+
+		// Con Axiom configurado y tardando lo que tarda la red: la traza de la copia es lo único que la
+		// alarma deja en `waitUntil`, y tiene que terminar.
+		vi.stubGlobal("fetch", async () => (await new Promise((r) => setTimeout(r, 50)), new Response("{}")));
+		try {
+			await enElHub(tenant, (hub: any) => {
+				hub.env = { ...hub.env, AXIOM_TOKEN: "t", AXIOM_DATASET_SYNC: "d" };
+			});
+			const antes = entregadas.n;
+			expect(await runDurableObjectAlarm(stub)).toBe(true);
+			expect(entregadas.n).toBeGreaterThan(antes);
+			await vi.waitFor(() => expect(pendientes.size).toBe(0), { timeout: 3_000, interval: 50 });
+			expect(await env.COPIAS_NEGOCIOS.head(`negocios/${tenant}/${new Date().toISOString().slice(0, 10)}.sql.gz`)).not.toBeNull();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

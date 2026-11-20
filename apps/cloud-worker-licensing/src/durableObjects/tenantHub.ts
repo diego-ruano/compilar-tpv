@@ -1,7 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
-import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
+import type {
+	ApplyParams,
+	EstadoDeLaBase,
+	IdentidadDelWorker,
+	ResultadoAplicacion,
+	ResultadoDeAdministracion,
+	VueltaAplicada,
+	VueltaPreparada,
+} from "./tenantHub.rpc";
+import type { CopiaHecha } from "./tenantHub.copia";
+import type { ModoDeVuelta } from "./tenantHub.instante";
 import type { LecturaWeb, RespuestaDeLecturaWeb } from "../domains/reservas_web/lecturasDeLaWeb";
 import { comoPeticionDeSentry } from "../observability/sentry";
 
@@ -50,6 +60,45 @@ export class TenantHub extends DurableObject<Env> {
 	/** Retirar un negocio de pruebas: cierra sus sesiones y borra todo lo guardado. */
 	borrarTodo(): Promise<void> {
 		return this.motor.borrarTodo();
+	}
+
+	/** DO-03 · La alarma: la copia diaria de la base a R2 (`tenantHub.copia.ts`). */
+	alarm(): Promise<void> {
+		return this.motor.alarma();
+	}
+
+	/** DO-03 · La copia de hoy, ahora (administración). */
+	copiarAhora(tenantId: string): Promise<ResultadoDeAdministracion<CopiaHecha>> {
+		return this.motor.copiarAhora(tenantId);
+	}
+
+	/** DO-03 · Cómo está la base (administración). Sólo lee. */
+	estadoDeLaBase(tenantId: string): Promise<ResultadoDeAdministracion<EstadoDeLaBase>> {
+		return this.motor.estadoDeLaBase(tenantId);
+	}
+
+	/**
+	 * DO-03 · Devolver la base a un instante, en tres llamadas (`domains/admin/basesDeNegocios.ts`):
+	 * preparar, reiniciar (el objeto vuelve al arrancar) y, ya vuelto, abrir el log.
+	 */
+	prepararVuelta(params: {
+		tenantId: string;
+		instanteMs?: number;
+		marcador?: string;
+	}): Promise<ResultadoDeAdministracion<VueltaPreparada>> {
+		return this.motor.prepararVuelta(params);
+	}
+
+	reiniciar(): void {
+		this.motor.reiniciar();
+	}
+
+	trasVolver(params: {
+		tenantId: string;
+		seqAntes: number;
+		modo: ModoDeVuelta;
+	}): Promise<ResultadoDeAdministracion<VueltaAplicada>> {
+		return this.motor.trasVolver(params);
 	}
 
 	revocarDispositivo(deviceId: string): Promise<void> {

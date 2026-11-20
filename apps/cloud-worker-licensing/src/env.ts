@@ -115,6 +115,12 @@ export interface Env {
 	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare.
 	COPIAS: R2Bucket;
 
+	// DO-03 · Bucket PRIVADO de las copias diarias de la base de cada negocio
+	// (`durableObjects/tenantHub.copia.ts`): `negocios/<negocio>/<día>.sql.gz`. Lleva datos personales
+	// (clientes, personal, reservas). No es el de la base central: otro token de R2 puede leer aquél
+	// sin leer éste, y aquí cuántas se guardan lo decide el código, no una regla de ciclo de vida.
+	COPIAS_NEGOCIOS: R2Bucket;
+
 	// Cloudflare Email Service: binding de envío de correo (send_email en wrangler.json).
 	// No lleva claves: el binding autentica solo. El dominio del remitente debe estar dado de
 	// alta en Email Sending (SPF+DKIM) — ver `wrangler email sending enable <dominio>`.

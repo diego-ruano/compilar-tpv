@@ -49,8 +49,9 @@ crean sin jurisdicción y con una pista de región de Europa occidental
   [sincronizacion.md](../arquitectura/sincronizacion.md).
 - La jurisdicción no se puede cambiar sin empezar de cero: el mismo nombre da otro objeto. Y la
   pista sólo cuenta al crear el objeto: uno que ya existe se queda donde nació.
-- Una base se administra a través del worker, no con la CLI de Turso. Las copias propias de cada
-  negocio están por hacer ([DO-03](../pendientes.md#do-03--copias-de-la-base-de-cada-negocio)).
+- Una base se administra a través del worker, no con la CLI de Turso: sus copias diarias a R2 y la
+  vuelta a un instante, por la administración (DO-03,
+  [worker.md](../arquitectura/worker.md#las-copias-de-la-base-de-cada-negocio-do-03)).
 - Lo que quedó en Turso de las bases de los negocios se retira a mano: la tabla `tenant_databases`
   de la base central con sus índices, los secretos `TURSO_PLATFORM_TOKEN` y `TURSO_ORG_SLUG` del
   worker y las bases del grupo `tpv`, sin borrar el grupo, en el que vive `tpv-control`. El código ya

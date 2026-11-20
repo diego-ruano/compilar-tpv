@@ -35,6 +35,13 @@
 //   pnpm reservas-web:dominio-quitar -- --tenant <tenantId> --origen https://www.su-web.es
 //   pnpm reservas-web:revocar-clave  -- --tenant <tenantId>
 //
+// Y la base de un negocio en la nube (DO-03, docs/guias/restaurar-un-negocio.md):
+//
+//   pnpm negocio:estado   -- --tenant <tenantId>   (si nació, si tiene base, su próxima copia y sus copias)
+//   pnpm negocio:copiar   -- --tenant <tenantId>   (la copia de hoy a R2, ahora)
+//   pnpm negocio:instante -- --tenant <tenantId> --instante 2026-11-20T10:30:00+01:00 --modo nube|main --motivo "…"
+//                            (o --marcador <m> en vez de --instante, para deshacer una vuelta)
+//
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
 //   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
@@ -371,6 +378,80 @@ async function huerfanos(args) {
 	console.log("");
 }
 
+/* ── DO-03 · La base de un negocio en la nube (docs/guias/restaurar-un-negocio.md) ── */
+
+function negocioDe(args) {
+	const tenantId = String(args.tenant || "").trim();
+	if (!tenantId) fail("--tenant <tenantId> requerido (sácalo de `pnpm piloto:lista -- --todos`)");
+	return tenantId;
+}
+
+function cuando(ms) {
+	return ms ? new Date(ms).toISOString() : "(ninguna)";
+}
+
+async function negocioEstado(args) {
+	const r = await api("POST", "/v1/admin/negocios/estado", { tenantId: negocioDe(args) });
+	console.log(`\n  Negocio        ${r.tenantId}`);
+	console.log(`  Ha nacido      ${r.nacido ? "sí (alguna licencia suya se activó)" : "no"}`);
+	console.log(`  Base           ${r.aprovisionado ? "sí" : "NO: el objeto está vacío"}${r.negocio && r.negocio !== r.tenantId ? ` (sello de ${r.negocio})` : ""}`);
+	console.log(`  Vuelta         ${r.vueltaEnCurso ? "PREPARADA Y SIN APLICAR: la base está cerrada" : "ninguna en curso"}`);
+	console.log(`  Seq            ${r.seq}`);
+	console.log(`  Sesiones       ${r.sesiones}`);
+	console.log(`  Próxima copia  ${cuando(r.proximaCopiaMs)}`);
+	if (!r.copias.length) {
+		console.log("  Copias         (ninguna en R2)\n");
+		return;
+	}
+	console.log("  Copias en R2:");
+	console.table(r.copias.map((c) => ({ dia: c.dia, bytes: c.bytes, subida: c.subida })));
+}
+
+async function negocioCopiar(args) {
+	const r = await api("POST", "/v1/admin/negocios/copiar", { tenantId: negocioDe(args) });
+	console.log(`\n  ✔ Copia de ${r.tenantId}: ${r.clave}, ${r.filas} filas en ${r.tablas} tablas, ${r.bytes} bytes comprimida.\n`);
+}
+
+function motivoDe(args) {
+	const motivo = String(args.motivo || "").trim();
+	if (motivo.length < 3) fail('--motivo "…" requerido: queda en la auditoría');
+	return motivo;
+}
+
+function modoDe(args) {
+	const modo = String(args.modo || "");
+	if (modo !== "nube" && modo !== "main") {
+		fail(
+			"--modo nube|main requerido: quién manda después.\n" +
+				"    nube → la nube del instante es la buena: cada Main aparta su base y se trae la nube\n" +
+				"    main → la Main es la buena: sigue con su base y repara la nube",
+		);
+	}
+	return modo;
+}
+
+async function negocioInstante(args) {
+	const tenantId = negocioDe(args);
+	const modo = modoDe(args);
+	const motivo = motivoDe(args);
+	const cuerpo = { tenantId, modo, motivo };
+	if (args.marcador) {
+		cuerpo.marcador = String(args.marcador);
+	} else {
+		const ms = Date.parse(String(args.instante || ""));
+		if (!Number.isFinite(ms)) {
+			fail("--instante <fecha ISO, p. ej. 2026-11-20T10:30:00+01:00> o --marcador <marcador> requerido");
+		}
+		cuerpo.instanteMs = ms;
+	}
+	const r = await api("POST", "/v1/admin/negocios/instante", cuerpo);
+	console.log(`\n  ✔ ${tenantId} ha vuelto${r.instanteMs ? ` a ${new Date(r.instanteMs).toISOString()}` : ` al marcador ${r.destino}`}.`);
+	console.log(`    Marcador para deshacerlo: ${r.deshacer}`);
+	console.log(`    Log abierto en el Seq ${r.inicio ?? "(sin base tras volver)"}${r.purgadoHasta ? `, purgado hasta ${r.purgadoHasta}` : ""}.\n`);
+	for (const paso of r.queHacer) console.log(`    · ${paso}`);
+	console.log("");
+}
+
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
 
 async function pilotoMarcar(args, piloto) {
@@ -486,6 +567,9 @@ const comandos = {
 	"reservas-web-dominio-poner": (a) => reservasWebDominio(a, true),
 	"reservas-web-dominio-quitar": (a) => reservasWebDominio(a, false),
 	"reservas-web-revocar-clave": reservasWebRevocarClave,
+	"negocio-estado": negocioEstado,
+	"negocio-copiar": negocioCopiar,
+	"negocio-instante": negocioInstante,
 };
 
 if (!comandos[cmd]) {
@@ -521,6 +605,11 @@ if (!comandos[cmd]) {
     dominio-poner   --tenant <tenantId> --origen https://www.su-web.es
     dominio-quitar  --tenant <tenantId> --origen https://www.su-web.es
     revocar-clave   --tenant <tenantId>
+
+  La base de un negocio en la nube (pnpm negocio:<comando>, docs/guias/restaurar-un-negocio.md):
+    estado    --tenant <tenantId>
+    copiar    --tenant <tenantId>          (la copia de hoy a R2, ahora)
+    instante  --tenant <tenantId> (--instante <fecha ISO> | --marcador <m>) --modo nube|main --motivo "…"
 `);
 	process.exit(1);
 }

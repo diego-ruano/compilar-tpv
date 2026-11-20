@@ -93,6 +93,10 @@
 		{
 			"binding": "COPIAS",
 			"bucket_name": "tpv-copias-control"
+		},
+		{
+			"binding": "COPIAS_NEGOCIOS",
+			"bucket_name": "tpv-copias-negocios"
 		}
 	],
 	"triggers": {

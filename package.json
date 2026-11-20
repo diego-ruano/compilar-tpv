@@ -36,7 +36,10 @@
     "reservas-web:dominio-quitar": "node scripts/tpv-license.mjs reservas-web-dominio-quitar",
     "reservas-web:revocar-clave": "node scripts/tpv-license.mjs reservas-web-revocar-clave",
     "release:lista": "node scripts/tpv-license.mjs release-lista",
-    "release:promocionar": "node scripts/tpv-license.mjs release-promocionar"
+    "release:promocionar": "node scripts/tpv-license.mjs release-promocionar",
+    "negocio:estado": "node scripts/tpv-license.mjs negocio-estado",
+    "negocio:copiar": "node scripts/tpv-license.mjs negocio-copiar",
+    "negocio:instante": "node scripts/tpv-license.mjs negocio-instante"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

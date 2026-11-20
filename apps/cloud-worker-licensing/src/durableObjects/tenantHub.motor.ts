@@ -22,7 +22,31 @@ import type { MainVigente } from "./tenantHub.main";
 import { apuntarNegocio, negocioApuntado } from "./tenantHub.negocio";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
-import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
+import type {
+	ApplyParams,
+	EstadoDeLaBase,
+	IdentidadDelWorker,
+	ResultadoAplicacion,
+	ResultadoDeAdministracion,
+	VueltaAplicada,
+	VueltaPreparada,
+} from "./tenantHub.rpc";
+import {
+	volcarNegocio,
+	subirCopia,
+	siguienteCopiaMs,
+	type CopiaHecha,
+} from "./tenantHub.copia";
+import {
+	abrirLogTrasVolver,
+	CLAVE_VUELTA_EN_CURSO,
+	esSinVueltaAUnInstante,
+	instantesDe,
+	seqMasAlto,
+	type Instantes,
+	type ModoDeVuelta,
+} from "./tenantHub.instante";
+import { nuevoId } from "../lib/ids";
 import {
 	leerConLaHoraDelNegocio,
 	type LecturaWeb,
@@ -128,6 +152,9 @@ const LOTE_MAX_APLAZADAS = 3;
 type LotePreparado = { escritura: EscrituraPreparada; lote: ReturnType<typeof loteDe> };
 
 
+// DO-03: si la copia diaria falla, cuándo se vuelve a intentar.
+const REINTENTO_COPIA_MS = 60 * 60 * 1000;
+
 /** Dónde anota el objeto la última baja de cada dispositivo (`revocarDispositivo`). */
 const CLAVE_REVOCADO = "revocado:";
 /** Holgura entre el reloj del Worker que canjea el ticket y el del objeto que anota la baja. */
@@ -140,7 +167,8 @@ export class MotorTenantHub {
 	//   · lo que describe a un socket        → su attachment (`WsAttachment`)
 	//   · el censo de conexiones             → `state.getWebSockets()` (etiquetadas por deviceId)
 	// Lo único que queda abajo son cachés best-effort que pueden perderse sin consecuencias.
-	// Tampoco hay `alarm`: nada se deja para después, y un negocio parado no despierta al objeto.
+	// La alarma es sólo la de la copia diaria (DO-03, `alarma`): una vez al día, también en un negocio
+	// parado. Nada más se deja para después.
 
 	// SYNC-08: último `last_seen` empujado a la BD central por dispositivo (throttle en memoria).
 	// Se pierde al hibernar: como mucho provoca un UPDATE extra tras despertar. Aceptable.
@@ -159,6 +187,15 @@ export class MotorTenantHub {
 	// Lo que ya se ha avisado desde esta instancia (`avisarUnaVez`): una avería de la base del
 	// negocio la ve cada petición, y con un aviso basta. Se pierde al hibernar: vuelve a avisar.
 	private avisados = new Set<string>();
+
+	// DO-03: la vuelta a un instante, detrás de algo que un test puede sustituir (en local no existe).
+	private instantes: Instantes;
+	// DO-03: caché de la marca de vuelta en curso (`CLAVE_VUELTA_EN_CURSO`, en el almacenamiento). La
+	// pone esta misma instancia; al despertar se vuelve a leer del almacenamiento.
+	private vueltaEnCurso = false;
+	// DO-03: esta instancia ya ha visto armada la alarma de la copia diaria. Una caché: al despertar,
+	// se vuelve a mirar.
+	private copiaProgramada = false;
 
 	// AUD-18: la cola de lo que está confirmando y difundiendo ahora mismo (ver `enTurnoDelLog`). Es
 	// lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo hiberna sin nada en
@@ -182,6 +219,7 @@ export class MotorTenantHub {
 	private ultimoMensajeMs = new WeakMap<WebSocket, number>();
 
 	constructor(private state: DurableObjectState, private env: Env) {
+		this.instantes = instantesDe(state);
 		// SYNC-16: el latido (cada 30 s por dispositivo) se responde EN EL EDGE, sin despertar al DO
 		// ni facturar duración. Es lo que hace que un hub con conexiones abiertas pero ociosas (la
 		// mayor parte del día en hostelería) cueste prácticamente cero.
@@ -257,8 +295,15 @@ export class MotorTenantHub {
 	 */
 	private async getTenantDb(tenantId: string): Promise<Client> {
 		this.tenantIdVisto ??= tenantId || null;
+		// DO-03: mientras la base vuelve a un instante o se restaura de una copia, nadie la toca. Para
+		// la Main es pasajero (`tenantHub.errores.ts`): su outbox espera.
+		if (this.vueltaEnCurso) throw new HubError("tenant_db_restaurando", 503);
 		if (this.baseLocal) return this.baseLocal;
 		const storage = this.state.storage;
+		if (await storage.get(CLAVE_VUELTA_EN_CURSO)) {
+			this.vueltaEnCurso = true;
+			throw new HubError("tenant_db_restaurando", 503);
+		}
 		if (!baseAprovisionada(storage.sql)) throw new HubError("tenant_db_not_provisioned", 404);
 		try {
 			await this.migrarEnExclusiva();
@@ -266,7 +311,183 @@ export class MotorTenantHub {
 			throw this.migracionFallida(causa);
 		}
 		this.baseLocal = clienteLocal(storage);
+		await this.programarCopia();
 		return this.baseLocal;
+	}
+
+	/**
+	 * DO-03 · Que la copia diaria esté armada: si el objeto no tiene alarma, la de la madrugada
+	 * siguiente (`siguienteCopiaMs`). Se mira una vez por instancia, en el primer acceso a la base, así
+	 * que un negocio con base y con actividad queda armado aunque su base sea de antes de que hubiera
+	 * copias. Sin negocio apuntado no hay a nombre de quién guardarla: no se arma. Nunca hace fallar a
+	 * quien accede a la base.
+	 */
+	private async programarCopia(): Promise<void> {
+		if (this.copiaProgramada) return;
+		try {
+			const storage = this.state.storage;
+			if ((await storage.getAlarm()) === null) {
+				const negocio = negocioApuntado(storage);
+				if (!negocio) return;
+				await storage.setAlarm(siguienteCopiaMs(negocio, Date.now()));
+			}
+			this.copiaProgramada = true;
+		} catch (e) {
+			capturarError(e, "hub.programar_copia");
+		}
+	}
+
+	/**
+	 * DO-03 · La alarma del objeto: la copia diaria de su base a R2 (`tenantHub.copia.ts`).
+	 *
+	 * - Todo lo que hace lo espera aquí, y lo único que deja en `waitUntil` es la traza de Axiom, que
+	 *   tiene su plazo: al acabar, el objeto puede volver a hibernar con los sockets abiertos (AUD-46).
+	 * - No propaga: un fallo se avisa (Sentry y Axiom) y se vuelve a intentar en una hora. Si
+	 *   lanzara, la plataforma lo repetiría por su cuenta unas cuantas veces y dejaría de hacerlo.
+	 * - Sin base, o sin negocio apuntado, no hace nada ni se vuelve a armar: un negocio retirado no
+	 *   despierta más.
+	 */
+	async alarma(): Promise<void> {
+		const storage = this.state.storage;
+		if (!baseAprovisionada(storage.sql)) return;
+		const negocio = negocioApuntado(storage);
+		if (!negocio) return;
+		try {
+			const r = await this.copiar(negocio);
+			this.emitSyncEvent("copia_diaria", { clave: r.clave, tablas: r.tablas, filas: r.filas, bytes: r.bytes });
+			await storage.setAlarm(siguienteCopiaMs(negocio, Date.now()));
+		} catch (e) {
+			capturarError(e, "hub.copia_diaria");
+			this.emitSyncEvent("copia_diaria_fallida", { error: String((e as Error)?.message ?? e).slice(0, 300) });
+			await storage.setAlarm(Date.now() + REINTENTO_COPIA_MS);
+		}
+	}
+
+	/** DO-03 · Copia la base del negocio a R2 y poda las viejas. Lanza si algo falla. */
+	private async copiar(negocio: string): Promise<CopiaHecha> {
+		// Por `getTenantDb`: con el esquema al día, y nunca a mitad de una vuelta a un instante.
+		await this.getTenantDb(negocio);
+		const ahora = new Date();
+		const volcado = volcarNegocio(this.state.storage.sql, { tenantId: negocio, ahora });
+		return subirCopia(this.env.COPIAS_NEGOCIOS, negocio, volcado, ahora);
+	}
+
+	/** DO-03 · La copia de hoy, ahora (`/v1/admin/negocios/copiar`). Arma la diaria si no lo estaba. */
+	async copiarAhora(tenantId: string): Promise<ResultadoDeAdministracion<CopiaHecha>> {
+		const ajeno = this.negocioAjeno(tenantId, "copiarAhora");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		try {
+			const r = await this.copiar(tenantId);
+			this.emitSyncEvent("copia_diaria", { clave: r.clave, tablas: r.tablas, filas: r.filas, bytes: r.bytes, aMano: true });
+			return { ok: true, ...r };
+		} catch (e) {
+			if (e instanceof HubError) return { ok: false, error: e.code, status: e.status };
+			throw e;
+		}
+	}
+
+	/** DO-03 · Cómo está la base, para soporte. Sólo lee. */
+	async estadoDeLaBase(tenantId: string): Promise<ResultadoDeAdministracion<EstadoDeLaBase>> {
+		const ajeno = this.negocioAjeno(tenantId, "estadoDeLaBase");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		const storage = this.state.storage;
+		return {
+			ok: true,
+			aprovisionado: baseAprovisionada(storage.sql),
+			negocio: negocioApuntado(storage),
+			proximaCopiaMs: await storage.getAlarm(),
+			vueltaEnCurso: Boolean(await storage.get(CLAVE_VUELTA_EN_CURSO)),
+			seq: seqMasAlto(storage.sql),
+			sesiones: this.authedCount(),
+		};
+	}
+
+	/**
+	 * DO-03 · Primera mitad de la vuelta a un instante (`tenantHub.instante.ts`): deja preparada la
+	 * vuelta para el siguiente arranque, cierra la base a todo el mundo y echa a las sesiones.
+	 *
+	 * - Lo que la nube había numerado (`seqAntes`) se lee aquí, antes de volver: después ya no está, y
+	 *   es lo que dice desde dónde abrir el log (`trasVolver`).
+	 * - La marca de vuelta en curso (en el almacenamiento) cierra la base hasta el reinicio: lo que
+	 *   entre entretanto se perdería al volver. La vuelta se la lleva, porque es de después.
+	 * - Las sesiones se cierran por `cerrar`, como todo cierre que inicia el DO: la Main y las Handy
+	 *   reconectan solas, y para entonces la nube ya ha vuelto.
+	 */
+	async prepararVuelta(params: {
+		tenantId: string;
+		instanteMs?: number;
+		marcador?: string;
+	}): Promise<ResultadoDeAdministracion<VueltaPreparada>> {
+		const ajeno = this.negocioAjeno(params.tenantId, "prepararVuelta");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		const storage = this.state.storage;
+		try {
+			const destino = params.marcador ?? (await this.instantes.marcadorDe(Number(params.instanteMs)));
+			const seqAntes = seqMasAlto(storage.sql);
+			const aprovisionadoAntes = baseAprovisionada(storage.sql);
+			const actual = await this.instantes.marcadorActual();
+			const deshacer = await this.instantes.restaurarAlReiniciar(destino);
+			await storage.put(CLAVE_VUELTA_EN_CURSO, { destino, desdeMs: Date.now() });
+			this.vueltaEnCurso = true;
+			this.baseLocal = null;
+			for (const ws of this.state.getWebSockets()) this.cerrar(ws, this.att(ws), 4003, "nube_devuelta");
+			return { ok: true, destino, actual, deshacer, seqAntes, aprovisionadoAntes };
+		} catch (e) {
+			if (esSinVueltaAUnInstante(e)) return { ok: false, error: "vuelta_no_disponible", status: 501 };
+			throw e;
+		}
+	}
+
+	/** DO-03 · Reinicia el objeto, que al arrancar vuelve al instante preparado. Lanza en quien llama. */
+	reiniciar(): void {
+		this.instantes.reiniciar("nube_devuelta");
+	}
+
+	/**
+	 * DO-03 · Segunda mitad de la vuelta, ya en el objeto reiniciado: comprueba que ha vuelto (la
+	 * marca de vuelta en curso es de después del instante, así que volver se la lleva), pone el esquema
+	 * al día, abre el log por encima de todo lo numerado y, con `nube`, obliga a las Main a traerse la
+	 * nube (`abrirLogTrasVolver`). Sin base tras volver (un instante de antes de que naciera), no toca
+	 * nada.
+	 */
+	async trasVolver(params: {
+		tenantId: string;
+		seqAntes: number;
+		modo: ModoDeVuelta;
+	}): Promise<ResultadoDeAdministracion<VueltaAplicada>> {
+		const storage = this.state.storage;
+		if (await storage.get(CLAVE_VUELTA_EN_CURSO)) {
+			return { ok: false, error: "vuelta_sin_aplicar", status: 503 };
+		}
+		this.vueltaEnCurso = false;
+		const ajeno = this.negocioAjeno(params.tenantId, "trasVolver");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		if (!baseAprovisionada(storage.sql)) return { ok: true, aprovisionado: false, inicio: null, purgadoHasta: null };
+		try {
+			await this.getTenantDb(params.tenantId);
+		} catch (e) {
+			if (e instanceof HubError) return { ok: false, error: e.code, status: e.status };
+			throw e;
+		}
+		const log = abrirLogTrasVolver(storage, {
+			seqAntes: params.seqAntes,
+			modo: params.modo,
+			opId: `nube-devuelta-${nuevoId()}`,
+			ahoraMs: Date.now(),
+		});
+		return { ok: true, aprovisionado: true, ...log };
+	}
+
+	/**
+	 * Deja el objeto como uno que nunca tuvo base: sin almacenamiento y sin alarma (antes que
+	 * `deleteAll`, que según la fecha de compatibilidad puede dejarla). No toca las sesiones.
+	 */
+	private async vaciarObjeto(): Promise<void> {
+		await this.state.storage.deleteAlarm();
+		await this.state.storage.deleteAll();
+		this.baseLocal = null;
+		this.copiaProgramada = false;
+		this.vueltaEnCurso = false;
 	}
 
 	/**
@@ -329,13 +550,25 @@ export class MotorTenantHub {
 		if (ajeno) throw ajeno;
 		this.tenantIdVisto ??= tenantId;
 		const storage = this.state.storage;
+		// DO-03: con una vuelta a un instante preparada no se crea nada: se perdería al volver.
+		if (this.vueltaEnCurso || (await storage.get(CLAVE_VUELTA_EN_CURSO))) {
+			throw new HubError("tenant_db_restaurando", 503);
+		}
 		const reused = baseAprovisionada(storage.sql);
+		await this.crearBase(tenantId);
+		this.baseLocal = clienteLocal(storage);
+		// DO-03: desde que tiene base, su copia diaria.
+		await this.programarCopia();
+		return { reused };
+	}
+
+	/** El esquema al día, el negocio apuntado y, si la base nace vacía, su administrador inicial. */
+	private async crearBase(tenantId: string): Promise<void> {
+		const storage = this.state.storage;
 		await this.migrarEnExclusiva();
 		// DO-NEGOCIO: el objeto queda con su negocio apuntado desde que tiene base.
 		apuntarNegocio(storage, tenantId);
 		await sembrarAdminInicial(storage);
-		this.baseLocal = clienteLocal(storage);
-		return { reused };
 	}
 
 	estaAprovisionado(): boolean {
@@ -425,8 +658,8 @@ export class MotorTenantHub {
 		for (const ws of this.state.getWebSockets()) {
 			this.cerrar(ws, this.att(ws), 4001, "negocio_retirado");
 		}
-		await this.state.storage.deleteAll();
-		this.baseLocal = null;
+		// DO-03: y su copia diaria, que sin base no tendría qué copiar.
+		await this.vaciarObjeto();
 		this.lastSeenPushedAtMs.clear();
 		this.lastPurgeAtMs = 0;
 		this.avisados.clear();

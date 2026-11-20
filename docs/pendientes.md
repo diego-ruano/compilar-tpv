@@ -17,7 +17,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
 | [OPS-02](#ops-02--soporte-sin-diagnóstico) | 🟡 | Sin paquete de diagnóstico exportable para soporte | Sin empezar |
-| [DO-03](#do-03--copias-de-la-base-de-cada-negocio) | 🟡 | Sin copias de la base de cada negocio fuera de su objeto, ni forma de devolverlo a un instante | Sin empezar |
 | [DO-PERDIDA](#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte) | 🟡 | Un negocio que se queda sin su base en la nube no tiene salida sin soporte, y soporte no tiene herramienta | Sin decidir |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
@@ -285,13 +284,6 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
 
-### DO-03 · Copias de la base de cada negocio
-
-El DO trae la vuelta a cualquier punto de los últimos 30 días, pero no hay forma de pedirla ni copia
-fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a un instante, y una copia
-diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
-queda como opción para guardar esas copias.
-
 ### DO-PERDIDA · Un negocio que se queda sin su base en la nube no tiene salida sin soporte
 
 Un negocio que ya nació (alguna licencia suya se activó) y cuyo `TenantHub` está vacío recibe
@@ -301,9 +293,9 @@ que pasar si su base está en otro objeto (el despliegue apunta a otro espacio d
 jurisdicción), pero deja sin salida el caso en que **la base se ha perdido de verdad** (un
 `borrarTodo` por error). Antes, una Main sin datos podía empezar de cero desde la recuperación; ahora
 no puede. Una Main que conserva sus datos tampoco tiene cómo subirlos enteros a una nube vacía: su
-outbox sólo lleva lo que no ha subido. Y soporte no tiene herramienta, ni para devolver el objeto a un
-instante anterior ([DO-03](#do-03--copias-de-la-base-de-cada-negocio)) ni para crear la base a
-sabiendas.
+outbox sólo lleva lo que no ha subido. Soporte puede devolver el objeto a un instante (DO-03,
+[restaurar-un-negocio.md](guias/restaurar-un-negocio.md)), pero no devolverle su copia diaria a un
+objeto vacío ni crear la base a sabiendas.
 
 Propuesta: una ruta de administración, con el token de administración y su rastro en Axiom, que con
 un negocio que ya nació haga una de dos cosas: devolver su objeto a un instante (DO-03) o crear su

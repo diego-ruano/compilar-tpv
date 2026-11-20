@@ -75,6 +75,9 @@ const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// DO-PERDIDA: el negocio ya nació y su base no está en su TenantHub (`lib/basePerdida.ts`). No
 	// es `tenant_db_not_provisioned`, que es con lo que la Main ofrece crear una base vacía.
 	"tenant_db_perdida",
+	// DO-03: la base del negocio está volviendo a un instante o restaurándose de una copia
+	// (`MotorTenantHub.getTenantDb`). Es cosa de minutos, y lo ha pedido soporte.
+	"tenant_db_restaurando",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -325,6 +328,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
 	tenant_db_perdida:
 		`La base de datos de este negocio no está en la nube, donde debería estar. En este equipo no se ha borrado nada. Contacta con soporte en ${CORREO_SOPORTE} antes de hacer nada más.`,
+	// DO-03: lo pide soporte, y dura lo que tarda en volver la base.
+	tenant_db_restaurando:
+		"La base de datos de la nube se está restaurando. Vuelve a intentarlo en unos minutos.",
 	tenant_db_migration_failed:
 		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
 	hub_overloaded:
@@ -499,6 +505,11 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	// agenda de reservas web que no ha acabado a tiempo lo que tenía a medias.
 	"tenant_id_invalido",
 	"agenda_ocupada",
+	// DO-03 · Las copias y la vuelta a un instante (`/v1/admin/negocios/*`): sólo las ve quien administra,
+	// y la ruta las acompaña de su frase.
+	"vuelta_no_disponible",
+	"vuelta_sin_aplicar",
+	"instante_fuera_de_plazo",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",
