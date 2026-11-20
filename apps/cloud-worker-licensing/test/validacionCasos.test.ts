@@ -33,7 +33,6 @@ import {
 	setReservaEstadoSchema,
 } from "../src/domains/mesas/mesas.schemas";
 import { altaReservaWebSchema } from "../src/domains/reservas_web/reservasWeb.schemas";
-import { createClienteSchema, updateClienteSchema } from "../src/domains/clientes/clientes.schemas";
 import {
 	asignacionCreateSchema,
 	copySemanaSchema,
@@ -74,7 +73,7 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	horario_semana: (e) => validarConMensaje(fechaLunesSchema, e),
 	reserva_web: (e) => validarConMensaje(altaReservaWebSchema, e),
 	// El alta y la edición del cliente validan lo mismo. Fija la regla de un correo (`isValidEmail`),
-	// que comparten el alta web y el correo de recuperación (AUD-39).
+	// que comparten el alta web y el correo de recuperación (AUD-39), y el tope de las notas (AUD-36).
 	cliente: async (e) => {
 		const alta: Resultado = await validarConMensaje(createClienteSchema, { id_cliente: null, ...e });
 		const edicion: Resultado = await validarConMensaje(updateClienteSchema, e);
@@ -121,13 +120,6 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	// AUD-31: la imagen de una categoría y la de un proveedor.
 	categoria: (e) => validarConMensaje(upsertCategoriaSchema, e),
 	proveedor: (e) => validarConMensaje(proveedorSaveSchema, e),
-	// AUD-36: las notas de un cliente; el alta y la edición tienen que decir lo mismo.
-	cliente: async (e) => {
-		const alta: Resultado = await validarConMensaje(createClienteSchema, e);
-		const edicion: Resultado = await validarConMensaje(updateClienteSchema, e);
-		expect({ success: edicion.success, mensaje: edicion.mensaje }).toEqual({ success: alta.success, mensaje: alta.mensaje });
-		return alta;
-	},
 	negocio: async (e) => {
 		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
 		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;
