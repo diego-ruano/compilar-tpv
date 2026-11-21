@@ -666,7 +666,10 @@ pub async fn ejecutar_con_saludo(ctx: &dyn ContextoReplicacion, nube: &dyn Pairi
         // carta, las mesas, el personal), o como mucho `NUCLEO_COMO_MUCHO`.
         // La subida se pide cada vez que se usa: no retiene la base (`ContextoReplicacion::repositorio`).
         let subida = if con_subida { ctx.subida().await? } else { None };
+        // Con la subida pausada desde la nube (`subida_nube`) el núcleo no avanza: esperarlo sólo
+        // retendría a las Handy tres minutos en cada sesión.
         let nucleo_listo = match &subida {
+            Some(_) if ctx.subida_pausada() => true,
             Some(s) if handy_por_soltar => {
                 let hecho = s.nucleo_hecho().await?;
                 if !hecho && empezada.elapsed() >= NUCLEO_COMO_MUCHO && !soltadas_sin_nucleo {

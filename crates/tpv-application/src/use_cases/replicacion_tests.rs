@@ -201,7 +201,7 @@ async fn upload_image(
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }
-struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize>, retenidas:Mutex<Vec<bool>>, subida:Mutex<Option<Arc<FakeSubida>>> }
+struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize>, retenidas:Mutex<Vec<bool>>, subida:Mutex<Option<Arc<FakeSubida>>>, pausada:Mutex<bool> }
 
 /// DO-SUBIDA · Una subida completa de mentira: el núcleo está hecho tras `nucleo_en` pasos, y apunta
 /// lo que se le pide.
@@ -234,6 +234,7 @@ impl ContextoReplicacion for Contexto {
     fn ritmo_de_subida(&self)->Arc<RitmoDeSubida> { self.ritmo.clone() }
     fn handy_retenidas(&self, retenidas:bool) { self.retenidas.lock().unwrap().push(retenidas); }
     async fn subida(&self) -> AppResult<Option<Arc<dyn SubidaCompleta>>> { Ok(self.subida.lock().unwrap().clone().map(|s| s as Arc<dyn SubidaCompleta>)) }
+    fn subida_pausada(&self) -> bool { *self.pausada.lock().unwrap() }
 }
 /// El acuse de un lote preparado sin `loteId` es el del último lote que ha salido: así los guiones
 /// no dependen de cómo nombra la Main sus lotes.
@@ -254,7 +255,7 @@ impl CanalReplicacion for Canal {
 }
 fn contexto(ops:Vec<OutboxEntry>)->Contexto {
     let repo=Arc::new(FakeRepo::default());*repo.pending.lock().unwrap()=ops;
-    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0),retenidas:Mutex::new(vec![]),subida:Mutex::new(None)}
+    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0),retenidas:Mutex::new(vec![]),subida:Mutex::new(None),pausada:Mutex::new(false)}
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![]),cuerpos:Mutex::new(vec![])}}
@@ -712,6 +713,23 @@ async fn con_una_subida_las_handy_esperan_a_su_nucleo() {
     let pasos=*subida.pasos.lock().unwrap();
     assert!(pasos>=3,"{pasos}");
     assert_eq!(c.log,["<main_status",">recovery_ready"]);
+    assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false]);
+}
+
+/// DO-SUBIDA · Con la subida pausada desde la nube (interruptor `subida_nube`) el núcleo no avanza:
+/// las Handy no lo esperan, ni siquiera los tres minutos de `NUCLEO_COMO_MUCHO` de cada sesión.
+#[tokio::test]
+async fn con_la_subida_pausada_las_handy_no_esperan_al_nucleo() {
+    let ctx=disponible(contexto(vec![]));
+    *ctx.pausada.lock().unwrap()=true;
+    let subida=Arc::new(FakeSubida{nucleo_en:2,..FakeSubida::default()});
+    *ctx.subida.lock().unwrap()=Some(subida.clone());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(),None,None]);
+    let peticion=Some(PeticionDeSubida{id:"s1".into(),terminada:false,origen:"copia".into()});
+    assert!(ejecutar_con_saludo(&ctx,&n,&mut c,false,peticion).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(*subida.pasos.lock().unwrap(),0,"pausada no da pasos");
+    assert_eq!(c.log,[">recovery_ready","<main_status"]);
     assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false]);
 }
 
