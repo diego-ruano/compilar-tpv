@@ -1157,7 +1157,9 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   mandaba, y la tabla, que ya subió, no se toca. El
   interruptor remoto `subida_nube` pausa los pasos.
 - **Las Handy** esperan, además de al outbox, al núcleo (`recovery_ready` sale cuando está, o a los
-  3 min de sesión con un aviso, `subida_suelta_sin_nucleo`); con la subida pausada (`subida_nube`)
+  3 min de sesión con un aviso, `subida_suelta_sin_nucleo`). Está en cuanto acaba su última tabla,
+  subida o dejada para el contraste (por una cuarentena, una ventana que no se ejecuta o un rechazo de
+  la nube), sin esperar a la entrada siguiente; con la subida pausada (`subida_nube`)
   no lo esperan. Lo demás sube con ellas trabajando; al
   acabar cada tabla la nube les manda `datos_subidos` y relean esas pantallas (`presencia_handy.rs`).
 - **El final**: con `fin` la nube la da por terminada y aquí queda `contrastando`. A los 5 min es

@@ -1229,6 +1229,52 @@ async fn la_ultima_tabla_del_nucleo_con_una_ventana_que_no_se_ejecuta_acaba_el_n
     nube.cerrar().await;
 }
 
+/// Con todo el núcleo subido menos `Clientes` fase 1, la nube rechaza sus páginas con `acuse` hasta
+/// que la entrada queda dejada. Devuelve la base de la Main en ese momento.
+async fn la_ultima_del_nucleo_rechazada(nombre: &str, acuse: serde_json::Value) -> Arc<Db> {
+    let (main, _dir) = base(nombre).await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva(nombre).await;
+    empezar(&main, "s1", "base_vacia").await;
+    el_nucleo_menos(&main, &mut nube, "Clientes", 1).await;
+    nube.rechazar_si = Some(Box::new(move |p| (p["tabla"] == "Clientes").then(|| acuse.clone())));
+    let dejada = "SELECT Estado FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase = 1;";
+    for _ in 0..100 {
+        if numero(&main, dejada).await == 2 {
+            break;
+        }
+        match un_paso(&main, &mut nube).await {
+            PasoHecho::PorSubir => {
+                nube.subir_outbox(&main).await;
+            }
+            PasoHecho::Avanza | PasoHecho::Esperar(_) => {}
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
+    assert_eq!(numero(&main, dejada).await, 2, "fallida, para el contraste");
+    assert!(!nube.rechazos.is_empty(), "por la nube");
+    nube.cerrar().await;
+    main
+}
+
+/// DO-SUBIDA · La última tabla del núcleo que la nube rechaza para siempre acaba el núcleo en ese
+/// mismo paso, como una que deja una cuarentena. Esperaba a que acabase otra entrada (una tabla
+/// imprescindible grande), y las Handy se soltaban a los 3 min con un aviso de núcleo sin subir.
+#[tokio::test]
+async fn la_ultima_tabla_del_nucleo_rechazada_para_siempre_acaba_el_nucleo() {
+    let main = la_ultima_del_nucleo_rechazada("nucleo-permanente", json!({"ok": false, "error": "subida_tabla_no_admitida", "permanente": true})).await;
+    assert!(SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap(), "el núcleo, hecho");
+    assert!(!estado_para_la_pantalla(&main).await.unwrap().unwrap().reintentando);
+}
+
+/// DO-SUBIDA · Lo mismo con una que se deja a los `MAX_INTENTOS` rechazos sin clasificar.
+#[tokio::test]
+async fn la_ultima_tabla_del_nucleo_dejada_por_rechazos_sin_clasificar_acaba_el_nucleo() {
+    let main = la_ultima_del_nucleo_rechazada("nucleo-sin-clasificar", json!({"ok": false, "error": "algo_raro"})).await;
+    assert!(SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap(), "el núcleo, hecho");
+    assert!(!estado_para_la_pantalla(&main).await.unwrap().unwrap().reintentando);
+}
+
 /// Los pasos de sobrantes de `tabla` que han llegado a la nube.
 fn sobrantes_de(nube: &NubeDeSubida, tabla: &str) -> usize {
     nube.pasos.iter().filter(|p| p["accion"] == "sobrantes" && p["tabla"] == tabla).count()

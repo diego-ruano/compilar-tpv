@@ -1084,6 +1084,13 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
             Some(fila) => (fila.get::<i64>(0).map_err(db_err)?, fila.get::<i64>(1).map_err(db_err)? != 0),
             None => (1, false),
         };
+        drop(f);
+        // DO-SUBIDA · Una entrada que se deja apunta los turnos que se acaban con ella, como al
+        // confirmar su última página o al dejarla sin pasar por la nube (`anotar_estado`): si era la
+        // última del núcleo, las Handy se soltaban a los 3 min con un aviso de núcleo sin subir.
+        if dejada {
+            hitos(conn).await?;
+        }
         AppResult::Ok((seguidos, dejada))
     };
     Ok(Err(match acuse {
