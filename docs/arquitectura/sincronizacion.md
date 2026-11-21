@@ -1132,8 +1132,11 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   tranquilo (3 min sin escrituras) y 500 con actividad, mandadas en trozos de como mucho 1 MiB de
   JSON (la nube admite 1,5 MiB), y la mitad tras una que no cabe. Un acuse que
   no llega acaba la sesión, como un lote del outbox; un rechazo pasajero espera 30 s; uno permanente
-  deja esa tabla para el contraste y sigue con las demás; uno sin clasificar se reintenta a los 30 s
-  y, a la quinta seguida, deja la tabla como uno permanente. En el repaso, uno permanente o sin clasificar
+  deja esa tabla para el contraste y sigue con las demás (del plan o del `fin`, deja la subida); uno
+  sin clasificar se reintenta tras una espera que se dobla con cada uno seguido (30 s, 1 min, 2 min…
+  hasta 30 min, contados en `_Sync_Subida.Rechazos_Seguidos` para que un reinicio no la vuelva a
+  empezar) y vuelve a 30 s en cuanto un paso se confirma. El plan y el `fin` no se abandonan nunca
+  por eso; una página, a la quinta seguida de su tabla, la deja como uno permanente. En el repaso, uno permanente o sin clasificar
   cuenta como uno de sus intentos de lo que mandaba, y la tabla, que ya subió, no se toca. El
   interruptor remoto `subida_nube` pausa los pasos.
 - **Las Handy** esperan, además de al outbox, al núcleo (`recovery_ready` sale cuando está, o a los

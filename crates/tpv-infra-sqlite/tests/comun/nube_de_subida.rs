@@ -61,6 +61,8 @@ pub struct NubeDeSubida {
     pub rechazos: Vec<String>,
     /// Un rechazo para cada página de filas que lo pida, en vez de aplicarla (`None`: se aplica).
     pub rechazar_si: Option<Rechazo>,
+    /// Un rechazo para cualquier paso que lo pida (el plan, el `fin`…), antes de mirarlo.
+    pub rechazar_paso: Option<Rechazo>,
 }
 
 /// El acuse de rechazo que da la nube a una página de filas, si lo da.
@@ -122,6 +124,7 @@ impl NubeDeSubida {
             rechazar_la_proxima: None,
             rechazos: Vec::new(),
             rechazar_si: None,
+            rechazar_paso: None,
         };
         // El cambio vacío que abre el log tras devolver la base (`abrirLogTrasVolver`).
         nube.sembrar(&format!(
@@ -223,6 +226,10 @@ impl NubeDeSubida {
     }
 
     async fn contestar(&mut self, p: &Json) -> Option<Json> {
+        if let Some(r) = self.rechazar_paso.as_ref().and_then(|f| f(p)) {
+            self.rechazos.push(r["error"].as_str().unwrap_or("").into());
+            return Some(r);
+        }
         let tabla = p["tabla"].as_str().unwrap_or("").to_string();
         Some(match p["accion"].as_str().unwrap() {
             "plan" => {

@@ -53,6 +53,14 @@
 //!
 //! El repaso aparta lo mismo que una página.
 //!
+//! # Los rechazos
+//!
+//! Uno pasajero espera 30 s. Uno permanente deja la tabla para el contraste (el del plan o el `fin`,
+//! la subida). Uno sin clasificar espera 30 s, el doble con cada uno seguido hasta 30 min
+//! (`espera_tras`, con la cuenta en `_Sync_Subida.Rechazos_Seguidos`), y vuelve a 30 s en cuanto un
+//! paso se confirma; el plan y el `fin` no se abandonan por eso, y una página, a los `MAX_INTENTOS`,
+//! deja su tabla. En el repaso, uno permanente o sin clasificar gasta un intento de lo que mandaba.
+//!
 //! # El cobro no se toca
 //!
 //! Las lecturas van por conexiones de lectura (`foto`), el escritor sólo se coge para
@@ -96,8 +104,10 @@ const CLAVES_POR_SOBRANTES: usize = 20_000;
 const CALMA_MS: i64 = 3 * 60 * 1000;
 /// Rechazos sin clasificar de una tabla antes de dejarla como fallida.
 const MAX_INTENTOS: i64 = 5;
-/// Lo que se espera tras un rechazo pasajero.
+/// Lo que se espera tras un rechazo pasajero, y tras el primero sin clasificar.
 const ESPERA_PASAJERA: Duration = Duration::from_secs(30);
+/// Lo más que se espera tras rechazos sin clasificar seguidos.
+const ESPERA_MAXIMA: Duration = Duration::from_secs(30 * 60);
 /// Veces que el repaso intenta lo que no entró.
 const MAX_REPASOS: i64 = 3;
 /// Sentencias por operación al pedir borrados por el outbox (como el contraste).
@@ -569,7 +579,7 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
         .map_err(db_err)?;
         conn.execute(
             "UPDATE _Sync_Subida SET Desde_Imprescindible = ?1, Desde_Reciente = ?2, Hasta_Seq_Plan = ?3, \
-               Vivos_Incompletos = ?4, Dispositivo = ?5 WHERE Id = 1;",
+               Vivos_Incompletos = ?4, Dispositivo = ?5, Rechazos_Seguidos = 0 WHERE Id = 1;",
             vec![
                 Value::Text(desde_imprescindible),
                 Value::Text(desde_reciente),
@@ -926,12 +936,21 @@ enum Quien<'a> {
     Repaso(&'a Entrada),
 }
 
+/// DO-SUBIDA · La espera tras `seguidos` rechazos sin clasificar seguidos: 30 s el primero, el doble
+/// con cada uno más, hasta 30 min. Un rechazo que no se entiende puede durar (un worker con un fallo
+/// que nadie ha clasificado): repetir el plan o el `fin` cada 30 s, sin fin, sólo cargaba la nube.
+fn espera_tras(seguidos: i64) -> Duration {
+    let dobles = (seguidos.clamp(1, 20) - 1) as u32;
+    ESPERA_PASAJERA.saturating_mul(1u32 << dobles).min(ESPERA_MAXIMA)
+}
+
 /// Lo que hace un paso con un acuse que no es bueno. `Ok`: era bueno (lo trata quien llama).
 async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<Result<Json, PasoHecho>> {
     let e = match quien {
         Quien::Subida => None,
         Quien::Entrada(e) | Quien::Repaso(e) => Some(e),
     };
+    // Apunta el rechazo y devuelve los sin clasificar seguidos (con éste, si lo es).
     let anotar = move |error: String, fallida: bool| async move {
         let w = db.write().await;
         let conn = w.raw();
@@ -954,9 +973,11 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         // Lo que enseña la pantalla: «se reintenta» sólo mientras se reintenta de verdad. Una tabla
         // que se da por fallida se cuenta aparte (`tablas_fallidas`). El código, sólo en la tabla de
         // la entrada y en la telemetría: la pantalla no enseña identificadores.
+        // Un rechazo sin clasificar (no `fallida`) cuenta en los seguidos; uno permanente, no.
         conn.execute(
             "UPDATE _Sync_Subida SET Ultimo_Error = CASE WHEN ?1 OR EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
-               WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN NULL ELSE 'reintentando' END WHERE Id = 1;",
+               WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN NULL ELSE 'reintentando' END, \
+               Rechazos_Seguidos = Rechazos_Seguidos + (NOT ?1) WHERE Id = 1;",
             vec![
                 Value::Integer(fallida as i64),
                 e.map_or(Value::Null, |e| Value::Text(e.tabla.clone())),
@@ -965,7 +986,12 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         )
         .await
         .map_err(db_err)?;
-        AppResult::Ok(())
+        let mut f = conn.query("SELECT Rechazos_Seguidos FROM _Sync_Subida WHERE Id = 1;", ()).await.map_err(db_err)?;
+        let seguidos = match f.next().await.map_err(db_err)? {
+            Some(fila) => fila.get::<i64>(0).map_err(db_err)?,
+            None => 1,
+        };
+        AppResult::Ok(seguidos)
     };
     Ok(Err(match acuse {
         Acuse::Bien(j) => return Ok(Ok(j)),
@@ -999,10 +1025,14 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
             anotar(error, true).await?;
             PasoHecho::Avanza
         }
+        // DO-SUBIDA · Un rechazo sin clasificar del plan o del `fin` se repetía cada 30 s sin fin. Ahora
+        // la espera crece con los seguidos (`espera_tras`) y vuelve a 30 s en cuanto un paso se
+        // confirma; sin abandonar. Uno de una página cuenta igual, y a los `MAX_INTENTOS` deja su
+        // tabla como uno permanente.
         Acuse::SinClasificar(error) => {
-            tracing::warn!(target: "tpv::sync", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, "DO-SUBIDA: rechazo sin clasificar");
-            anotar(error, false).await?;
-            PasoHecho::Esperar(ESPERA_PASAJERA)
+            let seguidos = anotar(error.clone(), false).await?;
+            tracing::warn!(target: "tpv::sync", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, seguidos, "DO-SUBIDA: rechazo sin clasificar");
+            PasoHecho::Esperar(espera_tras(seguidos))
         }
     }))
 }
@@ -1447,8 +1477,9 @@ impl SqliteSubidaCompleta {
         let conn = w.raw();
         let cursor = p.ultima.clone().map(|c| Json::Array(c).to_string());
         conn.transaccion(async {
-            // Un paso que entra apaga el «se reintenta» de la pantalla.
-            conn.execute("UPDATE _Sync_Subida SET Ultimo_Error = NULL WHERE Id = 1;", ()).await.map_err(db_err)?;
+            // Un paso que entra apaga el «se reintenta» de la pantalla, y la espera tras un rechazo sin
+            // clasificar vuelve a 30 s.
+            conn.execute("UPDATE _Sync_Subida SET Ultimo_Error = NULL, Rechazos_Seguidos = 0 WHERE Id = 1;", ()).await.map_err(db_err)?;
             conn.execute(
                 "UPDATE _Sync_Subida_Tablas SET Cursor_Json = COALESCE(?3, Cursor_Json), Filas_Leidas = Filas_Leidas + ?4, \
                    Filas_Escritas = Filas_Escritas + ?5, Intentos = 0, Estado = CASE WHEN ?6 THEN 1 ELSE Estado END \
@@ -1743,9 +1774,12 @@ impl SqliteSubidaCompleta {
         // Un rechazo permanente o sin clasificar (o una página que no cabe): cuenta como un intento de
         // todas, para que el repaso no se repita sin fin. Uno pasajero no cuenta: se espera.
         let mut rechazado = false;
+        // La nube ha admitido el último paso del repaso: la espera tras un rechazo vuelve a 30 s.
+        let mut confirmado = false;
         if !apuntadas.is_empty() {
             match self.distintas(envio, Quien::Repaso(&e), &e, &apuntadas).await? {
                 Ok((_, faltan)) => {
+                    confirmado = true;
                     for f in apuntadas {
                         if faltan.contains(&clave_de(&f)) {
                             mandar.push(f);
@@ -1764,8 +1798,14 @@ impl SqliteSubidaCompleta {
             HashSet::new()
         } else {
             match self.mandar_filas(envio, Quien::Repaso(&e), &e, &mandar, marca.checkpoint, false).await? {
-                Ok((_, _, no_entraron)) => no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect(),
-                Err(PasoHecho::Avanza) => halladas.clone(),
+                Ok((_, _, no_entraron)) => {
+                    confirmado = true;
+                    no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect()
+                }
+                Err(PasoHecho::Avanza) => {
+                    confirmado = false;
+                    halladas.clone()
+                }
                 Err(p) => return Ok(Some(p)),
             }
         };
@@ -1786,6 +1826,9 @@ impl SqliteSubidaCompleta {
                     args.push(Value::Integer(t));
                 }
                 conn.execute(sql, args).await.map_err(db_err)?;
+            }
+            if confirmado {
+                conn.execute("UPDATE _Sync_Subida SET Rechazos_Seguidos = 0 WHERE Id = 1;", ()).await.map_err(db_err)?;
             }
             hitos(conn).await?;
             Ok(())
@@ -1817,7 +1860,8 @@ impl SqliteSubidaCompleta {
                 let w = self.db.write().await;
                 w.raw()
                     .execute(
-                        "UPDATE _Sync_Subida SET Estado = 'contrastando', Fin_Ms = ?1 WHERE Id = 1 AND Estado = 'subiendo';",
+                        "UPDATE _Sync_Subida SET Estado = 'contrastando', Fin_Ms = ?1, Rechazos_Seguidos = 0 \
+                         WHERE Id = 1 AND Estado = 'subiendo';",
                         vec![Value::Integer(now_ms())],
                     )
                     .await
@@ -1878,7 +1922,9 @@ impl SubidaCompleta for SqliteSubidaCompleta {
                 // La misma petición, reabierta por la administración (`negocio:subida --reabrir`, tras
                 // agotar su techo en un bar con mucho histórico): se sigue por los cursores, sin
                 // volver a recorrer lo que ya subió.
-                conn.execute("UPDATE _Sync_Subida SET Estado = 'subiendo', Ultimo_Error = NULL WHERE Id = 1;", ()).await.map_err(db_err)?;
+                conn.execute("UPDATE _Sync_Subida SET Estado = 'subiendo', Ultimo_Error = NULL, Rechazos_Seguidos = 0 WHERE Id = 1;", ())
+                    .await
+                    .map_err(db_err)?;
                 tracing::info!(target: "tpv::sync", evento = "subida_reanudada", "DO-SUBIDA: la nube vuelve a pedir la misma subida: se sigue por donde iba");
                 Conciliacion::Seguir
             }

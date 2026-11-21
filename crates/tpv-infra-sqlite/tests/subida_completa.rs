@@ -830,3 +830,74 @@ async fn un_vivo_que_no_cabe_en_una_pagina_no_se_borra_arriba() {
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar WHERE Tabla = 'Detalle_Comanda' AND Motivo = 'otro';").await, 1);
     nube.cerrar().await;
 }
+
+/// Un paso de la subida, con una base nueva cada vez (lo que se recuerda entre pasos va en la base).
+async fn un_paso(main: &Arc<Db>, nube: &mut NubeDeSubida) -> PasoHecho {
+    SqliteSubidaCompleta::new(main.clone()).paso(nube).await.unwrap()
+}
+
+fn segundos(p: PasoHecho) -> u64 {
+    match p {
+        PasoHecho::Esperar(d) => d.as_secs(),
+        otro => panic!("se esperaba una espera: {otro:?}"),
+    }
+}
+
+/// DO-SUBIDA · Un rechazo sin clasificar del plan o del `fin` se repetía cada 30 s sin fin. La espera
+/// se dobla con cada rechazo seguido hasta 30 min, sin abandonar, y vuelve a 30 s en cuanto un paso
+/// se confirma. Uno pasajero sigue esperando 30 s.
+#[tokio::test]
+async fn un_rechazo_sin_clasificar_del_plan_o_del_fin_espera_cada_vez_mas_y_vuelve_a_30_s_al_confirmarse_un_paso() {
+    let (main, _dir) = base("rechazos-seguidos").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("rechazos-seguidos").await;
+    empezar(&main, "s1", "base_vacia").await;
+    let rechazar = |accion: Option<&'static str>, acuse: serde_json::Value| -> Option<comun::nube_de_subida::Rechazo> {
+        Some(Box::new(move |p| accion.is_none_or(|a| p["accion"] == a).then(|| acuse.clone())))
+    };
+    let sin_clasificar = json!({"ok": false, "error": "algo_raro"});
+
+    nube.rechazar_paso = rechazar(Some("plan"), sin_clasificar.clone());
+    let mut esperas = Vec::new();
+    for _ in 0..8 {
+        esperas.push(segundos(un_paso(&main, &mut nube).await));
+    }
+    assert_eq!(esperas, vec![30, 60, 120, 240, 480, 960, 1800, 1800], "se dobla hasta media hora");
+    // Uno pasajero sigue igual, y no cuenta.
+    nube.rechazar_paso = rechazar(Some("plan"), json!({"ok": false, "error": "presupuesto_de_subida_agotado", "transitorio": true}));
+    assert_eq!(segundos(un_paso(&main, &mut nube).await), 30);
+    nube.rechazar_paso = rechazar(Some("plan"), sin_clasificar.clone());
+    assert_eq!(segundos(un_paso(&main, &mut nube).await), 1800);
+    assert!(SqliteSubidaCompleta::new(main.clone()).pendiente().await.unwrap(), "sin abandonar");
+
+    // El plan entra: el siguiente rechazo sin clasificar (de una página) vuelve a esperar 30 s.
+    nube.rechazar_paso = None;
+    assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Avanza);
+    nube.rechazar_paso = rechazar(None, sin_clasificar.clone());
+    assert_eq!(segundos(un_paso(&main, &mut nube).await), 30);
+    assert_eq!(segundos(un_paso(&main, &mut nube).await), 60);
+
+    // Todo entra hasta el `fin`, que se rechaza: otra vez desde 30 s.
+    nube.rechazar_paso = rechazar(Some("fin"), sin_clasificar);
+    let mut esperas = Vec::new();
+    for _ in 0..10_000 {
+        match un_paso(&main, &mut nube).await {
+            PasoHecho::Esperar(d) => {
+                esperas.push(d.as_secs());
+                if esperas.len() == 3 {
+                    break;
+                }
+            }
+            PasoHecho::PorSubir => {
+                nube.subir_outbox(&main).await;
+            }
+            PasoHecho::Avanza => {}
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
+    assert_eq!(esperas, vec![30, 60, 120]);
+    nube.rechazar_paso = None;
+    assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Nada);
+    assert_eq!(filas(&main, "SELECT Estado, Rechazos_Seguidos FROM _Sync_Subida;").await, vec![vec![Value::Text("contrastando".into()), Value::Integer(0)]]);
+    nube.cerrar().await;
+}

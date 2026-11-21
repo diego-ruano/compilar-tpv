@@ -23,7 +23,10 @@ CREATE TABLE _Sync_Subida (
   Fin_Ms INTEGER,
   Terminada_Ms INTEGER,
   Pasadas_Contraste INTEGER NOT NULL DEFAULT 0,
-  Ultimo_Error TEXT
+  Ultimo_Error TEXT,
+  -- Rechazos sin clasificar seguidos: la espera hasta el siguiente paso se dobla con cada uno, y
+  -- vuelve a cero en cuanto un paso se confirma.
+  Rechazos_Seguidos INTEGER NOT NULL DEFAULT 0
 );
 
 -- Lo que se sube, tabla a tabla y fase a fase, con su cursor. Turno ordena las etapas (lo vivo, el
