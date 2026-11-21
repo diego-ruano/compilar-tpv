@@ -702,7 +702,9 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   siguiente llamada a cualquiera de las dos vacía lo que quedó antes de empezar.
 - **El log se abre por encima** (`abrirLogTrasVolver` con `seqAntes` = 0: el objeto vacío no recuerda
   hasta dónde numeró, y para eso está `SALTO_DE_SEQ`), con el mismo `modo` que la vuelta a un
-  instante. Luego, la copia diaria armada.
+  instante. Después se echa otra vez a todas las sesiones, como en `trasVolver`: el saludo no mira
+  la marca, y una que entró mientras se llenaba la base saludó sin la petición de subida. Luego, la
+  copia diaria armada.
 
 Lo cubre `test/basePerdidaSalidas.test.ts`.
 

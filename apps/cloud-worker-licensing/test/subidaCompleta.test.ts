@@ -61,6 +61,24 @@ async function conSubida(hub: any, tenant: string, origen: "copia" | "base_vacia
 const cliente = (id: string, nombre: string, total = 0) => [id, nombre, total];
 const COLS_CLIENTE = ["ID_Cliente", "Nombre", "Total_Gastado"];
 
+/** Un `tpv` que saluda de verdad (con la firma y la base central sustituidas). Devuelve su `hello_ok`. */
+async function saludaLaMain(hub: any, tenant: string, deviceId = MAIN): Promise<{ servidor: WebSocket; hello: any }> {
+	const par = new WebSocketPair();
+	hub.state.acceptWebSocket(par[1], [deviceId]);
+	par[1].serializeAttachment({ tenantId: tenant, deviceId, role: "tpv", authed: false, pubkeyB64: null, challenge: { nonceB64: "n", expiresAtMs: Date.now() + 60_000 }, recovering: true });
+	const recibidos: any[] = [];
+	par[0].accept();
+	par[0].addEventListener("message", (ev: MessageEvent) => {
+		recibidos.push(JSON.parse(String(ev.data)));
+	});
+	hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
+	hub.mainEnCentral = async () => deviceId;
+	hub.touchLastSeen = async () => {};
+	await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s", recovering: true }));
+	await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
+	return { servidor: par[1], hello: recibidos.find((x) => x.type === "hello_ok") };
+}
+
 describe("DO-SUBIDA · la petición", () => {
 	it("una base vacía en modo main la pide sin dueño, en la misma transacción que abre el log; en modo nube no", async () => {
 		await enElHub("subida-base-vacia-main", async (hub: any) => {
@@ -76,6 +94,27 @@ describe("DO-SUBIDA · la petición", () => {
 			const r = await hub.crearBaseVacia({ tenantId: "subida-base-vacia-nube", modo: "nube" });
 			expect(r.ok).toBe(true);
 			expect(leerSubida(hub.state.storage.sql)).toBeNull();
+		});
+	});
+
+	it("la Main que saluda mientras se llena la base vacía no se queda sin la petición: se la echa al acabar", async () => {
+		await enElHub("subida-base-vacia-saludo", async (hub: any) => {
+			const t = "subida-base-vacia-saludo";
+			// La Main reconecta mientras se llena la base (el PIN del administrador, la copia de R2).
+			const crear = hub.crearBase.bind(hub);
+			let entretanto: { servidor: WebSocket; hello: any } | null = null;
+			hub.crearBase = async (tenant: string) => {
+				await crear(tenant);
+				entretanto = await saludaLaMain(hub, t);
+			};
+			const r = await hub.crearBaseVacia({ tenantId: t, modo: "main" });
+			expect(r.ok).toBe(true);
+			// Su saludo salió sin la petición, que aún no existía...
+			expect(entretanto!.hello.subida).toBeUndefined();
+			// ...así que esa sesión no puede seguir: vuelve a saludar y entonces la recibe.
+			expect(entretanto!.servidor.readyState).not.toBe(1);
+			const otra = await saludaLaMain(hub, t);
+			expect(otra.hello.subida).toEqual({ id: leerSubida(hub.state.storage.sql)!.id, estado: "esperando", origen: "base_vacia" });
 		});
 	});
 

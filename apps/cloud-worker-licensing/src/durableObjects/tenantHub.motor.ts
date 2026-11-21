@@ -597,6 +597,8 @@ export class MotorTenantHub {
 	 * - **El log se abre por encima** (`abrirLogTrasVolver`, con `seqAntes` = 0: un objeto vacío no
 	 *   recuerda hasta dónde numeró, y para eso está `SALTO_DE_SEQ`). La Main tiene un checkpoint de
 	 *   la base perdida; sin esto se quedaría sin los cambios que la nueva numere por debajo.
+	 * - **Al acabar se echa otra vez a las sesiones**: una que entró mientras se llenaba la base
+	 *   saludó sin la petición de subida.
 	 */
 	private async darBase<T extends object>(
 		tenantId: string,
@@ -645,6 +647,11 @@ export class MotorTenantHub {
 				throw e;
 			}
 			this.vueltaEnCurso = false;
+			// DO-SUBIDA: `llenar` espera (la copia llega de R2, el PIN del administrador se deriva), y el
+			// saludo no mira la marca: una sesión que entró entretanto saludó sin la petición de subida. Se
+			// echa a todas, como en `trasVolver`: vuelven a saludar, y la Main recibe la petición en su
+			// `hello_ok`.
+			for (const ws of this.state.getWebSockets()) this.cerrar(ws, this.att(ws), 4003, "nube_devuelta");
 			this.copiaProgramada = false;
 			await this.programarCopia();
 			this.emitSyncEvent("base_devuelta", { operacion, modo, inicio: log.inicio });
