@@ -15,9 +15,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
-| [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
-| [RW-ALTAS](#rw-altas--el-tope-de-altas-web-y-de-correos-de-un-negocio-se-agota-con-altas-falsas) | 🟡 | Altas web falsas que no se anulan agotan el tope del negocio y su cupo de correos | Sin empezar |
-| [DO-SUBIDA](#do-subida--una-main-con-sus-datos-no-los-sube-enteros-a-una-nube-vacía) | 🟡 | Una Main con sus datos no los sube enteros a una nube vacía | Sin empezar |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
@@ -210,7 +207,7 @@ Por orden de dependencia:
 2. Todos los secretos repetidos con `--env staging`.
 3. **Otra base de control en Turso**: compartirla sería escribir sobre datos de clientes. Las bases
    de los negocios van con su `TenantHub`, que ya es otro.
-4. Otro bucket de R2, y la URL de imágenes configurable (`CDN_IMAGES_BASE` en `imageUrl.ts` y la CSP).
+4. Otro bucket de R2. La URL de las imágenes de la Handy sale de `CLOUD_API_BASE` (`handy_url_imagenes`, punto 6), y el `img-src` de la CSP la repite.
 5. Stripe en modo test, con su webhook y sus Prices.
 6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`) y
    `LICENSE_SIGNING_PUBLIC_KEYS_B64` están fijados en el código; hay que hacerlos configurables al
@@ -232,34 +229,6 @@ falta para probar la aplicación.
 actualizaciones, no la primera instalación. **Aceptado** mientras no haya ingresos: SmartScreen avisa
 pero deja instalar («Más información → Ejecutar de todas formas»). Azure Trusted Signing evita el token
 hardware de un certificado EV.
-
-### INFRA-03 · Imágenes por `r2.dev`
-
-La Handy carga las imágenes de `pub-6814….r2.dev` (`CDN_IMAGES_BASE`, `shared/lib/imageUrl.ts`), que
-Cloudflare documenta como no destinado a producción. **Decidido: subdominio propio.** Al hacerlo hay
-que tocar `CDN_IMAGES_BASE`, `img-src` de `csp` **y** `devCsp` en `tauri.conf.json`, y la guía de
-Android, que documenta ese host.
-
-⚠️ Un subdominio de `altarialights.com` en Cloudflare sale por 188.114.96.5 y 188.114.97.5, que los
-operadores españoles bloquean cuando hay fútbol: por eso la API y las reservas web siguen en
-`workers.dev` (el porqué, junto a `CLOUD_API_BASE`). Con las imágenes pasaría lo mismo: la Handy se
-quedaría sin ellas en hora de partido. Hace falta otra salida o volver a decidir.
-
-### RW-ALTAS · El tope de altas web y de correos de un negocio se agota con altas falsas
-
-Las altas web anuladas por su autor ya no cuentan para el tope diario (AUD-38), pero 200 altas falsas
-que nadie anula lo agotan igual, y con ellas el negocio deja de recibir reservas web ese día. El techo
-siguiente, 600 correos por negocio y día (`TOPE_DIARIO_NEGOCIO` en `domains/reservas_web/correos.ts`),
-cae con unos 300 ciclos de alta y cancelación: las altas entran sin confirmar el correo. Cada alta pide
-un token de Turnstile, que en modo gestionado sólo enseña la casilla si el riesgo lo pide.
-
-### DO-SUBIDA · Una Main con sus datos no los sube enteros a una nube vacía
-
-Si soporte le da a un negocio una base vacía (`pnpm negocio:base-vacia`, DO-PERDIDA), su Main sube
-lo que tenga en el outbox, y el resto depende del contraste periódico con la nube, que va por tandas
-con tope por pasada. En una base vacía puede tardar varias pasadas, y falta comprobar que suba también
-las filas antiguas fuera de su ventana reciente. Lo que haría falta: una subida completa a petición,
-desde la recuperación, que vuelque la base de la Main en la nube vacía.
 
 ---
 

@@ -23,7 +23,7 @@ con tests ejecutados, sobre `main` en `38a4c2db`.
   los negocios de pruebas del E2E y otros); en `licensing.helpers.ts`, las líneas a partir de la 445 se
   han movido unas seis.
 - **Ninguna repite un riesgo ya aceptado** en [pendientes.md](../pendientes.md) (SEC-SESION, FABLE-E,
-  LOGIN-04, LIC-02, INFRA-02, INFRA-03, RI-28-AUD). Cuando una va más allá de uno de
+  LOGIN-04, LIC-02, INFRA-02, RI-28-AUD). Cuando una va más allá de uno de
   ellos, se dice.
 - Lo que sólo se puede decidir con un panel, una cuenta o un equipo real está reunido al final, en «Lo
   que sólo puede comprobar el responsable».
