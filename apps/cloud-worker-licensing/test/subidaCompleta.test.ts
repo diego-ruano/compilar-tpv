@@ -556,6 +556,50 @@ describe("DO-SUBIDA · el final", () => {
 		});
 	});
 
+	it("una reabierta que ya tenía plan vuelve a tener su plazo: caduca si su Main no da ningún paso, y un paso la libra", async () => {
+		await enElHub("subida-reabierta-caduca", async (hub: any) => {
+			const m = await conSubida(hub, "subida-reabierta-caduca");
+			const storage = hub.state.storage;
+			const ahora = Date.now();
+			const pasado = ahora + PLAZO_DE_SUBIDA_MS + 60 * 60 * 1000;
+			const plan = (id: string) => ({ accion: "plan" as const, id, clientNow: ahoraCliente(), checkpoint: 0, totales: { Clientes: 2 } });
+			const pagina = (id: string, nombre: string) => ({
+				accion: "filas" as const, id, tabla: "Clientes", columnas: COLS_CLIENTE,
+				filas: [cliente("c1", nombre)], checkpoint: 0, ultimaDeLaTabla: false,
+			});
+			/** Una petición que su Main empezó y que acabó `estado`, reabierta ahora. */
+			const reabierta = (id: string, estado: "huerfana" | "agotada", conPagina: boolean) => {
+				pedirSubida(m.sql, { id, origen: "copia", mainDeviceId: MAIN, inicioSeq: 0, ahoraMs: ahora - 24 * 60 * 60 * 1000 });
+				ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: plan(id), ahoraMs: ahora - 60 * 60 * 1000 });
+				if (conPagina) ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: pagina(id, "Ana"), ahoraMs: ahora - 60 * 60 * 1000 });
+				m.sql.exec("UPDATE _Subida_Completa SET Estado = ?1 WHERE Id = 1;", estado);
+				expect(reabrirSubida(m.sql, ahora)).toBe(estado);
+				expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", mainDeviceId: null, filasDeclaradas: 2 });
+			};
+
+			// Huérfana después del plan: la reabre soporte y ninguna Main la retoma. Caduca a su plazo y
+			// suelta las copias.
+			reabierta("s-huerfana", "huerfana", false);
+			expect(sinEmpezarParaAvisar(m.sql, pasado)).toBeNull();
+			expect(leerSubida(m.sql)!.estado).toBe("caducada");
+			expect(copiasProtegidasDesde(m.sql)).toBeNull();
+
+			// Agotada (plan y páginas) y reabierta: la Main se la queda al saludar y no vuelve a mandar nada.
+			reabierta("s-agotada", "agotada", true);
+			m.sql.exec("UPDATE _Subida_Completa SET Main_Device_Id = ?1 WHERE Id = 1;", MAIN);
+			expect(sinEmpezarParaAvisar(m.sql, pasado)).toBeNull();
+			expect(leerSubida(m.sql)!.estado).toBe("caducada");
+
+			// Si su Main da un paso después de reabrirla, ya no caduca.
+			reabierta("s-retomada", "agotada", true);
+			m.sql.exec("UPDATE _Subida_Completa SET Main_Device_Id = ?1 WHERE Id = 1;", MAIN);
+			ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: pagina("s-retomada", "Bea"), ahoraMs: ahora + 60 * 60 * 1000 });
+			expect(sinEmpezarParaAvisar(m.sql, pasado)).toBeNull();
+			expect(leerSubida(m.sql)!.estado).toBe("esperando");
+			expect(copiasProtegidasDesde(m.sql)).not.toBeNull();
+		});
+	});
+
 	it("la que caduca en la alarma se avisa", async () => {
 		await enElHub("subida-caduca-en-la-alarma", async (hub: any) => {
 			const m = await conSubida(hub, "subida-caduca-en-la-alarma");

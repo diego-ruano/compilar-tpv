@@ -131,6 +131,8 @@ export type PeticionDeSubida = {
 	hastaMs: number;
 	filasDeclaradas: number | null;
 	primeraPaginaMs: number | null;
+	/** El primer paso de su Main desde que se pidió o se reabrió: desde ahí ya no caduca. */
+	empezadaMs: number | null;
 	terminadaMs: number | null;
 	filasEscritas: number;
 	bytesCrecidos: number;
@@ -152,6 +154,7 @@ function asegurarTabla(sql: SqlStorage): void {
 			Hasta_Ms INTEGER NOT NULL,
 			Filas_Declaradas INTEGER,
 			Primera_Pagina_Ms INTEGER,
+			Empezada_Ms INTEGER,
 			Terminada_Ms INTEGER,
 			Filas_Escritas INTEGER NOT NULL DEFAULT 0,
 			Bytes_Crecidos INTEGER NOT NULL DEFAULT 0,
@@ -179,13 +182,13 @@ export function pedirSubida(
 	asegurarTabla(sql);
 	sql.exec(
 		`INSERT INTO _Subida_Completa (Id, Id_Subida, Origen, Main_Device_Id, Inicio_Seq, Estado, Desde_Ms, Hasta_Ms,
-		   Filas_Declaradas, Primera_Pagina_Ms, Terminada_Ms, Filas_Escritas, Bytes_Crecidos, Paginas,
+		   Filas_Declaradas, Primera_Pagina_Ms, Empezada_Ms, Terminada_Ms, Filas_Escritas, Bytes_Crecidos, Paginas,
 		   Hora_Ms, Filas_Hora, Bytes_Hora, Aviso_Sin_Empezar_Ms)
-		 VALUES (1, ?1, ?2, ?3, ?4, 'esperando', ?5, ?6, NULL, NULL, NULL, 0, 0, 0, NULL, NULL, NULL, NULL)
+		 VALUES (1, ?1, ?2, ?3, ?4, 'esperando', ?5, ?6, NULL, NULL, NULL, NULL, 0, 0, 0, NULL, NULL, NULL, NULL)
 		 ON CONFLICT(Id) DO UPDATE SET
 		   Id_Subida = excluded.Id_Subida, Origen = excluded.Origen, Main_Device_Id = excluded.Main_Device_Id,
 		   Inicio_Seq = excluded.Inicio_Seq, Estado = 'esperando', Desde_Ms = excluded.Desde_Ms,
-		   Hasta_Ms = excluded.Hasta_Ms, Filas_Declaradas = NULL, Primera_Pagina_Ms = NULL, Terminada_Ms = NULL,
+		   Hasta_Ms = excluded.Hasta_Ms, Filas_Declaradas = NULL, Primera_Pagina_Ms = NULL, Empezada_Ms = NULL, Terminada_Ms = NULL,
 		   Filas_Escritas = 0, Bytes_Crecidos = 0, Paginas = 0, Hora_Ms = NULL, Filas_Hora = NULL, Bytes_Hora = NULL,
 		   Aviso_Sin_Empezar_Ms = NULL;`,
 		p.id,
@@ -218,6 +221,7 @@ export function leerSubida(sql: SqlStorage): PeticionDeSubida | null {
 		hastaMs: Number(f.Hasta_Ms),
 		filasDeclaradas: n(f.Filas_Declaradas),
 		primeraPaginaMs: n(f.Primera_Pagina_Ms),
+		empezadaMs: n(f.Empezada_Ms),
 		terminadaMs: n(f.Terminada_Ms),
 		filasEscritas: Number(f.Filas_Escritas ?? 0),
 		bytesCrecidos: Number(f.Bytes_Crecidos ?? 0),
@@ -231,12 +235,14 @@ function ponerEstado(sql: SqlStorage, estado: EstadoDeSubida): void {
 }
 
 /**
- * La Main ya la ha empezado: ha pedido el plan (que apunta lo que declara) o ha subido alguna página.
- * Desde entonces sigue por sus cursores cuando vuelve, aunque pasen semanas con el equipo apagado o
- * la subida pausada (`subida_nube`).
+ * La Main ya la ha empezado: ha dado algún paso (el plan, una página, una comparación) desde que se
+ * pidió o se reabrió (`Empezada_Ms`). Desde entonces sigue por sus cursores cuando vuelve, aunque
+ * pasen semanas con el equipo apagado o la subida pausada (`subida_nube`). No vale lo planeado
+ * (`Filas_Declaradas`): reabrir lo conserva para el techo, y una reabierta cuya Main no vuelve tiene
+ * que caducar a su plazo como cualquier otra.
  */
 function empezada(p: PeticionDeSubida): boolean {
-	return p.filasDeclaradas !== null || p.primeraPaginaMs !== null;
+	return p.empezadaMs !== null;
 }
 
 /**
@@ -308,7 +314,8 @@ export function estadoParaSoporte(sql: SqlStorage): Record<string, unknown> | nu
  * alarma avisa otra vez. Devuelve el estado de antes, o `null` si no había nada que reabrir.
  *
  * Lo que dice lo planeado (`Filas_Declaradas`) se queda: la misma Main sigue por sus cursores, sin
- * volver a pedir el plan, y su techo total sale de ahí.
+ * volver a pedir el plan, y su techo total sale de ahí. Lo que la daba por empezada, no: sólo un
+ * paso de su Main después de reabrirla la libra de caducar.
  */
 export function reabrirSubida(sql: SqlStorage, ahoraMs: number): EstadoDeSubida | null {
 	const p = leerSubida(sql);
@@ -316,7 +323,7 @@ export function reabrirSubida(sql: SqlStorage, ahoraMs: number): EstadoDeSubida 
 	sql.exec(
 		`UPDATE _Subida_Completa SET Estado = 'esperando', Main_Device_Id = NULL, Hasta_Ms = ?1,
 		   Filas_Escritas = 0, Bytes_Crecidos = 0, Hora_Ms = NULL, Filas_Hora = NULL, Bytes_Hora = NULL,
-		   Primera_Pagina_Ms = NULL, Aviso_Sin_Empezar_Ms = NULL
+		   Primera_Pagina_Ms = NULL, Empezada_Ms = NULL, Aviso_Sin_Empezar_Ms = NULL
 		 WHERE Id = 1;`,
 		ahoraMs + PLAZO_DE_SUBIDA_MS,
 	);
@@ -741,6 +748,8 @@ export function ejecutarPasoDeSubida(
 	if (!p || p.estado !== "esperando" || p.id !== paso.id || p.mainDeviceId !== deviceId) {
 		throw new HubError("subida_no_pedida", 409);
 	}
+	// Desde el primer paso de su Main (aunque se aplace o no entre), la petición ya no caduca.
+	if (p.empezadaMs === null) sql.exec("UPDATE _Subida_Completa SET Empezada_Ms = ?1 WHERE Id = 1;", ahoraMs);
 
 	switch (paso.accion) {
 		case "plan": {

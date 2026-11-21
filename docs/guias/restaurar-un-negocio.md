@@ -147,7 +147,9 @@ sale limpia.
   ```
 
   Vuelve a esperar sin dueño, con su plazo y su presupuesto a cero; la primera Main que salude se la
-  queda (la que esté conectada se desconecta un momento y la toma al volver a saludar) y, si es la misma, sigue por donde iba sin repetir lo que ya subió. Vale también para una `caducada` o una `huerfana`.
+  queda (la que esté conectada se desconecta un momento y la toma al volver a saludar) y, si es la misma, sigue por donde iba sin repetir lo que ya subió. Si en 14 días su Main no manda ningún paso,
+  caduca como una recién pedida, aunque antes de reabrirla ya estuviera empezada. Vale también para
+  una `caducada` o una `huerfana`.
 - **`huerfana`**: ha saludado como Main otro equipo (un traslado de licencia a mitad). **No traslades
   la licencia mientras dura la subida**: la base del equipo nuevo no es la que había que subir.
   Reábrela sólo si el equipo nuevo tiene los datos buenos.
