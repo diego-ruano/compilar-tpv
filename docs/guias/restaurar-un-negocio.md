@@ -137,14 +137,16 @@ la Main la entrega, pasa a `terminada`; la Main la da por buena cuando una pasad
 sale limpia.
 
 - **`agotada`**: la Main ha escrito más de lo que cabe en su techo total (diez veces lo que dijo que
-  iba a subir). Mira por qué antes de seguir; para reabrirla:
+  iba a subir, y como mucho 60 millones de filas escritas contando índices y triggers). Con una base
+  vacía y años de histórico de un bar con mucho movimiento es lo esperado (unos dos años de mil
+  comandas diarias ya llegan); si no, mira por qué antes de seguir. Para reabrirla:
 
   ```bash
   pnpm negocio:subida -- --tenant <tenantId> --reabrir --motivo "…"
   ```
 
   Vuelve a esperar sin dueño, con su plazo y su presupuesto a cero; la primera Main que salude se la
-  queda. Vale también para una `caducada` o una `huerfana`.
+  queda y, si es la misma, sigue por donde iba sin repetir lo que ya subió. Vale también para una `caducada` o una `huerfana`.
 - **`huerfana`**: ha saludado como Main otro equipo (un traslado de licencia a mitad). **No traslades
   la licencia mientras dura la subida**: la base del equipo nuevo no es la que había que subir.
   Reábrela sólo si el equipo nuevo tiene los datos buenos.

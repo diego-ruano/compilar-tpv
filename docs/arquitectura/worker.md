@@ -711,8 +711,9 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
 
 - **La petición vive en el SQL del objeto** (`_Subida_Completa`, una fila). La apunta
   `abrirLogTrasVolver` con `modo: "main"`, en la misma transacción que abre el log, con su origen
-  (`instante`, `copia` o `base_vacia`) y la Main vigente de ese momento; un objeto vacío no la sabe,
-  y se la queda la primera Main vigente que salude. Con `modo: "nube"` se borra. La copia de R2 no
+  (`instante`, `copia` o `base_vacia`) y sin dueño: se la queda la primera Main vigente que salude, que
+  el saludo comprueba contra la base central. No se ata a `_Main_Vigente`: tras volver a un instante,
+  esa tabla también ha vuelto y nombraría a la Main de entonces. Con `modo: "nube"` se borra. La copia de R2 no
   la trae (empieza por `_`) y `vaciarObjeto` se la lleva. Estados: `esperando`, `terminada`,
   `caducada` (14 días sin terminar), `agotada` (su techo total) y `huerfana` (saludó como Main otro
   dispositivo: un traslado a mitad).
@@ -726,8 +727,11 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
   `pragma_table_info` (sin repetir y con la clave entera), y construye él la sentencia: `INSERT …
   SELECT json_extract(value, '$[i]') … FROM json_each(?1) WHERE 1 ON CONFLICT(clave) DO UPDATE SET …
   WHERE NOT (todo igual)`, con la lista en un parámetro (DO-01). Nunca `REPLACE` y nunca borra: un
-  borrado lo pide la Main por su outbox, y pasa por AUD-36 como cualquier otro. Lo fiscal sólo se
-  inserta (`DO NOTHING`), y lo que ya está y es distinto vuelve como `fiscal` sin tocarse.
+  borrado lo pide la Main por su outbox, y pasa por AUD-36 como cualquier otro. Un registro de
+  facturación sólo se inserta (`DO NOTHING`), y lo que ya está y es distinto vuelve como `fiscal` sin
+  tocarse; el contador de una serie sólo sube (`Ultimo = MAX(Ultimo, excluded.Ultimo)`, política
+  `monotono`). El `plan` dice la política de cada tabla y cómo nombra el log a esa Main
+  (`dispositivo`), para que lo suyo no frene sus borrados.
 - **Una página con algo que no entra** (un único, una foránea, un `CHECK`, un trigger que rechaza) se
   parte por la mitad, cada mitad con su propia lista, hasta aislar las filas, que vuelven en
   `noEntraron` con su clase; lo pasajero (la base ocupada o llena) sale tal cual. 5.000 filas y
@@ -743,7 +747,9 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
   (`presupuesto_de_subida_agotado`, pasajero); en total, el menor entre 60 millones y diez veces lo
   que la Main declaró en su plan (con un suelo de un millón), y 6 GiB de crecimiento
   (`subida_presupuesto_superado`, permanente: la petición queda `agotada`, a Sentry, y sólo la reabre
-  la administración con `pnpm negocio:subida -- --reabrir`). La exención sólo existe para pasos de
+  la administración con `pnpm negocio:subida -- --reabrir`; la Main sigue entonces por donde iba). Un
+  bar con mucho histórico y una base vacía puede llegar a ese techo de 60 millones (un bar de mil
+  comandas diarias escribe unas 70-80 millones de filas en dos años, contando índices y triggers). La exención sólo existe para pasos de
   la Main de la petición, mientras está `esperando`, y acaba con `fin`.
 - **La alarma diaria** avisa una vez (Sentry `hub.subida_sin_empezar`) si la petición lleva un día
   esperando sin ninguna página, y mientras está `esperando`, `agotada` o `huerfana` **la poda no se
