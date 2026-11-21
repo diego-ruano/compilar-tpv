@@ -158,7 +158,7 @@ pub(crate) async fn de_un_cambio(conn: &Connection, sentencias: &[SqlStatement])
 }
 
 /// Las tablas de negocio en las que escriben las sentencias, por cómo empiezan.
-fn tablas_escritas(sentencias: &[SqlStatement]) -> Vec<String> {
+pub(crate) fn tablas_escritas(sentencias: &[SqlStatement]) -> Vec<String> {
     let mut tablas: Vec<String> = sentencias
         .iter()
         .filter_map(|s| Forma::leer(&s.sql))

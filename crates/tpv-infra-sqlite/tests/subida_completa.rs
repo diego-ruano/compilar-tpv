@@ -695,3 +695,48 @@ async fn un_rechazo_permanente_en_el_repaso_no_marca_fallida_la_tabla() {
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 0, "ninguna tabla fallida");
     assert_eq!(estado_para_la_pantalla(&main).await.unwrap().unwrap().tablas_fallidas, 0);
 }
+
+/// DO-SUBIDA · SYNC-36 · Una cuarentena sin `Filas_Json` (no se sabe qué filas toca) aparta las tablas
+/// en las que escriben sus sentencias: no apartaba ninguna y la subida pisaba lo de la Handy.
+#[tokio::test]
+async fn una_cuarentena_sin_filas_aparta_las_tablas_que_escribe() {
+    let (main, _dir) = base("cuarentena-sin-filas").await;
+    un_bar(&main).await;
+    cuarentena(
+        &main,
+        "op-handy",
+        None,
+        json!([{"sql": "UPDATE Clientes SET Nombre = ?1 WHERE ID_Cliente = ?2;", "args": ["De la Handy", "cli-0007"]}]),
+    )
+    .await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-sin-filas").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0007', 'De la Handy');").await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nombre_arriba(&nube, "cli-0007").await, Some(Value::Text("De la Handy".into())));
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase <> 4 AND Estado <> 2;").await, 0, "la tabla, para el contraste");
+    assert!(numero(&nube.db, "SELECT COUNT(*) FROM Zonas;").await > 0, "las demás tablas suben");
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Una cuarentena de la que no se sabe ni en qué tablas escribe (sin filas ni
+/// sentencias) aparta todas: no se sube ni se borra arriba nada que pudiera ser suyo.
+#[tokio::test]
+async fn una_cuarentena_que_no_dice_nada_aparta_todas_las_tablas() {
+    let (main, _dir) = base("cuarentena-sin-nada").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, json!([])).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-sin-nada").await;
+    nube.sembrar(
+        "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-handy', 'Alta de la Handy');
+         INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('com-handy', 'BARRA', 'Abierta', '2026-11-19 10:00:00');",
+    )
+    .await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nube.filas_mandadas(), 0, "no sube ninguna fila");
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Clientes WHERE ID_Cliente = 'cli-handy';").await, 1);
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'com-handy';").await, 1);
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Fase <> 4 AND Estado <> 2;").await, 0);
+    nube.cerrar().await;
+}

@@ -43,7 +43,8 @@
 //!
 //! - Las filas que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`, SYNC-36): las
 //!   de la nube son las buenas y aquí están por detrás. Si no se sabe cuáles son, su tabla entera
-//!   se deja para el contraste.
+//!   se deja para el contraste (las tablas en las que escriben sus sentencias; si ni eso se sabe,
+//!   todas).
 //! - Las filas apuntadas por el orden de la nube (SYNC-29): la nube ya tiene su versión y la
 //!   convergencia la trae. Sólo se suben si arriba faltan.
 //! - Un blob o una fila que no cabe en una página: se apunta y lo ve el contraste.
@@ -668,14 +669,32 @@ struct Pagina {
 struct Apartado {
     claves: HashSet<String>,
     tablas: HashSet<String>,
+    /// Una cuarentena de la que no se sabe ni en qué tablas escribe: todas.
+    todas: bool,
+}
+
+impl Apartado {
+    fn aparta_la_tabla(&self, tabla: &str) -> bool {
+        self.todas || self.tablas.contains(tabla)
+    }
 }
 
 async fn apartado(conn: &Connection) -> AppResult<Apartado> {
     let mut a = Apartado::default();
-    for f in filas(conn, "SELECT Filas_Json FROM _Sync_Failed;", vec![]).await? {
+    for f in filas(conn, "SELECT Filas_Json, Statements_Json FROM _Sync_Failed;", vec![]).await? {
         let t = f.first().and_then(texto).map(|j| Tocadas::de_json(&j)).unwrap_or_else(|| Tocadas::incierta_de_todo(Vec::new()));
         if t.incierto {
-            a.tablas.extend(t.tablas.iter().cloned());
+            // DO-SUBIDA · SYNC-36: sin saber qué filas toca (un `Filas_Json` que falta o no se lee),
+            // las tablas en las que escriben sus sentencias; y si tampoco quedan sentencias que lo
+            // digan, todas. Sin tablas no se apartaba nada, y la subida pisaba arriba lo del cambio.
+            let tablas = if t.tablas.is_empty() {
+                let sentencias: Vec<SqlStatement> = f.get(1).and_then(texto).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+                crate::filas_tocadas::tablas_escritas(&sentencias)
+            } else {
+                t.tablas.clone()
+            };
+            a.todas |= tablas.is_empty();
+            a.tablas.extend(tablas);
         }
         for fila in &t.filas {
             if let Some(c) = canonica_de(fila) {
@@ -1172,7 +1191,7 @@ impl SqliteSubidaCompleta {
     async fn apartar(&self, e: &Entrada, p: &mut Pagina) -> AppResult<bool> {
         let r = self.db.read().await;
         let ap = apartado(r.conn()).await?;
-        if ap.tablas.contains(&e.tabla) {
+        if ap.aparta_la_tabla(&e.tabla) {
             return Ok(false);
         }
         let marcadas = crate::convergencia::marcadas(r.conn()).await?;
@@ -1596,7 +1615,7 @@ impl SqliteSubidaCompleta {
                 let r = self.db.read().await;
                 apartado(r.conn()).await?
             };
-            if ap.tablas.contains(&e.tabla) {
+            if ap.aparta_la_tabla(&e.tabla) {
                 sobran.clear();
             } else {
                 sobran.retain(|k| canonica(&e.tabla, k).is_none_or(|c| !ap.claves.contains(&c)));
@@ -1689,7 +1708,7 @@ impl SqliteSubidaCompleta {
             let r = self.db.read().await;
             (apartado(r.conn()).await?, crate::convergencia::marcadas(r.conn()).await?)
         };
-        let tabla_apartada = ap.tablas.contains(&tabla);
+        let tabla_apartada = ap.aparta_la_tabla(&tabla);
         let mut dejadas: HashSet<String> = HashSet::new();
         let mut mandar: Vec<Fila> = Vec::new();
         let mut apuntadas: Vec<Fila> = Vec::new();
