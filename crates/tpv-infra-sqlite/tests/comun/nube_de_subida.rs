@@ -60,8 +60,11 @@ pub struct NubeDeSubida {
     /// Los acuses de rechazo que ha dado, por su código.
     pub rechazos: Vec<String>,
     /// Un rechazo para cada página de filas que lo pida, en vez de aplicarla (`None`: se aplica).
-    pub rechazar_si: Option<Box<dyn Fn(&Json) -> Option<Json> + Send + Sync>>,
+    pub rechazar_si: Option<Rechazo>,
 }
+
+/// El acuse de rechazo que da la nube a una página de filas, si lo da.
+pub type Rechazo = Box<dyn Fn(&Json) -> Option<Json> + Send + Sync>;
 
 fn celda(v: &Value) -> Celda<'_> {
     match v {
