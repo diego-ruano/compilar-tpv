@@ -14,17 +14,20 @@
 //!
 //! 0. **Lo vivo de la nube** (fase 0): las comandas abiertas, el último cierre, los pedidos en
 //!    borrador… que tiene la copia. De cada clave se sube la versión de aquí; la que aquí ya no
-//!    está se pide borrar por el outbox, sólo si la nube no ha cambiado desde el plan.
+//!    está se pide borrar por el outbox (`pedir_borrados`), al acabar la etapa y hijas primero, y
+//!    sólo si en la nube no ha escrito nadie más que esta Main desde el plan.
 //! 1. **El núcleo** (fase 1 de la carta, las mesas, el personal y los ajustes, y lo vivo de las
-//!    comandas): lo que las Handy necesitan para trabajar. Hasta que está, siguen retenidas.
+//!    comandas, con todo lo que apuntan sus foráneas): lo que las Handy necesitan para trabajar.
+//!    Hasta que está, siguen retenidas.
 //! 2. **Lo imprescindible** del resto (fase 1).
 //! 3. **Lo que sobra arriba en los maestros** (fase 4): las claves que la nube tiene y aquí no, por
-//!    el outbox, como la fase 0.
+//!    el outbox, como la fase 0 (y nunca lo que toca una cuarentena de bajada).
 //! 4. **Los últimos días** (fase 2, la ventana de la recuperación).
 //! 5. **El histórico entero** (fase 3), recorriendo cada tabla transaccional por su clave.
 //!
-//! Después, un repaso de lo que la nube no dejó entrar (un único o una foránea que dependían de algo
-//! que todavía no había subido), y `fin`. La nube la da entonces por terminada, y aquí queda
+//! Lo que la nube no deja entrar por un único o una foránea que dependía de algo que todavía no había
+//! subido se vuelve a intentar al pasar de una etapa a la siguiente (`repaso`), y al final hasta
+//! `MAX_REPASOS` veces más. Después, `fin`. La nube la da entonces por terminada, y aquí queda
 //! `contrastando` hasta que una pasada del contraste (`verificar_nube`) sale limpia
 //! (`tras_el_contraste`).
 //!
@@ -61,7 +64,7 @@ use tpv_application::error::AppResult;
 use tpv_application::ports::subida_completa::{
     Conciliacion, EnvioDeSubida, PasoHecho, PeticionDeSubida, SubidaCompleta,
 };
-use tpv_contracts::sync::SubidaNubeEstado;
+use tpv_contracts::sync::{SqlStatement, SubidaNubeEstado};
 use tpv_domain::contraste::{self as cubos, Celda};
 
 use crate::consultas::db_err;
@@ -173,6 +176,8 @@ pub(crate) struct Local {
     pub desde_reciente: Option<String>,
     pub hasta_seq_plan: i64,
     pub nucleo_hecho: bool,
+    /// Este equipo, como lo nombra el log de la nube (lo dice el plan).
+    pub dispositivo: Option<String>,
 }
 
 fn texto(v: &Value) -> Option<String> {
@@ -199,7 +204,7 @@ pub(crate) async fn local(conn: &Connection) -> AppResult<Option<Local>> {
     let f = filas(
         conn,
         "SELECT Id_Subida, Origen, Estado, Desde_Imprescindible, Desde_Reciente, COALESCE(Hasta_Seq_Plan, 0), \
-                Nucleo_Hecho_Ms IS NOT NULL FROM _Sync_Subida WHERE Id = 1;",
+                Nucleo_Hecho_Ms IS NOT NULL, Dispositivo FROM _Sync_Subida WHERE Id = 1;",
         vec![],
     )
     .await?;
@@ -211,6 +216,7 @@ pub(crate) async fn local(conn: &Connection) -> AppResult<Option<Local>> {
         desde_reciente: texto(&f[4]),
         hasta_seq_plan: entero(&f[5]),
         nucleo_hecho: entero(&f[6]) != 0,
+        dispositivo: texto(&f[7]),
     }))
 }
 
@@ -236,6 +242,7 @@ pub(crate) async fn vaciar(conn: &Connection) -> AppResult<()> {
         "DELETE FROM _Sync_Subida_Claves;",
         "DELETE FROM _Sync_Subida_Tablas;",
         "DELETE FROM _Sync_Subida_Por_Revisar;",
+        "DELETE FROM _Sync_Subida_Por_Borrar;",
         "DELETE FROM _Sync_Subida;",
     ] {
         conn.execute(sql, ()).await.map_err(db_err)?;
@@ -307,7 +314,8 @@ pub async fn estado_para_la_pantalla(db: &Db) -> AppResult<Option<SubidaNubeEsta
                 COALESCE(SUM(Filas_Leidas), 0), COALESCE(SUM(Total), 0), \
                 COALESCE(SUM(Estado = 0), 0), \
                 (SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar), \
-                (SELECT Ultimo_Error FROM _Sync_Subida WHERE Id = 1) \
+                (SELECT Ultimo_Error IS NOT NULL FROM _Sync_Subida WHERE Id = 1), \
+                (SELECT COUNT(DISTINCT Tabla) FROM _Sync_Subida_Tablas WHERE Estado = 2) \
            FROM _Sync_Subida_Tablas;",
         vec![],
     )
@@ -334,7 +342,8 @@ pub async fn estado_para_la_pantalla(db: &Db) -> AppResult<Option<SubidaNubeEsta
         filas_total: f.get(2).map(entero).unwrap_or(0),
         tablas_pendientes: f.get(3).map(entero).unwrap_or(0),
         filas_por_revisar: f.get(4).map(entero).unwrap_or(0),
-        ultimo_error: f.get(5).and_then(texto),
+        reintentando: f.get(5).map(entero).unwrap_or(0) != 0,
+        tablas_fallidas: f.get(6).map(entero).unwrap_or(0),
     }))
 }
 
@@ -350,10 +359,13 @@ struct Entrada {
     parametrizada: bool,
     columnas: Vec<String>,
     clave: Vec<String>,
-    solo_insertar: bool,
+    /// `upsert`, `solo_insertar` o `monotono`: lo dice la nube en el plan.
+    politica: &'static str,
     por_clave: bool,
     claves_fijadas: bool,
     cursor: Option<Vec<Json>>,
+    /// Su sitio entre las tablas, padres primero.
+    orden: i64,
 }
 
 /// Las columnas de una tabla y las de su clave primaria, en orden.
@@ -390,20 +402,32 @@ fn nombre_aceptable(n: &str) -> bool {
     !n.is_empty() && n.len() <= 64 && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !n.starts_with('_')
 }
 
+/// DO-SUBIDA · Las tablas del núcleo con todas las que apuntan sus claves foráneas, hasta cerrar:
+/// un producto con su proveedor o una comanda abierta con su cliente o su reserva no entran arriba
+/// sin ellos, y las Handy no se sueltan hasta que el núcleo está.
+fn nucleo_con_sus_padres(con_padres: &[(String, HashSet<String>)]) -> HashSet<String> {
+    let padres: HashMap<&str, &HashSet<String>> = con_padres.iter().map(|(t, p)| (t.as_str(), p)).collect();
+    let mut nucleo: HashSet<String> = NUCLEO.iter().map(|t| t.to_string()).collect();
+    let mut por_mirar: Vec<String> = nucleo.iter().cloned().collect();
+    while let Some(t) = por_mirar.pop() {
+        for p in padres.get(t.as_str()).map(|p| p.iter()).into_iter().flatten() {
+            if nucleo.insert(p.clone()) {
+                por_mirar.push(p.clone());
+            }
+        }
+    }
+    nucleo
+}
+
 /// Siembra el plan que ha contestado la nube. Todo en una transacción por `raw()`.
 async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
     let r = db.read().await;
     let esquema = r.conn().foto(esquema_local).await.map_err(db_err)?;
     let nombres: Vec<String> = esquema.keys().cloned().collect();
-    let orden_padres: Vec<String> = r
-        .conn()
-        .foto(move |f| crate::contraste::padres_primero(f, &nombres))
-        .await
-        .map_err(db_err)?
-        .into_iter()
-        .map(|(t, _)| t)
-        .collect();
+    let con_padres = r.conn().foto(move |f| crate::contraste::padres_primero(f, &nombres)).await.map_err(db_err)?;
     drop(r);
+    let nucleo = nucleo_con_sus_padres(&con_padres);
+    let orden_padres: Vec<String> = con_padres.into_iter().map(|(t, _)| t).collect();
     let posicion = |t: &str| orden_padres.iter().position(|x| x == t).unwrap_or(usize::MAX) as i64;
 
     let tablas = plan.get("tablas").and_then(Json::as_array).cloned().unwrap_or_default();
@@ -430,24 +454,29 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
             tracing::warn!(target: "tpv::sync", evento = "subida_columnas_omitidas", tabla, omitidas = locales.len() - columnas.len(), "DO-SUBIDA: columnas que la nube no tiene no se suben");
         }
         let parcial = t.get("parcial").and_then(Json::as_bool).unwrap_or(false);
-        let solo_insertar = t.get("politica").and_then(Json::as_str) == Some("solo_insertar");
+        // Lo fiscal (`solo_insertar`, `monotono`) no se borra nunca arriba: sin sobrantes.
+        let politica = match t.get("politica").and_then(Json::as_str) {
+            Some("solo_insertar") => "solo_insertar",
+            Some("monotono") => "monotono",
+            _ => "upsert",
+        };
         let sql = t.get("sql").and_then(Json::as_str).map(str::to_owned);
         let parametrizada = t.get("parametrizada").and_then(Json::as_bool).unwrap_or(false);
-        let nucleo = NUCLEO.contains(&tabla);
         let base = Entrada {
             tabla: tabla.to_string(),
             fase: 1,
-            turno: if nucleo { TURNO_NUCLEO } else { TURNO_IMPRESCINDIBLE },
+            turno: if nucleo.contains(tabla) { TURNO_NUCLEO } else { TURNO_IMPRESCINDIBLE },
             sql: sql.clone(),
             parametrizada,
             columnas,
             clave: clave_local.clone(),
-            solo_insertar,
+            politica,
             por_clave: !parcial,
             claves_fijadas: false,
             cursor: None,
+            orden: posicion(tabla),
         };
-        let orden = posicion(tabla);
+        let orden = base.orden;
         if let Some(lista) = vivos.get(tabla).and_then(Json::as_array).filter(|l| !l.is_empty()) {
             entradas.push((Entrada { fase: 0, turno: TURNO_VIVOS, por_clave: false, claves_fijadas: true, sql: None, ..base.clone() }, orden));
             for k in lista {
@@ -460,7 +489,7 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
         if parcial {
             entradas.push((Entrada { fase: 2, turno: TURNO_RECIENTE, ..base.clone() }, orden));
             entradas.push((Entrada { fase: 3, turno: TURNO_HISTORICO, por_clave: true, sql: None, ..base.clone() }, orden));
-        } else if !solo_insertar {
+        } else if politica == "upsert" {
             entradas.push((Entrada { fase: 4, turno: TURNO_SOBRANTES, por_clave: true, sql: None, ..base.clone() }, orden));
         }
     }
@@ -470,6 +499,7 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
     let desde_reciente = (ahora - chrono::Duration::days(ventana_dias.clamp(0, 3650))).format("%Y-%m-%d %H:%M:%S").to_string();
     let hasta_seq = plan.get("hastaSeq").and_then(Json::as_i64).unwrap_or(0);
     let incompletos = plan.get("vivosIncompletos").and_then(Json::as_bool).unwrap_or(false);
+    let dispositivo = plan.get("dispositivo").and_then(Json::as_str).filter(|d| !d.is_empty() && d.len() <= 200).map(str::to_owned);
 
     // Lo que tiene cada tabla aquí, antes de coger el escritor: una lectura no va dentro de su transacción.
     let mut totales: HashMap<String, i64> = HashMap::new();
@@ -485,7 +515,10 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
     let w = db.write().await;
     let conn = w.raw();
     conn.transaccion(async {
-        conn.execute_batch("DELETE FROM _Sync_Subida_Claves; DELETE FROM _Sync_Subida_Tablas; DELETE FROM _Sync_Subida_Por_Revisar;")
+        conn.execute_batch(
+            "DELETE FROM _Sync_Subida_Claves; DELETE FROM _Sync_Subida_Tablas; DELETE FROM _Sync_Subida_Por_Revisar; \
+             DELETE FROM _Sync_Subida_Por_Borrar;",
+        )
             .await
             .map_err(db_err)?;
         for (e, orden) in &entradas {
@@ -502,7 +535,7 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
                     Value::Integer(e.parametrizada as i64),
                     Value::Text(json!(e.columnas).to_string()),
                     Value::Text(json!(e.clave).to_string()),
-                    Value::Text(if e.solo_insertar { "solo_insertar" } else { "upsert" }.into()),
+                    Value::Text(e.politica.into()),
                     Value::Integer(e.por_clave as i64),
                     Value::Integer(e.claves_fijadas as i64),
                     Value::Integer(total),
@@ -531,12 +564,13 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
         .map_err(db_err)?;
         conn.execute(
             "UPDATE _Sync_Subida SET Desde_Imprescindible = ?1, Desde_Reciente = ?2, Hasta_Seq_Plan = ?3, \
-               Vivos_Incompletos = ?4 WHERE Id = 1;",
+               Vivos_Incompletos = ?4, Dispositivo = ?5 WHERE Id = 1;",
             vec![
                 Value::Text(desde_imprescindible),
                 Value::Text(desde_reciente),
                 Value::Integer(hasta_seq),
                 Value::Integer(incompletos as i64),
+                dispositivo.map_or(Value::Null, Value::Text),
             ],
         )
         .await
@@ -760,6 +794,51 @@ fn leer_pagina(foto: &Foto<'_>, e: &Entrada, desde: Option<&str>, tope: usize) -
     Ok(p)
 }
 
+/// Las filas en trozos que la nube admite: como mucho `FILAS_CON_CALMA` filas y `BYTES_POR_PAGINA`
+/// de JSON cada uno (la nube rechaza una página de más de 1,5 MiB). Una fila que no cabe sola ya no
+/// llega aquí: se queda por revisar al leerla (`leer_pagina`).
+fn trozos_que_caben(filas: &[Fila]) -> Vec<&[Fila]> {
+    let mut trozos = Vec::new();
+    let (mut inicio, mut bytes) = (0usize, 0usize);
+    for (i, f) in filas.iter().enumerate() {
+        let tam = serde_json::to_string(&f.valores).map(|s| s.len()).unwrap_or(BYTES_POR_PAGINA) + 1;
+        if i > inicio && (i - inicio >= FILAS_CON_CALMA || bytes + tam > BYTES_POR_PAGINA) {
+            trozos.push(&filas[inicio..i]);
+            inicio = i;
+            bytes = 0;
+        }
+        bytes += tam;
+    }
+    if inicio < filas.len() {
+        trozos.push(&filas[inicio..]);
+    }
+    trozos
+}
+
+/// DO-SUBIDA · El borrado de una fila que la nube tiene y esta Main no (lo vivo de una copia, el
+/// sobrante de un maestro), con la condición del contraste
+/// (`contraste::borrado_si_la_nube_no_ha_cambiado`: que el log llegue a `hasta_seq`, para que no
+/// haga nada en una Main que lo aplique) salvo en una cosa: lo que ha escrito esta misma Main
+/// (`dispositivo`) por encima de `hasta_seq` no lo frena, como tampoco aplaza una página de la
+/// subida. Esta Main no tiene la fila, así que nada de lo suyo cuelga de ella; lo de una Handy (o
+/// de la web) sí lo frena. Sin esto, cualquier venta subida mientras tanto dejaba el borrado en nada
+/// y la comanda que aquí ya no existe seguía viva para las Handy hasta el contraste.
+fn borrado_si_nadie_mas_ha_escrito(fila: &FilaAfectada, hasta_seq: i64, dispositivo: &str) -> Option<SqlStatement> {
+    let (donde, mut args) = crate::sync_reparacion::donde_de_la_clave(fila)?;
+    args.push(json!(hasta_seq));
+    let n = args.len();
+    args.push(json!(dispositivo));
+    Some(SqlStatement {
+        sql: format!(
+            "DELETE FROM \"{}\" WHERE {donde} AND EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?{n}) \
+             AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n} AND Device_Id IS NOT ?{});",
+            fila.tabla,
+            n + 1
+        ),
+        args,
+    })
+}
+
 /* ===== El acuse ===== */
 
 enum Acuse {
@@ -820,7 +899,20 @@ async fn tras_un_rechazo(db: &Db, e: Option<&Entrada>, acuse: Acuse) -> AppResul
             .await
             .map_err(db_err)?;
         }
-        conn.execute("UPDATE _Sync_Subida SET Ultimo_Error = ?1 WHERE Id = 1;", vec![Value::Text(error)]).await.map_err(db_err)?;
+        // Lo que enseña la pantalla: «se reintenta» sólo mientras se reintenta de verdad. Una tabla
+        // que se da por fallida se cuenta aparte (`tablas_fallidas`). El código, sólo en la tabla de
+        // la entrada y en la telemetría: la pantalla no enseña identificadores.
+        conn.execute(
+            "UPDATE _Sync_Subida SET Ultimo_Error = CASE WHEN ?1 OR EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
+               WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN NULL ELSE 'reintentando' END WHERE Id = 1;",
+            vec![
+                Value::Integer(fallida as i64),
+                e.map_or(Value::Null, |e| Value::Text(e.tabla.clone())),
+                Value::Integer(e.map_or(-1, |e| e.fase)),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
         AppResult::Ok(())
     };
     Ok(Err(match acuse {
@@ -867,17 +959,22 @@ fn leer_entrada(f: &[Value]) -> Option<Entrada> {
         parametrizada: entero(&f[4]) != 0,
         columnas,
         clave,
-        solo_insertar: texto(&f[8]).as_deref() == Some("solo_insertar"),
+        politica: match texto(&f[8]).as_deref() {
+            Some("solo_insertar") => "solo_insertar",
+            Some("monotono") => "monotono",
+            _ => "upsert",
+        },
         por_clave: entero(&f[9]) != 0,
         claves_fijadas: entero(&f[10]) != 0,
         cursor: texto(&f[11]).and_then(|c| serde_json::from_str(&c).ok()),
+        orden: entero(&f[5]),
     })
 }
 
 async fn siguiente(conn: &Connection) -> AppResult<Option<Entrada>> {
     let f = filas(
         conn,
-        "SELECT Tabla, Fase, Turno, Sql, Parametrizada, Clave_Json AS _x, Columnas_Json, Clave_Json, Politica, Por_Clave, \
+        "SELECT Tabla, Fase, Turno, Sql, Parametrizada, Orden, Columnas_Json, Clave_Json, Politica, Por_Clave, \
                 Claves_Fijadas, Cursor_Json, Intentos \
            FROM _Sync_Subida_Tablas WHERE Estado = 0 ORDER BY Turno, Orden, Tabla LIMIT 1;",
         vec![],
@@ -886,7 +983,9 @@ async fn siguiente(conn: &Connection) -> AppResult<Option<Entrada>> {
     Ok(f.into_iter().next().and_then(|f| leer_entrada(&f)))
 }
 
-/// Apunta los turnos que se han acabado.
+/// Apunta los turnos que se han acabado: sus tablas subidas, y lo que no entró por un único o una
+/// foránea, intentado otra vez al cambiar de etapa (`repaso`). Lo que sigue sin entrar tras ese
+/// intento queda para el siguiente y no retiene a nadie.
 async fn hitos(conn: &Connection) -> AppResult<()> {
     let ahora = now_ms();
     for (columna, hasta) in [("Nucleo_Hecho_Ms", TURNO_NUCLEO), ("Fase1_Hecha_Ms", TURNO_IMPRESCINDIBLE)] {
@@ -894,7 +993,9 @@ async fn hitos(conn: &Connection) -> AppResult<()> {
             .execute(
                 &format!(
                     "UPDATE _Sync_Subida SET {columna} = ?1 WHERE Id = 1 AND {columna} IS NULL \
-                       AND NOT EXISTS (SELECT 1 FROM _Sync_Subida_Tablas WHERE Estado = 0 AND Turno <= ?2);"
+                       AND NOT EXISTS (SELECT 1 FROM _Sync_Subida_Tablas WHERE Estado = 0 AND Turno <= ?2) \
+                       AND NOT EXISTS (SELECT 1 FROM _Sync_Subida_Por_Revisar WHERE Motivo IN ('unico', 'foranea') \
+                                         AND Turno <= ?2 AND Intentos < {MAX_REPASOS});"
                 ),
                 vec![Value::Integer(ahora), Value::Integer(hasta)],
             )
@@ -1130,7 +1231,12 @@ impl SqliteSubidaCompleta {
         let mut escritas = 0;
         let mut iguales = 0;
         let mut no_entraron = Vec::new();
-        let trozos: Vec<&[Fila]> = if filas.is_empty() { vec![&[]] } else { filas.chunks(FILAS_CON_CALMA).collect() };
+        let trozos = trozos_que_caben(filas);
+        if trozos.is_empty() && !ultima {
+            // Una lista vacía sólo vale para decir que la tabla ha acabado: la nube la rechazaría.
+            return Ok(Ok((0, 0, no_entraron)));
+        }
+        let trozos = if trozos.is_empty() { vec![&filas[..0]] } else { trozos };
         let n = trozos.len();
         for (i, t) in trozos.into_iter().enumerate() {
             let valores: Vec<&Vec<Json>> = t.iter().map(|f| &f.valores).collect();
@@ -1222,9 +1328,10 @@ impl SqliteSubidaCompleta {
             }
         }
 
-        // Fase 0: lo vivo de arriba que aquí ya no está se pide borrar por el outbox.
+        // Fase 0: lo vivo de arriba que aquí ya no está se pide borrar por el outbox, al acabar la
+        // etapa y hijas primero (`pedir_borrados`).
         if !p.borrar.is_empty() {
-            self.pedir_borrados(e, &p.borrar, l.hasta_seq_plan).await?;
+            self.apuntar_borrados(e, &p.borrar, l.hasta_seq_plan).await?;
         }
 
         let (escritas, iguales, no_entraron) = if mandar.is_empty() && !p.final_ {
@@ -1273,6 +1380,8 @@ impl SqliteSubidaCompleta {
         let conn = w.raw();
         let cursor = p.ultima.clone().map(|c| Json::Array(c).to_string());
         conn.transaccion(async {
+            // Un paso que entra apaga el «se reintenta» de la pantalla.
+            conn.execute("UPDATE _Sync_Subida SET Ultimo_Error = NULL WHERE Id = 1;", ()).await.map_err(db_err)?;
             conn.execute(
                 "UPDATE _Sync_Subida_Tablas SET Cursor_Json = COALESCE(?3, Cursor_Json), Filas_Leidas = Filas_Leidas + ?4, \
                    Filas_Escritas = Filas_Escritas + ?5, Intentos = 0, Estado = CASE WHEN ?6 THEN 1 ELSE Estado END \
@@ -1294,12 +1403,13 @@ impl SqliteSubidaCompleta {
                 .chain(p.por_revisar.iter().map(|(c, m)| json!([e.tabla, Json::Array(c.clone()).to_string(), m])))
                 .collect();
             if !revisar.is_empty() {
+                // Con su etapa: se vuelve a intentar al pasar a la siguiente (`repaso`).
                 conn.execute(
-                    "INSERT INTO _Sync_Subida_Por_Revisar (Tabla, Clave_Json, Motivo, Intentos) \
-                     SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), 0 \
+                    "INSERT INTO _Sync_Subida_Por_Revisar (Tabla, Clave_Json, Motivo, Intentos, Turno) \
+                     SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), 0, ?2 \
                        FROM json_each(?1) WHERE 1 \
-                     ON CONFLICT(Tabla, Clave_Json) DO UPDATE SET Motivo = excluded.Motivo;",
-                    vec![Value::Text(Json::Array(revisar).to_string())],
+                     ON CONFLICT(Tabla, Clave_Json) DO UPDATE SET Motivo = excluded.Motivo, Turno = excluded.Turno;",
+                    vec![Value::Text(Json::Array(revisar).to_string()), Value::Integer(e.turno)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1314,23 +1424,70 @@ impl SqliteSubidaCompleta {
         Ok(())
     }
 
-    /// Pide borrar arriba, por el outbox y sólo si la nube no ha cambiado desde `hasta_seq`, unas
-    /// filas que aquí ya no están.
-    async fn pedir_borrados(&self, e: &Entrada, claves: &[Vec<Json>], hasta_seq: i64) -> AppResult<()> {
-        let sentencias: Vec<_> = claves
-            .iter()
-            .filter_map(|k| {
-                let clave = e
-                    .clave
-                    .iter()
-                    .zip(k)
-                    .map(|(c, v)| (c.clone(), v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())))
-                    .collect();
-                crate::contraste::borrado_si_la_nube_no_ha_cambiado(&FilaAfectada { tabla: e.tabla.clone(), clave }, hasta_seq)
-            })
-            .collect();
-        if sentencias.is_empty() {
+    /// Apunta unas filas que la nube tiene y aquí ya no están, con el final del log que vio la nube
+    /// (`hasta_seq`). Se piden borrar al acabar la etapa, todas juntas y hijas primero
+    /// (`pedir_borrados`): una por una, padres primero, el borrado de una comanda chocaría con la
+    /// foránea de sus líneas, que todavía estarían arriba.
+    async fn apuntar_borrados(&self, e: &Entrada, claves: &[Vec<Json>], hasta_seq: i64) -> AppResult<()> {
+        if claves.is_empty() {
             return Ok(());
+        }
+        let lista: Vec<Json> = claves.iter().map(|k| json!([Json::Array(k.clone()).to_string()])).collect();
+        let w = self.db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO _Sync_Subida_Por_Borrar (Tabla, Clave_Json, Turno, Orden, Hasta_Seq) \
+                 SELECT ?1, json_extract(value, '$[0]'), ?2, ?3, ?4 FROM json_each(?5) WHERE 1 \
+                 ON CONFLICT(Tabla, Clave_Json) DO NOTHING;",
+                vec![
+                    Value::Text(e.tabla.clone()),
+                    Value::Integer(e.turno),
+                    Value::Integer(e.orden),
+                    Value::Integer(hasta_seq),
+                    Value::Text(Json::Array(lista).to_string()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Pide borrar arriba, por el outbox, lo apuntado en las etapas anteriores a `antes_de` (todas,
+    /// con `None`): en orden inverso a las foráneas (hijas primero), como el contraste, y cada fila
+    /// sólo si en la nube no ha escrito nadie más que esta Main desde que lo vio (`dispositivo`).
+    async fn pedir_borrados(&self, antes_de: Option<i64>, dispositivo: Option<&str>) -> AppResult<()> {
+        let tope = antes_de.unwrap_or(i64::MAX);
+        let apuntadas = {
+            let r = self.db.read().await;
+            filas(
+                r.conn(),
+                "SELECT b.Tabla, b.Clave_Json, b.Hasta_Seq, \
+                        (SELECT t.Clave_Json FROM _Sync_Subida_Tablas t WHERE t.Tabla = b.Tabla LIMIT 1) \
+                   FROM _Sync_Subida_Por_Borrar b WHERE b.Turno < ?1 \
+                  ORDER BY b.Orden DESC, b.Tabla, b.Clave_Json;",
+                vec![Value::Integer(tope)],
+            )
+            .await?
+        };
+        if apuntadas.is_empty() {
+            return Ok(());
+        }
+        let mut sentencias = Vec::new();
+        for f in &apuntadas {
+            let (Some(tabla), Some(clave_json), Some(columnas)) = (texto(&f[0]), texto(&f[1]), texto(&f[3])) else { continue };
+            let Ok(valores) = serde_json::from_str::<Vec<Json>>(&clave_json) else { continue };
+            let Ok(columnas) = serde_json::from_str::<Vec<String>>(&columnas) else { continue };
+            let clave = columnas
+                .iter()
+                .zip(&valores)
+                .map(|(c, v)| (c.clone(), v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())))
+                .collect();
+            let fila = FilaAfectada { tabla, clave };
+            let s = match dispositivo {
+                Some(d) => borrado_si_nadie_mas_ha_escrito(&fila, entero(&f[2]), d),
+                None => crate::contraste::borrado_si_la_nube_no_ha_cambiado(&fila, entero(&f[2])),
+            };
+            sentencias.extend(s);
         }
         let w = self.db.write().await;
         let conn = w.raw();
@@ -1338,10 +1495,11 @@ impl SqliteSubidaCompleta {
             for op in sentencias.chunks(BORRADOS_POR_OPERACION) {
                 crate::contraste::encolar_operacion(conn, op, None).await?;
             }
+            conn.execute("DELETE FROM _Sync_Subida_Por_Borrar WHERE Turno < ?1;", vec![Value::Integer(tope)]).await.map_err(db_err)?;
             Ok(())
         })
         .await?;
-        tracing::info!(target: "tpv::sync", tabla = %e.tabla, filas = sentencias.len(), "DO-SUBIDA: lo que la nube tiene y aquí no, por el outbox");
+        tracing::info!(target: "tpv::sync", filas = sentencias.len(), "DO-SUBIDA: lo que la nube tiene y aquí no, por el outbox");
         Ok(())
     }
 
@@ -1396,40 +1554,59 @@ impl SqliteSubidaCompleta {
             Ok(r) => r,
             Err(p) => return Ok(p),
         };
-        let sobran: Vec<Vec<Json>> =
+        let mut sobran: Vec<Vec<Json>> =
             r.get("sobran").and_then(Json::as_array).map(|l| l.iter().filter_map(|k| k.as_array().cloned()).collect()).unwrap_or_default();
         let hasta_seq = r.get("hastaSeq").and_then(Json::as_i64).unwrap_or(0);
+        if !sobran.is_empty() {
+            // SYNC-36: lo que aquí falta por una cuarentena de bajada puede ser justo lo que escribió
+            // ese cambio de la nube (el alta de una Handy): no se borra arriba. Con una cuarentena
+            // que no sabe qué filas toca, nada de su tabla.
+            let ap = {
+                let r = self.db.read().await;
+                apartado(r.conn()).await?
+            };
+            if ap.tablas.contains(&e.tabla) {
+                sobran.clear();
+            } else {
+                sobran.retain(|k| canonica(&e.tabla, k).is_none_or(|c| !ap.claves.contains(&c)));
+            }
+        }
         if !sobran.is_empty() && hasta_seq > 0 {
-            self.pedir_borrados(e, &sobran, hasta_seq).await?;
+            self.apuntar_borrados(e, &sobran, hasta_seq).await?;
         }
         let p = Pagina { ultima: claves.last().cloned(), final_, leidas: claves.len() as i64, ..Pagina::default() };
         self.confirmar(e, &p, 0, Vec::new()).await?;
         Ok(PasoHecho::Avanza)
     }
 
-    /// El repaso de lo que no entró por un único o una foránea: otra vez, con todo lo demás ya
-    /// arriba. Devuelve `None` si no queda nada que repasar.
-    async fn repaso(&self, envio: &mut dyn EnvioDeSubida) -> AppResult<Option<PasoHecho>> {
+    /// El repaso de lo que no entró por un único o una foránea: otra vez, con más cosas ya arriba.
+    /// Con `antes_de`, al cambiar de etapa: lo de las etapas anteriores, una vez por etapa y sin
+    /// gastar sus intentos (un producto cuyo proveedor no estaba entra en cuanto el núcleo ha subido,
+    /// y no hay que esperar al histórico entero). Sin él, al final: hasta `MAX_REPASOS` veces.
+    /// Devuelve `None` si no queda nada que repasar.
+    async fn repaso(&self, envio: &mut dyn EnvioDeSubida, antes_de: Option<i64>) -> AppResult<Option<PasoHecho>> {
         let r = self.db.read().await;
         let pendientes = filas(
             r.conn(),
             "SELECT Tabla, Clave_Json FROM _Sync_Subida_Por_Revisar \
-              WHERE Motivo IN ('unico', 'foranea') AND Intentos < ?1 ORDER BY Tabla, Clave_Json LIMIT 500;",
-            vec![Value::Integer(MAX_REPASOS)],
+              WHERE Motivo IN ('unico', 'foranea') AND Intentos < ?1 AND (?2 IS NULL OR Turno < ?2) \
+              ORDER BY Tabla, Clave_Json LIMIT 500;",
+            vec![Value::Integer(MAX_REPASOS), antes_de.map_or(Value::Null, Value::Integer)],
         )
         .await?;
         if pendientes.is_empty() {
             return Ok(None);
         }
         let tabla = texto(&pendientes[0][0]).unwrap_or_default();
-        let claves: Vec<Vec<Json>> = pendientes
+        // La clave tal como está guardada, y sus valores.
+        let claves: Vec<(String, Vec<Json>)> = pendientes
             .iter()
             .filter(|f| texto(&f[0]).as_deref() == Some(tabla.as_str()))
-            .filter_map(|f| texto(&f[1]).and_then(|c| serde_json::from_str::<Vec<Json>>(&c).ok()))
+            .filter_map(|f| texto(&f[1]).map(|c| (c.clone(), serde_json::from_str::<Vec<Json>>(&c).unwrap_or_default())))
             .collect();
         let entrada = filas(
             r.conn(),
-            "SELECT Tabla, Fase, Turno, Sql, Parametrizada, Clave_Json, Columnas_Json, Clave_Json, Politica, Por_Clave, \
+            "SELECT Tabla, Fase, Turno, Sql, Parametrizada, Orden, Columnas_Json, Clave_Json, Politica, Por_Clave, \
                     Claves_Fijadas, Cursor_Json, Intentos FROM _Sync_Subida_Tablas WHERE Tabla = ?1 ORDER BY Fase LIMIT 1;",
             vec![Value::Text(tabla.clone())],
         )
@@ -1447,36 +1624,45 @@ impl SqliteSubidaCompleta {
         if marca.pendientes > 0 {
             return Ok(Some(PasoHecho::PorSubir));
         }
-        let (cols, clave, cl) = (e.columnas.clone(), e.clave.clone(), claves.clone());
+        let (cols, clave) = (e.columnas.clone(), e.clave.clone());
+        let cl: Vec<Vec<Json>> = claves.iter().map(|(_, k)| k.clone()).collect();
         let t = tabla.clone();
         let encontradas = r.conn().foto(move |f| filas_por_clave(f, &t, &cols, &clave, &cl)).await.map_err(db_err)?;
         drop(r);
-        let (_, _, no_entraron) = match self.mandar_filas(envio, &e, &encontradas, marca.checkpoint, false).await? {
-            Ok(x) => x,
-            Err(p) => return Ok(Some(p)),
+        // DO-SUBIDA (repaso): lo que aquí ya no existe (o ya no se puede mandar) no se repasa: sale
+        // de la lista sin mandar nada. Mandar una lista vacía era un rechazo permanente de la nube
+        // que no movía nada, y el repaso se repetía sin fin, sin llegar nunca a `fin`.
+        let halladas: HashSet<String> = encontradas.iter().map(|f| Json::Array(f.clave.clone()).to_string()).collect();
+        let siguen: HashSet<String> = if encontradas.is_empty() {
+            HashSet::new()
+        } else {
+            match self.mandar_filas(envio, &e, &encontradas, marca.checkpoint, false).await? {
+                Ok((_, _, no_entraron)) => no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect(),
+                // Un rechazo permanente (o una página que no cabe): cuenta como un intento de todas,
+                // para que el repaso no se repita sin fin.
+                Err(PasoHecho::Avanza) => halladas.clone(),
+                Err(p) => return Ok(Some(p)),
+            }
         };
-        let siguen: HashSet<String> = no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect();
         let w = self.db.write().await;
         let conn = w.raw();
         conn.transaccion(async {
-            for k in &claves {
+            for (guardada, k) in &claves {
                 let k = Json::Array(k.clone()).to_string();
-                if siguen.contains(&k) {
-                    conn.execute(
-                        "UPDATE _Sync_Subida_Por_Revisar SET Intentos = Intentos + 1 WHERE Tabla = ?1 AND Clave_Json = ?2;",
-                        vec![Value::Text(tabla.clone()), Value::Text(k)],
-                    )
-                    .await
-                    .map_err(db_err)?;
+                let sql = if !halladas.contains(&k) || !siguen.contains(&k) {
+                    "DELETE FROM _Sync_Subida_Por_Revisar WHERE Tabla = ?1 AND Clave_Json = ?2;"
+                } else if antes_de.is_some() {
+                    "UPDATE _Sync_Subida_Por_Revisar SET Turno = ?3 WHERE Tabla = ?1 AND Clave_Json = ?2;"
                 } else {
-                    conn.execute(
-                        "DELETE FROM _Sync_Subida_Por_Revisar WHERE Tabla = ?1 AND Clave_Json = ?2;",
-                        vec![Value::Text(tabla.clone()), Value::Text(k)],
-                    )
-                    .await
-                    .map_err(db_err)?;
+                    "UPDATE _Sync_Subida_Por_Revisar SET Intentos = Intentos + 1 WHERE Tabla = ?1 AND Clave_Json = ?2;"
+                };
+                let mut args = vec![Value::Text(tabla.clone()), Value::Text(guardada.clone())];
+                if let Some(t) = antes_de.filter(|_| sql.contains("?3")) {
+                    args.push(Value::Integer(t));
                 }
+                conn.execute(sql, args).await.map_err(db_err)?;
             }
+            hitos(conn).await?;
             Ok(())
         })
         .await?;
@@ -1563,6 +1749,14 @@ impl SubidaCompleta for SqliteSubidaCompleta {
             }
             (Some(p), _) if p.terminada => Conciliacion::Nada,
             (Some(p), Some(l)) if mismo(&l, p) && l.estado == "subiendo" => Conciliacion::Seguir,
+            (Some(p), Some(l)) if mismo(&l, p) && l.estado == "abandonada" => {
+                // La misma petición, reabierta por la administración (`negocio:subida --reabrir`, tras
+                // agotar su techo en un bar con mucho histórico): se sigue por los cursores, sin
+                // volver a recorrer lo que ya subió.
+                conn.execute("UPDATE _Sync_Subida SET Estado = 'subiendo', Ultimo_Error = NULL WHERE Id = 1;", ()).await.map_err(db_err)?;
+                tracing::info!(target: "tpv::sync", evento = "subida_reanudada", "DO-SUBIDA: la nube vuelve a pedir la misma subida: se sigue por donde iba");
+                Conciliacion::Seguir
+            }
             (Some(p), Some(l)) if mismo(&l, p) && l.estado == "contrastando" => {
                 // La nube no recibió el `fin`: se vuelve a mandar.
                 conn.execute("UPDATE _Sync_Subida SET Estado = 'subiendo' WHERE Id = 1;", ()).await.map_err(db_err)?;
@@ -1615,11 +1809,18 @@ impl SubidaCompleta for SqliteSubidaCompleta {
             let r = self.db.read().await;
             siguiente(r.conn()).await?
         };
+        // Al cambiar de etapa: lo que la nube tiene y aquí no, pedido borrar ya junto y hijas primero,
+        // y otro intento de lo que no entró en las anteriores.
+        let turno = e.as_ref().map(|e| e.turno);
+        self.pedir_borrados(turno, l.dispositivo.as_deref()).await?;
+        if let Some(p) = self.repaso(&mut envio, Some(turno.unwrap_or(i64::MAX))).await? {
+            return Ok(p);
+        }
         match e {
             Some(e) if e.fase == 4 => self.sobrantes(&mut envio, &e).await,
             Some(e) if !e.por_clave && !e.claves_fijadas => self.fijar_claves(&e, &l).await,
             Some(e) => self.pagina(&mut envio, &e, &l).await,
-            None => match self.repaso(&mut envio).await? {
+            None => match self.repaso(&mut envio, None).await? {
                 Some(p) => Ok(p),
                 None => {
                     {

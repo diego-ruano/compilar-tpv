@@ -14,6 +14,8 @@ CREATE TABLE _Sync_Subida (
   Desde_Imprescindible TEXT,
   Desde_Reciente TEXT,
   Hasta_Seq_Plan INTEGER,
+  -- Este equipo, como lo nombra el log de la nube: lo suyo no frena sus borrados.
+  Dispositivo TEXT,
   Vivos_Incompletos INTEGER NOT NULL DEFAULT 0,
   Empezada_Ms INTEGER NOT NULL,
   Nucleo_Hecho_Ms INTEGER,
@@ -36,7 +38,7 @@ CREATE TABLE _Sync_Subida_Tablas (
   Parametrizada INTEGER NOT NULL DEFAULT 0,
   Columnas_Json TEXT NOT NULL CHECK (json_valid(Columnas_Json)),
   Clave_Json TEXT NOT NULL CHECK (json_valid(Clave_Json)),
-  Politica TEXT NOT NULL CHECK (Politica IN ('upsert', 'solo_insertar')),
+  Politica TEXT NOT NULL CHECK (Politica IN ('upsert', 'solo_insertar', 'monotono')),
   Por_Clave INTEGER NOT NULL DEFAULT 0,
   Claves_Fijadas INTEGER NOT NULL DEFAULT 0,
   Cursor_Json TEXT CHECK (Cursor_Json IS NULL OR json_valid(Cursor_Json)),
@@ -59,11 +61,25 @@ CREATE TABLE _Sync_Subida_Claves (
 ) WITHOUT ROWID;
 
 -- Lo que la nube no dejo entrar (un unico, una foranea, un CHECK, lo fiscal distinto), por su
--- clave y sin datos: el repaso lo vuelve a intentar y lo que quede lo ve el contraste.
+-- clave y sin datos: el repaso lo vuelve a intentar y lo que quede lo ve el contraste. Turno: el
+-- de la etapa tras la que toca volver a intentarlo (al cambiar de etapa).
 CREATE TABLE _Sync_Subida_Por_Revisar (
   Tabla TEXT NOT NULL,
   Clave_Json TEXT NOT NULL,
   Motivo TEXT NOT NULL,
   Intentos INTEGER NOT NULL DEFAULT 0,
+  Turno INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (Tabla, Clave_Json)
 );
+
+-- Lo que la nube tiene y este equipo no (lo vivo de la copia, los sobrantes de los maestros): se
+-- junta aqui y se pide borrar por el outbox al acabar su etapa, hijas primero (Orden mas alto
+-- antes), cada clave con el final del log que vio la nube al decirlo.
+CREATE TABLE _Sync_Subida_Por_Borrar (
+  Tabla TEXT NOT NULL,
+  Clave_Json TEXT NOT NULL,
+  Turno INTEGER NOT NULL,
+  Orden INTEGER NOT NULL,
+  Hasta_Seq INTEGER NOT NULL,
+  PRIMARY KEY (Tabla, Clave_Json)
+) WITHOUT ROWID;

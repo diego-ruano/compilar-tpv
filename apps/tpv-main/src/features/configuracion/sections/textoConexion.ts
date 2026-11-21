@@ -96,3 +96,32 @@ export function textoDeConexion(
 	}
 	return ESTADO_TEXTO[estado];
 }
+
+/**
+ * DO-SUBIDA · Los avisos del panel de la subida de los datos a la nube, en español y sin códigos:
+ * lo que no entró a la primera (se comprueba al final), una parte que la nube no admite (la revisa
+ * la comprobación con la nube, no se reintenta) y un rechazo que se está reintentando (se apaga en
+ * cuanto un paso entra).
+ */
+export function avisosDeSubida(subida: SubidaNubeEstado): { texto: string; tono: "info" | "aviso" }[] {
+	const avisos: { texto: string; tono: "info" | "aviso" }[] = [];
+	if (subida.filas_por_revisar > 0) {
+		avisos.push({
+			texto: `${subida.filas_por_revisar.toLocaleString("es-ES")} registros no han entrado a la primera; se comprueban al final.`,
+			tono: "info",
+		});
+	}
+	if (subida.tablas_fallidas > 0) {
+		avisos.push({
+			texto:
+				subida.tablas_fallidas === 1
+					? "Una parte de los datos no se ha podido subir así; la revisará la comprobación con la nube cuando termine."
+					: `${subida.tablas_fallidas} partes de los datos no se han podido subir así; las revisará la comprobación con la nube cuando termine.`,
+			tono: "aviso",
+		});
+	}
+	if (subida.reintentando) {
+		avisos.push({ texto: "La nube no ha aceptado el último envío. Se reintenta solo en unos segundos.", tono: "aviso" });
+	}
+	return avisos;
+}

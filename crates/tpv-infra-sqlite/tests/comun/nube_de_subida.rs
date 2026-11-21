@@ -35,6 +35,12 @@ fn ventana(t: &str) -> Option<&'static str> {
     })
 }
 
+/// Cómo nombra el log de la nube a la Main de la subida (`dispositivo` del plan).
+pub const DISPOSITIVO: &str = "main-subida";
+
+/// Lo que la nube admite en una página de filas (`BYTES_POR_PAGINA` del worker).
+const BYTES_POR_PAGINA: usize = 3 * 1024 * 1024 / 2;
+
 pub struct NubeDeSubida {
     pub db: Arc<Db>,
     dir: PathBuf,
@@ -49,6 +55,10 @@ pub struct NubeDeSubida {
     /// Todo lo que ha llegado, en orden.
     pub pasos: Vec<Json>,
     pub paginas_aplicadas: usize,
+    /// El acuse de la próxima página de filas, en vez de aplicarla (un rechazo de la nube).
+    pub rechazar_la_proxima: Option<Json>,
+    /// Los acuses de rechazo que ha dado, por su código.
+    pub rechazos: Vec<String>,
 }
 
 fn celda(v: &Value) -> Celda<'_> {
@@ -104,6 +114,8 @@ impl NubeDeSubida {
             cortar_tras: None,
             pasos: Vec::new(),
             paginas_aplicadas: 0,
+            rechazar_la_proxima: None,
+            rechazos: Vec::new(),
         };
         // El cambio vacío que abre el log tras devolver la base (`abrirLogTrasVolver`).
         nube.sembrar(&format!(
@@ -219,8 +231,12 @@ impl NubeDeSubida {
                         Some(s) => (s.to_string(), true),
                         None => (format!("SELECT * FROM {}", cita(&t)), false),
                     };
-                    let solo = t == "Registros_Facturacion" || t == "Serie_Facturacion";
-                    tablas.push(json!({"tabla": t, "columnas": cols, "clave": clave, "sql": sql, "parametrizada": parcial, "parcial": parcial, "politica": if solo {"solo_insertar"} else {"upsert"}}));
+                    let politica = match t.as_str() {
+                        "Registros_Facturacion" => "solo_insertar",
+                        "Serie_Facturacion" => "monotono",
+                        _ => "upsert",
+                    };
+                    tablas.push(json!({"tabla": t, "columnas": cols, "clave": clave, "sql": sql, "parametrizada": parcial, "parcial": parcial, "politica": politica}));
                 }
                 let abiertas: Vec<Json> = self
                     .filas("SELECT ID_Comanda FROM Comandas WHERE Estado = 'Abierta' ORDER BY ID_Comanda;", vec![])
@@ -231,7 +247,18 @@ impl NubeDeSubida {
                 if !abiertas.is_empty() {
                     vivos.insert("Comandas".into(), Json::Array(abiertas));
                 }
-                json!({"ok": true, "ventanaDias": 30, "tablas": tablas, "vivos": vivos, "vivosIncompletos": false, "hastaSeq": self.hasta_seq})
+                for (t, clave) in [("Detalle_Comanda", "ID_Detalle"), ("Pagos", "ID_Pago")] {
+                    let suyas: Vec<Json> = self
+                        .filas(&format!("SELECT {clave} FROM {t} WHERE ID_Comanda IN (SELECT ID_Comanda FROM Comandas WHERE Estado = 'Abierta') ORDER BY 1;"), vec![])
+                        .await
+                        .into_iter()
+                        .map(|f| json!([a_json(&f[0])]))
+                        .collect();
+                    if !suyas.is_empty() {
+                        vivos.insert(t.into(), Json::Array(suyas));
+                    }
+                }
+                json!({"ok": true, "ventanaDias": 30, "tablas": tablas, "vivos": vivos, "vivosIncompletos": false, "hastaSeq": self.hasta_seq, "dispositivo": DISPOSITIVO})
             }
             "huellas" => {
                 let cols: Vec<String> = serde_json::from_value(p["columnas"].clone()).unwrap();
@@ -279,6 +306,21 @@ impl NubeDeSubida {
                 json!({"ok": true, "distintos": distintos})
             }
             "filas" => {
+                // La forma, como `formaDelPaso`: una lista vacía sólo para decir que la tabla acabó,
+                // y una página que no cabe se contesta para que la Main la parta.
+                let lista = p["filas"].as_array().cloned().unwrap_or_default();
+                if lista.is_empty() && p["ultimaDeLaTabla"] != json!(true) {
+                    self.rechazos.push("subida_mal_formada".into());
+                    return Some(json!({"ok": false, "error": "subida_mal_formada", "permanente": true}));
+                }
+                if Json::Array(lista).to_string().len() > BYTES_POR_PAGINA {
+                    self.rechazos.push("subida_pagina_demasiado_grande".into());
+                    return Some(json!({"ok": false, "error": "subida_pagina_demasiado_grande"}));
+                }
+                if let Some(r) = self.rechazar_la_proxima.take() {
+                    self.rechazos.push(r["error"].as_str().unwrap_or("").into());
+                    return Some(r);
+                }
                 if self.ajeno {
                     return Some(json!({"ok": false, "aplazada": true, "hastaSeq": self.hasta_seq + 1}));
                 }
@@ -289,8 +331,10 @@ impl NubeDeSubida {
                 let resto: Vec<&String> = cols.iter().filter(|c| !clave.contains(c)).collect();
                 let valores = (0..cols.len()).map(|i| format!("json_extract(value, '$[{i}]')")).collect::<Vec<_>>().join(", ");
                 let conflicto = clave.iter().map(|c| cita(c)).collect::<Vec<_>>().join(", ");
-                let solo = tabla == "Registros_Facturacion" || tabla == "Serie_Facturacion";
-                let al_chocar = if solo || resto.is_empty() {
+                let solo = tabla == "Registros_Facturacion";
+                let al_chocar = if tabla == "Serie_Facturacion" {
+                    format!("ON CONFLICT({conflicto}) DO UPDATE SET \"Ultimo\" = MAX(\"Ultimo\", excluded.\"Ultimo\") WHERE excluded.\"Ultimo\" > \"Ultimo\"")
+                } else if solo || resto.is_empty() {
                     format!("ON CONFLICT({conflicto}) DO NOTHING")
                 } else {
                     format!(

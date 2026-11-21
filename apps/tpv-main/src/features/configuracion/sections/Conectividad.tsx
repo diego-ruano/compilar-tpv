@@ -11,7 +11,7 @@ import { useAuth } from "../../../shared/stores/useAuth";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import { useEstadoSync } from "../../../shared/stores/useEstadoSync";
-import { textoDeConexion } from "./textoConexion";
+import { avisosDeSubida, textoDeConexion } from "./textoConexion";
 import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 import { useSubidaNube } from "../../../shared/lib/subidaNubeQueries";
@@ -566,15 +566,16 @@ function SubidaNube({ darkMode }: { darkMode: boolean }) {
 						{data.tablas_pendientes > 0 ? ` · quedan ${data.tablas_pendientes} apartados` : ""}
 					</span>
 				</div>
-				{data.filas_por_revisar > 0 && (
-					<div className="text-[11px] text-fg-muted">
-						{data.filas_por_revisar.toLocaleString("es-ES")} registros no han entrado a la primera; se comprueban al final.
-					</div>
-				)}
-				{data.ultimo_error && (
-					<div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-[11px] text-warning">
-						La nube rechazó el último intento ({data.ultimo_error}). Se reintenta solo.
-					</div>
+				{avisosDeSubida(data).map((a) =>
+					a.tono === "info" ? (
+						<div key={a.texto} className="text-[11px] text-fg-muted">
+							{a.texto}
+						</div>
+					) : (
+						<div key={a.texto} className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-[11px] text-warning">
+							{a.texto}
+						</div>
+					),
 				)}
 			</div>
 		</Panel>

@@ -354,8 +354,12 @@ pub struct SubidaNubeEstado {
     pub tablas_pendientes: i64,
     /// Filas que la nube no ha dejado entrar y quedan para el contraste.
     pub filas_por_revisar: i64,
-    /// El último rechazo de la nube, por su código. Sin datos.
-    pub ultimo_error: Option<String>,
+    /// La nube rechazó el último intento sin decir por qué: se reintenta solo. Se apaga en cuanto
+    /// un paso entra.
+    pub reintentando: bool,
+    /// Tablas que la nube no admite en esta subida: no se reintentan, y lo que falte de ellas lo
+    /// repara la comprobación con la nube (el contraste).
+    pub tablas_fallidas: i64,
 }
 
 /// RI-31: estado de réplica para la UI, sin SQL ni credenciales.

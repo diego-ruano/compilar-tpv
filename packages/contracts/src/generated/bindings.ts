@@ -3363,8 +3363,16 @@ export type SubidaNubeEstado = {
 	tablas_pendientes: number,
 	/**  Filas que la nube no ha dejado entrar y quedan para el contraste. */
 	filas_por_revisar: number,
-	/**  El último rechazo de la nube, por su código. Sin datos. */
-	ultimo_error: string | null,
+	/**
+	 *  La nube rechazó el último intento sin decir por qué: se reintenta solo. Se apaga en cuanto
+	 *  un paso entra.
+	 */
+	reintentando: boolean,
+	/**
+	 *  Tablas que la nube no admite en esta subida: no se reintentan, y lo que falte de ellas lo
+	 *  repara la comprobación con la nube (el contraste).
+	 */
+	tablas_fallidas: number,
 };
 
 export type SummaryArgs = {

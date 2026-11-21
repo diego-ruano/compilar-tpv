@@ -4,13 +4,14 @@
 // nube que soporte ha restaurado (una copia, una base vacía, una vuelta a un instante).
 //
 // Con los Handy retenidos se dice por qué esperan, y que este TPV sigue cobrando. Con los Handy ya
-// sueltos (el núcleo ha subido) la conexión vuelve a decir lo de siempre: el progreso va en su panel.
+// sueltos (el núcleo ha subido) la conexión vuelve a decir lo de siempre: el progreso va en su panel,
+// con sus avisos en español y sin los códigos de la nube.
 
 import { describe, expect, it } from "vitest";
 
 import type { SubidaNubeEstado } from "@tpv/contracts";
 
-import { textoDeConexion } from "../src/features/configuracion/sections/textoConexion";
+import { avisosDeSubida, textoDeConexion } from "../src/features/configuracion/sections/textoConexion";
 
 const subiendo: SubidaNubeEstado = {
 	estado: "subiendo",
@@ -19,7 +20,8 @@ const subiendo: SubidaNubeEstado = {
 	filas_total: 50_000,
 	tablas_pendientes: 12,
 	filas_por_revisar: 0,
-	ultimo_error: null,
+	reintentando: false,
+	tablas_fallidas: 0,
 };
 
 describe("DO-SUBIDA · el texto de la conexión", () => {
@@ -43,5 +45,25 @@ describe("DO-SUBIDA · el texto de la conexión", () => {
 
 	it("sin conexión, manda el estado de la conexión", () => {
 		expect(textoDeConexion("reintentando", 0, true, subiendo).titulo).toBe("Sin conexión");
+	});
+});
+
+describe("DO-SUBIDA · los avisos del panel de la subida", () => {
+	it("sin nada que avisar, ninguno", () => {
+		expect(avisosDeSubida(subiendo)).toEqual([]);
+	});
+
+	it("una parte que la nube no admite se dice aparte, sin código y sin prometer que se reintenta", () => {
+		const avisos = avisosDeSubida({ ...subiendo, tablas_fallidas: 1 });
+		expect(avisos).toHaveLength(1);
+		expect(avisos[0].texto).toContain("la revisará la comprobación con la nube");
+		expect(avisos[0].texto).not.toMatch(/reintenta|_/);
+	});
+
+	it("un rechazo que se reintenta lo dice en español, sin el código de la nube", () => {
+		const avisos = avisosDeSubida({ ...subiendo, reintentando: true, filas_por_revisar: 1200 });
+		expect(avisos.map((a) => a.tono)).toEqual(["info", "aviso"]);
+		expect(avisos[1].texto).toBe("La nube no ha aceptado el último envío. Se reintenta solo en unos segundos.");
+		expect(avisos.every((a) => !/[a-z]+_[a-z]+/.test(a.texto))).toBe(true);
 	});
 });
