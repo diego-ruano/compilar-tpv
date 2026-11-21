@@ -23,7 +23,7 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 	const [ocupado, setOcupado] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Al cambiar de modo (tpv ↔ handy) las URLs de imagen cambian (AppData vs CDN).
+	// Al cambiar de modo (tpv ↔ handy) las URLs de imagen cambian (AppData vs el worker).
 	// Limpiamos el caché de React Query para que los datos se refresquen con el modo nuevo.
 	const modoAnteriorRef = useRef<ModeStateValue>("loading");
 	useEffect(() => {

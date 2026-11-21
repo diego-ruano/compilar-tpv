@@ -250,11 +250,14 @@ público del bucket se cierra **a mano y después**, cuando todas lleven la vers
 1. Comprobar que ninguna Handy va con una versión anterior: en Axiom (`tpv-device-logs`), los eventos
    con `device_mode = handy` de los últimos días, por `app_version`; o en las métricas del bucket, que
    ya no haya peticiones por `r2.dev`.
-2. En el panel de Cloudflare: **R2 → `tpv-images` → Settings → Public access → R2.dev subdomain →
-   Disallow**. El bucket es el del binding `IMAGES` de `apps/cloud-worker-licensing/wrangler.json`.
+2. En el panel de Cloudflare: **R2 → `tpv-images` → Settings → Public Development URL → Disable**; en
+   el diálogo «Disallow Public Access?», escribir `disallow` y pulsar **Disallow**
+   ([Cloudflare](https://developers.cloudflare.com/r2/buckets/public-buckets/)). El bucket es el del binding `IMAGES` de `apps/cloud-worker-licensing/wrangler.json`.
    No se toca ningún otro bucket: el de las versiones (`R2_BUCKET`, con su `R2_PUBLIC_BASE_URL`) lo
    descarga el updater, y `tpv-copias-control` y `tpv-copias-negocios` son privados.
 3. Comprobar desde una Handy que las imágenes de la carta se siguen viendo (van por el worker).
+4. Quitar de [worker.md](../arquitectura/worker.md#imágenes) y del comentario de `IMAGES` en
+   `apps/cloud-worker-licensing/src/env.ts` la salvedad de que el bucket sigue abierto por `r2.dev`.
 
 Una Handy que no se haya actualizado deja de ver las imágenes (pinta el marcador), sin más: no afecta a
 pedir ni a cobrar. Se arregla actualizándola.

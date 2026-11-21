@@ -96,7 +96,7 @@ export function useBorrarIngrediente() {
   });
 }
 
-/** Resuelve una ruta de imagen a URL utilizable (local en Main, CDN en Handy). */
+/** Resuelve una ruta de imagen a URL utilizable (local en Main, el worker en Handy). */
 const resolverUrlImagen = resolveImageUrl;
 
 /** Categorías "display" (con urlImagen ya resuelta) — cacheadas. */

@@ -111,10 +111,12 @@ export interface Env {
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.
-	// Se lee sólo por el worker: el GET público de `/v1/images/{tenant}/…` (la Handy) y el POST
+	// La app lo lee por el worker: el GET público de `/v1/images/{tenant}/…` (la Handy) y el POST
 	// firmado de `/download` (la Main); las ESCRITURAS (PUT/DELETE) van firmadas (JWT +
-	// device-proof) y el negocio sale del token. INFRA-03: el acceso público por `r2.dev` se cierra
-	// en Cloudflare cuando todas las Handy lleven la versión que lee por el worker.
+	// device-proof) y el negocio sale del token. ⚠️ INFRA-03: además sigue abierto por su dirección
+	// pública `r2.dev` (la de las Handy anteriores) hasta que se cierre a mano en Cloudflare, cuando
+	// todas lleven la versión que lee por el worker (docs/guias/publicar-version.md). Hasta entonces,
+	// lo que se guarde aquí es público sin pasar por el worker.
 	IMAGES: R2Bucket;
 
 	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`server/copiaBaseCentral.ts`).

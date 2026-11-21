@@ -490,17 +490,20 @@ ninguna fila se queda como está, sin subir. Lo que no tiene esa forma no se sub
 pide (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
 `test/sinDatosPersonalesEnLaQuery.node.test.ts`.
 
-**Quién lee el bucket.** Sólo el worker; el bucket no se sirve por ningún otro sitio:
+**Quién lee el bucket.** La app lo lee por el worker:
 
 | Quién | Cómo | Ruta |
 |---|---|---|
 | La Handy | `<img>` a `GET /v1/images/{tenant}/{ruta}`, público | La base `{CLOUD_API_BASE}/v1/images/{tenant}` la da Rust (`handy_url_imagenes`, `tpv_infra_licensing::url_imagenes_del_negocio`) y `imageUrl.ts` le pega la `Ruta_Imagen` |
 | La Main | `POST /v1/images/download`, firmado, el negocio sale del token | `images_ensure_local`, que la deja en disco ([tickets.md](tickets.md) para el logo) |
 
-INFRA-03: la Handy leía antes de la dirección pública `r2.dev` del bucket, que Cloudflare reserva para
-desarrollo (límite de peticiones, sin caché). Ya no la usa nadie del código; el acceso público por
-`r2.dev` se cierra a mano en Cloudflare cuando todas las Handy lleven la versión que lee por el
-worker ([publicar-version.md](../guias/publicar-version.md#cerrar-el-r2dev-de-las-imágenes)). La CSP de
+⚠️ **Además, el bucket sigue abierto por su dirección pública `r2.dev`** mientras no se cierre a mano:
+quien tenga `https://pub-….r2.dev/{tenant}/{ruta}` lee la imagen sin pasar por el worker (ni por su
+filtro ni por la validación de la ruta). Es lo que pide la Handy de una versión anterior a INFRA-03;
+Cloudflare reserva esa dirección para desarrollo (límite de peticiones, sin caché). El código ya no la
+usa, y se cierra cuando todas las Handy lleven la versión que lee por el worker
+([publicar-version.md](../guias/publicar-version.md#cerrar-el-r2dev-de-las-imágenes)); hasta entonces,
+en este bucket no se guarda nada que no pueda ser público. Cuando se cierre, se quita este párrafo. La CSP de
 la webview admite en `img-src` el origen del worker y no `r2.dev` (lo vigila
 `lib.rs::las_imagenes_de_la_handy_salen_del_worker_y_no_de_r2_dev`).
 
@@ -529,7 +532,10 @@ pedir mientras tenga su caché. Lo que cuesta cada fallo de esa caché: una peti
 línea en los logs del worker, `observability` y `logpush`) y una operación de clase B de R2. Delante de R2 hay un filtro por IP holgado, `LIMITADOR_IMAGENES` (3000 por
 minuto y red, `/64` en IPv6, AUD-11), para que nadie haga gastar sin techo; una Handy que estrena la
 carta pide cientos de golpe, y las de un bar salen por la misma IP. Sólo cuenta lo que llega a R2.
-Como los demás limitadores, si falta o falla deja pasar.
+Como los demás limitadores, si falta o falla deja pasar. El `<img>` no ve el 429: `ImageWithFallback`
+lo trata como cualquier fallo, con sus reintentos rápidos (unos 12 s, dentro de la ventana) y, agotados,
+el marcador y un último intento pasado el minuto (`ULTIMO_REINTENTO_MS`, más que el `Retry-After: 60`);
+si ése también falla, la imagen se queda en el marcador hasta que se vuelva a pintar la pantalla.
 
 Borrar una imagen la quita también del caché del edge (si lo hay), pero **sólo del centro de datos que
 atiende la petición** (barrer los demás pediría el API de purga).

@@ -2,8 +2,9 @@
 //
 // Envoltorio de React para `resolveImageUrl`. Existe porque lo que guarda la BD (y los stores) NO
 // es una URL: es una **ruta relativa** (`images/{subcarpeta}/{uuid}.jpg`), la misma en el disco de
-// la Main, en la clave de R2 y en la URL del CDN de la Handy. Convertirla en algo que un `<img>`
-// entienda es asíncrono (`convertFileSrc` + AppData en la Main, tenant del pairing en la Handy),
+// la Main, en la clave de R2 y en el camino del GET de imágenes del worker que pide la Handy. Convertirla
+// en algo que un `<img>` entienda es asíncrono (`convertFileSrc` + AppData en la Main; en la Handy, la
+// base `{worker}/v1/images/{tenant}` que da `handy_url_imagenes`, INFRA-03),
 // así que hace falta estado.
 //
 // Sin esto, la conversión se copiaba a mano en cada pantalla… y en tres de ellas no se copió: la
