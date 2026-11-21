@@ -240,6 +240,25 @@ el esquema, la aplicación copia `data.db` a `data.db.bak.<ms>` (se conservan la
 El job `deploy-worker` del tag hace ese despliegue antes de publicar el instalador; no se vuelve
 a compilar ni se publica con un `wrangler deploy` manual que omita las comprobaciones de Sentry.
 
+## Cerrar el `r2.dev` de las imágenes
+
+Desde INFRA-03 la Handy pide las imágenes al worker (`GET /v1/images/{tenant}/{ruta}`,
+[worker.md](../arquitectura/worker.md#imágenes)) y no a la dirección pública `r2.dev` del bucket. Una
+Handy con una versión anterior sigue pidiéndolas a `r2.dev` hasta que se actualice, así que el acceso
+público del bucket se cierra **a mano y después**, cuando todas lleven la versión nueva:
+
+1. Comprobar que ninguna Handy va con una versión anterior: en Axiom (`tpv-device-logs`), los eventos
+   con `device_mode = handy` de los últimos días, por `app_version`; o en las métricas del bucket, que
+   ya no haya peticiones por `r2.dev`.
+2. En el panel de Cloudflare: **R2 → `tpv-images` → Settings → Public access → R2.dev subdomain →
+   Disallow**. El bucket es el del binding `IMAGES` de `apps/cloud-worker-licensing/wrangler.json`.
+   No se toca ningún otro bucket: el de las versiones (`R2_BUCKET`, con su `R2_PUBLIC_BASE_URL`) lo
+   descarga el updater, y `tpv-copias-control` y `tpv-copias-negocios` son privados.
+3. Comprobar desde una Handy que las imágenes de la carta se siguen viendo (van por el worker).
+
+Una Handy que no se haya actualizado deja de ver las imágenes (pinta el marcador), sin más: no afecta a
+pedir ni a cobrar. Se arregla actualizándola.
+
 ## Qué corre en CI
 
 | Workflow | Cuándo | Qué |

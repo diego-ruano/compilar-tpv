@@ -192,8 +192,9 @@ curl -s http://localhost:9222/json/list                   # webSocketDebuggerUrl
 Devuelve la directiva culpable y la URI bloqueada. En escritorio es lo mismo arrancando el `.exe` con
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223`.
 
-Las imágenes de la Handy salen del bucket R2 (`pub-6814….r2.dev`), que está en `img-src` de `csp` y
-`devCsp`; cambiarlo de host es [INFRA-03](../pendientes.md#infra-03--imágenes-por-r2dev).
+Las imágenes de la Handy salen del worker (`GET /v1/images/{tenant}/{ruta}`, INFRA-03), cuyo origen
+está en `img-src` de `csp` y `devCsp`. Si se cambia `CLOUD_API_BASE`, cambia también ahí: lo vigila
+`lib.rs::las_imagenes_de_la_handy_salen_del_worker_y_no_de_r2_dev` ([worker.md](../arquitectura/worker.md#imágenes)).
 
 ## Lo que falta para usar Android como Main
 

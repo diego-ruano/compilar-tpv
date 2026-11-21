@@ -329,7 +329,7 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
 ## La superficie de la aplicación de escritorio
 
 - **CSP cerrada** (`tauri.conf.json`, `app.security`): `script-src 'self'`; `connect-src` sólo el IPC
-  en producción; `img-src` lo local y el bucket de imágenes de la Handy; `style-src
+  en producción; `img-src` lo local y el worker, del que la Handy pinta las imágenes; `style-src
   'self'`; `object-src` y `frame-src` `'none'`. Un origen nuevo va en `csp` **y** en `devCsp`. Nada de
   `<style>` inyectado en tiempo de ejecución ni librerías que se autoinyecten CSS; la CSP sólo se aplica
   al build empaquetado y en Android, no en `pnpm tauri dev` de escritorio. Detalle y cómo comprobarlo

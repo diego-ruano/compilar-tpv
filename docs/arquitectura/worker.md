@@ -29,9 +29,10 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
 (escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): los
-DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (público por `r2.dev`), `tpv-copias-control`
-(privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA`
-(`lib/limitador.ts`) y el cron diario `0 7 * * *`.
+DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (se lee por el worker, [Imágenes](#imágenes)),
+`tpv-copias-control` (privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los
+limitadores por IP `LIMITADOR_CLAIM`, `LIMITADOR_LICENCIA`, `LIMITADOR_RESERVA_WEB`,
+`LIMITADOR_RESERVA_WEB_ALTA` y `LIMITADOR_IMAGENES` (`lib/limitador.ts`) y el cron diario `0 7 * * *`.
 
 RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`. En desarrollo local, R2 y
 `EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
@@ -478,7 +479,7 @@ Se guardan en R2 con prefijo por tenant, y su ruta es siempre `images/{carpeta}/
 carpeta de la lista, en minúsculas, y por nombre el UUID que le pone la app al guardarla
 (`RUTA_DE_IMAGEN`, `domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`, y en la
 Handy, `imageUrl.ts`, que admiten lo mismo). Esa ruta va en el camino de
-`/v1/images/…` y en la dirección pública de `r2.dev`, y Cloudflare guarda la URL de cada petición: un
+`/v1/images/…`, y Cloudflare guarda la URL de cada petición: un
 nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
 guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada
 (`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, encola la copia,
@@ -486,12 +487,52 @@ cambia las filas que la usan (productos, categorías, proveedores y alérgenos) 
 `WriteGuard`, que sube a la nube, y borra el fichero de antes. Encolada antes de cambiar las filas,
 un corte a medias no deja ninguna fila apuntando a una imagen que no va a subir. Una que no usa
 ninguna fila se queda como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
-pide a `r2.dev` (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
-`test/sinDatosPersonalesEnLaQuery.node.test.ts`. El GET
-público las sirve con `max-age=31536000, immutable`; borrar una la quita también del caché del edge,
-pero **sólo del centro de datos que atiende la petición** (barrer los demás pediría el API de purga). La
-Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl.ts`,
-[INFRA-03](../pendientes.md#infra-03--imágenes-por-r2dev)).
+pide (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
+`test/sinDatosPersonalesEnLaQuery.node.test.ts`.
+
+**Quién lee el bucket.** Sólo el worker; el bucket no se sirve por ningún otro sitio:
+
+| Quién | Cómo | Ruta |
+|---|---|---|
+| La Handy | `<img>` a `GET /v1/images/{tenant}/{ruta}`, público | La base `{CLOUD_API_BASE}/v1/images/{tenant}` la da Rust (`handy_url_imagenes`, `tpv_infra_licensing::url_imagenes_del_negocio`) y `imageUrl.ts` le pega la `Ruta_Imagen` |
+| La Main | `POST /v1/images/download`, firmado, el negocio sale del token | `images_ensure_local`, que la deja en disco ([tickets.md](tickets.md) para el logo) |
+
+INFRA-03: la Handy leía antes de la dirección pública `r2.dev` del bucket, que Cloudflare reserva para
+desarrollo (límite de peticiones, sin caché). Ya no la usa nadie del código; el acceso público por
+`r2.dev` se cierra a mano en Cloudflare cuando todas las Handy lleven la versión que lee por el
+worker ([publicar-version.md](../guias/publicar-version.md#cerrar-el-r2dev-de-las-imágenes)). La CSP de
+la webview admite en `img-src` el origen del worker y no `r2.dev` (lo vigila
+`lib.rs::las_imagenes_de_la_handy_salen_del_worker_y_no_de_r2_dev`).
+
+**El GET público** contesta:
+
+- **200** con los bytes, `Content-Type` según la extensión (el PUT ya exige que los bytes casen con
+  ella), `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff` y el
+  `ETag` de R2.
+- **400** `bad_image_path` si la ruta no es de la app, **404** `not_found` si aún no está en el bucket
+  (la subida va por otro canal: el mismo URL la da en cuanto llegue) y **429** `too_many_attempts` si
+  la red de quien pide pasa del filtro. Los tres con `Cache-Control: no-store`: no se guardan en la
+  webview ni en una caché intermedia. El 400 y el 429 no llegan a R2; el 404 es una lectura que no
+  encuentra nada.
+- El negocio del camino es la carpeta del bucket (`prefijoDelNegocio`, que acaba en `/`): con otro
+  negocio en el camino no se llega a lo que no es suyo. Lo público es la imagen de quien sepa su negocio
+  y su UUID, que no se enumeran.
+
+⚠️ **Cada imagen que llega al worker puede ser una lectura de R2.** El worker se sirve por
+`workers.dev` (INFRA-04), y la documentación de Cloudflare sólo promete la Cache API en un dominio
+propio («Workers deployed to custom domains have access to functional `cache` operations»,
+[Cache](https://developers.cloudflare.com/workers/runtime-apis/cache/)); de `workers.dev` sólo dice
+cómo forma la clave. El `caches.default` del GET se queda por si funciona, pero no se cuenta con él.
+**La caché que cuenta es la de la webview**: el 200 es `immutable` por un año y cada imagen da siempre
+el mismo URL (`imageUrl.ts` lo memoriza), así que una Handy pide cada imagen una vez y no la vuelve a
+pedir mientras tenga su caché. Lo que cuesta cada fallo de esa caché: una petición del worker (con su
+línea en los logs del worker, `observability` y `logpush`) y una operación de clase B de R2. Delante de R2 hay un filtro por IP holgado, `LIMITADOR_IMAGENES` (3000 por
+minuto y red, `/64` en IPv6, AUD-11), para que nadie haga gastar sin techo; una Handy que estrena la
+carta pide cientos de golpe, y las de un bar salen por la misma IP. Sólo cuenta lo que llega a R2.
+Como los demás limitadores, si falta o falla deja pasar.
+
+Borrar una imagen la quita también del caché del edge (si lo hay), pero **sólo del centro de datos que
+atiende la petición** (barrer los demás pediría el API de purga).
 
 **Lo que se guarda, lo que se sube y lo que se pinta (AUD-31).** El valor de una imagen se replica y lo
 pinta cada equipo, también en la pantalla de entrada, así que:
@@ -513,7 +554,7 @@ pinta cada equipo, también en la pantalla de entrada, así que:
 La clave de la Cache API omite la query: no hay transformaciones por parámetros, así que distintas
 queries reutilizan la misma imagen y el borrado usa esa misma URL. No requiere opciones del plan
 de Cloudflare; `ignoreSearch` no está soportado por esta API. Esto no modifica las cachés TanStack
-del cliente ni la lectura directa de la Handy desde `r2.dev`.
+del cliente ni la de la webview.
 
 Main y Handy guardan su cola local en `image_uploads.json`, con escritura temporal y sustitución
 atómica. Solo hay un drenaje activo; cada confirmación modifica su propia revisión, conservando

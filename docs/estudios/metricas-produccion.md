@@ -161,8 +161,8 @@ Tres cosas concretas que comprobar:
 |---|---|
 | Almacenamiento (`tpv-images`, `tpv-releases`, `tpv-copias-control`) | Las imágenes crecen con el catálogo; las copias de la base central se borran a los 35 días |
 | Operaciones Clase A (escrituras) | Subidas de imágenes |
-| Operaciones Clase B (lecturas) | Cada imagen que carga una Handy |
-| **Peticiones a `pub-*.r2.dev`** | [INFRA-03](../pendientes.md#infra-03--imágenes-por-r2dev): esas URLs están limitadas y no son para producción. Si el volumen sube, es el empujón para el dominio propio |
+| Operaciones Clase B (lecturas) | Cada imagen que carga una Handy y no tiene en la caché de su webview (INFRA-03: va por el GET del worker, y en `workers.dev` no se cuenta con la Cache API; [worker.md](../arquitectura/worker.md#imágenes)) |
+| **Peticiones a `pub-*.r2.dev`** | Las de las Handy que aún no llevan la versión que pide las imágenes al worker. Cuando sean cero, se cierra el `r2.dev` del bucket ([publicar-version.md](../guias/publicar-version.md#cerrar-el-r2dev-de-las-imágenes)) |
 
 R2 **no cobra egreso**, que es justo lo que hace viable servir imágenes desde ahí.
 
@@ -274,5 +274,5 @@ medirlo todo.
 | Crecimiento de `data.db` | DB-14: si hace falta retención y con qué corte |
 | Multiplicador de filas escritas | Precio por cliente |
 | Duración del DO | Si SYNC-16 cumple su función o hay que perseguir lo que lo despierta |
-| Peticiones a `r2.dev` | Cuánta urgencia tiene INFRA-03 |
+| Peticiones a `r2.dev` | Cuándo se puede cerrar el acceso público del bucket (INFRA-03) |
 | Crash-free rate | Si el producto está listo para un segundo cliente |
