@@ -40,6 +40,26 @@ export function claveDeFreno(ip: string): string {
 		.join(":")}::/64`;
 }
 
+/**
+ * La red amplia de una IPv6: su /48, `2001:db8:1::/48`. Es lo más que suele tener una sola persona
+ * (un túnel gratuito da un /48 entero; una casa recibe un /56, 256 /64), así que un tope que cuente
+ * sólo por /64 se esquiva cambiando de /64 dentro de la propia red (RW-ALTAS). `null` en una IPv4
+ * (también la escrita como IPv6) o en lo que no se entiende: ahí no hay una red mayor que contar sin
+ * juntar a desconocidos (un /24 de IPv4 es el CGNAT de un operador).
+ */
+export function redAmpliaIpv6(ip: string): string | null {
+	const texto = ip.trim().toLowerCase();
+	if (!texto.includes(":")) return null;
+	const grupos = gruposIpv6(texto.replace(/^\[|\]$/g, "").split("%")[0]);
+	if (!grupos) return null;
+	const esIpv4 = grupos.slice(0, 5).every((g) => g === 0) && grupos[5] === 0xffff;
+	if (esIpv4) return null;
+	return `${grupos
+		.slice(0, 3)
+		.map((g) => g.toString(16))
+		.join(":")}::/48`;
+}
+
 /** Los ocho grupos de 16 bits de una IPv6, o `null` si no lo es. */
 function gruposIpv6(texto: string): number[] | null {
 	const partes = texto.split("::");

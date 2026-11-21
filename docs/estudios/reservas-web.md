@@ -209,9 +209,9 @@ pasa por las migraciones).
 | Tabla | Columnas |
 |---|---|
 | `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días), `resultado` y `codigo` (lo que contestó la Main, §5.4), `aviso_ms` (el último intento del correo de una fallida que no salió: van detrás) |
-| `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms` |
+| `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms`, `por_un_cambio` (1 si llegó en el correo de un cambio del restaurante, 0 si en la confirmación; §4.8) |
 | `intentos` | `clave` (la `Idempotency-Key` del widget), `respuesta_json` (lo que contestó el alta, sin datos personales), `creado_ms`. Un día |
-| `altas_por_conexion` | `conexion_hash` y `creada_ms`: una fila por alta apuntada, para el tope por conexión (§4.3). La huella es un HMAC, no la IP (§8). Se borra a las 24 h, cuando deja de contar |
+| `altas_por_conexion` | `conexion_hash` y `creada_ms`: una fila por alta apuntada y huella, para los topes por conexión y por red (§4.3): la de la conexión y, en IPv6, otra de su /48. La huella es un HMAC, no la IP (§8). Se borra a las 24 h, cuando deja de contar |
 | `estado` | Clave y valor: la versión del esquema de la agenda |
 
 Ciclo de una petición:
@@ -378,12 +378,19 @@ varios destinatarios o una cabecera más (AUD-39). Admite `+`, subdominios y let
      en el mismo restaurante el mismo día es rarísimo, y quien reserve por muchos puede llamar,
      que es lo que dice el mensaje. Un alta sin IP conocida (fuera de Cloudflare) no cuenta para él. La repetición de un
      mismo intento (`Idempotency-Key`) tampoco: no apunta otra alta (RW-ALTAS);
+   - en IPv6, además, 30 altas por red /48 y negocio en 24 h (`MAX_ALTAS_DIA_RED`, el mismo
+     `tope_reservas_conexion`), contadas igual: una casa recibe un /56 y un túnel gratuito da un /48,
+     así que sólo con el /64 una persona tenía cientos de conexiones. Un operador móvil puede
+     repartir /64 de un mismo /48 entre clientes distintos; que 30 de ellos reserven por la web el
+     mismo día en el mismo restaurante es rarísimo. En IPv4 no hay red amplia: un /24 juntaría a
+     desconocidos detrás del CGNAT. Quien tenga más de un /48 (o muchas IPv4) sigue pudiendo
+     repartirse; lo frena el coste de cada red y de cada Turnstile;
    - 200 altas por negocio en 24 h, que no cuenta las que su autor anuló antes de que la Main las
      tuviera: ni llegan al TPV ni ocupan mesa (AUD-38). Con el tope por conexión, llenarlo pide al
-     menos 20 conexiones distintas, cada una con su Turnstile.
+     menos 20 conexiones distintas (en IPv6, de al menos 7 redes /48), cada una con su Turnstile.
 
-   El tope por conexión se mira también antes de leer Turso: una conexión que ya está en él no le
-   cuesta a nadie una lectura de la base.
+   Los topes por conexión y por red se miran también antes de leer Turso: una conexión que ya está
+   en el suyo no le cuesta a nadie una lectura de la base.
 4. **En un bloque síncrono sobre el SQLite de la agenda, sin ningún `await` en medio:** volver a
    comprobar el punto 5 y los topes, e insertar la petición, el enlace y la conexión. Dos altas a la vez para la misma mesa:
    gana una y la otra recibe `mesa_no_disponible`. Lo que se lee de Turso puede tener un segundo de
@@ -507,7 +514,7 @@ Desde el worker, con el binding `EMAIL`:
 | Correo | Cuándo | Desde |
 |---|---|---|
 | Confirmación, con el enlace de cancelar | Al reservar | `POST /reservas`; la respuesta dice si salió (`correo`), y una repetición del alta no lo repite (`null`) |
-| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en Turso o, si aún no está, al del alta |
+| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). Si se cancela con el enlace del correo de un cambio del restaurante (`enlaces.por_un_cambio`), sale sin mirarlo: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara. De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en Turso o, si aún no está, al del alta |
 | Reserva modificada | El restaurante cambia día, hora, personas o mesa (§5.6) | `POST /v1/reservas-web/avisos` (§5.7) |
 | Reserva cancelada por el restaurante | El restaurante la cancela | `POST /v1/reservas-web/avisos` (§5.7) |
 | No se pudo registrar | La Main devuelve `fallida`: el restaurante se pondrá en contacto | La agenda, al contestar la Main; lo que no sale lo repite la alarma hasta la hora de la reserva, y después olvida el correo |
@@ -818,7 +825,7 @@ mismo origen).
 | Bots | Turnstile en el alta |
 | Volumen | Limitadores por IP (lecturas y altas) y, detrás, los topes exactos de la agenda: 10 activas por correo, 10 altas al día por conexión (contando las anuladas) y 200 altas al día por negocio |
 | Reservas falsas para bloquear mesas | Lo anterior, más el límite por correo y la cancelación por el restaurante. Una conexión sola no llena el tope del negocio cambiando de correo, ni gasta su cupo de correos reservando y cancelando en bucle (RW-ALTAS) |
-| La IP de quien reserva | La agenda no la guarda: guarda un HMAC (con `LICENSE_JWT_SECRET`) de la conexión y del negocio, que no se puede deshacer probando IPs ni seguir de un negocio a otro, y lo borra a las 24 h (`puerta.ts::huellaDeLaConexion`) |
+| La IP de quien reserva | La agenda no la guarda: guarda un HMAC (con `LICENSE_JWT_SECRET`) de la conexión (y en IPv6 otro de su /48) y del negocio, que no se puede deshacer probando IPs ni seguir de un negocio a otro, y lo borra a las 24 h (`puerta.ts::huellasDeLaConexion`). La fila no lleva el id de la reserva, pero su `creada_ms` es el de la petición: mientras están las dos, se puede cruzar qué alta llegó desde qué huella (no desde qué IP) |
 | Incrustarlo en otra web | `frame-ancestors` con los dominios del negocio |
 | Usar la API desde otra web | CORS sólo para los dominios del negocio (§4.1); la casilla de Turnstile del SDK, sólo para ellos y sólo incrustada en ellos (§7.4) |
 | Datos personales | Las respuestas públicas no los llevan (con un test que lo vigile) |
@@ -851,7 +858,7 @@ mismo origen).
 | `tpv-domain` | La validación del alta, con su dominio en `validacion_casos.json` |
 | Worker · disponibilidad | Una tabla de casos: días de la semana, fechas, la tolerancia de la franja, la capacidad de N a N + 2, cierres, antelación y horizonte, medianoche, comanda abierta, pendientes de la agenda |
 | Worker · agenda | Dos altas a la vez para la misma mesa (gana una), el ciclo de una petición, la reoferta a la hora, `fallida` con su correo, la purga de datos personales, la cancelación antes y después de entregar, los topes (también el de la conexión, con sus anuladas, y su purga) |
-| Worker · tope por conexión | En `reservasWebPublico`: la alta n.º 11 desde una IP da 429 y desde otra entra, el mismo /64 cuenta junto, el bucle de reservar y cancelar se corta, la IP no queda en claro en el objeto, y el «has cancelado» no sale sin confirmación (salvo de una reserva más vieja que la traza de los correos) |
+| Worker · tope por conexión | En `reservasWebPublico`: la alta n.º 11 desde una IP da 429 y desde otra entra, el mismo /64 cuenta junto, el mismo /48 tiene su tope de 30 y otro /48 entra, el bucle de reservar y cancelar se corta, la IP no queda en claro en el objeto, y el «has cancelado» no sale sin confirmación (salvo de una reserva más vieja que la traza de los correos, o con el enlace del correo de un cambio). En `agendaWeb`, varias altas a la vez desde una conexión a la que le queda una: entra una sola |
 | Worker · puerta pública | Clave inexistente o revocada, licencia caducada, interruptor, limitador, Turnstile, `frame-ancestors`, ningún dato personal en las respuestas |
 | Worker · guardianes | `vetoAntesDelCuerpo` (con los middlewares nuevos), `mensajesDeError` (los identificadores nuevos), `TABLAS_SOLO_MAIN` con las tablas de la web |
 | `tpv-infra-sqlite` | Registrar: cliente existente por correo, cliente nuevo, idempotencia por id, solape que se guarda, `Created_At` literal, captura en el outbox; cancelación idempotente; la foto del esquema; las columnas `INTEGER` declaradas |

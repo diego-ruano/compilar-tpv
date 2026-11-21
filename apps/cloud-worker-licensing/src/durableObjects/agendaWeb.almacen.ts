@@ -23,7 +23,8 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
  *   3. `intentos`: lo que contestó cada alta del widget, por su `Idempotency-Key` (la crea `ESQUEMA`).
  *   4. `peticiones.aviso_ms`: el último intento del correo de una fallida que no salió.
- *   5. `altas_por_conexion`: el tope de altas por conexión (RW-ALTAS; la crea `ESQUEMA`).
+ *   5. `altas_por_conexion`: el tope de altas por conexión (RW-ALTAS; la crea `ESQUEMA`), y
+ *      `enlaces.por_un_cambio`: el enlace llegó en el correo de un cambio del restaurante.
  */
 const VERSION_AGENDA = 5;
 
@@ -90,10 +91,13 @@ const ESQUEMA = [
 	// Un alta y, como mucho, una cancelación por reserva.
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_peticiones_tipo_reserva ON peticiones(tipo, id_reserva);`,
 	`CREATE INDEX IF NOT EXISTS idx_peticiones_estado_dia ON peticiones(estado, dia_ymd);`,
+	// `por_un_cambio`: 1 si el enlace llegó en el correo de un cambio del restaurante
+	// (`enlaceParaUnCambio`), 0 si en la confirmación del alta (RW-ALTAS).
 	`CREATE TABLE IF NOT EXISTS enlaces (
-		token_hash TEXT NOT NULL PRIMARY KEY,
-		id_reserva TEXT NOT NULL,
-		caduca_ms  INTEGER NOT NULL
+		token_hash    TEXT NOT NULL PRIMARY KEY,
+		id_reserva    TEXT NOT NULL,
+		caduca_ms     INTEGER NOT NULL,
+		por_un_cambio INTEGER NOT NULL DEFAULT 0
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_enlaces_reserva ON enlaces(id_reserva);`,
 	// Lo que contestó cada alta que acabó en reserva, por la clave del intento que manda el widget: si
@@ -104,12 +108,14 @@ const ESQUEMA = [
 		respuesta_json TEXT NOT NULL,
 		creado_ms      INTEGER NOT NULL
 	);`,
-	// RW-ALTAS · Una fila por alta apuntada, con la conexión desde la que llegó: el tope por conexión.
+	// RW-ALTAS · Una fila por alta apuntada y huella de la conexión desde la que llegó: la de la
+	// conexión (la IP, o su /64 en IPv6) y, en IPv6, otra de su /48; los topes por conexión y por red.
 	// Cuenta también las que su autor anula (no se borra al anular), que es lo que corta los ciclos de
-	// reservar y cancelar. La conexión no está en claro: es un HMAC, con un secreto del worker, de la IP
-	// (por /64 en IPv6) y del negocio (`puerta.ts::huellaDeLaConexion`). Se borra en cuanto deja de
-	// contar, a las 24 h (`purgar`). Sin el id de la reserva: no hace falta para contar, y sin él no
-	// se puede saber qué reserva llegó desde qué conexión.
+	// reservar y cancelar. La IP no está en claro: cada huella es un HMAC, con un secreto del worker, de
+	// la conexión o la red y del negocio (`puerta.ts::huellasDeLaConexion`), que no se deshace probando
+	// IPs. Se borra en cuanto deja de contar, a las 24 h (`purgar`). No lleva el id de la reserva, que
+	// no hace falta para contar; pero `creada_ms` es la misma marca que la de su petición, así que
+	// mientras las dos están se puede cruzar qué alta llegó desde qué huella (no desde qué IP).
 	`CREATE TABLE IF NOT EXISTS altas_por_conexion (
 		conexion_hash TEXT NOT NULL,
 		creada_ms     INTEGER NOT NULL
@@ -140,6 +146,13 @@ function migrar(sql: SqlStorage): void {
 		if (!columnas.has("codigo")) sql.exec(`ALTER TABLE peticiones ADD COLUMN codigo TEXT;`);
 	}
 	if (version < 4 && !columnas.has("aviso_ms")) sql.exec(`ALTER TABLE peticiones ADD COLUMN aviso_ms INTEGER;`);
+	if (version < 5) {
+		const deLosEnlaces = new Set(sql.exec(`PRAGMA table_info(enlaces);`).toArray().map((c: any) => String(c.name)));
+		// Los que ya había no se sabe por dónde llegaron: cuentan como de la confirmación.
+		if (!deLosEnlaces.has("por_un_cambio")) {
+			sql.exec(`ALTER TABLE enlaces ADD COLUMN por_un_cambio INTEGER NOT NULL DEFAULT 0;`);
+		}
+	}
 	sql.exec(
 		`INSERT INTO estado (clave, valor) VALUES ('version', ?)
 		 ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor WHERE valor <> excluded.valor;`,
@@ -409,17 +422,25 @@ export function prolongarEnlaces(sql: SqlStorage, idReserva: string, caducaMs: n
 	sql.exec(`UPDATE enlaces SET caduca_ms = MAX(caduca_ms, ?) WHERE id_reserva = ?;`, caducaMs, idReserva);
 }
 
-/** Un enlace de cancelar más para una reserva (el del correo de un cambio del restaurante). */
+/** Un enlace de cancelar más para una reserva: el del correo de un cambio del restaurante. */
 export function apuntarEnlace(sql: SqlStorage, idReserva: string, tokenHash: string, caducaMs: number): void {
-	sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES (?, ?, ?);`, tokenHash, idReserva, caducaMs);
+	sql.exec(
+		`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms, por_un_cambio) VALUES (?, ?, ?, 1);`,
+		tokenHash,
+		idReserva,
+		caducaMs,
+	);
 }
 
-/** La reserva de un enlace de cancelar, si existe y no ha caducado. */
-export function reservaDelEnlace(sql: SqlStorage, tokenHash: string, ahoraMs: number): string | null {
+/** Un enlace de cancelar vivo: su reserva y si llegó en el correo de un cambio del restaurante. */
+export type EnlaceVivo = { id_reserva: string; por_un_cambio: boolean };
+
+/** El enlace de cancelar de ese hash, si existe y no ha caducado. */
+export function reservaDelEnlace(sql: SqlStorage, tokenHash: string, ahoraMs: number): EnlaceVivo | null {
 	const fila = sql
-		.exec(`SELECT id_reserva FROM enlaces WHERE token_hash = ? AND caduca_ms > ?;`, tokenHash, ahoraMs)
+		.exec(`SELECT id_reserva, por_un_cambio FROM enlaces WHERE token_hash = ? AND caduca_ms > ?;`, tokenHash, ahoraMs)
 		.toArray()[0] as any;
-	return fila ? String(fila.id_reserva) : null;
+	return fila ? { id_reserva: String(fila.id_reserva), por_un_cambio: Number(fila.por_un_cambio) === 1 } : null;
 }
 
 export function peticion(sql: SqlStorage, tipo: "alta" | "cancelacion", idReserva: string): FilaPeticion | null {

@@ -25,7 +25,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 const { claveDelNegocio, olvidarClavesCacheadas } = await import("../src/domains/reservas_web/claves");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { olvidarInterruptoresCacheados } = await import("../src/lib/interruptores");
-const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo, huellaDeLaConexion } = await import(
+const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo, huellasDeLaConexion } = await import(
 	"../src/domains/reservas_web/puerta"
 );
 
@@ -235,8 +235,11 @@ describe("la verificación de Turnstile", () => {
 describe("la huella de la conexión de un alta (RW-ALTAS)", () => {
 	const ENV = { LICENSE_JWT_SECRET: "secreto" } as any;
 
+	const conexion = async (ip: string, env = ENV, tenant = "t1") => (await huellasDeLaConexion(env, tenant, ip))?.conexion;
+	const red = async (ip: string) => (await huellasDeLaConexion(ENV, "t1", ip))?.red;
+
 	it("la IPv4 exacta, y la IPv6 por su /64, escrita como se escriba", async () => {
-		const h = (ip: string) => huellaDeLaConexion(ENV, "t1", ip);
+		const h = conexion;
 		expect(await h("198.51.100.7")).toBe(await h(" 198.51.100.7 "));
 		expect(await h("198.51.100.7")).toBe(await h("::ffff:198.51.100.7"));
 		expect(await h("198.51.100.7")).not.toBe(await h("198.51.100.8"));
@@ -244,16 +247,32 @@ describe("la huella de la conexión de un alta (RW-ALTAS)", () => {
 		expect(await h("2001:db8:1:2::1")).not.toBe(await h("2001:db8:1:3::1"));
 	});
 
+	it("la red de una IPv6 es su /48, distinta de la huella de cualquier conexión; una IPv4 no tiene", async () => {
+		expect(await red("2001:db8:1:2::1")).toMatch(/^[0-9a-f]{64}$/);
+		expect(await red("2001:db8:1:2::1")).toBe(await red("2001:0DB8:0001:ffff:1:2:3:4"));
+		expect(await red("2001:db8:1:2::1")).not.toBe(await red("2001:db8:2:2::1"));
+		expect(await red("2001:db8:1:2::1")).not.toBe(await conexion("2001:db8:1:2::1"));
+		expect(await red("198.51.100.7")).toBeNull();
+		expect(await red("::ffff:198.51.100.7")).toBeNull();
+
+		const { redAmpliaIpv6 } = await import("../src/lib/limitador");
+		expect(redAmpliaIpv6("2001:0DB8:0001:0002::1")).toBe("2001:db8:1::/48");
+		expect(redAmpliaIpv6("[2001:db8::1%eth0]")).toBe("2001:db8:0::/48");
+		expect(redAmpliaIpv6("198.51.100.7")).toBeNull();
+		expect(redAmpliaIpv6("::ffff:198.51.100.7")).toBeNull();
+		expect(redAmpliaIpv6("no:es:una:ip:x")).toBeNull();
+	});
+
 	it("es un HMAC con el secreto, atado al negocio: sin la IP dentro y distinta en cada negocio", async () => {
-		const huella = await huellaDeLaConexion(ENV, "t1", "198.51.100.7");
+		const huella = await conexion("198.51.100.7");
 		expect(huella).toMatch(/^[0-9a-f]{64}$/);
-		expect(huella).not.toBe(await huellaDeLaConexion(ENV, "t2", "198.51.100.7"));
-		expect(huella).not.toBe(await huellaDeLaConexion({ LICENSE_JWT_SECRET: "otro" } as any, "t1", "198.51.100.7"));
+		expect(huella).not.toBe(await conexion("198.51.100.7", ENV, "t2"));
+		expect(huella).not.toBe(await conexion("198.51.100.7", { LICENSE_JWT_SECRET: "otro" } as any));
 	});
 
 	it("sin IP o sin secreto no hay huella: el alta no cuenta para ningún tope por conexión", async () => {
-		expect(await huellaDeLaConexion(ENV, "t1", "unknown")).toBeNull();
-		expect(await huellaDeLaConexion(ENV, "t1", "")).toBeNull();
-		expect(await huellaDeLaConexion({ LICENSE_JWT_SECRET: " " } as any, "t1", "198.51.100.7")).toBeNull();
+		expect(await huellasDeLaConexion(ENV, "t1", "unknown")).toBeNull();
+		expect(await huellasDeLaConexion(ENV, "t1", "")).toBeNull();
+		expect(await huellasDeLaConexion({ LICENSE_JWT_SECRET: " " } as any, "t1", "2001:db8:1:2::1")).toBeNull();
 	});
 });

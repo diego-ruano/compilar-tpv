@@ -19,7 +19,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
-import { MAX_ALTAS_DIA_CONEXION, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
+import { MAX_ALTAS_DIA_CONEXION, MAX_ALTAS_DIA_RED, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
 import { msDelId } from "../src/lib/ids";
 import { sha256HexStr } from "../src/server/utils/crypto";
 
@@ -72,7 +72,7 @@ vi.mock("../src/durableObjects/agendaWeb", async (importOriginal) => {
 });
 
 const { reservasWebPublicoRoutes } = await import("../src/domains/reservas_web/publico.routes");
-const { huellaDeLaConexion } = await import("../src/domains/reservas_web/puerta");
+const { huellasDeLaConexion } = await import("../src/domains/reservas_web/puerta");
 
 const app = new Hono();
 app.route("/v1/publico/reservas", reservasWebPublicoRoutes);
@@ -492,6 +492,25 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 		});
 	});
 
+	it("en IPv6 tampoco se esquiva cambiando de /64 dentro del mismo /48: su red tiene su tope, y otra red entra", async () => {
+		await conNegocio("publico-conexion-red-ipv6", async (sql) => {
+			// Cada alta en su día: hacen falta más que los 30 que se admiten por defecto.
+			sql.exec(`UPDATE Business_Settings SET Reserva_Web_Dias_Max = 60 WHERE ID = 1;`);
+			// Diez de cada /64, en tres /64 del mismo /48: ninguno pasa de su tope de conexión.
+			expect(MAX_ALTAS_DIA_RED).toBe(30);
+			for (let i = 0; i < MAX_ALTAS_DIA_RED; i++) {
+				const ip = `2001:db8:1:${Math.floor(i / 10) + 10}::${(i + 1).toString(16)}`;
+				expect((await altaDesde(ip, altaN(i))).status, `alta ${i} desde ${ip}`).toBe(200);
+			}
+			// Un /64 nuevo del mismo /48 ya no entra; uno de otro /48, sí.
+			expect(await altaDesde("2001:db8:1:ffff::1", altaN(MAX_ALTAS_DIA_RED))).toEqual({
+				status: 429,
+				json: { ok: false, error: "tope_reservas_conexion" },
+			});
+			expect((await altaDesde("2001:db8:2:ffff::1", altaN(MAX_ALTAS_DIA_RED))).status).toBe(200);
+		});
+	});
+
 	it("reservar y cancelar en bucle desde una IP se corta, con los correos que lleva cada vuelta", async () => {
 		await conNegocio("publico-conexion-bucle", async () => {
 			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
@@ -512,8 +531,13 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			expect((await altaDesde("192.0.2.77", ALTA_WEB)).status).toBe(200);
 			const huellas = sql.exec(`SELECT conexion_hash AS h FROM altas_por_conexion;`).toArray() as any[];
 			expect(huellas).toHaveLength(1);
-			expect(huellas[0].h).toBe(await huellaDeLaConexion(ENV as any, "t1", "192.0.2.77"));
-			expect(huellas[0].h).not.toBe(await huellaDeLaConexion(ENV as any, "t2", "192.0.2.77"));
+			expect(huellas[0].h).toBe((await huellasDeLaConexion(ENV as any, "t1", "192.0.2.77"))!.conexion);
+			expect(huellas[0].h).not.toBe((await huellasDeLaConexion(ENV as any, "t2", "192.0.2.77"))!.conexion);
+			// Una IPv6 deja dos: la de su /64 y la de su /48, y ninguna lleva la dirección.
+			expect((await altaDesde("2001:db8:aaaa:bbbb::7", { ...ALTA_WEB, mesa: "m4", correo: "otra@correo.es" })).status).toBe(200);
+			const v6 = (await huellasDeLaConexion(ENV as any, "t1", "2001:db8:aaaa:bbbb::7"))!;
+			const nuevas = (sql.exec(`SELECT conexion_hash AS h FROM altas_por_conexion;`).toArray() as any[]).map((f) => f.h);
+			expect(nuevas.sort()).toEqual([huellas[0].h, v6.conexion, v6.red].sort());
 			// En ninguna tabla del objeto, ni entera ni a medias.
 			const tablas = sql
 				.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%';`)
@@ -523,6 +547,7 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			for (const tabla of tablas) {
 				const texto = JSON.stringify(sql.exec(`SELECT * FROM "${tabla}";`).toArray());
 				expect(texto, tabla).not.toContain("192.0.2");
+				expect(texto, tabla).not.toMatch(/2001:db8|aaaa:bbbb/i);
 			}
 		});
 	});
@@ -550,6 +575,19 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
 			expect(enviados).toEqual([]);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
+	it("cancelar con el enlace del correo de un cambio del restaurante sí avisa, aunque la confirmación no saliera", async () => {
+		await conNegocio("publico-cancelar-con-enlace-de-un-cambio", async (sql, motor) => {
+			// Apuntada sin confirmación; después el restaurante la cambia, y el correo que se lo cuenta
+			// (lo pide la Main) lleva un enlace de cancelar nuevo.
+			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
+			const cambio = await motor.enlaceParaUnCambio({ tenantId: "t1", id_reserva: hecha.id_reserva, dia: DIA, hora: "21:00" });
+			expect(cambio.token).toBeTruthy();
+			expect((await pedir("/cancelar", { token: cambio.token })).json).toEqual({ ok: true });
+			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
+			expect(sql.exec(`SELECT id FROM email_sends;`).toArray()).toEqual([{ id: `rw:cancelacion:${hecha.id_reserva}` }]);
 		});
 	});
 

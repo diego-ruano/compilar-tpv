@@ -23,6 +23,7 @@ import { prepararAlmacen } from "../src/durableObjects/agendaWeb.almacen";
 import {
 	MAX_ALTAS_DIA_CONEXION,
 	MAX_ALTAS_DIA_NEGOCIO,
+	MAX_ALTAS_DIA_RED,
 	MAX_RESERVAS_POR_CORREO,
 	caducidadDelEnlace,
 	codigoDeReserva,
@@ -492,7 +493,7 @@ describe("la agenda de reservas web", () => {
 			// Con lo que necesita el correo de «has cancelado»: la dirección del alta y su reserva.
 			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({
 				ok: true,
-				aviso: { id_reserva: r.id_reserva, email: "ana@correo.es", dia: DIA, hora: "21:00", personas: 2, mesa: "2" },
+				aviso: { id_reserva: r.id_reserva, email: "ana@correo.es", dia: DIA, hora: "21:00", personas: 2, mesa: "2", con_enlace_de_un_cambio: false },
 			});
 			// Dos veces es lo mismo, pero el correo ya salió.
 			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true, aviso: null });
@@ -519,7 +520,7 @@ describe("la agenda de reservas web", () => {
 			// Lo que dice la base, que es lo que el restaurante haya cambiado.
 			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({
 				ok: true,
-				aviso: { id_reserva: r.id_reserva, email: "ana.nueva@correo.es", dia: DIA, hora: "21:30", personas: 3, mesa: "4" },
+				aviso: { id_reserva: r.id_reserva, email: "ana.nueva@correo.es", dia: DIA, hora: "21:30", personas: 3, mesa: "4", con_enlace_de_un_cambio: false },
 			});
 		});
 	});
@@ -1158,7 +1159,7 @@ describe("la entrega a la Main", () => {
 });
 
 describe("el tope de altas por conexión (RW-ALTAS)", () => {
-	/** Una huella de conexión como las de `huellaDeLaConexion`: aquí, cualquier texto sirve. */
+	/** Una huella de conexión como las de `huellasDeLaConexion`: aquí, cualquier texto sirve. */
 	const CONEXION_A = "a".repeat(64);
 	const CONEXION_B = "b".repeat(64);
 
@@ -1268,14 +1269,64 @@ describe("el tope de altas por conexión (RW-ALTAS)", () => {
 		});
 	});
 
-	it("una agenda de la versión 4 se pone al día con la tabla de las conexiones", async () => {
+	it("una agenda de la versión 4 se pone al día con la tabla de las conexiones y el origen de los enlaces", async () => {
 		await conAgenda("conexion-migracion", async (motor, sql) => {
 			sql.exec(`DROP TABLE altas_por_conexion;`);
+			sql.exec(`ALTER TABLE enlaces DROP COLUMN por_un_cambio;`);
+			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-vieja', 'r-vieja', ?);`, Date.now() + 86_400_000);
 			sql.exec(`UPDATE estado SET valor = '4' WHERE clave = 'version';`);
 			prepararAlmacen(sql);
 			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "5" });
-			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A })).ok).toBe(true);
-			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 1 });
+			// El enlace que ya había cuenta como de la confirmación.
+			expect(sql.exec(`SELECT por_un_cambio FROM enlaces WHERE token_hash = 'h-vieja';`).toArray()).toEqual([{ por_un_cambio: 0 }]);
+			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A, red: CONEXION_B })).ok).toBe(true);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 2 });
+			// Prepararla otra vez no cambia nada.
+			prepararAlmacen(sql);
+		});
+	});
+
+	it("varias altas a la vez desde una conexión a la que le queda una: entra una sola", async () => {
+		const nombre = "conexion-simultaneas";
+		await conAgenda(
+			nombre,
+			async (_motor, sql) => {
+				for (let i = 0; i < MAX_ALTAS_DIA_CONEXION - 1; i++) {
+					sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, CONEXION_A, Date.now() - 1000);
+				}
+			},
+			{ lector: (state) => lectorConBarrera(state, () => AHORA, 4) },
+		);
+		// Por RPC, como en producción. Las cuatro pasan la primera mirada (le queda una) y leen la base
+		// antes de que ninguna decida: lo que las separa es la segunda, en el bloque síncrono.
+		const stub = stubDeLaAgenda(nombre);
+		const resultados = (await Promise.all([0, 1, 2, 3].map((i) => stub.reservar({ tenantId: T, alta: altaN(i), conexion: CONEXION_A })))) as any[];
+		expect(resultados.filter((r) => r.ok)).toHaveLength(1);
+		expect(resultados.filter((r) => !r.ok)).toEqual(Array(3).fill({ ok: false, error: "tope_reservas_conexion", status: 429 }));
+		await enLaAgenda(nombre, (_motor, state) => {
+			const n = state.storage.sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion WHERE conexion_hash = ?;`, CONEXION_A).toArray()[0];
+			expect(n).toEqual({ n: MAX_ALTAS_DIA_CONEXION });
+		});
+	});
+
+	it("en IPv6, la red amplia tiene su propio tope, más ancho que el de cada conexión", async () => {
+		await conAgenda("conexion-red", async (motor, sql) => {
+			const RED = "c".repeat(64);
+			for (let i = 0; i < MAX_ALTAS_DIA_RED - 1; i++) {
+				sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, RED, Date.now() - 1000);
+			}
+			// Le queda una a la red: entra desde una conexión nueva, y la siguiente ya no, desde ninguna.
+			expect((await motor.reservar({ tenantId: T, alta: altaN(0), conexion: CONEXION_A, red: RED })).ok).toBe(true);
+			expect(await motor.reservar({ tenantId: T, alta: altaN(1), conexion: CONEXION_B, red: RED })).toEqual({
+				ok: false,
+				error: "tope_reservas_conexion",
+				status: 429,
+			});
+			// Sin red (una IPv4), sólo cuenta la conexión.
+			expect((await motor.reservar({ tenantId: T, alta: altaN(1), conexion: CONEXION_B, red: null })).ok).toBe(true);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion WHERE conexion_hash = ?;`, RED).toArray()[0]).toEqual({
+				n: MAX_ALTAS_DIA_RED,
+			});
 		});
 	});
 });

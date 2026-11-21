@@ -45,7 +45,7 @@ import { leerParaLaWeb } from "./lecturasDeLaWeb";
 import { origenDelWidget } from "./claves";
 import { corsPublico } from "./cors";
 import {
-	huellaDeLaConexion,
+	huellasDeLaConexion,
 	limitadorAltas,
 	puertaPublica,
 	topeDelCuerpo,
@@ -179,9 +179,16 @@ reservasWebPublicoRoutes.post(
 		// Una sin la forma esperada se ignora: el alta sigue, sólo que sin esa protección.
 		const clave = c.req.header("Idempotency-Key");
 		const intento = clave && CLAVE_DE_INTENTO.test(clave) ? clave : null;
-		// RW-ALTAS · La conexión, para su tope en la agenda: sólo su huella, nunca la IP.
-		const conexion = await huellaDeLaConexion(c.env, tenantId, ipDeLaPeticion(c.req.raw));
-		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta, intento, conexion });
+		// RW-ALTAS · La conexión (y en IPv6 su red), para sus topes en la agenda: sólo sus huellas,
+		// nunca la IP.
+		const huellas = await huellasDeLaConexion(c.env, tenantId, ipDeLaPeticion(c.req.raw));
+		const r = await agendaDe(c.env, tenantId).reservar({
+			tenantId,
+			alta,
+			intento,
+			conexion: huellas?.conexion ?? null,
+			red: huellas?.red ?? null,
+		});
 		if (!r.ok) {
 			anotar(c, { event: "reserva_web_rechazo", tenant_id: tenantId, motivo: r.error });
 			return rechazada(c, r);
@@ -244,7 +251,8 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 	anotar(c, { event: "reserva_web_cancelada", tenant_id: tenantId });
 	// «Has cancelado tu reserva», a su cliente. Sólo si se acaba de cancelar: la segunda vez no. Y sólo
 	// si salió (o está saliendo) su confirmación (RW-ALTAS): una reserva que nunca se le confirmó a
-	// nadie no gasta cupo al cancelarse.
+	// nadie no gasta cupo al cancelarse. Con el enlace de un correo de cambio del restaurante no se
+	// mira: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara.
 	if (r.aviso) {
 		const a = r.aviso;
 		await enviarCorreoReservaWeb(c.env, {
@@ -255,7 +263,7 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 			negocio: await negocioParaElCorreo(c, tenantId),
 			reserva: { dia: a.dia, hora: a.hora, personas: a.personas, mesa: a.mesa, codigo: codigoDeReserva(a.id_reserva) },
 			dispositivo: "web",
-			trasElCorreo: confirmacionQueSigueApuntada(a.id_reserva),
+			trasElCorreo: a.con_enlace_de_un_cambio ? undefined : confirmacionQueSigueApuntada(a.id_reserva),
 		});
 	}
 	return c.json({ ok: true });

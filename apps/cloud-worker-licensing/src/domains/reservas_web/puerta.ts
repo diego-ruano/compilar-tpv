@@ -27,7 +27,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../../env";
 import { estaApagado } from "../../lib/interruptores";
 import { negocioConLicenciaEnVigor } from "../../lib/licenciaEnUso";
-import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
+import { claveDeFreno, pasaElLimitador, redAmpliaIpv6 } from "../../lib/limitador";
 import { recortar } from "../../lib/texto";
 import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
@@ -70,25 +70,36 @@ export const limitadorAltas: MiddlewareHandler<Ctx> = async (c, next) => {
 	await next();
 };
 
+/** Las huellas de la conexión de un alta (`huellasDeLaConexion`). */
+export type HuellasDeLaConexion = {
+	/** La de la conexión: la IPv4 exacta o el /64 de la IPv6. */
+	conexion: string;
+	/** La de la red amplia de una IPv6, su /48; `null` en una IPv4. */
+	red: string | null;
+};
+
 /**
- * RW-ALTAS · La huella de la conexión desde la que llega un alta, para el tope de altas por conexión
- * de la agenda (`agendaWeb.motor.ts::MAX_ALTAS_DIA_CONEXION`).
+ * RW-ALTAS · Las huellas de la conexión desde la que llega un alta, para los topes de altas por
+ * conexión de la agenda (`agendaWeb.motor.ts::MAX_ALTAS_DIA_CONEXION` y `MAX_ALTAS_DIA_RED`).
  *
  * La conexión es la del limitador (`claveDeFreno`): la IPv4 tal cual y la IPv6 por su /64, que es lo
- * que tiene una casa o un móvil; contar por dirección le daría a cada uno 2^64 cuentas. La IP es un
- * dato personal y la agenda no la guarda: se queda con un HMAC, con `LICENSE_JWT_SECRET` (el secreto
- * con el que el worker ya firma los códigos por correo), atado a este uso y al negocio. Sin el
- * secreto, un SHA-256 de una IPv4 se deshace probando las 2^32; y por el negocio, la misma conexión
- * deja una huella distinta en cada agenda, así que no se puede seguir de un restaurante a otro.
+ * que tiene una casa o un móvil; contar por dirección le daría a cada uno 2^64 cuentas. En IPv6 va
+ * además su /48 (`redAmpliaIpv6`): quien tiene un /48, o un /56, tiene cientos de /64.
+ *
+ * La IP es un dato personal y la agenda no la guarda: se queda con un HMAC, con `LICENSE_JWT_SECRET`
+ * (el secreto con el que el worker ya firma los códigos por correo), atado a este uso y al negocio.
+ * Sin el secreto, un SHA-256 de una IPv4 se deshace probando las 2^32; y por el negocio, la misma
+ * conexión deja una huella distinta en cada agenda, así que no se puede seguir de un restaurante a
+ * otro. La conexión y la red van con usos distintos dentro del HMAC: una no cuenta como la otra.
  *
  * `null` si no hay IP (en Cloudflare siempre llega `CF-Connecting-IP`) o falta el secreto: entonces
  * el alta no cuenta para ningún tope por conexión, y detrás sigue el del negocio.
  */
-export async function huellaDeLaConexion(
+export async function huellasDeLaConexion(
 	env: Pick<Env, "LICENSE_JWT_SECRET">,
 	tenantId: string,
 	ip: string,
-): Promise<string | null> {
+): Promise<HuellasDeLaConexion | null> {
 	const conexion = claveDeFreno(ip);
 	if (!conexion || conexion === "unknown") return null;
 	const secreto = recortar(String(env.LICENSE_JWT_SECRET ?? ""));
@@ -96,7 +107,12 @@ export async function huellaDeLaConexion(
 		capturarError(new Error("missing_env_LICENSE_JWT_SECRET"), "reservas_web.conexion");
 		return null;
 	}
-	return hmacSha256Hex(secreto, `reserva_web_conexion\n${tenantId}\n${conexion}`);
+	const red = redAmpliaIpv6(ip);
+	const [huellaConexion, huellaRed] = await Promise.all([
+		hmacSha256Hex(secreto, `reserva_web_conexion\n${tenantId}\n${conexion}`),
+		red ? hmacSha256Hex(secreto, `reserva_web_red\n${tenantId}\n${red}`) : null,
+	]);
+	return { conexion: huellaConexion, red: huellaRed };
 }
 
 /**

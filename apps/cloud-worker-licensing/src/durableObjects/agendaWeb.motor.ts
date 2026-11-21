@@ -75,6 +75,7 @@ import {
 	vivasDelCorreoEnLaAgenda,
 	VENTANA_TOPES_MS,
 	type FilaPeticion,
+	type EnlaceVivo,
 	type ResultadoDeLaMain,
 } from "./agendaWeb.almacen";
 
@@ -91,9 +92,23 @@ export const MAX_ALTAS_DIA_NEGOCIO = 200;
  * muchas personas, pero que más de diez de ellas reserven por la web en el mismo restaurante el
  * mismo día es rarísimo; quien lo hace por todos (una empresa, un grupo grande) puede llamar, que es
  * lo que dice el rechazo. Y con 10, llegar al tope de 200 del negocio pide al menos 20 conexiones
- * distintas, cada una con su Turnstile resuelto.
+ * distintas, cada una con su Turnstile resuelto; en IPv6, además, de al menos 7 redes /48
+ * (`MAX_ALTAS_DIA_RED`).
  */
 export const MAX_ALTAS_DIA_CONEXION = 10;
+/**
+ * RW-ALTAS · Altas por red amplia de IPv6 (su /48, `limitador.ts::redAmpliaIpv6`) en este negocio en
+ * 24 h, contadas como las de la conexión. En IPv6 una sola persona suele tener muchos /64: una casa
+ * recibe un /56 (256) y un túnel gratuito da un /48 (65 536). Sólo con el tope por /64, llenaba el
+ * del negocio con 20 de los suyos.
+ *
+ * Por qué 30: el /48 es de una casa, una empresa o un túnel, pero un operador móvil puede repartir /64
+ * de un mismo /48 entre clientes distintos; 30 altas web el mismo día en el mismo restaurante desde
+ * ahí siguen siendo rarísimas, y quien choque puede llamar. Con 30, llenar el tope del negocio pide al
+ * menos 7 redes /48 distintas, y gastar su cupo de 600 correos reservando y cancelando (dos por
+ * vuelta), 10. En IPv4 no hay red amplia: un /24 juntaría a desconocidos detrás del CGNAT.
+ */
+export const MAX_ALTAS_DIA_RED = 30;
 /** Cada cuánto despierta la alarma mientras haya algo guardado. */
 const CADA_ALARMA_MS = 60 * 60_000;
 /** Lo entregado a la Main que no se ve en la base (ni contesta) en este tiempo se le vuelve a ofrecer. */
@@ -201,6 +216,12 @@ export type AvisoDeCancelacion = {
 	hora: string;
 	personas: number;
 	mesa: string | null;
+	/**
+	 * Se canceló con el enlace del correo de un cambio del restaurante (`enlaceParaUnCambio`), no con el
+	 * de la confirmación. Ese correo lo pide la Main, no quien reserva: el «has cancelado» no tiene que
+	 * esperar a la confirmación (RW-ALTAS).
+	 */
+	con_enlace_de_un_cambio: boolean;
 };
 
 /** `aviso`, si se acaba de cancelar y se sabe a quién decírselo; `null` si ya lo estaba. */
@@ -354,17 +375,19 @@ export class MotorAgendaWeb {
 	 * le llegó la respuesta. Si ese intento ya dio una reserva, se contesta la misma y no se apunta otra
 	 * (la mesa ya está ocupada por ella, y elegir otra la duplicaría).
 	 *
-	 * `conexion` es la huella de la conexión desde la que llega (`puerta.ts::huellaDeLaConexion`), para
-	 * su tope (RW-ALTAS); `null` si no se sabe, y entonces no cuenta para ninguno.
+	 * `conexion` y `red` son las huellas de la conexión desde la que llega y, en IPv6, de su /48
+	 * (`puerta.ts::huellasDeLaConexion`), para sus topes (RW-ALTAS); `null` si no se sabe, y entonces
+	 * no cuenta para ese tope.
 	 */
 	async reservar(p: {
 		tenantId: string;
 		alta: AltaReservaWeb;
 		intento?: string | null;
 		conexion?: string | null;
+		red?: string | null;
 	}): Promise<ResultadoReservar> {
 		const { alta } = p;
-		const conexion = p.conexion || null;
+		const conexion = { conexion: p.conexion || null, red: p.red || null };
 		// Sin mesa elegida (`MESA_AUTOMATICA`), la decide el bloque síncrono de abajo: la de menos plazas
 		// en la que quepan. Elegirla antes, con lo leído, dejaría que dos altas a la vez se llevaran la misma.
 		const automatica = alta.id_mesa === MESA_AUTOMATICA;
@@ -452,7 +475,8 @@ export class MotorAgendaWeb {
 				},
 				{ tokenHash, caducaMs },
 			);
-			if (conexion) apuntarAltaDeLaConexion(this.sql, conexion, ahoraMs);
+			if (conexion.conexion) apuntarAltaDeLaConexion(this.sql, conexion.conexion, ahoraMs);
+			if (conexion.red) apuntarAltaDeLaConexion(this.sql, conexion.red, ahoraMs);
 			if (p.intento) apuntarIntento(this.sql, p.intento, respuesta, ahoraMs);
 		});
 		// ── Fin del bloque ──
@@ -462,9 +486,17 @@ export class MotorAgendaWeb {
 		return { ok: true, ...respuesta, token, repetida: false };
 	}
 
-	/** RW-ALTAS · ¿Esa conexión ha apuntado ya su máximo de altas en las últimas 24 h? Síncrono. */
-	private conexionEnSuTope(conexion: string | null, ahoraMs: number): boolean {
-		return conexion !== null && altasDeLaConexionDesde(this.sql, conexion, ahoraMs - VENTANA_TOPES_MS) >= MAX_ALTAS_DIA_CONEXION;
+	/**
+	 * RW-ALTAS · ¿Esa conexión, o su red amplia de IPv6, ha apuntado ya su máximo de altas en las
+	 * últimas 24 h? Síncrono. Las dos huellas van en la misma tabla: el HMAC de cada una lleva su uso,
+	 * así que no se cuentan la una por la otra.
+	 */
+	private conexionEnSuTope(huellas: { conexion: string | null; red: string | null }, ahoraMs: number): boolean {
+		const desdeMs = ahoraMs - VENTANA_TOPES_MS;
+		if (huellas.conexion !== null && altasDeLaConexionDesde(this.sql, huellas.conexion, desdeMs) >= MAX_ALTAS_DIA_CONEXION) {
+			return true;
+		}
+		return huellas.red !== null && altasDeLaConexionDesde(this.sql, huellas.red, desdeMs) >= MAX_ALTAS_DIA_RED;
 	}
 
 	/** Lo que contestó ya ese intento, si acabó en reserva. */
@@ -476,7 +508,7 @@ export class MotorAgendaWeb {
 	/** El resumen para la página de cancelar. */
 	async consultarEnlace(p: { tenantId: string; token: string }): Promise<ResultadoConsulta> {
 		recordarNegocio(this.sql, p.tenantId);
-		const idReserva = await this.reservaDelToken(p.token);
+		const idReserva = (await this.enlaceDelToken(p.token))?.id_reserva;
 		if (!idReserva) return rechazo("enlace_no_valido");
 
 		const { leidaMs, ahora, enLaBase, numero } = await this.leerReserva(p.tenantId, idReserva);
@@ -504,8 +536,9 @@ export class MotorAgendaWeb {
 	 */
 	async cancelar(p: { tenantId: string; token: string }): Promise<ResultadoCancelar> {
 		recordarNegocio(this.sql, p.tenantId);
-		const idReserva = await this.reservaDelToken(p.token);
-		if (!idReserva) return rechazo("enlace_no_valido");
+		const enlace = await this.enlaceDelToken(p.token);
+		if (!enlace) return rechazo("enlace_no_valido");
+		const idReserva = enlace.id_reserva;
 
 		const { leidaMs, ahora, enLaBase, numero } = await this.leerReserva(p.tenantId, idReserva);
 		// ── Síncrono hasta el final ──
@@ -524,7 +557,15 @@ export class MotorAgendaWeb {
 		// Antes de anularla, que se lleva los datos del alta.
 		const email = enLaBase?.email ?? correoDelAlta(alta);
 		const aviso: AvisoDeCancelacion | null = email
-			? { id_reserva: idReserva, email, dia: datos.dia, hora: datos.hora, personas: datos.personas, mesa: numero }
+			? {
+					id_reserva: idReserva,
+					email,
+					dia: datos.dia,
+					hora: datos.hora,
+					personas: datos.personas,
+					mesa: numero,
+					con_enlace_de_un_cambio: enlace.por_un_cambio,
+				}
 			: null;
 
 		if (!enLaBase && anularAlta(this.sql, idReserva, ahoraMs)) return { ok: true, aviso };
@@ -688,7 +729,7 @@ export class MotorAgendaWeb {
 		return "confirmada";
 	}
 
-	private async reservaDelToken(token: string): Promise<string | null> {
+	private async enlaceDelToken(token: string): Promise<EnlaceVivo | null> {
 		if (!TOKEN_RE.test(token)) return null;
 		const hash = await sha256HexStr(token);
 		return reservaDelEnlace(this.sql, hash, Date.now());
