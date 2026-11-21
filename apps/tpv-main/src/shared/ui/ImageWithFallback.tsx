@@ -1,16 +1,23 @@
 // src/shared/ui/ImageWithFallback.tsx
 //
 // <img> con manejo elegante de errores, pensado para el Handy: la fila de un producto puede
-// llegar por WebSocket ANTES de que su imagen esté disponible en el CDN (la subida va por otro
-// canal y puede tardar segundos, o minutos si la Main estaba offline).
+// llegar por WebSocket ANTES de que su imagen esté en el bucket (la subida va por otro canal y
+// puede tardar segundos, o minutos si la Main estaba offline). La Handy la pide al GET público del
+// worker (`imageUrl.ts`, INFRA-03).
 //
 // Comportamiento:
 //   - Sin `src` o tras agotar reintentos → muestra `fallback` (placeholder estético del caller).
 //   - Mientras carga / reintenta → la imagen está oculta (transparente), nunca un placeholder de
 //     "Cargando…" ni una imagen rota. En modo Main las imágenes están en disco y aparecen al
-//     instante; en el Handy aparecen en cuanto el CDN responde.
+//     instante; en el Handy aparecen en cuanto el worker responde.
 //   - Ante un error (p. ej. 404 porque aún no se ha subido) reintenta el MISMO URL con un pequeño
-//     retardo (sin cache-busting, para no romper el cacheo del CDN cuando la imagen sí exista).
+//     retardo (sin cache-busting: la caché que ahorra peticiones es la de la webview, y sólo
+//     funciona si la misma imagen da siempre el mismo URL).
+//   - INFRA-03: agotados esos reintentos, pinta el `fallback` y hace UNO más pasado el minuto
+//     (`ULTIMO_REINTENTO_MS`). Un `<img>` no ve el código de la respuesta, y el 429 del filtro por
+//     IP del worker pide volver dentro de 60 s (`Retry-After`): los reintentos rápidos caen todos
+//     dentro de esa ventana, así que sin éste una imagen frenada se quedaba en el marcador hasta
+//     remontar la pantalla.
 //
 // IMPORTANTE (bug de imágenes cacheadas): un <img> cuyo fichero ya está en la caché del webview
 // —lo normal con ficheros LOCALES en modo Main, que cargan al instante— puede quedar marcado como
@@ -20,6 +27,13 @@
 
 import React, { useEffect, useRef, useState } from "react";
 
+/**
+ * INFRA-03 · Lo que espera el último reintento: más que el `Retry-After: 60` con el que el GET de
+ * imágenes del worker contesta un 429 (`domains/images/images.routes.ts`), para caer en otra ventana
+ * del filtro.
+ */
+export const ULTIMO_REINTENTO_MS = 65_000;
+
 type Props = {
   src: string | null | undefined;
   alt: string;
@@ -28,6 +42,8 @@ type Props = {
   fallback: React.ReactNode;
   retries?: number;
   retryDelayMs?: number;
+  /** Espera del último reintento, con el `fallback` pintado (0: no lo hay). */
+  ultimoReintentoMs?: number;
   draggable?: boolean;
   loading?: "lazy" | "eager"; // usa "eager" (default) si el img empieza hidden
 };
@@ -39,6 +55,7 @@ export default function ImageWithFallback({
   fallback,
   retries = 5,
   retryDelayMs = 3000,
+  ultimoReintentoMs = ULTIMO_REINTENTO_MS,
   draggable = false,
   loading = "eager",
 }: Props) {
@@ -46,22 +63,40 @@ export default function ImageWithFallback({
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
+  // El reintento pendiente: se anula al cambiar de imagen o al desmontar, para que el de una imagen
+  // anterior no cuente en la nueva.
+  const temporizador = useRef<number | undefined>(undefined);
+
+  const programar = (fn: () => void, ms: number) => {
+    window.clearTimeout(temporizador.current);
+    temporizador.current = window.setTimeout(fn, ms);
+  };
 
   // Reset al cambiar de imagen.
   useEffect(() => {
+    window.clearTimeout(temporizador.current);
     setAttempt(0);
     setLoaded(false);
     setFailed(false);
   }, [src]);
 
+  useEffect(() => () => window.clearTimeout(temporizador.current), []);
+
   const markError = () => {
     if (attempt < retries) {
-      // El primer reintento es casi inmediato: en el Handy la imagen suele estar en R2/edge a
+      // El primer reintento es casi inmediato: en el Handy la imagen suele estar en el bucket a
       // los pocos cientos de ms (un 404 inicial es por propagación, no por ausencia real). Así
       // se evita el efecto "placeholder hasta que navego y vuelvo". Los siguientes reintentos sí
       // espacian (retryDelayMs) para no martillear cuando la imagen tarda de verdad.
       const delay = attempt === 0 ? 400 : retryDelayMs;
-      window.setTimeout(() => setAttempt((a) => a + 1), delay);
+      programar(() => setAttempt((a) => a + 1), delay);
+    } else if (attempt === retries && ultimoReintentoMs > 0) {
+      // INFRA-03: el marcador mientras tanto, y un intento más pasada la ventana del 429.
+      setFailed(true);
+      programar(() => {
+        setFailed(false);
+        setAttempt((a) => a + 1);
+      }, ultimoReintentoMs);
     } else {
       setFailed(true);
     }
