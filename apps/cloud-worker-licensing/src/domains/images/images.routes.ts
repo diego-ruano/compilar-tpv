@@ -7,12 +7,14 @@
 // guarda la app (`images/{subcarpeta}/{uuid}.jpg`) sirve verbatim en los tres lados:
 //   - Main:  appDataDir + Ruta_Imagen
 //   - R2:    {tenant}/ + Ruta_Imagen
-//   - Handy: {CDN}/{tenant}/ + Ruta_Imagen
+//   - Handy: {worker}/v1/images/{tenant}/ + Ruta_Imagen (`handy_url_imagenes` en la app)
 //
 // Rutas:
-//   - GET    /:tenant/*   → PÚBLICO. Sirve el objeto desde R2 con Cache API (CDN edge) y
-//                           Cache-Control inmutable. Es la URL que carga el <img> del Handy.
-//                           El nombre de archivo es un UUID no adivinable (no enumerable).
+//   - GET    /:tenant/*   → PÚBLICO. Sirve el objeto desde R2 con Cache-Control inmutable. Es la
+//                           URL que carga el <img> de la Handy (INFRA-03: ya no lee del `r2.dev`
+//                           del bucket). El nombre de archivo es un UUID no adivinable (no
+//                           enumerable). La Cache API se intenta, pero en `workers.dev` no se
+//                           cuenta con ella: la caché que vale es la de la webview (ver abajo).
 //   - PUT    /*           → FIRMADO (JWT + device-proof). Sube bytes; el tenant sale del
 //                           token (no del path). Sólo la app (Main/Handy emparejados) escribe.
 //   - DELETE /*           → FIRMADO. Borra el objeto (reemplazo/limpieza) y purga su copia
@@ -25,6 +27,8 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { cuerpoConIdentificador } from "../../lib/validacion";
+import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
+import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 // Lo que viaja en el camino: una carpeta de la lista y un UUID con su extensión (OBS-06).
 import { RUTA_DE_IMAGEN } from "./rutaDeImagen";
 
@@ -43,6 +47,13 @@ export const imagesRoutes = new Hono<Ctx>();
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB (la Main ya comprime antes de subir)
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/**
+ * INFRA-03 · Lo que contesta el GET cuando no da una imagen (ruta mala, aún no subida, frenado): no
+ * se guarda en ningún caché, ni en el de la webview ni en uno intermedio. Una imagen que no estaba
+ * puede llegar en segundos, y el mismo URL tiene que dar entonces el 200.
+ */
+const SIN_CACHE = { "Cache-Control": "no-store" } as const;
 
 /** RI-67: la query no transforma la imagen; todas sus variantes comparten entrada de caché. */
 export function claveCacheImagen(request: Request): Request {
@@ -65,7 +76,7 @@ export function tipoImagen(bytes: Uint8Array): string | null {
 }
 
 // AUD-31: las cotas de RI-07 en la Main (`imagenes::decodificar`): 8192 px de lado y 24 Mpx. Lo que se
-// sube a R2 lo pinta la Handy tal cual desde r2.dev y lo baja la Main; la app sube siempre lo que ya ha
+// sube a R2 lo pinta la Handy tal cual (por el GET de abajo) y lo baja la Main; la app sube siempre lo que ya ha
 // reconstruido `imagenes::procesar` (1024 px como mucho), así que esto sólo para a quien sube otra cosa
 // con las credenciales de un dispositivo.
 const MAX_LADO = 8192;
@@ -111,14 +122,29 @@ export function dentroDeLasCotas(bytes: Uint8Array): boolean {
     return !!d && d.ancho > 0 && d.alto > 0 && d.ancho <= MAX_LADO && d.alto <= MAX_LADO && d.ancho * d.alto <= MAX_PIXELES;
 }
 
-// ───────────────── LECTURA (pública, cacheada en el edge) ─────────────────
+// ───────────────── LECTURA (pública) ─────────────────
+//
+// INFRA-03 · Es lo que pinta la Handy: `handy_url_imagenes` (Rust) le da `{CLOUD_API_BASE}/v1/images/
+// {tenant}` y `imageUrl.ts` le pega la `Ruta_Imagen`. Antes la leía del `r2.dev` del bucket, que
+// Cloudflare reserva para desarrollo (límite de peticiones, sin caché).
+//
+// ⚠️ **Cada imagen que llega aquí puede ser una lectura de R2.** El worker se sirve por `workers.dev`
+// (INFRA-04), y la documentación de Cloudflare sólo promete la Cache API en un dominio propio: el
+// `caches.default` de abajo se queda por si funciona, pero no se cuenta con él. Lo que ahorra
+// peticiones es la caché de la webview: el 200 sale con `immutable` y un año de vida, y el URL no
+// cambia mientras la imagen sea la misma (el nombre es su UUID). Lo que cuesta cada fallo de esa
+// caché: una petición del worker y una operación de clase B de R2.
+//
+// Por eso lleva un filtro por IP (`LIMITADOR_IMAGENES`, `wrangler.json`), holgado a propósito: una
+// Handy que estrena la carta pide cientos de golpe, y las de un bar salen por la misma IP. Sólo cuenta
+// lo que llega a R2 (un acierto de caché no). Como los demás, si falta o falla, deja pasar.
 
 imagesRoutes.get("/:tenant/*", async (c) => {
 	const tenant = (c.req.param("tenant") || "").trim();
 	// Hono no registra `*` como parámetro con nombre. Derivar la ruta del pathname montado.
 	const relPath = relPathFromUrl(c.req.url).split("/").slice(1).join("/");
 	if (!tenant || !RUTA_DE_IMAGEN.test(relPath)) {
-		return c.json({ error: "bad_image_path" }, 400);
+		return c.json({ error: "bad_image_path" }, 400, SIN_CACHE);
 	}
 
 	const cache = caches.default;
@@ -126,12 +152,20 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	const cached = await cache.match(cacheKey);
 	if (cached) return cached;
 
+	if (!(await pasaElLimitador(c.env.LIMITADOR_IMAGENES, claveDeFreno(ipDeLaPeticion(c.req.raw)), "images"))) {
+		return c.json(
+			{ error: "too_many_attempts", message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto." },
+			429,
+			{ ...SIN_CACHE, "Retry-After": "60" },
+		);
+	}
+
 	const key = prefijoDelNegocio(tenant) + relPath;
 	const obj = await c.env.IMAGES.get(key);
 	if (!obj) {
-		// 404 SIN cachear: la imagen puede llegar en segundos (la subida va por otro canal);
-		// el frontend reintenta el mismo URL y, cuando exista, el GET ya responde 200.
-		return c.json({ error: "not_found" }, 404);
+		// 404 SIN cachear (INFRA-03: `no-store`): la imagen puede llegar en segundos (la subida va por
+		// otro canal); el frontend reintenta el mismo URL y, cuando exista, el GET ya responde 200.
+		return c.json({ error: "not_found" }, 404, SIN_CACHE);
 	}
 
 	const headers = new Headers();
@@ -173,8 +207,8 @@ imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ 
 	const bytes = new Uint8Array(body);
 	const contentType = tipoImagen(bytes);
 	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
-	// AUD-31: lo que la Main no decodificaría (`imagenes::decodificar`) tampoco lo pinta la Handy desde
-	// r2.dev: ni WebP (AUD-30) ni una cabecera de más de 8192 px de lado o 24 Mpx.
+	// AUD-31: lo que la Main no decodificaría (`imagenes::decodificar`) tampoco lo pinta la Handy por
+	// el GET: ni WebP (AUD-30) ni una cabecera de más de 8192 px de lado o 24 Mpx.
 	if (contentType === "image/webp") return c.json({ error: "bad_image_path" }, 400);
 	if (!dentroDeLasCotas(bytes)) return c.json({ error: "image_too_large" }, 413);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.

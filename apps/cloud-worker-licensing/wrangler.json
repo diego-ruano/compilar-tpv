@@ -66,6 +66,14 @@
 				"limit": 10,
 				"period": 60
 			}
+		},
+		{
+			"name": "LIMITADOR_IMAGENES",
+			"namespace_id": "5",
+			"simple": {
+				"limit": 3000,
+				"period": 60
+			}
 		}
 	],
 	"durable_objects": {

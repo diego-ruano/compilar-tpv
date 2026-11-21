@@ -74,6 +74,11 @@ export interface Env {
 	// alta. Opcionales como los de arriba: detrás están los topes exactos de la agenda.
 	LIMITADOR_RESERVA_WEB?: RateLimit;
 	LIMITADOR_RESERVA_WEB_ALTA?: RateLimit;
+
+	// INFRA-03 · Filtro por IP del GET público de imágenes (`domains/images/images.routes.ts`), que
+	// pinta la Handy. Holgado: una Handy que estrena la carta pide cientos de golpe. Opcional como los
+	// de arriba: sin él cada imagen sigue saliendo de R2, sólo que sin techo por red.
+	LIMITADOR_IMAGENES?: RateLimit;
 	// Turnstile del widget. La clave pública va en `vars`; el secreto, con
 	// `wrangler secret put TURNSTILE_SECRET_KEY`. Sin secreto el alta queda cerrada (503).
 	TURNSTILE_SITE_KEY?: string;
@@ -106,12 +111,14 @@ export interface Env {
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.
-	// Las LECTURAS (GET) se sirven públicas + Cache API (CDN edge); las ESCRITURAS
-	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el token.
+	// Se lee sólo por el worker: el GET público de `/v1/images/{tenant}/…` (la Handy) y el POST
+	// firmado de `/download` (la Main); las ESCRITURAS (PUT/DELETE) van firmadas (JWT +
+	// device-proof) y el negocio sale del token. INFRA-03: el acceso público por `r2.dev` se cierra
+	// en Cloudflare cuando todas las Handy lleven la versión que lee por el worker.
 	IMAGES: R2Bucket;
 
 	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`server/copiaBaseCentral.ts`).
-	// No puede ser el de imágenes: aquél es público por `r2.dev`, y esto lleva correos de clientes y
+	// No puede ser el de imágenes: aquél se sirve sin firma por `/v1/images`, y esto lleva correos de clientes y
 	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare.
 	COPIAS: R2Bucket;
 

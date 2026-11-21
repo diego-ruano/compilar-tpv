@@ -2,7 +2,7 @@
 //
 // AUD-31 · Lo que se sube a R2 cabe en las cotas de RI-07.
 //
-// La Handy pinta desde r2.dev los bytes que haya en el bucket, y la Main los baja. El PUT sólo
+// La Handy pinta los bytes que haya en el bucket (por el GET del worker), y la Main los baja. El PUT sólo
 // miraba la firma del dispositivo, los 5 MB y que el contenido fuera de la clase que dice la
 // extensión: un PNG que declara 8193 px de ancho, o un WebP, entraban. Ahora la cabecera tiene que
 // decir sus dimensiones, como mucho 8192 px de lado y 24 Mpx (lo que decodifica la Main,

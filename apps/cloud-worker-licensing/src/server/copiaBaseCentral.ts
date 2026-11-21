@@ -24,7 +24,7 @@
 //     de eso; el día que se acerque, esto pasa a subir por partes (multipart de R2).
 //   · El formato es el de `sqlite3 .dump`, para poder restaurarlo sin nuestro código:
 //     `turso db create <nombre> --from-dump copia.sql`, o `sqlite3 local.db < copia.sql` para mirarla.
-//   · El bucket es PRIVADO y propio. Nunca `tpv-images`, que es público por `r2.dev`: esto lleva los
+//   · El bucket es PRIVADO y propio. Nunca `tpv-images`, que se sirve sin firma: esto lleva los
 //     correos de los clientes, y las DEK de los negocios (cifradas con `LICENSE_STORE_KEY`,
 //     que por eso tiene que estar guardada fuera de Cloudflare: sin ella la copia no los devuelve).
 //   · Cuánto se guardan las copias lo decide la regla de ciclo de vida del bucket, no este código.
