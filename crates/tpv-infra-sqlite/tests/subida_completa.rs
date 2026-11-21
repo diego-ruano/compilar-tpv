@@ -852,6 +852,29 @@ async fn con_un_instante_una_cuarentena_incierta_no_resucita_lo_que_borro() {
     nube.cerrar().await;
 }
 
+/// DO-SUBIDA · SYNC-36 · Una cuarentena `dudosa` dice sus filas, pero las de una tabla que sacó de esta
+/// base por un filtro con algo de esta Main rechazado arriba pudieron no ser las de la nube: la Handy
+/// borró `cli-0008` arriba y aquí el filtro dio `cli-0007`. Con una copia su tabla se deja para el
+/// contraste: subía `cli-0008`, que no estaba en la lista, y lo resucitaba.
+#[tokio::test]
+async fn con_una_copia_una_cuarentena_dudosa_no_resucita_lo_que_borro_fuera_de_su_lista() {
+    let (main, _dir) = base("cuarentena-dudosa").await;
+    un_bar(&main).await;
+    let filas_json = json!({"tablas": ["Clientes"], "incierto": false, "por_filtro": ["Clientes", "Comandas"], "dudosa": true,
+        "filas": [{"tabla": "Clientes", "clave": ["cli-0007"], "borrada": true}]});
+    cuarentena(&main, "op-handy", Some(filas_json), borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-dudosa").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1'), ('cli-0007', 'Cliente ñ 7');").await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nombre_arriba(&nube, "cli-0008").await, None, "lo que borró arriba no vuelve");
+    assert!(mandadas_de(&nube, "Clientes").is_empty(), "nada de su tabla viaja");
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase <> 4 AND Estado <> 2;").await, 0);
+    // Lo que sólo leyó para decidirlo (las comandas) no se toca: sube como siempre.
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Comandas;").await, 701);
+    nube.cerrar().await;
+}
+
 /// DO-SUBIDA · SYNC-36 · Dos cuarentenas inciertas en la misma tabla, una perdida con la base vacía y
 /// otra del log nuevo: gana la de fuera, y la tabla se deja entera para el contraste.
 #[tokio::test]

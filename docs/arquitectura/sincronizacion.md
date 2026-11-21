@@ -1112,7 +1112,9 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   SYNC-36: la nube es la buena en esas filas), las filas apuntadas por el orden de la nube (SYNC-29),
   salvo que arriba falten, y un blob o una fila de más de 1 MiB (por revisar). Si de una cuarentena
   no se sabe qué filas toca, lo que pasa con las tablas en las que escriben sus sentencias (y si ni
-  eso se sabe, con todas) depende de si su cambio puede seguir arriba (`perdida_con_la_base`):
+  eso se sabe, con todas) depende de si su cambio puede seguir arriba (`perdida_con_la_base`). Lo
+  mismo con las tablas que una cuarentena `dudosa` sacó de esta base por un filtro: dice sus filas,
+  pero pudieron no ser las de la nube, y una que el cambio quitó arriba puede faltar en su lista:
   - Con una copia o un instante (la base devuelta puede ser posterior al cambio), o con un cambio
     del log nuevo (`Seq` desde el cambio vacío con que la nube abrió su log al volver, el
     `inicioSeq` que da el plan y la Main guarda en `_Sync_Subida.Inicio_Seq`: se escribió en la nube

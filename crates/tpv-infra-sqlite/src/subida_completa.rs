@@ -45,7 +45,9 @@
 //! - Las filas que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`, SYNC-36): las
 //!   de la nube son las buenas y aquí están por detrás. Ni se suben ni se piden borrar arriba.
 //! - Si de ese cambio no se sabe qué filas toca, sus tablas (en las que escriben sus sentencias; si
-//!   ni eso se sabe, todas) dependen de si el cambio puede seguir arriba (`perdida_con_la_base`):
+//!   ni eso se sabe, todas) dependen de si el cambio puede seguir arriba (`perdida_con_la_base`). Lo
+//!   mismo las de una cuarentena `dudosa` que sacó de esta base por un filtro: sus filas pudieron no
+//!   ser las de la nube.
 //!   - Con una copia o un instante (la base devuelta puede ser posterior al cambio), o si el cambio
 //!     es del log nuevo (por encima del cambio vacío con que la nube lo abrió al volver, el
 //!     `inicioSeq` del plan: se escribió en la nube devuelta), la tabla entera se deja para el
@@ -697,8 +699,8 @@ struct Apartado {
     /// Las filas que toca una cuarentena, por su clave: ni se suben ni se piden borrar arriba, y
     /// quedan para el contraste.
     claves: HashSet<String>,
-    /// Las tablas en las que escribe una cuarentena que no dice qué filas toca y cuyo cambio puede
-    /// seguir arriba: se dejan enteras para el contraste.
+    /// Las tablas en las que escribe una cuarentena que no dice qué filas toca (o una `dudosa`, las
+    /// que sacó por un filtro) y cuyo cambio puede seguir arriba: se dejan enteras para el contraste.
     fuera: HashSet<String>,
     /// Una de esas cuarentenas de la que no se sabe ni en qué tablas escribe: todas fuera.
     todas_fuera: bool,
@@ -753,16 +755,36 @@ async fn apartado(conn: &Connection) -> AppResult<Apartado> {
     });
     for f in filas(conn, "SELECT Filas_Json, Statements_Json, Seq FROM _Sync_Failed;", vec![]).await? {
         let t = f.first().and_then(texto).map(|j| Tocadas::de_json(&j)).unwrap_or_else(|| Tocadas::incierta_de_todo(Vec::new()));
-        if t.incierto {
-            // DO-SUBIDA · SYNC-36: sin saber qué filas toca (un `Filas_Json` que falta o no se lee),
-            // las tablas en las que escriben sus sentencias; y si tampoco quedan sentencias que lo
-            // digan, todas. Sin tablas no se apartaba nada, y la subida pisaba arriba lo del cambio.
-            let tablas = if t.tablas.is_empty() {
+        // DO-SUBIDA · SYNC-36: sin saber qué filas toca (un `Filas_Json` que falta o no se lee), las
+        // tablas en las que escriben sus sentencias; y si tampoco quedan sentencias que lo digan,
+        // todas. Sin tablas no se apartaba nada, y la subida pisaba arriba lo del cambio.
+        let escritas = || {
+            if t.tablas.is_empty() {
                 let sentencias: Vec<SqlStatement> = f.get(1).and_then(texto).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
                 crate::filas_tocadas::tablas_escritas(&sentencias)
             } else {
                 t.tablas.clone()
-            };
+            }
+        };
+        let inciertas = if t.incierto {
+            Some(escritas())
+        } else if t.dudosa {
+            // DO-SUBIDA · SYNC-36: una `dudosa` dice sus filas, pero las de las tablas que sacó de esta
+            // base por un filtro (`por_filtro`) se apuntaron con algo de esta Main rechazado arriba en
+            // ellas, y pudieron no ser las de la nube: una fila que el cambio quitó arriba puede no
+            // estar en su lista, y subirla la resucitaba. Esas tablas cuentan como las de una incierta.
+            let escritas = escritas();
+            let cualquiera = t.por_filtro.iter().any(|x| x == crate::filas_tocadas::TODAS);
+            let filtradas: Vec<String> = escritas
+                .iter()
+                .filter(|x| cualquiera || t.por_filtro.iter().any(|p| p.eq_ignore_ascii_case(x)))
+                .cloned()
+                .collect();
+            (escritas.is_empty() || !filtradas.is_empty()).then_some(filtradas)
+        } else {
+            None
+        };
+        if let Some(tablas) = inciertas {
             if perdida_con_la_base(base_vacia, inicio_seq, f.get(2).map_or(i64::MAX, entero)) {
                 a.todas_inciertas |= tablas.is_empty();
                 a.inciertas.extend(tablas);
