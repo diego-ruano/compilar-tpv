@@ -580,3 +580,78 @@ async fn la_misma_peticion_reabierta_sigue_por_donde_iba() {
     iguales(&main, &nube, "Comandas", "ID_Comanda").await;
     nube.cerrar().await;
 }
+
+/// Una cuarentena de bajada en `_Sync_Failed`, con lo que se sabe de sus filas (`None`: nada).
+async fn cuarentena(main: &Db, op: &str, filas_json: Option<serde_json::Value>, sentencias: serde_json::Value) {
+    let w = main.write().await;
+    w.raw()
+        .execute(
+            "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, First_Failed_At_Ms, Last_Failed_At_Ms, Filas_Json) \
+             VALUES (?1, 5, ?2, 5, 1, 1, 1, ?3);",
+            vec![
+                Value::Text(op.into()),
+                Value::Text(sentencias.to_string()),
+                filas_json.map_or(Value::Null, |f| Value::Text(f.to_string())),
+            ],
+        )
+        .await
+        .unwrap();
+}
+
+/// El plan, y unos clientes que la nube no dejó entrar por una foránea: el repaso los vuelve a
+/// intentar al cambiar de etapa.
+async fn plan_y_por_revisar(main: &Arc<Db>, nube: &mut NubeDeSubida, clientes: &[&str]) {
+    assert!(matches!(SqliteSubidaCompleta::new(main.clone()).paso(nube).await.unwrap(), PasoHecho::Avanza));
+    for c in clientes {
+        sembrar(
+            main,
+            &format!("INSERT INTO _Sync_Subida_Por_Revisar (Tabla, Clave_Json, Motivo, Intentos, Turno) VALUES ('Clientes', '[\"{c}\"]', 'foranea', 0, 0);"),
+        )
+        .await;
+    }
+}
+
+async fn nombre_arriba(nube: &NubeDeSubida, cliente: &str) -> Option<Value> {
+    nube.filas("SELECT Nombre FROM Clientes WHERE ID_Cliente = ?1;", vec![Value::Text(cliente.into())]).await.into_iter().next().map(|f| f[0].clone())
+}
+
+/// DO-SUBIDA (repaso) · SYNC-36 · El repaso tampoco sube lo que toca una cuarentena de bajada: la
+/// versión de la nube es la buena (lo que escribió una Handy y aquí no ha entrado), y subir la de aquí
+/// la deshacía.
+#[tokio::test]
+async fn el_repaso_no_sube_lo_que_toca_una_cuarentena() {
+    let (main, _dir) = base("repaso-cuarentena").await;
+    un_bar(&main).await;
+    let filas_json = json!({"tablas": ["Clientes"], "incierto": false, "por_filtro": [], "dudosa": false,
+        "filas": [{"tabla": "Clientes", "clave": ["cli-0007"], "borrada": false}]});
+    cuarentena(&main, "op-handy", Some(filas_json), json!([])).await;
+    let mut nube = NubeDeSubida::nueva("repaso-cuarentena").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0007', 'De la Handy');").await;
+    empezar(&main, "s1", "copia").await;
+    plan_y_por_revisar(&main, &mut nube, &["cli-0007"]).await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nombre_arriba(&nube, "cli-0007").await, Some(Value::Text("De la Handy".into())), "la versión de la nube se queda");
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar;").await, 0, "se deja para el contraste");
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA (repaso) · SYNC-29 · Una fila apuntada por el orden de la nube sólo se sube en el repaso
+/// si arriba falta: la que está arriba es la buena y la trae la convergencia.
+#[tokio::test]
+async fn el_repaso_sube_una_fila_apuntada_solo_si_arriba_falta() {
+    let (main, _dir) = base("repaso-apuntadas").await;
+    un_bar(&main).await;
+    sembrar(
+        &main,
+        "INSERT INTO _Sync_Por_Contrastar (Tabla, Clave_Json, Seq, Desde_Ms) VALUES ('Clientes', '[\"cli-0008\"]', 5, 1), ('Clientes', '[\"cli-0009\"]', 5, 1);",
+    )
+    .await;
+    let mut nube = NubeDeSubida::nueva("repaso-apuntadas").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0008', 'De la nube');").await;
+    empezar(&main, "s1", "copia").await;
+    plan_y_por_revisar(&main, &mut nube, &["cli-0008", "cli-0009"]).await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nombre_arriba(&nube, "cli-0008").await, Some(Value::Text("De la nube".into())), "la que está arriba no se pisa");
+    assert_eq!(nombre_arriba(&nube, "cli-0009").await, Some(Value::Text("Cliente ñ 9".into())), "la que falta sí sube");
+    nube.cerrar().await;
+}

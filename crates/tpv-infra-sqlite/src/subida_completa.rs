@@ -48,6 +48,8 @@
 //!   convergencia la trae. Sólo se suben si arriba faltan.
 //! - Un blob o una fila que no cabe en una página: se apunta y lo ve el contraste.
 //!
+//! El repaso aparta lo mismo que una página.
+//!
 //! # El cobro no se toca
 //!
 //! Las lecturas van por conexiones de lectura (`foto`), el escritor sólo se coge para
@@ -597,6 +599,11 @@ struct Fila {
     clave: Vec<Json>,
     valores: Vec<Json>,
     huella: u64,
+}
+
+/// La clave de una fila como la nombra la nube en sus listas (`faltan`, `noEntraron`).
+fn clave_de(f: &Fila) -> String {
+    Json::Array(f.clave.clone()).to_string()
 }
 
 fn celda<'a>(v: &ValorPrestado<'a>) -> Celda<'a> {
@@ -1648,14 +1655,55 @@ impl SqliteSubidaCompleta {
         // DO-SUBIDA (repaso): lo que aquí ya no existe (o ya no se puede mandar) no se repasa: sale
         // de la lista sin mandar nada. Mandar una lista vacía era un rechazo permanente de la nube
         // que no movía nada, y el repaso se repetía sin fin, sin llegar nunca a `fin`.
-        let halladas: HashSet<String> = encontradas.iter().map(|f| Json::Array(f.clave.clone()).to_string()).collect();
-        let siguen: HashSet<String> = if encontradas.is_empty() {
+        let halladas: HashSet<String> = encontradas.iter().map(clave_de).collect();
+        // DO-SUBIDA (repaso) · Lo mismo que se aparta de una página (`apartar`). Lo que toca una
+        // cuarentena de bajada (SYNC-36), o su tabla entera si no se sabe qué filas, no se sube: la
+        // versión de la nube es la buena, y sale de la lista para el contraste. Una fila apuntada por
+        // el orden de la nube (SYNC-29) sólo se sube si arriba falta; si está, la trae la
+        // convergencia, y también sale. El repaso las mandaba tal cual y deshacía arriba lo bueno.
+        let (ap, marcadas) = {
+            let r = self.db.read().await;
+            (apartado(r.conn()).await?, crate::convergencia::marcadas(r.conn()).await?)
+        };
+        let tabla_apartada = ap.tablas.contains(&tabla);
+        let mut dejadas: HashSet<String> = HashSet::new();
+        let mut mandar: Vec<Fila> = Vec::new();
+        let mut apuntadas: Vec<Fila> = Vec::new();
+        for f in encontradas {
+            let c = canonica(&tabla, &f.clave);
+            if tabla_apartada || c.as_ref().is_some_and(|c| ap.claves.contains(c)) {
+                dejadas.insert(clave_de(&f));
+            } else if c.as_ref().is_some_and(|c| marcadas.contains(c)) {
+                apuntadas.push(f);
+            } else {
+                mandar.push(f);
+            }
+        }
+        // Un rechazo permanente (o una página que no cabe): cuenta como un intento de todas, para que
+        // el repaso no se repita sin fin.
+        let mut rechazado = false;
+        if !apuntadas.is_empty() {
+            match self.distintas(envio, &e, &apuntadas).await? {
+                Ok((_, faltan)) => {
+                    for f in apuntadas {
+                        if faltan.contains(&clave_de(&f)) {
+                            mandar.push(f);
+                        } else {
+                            dejadas.insert(clave_de(&f));
+                        }
+                    }
+                }
+                Err(PasoHecho::Avanza) => rechazado = true,
+                Err(p) => return Ok(Some(p)),
+            }
+        }
+        let siguen: HashSet<String> = if rechazado {
+            halladas.clone()
+        } else if mandar.is_empty() {
             HashSet::new()
         } else {
-            match self.mandar_filas(envio, &e, &encontradas, marca.checkpoint, false).await? {
+            match self.mandar_filas(envio, &e, &mandar, marca.checkpoint, false).await? {
                 Ok((_, _, no_entraron)) => no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect(),
-                // Un rechazo permanente (o una página que no cabe): cuenta como un intento de todas,
-                // para que el repaso no se repita sin fin.
                 Err(PasoHecho::Avanza) => halladas.clone(),
                 Err(p) => return Ok(Some(p)),
             }
@@ -1665,7 +1713,7 @@ impl SqliteSubidaCompleta {
         conn.transaccion(async {
             for (guardada, k) in &claves {
                 let k = Json::Array(k.clone()).to_string();
-                let sql = if !halladas.contains(&k) || !siguen.contains(&k) {
+                let sql = if !halladas.contains(&k) || dejadas.contains(&k) || !siguen.contains(&k) {
                     "DELETE FROM _Sync_Subida_Por_Revisar WHERE Tabla = ?1 AND Clave_Json = ?2;"
                 } else if antes_de.is_some() {
                     "UPDATE _Sync_Subida_Por_Revisar SET Turno = ?3 WHERE Tabla = ?1 AND Clave_Json = ?2;"
