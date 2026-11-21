@@ -78,8 +78,8 @@ no toca, devuelve `Ok` sin pedir nada a la nube. Lo orquesta `use_cases/verifica
 
 | | |
 |---|---|
-| **Hay un motivo** | Un cierre de caja sin reabrir posterior a la última pasada buena, hecho hace al menos 5 min; o 20 h desde la última pasada buena (o ninguna todavía) |
-| **Es un momento tranquilo** | Main operativa; sin histórico por bajar (VERIF-01); nada pendiente de subir (el outbox sin lo apartado) ni un cambio de la nube detenido (un fallo de bajada sin cuarentena); 10 min desde que arrancó la aplicación; 15 min sin ninguna escritura (la última fila de `_Sync_Applied_Ops`: una operación de aquí o un cambio aplicado de la nube) |
+| **Hay un motivo** | Un cierre de caja sin reabrir posterior a la última pasada buena, hecho hace al menos 5 min; o 20 h desde la última pasada buena (o ninguna todavía); o una subida completa entregada a la nube hace al menos 5 min y por confirmar (DO-SUBIDA, [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-devuelta-do-subida)): una pasada limpia la da por terminada, y a la tercera con diferencias también, con un aviso |
+| **Es un momento tranquilo** | Main operativa; sin histórico por bajar (VERIF-01); sin una subida completa en curso (DO-SUBIDA: la nube no está para compararla); nada pendiente de subir (el outbox sin lo apartado) ni un cambio de la nube detenido (un fallo de bajada sin cuarentena); 10 min desde que arrancó la aplicación; 15 min sin ninguna escritura (la última fila de `_Sync_Applied_Ops`: una operación de aquí o un cambio aplicado de la nube) |
 | **Máximo** | A las 48 h de la última pasada buena bastan 5 min sin escrituras. Lo demás no se relaja: con algo pendiente de subir o con el histórico a medias no se contrasta nunca |
 | **Tras un fallo** | Espera propia, no la del motor: 30 min, 1 h, 2 h, 4 h y 6 h. El intento que falla devuelve `Err` (sale en el panel); las vueltas de en medio son «no toca» |
 | **Aplazado** | Si la nube dice que ahora no (se ha escrito en su log hace menos de dos minutos, o hay cambios ajenos por encima del checkpoint local) o una de las dos bases se mueve a mitad de la pasada, no se compara ni se toca nada: se reintenta a los 10 min, y no cuenta como fallo |
@@ -133,6 +133,7 @@ pnpm interruptor:lista    -- [--historial]
 | `cifrado_pii` | motor de jobs | Convertir la PII del personal a cifrado |
 | `imagenes` | `lib.rs::drenar_imagenes` | Subir imágenes a R2 |
 | `reservas_web` | `domains/reservas_web/puerta.ts` (worker) | Las rutas públicas de la reserva desde la web: el widget dice que ahora no se puede reservar online. Lo ya reservado sigue en la agenda |
+| `subida_nube` | motor de réplica (`use_cases/replicacion.rs`) | Los pasos de la subida completa de la base a una nube devuelta (DO-SUBIDA); el outbox, la bajada y el cobro siguen, y al encenderlo sigue donde iba |
 
 ### Reglas
 

@@ -3,11 +3,14 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
 en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
 `packages/database/migrations/`, aplicados en orden.
-Hoy son cuatro: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
+Hoy son cinco: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
 (AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)),
-`0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)), y
+`0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)),
 `0004_producto_sin_categoria.sql`, que deja a un producto sin categoría
-([abajo](#borrar-una-categoría-de-productos-0004)).
+([abajo](#borrar-una-categoría-de-productos-0004)), y `0005_subida_completa.sql`, el estado local de
+la subida completa de la Main a una nube devuelta (`_Sync_Subida*`, DO-SUBIDA,
+[sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-devuelta-do-subida)): tablas del
+equipo, escritas por `raw()`, que en la nube existen vacías.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 

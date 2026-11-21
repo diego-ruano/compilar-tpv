@@ -669,8 +669,10 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
   sentencias) con el `Seq` más alto que se sabía más `SALTO_DE_SEQ` (diez millones: cubre también un
   objeto que lo ha perdido todo y no recuerda hasta dónde numeró). Con `modo: "nube"`, además, lo
   purgado se pone justo debajo, por encima de cualquier checkpoint, y cada Main aparta su base y se
-  trae la nube (SYNC-32); con `main`, la Main sigue y el contraste repara la nube
-  ([recuperacion.md](recuperacion.md#cuando-la-nube-vuelve-atrás-do-03)).
+  trae la nube (SYNC-32); con `main`, la Main sigue y sube su base entera (DO-SUBIDA, abajo)
+  ([recuperacion.md](recuperacion.md#cuando-la-nube-vuelve-atrás-do-03)). Después de abrir el log se
+  echa a todas las sesiones, también a las que entraron entre el reinicio y `trasVolver`: vuelven a
+  saludar, y la Main recibe en su `hello_ok` la petición de subida.
 - **Vuelve todo lo guardado**, también la tabla de quién es la Main (se vuelve a leer en el saludo),
   las bajas apuntadas para el canje del socket (la base central sigue rechazando el ticket de un
   dispositivo dado de baja) y quizá la alarma, que se vuelve a armar en el primer acceso.
@@ -703,6 +705,53 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   instante. Luego, la copia diaria armada.
 
 Lo cubre `test/basePerdidaSalidas.test.ts`.
+
+**La subida completa de la Main** (DO-SUBIDA, `durableObjects/tenantHub.subida.ts`; el lado de la
+Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-devuelta-do-subida)):
+
+- **La petición vive en el SQL del objeto** (`_Subida_Completa`, una fila). La apunta
+  `abrirLogTrasVolver` con `modo: "main"`, en la misma transacción que abre el log, con su origen
+  (`instante`, `copia` o `base_vacia`) y la Main vigente de ese momento; un objeto vacío no la sabe,
+  y se la queda la primera Main vigente que salude. Con `modo: "nube"` se borra. La copia de R2 no
+  la trae (empieza por `_`) y `vaciarObjeto` se la lleva. Estados: `esperando`, `terminada`,
+  `caducada` (14 días sin terminar), `agotada` (su techo total) y `huerfana` (saludó como Main otro
+  dispositivo: un traslado a mitad).
+- **El saludo de esa Main la lleva** (`hello_ok.subida: {id, estado, origen}`), sin esperas; a una
+  Handy no se le dice nunca. Una Main anterior no mira el campo y sigue como antes.
+- **Los pasos llegan por el socket** (`{type: "subida", pasoId, accion, …}`, acuse `subida_ack` con el
+  mismo `pasoId`), como un `apply_lote`: sólo de un `tpv`, la forma antes que nada, en fila con lo
+  demás que manda la Main, y después de la comprobación por actividad, en el turno del log. Llevan
+  datos, no SQL. El objeto casa la tabla con su esquema (una tabla del negocio que existe como tabla:
+  ni vistas, ni `_*`, ni el andamiaje de la réplica, ni los intentos de PIN) y las columnas con
+  `pragma_table_info` (sin repetir y con la clave entera), y construye él la sentencia: `INSERT …
+  SELECT json_extract(value, '$[i]') … FROM json_each(?1) WHERE 1 ON CONFLICT(clave) DO UPDATE SET …
+  WHERE NOT (todo igual)`, con la lista en un parámetro (DO-01). Nunca `REPLACE` y nunca borra: un
+  borrado lo pide la Main por su outbox, y pasa por AUD-36 como cualquier otro. Lo fiscal sólo se
+  inserta (`DO NOTHING`), y lo que ya está y es distinto vuelve como `fiscal` sin tocarse.
+- **Una página con algo que no entra** (un único, una foránea, un `CHECK`, un trigger que rechaza) se
+  parte por la mitad, cada mitad con su propia lista, hasta aislar las filas, que vuelven en
+  `noEntraron` con su clase; lo pasajero (la base ocupada o llena) sale tal cual. 5.000 filas y
+  1,5 MiB por página; más, `subida_pagina_demasiado_grande`, y la Main la parte.
+- **Lo ajeno manda**: una página no entra si en el log hay algo de otro dispositivo por encima del
+  checkpoint con el que la Main la leyó (`aplazada`, con `hastaSeq`). El `plan` y los `sobrantes`
+  miran lo mismo.
+- **No toca el log**: ni `Sync_Changes`, ni `Applied_Operations`, ni difusión de filas. Al acabar una
+  tabla manda a las Handy `datos_subidos {tablas}`, que relee esas pantallas.
+- **Su propio presupuesto (AUD-36)**: las páginas no gastan `_Presupuesto_Escritura`, así que el
+  outbox de la Main y las Handy siguen como siempre. Gastan el de la petición (`LIMITES_DE_SUBIDA`):
+  por hora, 10 millones de filas escritas (`rowsWritten`, con índices y triggers) o 2 GiB
+  (`presupuesto_de_subida_agotado`, pasajero); en total, el menor entre 60 millones y diez veces lo
+  que la Main declaró en su plan (con un suelo de un millón), y 6 GiB de crecimiento
+  (`subida_presupuesto_superado`, permanente: la petición queda `agotada`, a Sentry, y sólo la reabre
+  la administración con `pnpm negocio:subida -- --reabrir`). La exención sólo existe para pasos de
+  la Main de la petición, mientras está `esperando`, y acaba con `fin`.
+- **La alarma diaria** avisa una vez (Sentry `hub.subida_sin_empezar`) si la petición lleva un día
+  esperando sin ninguna página, y mientras está `esperando`, `agotada` o `huerfana` **la poda no se
+  lleva las copias de R2 anteriores a la petición**: son las buenas, y las de después son de una base
+  a medias.
+- `negocio:estado` la enseña (`subida`): estado, origen, Main, páginas, filas escritas y declaradas.
+
+Lo cubre `test/subidaCompleta.test.ts`.
 
 ## Los tests no salen a la red
 

@@ -506,10 +506,13 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
   a mitad de reconciliar para con «Esta copia es anterior a lo que guarda la nube» y ofrece lo mismo.
   Lo que hizo después del instante, cobros incluidos, se queda en esa copia apartada.
 - **Con `main` (la Main es la buena)**, lo purgado no se toca. La Main se pone al día por encima del
-  cambio vacío y sube su outbox; lo que había subido después del instante y la nube ha perdido lo
-  repara el contraste (`verificar_nube`, [sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)),
-  que hace la nube igual que la Main en su siguiente momento tranquilo. Lo que la Main había subido
-  y la nube ha perdido no vuelve a subir por el outbox: ya salió de él con su acuse.
+  cambio vacío y sube su outbox; lo que había subido después del instante y la nube ha perdido no
+  vuelve a subir por el outbox (ya salió de él con su acuse): lo devuelve la **subida completa**
+  (DO-SUBIDA, [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-devuelta-do-subida)).
+  La nube la pide en el `hello_ok` de la Main, y la Main sube su base entera por pasos, empezando por
+  lo que las Handy necesitan para trabajar, que esperan sólo a eso. Al acabar, el contraste
+  (`verificar_nube`) confirma que cuadra. Lo mismo tras darle a un objeto vacío su copia de R2 o una
+  base vacía con `--modo main`.
 - **Las Handy** no guardan base: se las echa al volver, reconectan solas y leen la nube que haya.
 
 ## Lo que vuelve y lo que no

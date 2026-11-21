@@ -38,10 +38,8 @@ pnpm negocio:instante -- --tenant <tenantId> --instante 2026-11-20T10:30:00+01:0
     hizo después del instante se queda en su equipo, en `backups/antes-de-la-nube-*`, **cobros
     incluidos**: no vuelven a la nube solos.
   - **`main`**: la Main es la buena. Es el caso de una nube que se estropeó o se perdió sin que la
-    Main lo viera. La Main sigue con su base, se pone al día y sube lo que tenga pendiente; lo que la
-    nube perdió y la Main ya había subido lo repara el contraste de la Main en su siguiente momento
-    tranquilo (como mucho unas 20 horas, [VERIF-02](../arquitectura/jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02)).
-    Hasta entonces las Handy ven la nube del instante.
+    Main lo viera. La Main sigue con su base, se pone al día, sube lo que tenga pendiente y después
+    **sube su base entera** ([la subida completa](#la-subida-completa-de-la-main-do-subida)).
 - **`--motivo`**: queda en `admin_audit` con todo lo demás.
 
 Lo que pasa: se echa a la Main y a las Handy (reconectan solas), la base se cierra
@@ -110,12 +108,45 @@ pnpm negocio:base-vacia -- --tenant <tenantId> --modo main --motivo "…"
 En las dos, el log de la réplica se abre por encima de lo que la Main pueda haber visto, como tras una
 vuelta a un instante, y `--modo` dice quién manda después:
 
-- **`main`**: la Main sigue con su base, se pone al día y sube lo que tenga pendiente; lo que la nube
-  no tenga y la Main ya había subido lo repara su contraste en su siguiente momento tranquilo
-  ([sincronizacion.md](../arquitectura/sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)),
-  con sus topes por pasada: a una base vacía puede llevarle varias.
+- **`main`**: la Main sigue con su base, se pone al día, sube lo que tenga pendiente y después sube su
+  base entera ([la subida completa](#la-subida-completa-de-la-main-do-subida)).
 - **`nube`**: cada Main aparta su base en `backups/antes-de-la-nube-*` y se trae la nube. Con una copia,
   pierde lo que hizo después de esa madrugada; con una base vacía, todo.
 
 Si una de las dos se corta a mitad (el objeto se reinicia), la base se queda cerrada: repite la misma
 orden, que vacía lo que quedó y empieza otra vez.
+
+## La subida completa de la Main (DO-SUBIDA)
+
+Con `--modo main` (una vuelta a un instante, una copia o una base vacía), la nube apunta una petición
+de subida completa y se la dice a la Main en su saludo. La Main sube entonces su base entera, por
+pasos y sin tocar su outbox: primero lo que está abierto arriba y lo imprescindible para trabajar
+(la carta, las mesas, el personal, las comandas abiertas), que es lo único que esperan las Handy;
+después lo que falta de los maestros arriba se borra, luego los últimos 30 días y al final el
+histórico entero. Con una copia o un instante sólo viaja lo que arriba falta o es distinto. La Main
+sigue cobrando con normalidad todo el rato, y en su Configuración → Conectividad se ve el progreso
+(«Subiendo los datos a la nube»).
+
+**Antes de lanzarlo**, mira que la Main tenga una versión con la subida completa: una anterior no
+la hace, y la nube se queda como antes (lo que falta lo repara el contraste por tandas). La petición
+caduca a los 14 días.
+
+**Cómo va**: `pnpm negocio:estado` enseña `Subida` con su estado (`esperando`, `terminada`,
+`caducada`, `agotada` o `huerfana`), la Main que la tiene, las páginas y las filas escritas. Cuando
+la Main la entrega, pasa a `terminada`; la Main la da por buena cuando una pasada de su contraste
+sale limpia.
+
+- **`agotada`**: la Main ha escrito más de lo que cabe en su techo total (diez veces lo que dijo que
+  iba a subir). Mira por qué antes de seguir; para reabrirla:
+
+  ```bash
+  pnpm negocio:subida -- --tenant <tenantId> --reabrir --motivo "…"
+  ```
+
+  Vuelve a esperar sin dueño, con su plazo y su presupuesto a cero; la primera Main que salude se la
+  queda. Vale también para una `caducada` o una `huerfana`.
+- **`huerfana`**: ha saludado como Main otro equipo (un traslado de licencia a mitad). **No traslades
+  la licencia mientras dura la subida**: la base del equipo nuevo no es la que había que subir.
+  Reábrela sólo si el equipo nuevo tiene los datos buenos.
+- **Pausarla**: el interruptor remoto `subida_nube` sólo para sus pasos; el cobro, el outbox y las
+  Handy siguen igual, y al encenderlo sigue donde iba.

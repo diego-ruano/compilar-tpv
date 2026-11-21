@@ -52,6 +52,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar/resumen`, `/verificar/filas`, `/verificar/por-clave`, `/verificar/claves`, `/salud` |
 | El contraste con la nube | `domains/sync/verificar.ts` · `resumenCubos.ts` · `tpv-infra-sqlite/src/contraste.rs` · `tpv-domain/src/contraste.rs` | El resumen por cubos de cada lado y lo que se baja cuando no cuadra |
+| La subida completa (DO-SUBIDA) | `durableObjects/tenantHub.subida.ts` · `tpv-infra-sqlite/src/subida_completa.rs` · `tpv-application/src/ports/subida_completa.rs` | La Main sube su base entera a una nube devuelta en modo «main» ([abajo](#la-subida-completa-tras-una-nube-devuelta-do-subida)) |
 
 ### Servicio de avisos de la Handy
 
@@ -526,8 +527,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
   refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
 - **Por el socket no hay más mensajes que los del protocolo**: el saludo (`connected`, `challenge`,
-  `helloSigned`, `hello_ok`), lo que sube la Main (`apply_lote`, `recovery_ready` y sus acuses), lo que baja (`change`) y los avisos
-  (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`).
+  `helloSigned`, `hello_ok`), lo que sube la Main (`apply_lote`, `recovery_ready`, los pasos de la
+  subida completa `subida` y sus acuses), lo que baja (`change`) y los avisos
+  (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`,
+  `datos_subidos`).
   Un dispositivo no manda mensajes a los demás, y no se difunde quién entra o sale: lo que hay que
   saber de los otros es si hay Main. Un tipo que no está en la lista se contesta `unknown_type`.
   Lo cubre `test/difusionAjustada.test.ts`.
@@ -1052,6 +1055,82 @@ millón de filas (`RESUMEN_MAX_FILAS`): si el mes no cabe, la ventana se encoge 
 escalones que la de la recuperación, y si no cabe ni lo imprescindible van los conteos solos
 (`ventana_omitida`), que se comparan con sus claves. Las páginas tienen su techo en bytes; una fila
 que sola pasa de él viaja igual, como en el histórico.
+
+### La subida completa tras una nube devuelta (DO-SUBIDA)
+
+Cuando soporte devuelve la base de la nube con `--modo main` (una vuelta a un instante, una copia de
+R2 o una base vacía, [restaurar-un-negocio.md](../guias/restaurar-un-negocio.md)), lo que la Main
+había subido y la nube ha perdido no vuelve por el outbox (ya salió de él con su acuse), y el
+contraste, con sus topes por pasada y sus momentos tranquilos, tardaría días con una base vacía.
+Mientras, las Handy verían una nube a medias. Así que la Main **sube su base entera**, por pasos:
+
+- **La señal.** La nube apunta la petición en su SQL al abrir el log y se la dice a la Main vigente
+  en su `hello_ok` (`subida: {id, estado, origen}`, [worker.md](worker.md#las-copias-de-la-base-de-cada-negocio-do-03)).
+  La Main la concilia con lo suyo al principio de cada sesión normal, tras ponerse al día y subir su
+  outbox (`SubidaCompleta::conciliar`): una petición nueva empieza de cero; la misma sigue por sus
+  cursores; sin petición, la que hubiera a medias se deja (`abandonada`: modo nube, caducada,
+  huérfana, agotada o un worker anterior); y en la recuperación no se hace nada, porque esa base
+  todavía no es la buena.
+- **El estado es local y reanudable** (`0005_subida_completa.sql`, por `raw()`): `_Sync_Subida` (la
+  petición, su plan y sus hitos), `_Sync_Subida_Tablas` (una entrada por tabla y fase, con su cursor),
+  `_Sync_Subida_Claves` (las claves fijadas al empezar una fase de ventana) y
+  `_Sync_Subida_Por_Revisar` (lo que la nube no dejó entrar, por su clave y sin datos). Un corte, un
+  reinicio o un acuse perdido no cuestan nada: lo confirmado aquí es lo que la nube contestó, y lo
+  que se reenvía entra igual (es un upsert que no escribe lo que ya está igual).
+- **El orden** (`tpv-infra-sqlite/src/subida_completa.rs`): el `plan` de la nube trae sus tablas, sus
+  columnas y su clave, la sentencia de la ventana de la recuperación de cada una (`sentenciaVolcado`,
+  que la Main ejecuta en una foto con su propia hora) y las claves de lo que allí sigue vivo. Con eso
+  se siembra, padres primero: **lo vivo de arriba** (de cada clave se sube la versión de aquí; la que
+  aquí ya no está se pide borrar por el outbox), **el núcleo** (la carta, las mesas, el personal, los
+  ajustes y las comandas abiertas), **lo imprescindible** del resto, **lo que sobra arriba en los
+  maestros** (por el outbox), **los últimos 30 días** y **el histórico**, recorriendo cada tabla
+  transaccional por su clave. Después, un repaso de lo que no entró por un único o una foránea (otra
+  vez, con todo lo demás ya arriba), y `fin`.
+- **Lo que viaja**: con una copia o un instante casi todo está ya arriba, así que el histórico se
+  compara por **tramos** (100 filas seguidas, por su número y la suma módulo 2⁶⁴ de sus huellas,
+  `tpv_domain::contraste::suma_de_huellas`), los tramos distintos por **huellas** de cada fila, y sólo
+  lo distinto viaja como **filas**. La huella es la forma canónica del contraste; las dos
+  implementaciones leen los casos de `verificacion_casos.json` (`filas` y `tramos`). Con una base
+  vacía, filas directamente; y donde la mayoría difiere, se dejan de comparar hasta que vuelve a
+  haber más iguales que distintas.
+- **Los borrados** van por el outbox, como una reparación por estado, y sólo si la nube no ha cambiado
+  desde el plan (`borrado_si_la_nube_no_ha_cambiado`, la misma condición del contraste). Si algo de
+  una Handy se ha colado, no borran nada y lo ve el contraste.
+- **Lo que no se sube**: lo que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`,
+  SYNC-36: la nube es la buena en esas filas; si no se sabe qué filas, la tabla entera se deja para el
+  contraste), las filas apuntadas por el orden de la nube (SYNC-29), salvo que arriba falten, y un
+  blob o una fila de más de 1 MiB (por revisar).
+- **Lo ajeno manda.** Cada página lleva el checkpoint con el que se leyó, y la nube no la aplica si
+  tiene algo de otro dispositivo por encima (`aplazada`): la Main baja eso (`ponerse_al_dia`) y la
+  vuelve a leer. Antes de leer una página, si hay algo en el outbox, se sube primero: lo de aquí va
+  siempre antes. Las escrituras locales que llegan mientras tanto suben por el outbox detrás.
+- **La convergencia (SYNC-29) no borra aquí** lo que falta arriba mientras dura la subida: puede faltar
+  porque la nube lo perdió, y la subida lo devuelve.
+- **El ritmo**: un paso por vuelta del motor, un mensaje en vuelo y su acuse esperado 30 s atendiendo
+  el socket (`PasosPorElSocket`, `use_cases/replicacion.rs`); 2.000 filas por página con el bar
+  tranquilo (3 min sin escrituras) y 500 con actividad, la mitad tras una que no cabe. Un acuse que
+  no llega acaba la sesión, como un lote del outbox; un rechazo pasajero espera 30 s; uno permanente
+  deja esa tabla para el contraste y sigue con las demás. El interruptor remoto `subida_nube` pausa
+  los pasos.
+- **Las Handy** esperan, además de al outbox, al núcleo (`recovery_ready` sale cuando está, o a los
+  3 min de sesión con un aviso, `subida_suelta_sin_nucleo`). Lo demás sube con ellas trabajando; al
+  acabar cada tabla la nube les manda `datos_subidos` y relean esas pantallas (`presencia_handy.rs`).
+- **El final**: con `fin` la nube la da por terminada y aquí queda `contrastando`. A los 5 min es
+  motivo para el contraste (`cuando_verificar`, que con la subida en curso espera siempre); una pasada
+  que compara y sale limpia la deja `terminada` (`subida_completa_confirmada`), y a la tercera con
+  diferencias también, con un error (`subida_con_diferencias`).
+- **Traer la nube** o restaurar una copia local vacían la subida: lo que había aquí ya no es lo que
+  se subía, y se avisa si estaba a medias. Si la nube la sigue pidiendo, la siguiente sesión empieza
+  otra con lo que haya.
+- **El cobro no se toca**: las lecturas van por conexiones de lectura (`foto`), el escritor sólo se
+  coge para transacciones cortas por `raw()`, y nada escribe en tablas de negocio.
+- **Cómo se ve**: Configuración → Conectividad dice «Devolviendo los datos a la nube…» mientras los
+  Handy esperan, y su panel «Subiendo los datos a la nube» enseña la fase y el progreso
+  (`sync_subida_estado`, `subidaNubeQueries.ts`).
+
+Con una Main anterior a esto, la petición se queda esperando (el worker avisa al día sin empezar, no
+poda las copias buenas y la da por caducada a los 14 días) y lo que falta lo repara el contraste,
+como antes. Con un worker anterior, el saludo no trae la petición y la Main no manda ningún paso.
 
 ---
 
