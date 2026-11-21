@@ -234,7 +234,7 @@ Ciclo de una petición:
 - La alarma, cada hora mientras quede algo: da por visto lo que ya está en Turso (por lotes, con un
   cursor por tipo en `estado`), reofrece, vuelve a avisar a la Main si queda algo `pendiente`, apunta
   en Axiom lo que lleva tres días sin recoger y purga (también las conexiones de más de 24 h).
-- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 5): una agenda vieja
+- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 6): una agenda vieja
   se pone al día al construirse el objeto (`agendaWeb.almacen.ts::migrar`).
 - `pendiente` → `anulada` si el cliente la cancela antes de que la Main la recoja: se borra
   `datos_json` y la mesa queda libre en el acto.

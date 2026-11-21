@@ -19,7 +19,7 @@ import { enElObjetoDeLaAgenda, enLaAgenda, lectorConBarrera, lectorSobre, stubDe
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
-import { prepararAlmacen } from "../src/durableObjects/agendaWeb.almacen";
+import { apuntarEnlace, prepararAlmacen, reservaDelEnlace } from "../src/durableObjects/agendaWeb.almacen";
 import {
 	MAX_ALTAS_DIA_CONEXION,
 	MAX_ALTAS_DIA_NEGOCIO,
@@ -1101,7 +1101,7 @@ describe("la entrega a la Main", () => {
 			prepararAlmacen(sql);
 			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
 			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo", "aviso_ms"]));
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "5" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
 			const r = await motor.recogidas({
@@ -1276,11 +1276,33 @@ describe("el tope de altas por conexión (RW-ALTAS)", () => {
 			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-vieja', 'r-vieja', ?);`, Date.now() + 86_400_000);
 			sql.exec(`UPDATE estado SET valor = '4' WHERE clave = 'version';`);
 			prepararAlmacen(sql);
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "5" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
 			// El enlace que ya había cuenta como de la confirmación.
 			expect(sql.exec(`SELECT por_un_cambio FROM enlaces WHERE token_hash = 'h-vieja';`).toArray()).toEqual([{ por_un_cambio: 0 }]);
 			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A, red: CONEXION_B })).ok).toBe(true);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 2 });
+			// Prepararla otra vez no cambia nada.
+			prepararAlmacen(sql);
+		});
+	});
+
+	// RW-ALTAS · Hubo una versión 5 que sólo traía `altas_por_conexion`: una agenda que se quedó en ella
+	// tiene la tabla y la versión, pero no `enlaces.por_un_cambio`, y sin la columna ni se lee ni se
+	// apunta un enlace de cancelar.
+	it("una agenda que se quedó en la primera versión 5 recibe el origen de los enlaces", async () => {
+		await conAgenda("conexion-migracion-v5", async (motor, sql) => {
+			sql.exec(`ALTER TABLE enlaces DROP COLUMN por_un_cambio;`);
+			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-vieja', 'r-vieja', ?);`, Date.now() + 86_400_000);
+			sql.exec(`UPDATE estado SET valor = '5' WHERE clave = 'version';`);
+			prepararAlmacen(sql);
+			const deLosEnlaces = sql.exec(`PRAGMA table_info(enlaces);`).toArray().map((c: any) => c.name);
+			expect(deLosEnlaces).toContain("por_un_cambio");
+			// El enlace que ya había cuenta como de la confirmación; el de un cambio, como de un cambio.
+			expect(reservaDelEnlace(sql, "h-vieja", Date.now())).toEqual({ id_reserva: "r-vieja", por_un_cambio: false });
+			apuntarEnlace(sql, "r-vieja", "h-cambio", Date.now() + 86_400_000);
+			expect(reservaDelEnlace(sql, "h-cambio", Date.now())).toEqual({ id_reserva: "r-vieja", por_un_cambio: true });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
+			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A, red: CONEXION_B })).ok).toBe(true);
 			// Prepararla otra vez no cambia nada.
 			prepararAlmacen(sql);
 		});

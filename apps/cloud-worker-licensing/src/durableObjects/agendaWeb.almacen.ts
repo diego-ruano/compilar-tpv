@@ -23,10 +23,12 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
  *   3. `intentos`: lo que contestó cada alta del widget, por su `Idempotency-Key` (la crea `ESQUEMA`).
  *   4. `peticiones.aviso_ms`: el último intento del correo de una fallida que no salió.
- *   5. `altas_por_conexion`: el tope de altas por conexión (RW-ALTAS; la crea `ESQUEMA`), y
- *      `enlaces.por_un_cambio`: el enlace llegó en el correo de un cambio del restaurante.
+ *   5. `altas_por_conexion`: el tope de altas por conexión (RW-ALTAS; la crea `ESQUEMA`).
+ *   6. `enlaces.por_un_cambio`: el enlace llegó en el correo de un cambio del restaurante. Va en su
+ *      propia versión porque hubo una 5 sólo con `altas_por_conexion`: una agenda que se quedó en
+ *      ella no tiene la columna (RW-ALTAS).
  */
-const VERSION_AGENDA = 5;
+const VERSION_AGENDA = 6;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
@@ -146,7 +148,7 @@ function migrar(sql: SqlStorage): void {
 		if (!columnas.has("codigo")) sql.exec(`ALTER TABLE peticiones ADD COLUMN codigo TEXT;`);
 	}
 	if (version < 4 && !columnas.has("aviso_ms")) sql.exec(`ALTER TABLE peticiones ADD COLUMN aviso_ms INTEGER;`);
-	if (version < 5) {
+	if (version < 6) {
 		const deLosEnlaces = new Set(sql.exec(`PRAGMA table_info(enlaces);`).toArray().map((c: any) => String(c.name)));
 		// Los que ya había no se sabe por dónde llegaron: cuentan como de la confirmación.
 		if (!deLosEnlaces.has("por_un_cambio")) {
