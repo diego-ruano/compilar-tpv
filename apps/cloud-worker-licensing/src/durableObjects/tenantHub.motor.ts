@@ -550,13 +550,15 @@ export class MotorTenantHub {
 	 * DO-PERDIDA · Una base vacía para un negocio que ya nació y la ha perdido
 	 * (`/v1/admin/negocios/base-vacia`). Es el alta (`aprovisionar`: el esquema, el sello y el
 	 * administrador inicial), y además abre el log por encima de lo que la Main pueda haber visto,
-	 * como tras una vuelta a un instante. Que el negocio nació lo mira la ruta en la base central.
+	 * como tras una vuelta a un instante. Que el negocio nació lo mira la ruta en la base central, y
+	 * hasta dónde numeró el log que se perdió (`seqConocido`), también: el objeto ya no lo sabe.
 	 */
 	async crearBaseVacia(params: {
 		tenantId: string;
 		modo: ModoDeVuelta;
+		seqConocido?: number;
 	}): Promise<ResultadoDeAdministracion<BaseDevuelta>> {
-		return this.darBase(params.tenantId, "base_vacia", params.modo, async () => {
+		return this.darBase(params.tenantId, "base_vacia", params.modo, params.seqConocido, async () => {
 			await this.crearBase(params.tenantId);
 			return {};
 		});
@@ -572,13 +574,14 @@ export class MotorTenantHub {
 		tenantId: string;
 		clave: string;
 		modo: ModoDeVuelta;
+		seqConocido?: number;
 	}): Promise<ResultadoDeAdministracion<CopiaRestaurada>> {
 		const { tenantId, clave } = params;
 		if (!tenantId || !clave.startsWith(prefijoDeCopias(tenantId))) {
 			return { ok: false, error: "copia_de_otro_negocio", status: 400 };
 		}
 		try {
-			return await this.darBase(tenantId, "copia", params.modo, async () => {
+			return await this.darBase(tenantId, "copia", params.modo, params.seqConocido, async () => {
 				const objeto = await this.env.COPIAS_NEGOCIOS.get(clave);
 				if (!objeto) throw new HubError("copia_no_encontrada", 404);
 				const storage = this.state.storage;
@@ -605,9 +608,13 @@ export class MotorTenantHub {
 	 * - **Todo o nada**: si `llenar` falla, el objeto se vacía otra vez (`vaciarObjeto`), y si la
 	 *   instancia se pierde a mitad, la marca se queda puesta y la base cerrada; la siguiente llamada
 	 *   a esto la ve sin nadie que la esté llenando y vacía lo que dejó antes de empezar.
-	 * - **El log se abre por encima** (`abrirLogTrasVolver`, con `seqAntes` = 0: un objeto vacío no
-	 *   recuerda hasta dónde numeró, y para eso está `SALTO_DE_SEQ`). La Main tiene un checkpoint de
-	 *   la base perdida; sin esto se quedaría sin los cambios que la nueva numere por debajo.
+	 * - **El log se abre por encima** (`abrirLogTrasVolver`). La Main tiene un checkpoint de la base
+	 *   perdida; sin esto se quedaría sin los cambios que la nueva numere por debajo. Un objeto vacío no
+	 *   recuerda hasta dónde numeró, así que lo dice quien llama (`seqConocido`: lo que sobrevive a la
+	 *   pérdida, en la base central y en las copias de R2, `basesDeNegocios.ts`), y encima va
+	 *   `SALTO_DE_SEQ`, que cubre lo que el log perdido numeró después. Sin `seqConocido` (0), sólo
+	 *   vale para una base que nunca había vuelto: tras otra pérdida o una vuelta, el log perdido
+	 *   ya numeraba por encima del salto.
 	 * - **Al acabar se echa otra vez a las sesiones**: una que entró mientras se llenaba la base
 	 *   saludó sin la petición de subida.
 	 */
@@ -615,6 +622,7 @@ export class MotorTenantHub {
 		tenantId: string,
 		operacion: "base_vacia" | "copia",
 		modo: ModoDeVuelta,
+		seqConocido: number | undefined,
 		llenar: () => Promise<T>,
 	): Promise<ResultadoDeAdministracion<T & BaseDevuelta>> {
 		if (this.dandoBase) return { ok: false, error: "tenant_db_restaurando", status: 503 };
@@ -642,7 +650,7 @@ export class MotorTenantHub {
 			try {
 				lleno = await llenar();
 				log = abrirLogTrasVolver(storage, {
-					seqAntes: 0,
+					seqAntes: seqConocido ?? 0,
 					modo,
 					opId: `nube-devuelta-${nuevoId()}`,
 					ahoraMs: Date.now(),

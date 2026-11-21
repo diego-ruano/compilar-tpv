@@ -110,9 +110,14 @@ export class TenantHub extends DurableObject<Env> {
 
 	/**
 	 * DO-PERDIDA · Darle base a un objeto vacío de un negocio que ya nació (administración,
-	 * `domains/admin/basesDeNegocios.ts`): una vacía, o la de una copia diaria de R2.
+	 * `domains/admin/basesDeNegocios.ts`): una vacía, o la de una copia diaria de R2. `seqConocido`
+	 * es hasta dónde numeró el log que se perdió, según lo que sobrevive al objeto.
 	 */
-	crearBaseVacia(params: { tenantId: string; modo: ModoDeVuelta }): Promise<ResultadoDeAdministracion<BaseDevuelta>> {
+	crearBaseVacia(params: {
+		tenantId: string;
+		modo: ModoDeVuelta;
+		seqConocido?: number;
+	}): Promise<ResultadoDeAdministracion<BaseDevuelta>> {
 		return this.motor.crearBaseVacia(params);
 	}
 
@@ -120,6 +125,7 @@ export class TenantHub extends DurableObject<Env> {
 		tenantId: string;
 		clave: string;
 		modo: ModoDeVuelta;
+		seqConocido?: number;
 	}): Promise<ResultadoDeAdministracion<CopiaRestaurada>> {
 		return this.motor.restaurarDesdeCopia(params);
 	}

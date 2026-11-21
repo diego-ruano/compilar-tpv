@@ -76,7 +76,8 @@ gunzip -c copia.sql.gz | sqlite3 copia.db
 
 No trae el log de la réplica, ni el sello del negocio, ni el resumen de las estadísticas, ni los
 intentos de PIN: sólo lo que es del negocio. Tampoco las vistas ni los disparadores, que son del
-esquema y los ponen las migraciones.
+esquema y los ponen las migraciones. Hasta dónde había numerado el log sí va, en los metadatos del
+objeto (`seq`), para abrir por encima el de una base devuelta.
 
 ## Un negocio que ha perdido su base (DO-PERDIDA)
 
@@ -106,7 +107,10 @@ pnpm negocio:base-vacia -- --tenant <tenantId> --modo main --motivo "…"
 ```
 
 En las dos, el log de la réplica se abre por encima de lo que la Main pueda haber visto, como tras una
-vuelta a un instante, y `--modo` dice quién manda después:
+vuelta a un instante. El objeto vacío ya no sabe hasta dónde numeró, así que la ruta lo saca de lo que
+sobrevive: el `inicio` de los logs que se le abrieron antes (en `admin_audit`) y el `seq` de sus
+copias de R2; la respuesta lo trae como `seqConocido`. Por eso las dos necesitan que contesten la base
+central y R2. `--modo` dice quién manda después:
 
 - **`main`**: la Main sigue con su base, se pone al día, sube lo que tenga pendiente y después sube su
   base entera ([la subida completa](#la-subida-completa-de-la-main-do-subida)).

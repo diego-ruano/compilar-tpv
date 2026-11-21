@@ -666,8 +666,9 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
 - **El log se abre por encima de todo lo numerado** (`abrirLogTrasVolver`). La nube vuelta numeraría
   otra vez desde el `Seq` del instante, y la Main, que pide desde su checkpoint, se saltaría para
   siempre lo nuevo con un número que ya ha visto. Se escribe un cambio vacío (`nube_devuelta`, sin
-  sentencias) con el `Seq` más alto que se sabía más `SALTO_DE_SEQ` (diez millones: cubre también un
-  objeto que lo ha perdido todo y no recuerda hasta dónde numeró). Con `modo: "nube"`, además, lo
+  sentencias) con el `Seq` más alto que se sabía más `SALTO_DE_SEQ` (diez millones). Lo que se sabía
+  es lo que la nube había numerado (`seqAntes`, que `prepararVuelta` lee antes de volver) y lo que la
+  ruta saca de fuera del objeto (`seqConocido`, abajo). Con `modo: "nube"`, además, lo
   purgado se pone justo debajo, por encima de cualquier checkpoint, y cada Main aparta su base y se
   trae la nube (SYNC-32); con `main`, la Main sigue y sube su base entera (DO-SUBIDA, abajo)
   ([recuperacion.md](recuperacion.md#cuando-la-nube-vuelve-atrás-do-03)). Después de abrir el log se
@@ -700,9 +701,16 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   apagadas, y echan a las sesiones. **Todo o nada**: si algo falla, el objeto se vacía otra vez
   (también la alarma); si el objeto se reinicia a mitad, la marca se queda y la base cerrada, y la
   siguiente llamada a cualquiera de las dos vacía lo que quedó antes de empezar.
-- **El log se abre por encima** (`abrirLogTrasVolver` con `seqAntes` = 0: el objeto vacío no recuerda
-  hasta dónde numeró, y para eso está `SALTO_DE_SEQ`), con el mismo `modo` que la vuelta a un
-  instante. Después se echa otra vez a todas las sesiones, como en `trasVolver`: el saludo no mira
+- **El log se abre por encima** (`abrirLogTrasVolver`), con el mismo `modo` que la vuelta a un
+  instante. El objeto vacío no recuerda hasta dónde numeró, y `SALTO_DE_SEQ` solo no basta: tras otra
+  pérdida o una vuelta, el log perdido ya numeraba por encima del salto, y la Main, con el checkpoint
+  por encima del log nuevo, no bajaría lo que éste numerase por debajo (con `nube`, lo purgado tampoco
+  le quedaría encima y no se traería la nube). Así que la ruta le pasa `seqConocido`, de lo que
+  sobrevive a perder el objeto: el `inicio` más alto de los logs que se le han abierto (cada vuelta y
+  cada base devuelta lo dejan en `admin_audit`) y el `seq` de sus copias de R2 (`seqMasAlto` al
+  copiar, en los metadatos del objeto). El salto va encima y cubre lo que el log perdido numeró
+  después. Sin la base central o R2 no se abre nada. La vuelta a un instante lo suma también a su
+  `seqAntes`. Después se echa otra vez a todas las sesiones, como en `trasVolver`: el saludo no mira
   la marca, y una que entró mientras se llenaba la base saludó sin la petición de subida. Luego, la
   copia diaria armada.
 

@@ -17,7 +17,9 @@
 //   · **Sólo las tablas del negocio** (`esTablaDeNegocio`, la misma lista que el volcado de la
 //     recuperación): ni las que empiezan por `_` (el sello, la Main vigente, el resumen de las
 //     estadísticas, `_migrations`), ni el andamiaje de la réplica (`Sync_Changes`,
-//     `Applied_Operations`, `Sync_Main_Checkpoints`), ni el freno del PIN.
+//     `Applied_Operations`, `Sync_Main_Checkpoints`), ni el freno del PIN. Del log sólo va hasta
+//     dónde numeró (`seq`, en los metadatos del objeto de R2): sobrevive a perder el objeto, y es con
+//     lo que se abre por encima el log de una base devuelta (DO-PERDIDA, `seqDeLasCopias`).
 //   · **Legible sin nuestro código**: es un volcado SQL comprimido con gzip, como el de la base
 //     central (`server/copiaBaseCentral.ts`). `gunzip -c copia.sql.gz | sqlite3 copia.db` la abre.
 //     Cada sentencia de datos va en una línea (un salto de línea dentro de un texto se escribe como
@@ -31,6 +33,7 @@
 import { constants, crc32, deflateRawSync } from "node:zlib";
 
 import { esTablaDeNegocio } from "../domains/sync/bootstrap.ventana";
+import { seqMasAlto } from "./tenantHub.instante";
 
 /** Dónde caen las copias de los negocios dentro de su bucket: `negocios/<negocio>/<día>.sql.gz`. */
 export const PREFIJO_COPIAS_NEGOCIOS = "negocios/";
@@ -80,6 +83,12 @@ export type VolcadoDelNegocio = {
 	bytesSinComprimir: number;
 	/** Las migraciones aplicadas a la base, en orden: con qué esquema se hizo. */
 	migraciones: string[];
+	/**
+	 * DO-PERDIDA · El `Seq` más alto que sabía la base al copiarla (`seqMasAlto`). El log no va en la
+	 * copia, pero hasta dónde numeró sí, en sus metadatos (`seqDeLasCopias`): sobrevive a perder el
+	 * objeto, y es parte de lo que dice desde dónde abrir el log de su base nueva.
+	 */
+	seq: number;
 };
 
 /**
@@ -96,6 +105,7 @@ export function volcarNegocio(
 	const migraciones = (sql.exec("SELECT name FROM _migrations ORDER BY rowid;").toArray() as { name: string }[]).map(
 		(f) => String(f.name),
 	);
+	const seq = seqMasAlto(sql);
 	const esquema = sql
 		.exec("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY rowid;")
 		.toArray() as { type: string; name: string; tbl_name: string; sql: string }[];
@@ -123,7 +133,7 @@ export function volcarNegocio(
 	gz.linea("COMMIT;");
 
 	const { gzip, bytesSinComprimir } = gz.cerrar();
-	return { gzip, tablas: tablas.length, filas, bytesSinComprimir, migraciones };
+	return { gzip, tablas: tablas.length, filas, bytesSinComprimir, migraciones, seq };
 }
 
 /** Las filas de una tabla, una sentencia por línea. El cursor se recorre entero (worker.md). */
@@ -271,6 +281,7 @@ export async function subirCopia(
 			filas: String(volcado.filas),
 			sinComprimir: String(volcado.bytesSinComprimir),
 			ultimaMigracion: volcado.migraciones.at(-1) ?? "",
+			seq: String(volcado.seq),
 		},
 		// R2 recalcula el hash al recibirlo y rechaza la subida si no coincide.
 		sha256: await crypto.subtle.digest("SHA-256", volcado.gzip),
@@ -302,6 +313,27 @@ export async function listarCopias(bucket: R2Bucket, tenantId: string): Promise<
 	} while (cursor);
 	// Las claves llevan el día con ceros delante: el orden de las letras es el de las fechas.
 	return copias.sort((a, b) => (a.clave < b.clave ? 1 : a.clave > b.clave ? -1 : 0));
+}
+
+/**
+ * DO-PERDIDA · El `Seq` más alto que dicen las copias de un negocio (el `seq` de sus metadatos, que
+ * apunta `subirCopia`), o 0 si ninguna lo dice. Lo lee la administración antes de abrir el log de
+ * una base devuelta (`basesDeNegocios.ts`): un objeto que lo ha perdido todo no recuerda hasta dónde
+ * numeró, y sus copias sí.
+ */
+export async function seqDeLasCopias(bucket: R2Bucket, tenantId: string): Promise<number> {
+	const prefix = prefijoDeCopias(tenantId);
+	let maximo = 0;
+	let cursor: string | undefined;
+	do {
+		const pagina = await bucket.list({ prefix, cursor, limit: 1000, include: ["customMetadata"] });
+		for (const o of pagina.objects) {
+			const seq = Number(o.customMetadata?.seq);
+			if (Number.isSafeInteger(seq) && seq > maximo) maximo = seq;
+		}
+		cursor = pagina.truncated ? pagina.cursor : undefined;
+	} while (cursor);
+	return maximo;
 }
 
 /**

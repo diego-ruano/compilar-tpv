@@ -71,9 +71,11 @@ export type ModoDeVuelta = "nube" | "main";
 
 /**
  * Cuánto se salta el log tras volver. Basta con pasar de lo que la nube ha numerado nunca, que se
- * lee antes de volver (`seqMasAlto`); el salto es para cuando no se puede leer: un objeto vacío (su
- * base se perdió) no recuerda hasta dónde numeró, y la Main sí. Diez millones de cambios son años de
- * un bar con mucho movimiento, y la vuelta llega como mucho a 30 días.
+ * lee antes de volver (`seqMasAlto`); el salto es para lo que no se puede leer. Un objeto vacío (su
+ * base se perdió) no recuerda hasta dónde numeró, y la Main sí: lo que se sabe de fuera del objeto
+ * (`seqConocido` en `basesDeNegocios.ts`: el inicio de cada log abierto y lo que dicen las copias) se
+ * queda corto en lo que el log perdido numeró después, y eso es lo que cubre el salto. Diez millones
+ * de cambios son años de un bar con mucho movimiento, y la vuelta llega como mucho a 30 días.
  */
 export const SALTO_DE_SEQ = 10_000_000;
 

@@ -19,8 +19,10 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { PURGADO_HASTA } from "../src/domains/sync/cambiosJson";
+import { leerPaginaDeCambios } from "../src/domains/sync/sync.routes";
 import { claveDeCopia } from "../src/durableObjects/tenantHub.copia";
 import { SALTO_DE_SEQ } from "../src/durableObjects/tenantHub.instante";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 let dbDePruebas: unknown = null;
 
@@ -168,7 +170,14 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		});
 
 		expect(r.restaurada.status).toBe(200);
-		expect(r.restaurada.body).toMatchObject({ ok: true, clave: claveDeCopia(t, hoy()), inicio: SALTO_DE_SEQ, purgadoHasta: null });
+		// La copia dice hasta dónde numeró su base (el 70), y el log se abre por encima.
+		expect(r.restaurada.body).toMatchObject({
+			ok: true,
+			clave: claveDeCopia(t, hoy()),
+			seqConocido: 70,
+			inicio: 70 + SALTO_DE_SEQ,
+			purgadoHasta: null,
+		});
 		expect(r.restaurada.body.filas).toBeGreaterThan(5);
 		expect(r.otraVez).toMatchObject({ status: 409, body: { error: "tenant_db_already_provisioned" } });
 		expect(r.auditoria).toEqual(["negocio_restaurar_copia"]);
@@ -178,13 +187,79 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			expect(foto(sql)).toEqual(antes);
 			// El log de la réplica no venía en la copia: sólo el cambio vacío que lo abre.
 			expect(sql.exec("SELECT Seq, Command_Name FROM Sync_Changes;").toArray()).toEqual([
-				{ Seq: SALTO_DE_SEQ, Command_Name: "nube_devuelta" },
+				{ Seq: 70 + SALTO_DE_SEQ, Command_Name: "nube_devuelta" },
 			]);
 			expect(sql.exec("SELECT ID_Negocio FROM _Negocio;").one().ID_Negocio).toBe(t);
 			expect(Number(sql.exec("PRAGMA foreign_keys;").one().foreign_keys)).toBe(1);
 			expect(await hub.state.storage.getAlarm()).toBeGreaterThan(Date.now());
 		});
 		expect(await stub(t).leerParaLaWeb(t, { que: "plano" })).toMatchObject({ ok: true });
+	});
+
+	it("tras otra pérdida el log nuevo se abre por encima del perdido, que la Main ya ha bajado (DO-PERDIDA)", async () => {
+		const t = "perdida-dos-veces";
+		const r = await conCentral("perdida-central-dos-veces", async (central) => {
+			central.nacer(t);
+			const primera = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
+			// La base nueva numera lo que escriben las Handy, y la Main lo baja: su checkpoint ya pasa del salto.
+			const checkpoint = await enElHub(t, (hub: any) => {
+				const sql = hub.state.storage.sql;
+				for (let i = 1; i <= 5; i++) {
+					sql.exec(
+						"INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?, 'x', '[]', 'una-handy', 1);",
+						`op-${i}`,
+					);
+				}
+				const ultimo = Number(sql.exec("SELECT MAX(Seq) AS s FROM Sync_Changes;").one().s);
+				sql.exec("INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms) VALUES ('la-main', ?, 1);", ultimo);
+				return ultimo;
+			});
+			// Y se vuelve a perder, antes de que le dé tiempo a hacer una copia.
+			await stub(t).borrarTodo();
+			const segunda = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "otra vez" });
+			// Una Handy escribe en la base de ahora, y la Main pide desde su checkpoint.
+			const pagina = await enElHub(t, (hub: any) => {
+				hub.state.storage.sql.exec(
+					"INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES ('op-handy', 'x', '[]', 'una-handy', 2);",
+				);
+				return leerPaginaDeCambios(clienteLocal(hub.state.storage), checkpoint, 100);
+			});
+			return { primera, checkpoint, segunda, pagina };
+		});
+
+		expect(r.checkpoint).toBe(SALTO_DE_SEQ + 5);
+		// La Main baja el cambio que abre el log y lo de la Handy: nada queda por debajo de su checkpoint.
+		expect(r.pagina.items.map((c: any) => [Number(c.Seq), c.Op_Id])).toEqual([
+			[2 * SALTO_DE_SEQ, expect.stringMatching(/^nube-devuelta-/)],
+			[2 * SALTO_DE_SEQ + 1, "op-handy"],
+		]);
+		// Lo que se perdió lo dice la base central: el inicio del log anterior, en `admin_audit`.
+		expect(r.primera.body).toMatchObject({ ok: true, seqConocido: 0, inicio: SALTO_DE_SEQ });
+		expect(r.segunda.body).toMatchObject({ ok: true, seqConocido: SALTO_DE_SEQ, inicio: 2 * SALTO_DE_SEQ });
+	});
+
+	it("la copia dice hasta dónde numeró su base, y restaurarla abre el log por encima aunque la base central no lo sepa", async () => {
+		const t = "perdida-copia-numerada";
+		// Una base que ya venía de otra vuelta: numera por encima de varios saltos, y la Main con ella.
+		const numerado = 3 * SALTO_DE_SEQ + 7;
+		await stub(t).aprovisionar(t);
+		await enElHub(t, (hub: any) => {
+			const sql = hub.state.storage.sql;
+			sql.exec("INSERT INTO Sync_Changes (Seq, Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES (?, 'op-x', 'x', '[]', 1);", numerado - 2);
+			sql.exec("INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms) VALUES ('la-main', ?, 1);", numerado);
+		});
+		expect(await runDurableObjectAlarm(stub(t))).toBe(true);
+		const metadatos = (await bucket.head(claveDeCopia(t, hoy())))?.customMetadata;
+		await stub(t).borrarTodo();
+
+		// Sin rastro en la base central: lo sabe sólo la copia.
+		const r = await conCentral("perdida-central-copia-numerada", async (central) => {
+			central.nacer(t);
+			return pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
+		});
+		expect(r.body).toMatchObject({ ok: true, inicio: numerado + SALTO_DE_SEQ, purgadoHasta: numerado + SALTO_DE_SEQ - 1 });
+		expect(r.body.seqConocido).toBe(numerado);
+		expect(metadatos?.seq).toBe(String(numerado));
 	});
 
 	it("una copia cortada o de otra versión no se restaura y el objeto se queda vacío", async () => {

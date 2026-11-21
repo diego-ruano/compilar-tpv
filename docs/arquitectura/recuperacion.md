@@ -498,7 +498,9 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
 - **Ninguna Main se salta nada.** La nube vuelta numeraría otra vez desde el `Seq` del instante, por
   debajo del checkpoint de la Main, que pide «desde mi checkpoint». Por eso, al volver, la nube abre
   el log con un cambio vacío muy por encima de todo lo que llegó a numerar: lo nuevo llega siempre
-  por encima del checkpoint de cualquier Main.
+  por encima del checkpoint de cualquier Main. Un objeto que lo ha perdido todo no sabe hasta dónde
+  numeró: lo saben la base central (el inicio de cada log que se le abrió) y sus copias de R2, y eso
+  es lo que se usa ([worker.md](worker.md#las-copias-de-la-base-de-cada-negocio-do-03)).
 - **Con `nube` (la nube del instante es la buena)**, lo purgado queda justo debajo de ese cambio, por
   encima de cualquier checkpoint. La Main lo ve en su sesión normal como una base anterior a la nube
   ([arriba](#una-base-anterior-a-lo-que-guarda-la-nube-sync-32)): para sin aplicar ni subir nada,

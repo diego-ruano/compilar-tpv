@@ -58,7 +58,7 @@ async function pedir(ruta: string, cuerpo: unknown, token: string | null = TOKEN
 	return { status: res.status, body: (await res.json()) as any };
 }
 
-type Central = { auditoria: () => any[]; nacer: (t: string) => void };
+type Central = { auditoria: () => any[]; nacer: (t: string) => void; apuntar: (action: string, detail: unknown) => void };
 
 /**
  * Corre `cuerpo` con la base central sobre el SQLite de un DO aparte, con `admin_audit` vacía, y
@@ -84,6 +84,13 @@ async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promi
 					`lic-${t}`,
 					`hash-${t}`,
 					t,
+				),
+			apuntar: (action: string, detail: unknown) =>
+				sql.exec(
+					"INSERT INTO admin_audit (audit_id, action, license_id, detail, at_ms) VALUES (?, ?, NULL, ?, 1);",
+					crypto.randomUUID(),
+					action,
+					JSON.stringify(detail),
 				),
 		});
 	});
@@ -368,6 +375,21 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			expect(deshecho.body).toMatchObject({ ok: true, destino: "m-deshacer", inicio: seqAntes + 2 * SALTO_DE_SEQ });
 		});
 	}
+
+	it("abre por encima también de lo que numeró una base anterior del negocio, que el objeto no recuerda (DO-PERDIDA)", async () => {
+		const t = "instante-tras-perdida";
+		await negocioConDatos(t);
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, []));
+		// El negocio ya perdió una base, cuyo log se abrió en el 5·salto: la Main puede ir por ahí.
+		const anterior = 5 * SALTO_DE_SEQ;
+		const r = await conCentral("copias-central-instante-tras-perdida", async (central) => {
+			central.apuntar("negocio_base_vacia", { tenantId: t, modo: "main", inicio: anterior, purgadoHasta: null });
+			central.apuntar("negocio_base_vacia", { tenantId: "otro-negocio", modo: "main", inicio: 9 * SALTO_DE_SEQ });
+			return pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+		});
+		expect(r.status).toBe(200);
+		expect(r.body).toMatchObject({ ok: true, seqAntes: 1, seqConocido: anterior, inicio: anterior + SALTO_DE_SEQ });
+	});
 
 	it("mientras la vuelta está preparada la base no atiende a nadie, y sin volver no se abre el log", async () => {
 		const t = "instante-cerrado";

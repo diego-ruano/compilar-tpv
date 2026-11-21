@@ -17,6 +17,10 @@
 // (`lib/basePerdida.ts`): la activación y `/v1/sync/initialize-empty` se niegan a crearla, a
 // propósito, y esto es hacerlo a sabiendas. Sólo con un negocio nacido y un objeto vacío.
 //
+// Las tres que abren el log de la réplica (la vuelta a un instante y las dos de DO-PERDIDA) le dicen
+// al objeto hasta dónde numeraron los logs de antes, que un objeto vacío no recuerda (`seqConocido`):
+// el `inicio` que cada una deja en `admin_audit` y el `seq` de las copias de R2.
+//
 // Todo va por POST con el negocio en el cuerpo, como el resto de la administración que lleva datos.
 // Lo que cambia algo deja rastro en `admin_audit` (con el motivo) y en Axiom (sin él: es texto
 // libre).
@@ -32,7 +36,7 @@ import { cuerpo } from "../../lib/validacion";
 import { ingestToAxiom } from "../../observability/axiom";
 import { auditAdmin } from "../../server/licenseStore";
 import { getDb } from "../../server/db";
-import { claveDeCopia, listarCopias } from "../../durableObjects/tenantHub.copia";
+import { claveDeCopia, listarCopias, seqDeLasCopias } from "../../durableObjects/tenantHub.copia";
 import { zDia } from "../../lib/fechas";
 import { VENTANA_DE_VUELTA_MS, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
 import type { VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
@@ -57,6 +61,33 @@ async function rastro(env: Env, evento: string, campos: Record<string, unknown>)
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
 	if (!dataset) return;
 	await ingestToAxiom(env, dataset, [{ _time: new Date().toISOString(), service: "tpv-api", event: evento, ...campos }]);
+}
+
+/** Lo que apunta en `admin_audit`, con el `inicio` del log que abrió, cada vez que se abre un log. */
+const AL_ABRIR_UN_LOG = ["negocio_volver_a_instante", "negocio_restaurar_copia", "negocio_base_vacia"] as const;
+
+/**
+ * DO-PERDIDA · Hasta dónde ha numerado nunca el log de este negocio, según lo que sobrevive a perder
+ * su objeto: el `inicio` más alto de los logs que se le han abierto desde aquí (cada uno lo deja en
+ * `admin_audit`) y el `seq` de sus copias de R2 (`seqDeLasCopias`). Lo que un log numeró después de
+ * eso lo cubre `SALTO_DE_SEQ`, que va encima (`abrirLogTrasVolver`).
+ *
+ * Sin esto, un objeto vacío abriría el log en `SALTO_DE_SEQ` justo: bien la primera vez que se
+ * pierde, pero tras otra pérdida o una vuelta a un instante el log perdido ya numeraba por encima
+ * del salto, y la Main, con el checkpoint por encima del log nuevo, no bajaría lo que éste numerase
+ * por debajo (con `nube`, ni vería que tiene que traerse la nube). Lanza si la base central o R2 no
+ * contestan: sin saberlo no se abre ningún log.
+ */
+async function seqConocido(env: Env, tenantId: string): Promise<number> {
+	const [auditado, deLasCopias] = await Promise.all([
+		getDb(env).execute({
+			sql: `SELECT MAX(CAST(json_extract(detail, '$.inicio') AS INTEGER)) AS seq FROM admin_audit
+			      WHERE action IN (SELECT value FROM json_each(?1)) AND json_extract(detail, '$.tenantId') = ?2;`,
+			args: [JSON.stringify(AL_ABRIR_UN_LOG), tenantId],
+		}),
+		seqDeLasCopias(env.COPIAS_NEGOCIOS, tenantId),
+	]);
+	return Math.max(Number((auditado.rows[0] as { seq?: unknown } | undefined)?.seq ?? 0) || 0, deLasCopias);
 }
 
 basesDeNegociosRoutes.post("/estado", cuerpo(negocioSchema), async (c) => {
@@ -143,6 +174,10 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 		);
 	}
 
+	// DO-PERDIDA: lo que la base actual numeró lo lee `prepararVuelta`; esto es lo de las anteriores, si
+	// la Main todavía tiene el checkpoint de una (no ha conectado desde que se perdió). Antes de tocar
+	// nada: sin saberlo, no se vuelve.
+	const conocido = await seqConocido(env, tenantId);
 	const hub = () => hubDe(env, tenantId);
 	const prep = await hub().prepararVuelta({ tenantId, instanteMs, marcador });
 	if (!prep.ok) {
@@ -153,15 +188,17 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 		return c.json({ ok: false, error: prep.error, ...(message ? { message } : {}) }, prep.status as 500);
 	}
 
-	let tras = await reiniciarYAbrir(hub, { tenantId, seqAntes: prep.seqAntes, modo });
+	const seqAntes = Math.max(prep.seqAntes, conocido);
+	let tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
 	if (!tras.ok && tras.error === "vuelta_sin_aplicar") {
-		tras = await reiniciarYAbrir(hub, { tenantId, seqAntes: prep.seqAntes, modo });
+		tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
 	}
 
 	const resultado = {
 		tenantId,
 		modo,
 		instanteMs: instanteMs ?? null,
+		seqConocido: conocido,
 		...soloLoPreparado(prep),
 		...(tras.ok ? soloLoAplicado(tras) : { error: tras.error }),
 	};
@@ -257,10 +294,20 @@ basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c
 	if (!clave) {
 		return c.json({ ok: false, error: "copia_no_encontrada", message: "Este negocio no tiene ninguna copia." }, 404);
 	}
-	const r = await hubDe(env, tenantId).restaurarDesdeCopia({ tenantId, clave, modo });
+	const conocido = await seqConocido(env, tenantId);
+	const r = await hubDe(env, tenantId).restaurarDesdeCopia({ tenantId, clave, modo, seqConocido: conocido });
 	if (!r.ok) return c.json({ ok: false, error: r.error, clave }, r.status as 409);
 
-	const resultado = { tenantId, modo, clave: r.clave, filas: r.filas, tablas: r.tablas, inicio: r.inicio, purgadoHasta: r.purgadoHasta };
+	const resultado = {
+		tenantId,
+		modo,
+		clave: r.clave,
+		filas: r.filas,
+		tablas: r.tablas,
+		seqConocido: conocido,
+		inicio: r.inicio,
+		purgadoHasta: r.purgadoHasta,
+	};
 	await auditAdmin(getDb(env), "negocio_restaurar_copia", null, { ...resultado, motivo });
 	await rastro(env, "base_restaurada_de_copia", resultado);
 	return c.json({ ok: true, ...resultado, queHacer: queHacerTrasDarBase(modo) });
@@ -291,10 +338,11 @@ basesDeNegociosRoutes.post("/base-vacia", cuerpo(baseSchema), async (c) => {
 	const { tenantId, modo, motivo } = c.req.valid("json");
 	if (!(await negocioNacido(getDb(env), tenantId))) return c.json(sinNacer(tenantId), 409);
 
-	const r = await hubDe(env, tenantId).crearBaseVacia({ tenantId, modo });
+	const conocido = await seqConocido(env, tenantId);
+	const r = await hubDe(env, tenantId).crearBaseVacia({ tenantId, modo, seqConocido: conocido });
 	if (!r.ok) return c.json({ ok: false, error: r.error }, r.status as 409);
 
-	const resultado = { tenantId, modo, inicio: r.inicio, purgadoHasta: r.purgadoHasta };
+	const resultado = { tenantId, modo, seqConocido: conocido, inicio: r.inicio, purgadoHasta: r.purgadoHasta };
 	await auditAdmin(getDb(env), "negocio_base_vacia", null, { ...resultado, motivo });
 	await rastro(env, "base_vacia_creada", resultado);
 	return c.json({ ok: true, ...resultado, queHacer: queHacerTrasDarBase(modo) });
