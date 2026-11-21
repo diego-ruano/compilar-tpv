@@ -218,8 +218,11 @@ describe("DO-SUBIDA · las páginas", () => {
 			const m = await conSubida(hub, "subida-plan");
 			m.sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
 			m.sql.exec("INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('c-abierta', 'BARRA', 'Abierta', '2026-01-01 10:00:00');");
+			m.sql.exec("UPDATE _Subida_Completa SET Inicio_Seq = 10000042 WHERE Id = 1;");
 			const r = await paso(hub, m, { accion: "plan", id: "s1", clientNow: ahoraCliente(), checkpoint: 0, totales: { Zonas: 3, Clientes: 7 } });
 			expect(r.ok).toBe(true);
+			// Dónde empieza el log nuevo: lo de una cuarentena de la Main de antes se perdió con una base vacía.
+			expect(r.inicioSeq).toBe(10000042);
 			const zonas = r.tablas.find((t: any) => t.tabla === "Zonas");
 			expect(zonas).toMatchObject({ clave: ["ID_Zona"], parcial: false, politica: "upsert", parametrizada: false });
 			const pagos = r.tablas.find((t: any) => t.tabla === "Pagos");

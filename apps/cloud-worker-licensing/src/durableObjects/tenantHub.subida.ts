@@ -777,8 +777,19 @@ export function ejecutarPasoDeSubida(
 			const hastaSeq = Number((sql.exec("SELECT COALESCE(MAX(Seq), 0) AS s FROM Sync_Changes;").one() as { s: number }).s);
 			return {
 				// `dispositivo`: cómo nombra el log a esta Main. Sus borrados (lo vivo, los sobrantes) no
-				// los frena lo que ella misma escribe, sólo lo de otro.
-				respuesta: { ok: true, ventanaDias: VENTANA_DIAS, tablas, vivos, vivosIncompletos: incompletos, hastaSeq, dispositivo: deviceId },
+				// los frena lo que ella misma escribe, sólo lo de otro. `inicioSeq`: el cambio vacío que
+				// abrió el log al volver (`abrirLogTrasVolver`). Lo de una cuarentena de la Main numerado
+				// por debajo se perdió con una base vacía; lo de encima se escribió en la nube devuelta.
+				respuesta: {
+					ok: true,
+					ventanaDias: VENTANA_DIAS,
+					tablas,
+					vivos,
+					vivosIncompletos: incompletos,
+					hastaSeq,
+					dispositivo: deviceId,
+					inicioSeq: p.inicioSeq,
+				},
 				efectos: { empezada: true },
 			};
 		}

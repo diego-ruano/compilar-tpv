@@ -1114,18 +1114,18 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   no se sabe qué filas toca, lo que pasa con las tablas en las que escriben sus sentencias (y si ni
   eso se sabe, con todas) depende de si su cambio puede seguir arriba (`perdida_con_la_base`):
   - Con una copia o un instante (la base devuelta puede ser posterior al cambio), o con un cambio
-    posterior al plan (`Seq` por encima de `Hasta_Seq_Plan`: se escribió en la nube devuelta), la
-    tabla entera **se deja para el contraste** y cuenta como fallida en la pantalla. Lo que aquí está
-    y arriba falta puede ser justo lo que el cambio borró: subirlo lo resucitaba arriba, y el
-    contraste, con las dos bases iguales, ya no lo veía.
-  - Con una base vacía y un cambio anterior al plan, el cambio se perdió con la base, y sus tablas
+    del log nuevo (`Seq` desde el cambio vacío con que la nube abrió su log al volver, el
+    `inicioSeq` que da el plan y la Main guarda en `_Sync_Subida.Inicio_Seq`: se escribió en la nube
+    devuelta, también si fue antes del plan), la tabla entera **se deja para el contraste** y cuenta
+    como fallida en la pantalla. Lo que aquí está y arriba falta puede ser justo lo que el cambio
+    borró: subirlo lo resucitaba arriba, y el contraste, con las dos bases iguales, ya no lo veía.
+    Igual si el plan no dice `inicioSeq` (un worker anterior): no se sabe de qué log es el cambio.
+  - Con una base vacía y un cambio del log de antes, el cambio se perdió con la base, y sus tablas
     son **inciertas**: de ellas sólo sube lo que falta arriba (por las huellas, con su lista
     `faltan`; nunca se pisa una fila que ya está, que la escribió alguien en la nube devuelta) y no
     se pide borrar nada. En lo vivo eso es nada, porque sus claves salen de la nube. La tabla acaba
     como las demás y no cuenta como fallida; lo que difiere lo ve el contraste. Así una nube
-    devuelta con una base vacía no se queda vacía en esas tablas. El plan es la frontera que la
-    Main conoce: un cambio de otro que entrase entre la vuelta y el plan cuenta como anterior, y lo
-    que pudo borrar en la nube vacía era sólo lo que la Main ya había subido por el outbox.
+    devuelta con una base vacía no se queda vacía en esas tablas.
 
   El repaso aparta lo mismo que una página, y lo apartado sale de su lista: lo ve el contraste o lo
   trae la convergencia.

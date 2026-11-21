@@ -14,6 +14,9 @@ CREATE TABLE _Sync_Subida (
   Desde_Imprescindible TEXT,
   Desde_Reciente TEXT,
   Hasta_Seq_Plan INTEGER,
+  -- El Seq del cambio vacio con que la nube abrio su log al volver (lo dice el plan; NULL si no lo
+  -- dice, un worker anterior): lo numerado por debajo es de la base de antes.
+  Inicio_Seq INTEGER,
   -- Este equipo, como lo nombra el log de la nube: lo suyo no frena sus borrados.
   Dispositivo TEXT,
   Vivos_Incompletos INTEGER NOT NULL DEFAULT 0,

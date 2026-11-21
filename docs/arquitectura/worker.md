@@ -734,8 +734,10 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
   borrado lo pide la Main por su outbox, y pasa por AUD-36 como cualquier otro. Un registro de
   facturación sólo se inserta (`DO NOTHING`), y lo que ya está y es distinto vuelve como `fiscal` sin
   tocarse; el contador de una serie sólo sube (`Ultimo = MAX(Ultimo, excluded.Ultimo)`, política
-  `monotono`). El `plan` dice la política de cada tabla y cómo nombra el log a esa Main
-  (`dispositivo`), para que lo suyo no frene sus borrados.
+  `monotono`). El `plan` dice la política de cada tabla, cómo nombra el log a esa Main
+  (`dispositivo`), para que lo suyo no frene sus borrados, y dónde empieza el log nuevo
+  (`inicioSeq`, el cambio vacío de `abrirLogTrasVolver`), para que la Main sepa si el cambio de una
+  cuarentena suya se perdió con una base vacía o se escribió en la nube devuelta.
 - **Una página con algo que no entra** (un único, una foránea, un `CHECK`, un trigger que rechaza) se
   parte por la mitad, cada mitad con su propia lista, hasta aislar las filas, que vuelven en
   `noEntraron` con su clase; lo pasajero (la base ocupada o llena) sale tal cual. 5.000 filas y

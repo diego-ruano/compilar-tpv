@@ -9,7 +9,8 @@
 //! # Las etapas
 //!
 //! Con el `plan` que contesta la nube (sus tablas, sus columnas, la sentencia de la ventana de una
-//! recuperación de cada una y las claves de lo que allí sigue vivo) se siembra una entrada por tabla
+//! recuperación de cada una, las claves de lo que allí sigue vivo y dónde empieza su log nuevo) se
+//! siembra una entrada por tabla
 //! y fase, en este orden (`Turno`):
 //!
 //! 0. **Lo vivo de la nube** (fase 0): las comandas abiertas, el último cierre, los pedidos en
@@ -46,10 +47,12 @@
 //! - Si de ese cambio no se sabe qué filas toca, sus tablas (en las que escriben sus sentencias; si
 //!   ni eso se sabe, todas) dependen de si el cambio puede seguir arriba (`perdida_con_la_base`):
 //!   - Con una copia o un instante (la base devuelta puede ser posterior al cambio), o si el cambio
-//!     es posterior al plan (se escribió en la nube devuelta), la tabla entera se deja para el
+//!     es del log nuevo (por encima del cambio vacío con que la nube lo abrió al volver, el
+//!     `inicioSeq` del plan: se escribió en la nube devuelta), la tabla entera se deja para el
 //!     contraste y queda fallida: lo que aquí está y arriba falta puede ser justo lo que borró, y
-//!     subirlo lo resucitaba sin que el contraste viera ya ninguna diferencia.
-//!   - Con una base vacía y un cambio anterior al plan, el cambio se perdió con la base: de esas
+//!     subirlo lo resucitaba sin que el contraste viera ya ninguna diferencia. Igual si el plan no
+//!     dice dónde empieza el log nuevo (un worker anterior).
+//!   - Con una base vacía y un cambio del log de antes, el cambio se perdió con la base: de esas
 //!     tablas (**inciertas**) sólo sube lo que falta arriba, por las huellas, sin pisar nunca una
 //!     fila que ya está (la escribió alguien en la nube devuelta), y no se pide borrar nada (ni lo
 //!     vivo ni los sobrantes). En lo vivo (etapa 0) eso es nada: sus claves salen de la nube y ya
@@ -521,6 +524,8 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
     let desde_imprescindible = ahora.format("%Y-%m-%d %H:%M:%S").to_string();
     let desde_reciente = (ahora - chrono::Duration::days(ventana_dias.clamp(0, 3650))).format("%Y-%m-%d %H:%M:%S").to_string();
     let hasta_seq = plan.get("hastaSeq").and_then(Json::as_i64).unwrap_or(0);
+    // El cambio vacío con que la nube abrió su log al volver: un worker anterior no lo dice.
+    let inicio_seq = plan.get("inicioSeq").and_then(Json::as_i64).filter(|n| *n > 0);
     let incompletos = plan.get("vivosIncompletos").and_then(Json::as_bool).unwrap_or(false);
     let dispositivo = plan.get("dispositivo").and_then(Json::as_str).filter(|d| !d.is_empty() && d.len() <= 200).map(str::to_owned);
 
@@ -587,13 +592,14 @@ async fn sembrar(db: &Db, plan: &Json, ventana_dias: i64) -> AppResult<()> {
         .map_err(db_err)?;
         conn.execute(
             "UPDATE _Sync_Subida SET Desde_Imprescindible = ?1, Desde_Reciente = ?2, Hasta_Seq_Plan = ?3, \
-               Vivos_Incompletos = ?4, Dispositivo = ?5, Rechazos_Seguidos = 0 WHERE Id = 1;",
+               Vivos_Incompletos = ?4, Dispositivo = ?5, Inicio_Seq = ?6, Rechazos_Seguidos = 0 WHERE Id = 1;",
             vec![
                 Value::Text(desde_imprescindible),
                 Value::Text(desde_reciente),
                 Value::Integer(hasta_seq),
                 Value::Integer(incompletos as i64),
                 dispositivo.map_or(Value::Null, Value::Text),
+                inicio_seq.map_or(Value::Null, Value::Integer),
             ],
         )
         .await
@@ -727,21 +733,23 @@ impl Apartado {
 }
 
 /// DO-SUBIDA · SYNC-36 · Si el cambio de una cuarentena de bajada se perdió con la base de la nube:
-/// sólo cuando a la nube se le dio una base vacía y el cambio es anterior al plan (`Seq` hasta
-/// `Hasta_Seq_Plan`). Con una copia o un instante la base devuelta puede tenerlo (es posterior al
-/// cambio), y uno posterior al plan se escribió en la nube devuelta: lo que falta arriba de su tabla
-/// puede ser justo lo que borró, y subirlo lo resucitaba sin que el contraste lo viera ya. El plan es
-/// la frontera que esta Main conoce: un cambio de otro entre la vuelta y el plan cuenta como anterior,
-/// y lo que pudo borrar en la nube vacía era sólo lo que esta Main ya había subido por el outbox.
-fn perdida_con_la_base(base_vacia: bool, hasta_seq_plan: i64, seq: i64) -> bool {
-    base_vacia && hasta_seq_plan > 0 && seq <= hasta_seq_plan
+/// sólo cuando a la nube se le dio una base vacía y el cambio es de su log de antes (`Seq` por
+/// debajo de `Inicio_Seq`, el cambio vacío con que la nube abrió el log al volver, que dice el plan).
+/// Con una copia o un instante la base devuelta puede tenerlo (es posterior al cambio), y uno del log
+/// nuevo se escribió en la nube devuelta: lo que falta arriba de su tabla puede ser justo lo que
+/// borró, y subirlo lo resucitaba sin que el contraste lo viera ya. Eso vale también para lo que una
+/// Handy escribió entre la vuelta y el plan: la frontera era el plan, y eso contaba como perdido. Sin
+/// `Inicio_Seq` (un worker que no lo dice) no se sabe: no se da por perdido.
+fn perdida_con_la_base(base_vacia: bool, inicio_seq: Option<i64>, seq: i64) -> bool {
+    base_vacia && inicio_seq.is_some_and(|inicio| seq < inicio)
 }
 
 async fn apartado(conn: &Connection) -> AppResult<Apartado> {
     let mut a = Apartado::default();
-    let subida = filas(conn, "SELECT Origen, COALESCE(Hasta_Seq_Plan, 0) FROM _Sync_Subida WHERE Id = 1;", vec![]).await?;
-    let (base_vacia, hasta_seq_plan) =
-        subida.first().map_or((false, 0), |f| (texto(&f[0]).as_deref() == Some("base_vacia"), entero(&f[1])));
+    let subida = filas(conn, "SELECT Origen, Inicio_Seq FROM _Sync_Subida WHERE Id = 1;", vec![]).await?;
+    let (base_vacia, inicio_seq) = subida.first().map_or((false, None), |f| {
+        (texto(&f[0]).as_deref() == Some("base_vacia"), matches!(f[1], Value::Integer(_)).then(|| entero(&f[1])))
+    });
     for f in filas(conn, "SELECT Filas_Json, Statements_Json, Seq FROM _Sync_Failed;", vec![]).await? {
         let t = f.first().and_then(texto).map(|j| Tocadas::de_json(&j)).unwrap_or_else(|| Tocadas::incierta_de_todo(Vec::new()));
         if t.incierto {
@@ -754,7 +762,7 @@ async fn apartado(conn: &Connection) -> AppResult<Apartado> {
             } else {
                 t.tablas.clone()
             };
-            if perdida_con_la_base(base_vacia, hasta_seq_plan, f.get(2).map_or(i64::MAX, entero)) {
+            if perdida_con_la_base(base_vacia, inicio_seq, f.get(2).map_or(i64::MAX, entero)) {
                 a.todas_inciertas |= tablas.is_empty();
                 a.inciertas.extend(tablas);
             } else {

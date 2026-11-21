@@ -46,6 +46,9 @@ pub struct NubeDeSubida {
     dir: PathBuf,
     /// El final del log de la nube: lo que dice el plan y lo que piden los borrados condicionados.
     pub hasta_seq: i64,
+    /// El cambio vacío que abrió el log al volver (`inicioSeq` del plan). `None`: un worker
+    /// anterior, que no lo dice.
+    pub inicio_seq: Option<i64>,
     /// Hay algo de una Handy por encima del checkpoint de la Main: las páginas de filas se aplazan.
     pub ajeno: bool,
     /// Columnas que la nube no tiene (otra versión): no salen en el plan.
@@ -116,6 +119,7 @@ impl NubeDeSubida {
             db,
             dir,
             hasta_seq: 10_000_100,
+            inicio_seq: Some(10_000_100),
             ajeno: false,
             sin_columnas: HashMap::new(),
             cortar_tras: None,
@@ -271,7 +275,11 @@ impl NubeDeSubida {
                         vivos.insert(t.into(), Json::Array(suyas));
                     }
                 }
-                json!({"ok": true, "ventanaDias": 30, "tablas": tablas, "vivos": vivos, "vivosIncompletos": false, "hastaSeq": self.hasta_seq, "dispositivo": DISPOSITIVO})
+                let mut plan = json!({"ok": true, "ventanaDias": 30, "tablas": tablas, "vivos": vivos, "vivosIncompletos": false, "hastaSeq": self.hasta_seq, "dispositivo": DISPOSITIVO});
+                if let Some(inicio) = self.inicio_seq {
+                    plan["inicioSeq"] = json!(inicio);
+                }
+                plan
             }
             "huellas" => {
                 let cols: Vec<String> = serde_json::from_value(p["columnas"].clone()).unwrap();

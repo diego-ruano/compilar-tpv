@@ -582,7 +582,7 @@ async fn la_misma_peticion_reabierta_sigue_por_donde_iba() {
 }
 
 /// Una cuarentena de bajada en `_Sync_Failed`, con lo que se sabe de sus filas (`None`: nada), del
-/// cambio 5 de la nube: anterior al plan.
+/// cambio 5 de la nube: del log de antes de la vuelta.
 async fn cuarentena(main: &Db, op: &str, filas_json: Option<serde_json::Value>, sentencias: serde_json::Value) {
     cuarentena_en(main, op, 5, filas_json, sentencias).await;
 }
@@ -723,7 +723,7 @@ fn borrado_en_clientes() -> serde_json::Value {
     json!([{"sql": "DELETE FROM Clientes WHERE ID_Cliente IN (SELECT ID_Cliente FROM Clientes WHERE Nombre = ?1);", "args": ["Cliente ñ 7"]}])
 }
 
-/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena anterior al plan sin `Filas_Json` (no se
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena del log de antes sin `Filas_Json` (no se
 /// sabe qué filas toca) hace inciertas las tablas en las que escriben sus sentencias: de ellas sube
 /// sólo lo que falta arriba, sin pisar lo que ya está (lo de la Handy) ni pedir borrar lo que aquí
 /// falta, y la tabla no queda fallida.
@@ -776,7 +776,7 @@ async fn con_una_copia_una_cuarentena_incierta_no_resucita_lo_que_borro() {
     nube.cerrar().await;
 }
 
-/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena posterior al plan es un cambio escrito en
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena posterior al plan (del log nuevo) es un cambio escrito en
 /// la nube devuelta: su tabla entera se deja para el contraste. Lo que aquí está y arriba falta puede
 /// ser lo que borró, y subirlo lo resucitaba.
 #[tokio::test]
@@ -793,7 +793,83 @@ async fn una_cuarentena_incierta_posterior_al_plan_no_resucita_lo_que_borro() {
     nube.cerrar().await;
 }
 
-/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena anterior al plan de la que no se sabe ni
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena de un cambio que una Handy escribió en la
+/// nube devuelta antes del plan (entre la vuelta y el primer saludo de la Main, o con la subida en
+/// pausa) es del log nuevo: su tabla entera se deja para el contraste. La frontera era el plan, ese
+/// cambio contaba como perdido con la base, y lo que había borrado volvía a subir.
+#[tokio::test]
+async fn una_cuarentena_incierta_entre_la_vuelta_y_el_plan_no_resucita_lo_que_borro() {
+    let (main, _dir) = base("cuarentena-antes-del-plan").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-antes-del-plan").await;
+    let inicio = nube.inicio_seq.unwrap();
+    // El cambio de la Handy, y otro después: el plan los ve los dos.
+    cuarentena_en(&main, "op-handy", inicio + 2, None, borrado_en_clientes()).await;
+    nube.hasta_seq = inicio + 5;
+    nube.sembrar(&format!(
+        "INSERT INTO Sync_Changes (Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES
+           ({}, 'op-handy', 'x', '[]', 'handy-1', 2), ({}, 'otro', 'x', '[]', 'handy-1', 3);",
+        inicio + 2,
+        inicio + 5
+    ))
+    .await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1');").await;
+    empezar(&main, "s1", "base_vacia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Si el plan no dice dónde empieza el log nuevo (un worker anterior), no se
+/// sabe si el cambio de una cuarentena incierta se perdió con la base: su tabla se deja para el
+/// contraste, como con una copia.
+#[tokio::test]
+async fn sin_el_inicio_del_log_una_cuarentena_incierta_deja_su_tabla_para_el_contraste() {
+    let (main, _dir) = base("cuarentena-worker-viejo").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-worker-viejo").await;
+    nube.inicio_seq = None;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1');").await;
+    empezar(&main, "s1", "base_vacia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Con la vuelta a un instante, como con una copia: la nube devuelta puede tener
+/// ya el cambio de la cuarentena, y su tabla se deja para el contraste.
+#[tokio::test]
+async fn con_un_instante_una_cuarentena_incierta_no_resucita_lo_que_borro() {
+    let (main, _dir) = base("cuarentena-instante").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-instante").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1'), ('cli-0008', 'Cliente ñ 8');").await;
+    empezar(&main, "s1", "instante").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Dos cuarentenas inciertas en la misma tabla, una perdida con la base vacía y
+/// otra del log nuevo: gana la de fuera, y la tabla se deja entera para el contraste.
+#[tokio::test]
+async fn con_una_cuarentena_perdida_y_otra_del_log_nuevo_la_tabla_queda_fuera() {
+    let (main, _dir) = base("cuarentena-dos-clases").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-dos-clases").await;
+    let inicio = nube.inicio_seq.unwrap();
+    cuarentena(&main, "op-perdida", None, sentencias_en_clientes()).await;
+    cuarentena_en(&main, "op-nueva", inicio + 1, None, borrado_en_clientes()).await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1');").await;
+    empezar(&main, "s1", "base_vacia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena del log de antes de la que no se sabe ni
 /// en qué tablas escribe (sin filas ni sentencias) hace inciertas todas: sube lo que falta arriba, no
 /// pisa nada de lo que ya está ni pide borrar nada que pudiera ser suyo.
 #[tokio::test]
