@@ -1614,21 +1614,37 @@ impl SqliteSubidaCompleta {
         .into_iter()
         .next()
         .and_then(|f| leer_entrada(&f));
-        let marca = r.conn().foto(crate::contraste::leer_marca).await.map_err(db_err)?;
         let Some(e) = entrada else {
             drop(r);
             let w = self.db.write().await;
             w.raw().execute("DELETE FROM _Sync_Subida_Por_Revisar WHERE Tabla = ?1;", vec![Value::Text(tabla)]).await.map_err(db_err)?;
             return Ok(Some(PasoHecho::Avanza));
         };
-        if marca.pendientes > 0 {
-            return Ok(Some(PasoHecho::PorSubir));
-        }
         let (cols, clave) = (e.columnas.clone(), e.clave.clone());
         let cl: Vec<Vec<Json>> = claves.iter().map(|(_, k)| k.clone()).collect();
         let t = tabla.clone();
-        let encontradas = r.conn().foto(move |f| filas_por_clave(f, &t, &cols, &clave, &cl)).await.map_err(db_err)?;
+        // DO-SUBIDA (repaso) · La marca y las filas, en la misma foto, como `leer_pagina`: lo que se
+        // manda es lo de ese checkpoint con el outbox vacío. En dos fotos, una venta entre medias
+        // dejaba en el outbox un descuento de stock que la fila leída ya llevaba, y arriba se
+        // descontaba dos veces.
+        let (marca, encontradas) = r
+            .conn()
+            .foto(move |f| {
+                let marca = crate::contraste::leer_marca(f)?;
+                #[cfg(test)]
+                tests::entre_la_marca_y_las_filas();
+                if marca.pendientes > 0 {
+                    return Ok((marca, Vec::new()));
+                }
+                let encontradas = filas_por_clave(f, &t, &cols, &clave, &cl)?;
+                Ok((marca, encontradas))
+            })
+            .await
+            .map_err(db_err)?;
         drop(r);
+        if marca.pendientes > 0 {
+            return Ok(Some(PasoHecho::PorSubir));
+        }
         // DO-SUBIDA (repaso): lo que aquí ya no existe (o ya no se puede mandar) no se repasa: sale
         // de la lista sin mandar nada. Mandar una lista vacía era un rechazo permanente de la nube
         // que no movía nada, y el repaso se repetía sin fin, sin llegar nunca a `fin`.
@@ -1848,6 +1864,80 @@ impl SubidaCompleta for SqliteSubidaCompleta {
 mod tests {
     use super::*;
 
+    /// Lo que pasa en otra conexión justo después de que el repaso lea la marca (una venta que se
+    /// cuela). Se usa una vez.
+    type Escritura = Box<dyn FnOnce() + Send>;
+    static ENTRE_LA_MARCA_Y_LAS_FILAS: Mutex<Option<Escritura>> = Mutex::new(None);
+
+    pub(super) fn entre_la_marca_y_las_filas() {
+        let escritura = ENTRE_LA_MARCA_Y_LAS_FILAS.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(f) = escritura {
+            f();
+        }
+    }
+
+    /// Una nube que admite todas las filas y apunta lo que le llega.
+    #[derive(Default)]
+    struct Nube {
+        pasos: Vec<Json>,
+    }
+
+    #[async_trait]
+    impl EnvioDeSubida for Nube {
+        async fn mandar(&mut self, paso: Json) -> AppResult<Option<Json>> {
+            let n = paso["filas"].as_array().map_or(0, Vec::len);
+            self.pasos.push(paso);
+            Ok(Some(json!({"ok": true, "escritas": n, "iguales": 0, "noEntraron": []})))
+        }
+    }
+
+    /// DO-SUBIDA (repaso) · Una venta que entra entre la marca y las filas del repaso (su descuento en
+    /// el outbox) no viaja dentro de la fila: lo mandado es lo de la marca, y el descuento sube
+    /// detrás por el outbox una sola vez.
+    #[tokio::test]
+    async fn el_repaso_lee_la_marca_y_las_filas_en_la_misma_foto() {
+        let dir = crate::test_temp::dir_temporal("subida-repaso-foto");
+        let ruta = dir.join("data.db");
+        let db = Db::open(ruta.to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana', 100);
+                     INSERT INTO _Sync_Subida (Id, Id_Subida, Origen, Estado, Desde_Imprescindible, Empezada_Ms)
+                       VALUES (1, 's1', 'copia', 'subiendo', '2026-11-20 10:00:00', 1);
+                     INSERT INTO _Sync_Subida_Tablas (Tabla, Fase, Turno, Orden, Columnas_Json, Clave_Json, Politica, Por_Clave, Estado)
+                       VALUES ('Clientes', 1, 1, 0, '[\"ID_Cliente\",\"Nombre\",\"Total_Gastado\"]', '[\"ID_Cliente\"]', 'upsert', 1, 1);
+                     INSERT INTO _Sync_Subida_Por_Revisar (Tabla, Clave_Json, Motivo, Intentos, Turno)
+                       VALUES ('Clientes', '[\"cli-1\"]', 'foranea', 0, 1);",
+                )
+                .await
+                .unwrap();
+        }
+        *ENTRE_LA_MARCA_Y_LAS_FILAS.lock().unwrap() = Some(Box::new(move || {
+            let otra = rusqlite::Connection::open(&ruta).unwrap();
+            otra.execute_batch(
+                "UPDATE Clientes SET Total_Gastado = Total_Gastado + 50 WHERE ID_Cliente = 'cli-1';
+                 INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms)
+                   VALUES ('venta', 'cobrar', '[{\"sql\":\"UPDATE Clientes SET Total_Gastado = Total_Gastado + 50 WHERE ID_Cliente = ?1;\",\"args\":[\"cli-1\"]}]', 1);",
+            )
+            .unwrap();
+        }));
+        let mut nube = Nube::default();
+        let paso = SqliteSubidaCompleta::new(db.clone()).repaso(&mut nube, None).await.unwrap();
+        assert!(ENTRE_LA_MARCA_Y_LAS_FILAS.lock().unwrap().is_none(), "la venta se ha colado");
+        let mandadas: Vec<&Json> = nube.pasos.iter().filter(|p| p["accion"] == "filas").collect();
+        match paso {
+            // Lo que se mandó es lo de antes de la venta, con el checkpoint de antes.
+            Some(PasoHecho::Avanza) => {
+                assert_eq!(mandadas.len(), 1);
+                assert_eq!(mandadas[0]["filas"], json!([["cli-1", "Ana", 100]]), "la fila de la marca, sin el descuento del outbox");
+            }
+            // O nada, y el outbox sube primero.
+            Some(PasoHecho::PorSubir) => assert!(mandadas.is_empty()),
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
 
     #[test]
     fn el_acuse_se_lee_solo_por_sus_marcas_y_su_codigo() {
