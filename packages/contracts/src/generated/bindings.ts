@@ -1463,7 +1463,12 @@ export type Interruptor =
  *  que ahora no se puede reservar online. Sólo lo mira el worker; lo ya reservado sigue en la
  *  agenda y se entrega a la Main igual.
  */
-"reservas_web";
+"reservas_web" |
+/**
+ *  DO-SUBIDA: la subida completa de la base a una nube devuelta en modo «main». Sólo pausa sus
+ *  pasos: el outbox, la bajada y el cobro siguen como siempre, y la subida sigue donde iba.
+ */
+"subida_nube";
 
 /**  Un interruptor apagado ahora mismo para este equipo, tal como lo devuelve el worker. */
 export type InterruptorApagado = {
@@ -3343,6 +3348,24 @@ export type StatsCategoriaRow = {
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
 
 export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
+
+/**
+ *  DO-SUBIDA: cómo va la subida completa de la base a una nube devuelta en modo «main». Lo enseña
+ *  Configuración → Conectividad mientras dura; terminada o abandonada no se enseña (`None`).
+ */
+export type SubidaNubeEstado = {
+	/**  `subiendo` o `contrastando` (subida entregada, esperando a que el contraste la confirme). */
+	estado: string,
+	/**  `empezando`, `vivos`, `imprescindible`, `reciente`, `historico`, `revisando` o `contrastando`. */
+	fase: string,
+	filas_leidas: number,
+	filas_total: number,
+	tablas_pendientes: number,
+	/**  Filas que la nube no ha dejado entrar y quedan para el contraste. */
+	filas_por_revisar: number,
+	/**  El último rechazo de la nube, por su código. Sin datos. */
+	ultimo_error: string | null,
+};
 
 export type SummaryArgs = {
 	limit?: number | null,

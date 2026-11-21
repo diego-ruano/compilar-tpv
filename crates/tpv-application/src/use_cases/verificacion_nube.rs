@@ -42,6 +42,17 @@ pub enum Vuelta {
     EscritoAqui(tpv_contracts::sync::CambioReplicado),
 }
 
+/// DO-SUBIDA · ¿Ha salido limpia la pasada? Sin descuadres, sin nada encolado, aplazado ni sin
+/// comparar: la nube cuadra con esta base.
+pub fn pasada_limpia(r: &ResultadoVerificacion) -> bool {
+    r.descuadres.is_empty()
+        && r.reparadas == 0
+        && r.borradas == 0
+        && !r.aplazado
+        && !r.ventana_omitida
+        && r.tablas_sin_comparar.is_empty()
+}
+
 /// Una vuelta del job: decide si toca y, si toca, contrasta y lo anota.
 ///
 /// Un fallo del contraste se anota (es lo que hace que el siguiente intento espere 30 min, 1 h…
@@ -65,6 +76,8 @@ pub async fn verificar_si_toca(
         bajada_detenida: s.bajada_detenida,
         desde_el_arranque_ms: momento.desde_el_arranque_ms,
         ultima_escritura_ms: s.ultima_escritura_ms,
+        subida_en_curso: s.subida_en_curso,
+        subida_por_confirmar_ms: s.subida_por_confirmar_ms,
     };
     if let Decision::Esperar(motivo) = cuando_verificar(&entrada, momento.ahora_ms) {
         return Ok(Vuelta::NoToca(motivo));
@@ -75,6 +88,10 @@ pub async fn verificar_si_toca(
     match verificar_contra_la_nube(nube, sync, reparar).await {
         Ok(Contraste::Hecho(resultado)) => {
             estado.anotar(IntentoVerificacion::Hecha, momento.ahora_ms).await?;
+            // DO-SUBIDA: una pasada que ha comparado confirma (o no) la subida completa.
+            if s.subida_por_confirmar_ms.is_some() {
+                estado.tras_contrastar_la_subida(pasada_limpia(&resultado)).await?;
+            }
             Ok(Vuelta::Hecha(resultado))
         }
         Ok(Contraste::Aplazado) => {

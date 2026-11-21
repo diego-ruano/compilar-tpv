@@ -45,6 +45,8 @@
 //                            (DO-PERDIDA: un objeto vacío, con la base de su copia de R2; sin --dia, la última)
 //   pnpm negocio:base-vacia      -- --tenant <tenantId> --modo nube|main --motivo "…"
 //                            (DO-PERDIDA: un objeto vacío de un negocio nacido, con una base nueva y vacía)
+//   pnpm negocio:subida          -- --tenant <tenantId> --reabrir --motivo "…"
+//                            (DO-SUBIDA: reabre la subida completa de la Main agotada, caducada o huérfana)
 //
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
@@ -403,6 +405,14 @@ async function negocioEstado(args) {
 	console.log(`  Seq            ${r.seq}`);
 	console.log(`  Sesiones       ${r.sesiones}`);
 	console.log(`  Próxima copia  ${cuando(r.proximaCopiaMs)}`);
+	// DO-SUBIDA: la subida completa que se le pidió a la Main tras devolverle la base en modo «main».
+	if (r.subida) {
+		const s = r.subida;
+		console.log(`  Subida         ${s.estado} (${s.origen}), pedida ${s.desde}${s.terminada ? `, terminada ${s.terminada}` : `, plazo hasta ${s.hasta}`}`);
+		console.log(`                 Main ${s.mainDeviceId ?? "(la primera que salude)"}; ${s.paginas} páginas, ${s.filasEscritas} filas escritas de ${s.filasDeclaradas ?? "?"} declaradas`);
+	} else {
+		console.log("  Subida         (ninguna pedida)");
+	}
 	if (!r.copias.length) {
 		console.log("  Copias         (ninguna en R2)\n");
 		return;
@@ -480,6 +490,14 @@ async function negocioBaseVacia(args) {
 	console.log(`
   ✔ ${tenantId} tiene una base nueva y vacía, con su administrador inicial.`);
 	trasDarBase(r);
+}
+
+/** DO-SUBIDA · Reabre la subida completa de la Main (agotada, caducada o huérfana). */
+async function negocioSubida(args) {
+	const tenantId = negocioDe(args);
+	if (!args.reabrir) fail("--reabrir requerido (lo único que se hace con la subida desde aquí; su estado sale en negocio:estado)");
+	const r = await api("POST", "/v1/admin/negocios/subida/reabrir", { tenantId, motivo: motivoDe(args) });
+	console.log(`\n  ✔ Subida completa de ${tenantId} reabierta (estaba ${r.antes}). La primera Main vigente que salude se la queda.\n`);
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
@@ -602,6 +620,7 @@ const comandos = {
 	"negocio-instante": negocioInstante,
 	"negocio-restaurar-copia": negocioRestaurarCopia,
 	"negocio-base-vacia": negocioBaseVacia,
+	"negocio-subida": negocioSubida,
 };
 
 if (!comandos[cmd]) {
@@ -644,6 +663,7 @@ if (!comandos[cmd]) {
     instante  --tenant <tenantId> (--instante <fecha ISO> | --marcador <m>) --modo nube|main --motivo "…"
     restaurar-copia --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"   (a un objeto vacío)
     base-vacia      --tenant <tenantId> --modo nube|main --motivo "…"                      (a un objeto vacío)
+    subida          --tenant <tenantId> --reabrir --motivo "…"   (reabre la subida completa de la Main)
 `);
 	process.exit(1);
 }

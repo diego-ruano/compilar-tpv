@@ -22,6 +22,7 @@ pub mod reservas;
 pub mod reservas_web;
 pub mod stats;
 pub mod stock_alertas;
+pub mod subida_completa;
 pub mod sync;
 pub mod tareas;
 pub mod tickets;

@@ -2449,6 +2449,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::sync::sync_estado,
             commands::sync::sync_reintentar,
             commands::sync::sync_backfill_estado,
+            commands::sync::sync_subida_estado,
             commands::sync::sync_bootstrap_desde_nube,
             commands::sync::sync_inicializar_tenant_vacio,
             // tareas periódicas de fondo (runner de jobs)

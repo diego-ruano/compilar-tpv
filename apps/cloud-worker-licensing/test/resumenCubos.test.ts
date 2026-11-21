@@ -16,6 +16,7 @@ import {
 	FiltroDeCubos,
 	MAX_CUBOS,
 	Resumidor,
+	SumaDeTramo,
 	cubosPara,
 	cubosValidos,
 	fnv1a64,
@@ -31,6 +32,7 @@ const casos = JSON.parse(casosJson) as {
 	filas: { fila: ValorDeCaso[]; bytes: string; hash: string }[];
 	cubos: { clave: ValorDeCaso[]; hash: string; cubo: Record<string, number> }[];
 	cubos_para: { filas: number; cubos: number }[];
+	tramos: { descripcion: string; filas: ValorDeCaso[][]; n: number; suma: string }[];
 	resumenes: {
 		descripcion: string;
 		claves: number[];
@@ -76,6 +78,17 @@ describe("el resumen por cubos cuadra con la tabla compartida", () => {
 		const foobar = utf8.encode("foobar y lo que sobra");
 		fnv1a64(foobar, 6, mitades);
 		expect(hex64(mitades[0], mitades[1])).toBe("85944171f73967e8");
+	});
+
+	// DO-SUBIDA: un tramo del histórico de la subida completa se compara por sus filas y la suma de
+	// sus huellas, igual que la Main (`tpv_domain::contraste::suma_de_huellas`).
+	it("la suma de un tramo es la de la tabla compartida", () => {
+		for (const caso of casos.tramos) {
+			const s = new SumaDeTramo();
+			for (const fila of caso.filas) s.fila(fila.map(delDo));
+			expect(s.n, caso.descripcion).toBe(caso.n);
+			expect(s.suma, caso.descripcion).toBe(caso.suma);
+		}
 	});
 
 	it("cada valor tiene una sola forma de escribirse", () => {

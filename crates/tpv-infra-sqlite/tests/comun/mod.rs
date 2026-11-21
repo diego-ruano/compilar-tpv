@@ -2,3 +2,4 @@
 #![allow(dead_code)] // cada test usa una parte
 
 pub mod nube_de_contraste;
+pub mod nube_de_subida;

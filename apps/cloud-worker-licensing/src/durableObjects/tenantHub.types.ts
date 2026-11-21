@@ -111,11 +111,18 @@ export type OpDeLote = {
 	clientNow?: string | null;
 };
 
+/**
+ * DO-SUBIDA · Un paso de la subida completa de la Main (`tenantHub.subida.ts`): datos, no SQL. El DO
+ * contesta con un `subida_ack` que lleva el mismo `pasoId`.
+ */
+export type SubidaMsg = { type: "subida"; pasoId?: string; [campo: string]: unknown };
+
 export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
-	| ApplyLoteMsg;
+	| ApplyLoteMsg
+	| SubidaMsg;
 
 /* =========================================================
    3. Comando interno (SQL replicable)

@@ -135,6 +135,12 @@ impl PresenciaHandy {
                     .map_err(|_| AppError::external("Aviso de cambios inválido"))?;
                 return Ok(Some(aviso(&sentencias)));
             }
+            // DO-SUBIDA: la Main ha subido a la nube una tabla entera (una nube devuelta en modo
+            // «main»): se releen esas tablas. Una Handy anterior a esto lo ignora.
+            Some("datos_subidos") => {
+                let tablas: Vec<String> = mensaje.get("tablas").and_then(Value::as_array).map(|t| t.iter().filter_map(Value::as_str).map(str::to_owned).take(100).collect()).unwrap_or_default();
+                return Ok(Some(crate::use_cases::avisos_nube::aviso_de_tablas(&tablas)));
+            }
             Some("error") => return Err(AppError::external("La nube rechazó un mensaje del socket")),
             _ => {}
         }
@@ -189,6 +195,14 @@ mod tests {
         let aviso = p.atender(json!({"type":"change","statements":[{"sql":"UPDATE Detalle_Comanda SET Cantidad=?1 WHERE ID_Comanda=?2","args":[2,"c1"]}]})).unwrap().unwrap();
         assert_eq!(aviso.comanda.ids, vec!["c1"]);
         let serializado = serde_json::to_string(&aviso).unwrap(); assert!(!serializado.contains("sql")); assert!(!serializado.contains("Cantidad"));
+    }
+    // DO-SUBIDA: lo que la Main sube entero se relee.
+    #[test]
+    fn los_datos_subidos_por_la_main_se_releen() {
+        let mut p = conectada();
+        let aviso = p.atender(json!({"type":"datos_subidos","tablas":["Productos"]})).unwrap().unwrap();
+        assert_eq!(aviso.tablas, Some(vec!["productos".to_string()]));
+        assert!(aviso.comanda.touched_catalog);
     }
     #[test]
     fn una_presencia_malformada_no_desbloquea() {

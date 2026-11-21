@@ -52,6 +52,16 @@ import {
 } from "./tenantHub.instante";
 import { nuevoId } from "../lib/ids";
 import {
+	copiasProtegidasDesde,
+	ejecutarPasoDeSubida,
+	estadoParaSoporte,
+	reabrirSubida,
+	sinEmpezarParaAvisar,
+	subidaParaElSaludo,
+	type PasoDeSubida,
+	type SubidaEnElSaludo,
+} from "./tenantHub.subida";
+import {
 	leerConLaHoraDelNegocio,
 	type LecturaWeb,
 	type RespuestaDeLecturaWeb,
@@ -359,6 +369,17 @@ export class MotorTenantHub {
 		if (!baseAprovisionada(storage.sql)) return;
 		const negocio = negocioApuntado(storage);
 		if (!negocio) return;
+		// DO-SUBIDA: una petición de subida completa que lleva un día sin ninguna página. Antes de la
+		// copia: si la copia falla, el aviso sale igual.
+		try {
+			const sinEmpezar = sinEmpezarParaAvisar(storage.sql, Date.now());
+			if (sinEmpezar) {
+				capturarError(new Error("subida_sin_empezar"), "hub.subida_sin_empezar");
+				this.emitSyncEvent("subida_sin_empezar", { origen: sinEmpezar.origen, main_device_id: sinEmpezar.mainDeviceId });
+			}
+		} catch (e) {
+			capturarError(e, "hub.subida_sin_empezar");
+		}
 		try {
 			const r = await this.copiar(negocio);
 			this.emitSyncEvent("copia_diaria", { clave: r.clave, tablas: r.tablas, filas: r.filas, bytes: r.bytes });
@@ -376,7 +397,9 @@ export class MotorTenantHub {
 		await this.getTenantDb(negocio);
 		const ahora = new Date();
 		const volcado = volcarNegocio(this.state.storage.sql, { tenantId: negocio, ahora });
-		return subirCopia(this.env.COPIAS_NEGOCIOS, negocio, volcado, ahora);
+		// DO-SUBIDA: mientras la Main no ha subido su base, las copias de antes de la pérdida son las
+		// buenas, y no se podan.
+		return subirCopia(this.env.COPIAS_NEGOCIOS, negocio, volcado, ahora, copiasProtegidasDesde(this.state.storage.sql));
 	}
 
 	/** DO-03 · La copia de hoy, ahora (`/v1/admin/negocios/copiar`). Arma la diaria si no lo estaba. */
@@ -406,7 +429,23 @@ export class MotorTenantHub {
 			vueltaEnCurso: Boolean(await storage.get(CLAVE_VUELTA_EN_CURSO)),
 			seq: seqMasAlto(storage.sql),
 			sesiones: this.authedCount(),
+			// DO-SUBIDA: la subida completa que se le pidió a la Main, si hay.
+			subida: estadoParaSoporte(storage.sql),
 		};
+	}
+
+	/**
+	 * DO-SUBIDA · Vuelve a abrir una subida completa `agotada`, `caducada` o `huerfana`
+	 * (`/v1/admin/negocios/subida/reabrir`): otra vez esperando, sin dueño, con su plazo y su
+	 * presupuesto a cero. Sin nada que reabrir, `subida_no_reabrible`.
+	 */
+	async reabrirSubida(tenantId: string): Promise<ResultadoDeAdministracion<{ antes: string }>> {
+		const ajeno = this.negocioAjeno(tenantId, "reabrirSubida");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		const antes = reabrirSubida(this.state.storage.sql, Date.now());
+		if (!antes) return { ok: false, error: "subida_no_reabrible", status: 409 };
+		this.emitSyncEvent("subida_reabierta", { antes });
+		return { ok: true, antes };
 	}
 
 	/**
@@ -481,7 +520,14 @@ export class MotorTenantHub {
 			modo: params.modo,
 			opId: `nube-devuelta-${nuevoId()}`,
 			ahoraMs: Date.now(),
+			origen: "instante",
+			mainDeviceId: this.mainVigente().deviceId,
 		});
+		// DO-SUBIDA: una sesión que entró entre el reinicio y esto saludó sin la petición de subida (y
+		// escribió sobre la base vuelta sin el log abierto). Se echa a todas: vuelven a saludar, y la
+		// Main recibe la petición en su `hello_ok`.
+		for (const ws of this.state.getWebSockets()) this.cerrar(ws, this.att(ws), 4003, "nube_devuelta");
+		this.emitSyncEvent("base_devuelta", { operacion: "instante", modo: params.modo, inicio: log.inicio });
 		return { ok: true, aprovisionado: true, ...log };
 	}
 
@@ -583,6 +629,9 @@ export class MotorTenantHub {
 					modo,
 					opId: `nube-devuelta-${nuevoId()}`,
 					ahoraMs: Date.now(),
+					// DO-SUBIDA: un objeto vacío no sabe quién era la Main: la primera que salude.
+					origen: operacion,
+					mainDeviceId: this.mainVigente().deviceId,
 				});
 				await storage.delete(CLAVE_VUELTA_EN_CURSO);
 			} catch (e) {
@@ -1467,6 +1516,78 @@ export class MotorTenantHub {
 		}, params.alReservarTurno);
 	}
 
+	/**
+	 * DO-SUBIDA · Lo que lleva el `hello_ok` de un `tpv` que acaba de entrar como Main vigente
+	 * (`tenantHub.subida.ts::subidaParaElSaludo`). Sin esperas: lo llama el saludo justo antes de
+	 * contestar. Una petición que pasa a `huerfana` o `caducada` aquí se avisa.
+	 */
+	private subidaParaElSaludo(deviceId: string): SubidaEnElSaludo | null {
+		const sql = this.state.storage.sql;
+		if (!baseAprovisionada(sql)) return null;
+		const r = subidaParaElSaludo(sql, deviceId, Date.now());
+		if (r.caducada) this.emitSyncEvent("subida_caducada", {});
+		if (r.huerfana) {
+			capturarError(new Error("subida_huerfana"), "sync.subida");
+			this.emitSyncEvent("subida_huerfana", { de: r.huerfana.mainDeviceId, saluda: deviceId });
+		}
+		return r.subida;
+	}
+
+	/**
+	 * DO-SUBIDA · Un paso de la subida completa (`tenantHub.subida.ts`), como un lote de la Main: con
+	 * la base abierta, en el turno del log, y después de la comprobación por actividad, que es la
+	 * última espera. No escribe en el log ni difunde filas; al acabar una tabla avisa a las Handy
+	 * (`datos_subidos`) para que relean.
+	 */
+	private async aplicarSubida(params: {
+		tenantId: string;
+		deviceId: string;
+		sesion: WebSocket;
+		paso: PasoDeSubida;
+		alTerminar: (respuesta: Record<string, unknown>) => void;
+	}): Promise<void> {
+		const { tenantId, deviceId, sesion, paso } = params;
+		const exigirQueSeaLaMain = () => {
+			if (sesion.readyState !== 1 || !this.esLaMain(this.att(sesion))) throw new HubError("not_authenticated", 401);
+		};
+		exigirQueSeaLaMain();
+		await this.withTenantDbRetry(tenantId, async (base) => base);
+		return this.enTurnoDelLog(async () => {
+			await this.comprobarMain();
+			// ⚠️ De aquí al final no hay ninguna espera.
+			exigirQueSeaLaMain();
+			const tabla = "tabla" in paso ? paso.tabla : null;
+			let r: ReturnType<typeof ejecutarPasoDeSubida>;
+			try {
+				r = ejecutarPasoDeSubida(this.state.storage, { deviceId, paso, ahoraMs: Date.now() });
+			} catch (e: any) {
+				const codigo = e instanceof HubError ? e.code : "";
+				if (codigo === "subida_presupuesto_superado") {
+					capturarError(e, "sync.subida");
+					this.emitSyncEvent("subida_agotada", {});
+				} else if (!codigo) {
+					if (esBaseLlena(e)) this.avisarBaseLlena(e);
+					else this.avisarUnaVez("subida_fallo", e, "sync.subida");
+				}
+				this.emitSyncEvent("subida_rechazo", { accion: paso.accion, tabla, error: codigo || "sqlite" });
+				throw e;
+			}
+			params.alTerminar(r.respuesta);
+			const efectos = r.efectos;
+			if (efectos.empezada) this.emitSyncEvent("subida_empezada", {});
+			if (efectos.aplazada) this.emitSyncEvent("subida_aplazada", { accion: paso.accion });
+			if (efectos.rechazadas) this.emitSyncEvent("subida_rechazo", { accion: paso.accion, tabla, filas: efectos.rechazadas });
+			if (efectos.tablaSubida) {
+				this.emitSyncEvent("subida_tabla", { tabla: efectos.tablaSubida });
+				this.broadcastRol("handy", { type: "datos_subidos", tablas: [efectos.tablaSubida] });
+			}
+			if (efectos.terminada) {
+				const diferencias = Number((r.respuesta as { diferencias?: number }).diferencias ?? 0);
+				this.emitSyncEvent("subida_terminada", { diferencias });
+			}
+		});
+	}
+
 	/** El cuerpo síncrono de `aplicarLote`: las operaciones, en orden, y el veredicto de cada una. */
 	private aplicarEnOrden(
 		tenantId: string,
@@ -2111,6 +2232,8 @@ export class MotorTenantHub {
 			isMainRecovering: () => this.isMainRecovering(),
 			cerrarMainsSinLatido: () => this.cerrarMainsSinLatido(),
 			aplicarLote: (params) => this.aplicarLote(params),
+			subidaParaElSaludo: (deviceId) => this.subidaParaElSaludo(deviceId),
+			aplicarSubida: (params) => this.aplicarSubida(params),
 		};
 	}
 

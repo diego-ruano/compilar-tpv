@@ -464,6 +464,19 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"line_items_paginados",
 	"malformed_signature",
 	"missing_apply_fields",
+	// DO-SUBIDA: veredictos de los pasos de la subida completa de la Main (`tenantHub.subida.ts`);
+	// viajan en su acuse, y los de la administración los lee soporte en el CLI.
+	"subida_no_pedida",
+	"subida_mal_formada",
+	"subida_tabla_no_admitida",
+	"subida_columnas_desconocidas",
+	"subida_presupuesto_superado",
+	"subida_pagina_demasiado_grande",
+	"presupuesto_de_subida_agotado",
+	"subida_no_reabrible",
+	// Lo que se manda a Sentry de una subida que lleva un día sin empezar o se ha quedado huérfana.
+	"subida_sin_empezar",
+	"subida_huerfana",
 	// AUD-36: veredictos del lote de la Main; viajan en su acuse y no los ve nadie.
 	"sentencia_no_admitida",
 	"operacion_demasiado_grande",

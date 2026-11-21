@@ -223,4 +223,20 @@ describe("un dispositivo no manda mensajes a los demás", () => {
 			expect(otra.recibidos).toEqual([]);
 		});
 	});
+
+	// DO-SUBIDA: un paso de la subida completa sólo lo contesta el DO a quien lo manda (y a una Handy,
+	// rechazándolo); no llega a nadie más.
+	it("un paso de la subida completa sólo tiene su acuse", async () => {
+		await enElHub("difusion-subida", async (hub: any) => {
+			preparar(hub);
+			const main = conectar(hub, MAIN, "tpv");
+			const handy = conectar(hub, "handy-1", "handy");
+
+			await hub.webSocketMessage(handy.servidor, JSON.stringify({ type: "subida", pasoId: "p1", accion: "fin", id: "x", conteos: {}, porRevisar: 0 }));
+			await unMomento();
+
+			expect(handy.recibidos).toEqual([{ type: "subida_ack", pasoId: "p1", ok: false, error: "forbidden_not_tpv", permanente: true, transitorio: false }]);
+			expect(main.recibidos).toEqual([]);
+		});
+	});
 });

@@ -79,6 +79,16 @@ pub trait ContextoReplicacion: Send + Sync {
     /// `recovery_ready`. Lo enseña Conectividad, que sólo dice que los Handy esperan cuando es así;
     /// un outbox con algo por subir en uso normal no los retiene.
     fn handy_retenidas(&self, _retenidas: bool) {}
+    /// DO-SUBIDA: la subida completa de la base de este equipo. Sin ella (un contexto de pruebas, la
+    /// Handy), la sesión no sube nada aunque la nube lo pida.
+    async fn subida(&self) -> AppResult<Option<Arc<dyn crate::ports::subida_completa::SubidaCompleta>>> {
+        Ok(None)
+    }
+    /// DO-SUBIDA: soporte ha pausado la subida completa (interruptor `subida_nube`). Sólo para sus
+    /// pasos: nada más de la réplica depende de esto.
+    fn subida_pausada(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

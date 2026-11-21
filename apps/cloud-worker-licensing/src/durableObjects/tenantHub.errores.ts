@@ -72,6 +72,14 @@ const CODIGOS_PERMANENTES: ReadonlySet<string> = new Set([
 	// escribe más de lo que cabe en una (`tenantHub.presupuesto.ts`). La misma operación dará lo mismo.
 	"sentencia_no_admitida",
 	"operacion_demasiado_grande",
+	// DO-SUBIDA: un paso de la subida completa que no se va a admitir nunca (`tenantHub.subida.ts`):
+	// sin petición para esa Main, mal formado, sobre una tabla o unas columnas que no son del negocio,
+	// o con el techo total de la subida superado (lo reabre la administración).
+	"subida_no_pedida",
+	"subida_mal_formada",
+	"subida_tabla_no_admitida",
+	"subida_columnas_desconocidas",
+	"subida_presupuesto_superado",
 ]);
 
 /**
@@ -96,6 +104,8 @@ const CODIGOS_PASAJEROS: ReadonlySet<string> = new Set([
 	// AUD-36: el negocio ha gastado lo que puede escribir en esta hora (`tenantHub.presupuesto.ts`).
 	// La operación es buena y entra en la hora siguiente.
 	"presupuesto_agotado",
+	// DO-SUBIDA: la subida completa ha gastado lo suyo de esta hora; sigue en la siguiente.
+	"presupuesto_de_subida_agotado",
 ]);
 
 /**

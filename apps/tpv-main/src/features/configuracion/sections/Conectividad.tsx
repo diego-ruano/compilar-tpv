@@ -14,6 +14,7 @@ import { useEstadoSync } from "../../../shared/stores/useEstadoSync";
 import { textoDeConexion } from "./textoConexion";
 import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
+import { useSubidaNube } from "../../../shared/lib/subidaNubeQueries";
 import { AvisoInterruptores } from "./AvisoInterruptores";
 import { ImagenesPendientes } from "./ImagenesPendientes";
 import { CORREO_SOPORTE } from "../../../shared/lib/soporte";
@@ -37,6 +38,8 @@ function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: n
 	const detalle = useEstadoSync((s) => s.detalle);
 	const desde = useEstadoSync((s) => s.desde);
 	const handyRetenidas = useEstadoSync((s) => s.handyRetenidas);
+	// DO-SUBIDA: con la nube restaurada, lo que dice la conexión mientras los Handy esperan.
+	const { data: subida } = useSubidaNube();
 
 	// Repintado periódico: lo único que cambia solo es el "desde hace X".
 	const [, setTick] = React.useState(0);
@@ -45,7 +48,7 @@ function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: n
 		return () => window.clearInterval(id);
 	}, []);
 
-	const info = textoDeConexion(estado, porSubir, handyRetenidas);
+	const info = textoDeConexion(estado, porSubir, handyRetenidas, subida ?? null);
 	const color =
 		info.tono === "ok"
 			? "bg-success"
@@ -523,6 +526,61 @@ function HistoricoPendiente({ darkMode }: { darkMode: boolean }) {
 	);
 }
 
+/** DO-SUBIDA · Lo que se lee de cada fase de la subida completa. */
+const FASE_DE_SUBIDA: Record<string, string> = {
+	empezando: "preparando",
+	vivos: "lo que está abierto",
+	imprescindible: "lo imprescindible",
+	reciente: "los últimos días",
+	historico: "el histórico",
+	revisando: "revisando lo que no entró",
+	contrastando: "comprobando que cuadra",
+};
+
+/**
+ * DO-SUBIDA · Progreso de la subida completa de la base a una nube devuelta (una copia o una base
+ * vacía). Sólo aparece mientras dura; en un equipo cuya nube nunca se ha restaurado no existe.
+ */
+function SubidaNube({ darkMode }: { darkMode: boolean }) {
+	const { data } = useSubidaNube();
+	if (!data) return null;
+
+	const pct = data.filas_total > 0 ? Math.min(100, Math.round((data.filas_leidas / data.filas_total) * 100)) : 0;
+	const fase = FASE_DE_SUBIDA[data.fase] ?? data.fase;
+
+	return (
+		<Panel
+			title="Subiendo los datos a la nube"
+			subtitle="La nube del negocio se ha restaurado y este TPV le está devolviendo lo que tiene. Puedes seguir trabajando."
+		>
+			<div className="grid gap-3">
+				{data.estado === "subiendo" && (
+					<div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
+						<div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${pct}%` }} />
+					</div>
+				)}
+				<div className={cn("flex flex-wrap items-center justify-between gap-2 text-xs", darkMode ? "text-fg-muted" : "text-fg-muted")}>
+					<span>Ahora: {fase}</span>
+					<span className="tabular-nums">
+						{data.filas_leidas.toLocaleString("es-ES")} registros revisados
+						{data.tablas_pendientes > 0 ? ` · quedan ${data.tablas_pendientes} apartados` : ""}
+					</span>
+				</div>
+				{data.filas_por_revisar > 0 && (
+					<div className="text-[11px] text-fg-muted">
+						{data.filas_por_revisar.toLocaleString("es-ES")} registros no han entrado a la primera; se comprueban al final.
+					</div>
+				)}
+				{data.ultimo_error && (
+					<div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-[11px] text-warning">
+						La nube rechazó el último intento ({data.ultimo_error}). Se reintenta solo.
+					</div>
+				)}
+			</div>
+		</Panel>
+	);
+}
+
 export function Conectividad({ darkMode }: { darkMode: boolean }) {
 	const deviceMode = useMode((s) => s.mode);
 	const salud = useSaludSync(deviceMode === "tpv");
@@ -542,6 +600,7 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 
 			{/* SYNC-19: sólo se pinta si hay una recuperación completándose de fondo. */}
 			{deviceMode === "tpv" && <HistoricoPendiente darkMode={darkMode} />}
+			{deviceMode === "tpv" && <SubidaNube darkMode={darkMode} />}
 
 			{/* Runner de jobs: corre haya conexión o no (licencia con gracia, avisos), así que solo
 			    depende de que esta sea la Main. */}

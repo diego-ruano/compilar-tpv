@@ -27,6 +27,9 @@ const HORA: i64 = 60 * MIN;
 /// arranque mientras todavía se está recogiendo.
 pub const CIERRE_REPOSADO_MS: i64 = 5 * MIN;
 
+/// DO-SUBIDA: lo que tiene que llevar entregada una subida completa para contar como motivo.
+pub const SUBIDA_REPOSADA_MS: i64 = 5 * MIN;
+
 /// Sin cierre de caja de por medio, cada cuánto se contrasta.
 pub const PERIODO_MS: i64 = 20 * HORA;
 
@@ -79,6 +82,12 @@ pub struct EntradaVerificacion {
     pub desde_el_arranque_ms: i64,
     /// La última escritura en la base: una operación de aquí o un cambio aplicado de la nube.
     pub ultima_escritura_ms: Option<i64>,
+    /// DO-SUBIDA: la Main está subiendo su base entera a una nube devuelta: hasta que acabe, la
+    /// nube no está para compararla.
+    pub subida_en_curso: bool,
+    /// DO-SUBIDA: la subida completa se entregó a la nube en este instante y espera que una pasada
+    /// la confirme. Es motivo, como un cierre de caja.
+    pub subida_por_confirmar_ms: Option<i64>,
 }
 
 /// Por qué no toca todavía.
@@ -88,6 +97,8 @@ pub enum Espera {
     NoOperativa,
     /// Queda histórico por bajar.
     HistoricoPendiente,
+    /// DO-SUBIDA: la Main está subiendo su base entera a la nube.
+    SubidaEnCurso,
     /// El último intento falló o se aplazó hace poco.
     Reintento,
     /// Ni un cierre de caja nuevo ni veinte horas desde la última pasada.
@@ -132,6 +143,9 @@ pub fn cuando_verificar(e: &EntradaVerificacion, ahora_ms: i64) -> Decision {
     if e.historico_pendiente {
         return Esperar(Espera::HistoricoPendiente);
     }
+    if e.subida_en_curso {
+        return Esperar(Espera::SubidaEnCurso);
+    }
 
     let pasada = |marca: Option<i64>| marca.filter(|m| *m <= ahora_ms);
     let ultima_ok = pasada(e.ultima_ok_ms);
@@ -157,7 +171,11 @@ pub fn cuando_verificar(e: &EntradaVerificacion, ahora_ms: i64) -> Decision {
     let por_cierre = e.ultimo_cierre_ms.is_some_and(|cierre| {
         ultima_ok.is_none_or(|ok| cierre > ok) && ahora_ms - cierre >= CIERRE_REPOSADO_MS
     });
-    if !por_tiempo && !por_cierre {
+    // DO-SUBIDA: una subida completa entregada a la nube se confirma con una pasada, a los cinco
+    // minutos (lo que la nube aplica de lo último sale en su log y lo baja esta Main), y se vuelve
+    // a intentar mientras no salga limpia.
+    let por_subida = e.subida_por_confirmar_ms.is_some_and(|fin| ahora_ms - fin >= SUBIDA_REPOSADA_MS);
+    if !por_tiempo && !por_cierre && !por_subida {
         return Esperar(Espera::SinMotivo);
     }
 
@@ -207,6 +225,8 @@ mod tests {
             bajada_detenida: false,
             desde_el_arranque_ms: HORA,
             ultima_escritura_ms: Some(AHORA - HORA),
+            subida_en_curso: false,
+            subida_por_confirmar_ms: None,
         }
     }
 
@@ -217,6 +237,22 @@ mod tests {
 
     fn esperar(e: Espera) -> Decision {
         Decision::Esperar(e)
+    }
+
+    // DO-SUBIDA: con la subida completa en curso no se contrasta nunca; entregada, es motivo a los
+    // cinco minutos, pero sin relajar la calma.
+    #[test]
+    fn la_subida_completa_espera_y_despues_es_motivo() {
+        let subiendo = EntradaVerificacion { subida_en_curso: true, ..hace(30) };
+        assert_eq!(cuando_verificar(&subiendo, AHORA), esperar(Espera::SubidaEnCurso));
+        let recien = EntradaVerificacion { subida_por_confirmar_ms: Some(AHORA - 4 * MIN), ..hace(3) };
+        assert_eq!(cuando_verificar(&recien, AHORA), esperar(Espera::SinMotivo));
+        let reposada = EntradaVerificacion { subida_por_confirmar_ms: Some(AHORA - 5 * MIN), ..hace(3) };
+        assert_eq!(cuando_verificar(&reposada, AHORA), Decision::Ahora);
+        let con_prisa = EntradaVerificacion { ultima_escritura_ms: Some(AHORA - MIN), ..reposada.clone() };
+        assert_eq!(cuando_verificar(&con_prisa, AHORA), esperar(Espera::ActividadReciente));
+        let historico = EntradaVerificacion { historico_pendiente: true, ..reposada };
+        assert_eq!(cuando_verificar(&historico, AHORA), esperar(Espera::HistoricoPendiente));
     }
 
     #[test]
@@ -373,6 +409,8 @@ mod tests {
                                             bajada_detenida: detenida,
                                             desde_el_arranque_ms: arranque * MIN,
                                             ultima_escritura_ms: escritura.map(|m| AHORA - m * MIN),
+                                            subida_en_curso: false,
+                                            subida_por_confirmar_ms: None,
                                         };
                                         let decision = cuando_verificar(&e, AHORA);
 

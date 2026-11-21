@@ -97,6 +97,8 @@ pub(crate) mod convergencia;
 // SYNC-37: escribir de una vez filas que se intercambian un valor único.
 pub(crate) mod aparcar;
 pub mod sync_reparacion;
+// DO-SUBIDA: la subida completa de la base a una nube devuelta en modo «main».
+pub mod subida_completa;
 pub mod tareas;
 pub mod tickets;
 pub mod trabajadores;

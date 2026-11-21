@@ -41,9 +41,9 @@ describe("esquema", () => {
 			await migrarBaseLocal(st);
 			expect(baseAprovisionada(st.sql)).toBe(true);
 			const migraciones = st.sql.exec("SELECT name FROM _migrations ORDER BY name;").toArray();
-			expect(migraciones.map((r: any) => r.name)).toEqual(["0001_inicial.sql", "0002_negocio.sql", "0003_ingredientes.sql", "0004_producto_sin_categoria.sql"]);
+			expect(migraciones.map((r: any) => r.name)).toEqual(["0001_inicial.sql", "0002_negocio.sql", "0003_ingredientes.sql", "0004_producto_sin_categoria.sql", "0005_subida_completa.sql"]);
 			await migrarBaseLocal(st);
-			expect(st.sql.exec("SELECT COUNT(*) AS n FROM _migrations;").one().n).toBe(4);
+			expect(st.sql.exec("SELECT COUNT(*) AS n FROM _migrations;").one().n).toBe(5);
 		});
 	});
 });

@@ -33,6 +33,8 @@ export const INTERRUPTORES = [
 	"cifrado_pii",
 	"imagenes",
 	"reservas_web",
+	// DO-SUBIDA: pausa los pasos de la subida completa de la Main (no el outbox ni el cobro).
+	"subida_nube",
 ] as const;
 
 export const zInterruptor = z.enum(INTERRUPTORES);

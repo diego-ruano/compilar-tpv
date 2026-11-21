@@ -79,6 +79,11 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.estadoDeLaBase(tenantId);
 	}
 
+	/** DO-SUBIDA · Reabre una subida completa agotada, caducada o huérfana (administración). */
+	reabrirSubida(tenantId: string): Promise<ResultadoDeAdministracion<{ antes: string }>> {
+		return this.motor.reabrirSubida(tenantId);
+	}
+
 	/**
 	 * DO-03 · Devolver la base a un instante, en tres llamadas (`domains/admin/basesDeNegocios.ts`):
 	 * preparar, reiniciar (el objeto vuelve al arrancar) y, ya vuelto, abrir el log.

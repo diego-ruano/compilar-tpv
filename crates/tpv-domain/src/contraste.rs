@@ -286,6 +286,23 @@ pub fn de_hex64(texto: &str) -> Option<u64> {
     u64::from_str_radix(texto, 16).ok()
 }
 
+/// DO-SUBIDA · La huella de una fila: el FNV-1a de la forma canónica de sus valores, en su orden. Es
+/// el hash de fila de [`Resumidor::fila`], suelto.
+pub fn huella_de_fila(celdas: &[Celda<'_>]) -> u64 {
+    let mut bytes = Vec::with_capacity(128);
+    for c in celdas {
+        escribir_canonico(c, &mut bytes);
+    }
+    fnv1a64(&bytes)
+}
+
+/// DO-SUBIDA · La suma de un tramo de filas: la de sus huellas, módulo 2⁶⁴. No depende del orden. El
+/// worker la calcula igual (`resumenCubos.ts::sumaDeTramo`); los dos leen `tramos` en
+/// `verificacion_casos.json`.
+pub fn suma_de_huellas(huellas: impl IntoIterator<Item = u64>) -> u64 {
+    huellas.into_iter().fold(0u64, u64::wrapping_add)
+}
+
 #[cfg(test)]
 mod tests {
     //! Contra la tabla que comparte con el worker (`verificacion_casos.json`): la forma canónica,
@@ -360,6 +377,20 @@ mod tests {
             escribir_canonico(&v.celda(), &mut salida);
         }
         salida
+    }
+
+    // DO-SUBIDA: el número de filas y la suma de sus huellas, igual que el worker.
+    #[test]
+    fn la_suma_de_un_tramo_es_la_de_la_tabla_compartida() {
+        for caso in casos()["tramos"].as_array().unwrap() {
+            let filas: Vec<Vec<Valor>> = caso["filas"].as_array().unwrap().iter().map(fila).collect();
+            let suma = suma_de_huellas(filas.iter().map(|f| {
+                let celdas: Vec<Celda<'_>> = f.iter().map(Valor::celda).collect();
+                huella_de_fila(&celdas)
+            }));
+            assert_eq!(filas.len() as u64, caso["n"].as_u64().unwrap(), "{}", caso["descripcion"]);
+            assert_eq!(hex64(suma), caso["suma"].as_str().unwrap(), "{}", caso["descripcion"]);
+        }
     }
 
     #[test]

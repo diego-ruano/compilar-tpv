@@ -1071,7 +1071,7 @@ struct Encolado {
 /// la condición daría otra cosa que en la nube y borraría lo que allí no se borró. Por eso exige
 /// además que el log tenga algo a partir del `hasta_seq`, que en la nube siempre es así (la purga
 /// deja la cola del log) y en una Main nunca: allí no hace nada.
-fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Option<SqlStatement> {
+pub(crate) fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Option<SqlStatement> {
     let (donde, mut args) = rep::donde_de_la_clave(fila)?;
     let condicion = si_la_nube_no_ha_cambiado(&mut args, hasta_seq);
     Some(SqlStatement { sql: format!("DELETE FROM \"{}\" WHERE {donde} AND {condicion};", fila.tabla), args })

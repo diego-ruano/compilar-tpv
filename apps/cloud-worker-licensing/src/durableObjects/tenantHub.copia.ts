@@ -259,6 +259,8 @@ export async function subirCopia(
 	tenantId: string,
 	volcado: VolcadoDelNegocio,
 	ahora: Date,
+	/** DO-SUBIDA: las copias de antes de este instante no se podan (`copiasProtegidasDesde`). */
+	protegerAntesDeMs: number | null = null,
 ): Promise<CopiaHecha> {
 	const clave = claveDeCopia(tenantId, ahora.toISOString().slice(0, 10));
 	await bucket.put(clave, volcado.gzip, {
@@ -273,7 +275,7 @@ export async function subirCopia(
 		// R2 recalcula el hash al recibirlo y rechaza la subida si no coincide.
 		sha256: await crypto.subtle.digest("SHA-256", volcado.gzip),
 	});
-	const podadas = await podarCopias(bucket, tenantId);
+	const podadas = await podarCopias(bucket, tenantId, COPIAS_QUE_SE_GUARDAN, protegerAntesDeMs);
 	return { clave, tablas: volcado.tablas, filas: volcado.filas, bytes: volcado.gzip.byteLength, podadas };
 }
 
@@ -302,13 +304,23 @@ export async function listarCopias(bucket: R2Bucket, tenantId: string): Promise<
 	return copias.sort((a, b) => (a.clave < b.clave ? 1 : a.clave > b.clave ? -1 : 0));
 }
 
-/** Borra las copias de un negocio que pasan de las `guardar` más nuevas. Devuelve cuántas. */
+/**
+ * Borra las copias de un negocio que pasan de las `guardar` más nuevas. Devuelve cuántas.
+ *
+ * DO-SUBIDA: con `protegerAntesDeMs`, las de un día anterior a ese instante se quedan: mientras la
+ * Main no ha subido su base a una nube devuelta, las copias de antes de la pérdida son las buenas.
+ */
 export async function podarCopias(
 	bucket: R2Bucket,
 	tenantId: string,
 	guardar: number = COPIAS_QUE_SE_GUARDAN,
+	protegerAntesDeMs: number | null = null,
 ): Promise<number> {
-	const sobran = (await listarCopias(bucket, tenantId)).slice(guardar).map((c) => c.clave);
+	const diaProtegido = protegerAntesDeMs === null ? null : new Date(protegerAntesDeMs).toISOString().slice(0, 10);
+	const sobran = (await listarCopias(bucket, tenantId))
+		.slice(guardar)
+		.filter((c) => diaProtegido === null || c.dia >= diaProtegido)
+		.map((c) => c.clave);
 	if (sobran.length) await bucket.delete(sobran);
 	return sobran.length;
 }

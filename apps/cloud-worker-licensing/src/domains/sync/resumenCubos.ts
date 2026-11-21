@@ -197,6 +197,35 @@ export function hex64(alto: number, bajo: number): string {
 	return alto.toString(16).padStart(8, "0") + bajo.toString(16).padStart(8, "0");
 }
 
+/**
+ * DO-SUBIDA · Las filas de un tramo, resumidas: cuántas son y la suma, módulo 2⁶⁴, de sus huellas
+ * (el hash de la fila entera, el mismo de `Resumidor`). No depende del orden. La Main lo calcula igual
+ * (`tpv_domain::contraste::suma_de_huellas`); los dos leen `tramos` en `verificacion_casos.json`.
+ */
+export class SumaDeTramo {
+	private readonly canonico = new Canonico();
+	private alto = 0;
+	private bajo = 0;
+	n = 0;
+
+	/** Añade una fila: sus valores tal como los entrega el SQLite del DO. */
+	fila(valores: unknown[]): void {
+		const c = this.canonico;
+		c.vaciar();
+		for (const v of valores) c.valor(v);
+		c.hash();
+		const b = this.bajo + c.bajo;
+		this.bajo = b >>> 0;
+		this.alto = (this.alto + c.alto + (b > 0xffffffff ? 1 : 0)) >>> 0;
+		this.n++;
+	}
+
+	/** La suma, en dieciséis cifras hexadecimales. */
+	get suma(): string {
+		return hex64(this.alto, this.bajo);
+	}
+}
+
 /** El resumen de una tabla, como viaja: por cubo, cuántas filas y la suma de sus hashes. */
 export type ResumenCubos = { cubos: number; cuentas: number[]; sumas: string[] };
 

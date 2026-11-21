@@ -27,6 +27,10 @@ pub struct SituacionVerificacion {
     pub bajada_detenida: bool,
     /// La última escritura: una operación de aquí o un cambio aplicado de la nube.
     pub ultima_escritura_ms: Option<i64>,
+    /// DO-SUBIDA: la subida completa de la base está en curso.
+    pub subida_en_curso: bool,
+    /// DO-SUBIDA: la subida completa se entregó a la nube en este instante y espera confirmarse.
+    pub subida_por_confirmar_ms: Option<i64>,
 }
 
 /// Cómo acabó un intento de contraste.
@@ -53,4 +57,10 @@ pub trait VerificacionNubeRepository: Send + Sync {
     /// Anota cómo acabó el intento que empezó en `ahora_ms`. Es estado local del equipo: no se
     /// replica.
     async fn anotar(&self, intento: IntentoVerificacion, ahora_ms: i64) -> AppResult<()>;
+
+    /// DO-SUBIDA: lo que ha dado una pasada que llegó a comparar con la subida completa por
+    /// confirmar. Limpia, la subida queda terminada; si no, se cuenta, y a la tercera también.
+    async fn tras_contrastar_la_subida(&self, _limpia: bool) -> AppResult<()> {
+        Ok(())
+    }
 }

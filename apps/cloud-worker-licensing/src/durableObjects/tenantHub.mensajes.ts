@@ -36,6 +36,7 @@ import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 import { bytesUtf8 } from "../lib/texto";
 import { buildInternalPayloadForHash, safeJsonParse, stableStringify } from "./tenantHub.envelope";
+import { formaDelPaso, type PasoDeSubida, type SubidaEnElSaludo } from "./tenantHub.subida";
 
 import type {
 	AnyMsg,
@@ -45,6 +46,7 @@ import type {
 	OpDeLote,
 	RecoveryReadyMsg,
 	Role,
+	SubidaMsg,
 	VeredictoDeLote,
 	WsAttachment,
 } from "./tenantHub.types";
@@ -103,6 +105,20 @@ export interface ContextoDeMensajes {
 		ops: OpDeLote[];
 		alReservarTurno?: () => void;
 		alTerminar: (resultados: VeredictoDeLote[]) => void;
+	}): Promise<void>;
+
+	/**
+	 * DO-SUBIDA: lo que lleva el `hello_ok` de un `tpv` que acaba de entrar como Main vigente: la
+	 * petición de subida completa, si es suya. Sin esperas.
+	 */
+	subidaParaElSaludo(deviceId: string): SubidaEnElSaludo | null;
+	/** DO-SUBIDA: un paso de la subida, en el turno del log, y su acuse dentro de él. */
+	aplicarSubida(params: {
+		tenantId: string;
+		deviceId: string;
+		sesion: WebSocket;
+		paso: PasoDeSubida;
+		alTerminar: (respuesta: Record<string, unknown>) => void;
 	}): Promise<void>;
 }
 
@@ -165,6 +181,7 @@ export async function despachar(
 
 	if (msg.type === "recovery_ready") return atenderRecoveryReady(ctx, ws, a, msg);
 	if (msg.type === "apply_lote") return atenderApplyLote(ctx, ws, a, msg);
+	if (msg.type === "subida") return atenderSubida(ctx, ws, a, msg);
 
 	ctx.send(ws, { type: "error", error: "unknown_type" });
 }
@@ -233,10 +250,14 @@ export async function atenderHelloSigned(
 					autenticadaMs: Date.now(),
 				});
 
+				// DO-SUBIDA: a la Main de la petición se le dice que tiene que subir su base entera. A una
+				// Handy, nunca. Una Main vieja no mira el campo.
+				const subida = roleFinal === "tpv" ? ctx.subidaParaElSaludo(deviceId) : null;
 				ctx.send(ws, {
 					type: "hello_ok",
 					role: roleFinal,
 					authed: true,
+					...(subida ? { subida } : {}),
 				});
 
 				// SYN-INC-01: lo que se le diga de la Main, con las que ya no dan señales de vida
@@ -414,6 +435,57 @@ async function atenderApplyLote(
 				})(),
 			);
 			await tieneSitio;
+		}),
+	);
+}
+
+/**
+ * DO-SUBIDA · Un paso de la subida completa de la Main (`tenantHub.subida.ts`). Como un `apply_lote`:
+ * sólo un `tpv`, la forma antes que nada, en fila con lo demás que manda la Main, y la sesión como
+ * está después de la comprobación por actividad. El acuse (`subida_ack`, con el `pasoId` del
+ * mensaje) lleva `ok`, o el error con su clase (`permanente`, `transitorio`), o `aplazada`.
+ */
+async function atenderSubida(
+	ctx: ContextoDeMensajes,
+	ws: WebSocket,
+	a: WsAttachment,
+	msg: SubidaMsg,
+): Promise<void> {
+	const { tenantId, deviceId } = a;
+	const pasoId = typeof msg.pasoId === "string" ? msg.pasoId.slice(0, 100) : "";
+	const acusar = (cuerpo: Record<string, unknown>) => ctx.send(ws, { type: "subida_ack", pasoId, ...cuerpo });
+	const rechazo = (e: any) => ({
+		ok: false,
+		error: String(e?.code ?? e?.message ?? e).slice(0, 200),
+		permanente: esRechazoPermanente(e),
+		transitorio: esFalloPasajero(e),
+	});
+
+	if (a.role !== "tpv") {
+		acusar({ ok: false, error: "forbidden_not_tpv", permanente: true, transitorio: false });
+		return;
+	}
+	let paso: PasoDeSubida;
+	try {
+		if (!pasoId) throw new Error("subida_mal_formada");
+		paso = formaDelPaso(msg);
+	} catch (e) {
+		acusar(rechazo(e));
+		return;
+	}
+
+	ctx.waitUntil(
+		ctx.enTurnoDeEntrada(async () => {
+			await ctx.comprobarMain();
+			if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
+				acusar({ ok: false, error: "not_authenticated", permanente: false, transitorio: true });
+				return;
+			}
+			try {
+				await ctx.aplicarSubida({ tenantId, deviceId, sesion: ws, paso, alTerminar: acusar });
+			} catch (e: any) {
+				acusar(rechazo(e));
+			}
 		}),
 	);
 }

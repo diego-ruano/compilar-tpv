@@ -133,6 +133,12 @@ impl VerificacionNubeRepository for SqliteVerificacionNube {
 
         let ultima_escritura_ms = ultima_escritura_creible(&r, ahora_ms).await?;
 
+        // DO-SUBIDA: la subida completa de la base, en curso o por confirmar.
+        let subida_en_curso =
+            un_entero(&r, "SELECT COUNT(*) FROM _Sync_Subida WHERE Estado = 'subiendo';").await?.unwrap_or(0) > 0;
+        let subida_por_confirmar_ms =
+            un_entero(&r, "SELECT COALESCE(Fin_Ms, 0) FROM _Sync_Subida WHERE Estado = 'contrastando';").await?;
+
         Ok(SituacionVerificacion {
             ultima_ok_ms,
             ultimo_intento_ms,
@@ -142,7 +148,13 @@ impl VerificacionNubeRepository for SqliteVerificacionNube {
             outbox_pendiente,
             bajada_detenida,
             ultima_escritura_ms,
+            subida_en_curso,
+            subida_por_confirmar_ms,
         })
+    }
+
+    async fn tras_contrastar_la_subida(&self, limpia: bool) -> AppResult<()> {
+        crate::subida_completa::tras_el_contraste(&self.db, limpia).await
     }
 
     async fn anotar(&self, intento: IntentoVerificacion, ahora_ms: i64) -> AppResult<()> {

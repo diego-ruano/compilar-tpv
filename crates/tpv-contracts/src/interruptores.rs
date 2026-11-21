@@ -32,6 +32,9 @@ pub enum Interruptor {
     /// que ahora no se puede reservar online. Sólo lo mira el worker; lo ya reservado sigue en la
     /// agenda y se entrega a la Main igual.
     ReservasWeb,
+    /// DO-SUBIDA: la subida completa de la base a una nube devuelta en modo «main». Sólo pausa sus
+    /// pasos: el outbox, la bajada y el cobro siguen como siempre, y la subida sigue donde iba.
+    SubidaNube,
 }
 
 /// Un interruptor apagado ahora mismo para este equipo, tal como lo devuelve el worker.

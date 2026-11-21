@@ -226,6 +226,7 @@ export const nombresComandos = {
     "sync_estado": "syncEstado",
     "sync_reintentar": "syncReintentar",
     "sync_backfill_estado": "syncBackfillEstado",
+    "sync_subida_estado": "syncSubidaEstado",
     "sync_bootstrap_desde_nube": "syncBootstrapDesdeNube",
     "sync_inicializar_tenant_vacio": "syncInicializarTenantVacio",
     "jobs_status": "jobsStatus",
@@ -468,6 +469,7 @@ type Argumentos = {
     "sync_estado": {  };
     "sync_reintentar": {  };
     "sync_backfill_estado": {  };
+    "sync_subida_estado": {  };
     "sync_bootstrap_desde_nube": {  };
     "sync_inicializar_tenant_vacio": {  };
     "jobs_status": {  };

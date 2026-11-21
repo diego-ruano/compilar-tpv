@@ -654,6 +654,9 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
     }
     let subida = bajada::lo_apartado_de_la_subida(db, &claves).await?;
     let cascadas = bajada::cascadas(db).await?;
+    // DO-SUBIDA: con la subida completa a medias, lo que falta arriba puede faltar porque la nube
+    // lo perdió: no se borra aquí. Se queda apuntado, y la subida lo sube si arriba falta.
+    let subida_completa = crate::subida_completa::subiendo(conn).await?;
 
     let mut columnas_de: HashMap<String, Vec<String>> = HashMap::new();
     let mut planes: Vec<Plan<'_>> = Vec::new();
@@ -691,7 +694,13 @@ pub(crate) async fn converger(db: &Db, nube: &dyn PaginasDelContraste) -> AppRes
                     difiere => Accion::Escribir { fila: fila.clone(), existe: difiere.is_some() },
                 }
             }
-            None if existe(conn, tabla, &clave, &valores_clave).await? => Accion::Borrar,
+            None if existe(conn, tabla, &clave, &valores_clave).await? => {
+                if subida_completa {
+                    dejadas.push((m, "subida_completa_en_curso"));
+                    continue;
+                }
+                Accion::Borrar
+            }
             None => Accion::Nada,
         };
         let sentencia = match &accion {

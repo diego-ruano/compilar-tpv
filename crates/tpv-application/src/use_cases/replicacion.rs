@@ -3,7 +3,7 @@
 use std::{collections::HashMap, time::{Duration, Instant}};
 use serde_json::{json, Value};
 use tpv_contracts::{licensing::FirmaDispositivo, sync::{OutboxEntry, SyncChange}};
-use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida}, sync::{BajadaAplicada, CambioDetenido, Convergencia}}};
+use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida}, subida_completa::{Conciliacion, EnvioDeSubida, PasoHecho, PeticionDeSubida, SubidaCompleta}, sync::{BajadaAplicada, CambioDetenido, Convergencia}}};
 
 const MAX_PAGINAS: usize = 2000;
 /// Lo que ocupan como mucho las sentencias de un lote (`apply_lote`). Una operación que pase de
@@ -107,6 +107,64 @@ pub struct Sesion {
     lotes: u64,
     /// SYNC-29: cuándo se vuelve a mirar si hay algo que traer de la nube.
     convergencia: RitmoDeConvergencia,
+    /// DO-SUBIDA: los pasos de la subida completa que ha mandado esta sesión, para nombrarlos.
+    pasos: u64,
+}
+
+/// DO-SUBIDA · Lo que se espera el acuse de un paso de la subida completa.
+const ESPERA_DEL_PASO: Duration = Duration::from_secs(30);
+
+/// DO-SUBIDA · Lo más que retiene a las Handy una subida completa cuyo núcleo no acaba de subir (la
+/// red, rechazos). Pasado, se sueltan igual y se avisa: lo demás sigue con ellas trabajando.
+const NUCLEO_COMO_MUCHO: Duration = Duration::from_secs(3 * 60);
+
+/// DO-SUBIDA · Los pasos de la subida completa por el socket de esta sesión: uno en vuelo, y su acuse
+/// esperado atendiendo lo demás que llegue (como un lote del outbox).
+struct PasosPorElSocket<'a> {
+    ctx: &'a dyn ContextoReplicacion,
+    canal: &'a mut dyn CanalReplicacion,
+    sesion: &'a mut Sesion,
+}
+
+#[async_trait::async_trait]
+impl EnvioDeSubida for PasosPorElSocket<'_> {
+    async fn mandar(&mut self, mut paso: Value) -> AppResult<Option<Value>> {
+        self.sesion.pasos += 1;
+        let paso_id = format!("paso-{}", self.sesion.pasos);
+        if let Some(o) = paso.as_object_mut() {
+            o.insert("type".into(), json!("subida"));
+            o.insert("pasoId".into(), json!(paso_id));
+        }
+        self.canal.enviar(paso).await?;
+        let fin = Instant::now() + ESPERA_DEL_PASO;
+        while Instant::now() < fin {
+            let Some(m) = self.canal.recibir(fin.saturating_duration_since(Instant::now())).await? else { continue };
+            match (m.get("type").and_then(Value::as_str), m.get("error").and_then(Value::as_str)) {
+                (Some("subida_ack"), _) if m.get("pasoId").and_then(Value::as_str) == Some(paso_id.as_str()) => return Ok(Some(m)),
+                // Sólo un paso puede no caberle a la nube: es su respuesta.
+                (Some("error"), Some("payload_too_large")) => {
+                    return Ok(Some(json!({"ok": false, "error": "subida_pagina_demasiado_grande"})));
+                }
+                _ => atender(self.ctx, self.sesion, m).await?,
+            }
+        }
+        Ok(None)
+    }
+}
+
+/// DO-SUBIDA · Cuándo toca el siguiente paso de la subida completa: `None`, ya.
+#[derive(Debug, Default)]
+struct RitmoDeLaSubida {
+    siguiente: Option<Instant>,
+}
+
+impl RitmoDeLaSubida {
+    fn toca(&self) -> bool {
+        self.siguiente.is_none_or(|t| Instant::now() >= t)
+    }
+    fn espera(&self) -> Duration {
+        self.siguiente.map(|t| t.saturating_duration_since(Instant::now())).unwrap_or_default()
+    }
 }
 
 /// Lo que deja un catch-up: el final del log que ha visto, si se ha detenido, en qué cambio, y si a
@@ -494,12 +552,67 @@ fn espera_del_socket(vacio: bool, puede_converger: bool, convergencia: &RitmoDeC
 ///
 /// En el DO, `recovering` sólo congela a las Handy; el modo recuperación de la Main (estricto, con
 /// sus fases y `completar_recuperacion`) sigue siendo `recuperando`, que no tiene que ver con esto.
-pub async fn saludar<F>(canal: &mut dyn CanalReplicacion, firmar: F) -> AppResult<()>
+///
+/// DO-SUBIDA: devuelve la petición de subida completa que trae el `hello_ok`, si la trae.
+pub async fn saludar<F>(canal: &mut dyn CanalReplicacion, firmar: F) -> AppResult<Option<PeticionDeSubida>>
 where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
-    crate::use_cases::saludo_socket::saludar(canal, firmar, "tpv", true).await
+    let hello = crate::use_cases::saludo_socket::saludar(canal, firmar, "tpv", true).await?;
+    Ok(PeticionDeSubida::del_saludo(&hello))
 }
 
+/// Una sesión del motor sin petición de subida completa (un worker anterior, o la nube no la pide).
 pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<FinDeSesion> {
+    ejecutar_con_saludo(ctx, nube, canal, recuperando, None).await
+}
+
+/// DO-SUBIDA · Lo que la nube dice de la subida completa frente a lo que hay aquí, al principio de
+/// una sesión normal (en la recuperación, nada: esa base todavía no es la buena). Sin la subida en
+/// este equipo (`ContextoReplicacion::subida`), nada. Devuelve si este equipo la tiene.
+async fn conciliar_la_subida(ctx: &dyn ContextoReplicacion, peticion: Option<&PeticionDeSubida>) -> AppResult<bool> {
+    let Some(subida) = ctx.subida().await? else { return Ok(false) };
+    // Lo que se decide queda apuntado (y en la telemetría) por el repositorio.
+    let _: Conciliacion = subida.conciliar(peticion).await?;
+    Ok(true)
+}
+
+/// DO-SUBIDA · Un paso de la subida completa, si toca. Devuelve si conviene dar otro enseguida.
+async fn paso_de_la_subida(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, subida: &dyn SubidaCompleta, ritmo: &mut RitmoDeLaSubida) -> AppResult<Result<bool, FinDeSesion>> {
+    if !ritmo.toca() || sesion.bajada.detenida() || ctx.subida_pausada() || !subida.pendiente().await? {
+        return Ok(Ok(false));
+    }
+    // Lo del outbox va siempre antes: si la página lo pide, se sube y se repite, hasta dos veces.
+    for _ in 0..3 {
+        let hecho = {
+            let mut envio = PasosPorElSocket { ctx, canal: &mut *canal, sesion: &mut *sesion };
+            subida.paso(&mut envio).await?
+        };
+        match hecho {
+            PasoHecho::Avanza => {
+                ritmo.siguiente = None;
+                return Ok(Ok(true));
+            }
+            PasoHecho::Nada => return Ok(Ok(false)),
+            PasoHecho::PorSubir => {
+                subir_pendientes(ctx, canal, sesion, false).await?;
+            }
+            PasoHecho::Aplazada => {
+                // La nube tiene algo de otro que aquí no ha bajado: se baja y se repite.
+                if ponerse_al_dia(ctx, nube, canal, sesion, false).await?.anterior_al_log { return Ok(Err(anterior_al_log(ctx).await?)); }
+            }
+            PasoHecho::Esperar(d) => {
+                ritmo.siguiente = Some(Instant::now() + d);
+                return Ok(Ok(false));
+            }
+            PasoHecho::SinAcuse => return Err(AppError::external("No llegó la confirmación de la nube")),
+        }
+    }
+    ritmo.siguiente = Some(Instant::now() + Duration::from_secs(3));
+    Ok(Ok(false))
+}
+
+/// La sesión del motor. `peticion`: la petición de subida completa del saludo (DO-SUBIDA).
+pub async fn ejecutar_con_saludo(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool, peticion: Option<PeticionDeSubida>) -> AppResult<FinDeSesion> {
+    let empezada = Instant::now();
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
     // El saludo ha congelado a las Handy: quedan retenidas hasta el `recovery_ready` de esta sesión.
     ctx.handy_retenidas(true);
@@ -534,6 +647,10 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         // Al conectar, lo que se haya reservado en la web mientras esta Main no estaba.
         ctx.reservas_web();
     }
+    // DO-SUBIDA: la subida completa, sólo en la sesión normal y con la base ya al día con la nube.
+    let con_subida = !recuperando && conciliar_la_subida(ctx, peticion.as_ref()).await?;
+    let mut ritmo_de_la_subida = RitmoDeLaSubida::default();
+    let mut soltadas_sin_nucleo = false;
     // AUD-15: las Handy que congeló el saludo se sueltan una vez por sesión, cuando no queda nada
     // que deba llegar antes a la nube: `subir_pendientes` encuentra el outbox vacío, con las
     // reparaciones de lo apartado ya subidas. Una reparación que la nube tampoco acepta queda en
@@ -545,7 +662,22 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
     // `None`: toca mirar si sigue disponible. La primera vuelta mira siempre.
     let mut disponible_comprobado: Option<Instant> = None;
     loop {
-        if handy_por_soltar && vacio {
+        // DO-SUBIDA: con una subida completa, las Handy esperan además a su núcleo (lo vivo, la
+        // carta, las mesas, el personal), o como mucho `NUCLEO_COMO_MUCHO`.
+        // La subida se pide cada vez que se usa: no retiene la base (`ContextoReplicacion::repositorio`).
+        let subida = if con_subida { ctx.subida().await? } else { None };
+        let nucleo_listo = match &subida {
+            Some(s) if handy_por_soltar => {
+                let hecho = s.nucleo_hecho().await?;
+                if !hecho && empezada.elapsed() >= NUCLEO_COMO_MUCHO && !soltadas_sin_nucleo {
+                    soltadas_sin_nucleo = true;
+                    s.sueltas_sin_nucleo();
+                }
+                hecho || soltadas_sin_nucleo
+            }
+            _ => true,
+        };
+        if handy_por_soltar && vacio && nucleo_listo {
             vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
             if vacio {
                 canal.enviar(json!({"type":"recovery_ready"})).await?;
@@ -566,10 +698,29 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             ultimo_sondeo = Instant::now();
             continue;
         }
+        // DO-SUBIDA: un paso de la subida completa por vuelta, con el outbox siempre antes.
+        let mut otro_paso = false;
+        if let Some(s) = &subida {
+            if vacio {
+                match paso_de_la_subida(ctx, nube, canal, &mut sesion, s.as_ref(), &mut ritmo_de_la_subida).await? {
+                    Ok(seguir) => otro_paso = seguir,
+                    Err(fin) => return Ok(fin),
+                }
+                ultimo_sondeo = Instant::now();
+            }
+        }
+        drop(subida);
         // SYNC-29: con todo subido, lo que la nube ordenó de otra forma se trae de ella.
         let puede_converger = vacio && !handy_por_soltar;
         if puede_converger { converger(ctx, nube, &mut sesion).await; }
-        let msg = canal.recibir(espera_del_socket(vacio, puede_converger, &sesion.convergencia)).await?;
+        let mut espera = espera_del_socket(vacio, puede_converger, &sesion.convergencia);
+        if con_subida && vacio {
+            // DO-SUBIDA: con la subida pendiente, el socket se espera poco: lo que falte para el
+            // paso siguiente, o casi nada si toca otro ya.
+            if otro_paso { espera = Duration::from_millis(50); }
+            else if ritmo_de_la_subida.siguiente.is_some() { espera = espera.min(ritmo_de_la_subida.espera().max(Duration::from_millis(100))); }
+        }
+        let msg = canal.recibir(espera).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
         // Un cambio de modo o de la palanca despierta al motor (`contexto_cambiado`): se mira ya.
         if despertar { disponible_comprobado = None; }

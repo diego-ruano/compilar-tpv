@@ -341,6 +341,23 @@ pub struct ResultadoVerificacion {
     pub tablas_sin_comparar: Vec<String>,
 }
 
+/// DO-SUBIDA: cómo va la subida completa de la base a una nube devuelta en modo «main». Lo enseña
+/// Configuración → Conectividad mientras dura; terminada o abandonada no se enseña (`None`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SubidaNubeEstado {
+    /// `subiendo` o `contrastando` (subida entregada, esperando a que el contraste la confirme).
+    pub estado: String,
+    /// `empezando`, `vivos`, `imprescindible`, `reciente`, `historico`, `revisando` o `contrastando`.
+    pub fase: String,
+    pub filas_leidas: i64,
+    pub filas_total: i64,
+    pub tablas_pendientes: i64,
+    /// Filas que la nube no ha dejado entrar y quedan para el contraste.
+    pub filas_por_revisar: i64,
+    /// El último rechazo de la nube, por su código. Sin datos.
+    pub ultimo_error: Option<String>,
+}
+
 /// RI-31: estado de réplica para la UI, sin SQL ni credenciales.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EstadoReplicacion {

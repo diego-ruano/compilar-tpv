@@ -2,6 +2,8 @@
 //
 // Lo que dice Configuración → Conectividad de la conexión con la nube.
 
+import type { SubidaNubeEstado } from "@tpv/contracts";
+
 import type { EstadoSync } from "../../../shared/stores/useEstadoSync";
 
 export type TextoConexion = { titulo: string; desc: string; tono: "ok" | "neutro" | "aviso" | "malo" };
@@ -64,9 +66,20 @@ export function textoDeConexion(
 	estado: EstadoSync,
 	porSubir: number | null,
 	handyRetenidas: boolean,
+	subida: SubidaNubeEstado | null = null,
 ): TextoConexion {
 	if (estado !== "conectado") return ESTADO_TEXTO[estado];
 	const hayPorSubir = porSubir !== null && porSubir > 0;
+	// DO-SUBIDA: soporte ha devuelto la nube a una copia (o a una base vacía) y este TPV le sube lo
+	// que tiene. Los Handy esperan sólo a lo imprescindible; lo demás sigue con ellos trabajando y
+	// se ve en su panel.
+	if (handyRetenidas && subida?.estado === "subiendo") {
+		return {
+			titulo: "Devolviendo los datos a la nube…",
+			desc: "La nube del negocio se ha restaurado y este TPV le está subiendo lo que tiene. Los Handy esperan a que llegue lo imprescindible; este TPV sigue cobrando con normalidad.",
+			tono: "aviso",
+		};
+	}
 	if (handyRetenidas) {
 		return {
 			titulo: hayPorSubir ? `Subiendo cambios (${porSubir})…` : "Poniéndose al día…",

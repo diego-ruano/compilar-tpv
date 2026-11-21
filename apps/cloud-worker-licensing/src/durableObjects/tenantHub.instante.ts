@@ -31,11 +31,14 @@
 //   `backups/antes-de-la-nube-*` y se trae la nube. Las Handy no guardan base.
 // - `main`: la Main es la buena (la nube se perdió o se estropeó sola). No se toca lo purgado: la
 //   Main sigue con su base, se pone al día por encima del cambio vacío y sube su outbox, y lo que la
-//   nube perdió entre el instante y ahora lo repara por estado el contraste
-//   (sincronizacion.md, «Reparar una divergencia»). Hasta entonces la nube va por detrás de la Main.
+//   nube perdió entre el instante y ahora lo sube la Main entera (DO-SUBIDA, `tenantHub.subida.ts`):
+//   en la misma transacción que abre el log se apunta la petición de subida completa, atada a la
+//   Main de entonces, y la Main la ve en su siguiente saludo. Hasta que acaba, la nube va por detrás
+//   de la Main.
 
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 import { baseAprovisionada } from "./tenantHub.sqlite";
+import { olvidarSubida, pedirSubida, type OrigenDeSubida } from "./tenantHub.subida";
 
 /** Lo que se le pide a la plataforma. Un test lo sustituye: en local no existe. */
 export type Instantes = {
@@ -109,7 +112,16 @@ export type LogAbierto = {
  */
 export function abrirLogTrasVolver(
 	storage: DurableObjectStorage,
-	opciones: { seqAntes: number; modo: ModoDeVuelta; opId: string; ahoraMs: number },
+	opciones: {
+		seqAntes: number;
+		modo: ModoDeVuelta;
+		opId: string;
+		ahoraMs: number;
+		/** DO-SUBIDA: de dónde sale la base que se acaba de devolver. */
+		origen: OrigenDeSubida;
+		/** DO-SUBIDA: la Main vigente al devolverla, o `null`: la primera que salude se queda la subida. */
+		mainDeviceId: string | null;
+	},
 ): LogAbierto {
 	const sql = storage.sql;
 	return storage.transactionSync(() => {
@@ -121,7 +133,18 @@ export function abrirLogTrasVolver(
 			opciones.opId,
 			opciones.ahoraMs,
 		);
-		if (opciones.modo !== "nube") return { inicio, purgadoHasta: null };
+		// DO-SUBIDA: con `main`, la Main tiene que subir su base entera; con `nube`, no hay nada que subir.
+		if (opciones.modo !== "nube") {
+			pedirSubida(sql, {
+				id: opciones.opId,
+				origen: opciones.origen,
+				mainDeviceId: opciones.mainDeviceId,
+				inicioSeq: inicio,
+				ahoraMs: opciones.ahoraMs,
+			});
+			return { inicio, purgadoHasta: null };
+		}
+		olvidarSubida(sql);
 		const purgadoHasta = inicio - 1;
 		sql.exec(
 			`INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms) VALUES (?1, ?2, ?3)

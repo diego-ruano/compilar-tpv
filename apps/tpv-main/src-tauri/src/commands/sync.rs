@@ -71,6 +71,20 @@ pub(crate) async fn estado_del_historico(state: &AppState) -> Result<BackfillEst
     Ok(uc::backfill_estado(repo.as_ref()).await?)
 }
 
+/// DO-SUBIDA: cómo va la subida completa de la base a una nube devuelta en modo «main». `None` si no
+/// hay ninguna en curso, y siempre en una Handy, que no tiene base que subir.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_subida_estado(
+    state: State<'_, AppState>,
+) -> Result<Option<tpv_contracts::sync::SubidaNubeEstado>, AppErrorDto> {
+    if *state.mode.lock().await == Some(crate::DeviceMode::Handy) {
+        return Ok(None);
+    }
+    let Some(db) = state.db.lock().await.as_ref().cloned() else { return Ok(None) };
+    Ok(tpv_infra_sqlite::subida_completa::estado_para_la_pantalla(&db).await?)
+}
+
 /// Reconstruye la BD local desde la nube. Es la salida de una Main que ha perdido su `data.db`:
 /// la pantalla de recuperación (a la que lleva `setup_pendiente.requiere_recuperacion`) lo llama y
 /// después ya se puede iniciar sesión con las credenciales de siempre.

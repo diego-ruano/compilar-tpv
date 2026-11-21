@@ -54,6 +54,8 @@ export type EstadoDeLaBase = {
 	seq: number;
 	/** Sesiones autenticadas ahora mismo. */
 	sesiones: number;
+	/** DO-SUBIDA: la subida completa que se le pidió a la Main (`tenantHub.subida.ts`), o `null`. */
+	subida: Record<string, unknown> | null;
 };
 
 /** DO-03 · Lo que deja preparado la primera mitad de la vuelta a un instante (`prepararVuelta`). */

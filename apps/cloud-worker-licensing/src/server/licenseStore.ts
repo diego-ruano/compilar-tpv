@@ -1780,7 +1780,9 @@ export async function auditAdmin(
 		| "negocio_volver_a_instante"
 		// DO-PERDIDA: base a un objeto vacío de un negocio que ya nació.
 		| "negocio_restaurar_copia"
-		| "negocio_base_vacia",
+		| "negocio_base_vacia"
+		// DO-SUBIDA: reabrir la subida completa de la Main.
+		| "negocio_subida_reabierta",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

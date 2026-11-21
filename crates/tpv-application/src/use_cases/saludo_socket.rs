@@ -4,7 +4,9 @@ use serde_json::{json, Value};
 use tpv_contracts::licensing::FirmaDispositivo;
 use crate::{error::{AppError, AppResult}, ports::canal_nube::CanalNube};
 
-pub async fn saludar<F>(canal: &mut dyn CanalNube, mut firmar: F, rol: &str, recuperando: bool) -> AppResult<()>
+/// Devuelve el `hello_ok`: la Main lee de él la petición de subida completa (DO-SUBIDA); la Handy
+/// lo descarta.
+pub async fn saludar<F>(canal: &mut dyn CanalNube, mut firmar: F, rol: &str, recuperando: bool) -> AppResult<Value>
 where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
     let fin = Instant::now() + Duration::from_secs(20);
     let mut firmado = false;
@@ -19,7 +21,7 @@ where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
                 canal.enviar(json!({"type":"helloSigned","ts":firma.ts,"sigB64":firma.sig_b64,"nonceB64":nonce,"recovering":recuperando})).await?;
                 firmado = true;
             }
-            Some("hello_ok") if firmado && m.get("authed") == Some(&Value::Bool(true)) && m.get("role").and_then(Value::as_str) == Some(rol) => return Ok(()),
+            Some("hello_ok") if firmado && m.get("authed") == Some(&Value::Bool(true)) && m.get("role").and_then(Value::as_str) == Some(rol) => return Ok(m),
             Some("hello_ok" | "hello_error" | "error" | "challenge") => return Err(AppError::external("La nube rechazó el saludo del dispositivo")),
             _ => {}
         }

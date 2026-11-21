@@ -10,6 +10,8 @@
 //   POST /v1/admin/negocios/instante  → devuelve su TenantHub a un instante (o a un marcador)
 //   POST /v1/admin/negocios/restaurar-copia → DO-PERDIDA: a un objeto vacío, la base de una copia de R2
 //   POST /v1/admin/negocios/base-vacia      → DO-PERDIDA: a un objeto vacío, una base nueva y vacía
+//   POST /v1/admin/negocios/subida/reabrir  → DO-SUBIDA: reabre la subida completa de la Main si se
+//                                             agotó su presupuesto, caducó o se quedó huérfana
 //
 // Las dos de DO-PERDIDA son la salida de un negocio que ya nació y cuya base no está en su objeto
 // (`lib/basePerdida.ts`): la activación y `/v1/sync/initialize-empty` se niegan a crearla, a
@@ -104,7 +106,7 @@ function queHacerDespues(modo: ModoDeVuelta, deshacer: string, tenantId: string)
 				]
 			: [
 					"La Main sigue con su base, se pone al día por encima de la vuelta y sube lo que tenga pendiente.",
-					"Lo que la nube ha perdido desde el instante y la Main ya había subido lo repara el contraste de la Main, en su siguiente momento tranquilo; hasta entonces las Handy ven la nube del instante.",
+					"Después sube su base entera (DO-SUBIDA): lo que la nube ha perdido desde el instante vuelve a ella, empezando por lo imprescindible para las Handy. Mira cómo va con pnpm negocio:estado (subida).",
 				];
 	return [
 		...pasos,
@@ -236,7 +238,7 @@ function queHacerTrasDarBase(modo: ModoDeVuelta): string[] {
 					"Manda la nube. Cada Main del negocio verá al conectar que su base es anterior a la nube y sólo ofrecerá «Recuperar el estado actual de la nube»: lo suyo se queda en su equipo, en backups/antes-de-la-nube-*.",
 				]
 			: [
-					"Manda la Main: sigue con su base, se pone al día por encima del log nuevo y sube lo que tenga pendiente. Lo que la nube no tenga y la Main ya había subido lo repara su contraste, en su siguiente momento tranquilo.",
+					"Manda la Main: sigue con su base, se pone al día por encima del log nuevo y sube lo que tenga pendiente. Después sube su base entera (DO-SUBIDA): primero lo imprescindible para que trabajen las Handy, luego los últimos 30 días y al final el histórico. Mira cómo va con pnpm negocio:estado (subida).",
 				]),
 		"Las Handy y la Main reconectan solas.",
 	];
@@ -262,6 +264,24 @@ basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c
 	await auditAdmin(getDb(env), "negocio_restaurar_copia", null, { ...resultado, motivo });
 	await rastro(env, "base_restaurada_de_copia", resultado);
 	return c.json({ ok: true, ...resultado, queHacer: queHacerTrasDarBase(modo) });
+});
+
+const reabrirSchema = z.object({ tenantId: zNegocio, motivo: zMotivo });
+
+/**
+ * DO-SUBIDA · Reabre la subida completa de la Main (`MotorTenantHub.reabrirSubida`): una agotada (su
+ * techo total, que la Main no puede volver a abrir sola), una caducada (la Main no empezó en 14 días)
+ * o una huérfana (un traslado a mitad). Vuelve a esperar sin dueño: la primera Main vigente que salude
+ * se la queda. Deja rastro con el motivo.
+ */
+basesDeNegociosRoutes.post("/subida/reabrir", cuerpo(reabrirSchema), async (c) => {
+	const env = c.env;
+	const { tenantId, motivo } = c.req.valid("json");
+	const r = await hubDe(env, tenantId).reabrirSubida(tenantId);
+	if (!r.ok) return c.json({ ok: false, error: r.error }, r.status as 409);
+	await auditAdmin(getDb(env), "negocio_subida_reabierta", null, { tenantId, antes: r.antes, motivo });
+	await rastro(env, "subida_reabierta", { tenantId, antes: r.antes });
+	return c.json({ ok: true, tenantId, antes: r.antes });
 });
 
 /** Una base nueva y vacía, a un objeto vacío de un negocio nacido (`MotorTenantHub.crearBaseVacia`). */

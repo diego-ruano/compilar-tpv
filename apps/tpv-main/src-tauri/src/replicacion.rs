@@ -117,6 +117,14 @@ impl ContextoReplicacion for Contexto {
         Ok(estado == if recuperando {RecoveryState::ReconciliationPending} else {RecoveryState::Ready})
     }
     fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> { self.app.state::<SyncNativo>().ritmo.clone() }
+    async fn subida(&self) -> AppResult<Option<Arc<dyn tpv_application::ports::subida_completa::SubidaCompleta>>> {
+        // DO-SUBIDA: sobre la base de este equipo, creada para cada uso (no retiene la base).
+        let db = self.app.state::<AppState>().db.lock().await.as_ref().cloned();
+        Ok(db.map(|db| Arc::new(tpv_infra_sqlite::subida_completa::SqliteSubidaCompleta::new(db)) as Arc<dyn tpv_application::ports::subida_completa::SubidaCompleta>))
+    }
+    fn subida_pausada(&self) -> bool {
+        crate::interruptores::apagado(&self.app, tpv_contracts::interruptores::Interruptor::SubidaNube).is_some()
+    }
     fn handy_retenidas(&self, retenidas: bool) {
         let estado = self.app.state::<SyncNativo>();
         let mut foto = estado.foto.lock().unwrap_or_else(|e| e.into_inner());
@@ -133,7 +141,8 @@ async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<uc::FinDeSesion
     let ticket = ticket.get("ticket").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Respuesta sin ticket"))?;
     let mut canal = conectar(ticket, app.state::<SyncNativo>().despertar.clone()).await?;
     // AUD-15: el saludo congela a las Handy hasta que esta Main se ponga al día (`uc::saludar`).
-    uc::saludar(&mut canal, |nonce| nube.firmar_hello("tpv", nonce)).await?;
+    // DO-SUBIDA: el saludo trae, si la nube la pide, la petición de subida completa.
+    let peticion = uc::saludar(&mut canal, |nonce| nube.firmar_hello("tpv", nonce)).await?;
     app.state::<SyncNativo>().publicar(app, "conectado", None);
     if !recuperando {
         let h = app.clone();
@@ -144,7 +153,7 @@ async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<uc::FinDeSesion
         });
     }
     let ctx = Contexto { app: app.clone() };
-    uc::ejecutar(&ctx, &nube, &mut canal, recuperando).await
+    uc::ejecutar_con_saludo(&ctx, &nube, &mut canal, recuperando, peticion).await
 }
 
 pub(crate) fn arrancar(app: AppHandle) {

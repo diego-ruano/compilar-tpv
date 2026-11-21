@@ -31,6 +31,8 @@ describe("TenantHub RPC", () => {
 			"alarm", "copiarAhora", "estadoDeLaBase", "prepararVuelta", "reiniciar", "trasVolver",
 			// DO-PERDIDA: darle base a un objeto vacío de un negocio que ya nació.
 			"crearBaseVacia", "restaurarDesdeCopia",
+			// DO-SUBIDA: reabrir la subida completa de la Main (administración).
+			"reabrirSubida",
 		].sort());
 	});
 

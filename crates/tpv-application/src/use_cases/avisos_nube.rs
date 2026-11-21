@@ -34,10 +34,32 @@ pub fn aviso(sentencias: &[SqlStatement]) -> CambioReplicado {
     CambioReplicado { tablas: conocida.then(|| tablas.into_iter().collect()), comanda: ComandaReplicada { ids:ids.into_iter().collect(), touched_comanda:tocada, uncertain:incierta, touched_catalog:catalogo } }
 }
 
+/// DO-SUBIDA · El aviso de que la Main ha subido una tabla entera a la nube (`datos_subidos`): esas
+/// tablas, sin comandas concretas (todas las abiertas pueden haber cambiado). Sin tablas, todo.
+pub fn aviso_de_tablas(nombres: &[String]) -> CambioReplicado {
+    let tablas: BTreeSet<String> = nombres.iter().map(|t| t.to_ascii_lowercase()).filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')).collect();
+    let toda = tablas.is_empty();
+    let comandas = toda || tablas.iter().any(|t| ["comandas","detalle_comanda","pagos","pago_detalles"].contains(&t.as_str()));
+    let catalogo = toda || tablas.iter().any(|t| ["categorias_producto","productos","lotes_producto","lote_consumos","alergenos","producto_alergenos"].contains(&t.as_str()));
+    CambioReplicado {
+        tablas: (!toda).then(|| tablas.into_iter().collect()),
+        comanda: ComandaReplicada { ids: Vec::new(), touched_comanda: comandas, uncertain: comandas, touched_catalog: catalogo },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn el_aviso_de_una_tabla_subida_relee_esa_tabla_y_sus_comandas_sin_elegir_ninguna() {
+        let v = aviso_de_tablas(&["Detalle_Comanda".into()]);
+        assert_eq!(v.tablas, Some(vec!["detalle_comanda".into()]));
+        assert!(v.comanda.touched_comanda && v.comanda.uncertain && v.comanda.ids.is_empty());
+        let v = aviso_de_tablas(&["Zonas".into()]);
+        assert!(!v.comanda.touched_comanda && !v.comanda.touched_catalog);
+        assert_eq!(aviso_de_tablas(&[]).tablas, None, "sin tablas, se relee todo");
+    }
     #[test]
     fn el_aviso_no_expone_sql_y_conserva_la_seleccion_del_ticket() {
         let v = aviso(&[SqlStatement { sql:"UPDATE Detalle_Comanda SET Cantidad=?1 WHERE ID_Comanda=?2".into(), args:vec![json!(2),json!("comanda-1")] }]);

@@ -1640,6 +1640,9 @@ impl SyncRepository for SqliteSyncRepository {
             conn.execute("DELETE FROM _Sync_Por_Contrastar;", ())
                 .await
                 .map_err(db_err)?;
+            // DO-SUBIDA: la subida completa que hubiera a medias se deja: lo que había aquí ya no
+            // es lo que se subía. Si la nube la sigue pidiendo, la siguiente sesión empieza otra.
+            crate::subida_completa::vaciar(conn).await?;
             if apartar_outbox {
                 // Lo que quedaba por subir es de antes del traslado o de la copia (ver arriba): ya
                 // está en la base guardada, y en el outbox lo subiría el primer drenado encima de

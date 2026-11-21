@@ -18,6 +18,7 @@ const ETIQUETA: Record<Interruptor, string> = {
 	cifrado_pii: "El cifrado de los datos del personal",
 	imagenes: "La subida de imágenes",
 	reservas_web: "Las reservas desde la web",
+	subida_nube: "La subida de los datos a la nube restaurada",
 };
 
 function hasta(ms: number): string {

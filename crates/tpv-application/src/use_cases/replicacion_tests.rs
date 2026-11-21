@@ -201,7 +201,26 @@ async fn upload_image(
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }
-struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize>, retenidas:Mutex<Vec<bool>> }
+struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, ritmo:Arc<RitmoDeSubida>, comprobaciones:Mutex<usize>, retenidas:Mutex<Vec<bool>>, subida:Mutex<Option<Arc<FakeSubida>>> }
+
+/// DO-SUBIDA · Una subida completa de mentira: el núcleo está hecho tras `nucleo_en` pasos, y apunta
+/// lo que se le pide.
+#[derive(Default)]
+struct FakeSubida { nucleo_en: usize, pasos: Mutex<usize>, conciliadas: Mutex<Vec<Option<PeticionDeSubida>>> }
+#[async_trait]
+impl SubidaCompleta for FakeSubida {
+    async fn conciliar(&self, p: Option<&PeticionDeSubida>) -> AppResult<Conciliacion> {
+        self.conciliadas.lock().unwrap().push(p.cloned());
+        Ok(if p.is_some() { Conciliacion::Empezar } else { Conciliacion::Nada })
+    }
+    async fn pendiente(&self) -> AppResult<bool> { Ok(self.conciliadas.lock().unwrap().last().is_some_and(Option::is_some)) }
+    async fn nucleo_hecho(&self) -> AppResult<bool> {
+        let pendiente = self.conciliadas.lock().unwrap().last().is_some_and(Option::is_some);
+        Ok(!pendiente || *self.pasos.lock().unwrap() >= self.nucleo_en)
+    }
+    async fn paso(&self, _: &mut dyn EnvioDeSubida) -> AppResult<PasoHecho> { *self.pasos.lock().unwrap() += 1; Ok(PasoHecho::Avanza) }
+    async fn abandonar(&self, _: &str) -> AppResult<()> { Ok(()) }
+}
 #[async_trait]
 impl ContextoReplicacion for Contexto {
     async fn repositorio(&self) -> AppResult<Arc<dyn SyncRepository>> { Ok(self.repo.clone()) }
@@ -214,6 +233,7 @@ impl ContextoReplicacion for Contexto {
     async fn sigue_disponible(&self,_:bool)->AppResult<bool> { *self.comprobaciones.lock().unwrap()+=1; Ok(*self.sigue.lock().unwrap()) }
     fn ritmo_de_subida(&self)->Arc<RitmoDeSubida> { self.ritmo.clone() }
     fn handy_retenidas(&self, retenidas:bool) { self.retenidas.lock().unwrap().push(retenidas); }
+    async fn subida(&self) -> AppResult<Option<Arc<dyn SubidaCompleta>>> { Ok(self.subida.lock().unwrap().clone().map(|s| s as Arc<dyn SubidaCompleta>)) }
 }
 /// El acuse de un lote preparado sin `loteId` es el del último lote que ha salido: así los guiones
 /// no dependen de cómo nombra la Main sus lotes.
@@ -234,7 +254,7 @@ impl CanalReplicacion for Canal {
 }
 fn contexto(ops:Vec<OutboxEntry>)->Contexto {
     let repo=Arc::new(FakeRepo::default());*repo.pending.lock().unwrap()=ops;
-    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0),retenidas:Mutex::new(vec![])}
+    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),ritmo:Arc::default(),comprobaciones:Mutex::new(0),retenidas:Mutex::new(vec![]),subida:Mutex::new(None)}
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![]),cuerpos:Mutex::new(vec![])}}
@@ -662,6 +682,58 @@ async fn sin_atraso_las_suelta_al_conectar() {
     let mut c=conversacion(vec![estado()]);
     assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
     assert_eq!(c.log,[">recovery_ready","<main_status"]);
+}
+
+// ── DO-SUBIDA · la subida completa de la base ───────────────────────────────
+
+#[tokio::test]
+async fn el_saludo_trae_la_peticion_de_subida_solo_si_la_nube_la_manda() {
+    let mut c=conversacion(vec![Some(json!({"type":"challenge","nonceB64":"reto"})),Some(json!({"type":"hello_ok","role":"tpv","authed":true}))]);
+    assert_eq!(saludar(&mut c,firma).await.unwrap(),None,"un worker anterior no la manda");
+    let mut c=conversacion(vec![Some(json!({"type":"challenge","nonceB64":"reto"})),Some(json!({"type":"hello_ok","role":"tpv","authed":true,"subida":{"id":"s1","estado":"esperando","origen":"copia"}}))]);
+    assert_eq!(saludar(&mut c,firma).await.unwrap(),Some(PeticionDeSubida{id:"s1".into(),terminada:false,origen:"copia".into()}));
+    // Lo que no es una petición bien formada se lee como ninguna.
+    for raro in [json!({"id":"","estado":"esperando","origen":"copia"}),json!({"id":"s","estado":"caducada","origen":"copia"}),json!({"id":"s","estado":"esperando","origen":"otro"})] {
+        assert_eq!(PeticionDeSubida::del_saludo(&json!({"subida":raro})),None);
+    }
+}
+
+#[tokio::test]
+async fn con_una_subida_las_handy_esperan_a_su_nucleo() {
+    let ctx=disponible(contexto(vec![]));
+    let subida=Arc::new(FakeSubida{nucleo_en:2,..FakeSubida::default()});
+    *ctx.subida.lock().unwrap()=Some(subida.clone());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(),None,None,None]);
+    let peticion=Some(PeticionDeSubida{id:"s1".into(),terminada:false,origen:"base_vacia".into()});
+    assert!(ejecutar_con_saludo(&ctx,&n,&mut c,false,peticion.clone()).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(*subida.conciliadas.lock().unwrap(),vec![peticion]);
+    // Dos pasos (el núcleo) antes de soltarlas, y la subida sigue con ellas sueltas.
+    let pasos=*subida.pasos.lock().unwrap();
+    assert!(pasos>=3,"{pasos}");
+    assert_eq!(c.log,["<main_status",">recovery_ready"]);
+    assert_eq!(*ctx.retenidas.lock().unwrap(),vec![true,false]);
+}
+
+#[tokio::test]
+async fn sin_peticion_no_se_sube_nada_y_en_la_recuperacion_ni_se_concilia() {
+    let ctx=disponible(contexto(vec![]));
+    let subida=Arc::new(FakeSubida::default());
+    *ctx.subida.lock().unwrap()=Some(subida.clone());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado()]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(*subida.conciliadas.lock().unwrap(),vec![None],"se le dice que la nube no la pide");
+    assert_eq!(*subida.pasos.lock().unwrap(),0);
+    assert_eq!(c.log,[">recovery_ready","<main_status"]);
+
+    let ctx=contexto(vec![]);
+    let subida=Arc::new(FakeSubida::default());
+    *ctx.subida.lock().unwrap()=Some(subida.clone());
+    let n=nube(vec![pagina(vec![],0),pagina(vec![],0)]);
+    let mut c=canal(vec![]);
+    let _=ejecutar_con_saludo(&ctx,&n,&mut c,true,Some(PeticionDeSubida{id:"s1".into(),terminada:false,origen:"copia".into()})).await;
+    assert!(subida.conciliadas.lock().unwrap().is_empty(),"la base de una recuperación todavía no es la buena");
 }
 
 // ── Si sigue disponible se mira con un reloj, no con cada mensaje ───────────

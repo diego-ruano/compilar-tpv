@@ -1523,6 +1523,9 @@ async fn ajustar_registro_de_fallos(db: &Db) -> AppResult<()> {
     let w = db.write().await;
     let conn: &Connection = w.raw();
     conn.transaccion(async {
+        // DO-SUBIDA: la subida completa que tuviera la copia era de una base que ya no es ésta. Si la
+        // nube la sigue pidiendo, la primera sesión normal empieza otra con lo que hay ahora.
+        crate::subida_completa::vaciar(conn).await?;
         conn.execute(
             "DELETE FROM _Sync_Applied_Ops \
               WHERE EXISTS (SELECT 1 FROM _Sync_Failed f \
