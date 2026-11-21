@@ -1076,11 +1076,12 @@ async fn un_rechazo_sin_clasificar_del_plan_o_del_fin_espera_cada_vez_mas_y_vuel
 }
 
 /// DO-SUBIDA · Una página rechazada sin clasificar a los `MAX_INTENTOS` deja su tabla sin esperar más
-/// y con la cuenta de seguidos a cero: la siguiente tabla rota vuelve a empezar por 30 s. La cuenta
-/// pasaba de una a otra: la primera esperaba 8 min más ya dada por fallida y la segunda empezaba por
-/// 16 min, unas 2 h y media por cada tabla rota.
+/// (esperaba 8 min más ya dada por fallida), pero la cuenta de seguidos no vuelve a cero hasta que la
+/// nube admite un paso: con un fallo de todas las tablas (un worker roto que nadie ha clasificado),
+/// la siguiente sigue esperando cada vez más. Empezar cada tabla por 30 s dejaba fallida una tabla
+/// cada 7 min y medio, y el plan entero en unas horas.
 #[tokio::test]
-async fn una_tabla_que_se_deja_por_rechazos_sin_clasificar_no_pasa_su_espera_a_la_siguiente() {
+async fn con_un_fallo_sin_clasificar_de_todas_las_tablas_la_espera_sigue_creciendo_de_una_a_otra() {
     let (main, _dir) = base("rechazos-por-tabla").await;
     un_bar(&main).await;
     let mut nube = NubeDeSubida::nueva("rechazos-por-tabla").await;
@@ -1109,10 +1110,42 @@ async fn una_tabla_que_se_deja_por_rechazos_sin_clasificar_no_pasa_su_espera_a_l
         }
     }
     let esperas: Vec<&str> = pasos.iter().map(String::as_str).filter(|p| *p != "sigue").collect();
-    assert_eq!(esperas, ["30", "60", "120", "240", "30", "60", "120", "240"], "cada tabla empieza por 30 s: {pasos:?}");
+    assert_eq!(esperas, ["30", "60", "120", "240", "960", "1800", "1800", "1800"], "la segunda sigue la cuenta de la primera: {pasos:?}");
     assert_eq!(pasos.iter().filter(|p| *p == "sigue").count(), 1, "y tras la quinta sigue sin esperar: {pasos:?}");
     assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Avanza, "también en la segunda");
-    assert_eq!(numero(&main, "SELECT Rechazos_Seguidos FROM _Sync_Subida;").await, 0);
+    assert_eq!(numero(&main, "SELECT Rechazos_Seguidos FROM _Sync_Subida;").await, 10);
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 2, "las dos, fallidas");
+    // La nube se arregla: en cuanto admite una página, la cuenta vuelve a cero, y el siguiente rechazo
+    // espera otra vez 30 s.
+    nube.rechazar_si = None;
+    for _ in 0..10_000 {
+        if nube.paginas_aplicadas > 0 {
+            break;
+        }
+        match un_paso(&main, &mut nube).await {
+            PasoHecho::PorSubir => {
+                nube.subir_outbox(&main).await;
+            }
+            PasoHecho::Avanza => {}
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
+    assert_eq!(numero(&main, "SELECT Rechazos_Seguidos FROM _Sync_Subida;").await, 0);
+    nube.rechazar_si = Some(Box::new(|_| Some(json!({"ok": false, "error": "algo_raro"}))));
+    let mut espera = None;
+    for _ in 0..10_000 {
+        match un_paso(&main, &mut nube).await {
+            PasoHecho::Esperar(d) => {
+                espera = Some(d.as_secs());
+                break;
+            }
+            PasoHecho::PorSubir => {
+                nube.subir_outbox(&main).await;
+            }
+            PasoHecho::Avanza => {}
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
+    assert_eq!(espera, Some(30));
     nube.cerrar().await;
 }

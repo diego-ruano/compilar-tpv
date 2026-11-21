@@ -1147,9 +1147,10 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   sin clasificar se reintenta tras una espera que se dobla con cada uno seguido (30 s, 1 min, 2 min…
   hasta 30 min, contados en `_Sync_Subida.Rechazos_Seguidos` para que un reinicio no la vuelva a
   empezar) y vuelve a 30 s en cuanto un paso se confirma. El plan y el `fin` no se abandonan nunca
-  por eso; una página, a la quinta seguida de su tabla, la deja como uno permanente, sigue con la
-  siguiente sin esperar y la cuenta vuelve a cero (una tabla rota no alarga la espera de la
-  siguiente). En el repaso, uno permanente o sin clasificar cuenta como uno de sus intentos de lo que
+  por eso; una página, a la quinta seguida de su tabla, la deja como uno permanente y sigue con la
+  siguiente sin esperar, pero la cuenta no vuelve a cero hasta que la nube admite un paso: si la
+  siguiente también falla a la primera, la nube tiene un fallo de todas (un despliegue roto) y la
+  espera sigue creciendo, en vez de dejar fallida una tabla cada 7 min y medio. En el repaso, uno permanente o sin clasificar cuenta como uno de sus intentos de lo que
   mandaba, y la tabla, que ya subió, no se toca. El
   interruptor remoto `subida_nube` pausa los pasos.
 - **Las Handy** esperan, además de al outbox, al núcleo (`recovery_ready` sale cuando está, o a los

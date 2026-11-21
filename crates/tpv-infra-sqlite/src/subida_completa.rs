@@ -69,8 +69,9 @@
 //! la subida). Uno sin clasificar espera 30 s, el doble con cada uno seguido hasta 30 min
 //! (`espera_tras`, con la cuenta en `_Sync_Subida.Rechazos_Seguidos`), y vuelve a 30 s en cuanto un
 //! paso se confirma; el plan y el `fin` no se abandonan por eso, y una página, a los `MAX_INTENTOS`,
-//! deja su tabla sin esperar más y con la cuenta otra vez a cero. En el repaso, uno permanente o sin
-//! clasificar gasta un intento de lo que mandaba.
+//! deja su tabla sin esperar más pero sin poner la cuenta a cero: si la siguiente también falla a la
+//! primera, la nube tiene un fallo de todas y la espera sigue creciendo. En el repaso, uno permanente
+//! o sin clasificar gasta un intento de lo que mandaba.
 //!
 //! # El cobro no se toca
 //!
@@ -1008,8 +1009,8 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         Quien::Subida => None,
         Quien::Entrada(e) | Quien::Repaso(e) => Some(e),
     };
-    // Apunta el rechazo y devuelve los sin clasificar seguidos (con éste, si lo es; cero si ha dejado
-    // su tabla).
+    // Apunta el rechazo y devuelve los sin clasificar seguidos (con éste, si lo es) y si ha dejado su
+    // tabla.
     let anotar = move |error: String, fallida: bool| async move {
         let w = db.write().await;
         let conn = w.raw();
@@ -1033,14 +1034,14 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         // que se da por fallida se cuenta aparte (`tablas_fallidas`). El código, sólo en la tabla de
         // la entrada y en la telemetría: la pantalla no enseña identificadores.
         // Un rechazo sin clasificar (no `fallida`) cuenta en los seguidos; uno permanente, no.
-        // DO-SUBIDA · Uno que deja su tabla acaba un paso, como uno que se confirma: la cuenta vuelve
-        // a cero. Pasaba a la tabla siguiente, que empezaba esperando 16 min en vez de 30 s, y cada
-        // tabla rota más costaba unas 2 h y media.
+        // DO-SUBIDA · Uno que deja su tabla no pone la cuenta a cero: vuelve a cero sola con el
+        // primer paso que la nube admita. Que la tabla siguiente también falle a la primera es la
+        // firma de un worker con un fallo global sin clasificar, y empezar cada tabla por 30 s se
+        // comía el plan entero en unas horas, dejando fallida cada tabla sin reintentarla.
         conn.execute(
             "UPDATE _Sync_Subida SET Ultimo_Error = CASE WHEN ?1 OR EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
                WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN NULL ELSE 'reintentando' END, \
-               Rechazos_Seguidos = CASE WHEN EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
-               WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN 0 ELSE Rechazos_Seguidos + (NOT ?1) END WHERE Id = 1;",
+               Rechazos_Seguidos = Rechazos_Seguidos + (NOT ?1) WHERE Id = 1;",
             vec![
                 Value::Integer(fallida as i64),
                 e.map_or(Value::Null, |e| Value::Text(e.tabla.clone())),
@@ -1049,12 +1050,19 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         )
         .await
         .map_err(db_err)?;
-        let mut f = conn.query("SELECT Rechazos_Seguidos FROM _Sync_Subida WHERE Id = 1;", ()).await.map_err(db_err)?;
-        let seguidos = match f.next().await.map_err(db_err)? {
-            Some(fila) => fila.get::<i64>(0).map_err(db_err)?,
-            None => 1,
+        let mut f = conn
+            .query(
+                "SELECT Rechazos_Seguidos, EXISTS (SELECT 1 FROM _Sync_Subida_Tablas WHERE Tabla = ?1 AND Fase = ?2 AND Estado = 2) \
+                   FROM _Sync_Subida WHERE Id = 1;",
+                vec![e.map_or(Value::Null, |e| Value::Text(e.tabla.clone())), Value::Integer(e.map_or(-1, |e| e.fase))],
+            )
+            .await
+            .map_err(db_err)?;
+        let (seguidos, dejada) = match f.next().await.map_err(db_err)? {
+            Some(fila) => (fila.get::<i64>(0).map_err(db_err)?, fila.get::<i64>(1).map_err(db_err)? != 0),
+            None => (1, false),
         };
-        AppResult::Ok(seguidos)
+        AppResult::Ok((seguidos, dejada))
     };
     Ok(Err(match acuse {
         Acuse::Bien(j) => return Ok(Ok(j)),
@@ -1091,10 +1099,10 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         // DO-SUBIDA · Un rechazo sin clasificar del plan o del `fin` se repetía cada 30 s sin fin. Ahora
         // la espera crece con los seguidos (`espera_tras`) y vuelve a 30 s en cuanto un paso se
         // confirma; sin abandonar. Uno de una página cuenta igual, y a los `MAX_INTENTOS` deja su
-        // tabla como uno permanente: sigue con la siguiente sin esperar, y la cuenta vuelve a cero.
+        // tabla como uno permanente: sigue con la siguiente sin esperar, y con la cuenta como está.
         Acuse::SinClasificar(error) => {
-            let seguidos = anotar(error.clone(), false).await?;
-            if seguidos == 0 {
+            let (seguidos, dejada) = anotar(error.clone(), false).await?;
+            if dejada {
                 tracing::error!(target: "tpv::sync", evento = "subida_tabla_fallida", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, "DO-SUBIDA: la nube rechaza una tabla de la subida");
                 PasoHecho::Avanza
             } else {
