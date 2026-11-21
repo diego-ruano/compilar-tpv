@@ -19,7 +19,9 @@
 //
 // Las tres que abren el log de la réplica (la vuelta a un instante y las dos de DO-PERDIDA) le dicen
 // al objeto hasta dónde numeraron los logs de antes, que un objeto vacío no recuerda (`seqConocido`):
-// el `inicio` que cada una deja en `admin_audit` y el `seq` de las copias de R2.
+// el `inicio` que cada una apunta en `admin_audit` y el `seq` de las copias de R2. Ese `inicio` se
+// apunta antes de llamar al objeto (`reservarLog`), no al acabar: un log abierto sin su rastro haría
+// que la siguiente base devuelta se abriera otra vez en el mismo número.
 //
 // Todo va por POST con el negocio en el cuerpo, como el resto de la administración que lleva datos.
 // Lo que cambia algo deja rastro en `admin_audit` (con el motivo) y en Axiom (sin él: es texto
@@ -38,7 +40,7 @@ import { auditAdmin } from "../../server/licenseStore";
 import { getDb } from "../../server/db";
 import { claveDeCopia, listarCopias, seqDeLasCopias } from "../../durableObjects/tenantHub.copia";
 import { zDia } from "../../lib/fechas";
-import { VENTANA_DE_VUELTA_MS, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
+import { SALTO_DE_SEQ, VENTANA_DE_VUELTA_MS, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
 import type { VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
 
 export const basesDeNegociosRoutes = new Hono<{ Bindings: Env }>();
@@ -63,8 +65,16 @@ async function rastro(env: Env, evento: string, campos: Record<string, unknown>)
 	await ingestToAxiom(env, dataset, [{ _time: new Date().toISOString(), service: "tpv-api", event: evento, ...campos }]);
 }
 
-/** Lo que apunta en `admin_audit`, con el `inicio` del log que abrió, cada vez que se abre un log. */
-const AL_ABRIR_UN_LOG = ["negocio_volver_a_instante", "negocio_restaurar_copia", "negocio_base_vacia"] as const;
+/**
+ * Lo que apunta en `admin_audit` el `inicio` de un log: la reserva de antes de abrirlo
+ * (`reservarLog`) y el rastro de cada orden que lo ha abierto.
+ */
+const AL_ABRIR_UN_LOG = [
+	"negocio_log_reservado",
+	"negocio_volver_a_instante",
+	"negocio_restaurar_copia",
+	"negocio_base_vacia",
+] as const;
 
 /**
  * DO-PERDIDA · Hasta dónde ha numerado nunca el log de este negocio, según lo que sobrevive a perder
@@ -77,6 +87,10 @@ const AL_ABRIR_UN_LOG = ["negocio_volver_a_instante", "negocio_restaurar_copia",
  * del salto, y la Main, con el checkpoint por encima del log nuevo, no bajaría lo que éste numerase
  * por debajo (con `nube`, ni vería que tiene que traerse la nube). Lanza si la base central o R2 no
  * contestan: sin saberlo no se abre ningún log.
+ *
+ * Una reserva cuya orden no llegó a abrir el log (el objeto ya tenía base, la copia no valía) también
+ * cuenta: la siguiente se abre un salto más arriba, que no estorba. Lo que no puede pasar es lo
+ * contrario, un log abierto que no conste.
  */
 async function seqConocido(env: Env, tenantId: string): Promise<number> {
 	const [auditado, deLasCopias] = await Promise.all([
@@ -88,6 +102,30 @@ async function seqConocido(env: Env, tenantId: string): Promise<number> {
 		seqDeLasCopias(env.COPIAS_NEGOCIOS, tenantId),
 	]);
 	return Math.max(Number((auditado.rows[0] as { seq?: unknown } | undefined)?.seq ?? 0) || 0, deLasCopias);
+}
+
+/**
+ * DO-PERDIDA · Apunta en `admin_audit`, antes de llamar al objeto, el `inicio` con el que se va a abrir
+ * el log (`seqAntes` + `SALTO_DE_SEQ`, como `abrirLogTrasVolver`), para `seqConocido`. El rastro de la
+ * orden va después de que el objeto conteste, y puede no llegar: la base central falla en ese momento,
+ * o se pierde la respuesta del objeto con el log ya abierto, y repetir la orden no lo arregla (el
+ * objeto ya tiene base). Sin la reserva, la siguiente base devuelta antes de la copia de la noche
+ * leería el `seqConocido` de antes y abriría su log en el mismo número que éste, por debajo del
+ * checkpoint de la Main. Lanza si la base central no contesta: sin apuntarlo no se abre ningún log.
+ *
+ * Con un objeto vacío el `inicio` es exacto: tras `llenar` no queda nada numerado. Tras volver a un
+ * instante, lo vuelto es de antes de lo que se leyó al prepararlo (`seqAntes`).
+ */
+async function reservarLog(
+	env: Env,
+	{ tenantId, operacion, seqAntes }: { tenantId: string; operacion: "instante" | "base_vacia" | "copia"; seqAntes: number },
+): Promise<void> {
+	await auditAdmin(getDb(env), "negocio_log_reservado", null, {
+		tenantId,
+		operacion,
+		seqAntes,
+		inicio: seqAntes + SALTO_DE_SEQ,
+	});
 }
 
 basesDeNegociosRoutes.post("/estado", cuerpo(negocioSchema), async (c) => {
@@ -189,6 +227,20 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	}
 
 	const seqAntes = Math.max(prep.seqAntes, conocido);
+	try {
+		await reservarLog(env, { tenantId, operacion: "instante", seqAntes });
+	} catch {
+		return c.json(
+			{
+				ok: false,
+				error: "log_sin_reservar",
+				message:
+					"La vuelta está preparada, pero la base central no ha contestado y sin ella no se abre el log: la base sigue cerrada. Repite la misma orden.",
+				deshacer: prep.deshacer,
+			},
+			503,
+		);
+	}
 	let tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
 	if (!tras.ok && tras.error === "vuelta_sin_aplicar") {
 		tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
@@ -295,6 +347,7 @@ basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c
 		return c.json({ ok: false, error: "copia_no_encontrada", message: "Este negocio no tiene ninguna copia." }, 404);
 	}
 	const conocido = await seqConocido(env, tenantId);
+	await reservarLog(env, { tenantId, operacion: "copia", seqAntes: conocido });
 	const r = await hubDe(env, tenantId).restaurarDesdeCopia({ tenantId, clave, modo, seqConocido: conocido });
 	if (!r.ok) return c.json({ ok: false, error: r.error, clave }, r.status as 409);
 
@@ -339,6 +392,7 @@ basesDeNegociosRoutes.post("/base-vacia", cuerpo(baseSchema), async (c) => {
 	if (!(await negocioNacido(getDb(env), tenantId))) return c.json(sinNacer(tenantId), 409);
 
 	const conocido = await seqConocido(env, tenantId);
+	await reservarLog(env, { tenantId, operacion: "base_vacia", seqAntes: conocido });
 	const r = await hubDe(env, tenantId).crearBaseVacia({ tenantId, modo, seqConocido: conocido });
 	if (!r.ok) return c.json({ ok: false, error: r.error }, r.status as 409);
 

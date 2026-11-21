@@ -55,10 +55,19 @@ async function pedir(ruta: string, cuerpo: unknown, token: string | null = TOKEN
 		}),
 		entorno,
 	);
-	return { status: res.status, body: (await res.json()) as any };
+	// Un fallo sin capturar sale del `onError` de Hono como texto: sin cuerpo que leer.
+	return { status: res.status, body: (await res.json().catch(() => null)) as any };
 }
 
-type Central = { auditoria: () => any[]; nacer: (t: string) => void; apuntar: (action: string, detail: unknown) => void };
+type Central = {
+	auditoria: () => any[];
+	nacer: (t: string) => void;
+	apuntar: (action: string, detail: unknown) => void;
+	/** Desde ahora, la base central falla al apuntar esa acción en `admin_audit`, y sólo ésa. */
+	fallarAlApuntar: (action: string) => void;
+	/** Y vuelve a contestar. */
+	contestar: () => void;
+};
 
 /**
  * Corre `cuerpo` con la base central sobre el SQLite de un DO aparte, con `admin_audit` vacía, y
@@ -73,7 +82,7 @@ async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promi
 		return cuerpo({
 			auditoria: () =>
 				sql
-					.exec("SELECT action, detail FROM admin_audit ORDER BY at_ms;")
+					.exec("SELECT action, detail FROM admin_audit ORDER BY at_ms, rowid;")
 					.toArray()
 					.map((f: any) => ({ action: f.action, detail: JSON.parse(f.detail) })),
 			nacer: (t: string) =>
@@ -92,6 +101,12 @@ async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promi
 					action,
 					JSON.stringify(detail),
 				),
+			fallarAlApuntar: (action: string) =>
+				sql.exec(
+					`CREATE TRIGGER falla_al_apuntar BEFORE INSERT ON admin_audit WHEN NEW.action = '${action}'
+					 BEGIN SELECT RAISE(ABORT, 'la base central no contesta'); END;`,
+				),
+			contestar: () => sql.exec("DROP TRIGGER IF EXISTS falla_al_apuntar;"),
 		});
 	});
 }
@@ -362,6 +377,11 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			// La base vuelve a atender, y queda el rastro con el motivo.
 			expect(await stub(t).leerParaLaWeb(t, { que: "plano" })).toMatchObject({ ok: true });
 			expect(auditoria).toEqual([
+				// Antes de abrir el log, desde dónde se abrirá (DO-PERDIDA).
+				{
+					action: "negocio_log_reservado",
+					detail: { tenantId: t, operacion: "instante", seqAntes, inicio: seqAntes + SALTO_DE_SEQ },
+				},
 				{
 					action: "negocio_volver_a_instante",
 					detail: expect.objectContaining({ tenantId: t, modo, deshacer: "m-deshacer", motivo: "un borrado por error" }),
@@ -389,6 +409,47 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 		});
 		expect(r.status).toBe(200);
 		expect(r.body).toMatchObject({ ok: true, seqAntes: 1, seqConocido: anterior, inicio: anterior + SALTO_DE_SEQ });
+	});
+
+	it("si la base central no apunta la vuelta con el log ya abierto, una pérdida después abre igual por encima (DO-PERDIDA)", async () => {
+		const t = "instante-sin-rastro";
+		await negocioConDatos(t);
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, []));
+		const r = await conCentral("copias-central-instante-sin-rastro", async (central) => {
+			central.nacer(t);
+			// El objeto vuelve y abre el log, y la base central falla justo al apuntar la vuelta.
+			central.fallarAlApuntar("negocio_volver_a_instante");
+			const vuelta = await pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+			central.contestar();
+			const abierto = await enElHub(t, (hub: any) =>
+				Number(hub.state.storage.sql.exec("SELECT MAX(Seq) AS s FROM Sync_Changes WHERE Command_Name = 'nube_devuelta';").one().s),
+			);
+			// La Main baja de ese log, y el objeto se pierde antes de la copia de la noche.
+			await stub(t).borrarTodo();
+			const vacia = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
+			return { vuelta, abierto, vacia };
+		});
+		expect(r.vuelta.status).toBe(500);
+		expect(r.abierto).toBe(1 + SALTO_DE_SEQ);
+		expect(r.vacia.status).toBe(200);
+		expect(r.vacia.body.seqConocido).toBeGreaterThanOrEqual(r.abierto);
+		expect(r.vacia.body.inicio).toBeGreaterThanOrEqual(r.abierto + SALTO_DE_SEQ);
+	});
+
+	it("si la base central no contesta al apuntar desde dónde se abre el log, la vuelta no lo abre y lo dice", async () => {
+		const t = "instante-sin-reserva";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, llamadas));
+		const r = await conCentral("copias-central-instante-sin-reserva", async (central) => {
+			central.fallarAlApuntar("negocio_log_reservado");
+			return pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+		});
+		expect(r).toMatchObject({ status: 503, body: { ok: false, error: "log_sin_reservar", deshacer: "m-deshacer" } });
+		expect(r.body.message).toContain("Repite la misma orden");
+		// Ni se reinicia el objeto ni se abre el log: la vuelta sigue preparada y la base, cerrada.
+		expect(llamadas).not.toContain("reiniciar");
+		expect(await stub(t).estadoDeLaBase(t)).toMatchObject({ ok: true, vueltaEnCurso: true });
 	});
 
 	it("mientras la vuelta está preparada la base no atiende a nadie, y sin volver no se abre el log", async () => {

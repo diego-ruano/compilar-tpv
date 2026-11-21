@@ -526,6 +526,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"vuelta_no_disponible",
 	"vuelta_sin_aplicar",
 	"instante_fuera_de_plazo",
+	"log_sin_reservar",
 	// DO-PERDIDA · Darle base a un objeto vacío (`/v1/admin/negocios/restaurar-copia` y `base-vacia`).
 	"negocio_sin_nacer",
 	"copia_no_encontrada",

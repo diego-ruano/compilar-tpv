@@ -52,7 +52,8 @@ pnpm negocio:instante -- --tenant <tenantId> --marcador <deshacer> --modo <el mi
 ```
 
 Si contesta `vuelta_sin_aplicar`, el objeto no se ha reiniciado todavía y su base sigue cerrada:
-repite la misma orden. Si contesta `vuelta_no_disponible`, ese despliegue no tiene vuelta a un
+repite la misma orden. Lo mismo con `log_sin_reservar`: la base central no ha contestado al apuntar
+desde dónde se abre el log, y sin eso no se abre. Si contesta `vuelta_no_disponible`, ese despliegue no tiene vuelta a un
 instante (en local, `wrangler dev`, no existe).
 
 ## Las copias diarias
@@ -110,7 +111,9 @@ En las dos, el log de la réplica se abre por encima de lo que la Main pueda hab
 vuelta a un instante. El objeto vacío ya no sabe hasta dónde numeró, así que la ruta lo saca de lo que
 sobrevive: el `inicio` de los logs que se le abrieron antes (en `admin_audit`) y el `seq` de sus
 copias de R2; la respuesta lo trae como `seqConocido`. Por eso las dos necesitan que contesten la base
-central y R2. `--modo` dice quién manda después:
+central y R2. Desde dónde se abre el log nuevo queda apuntado antes de tocar el objeto
+(`negocio_log_reservado`): si la orden contesta 500 después, el log puede estar abierto aunque falte
+su rastro, y la siguiente orden lo tiene en cuenta igual. `--modo` dice quién manda después:
 
 - **`main`**: la Main sigue con su base, se pone al día, sube lo que tenga pendiente y después sube su
   base entera ([la subida completa](#la-subida-completa-de-la-main-do-subida)).

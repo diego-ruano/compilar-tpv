@@ -50,10 +50,18 @@ async function pedir(ruta: string, cuerpo: unknown, token: string | null = TOKEN
 		}),
 		ENV,
 	);
-	return { status: res.status, body: (await res.json()) as any };
+	// Un fallo sin capturar sale del `onError` de Hono como texto: sin cuerpo que leer.
+	return { status: res.status, body: (await res.json().catch(() => null)) as any };
 }
 
-type Central = { auditoria: () => string[]; nacer: (t: string) => void };
+type Central = {
+	auditoria: () => string[];
+	nacer: (t: string) => void;
+	/** Desde ahora, la base central falla al apuntar esa acción en `admin_audit`, y sólo ésa. */
+	fallarAlApuntar: (action: string) => void;
+	/** Y vuelve a contestar. */
+	contestar: () => void;
+};
 
 /** Corre `cuerpo` dentro del DO de la base central (su SQLite no se deja tocar desde fuera). */
 async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promise<R>): Promise<R> {
@@ -63,7 +71,13 @@ async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promi
 		sql.exec("DELETE FROM admin_audit;");
 		dbDePruebas = clienteSobre(sql, hub.state.storage);
 		return cuerpo({
-			auditoria: () => sql.exec("SELECT action FROM admin_audit ORDER BY at_ms;").toArray().map((f: any) => f.action),
+			auditoria: () => sql.exec("SELECT action FROM admin_audit ORDER BY at_ms, rowid;").toArray().map((f: any) => f.action),
+			fallarAlApuntar: (action: string) =>
+				sql.exec(
+					`CREATE TRIGGER falla_al_apuntar BEFORE INSERT ON admin_audit WHEN NEW.action = '${action}'
+					 BEGIN SELECT RAISE(ABORT, 'la base central no contesta'); END;`,
+				),
+			contestar: () => sql.exec("DROP TRIGGER IF EXISTS falla_al_apuntar;"),
 			nacer: (t: string) =>
 				sql.exec(
 					`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled, term_months,
@@ -142,7 +156,8 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		expect(r.creada.status).toBe(200);
 		expect(r.creada.body).toMatchObject({ ok: true, inicio: SALTO_DE_SEQ, purgadoHasta: SALTO_DE_SEQ - 1 });
 		expect(r.otraVez).toMatchObject({ status: 409, body: { error: "tenant_db_already_provisioned" } });
-		expect(r.auditoria).toEqual(["negocio_base_vacia"]);
+		// Antes de llamar al objeto se apunta desde dónde se abrirá el log, también la vez que no se abre.
+		expect(r.auditoria).toEqual(["negocio_log_reservado", "negocio_base_vacia", "negocio_log_reservado"]);
 
 		expect(await stub(t).estaAprovisionado()).toBe(true);
 		await enElHub(t, async (hub: any) => {
@@ -180,7 +195,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		});
 		expect(r.restaurada.body.filas).toBeGreaterThan(5);
 		expect(r.otraVez).toMatchObject({ status: 409, body: { error: "tenant_db_already_provisioned" } });
-		expect(r.auditoria).toEqual(["negocio_restaurar_copia"]);
+		expect(r.auditoria).toEqual(["negocio_log_reservado", "negocio_restaurar_copia", "negocio_log_reservado"]);
 
 		await enElHub(t, async (hub: any) => {
 			const sql = hub.state.storage.sql;
@@ -237,6 +252,40 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		expect(r.primera.body).toMatchObject({ ok: true, seqConocido: 0, inicio: SALTO_DE_SEQ });
 		expect(r.segunda.body).toMatchObject({ ok: true, seqConocido: SALTO_DE_SEQ, inicio: 2 * SALTO_DE_SEQ });
 	});
+
+	for (const ruta of ["/negocios/base-vacia", "/negocios/restaurar-copia"] as const) {
+		it(`${ruta}: si la base central no apunta la orden con el log ya abierto, la siguiente pérdida abre igual por encima (DO-PERDIDA)`, async () => {
+			const t = `perdida-sin-rastro-${ruta.slice(10)}`;
+			const accion = ruta === "/negocios/base-vacia" ? "negocio_base_vacia" : "negocio_restaurar_copia";
+			const orden = { tenantId: t, modo: "main", motivo: "se perdió" };
+			if (ruta === "/negocios/restaurar-copia") await negocioConCopia(t); // su copia dice el 70
+			await stub(t).borrarTodo();
+			const r = await conCentral(`perdida-central-sin-rastro-${ruta.slice(10)}`, async (central) => {
+				central.nacer(t);
+				// El objeto abre el log, y la base central falla justo al apuntar la orden.
+				central.fallarAlApuntar(accion);
+				const fallida = await pedir(ruta, orden);
+				central.contestar();
+				const abierto = await enElHub(t, (hub: any) =>
+					Number(hub.state.storage.sql.exec("SELECT MAX(Seq) AS s FROM Sync_Changes WHERE Command_Name = 'nube_devuelta';").one().s),
+				);
+				// Repetirla no lo arregla: el objeto ya tiene base.
+				const repetida = await pedir(ruta, orden);
+				// La Main baja de ese log, y el objeto se vuelve a perder antes de la copia de la noche.
+				await stub(t).borrarTodo();
+				const siguiente = await pedir("/negocios/base-vacia", orden);
+				return { fallida, abierto, repetida, siguiente };
+			});
+
+			expect(r.fallida.status).toBe(500);
+			expect(r.abierto).toBe((ruta === "/negocios/restaurar-copia" ? 70 : 0) + SALTO_DE_SEQ);
+			expect(r.repetida).toMatchObject({ status: 409, body: { error: "tenant_db_already_provisioned" } });
+			// Por encima del log que se abrió sin rastro, y de lo que la Main bajó de él (lo cubre el salto).
+			expect(r.siguiente.status).toBe(200);
+			expect(r.siguiente.body.seqConocido).toBeGreaterThanOrEqual(r.abierto);
+			expect(r.siguiente.body.inicio).toBeGreaterThanOrEqual(r.abierto + SALTO_DE_SEQ);
+		});
+	}
 
 	it("la copia dice hasta dónde numeró su base, y restaurarla abre el log por encima aunque la base central no lo sepa", async () => {
 		const t = "perdida-copia-numerada";

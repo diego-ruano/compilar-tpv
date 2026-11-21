@@ -710,7 +710,11 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   cada base devuelta lo dejan en `admin_audit`) y el `seq` de sus copias de R2 (`seqMasAlto` al
   copiar, en los metadatos del objeto). El salto va encima y cubre lo que el log perdido numeró
   después. Sin la base central o R2 no se abre nada. La vuelta a un instante lo suma también a su
-  `seqAntes`. Después se echa otra vez a todas las sesiones, como en `trasVolver`: el saludo no mira
+  `seqAntes`. Ese `inicio` se apunta **antes** de llamar al objeto (`negocio_log_reservado`,
+  `reservarLog`): el rastro de la orden va cuando el objeto contesta, y si la base central falla
+  entonces, o se pierde la respuesta con el log ya abierto, repetir la orden no lo arregla (el objeto
+  ya tiene base) y la siguiente pérdida antes de la copia de la noche abriría otra vez en el mismo
+  número. Una reserva cuya orden no llegó a abrir nada sólo sube un salto más la siguiente. Después se echa otra vez a todas las sesiones, como en `trasVolver`: el saludo no mira
   la marca, y una que entró mientras se llenaba la base saludó sin la petición de subida. Luego, la
   copia diaria armada.
 

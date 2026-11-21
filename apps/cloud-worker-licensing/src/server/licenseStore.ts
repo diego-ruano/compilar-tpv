@@ -1781,6 +1781,8 @@ export async function auditAdmin(
 		// DO-PERDIDA: base a un objeto vacío de un negocio que ya nació.
 		| "negocio_restaurar_copia"
 		| "negocio_base_vacia"
+		// DO-PERDIDA: el `inicio` de un log, apuntado antes de abrirlo (`reservarLog`).
+		| "negocio_log_reservado"
 		// DO-SUBIDA: reabrir la subida completa de la Main.
 		| "negocio_subida_reabierta",
 	licenseId: string | null,
