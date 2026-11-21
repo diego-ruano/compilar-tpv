@@ -1106,12 +1106,18 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   una cosa: lo que ha escrito esta misma Main después no lo frena (`borrado_si_nadie_mas_ha_escrito`,
   con el `dispositivo` que da el plan), porque nada suyo cuelga de una fila que no tiene. Si algo de
   una Handy (o de la web) se ha colado, no borran nada y lo ve el contraste. Lo que toca una
-  cuarentena de bajada (SYNC-36) no se pide borrar nunca, tampoco como sobrante.
+  cuarentena de bajada (SYNC-36) no se pide borrar nunca, tampoco como sobrante, ni nada de una tabla
+  incierta.
 - **Lo que no se sube**: lo que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`,
-  SYNC-36: la nube es la buena en esas filas; si no se sabe qué filas, la tabla entera se deja para el
-  contraste, y si no se sabe ni en qué tablas escriben sus sentencias, todas), las filas apuntadas por el orden de la nube (SYNC-29), salvo que arriba falten, y un
-  blob o una fila de más de 1 MiB (por revisar). El repaso aparta lo mismo que una página, y lo
-  apartado sale de su lista: lo ve el contraste o lo trae la convergencia.
+  SYNC-36: la nube es la buena en esas filas), las filas apuntadas por el orden de la nube (SYNC-29),
+  salvo que arriba falten, y un blob o una fila de más de 1 MiB (por revisar). Si de una cuarentena
+  no se sabe qué filas toca, las tablas en las que escriben sus sentencias (y si ni eso se sabe,
+  todas) son **inciertas**: de ellas sólo sube lo que falta arriba (los tramos, si los hay, y las
+  huellas, con su lista `faltan`; nunca se pisa una fila que ya está, que puede ser lo que escribió
+  ese cambio) y no se pide borrar nada. La tabla acaba como las demás y no cuenta como fallida; lo
+  que difiere lo ve el contraste. Así una nube devuelta con una base vacía no se queda vacía en esas
+  tablas. El repaso aparta lo mismo que una página, y lo apartado sale de su lista: lo ve el
+  contraste o lo trae la convergencia.
 - **Lo fiscal**: un registro de facturación sólo se inserta (lo que arriba es distinto vuelve como
   `fiscal` y lo ve el contraste); el contador de cada serie (`Serie_Facturacion.Ultimo`) sólo sube,
   hasta el de aquí. Ninguno de los dos se pide borrar arriba.
