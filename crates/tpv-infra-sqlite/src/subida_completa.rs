@@ -797,6 +797,9 @@ fn leer_pagina(foto: &Foto<'_>, e: &Entrada, desde: Option<&str>, tope: usize) -
             tomar(v, &mut sueltas);
             Ok(())
         })?;
+        // DO-SUBIDA · Lo que aquí está pero no se puede mandar (no cabe en una página, un valor sin
+        // JSON) queda por revisar, y no es lo que aquí ya no está: no se pide borrar arriba.
+        let por_revisar: HashSet<String> = sueltas.por_revisar.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect();
         p.por_revisar.append(&mut sueltas.por_revisar);
         for f in sueltas.filas {
             por_clave.insert(Json::Array(f.clave.clone()).to_string(), f);
@@ -805,7 +808,7 @@ fn leer_pagina(foto: &Foto<'_>, e: &Entrada, desde: Option<&str>, tope: usize) -
             let normal = serde_json::from_str::<Json>(k).map(|j| j.to_string()).unwrap_or_default();
             match por_clave.remove(&normal) {
                 Some(f) => p.filas.push(f),
-                None if e.fase == 0 => {
+                None if e.fase == 0 && !por_revisar.contains(&normal) => {
                     if let Ok(Json::Array(c)) = serde_json::from_str::<Json>(k) {
                         p.borrar.push(c);
                     }

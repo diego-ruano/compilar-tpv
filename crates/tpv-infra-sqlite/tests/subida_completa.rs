@@ -740,3 +740,29 @@ async fn una_cuarentena_que_no_dice_nada_aparta_todas_las_tablas() {
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Fase <> 4 AND Estado <> 2;").await, 0);
     nube.cerrar().await;
 }
+
+/// DO-SUBIDA · Una fila viva que aquí existe pero no se puede mandar (no cabe en una página) queda
+/// por revisar, y no se pide borrar arriba: la nube perdía una fila que la Main tiene.
+#[tokio::test]
+async fn un_vivo_que_no_cabe_en_una_pagina_no_se_borra_arriba() {
+    let (main, _dir) = base("vivo-gordo").await;
+    un_bar(&main).await;
+    sembrar(
+        &main,
+        "INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('com-gorda', 'BARRA', 'Abierta', '2026-11-20 10:00:00');
+         INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Nombre_Producto, Cantidad, Precio_Unitario, Notas)
+           VALUES ('det-gorda', 'com-gorda', 'Cana', 1, 250, replace(hex(zeroblob(600000)), '0', 'x'));",
+    )
+    .await;
+    let mut nube = NubeDeSubida::nueva("vivo-gordo").await;
+    nube.sembrar(
+        "INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('com-gorda', 'BARRA', 'Abierta', '2026-11-20 10:00:00');
+         INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Nombre_Producto, Cantidad, Precio_Unitario, Notas) VALUES ('det-gorda', 'com-gorda', 'Cana', 1, 250, 'corta');",
+    )
+    .await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Detalle = 'det-gorda';").await, 1, "sigue arriba");
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar WHERE Tabla = 'Detalle_Comanda' AND Motivo = 'otro';").await, 1);
+    nube.cerrar().await;
+}
