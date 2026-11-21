@@ -99,6 +99,16 @@ pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
 
+/// INFRA-03 · De dónde pinta la Handy las imágenes de su negocio: `{CLOUD_API_BASE}/v1/images/{negocio}`
+/// (`tpv_infra_licensing::url_imagenes_del_negocio`), sin la `Ruta_Imagen`, que pone `imageUrl.ts`.
+/// `None` si no está vinculada. La dirección del worker sale del backend, la misma de la API, y no
+/// se escribe otra vez en el frontend.
+#[tauri::command(async)]
+#[specta::specta]
+pub fn handy_url_imagenes(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
+    Ok(uc::handy_get_tenant(&svc(&app)?)?.and_then(|negocio| tpv_infra_licensing::url_imagenes_del_negocio(&negocio)))
+}
+
 
 #[tauri::command(async)]
 #[specta::specta]

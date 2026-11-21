@@ -68,6 +68,24 @@ use device::{
 /// pegada en cada web que pega el widget o usa el SDK.
 pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 
+/// INFRA-03 · De dónde pinta la Handy las imágenes de su negocio: el GET público del worker,
+/// `{CLOUD_API_BASE}/v1/images/{negocio}` (`domains/images/images.routes.ts`), al que `imageUrl.ts`
+/// le pega la `Ruta_Imagen` (`images/{carpeta}/{uuid}.{ext}`). Antes las leía del `r2.dev` del bucket,
+/// que Cloudflare reserva para desarrollo. Sale de aquí para que la dirección del worker siga siendo
+/// una sola; la CSP de `tauri.conf.json` la repite en `img-src`, y lo vigila un test de `lib.rs`.
+///
+/// El negocio es la carpeta del bucket y va como un segmento del camino, escapado: es un UUID, y si
+/// no lo fuera no podría salirse de su segmento. Sin negocio (vacío) no hay dirección.
+pub fn url_imagenes_del_negocio(negocio: &str) -> Option<String> {
+    let negocio = negocio.trim();
+    if negocio.is_empty() {
+        return None;
+    }
+    let mut url = reqwest::Url::parse(CLOUD_API_BASE).ok()?;
+    url.path_segments_mut().ok()?.pop_if_empty().extend(["v1", "images", negocio]);
+    Some(url.to_string())
+}
+
 /// Claves públicas ed25519 (base64) con las que el worker puede firmar el estado de licencia. Van
 /// **pineadas** en el binario: no se descargan de ningún sitio. Es lo que cierra LIC-01 —un servidor
 /// falso, un MITM con CA de confianza o un DNS envenenado no tienen la privada, así que no pueden
@@ -2133,6 +2151,39 @@ mod tests_subida_imagen {
                 Ok(ResultadoSubidaImagen::Rechazada { .. })));
         }
         assert!(matches!(clasificar_subida_imagen(204, b""), Ok(ResultadoSubidaImagen::Subida)));
+    }
+}
+
+#[cfg(test)]
+mod tests_url_imagenes {
+    use super::*;
+
+    /// INFRA-03: la forma exacta que espera el GET del worker (`/v1/images/:tenant/*`), sobre la
+    /// misma dirección que el resto de la nube, y nunca el `r2.dev` del bucket.
+    #[test]
+    fn la_handy_pide_las_imagenes_al_worker_con_su_negocio() {
+        let negocio = "0190f3a1-7b2c-4d4e-8f00-123456789abc";
+        assert_eq!(
+            url_imagenes_del_negocio(negocio).as_deref(),
+            Some("https://tpv-api.altarialights.workers.dev/v1/images/0190f3a1-7b2c-4d4e-8f00-123456789abc")
+        );
+        assert_eq!(
+            url_imagenes_del_negocio(negocio).unwrap(),
+            format!("{CLOUD_API_BASE}/v1/images/{negocio}")
+        );
+        assert_eq!(
+            url_imagenes_del_negocio(&format!("  {negocio}\n")).unwrap(),
+            format!("{CLOUD_API_BASE}/v1/images/{negocio}")
+        );
+        assert!(!url_imagenes_del_negocio(negocio).unwrap().contains("r2.dev"));
+    }
+
+    #[test]
+    fn sin_negocio_no_hay_direccion_y_el_negocio_no_sale_de_su_segmento() {
+        assert_eq!(url_imagenes_del_negocio(""), None);
+        assert_eq!(url_imagenes_del_negocio("   "), None);
+        let raro = url_imagenes_del_negocio("a/b?c#d").unwrap();
+        assert_eq!(raro, format!("{CLOUD_API_BASE}/v1/images/a%2Fb%3Fc%23d"));
     }
 }
 

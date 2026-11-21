@@ -2429,6 +2429,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
             commands::pairing::handy_set_token,
             commands::pairing::handy_get_tenant,
+            commands::pairing::handy_url_imagenes,
 
             commands::pairing::device_get_identity,
             commands::pairing::device_firmar_emparejamiento,
@@ -3845,6 +3846,23 @@ mod tests_exenciones_del_gate {
             let img = csp.split(';').find(|s| s.trim().starts_with("img-src")).unwrap();
             assert!(!img.split_whitespace().any(|t| t == "data:"), "{campo}: img-src sin data:");
         }
+    }
+
+    /// INFRA-03: la Handy pinta las imágenes por el GET del worker (`handy_url_imagenes`), no por el
+    /// `r2.dev` del bucket. `img-src` admite el origen de `CLOUD_API_BASE` —el mismo, no otro escrito
+    /// a mano— y nada de `r2.dev`; y el frontend no compone la dirección por su cuenta.
+    #[test]
+    fn las_imagenes_de_la_handy_salen_del_worker_y_no_de_r2_dev() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for campo in ["csp", "devCsp"] {
+            let csp = config["app"]["security"][campo].as_str().unwrap();
+            let img = csp.split(';').find(|s| s.trim().starts_with("img-src")).unwrap();
+            assert!(img.split_whitespace().any(|t| t == super::CLOUD_API_BASE), "{campo}: img-src con el origen del worker");
+            assert!(!csp.contains("r2.dev"), "{campo}: sin el r2.dev del bucket");
+        }
+        let front = include_str!("../../src/shared/lib/imageUrl.ts");
+        assert!(front.contains("commands.handyUrlImagenes()"), "la base sale de handy_url_imagenes");
+        assert!(!front.contains("r2.dev") && !front.contains("workers.dev"), "imageUrl.ts no escribe la dirección a mano");
     }
 
     #[test]

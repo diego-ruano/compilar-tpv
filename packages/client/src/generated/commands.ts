@@ -598,6 +598,13 @@ export const commands = {
 	licenseCheckNow: () => __TAURI_INVOKE<LicenseGateResult_Serialize>("license_check_now"),
 	handySetToken: (args: HandySetTokenArgs) => __TAURI_INVOKE<string>("handy_set_token", { args }),
 	handyGetTenant: () => __TAURI_INVOKE<string | null>("handy_get_tenant"),
+	/**
+	 *  INFRA-03 · De dónde pinta la Handy las imágenes de su negocio: `{CLOUD_API_BASE}/v1/images/{negocio}`
+	 *  (`tpv_infra_licensing::url_imagenes_del_negocio`), sin la `Ruta_Imagen`, que pone `imageUrl.ts`.
+	 *  `None` si no está vinculada. La dirección del worker sale del backend, la misma de la API, y no
+	 *  se escribe otra vez en el frontend.
+	 */
+	handyUrlImagenes: () => __TAURI_INVOKE<string | null>("handy_url_imagenes"),
 	deviceGetIdentity: () => __TAURI_INVOKE<DeviceIdentity>("device_get_identity"),
 	deviceFirmarEmparejamiento: (args: DeviceFirmarEmparejamientoArgs) => __TAURI_INVOKE<FirmaDispositivo>("device_firmar_emparejamiento", { args }),
 	/**

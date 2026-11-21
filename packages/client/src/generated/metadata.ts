@@ -211,6 +211,7 @@ export const nombresComandos = {
     "license_check_now": "licenseCheckNow",
     "handy_set_token": "handySetToken",
     "handy_get_tenant": "handyGetTenant",
+    "handy_url_imagenes": "handyUrlImagenes",
     "device_get_identity": "deviceGetIdentity",
     "device_firmar_emparejamiento": "deviceFirmarEmparejamiento",
     "device_hora_para_firmar": "deviceHoraParaFirmar",
@@ -452,6 +453,7 @@ type Argumentos = {
     "license_check_now": {  };
     "handy_set_token": { args: Parameters<Comandos["handySetToken"]>[0] };
     "handy_get_tenant": {  };
+    "handy_url_imagenes": {  };
     "device_get_identity": {  };
     "device_firmar_emparejamiento": { args: Parameters<Comandos["deviceFirmarEmparejamiento"]>[0] };
     "device_hora_para_firmar": {  };

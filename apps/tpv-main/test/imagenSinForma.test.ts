@@ -59,13 +59,15 @@ describe("AUD-31 · Handy", () => {
     beforeEach(() => { useMode.setState({ mode: "handy" }); });
 
     it.each(SIN_FORMA)("%s no llega al <img> ni se pide el negocio", async (valor) => {
-        h.invoke.mockResolvedValue("negocio-a");
+        h.invoke.mockResolvedValue("https://tpv-api.altarialights.workers.dev/v1/images/negocio-a");
         expect(await resolveImageUrl(valor)).toBe("");
         expect(h.invoke).not.toHaveBeenCalled();
     });
 
-    it("una ruta de la app se pide a r2.dev", async () => {
-        h.invoke.mockResolvedValue("negocio-a");
-        expect(await resolveImageUrl(LOGO)).toMatch(new RegExp(`^https://pub-[0-9a-f]+\.r2\.dev/negocio-a/${LOGO}$`));
+    // INFRA-03: por el GET del worker, con la base que da `handy_url_imagenes`.
+    it("una ruta de la app se pide al worker", async () => {
+        h.invoke.mockResolvedValue("https://tpv-api.altarialights.workers.dev/v1/images/negocio-a");
+        expect(await resolveImageUrl(LOGO)).toBe(`https://tpv-api.altarialights.workers.dev/v1/images/negocio-a/${LOGO}`);
+        expect(h.invoke).toHaveBeenCalledWith("handy_url_imagenes", undefined);
     });
 });

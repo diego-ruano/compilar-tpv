@@ -6,16 +6,19 @@ import { commands } from "@tpv/client";
 //
 //   - Main (tpv):  fichero LOCAL en AppData (`convertFileSrc`). Funciona offline y es instantáneo
 //                  (la Main es quien crea/posee las imágenes).
-//   - Handy:       URL del bucket R2 servida por el worker tras el CDN de Cloudflare (cacheada en
-//                  el edge). La `Ruta_Imagen` de BD se compone verbatim: `{CDN}/{tenant}/{ruta}`.
+//   - Handy:       el GET público del worker, `{worker}/v1/images/{tenant}/{ruta}`, que lee el bucket
+//                  R2 (`domains/images/images.routes.ts`). La `Ruta_Imagen` de BD se compone verbatim
+//                  detrás de la base que da `handy_url_imagenes`.
 //
 // La `Ruta_Imagen` que guarda la BD es siempre relativa (`images/{subcarpeta}/{uuid}.jpg`) y se
-// usa idéntica en los tres lados (disco local, clave R2 y URL del CDN).
+// usa idéntica en los tres lados (disco local, clave R2 y camino del GET).
 //
-// NOTA de despliegue: las lecturas del Handy van directas a la URL pública del bucket R2
-// (r2.dev), servida y cacheada por la red de Cloudflare → sin invocar el worker en cada imagen.
-// La SUBIDA sigue yendo firmada por el worker (PUT /v1/images). Si en el futuro conectas un
-// dominio propio al bucket, basta con cambiar `CDN_IMAGES_BASE` por ese dominio.
+// INFRA-03: la Handy ya no lee de la dirección pública del bucket, que Cloudflare reserva para
+// desarrollo (límite de peticiones, sin caché). La base `{worker}/v1/images/{tenant}` la da Rust
+// (`handy_url_imagenes`, sobre `CLOUD_API_BASE`): la dirección del worker no se escribe aquí otra vez.
+// El GET contesta con `immutable` y un año de vida, así que la caché que ahorra peticiones es la
+// de la webview: por eso cada imagen tiene que dar siempre el mismo URL (la caché de abajo). La
+// SUBIDA sigue yendo firmada por el worker (PUT /v1/images).
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
@@ -23,22 +26,16 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { useMode } from "../stores/useMode";
 import { captureException } from "../observability/sentry";
 
-/**
- * Base pública desde la que el Handy carga las imágenes: la URL r2.dev del bucket.
- * La clave del objeto en R2 es `{tenant}/images/{subcarpeta}/{archivo}`, así que la URL
- * final queda `{CDN_IMAGES_BASE}/{tenant}/{Ruta_Imagen}`.
- */
-export const CDN_IMAGES_BASE =
-  "https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev";
-
-// El tenant del Handy no cambia en una sesión: lo resolvemos una vez y lo cacheamos.
-let handyTenantPromise: Promise<string> | null = null;
+// INFRA-03 · La base de las imágenes de la Handy, `{worker}/v1/images/{tenant}`: no cambia mientras
+// no cambie el vínculo, así que se pide una vez y se guarda. La clave del objeto en R2 es
+// `{tenant}/images/{subcarpeta}/{archivo}`, y la URL final, `{base}/{Ruta_Imagen}`.
+let handyBasePromise: Promise<string> | null = null;
 
 // Caché de URLs resueltas (por `Ruta_Imagen`). Una `Ruta_Imagen` (uuid en el nombre) es inmutable:
 // al reemplazar la imagen de un producto/categoría cambia el nombre del fichero, así que cambia la
 // clave y la entrada vieja simplemente queda huérfana (inocua). Cachear aquí evita:
 //   - reinvocar `images_ensure_local` (un IPC a Rust) en cada refetch de TanStack Query, y
-//   - devolver URLs distintas para la misma imagen, lo que rompería el cacheo del webview/CDN.
+//   - devolver URLs distintas para la misma imagen, lo que rompería el cacheo de la webview.
 // En modo Main solo se cachea cuando el fichero YA está en disco (ensure_local => true); si aún no
 // está (creada en otra Handy, pendiente de bajar de R2) NO se cachea, para reintentar la bajada en
 // la siguiente resolución.
@@ -48,23 +45,24 @@ let contexto = 0;
 /** Al cambiar de modo o negocio las mismas rutas relativas ya no identifican las mismas URLs. */
 export function limpiarCacheImagenes(): void {
   contexto++;
-  handyTenantPromise = null;
+  handyBasePromise = null;
   urlCache.clear();
 }
 
-async function getHandyTenant(): Promise<string> {
-  if (!handyTenantPromise) {
-    handyTenantPromise = commands.handyGetTenant()
-      .then((t) => String(t ?? "").trim())
+async function baseDeLaHandy(): Promise<string> {
+  if (!handyBasePromise) {
+    // Sin vínculo (o si el almacén no contesta) no hay base, y la imagen es el marcador.
+    handyBasePromise = commands.handyUrlImagenes()
+      .then((b) => String(b ?? "").trim())
       .catch(() => "");
   }
-  return handyTenantPromise;
+  return handyBasePromise;
 }
 
 /**
- * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en la URL
- * pública de `r2.dev`, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el UUID que le
- * pone la app (una heredada que la Main no ha podido renombrar, con el nombre que alguien le dio).
+ * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en el camino
+ * del GET de imágenes del worker, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el
+ * UUID que le pone la app (una heredada que la Main no ha podido renombrar, con el nombre que alguien le dio).
  * Lo mismo que piden la Main (`imagenes::ruta_segura`) y el worker (`RUTA_DE_IMAGEN`): el prefijo y la
  * carpeta en minúsculas, y el UUID y la extensión en cualquier caja.
  */
@@ -102,9 +100,9 @@ export async function resolveImageUrl(
   if (cached) return cached;
 
   if (useMode.getState().mode === "handy") {
-    const tenant = await getHandyTenant();
-    if (!tenant || vigente !== contexto) return "";
-    const url = `${CDN_IMAGES_BASE}/${tenant}/${r}`;
+    const base = await baseDeLaHandy();
+    if (!base || vigente !== contexto) return "";
+    const url = `${base}/${r}`;
     urlCache.set(r, url);
     return url;
   }

@@ -21,8 +21,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost https://asset.localhost https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'",
-      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:; img-src 'self' asset: http://asset.localhost https://asset.localhost https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost https://asset.localhost https://tpv-api.altarialights.workers.dev blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost ws:; img-src 'self' asset: http://asset.localhost https://asset.localhost https://tpv-api.altarialights.workers.dev blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": [

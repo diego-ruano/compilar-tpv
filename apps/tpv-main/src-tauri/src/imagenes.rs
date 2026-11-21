@@ -33,8 +33,8 @@ pub fn para_registro(rel: &str) -> String {
 }
 
 /// OBS-06 · Una imagen guardada por la app: `images/{carpeta}/{uuid}.{ext}`. Es lo único que se
-/// sube, se baja, se borra o se lee del disco. Su ruta viaja en la URL (`/v1/images/…` y la
-/// dirección pública de `r2.dev` que carga la Handy), y Cloudflare guarda la URL de cada petición:
+/// sube, se baja, se borra o se lee del disco. Su ruta viaja en la URL (`/v1/images/…`, también la
+/// que carga la Handy), y Cloudflare guarda la URL de cada petición:
 /// el nombre que alguien le diera al fichero puede ser el de una persona. Las heredadas las renombra
 /// antes `images_backfill` (`nombre_opaco`). El worker pide lo mismo (`RUTA_DE_IMAGEN`, en
 /// `domains/images/rutaDeImagen.ts`).
