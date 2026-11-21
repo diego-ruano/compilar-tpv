@@ -43,7 +43,9 @@ import {
 import { MESA_AUTOMATICA, type AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
 import { enviarCorreoReservaWeb, type Correo, type ResultadoCorreo } from "../domains/reservas_web/correos";
 import {
+	altasDeLaConexionDesde,
 	altasDesde,
+	apuntarAltaDeLaConexion,
 	cancelacionesHechas,
 	esperando,
 	fallidasPorAvisar,
@@ -71,6 +73,7 @@ import {
 	reservaDelEnlace,
 	respuestaDelIntento,
 	vivasDelCorreoEnLaAgenda,
+	VENTANA_TOPES_MS,
 	type FilaPeticion,
 	type ResultadoDeLaMain,
 } from "./agendaWeb.almacen";
@@ -79,6 +82,18 @@ import {
 export const MAX_RESERVAS_POR_CORREO = 10;
 /** Altas por negocio en 24 h: el control exacto detrás del limitador por IP. */
 export const MAX_ALTAS_DIA_NEGOCIO = 200;
+/**
+ * RW-ALTAS · Altas por conexión (la IP, o su /64 en IPv6) en este negocio en 24 h, contando las que
+ * su autor anula. Sin él, una sola conexión llenaba el tope del negocio cambiando de correo, o
+ * gastaba su cupo de correos reservando y cancelando en bucle.
+ *
+ * Por qué 10: una conexión compartida (el CGNAT de un operador móvil, una oficina, un hotel) junta a
+ * muchas personas, pero que más de diez de ellas reserven por la web en el mismo restaurante el
+ * mismo día es rarísimo; quien lo hace por todos (una empresa, un grupo grande) puede llamar, que es
+ * lo que dice el rechazo. Y con 10, llegar al tope de 200 del negocio pide al menos 20 conexiones
+ * distintas, cada una con su Turnstile resuelto.
+ */
+export const MAX_ALTAS_DIA_CONEXION = 10;
 /** Cada cuánto despierta la alarma mientras haya algo guardado. */
 const CADA_ALARMA_MS = 60 * 60_000;
 /** Lo entregado a la Main que no se ve en la base (ni contesta) en este tiempo se le vuelve a ofrecer. */
@@ -114,6 +129,7 @@ type ErrorAgenda =
 	| "sin_mesa_libre"
 	| "limite_reservas_correo"
 	| "tope_reservas_negocio"
+	| "tope_reservas_conexion"
 	| "reserva_no_cancelable"
 	| "enlace_no_valido";
 
@@ -128,6 +144,7 @@ const STATUS: Record<ErrorAgenda, RechazoAgenda["status"]> = {
 	sin_mesa_libre: 409,
 	limite_reservas_correo: 409,
 	tope_reservas_negocio: 429,
+	tope_reservas_conexion: 429,
 	reserva_no_cancelable: 409,
 	enlace_no_valido: 404,
 };
@@ -336,15 +353,27 @@ export class MotorAgendaWeb {
 	 * Un alta del widget. `intento` es su `Idempotency-Key`: la misma mientras repite el alta porque no
 	 * le llegó la respuesta. Si ese intento ya dio una reserva, se contesta la misma y no se apunta otra
 	 * (la mesa ya está ocupada por ella, y elegir otra la duplicaría).
+	 *
+	 * `conexion` es la huella de la conexión desde la que llega (`puerta.ts::huellaDeLaConexion`), para
+	 * su tope (RW-ALTAS); `null` si no se sabe, y entonces no cuenta para ninguno.
 	 */
-	async reservar(p: { tenantId: string; alta: AltaReservaWeb; intento?: string | null }): Promise<ResultadoReservar> {
+	async reservar(p: {
+		tenantId: string;
+		alta: AltaReservaWeb;
+		intento?: string | null;
+		conexion?: string | null;
+	}): Promise<ResultadoReservar> {
 		const { alta } = p;
+		const conexion = p.conexion || null;
 		// Sin mesa elegida (`MESA_AUTOMATICA`), la decide el bloque síncrono de abajo: la de menos plazas
 		// en la que quepan. Elegirla antes, con lo leído, dejaría que dos altas a la vez se llevaran la misma.
 		const automatica = alta.id_mesa === MESA_AUTOMATICA;
 		recordarNegocio(this.sql, p.tenantId);
 		const repetida = this.repeticion(p.intento);
 		if (repetida) return repetida;
+		// RW-ALTAS · Una conexión que ya ha llegado a su tope no le cuesta a nadie una lectura de la base.
+		// Se vuelve a mirar en el bloque que decide: dos altas a la vez pueden pasar las dos por aquí.
+		if (this.conexionEnSuTope(conexion, Date.now())) return rechazo("tope_reservas_conexion");
 
 		// Lo asíncrono, antes del bloque que decide.
 		const token = nuevoToken();
@@ -383,7 +412,8 @@ export class MotorAgendaWeb {
 		if (leido.delCorreo.size + vivasDelCorreoEnLaAgenda(this.sql, emailHash, hoy, lecturaDelCorreo) >= MAX_RESERVAS_POR_CORREO) {
 			return rechazo("limite_reservas_correo");
 		}
-		if (altasDesde(this.sql, ahoraMs - 86_400_000) >= MAX_ALTAS_DIA_NEGOCIO) return rechazo("tope_reservas_negocio");
+		if (this.conexionEnSuTope(conexion, ahoraMs)) return rechazo("tope_reservas_conexion");
+		if (altasDesde(this.sql, ahoraMs - VENTANA_TOPES_MS) >= MAX_ALTAS_DIA_NEGOCIO) return rechazo("tope_reservas_negocio");
 
 		const idReserva = nuevoId();
 		const caducaMs = caducidadDelEnlace(alta.dia_ymd, alta.hora);
@@ -422,6 +452,7 @@ export class MotorAgendaWeb {
 				},
 				{ tokenHash, caducaMs },
 			);
+			if (conexion) apuntarAltaDeLaConexion(this.sql, conexion, ahoraMs);
 			if (p.intento) apuntarIntento(this.sql, p.intento, respuesta, ahoraMs);
 		});
 		// ── Fin del bloque ──
@@ -429,6 +460,11 @@ export class MotorAgendaWeb {
 		this.avisarALaMain(p.tenantId);
 		await this.asegurarAlarma();
 		return { ok: true, ...respuesta, token, repetida: false };
+	}
+
+	/** RW-ALTAS · ¿Esa conexión ha apuntado ya su máximo de altas en las últimas 24 h? Síncrono. */
+	private conexionEnSuTope(conexion: string | null, ahoraMs: number): boolean {
+		return conexion !== null && altasDeLaConexionDesde(this.sql, conexion, ahoraMs - VENTANA_TOPES_MS) >= MAX_ALTAS_DIA_CONEXION;
 	}
 
 	/** Lo que contestó ya ese intento, si acabó en reserva. */

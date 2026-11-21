@@ -67,3 +67,12 @@ export function nuevoId(): string {
 	}
 	return s;
 }
+
+/**
+ * El instante en que se creó un id de `nuevoId` (sus 48 bits de milisegundos), o `null` si no es un
+ * UUIDv7. Sólo para saber la edad de algo que no guarda su fecha a mano, nunca para ordenar.
+ */
+export function msDelId(id: string): number | null {
+	const m = /^([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.exec(id);
+	return m ? parseInt(m[1] + m[2], 16) : null;
+}

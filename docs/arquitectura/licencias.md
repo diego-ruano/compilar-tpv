@@ -721,7 +721,7 @@ gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén dist
 | Secreto | Para qué |
 |---|---|
 | `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. Su pública va fija en `LICENSE_SIGNING_PUBLIC_KEYS_B64` (`tpv-infra-licensing/src/lib.rs`) junto a la de reserva (`pnpm license:keypair` genera cada par) |
-| `LICENSE_JWT_SECRET` | Tokens de sesión |
+| `LICENSE_JWT_SECRET` | Tokens de sesión. También la clave de los HMAC de los códigos por correo y de la huella de la conexión de un alta web (RW-ALTAS): rotarlo invalida los códigos en vuelo y pone a cero el tope de altas por conexión del día |
 | `LICENSE_STORE_KEY` (+ `LICENSE_STORE_KEY_ID`) | Cifrar en reposo claves y DEK (`server/crypto.ts`). Global: perderla deja la PII de todos irrecuperable. **No se regenera nunca**: se guarda en el gestor de contraseñas el día que se crea, porque Cloudflare no deja volver a leerla |
 | `LICENSE_STORE_KEY_ANTERIOR` (+ `_ID`) | Sólo durante una rotación: la clave de antes, para leer |
 | `ADMIN_API_TOKEN` | Las rutas de administración |

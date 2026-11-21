@@ -100,6 +100,7 @@ Todo error es un `ErrorReservas`: se decide por `e.codigo` y se enseña `e.messa
 | `limite_reservas_correo` | Ese correo ya tiene muchas reservas activas |
 | `reserva_web_cerrada` | El restaurante tiene apagadas las reservas por internet. `e.cuerpo.negocio` trae el nombre y el teléfono |
 | `reserva_web_no_disponible`, `tope_reservas_negocio` | Ahora no se puede reservar por internet: que llamen al restaurante |
+| `tope_reservas_conexion` | Desde esa conexión ya se han hecho muchas reservas hoy en el restaurante: que llamen |
 | `reserva_web_demasiadas` | Demasiadas peticiones seguidas: esperar un minuto |
 | `verificacion_pendiente` | La casilla no está resuelta |
 | `verificacion_humana_fallida` | La casilla no ha dado por buena la comprobación: reiniciarla |

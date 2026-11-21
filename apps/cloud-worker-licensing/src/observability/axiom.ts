@@ -235,8 +235,9 @@ type EventoReservaWeb =
  * Lo que pasa en las rutas públicas de la reserva web. **Sólo ids y motivos**: ni el correo, ni el
  * nombre, ni el teléfono de quien reserva, que no tienen por qué salir de la agenda.
  *
- * Las alertas que habilita: muchos `reserva_web_rechazo` con `tope_reservas_negocio` o
- * `limite_reservas_correo` en un negocio es alguien intentando llenarle las mesas; un
+ * Las alertas que habilita: muchos `reserva_web_rechazo` con `tope_reservas_negocio`,
+ * `tope_reservas_conexion` o `limite_reservas_correo` en un negocio es alguien intentando llenarle
+ * las mesas; un
  * `reserva_web_atascada` es una Main que lleva días sin recoger, y un `reserva_web_fallida`, una
  * reserva confirmada que el restaurante no tiene.
  */

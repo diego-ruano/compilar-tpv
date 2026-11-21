@@ -19,7 +19,9 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
-import { codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
+import { MAX_ALTAS_DIA_CONEXION, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
+import { msDelId } from "../src/lib/ids";
+import { sha256HexStr } from "../src/server/utils/crypto";
 
 const AHORA = horaLocalEn("Europe/Madrid", Date.now());
 const HOY = AHORA.slice(0, 10);
@@ -70,6 +72,7 @@ vi.mock("../src/durableObjects/agendaWeb", async (importOriginal) => {
 });
 
 const { reservasWebPublicoRoutes } = await import("../src/domains/reservas_web/publico.routes");
+const { huellaDeLaConexion } = await import("../src/domains/reservas_web/puerta");
 
 const app = new Hono();
 app.route("/v1/publico/reservas", reservasWebPublicoRoutes);
@@ -172,6 +175,27 @@ const ALTA_WEB = {
 	telefono: "600 112 233",
 	nota: "Silla para bebé",
 };
+
+/** El token del enlace de cancelar de un correo de confirmación, que es el único sitio por donde viaja. */
+function tokenDelCorreo(m: any): string {
+	const linea = String(m.text)
+		.split("\n")
+		.find((l) => l.startsWith("Cancelar la reserva: "));
+	return new URL(linea!.slice("Cancelar la reserva: ".length)).hash.slice("#t=".length);
+}
+
+/** Un alta desde una IP, como llega de Cloudflare: en `CF-Connecting-IP`. */
+async function altaDesde(ip: string, cuerpo: unknown) {
+	const res = await app.request(
+		`${BASE}/reservas`,
+		{ method: "POST", headers: { "content-type": "application/json", "CF-Connecting-IP": ip }, body: JSON.stringify(cuerpo) },
+		ENV,
+	);
+	return { status: res.status, json: (await res.json()) as any };
+}
+
+/** La alta n.º `i` de una tanda: cada una en su día y con su correo, para no chocar con otros topes. */
+const altaN = (i: number) => ({ ...ALTA_WEB, dia: sumarDias(HOY, 2 + i), correo: `persona${i}@correo.test` });
 
 describe("las rutas públicas de la reserva web", () => {
 	it("GET /negocio: lo del negocio y el calendario", async () => {
@@ -375,9 +399,12 @@ describe("las rutas públicas de la reserva web", () => {
 	});
 
 	it("POST /reserva y /cancelar: con el token del correo", async () => {
-		await conNegocio("publico-cancelar", async (_sql, motor) => {
-			const hecha = await motor.reservar({ tenantId: "t1", alta: { ...ALTA, telefono: "600112233" } });
-			const resumen = await pedir("/reserva", { token: hecha.token });
+		await conNegocio("publico-cancelar", async () => {
+			const alta = await pedir("/reservas", ALTA_WEB);
+			expect(enviados.map((m) => m.subject)).toEqual(["Reserva confirmada en Bar Pepe"]);
+			const token = tokenDelCorreo(enviados[0]);
+			enviados.length = 0;
+			const resumen = await pedir("/reserva", { token });
 			expect(resumen.json).toEqual({
 				ok: true,
 				dia: DIA,
@@ -389,13 +416,13 @@ describe("las rutas públicas de la reserva web", () => {
 				cancelable: true,
 			});
 
-			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
-			expect((await pedir("/reserva", { token: hecha.token })).json.estado).toBe("cancelada");
+			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+			expect((await pedir("/reserva", { token })).json.estado).toBe("cancelada");
 			// El correo de «has cancelado», a su dirección; cancelar otra vez no lo repite.
 			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
-			expect(enviados[0].text).toContain(codigoDeReserva(hecha.id_reserva));
+			expect(enviados[0].text).toContain(alta.json.codigo);
 			expect(enviados[0].text).not.toContain("600112233");
-			await pedir("/cancelar", { token: hecha.token });
+			await pedir("/cancelar", { token });
 			expect(enviados).toHaveLength(1);
 			expect(await pedir("/cancelar", { token: "inventado" })).toMatchObject({ status: 404, json: { error: "enlace_no_valido" } });
 			// Sin token, la petición está mal hecha.
@@ -431,6 +458,129 @@ describe("las rutas públicas de la reserva web", () => {
 			const bien = [a, b, c].filter((r) => r.status === 200).map((r) => r.json.mesa);
 			expect(bien.sort()).toEqual(["m2", "m4"]);
 			expect([a, b, c].filter((r) => r.status === 409).map((r) => r.json.error)).toEqual(["sin_mesa_libre"]);
+		});
+	});
+});
+
+describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", () => {
+	it("desde una IP, la alta n.º 11 da 429 con su código; desde otra IP entra", async () => {
+		await conNegocio("publico-conexion-ipv4", async () => {
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				expect((await altaDesde("198.51.100.7", altaN(i))).status, `alta ${i}`).toBe(200);
+			}
+			expect(await altaDesde("198.51.100.7", altaN(10))).toEqual({
+				status: 429,
+				json: { ok: false, error: "tope_reservas_conexion" },
+			});
+			expect(eventos.at(-1)).toEqual({ event: "reserva_web_rechazo", tenant_id: "t1", motivo: "tope_reservas_conexion" });
+			// La de al lado es otra conexión.
+			expect((await altaDesde("198.51.100.8", altaN(10))).status).toBe(200);
+			// Las diez confirmaciones y la de la otra IP; la rechazada no gasta correo.
+			expect(enviados).toHaveLength(MAX_ALTAS_DIA_CONEXION + 1);
+		});
+	});
+
+	it("en IPv6 cuentan juntas las del mismo /64, y las de otro /64 no", async () => {
+		await conNegocio("publico-conexion-ipv6", async () => {
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				// Cada una con una dirección distinta del mismo /64, escrita de una forma distinta.
+				const ip = i % 2 ? `2001:db8:1:2::${(i + 1).toString(16)}` : `2001:0DB8:0001:0002:${i + 1}:0:0:1`;
+				expect((await altaDesde(ip, altaN(i))).status, `alta ${i} desde ${ip}`).toBe(200);
+			}
+			expect((await altaDesde("2001:db8:1:2:abcd:ef01:2345:6789", altaN(10))).json.error).toBe("tope_reservas_conexion");
+			expect((await altaDesde("2001:db8:1:3::1", altaN(10))).status).toBe(200);
+		});
+	});
+
+	it("reservar y cancelar en bucle desde una IP se corta, con los correos que lleva cada vuelta", async () => {
+		await conNegocio("publico-conexion-bucle", async () => {
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				enviados.length = 0;
+				expect((await altaDesde("203.0.113.9", { ...ALTA_WEB, correo: `ciclo${i}@correo.test` })).status, `alta ${i}`).toBe(200);
+				const token = tokenDelCorreo(enviados[0]);
+				expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+				expect(enviados.map((m) => m.subject)).toEqual(["Reserva confirmada en Bar Pepe", "Reserva cancelada en Bar Pepe"]);
+			}
+			enviados.length = 0;
+			expect((await altaDesde("203.0.113.9", { ...ALTA_WEB, correo: "otra@correo.test" })).status).toBe(429);
+			expect(enviados).toEqual([]);
+		});
+	});
+
+	it("la IP no queda en claro en la agenda: sólo su huella, que cambia de un negocio a otro", async () => {
+		await conNegocio("publico-conexion-sin-ip", async (sql) => {
+			expect((await altaDesde("192.0.2.77", ALTA_WEB)).status).toBe(200);
+			const huellas = sql.exec(`SELECT conexion_hash AS h FROM altas_por_conexion;`).toArray() as any[];
+			expect(huellas).toHaveLength(1);
+			expect(huellas[0].h).toBe(await huellaDeLaConexion(ENV as any, "t1", "192.0.2.77"));
+			expect(huellas[0].h).not.toBe(await huellaDeLaConexion(ENV as any, "t2", "192.0.2.77"));
+			// En ninguna tabla del objeto, ni entera ni a medias.
+			const tablas = sql
+				.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%';`)
+				.toArray()
+				.map((t: any) => String(t.name));
+			expect(tablas).toContain("altas_por_conexion");
+			for (const tabla of tablas) {
+				const texto = JSON.stringify(sql.exec(`SELECT * FROM "${tabla}";`).toArray());
+				expect(texto, tabla).not.toContain("192.0.2");
+			}
+		});
+	});
+
+	it("cancelar una reserva cuya confirmación no salió no manda correo ni gasta cupo", async () => {
+		await conNegocio("publico-cancelar-sin-confirmacion", async (sql, motor) => {
+			// Apuntada sin pasar por la ruta: no ha salido ningún correo.
+			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
+			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
+			expect((await pedir("/reserva", { token: hecha.token })).json.estado).toBe("cancelada");
+			expect(enviados).toEqual([]);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).toArray()[0]).toEqual({ n: 0 });
+		});
+	});
+
+	it("cancelar una reserva cuya confirmación falló en el binding tampoco manda el «has cancelado»", async () => {
+		await conNegocio("publico-cancelar-confirmacion-fallida", async (sql, motor) => {
+			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
+			sql.exec(
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+				 VALUES (?, 't1', 'web', 'ana@correo.es', NULL, 0, 'E_INTERNAL', ?, 'reserva_web');`,
+				`rw:confirmacion:${hecha.id_reserva}`,
+				Date.now(),
+			);
+			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
+			expect(enviados).toEqual([]);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
+	it("una reserva apuntada hace más de lo que se guarda la traza de los correos sí avisa al cancelar", async () => {
+		await conNegocio("publico-cancelar-reserva-antigua", async (sql) => {
+			// Un alta apuntada hace 100 días para dentro de unos días, con su enlace: la traza de su
+			// confirmación ya se habría purgado, y no se puede saber si salió.
+			const hace100Dias = Date.now() - 100 * 86_400_000;
+			const hex = hace100Dias.toString(16).padStart(12, "0");
+			const idReserva = `${hex.slice(0, 8)}-${hex.slice(8)}-7abc-8def-0123456789ab`;
+			expect(msDelId(idReserva)).toBe(hace100Dias);
+			sql.exec(
+				`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, email_hash, datos_json,
+				                         creada_local, creada_ms, estado)
+				 VALUES ('p-antigua', 'alta', ?, 'm2', ?, '21:00', 2, 'x', ?, ?, ?, 'pendiente');`,
+				idReserva,
+				DIA,
+				JSON.stringify({ nombre: "Ana", email: "ana@correo.es", telefono: "600112233", nota: null }),
+				AHORA,
+				hace100Dias,
+			);
+			const token = "AAAAAAAAAAAAAAAAAAAAAA";
+			sql.exec(
+				`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES (?, ?, ?);`,
+				await sha256HexStr(token),
+				idReserva,
+				Date.now() + 10 * 86_400_000,
+			);
+			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
+			expect(enviados[0].text).toContain(codigoDeReserva(idReserva));
 		});
 	});
 });

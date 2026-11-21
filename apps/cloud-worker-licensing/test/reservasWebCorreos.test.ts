@@ -447,3 +447,60 @@ describe("el destinatario, una sola dirección (AUD-39)", () => {
 		expect(falso.enviados.map((m) => m.to)).toEqual(["ana+reservas@sub.correo.es"]);
 	});
 });
+
+describe("un correo que va detrás de otro (RW-ALTAS)", () => {
+	const cancelacion = () => correo({ id: "rw:cancelacion:r1", tipo: "cancelacion", enlace: undefined, trasElCorreo: "rw:confirmacion:r1" });
+	const apuntarConfirmacion = (sql: any, ok: number, codigo: string | null, tenant = "t1") =>
+		sql.exec(
+			`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
+			 VALUES ('rw:confirmacion:r1', ?, 'web', 'ana@correo.es', ?, ?, ?, 'reserva_web');`,
+			tenant,
+			ok,
+			codigo,
+			Date.now() - 60_000,
+		);
+
+	it("si el anterior no salió, no sale ni gasta cupo", async () => {
+		const falso = correoFalso();
+		const r = await conBase("tras-sin-previo", async (sql) => {
+			const sinNada = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+			apuntarConfirmacion(sql, 0, "E_INTERNAL");
+			const conFallo = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+			return { sinNada, conFallo, filas: sql.exec(`SELECT id FROM email_sends;`).toArray() };
+		});
+		expect(r.sinNada).toBe("sin_previo");
+		expect(r.conFallo).toBe("sin_previo");
+		expect(r.filas).toEqual([{ id: "rw:confirmacion:r1" }]);
+		expect(falso.enviados).toEqual([]);
+	});
+
+	it("el de otro negocio con el mismo id no cuenta como anterior", async () => {
+		const falso = correoFalso();
+		const r = await conBase("tras-otro-negocio", async (sql) => {
+			apuntarConfirmacion(sql, 1, null, "t2");
+			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+		});
+		expect(r).toBe("sin_previo");
+		expect(falso.enviados).toEqual([]);
+	});
+
+	it("si el anterior salió, o está saliendo, sale", async () => {
+		for (const [nombre, ok, codigo] of [["salio", 1, null], ["saliendo", 0, "enviando"]] as const) {
+			const falso = correoFalso();
+			const r = await conBase(`tras-${nombre}`, async (sql) => {
+				apuntarConfirmacion(sql, ok, codigo);
+				return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+			});
+			expect(r, nombre).toBe("enviado");
+			expect(falso.enviados.map((m) => m.subject), nombre).toEqual(["Reserva cancelada en Bar Pepe"]);
+		}
+	});
+
+	it("sin `trasElCorreo`, como hasta ahora", async () => {
+		const falso = correoFalso();
+		const r = await conBase("tras-nada", async () =>
+			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:cancelacion:r1", tipo: "cancelacion", enlace: undefined })),
+		);
+		expect(r).toBe("enviado");
+	});
+});

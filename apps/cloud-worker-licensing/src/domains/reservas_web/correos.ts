@@ -51,13 +51,20 @@ export type Correo = {
 	enlace?: string;
 	/** Quién lo provoca, para la traza: `web` el visitante, `agenda` la agenda, o el dispositivo. */
 	dispositivo: string;
+	/**
+	 * RW-ALTAS · El id del correo que tiene que haber salido (o estar saliendo) antes que éste. Si no,
+	 * éste no sale ni gasta cupo (`sin_previo`): el «has cancelado» sólo va a quien recibió el «está
+	 * confirmada». Se mira en la misma sentencia que reserva el cupo.
+	 */
+	trasElCorreo?: string;
 };
 
 /**
  * `en_curso`: otro lo está enviando ahora mismo; no se sabe aún si saldrá, y quien pueda lo repite.
  * `fallido`: no ha salido (el binding, o la base central sin responder); también se puede repetir.
+ * `sin_previo`: no sale porque no salió el que tenía que ir antes (`Correo.trasElCorreo`).
  */
-export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "fallido";
+export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "fallido" | "sin_previo";
 
 const correoValido = z.string().max(254).email();
 
@@ -123,6 +130,7 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	}
 	const reserva = await reservar(db, correo, para);
 	if (reserva === "tope") console.warn("[reservas-web] correo sin enviar por el tope diario:", correo.tipo);
+	if (reserva === "sin_previo") console.warn("[reservas-web] correo sin enviar: no salió el anterior:", correo.tipo);
 	if (reserva !== "mio") return reserva;
 
 	const { asunto, html, texto } = plantilla(correo);
@@ -189,6 +197,7 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  *   · `en_curso`: otro lo está enviando ahora; quien llama lo puede repetir más tarde. Uno que se
  *     quedó a medias se puede retomar pasados unos minutos.
  *   · `tope`: no cabe en alguno de los dos topes.
+ *   · `sin_previo`: lleva `trasElCorreo` y ese correo ni salió ni está saliendo (RW-ALTAS).
  *   · `fallido`: la base central no responde. Sin ella no se sabe si ya salió, así que no se envía:
  *     quien llama lo repite si puede. Lo de negocio (la reserva, la cancelación) ya está hecho.
  *
@@ -207,6 +216,9 @@ async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | 
 			        AND (SELECT COUNT(*) FROM email_sends
 			             WHERE to_email = ?4 AND tipo = 'reserva_web' AND id <> ?1 AND sent_at_ms > ?7
 			               AND (ok = 1 OR (error_code = 'enviando' AND sent_at_ms > ?6))) < ?9
+			        AND (?10 IS NULL OR EXISTS (SELECT 1 FROM email_sends
+			                                    WHERE id = ?10 AND tenant_id = ?2 AND tipo = 'reserva_web'
+			                                      AND (ok = 1 OR error_code = 'enviando')))
 			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms,
 			                                    to_email = excluded.to_email, device_id = excluded.device_id
 			      WHERE email_sends.ok = 0
@@ -221,6 +233,7 @@ async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | 
 				ahora - VENTANA_MS,
 				TOPE_DIARIO_NEGOCIO,
 				TOPE_DIARIO_DESTINATARIO,
+				correo.trasElCorreo ?? null,
 			],
 		});
 		if (rs.rowsAffected > 0) return "mio";
@@ -230,6 +243,16 @@ async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | 
 		).rows?.[0];
 		if (Number(fila?.ok) === 1) return "ya_enviado";
 		if (fila?.error_code === "enviando" && Number(fila.sent_at_ms) > ahora - ENVIANDO_MAX_MS) return "en_curso";
+		if (correo.trasElCorreo) {
+			const previo: any = (
+				await db.execute({
+					sql: `SELECT 1 AS hay FROM email_sends
+					      WHERE id = ?1 AND tenant_id = ?2 AND tipo = 'reserva_web' AND (ok = 1 OR error_code = 'enviando');`,
+					args: [correo.trasElCorreo, correo.tenantId],
+				})
+			).rows?.[0];
+			if (!previo) return "sin_previo";
+		}
 		return "tope";
 	} catch (e: any) {
 		capturarError(e, "reservas_web.correo.traza");

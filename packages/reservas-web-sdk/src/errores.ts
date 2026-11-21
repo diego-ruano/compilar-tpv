@@ -18,6 +18,8 @@ export type CodigoError =
 	| "sin_mesa_libre"
 	| "limite_reservas_correo"
 	| "tope_reservas_negocio"
+	/** Desde esta conexión ya se han hecho muchas reservas hoy en este restaurante: que llamen. */
+	| "tope_reservas_conexion"
 	/** Turnstile no ha dado por buena la comprobación. */
 	| "verificacion_humana_fallida"
 	| "reserva_no_cancelable"

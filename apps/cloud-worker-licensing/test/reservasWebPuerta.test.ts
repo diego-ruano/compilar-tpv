@@ -25,7 +25,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 const { claveDelNegocio, olvidarClavesCacheadas } = await import("../src/domains/reservas_web/claves");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { olvidarInterruptoresCacheados } = await import("../src/lib/interruptores");
-const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo } = await import(
+const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo, huellaDeLaConexion } = await import(
 	"../src/domains/reservas_web/puerta"
 );
 
@@ -229,5 +229,31 @@ describe("la verificación de Turnstile", () => {
 		const r = respondiendo({ success: true });
 		await turnstileValido("secreto", "token", "unknown", r.fetcher);
 		expect(r.llamadas[0].get("remoteip")).toBeNull();
+	});
+});
+
+describe("la huella de la conexión de un alta (RW-ALTAS)", () => {
+	const ENV = { LICENSE_JWT_SECRET: "secreto" } as any;
+
+	it("la IPv4 exacta, y la IPv6 por su /64, escrita como se escriba", async () => {
+		const h = (ip: string) => huellaDeLaConexion(ENV, "t1", ip);
+		expect(await h("198.51.100.7")).toBe(await h(" 198.51.100.7 "));
+		expect(await h("198.51.100.7")).toBe(await h("::ffff:198.51.100.7"));
+		expect(await h("198.51.100.7")).not.toBe(await h("198.51.100.8"));
+		expect(await h("2001:db8:1:2::1")).toBe(await h("2001:0DB8:0001:0002:ffff:eeee:dddd:cccc"));
+		expect(await h("2001:db8:1:2::1")).not.toBe(await h("2001:db8:1:3::1"));
+	});
+
+	it("es un HMAC con el secreto, atado al negocio: sin la IP dentro y distinta en cada negocio", async () => {
+		const huella = await huellaDeLaConexion(ENV, "t1", "198.51.100.7");
+		expect(huella).toMatch(/^[0-9a-f]{64}$/);
+		expect(huella).not.toBe(await huellaDeLaConexion(ENV, "t2", "198.51.100.7"));
+		expect(huella).not.toBe(await huellaDeLaConexion({ LICENSE_JWT_SECRET: "otro" } as any, "t1", "198.51.100.7"));
+	});
+
+	it("sin IP o sin secreto no hay huella: el alta no cuenta para ningún tope por conexión", async () => {
+		expect(await huellaDeLaConexion(ENV, "t1", "unknown")).toBeNull();
+		expect(await huellaDeLaConexion(ENV, "t1", "")).toBeNull();
+		expect(await huellaDeLaConexion({ LICENSE_JWT_SECRET: " " } as any, "t1", "198.51.100.7")).toBeNull();
 	});
 });

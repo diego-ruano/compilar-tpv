@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { nuevoId } from "../src/lib/ids";
+import { msDelId, nuevoId } from "../src/lib/ids";
 
 // El generador no retrocede nunca (ni ante un reloj que va hacia atrás), así que los relojes
 // falsos van por delante del real, que ya han usado los tests anteriores.
@@ -43,5 +43,17 @@ describe("nuevoId", () => {
 		const antes = nuevoId();
 		reloj.mockReturnValue(base - 5_000);
 		expect(nuevoId() > antes).toBe(true);
+	});
+});
+
+describe("msDelId", () => {
+	it("devuelve los milisegundos de un id de `nuevoId`, y nada de lo que no es un UUIDv7", () => {
+		// Los tests de arriba dejan el generador en el futuro: se mira contra el propio id.
+		const id = nuevoId();
+		expect(msDelId(id)!.toString(16).padStart(12, "0")).toBe(id.replace(/-/g, "").slice(0, 12));
+		expect(msDelId("0190f5a3-1b2c-7abc-8def-0123456789ab")).toBe(0x0190f5a31b2c);
+		for (const otro of ["", "r1", crypto.randomUUID(), "0190f5a3-1b2c-4abc-8def-0123456789ab"]) {
+			expect(msDelId(otro), otro).toBeNull();
+		}
 	});
 });

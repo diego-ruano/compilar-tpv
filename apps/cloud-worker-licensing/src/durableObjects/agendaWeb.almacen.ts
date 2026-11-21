@@ -22,14 +22,22 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *   1. Las tablas de la fase 2: peticiones, enlaces y estado.
  *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
  *   3. `intentos`: lo que contestó cada alta del widget, por su `Idempotency-Key` (la crea `ESQUEMA`).
+ *   4. `peticiones.aviso_ms`: el último intento del correo de una fallida que no salió.
+ *   5. `altas_por_conexion`: el tope de altas por conexión (RW-ALTAS; la crea `ESQUEMA`).
  */
-const VERSION_AGENDA = 4;
+const VERSION_AGENDA = 5;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
 
 /** Lo que se queda la respuesta de un intento: el widget lo repite en minutos, no en días. */
 const RETENCION_INTENTOS_MS = 86_400_000;
+
+/**
+ * La ventana de los topes de altas, por negocio y por conexión: 24 h. Una conexión apuntada hace más
+ * ya no cuenta, y la purga la borra (RW-ALTAS).
+ */
+export const VENTANA_TOPES_MS = 86_400_000;
 
 type EstadoPeticion = "pendiente" | "entregada" | "vista" | "fallida" | "anulada";
 
@@ -96,6 +104,17 @@ const ESQUEMA = [
 		respuesta_json TEXT NOT NULL,
 		creado_ms      INTEGER NOT NULL
 	);`,
+	// RW-ALTAS · Una fila por alta apuntada, con la conexión desde la que llegó: el tope por conexión.
+	// Cuenta también las que su autor anula (no se borra al anular), que es lo que corta los ciclos de
+	// reservar y cancelar. La conexión no está en claro: es un HMAC, con un secreto del worker, de la IP
+	// (por /64 en IPv6) y del negocio (`puerta.ts::huellaDeLaConexion`). Se borra en cuanto deja de
+	// contar, a las 24 h (`purgar`). Sin el id de la reserva: no hace falta para contar, y sin él no
+	// se puede saber qué reserva llegó desde qué conexión.
+	`CREATE TABLE IF NOT EXISTS altas_por_conexion (
+		conexion_hash TEXT NOT NULL,
+		creada_ms     INTEGER NOT NULL
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_altas_por_conexion ON altas_por_conexion(conexion_hash, creada_ms);`,
 ];
 
 /** Crea lo que falte y pone al día lo que ya había. Idempotente: se llama al construir el objeto. */
@@ -284,6 +303,26 @@ export function altasDesde(sql: SqlStorage, desdeMs: number): number {
 }
 
 /**
+ * RW-ALTAS · Altas apuntadas desde una conexión desde `desdeMs`: el tope por conexión. Todas,
+ * también las anuladas por su autor: lo que se corta aquí es reservar y cancelar en bucle.
+ */
+export function altasDeLaConexionDesde(sql: SqlStorage, conexionHash: string, desdeMs: number): number {
+	const fila = sql
+		.exec(
+			`SELECT COUNT(*) AS n FROM altas_por_conexion WHERE conexion_hash = ? AND creada_ms >= ?;`,
+			conexionHash,
+			desdeMs,
+		)
+		.toArray()[0] as any;
+	return Number(fila?.n ?? 0);
+}
+
+/** RW-ALTAS · Apunta un alta de esa conexión. Va en la misma transacción que `apuntarAlta`. */
+export function apuntarAltaDeLaConexion(sql: SqlStorage, conexionHash: string, creadaMs: number): void {
+	sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, conexionHash, creadaMs);
+}
+
+/**
  * Las altas vivas de un correo desde `hoy` que la lectura de la base no trae (las que sí, las cuenta
  * la base; ver `Lectura`). Una con cancelación pedida ya no cuenta.
  */
@@ -432,8 +471,9 @@ export function apuntarCancelacion(
 }
 
 /**
- * La limpieza de la alarma: las peticiones cerradas hace más de una semana, los enlaces caducados y
- * las respuestas de los intentos de más de un día.
+ * La limpieza de la alarma: las peticiones cerradas hace más de una semana, los enlaces caducados,
+ * las respuestas de los intentos de más de un día y las conexiones que ya no cuentan para su tope
+ * (RW-ALTAS).
  * Devuelve si queda algo por lo que volver a despertar.
  */
 export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
@@ -443,9 +483,11 @@ export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
 	);
 	sql.exec(`DELETE FROM enlaces WHERE caduca_ms <= ?;`, ahoraMs);
 	sql.exec(`DELETE FROM intentos WHERE creado_ms <= ?;`, ahoraMs - RETENCION_INTENTOS_MS);
+	sql.exec(`DELETE FROM altas_por_conexion WHERE creada_ms < ?;`, ahoraMs - VENTANA_TOPES_MS);
 	const quedan = sql
 		.exec(
-			`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) + (SELECT COUNT(*) FROM intentos) AS n;`,
+			`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) + (SELECT COUNT(*) FROM intentos)
+			      + (SELECT COUNT(*) FROM altas_por_conexion) AS n;`,
 		)
 		.toArray()[0] as any;
 	return Number(quedan?.n ?? 0) > 0;

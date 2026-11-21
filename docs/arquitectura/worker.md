@@ -433,8 +433,10 @@ llevan datos estructurados (nada que haya escrito el visitante), van a la direcc
 cliente de la reserva web en la nube, y tienen sus topes: 600 al día por negocio y 10 por
 destinatario, sobre lo entregado y lo que está saliendo (`tipo = 'reserva_web'`). Cada uno lleva su
 id en `email_sends`, y el id y el cupo se reservan en una sola sentencia antes de enviar: el mismo
-no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se puede repetir. Sin la
-base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
+no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se puede repetir. Un correo
+puede exigir que otro haya salido (o esté saliendo) antes (`trasElCorreo`, en la misma sentencia):
+el «has cancelado» sólo sale tras la confirmación de esa reserva, y si no, no gasta cupo
+(RW-ALTAS). Sin la base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al

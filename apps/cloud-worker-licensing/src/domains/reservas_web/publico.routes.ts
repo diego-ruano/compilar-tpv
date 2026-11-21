@@ -35,13 +35,23 @@ import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { codigoDeReserva, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
 import { reportarReservaWeb } from "../../observability/axiom";
+import { msDelId } from "../../lib/ids";
 import { consulta, cuerpo } from "../../lib/validacion";
+import { RETENCION_ENVIOS_MS } from "../../server/purga";
+import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { diasAbiertos, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
 import { enlaceDeCancelar, enviarCorreoReservaWeb, type NegocioDelCorreo } from "./correos";
 import { leerParaLaWeb } from "./lecturasDeLaWeb";
 import { origenDelWidget } from "./claves";
 import { corsPublico } from "./cors";
-import { limitadorAltas, puertaPublica, topeDelCuerpo, verificacionHumana, type PublicoVars } from "./puerta";
+import {
+	huellaDeLaConexion,
+	limitadorAltas,
+	puertaPublica,
+	topeDelCuerpo,
+	verificacionHumana,
+	type PublicoVars,
+} from "./puerta";
 import {
 	altaPublicaSchema,
 	diaQuerySchema,
@@ -139,6 +149,19 @@ async function negocioParaElCorreo(c: any, tenantId: string): Promise<NegocioDel
 	}
 }
 
+/**
+ * RW-ALTAS · El id del correo de confirmación de una reserva, mientras su traza siga en
+ * `email_sends`. La purga la borra a los 90 días (`RETENCION_ENVIOS_MS`), y una reserva web se puede
+ * hacer con hasta un año de antelación: pasado ese plazo (menos un día, lo que tarda en pasar el
+ * cron) ya no se puede saber si salió, y el «has cancelado» sale sin mirarlo. La edad sale del
+ * propio id, un UUIDv7 que pone la agenda al apuntar el alta.
+ */
+function confirmacionQueSigueApuntada(idReserva: string): string | undefined {
+	const creadaMs = msDelId(idReserva);
+	if (creadaMs === null || Date.now() - creadaMs > RETENCION_ENVIOS_MS - 86_400_000) return undefined;
+	return `rw:confirmacion:${idReserva}`;
+}
+
 /** Una `Idempotency-Key` del widget: un UUID, o algo de su estilo. */
 const CLAVE_DE_INTENTO = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -156,7 +179,9 @@ reservasWebPublicoRoutes.post(
 		// Una sin la forma esperada se ignora: el alta sigue, sólo que sin esa protección.
 		const clave = c.req.header("Idempotency-Key");
 		const intento = clave && CLAVE_DE_INTENTO.test(clave) ? clave : null;
-		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta, intento });
+		// RW-ALTAS · La conexión, para su tope en la agenda: sólo su huella, nunca la IP.
+		const conexion = await huellaDeLaConexion(c.env, tenantId, ipDeLaPeticion(c.req.raw));
+		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta, intento, conexion });
 		if (!r.ok) {
 			anotar(c, { event: "reserva_web_rechazo", tenant_id: tenantId, motivo: r.error });
 			return rechazada(c, r);
@@ -217,7 +242,9 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 	const r = await agendaDe(c.env, tenantId).cancelar({ tenantId, token });
 	if (!r.ok) return rechazada(c, r);
 	anotar(c, { event: "reserva_web_cancelada", tenant_id: tenantId });
-	// «Has cancelado tu reserva», a su cliente. Sólo si se acaba de cancelar: la segunda vez no.
+	// «Has cancelado tu reserva», a su cliente. Sólo si se acaba de cancelar: la segunda vez no. Y sólo
+	// si salió (o está saliendo) su confirmación (RW-ALTAS): una reserva que nunca se le confirmó a
+	// nadie no gasta cupo al cancelarse.
 	if (r.aviso) {
 		const a = r.aviso;
 		await enviarCorreoReservaWeb(c.env, {
@@ -228,6 +255,7 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 			negocio: await negocioParaElCorreo(c, tenantId),
 			reserva: { dia: a.dia, hora: a.hora, personas: a.personas, mesa: a.mesa, codigo: codigoDeReserva(a.id_reserva) },
 			dispositivo: "web",
+			trasElCorreo: confirmacionQueSigueApuntada(a.id_reserva),
 		});
 	}
 	return c.json({ ok: true });

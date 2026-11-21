@@ -368,6 +368,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"Ya tienes muchas reservas activas con este correo. Cancela alguna o llama al restaurante.",
 	tope_reservas_negocio:
 		"Este restaurante ha recibido muchas reservas por internet hoy. Llama para reservar.",
+	// RW-ALTAS: la conexión (la IP, o su /64) ha hecho ya su máximo de altas del día en este negocio.
+	tope_reservas_conexion:
+		"Desde tu conexión ya se han hecho muchas reservas hoy en este restaurante. Llama para reservar.",
 	reserva_no_cancelable:
 		"Esta reserva ya no se puede cancelar por internet. Si lo necesitas, llama al restaurante.",
 	enlace_no_valido: "Este enlace no es válido o ha caducado.",

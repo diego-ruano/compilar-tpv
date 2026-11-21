@@ -27,8 +27,11 @@ import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../../env";
 import { estaApagado } from "../../lib/interruptores";
 import { negocioConLicenciaEnVigor } from "../../lib/licenciaEnUso";
-import { pasaElLimitador } from "../../lib/limitador";
+import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
+import { recortar } from "../../lib/texto";
+import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
+import { hmacSha256Hex } from "../../server/utils/hmac";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { negocioDeLaClave } from "./claves";
 
@@ -66,6 +69,35 @@ export const limitadorAltas: MiddlewareHandler<Ctx> = async (c, next) => {
 	}
 	await next();
 };
+
+/**
+ * RW-ALTAS · La huella de la conexión desde la que llega un alta, para el tope de altas por conexión
+ * de la agenda (`agendaWeb.motor.ts::MAX_ALTAS_DIA_CONEXION`).
+ *
+ * La conexión es la del limitador (`claveDeFreno`): la IPv4 tal cual y la IPv6 por su /64, que es lo
+ * que tiene una casa o un móvil; contar por dirección le daría a cada uno 2^64 cuentas. La IP es un
+ * dato personal y la agenda no la guarda: se queda con un HMAC, con `LICENSE_JWT_SECRET` (el secreto
+ * con el que el worker ya firma los códigos por correo), atado a este uso y al negocio. Sin el
+ * secreto, un SHA-256 de una IPv4 se deshace probando las 2^32; y por el negocio, la misma conexión
+ * deja una huella distinta en cada agenda, así que no se puede seguir de un restaurante a otro.
+ *
+ * `null` si no hay IP (en Cloudflare siempre llega `CF-Connecting-IP`) o falta el secreto: entonces
+ * el alta no cuenta para ningún tope por conexión, y detrás sigue el del negocio.
+ */
+export async function huellaDeLaConexion(
+	env: Pick<Env, "LICENSE_JWT_SECRET">,
+	tenantId: string,
+	ip: string,
+): Promise<string | null> {
+	const conexion = claveDeFreno(ip);
+	if (!conexion || conexion === "unknown") return null;
+	const secreto = recortar(String(env.LICENSE_JWT_SECRET ?? ""));
+	if (!secreto) {
+		capturarError(new Error("missing_env_LICENSE_JWT_SECRET"), "reservas_web.conexion");
+		return null;
+	}
+	return hmacSha256Hex(secreto, `reserva_web_conexion\n${tenantId}\n${conexion}`);
+}
 
 /**
  * Paso 6: lo más largo que manda el widget es un alta, con la nota de 200 caracteres. 8 KB sobra

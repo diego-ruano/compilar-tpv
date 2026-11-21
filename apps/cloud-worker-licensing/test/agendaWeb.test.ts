@@ -20,7 +20,13 @@ import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
 import { prepararAlmacen } from "../src/durableObjects/agendaWeb.almacen";
-import { MAX_ALTAS_DIA_NEGOCIO, MAX_RESERVAS_POR_CORREO, caducidadDelEnlace, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
+import {
+	MAX_ALTAS_DIA_CONEXION,
+	MAX_ALTAS_DIA_NEGOCIO,
+	MAX_RESERVAS_POR_CORREO,
+	caducidadDelEnlace,
+	codigoDeReserva,
+} from "../src/durableObjects/agendaWeb.motor";
 
 // Fechas relativas al reloj de verdad: la agenda mira `Date.now()` para caducar los enlaces.
 const AHORA = horaLocalEn("Europe/Madrid", Date.now());
@@ -1094,7 +1100,7 @@ describe("la entrega a la Main", () => {
 			prepararAlmacen(sql);
 			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
 			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo", "aviso_ms"]));
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "4" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "5" });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
 			const r = await motor.recogidas({
@@ -1147,6 +1153,129 @@ describe("la entrega a la Main", () => {
 			await motor.cancelar({ tenantId: T, token: b.token });
 			const sola = (await motor.pendientes({ tenantId: T })).peticiones;
 			expect(sola.map((p: any) => p.tipo)).toEqual(["cancelacion"]);
+		});
+	});
+});
+
+describe("el tope de altas por conexión (RW-ALTAS)", () => {
+	/** Una huella de conexión como las de `huellaDeLaConexion`: aquí, cualquier texto sirve. */
+	const CONEXION_A = "a".repeat(64);
+	const CONEXION_B = "b".repeat(64);
+
+	/** La alta n.º `i` de una tanda: cada una en su día y con su correo, para no chocar con otros topes. */
+	const altaN = (i: number) => alta({ dia_ymd: sumarDias(HOY, 2 + i), email: `persona${i}@correo.test` });
+
+	it("desde una conexión, la alta n.º 11 en 24 h da 429; desde otra, o sin conexión conocida, entra", async () => {
+		await conAgenda("conexion-tope", async (motor) => {
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				const r = await motor.reservar({ tenantId: T, alta: altaN(i), conexion: CONEXION_A });
+				expect(r.ok, `alta ${i}`).toBe(true);
+			}
+			expect(MAX_ALTAS_DIA_CONEXION).toBe(10);
+			expect(await motor.reservar({ tenantId: T, alta: altaN(10), conexion: CONEXION_A })).toEqual({
+				ok: false,
+				error: "tope_reservas_conexion",
+				status: 429,
+			});
+			expect((await motor.reservar({ tenantId: T, alta: altaN(10), conexion: CONEXION_B })).ok).toBe(true);
+			expect((await motor.reservar({ tenantId: T, alta: altaN(11), conexion: null })).ok).toBe(true);
+		});
+	});
+
+	it("reservar y cancelar en bucle se corta: las anuladas por su autor cuentan para su conexión", async () => {
+		await conAgenda("conexion-bucle", async (motor, sql) => {
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				const r = await motor.reservar({ tenantId: T, alta: alta({ email: `ciclo${i}@correo.test` }), conexion: CONEXION_A });
+				expect(r.ok, `alta ${i}`).toBe(true);
+				expect(await motor.cancelar({ tenantId: T, token: r.token })).toMatchObject({ ok: true });
+			}
+			const anuladas = sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE estado = 'anulada';`).toArray()[0] as any;
+			expect(anuladas.n).toBe(MAX_ALTAS_DIA_CONEXION);
+			expect(await motor.reservar({ tenantId: T, alta: alta({ email: "otra@correo.test" }), conexion: CONEXION_A })).toEqual({
+				ok: false,
+				error: "tope_reservas_conexion",
+				status: 429,
+			});
+			// Las anuladas no gastan el tope del negocio (AUD-38): desde otra conexión, entra.
+			expect((await motor.reservar({ tenantId: T, alta: alta({ email: "otra@correo.test" }), conexion: CONEXION_B })).ok).toBe(true);
+		});
+	});
+
+	it("una repetición del mismo intento no cuenta otra vez para su conexión", async () => {
+		await conAgenda("conexion-repeticion", async (motor, sql) => {
+			const p = { tenantId: T, alta: alta(), intento: "intento-0123456789", conexion: CONEXION_A };
+			expect((await motor.reservar(p)).repetida).toBe(false);
+			expect((await motor.reservar(p)).repetida).toBe(true);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
+	it("200 altas desde 200 conexiones siguen dando el tope del negocio", async () => {
+		await conAgenda("conexion-tope-negocio", async (motor, sql) => {
+			const ahora = Date.now();
+			for (let i = 0; i < MAX_ALTAS_DIA_NEGOCIO; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, dia_ymd, hora, comensales, creada_local, creada_ms, estado)
+					 VALUES (?, 'alta', ?, '2000-01-01', '13:00', 2, '2000-01-01 00:00:00', ?, 'pendiente');`,
+					`p${i}`,
+					`r${i}`,
+					ahora - 1000,
+				);
+				sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, `conexion-${i}`, ahora - 1000);
+			}
+			// Ni una conexión nueva ni una de las que llevan una.
+			for (const conexion of [CONEXION_A, "conexion-7"]) {
+				expect(await motor.reservar({ tenantId: T, alta: alta(), conexion })).toEqual({
+					ok: false,
+					error: "tope_reservas_negocio",
+					status: 429,
+				});
+			}
+		});
+	});
+
+	it("lo de hace más de 24 h ya no cuenta, y la alarma lo borra", async () => {
+		await conAgenda("conexion-purga", async (motor, sql, state) => {
+			const ahora = Date.now();
+			for (let i = 0; i < MAX_ALTAS_DIA_CONEXION; i++) {
+				sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, CONEXION_A, ahora - 25 * 3_600_000);
+			}
+			sql.exec(`INSERT INTO altas_por_conexion (conexion_hash, creada_ms) VALUES (?, ?);`, CONEXION_B, ahora - 3_600_000);
+			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A })).ok).toBe(true);
+			// La de esta alta ya cuenta.
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion WHERE creada_ms >= ?;`, ahora).toArray()[0]).toEqual({ n: 1 });
+
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			const quedan = sql
+				.exec(`SELECT conexion_hash AS c, creada_ms >= ? AS reciente FROM altas_por_conexion ORDER BY creada_ms;`, ahora)
+				.toArray();
+			expect(quedan).toEqual([
+				{ c: CONEXION_B, reciente: 0 },
+				{ c: CONEXION_A, reciente: 1 },
+			]);
+
+			// Si sólo quedan conexiones que aún cuentan, la alarma sigue programada para borrarlas.
+			sql.exec(`DELETE FROM peticiones; DELETE FROM enlaces; DELETE FROM intentos;`);
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(await state.storage.getAlarm()).not.toBeNull();
+			sql.exec(`UPDATE altas_por_conexion SET creada_ms = ?;`, ahora - 25 * 3_600_000);
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 0 });
+			expect(await state.storage.getAlarm()).toBeNull();
+		});
+	});
+
+	it("una agenda de la versión 4 se pone al día con la tabla de las conexiones", async () => {
+		await conAgenda("conexion-migracion", async (motor, sql) => {
+			sql.exec(`DROP TABLE altas_por_conexion;`);
+			sql.exec(`UPDATE estado SET valor = '4' WHERE clave = 'version';`);
+			prepararAlmacen(sql);
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "5" });
+			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A })).ok).toBe(true);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion;`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
 });
