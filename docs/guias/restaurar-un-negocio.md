@@ -129,7 +129,8 @@ sigue cobrando con normalidad todo el rato, y en su Configuración → Conectivi
 
 **Antes de lanzarlo**, mira que la Main tenga una versión con la subida completa: una anterior no
 la hace, y la nube se queda como antes (lo que falta lo repara el contraste por tandas). La petición
-caduca a los 14 días.
+caduca si la Main no la empieza en 14 días; una vez empezada no caduca, aunque la Main pase días
+apagada o la subida esté pausada.
 
 **Cómo va**: `pnpm negocio:estado` enseña `Subida` con su estado (`esperando`, `terminada`,
 `caducada`, `agotada` o `huerfana`), la Main que la tiene, las páginas y las filas escritas. Cuando

@@ -29,11 +29,13 @@ import { claveDeCopia, podarCopias } from "../src/durableObjects/tenantHub.copia
 import {
 	LIMITES_DE_SUBIDA,
 	PLAZO_DE_SUBIDA_MS,
+	copiasProtegidasDesde,
 	ejecutarPasoDeSubida,
 	leerSubida,
 	pedirSubida,
 	reabrirSubida,
 	sentenciaDeSubida,
+	sinEmpezarParaAvisar,
 } from "../src/durableObjects/tenantHub.subida";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -500,6 +502,32 @@ describe("DO-SUBIDA · el final", () => {
 			pedirSubida(m.sql, { id: "s2", origen: "copia", mainDeviceId: MAIN, inicioSeq: 0, ahoraMs: Date.now() - PLAZO_DE_SUBIDA_MS - 1 });
 			expect(await paso(hub, m, { accion: "fin", id: "s2", conteos: {}, porRevisar: 0 })).toMatchObject({ ok: false, error: "subida_no_pedida" });
 			expect(leerSubida(m.sql)!.estado).toBe("caducada");
+		});
+	});
+
+	it("el plazo es para empezar: una subida empezada sigue pasados los 14 días y sus copias siguen protegidas", async () => {
+		await enElHub("subida-empezada-no-caduca", async (hub: any) => {
+			const m = await conSubida(hub, "subida-empezada-no-caduca");
+			const storage = hub.state.storage;
+			const ahora = Date.now();
+			const pasado = ahora + PLAZO_DE_SUBIDA_MS + 24 * 60 * 60 * 1000;
+			const pagina = (nombre: string) => ({
+				accion: "filas" as const, id: "s1", tabla: "Clientes", columnas: COLS_CLIENTE,
+				filas: [cliente("c1", nombre)], checkpoint: 0, ultimaDeLaTabla: false,
+			});
+			// La Main sube parte y se para (el equipo apagado, la subida pausada) más de 14 días.
+			ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: pagina("Ana"), ahoraMs: ahora });
+			expect(sinEmpezarParaAvisar(m.sql, pasado)).toBeNull();
+			expect(leerSubida(m.sql)!.estado).toBe("esperando");
+			expect(copiasProtegidasDesde(m.sql)).toBe(leerSubida(m.sql)!.desdeMs);
+			// Cuando vuelve, sigue por donde iba.
+			expect(ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: pagina("Bea"), ahoraMs: pasado }).respuesta).toMatchObject({ ok: true, escritas: 1 });
+
+			// Con sólo el plan pedido también está empezada.
+			pedirSubida(m.sql, { id: "s2", origen: "copia", mainDeviceId: MAIN, inicioSeq: 0, ahoraMs: ahora });
+			ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: { accion: "plan", id: "s2", clientNow: ahoraCliente(), checkpoint: 0, totales: { Clientes: 2 } }, ahoraMs: ahora });
+			expect(ejecutarPasoDeSubida(storage, { deviceId: MAIN, paso: { ...pagina("Ana"), id: "s2" }, ahoraMs: pasado }).respuesta).toMatchObject({ ok: true });
+			expect(leerSubida(m.sql)!.estado).toBe("esperando");
 		});
 	});
 

@@ -717,8 +717,9 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
   el saludo comprueba contra la base central. No se ata a `_Main_Vigente`: tras volver a un instante,
   esa tabla también ha vuelto y nombraría a la Main de entonces. Con `modo: "nube"` se borra. La copia de R2 no
   la trae (empieza por `_`) y `vaciarObjeto` se la lleva. Estados: `esperando`, `terminada`,
-  `caducada` (14 días sin terminar), `agotada` (su techo total) y `huerfana` (saludó como Main otro
-  dispositivo: un traslado a mitad).
+  `caducada` (14 días sin que la Main la empiece, ni el plan ni una página; una empezada no caduca,
+  aunque la Main pase semanas apagada o la subida pausada), `agotada` (su techo total) y `huerfana`
+  (saludó como Main otro dispositivo: un traslado a mitad).
 - **El saludo de esa Main la lleva** (`hello_ok.subida: {id, estado, origen}`), sin esperas; a una
   Handy no se le dice nunca. Una Main anterior no mira el campo y sigue como antes.
 - **Los pasos llegan por el socket** (`{type: "subida", pasoId, accion, …}`, acuse `subida_ack` con el

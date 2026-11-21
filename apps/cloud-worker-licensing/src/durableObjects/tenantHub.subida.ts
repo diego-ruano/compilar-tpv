@@ -54,7 +54,10 @@ const HORA_MS = 60 * 60 * 1000;
 const DIA_MS = 24 * HORA_MS;
 const MIB = 1024 * 1024;
 
-/** Lo que tiene la Main para empezar la subida desde que se pide. Después, `caducada`. */
+/**
+ * Lo que tiene la Main para empezar la subida desde que se pide (o se reabre). Si no la ha empezado
+ * para entonces, `caducada`; una empezada no caduca (`caducarSiToca`).
+ */
 export const PLAZO_DE_SUBIDA_MS = 14 * DIA_MS;
 
 /** Sin ninguna página en este tiempo desde que se pidió, la alarma diaria avisa una vez. */
@@ -227,10 +230,23 @@ function ponerEstado(sql: SqlStorage, estado: EstadoDeSubida): void {
 	sql.exec("UPDATE _Subida_Completa SET Estado = ?1 WHERE Id = 1;", estado);
 }
 
-/** Si la petición lleva esperando más de su plazo, pasa a `caducada`. Devuelve si ha caducado ahora. */
+/**
+ * La Main ya la ha empezado: ha pedido el plan (que apunta lo que declara) o ha subido alguna página.
+ * Desde entonces sigue por sus cursores cuando vuelve, aunque pasen semanas con el equipo apagado o
+ * la subida pausada (`subida_nube`).
+ */
+function empezada(p: PeticionDeSubida): boolean {
+	return p.filasDeclaradas !== null || p.primeraPaginaMs !== null;
+}
+
+/**
+ * Si la petición lleva esperando más de su plazo sin que la Main la haya empezado, pasa a
+ * `caducada`. Devuelve si ha caducado ahora. Una empezada no caduca: dejarla a medias por el plazo
+ * dejaría la nube incompleta para siempre y soltaría las copias buenas a la poda.
+ */
 export function caducarSiToca(sql: SqlStorage, ahoraMs: number): boolean {
 	const p = leerSubida(sql);
-	if (!p || p.estado !== "esperando" || ahoraMs <= p.hastaMs) return false;
+	if (!p || p.estado !== "esperando" || empezada(p) || ahoraMs <= p.hastaMs) return false;
 	ponerEstado(sql, "caducada");
 	return true;
 }
