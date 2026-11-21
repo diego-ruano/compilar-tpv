@@ -32,8 +32,8 @@
 // - `main`: la Main es la buena (la nube se perdió o se estropeó sola). No se toca lo purgado: la
 //   Main sigue con su base, se pone al día por encima del cambio vacío y sube su outbox, y lo que la
 //   nube perdió entre el instante y ahora lo sube la Main entera (DO-SUBIDA, `tenantHub.subida.ts`):
-//   en la misma transacción que abre el log se apunta la petición de subida completa, atada a la
-//   Main de entonces, y la Main la ve en su siguiente saludo. Hasta que acaba, la nube va por detrás
+//   en la misma transacción que abre el log se apunta la petición de subida completa, sin dueño (la
+//   primera Main vigente que salude se la queda), y la Main la ve en su siguiente saludo. Hasta que acaba, la nube va por detrás
 //   de la Main.
 
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
@@ -119,7 +119,7 @@ export function abrirLogTrasVolver(
 		ahoraMs: number;
 		/** DO-SUBIDA: de dónde sale la base que se acaba de devolver. */
 		origen: OrigenDeSubida;
-		/** DO-SUBIDA: la Main vigente al devolverla, o `null`: la primera que salude se queda la subida. */
+		/** DO-SUBIDA: la Main de la petición, o `null`: la primera Main vigente que salude se la queda. */
 		mainDeviceId: string | null;
 	},
 ): LogAbierto {

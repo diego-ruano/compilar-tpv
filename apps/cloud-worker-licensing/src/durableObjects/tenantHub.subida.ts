@@ -11,8 +11,10 @@
 // Aquí está lo que el objeto hace de su parte:
 //
 // - **La petición** (`_Subida_Completa`, una fila en el SQL del objeto: sobrevive a la hibernación y
-//   a los reinicios). La apunta `abrirLogTrasVolver` en la misma transacción que abre el log, atada
-//   al dispositivo que era la Main (o a ninguno: la primera Main vigente que salude se la queda).
+//   a los reinicios). La apunta `abrirLogTrasVolver` en la misma transacción que abre el log, sin
+//   dueño: la primera Main vigente que salude (comprobada contra la base central) se la queda. No se
+//   ata a `_Main_Vigente`: tras volver a un instante, esa tabla también ha vuelto y nombraría a la Main
+//   de entonces.
 //   Una vuelta en modo «nube» la borra. La copia de R2 no la trae (empieza por `_`), y `vaciarObjeto`
 //   se la lleva.
 // - **El saludo** (`subidaParaElSaludo`): el `hello_ok` de esa Main lleva `subida: {id, estado,
@@ -23,7 +25,8 @@
 //   tabla y las columnas con su propio esquema y construye él la sentencia, un `INSERT … SELECT …
 //   FROM json_each(?1) … ON CONFLICT(clave) DO UPDATE … WHERE algo cambia` con la lista en un solo
 //   parámetro (DO-01). Nunca `REPLACE` y nunca borra: los borrados van por el outbox, como cualquier
-//   reparación (AUD-36 sigue mirándolos). Lo fiscal sólo se inserta.
+//   reparación (AUD-36 sigue mirándolos). Un registro de facturación sólo se inserta, y el
+//   contador de una serie sólo sube.
 // - **Lo ajeno manda**: una página de filas no entra si en el log hay algo de otro dispositivo por
 //   encima del checkpoint con el que la Main la leyó (`aplazada`): la Main baja eso antes y la
 //   vuelve a leer.
@@ -93,7 +96,23 @@ export const CLAVES_POR_SOBRANTES = 20_000;
 export const CLAVES_VIVAS_MAX = 20_000;
 
 /** Lo fiscal sólo se inserta: un registro de facturación no se modifica nunca. */
-const SOLO_INSERTAR: ReadonlySet<string> = new Set(["Registros_Facturacion", "Serie_Facturacion"]);
+const SOLO_INSERTAR: ReadonlySet<string> = new Set(["Registros_Facturacion"]);
+
+/**
+ * Los contadores: sólo suben. `Serie_Facturacion.Ultimo` es el último número de su serie, y la Main
+ * lo sube en cada cobro con `Ultimo = Ultimo + 1`: si la subida no lo pusiera al día, la nube de una
+ * copia se quedaría para siempre los cobros que perdió por detrás. Nunca baja.
+ */
+const MONOTONAS: Readonly<Record<string, readonly string[]>> = { Serie_Facturacion: ["Ultimo"] };
+
+/** Lo que la subida hace con una fila que ya está arriba. Lo fiscal no se borra nunca (sin sobrantes). */
+export type PoliticaDeSubida = "upsert" | "solo_insertar" | "monotono";
+
+function politicaDe(tabla: string): PoliticaDeSubida {
+	if (SOLO_INSERTAR.has(tabla)) return "solo_insertar";
+	if (MONOTONAS[tabla]) return "monotono";
+	return "upsert";
+}
 
 /** Lo que tiene un nombre de tabla o de columna que se acepta mirar en el esquema. */
 const NOMBRE = /^[A-Za-z0-9_]{1,64}$/;
@@ -505,15 +524,20 @@ function claseDeFallo(e: unknown): NoEntro["motivo"] {
 }
 
 /** La sentencia de una página: un upsert con la lista en un solo parámetro (DO-01). */
-export function sentenciaDeSubida(tabla: string, columnas: string[], claveDe: string[], soloInsertar: boolean): string {
+export function sentenciaDeSubida(tabla: string, columnas: string[], claveDe: string[], politica: PoliticaDeSubida): string {
 	const lista = columnas.map(cita).join(", ");
 	const valores = columnas.map((_, i) => `json_extract(value, '$[${i}]')`).join(", ");
 	const resto = columnas.filter((c) => !claveDe.includes(c));
 	const conflicto = `ON CONFLICT(${claveDe.map(cita).join(", ")})`;
+	// Un contador sólo sube: `MAX` de lo de arriba y lo que llega, y sólo si lo que llega es mayor.
+	const monotonas = politica === "monotono" ? resto.filter((c) => MONOTONAS[tabla]?.includes(c)) : [];
 	const alChocar =
-		soloInsertar || resto.length === 0
-			? `${conflicto} DO NOTHING`
-			: `${conflicto} DO UPDATE SET ${resto.map((c) => `${cita(c)} = excluded.${cita(c)}`).join(", ")}
+		politica === "monotono" && monotonas.length
+			? `${conflicto} DO UPDATE SET ${monotonas.map((c) => `${cita(c)} = MAX(${cita(c)}, excluded.${cita(c)})`).join(", ")}
+			   WHERE ${monotonas.map((c) => `excluded.${cita(c)} > ${cita(c)}`).join(" OR ")}`
+			: politica !== "upsert" || resto.length === 0
+				? `${conflicto} DO NOTHING`
+				: `${conflicto} DO UPDATE SET ${resto.map((c) => `${cita(c)} = excluded.${cita(c)}`).join(", ")}
 			   WHERE NOT (${resto.map((c) => `${cita(c)} IS excluded.${cita(c)}`).join(" AND ")})`;
 	// El `WHERE 1` no sobra: sin él, SQLite lee el `ON` del `ON CONFLICT` como el de un `JOIN`.
 	return `INSERT INTO ${cita(tabla)} (${lista}) SELECT ${valores} FROM json_each(?1) WHERE 1 ${alChocar}`;
@@ -656,7 +680,7 @@ function clavesVivas(sql: SqlStorage, ahora: string): { vivos: Record<string, Cl
 	let total = 0;
 	let incompletos = false;
 	for (const tabla of tablasDelNegocio(sql)) {
-		if (!esTransaccional(tabla) || SOLO_INSERTAR.has(tabla)) continue;
+		if (!esTransaccional(tabla) || politicaDe(tabla) !== "upsert") continue;
 		const t = tablaAdmitida(sql, tabla);
 		const { sql: texto, args } = sentenciaVolcado(tabla, ahora);
 		const cursor = sql.exec(texto, ...args);
@@ -715,14 +739,16 @@ export function ejecutarPasoDeSubida(
 					sql: v.sql.replace(/;\s*$/, ""),
 					parametrizada: v.args.length > 0,
 					parcial: esTransaccional(tabla),
-					politica: SOLO_INSERTAR.has(tabla) ? "solo_insertar" : "upsert",
+					politica: politicaDe(tabla),
 				};
 			});
 			const ahora = parseClientNow(paso.clientNow) ?? serverNowFixed();
 			const { vivos, incompletos } = clavesVivas(sql, ahora);
 			const hastaSeq = Number((sql.exec("SELECT COALESCE(MAX(Seq), 0) AS s FROM Sync_Changes;").one() as { s: number }).s);
 			return {
-				respuesta: { ok: true, ventanaDias: VENTANA_DIAS, tablas, vivos, vivosIncompletos: incompletos, hastaSeq },
+				// `dispositivo`: cómo nombra el log a esta Main. Sus borrados (lo vivo, los sobrantes) no
+				// los frena lo que ella misma escribe, sólo lo de otro.
+				respuesta: { ok: true, ventanaDias: VENTANA_DIAS, tablas, vivos, vivosIncompletos: incompletos, hastaSeq, dispositivo: deviceId },
 				efectos: { empezada: true },
 			};
 		}
@@ -779,7 +805,8 @@ export function ejecutarPasoDeSubida(
 			if (hasta !== null) return { respuesta: { ok: false, aplazada: true, hastaSeq: hasta }, efectos: { aplazada: true } };
 			exigirPresupuesto(sql, p, ahoraMs, limites);
 
-			const soloInsertar = SOLO_INSERTAR.has(t.tabla);
+			const politica = politicaDe(t.tabla);
+			const soloInsertar = politica === "solo_insertar";
 			const noEntraron: NoEntro[] = [];
 			let filas = paso.filas;
 			let iguales = 0;
@@ -805,7 +832,7 @@ export function ejecutarPasoDeSubida(
 				if (filas.length) {
 					const r = aplicarConParticion(
 						storage,
-						sentenciaDeSubida(t.tabla, paso.columnas, t.clave, soloInsertar),
+						sentenciaDeSubida(t.tabla, paso.columnas, t.clave, politica),
 						filas,
 						posiciones,
 						medida,

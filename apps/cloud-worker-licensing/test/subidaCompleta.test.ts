@@ -86,7 +86,7 @@ describe("DO-SUBIDA · la petición", () => {
 			const r = await hub.trasVolver({ tenantId: t, seqAntes: 0, modo: "main" });
 			expect(r.ok).toBe(true);
 			expect(m.main.servidor.readyState).not.toBe(1);
-			expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", origen: "instante", mainDeviceId: MAIN });
+			expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", origen: "instante", mainDeviceId: null });
 
 			// Vuelve a saludar.
 			const par = new WebSocketPair();
@@ -117,6 +117,35 @@ describe("DO-SUBIDA · la petición", () => {
 			await hub.webSocketMessage(h[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s" }));
 			await vi.waitFor(() => expect(deLaHandy.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
 			expect(deLaHandy.find((x) => x.type === "hello_ok").subida).toBeUndefined();
+		});
+	});
+
+	it("la vuelta a un instante no ata la petición a la Main de entonces: la Main de ahora la recibe", async () => {
+		await enElHub("subida-instante-traslado", async (hub: any) => {
+			const t = "subida-instante-traslado";
+			const m = await montarMainEnElHub(hub, t, { main: MAIN, recovering: false });
+			// La tabla de la Main vigente ha vuelto al instante con todo lo demás: nombra al equipo de
+			// antes de un traslado de licencia.
+			laMainEs(hub, "main-de-antes");
+			const r = await hub.trasVolver({ tenantId: t, seqAntes: 0, modo: "main" });
+			expect(r.ok).toBe(true);
+			expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", origen: "instante", mainDeviceId: null });
+
+			// La Main de ahora (la de la base central) saluda y se la queda.
+			const par = new WebSocketPair();
+			hub.state.acceptWebSocket(par[1], [MAIN]);
+			par[1].serializeAttachment({ tenantId: t, deviceId: MAIN, role: "tpv", authed: false, pubkeyB64: null, challenge: { nonceB64: "n", expiresAtMs: Date.now() + 60_000 }, recovering: true });
+			const recibidos: any[] = [];
+			par[0].accept();
+			par[0].addEventListener("message", (ev: MessageEvent) => {
+				recibidos.push(JSON.parse(String(ev.data)));
+			});
+			hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
+			hub.mainEnCentral = async () => MAIN;
+			await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s", recovering: true }));
+			await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
+			expect(recibidos.find((x) => x.type === "hello_ok").subida).toMatchObject({ estado: "esperando", origen: "instante" });
+			expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", mainDeviceId: MAIN });
 		});
 	});
 
@@ -198,20 +227,45 @@ describe("DO-SUBIDA · las páginas", () => {
 		});
 	});
 
-	it("lo fiscal sólo se inserta: lo que ya está y es distinto no se toca y se dice", async () => {
+	it("un registro de facturación sólo se inserta: lo que ya está y es distinto no se toca y se dice", async () => {
 		await enElHub("subida-fiscal", async (hub: any) => {
 			const m = await conSubida(hub, "subida-fiscal");
-			m.sql.exec("INSERT INTO Serie_Facturacion (Serie, Ultimo) VALUES ('A', 7);");
+			const cols = ["ID_Registro", "Orden", "Tipo", "NIF_Emisor", "Num_Serie_Factura", "Fecha_Expedicion", "Serie", "Numero",
+				"Nombre_Razon_Emisor", "Cadena_Huella", "Huella", "Fecha_Hora_Huso", "Sistema_Json", "QR_Url"];
+			const registro = (id: string, orden: number, huella: string) =>
+				[id, orden, "ALTA", "B00000000", `A-${orden}`, "20-11-2026", "A", orden, "Bar", "cadena", huella, "2026-11-20T10:00:00+01:00", "{}", "https://qr"];
+			m.sql.exec(`INSERT INTO Registros_Facturacion (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")});`, ...registro("r1", 1, "H1"));
 			const r = await paso(hub, m, {
-				accion: "filas", id: "s1", tabla: "Serie_Facturacion", columnas: ["Serie", "Ultimo"],
-				filas: [["A", 3], ["B", 1]], checkpoint: 0, ultimaDeLaTabla: false,
+				accion: "filas", id: "s1", tabla: "Registros_Facturacion", columnas: cols,
+				filas: [registro("r1", 1, "OTRA"), registro("r2", 2, "H2")], checkpoint: 0, ultimaDeLaTabla: false,
 			});
 			expect(r.ok).toBe(true);
-			expect(r.noEntraron).toEqual([{ clave: ["A"], motivo: "fiscal" }]);
-			expect(m.sql.exec("SELECT Serie, Ultimo FROM Serie_Facturacion ORDER BY Serie;").toArray()).toEqual([
-				{ Serie: "A", Ultimo: 7 },
-				{ Serie: "B", Ultimo: 1 },
+			expect(r.noEntraron).toEqual([{ clave: ["r1"], motivo: "fiscal" }]);
+			expect(m.sql.exec("SELECT ID_Registro, Huella FROM Registros_Facturacion ORDER BY ID_Registro;").toArray()).toEqual([
+				{ ID_Registro: "r1", Huella: "H1" },
+				{ ID_Registro: "r2", Huella: "H2" },
 			]);
+		});
+	});
+
+	it("el contador de una serie sólo sube: la nube de una copia se pone al día y nunca baja", async () => {
+		await enElHub("subida-serie", async (hub: any) => {
+			const m = await conSubida(hub, "subida-serie");
+			m.sql.exec("INSERT INTO Serie_Facturacion (Serie, Ultimo) VALUES ('A', 7), ('B', 9);");
+			const r = await paso(hub, m, {
+				accion: "filas", id: "s1", tabla: "Serie_Facturacion", columnas: ["Serie", "Ultimo"],
+				filas: [["A", 12], ["B", 3], ["C", 1]], checkpoint: 0, ultimaDeLaTabla: false,
+			});
+			expect(r).toMatchObject({ ok: true, escritas: 2, noEntraron: [] });
+			expect(m.sql.exec("SELECT Serie, Ultimo FROM Serie_Facturacion ORDER BY Serie;").toArray()).toEqual([
+				{ Serie: "A", Ultimo: 12 },
+				{ Serie: "B", Ultimo: 9 },
+				{ Serie: "C", Ultimo: 1 },
+			]);
+			// Ni se ofrece borrar arriba una serie: no tiene sobrantes ni vivos.
+			const plan = await paso(hub, m, { accion: "plan", id: "s1", clientNow: ahoraCliente(), checkpoint: 0, totales: {} });
+			expect(plan.tablas.find((t: any) => t.tabla === "Serie_Facturacion").politica).toBe("monotono");
+			expect(plan.dispositivo).toBe(MAIN);
 		});
 	});
 
@@ -423,10 +477,13 @@ describe("DO-SUBIDA · el final", () => {
 	});
 
 	it("la sentencia de una página nunca reemplaza ni borra, y lleva la lista en un parámetro", () => {
-		const s = sentenciaDeSubida("Zonas", ["ID_Zona", "Nombre_Zona"], ["ID_Zona"], false);
+		const s = sentenciaDeSubida("Zonas", ["ID_Zona", "Nombre_Zona"], ["ID_Zona"], "upsert");
 		expect(s).not.toMatch(/REPLACE|DELETE/i);
 		expect(s).toContain("json_each(?1)");
 		expect(s).toContain('ON CONFLICT("ID_Zona") DO UPDATE SET "Nombre_Zona" = excluded."Nombre_Zona"');
-		expect(sentenciaDeSubida("Serie_Facturacion", ["Serie", "Ultimo"], ["Serie"], true)).toContain("DO NOTHING");
+		expect(sentenciaDeSubida("Registros_Facturacion", ["ID_Registro", "Huella"], ["ID_Registro"], "solo_insertar")).toContain("DO NOTHING");
+		const serie = sentenciaDeSubida("Serie_Facturacion", ["Serie", "Ultimo"], ["Serie"], "monotono");
+		expect(serie).toContain('"Ultimo" = MAX("Ultimo", excluded."Ultimo")');
+		expect(serie).not.toMatch(/REPLACE|DELETE/i);
 	});
 });

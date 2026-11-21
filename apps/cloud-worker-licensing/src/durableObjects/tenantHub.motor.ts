@@ -521,7 +521,11 @@ export class MotorTenantHub {
 			opId: `nube-devuelta-${nuevoId()}`,
 			ahoraMs: Date.now(),
 			origen: "instante",
-			mainDeviceId: this.mainVigente().deviceId,
+			// Sin dueño: la tabla de la Main vigente (`_Main_Vigente`) acaba de volver al instante con
+			// todo lo demás, y si la licencia cambió de equipo desde entonces nombraría al de antes (la
+			// petición quedaría huérfana con la Main de ahora). La primera Main vigente que salude, que el
+			// saludo comprueba contra la base central, se la queda.
+			mainDeviceId: null,
 		});
 		// DO-SUBIDA: una sesión que entró entre el reinicio y esto saludó sin la petición de subida (y
 		// escribió sobre la base vuelta sin el log abierto). Se echa a todas: vuelven a saludar, y la
@@ -629,9 +633,10 @@ export class MotorTenantHub {
 					modo,
 					opId: `nube-devuelta-${nuevoId()}`,
 					ahoraMs: Date.now(),
-					// DO-SUBIDA: un objeto vacío no sabe quién era la Main: la primera que salude.
+					// DO-SUBIDA: un objeto vacío (o una copia, que no trae `_Main_Vigente`) no sabe quién es la
+					// Main: la primera Main vigente que salude.
 					origen: operacion,
-					mainDeviceId: this.mainVigente().deviceId,
+					mainDeviceId: null,
 				});
 				await storage.delete(CLAVE_VUELTA_EN_CURSO);
 			} catch (e) {
