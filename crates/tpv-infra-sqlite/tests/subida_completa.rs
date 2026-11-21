@@ -581,17 +581,24 @@ async fn la_misma_peticion_reabierta_sigue_por_donde_iba() {
     nube.cerrar().await;
 }
 
-/// Una cuarentena de bajada en `_Sync_Failed`, con lo que se sabe de sus filas (`None`: nada).
+/// Una cuarentena de bajada en `_Sync_Failed`, con lo que se sabe de sus filas (`None`: nada), del
+/// cambio 5 de la nube: anterior al plan.
 async fn cuarentena(main: &Db, op: &str, filas_json: Option<serde_json::Value>, sentencias: serde_json::Value) {
+    cuarentena_en(main, op, 5, filas_json, sentencias).await;
+}
+
+/// Una cuarentena de bajada del cambio `seq` de la nube.
+async fn cuarentena_en(main: &Db, op: &str, seq: i64, filas_json: Option<serde_json::Value>, sentencias: serde_json::Value) {
     let w = main.write().await;
     w.raw()
         .execute(
             "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined, First_Failed_At_Ms, Last_Failed_At_Ms, Filas_Json) \
-             VALUES (?1, 5, ?2, 5, 1, 1, 1, ?3);",
+             VALUES (?1, ?4, ?2, 5, 1, 1, 1, ?3);",
             vec![
                 Value::Text(op.into()),
                 Value::Text(sentencias.to_string()),
                 filas_json.map_or(Value::Null, |f| Value::Text(f.to_string())),
+                Value::Integer(seq),
             ],
         )
         .await
@@ -706,23 +713,28 @@ fn mandadas_de(nube: &NubeDeSubida, tabla: &str) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// DO-SUBIDA · SYNC-36 · Una cuarentena sin `Filas_Json` (no se sabe qué filas toca) hace inciertas
-/// las tablas en las que escriben sus sentencias: de ellas sube sólo lo que falta arriba, sin pisar
-/// lo que ya está (lo de la Handy) ni pedir borrar lo que aquí falta, y la tabla no queda fallida.
+/// Una cuarentena de la Handy que no dice qué filas toca y que escribe en `Clientes`.
+fn sentencias_en_clientes() -> serde_json::Value {
+    json!([{"sql": "UPDATE Clientes SET Nombre = ?1 WHERE ID_Cliente = ?2;", "args": ["De la Handy", "cli-0007"]}])
+}
+
+/// Un borrado de la Handy en `Clientes` del que no se saben las filas.
+fn borrado_en_clientes() -> serde_json::Value {
+    json!([{"sql": "DELETE FROM Clientes WHERE ID_Cliente IN (SELECT ID_Cliente FROM Clientes WHERE Nombre = ?1);", "args": ["Cliente ñ 7"]}])
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena anterior al plan sin `Filas_Json` (no se
+/// sabe qué filas toca) hace inciertas las tablas en las que escriben sus sentencias: de ellas sube
+/// sólo lo que falta arriba, sin pisar lo que ya está (lo de la Handy) ni pedir borrar lo que aquí
+/// falta, y la tabla no queda fallida.
 #[tokio::test]
 async fn una_cuarentena_sin_filas_solo_sube_lo_que_falta_en_las_tablas_que_escribe() {
     let (main, _dir) = base("cuarentena-sin-filas").await;
     un_bar(&main).await;
-    cuarentena(
-        &main,
-        "op-handy",
-        None,
-        json!([{"sql": "UPDATE Clientes SET Nombre = ?1 WHERE ID_Cliente = ?2;", "args": ["De la Handy", "cli-0007"]}]),
-    )
-    .await;
+    cuarentena(&main, "op-handy", None, sentencias_en_clientes()).await;
     let mut nube = NubeDeSubida::nueva("cuarentena-sin-filas").await;
     nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0007', 'De la Handy'), ('cli-handy', 'Alta de la Handy');").await;
-    empezar(&main, "s1", "copia").await;
+    empezar(&main, "s1", "base_vacia").await;
     hasta_el_final_y_el_outbox(&main, &mut nube).await;
     assert_eq!(nombre_arriba(&nube, "cli-0007").await, Some(Value::Text("De la Handy".into())), "lo que ya está no se pisa");
     assert!(!mandadas_de(&nube, "Clientes").contains(&json!("cli-0007")), "ni viaja");
@@ -733,9 +745,57 @@ async fn una_cuarentena_sin_filas_solo_sube_lo_que_falta_en_las_tablas_que_escri
     nube.cerrar().await;
 }
 
-/// DO-SUBIDA · SYNC-36 · Una cuarentena de la que no se sabe ni en qué tablas escribe (sin filas ni
-/// sentencias) hace inciertas todas: sube lo que falta arriba, no pisa nada de lo que ya está ni pide
-/// borrar nada que pudiera ser suyo.
+/// Lo que comprueban las dos de abajo: la fila que borró la cuarentena (`cli-0007`) sigue sin estar
+/// arriba, nada de `Clientes` ha viajado, la tabla queda fallida para el contraste y las demás suben.
+async fn clientes_fuera_sin_resucitar(main: &Db, nube: &NubeDeSubida) {
+    assert_eq!(nombre_arriba(nube, "cli-0007").await, None, "lo que borró la cuarentena no vuelve");
+    assert!(mandadas_de(nube, "Clientes").is_empty(), "nada de su tabla viaja");
+    assert_eq!(
+        filas(main, "SELECT DISTINCT Ultimo_Error FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase <> 4;").await,
+        vec![vec![Value::Text("cuarentena".into())]],
+        "la tabla, para el contraste"
+    );
+    assert_eq!(numero(main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase <> 4 AND Estado <> 2;").await, 0);
+    assert!(numero(&nube.db, "SELECT COUNT(*) FROM Zonas;").await > 0, "las demás tablas suben");
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una copia (o un instante), la nube devuelta puede tener ya el cambio de
+/// una cuarentena que no dice qué filas toca: su tabla entera se deja para el contraste. Subía lo que
+/// faltaba arriba, que podía ser justo lo que la Handy había borrado: la fila volvía a la nube y el
+/// contraste, con las dos bases iguales, ya no lo veía.
+#[tokio::test]
+async fn con_una_copia_una_cuarentena_incierta_no_resucita_lo_que_borro() {
+    let (main, _dir) = base("cuarentena-copia-borrado").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-copia-borrado").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1'), ('cli-0008', 'Cliente ñ 8');").await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena posterior al plan es un cambio escrito en
+/// la nube devuelta: su tabla entera se deja para el contraste. Lo que aquí está y arriba falta puede
+/// ser lo que borró, y subirlo lo resucitaba.
+#[tokio::test]
+async fn una_cuarentena_incierta_posterior_al_plan_no_resucita_lo_que_borro() {
+    let (main, _dir) = base("cuarentena-tras-el-plan").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-tras-el-plan").await;
+    let seq = nube.hasta_seq + 1;
+    cuarentena_en(&main, "op-handy", seq, None, borrado_en_clientes()).await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0001', 'Cliente ñ 1');").await;
+    empezar(&main, "s1", "base_vacia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    clientes_fuera_sin_resucitar(&main, &nube).await;
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una base vacía, una cuarentena anterior al plan de la que no se sabe ni
+/// en qué tablas escribe (sin filas ni sentencias) hace inciertas todas: sube lo que falta arriba, no
+/// pisa nada de lo que ya está ni pide borrar nada que pudiera ser suyo.
 #[tokio::test]
 async fn una_cuarentena_que_no_dice_nada_solo_sube_lo_que_falta_en_todas_las_tablas() {
     let (main, _dir) = base("cuarentena-sin-nada").await;
@@ -747,7 +807,7 @@ async fn una_cuarentena_que_no_dice_nada_solo_sube_lo_que_falta_en_todas_las_tab
          INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('com-handy', 'BARRA', 'Abierta', '2026-11-19 10:00:00');",
     )
     .await;
-    empezar(&main, "s1", "copia").await;
+    empezar(&main, "s1", "base_vacia").await;
     hasta_el_final_y_el_outbox(&main, &mut nube).await;
     assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Clientes WHERE ID_Cliente = 'cli-handy';").await, 1, "un sobrante no se borra");
     assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'com-handy';").await, 1, "un vivo que aquí falta no se borra");
@@ -756,6 +816,31 @@ async fn una_cuarentena_que_no_dice_nada_solo_sube_lo_que_falta_en_todas_las_tab
     assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Clientes;").await, 301);
     assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Comandas;").await, 702);
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 0, "ninguna tabla fallida");
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Con una copia, una cuarentena de la que no se sabe ni en qué tablas escribe
+/// deja todas para el contraste, y la pantalla las cuenta fallidas: daba por subidas sus tablas sin
+/// subir nada de lo vivo (sus claves salen de la nube y ya están todas arriba) y subía lo que faltaba,
+/// que podía ser lo que el cambio había borrado.
+#[tokio::test]
+async fn con_una_copia_una_cuarentena_que_no_dice_nada_deja_todas_las_tablas_para_el_contraste() {
+    let (main, _dir) = base("cuarentena-copia-sin-nada").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, json!([])).await;
+    let mut nube = NubeDeSubida::nueva("cuarentena-copia-sin-nada").await;
+    nube.sembrar(
+        "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-handy', 'Alta de la Handy');
+         INSERT INTO Comandas (ID_Comanda, Canal, Estado, Fecha_Hora_Apertura) VALUES ('com-handy', 'BARRA', 'Abierta', '2026-11-19 10:00:00');",
+    )
+    .await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(nube.filas_mandadas(), 0, "no sube ninguna fila");
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Clientes WHERE ID_Cliente = 'cli-handy';").await, 1);
+    assert_eq!(numero(&nube.db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'com-handy';").await, 1);
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Fase <> 4 AND Estado <> 2;").await, 0, "todas fallidas");
+    assert!(estado_para_la_pantalla(&main).await.unwrap().unwrap().tablas_fallidas > 0, "y la pantalla lo dice");
     nube.cerrar().await;
 }
 
@@ -779,30 +864,42 @@ async fn una_cuarentena_incierta_no_deja_vacia_una_nube_devuelta_con_una_base_va
     nube.cerrar().await;
 }
 
-/// DO-SUBIDA (repaso) · SYNC-36 · En una tabla incierta el repaso sube lo que no entró sólo si arriba
-/// falta, y suelta lo que ya está: lo dejaba todo fuera, y lo que faltaba se quedaba sin subir.
-#[tokio::test]
-async fn el_repaso_de_una_tabla_incierta_sube_solo_lo_que_falta() {
-    let (main, _dir) = base("repaso-incierta").await;
+/// El primer repaso tras el plan, con `cli-0007` (arriba, de la Handy) y `cli-0009` (sólo aquí) por
+/// revisar y una cuarentena que no dice qué filas toca en `Clientes`. Devuelve lo que ha viajado en él.
+async fn repaso_con_una_cuarentena_incierta(nombre: &str, origen: &str) -> Vec<serde_json::Value> {
+    let (main, _dir) = base(nombre).await;
     un_bar(&main).await;
-    cuarentena(
-        &main,
-        "op-handy",
-        None,
-        json!([{"sql": "UPDATE Clientes SET Nombre = ?1 WHERE ID_Cliente = ?2;", "args": ["De la Handy", "cli-0007"]}]),
-    )
-    .await;
-    let mut nube = NubeDeSubida::nueva("repaso-incierta").await;
+    cuarentena(&main, "op-handy", None, sentencias_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva(nombre).await;
     nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-0007', 'De la Handy');").await;
-    empezar(&main, "s1", "copia").await;
+    empezar(&main, "s1", origen).await;
     plan_y_por_revisar(&main, &mut nube, &["cli-0007", "cli-0009"]).await;
     // El primer paso tras el plan es el repaso de lo que no entró (de la etapa 0).
     assert!(matches!(SqliteSubidaCompleta::new(main.clone()).paso(&mut nube).await.unwrap(), PasoHecho::Avanza));
-    assert_eq!(mandadas_de(&nube, "Clientes"), vec![json!("cli-0009")], "el repaso sube sólo lo que falta arriba");
-    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar;").await, 0, "y suelta lo demás");
+    let mandadas = mandadas_de(&nube, "Clientes");
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar;").await, 0, "suelta lo demás");
     hasta_el_final_y_el_outbox(&main, &mut nube).await;
     assert_eq!(nombre_arriba(&nube, "cli-0007").await, Some(Value::Text("De la Handy".into())));
     nube.cerrar().await;
+    mandadas
+}
+
+/// DO-SUBIDA (repaso) · SYNC-36 · Con una base vacía, en una tabla incierta el repaso sube lo que no
+/// entró sólo si arriba falta, y suelta lo que ya está: lo dejaba todo fuera, y lo que faltaba se
+/// quedaba sin subir.
+#[tokio::test]
+async fn el_repaso_de_una_tabla_incierta_sube_solo_lo_que_falta() {
+    let mandadas = repaso_con_una_cuarentena_incierta("repaso-incierta", "base_vacia").await;
+    assert_eq!(mandadas, vec![json!("cli-0009")], "el repaso sube sólo lo que falta arriba");
+}
+
+/// DO-SUBIDA (repaso) · SYNC-36 · Con una copia, el repaso deja fuera la tabla de una cuarentena que
+/// no dice qué filas toca, como una página: subía lo que faltaba arriba, que podía ser lo que el
+/// cambio había borrado.
+#[tokio::test]
+async fn con_una_copia_el_repaso_deja_fuera_la_tabla_de_una_cuarentena_incierta() {
+    let mandadas = repaso_con_una_cuarentena_incierta("repaso-incierta-copia", "copia").await;
+    assert!(mandadas.is_empty(), "nada de su tabla viaja: {mandadas:?}");
 }
 
 /// DO-SUBIDA · Una fila viva que aquí existe pero no se puede mandar (no cabe en una página) queda

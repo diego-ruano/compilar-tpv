@@ -44,9 +44,16 @@
 //! - Las filas que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`, SYNC-36): las
 //!   de la nube son las buenas y aquí están por detrás. Ni se suben ni se piden borrar arriba.
 //! - Si de ese cambio no se sabe qué filas toca, sus tablas (en las que escriben sus sentencias; si
-//!   ni eso se sabe, todas) son **inciertas**: de ellas sólo sube lo que falta arriba, por las
-//!   huellas, sin pisar nunca una fila que ya está, y no se pide borrar nada (ni lo vivo ni los
-//!   sobrantes). Lo que difiere lo ve el contraste. La tabla acaba como cualquier otra, no fallida.
+//!   ni eso se sabe, todas) dependen de si el cambio puede seguir arriba (`perdida_con_la_base`):
+//!   - Con una copia o un instante (la base devuelta puede ser posterior al cambio), o si el cambio
+//!     es posterior al plan (se escribió en la nube devuelta), la tabla entera se deja para el
+//!     contraste y queda fallida: lo que aquí está y arriba falta puede ser justo lo que borró, y
+//!     subirlo lo resucitaba sin que el contraste viera ya ninguna diferencia.
+//!   - Con una base vacía y un cambio anterior al plan, el cambio se perdió con la base: de esas
+//!     tablas (**inciertas**) sólo sube lo que falta arriba, por las huellas, sin pisar nunca una
+//!     fila que ya está (la escribió alguien en la nube devuelta), y no se pide borrar nada (ni lo
+//!     vivo ni los sobrantes). En lo vivo (etapa 0) eso es nada: sus claves salen de la nube y ya
+//!     están todas arriba. Lo que difiere lo ve el contraste. La tabla acaba como cualquier otra.
 //! - Las filas apuntadas por el orden de la nube (SYNC-29): la nube ya tiene su versión y la
 //!   convergencia la trae. Sólo se suben si arriba faltan.
 //! - Un blob o una fila que no cabe en una página: se apunta y lo ve el contraste.
@@ -676,28 +683,65 @@ struct Pagina {
     leidas: i64,
 }
 
-/// Lo que se aparta de la subida por las cuarentenas de bajada (SYNC-36), de dos clases.
+/// Lo que se aparta de la subida por las cuarentenas de bajada (SYNC-36).
 #[derive(Default)]
 struct Apartado {
     /// Las filas que toca una cuarentena, por su clave: ni se suben ni se piden borrar arriba, y
     /// quedan para el contraste.
     claves: HashSet<String>,
-    /// Las tablas en las que escribe una cuarentena que no dice qué filas toca: de ellas sólo sube
-    /// lo que falta arriba (nunca se pisa una fila que ya está) y no se pide borrar nada.
+    /// Las tablas en las que escribe una cuarentena que no dice qué filas toca y cuyo cambio puede
+    /// seguir arriba: se dejan enteras para el contraste.
+    fuera: HashSet<String>,
+    /// Una de esas cuarentenas de la que no se sabe ni en qué tablas escribe: todas fuera.
+    todas_fuera: bool,
+    /// Las tablas en las que escribe una cuarentena que no dice qué filas toca y cuyo cambio se
+    /// perdió con la base de la nube (`perdida_con_la_base`): de ellas sólo sube lo que falta arriba
+    /// (nunca se pisa una fila que ya está) y no se pide borrar nada.
     inciertas: HashSet<String>,
-    /// Una cuarentena de la que no se sabe ni en qué tablas escribe: todas son inciertas.
+    /// Una de esas cuarentenas de la que no se sabe ni en qué tablas escribe: todas inciertas.
     todas_inciertas: bool,
 }
 
+/// Qué se hace con una tabla según las cuarentenas de bajada.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Trato {
+    /// Como cualquiera, sin las filas que toca una cuarentena (`Apartado::claves`).
+    Normal,
+    /// Sólo sube lo que falta arriba y no se pide borrar nada.
+    SoloLoQueFalta,
+    /// Entera para el contraste: no sube nada y queda fallida.
+    Fuera,
+}
+
 impl Apartado {
-    fn incierta(&self, tabla: &str) -> bool {
-        self.todas_inciertas || self.inciertas.contains(tabla)
+    fn trato(&self, tabla: &str) -> Trato {
+        if self.todas_fuera || self.fuera.contains(tabla) {
+            Trato::Fuera
+        } else if self.todas_inciertas || self.inciertas.contains(tabla) {
+            Trato::SoloLoQueFalta
+        } else {
+            Trato::Normal
+        }
     }
+}
+
+/// DO-SUBIDA · SYNC-36 · Si el cambio de una cuarentena de bajada se perdió con la base de la nube:
+/// sólo cuando a la nube se le dio una base vacía y el cambio es anterior al plan (`Seq` hasta
+/// `Hasta_Seq_Plan`). Con una copia o un instante la base devuelta puede tenerlo (es posterior al
+/// cambio), y uno posterior al plan se escribió en la nube devuelta: lo que falta arriba de su tabla
+/// puede ser justo lo que borró, y subirlo lo resucitaba sin que el contraste lo viera ya. El plan es
+/// la frontera que esta Main conoce: un cambio de otro entre la vuelta y el plan cuenta como anterior,
+/// y lo que pudo borrar en la nube vacía era sólo lo que esta Main ya había subido por el outbox.
+fn perdida_con_la_base(base_vacia: bool, hasta_seq_plan: i64, seq: i64) -> bool {
+    base_vacia && hasta_seq_plan > 0 && seq <= hasta_seq_plan
 }
 
 async fn apartado(conn: &Connection) -> AppResult<Apartado> {
     let mut a = Apartado::default();
-    for f in filas(conn, "SELECT Filas_Json, Statements_Json FROM _Sync_Failed;", vec![]).await? {
+    let subida = filas(conn, "SELECT Origen, COALESCE(Hasta_Seq_Plan, 0) FROM _Sync_Subida WHERE Id = 1;", vec![]).await?;
+    let (base_vacia, hasta_seq_plan) =
+        subida.first().map_or((false, 0), |f| (texto(&f[0]).as_deref() == Some("base_vacia"), entero(&f[1])));
+    for f in filas(conn, "SELECT Filas_Json, Statements_Json, Seq FROM _Sync_Failed;", vec![]).await? {
         let t = f.first().and_then(texto).map(|j| Tocadas::de_json(&j)).unwrap_or_else(|| Tocadas::incierta_de_todo(Vec::new()));
         if t.incierto {
             // DO-SUBIDA · SYNC-36: sin saber qué filas toca (un `Filas_Json` que falta o no se lee),
@@ -709,8 +753,13 @@ async fn apartado(conn: &Connection) -> AppResult<Apartado> {
             } else {
                 t.tablas.clone()
             };
-            a.todas_inciertas |= tablas.is_empty();
-            a.inciertas.extend(tablas);
+            if perdida_con_la_base(base_vacia, hasta_seq_plan, f.get(2).map_or(i64::MAX, entero)) {
+                a.todas_inciertas |= tablas.is_empty();
+                a.inciertas.extend(tablas);
+            } else {
+                a.todas_fuera |= tablas.is_empty();
+                a.fuera.extend(tablas);
+            }
         }
         for fila in &t.filas {
             if let Some(c) = canonica_de(fila) {
@@ -1226,15 +1275,20 @@ impl SqliteSubidaCompleta {
         Ok(PasoHecho::Avanza)
     }
 
-    /// Las filas de la página por revisar: las de las cuarentenas (fuera) y las apuntadas. Devuelve si
-    /// la tabla es incierta (una cuarentena que no dice qué filas toca escribe en ella): entonces todo
-    /// lo de la página va como lo apuntado, sólo si arriba falta (`pagina`), y no se pide borrar nada.
-    async fn apartar(&self, e: &Entrada, p: &mut Pagina) -> AppResult<bool> {
+    /// Las filas de la página por revisar: las de las cuarentenas (fuera) y las apuntadas. Devuelve el
+    /// trato de la tabla (`Apartado::trato`): con `Fuera` no se toca la página; con `SoloLoQueFalta`
+    /// todo lo de la página va como lo apuntado, sólo si arriba falta (`pagina`), y no se pide borrar
+    /// nada.
+    async fn apartar(&self, e: &Entrada, p: &mut Pagina) -> AppResult<Trato> {
         let r = self.db.read().await;
         let ap = apartado(r.conn()).await?;
         let marcadas = crate::convergencia::marcadas(r.conn()).await?;
         drop(r);
-        let incierta = ap.incierta(&e.tabla);
+        let trato = ap.trato(&e.tabla);
+        if trato == Trato::Fuera {
+            return Ok(trato);
+        }
+        let incierta = trato == Trato::SoloLoQueFalta;
         let filas = std::mem::take(&mut p.filas);
         for f in filas {
             let Some(c) = canonica(&e.tabla, &f.clave) else {
@@ -1257,7 +1311,7 @@ impl SqliteSubidaCompleta {
             // Lo vivo de la nube que aquí ya no está, salvo lo que toca una cuarentena.
             p.borrar.retain(|k| canonica(&e.tabla, k).is_none_or(|c| !ap.claves.contains(&c)));
         }
-        Ok(incierta)
+        Ok(trato)
     }
 
     /// Compara las filas por sus huellas: devuelve las que la nube no tiene o tiene distintas, y de
@@ -1375,7 +1429,15 @@ impl SqliteSubidaCompleta {
         if p.pendientes > 0 {
             return Ok(PasoHecho::PorSubir);
         }
-        let incierta = self.apartar(e, &mut p).await?;
+        let trato = self.apartar(e, &mut p).await?;
+        if trato == Trato::Fuera {
+            // DO-SUBIDA · SYNC-36 · Una cuarentena que no sabe qué filas toca y cuyo cambio puede
+            // seguir arriba: la tabla entera se deja para el contraste, y la pantalla la cuenta.
+            self.anotar_estado(e, 2, Some("cuarentena")).await?;
+            tracing::warn!(target: "tpv::sync", tabla = %e.tabla, "DO-SUBIDA: una cuarentena de bajada incierta deja la tabla para el contraste");
+            return Ok(PasoHecho::Avanza);
+        }
+        let incierta = trato == Trato::SoloLoQueFalta;
 
         // Qué se manda: lo que arriba es distinto o falta.
         let clave_txt = |f: &Fila| Json::Array(f.clave.clone()).to_string();
@@ -1386,26 +1448,14 @@ impl SqliteSubidaCompleta {
         let mut mandar: Vec<Fila> = if n == 0 {
             Vec::new()
         } else if incierta {
-            // DO-SUBIDA · SYNC-36 · Una cuarentena de bajada que no dice qué filas toca escribe en
-            // esta tabla: de ella sólo sube lo que falta arriba, por las huellas (con los tramos antes,
-            // si los hay: un tramo igual no tiene nada que falte). Lo que ya está arriba puede ser lo
-            // que escribió ese cambio y no se pisa; lo ve el contraste. Dejar la tabla entera fuera
-            // dejaba vacía en ella una nube devuelta con una base vacía.
-            let candidatas = if e.por_clave && !base_vacia {
-                match self.por_tramos(envio, e, &leidas).await? {
-                    Ok(c) => c,
-                    Err(paso) => return Ok(paso),
-                }
-            } else {
-                leidas
-            };
-            if candidatas.is_empty() {
-                candidatas
-            } else {
-                match self.distintas(envio, Quien::Entrada(e), e, &candidatas).await? {
-                    Ok((_, faltan)) => candidatas.into_iter().filter(|f| faltan.contains(&clave_txt(f))).collect(),
-                    Err(paso) => return Ok(paso),
-                }
+            // DO-SUBIDA · SYNC-36 · Una cuarentena de bajada que no dice qué filas toca, y cuyo cambio
+            // se perdió con la base vacía que se le dio a la nube (`perdida_con_la_base`), escribe en
+            // esta tabla: de ella sólo sube lo que falta arriba, por las huellas. Lo que ya está
+            // arriba lo escribió alguien en la nube devuelta y no se pisa; lo ve el contraste. Dejar
+            // la tabla entera fuera dejaba vacía en ella la nube.
+            match self.distintas(envio, Quien::Entrada(e), e, &leidas).await? {
+                Ok((_, faltan)) => leidas.into_iter().filter(|f| faltan.contains(&clave_txt(f))).collect(),
+                Err(paso) => return Ok(paso),
             }
         } else if directa || (base_vacia && e.fase != 3 && e.fase != 0) {
             // Con una base vacía arriba no hay nada que comparar, salvo en el histórico, que
@@ -1469,6 +1519,23 @@ impl SqliteSubidaCompleta {
 
         self.confirmar(e, &p, escritas, no_entraron).await?;
         Ok(PasoHecho::Avanza)
+    }
+
+    async fn anotar_estado(&self, e: &Entrada, estado: i64, error: Option<&str>) -> AppResult<()> {
+        let w = self.db.write().await;
+        w.raw()
+            .execute(
+                "UPDATE _Sync_Subida_Tablas SET Estado = ?3, Ultimo_Error = COALESCE(?4, Ultimo_Error) WHERE Tabla = ?1 AND Fase = ?2;",
+                vec![
+                    Value::Text(e.tabla.clone()),
+                    Value::Integer(e.fase),
+                    Value::Integer(estado),
+                    error.map_or(Value::Null, |x| Value::Text(x.into())),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
     }
 
     /// Avanza el cursor y apunta lo que no entró, en una transacción por `raw()`.
@@ -1663,7 +1730,7 @@ impl SqliteSubidaCompleta {
                 let r = self.db.read().await;
                 apartado(r.conn()).await?
             };
-            if ap.incierta(&e.tabla) {
+            if ap.trato(&e.tabla) != Trato::Normal {
                 sobran.clear();
             } else {
                 sobran.retain(|k| canonica(&e.tabla, k).is_none_or(|c| !ap.claves.contains(&c)));
@@ -1748,22 +1815,24 @@ impl SqliteSubidaCompleta {
         // que no movía nada, y el repaso se repetía sin fin, sin llegar nunca a `fin`.
         let halladas: HashSet<String> = encontradas.iter().map(clave_de).collect();
         // DO-SUBIDA (repaso) · Lo mismo que se aparta de una página (`apartar`). Lo que toca una
-        // cuarentena de bajada (SYNC-36) no se sube: la versión de la nube es la buena, y sale de la
-        // lista para el contraste. Una fila apuntada por el orden de la nube (SYNC-29), o cualquiera
-        // de una tabla incierta (una cuarentena que no dice qué filas toca escribe en ella), sólo se
-        // sube si arriba falta; si está, la trae la convergencia o la ve el contraste, y también
-        // sale. El repaso las mandaba tal cual y deshacía arriba lo bueno.
+        // cuarentena de bajada (SYNC-36), o su tabla entera si no se sabe qué filas y el cambio puede
+        // seguir arriba, no se sube: la versión de la nube es la buena, y sale de la lista para el
+        // contraste. Una fila apuntada por el orden de la nube (SYNC-29), o cualquiera de una tabla
+        // de la que sólo sube lo que falta (`Trato::SoloLoQueFalta`), sólo se sube si arriba falta;
+        // si está, la trae la convergencia o la ve el contraste, y también sale. El repaso las
+        // mandaba tal cual y deshacía arriba lo bueno.
         let (ap, marcadas) = {
             let r = self.db.read().await;
             (apartado(r.conn()).await?, crate::convergencia::marcadas(r.conn()).await?)
         };
-        let incierta = ap.incierta(&tabla);
+        let trato = ap.trato(&tabla);
+        let incierta = trato == Trato::SoloLoQueFalta;
         let mut dejadas: HashSet<String> = HashSet::new();
         let mut mandar: Vec<Fila> = Vec::new();
         let mut apuntadas: Vec<Fila> = Vec::new();
         for f in encontradas {
             let c = canonica(&tabla, &f.clave);
-            if c.as_ref().is_some_and(|c| ap.claves.contains(c)) {
+            if trato == Trato::Fuera || c.as_ref().is_some_and(|c| ap.claves.contains(c)) {
                 dejadas.insert(clave_de(&f));
             } else if incierta || c.as_ref().is_some_and(|c| marcadas.contains(c)) {
                 apuntadas.push(f);
