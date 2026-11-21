@@ -59,6 +59,8 @@ pub struct NubeDeSubida {
     pub rechazar_la_proxima: Option<Json>,
     /// Los acuses de rechazo que ha dado, por su código.
     pub rechazos: Vec<String>,
+    /// Un rechazo para cada página de filas que lo pida, en vez de aplicarla (`None`: se aplica).
+    pub rechazar_si: Option<Box<dyn Fn(&Json) -> Option<Json> + Send + Sync>>,
 }
 
 fn celda(v: &Value) -> Celda<'_> {
@@ -116,6 +118,7 @@ impl NubeDeSubida {
             paginas_aplicadas: 0,
             rechazar_la_proxima: None,
             rechazos: Vec::new(),
+            rechazar_si: None,
         };
         // El cambio vacío que abre el log tras devolver la base (`abrirLogTrasVolver`).
         nube.sembrar(&format!(
@@ -317,7 +320,7 @@ impl NubeDeSubida {
                     self.rechazos.push("subida_pagina_demasiado_grande".into());
                     return Some(json!({"ok": false, "error": "subida_pagina_demasiado_grande"}));
                 }
-                if let Some(r) = self.rechazar_la_proxima.take() {
+                if let Some(r) = self.rechazar_la_proxima.take().or_else(|| self.rechazar_si.as_ref().and_then(|f| f(p))) {
                     self.rechazos.push(r["error"].as_str().unwrap_or("").into());
                     return Some(r);
                 }

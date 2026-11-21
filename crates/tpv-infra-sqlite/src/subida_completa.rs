@@ -885,8 +885,25 @@ fn leer_acuse(a: &Json) -> Acuse {
 
 /* ===== El repositorio ===== */
 
-/// Lo que hace un paso con un acuse que no es bueno. `None`: era bueno (lo trata quien llama).
-async fn tras_un_rechazo(db: &Db, e: Option<&Entrada>, acuse: Acuse) -> AppResult<Result<Json, PasoHecho>> {
+/// De quién es el paso que la nube rechaza: dónde se apunta el rechazo.
+#[derive(Clone, Copy)]
+enum Quien<'a> {
+    /// El plan o el `fin`: uno que no se va a admitir nunca deja la subida entera.
+    Subida,
+    /// Una página (o sus huellas, sus tramos, sus sobrantes): el rechazo cuenta en los intentos de
+    /// su entrada, y la puede dejar fallida.
+    Entrada(&'a Entrada),
+    /// El repaso, con la entrada de la tabla ya hecha, que no se toca: un rechazo permanente o sin
+    /// clasificar cuenta como un intento de lo que se mandaba (`Avanza`), y lo apunta el repaso.
+    Repaso(&'a Entrada),
+}
+
+/// Lo que hace un paso con un acuse que no es bueno. `Ok`: era bueno (lo trata quien llama).
+async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<Result<Json, PasoHecho>> {
+    let e = match quien {
+        Quien::Subida => None,
+        Quien::Entrada(e) | Quien::Repaso(e) => Some(e),
+    };
     let anotar = move |error: String, fallida: bool| async move {
         let w = db.write().await;
         let conn = w.raw();
@@ -935,12 +952,19 @@ async fn tras_un_rechazo(db: &Db, e: Option<&Entrada>, acuse: Acuse) -> AppResul
             abandonar_en(w.raw(), &error).await?;
             PasoHecho::Nada
         }
-        Acuse::Permanente(error) if e.is_none() => {
+        Acuse::Permanente(error) if matches!(quien, Quien::Subida) => {
             // El plan o el `fin` no se van a admitir nunca: la subida entera se deja, y lo que falte
             // lo ve el contraste.
             let w = db.write().await;
             abandonar_en(w.raw(), &error).await?;
             PasoHecho::Nada
+        }
+        // DO-SUBIDA (repaso) · Un rechazo sin clasificar del repaso se repetía cada 30 s sin gastar
+        // ningún intento, y la subida no llegaba a `fin`; y apuntado en la entrada de la tabla, ya
+        // hecha, la daba por fallida sin serlo.
+        Acuse::Permanente(error) | Acuse::SinClasificar(error) if matches!(quien, Quien::Repaso(_)) => {
+            tracing::warn!(target: "tpv::sync", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, "DO-SUBIDA: la nube rechaza el repaso");
+            PasoHecho::Avanza
         }
         Acuse::Permanente(error) => {
             tracing::error!(target: "tpv::sync", evento = "subida_tabla_fallida", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, "DO-SUBIDA: la nube rechaza una tabla de la subida");
@@ -1060,7 +1084,7 @@ impl SqliteSubidaCompleta {
         else {
             return Ok(PasoHecho::SinAcuse);
         };
-        match tras_un_rechazo(&self.db, None, leer_acuse(&acuse)).await? {
+        match tras_un_rechazo(&self.db, Quien::Subida, leer_acuse(&acuse)).await? {
             Ok(plan) => {
                 let ventana = plan.get("ventanaDias").and_then(Json::as_i64).unwrap_or(30);
                 sembrar(&self.db, &plan, ventana).await?;
@@ -1175,7 +1199,7 @@ impl SqliteSubidaCompleta {
 
     /// Compara las filas por sus huellas: devuelve las que la nube no tiene o tiene distintas, y de
     /// ellas las que le faltan.
-    async fn distintas(&self, envio: &mut dyn EnvioDeSubida, e: &Entrada, filas: &[Fila]) -> AppResult<Result<(HashSet<String>, HashSet<String>), PasoHecho>> {
+    async fn distintas(&self, envio: &mut dyn EnvioDeSubida, quien: Quien<'_>, e: &Entrada, filas: &[Fila]) -> AppResult<Result<(HashSet<String>, HashSet<String>), PasoHecho>> {
         let mut distintas = HashSet::new();
         let mut faltan = HashSet::new();
         for trozo in filas.chunks(5_000) {
@@ -1186,7 +1210,7 @@ impl SqliteSubidaCompleta {
             else {
                 return Ok(Err(PasoHecho::SinAcuse));
             };
-            match tras_un_rechazo(&self.db, Some(e), leer_acuse(&acuse)).await? {
+            match tras_un_rechazo(&self.db, quien, leer_acuse(&acuse)).await? {
                 Ok(r) => {
                     for (lista, destino) in [("distintas", &mut distintas), ("faltan", &mut faltan)] {
                         for k in r.get(lista).and_then(Json::as_array).map(Vec::as_slice).unwrap_or_default() {
@@ -1219,7 +1243,7 @@ impl SqliteSubidaCompleta {
             else {
                 return Ok(Err(PasoHecho::SinAcuse));
             };
-            match tras_un_rechazo(&self.db, Some(e), leer_acuse(&acuse)).await? {
+            match tras_un_rechazo(&self.db, Quien::Entrada(e), leer_acuse(&acuse)).await? {
                 Ok(r) => {
                     for d in r.get("distintos").and_then(Json::as_array).map(Vec::as_slice).unwrap_or_default() {
                         if let Some(t) = d.as_u64().and_then(|d| trozos.get(i * TRAMOS_POR_PASO + d as usize)) {
@@ -1234,7 +1258,7 @@ impl SqliteSubidaCompleta {
     }
 
     /// Manda unas filas y confirma aquí lo que ha pasado con ellas. `Ok(Ok(iguales))`.
-    async fn mandar_filas(&self, envio: &mut dyn EnvioDeSubida, e: &Entrada, filas: &[Fila], checkpoint: i64, ultima: bool) -> AppResult<Result<(i64, i64, Vec<(Vec<Json>, String)>), PasoHecho>> {
+    async fn mandar_filas(&self, envio: &mut dyn EnvioDeSubida, quien: Quien<'_>, e: &Entrada, filas: &[Fila], checkpoint: i64, ultima: bool) -> AppResult<Result<(i64, i64, Vec<(Vec<Json>, String)>), PasoHecho>> {
         let mut escritas = 0;
         let mut iguales = 0;
         let mut no_entraron = Vec::new();
@@ -1256,7 +1280,7 @@ impl SqliteSubidaCompleta {
             else {
                 return Ok(Err(PasoHecho::SinAcuse));
             };
-            match tras_un_rechazo(&self.db, Some(e), leer_acuse(&acuse)).await? {
+            match tras_un_rechazo(&self.db, quien, leer_acuse(&acuse)).await? {
                 Ok(r) => {
                     escritas += r.get("escritas").and_then(Json::as_i64).unwrap_or(0);
                     iguales += r.get("iguales").and_then(Json::as_i64).unwrap_or(0);
@@ -1320,7 +1344,7 @@ impl SqliteSubidaCompleta {
                 // Nada distinto, o más de la mitad: entonces las filas van sin compararlas una a una.
                 candidatas
             } else {
-                match self.distintas(envio, e, &candidatas).await? {
+                match self.distintas(envio, Quien::Entrada(e), e, &candidatas).await? {
                     Ok((d, _)) => candidatas.into_iter().filter(|f| d.contains(&clave_txt(f))).collect(),
                     Err(paso) => return Ok(paso),
                 }
@@ -1329,7 +1353,7 @@ impl SqliteSubidaCompleta {
         let total = n.max(1);
         // Las apuntadas, sólo si arriba faltan.
         if !p.apuntadas.is_empty() {
-            match self.distintas(envio, e, &p.apuntadas).await? {
+            match self.distintas(envio, Quien::Entrada(e), e, &p.apuntadas).await? {
                 Ok((_, faltan)) => mandar.extend(p.apuntadas.iter().filter(|f| faltan.contains(&clave_txt(f))).cloned()),
                 Err(paso) => return Ok(paso),
             }
@@ -1344,7 +1368,7 @@ impl SqliteSubidaCompleta {
         let (escritas, iguales, no_entraron) = if mandar.is_empty() && !p.final_ {
             (0, 0, Vec::new())
         } else {
-            match self.mandar_filas(envio, e, &mandar, p.checkpoint, p.final_).await? {
+            match self.mandar_filas(envio, Quien::Entrada(e), e, &mandar, p.checkpoint, p.final_).await? {
                 Ok(r) => r,
                 Err(paso) => return Ok(paso),
             }
@@ -1557,7 +1581,7 @@ impl SqliteSubidaCompleta {
         else {
             return Ok(PasoHecho::SinAcuse);
         };
-        let r = match tras_un_rechazo(&self.db, Some(e), leer_acuse(&acuse)).await? {
+        let r = match tras_un_rechazo(&self.db, Quien::Entrada(e), leer_acuse(&acuse)).await? {
             Ok(r) => r,
             Err(p) => return Ok(p),
         };
@@ -1679,11 +1703,11 @@ impl SqliteSubidaCompleta {
                 mandar.push(f);
             }
         }
-        // Un rechazo permanente (o una página que no cabe): cuenta como un intento de todas, para que
-        // el repaso no se repita sin fin.
+        // Un rechazo permanente o sin clasificar (o una página que no cabe): cuenta como un intento de
+        // todas, para que el repaso no se repita sin fin. Uno pasajero no cuenta: se espera.
         let mut rechazado = false;
         if !apuntadas.is_empty() {
-            match self.distintas(envio, &e, &apuntadas).await? {
+            match self.distintas(envio, Quien::Repaso(&e), &e, &apuntadas).await? {
                 Ok((_, faltan)) => {
                     for f in apuntadas {
                         if faltan.contains(&clave_de(&f)) {
@@ -1702,7 +1726,7 @@ impl SqliteSubidaCompleta {
         } else if mandar.is_empty() {
             HashSet::new()
         } else {
-            match self.mandar_filas(envio, &e, &mandar, marca.checkpoint, false).await? {
+            match self.mandar_filas(envio, Quien::Repaso(&e), &e, &mandar, marca.checkpoint, false).await? {
                 Ok((_, _, no_entraron)) => no_entraron.iter().map(|(c, _)| Json::Array(c.clone()).to_string()).collect(),
                 Err(PasoHecho::Avanza) => halladas.clone(),
                 Err(p) => return Ok(Some(p)),
@@ -1751,7 +1775,7 @@ impl SqliteSubidaCompleta {
         let Some(acuse) = envio.mandar(json!({"accion": "fin", "id": l.id, "conteos": conteos, "porRevisar": por_revisar})).await? else {
             return Ok(PasoHecho::SinAcuse);
         };
-        match tras_un_rechazo(&self.db, None, leer_acuse(&acuse)).await? {
+        match tras_un_rechazo(&self.db, Quien::Subida, leer_acuse(&acuse)).await? {
             Ok(r) => {
                 let w = self.db.write().await;
                 w.raw()

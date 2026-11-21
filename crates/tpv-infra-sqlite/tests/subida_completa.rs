@@ -655,3 +655,43 @@ async fn el_repaso_sube_una_fila_apuntada_solo_si_arriba_falta() {
     assert_eq!(nombre_arriba(&nube, "cli-0009").await, Some(Value::Text("Cliente ñ 9".into())), "la que falta sí sube");
     nube.cerrar().await;
 }
+
+/// La nube rechaza siempre `cli-0005` cuando va sola (lo que manda el repaso) con `acuse`. Devuelve
+/// la base de la Main con la subida entregada.
+async fn repaso_siempre_rechazado(nombre: &str, acuse: serde_json::Value) -> Arc<Db> {
+    let (main, _dir) = base(nombre).await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva(nombre).await;
+    nube.rechazar_si = Some(Box::new(move |p| {
+        let filas = p["filas"].as_array()?;
+        let sola = p["tabla"] == "Clientes" && filas.len() == 1 && filas[0].as_array().is_some_and(|f| f.contains(&json!("cli-0005")));
+        sola.then(|| acuse.clone())
+    }));
+    empezar(&main, "s1", "base_vacia").await;
+    plan_y_por_revisar(&main, &mut nube, &["cli-0005"]).await;
+    hasta_el_final(&main, &mut nube).await;
+    assert_eq!(nube.pasos.last().unwrap()["accion"], "fin", "la subida acaba");
+    assert!(!nube.rechazos.is_empty(), "el repaso se ha rechazado");
+    nube.cerrar().await;
+    main
+}
+
+/// DO-SUBIDA (repaso) · Un rechazo sin clasificar en el repaso cuenta como un intento de lo mandado:
+/// se repetía cada 30 s sin gastar ninguno y la subida no llegaba nunca a `fin`. Y no marca como
+/// fallida la tabla, que ya había subido.
+#[tokio::test]
+async fn un_rechazo_sin_clasificar_en_el_repaso_gasta_sus_intentos_y_la_subida_acaba() {
+    let main = repaso_siempre_rechazado("repaso-sin-clasificar", json!({"ok": false, "error": "algo_raro"})).await;
+    assert_eq!(numero(&main, "SELECT Intentos FROM _Sync_Subida_Por_Revisar WHERE Clave_Json = '[\"cli-0005\"]';").await, 3);
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 0, "ninguna tabla fallida");
+    assert_eq!(estado_para_la_pantalla(&main).await.unwrap().unwrap().tablas_fallidas, 0);
+}
+
+/// DO-SUBIDA (repaso) · Un rechazo permanente en el repaso tampoco da por fallida una tabla que ya
+/// había subido entera: la pantalla contaba una tabla para el contraste que no lo estaba.
+#[tokio::test]
+async fn un_rechazo_permanente_en_el_repaso_no_marca_fallida_la_tabla() {
+    let main = repaso_siempre_rechazado("repaso-permanente", json!({"ok": false, "error": "subida_tabla_no_admitida", "permanente": true})).await;
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 0, "ninguna tabla fallida");
+    assert_eq!(estado_para_la_pantalla(&main).await.unwrap().unwrap().tablas_fallidas, 0);
+}
