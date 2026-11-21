@@ -998,3 +998,45 @@ async fn un_rechazo_sin_clasificar_del_plan_o_del_fin_espera_cada_vez_mas_y_vuel
     assert_eq!(filas(&main, "SELECT Estado, Rechazos_Seguidos FROM _Sync_Subida;").await, vec![vec![Value::Text("contrastando".into()), Value::Integer(0)]]);
     nube.cerrar().await;
 }
+
+/// DO-SUBIDA · Una página rechazada sin clasificar a los `MAX_INTENTOS` deja su tabla sin esperar más
+/// y con la cuenta de seguidos a cero: la siguiente tabla rota vuelve a empezar por 30 s. La cuenta
+/// pasaba de una a otra: la primera esperaba 8 min más ya dada por fallida y la segunda empezaba por
+/// 16 min, unas 2 h y media por cada tabla rota.
+#[tokio::test]
+async fn una_tabla_que_se_deja_por_rechazos_sin_clasificar_no_pasa_su_espera_a_la_siguiente() {
+    let (main, _dir) = base("rechazos-por-tabla").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("rechazos-por-tabla").await;
+    empezar(&main, "s1", "base_vacia").await;
+    // Un worker que rechaza sin clasificar las páginas de todas las tablas.
+    nube.rechazar_si = Some(Box::new(|_| Some(json!({"ok": false, "error": "algo_raro"}))));
+    // Lo que hace cada paso hasta la octava espera: las de las dos primeras tablas.
+    let mut pasos: Vec<String> = Vec::new();
+    for _ in 0..10_000 {
+        match un_paso(&main, &mut nube).await {
+            PasoHecho::Esperar(d) => {
+                pasos.push(d.as_secs().to_string());
+                if pasos.iter().filter(|p| *p != "sigue").count() == 8 {
+                    break;
+                }
+            }
+            PasoHecho::PorSubir => {
+                nube.subir_outbox(&main).await;
+            }
+            PasoHecho::Avanza => {
+                if pasos.last().is_some_and(|p| p != "sigue") {
+                    pasos.push("sigue".into());
+                }
+            }
+            otro => panic!("paso inesperado: {otro:?}"),
+        }
+    }
+    let esperas: Vec<&str> = pasos.iter().map(String::as_str).filter(|p| *p != "sigue").collect();
+    assert_eq!(esperas, ["30", "60", "120", "240", "30", "60", "120", "240"], "cada tabla empieza por 30 s: {pasos:?}");
+    assert_eq!(pasos.iter().filter(|p| *p == "sigue").count(), 1, "y tras la quinta sigue sin esperar: {pasos:?}");
+    assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Avanza, "también en la segunda");
+    assert_eq!(numero(&main, "SELECT Rechazos_Seguidos FROM _Sync_Subida;").await, 0);
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Tablas WHERE Estado = 2;").await, 2, "las dos, fallidas");
+    nube.cerrar().await;
+}

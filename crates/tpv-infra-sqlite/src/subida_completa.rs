@@ -66,7 +66,8 @@
 //! la subida). Uno sin clasificar espera 30 s, el doble con cada uno seguido hasta 30 min
 //! (`espera_tras`, con la cuenta en `_Sync_Subida.Rechazos_Seguidos`), y vuelve a 30 s en cuanto un
 //! paso se confirma; el plan y el `fin` no se abandonan por eso, y una página, a los `MAX_INTENTOS`,
-//! deja su tabla. En el repaso, uno permanente o sin clasificar gasta un intento de lo que mandaba.
+//! deja su tabla sin esperar más y con la cuenta otra vez a cero. En el repaso, uno permanente o sin
+//! clasificar gasta un intento de lo que mandaba.
 //!
 //! # El cobro no se toca
 //!
@@ -999,7 +1000,8 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         Quien::Subida => None,
         Quien::Entrada(e) | Quien::Repaso(e) => Some(e),
     };
-    // Apunta el rechazo y devuelve los sin clasificar seguidos (con éste, si lo es).
+    // Apunta el rechazo y devuelve los sin clasificar seguidos (con éste, si lo es; cero si ha dejado
+    // su tabla).
     let anotar = move |error: String, fallida: bool| async move {
         let w = db.write().await;
         let conn = w.raw();
@@ -1023,10 +1025,14 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         // que se da por fallida se cuenta aparte (`tablas_fallidas`). El código, sólo en la tabla de
         // la entrada y en la telemetría: la pantalla no enseña identificadores.
         // Un rechazo sin clasificar (no `fallida`) cuenta en los seguidos; uno permanente, no.
+        // DO-SUBIDA · Uno que deja su tabla acaba un paso, como uno que se confirma: la cuenta vuelve
+        // a cero. Pasaba a la tabla siguiente, que empezaba esperando 16 min en vez de 30 s, y cada
+        // tabla rota más costaba unas 2 h y media.
         conn.execute(
             "UPDATE _Sync_Subida SET Ultimo_Error = CASE WHEN ?1 OR EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
                WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN NULL ELSE 'reintentando' END, \
-               Rechazos_Seguidos = Rechazos_Seguidos + (NOT ?1) WHERE Id = 1;",
+               Rechazos_Seguidos = CASE WHEN EXISTS (SELECT 1 FROM _Sync_Subida_Tablas \
+               WHERE Tabla = ?2 AND Fase = ?3 AND Estado = 2) THEN 0 ELSE Rechazos_Seguidos + (NOT ?1) END WHERE Id = 1;",
             vec![
                 Value::Integer(fallida as i64),
                 e.map_or(Value::Null, |e| Value::Text(e.tabla.clone())),
@@ -1077,11 +1083,16 @@ async fn tras_un_rechazo(db: &Db, quien: Quien<'_>, acuse: Acuse) -> AppResult<R
         // DO-SUBIDA · Un rechazo sin clasificar del plan o del `fin` se repetía cada 30 s sin fin. Ahora
         // la espera crece con los seguidos (`espera_tras`) y vuelve a 30 s en cuanto un paso se
         // confirma; sin abandonar. Uno de una página cuenta igual, y a los `MAX_INTENTOS` deja su
-        // tabla como uno permanente.
+        // tabla como uno permanente: sigue con la siguiente sin esperar, y la cuenta vuelve a cero.
         Acuse::SinClasificar(error) => {
             let seguidos = anotar(error.clone(), false).await?;
-            tracing::warn!(target: "tpv::sync", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, seguidos, "DO-SUBIDA: rechazo sin clasificar");
-            PasoHecho::Esperar(espera_tras(seguidos))
+            if seguidos == 0 {
+                tracing::error!(target: "tpv::sync", evento = "subida_tabla_fallida", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, "DO-SUBIDA: la nube rechaza una tabla de la subida");
+                PasoHecho::Avanza
+            } else {
+                tracing::warn!(target: "tpv::sync", tabla = e.map(|e| e.tabla.as_str()).unwrap_or(""), error = %error, seguidos, "DO-SUBIDA: rechazo sin clasificar");
+                PasoHecho::Esperar(espera_tras(seguidos))
+            }
         }
     }))
 }
