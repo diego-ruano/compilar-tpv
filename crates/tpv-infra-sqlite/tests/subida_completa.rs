@@ -1172,3 +1172,56 @@ async fn con_un_fallo_sin_clasificar_de_todas_las_tablas_la_espera_sigue_crecien
     assert_eq!(espera, Some(30));
     nube.cerrar().await;
 }
+
+/// Tras el plan, todo el núcleo dado por subido menos la entrada `(tabla, fase)`, y la pantalla
+/// diciendo «se reintenta» (un rechazo sin clasificar de antes).
+async fn el_nucleo_menos(main: &Arc<Db>, nube: &mut NubeDeSubida, tabla: &str, fase: i64) {
+    assert_eq!(un_paso(main, nube).await, PasoHecho::Avanza, "el plan");
+    assert_eq!(numero(main, &format!("SELECT Turno FROM _Sync_Subida_Tablas WHERE Tabla = '{tabla}' AND Fase = {fase};")).await, 1, "es del núcleo");
+    sembrar(
+        main,
+        &format!(
+            "UPDATE _Sync_Subida_Tablas SET Estado = 1 WHERE Turno <= 1 AND NOT (Tabla = '{tabla}' AND Fase = {fase});
+             UPDATE _Sync_Subida SET Ultimo_Error = 'reintentando';"
+        ),
+    )
+    .await;
+    assert!(!SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap());
+}
+
+/// DO-SUBIDA · Una tabla del núcleo que una cuarentena deja fuera acaba el núcleo en ese mismo paso,
+/// como una que sube, y apaga el «se reintenta». Esperaba a que acabase otra entrada, y si ésa se
+/// atascaba las Handy se soltaban a los 3 min con un aviso de núcleo sin subir que no era verdad.
+#[tokio::test]
+async fn la_ultima_tabla_del_nucleo_dejada_por_una_cuarentena_acaba_el_nucleo() {
+    let (main, _dir) = base("nucleo-fuera").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("nucleo-fuera").await;
+    empezar(&main, "s1", "copia").await;
+    el_nucleo_menos(&main, &mut nube, "Clientes", 1).await;
+    assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Avanza);
+    assert_eq!(numero(&main, "SELECT Estado FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase = 1;").await, 2, "fuera");
+    assert!(SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap(), "el núcleo, hecho");
+    assert!(!estado_para_la_pantalla(&main).await.unwrap().unwrap().reintentando, "ya no se reintenta nada");
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · Lo mismo con una tabla del núcleo cuya ventana no se puede ejecutar aquí.
+#[tokio::test]
+async fn la_ultima_tabla_del_nucleo_con_una_ventana_que_no_se_ejecuta_acaba_el_nucleo() {
+    let (main, _dir) = base("nucleo-ventana").await;
+    un_bar(&main).await;
+    let mut nube = NubeDeSubida::nueva("nucleo-ventana").await;
+    empezar(&main, "s1", "base_vacia").await;
+    el_nucleo_menos(&main, &mut nube, "Comandas", 1).await;
+    sembrar(&main, "UPDATE _Sync_Subida_Tablas SET Sql = 'SELECT 1' WHERE Tabla = 'Comandas' AND Fase = 1;").await;
+    assert_eq!(un_paso(&main, &mut nube).await, PasoHecho::Avanza);
+    assert_eq!(
+        filas(&main, "SELECT Estado, Ultimo_Error FROM _Sync_Subida_Tablas WHERE Tabla = 'Comandas' AND Fase = 1;").await,
+        vec![vec![Value::Integer(2), Value::Text("ventana".into())]]
+    );
+    assert!(SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap(), "el núcleo, hecho");
+    assert!(!estado_para_la_pantalla(&main).await.unwrap().unwrap().reintentando);
+    nube.cerrar().await;
+}

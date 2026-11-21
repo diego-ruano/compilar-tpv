@@ -1286,22 +1286,17 @@ impl SqliteSubidaCompleta {
             })
             .await;
         drop(r);
-        let w = self.db.write().await;
-        let conn = w.raw();
         let claves = match claves {
             Ok(c) => c,
             Err(err) => {
                 // Una sentencia que esta versión no sabe ejecutar: la tabla se deja para el contraste.
                 tracing::warn!(target: "tpv::sync", tabla = %e.tabla, error = %err, "DO-SUBIDA: la ventana de la nube no se puede ejecutar aquí");
-                conn.execute(
-                    "UPDATE _Sync_Subida_Tablas SET Estado = 2, Ultimo_Error = 'ventana' WHERE Tabla = ?1 AND Fase = ?2;",
-                    vec![Value::Text(e.tabla.clone()), Value::Integer(e.fase)],
-                )
-                .await
-                .map_err(db_err)?;
+                self.anotar_estado(e, 2, Some("ventana")).await?;
                 return Ok(PasoHecho::Avanza);
             }
         };
+        let w = self.db.write().await;
+        let conn = w.raw();
         conn.transaccion(async {
             for trozo in claves.chunks(2_000) {
                 conn.execute(
@@ -1570,10 +1565,17 @@ impl SqliteSubidaCompleta {
         Ok(PasoHecho::Avanza)
     }
 
+    /// Da por acabada una entrada sin pasar por la nube (hecha, o fallida para el contraste). Como al
+    /// confirmar su última página: apaga el «se reintenta» de la pantalla, que ya no se espera a nada,
+    /// y apunta los turnos que se acaban con ella (`hitos`). Sin esto, si la última tabla del núcleo
+    /// quedaba fuera, el núcleo esperaba a que acabase otra entrada, y las Handy se soltaban a los
+    /// 3 min con un aviso de núcleo sin subir que no era verdad. La cuenta de rechazos seguidos no se
+    /// toca: vuelve a cero sólo con un paso que la nube admite.
     async fn anotar_estado(&self, e: &Entrada, estado: i64, error: Option<&str>) -> AppResult<()> {
         let w = self.db.write().await;
-        w.raw()
-            .execute(
+        let conn = w.raw();
+        conn.transaccion(async {
+            conn.execute(
                 "UPDATE _Sync_Subida_Tablas SET Estado = ?3, Ultimo_Error = COALESCE(?4, Ultimo_Error) WHERE Tabla = ?1 AND Fase = ?2;",
                 vec![
                     Value::Text(e.tabla.clone()),
@@ -1584,7 +1586,11 @@ impl SqliteSubidaCompleta {
             )
             .await
             .map_err(db_err)?;
-        Ok(())
+            conn.execute("UPDATE _Sync_Subida SET Ultimo_Error = NULL WHERE Id = 1;", ()).await.map_err(db_err)?;
+            Ok(())
+        })
+        .await?;
+        hitos(conn).await
     }
 
     /// Avanza el cursor y apunta lo que no entró, en una transacción por `raw()`.
