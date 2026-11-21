@@ -1726,6 +1726,25 @@ impl SqliteSubidaCompleta {
     /// Los sobrantes de un maestro: las claves de aquí, por tramos, y lo que la nube tiene de más se
     /// pide borrar.
     async fn sobrantes(&self, envio: &mut dyn EnvioDeSubida, e: &Entrada) -> AppResult<PasoHecho> {
+        // DO-SUBIDA · SYNC-36 · De una tabla con una cuarentena incierta no se pide borrar nada: fuera,
+        // queda fallida para el contraste como sus otras fases; sólo lo que falta, acaba sin más.
+        // Mandaba igual todas sus claves (hasta 20.000 por paso) para tirar la respuesta, y una tabla
+        // fuera acababa aquí como hecha.
+        let trato = {
+            let r = self.db.read().await;
+            apartado(r.conn()).await?.trato(&e.tabla)
+        };
+        match trato {
+            Trato::Fuera => {
+                self.anotar_estado(e, 2, Some("cuarentena")).await?;
+                return Ok(PasoHecho::Avanza);
+            }
+            Trato::SoloLoQueFalta => {
+                self.anotar_estado(e, 1, None).await?;
+                return Ok(PasoHecho::Avanza);
+            }
+            Trato::Normal => {}
+        }
         let e2 = e.clone();
         let r = self.db.read().await;
         let (claves, checkpoint, pendientes, final_) = r

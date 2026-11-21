@@ -964,8 +964,9 @@ async fn una_cuarentena_incierta_no_deja_vacia_una_nube_devuelta_con_una_base_va
 }
 
 /// El primer repaso tras el plan, con `cli-0007` (arriba, de la Handy) y `cli-0009` (sólo aquí) por
-/// revisar y una cuarentena que no dice qué filas toca en `Clientes`. Devuelve lo que ha viajado en él.
-async fn repaso_con_una_cuarentena_incierta(nombre: &str, origen: &str) -> Vec<serde_json::Value> {
+/// revisar y una cuarentena que no dice qué filas toca en `Clientes`. Devuelve lo que ha viajado en él
+/// y lo que ha viajado de `Clientes` en toda la subida.
+async fn repaso_con_una_cuarentena_incierta(nombre: &str, origen: &str) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
     let (main, _dir) = base(nombre).await;
     un_bar(&main).await;
     cuarentena(&main, "op-handy", None, sentencias_en_clientes()).await;
@@ -979,8 +980,9 @@ async fn repaso_con_una_cuarentena_incierta(nombre: &str, origen: &str) -> Vec<s
     assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida_Por_Revisar;").await, 0, "suelta lo demás");
     hasta_el_final_y_el_outbox(&main, &mut nube).await;
     assert_eq!(nombre_arriba(&nube, "cli-0007").await, Some(Value::Text("De la Handy".into())));
+    let toda = mandadas_de(&nube, "Clientes");
     nube.cerrar().await;
-    mandadas
+    (mandadas, toda)
 }
 
 /// DO-SUBIDA (repaso) · SYNC-36 · Con una base vacía, en una tabla incierta el repaso sube lo que no
@@ -988,7 +990,7 @@ async fn repaso_con_una_cuarentena_incierta(nombre: &str, origen: &str) -> Vec<s
 /// quedaba sin subir.
 #[tokio::test]
 async fn el_repaso_de_una_tabla_incierta_sube_solo_lo_que_falta() {
-    let mandadas = repaso_con_una_cuarentena_incierta("repaso-incierta", "base_vacia").await;
+    let (mandadas, _) = repaso_con_una_cuarentena_incierta("repaso-incierta", "base_vacia").await;
     assert_eq!(mandadas, vec![json!("cli-0009")], "el repaso sube sólo lo que falta arriba");
 }
 
@@ -997,8 +999,9 @@ async fn el_repaso_de_una_tabla_incierta_sube_solo_lo_que_falta() {
 /// cambio había borrado.
 #[tokio::test]
 async fn con_una_copia_el_repaso_deja_fuera_la_tabla_de_una_cuarentena_incierta() {
-    let mandadas = repaso_con_una_cuarentena_incierta("repaso-incierta-copia", "copia").await;
+    let (mandadas, toda) = repaso_con_una_cuarentena_incierta("repaso-incierta-copia", "copia").await;
     assert!(mandadas.is_empty(), "nada de su tabla viaja: {mandadas:?}");
+    assert!(toda.is_empty(), "ni en el resto de la subida (`cli-0009` incluido): {toda:?}");
 }
 
 /// DO-SUBIDA · Una fila viva que aquí existe pero no se puede mandar (no cabe en una página) queda
@@ -1223,5 +1226,49 @@ async fn la_ultima_tabla_del_nucleo_con_una_ventana_que_no_se_ejecuta_acaba_el_n
     );
     assert!(SqliteSubidaCompleta::new(main.clone()).nucleo_hecho().await.unwrap(), "el núcleo, hecho");
     assert!(!estado_para_la_pantalla(&main).await.unwrap().unwrap().reintentando);
+    nube.cerrar().await;
+}
+
+/// Los pasos de sobrantes de `tabla` que han llegado a la nube.
+fn sobrantes_de(nube: &NubeDeSubida, tabla: &str) -> usize {
+    nube.pasos.iter().filter(|p| p["accion"] == "sobrantes" && p["tabla"] == tabla).count()
+}
+
+/// DO-SUBIDA · SYNC-36 · Los sobrantes de una tabla que una cuarentena incierta deja fuera no mandan
+/// sus claves a la nube (hasta 20.000 por paso, para tirar la respuesta) y la entrada queda fallida
+/// para el contraste, como sus otras fases: acababa como hecha.
+#[tokio::test]
+async fn los_sobrantes_de_una_tabla_fuera_no_viajan_y_quedan_para_el_contraste() {
+    let (main, _dir) = base("sobrantes-fuera").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("sobrantes-fuera").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-sobra', 'Sólo arriba');").await;
+    empezar(&main, "s1", "copia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(sobrantes_de(&nube, "Clientes"), 0, "no viaja ninguna clave");
+    assert!(sobrantes_de(&nube, "Zonas") > 0, "los de las demás tablas, sí");
+    assert_eq!(
+        filas(&main, "SELECT Estado, Ultimo_Error FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase = 4;").await,
+        vec![vec![Value::Integer(2), Value::Text("cuarentena".into())]]
+    );
+    assert_eq!(nombre_arriba(&nube, "cli-sobra").await, Some(Value::Text("Sólo arriba".into())), "ni se pide borrar");
+    nube.cerrar().await;
+}
+
+/// DO-SUBIDA · SYNC-36 · Los de una tabla de la que sólo sube lo que falta tampoco viajan (no se va a
+/// borrar nada de ella), y la entrada acaba como cualquier otra.
+#[tokio::test]
+async fn los_sobrantes_de_una_tabla_incierta_no_viajan() {
+    let (main, _dir) = base("sobrantes-incierta").await;
+    un_bar(&main).await;
+    cuarentena(&main, "op-handy", None, borrado_en_clientes()).await;
+    let mut nube = NubeDeSubida::nueva("sobrantes-incierta").await;
+    nube.sembrar("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-sobra', 'Sólo arriba');").await;
+    empezar(&main, "s1", "base_vacia").await;
+    hasta_el_final_y_el_outbox(&main, &mut nube).await;
+    assert_eq!(sobrantes_de(&nube, "Clientes"), 0, "no viaja ninguna clave");
+    assert_eq!(numero(&main, "SELECT Estado FROM _Sync_Subida_Tablas WHERE Tabla = 'Clientes' AND Fase = 4;").await, 1);
+    assert_eq!(nombre_arriba(&nube, "cli-sobra").await, Some(Value::Text("Sólo arriba".into())), "ni se pide borrar");
     nube.cerrar().await;
 }

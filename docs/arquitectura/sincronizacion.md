@@ -1107,7 +1107,8 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   con el `dispositivo` que da el plan), porque nada suyo cuelga de una fila que no tiene. Si algo de
   una Handy (o de la web) se ha colado, no borran nada y lo ve el contraste. Lo que toca una
   cuarentena de bajada (SYNC-36) no se pide borrar nunca, tampoco como sobrante, ni nada de una tabla
-  incierta o dejada fuera por una cuarentena.
+  incierta o dejada fuera por una cuarentena: de ésas ni se mandan las claves para buscar sobrantes
+  (la de una tabla fuera queda fallida, como sus otras fases).
 - **Lo que no se sube**: lo que toca un cambio de la nube que no ha entrado aquí (`_Sync_Failed`,
   SYNC-36: la nube es la buena en esas filas), las filas apuntadas por el orden de la nube (SYNC-29),
   salvo que arriba falten, y un blob o una fila de más de 1 MiB (por revisar). Si de una cuarentena
