@@ -750,12 +750,14 @@ Main, en [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-
   (`presupuesto_de_subida_agotado`, pasajero); en total, el menor entre 60 millones y diez veces lo
   que la Main declaró en su plan (con un suelo de un millón), y 6 GiB de crecimiento
   (`subida_presupuesto_superado`, permanente: la petición queda `agotada`, a Sentry, y sólo la reabre
-  la administración con `pnpm negocio:subida -- --reabrir`; la Main sigue entonces por donde iba). Un
+  la administración con `pnpm negocio:subida -- --reabrir`, que echa a las sesiones `tpv` para que la
+  Main vuelva a saludar y se la quede; sigue entonces por donde iba). Un
   bar con mucho histórico y una base vacía puede llegar a ese techo de 60 millones (un bar de mil
   comandas diarias escribe unas 70-80 millones de filas en dos años, contando índices y triggers). La exención sólo existe para pasos de
   la Main de la petición, mientras está `esperando`, y acaba con `fin`.
 - **La alarma diaria** avisa una vez (Sentry `hub.subida_sin_empezar`) si la petición lleva un día
-  esperando sin ninguna página, y mientras está `esperando`, `agotada` o `huerfana` **la poda no se
+  esperando sin ninguna página desde que se pidió o se reabrió, emite `subida_caducada` si caduca
+  entonces, y mientras está `esperando`, `agotada` o `huerfana` **la poda no se
   lleva las copias de R2 anteriores a la petición**: son las buenas, y las de después son de una base
   a medias.
 - `negocio:estado` la enseña (`subida`): estado, origen, Main, páginas, filas escritas y declaradas.

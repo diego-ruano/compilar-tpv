@@ -531,6 +531,41 @@ describe("DO-SUBIDA · el final", () => {
 		});
 	});
 
+	it("reabrirla echa a la Main conectada, que al volver a saludar se la queda, y el aviso de «sin empezar» vuelve a contar", async () => {
+		await enElHub("subida-reabrir-conectada", async (hub: any) => {
+			const t = "subida-reabrir-conectada";
+			const m = await conSubida(hub, t);
+			const ahora = Date.now();
+			// Se pidió hace días, empezó, se agotó y ya avisó de que no empezaba; la Main sigue conectada.
+			m.sql.exec(
+				"UPDATE _Subida_Completa SET Estado = 'agotada', Desde_Ms = ?1, Primera_Pagina_Ms = ?1, Aviso_Sin_Empezar_Ms = ?1, Filas_Declaradas = 10 WHERE Id = 1;",
+				ahora - 3 * 24 * 60 * 60 * 1000,
+			);
+			expect(await hub.reabrirSubida(t)).toEqual({ ok: true, antes: "agotada" });
+			// La sesión de la Main no se entera de otra forma: se la echa. La Handy sigue.
+			expect(m.main.servidor.readyState).not.toBe(1);
+			expect(m.handy.servidor.readyState).toBe(1);
+			const p = leerSubida(m.sql)!;
+			expect(p).toMatchObject({ estado: "esperando", mainDeviceId: null, primeraPaginaMs: null, avisoSinEmpezarMs: null, filasDeclaradas: 10 });
+			const otra = await saludaLaMain(hub, t);
+			expect(otra.hello.subida).toEqual({ id: "s1", estado: "esperando", origen: "copia" });
+			expect(leerSubida(m.sql)!.mainDeviceId).toBe(MAIN);
+			// Si nadie la retoma en un día desde que se reabrió, la alarma vuelve a avisar.
+			expect(sinEmpezarParaAvisar(m.sql, ahora + 60 * 60 * 1000)).toBeNull();
+			expect(sinEmpezarParaAvisar(m.sql, ahora + 25 * 60 * 60 * 1000)).not.toBeNull();
+		});
+	});
+
+	it("la que caduca en la alarma se avisa", async () => {
+		await enElHub("subida-caduca-en-la-alarma", async (hub: any) => {
+			const m = await conSubida(hub, "subida-caduca-en-la-alarma");
+			pedirSubida(m.sql, { id: "s2", origen: "copia", mainDeviceId: MAIN, inicioSeq: 0, ahoraMs: Date.now() - PLAZO_DE_SUBIDA_MS - 1 });
+			await hub.alarma();
+			expect(leerSubida(m.sql)!.estado).toBe("caducada");
+			expect(m.eventos.map((e) => e.name)).toContain("subida_caducada");
+		});
+	});
+
 	it("mientras se espera la subida, la poda no se lleva las copias de antes de la pérdida", async () => {
 		const bucket = (env as any).COPIAS_NEGOCIOS as R2Bucket;
 		const t = "subida-poda";

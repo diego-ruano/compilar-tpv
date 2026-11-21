@@ -304,14 +304,19 @@ export function estadoParaSoporte(sql: SqlStorage): Record<string, unknown> | nu
 /**
  * Vuelve a abrir una petición `agotada`, `caducada` o `huerfana` desde la administración: otra vez
  * esperando, con su plazo y su presupuesto a cero y sin dueño (la primera Main vigente que salude se
- * la queda). Devuelve el estado de antes, o `null` si no había nada que reabrir.
+ * la queda). El aviso de «sin empezar» vuelve a contar desde aquí: si nadie la retoma en un día, la
+ * alarma avisa otra vez. Devuelve el estado de antes, o `null` si no había nada que reabrir.
+ *
+ * Lo que dice lo planeado (`Filas_Declaradas`) se queda: la misma Main sigue por sus cursores, sin
+ * volver a pedir el plan, y su techo total sale de ahí.
  */
 export function reabrirSubida(sql: SqlStorage, ahoraMs: number): EstadoDeSubida | null {
 	const p = leerSubida(sql);
 	if (!p || p.estado === "esperando" || p.estado === "terminada") return null;
 	sql.exec(
 		`UPDATE _Subida_Completa SET Estado = 'esperando', Main_Device_Id = NULL, Hasta_Ms = ?1,
-		   Filas_Escritas = 0, Bytes_Crecidos = 0, Hora_Ms = NULL, Filas_Hora = NULL, Bytes_Hora = NULL
+		   Filas_Escritas = 0, Bytes_Crecidos = 0, Hora_Ms = NULL, Filas_Hora = NULL, Bytes_Hora = NULL,
+		   Primera_Pagina_Ms = NULL, Aviso_Sin_Empezar_Ms = NULL
 		 WHERE Id = 1;`,
 		ahoraMs + PLAZO_DE_SUBIDA_MS,
 	);
@@ -319,14 +324,14 @@ export function reabrirSubida(sql: SqlStorage, ahoraMs: number): EstadoDeSubida 
 }
 
 /**
- * La alarma diaria: si la petición lleva un día esperando sin ninguna página, se avisa una vez.
- * Devuelve la petición si toca avisar ahora.
+ * La alarma diaria: si la petición lleva un día esperando sin ninguna página desde que se pidió (o se
+ * reabrió: `Hasta_Ms` menos el plazo), se avisa una vez. Devuelve la petición si toca avisar ahora.
  */
 export function sinEmpezarParaAvisar(sql: SqlStorage, ahoraMs: number): PeticionDeSubida | null {
 	caducarSiToca(sql, ahoraMs);
 	const p = leerSubida(sql);
 	if (!p || p.estado !== "esperando" || p.primeraPaginaMs !== null || p.avisoSinEmpezarMs !== null) return null;
-	if (ahoraMs - p.desdeMs < AVISO_SIN_EMPEZAR_MS) return null;
+	if (ahoraMs - (p.hastaMs - PLAZO_DE_SUBIDA_MS) < AVISO_SIN_EMPEZAR_MS) return null;
 	sql.exec("UPDATE _Subida_Completa SET Aviso_Sin_Empezar_Ms = ?1 WHERE Id = 1;", ahoraMs);
 	return p;
 }

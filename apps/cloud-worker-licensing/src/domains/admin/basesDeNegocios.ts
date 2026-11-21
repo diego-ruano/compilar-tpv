@@ -272,7 +272,8 @@ const reabrirSchema = z.object({ tenantId: zNegocio, motivo: zMotivo });
  * DO-SUBIDA · Reabre la subida completa de la Main (`MotorTenantHub.reabrirSubida`): una agotada (su
  * techo total, que la Main no puede volver a abrir sola), una caducada (la Main no empezó en 14 días)
  * o una huérfana (un traslado a mitad). Vuelve a esperar sin dueño: la primera Main vigente que salude
- * se la queda. Deja rastro con el motivo.
+ * se la queda (a la que ya está conectada el objeto la echa para que vuelva a saludar). Deja rastro
+ * con el motivo.
  */
 basesDeNegociosRoutes.post("/subida/reabrir", cuerpo(reabrirSchema), async (c) => {
 	const env = c.env;

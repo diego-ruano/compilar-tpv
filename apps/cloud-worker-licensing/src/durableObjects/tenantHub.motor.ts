@@ -52,6 +52,7 @@ import {
 } from "./tenantHub.instante";
 import { nuevoId } from "../lib/ids";
 import {
+	caducarSiToca,
 	copiasProtegidasDesde,
 	ejecutarPasoDeSubida,
 	estadoParaSoporte,
@@ -369,9 +370,10 @@ export class MotorTenantHub {
 		if (!baseAprovisionada(storage.sql)) return;
 		const negocio = negocioApuntado(storage);
 		if (!negocio) return;
-		// DO-SUBIDA: una petición de subida completa que lleva un día sin ninguna página. Antes de la
-		// copia: si la copia falla, el aviso sale igual.
+		// DO-SUBIDA: una petición de subida completa que lleva un día sin ninguna página, o que caduca
+		// ahora sin que la Main la empezara. Antes de la copia: si la copia falla, el aviso sale igual.
 		try {
+			if (caducarSiToca(storage.sql, Date.now())) this.emitSyncEvent("subida_caducada", {});
 			const sinEmpezar = sinEmpezarParaAvisar(storage.sql, Date.now());
 			if (sinEmpezar) {
 				capturarError(new Error("subida_sin_empezar"), "hub.subida_sin_empezar");
@@ -438,12 +440,21 @@ export class MotorTenantHub {
 	 * DO-SUBIDA · Vuelve a abrir una subida completa `agotada`, `caducada` o `huerfana`
 	 * (`/v1/admin/negocios/subida/reabrir`): otra vez esperando, sin dueño, con su plazo y su
 	 * presupuesto a cero. Sin nada que reabrir, `subida_no_reabrible`.
+	 *
+	 * La petición sólo se entrega en el `hello_ok`, y la Main la concilia al empezar cada sesión: la
+	 * que ya está conectada (con hibernación, un socket puede durar días) no se enteraría y sus pasos
+	 * darían `subida_no_pedida`. Así que se echa a las sesiones `tpv`, por `cerrar` como todo cierre
+	 * que inicia el DO: la Main vuelve a saludar y se la queda. Las Handy siguen.
 	 */
 	async reabrirSubida(tenantId: string): Promise<ResultadoDeAdministracion<{ antes: string }>> {
 		const ajeno = this.negocioAjeno(tenantId, "reabrirSubida");
 		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
 		const antes = reabrirSubida(this.state.storage.sql, Date.now());
 		if (!antes) return { ok: false, error: "subida_no_reabrible", status: 409 };
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (a?.role === "tpv") this.cerrar(ws, a, 4003, "subida_reabierta");
+		}
 		this.emitSyncEvent("subida_reabierta", { antes });
 		return { ok: true, antes };
 	}
