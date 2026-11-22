@@ -10,7 +10,7 @@ import AppBoot from "../../src/app/AppBoot";
 import { useMainPresence } from "../../src/shared/stores/useMainPresence";
 import { useMode } from "../../src/shared/stores/useMode";
 
-vi.mock("@tpv/client", () => ({ commands: { logout: async () => {} } }));
+vi.mock("@tpv/client", () => ({ commands: { logout: async () => {}, relojDesfase: async () => ({ desfaseMs: null }) } }));
 vi.mock("../../src/shared/lib/useHandySocket", () => ({ useHandySocket: () => {} }));
 vi.mock("../../src/shared/lib/useMainSocket", () => ({ useMainSocket: () => {} }));
 vi.mock("../../src/shared/lib/useImageUrl", () => ({ useImageUrl: () => "" }));

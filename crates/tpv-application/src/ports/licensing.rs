@@ -164,6 +164,10 @@ pub trait PairingService: Send + Sync {
     /// corregida con la que trae cada respuesta del worker. Para lo que firma el frontend (el saludo
     /// del WebSocket, el emparejamiento); lo que firma Rust ya la usa por su cuenta.
     fn hora_para_firmar(&self) -> i64;
+    /// RELOJ-01: lo último que se ha medido de cuánto se aparta el reloj del equipo del de la nube
+    /// (ms que hay que sumarle; positivo, va atrasado), o `None` si todavía no ha respondido la nube.
+    /// Sólo para avisar: no corrige ninguna hora.
+    fn desfase_del_reloj_ms(&self) -> Option<i64>;
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()>;
     fn handy_clear_token(&self) -> AppResult<()>;
     fn handy_get_tenant(&self) -> AppResult<Option<String>>;

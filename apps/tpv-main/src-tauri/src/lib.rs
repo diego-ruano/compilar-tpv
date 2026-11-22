@@ -2434,6 +2434,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::pairing::device_get_identity,
             commands::pairing::device_firmar_emparejamiento,
             commands::pairing::device_hora_para_firmar,
+            // RELOJ-01: el aviso del reloj desfasado (sin sesión: commands/reloj.rs)
+            commands::reloj::reloj_desfase,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
             // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
@@ -3817,6 +3819,11 @@ mod tests_exenciones_del_gate {
             include_str!("commands/ventana.rs"),
             "el tamaño de la pantalla se ajusta también en el login",
         ),
+        (
+            "commands/reloj.rs",
+            include_str!("commands/reloj.rs"),
+            "el aviso del reloj desfasado cuelga también sobre el login y la espera de la Handy (RELOJ-01)",
+        ),
     ];
 
     /// Marcas de que alguien ha metido el gate donde no puede estar.
@@ -3864,6 +3871,25 @@ mod tests_exenciones_del_gate {
         let front = include_str!("../../src/shared/lib/imageUrl.ts");
         assert!(front.contains("commands.handyUrlImagenes()"), "la base sale de handy_url_imagenes");
         assert!(!front.contains("r2.dev") && !front.contains("workers.dev"), "imageUrl.ts no escribe la dirección a mano");
+    }
+
+    /// RELOJ-01: el aviso del reloj está registrado, se pide desde el arranque (encima del login y
+    /// de la espera de la Handy, no dentro de una pantalla con sesión) y sólo lee: ni firma, ni sale a
+    /// la red, ni escribe.
+    #[test]
+    fn el_aviso_del_reloj_se_ve_antes_del_login_y_solo_lee() {
+        let registro = include_str!("lib.rs").split("collect_commands!").nth(1).unwrap().split("])").next().unwrap();
+        assert!(registro.contains("commands::reloj::reloj_desfase"), "reloj_desfase registrado");
+
+        let arranque = include_str!("../../src/app/AppBoot.tsx");
+        assert!(arranque.contains("<AvisoReloj"), "la franja cuelga del arranque, fuera de las rutas");
+        let franja = include_str!("../../src/app/arranque/AvisoReloj.tsx");
+        assert!(franja.contains("commands.relojDesfase()"), "la franja pregunta por reloj_desfase");
+
+        let comando = include_str!("commands/reloj.rs");
+        for prohibido in ["WriteGuard", "execute", "enviar", "firmar", "reqwest"] {
+            assert!(!comando.split("pub fn reloj_desfase").nth(1).unwrap().contains(prohibido), "reloj_desfase no {prohibido}");
+        }
     }
 
     #[test]

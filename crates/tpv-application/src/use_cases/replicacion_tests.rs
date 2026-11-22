@@ -166,6 +166,7 @@ fn device_identity(&self) -> AppResult<DeviceIdentity> { panic!("Capacidad ajena
 fn firmar_hello(&self, _mode: &str, _nonce_b64: &str) -> AppResult<FirmaDispositivo> { panic!("Capacidad ajena a esta prueba") }
 fn firmar_emparejamiento(&self, _args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> { panic!("Capacidad ajena a esta prueba") }
 fn hora_para_firmar(&self) -> i64 { panic!("Capacidad ajena a esta prueba") }
+fn desfase_del_reloj_ms(&self) -> Option<i64> { panic!("Capacidad ajena a esta prueba") }
 fn handy_set_token(&self, _token: &str, _tenant_id: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 fn handy_clear_token(&self) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 fn handy_get_tenant(&self) -> AppResult<Option<String>> { panic!("Capacidad ajena a esta prueba") }

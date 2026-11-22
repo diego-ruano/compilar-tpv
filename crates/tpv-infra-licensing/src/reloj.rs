@@ -19,10 +19,15 @@
 //! propósito: corregirla de golpe podría fechar una factura antes que la anterior, y eso una cadena
 //! de facturación no lo admite. Es otra decisión, y no se toma aquí.
 //!
+//! RELOJ-01 — lo que sí se hace con la hora del negocio es AVISAR: la medida sale a la pantalla
+//! ([`desfase_medido_ms`], comando `reloj_desfase`) y una franja le dice a quien está delante que
+//! ajuste la hora del equipo cuando se aparta varios minutos de la nube. Nada se corrige solo.
+//!
 //! El desfase vive en memoria y no se guarda: al arrancar vale 0, la primera petición que la nube
-//! rechace por la hora trae ya la suya, y se repite una vez (ver [`es_rechazo_por_reloj`]).
+//! rechace por la hora trae ya la suya, y se repite una vez (ver [`es_rechazo_por_reloj`]). Ese 0 de
+//! arranque no es una medida, y por eso [`MEDIDO`] dice aparte si ya ha llegado alguna.
 
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{HeaderMap, DATE};
@@ -33,6 +38,10 @@ use tpv_application::error::AppError;
 /// un adaptador: los adaptadores se construyen en cada comando y lo que aprende uno lo tiene que
 /// saber el siguiente.
 static DESFASE_MS: AtomicI64 = AtomicI64::new(0);
+
+/// RELOJ-01 — ¿ha llegado ya alguna medida? Sin ella, el 0 de [`DESFASE_MS`] sólo es el valor de
+/// arranque: un equipo sin red que lleva un día adelantado no puede enseñar «la hora está bien».
+static MEDIDO: AtomicBool = AtomicBool::new(false);
 
 /// Una respuesta que tarda más que esto no sirve para medir: el error de la estimación es la mitad
 /// de la ida y vuelta, y con 10 s ya son 5 contra un margen de 120.
@@ -105,7 +114,21 @@ pub fn anotar_respuesta(cabeceras: &HeaderMap, enviada_ms: i64, recibida_ms: i64
     };
     if let Some(desfase) = estimar_desfase(fecha, enviada_ms, recibida_ms) {
         DESFASE_MS.store(desfase, Ordering::Relaxed);
+        // Después del desfase y con `Release`: quien vea la marca ve ya la medida que la puso.
+        MEDIDO.store(true, Ordering::Release);
     }
+}
+
+/// RELOJ-01 — el último desfase medido (positivo: el reloj del sistema va atrasado respecto a la
+/// nube; negativo: adelantado), o `None` si este proceso aún no ha tenido ninguna respuesta del
+/// worker con la que medirlo. Es lo que enseña el aviso del reloj; firmar sigue con [`ahora_ms`].
+///
+/// La medida se renueva sola con cada respuesta: en la Main, al menos con la consulta de
+/// interruptores (cada 5 min, job `interruptores`); en la Handy, con cada lectura o escritura.
+pub fn desfase_medido_ms() -> Option<i64> {
+    MEDIDO
+        .load(Ordering::Acquire)
+        .then(|| DESFASE_MS.load(Ordering::Relaxed))
 }
 
 /// Cuánto va por detrás (positivo) o por delante (negativo) el reloj del sistema respecto a la
@@ -214,6 +237,34 @@ mod tests {
 
         let dif = ahora_ms() - reloj_del_sistema_ms();
         assert!((599_000..=601_000).contains(&dif), "la hora de firmar lleva el desfase: {dif}");
+    }
+
+    /// RELOJ-01: el 0 de arranque no es una medida. Hasta que llega una respuesta que se pueda leer,
+    /// el aviso no sabe nada; un medido 0 (reloj en hora) sí es una medida.
+    #[test]
+    fn sin_medir_no_es_lo_mismo_que_medido_cero() {
+        assert_eq!(desfase_medido_ms(), None, "al arrancar no hay medida");
+
+        // Ni una respuesta sin `Date`, ni una demasiado lenta, ni una ilegible cuentan como medida.
+        anotar_respuesta(&HeaderMap::new(), 0, 0);
+        let mut cabeceras = HeaderMap::new();
+        cabeceras.insert(DATE, FECHA.parse().unwrap());
+        anotar_respuesta(&cabeceras, 0, MAX_IDA_Y_VUELTA_MS + 1);
+        let mut ilegible = HeaderMap::new();
+        ilegible.insert(DATE, "ayer".parse().unwrap());
+        anotar_respuesta(&ilegible, 0, 0);
+        assert_eq!(desfase_medido_ms(), None);
+
+        // En hora: medido, y 0.
+        anotar_respuesta(&cabeceras, FECHA_MS + 500, FECHA_MS + 500);
+        assert_eq!(desfase_medido_ms(), Some(0));
+
+        // Adelantado una hora; y lo que no se puede leer después no borra la medida.
+        let adelantado = FECHA_MS + 500 + 3_600_000;
+        anotar_respuesta(&cabeceras, adelantado, adelantado);
+        assert_eq!(desfase_medido_ms(), Some(-3_600_000));
+        anotar_respuesta(&HeaderMap::new(), 0, 0);
+        assert_eq!(desfase_medido_ms(), Some(-3_600_000));
     }
 
     #[test]

@@ -948,6 +948,15 @@ export type DescuadreTabla = {
 	distintas: number,
 };
 
+/**  RELOJ-01 · Cuánto se aparta el reloj de este equipo del de la nube, para el aviso del reloj. */
+export type DesfaseReloj = {
+	/**
+	 *  Milisegundos que hay que sumarle a la hora del equipo para tener la de la nube: positivo, la
+	 *  del equipo va atrasada; negativo, adelantada. `None` mientras no haya respondido la nube.
+	 */
+	desfaseMs: number | null,
+};
+
 /**
  *  Datos del cliente para emitir **factura completa** (FISCAL-02).
  *

@@ -20,7 +20,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
-| [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -302,15 +301,6 @@ Opciones, de menos a más ambiciosas:
 
 Decisión: refactor gradual después del lanzamiento, por (2) y luego (3) si la duplicación sigue
 doliendo.
-
-### RELOJ-01 · La hora del negocio es la del equipo
-
-Las **firmas** usan la hora de la nube (`tpv-infra-licensing/src/reloj.rs`), pero ventas, fichajes,
-caja, registros Veri\*factu y `x-client-now` usan el reloj del PC. Un desvío lento no importa; un salto
-grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) facturaría con otra fecha. No
-se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
-anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
-(`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
 
 ---
 

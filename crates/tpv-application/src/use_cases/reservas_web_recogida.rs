@@ -351,6 +351,9 @@ mod tests {
         fn hora_para_firmar(&self) -> i64 {
             panic!("ajeno a esta prueba")
         }
+        fn desfase_del_reloj_ms(&self) -> Option<i64> {
+            panic!("ajeno a esta prueba")
+        }
         fn handy_set_token(&self, _: &str, _: &str) -> AppResult<()> {
             panic!("ajeno a esta prueba")
         }

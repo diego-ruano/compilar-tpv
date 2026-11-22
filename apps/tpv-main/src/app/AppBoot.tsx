@@ -28,6 +28,7 @@ import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import UpdateBanner from "../shared/ui/UpdateBanner";
 import ActivacionLicencia from "./arranque/ActivacionLicencia";
 import AvisoCaducidad from "./arranque/AvisoCaducidad";
+import AvisoReloj from "./arranque/AvisoReloj";
 import EmparejarHandy from "./arranque/EmparejarHandy";
 import HandyEsperandoMain from "./arranque/HandyEsperandoMain";
 import LicenciaBloqueada from "./arranque/LicenciaBloqueada";
@@ -235,6 +236,8 @@ export default function AppBoot({ router }: { router: any }) {
 		<div className="zona-segura w-screen h-screen flex flex-col overflow-hidden">
 			<UpdateBanner />
 			{arranque.avisoCaducidad ? <AvisoCaducidad aviso={arranque.avisoCaducidad} /> : null}
+			{/* RELOJ-01: en la Main y en la Handy, también antes del login. */}
+			<AvisoReloj />
 			{/* El layout de la Main y el del Handy traen su propia barra de título (Titlebar, con el
 			    toggle claro/oscuro). La del arranque sólo se enseña mientras no hay aplicación. */}
 			{arranque.conBarraDeArranque ? <Titlebar /> : null}

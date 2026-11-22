@@ -4,7 +4,7 @@
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
+    ApiSignedHeaders, DesfaseReloj, DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
     PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
 };
 
@@ -52,6 +52,11 @@ pub fn firmar_emparejamiento(svc: &dyn PairingService, args: DeviceFirmarEmparej
 
 pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
     svc.hora_para_firmar()
+}
+
+/// RELOJ-01: el desfase medido del reloj, para el aviso de la pantalla.
+pub fn desfase_del_reloj(svc: &dyn PairingService) -> DesfaseReloj {
+    DesfaseReloj { desfase_ms: svc.desfase_del_reloj_ms() }
 }
 
 pub fn handy_set_token(svc: &dyn PairingService, args: HandySetTokenArgs) -> AppResult<()> {

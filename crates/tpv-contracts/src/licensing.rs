@@ -98,6 +98,15 @@ pub struct FirmaDispositivo {
     pub sig_b64: String,
 }
 
+/// RELOJ-01 · Cuánto se aparta el reloj de este equipo del de la nube, para el aviso del reloj.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DesfaseReloj {
+    /// Milisegundos que hay que sumarle a la hora del equipo para tener la de la nube: positivo, la
+    /// del equipo va atrasada; negativo, adelantada. `None` mientras no haya respondido la nube.
+    pub desfase_ms: Option<i64>,
+}
+
 
 /* =========================================================
    Args / Inputs

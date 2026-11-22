@@ -215,6 +215,7 @@ export const nombresComandos = {
     "device_get_identity": "deviceGetIdentity",
     "device_firmar_emparejamiento": "deviceFirmarEmparejamiento",
     "device_hora_para_firmar": "deviceHoraParaFirmar",
+    "reloj_desfase": "relojDesfase",
     "tpv_server_post_json": "tpvServerPostJson",
     "pair_create": "pairCreate",
     "sync_health": "syncHealth",
@@ -458,6 +459,7 @@ type Argumentos = {
     "device_get_identity": {  };
     "device_firmar_emparejamiento": { args: Parameters<Comandos["deviceFirmarEmparejamiento"]>[0] };
     "device_hora_para_firmar": {  };
+    "reloj_desfase": {  };
     "tpv_server_post_json": { args: Parameters<Comandos["tpvServerPostJson"]>[0] };
     "pair_create": {  };
     "sync_health": {  };

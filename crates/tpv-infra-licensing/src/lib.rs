@@ -1633,6 +1633,10 @@ impl PairingService for PairingAdapter {
         reloj::ahora_ms()
     }
 
+    fn desfase_del_reloj_ms(&self) -> Option<i64> {
+        reloj::desfase_medido_ms()
+    }
+
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()> {
         device::handy_set_token(token, tenant_id).map_err(ext)
     }
@@ -2184,6 +2188,31 @@ mod tests_url_imagenes {
         assert_eq!(url_imagenes_del_negocio("   "), None);
         let raro = url_imagenes_del_negocio("a/b?c#d").unwrap();
         assert_eq!(raro, format!("{CLOUD_API_BASE}/v1/images/a%2Fb%3Fc%23d"));
+    }
+}
+
+#[cfg(test)]
+mod tests_desfase_del_reloj {
+    use super::*;
+
+    /// RELOJ-01: el adaptador da lo que ha medido el transporte, el mismo que usa cualquier
+    /// petición de este proceso, y «sin medir» llega a la pantalla como `None`, no como 0.
+    #[test]
+    fn el_aviso_ve_la_medida_del_transporte_y_sin_ella_nada() {
+        let adaptador = PairingAdapter::new(PathBuf::from("sin-uso"));
+        assert_eq!(adaptador.desfase_del_reloj_ms(), None);
+
+        let mut cabeceras = reqwest::header::HeaderMap::new();
+        cabeceras.insert(reqwest::header::DATE, "Fri, 25 Sep 2026 19:19:26 GMT".parse().unwrap());
+        // Diez minutos adelantado: la hora del equipo va por delante de la que puso la nube.
+        let adelantado = 1_790_363_966_000 + 500 + 600_000;
+        reloj::anotar_respuesta(&cabeceras, adelantado, adelantado);
+
+        assert_eq!(adaptador.desfase_del_reloj_ms(), Some(-600_000));
+        assert_eq!(
+            tpv_application::use_cases::pairing::desfase_del_reloj(&adaptador).desfase_ms,
+            Some(-600_000)
+        );
     }
 }
 

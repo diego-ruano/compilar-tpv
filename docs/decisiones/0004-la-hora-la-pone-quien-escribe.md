@@ -27,7 +27,8 @@ horas distintas en cada sitio, y una venta de las 23:59 podría caer en otro dí
 ## Consecuencias
 
 - La hora del negocio es la del reloj del equipo que escribe. Corregirla con la de la nube podría fechar
-  una factura antes que la anterior ([RELOJ-01](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del-equipo)).
+  una factura antes que la anterior; cuando se aparta 5 minutos o más de la nube, una franja lo avisa
+  para que se ajuste (RELOJ-01, [licencias.md](../arquitectura/licencias.md#el-aviso-del-reloj-desfasado-reloj-01)).
   Las **firmas**, en cambio, usan la hora de la nube ([licencias.md](../arquitectura/licencias.md)).
 - Un `'localtime'` aplicado a un valor (`datetime(Fecha,'localtime')`) no se puede fijar: depende de quién
   lo ejecuta.

@@ -848,6 +848,9 @@ mod tests_leer_respuesta {
         fn hora_para_firmar(&self) -> i64 {
             unimplemented!()
         }
+        fn desfase_del_reloj_ms(&self) -> Option<i64> {
+            unimplemented!()
+        }
         fn handy_set_token(&self, _: &str, _: &str) -> AppResult<()> {
             unimplemented!()
         }

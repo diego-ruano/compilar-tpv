@@ -586,8 +586,24 @@ cabecera `Date` de cada respuesta del worker. Todo lo que habla con el worker se
 `reloj::enviar`, para anotar la medida. Un rechazo por la hora se repite **una vez** con la hora que
 trajo ese rechazo; también la activación, que es la primera petición de un equipo recién estrenado. El desfase vive en memoria; se descarta una medida con una ida y vuelta de más de
 10 s. Las caducidades que pone la nube (de la aserción, del token) también se comparan con su hora.
-La **hora del negocio** —ventas, fichajes, caja, Veri\*factu, `x-client-now`— sigue siendo la del
-equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del-equipo)).
+La **hora del negocio** —ventas, fichajes, caja, registros de facturación, `x-client-now`— sigue
+siendo la del equipo, a propósito: corregirla de golpe podría fechar una factura antes que la anterior
+([0004](../decisiones/0004-la-hora-la-pone-quien-escribe.md)).
+
+#### El aviso del reloj desfasado (RELOJ-01)
+
+Lo que se hace con ella es avisar. `reloj::desfase_medido_ms()` da el último desfase medido, o nada
+si este proceso todavía no ha tenido una respuesta del worker con la que medirlo (el 0 de arranque no
+es una medida). Lo expone el comando `reloj_desfase` (`commands/reloj.rs`, DTO `DesfaseReloj`), sin
+sesión y de sólo lectura: no firma, no sale a la red, no escribe. La franja `AvisoReloj`
+(`app/arranque/`, hermana de `AvisoCaducidad` en `AppBoot`) lo lee al montar y cada minuto, en la Main
+y en la Handy y también antes del login, y aparece cuando la hora del equipo se aparta **5 minutos o
+más**: dice cuánto va adelantada o atrasada, que los tickets y la caja salen con esa hora y cómo
+ajustarla (en Windows, Configuración → Hora e idioma → Fecha y hora → «Sincronizar ahora»; en el
+teléfono, la fecha y la hora automáticas). No corrige nada ni toca el cobro. La medida se renueva sola
+con el tráfico que ya hay: en la Main, al menos la consulta de interruptores (job `interruptores`, cada
+5 minutos); en la Handy, cada lectura o escritura. Qué dice y a partir de cuánto, en
+`relojDesfasado.ts` y `test/relojDesfasado.test.ts`.
 
 ## Anular desde la administración
 
