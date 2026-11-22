@@ -15,6 +15,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
+| [SUBIDA-TECHO](#subida-techo--el-techo-total-de-la-subida-completa) | 🔵 | El techo de 60 millones de filas de la subida completa, sin medir con bares reales | Medir en producción |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
@@ -229,6 +230,20 @@ falta para probar la aplicación.
 actualizaciones, no la primera instalación. **Aceptado** mientras no haya ingresos: SmartScreen avisa
 pero deja instalar («Más información → Ejecutar de todas formas»). Azure Trusted Signing evita el token
 hardware de un certificado EV.
+
+### SUBIDA-TECHO · El techo total de la subida completa
+
+La subida completa de la Main a una nube devuelta (DO-SUBIDA,
+[worker.md](arquitectura/worker.md)) tiene un techo total de filas escritas, índices y triggers
+incluidos: el menor entre 60 millones y diez veces lo que la Main declaró en su plan
+(`LIMITES_DE_SUBIDA.filasTotales` en `tenantHub.subida.ts`). Al pasarlo, la petición queda `agotada`
+y la reabre la administración con `pnpm negocio:subida -- --reabrir`, que sigue por donde iba
+([restaurar-un-negocio.md](guias/restaurar-un-negocio.md)).
+
+El 60 es una estimación: un bar de mil comandas diarias escribe unos 70-80 millones de filas en dos
+años, así que uno con mucho movimiento, años de histórico y una base vacía llegaría al techo. Subirlo
+es también subir lo que puede escribir un cliente que abuse. Falta medir cuánto escribe un bar real
+al año (las filas de su base y las escritas por la subida) y ajustarlo con ese dato.
 
 ---
 
