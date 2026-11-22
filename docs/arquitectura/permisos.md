@@ -113,7 +113,7 @@ iba a borrar para siempre, no se borra), y se cumple también donde se aplique d
 `not_found` («Esa notificación no está en tu lista.») y nada en el outbox. En la Handy el usuario lo
 pone Rust desde la sesión y viaja en el cuerpo; el Worker aplica la misma condición, pero no puede
 saber que ese usuario es el de la sesión
-([SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker)).
+([SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud)).
 
 Valores iniciales:
 
@@ -177,7 +177,7 @@ El JWT y la firma de mensajes arbitrarios no se exponen a JavaScript (RI-20/RI-5
 El Worker autentica **al dispositivo**, con JWT y device-proof. Rust valida la sesión personal y
 sus capacidades antes de llamar a los puertos HTTP. La consulta de concesiones del Worker devuelve
 configuración; no demuestra una sesión personal. Esa ampliación está aplazada en
-[SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker).
+[SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud).
 Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) siguen aplicándose.
 
 ### La autorización guardada en la Handy (PERM-CACHE)

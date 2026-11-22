@@ -21,11 +21,6 @@ const BOTON_RELLENAR_AHORA =
     '//h3[contains(normalize-space(.), "Este TPV todavía no puede cobrar")]' +
     '/ancestor::div[1]//button[contains(normalize-space(.), "Rellenarlo ahora")]';
 
-/** El otro botón del mismo aviso: seguir sin rellenarlo. */
-const BOTON_AHORA_NO =
-    '//h3[contains(normalize-space(.), "Este TPV todavía no puede cobrar")]' +
-    '/ancestor::div[1]//button[normalize-space(.)="Ahora no"]';
-
 /** El panel de Configuración → Negocio donde se declaran los datos del obligado. */
 const PANEL_OBLIGADO =
     '//section[.//h2[normalize-space(text())="Datos del negocio"]]';
@@ -114,28 +109,6 @@ export async function declararDatosFiscales(razon_social: string, nif: string): 
 
     if ((estado.nif ?? "") !== nif.toUpperCase()) {
         throw new Error(`El NIF guardado es "${estado.nif}" y se declaró "${nif}".`);
-    }
-}
-
-/**
- * Cierra el aviso de «este TPV todavía no puede cobrar» con «Ahora no», si está.
- *
- * Sirve a un recorrido que **no** vaya de facturar: el aviso es un `fixed inset-0` y tapa el menú,
- * así que sin quitarlo no se llega a ninguna pantalla. Hoy no lo llama ninguno: todos comparten el
- * equipo que estrena la venta, que ya declara los datos.
- *
- * Es tolerante a que no esté: en un equipo restaurado los datos ya vienen puestos.
- */
-export async function descartarAvisoDatosFiscales(): Promise<void> {
-    const hay = await $(BOTON_AHORA_NO)
-        .waitForClickable({ timeout: 8_000 })
-        .then(
-            () => true,
-            () => false,
-        );
-    if (hay) {
-        await pulsarXPath(BOTON_AHORA_NO, 'botón "Ahora no" del aviso de datos fiscales');
-        await $(BOTON_AHORA_NO).waitForExist({ reverse: true, timeout: 10_000 });
     }
 }
 
