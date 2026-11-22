@@ -201,7 +201,10 @@ propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
 - **Para enseñar una**, `use_cases::facturas_pdf::pdf_de_factura` da la local; si no está, la de la
   nube (salvo que el job la haya dejado en pausa, para no esperar a una nube que no contesta); y si
   no la tiene, la compone en ese momento y se queda como si la hubiera hecho el job. Lo que no es una
-  factura completa se contesta `not_found`, y con el histórico a medias, `conflict`. El job y la
+  factura completa se contesta `not_found`. El cobro sólo hace falta para componerla: la local y la
+  de la nube se dan aunque no esté (tras restaurar, una `F3` reciente baja antes que los cobros de
+  los tickets antiguos que canjea). Si hay que componerla, con el histórico a medias se contesta
+  `conflict`, y también si su cobro no está en el equipo. El job y la
   pantalla montan lo mismo (`factura_pdf::PiezasFacturas`), y cada escritura del PDF local va a su
   propio temporal antes de ponerse en su sitio, así que pueden guardar la misma factura a la vez.
 

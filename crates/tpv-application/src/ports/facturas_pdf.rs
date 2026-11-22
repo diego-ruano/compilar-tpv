@@ -85,6 +85,11 @@ pub trait FacturasPdfRepository: Send + Sync {
     /// completa).
     async fn estado(&self, id_registro: &str) -> AppResult<Option<EstadoPdfFactura>>;
 
+    /// ¿Es una factura completa (un alta con destinatario que no es una subsanación)? Lo es aunque
+    /// su cobro no esté en la base: tras restaurar, una `F3` reciente baja antes que los cobros de
+    /// los tickets antiguos que canjea.
+    async fn es_factura_completa(&self, id_registro: &str) -> AppResult<bool>;
+
     /// El cobro con el que se compone su papel. `None` si no es una factura completa o no se
     /// encuentra su cobro.
     async fn cobro_de_la_factura(&self, id_registro: &str) -> AppResult<Option<CobroDeLaFactura>>;

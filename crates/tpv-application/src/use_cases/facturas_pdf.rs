@@ -61,6 +61,11 @@ pub const MSG_NO_ES_FACTURA_COMPLETA: &str = "Esa factura no existe o no lleva l
 pub const MSG_HISTORICO_A_MEDIAS: &str =
     "Todavía se está bajando el histórico de la nube: el PDF de esta factura estará cuando acabe.";
 
+/// Lo que se le dice cuando el PDF no está, no se puede bajar y su cobro no está en este equipo,
+/// así que no hay con qué componerlo.
+pub const MSG_SIN_SU_COBRO: &str = "El cobro de esta factura no está en este equipo y no se puede componer su PDF: \
+     vuelve a pedirlo cuando haya conexión con la nube.";
+
 /// Cuántas facturas de un cliente enseña su ficha, como mucho: las más recientes.
 pub const LIMITE_FACTURAS_DEL_CLIENTE: i64 = 200;
 
@@ -164,6 +169,9 @@ pub async fn pasada(f: &Facturas<'_>, ahora_ms: i64, se_puede_generar: bool) -> 
 
 /// El PDF de una factura para enseñarlo: el local; si no, el de la nube; y si no lo tiene, se
 /// compone ahora (y se queda, como si lo hubiera hecho el job).
+///
+/// El cobro sólo hace falta para componerlo: el local y el de la nube se dan aunque no esté (tras
+/// restaurar, una `F3` reciente baja antes que los cobros de los tickets antiguos que canjea).
 pub async fn pdf_de_factura(
     f: &Facturas<'_>,
     id_registro: &str,
@@ -171,11 +179,9 @@ pub async fn pdf_de_factura(
     se_puede_generar: bool,
 ) -> AppResult<Vec<u8>> {
     let id = id_registro.trim();
-    let cobro = match id {
-        "" => None,
-        id => f.repo.cobro_de_la_factura(id).await?,
+    if id.is_empty() || !f.repo.es_factura_completa(id).await? {
+        return Err(AppError::not_found(MSG_NO_ES_FACTURA_COMPLETA));
     }
-    .ok_or_else(|| AppError::not_found(MSG_NO_ES_FACTURA_COMPLETA))?;
 
     if let Some(local) = f.archivos.leer(id)?.filter(|b| es_pdf(b)) {
         if f.repo.estado(id).await?.and_then(|e| e.origen).is_none() {
@@ -200,6 +206,11 @@ pub async fn pdf_de_factura(
     if !se_puede_generar {
         return Err(AppError::conflict(MSG_HISTORICO_A_MEDIAS));
     }
+    let cobro = f
+        .repo
+        .cobro_de_la_factura(id)
+        .await?
+        .ok_or_else(|| AppError::conflict(MSG_SIN_SU_COBRO))?;
     let pdf = f.generador.generar(&cobro).await?;
     if !es_pdf(&pdf) {
         return Err(AppError::internal("lo compuesto para la factura no es un PDF"));
@@ -520,6 +531,9 @@ mod tests {
         }
         async fn estado(&self, id: &str) -> AppResult<Option<EstadoPdfFactura>> {
             Ok(self.filas.lock().unwrap().get(id).cloned())
+        }
+        async fn es_factura_completa(&self, id: &str) -> AppResult<bool> {
+            Ok(self.completas.iter().any(|c| c == id))
         }
         async fn cobro_de_la_factura(&self, id: &str) -> AppResult<Option<CobroDeLaFactura>> {
             if !self.completas.iter().any(|c| c == id) || self.sin_cobro.iter().any(|c| c == id) {
@@ -929,6 +943,30 @@ mod tests {
         }
         let e = pdf_de_factura(&f, "a", AHORA, false).await.unwrap_err();
         assert!(matches!(e, AppError::Conflict(_)));
+    }
+
+    /// Tras restaurar, una F3 reciente baja antes que los cobros de los tickets que canjea: su PDF
+    /// se da desde la carpeta o desde la nube, y sólo para componerlo hace falta el cobro.
+    #[tokio::test]
+    async fn la_pantalla_recibe_el_pdf_de_una_factura_cuyo_cobro_aun_no_esta() {
+        let (c, g, n) = (Carpeta::default(), Generador::default(), Nube::default());
+        let r = Repo { sin_cobro: vec!["a".into(), "b".into(), "x".into()], ..Repo::con(&["a", "b", "x"]) };
+        c.guardar("a", PDF_NUBE).unwrap();
+        n.tiene.lock().unwrap().insert("b".into(), PDF_NUBE.to_vec());
+        let f = facturas(&r, &c, &g, Some(&n));
+
+        // Con el histórico a medias, que es cuando pasa.
+        assert_eq!(pdf_de_factura(&f, "a", AHORA, false).await.unwrap(), PDF_NUBE);
+        assert_eq!(pdf_de_factura(&f, "b", AHORA, false).await.unwrap(), PDF_NUBE);
+        assert_eq!(c.de("b").as_deref(), Some(PDF_NUBE));
+
+        // La que no está en ningún sitio no se puede componer: no es que no exista.
+        let e = pdf_de_factura(&f, "x", AHORA, false).await.unwrap_err();
+        assert_eq!(e.to_string(), MSG_HISTORICO_A_MEDIAS);
+        let e = pdf_de_factura(&f, "x", AHORA, true).await.unwrap_err();
+        assert!(matches!(e, AppError::Conflict(_)), "{e:?}");
+        assert_eq!(e.to_string(), MSG_SIN_SU_COBRO);
+        assert_eq!(*g.veces.lock().unwrap(), 0);
     }
 
     #[test]

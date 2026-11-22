@@ -261,6 +261,21 @@ impl FacturasPdfRepository for SqliteFacturasPdf {
             .next())
     }
 
+    async fn es_factura_completa(&self, id_registro: &str) -> AppResult<bool> {
+        let r = self.db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT 1 FROM Registros_Facturacion \
+                 WHERE ID_Registro = ?1 AND Tipo = 'ALTA' AND Destinatario_Json IS NOT NULL \
+                   AND (Subsanacion IS NULL OR Subsanacion <> 'S') LIMIT 1;",
+                vec![Value::Text(id_registro.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(rows.next().await.map_err(db_err)?.is_some())
+    }
+
     async fn cobro_de_la_factura(&self, id_registro: &str) -> AppResult<Option<CobroDeLaFactura>> {
         let r = self.db.read().await;
         let mut rows = r
@@ -485,6 +500,35 @@ mod tests {
         );
         assert_eq!(repo.cobro_de_la_factura("00000000-0000-7000-8000-00000000000a").await.unwrap(), None);
         assert_eq!(repo.cobro_de_la_factura("no-existe").await.unwrap(), None);
+    }
+
+    /// Una F3 cuyos tickets aún no tienen su cobro en la base sigue siendo una factura completa:
+    /// su PDF se puede dar desde la carpeta o desde la nube.
+    #[tokio::test]
+    async fn una_factura_completa_lo_es_aunque_no_este_su_cobro() {
+        let (db, _dir) = con_facturas().await;
+        let sin_cobro = registro(
+            "00000000-0000-7000-8000-0000000000f4",
+            4,
+            "F-000003",
+            "F3",
+            CLIENTE,
+            r#"'{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000099","FechaExpedicionFactura":"02-01-2026"}]}'"#,
+            "NULL",
+        );
+        let sub = registro("00000000-0000-7000-8000-00000000005b", 5, "F-000001", "F1", CLIENTE, "NULL", "'p1'")
+            .replace("ID_Pago)", "ID_Pago, Subsanacion)")
+            .replace("'p1');", "'p1', 'S');");
+        sembrar(&db, &[&sin_cobro, &sub]).await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        assert!(repo.es_factura_completa("00000000-0000-7000-8000-0000000000f4").await.unwrap());
+        assert_eq!(repo.cobro_de_la_factura("00000000-0000-7000-8000-0000000000f4").await.unwrap(), None);
+        assert!(repo.es_factura_completa("00000000-0000-7000-8000-0000000000f1").await.unwrap());
+        // Un ticket, una subsanación o lo que no existe no lo son.
+        assert!(!repo.es_factura_completa("00000000-0000-7000-8000-00000000000a").await.unwrap());
+        assert!(!repo.es_factura_completa("00000000-0000-7000-8000-00000000005b").await.unwrap());
+        assert!(!repo.es_factura_completa("no-existe").await.unwrap());
     }
 
     #[tokio::test]
