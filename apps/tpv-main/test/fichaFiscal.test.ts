@@ -10,10 +10,12 @@ import {
     buscarFichas,
     datosDeFicha,
     fichaConNif,
+    fichaDestino,
     guardarPorDefecto,
     mismosDatos,
     normalizarNif,
     planDeGuardado,
+    rellenoConFicha,
     sirveParaFacturar,
     sugerenciasPorNombre,
     trasFacturar,
@@ -88,6 +90,49 @@ describe("con qué se rellena y qué se guarda", () => {
         expect(planDeGuardado(d, COMIDAS)).toEqual({ id_cliente: "c2", nif: "B12345674", razon_social: "Comidas SL", direccion_fiscal: null });
         expect(planDeGuardado(d, null).id_cliente).toBeNull();
         expect(normalizarNif(" x-1234567 l")).toBe("X1234567L");
+    });
+});
+
+describe("en qué ficha se guarda", () => {
+    // Ana reservó con su ficha (NIF 12345678Z) y la factura es a nombre de su empresa.
+    const ANA_CON_NIF = ficha("c4", "Ana", { nif: "12345678Z", razon_social: "Ana López" });
+
+    it("en la elegida, si el NIF es el suyo o no tenía", () => {
+        expect(fichaDestino(ANA_CON_NIF, ANA_CON_NIF, "12345678-z")).toBe(ANA_CON_NIF);
+        // Una ficha sin NIF se elige para ponérselo.
+        expect(fichaDestino(ANA, null, "A58818501")).toBe(ANA);
+        expect(fichaDestino(null, COMIDAS, "B12345674")).toBe(COMIDAS);
+        expect(fichaDestino(null, null, "A58818501")).toBeNull();
+    });
+
+    it("no en la elegida si el NIF es otro: el de otra ficha, o una ficha nueva", () => {
+        // El NIF de la empresa ya tiene ficha: ésa.
+        expect(fichaDestino(ANA_CON_NIF, COMIDAS, "B12345674")).toBe(COMIDAS);
+        // No la tiene: una nueva, y la de Ana no pierde su NIF.
+        expect(fichaDestino(ANA_CON_NIF, null, "A58818501")).toBeNull();
+        expect(planDeGuardado({ nombre_razon: "Otra SA", nif: "A58818501" }, fichaDestino(ANA_CON_NIF, null, "A58818501")).id_cliente).toBeNull();
+        // Una ficha sin NIF elegida, con el NIF de otra: tampoco se duplica.
+        expect(fichaDestino(ANA, COMIDAS, "B12345674")).toBe(COMIDAS);
+    });
+});
+
+describe("con qué queda el formulario al elegir una ficha", () => {
+    const VACIO = { nombre: "", nif: "", domicilio: "" };
+
+    it("la primera vez, lo que la ficha no tiene se deja como estaba", () => {
+        const escrito = { nombre: "x", nif: "A58818501", domicilio: "Calle 2" };
+        expect(rellenoConFicha(escrito, ANA, false)).toEqual({ nombre: "Ana García", nif: "A58818501", domicilio: "Calle 2" });
+        expect(rellenoConFicha(VACIO, COMIDAS, false)).toEqual({
+            nombre: "Comidas Peñalver SL",
+            nif: "B12345674",
+            domicilio: "Calle Mayor 1, Madrid",
+        });
+    });
+
+    it("tras otra ficha, se sustituye todo: no se mezclan los datos de las dos", () => {
+        const deComidas = rellenoConFicha(VACIO, COMIDAS, false);
+        expect(rellenoConFicha(deComidas, ANA, true)).toEqual({ nombre: "Ana García", nif: "", domicilio: "" });
+        expect(rellenoConFicha(deComidas, ROSA, true)).toEqual({ nombre: "Rosa", nif: "12345678Z", domicilio: "" });
     });
 });
 

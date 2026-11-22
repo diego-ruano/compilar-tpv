@@ -313,14 +313,20 @@ editar el teléfono de una ficha le borraría los datos fiscales. La de ahora ma
 El formulario de la factura completa (`DatosFiscalesModal`, en el cobro de la mesa, en la venta
 rápida y en Cuentas) los usa en la Main:
 
-- **Elegir cliente** busca las fichas por nombre, razón social o NIF y rellena los tres campos.
+- **Elegir cliente** busca las fichas por nombre, razón social o NIF y rellena los tres campos. Sobre
+  lo escrito a mano, lo que la ficha no tiene se deja como estaba; si antes se había elegido otra
+  ficha, se sustituye todo y lo que la nueva no tiene se vacía, para no facturar con el nombre de una
+  y el NIF de otra (`rellenoConFicha`).
 - Un NIF que es el de una ficha ofrece «Es <cliente>: rellenar con sus datos», y el nombre que se
   teclea sugiere las fichas que casan.
 - Si el cliente de la comanda que se cobra (el suyo o el de su reserva) tiene ficha con NIF, el
   formulario empieza con sus datos.
 - La casilla **Guardar en la ficha del cliente** sale marcada si los datos son nuevos o distintos de
   los de la ficha. Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
-  ninguna, se da de alta una con la razón social de nombre.
+  ninguna, se da de alta una con la razón social de nombre. La elegida deja de serlo si el NIF con
+  el que se factura es el de otra ficha (va a ésa) o distinto del que ya tenía (va a una nueva): la
+  comida de empresa que reservó una persona no le cambia el NIF a su ficha (`fichaDestino`). La
+  casilla lo dice.
 
 El guardado va **después** de que el cobro o la emisión hayan entrado (`trasFacturar`), nunca dentro
 ni antes, y si falla sólo se avisa: no impide ni deshace el cobro. Quien cobra puede no tener

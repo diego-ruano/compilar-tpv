@@ -30,11 +30,12 @@ import { eur } from "../lib/dinero";
 import { useMode } from "../stores/useMode";
 import {
     buscarFichas,
-    datosDeFicha,
     fichaConNif,
+    fichaDestino,
     guardarPorDefecto,
     mismosDatos,
     planDeGuardado,
+    rellenoConFicha,
     sirveParaFacturar,
     sugerenciasPorNombre,
     trasFacturar,
@@ -131,12 +132,15 @@ function Formulario({
         return () => clearTimeout(t);
     }, [inicial?.nombre_razon, inicial?.nif, inicial?.domicilio]);
 
-    /** Rellena con los datos de una ficha. Lo que la ficha no tiene se deja como estaba. */
+    /**
+     * Rellena con los datos de una ficha. Sobre lo escrito a mano, lo que la ficha no tiene se deja
+     * como estaba; si antes se había elegido otra, se sustituye todo (`rellenoConFicha`).
+     */
     function rellenar(f: ClienteParaFactura) {
-        const d = datosDeFicha(f);
-        setNombre(d.nombre_razon);
-        if (d.nif) setNif(d.nif);
-        if (d.domicilio) setDomicilio(d.domicilio);
+        const r = rellenoConFicha({ nombre, nif, domicilio }, f, elegida != null);
+        setNombre(r.nombre);
+        setNif(r.nif);
+        setDomicilio(r.domicilio);
         setElegida(f);
         setBuscador(null);
         setGuardarFicha(null);
@@ -165,7 +169,9 @@ function Formulario({
         domicilio: domicilio.trim() || undefined,
     };
     const coincidente = useMemo(() => (conFichas ? fichaConNif(fichas, nif) : null), [conFichas, fichas, nif]);
-    const destino = elegida ?? coincidente;
+    const destino = fichaDestino(elegida, coincidente, nif);
+    /** La ficha elegida no es donde se guardaría: el NIF es de otra, o no es el suyo. */
+    const noEsLaElegida = elegida != null && destino?.id_cliente !== elegida.id_cliente;
     const ofrecerCoincidente =
         coincidente != null &&
         coincidente.id_cliente !== elegida?.id_cliente &&
@@ -383,6 +389,9 @@ function Formulario({
                                 {destino
                                     ? `En la ficha de ${destino.nombre}, cuando la factura esté hecha.`
                                     : "En una ficha nueva con este nombre, cuando la factura esté hecha."}
+                                {noEsLaElegida
+                                    ? ` El NIF no es el de la ficha de ${elegida.nombre}: esa ficha no se cambia.`
+                                    : null}
                             </span>
                         </span>
                     </label>

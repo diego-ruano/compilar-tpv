@@ -109,6 +109,39 @@ it("los datos nuevos se guardan en la ficha después de cobrar, y no si el cobro
 	});
 });
 
+it("elegir otra ficha sustituye los datos de la primera, sin mezclarlos", async () => {
+	formulario(() => true);
+	fireEvent.click(await screen.findByRole("button", { name: "Elegir cliente" }));
+	fireEvent.change(screen.getByRole("textbox", { name: "Buscar cliente" }), { target: { value: "Paco" } });
+	fireEvent.click(await screen.findByRole("button", { name: /Paco/ }));
+	expect(campo(/NIF/).value).toBe("B12345674");
+
+	fireEvent.click(screen.getByRole("button", { name: "Elegir cliente" }));
+	fireEvent.change(screen.getByRole("textbox", { name: "Buscar cliente" }), { target: { value: "Ana" } });
+	fireEvent.click(await screen.findByRole("button", { name: /Ana García/ }));
+	expect(campo(/Nombre o razón social/).value).toBe("Ana García");
+	expect(campo(/NIF/).value).toBe("");
+	expect(campo(/Domicilio/).value).toBe("");
+	// Sin NIF no se puede facturar: no sale una factura con el nombre de una y el NIF de otra.
+	expect((screen.getByRole("button", { name: "Cobrar y facturar" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("facturar con otro NIF a quien reservó no le cambia el suyo a su ficha", async () => {
+	comandaConCliente.id = "c2";
+	formulario(() => true);
+	await waitFor(() => expect(campo(/NIF/).value).toBe("B12345674"));
+	fireEvent.change(campo(/Nombre o razón social/), { target: { value: "Otra Empresa SA" } });
+	fireEvent.change(campo(/NIF/), { target: { value: "A58818501" } });
+	expect(screen.getByText(/En una ficha nueva con este nombre/)).toBeTruthy();
+
+	fireEvent.click(screen.getByRole("button", { name: "Cobrar y facturar" }));
+	await waitFor(() => expect(llamadas.some((l) => l.comando === "clientes_guardar_datos_fiscales")).toBe(true));
+	expect(llamadas.find((l) => l.comando === "clientes_guardar_datos_fiscales")?.args).toMatchObject({
+		id_cliente: null,
+		nif: "A58818501",
+	});
+});
+
 it("en la Handy no se piden fichas ni se ofrece guardarlas", async () => {
 	useMode.setState({ mode: "handy" });
 	formulario(() => true);

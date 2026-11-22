@@ -100,6 +100,48 @@ export function datosDeFicha(f: ClienteParaFactura): DestinatarioInput {
     };
 }
 
+/** Lo que hay escrito en el formulario. */
+export type CamposFiscales = { nombre: string; nif: string; domicilio: string };
+
+/**
+ * Con qué queda el formulario al elegir una ficha. La primera vez, sobre lo escrito a mano, lo que
+ * la ficha no tiene se deja como estaba (se ha tecleado el NIF y se elige la ficha sin él para
+ * ponérselo). Si ya había otra ficha elegida, se sustituye todo: lo que la ficha no tiene se vacía,
+ * para no facturar con el nombre de una y el NIF de otra.
+ */
+export function rellenoConFicha(
+    actual: CamposFiscales,
+    f: ClienteParaFactura,
+    habiaOtra: boolean,
+): CamposFiscales {
+    const d = datosDeFicha(f);
+    const domicilio = d.domicilio ?? "";
+    if (habiaOtra) return { nombre: d.nombre_razon, nif: d.nif, domicilio };
+    return {
+        nombre: d.nombre_razon,
+        nif: d.nif || actual.nif,
+        domicilio: domicilio || actual.domicilio,
+    };
+}
+
+/**
+ * En qué ficha se guardan los datos con los que se factura: la elegida, salvo que el NIF sea el de
+ * otra ficha (entonces, ésa) o distinto del que la elegida ya tenía (entonces, ninguna: se da de
+ * alta otra). Es la comida de empresa reservada por una persona: se factura a la empresa, y la ficha
+ * de quien reservó no puede quedarse con el NIF de la empresa.
+ */
+export function fichaDestino(
+    elegida: ClienteParaFactura | null,
+    coincidente: ClienteParaFactura | null,
+    nif: string,
+): ClienteParaFactura | null {
+    if (elegida == null) return coincidente;
+    if (coincidente != null && coincidente.id_cliente !== elegida.id_cliente) return coincidente;
+    const suyo = normalizarNif(elegida.nif);
+    if (suyo && suyo !== normalizarNif(nif)) return null;
+    return elegida;
+}
+
 /** ¿Tiene la ficha lo necesario para empezar el formulario con ella? (el NIF y un nombre) */
 export function sirveParaFacturar(f: ClienteParaFactura | null | undefined): f is ClienteParaFactura {
     return f != null && f.nif != null && nifValido(f.nif);
