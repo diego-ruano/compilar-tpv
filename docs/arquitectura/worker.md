@@ -20,6 +20,7 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 | `/v1/clientes`, `/configuracion`, `/cuentas`, `/inventario`, `/login`, `/mesas`, `/notificaciones`, `/pedidos-proveedor`, `/proveedores`, `/reservas`, `/stats`, `/tareas`, `/trabajadores`, `/venta-rapida` | `domains/<dominio>/` | La Handy (lecturas y escrituras de negocio) |
 | `/v1/sync/*` | `domains/sync/` | La Main: catch-up, volcado, histórico, contraste ([sincronizacion.md](sincronizacion.md)) |
 | `/v1/images/*` | `domains/images/` | Subir, servir y borrar imágenes en R2 |
+| `/v1/facturas/*` | `domains/facturas/` | La Main: subir y bajar el PDF de cada factura completa ([Facturas en PDF](#facturas-en-pdf)) |
 | `/v1/email/*` | `domains/email/` | El correo de un pedido a un proveedor (la Main y la Handy) |
 | `/v1/pair/*`, `/v1/device/*` | `domains/pairing/` | Emparejamiento ([emparejamiento.md](emparejamiento.md)) |
 | `/v1/license/*`, `/v1/stripe/*`, `/v1/admin/*` | `domains/{licensing,stripe,admin}/` | Licencias ([licencias.md](licencias.md)) |
@@ -29,12 +30,14 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
 (escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): los
-DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (se lee por el worker, [Imágenes](#imágenes)),
+DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (las imágenes y el PDF de las facturas; se lee
+por el worker, [Imágenes](#imágenes) y [Facturas en PDF](#facturas-en-pdf)),
 `tpv-copias-control` (privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los
 limitadores por IP `LIMITADOR_CLAIM`, `LIMITADOR_LICENCIA`, `LIMITADOR_RESERVA_WEB`,
 `LIMITADOR_RESERVA_WEB_ALTA` y `LIMITADOR_IMAGENES` (`lib/limitador.ts`) y el cron diario `0 7 * * *`.
 
-RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`. En desarrollo local, R2 y
+RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`; lo de los TPV
+(imágenes y facturas) va en `IMAGES`, separado por carpetas. En desarrollo local, R2 y
 `EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
 el mismo `wrangler.json` con el entorno pisado ([los tests no salen a la red](#los-tests-no-salen-a-la-red))
@@ -251,8 +254,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
     reservó en una agenda ya retirada), y lo que llega mientras se borra espera a que termine. Si lo
     que está a medias no acaba en diez segundos, falla con `agenda_ocupada` y el negocio se queda
     para el siguiente intento;
-  - sus imágenes: la carpeta del negocio en el bucket (`prefijoDelNegocio`), que acaba en `/` y por
-    eso no es el principio de la de otro. La copia que el edge tenga en caché caduca sola.
+  - sus imágenes y el PDF de sus facturas: la carpeta del negocio en el bucket (`prefijoDelNegocio`),
+    que acaba en `/` y por eso no es el principio de la de otro. Es lo único que borra una factura
+    del bucket, y sólo de un negocio de pruebas. La copia que el edge tenga en caché caduca sola.
 
   Lo cubre `test/retirarUnNegocio.test.ts`.
 
@@ -506,7 +510,9 @@ La CSP de la webview admite en `img-src` el origen del worker y no `r2.dev` (lo 
 - **200** con los bytes, `Content-Type` según la extensión (el PUT ya exige que los bytes casen con
   ella), `Cache-Control: public, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff` y el
   `ETag` de R2.
-- **400** `bad_image_path` si la ruta no es de la app, **404** `not_found` si aún no está en el bucket
+- **400** `bad_image_path` si la ruta no es de la app o el negocio del camino no tiene forma de id
+  (letras, cifras, `-` y `_`: ni una barra, que Hono descodificaría de un `%2F`, ni un punto),
+  **404** `not_found` si aún no está en el bucket
   (la subida va por otro canal: el mismo URL la da en cuanto llegue) y **429** `too_many_attempts` si
   la red de quien pide pasa del filtro. Los tres con `Cache-Control: no-store`: no se guardan en la
   webview ni en una caché intermedia. El 400 y el 429 no llegan a R2; el 404 es una lectura que no
@@ -564,6 +570,65 @@ credenciales y servidor conservan la entrada para reintentar. Una cola ilegible 
 no se trata como vacía ni se sobrescribe. Configuración → Conectividad muestra el estado y permite
 reintentar; sustituir una imagen desde su ficha elimina su entrada anterior. Cada rechazo nuevo
 se registra a nivel ERROR, que la integración existente con Sentry captura una sola vez.
+
+## Facturas en PDF
+
+El PDF de cada factura completa (un registro `ALTA` de `Registros_Facturacion` con destinatario) se
+guarda en el mismo bucket que las imágenes, `IMAGES` (`tpv-images`), en
+`{tenant}/facturas/{ID_Registro}.pdf`: un solo bucket para lo de los TPV, y lo que separa una cosa de
+otra es la carpeta. Lo compone la Main una vez, después del cobro o de la emisión, y lo sube; es la
+copia «congelada» que vuelve a bajar un equipo restaurado. Sólo la ve la Main, nunca la Handy.
+
+Las rutas están en `domains/facturas/facturas.routes.ts` (la clave, en `claveDeFactura.ts`). No tocan la
+base del negocio, así que se ejecutan en el Worker (sin `alHub`) y el veto es `soloLaMainVigente`, que
+además mira la licencia sin caché. **Ninguna ruta borra una factura**: se conservan por ley. Lo único
+que vacía esa carpeta es retirar un negocio de pruebas, que se lleva todo lo suyo.
+
+**El contrato.** Las dos rutas van firmadas como las demás (`Authorization: Bearer`, `X-Device-Ts`,
+`X-Device-Sig`; la firma cubre los bytes del cuerpo). El negocio sale del token; en el camino o en el
+cuerpo sólo viaja el `ID_Registro`, un UUID (en cualquier caja; la clave lo escribe en minúsculas),
+nunca el número de la factura ni el NIF (AUD-27).
+
+`PUT /v1/facturas/{ID_Registro}`: sube el PDF. Cuerpo: los bytes del PDF tal cual
+(`Content-Type: application/pdf`).
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | `{ "ok": true, "ya_estaba": false }` | Guardado |
+| 200 | `{ "ok": true, "ya_estaba": true }` | Ya había un PDF de ese registro: no se toca (una factura subida no cambia). Para la Main es «subido» |
+| 400 | `factura_id_no_valido` | El id del camino no es un UUID |
+| 400 | `factura_no_es_pdf` | El cuerpo no empieza por `%PDF-` (o va vacío) |
+| 403 | `forbidden_not_tpv` | Lo pide una Handy |
+| 403 | `device_replaced` / `license_revoked` (y los demás rechazos de `tenantAuth`, 401 o 403) | La licencia ya no es de este equipo, o la firma o el token no valen |
+| 413 | `factura_demasiado_grande` | Más de 5 MB (`MAX_BYTES_FACTURA`). Se decide antes de leer el cuerpo y de autenticar |
+
+`POST /v1/facturas/descargar`: baja el PDF. Cuerpo JSON `{ "id_registro": "<UUID>" }` (1 KB como
+mucho; si pasa, 413 `payload_too_large`).
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| 200 | Los bytes, `Content-Type: application/pdf`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` y el `ETag` de R2 | Está en la nube |
+| 404 | `not_found` (`no-store`) | No está: aún no se ha subido. La Main la compone ella |
+| 400 | `factura_id_no_valido` | Falta `id_registro` o no es un UUID (sin espacios alrededor) |
+| 403 | `forbidden_not_tpv`, `device_replaced`… | Como en la subida |
+
+Los errores salen como todos los del worker, `{ ok: false, code, error }` (`completarErrores`), con
+`code` del catálogo: `validation` para los 400, `external` para el 413 y el 403 de la Handy, y
+`device_revoked` o `license_expired` para la licencia. Los identificadores `factura_*` están en
+`SIN_MENSAJE_PROPIO`: los lee el job de la Main, que reintenta o aparta, y no llegan a nadie.
+
+**No se sobrescribe.** La subida pregunta antes si ya está (`head`) y, si no, escribe con
+`If-None-Match: *`: si otra subida del mismo registro se cuela entre medias, R2 no escribe y la ruta
+contesta `ya_estaba: true`.
+
+**Las rutas de imágenes no llegan a las facturas.** Todas exigen una ruta con la forma de
+`RUTA_DE_IMAGEN` (que empieza por `images/` y acaba en una extensión de imagen), y el GET público
+además un negocio con forma de id. Ni el GET público, ni la subida, el borrado o la descarga firmados
+de imágenes entregan, aceptan o borran nada de `facturas/`, se les pida como se les pida (mayúsculas,
+`..`, `%2e%2e`, `\`, `%2F` en la ruta o en el negocio): lo vigila `test/facturasEnElBucket.test.ts`, que
+cubre también la inmutabilidad, el tope, el veto y que sólo borren del bucket las rutas de imágenes y
+la retirada de un negocio de pruebas. Que las rutas de facturas sean de la Main vigente lo vigila
+además `test/mainDesplazadaRest.test.ts`.
 
 ## Salud y vigilancia externa
 

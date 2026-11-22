@@ -115,6 +115,12 @@ export interface Env {
 	// firmado de `/download` (la Main); las ESCRITURAS (PUT/DELETE) van firmadas (JWT +
 	// device-proof) y el negocio sale del token. INFRA-03: su dirección pública `r2.dev` está
 	// cerrada; sólo se lee por el worker.
+	//
+	// Guarda también el PDF de cada factura completa, en `{tenantId}/facturas/{ID_Registro}.pdf`: un
+	// solo bucket para lo de los TPV, por decisión del responsable. Esa carpeta sólo se sube y se baja
+	// por `/v1/facturas` (firmado, sólo la Main vigente), nunca se sobrescribe ni se borra, y ninguna
+	// ruta de `/v1/images` —tampoco el GET público— la entrega, la acepta ni la borra
+	// (`domains/facturas/`, `test/facturasEnElBucket.test.ts`).
 	IMAGES: R2Bucket;
 
 	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`server/copiaBaseCentral.ts`).

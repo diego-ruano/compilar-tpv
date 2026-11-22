@@ -400,6 +400,11 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"correo_en_curso",
 	"aviso_superado",
 	"agenda_no_disponible",
+	// El PDF de una factura (`/v1/facturas`): sólo los lee el job de la Main que los sube, que
+	// reintenta o aparta; no llegan a nadie.
+	"factura_id_no_valido",
+	"factura_no_es_pdf",
+	"factura_demasiado_grande",
 	// El id de un parámetro de ruta que llega en blanco (`parseId`). La Handy no lo manda nunca:
 	// el caso de uso de la Main ya exige el id antes de llamar, con su frase (VALID-03).
 	"id_asignacion_invalido",

@@ -72,6 +72,9 @@ export type EntornoDeRetirada = EntornoDelHub & Pick<Env, "AgendaWeb" | "IMAGES"
  * Borra las imágenes de un negocio: todo lo que cuelga de su carpeta en el bucket
  * (`{tenantId}/…`, ver `images.routes.ts`). Devuelve cuántas.
  *
+ * Se lleva también el PDF de sus facturas (`{tenantId}/facturas/`), que ninguna ruta borra: es un
+ * negocio de pruebas, y retirarlo es no dejar nada suyo en la nube.
+ *
  * La carpeta acaba en `/`, así que la de un negocio no es el principio de la de otro. Un id vacío o
  * con una barra no nombra una carpeta de negocio: no se borra nada.
  */

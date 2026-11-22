@@ -19,6 +19,11 @@
 //                           token (no del path). Sólo la app (Main/Handy emparejados) escribe.
 //   - DELETE /*           → FIRMADO. Borra el objeto (reemplazo/limpieza) y purga su copia
 //                           cacheada en el edge (REV-20; ver la nota del handler sobre el alcance).
+//
+// El bucket guarda también el PDF de las facturas, en `{tenant}/facturas/` (`domains/facturas/`).
+// Ninguna de estas rutas lo entrega, lo acepta ni lo borra: todas exigen una ruta con la forma de
+// `RUTA_DE_IMAGEN`, que empieza por `images/` y acaba en una extensión de imagen, y el GET público
+// además un negocio sin barras (`NEGOCIO_DEL_CAMINO`). Lo vigila `test/facturasEnElBucket.test.ts`.
 
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -44,6 +49,12 @@ export function prefijoDelNegocio(tenantId: string): string {
 }
 
 export const imagesRoutes = new Hono<Ctx>();
+
+/**
+ * El negocio en el camino del GET público: un id de negocio (un UUID; letras, cifras y guiones).
+ * Ni una barra, ni un punto, ni un `%`: lo que se le pega detrás es una carpeta del bucket.
+ */
+const NEGOCIO_DEL_CAMINO = /^[A-Za-z0-9_-]{1,128}$/;
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB (la Main ya comprime antes de subir)
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -143,7 +154,10 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	const tenant = (c.req.param("tenant") || "").trim();
 	// Hono no registra `*` como parámetro con nombre. Derivar la ruta del pathname montado.
 	const relPath = relPathFromUrl(c.req.url).split("/").slice(1).join("/");
-	if (!tenant || !RUTA_DE_IMAGEN.test(relPath)) {
+	// El negocio nombra una carpeta del bucket: sin barras (Hono descodifica `%2F` en el parámetro)
+	// ni nada que no tenga un id de negocio. Con la ruta, que empieza siempre por `images/`, es lo que
+	// hace que este GET no llegue a otra carpeta del negocio, como la de sus facturas.
+	if (!NEGOCIO_DEL_CAMINO.test(tenant) || !RUTA_DE_IMAGEN.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400, SIN_CACHE);
 	}
 

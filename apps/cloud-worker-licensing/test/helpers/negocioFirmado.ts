@@ -124,7 +124,9 @@ function ahora(): string {
 
 /**
  * Una petición firmada por `deviceId` (`MAIN` o `HANDY`), lista para `app.request` o para el
- * `fetch` del worker. `cuerpo` se manda como JSON; sin él, la petición va sin cuerpo.
+ * `fetch` del worker. `cuerpo` se manda como JSON; `bytes`, tal cual (un PDF, una imagen); sin
+ * ninguno de los dos, la petición va sin cuerpo. La firma cubre el camino como lo verá el worker,
+ * ya normalizado por la URL (`..`, `%2e%2e`), igual que lo firma el cliente Rust.
  */
 export async function peticionFirmada(
 	deps: Pick<Dependencias, "firmarSesion">,
@@ -132,12 +134,16 @@ export async function peticionFirmada(
 	deviceId: string,
 	metodo: string,
 	ruta: string,
-	opciones: { cuerpo?: unknown; cabeceras?: Record<string, string> } = {},
+	opciones: { cuerpo?: unknown; bytes?: Uint8Array; cabeceras?: Record<string, string> } = {},
 ): Promise<Request> {
 	const token = await deps.firmarSesion(env, { tenantId: n.tenantId, deviceId, licHash: LIC_HASH });
-	const cuerpo = opciones.cuerpo === undefined ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(opciones.cuerpo));
+	const cuerpo =
+		opciones.bytes ??
+		(opciones.cuerpo === undefined ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(opciones.cuerpo)));
 	const ts = Date.now();
-	const mensaje = ["DEVICE_PROOF", ts, metodo, ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
+	const url = new URL(`https://tpv-api.test${ruta}`);
+	const firmada = url.pathname + url.search;
+	const mensaje = ["DEVICE_PROOF", ts, metodo, firmada, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
 	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), SEMILLAS[deviceId]));
 	return new Request(`https://tpv-api.test${ruta}`, {
 		method: metodo,
@@ -150,7 +156,7 @@ export async function peticionFirmada(
 			...(opciones.cuerpo === undefined ? {} : { "content-type": "application/json" }),
 			...opciones.cabeceras,
 		},
-		...(opciones.cuerpo === undefined ? {} : { body: cuerpo }),
+		...(opciones.cuerpo === undefined && opciones.bytes === undefined ? {} : { body: cuerpo }),
 	});
 }
 

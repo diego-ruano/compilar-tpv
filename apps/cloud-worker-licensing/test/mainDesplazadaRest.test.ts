@@ -22,7 +22,7 @@
 //     dice que ha sido sustituida;
 //   · una Handy no pasa por esta comprobación;
 //   · las pocas rutas de la Main que se ejecutan en el Worker (emparejar, dispositivos, reservas de
-//     la web) miran la licencia sin la caché (`soloLaMainVigente`), y ningún router con rutas de la
+//     la web, el PDF de las facturas) miran la licencia sin la caché (`soloLaMainVigente`), y ningún router con rutas de la
 //     Main fuera del hub se queda sin hacerlo.
 //
 // La base central del Worker es un doble (`getDb`) que vive en otro Durable Object de pruebas, y
@@ -246,7 +246,12 @@ describe("las rutas de la Main que se ejecutan en el Worker", () => {
 			.filter(([, fuente]) => !/\.use\(\s*"\*",\s*tenantAuth,\s*alHub\b/.test(fuente))
 			.map(([fichero]) => fichero);
 		expect(fueraDelHub).toEqual([]);
-		for (const fichero of ["pairing/pairing.routes.ts", "pairing/dispositivos.routes.ts", "reservas_web/main.routes.ts"]) {
+		for (const fichero of [
+			"pairing/pairing.routes.ts",
+			"pairing/dispositivos.routes.ts",
+			"reservas_web/main.routes.ts",
+			"facturas/facturas.routes.ts",
+		]) {
 			expect(sinComentarios(fuentes[`../src/domains/${fichero}`]), fichero).toMatch(/soloLaMainVigente\(/);
 		}
 	});
