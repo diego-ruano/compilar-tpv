@@ -304,6 +304,12 @@ social y la dirección saneadas y recortadas a 120 y 250 caracteres. El worker h
 (`lib/fiscal.ts`), con los casos en `validacion_casos.json` y `nif_casos.json`. La ficha enseña
 sus datos de facturación si los tiene.
 
+En el worker, una clave que no viene en el cuerpo (`POST`/`PUT /v1/clientes`) no es lo mismo que una
+que viene vacía: la columna de la que no viene no se toca. La Handy de la versión anterior no conoce
+estos campos y no los manda, y convive con el worker nuevo, que se despliega antes; sin esto, al
+editar el teléfono de una ficha le borraría los datos fiscales. La de ahora manda siempre los tres,
+`null` si están vacíos. Lo prueba `guardasEnElLote.test.ts` (FISCAL-02).
+
 El formulario de la factura completa (`DatosFiscalesModal`, en el cobro de la mesa, en la venta
 rápida y en Cuentas) los usa en la Main:
 

@@ -18,6 +18,27 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
+const CAMPOS_FISCALES = ["nif", "razon_social", "direccion_fiscal"] as const;
+type CampoFiscal = (typeof CAMPOS_FISCALES)[number];
+
+/**
+ * FISCAL-02 · Los datos fiscales que trae el cuerpo: los que vienen (`null` si vacíos) y, por cada
+ * uno, si viene (1) o no (0). Una Handy de la versión anterior no los manda, y lo que no viene no se
+ * toca: si no, al editar el teléfono de una ficha le borraría el NIF que le puso la Main.
+ */
+function datosFiscales(input: Partial<Record<CampoFiscal, string | null>>) {
+	const valores = {} as Record<CampoFiscal, string | null>;
+	const vienen = {} as Record<CampoFiscal, 0 | 1>;
+	const enElCuerpo = {} as Partial<Record<CampoFiscal, string | null>>;
+	for (const k of CAMPOS_FISCALES) {
+		const viene = input[k] !== undefined;
+		valores[k] = viene ? cleanOrNull(input[k]) : null;
+		vienen[k] = viene ? 1 : 0;
+		if (viene) enElCuerpo[k] = valores[k];
+	}
+	return { valores, vienen, enElCuerpo };
+}
+
 /**
  * SYNC-30: 1 si el email (`?1`) no es de ningún cliente salvo, si lo hay, el que se guarda (`?2`).
  * Es el criterio del índice único `ux_clientes_email` (sobre `lower(Email)`, sin contar los vacíos),
@@ -45,16 +66,15 @@ function idStep(provided?: string | null) {
 // UPDATE), no un alta estricta. Es intencional para que reaplicar el mismo comando (misma
 // Op_Id/UUID en catch-up o reintentos de sync) sea idempotente en vez de romper por PK.
 export function createCliente(input: CreateClienteInput): BuiltCommand {
+	// FISCAL-02: llegan normalizados por el schema, como en la Main.
+	const fiscal = datosFiscales(input);
 	const cloudPayload = {
 		id_cliente: input.id_cliente,
 		nombre: recortar(input.nombre),
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),
-		// FISCAL-02: llegan normalizados por el schema, como en la Main.
-		nif: cleanOrNull(input.nif),
-		razon_social: cleanOrNull(input.razon_social),
-		direccion_fiscal: cleanOrNull(input.direccion_fiscal),
+		...fiscal.enElCuerpo,
 	};
 
 	const steps = [
@@ -90,9 +110,9 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 					Telefono = excluded.Telefono,
 					Email = excluded.Email,
 					Notas = excluded.Notas,
-					NIF = excluded.NIF,
-					Razon_Social = excluded.Razon_Social,
-					Direccion_Fiscal = excluded.Direccion_Fiscal;
+					NIF = CASE WHEN ?9 THEN excluded.NIF ELSE NIF END,
+					Razon_Social = CASE WHEN ?10 THEN excluded.Razon_Social ELSE Razon_Social END,
+					Direccion_Fiscal = CASE WHEN ?11 THEN excluded.Direccion_Fiscal ELSE Direccion_Fiscal END;
 			`,
 			args: [
 				REF_ID,
@@ -100,9 +120,12 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 				cloudPayload.telefono,
 				cloudPayload.email,
 				cloudPayload.notas,
-				cloudPayload.nif,
-				cloudPayload.razon_social,
-				cloudPayload.direccion_fiscal,
+				fiscal.valores.nif,
+				fiscal.valores.razon_social,
+				fiscal.valores.direccion_fiscal,
+				fiscal.vienen.nif,
+				fiscal.vienen.razon_social,
+				fiscal.vienen.direccion_fiscal,
 			],
 		},
 	];
@@ -115,15 +138,14 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 }
 
 export function updateCliente(idCliente: string, input: UpdateClienteInput): BuiltCommand {
+	const fiscal = datosFiscales(input);
 	const cloudPayload = {
 		id_cliente: idCliente,
 		nombre: recortar(input.nombre),
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),
-		nif: cleanOrNull(input.nif),
-		razon_social: cleanOrNull(input.razon_social),
-		direccion_fiscal: cleanOrNull(input.direccion_fiscal),
+		...fiscal.enElCuerpo,
 	};
 
 	return {
@@ -142,9 +164,9 @@ export function updateCliente(idCliente: string, input: UpdateClienteInput): Bui
 								Telefono = ?2,
 								Email = ?3,
 								Notas = ?4,
-								NIF = ?5,
-								Razon_Social = ?6,
-								Direccion_Fiscal = ?7
+								NIF = CASE WHEN ?9 THEN ?5 ELSE NIF END,
+								Razon_Social = CASE WHEN ?10 THEN ?6 ELSE Razon_Social END,
+								Direccion_Fiscal = CASE WHEN ?11 THEN ?7 ELSE Direccion_Fiscal END
 							WHERE ID_Cliente = ?8;
 						`,
 						args: [
@@ -152,10 +174,13 @@ export function updateCliente(idCliente: string, input: UpdateClienteInput): Bui
 							cloudPayload.telefono,
 							cloudPayload.email,
 							cloudPayload.notas,
-							cloudPayload.nif,
-							cloudPayload.razon_social,
-							cloudPayload.direccion_fiscal,
+							fiscal.valores.nif,
+							fiscal.valores.razon_social,
+							fiscal.valores.direccion_fiscal,
 							cloudPayload.id_cliente,
+							fiscal.vienen.nif,
+							fiscal.vienen.razon_social,
+							fiscal.vienen.direccion_fiscal,
 						],
 					},
 				],

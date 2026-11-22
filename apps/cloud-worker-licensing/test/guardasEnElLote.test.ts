@@ -1213,3 +1213,44 @@ describe("SYNC-30 · el correo de un cliente lo decide la guarda del lote", () =
 		});
 	});
 });
+
+/* =========================================================
+   FISCAL-02 · Los datos fiscales y la Handy de la versión anterior
+========================================================= */
+
+// No es una guarda, pero se prueba con el mismo arnés: la ruta de verdad y el motor del TenantHub.
+// La Handy de la versión anterior no conoce el NIF, la razón social ni la dirección fiscal y no los
+// manda; el worker se despliega antes que las apps, así que convive con ella. Lo que no viene no se
+// toca: si no, al editar el teléfono de una ficha le borraría los datos que le puso la Main.
+describe("FISCAL-02 · una ficha guardada sin los datos fiscales los conserva", () => {
+	const conDatos =
+		"INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, NIF, Razon_Social, Direccion_Fiscal) VALUES ('ana', 'Ana', '600000000', 'B12345674', 'Comidas SL', 'Calle Mayor 1')";
+	const intactos = "SELECT COUNT(*) FROM Clientes WHERE ID_Cliente = 'ana' AND NIF = 'B12345674' AND Razon_Social = 'Comidas SL' AND Direccion_Fiscal = 'Calle Mayor 1'";
+
+	it("editar desde una Handy que no los manda no los borra", async () => {
+		await conNegocio("fiscal-editar-antigua", [conDatos], async (n) => {
+			const r = await n.pedir("PUT", "/v1/clientes/ana", { nombre: "Ana", email: null, telefono: "611111111", notas: null });
+			expect(r).toEqual({ status: 200, json: { ok: true } });
+			expect(n.n("SELECT COUNT(*) FROM Clientes WHERE Telefono = '611111111'")).toBe(1);
+			expect(n.n(intactos)).toBe(1);
+		});
+	});
+
+	it("el reintento de un alta que no los manda tampoco los borra", async () => {
+		await conNegocio("fiscal-alta-antigua", [conDatos], async (n) => {
+			const r = await n.pedir("POST", "/v1/clientes", { id_cliente: "ana", nombre: "Ana", email: null, telefono: "600000000", notas: null });
+			expect(r).toEqual({ status: 200, json: { ok: true, id_cliente: "ana" } });
+			expect(n.n(intactos)).toBe(1);
+		});
+	});
+
+	it("la Handy de ahora, que los manda vacíos, sí los borra; y los cambia si vienen", async () => {
+		await conNegocio("fiscal-editar-nueva", [conDatos], async (n) => {
+			const base = { nombre: "Ana", email: null, telefono: null, notas: null };
+			await n.pedir("PUT", "/v1/clientes/ana", { ...base, nif: "a58818501", razon_social: "Otra SA", direccion_fiscal: null });
+			expect(n.n("SELECT COUNT(*) FROM Clientes WHERE NIF = 'A58818501' AND Razon_Social = 'Otra SA' AND Direccion_Fiscal IS NULL")).toBe(1);
+			await n.pedir("PUT", "/v1/clientes/ana", { ...base, nif: null, razon_social: null, direccion_fiscal: null });
+			expect(n.n("SELECT COUNT(*) FROM Clientes WHERE NIF IS NULL AND Razon_Social IS NULL AND Direccion_Fiscal IS NULL")).toBe(1);
+		});
+	});
+});

@@ -67,20 +67,27 @@ const notas = optStr.refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO);
 
 // FISCAL-02: los datos para facturarle, normalizados como el destinatario de la factura
 // (`DatosFiscales::validar` en la Main). Vacío => null; un NIF con algo tiene que pasar el control.
+//
+// Una clave que NO VIENE se queda `undefined`, que no es lo mismo que `null` (vacío): la Handy de la
+// versión anterior no conoce estos campos y no los manda, y al editar una ficha no puede borrarle
+// los datos fiscales que le puso la Main. El comando no toca la columna de una clave que no viene
+// (`clientes.commands.ts`). La Handy de ahora manda siempre las tres, `null` si están vacías.
 const nif = z
 	.string()
 	.nullish()
 	.transform((v) => {
+		if (v === undefined) return undefined;
 		const n = normalizarNif((v ?? "").toString());
 		return n.length ? n : null;
 	})
-	.refine((v) => v === null || nifValido(v), { message: MSG_NIF_NO_VALIDO });
+	.refine((v) => v == null || nifValido(v), { message: MSG_NIF_NO_VALIDO });
 
 function saneado(max: number) {
 	return z
 		.string()
 		.nullish()
 		.transform((v) => {
+			if (v === undefined) return undefined;
 			const t = sanearTexto((v ?? "").toString(), max);
 			return t.length ? t : null;
 		});
