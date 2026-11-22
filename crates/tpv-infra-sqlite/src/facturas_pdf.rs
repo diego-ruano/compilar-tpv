@@ -138,9 +138,15 @@ async fn sustituciones<R: Reader>(r: &R) -> AppResult<std::collections::HashMap<
     Ok(por)
 }
 
+/// El cobro en pie de un número de ticket.
+const SQL_PAGO_ACTIVO_DE_TICKET: &str = "SELECT ID_Pago FROM Pagos \
+     WHERE Numero_Ticket = ?1 AND Estado = 'ACTIVO' ORDER BY Fecha_Hora ASC LIMIT 1;";
+
 /// El cobro con el que se imprime una factura: el suyo; y una `F3` de varios tickets, que no
 /// cuelga de ningún cobro, se imprime desde cualquiera de los que canjea (`tickets.rs`): el primero
-/// que se encuentre.
+/// que siga en pie. Desde el de un ticket dado de baja el papel saldría marcado ANULADO, y la `F3`
+/// sigue vigente por los demás (`emitir_baja_de_pago` sólo emite la negativa de ese ticket). Si
+/// todos están dados de baja, el primero que se encuentre.
 async fn pago_de_la_factura<R: Reader>(
     r: &R,
     id_pago: Option<String>,
@@ -149,8 +155,20 @@ async fn pago_de_la_factura<R: Reader>(
     if let Some(p) = id_pago.filter(|s| !s.trim().is_empty()) {
         return Ok(Some(p));
     }
-    for num in crate::verifactu::numeros_sustituidos(referencias) {
-        if let Some(p) = crate::tickets::pago_de_ticket(r, &num).await? {
+    let tickets = crate::verifactu::numeros_sustituidos(referencias);
+    for num in &tickets {
+        let mut rows = r
+            .query(SQL_PAGO_ACTIVO_DE_TICKET, vec![Value::Text(num.trim().to_string())])
+            .await
+            .map_err(db_err)?;
+        if let Some(row) = rows.next().await.map_err(db_err)? {
+            if let Some(p) = v_string(row.get_value(0).map_err(db_err)?) {
+                return Ok(Some(p));
+            }
+        }
+    }
+    for num in &tickets {
+        if let Some(p) = crate::tickets::pago_de_ticket(r, num).await? {
             return Ok(Some(p));
         }
     }
@@ -778,6 +796,52 @@ mod tests {
         );
         let nuevo = repo.facturas_del_nif("A58818501", 10).await.unwrap();
         assert_eq!((nuevo.len(), nuevo[0].sustituida_por.as_deref()), (1, None));
+    }
+
+    /// Una F3 de varios tickets se reimprime desde un cobro que siga en pie: desde el de un ticket
+    /// dado de baja, el papel saldría marcado ANULADO aunque la factura sigue vigente.
+    #[tokio::test]
+    async fn una_f3_de_varios_tickets_se_reimprime_desde_un_cobro_activo() {
+        let (db, _dir) = con_facturas().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) \
+                 VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+                // T-000009, el primero que canjea, se dio de baja después.
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, \
+                   Numero_Ticket, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja) \
+                 VALUES ('p9', 'com', '2026-01-02 12:35:00', 'Efectivo', 200, 'TOTAL', 'T-000009', \
+                   'ANULADO', '2026-01-03 10:00:00', 'u1', 'error', 'ERROR');",
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db.clone());
+
+        assert_eq!(
+            repo.cobro_de_la_factura("00000000-0000-7000-8000-0000000000f3").await.unwrap(),
+            Some(CobroDeLaFactura { id_pago: "p10".into(), num_serie: "F-000002".into() })
+        );
+        let f3 = repo
+            .facturas_del_nif("B87654321", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|f| f.num_serie == "F-000002")
+            .unwrap();
+        assert_eq!(f3.id_pago.as_deref(), Some("p10"));
+
+        // Si todos están dados de baja, cualquiera: la factura sigue teniendo papel.
+        sembrar(
+            &db,
+            &["UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = '2026-01-03 10:00:00', Anulado_Por = 'u1' \
+               WHERE ID_Pago = 'p10';"],
+        )
+        .await;
+        assert_eq!(
+            repo.cobro_de_la_factura("00000000-0000-7000-8000-0000000000f3").await.unwrap(),
+            Some(CobroDeLaFactura { id_pago: "p9".into(), num_serie: "F-000002".into() })
+        );
     }
 
     /// Las sustitutivas se buscan por el índice parcial, sin recorrer los tickets.

@@ -172,7 +172,7 @@ pub struct FacturaCompleta {
     pub tipo_factura: String,
     pub importe: Dinero,
     /// El cobro con el que se imprime su papel; el de una `F3` de varios tickets, el del primero
-    /// de los que canjea que esté en la base.
+    /// de los que canjea que esté en la base y siga en pie (si no queda ninguno, el del primero).
     pub id_pago: Option<String>,
     /// Tiene un registro de anulación posterior: fiscalmente ya no existe (la baja de su cobro por
     /// error, `verifactu::emitir_baja_de_pago`).

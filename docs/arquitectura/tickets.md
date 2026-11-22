@@ -165,7 +165,8 @@ propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
   a…» / «Sustituye a…», las líneas, el desglose declarado y el total salen de ahí, y el dinero con
   `fmt_eur`, el formateador del papel. Lo vigila `la_factura_lleva_lo_que_lleva_su_papel`, que saca los
   importes del ticket ESC/POS y los busca en el PDF. Una `F3` de varios tickets, que no cuelga de
-  ningún cobro, se compone desde el primero de los que canjea que esté en la base.
+  ningún cobro, se compone desde el primero de los que canjea que esté en la base y siga en pie
+  (si no queda ninguno, desde el primero que esté).
 - **Lo que exige una factura sale siempre**: el rótulo, la razón social, el NIF y la dirección del
   emisor, aunque el ticket los oculte; el teléfono y el mensaje final, si el ticket los lleva. El logo,
   si el ticket lo lleva, en JPEG (la transparencia sobre blanco, 600 px como mucho) y con las mismas
@@ -236,8 +237,9 @@ del antiguo se quedaría con la `F1` como vigente. Las sustitutivas se leen una 
   que da `clientes_factura_pdf` (el de arriba: local, nube o compuesto). La app no tiene con qué abrir
   un fichero con el visor del sistema; se guarda como el PDF de Cuentas.
 - **Reimprimir** abre el `PrintTicketModal` con el papel de su cobro y su número, marcado COPIA. Una
-  `F3` de varios tickets se reimprime desde el primero de los que canjea que esté en la base; si no
-  hay ninguno, el botón queda apagado.
+  `F3` de varios tickets se reimprime desde el primero de los que canjea que esté en la base y siga
+  en pie: desde el de un ticket dado de baja saldría marcada ANULADO, y la `F3` sigue vigente por los
+  demás. Si todos están dados de baja, desde el primero; si no hay ninguno, el botón queda apagado.
 
 La lista la da `clientes_facturas` (`use_cases::facturas_pdf::facturas_de_cliente`), que lee el NIF
 de la ficha y busca por el índice parcial de las facturas completas. Los dos comandos piden
