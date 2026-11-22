@@ -599,10 +599,15 @@ sesión y de sólo lectura: no firma, no sale a la red, no escribe. La franja `A
 (`app/arranque/`, hermana de `AvisoCaducidad` en `AppBoot`) lo lee al montar y cada minuto, en la Main
 y en la Handy y también antes del login, y aparece cuando la hora del equipo se aparta **5 minutos o
 más**: dice cuánto va adelantada o atrasada, que los tickets y la caja salen con esa hora y cómo
-ajustarla (en Windows, Configuración → Hora e idioma → Fecha y hora → «Sincronizar ahora»; en el
-teléfono, la fecha y la hora automáticas). No corrige nada ni toca el cobro. La medida se renueva sola
-con el tráfico que ya hay: en la Main, al menos la consulta de interruptores (job `interruptores`, cada
-5 minutos); en la Handy, cada lectura o escritura. Qué dice y a partir de cuánto, en
+ajustarla (sincronizándola con la hora de Internet: en Windows 10 y 11, Configuración → Hora e idioma
+→ Fecha y hora → «Sincronizar ahora»; en Windows 7, Panel de control → Fecha y hora → Hora de
+Internet; en el teléfono, la fecha y la hora automáticas). No corrige nada ni toca el cobro. La medida
+se renueva sola con el tráfico que ya hay: en la Main, al menos la consulta de interruptores (job
+`interruptores`, cada 5 minutos); en la Handy, cada lectura o escritura. Con la medida se guardan la
+hora del sistema y el reloj monótono de ese momento: si después la hora del sistema avanza más de un
+minuto más o menos que el monótono, alguien la ha cambiado (o el equipo ha estado suspendido) y la
+medida deja de valer hasta la siguiente. Así, quien pone el equipo en hora ve irse la franja en la
+lectura siguiente, sin esperar a otra respuesta de la nube. Qué dice y a partir de cuánto, en
 `relojDesfasado.ts` y `test/relojDesfasado.test.ts`.
 
 ## Anular desde la administración

@@ -25,10 +25,11 @@
 //!
 //! El desfase vive en memoria y no se guarda: al arrancar vale 0, la primera petición que la nube
 //! rechace por la hora trae ya la suya, y se repite una vez (ver [`es_rechazo_por_reloj`]). Ese 0 de
-//! arranque no es una medida, y por eso [`MEDIDO`] dice aparte si ya ha llegado alguna.
+//! arranque no es una medida, y por eso [`MEDIDA`] dice aparte si ya ha llegado alguna.
 
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Mutex;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{HeaderMap, DATE};
 use reqwest::{RequestBuilder, Response};
@@ -39,9 +40,22 @@ use tpv_application::error::AppError;
 /// saber el siguiente.
 static DESFASE_MS: AtomicI64 = AtomicI64::new(0);
 
-/// RELOJ-01 — ¿ha llegado ya alguna medida? Sin ella, el 0 de [`DESFASE_MS`] sólo es el valor de
-/// arranque: un equipo sin red que lleva un día adelantado no puede enseñar «la hora está bien».
-static MEDIDO: AtomicBool = AtomicBool::new(false);
+/// RELOJ-01 — la última medida, para el aviso: el desfase, y la hora del sistema y el reloj
+/// monótono de cuando se tomó. Sin ella, el 0 de [`DESFASE_MS`] sólo es el valor de arranque: un
+/// equipo sin red que lleva un día adelantado no puede enseñar «la hora está bien».
+static MEDIDA: Mutex<Option<Medida>> = Mutex::new(None);
+
+#[derive(Debug, Clone, Copy)]
+struct Medida {
+    desfase_ms: i64,
+    sistema_ms: i64,
+    monotono: Instant,
+}
+
+/// RELOJ-01 — si desde la medida la hora del sistema ha avanzado más o menos que el reloj monótono
+/// en más que esto, alguien la ha cambiado (o el equipo ha estado suspendido): la medida ya no dice
+/// nada de la hora de ahora.
+const SALTO_DEL_RELOJ_MS: i64 = 60_000;
 
 /// Una respuesta que tarda más que esto no sirve para medir: el error de la estimación es la mitad
 /// de la ida y vuelta, y con 10 s ya son 5 contra un margen de 120.
@@ -114,21 +128,37 @@ pub fn anotar_respuesta(cabeceras: &HeaderMap, enviada_ms: i64, recibida_ms: i64
     };
     if let Some(desfase) = estimar_desfase(fecha, enviada_ms, recibida_ms) {
         DESFASE_MS.store(desfase, Ordering::Relaxed);
-        // Después del desfase y con `Release`: quien vea la marca ve ya la medida que la puso.
-        MEDIDO.store(true, Ordering::Release);
+        // Los dos relojes de ahora, juntos: con ellos se sabe después si la hora del sistema ha
+        // saltado (`desfase_vigente`).
+        let medida = Medida { desfase_ms: desfase, sistema_ms: reloj_del_sistema_ms(), monotono: Instant::now() };
+        *MEDIDA.lock().unwrap_or_else(|e| e.into_inner()) = Some(medida);
     }
 }
 
 /// RELOJ-01 — el último desfase medido (positivo: el reloj del sistema va atrasado respecto a la
 /// nube; negativo: adelantado), o `None` si este proceso aún no ha tenido ninguna respuesta del
-/// worker con la que medirlo. Es lo que enseña el aviso del reloj; firmar sigue con [`ahora_ms`].
+/// worker con la que medirlo, o si la hora del sistema ha saltado desde entonces. Es lo que enseña el
+/// aviso del reloj; firmar sigue con [`ahora_ms`].
 ///
 /// La medida se renueva sola con cada respuesta: en la Main, al menos con la consulta de
-/// interruptores (cada 5 min, job `interruptores`); en la Handy, con cada lectura o escritura.
+/// interruptores (cada 5 min, job `interruptores`); en la Handy, con cada lectura o escritura. Quien
+/// pone el equipo en hora siguiendo el aviso no espera a la siguiente: la hora del sistema salta
+/// respecto al reloj monótono, la medida deja de valer y el aviso se va en su lectura siguiente. Si
+/// la hora sigue mal, la medida nueva lo vuelve a decir.
 pub fn desfase_medido_ms() -> Option<i64> {
-    MEDIDO
-        .load(Ordering::Acquire)
-        .then(|| DESFASE_MS.load(Ordering::Relaxed))
+    let medida = *MEDIDA.lock().unwrap_or_else(|e| e.into_inner());
+    desfase_vigente(medida.as_ref(), reloj_del_sistema_ms(), Instant::now())
+}
+
+/// El desfase de una medida, si sigue valiendo: si la hora del sistema ha avanzado desde ella lo
+/// mismo que el reloj monótono (con [`SALTO_DEL_RELOJ_MS`] de holgura). Un equipo que vuelve de
+/// suspenderse puede dar también por saltada la medida: entonces el aviso calla hasta la siguiente,
+/// que es lo seguro.
+fn desfase_vigente(medida: Option<&Medida>, sistema_ms: i64, ahora: Instant) -> Option<i64> {
+    let m = medida?;
+    let monotono_ms = i64::try_from(ahora.saturating_duration_since(m.monotono).as_millis()).unwrap_or(i64::MAX);
+    let sistema = sistema_ms.saturating_sub(m.sistema_ms);
+    (sistema.saturating_sub(monotono_ms).abs() <= SALTO_DEL_RELOJ_MS).then_some(m.desfase_ms)
 }
 
 /// Cuánto va por detrás (positivo) o por delante (negativo) el reloj del sistema respecto a la
@@ -265,6 +295,29 @@ mod tests {
         assert_eq!(desfase_medido_ms(), Some(-3_600_000));
         anotar_respuesta(&HeaderMap::new(), 0, 0);
         assert_eq!(desfase_medido_ms(), Some(-3_600_000));
+    }
+
+    /// RELOJ-01: quien pone el equipo en hora siguiendo el aviso no tiene que esperar a la medida
+    /// siguiente para que se vaya. La hora del sistema salta respecto al reloj monótono, y la medida
+    /// deja de valer.
+    #[test]
+    fn tras_poner_el_equipo_en_hora_la_medida_vieja_deja_de_valer() {
+        use std::time::Duration;
+        let t0 = Instant::now();
+        // Medido con el equipo dos horas adelantado.
+        let m = Medida { desfase_ms: -7_200_000, sistema_ms: 1_000_000_000, monotono: t0 };
+        let dentro = |s: u64| t0 + Duration::from_secs(s);
+
+        // Pasa el tiempo sin tocar la hora: la medida vale.
+        assert_eq!(desfase_vigente(Some(&m), 1_000_000_000 + 120_000, dentro(120)), Some(-7_200_000));
+        // Un desajuste pequeño entre los dos relojes no la invalida.
+        assert_eq!(desfase_vigente(Some(&m), 1_000_000_000 + 150_000, dentro(120)), Some(-7_200_000));
+        // Se atrasa la hora del sistema dos horas: la medida ya no dice nada de la hora de ahora.
+        assert_eq!(desfase_vigente(Some(&m), 1_000_000_000 + 120_000 - 7_200_000, dentro(120)), None);
+        // Y si se adelanta, tampoco.
+        assert_eq!(desfase_vigente(Some(&m), 1_000_000_000 + 120_000 + 7_200_000, dentro(120)), None);
+        // Sin medida, nada.
+        assert_eq!(desfase_vigente(None, 0, t0), None);
     }
 
     #[test]

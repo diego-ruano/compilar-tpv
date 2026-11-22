@@ -63,11 +63,15 @@ export function duracionEnPalabras(ms: number): string {
 	return horas === 0 ? d : `${d} y ${cuenta(horas, "hora", "horas")}`;
 }
 
-/** Cómo se pone en hora cada equipo: el PC de la Main (Windows) o el teléfono de la Handy. */
+/**
+ * Cómo se pone en hora cada equipo: el PC de la Main (Windows) o el teléfono de la Handy. El PC puede
+ * ser Windows 10 u 11 o Windows 7 (la rama `compilacion-windows-7` recibe este texto por merge), y
+ * el camino no es el mismo: van los dos.
+ */
 function comoAjustarla(movil: boolean): string {
 	return movil
 		? "Ajústala en los ajustes del dispositivo: Fecha y hora, con la fecha y la hora automáticas."
-		: "Ajústala en Windows: Configuración → Hora e idioma → Fecha y hora → «Sincronizar ahora».";
+		: "Ajústala sincronizándola con la hora de Internet. En Windows 10 y 11: Configuración → Hora e idioma → Fecha y hora → «Sincronizar ahora». En Windows 7: Panel de control → Fecha y hora → Hora de Internet → Cambiar la configuración → «Actualizar ahora».";
 }
 
 /** El texto entero de la franja. */

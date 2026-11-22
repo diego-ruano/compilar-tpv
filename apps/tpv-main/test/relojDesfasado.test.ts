@@ -78,6 +78,14 @@ describe("textoAvisoReloj", () => {
 		expect(texto).toContain("Configuración → Hora e idioma → Fecha y hora → «Sincronizar ahora»");
 	});
 
+	it("y en Windows 7, que no tiene ese camino, por el Panel de control", () => {
+		const texto = textoAvisoReloj(avisoDelReloj(10 * MIN)!, false);
+		expect(texto).toContain("En Windows 10 y 11:");
+		expect(texto).toContain(
+			"En Windows 7: Panel de control → Fecha y hora → Hora de Internet → Cambiar la configuración → «Actualizar ahora».",
+		);
+	});
+
 	it("en el teléfono de la Handy, los ajustes del dispositivo", () => {
 		const texto = textoAvisoReloj(avisoDelReloj(3 * DIA)!, true);
 		expect(texto).toContain("La hora de este equipo va 3 días atrasada.");
