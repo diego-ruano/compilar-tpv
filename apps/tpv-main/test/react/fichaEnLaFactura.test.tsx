@@ -173,6 +173,17 @@ it("facturar con otro NIF a quien reservó no le cambia el suyo a su ficha", asy
 	});
 });
 
+it("la ficha elegida no sale entre las sugerencias: pulsarla desharía el NIF que se acaba de escribir", async () => {
+	comandaConCliente.id = "c2";
+	formulario(() => true);
+	await waitFor(() => expect(campo(/NIF/).value).toBe("B12345674"));
+	// El cliente dicta otro NIF que no es de ninguna ficha; el nombre sigue siendo el de la suya.
+	fireEvent.change(campo(/NIF/), { target: { value: "A58818501" } });
+	expect(screen.getByText(/En una ficha nueva con este nombre/)).toBeTruthy();
+	expect(screen.queryByText("¿Es alguna de estas fichas?")).toBeNull();
+	expect(screen.queryByRole("button", { name: /Paco · B12345674/ })).toBeNull();
+});
+
 it("en la Handy no se piden fichas ni se ofrece guardarlas", async () => {
 	useMode.setState({ mode: "handy" });
 	formulario(() => true);

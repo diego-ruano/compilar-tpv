@@ -201,9 +201,14 @@ function Formulario({
         coincidente != null &&
         coincidente.id_cliente !== elegida?.id_cliente &&
         !mismosDatos(actuales, coincidente);
+    // La ficha ya elegida no se sugiere: está arriba, y pulsarla volvería a poner su NIF encima del
+    // que se acaba de escribir.
     const sugerencias = useMemo(
-        () => (conFichas && destino == null ? sugerenciasPorNombre(fichas, nombre) : []),
-        [conFichas, destino, fichas, nombre],
+        () =>
+            conFichas && destino == null
+                ? sugerenciasPorNombre(fichas, nombre, elegida?.id_cliente ?? null)
+                : [],
+        [conFichas, destino, fichas, nombre, elegida],
     );
     const encontradas = useMemo(
         () => (buscador != null ? buscarFichas(fichas, buscador) : []),
