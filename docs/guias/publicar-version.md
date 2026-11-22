@@ -217,7 +217,7 @@ versión.
 | Pieza | Archivo |
 |---|---|
 | Configuración | `tauri.conf.json` (`plugins.updater`: `pubkey`, `endpoints`, `windows.installMode: "passive"`; `bundle.createUpdaterArtifacts`) |
-| Instalador | `tauri.conf.json`: `productName`, `bundle.publisher`, `copyright` y `homepage`, y `bundle.windows.nsis` (en español, con el icono de la app y las imágenes de `src-tauri/windows/`) |
+| Instalador | `tauri.conf.json`: `productName`, `bundle.publisher`, `copyright` y `homepage`, y `bundle.windows.nsis` (en español, con el icono de la app y las imágenes de `src-tauri/windows/`, y los ganchos de `src-tauri/windows/hooks.nsh`) |
 | Comandos | `lib.rs`: `updater_check`, `updater_status`, `updater_install` |
 | Comprobación | job `updater` (sólo escritorio): a los 30 s del arranque y cada 6 h → `check_and_announce` |
 | Aviso | evento `update:available` (banner `src/shared/ui/UpdateBanner.tsx`) y notificación a los administradores con dedupe `actualizacion:<versión>` |
@@ -227,8 +227,32 @@ La instalación no reinicia sola: la lanza el usuario («Actualizar y reiniciar�
 servicio. Si el feed está caído, la aplicación sigue funcionando y lo vuelve a intentar con el backoff del
 runner. Reinstalar el `.exe` por encima conserva los datos (`data.db` está en AppData). Cambiar el
 `productName` no es reinstalar: el instalador busca la instalación anterior por ese nombre y, si no la
-encuentra, deja otra copia al lado, con los mismos datos (AppData va por `identifier`). Antes de migrar
-el esquema, la aplicación copia `data.db` a `data.db.bak.<ms>` (se conservan las dos últimas).
+encuentra, deja otra copia al lado, con los mismos datos (AppData va por `identifier`). Por eso
+`hooks.nsh` quita, al instalar y también al actualizar, la que se llamaba `tpv` (el nombre hasta el
+29-10-2026, con el editor `altarialights`), sin tocar los datos, y rehace sus accesos directos. Antes
+de migrar el esquema, la aplicación copia `data.db` a `data.db.bak.<ms>` (se conservan las dos últimas).
+
+### Empezar de cero en un equipo
+
+Los datos de un equipo son dos cosas: las carpetas `%APPDATA%\com.altarialights.tpv` (la base, la
+configuración y las copias de seguridad) y `%LOCALAPPDATA%\com.altarialights.tpv` (el WebView), y las credenciales de Windows
+`{clave}.tpv-licensing`, `{clave}.tpv-licensing-devicekey` y `{clave}.tpv-auth` (la identidad del
+equipo, la licencia y la clave de cifrado). Borrar sólo una de las dos deja el equipo a medias: con las
+credenciales, la app lo da por activado en el negocio de antes; con las carpetas, abre la base de antes,
+que puede ser de un esquema que ya no vale.
+
+- **Al instalar a mano**, si hay algo de eso, el instalador pregunta si se quiere empezar de cero, con
+  «No» por defecto y una segunda confirmación, y si se acepta lo borra todo antes de copiar el programa.
+  Nunca en una actualización (`/UPDATE`), en modo pasivo (`/P`, el del updater) ni en silencio (`/S`),
+  ni sobre la instalación vigente: si en la pantalla de «ya está instalado» se elige no desinstalar, es
+  una caja que se actualiza y no se le pregunta. Si se elige desinstalar antes (lo marcado al instalar
+  una versión más nueva), sí pregunta.
+- **Al desinstalar** con «Eliminar los datos de aplicación» se borran las carpetas, como siempre, y
+  también las credenciales, salvo que la carpeta de la base no se haya podido borrar entera.
+
+Las credenciales de los E2E (`….tpv-auth.e2e`) no terminan así y no se tocan. El equipo borrado se
+presenta a la nube con otra identidad: si la licencia tiene tope de equipos, el anterior sigue
+contando hasta liberarlo ([recuperacion.md](../arquitectura/recuperacion.md#traslado-de-licencia)).
 
 ## Cambios de esquema y de la base central
 

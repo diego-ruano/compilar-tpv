@@ -50,7 +50,8 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "windows/instalador-lateral.bmp",
-        "headerImage": "windows/instalador-cabecera.bmp"
+        "headerImage": "windows/instalador-cabecera.bmp",
+        "installerHooks": "windows/hooks.nsh"
       }
     }
   },
