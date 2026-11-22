@@ -82,14 +82,15 @@ const APARTADO_EN_CURSO: &str = "apartado-en-curso";
 const NEGOCIO_ANTERIOR_PREFIX: &str = "negocio-anterior-";
 /// AUD-06 · Lo que un negocio tiene en la raíz de AppData, fuera de la base y de `backups/`: las
 /// copias previas a una migración y los temporales de una restauración (por prefijo), la cola de
-/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes, la de
-/// un traslado y la de una base anterior a la nube. Lo que es del equipo (la licencia, el modo, los
-/// interruptores, la telemetría) no.
-const DEL_NEGOCIO_EN_APPDATA: [&str; 6] = [
+/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes, la
+/// carpeta con el PDF de sus facturas, la de un traslado y la de una base anterior a la nube. Lo que
+/// es del equipo (la licencia, el modo, los interruptores, la telemetría) no.
+const DEL_NEGOCIO_EN_APPDATA: [&str; 7] = [
     "image_uploads.json",
     "image_uploads.json.tmp",
     "images",
     "image_backfill_done",
+    "facturas",
     MARCA_TRASLADO,
     MARCA_ANTERIOR_A_LA_NUBE,
 ];
@@ -3293,6 +3294,8 @@ mod tests {
         }
         std::fs::create_dir_all(dir.join("images").join("logo")).unwrap();
         std::fs::write(dir.join("images").join("logo").join("logo.png"), "logo de A").unwrap();
+        std::fs::create_dir_all(dir.join("facturas")).unwrap();
+        std::fs::write(dir.join("facturas").join("f.pdf"), "factura de A").unwrap();
         let del_equipo = ["license_state.json", "device_config.json", "interruptores.json"];
         for nombre in del_equipo {
             std::fs::write(dir.join(nombre), "del equipo").unwrap();
@@ -3331,6 +3334,8 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(carpeta.join("images").join("logo").join("logo.png")).unwrap(), "logo de A");
         assert!(!dir.join("images").exists());
+        assert_eq!(std::fs::read_to_string(carpeta.join("facturas").join("f.pdf")).unwrap(), "factura de A");
+        assert!(!dir.join("facturas").exists());
         assert!(!dir.join("data.db").exists());
         for nombre in del_equipo {
             assert!(dir.join(nombre).exists(), "{nombre} es del equipo y se queda");

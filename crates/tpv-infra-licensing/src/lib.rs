@@ -12,6 +12,7 @@
 
 pub mod cola_imagenes;
 pub mod device;
+pub mod facturas;
 pub mod field_crypto;
 pub mod reloj;
 mod secret_store;

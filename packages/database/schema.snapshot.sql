@@ -47,6 +47,7 @@ CREATE INDEX idx_prod_ingr_ingrediente ON Producto_Ingredientes(ID_Ingrediente);
 CREATE INDEX idx_productos_categoria ON Productos(ID_Categoria);
 CREATE UNIQUE INDEX idx_productos_nombre_activo ON Productos(Nombre) WHERE Archivado_En IS NULL;
 CREATE INDEX idx_productos_proveedor ON Productos(ID_Proveedor);
+CREATE INDEX idx_regfact_completas ON Registros_Facturacion(Orden) WHERE Tipo = 'ALTA' AND Destinatario_Json IS NOT NULL;
 CREATE INDEX idx_regfact_fecha ON Registros_Facturacion(Fecha_Expedicion);
 CREATE INDEX idx_regfact_numserie ON Registros_Facturacion(Num_Serie_Factura, Tipo, Orden);
 CREATE INDEX idx_regfact_pago ON Registros_Facturacion(ID_Pago);
@@ -125,6 +126,7 @@ CREATE TABLE _Cobros_Pendientes ( ID_Pago TEXT PRIMARY KEY NOT NULL, Datos_Json 
 CREATE TABLE _Estad_Dias_Sucios ( Dia TEXT NOT NULL PRIMARY KEY ) WITHOUT ROWID;
 CREATE TABLE _Estad_Mesa_Dia ( Dia TEXT NOT NULL, ID_Mesa TEXT NOT NULL, Importe INTEGER NOT NULL CHECK (typeof(Importe) IN ('integer','null')), Comandas INTEGER NOT NULL, Comandas_Ultimo_Mes INTEGER NOT NULL, Comandas_Ultimo INTEGER NOT NULL, PRIMARY KEY (Dia, ID_Mesa) ) WITHOUT ROWID;
 CREATE TABLE _Estad_Producto_Dia ( Dia TEXT NOT NULL, ID_Producto TEXT, Nombre_Producto TEXT, Milesimas INTEGER NOT NULL );
+CREATE TABLE _Facturas_Pdf ( ID_Registro TEXT NOT NULL PRIMARY KEY, -- El PDF local, relativo a AppData (facturas/{ID_Registro}.pdf). NULL hasta que lo hay. Ruta TEXT, -- De donde salio el local: compuesto aqui o bajado de la nube (el que se emitio, en un equipo -- restaurado). Origen TEXT CHECK (Origen IS NULL OR Origen IN ('generado', 'bajado')), Generado_Ms INTEGER, -- Cuando lo confirmo la nube: subido, ya estaba o bajado de ella. Subido_Ms INTEGER, -- Los intentos fallidos de componerlo seguidos, el ultimo error y cuando toca el siguiente (la -- espera crece con cada fallo). Un fallo de la red no cuenta. Intentos INTEGER NOT NULL DEFAULT 0, Ultimo_Error TEXT, Proximo_Intento_Ms INTEGER, -- La nube lo rechazo por lo que es (no es un PDF, demasiado grande): no se vuelve a subir. Apartado INTEGER NOT NULL DEFAULT 0 CHECK (Apartado IN (0, 1)) );
 CREATE TABLE _Jobs_State ( Nombre TEXT NOT NULL PRIMARY KEY, Last_Run_Ms INTEGER, Last_Ok_Ms INTEGER, Last_Error TEXT, Fallos INTEGER NOT NULL DEFAULT 0 );
 CREATE TABLE _Negocio ( Id INTEGER PRIMARY KEY CHECK (Id = 1), ID_Negocio TEXT NOT NULL CHECK (length(ID_Negocio) > 0) );
 CREATE TABLE _Recovery_State ( Id INTEGER PRIMARY KEY CHECK (Id = 1), Reconciliation_Pending INTEGER NOT NULL DEFAULT 0 );

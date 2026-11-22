@@ -577,7 +577,9 @@ El PDF de cada factura completa (un registro `ALTA` de `Registros_Facturacion` c
 guarda en el mismo bucket que las imágenes, `IMAGES` (`tpv-images`), en
 `{tenant}/facturas/{ID_Registro}.pdf`: un solo bucket para lo de los TPV, y lo que separa una cosa de
 otra es la carpeta. Lo compone la Main una vez, después del cobro o de la emisión, y lo sube; es la
-copia «congelada» que vuelve a bajar un equipo restaurado. Sólo la ve la Main, nunca la Handy.
+copia «congelada» que vuelve a bajar un equipo restaurado. Sólo la ve la Main, nunca la Handy. En la
+Main lo mueve el job `facturas_pdf` (`tpv-infra-licensing/src/facturas.rs` es el cliente de estas
+rutas; [tickets.md](tickets.md#el-pdf-de-una-factura-completa)).
 
 Las rutas están en `domains/facturas/facturas.routes.ts` (la clave, en `claveDeFactura.ts`). No tocan la
 base del negocio, así que se ejecutan en el Worker (sin `alHub`) y el veto es `soloLaMainVigente`, que

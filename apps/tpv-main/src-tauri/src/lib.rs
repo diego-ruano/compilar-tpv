@@ -4,6 +4,7 @@
 
 mod commands;
 mod diagnostico;
+mod factura_pdf;
 mod interruptores;
 mod imagenes;
 mod replicacion;
@@ -12,6 +13,7 @@ mod socket_handy;
 mod jobs;
 mod navegacion;
 mod notificador;
+mod pdf;
 mod printing;
 mod zoom;
 #[cfg(target_os = "ios")]
@@ -4074,6 +4076,8 @@ mod tests_exenciones_del_gate {
             "$APPDATA/telemetry-spool/**",
             "$APPDATA/logs/**",
             "$APPDATA/image_backfill_done",
+            // El PDF de cada factura completa: lo que se entregó, que no se reescribe.
+            "$APPDATA/facturas/**",
         ];
 
         // RI-51: la interfaz solo exporta a ficheros autorizados por el diálogo; no lee AppData.

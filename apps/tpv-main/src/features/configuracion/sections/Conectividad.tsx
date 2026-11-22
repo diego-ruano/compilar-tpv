@@ -352,6 +352,7 @@ const JOB_ETIQUETA: Record<string, string> = {
 	avisos: "Avisos de tareas y reservas",
 	updater: "Búsqueda de actualizaciones",
 	imagenes: "Subida de imágenes pendientes",
+	facturas_pdf: "PDF de las facturas",
 	purga_sync: "Limpieza de registros de sincronización",
 	backup_local: "Copia de seguridad diaria",
 	reconciliacion: "Reconciliación con la nube",

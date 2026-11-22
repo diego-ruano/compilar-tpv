@@ -21,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use tpv_application::use_cases::avisos as uc_avisos;
 use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
+use tpv_application::use_cases::facturas_pdf as uc_facturas_pdf;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::reservas as uc_reservas;
@@ -86,6 +87,17 @@ const RESERVAS_NO_VINO_INTERVAL_SECS: u64 = 5 * 60;
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
 const IMAGENES_INTERVAL_SECS: u64 = 15 * 60;
+
+/// Cada cuánto se documentan las facturas completas: se compone el PDF de las nuevas y se sube a la
+/// nube. Un minuto, para que una factura recién emitida tenga su PDF enseguida: el runner no tiene
+/// forma de despertar un job tras el cobro. Sin facturas nuevas es una lectura por el índice parcial
+/// de las facturas completas (`idx_regfact_completas`).
+const FACTURAS_PDF_INTERVAL_SECS: u64 = 60;
+
+/// Cuándo vuelve a hablar con la nube el job `facturas_pdf` tras un fallo suyo (sin red, por
+/// ejemplo): en memoria, crece con cada fallo y vuelve a cero en cuanto la nube contesta.
+static PAUSA_NUBE_FACTURAS: LazyLock<std::sync::Mutex<uc_facturas_pdf::PausaNube>> =
+    LazyLock::new(Default::default);
 
 /// Cada cuánto se busca PII del personal todavía en claro. No hace falta más: sólo hay trabajo
 /// la primera vez tras activar el cifrado (y tras un cambio de equipo que traiga filas viejas).
@@ -278,6 +290,18 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::Siempre,
             interruptor: None,
             ejecutar: tarea(imagenes),
+        },
+        Job {
+            // El PDF de cada factura completa (`use_cases::facturas_pdf`): después del cobro o de la
+            // emisión, nunca dentro. Sin interruptor: no está en el camino del cobro, y apagarlo
+            // sólo dejaría las facturas sin su PDF.
+            nombre: "facturas_pdf",
+            cada: Duration::from_secs(FACTURAS_PDF_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(40),
+            // `MainOperativa` excluye la recuperación: con la base a medias no se compone nada.
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(facturas_pdf),
         },
         Job {
             nombre: "purga_sync",
@@ -666,6 +690,92 @@ async fn interruptores(app: AppHandle) -> Result<(), String> {
 async fn imagenes(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     crate::drenar_imagenes(&app, &state).await.map(|_| ())
+}
+
+/// El PDF de las facturas completas (`use_cases::facturas_pdf`): apunta las nuevas, baja de la nube
+/// o compone el de las que no lo tienen y sube los que la nube no tiene.
+///
+/// Lo de cada factura (un fallo al componerla, un rechazo de la nube) se queda en su fila de
+/// `_Facturas_Pdf` con su espera y no hace fallar el job, para no retrasar a las demás. Lo de la
+/// nube (sin red, credenciales) tampoco: se deja la nube en pausa, cada vez más rato. El job sólo
+/// falla si no puede leer la base o escribir en la carpeta de las facturas.
+async fn facturas_pdf(app: AppHandle) -> Result<(), String> {
+    use tpv_application::ports::facturas_pdf::FacturasNube;
+    use tpv_infra_licensing::facturas::FacturasEnLaNube;
+
+    let state = app.state::<AppState>();
+    let db = state.db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    let ahora = tpv_infra_sqlite::util::now_ms();
+
+    // SYNC-19: con el histórico a medias, las líneas de una factura antigua pueden no estar aún, y
+    // lo compuesto se quedaría así. Se baja de la nube, pero no se compone.
+    let sync = state.sync_repo().await?;
+    let se_puede_generar = uc_sync::backfill_estado(sync.as_ref()).await?.tablas_pendientes == 0;
+
+    // La nube, si hay conectividad, la base tiene negocio (AUD-06: se sube a la carpeta de ESE
+    // negocio) y no está en pausa.
+    let conectividad_apagada =
+        crate::load_config(&dir).connectivity == Some(crate::ConnectivityMode::Off);
+    let en_pausa = PAUSA_NUBE_FACTURAS.lock().map(|p| p.activa(ahora)).unwrap_or(false);
+    let negocio = tpv_infra_sqlite::sello::leer(&db.read().await).await.ok().flatten();
+    let nube = match negocio {
+        Some(n) if !conectividad_apagada && !en_pausa => {
+            Some(FacturasEnLaNube::new(PairingAdapter::new(dir.clone()), n))
+        }
+        _ => None,
+    };
+
+    let repo = tpv_infra_sqlite::facturas_pdf::SqliteFacturasPdf::new(db);
+    let carpeta = crate::factura_pdf::CarpetaFacturas::new(dir.clone());
+    let tickets = state.tickets_repo().await.map_err(|e| e.message)?;
+    let config = state.configuracion_repo().await?;
+    let maqueta = crate::factura_pdf::MaquetaPdf::new(dir);
+    let generador = uc_facturas_pdf::PapelDeLaFactura {
+        tickets: tickets.as_ref(),
+        config: config.as_ref(),
+        maqueta: &maqueta,
+    };
+    let facturas = uc_facturas_pdf::Facturas {
+        repo: &repo,
+        archivos: &carpeta,
+        generador: &generador,
+        nube: nube.as_ref().map(|n| n as &dyn FacturasNube),
+    };
+
+    let p = uc_facturas_pdf::pasada(&facturas, ahora, se_puede_generar).await?;
+
+    if let Ok(mut pausa) = PAUSA_NUBE_FACTURAS.lock() {
+        if p.fallo_de_la_nube.is_some() {
+            pausa.fallo(ahora);
+        } else if p.nube_contesto {
+            pausa.exito();
+        }
+    }
+    if let Some(motivo) = &p.fallo_de_la_nube {
+        tracing::info!(target: "tpv::facturas", %motivo, "PDF de las facturas: la nube no contesta, se deja para luego");
+    }
+    if p.fallidas > 0 {
+        // Componer el PDF de una factura no debería fallar: es un fallo del programa.
+        tracing::error!(target: "tpv::facturas", fallidas = p.fallidas, "PDF de las facturas: no se han podido componer");
+    }
+    if p.apartadas > 0 {
+        tracing::error!(target: "tpv::facturas", apartadas = p.apartadas, "PDF de las facturas: la nube los ha rechazado");
+    }
+    if p.generadas + p.bajadas + p.subidas > 0 {
+        tracing::info!(
+            target: "tpv::facturas",
+            generadas = p.generadas,
+            bajadas = p.bajadas,
+            subidas = p.subidas,
+            en_espera = p.en_espera,
+            "PDF de las facturas"
+        );
+    }
+    Ok(())
 }
 
 /// Poda de `_Sync_Applied_Ops`, la tabla anti-eco: una fila por escritura local, que solo se puede

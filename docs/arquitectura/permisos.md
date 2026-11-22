@@ -360,7 +360,8 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
   primera capa: [frontend.md](frontend.md#gráficas).
 - **La webview no lee AppData mediante el plugin `fs` ni escribe sobre los ficheros del equipo.** `fs:allow-write-file` existe para guardar
   donde la persona elija (el diálogo autoriza la ruta), con un `deny` para `data.db`, el estado de
-  licencia, las copias y el resto de ficheros propios de AppData. Un fichero propio nuevo va a ese
+  licencia, las copias, el PDF de las facturas (`facturas/**`) y el resto de ficheros propios de
+  AppData. Un fichero propio nuevo va a ese
   `deny`; lo vigila `la_webview_no_puede_escribir_sobre_los_ficheros_del_equipo`, que además rechaza
   cualquier `fs:allow-write*` sin ámbito.
 - **Lo registrado es lo invocable.** Un comando que nadie llama no se registra en el

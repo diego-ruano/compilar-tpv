@@ -63,10 +63,10 @@ describe("migraciones del tenant", () => {
 			// AUD-06: el sello de la base (0002) existe también en la nube, vacío: es de cada equipo, y el
 			// volcado de recuperación descarta lo que empieza por `_`.
 			expect(sql.exec("SELECT COUNT(*) AS n FROM _Negocio").toArray()[0].n).toBe(0);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(5);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(6);
 			// Volver a ejecutar el runner conserva el esquema y no duplica sus registros.
 			await migrarBaseLocal(hub.state.storage);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(5);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(6);
 		});
 	});
     it("RI-48 impone los valores de dominio en el SQL de la nube", async () => {

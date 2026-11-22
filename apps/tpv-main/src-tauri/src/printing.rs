@@ -105,7 +105,7 @@ fn effective_cols(p: &PrintTicketPayload) -> usize {
 ///
 /// Sin separador de miles a propósito: en una columna de 32 caracteres, un punto de millar se
 /// confunde con el decimal.
-fn fmt_eur(n: Dinero) -> String {
+pub(crate) fn fmt_eur(n: Dinero) -> String {
     format!("{} €", n.texto_fiscal()).replace('.', ",")
 }
 
@@ -299,7 +299,7 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 /// se redondea) están documentadas allí.
 ///
 /// Una línea sin tipo propio usa el general del negocio, que es el caso de casi todo.
-fn desglose_iva(p: &PrintTicketPayload) -> Vec<TramoIva> {
+pub(crate) fn desglose_iva(p: &PrintTicketPayload) -> Vec<TramoIva> {
     if let Some(declarado) = &p.desglose {
         return declarado
             .iter()
@@ -911,7 +911,7 @@ fn etiqueta_descuadre(descuadre: Dinero) -> String {
 }
 
 /// Formatea un porcentaje sin decimales innecesarios (`10` en vez de `10,00`).
-fn fmt_pct(n: f64) -> String {
+pub(crate) fn fmt_pct(n: f64) -> String {
     if (n - n.round()).abs() < f64::EPSILON {
         format!("{}", n.round() as i64)
     } else {

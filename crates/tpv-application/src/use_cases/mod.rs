@@ -7,6 +7,7 @@ pub mod configuracion;
 pub mod correo_recuperacion;
 pub mod cuentas;
 pub mod diagnostico;
+pub mod facturas_pdf;
 pub mod interruptores;
 pub mod inventario;
 pub mod jobs;

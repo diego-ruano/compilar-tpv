@@ -457,10 +457,11 @@ se prueba a mano.
   `backups/negocio-anterior-<ms>/`, con la misma forma que tenía en AppData: la base (y con ella sus
   intentos de login, su registro de jobs, lo que tenía a medias y su outbox), **todas** sus copias y
   bases guardadas de `backups/`, las copias previas a una migración, los temporales de una
-  restauración, la carpeta `images/` y su cola, sus marcas y el WAL de la base (aunque no esté la
-  base: junto a la nueva sería su WAL). Al abrir una base ilegible se quedan sólo las copias selladas
-  con la licencia, que dicen ser de ese negocio: son con las que se recupera una base dañada. Lo que
-  es del equipo (la licencia, el modo, los interruptores, la telemetría) se queda.
+  restauración, la carpeta `images/` y su cola, la carpeta `facturas/` (el PDF de sus facturas),
+  sus marcas y el WAL de la base (aunque no esté la base: junto a la nueva sería su WAL). Al abrir
+  una base ilegible se quedan sólo las copias selladas con la licencia, que dicen ser de ese negocio:
+  son con las que se recupera una base dañada. Lo que es del equipo (la licencia, el modo, los
+  interruptores, la telemetría) se queda.
 
 La carpeta lleva una marca de apartado en curso desde que se crea hasta que termina, y la base es lo
 último que se mueve. Si algo no se deja mover (un fichero abierto por otro programa), o una carpeta
@@ -518,6 +519,13 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
 - **Las Handy** no guardan base: se las echa al volver, reconectan solas y leen la nube que haya.
 
 ## Lo que vuelve y lo que no
+
+- Vuelve el **PDF de cada factura completa** tal como se emitió: la tabla que lo anota
+  (`_Facturas_Pdf`) es del equipo y no vuelve, pero el job `facturas_pdf` pregunta primero a la nube
+  por el de cada factura sin PDF local y lo baja; sólo compone el que la nube no tiene, y no antes
+  de que acabe de bajar el histórico ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)). Tras
+  restaurar una copia local en el mismo equipo, los que ya estaban en `AppData/facturas/` se quedan
+  como estaban.
 
 - Vuelve todo lo que llegó a la nube, incluida la **PII del personal**: viaja cifrada por el outbox, el
   volcado la devuelve tal cual y la DEK se recupera al activar.

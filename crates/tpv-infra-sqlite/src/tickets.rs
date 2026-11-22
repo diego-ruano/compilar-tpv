@@ -285,7 +285,7 @@ async fn lineas_devueltas<R: Reader>(r: &R, id_pago: &str) -> AppResult<Vec<Line
 }
 
 /// El cobro de un número de ticket, si existe.
-async fn pago_de_ticket<R: Reader>(r: &R, num: &str) -> AppResult<Option<String>> {
+pub(crate) async fn pago_de_ticket<R: Reader>(r: &R, num: &str) -> AppResult<Option<String>> {
     let mut rows = r
         .query(SQL_PAGO_DE_TICKET, vec![Value::Text(num.trim().to_string())])
         .await

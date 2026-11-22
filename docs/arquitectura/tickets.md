@@ -26,6 +26,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 | Modal de impresión | `src/shared/ticket/PrintTicketModal.tsx` | Un botón por cada factura del cobro (`facturas_del_cobro`: el ticket, la `F3` del canje, la rectificativa, la `F3` de la devolución), sin elegir líneas; o la precuenta de todo, de lo pendiente o de una selección |
 | Reimpresión y devolución | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia`; tras una devolución (entera o de una parte) se abre con la rectificativa elegida, sin imprimir |
 | Tests | `src-tauri/src/printing/tests.rs` · `test/ticketMath.test.ts` | Goldens duplicados a propósito |
+| PDF de una factura completa | `src-tauri/src/factura_pdf.rs` + `src-tauri/src/pdf.rs` · `use_cases/facturas_pdf.rs` · job `facturas_pdf` | El mismo papel en A4, compuesto una vez y guardado en el equipo y en la nube ([abajo](#el-pdf-de-una-factura-completa)) |
 
 ## Orden del ticket
 
@@ -152,6 +153,50 @@ un punto de millar se confunde con el decimal) y es distinto del de pantalla.
 
 Dos trampas: `Intl.NumberFormat` mete el punto de los miles y un espacio duro que el papel no lleva, y
 `String.slice` cuenta unidades UTF-16 (parte un emoji) donde Rust cuenta caracteres.
+
+## El PDF de una factura completa
+
+Cada factura completa (un alta de `Registros_Facturacion` con destinatario: `F1`, `F3` y las
+rectificativas con cliente; no los tickets ni una `R5` sin cliente, y una subsanación no lleva PDF
+propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
+
+- **Es el mismo papel.** El job pide su `ticket_de_pago` por el número de la factura y lo maqueta en A4
+  (`factura_pdf::pdf_de_factura`): el emisor, el número, la fecha de expedición, el cliente, «Rectifica
+  a…» / «Sustituye a…», las líneas, el desglose declarado y el total salen de ahí, y el dinero con
+  `fmt_eur`, el formateador del papel. Lo vigila `la_factura_lleva_lo_que_lleva_su_papel`, que saca los
+  importes del ticket ESC/POS y los busca en el PDF. Una `F3` de varios tickets, que no cuelga de
+  ningún cobro, se compone desde el primero de los que canjea que esté en la base.
+- **Lo que exige una factura sale siempre**: el rótulo, la razón social, el NIF y la dirección del
+  emisor, aunque el ticket los oculte; el teléfono y el mensaje final, si el ticket los lleva. El logo,
+  si el ticket lo lleva, en JPEG (la transparencia sobre blanco, 600 px como mucho) y con las mismas
+  cotas que al imprimirlo (`imagenes::decodificar`, AUD-30); si no se puede leer, sale sin él. No
+  lleva ni COPIA ni ANULADO: son marcas del papel de un cobro, no de la factura.
+- **El escritor de PDF es propio** (`pdf.rs`), sin dependencias: Helvetica y Helvetica-Bold, las fuentes
+  estándar del PDF, que no se incrustan, con `WinAnsiEncoding` (tildes, ñ, ü, ç, ¿, ¡, º y el €; lo que
+  no está sale `?`). El contenido va sin comprimir y en ASCII (lo demás, en octal), y no lleva fecha
+  ni nada al azar: **los mismos datos dan los mismos bytes**. Una tabla de muchas líneas sigue en otra
+  página con su cabecera, y cada página lleva «FACTURA F-… · Página n de m».
+- **Se compone una vez, después del cobro o de la emisión** y nunca dentro de su transacción: lo hace
+  el job `facturas_pdf` cada minuto ([jobs-e-interruptores.md](jobs-e-interruptores.md)). Nada de esto
+  puede impedir cobrar.
+- **No se vuelve a componer.** Se guarda en `AppData/facturas/{ID_Registro}.pdf` (fuera del alcance de
+  la webview: [permisos.md](permisos.md)) y se sube a la nube, que lo guarda en el bucket de las
+  imágenes y no lo sobrescribe ([worker.md](worker.md#facturas-en-pdf)). Para documentar una factura
+  sin PDF local, primero se pregunta a la nube: en un equipo restaurado, el bueno es el que se subió
+  el día que se emitió, no uno compuesto con los datos del negocio de hoy. Si se compuso aquí sin red
+  y al subirlo la nube ya tenía otro, se cambia el de aquí por el de la nube.
+- **Con el histórico a medias no se compone** (tras restaurar desde la nube, SYNC-19): las líneas de
+  una factura antigua pueden no haber bajado. Se baja de la nube lo que esté y lo demás espera.
+- **El estado de cada una** está en `_Facturas_Pdf` (`0006_facturas_pdf.sql`, local del equipo:
+  [esquema.md](esquema.md#el-andamiaje-local-16-de-0001-y-0002)): la ruta, de dónde salió (`generado`
+  o `bajado`), cuándo se generó y cuándo lo confirmó la nube, y los fallos al componerla, con una
+  espera que se dobla desde un minuto hasta seis horas. Un rechazo de la nube por lo que es (400 o
+  413) la aparta de la subida. Un fallo de la nube (sin red, credenciales, un fallo suyo) no es de la
+  factura: no cuenta como intento, la pasada deja de hablar con ella y no vuelve hasta pasado un
+  minuto, dos, cuatro… hasta media hora.
+- **Para enseñar una**, `use_cases::facturas_pdf::pdf_de_factura` da la local; si no está, la de la
+  nube; y si no la tiene, la compone en ese momento y se queda como si la hubiera hecho el job. Lo que
+  no es una factura completa se contesta `not_found`, y con el histórico a medias, `conflict`.
 
 ## Los tests del generador
 

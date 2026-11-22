@@ -3,14 +3,16 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
 en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
 `packages/database/migrations/`, aplicados en orden.
-Hoy son cinco: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
+Hoy son seis: `0001_inicial.sql`, con el esquema completo, `0002_negocio.sql`, el sello de la base
 (AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)),
 `0003_ingredientes.sql`, los ingredientes ([abajo](#los-ingredientes-0003)),
 `0004_producto_sin_categoria.sql`, que deja a un producto sin categoría
-([abajo](#borrar-una-categoría-de-productos-0004)), y `0005_subida_completa.sql`, el estado local de
+([abajo](#borrar-una-categoría-de-productos-0004)), `0005_subida_completa.sql`, el estado local de
 la subida completa de la Main a una nube devuelta (`_Sync_Subida*`, DO-SUBIDA,
 [sincronizacion.md](sincronizacion.md#la-subida-completa-tras-una-nube-devuelta-do-subida)): tablas del
-equipo, escritas por `raw()`, que en la nube existen vacías.
+equipo, escritas por `raw()`, que en la nube existen vacías; y `0006_facturas_pdf.sql`, el estado
+local del PDF de cada factura completa (`_Facturas_Pdf`, [abajo](#el-andamiaje-local-16-de-0001-y-0002))
+y el índice con el que se buscan.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
@@ -154,6 +156,16 @@ remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Bac
 `_Negocio` (de qué negocio es la base) describen **este equipo**, se escriben por `raw()` y no se replican. Que se creen
 también, vacías, en la base del tenant es deliberado: hay un único esquema, y el volcado de
 recuperación descarta todo lo que empieza por `_`.
+
+`_Facturas_Pdf` (`0006`) es otra de ellas: por cada factura completa (un alta de
+`Registros_Facturacion` con destinatario), su PDF local (`Ruta`, relativa a AppData), de dónde salió
+(`Origen`: `generado` o `bajado`), cuándo se generó y cuándo lo confirmó la nube (`Generado_Ms`,
+`Subido_Ms`), los fallos al componerlo (`Intentos`, `Ultimo_Error`, `Proximo_Intento_Ms`) y si la
+nube lo rechazó (`Apartado`). La escribe el job `facturas_pdf` ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)).
+Las facturas completas se buscan por `idx_regfact_completas`, un índice parcial de
+`Registros_Facturacion` (`WHERE Tipo = 'ALTA' AND Destinatario_Json IS NOT NULL`) que la consulta pide
+con `INDEXED BY`: sin estadísticas, SQLite prefiere `ux_regfact_idfactura`, que recorre todos los
+registros. Lo vigila `facturas_pdf::tests::buscar_las_nuevas_no_recorre_los_tickets`.
 
 Al revés, `Applied_Operations`, `Sync_Changes` y `Sync_Main_Checkpoints` sólo las usa la nube y existen
 vacías en la Main. Un volcado o una comparación que recorra tablas se las salta. `Sync_Changes` lleva
