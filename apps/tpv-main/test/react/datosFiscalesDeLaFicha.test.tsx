@@ -10,6 +10,7 @@ import Clientes from "../../src/app/pages/Clientes";
 import { ToastProvider } from "../../src/shared/toast";
 
 const llamadas = vi.hoisted(() => [] as { comando: string; args: unknown }[]);
+const fichaFalla = vi.hoisted(() => ({ si: false }));
 
 vi.mock("../../src/shared/lib/usePermisos", () => ({
 	usePermisos: () => ({ puede: () => true, rol: "Administrador" }),
@@ -37,6 +38,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 			];
 		}
 		if (comando === "clientes_get_cliente_form") {
+			if (fichaFalla.si) throw { code: "not_found", message: "Ese cliente ya no existe: vuelve a la lista de clientes." };
 			return {
 				nombre: "Paco",
 				email: null,
@@ -54,6 +56,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 
 beforeEach(() => {
 	llamadas.length = 0;
+	fichaFalla.si = false;
 });
 afterEach(cleanup);
 
@@ -94,4 +97,14 @@ it("la ficha enseña los datos de facturación y el formulario los guarda", asyn
 		razon_social: "Comidas Peñalver SL",
 		direccion_fiscal: undefined,
 	});
+});
+
+it("si no se pueden leer los datos de facturación, se avisa en vez de parecer que no los tiene", async () => {
+	fichaFalla.si = true;
+	pagina();
+	fireEvent.click(await screen.findByText("Paco"));
+	expect(
+		await screen.findByText("No se pudieron cargar los datos de facturación del cliente", { selector: "p" }),
+	).toBeTruthy();
+	expect(screen.queryByText("Datos de facturación")).toBeNull();
 });

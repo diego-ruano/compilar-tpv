@@ -130,6 +130,14 @@ export default function Clientes() {
   const fiscalActivo = fichaActiva.data;
   const tieneDatosFiscales = !!(fiscalActivo?.nif || fiscalActivo?.razon_social || fiscalActivo?.direccion_fiscal);
 
+  // Si no se pueden leer, se avisa: sin el bloque, la ficha parecería no tener datos de facturación.
+  useEffect(() => {
+    if (fichaActiva.isError) {
+      toast.error("No se pudieron cargar los datos de facturación del cliente", toAppError(fichaActiva.error).message);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fichaActiva.isError]);
+
   function mapRowToUI(r: ClienteOverview): ClienteUI {
     const fecha = r.ultima_reserva_fecha;
     const hora = r.ultima_reserva_hora;
