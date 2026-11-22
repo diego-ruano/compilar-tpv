@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
     buscarFichas,
+    camposSinLaFicha,
     datosDeFicha,
     fichaConNif,
     fichaDestino,
@@ -142,6 +143,25 @@ describe("con qué queda el formulario al elegir una ficha", () => {
         const deComidas = rellenoConFicha(VACIO, COMIDAS, false);
         expect(rellenoConFicha(deComidas, ANA, true)).toEqual({ nombre: "Ana García", nif: "", domicilio: "" });
         expect(rellenoConFicha(deComidas, ROSA, true)).toEqual({ nombre: "Rosa", nif: "12345678Z", domicilio: "" });
+    });
+});
+
+describe("con qué queda el formulario al decir que no es esa ficha", () => {
+    const VACIO = { nombre: "", nif: "", domicilio: "" };
+
+    it("lo que puso la ficha se va y vuelve lo de antes", () => {
+        const deComidas = rellenoConFicha(VACIO, COMIDAS, false);
+        expect(camposSinLaFicha(deComidas, VACIO, COMIDAS)).toEqual(VACIO);
+        // Con el NIF tecleado antes de elegir una ficha sin NIF, el NIF se queda.
+        const escrito = { nombre: "x", nif: "A58818501", domicilio: "" };
+        expect(camposSinLaFicha(rellenoConFicha(escrito, ANA, false), escrito, ANA)).toEqual(escrito);
+    });
+
+    it("lo escrito después de elegirla se queda", () => {
+        const deComidas = { ...rellenoConFicha(VACIO, COMIDAS, false), domicilio: "Calle Nueva 5" };
+        expect(camposSinLaFicha(deComidas, VACIO, COMIDAS)).toEqual({ nombre: "", nif: "", domicilio: "Calle Nueva 5" });
+        // El NIF de la ficha escrito de otra manera sigue siendo el suyo.
+        expect(camposSinLaFicha({ ...deComidas, nif: "b-12345674" }, VACIO, COMIDAS).nif).toBe("");
     });
 });
 

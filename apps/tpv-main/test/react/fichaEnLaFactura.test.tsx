@@ -126,6 +126,37 @@ it("elegir otra ficha sustituye los datos de la primera, sin mezclarlos", async 
 	expect((screen.getByRole("button", { name: "Cobrar y facturar" }) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it("«No es esta ficha» se lleva sus datos: elegir otra sin NIF ni domicilio no los mezcla", async () => {
+	// La comanda es de la reserva de Paco y el formulario empieza con su ficha; no es él.
+	comandaConCliente.id = "c2";
+	formulario(() => true);
+	await waitFor(() => expect(campo(/NIF/).value).toBe("B12345674"));
+	fireEvent.click(screen.getByRole("button", { name: "No es esta ficha" }));
+	expect(campo(/Nombre o razón social/).value).toBe("");
+	expect(campo(/NIF/).value).toBe("");
+	expect(campo(/Domicilio/).value).toBe("");
+
+	fireEvent.click(screen.getByRole("button", { name: "Elegir cliente" }));
+	fireEvent.change(screen.getByRole("textbox", { name: "Buscar cliente" }), { target: { value: "Ana" } });
+	fireEvent.click(await screen.findByRole("button", { name: /Ana García/ }));
+	expect(campo(/Nombre o razón social/).value).toBe("Ana García");
+	expect(campo(/NIF/).value).toBe("");
+	expect(campo(/Domicilio/).value).toBe("");
+	// Nada apunta a la ficha de Paco.
+	expect(screen.queryByText(/En la ficha de Paco/)).toBeNull();
+	expect((screen.getByRole("button", { name: "Cobrar y facturar" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("«No es esta ficha» deja lo que se escribió después de elegirla", async () => {
+	comandaConCliente.id = "c2";
+	formulario(() => true);
+	await waitFor(() => expect(campo(/NIF/).value).toBe("B12345674"));
+	fireEvent.change(campo(/Domicilio/), { target: { value: "Calle Nueva 5" } });
+	fireEvent.click(screen.getByRole("button", { name: "No es esta ficha" }));
+	expect(campo(/NIF/).value).toBe("");
+	expect(campo(/Domicilio/).value).toBe("Calle Nueva 5");
+});
+
 it("facturar con otro NIF a quien reservó no le cambia el suyo a su ficha", async () => {
 	comandaConCliente.id = "c2";
 	formulario(() => true);

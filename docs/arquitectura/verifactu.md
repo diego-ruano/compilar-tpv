@@ -316,7 +316,10 @@ rápida y en Cuentas) los usa en la Main:
 - **Elegir cliente** busca las fichas por nombre, razón social o NIF y rellena los tres campos. Sobre
   lo escrito a mano, lo que la ficha no tiene se deja como estaba; si antes se había elegido otra
   ficha, se sustituye todo y lo que la nueva no tiene se vacía, para no facturar con el nombre de una
-  y el NIF de otra (`rellenoConFicha`).
+  y el NIF de otra (`rellenoConFicha`). **No es esta ficha** deja de elegirla y se lleva lo que ella
+  puso: vuelve lo que había escrito antes de elegirla, y lo escrito después se queda
+  (`camposSinLaFicha`). Así, decir que no es la ficha de la reserva y elegir otra sin NIF ni
+  domicilio no factura con el NIF y el domicilio de la primera.
 - Un NIF que es el de una ficha ofrece «Es <cliente>: rellenar con sus datos», y el nombre que se
   teclea sugiere las fichas que casan.
 - Si el cliente de la comanda que se cobra (el suyo o el de su reserva) tiene ficha con NIF, el

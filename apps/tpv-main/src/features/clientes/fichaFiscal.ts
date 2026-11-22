@@ -125,6 +125,27 @@ export function rellenoConFicha(
 }
 
 /**
+ * Con qué queda el formulario al pulsar «No es esta ficha»: lo que vino de la ficha se va, y vuelve
+ * lo que había antes de elegirla (`antes`); lo que se ha escrito después se queda. Si no, quien
+ * dice que no es esa ficha y elige otra sin NIF ni domicilio facturaría con el nombre de la nueva y
+ * el NIF y el domicilio de la primera, y los guardaría en la ficha de la primera, que casa por NIF.
+ */
+export function camposSinLaFicha(
+    actual: CamposFiscales,
+    antes: CamposFiscales,
+    f: ClienteParaFactura,
+): CamposFiscales {
+    const d = datosDeFicha(f);
+    const vino = (escrito: string, deLaFicha: string | null | undefined, igual: (t: string) => string) =>
+        !!deLaFicha && igual(escrito) === igual(deLaFicha);
+    return {
+        nombre: vino(actual.nombre, d.nombre_razon, comparable) ? antes.nombre : actual.nombre,
+        nif: vino(actual.nif, d.nif, normalizarNif) ? antes.nif : actual.nif,
+        domicilio: vino(actual.domicilio, d.domicilio, comparable) ? antes.domicilio : actual.domicilio,
+    };
+}
+
+/**
  * En qué ficha se guardan los datos con los que se factura: la elegida, salvo que el NIF sea el de
  * otra ficha (entonces, ésa) o distinto del que la elegida ya tenía (entonces, ninguna: se da de
  * alta otra). Es la comida de empresa reservada por una persona: se factura a la empresa, y la ficha

@@ -30,6 +30,7 @@ import { eur } from "../lib/dinero";
 import { useMode } from "../stores/useMode";
 import {
     buscarFichas,
+    camposSinLaFicha,
     fichaConNif,
     fichaDestino,
     guardarPorDefecto,
@@ -39,6 +40,7 @@ import {
     sirveParaFacturar,
     sugerenciasPorNombre,
     trasFacturar,
+    type CamposFiscales,
     type ClienteParaFactura,
 } from "../../features/clientes/fichaFiscal";
 import {
@@ -118,6 +120,8 @@ function Formulario({
     const guardarEnFicha = useGuardarDatosFiscales();
 
     const [elegida, setElegida] = useState<ClienteParaFactura | null>(null);
+    /** Lo que había escrito antes de elegir la ficha: vuelve con «No es esta ficha». */
+    const [antesDeLaFicha, setAntesDeLaFicha] = useState<CamposFiscales | null>(null);
     const [buscador, setBuscador] = useState<string | null>(null);
     /** `null` = lo que toque por defecto (`guardarPorDefecto`); si se toca la casilla, lo elegido. */
     const [guardarFicha, setGuardarFicha] = useState<boolean | null>(null);
@@ -138,11 +142,32 @@ function Formulario({
      */
     function rellenar(f: ClienteParaFactura) {
         const r = rellenoConFicha({ nombre, nif, domicilio }, f, elegida != null);
+        if (elegida == null) setAntesDeLaFicha({ nombre, nif, domicilio });
         setNombre(r.nombre);
         setNif(r.nif);
         setDomicilio(r.domicilio);
         setElegida(f);
         setBuscador(null);
+        setGuardarFicha(null);
+    }
+
+    /**
+     * La ficha elegida no es la del cliente: deja de estar elegida y se lleva lo que puso en el
+     * formulario (`camposSinLaFicha`), para que elegir otra no la mezcle con la primera.
+     */
+    function noEsEstaFicha() {
+        if (elegida) {
+            const r = camposSinLaFicha(
+                { nombre, nif, domicilio },
+                antesDeLaFicha ?? { nombre: "", nif: "", domicilio: "" },
+                elegida,
+            );
+            setNombre(r.nombre);
+            setNif(r.nif);
+            setDomicilio(r.domicilio);
+        }
+        setElegida(null);
+        setAntesDeLaFicha(null);
         setGuardarFicha(null);
     }
 
@@ -280,10 +305,7 @@ function Formulario({
                         <button
                             type="button"
                             disabled={guardando}
-                            onClick={() => {
-                                setElegida(null);
-                                setGuardarFicha(null);
-                            }}
+                            onClick={noEsEstaFicha}
                             className="cursor-pointer underline"
                         >
                             No es esta ficha
