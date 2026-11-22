@@ -197,7 +197,10 @@ propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
   espera que se dobla desde un minuto hasta seis horas. Un rechazo de la nube por lo que es (400 o
   413) la aparta de la subida. Un fallo de la nube (sin red, credenciales, un fallo suyo) no es de la
   factura: no cuenta como intento, la pasada deja de hablar con ella y no vuelve hasta pasado un
-  minuto, dos, cuatro… hasta media hora.
+  minuto, dos, cuatro… hasta media hora. Las dos esperas van en hora del equipo, que puede saltar
+  hacia atrás (se pone en hora uno adelantado, RELOJ-01): una espera a la que le queda más que su
+  techo (seis horas la de una factura, `ESPERA_MAXIMA_MS`; media hora la de la nube) se da por
+  vencida, en vez de durar el desfase entero.
 - **Para enseñar una**, `use_cases::facturas_pdf::pdf_de_factura` da la local; si no está, la de la
   nube (salvo que el job la haya dejado en pausa, para no esperar a una nube que no contesta); y si
   no la tiene, la compone en ese momento y se queda como si la hubiera hecho el job. Lo que no es una

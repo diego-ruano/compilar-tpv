@@ -18,6 +18,7 @@ use tpv_application::ports::facturas_pdf::{
     CobroDeLaFactura, EstadoPdfFactura, FacturaCompleta, FacturasDeClienteRepository,
     FacturasPdfRepository, OrigenPdf,
 };
+use tpv_application::use_cases::facturas_pdf::ESPERA_MAXIMA_MS;
 use tpv_domain::dinero::Dinero;
 use tpv_domain::verifactu::normalizar_nif;
 
@@ -229,10 +230,13 @@ impl FacturasPdfRepository for SqliteFacturasPdf {
                 "SELECT {COLS} FROM _Facturas_Pdf f \
                  JOIN Registros_Facturacion r ON r.ID_Registro = f.ID_Registro \
                  WHERE f.Generado_Ms IS NULL \
-                   AND (f.Proximo_Intento_Ms IS NULL OR f.Proximo_Intento_Ms <= ?1) \
+                   AND (f.Proximo_Intento_Ms IS NULL OR f.Proximo_Intento_Ms <= ?1 \
+                        OR f.Proximo_Intento_Ms > ?1 + ?3) \
                  ORDER BY r.Orden DESC LIMIT ?2;"
             ),
-            vec![Value::Integer(ahora_ms), Value::Integer(limite)],
+            // Una espera más larga que la mayor posible se anotó con la hora adelantada y el
+            // equipo se ha puesto en hora después (RELOJ-01): no se espera el desfase entero.
+            vec![Value::Integer(ahora_ms), Value::Integer(limite), Value::Integer(ESPERA_MAXIMA_MS)],
         )
         .await
     }
@@ -598,6 +602,24 @@ mod tests {
         assert_eq!((e.intentos, e.ultimo_error, e.proximo_intento_ms), (0, None, Some(5_000)));
         assert_eq!(repo.sin_pdf_local(4_999, 10).await.unwrap().len(), 1);
         assert_eq!(repo.sin_pdf_local(5_000, 10).await.unwrap().len(), 2);
+    }
+
+    /// Un fallo (o un aplazamiento) anotado con el equipo un día adelantado: tras ponerlo en hora,
+    /// la factura no espera el día entero.
+    #[tokio::test]
+    async fn si_se_atrasa_la_hora_una_factura_no_espera_el_desfase() {
+        const DIA: i64 = 24 * 60 * 60 * 1000;
+        let (db, _dir) = con_facturas().await;
+        let repo = SqliteFacturasPdf::new(db);
+        repo.apuntar_nuevas().await.unwrap();
+        let ahora = 1_000_000_000_000;
+        repo.anotar_fallo("00000000-0000-7000-8000-0000000000f1", "no se pudo", ahora + DIA + 60_000).await.unwrap();
+        repo.aplazar("00000000-0000-7000-8000-0000000000f3", ahora + DIA + ESPERA_MAXIMA_MS).await.unwrap();
+        assert_eq!(repo.sin_pdf_local(ahora, 10).await.unwrap().len(), 2);
+        // Una espera que cabe sigue esperando.
+        repo.aplazar("00000000-0000-7000-8000-0000000000f3", ahora + ESPERA_MAXIMA_MS).await.unwrap();
+        let ids: Vec<_> = repo.sin_pdf_local(ahora, 10).await.unwrap().into_iter().map(|e| e.id_registro).collect();
+        assert_eq!(ids, ["00000000-0000-7000-8000-0000000000f1"]);
     }
 
     #[tokio::test]

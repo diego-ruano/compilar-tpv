@@ -75,7 +75,8 @@ pub trait FacturasPdfRepository: Send + Sync {
     async fn apuntar_nuevas(&self) -> AppResult<u64>;
 
     /// Las que no tienen PDF local y ya pueden intentarse (sin espera pendiente), de la más
-    /// reciente a la más antigua.
+    /// reciente a la más antigua. Una espera que pasa de `ESPERA_MAXIMA_MS` desde `ahora_ms` se
+    /// anotó con la hora del equipo adelantada: también puede intentarse.
     async fn sin_pdf_local(&self, ahora_ms: i64, limite: i64) -> AppResult<Vec<EstadoPdfFactura>>;
 
     /// Las que tienen PDF local y la nube todavía no lo ha confirmado, sin las apartadas.

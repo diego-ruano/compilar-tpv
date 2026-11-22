@@ -54,6 +54,13 @@ pub const PAUSA_NUBE_TECHO_MS: i64 = 30 * 60 * 1000;
 /// no tiene: mientras, la pasada sigue con otras en vez de preguntar cada minuto por las mismas.
 pub const ESPERA_HISTORICO_MS: i64 = 15 * 60 * 1000;
 
+/// Lo más que puede esperar una factura a su siguiente intento (el techo de las dos esperas de
+/// arriba). Una que espera más es que la hora del equipo se ha atrasado desde que se anotó (se puso
+/// en hora un equipo adelantado, RELOJ-01): no se le hace esperar el desfase entero, se da por
+/// vencida (`FacturasPdfRepository::sin_pdf_local`).
+pub const ESPERA_MAXIMA_MS: i64 =
+    if ESPERA_TECHO_MS > ESPERA_HISTORICO_MS { ESPERA_TECHO_MS } else { ESPERA_HISTORICO_MS };
+
 /// Lo que se le dice a la pantalla cuando pide el PDF de algo que no es una factura completa.
 pub const MSG_NO_ES_FACTURA_COMPLETA: &str = "Esa factura no existe o no lleva los datos de un cliente.";
 
@@ -87,6 +94,10 @@ pub fn espera_tras_fallos(intentos: i64) -> i64 {
 /// Cuándo se vuelve a hablar con la nube tras un fallo suyo. Vive en memoria del proceso: un
 /// equipo sin red no le pregunta cada minuto, sino al minuto, a los dos, a los cuatro… hasta media
 /// hora; y al reiniciar se vuelve a probar enseguida.
+///
+/// Va en hora del equipo, que puede saltar hacia atrás (se pone en hora uno adelantado, RELOJ-01):
+/// una pausa a la que le queda más que su techo ya no es de fiar y se da por acabada, en vez de
+/// dejar la nube sin hablar el desfase entero.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PausaNube {
     fallos: u32,
@@ -96,7 +107,9 @@ pub struct PausaNube {
 impl PausaNube {
     /// ¿Hay que dejar la nube en paz en este momento?
     pub fn activa(&self, ahora_ms: i64) -> bool {
-        self.fallos > 0 && ahora_ms < self.hasta_ms
+        self.fallos > 0
+            && ahora_ms < self.hasta_ms
+            && self.hasta_ms.saturating_sub(ahora_ms) <= PAUSA_NUBE_TECHO_MS
     }
 
     /// La nube ha fallado: la espera siguiente es el doble que la anterior.
@@ -993,6 +1006,24 @@ mod tests {
         assert!(!p.activa(AHORA + PAUSA_NUBE_TECHO_MS));
         p.exito();
         assert!(!p.activa(AHORA));
+    }
+
+    /// Un fallo de la nube con el equipo un día adelantado y, después, el equipo puesto en hora: la
+    /// pausa no dura el día entero.
+    #[test]
+    fn si_se_atrasa_la_hora_la_pausa_de_la_nube_no_dura_el_desfase() {
+        const DIA: i64 = 24 * 60 * 60 * 1000;
+        let mut p = PausaNube::default();
+        p.fallo(AHORA + DIA);
+        assert!(p.activa(AHORA + DIA));
+        assert!(!p.activa(AHORA));
+        // Desde cualquier hora, lo que queda de pausa nunca pasa de su techo.
+        let mut p = PausaNube::default();
+        for _ in 0..20 {
+            p.fallo(AHORA);
+        }
+        assert!(p.activa(AHORA));
+        assert!(!p.activa(AHORA - 1000));
     }
 
     #[test]
