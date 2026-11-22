@@ -110,6 +110,33 @@ pub(crate) const SQL_FACTURAS_DEL_NIF: &str = "\
             THEN json_extract(r.Destinatario_Json, '$.NIF') END), '-', ''), ' ', '')) = ?1 \
     ORDER BY r.Orden DESC LIMIT ?2;";
 
+/// Las rectificativas por sustitución (`R1`–`R4` con `Tipo_Rectificativa = 'S'`), para saber qué
+/// facturas de la ficha ya no son las vigentes: la que una de ellas pone en `rectificadas` está
+/// sustituida, el mismo criterio que `verifactu::cadena_de_sustitutivas`. Hoy sólo las emite la
+/// corrección de los datos del cliente (`verifactu::corregir_factura`), siempre con destinatario,
+/// así que van por `idx_regfact_completas` sin recorrer los tickets (lo vigila un test del plan).
+/// En orden de emisión: si dos la sustituyeran, cuenta la última, como en la cadena.
+pub(crate) const SQL_SUSTITUTIVAS: &str = "\
+    SELECT r.Num_Serie_Factura, r.Referencias_Json \
+    FROM Registros_Facturacion r INDEXED BY idx_regfact_completas \
+    WHERE r.Tipo = 'ALTA' AND r.Destinatario_Json IS NOT NULL \
+      AND r.Tipo_Factura IN ('R1', 'R2', 'R3', 'R4') AND r.Tipo_Rectificativa = 'S' \
+    ORDER BY r.Orden ASC;";
+
+/// Qué factura sustituye a cada una: número sustituido → número de la sustitutiva.
+async fn sustituciones<R: Reader>(r: &R) -> AppResult<std::collections::HashMap<String, String>> {
+    let mut rows = r.query(SQL_SUSTITUTIVAS, Vec::<Value>::new()).await.map_err(db_err)?;
+    let mut por = std::collections::HashMap::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+        let refs = v_string(row.get_value(1).map_err(db_err)?);
+        for sustituida in crate::verifactu::numeros_rectificados(refs.as_deref()) {
+            por.insert(sustituida.trim().to_string(), num.trim().to_string());
+        }
+    }
+    Ok(por)
+}
+
 /// El cobro con el que se imprime una factura: el suyo; y una `F3` de varios tickets, que no
 /// cuelga de ningún cobro, se imprime desde cualquiera de los que canjea (`tickets.rs`): el primero
 /// que se encuentre.
@@ -154,6 +181,7 @@ impl FacturasDeClienteRepository for SqliteFacturasPdf {
                     importe: Dinero::de_texto_fiscal(&t(4)?.unwrap_or_default()).unwrap_or(Dinero::CERO),
                     id_pago: None,
                     anulada: v_i64(row.get_value(7).map_err(db_err)?).unwrap_or(0) != 0,
+                    sustituida_por: None,
                 },
                 t(5)?,
                 t(6)?,
@@ -161,9 +189,11 @@ impl FacturasDeClienteRepository for SqliteFacturasPdf {
         }
         drop(rows);
 
+        let sustituidas = if filas.is_empty() { Default::default() } else { sustituciones(&r).await? };
         let mut out = Vec::with_capacity(filas.len());
         for (mut f, id_pago, referencias) in filas {
             f.id_pago = pago_de_la_factura(&r, id_pago, referencias.as_deref()).await?;
+            f.sustituida_por = sustituidas.get(f.num_serie.trim()).cloned();
             out.push(f);
         }
         Ok(out)
@@ -620,6 +650,76 @@ mod tests {
         let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
         let resumen: Vec<_> = facturas.iter().map(|f| (f.num_serie.as_str(), f.anulada)).collect();
         assert_eq!(resumen, [("F-000002", false), ("F-000001", true)]);
+    }
+
+    /// Una `R4` por sustitución que reemplaza a `rectifica`, como la emite la corrección de los
+    /// datos del cliente: mismos importes, el destinatario nuevo.
+    fn sustitutiva(id: &str, orden: i64, num: &str, destinatario: &str, rectifica: &str) -> String {
+        let refs = format!(
+            r#"'{{"rectificadas":[{{"IDEmisorFactura":"B12345674","NumSerieFactura":"{rectifica}","FechaExpedicionFactura":"02-01-2026"}}],"sustituidas":[]}}'"#
+        );
+        registro(id, orden, num, "R4", destinatario, &refs, "'p1'")
+            .replace("ID_Pago)", "ID_Pago, Tipo_Rectificativa)")
+            .replace("'p1');", "'p1', 'S');")
+    }
+
+    /// Corregir el cliente de una F1 emite una R4 que la sustituye: la ficha no puede enseñar las
+    /// dos como vigentes (parecerían el doble de lo facturado).
+    #[tokio::test]
+    async fn una_factura_sustituida_llega_con_la_que_la_sustituye() {
+        let (db, _dir) = con_facturas().await;
+        let corregido = r#"'{"NombreRazon":"Cliente Corregido SL","NIF":"B87654321","Domicilio":"Calle 2"}'"#;
+        sembrar(
+            &db,
+            &[
+                &sustitutiva("00000000-0000-7000-8000-0000000000c1", 8, "R-000001", corregido, "F-000001"),
+                // Una por diferencias (`I`) rectifica pero no sustituye: la F3 sigue siendo la suya.
+                &sustitutiva("00000000-0000-7000-8000-0000000000c2", 9, "R-000002", corregido, "F-000002")
+                    .replace("'p1', 'S');", "'p1', 'I');"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
+        let resumen: Vec<_> =
+            facturas.iter().map(|f| (f.num_serie.as_str(), f.sustituida_por.as_deref())).collect();
+        assert_eq!(
+            resumen,
+            [("R-000002", None), ("R-000001", None), ("F-000002", None), ("F-000001", Some("R-000001"))]
+        );
+    }
+
+    /// Si la corrección cambia el NIF, la ficha del NIF antiguo se queda con la F1: tiene que
+    /// decir que ya no vale.
+    #[tokio::test]
+    async fn una_factura_sustituida_a_otro_nif_tambien_lo_dice() {
+        let (db, _dir) = con_facturas().await;
+        let otro = r#"'{"NombreRazon":"Otra SL","NIF":"A58818501"}'"#;
+        sembrar(&db, &[&sustitutiva("00000000-0000-7000-8000-0000000000c1", 8, "R-000001", otro, "F-000001")]).await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let antiguo: Vec<_> = repo
+            .facturas_del_nif("B87654321", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.num_serie, f.sustituida_por))
+            .collect();
+        assert_eq!(
+            antiguo,
+            [("F-000002".to_string(), None), ("F-000001".to_string(), Some("R-000001".to_string()))]
+        );
+        let nuevo = repo.facturas_del_nif("A58818501", 10).await.unwrap();
+        assert_eq!((nuevo.len(), nuevo[0].sustituida_por.as_deref()), (1, None));
+    }
+
+    /// Las sustitutivas se buscan por el índice parcial, sin recorrer los tickets.
+    #[tokio::test]
+    async fn las_sustitutivas_no_recorren_los_tickets() {
+        let plan = plan_de(SQL_SUSTITUTIVAS).await;
+        assert!(plan.iter().any(|l| l.contains("idx_regfact_completas")), "{plan:#?}");
+        assert!(!plan.iter().any(|l| l == "SCAN r"), "{plan:#?}");
     }
 
     /// El plan de una consulta, renglón a renglón.

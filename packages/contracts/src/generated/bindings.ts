@@ -1328,6 +1328,11 @@ export type FacturaDelCliente = {
 	 *  lista lo dice; su PDF es el que se emitió, sin marca (`tickets.md`).
 	 */
 	anulada: boolean,
+	/**
+	 *  El número de la rectificativa que la sustituye (la corrección de los datos del cliente de
+	 *  una `F1`): ya no es la vigente, y la lista lo dice como dice una anulada.
+	 */
+	sustituida_por: string | null,
 };
 
 /**  Una factura de un cobro, para elegir qué papel se imprime. */

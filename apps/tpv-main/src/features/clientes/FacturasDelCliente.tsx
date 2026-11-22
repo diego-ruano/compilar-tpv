@@ -27,6 +27,7 @@ import {
     fechaDeLaFactura,
     nombreDelPdf,
     reimpresionDe,
+    yaNoVale,
     type FacturaDelCliente,
 } from "./facturasDeLaFicha";
 
@@ -92,6 +93,7 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                     {datos.facturas.map((f) => {
                         const cobro = reimpresionDe(f);
                         const guardando = guardandoPdf === f.id_registro;
+                        const noVale = yaNoVale(f);
                         return (
                             <li
                                 key={f.id_registro}
@@ -99,7 +101,7 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                             >
                                 <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-fg">{f.num_serie}</p>
-                                    <p className={cn("text-xs", f.anulada ? "font-semibold text-danger" : "text-fg-muted")}>
+                                    <p className={cn("text-xs", noVale ? "font-semibold text-danger" : "text-fg-muted")}>
                                         {fechaDeLaFactura(f.fecha_expedicion)} · {descripcionDeLaFactura(f)}
                                     </p>
                                 </div>
@@ -107,7 +109,7 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                                     <span
                                         className={cn(
                                             "text-sm font-bold tabular-nums",
-                                            f.anulada
+                                            noVale
                                                 ? "text-fg-muted line-through"
                                                 : f.importe < 0
                                                   ? "text-danger"
@@ -123,7 +125,9 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                                         title={
                                             f.anulada
                                                 ? "Guardar el PDF que se emitió: la factura está anulada y ya no vale"
-                                                : "Guardar el PDF de esta factura"
+                                                : f.sustituida_por
+                                                  ? `Guardar el PDF que se emitió: la sustituye la ${f.sustituida_por} y ya no vale`
+                                                  : "Guardar el PDF de esta factura"
                                         }
                                         onClick={conAviso(() => guardarPdf(f), "No se pudo guardar el PDF de la factura")}
                                     >

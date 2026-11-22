@@ -1747,6 +1747,14 @@ pub(crate) fn numeros_sustituidos(referencias_json: Option<&str>) -> Vec<String>
         .collect()
 }
 
+/// Los números de las facturas que rectifica una rectificativa, leídos de su `Referencias_Json`.
+pub(crate) fn numeros_rectificados(referencias_json: Option<&str>) -> Vec<String> {
+    refs_desde_json(referencias_json, "rectificadas")
+        .into_iter()
+        .map(|r| r.num_serie)
+        .collect()
+}
+
 /// La factura que rectifica una rectificativa, para el papel: `(número, fecha DD-MM-AAAA)`.
 pub(crate) fn rectificada_del_papel(referencias_json: Option<&str>) -> Option<(String, String)> {
     refs_desde_json(referencias_json, "rectificadas")

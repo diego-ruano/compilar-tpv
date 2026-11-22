@@ -408,6 +408,7 @@ pub async fn facturas_de_cliente(
                 importe: f.importe,
                 id_pago: f.id_pago,
                 anulada: f.anulada,
+                sustituida_por: f.sustituida_por,
             })
             .collect(),
         hay_mas,
@@ -1012,6 +1013,7 @@ mod tests_facturas_de_cliente {
                     importe: Dinero::de_centimos(510),
                     id_pago: Some(format!("p{i}")),
                     anulada: i == 1,
+                    sustituida_por: (i == 2).then(|| "R-000009".to_string()),
                 })
                 .collect())
         }
@@ -1048,6 +1050,9 @@ mod tests_facturas_de_cliente {
         // La que está anulada llega dicha a la pantalla.
         let anuladas: Vec<_> = out.facturas.iter().map(|f| f.anulada).collect();
         assert_eq!(anuladas, [false, true, false, false]);
+        // Y la que está sustituida, con el número de la que la sustituye.
+        let sustituidas: Vec<_> = out.facturas.iter().map(|f| f.sustituida_por.as_deref()).collect();
+        assert_eq!(sustituidas, [None, None, Some("R-000009"), None]);
         assert!(!out.hay_mas);
     }
 

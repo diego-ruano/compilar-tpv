@@ -11,6 +11,7 @@ import {
     fechaDeLaFactura,
     nombreDelPdf,
     reimpresionDe,
+    yaNoVale,
 } from "../src/features/clientes/facturasDeLaFicha";
 
 describe("facturas del cliente", () => {
@@ -25,6 +26,17 @@ describe("facturas del cliente", () => {
         expect(descripcionDeLaFactura({ clase: "factura", anulada: true })).toBe("Factura anulada");
         expect(descripcionDeLaFactura({ clase: "sustitutiva", anulada: true })).toBe("Sustitutiva anulada");
         expect(nombreDelPdf({ num_serie: "F-000001", anulada: true })).toBe("factura_F-000001_anulada.pdf");
+    });
+
+    it("una factura sustituida por la corrección de su cliente se dice sustituida y ya no vale", () => {
+        const sustituida = { clase: "factura" as const, anulada: false, sustituida_por: "R-000001" };
+        expect(descripcionDeLaFactura(sustituida)).toBe("Factura sustituida por R-000001");
+        expect(yaNoVale(sustituida)).toBe(true);
+        expect(yaNoVale({ anulada: true, sustituida_por: null })).toBe(true);
+        expect(yaNoVale({ anulada: false, sustituida_por: null })).toBe(false);
+        expect(nombreDelPdf({ num_serie: "F-000001", sustituida_por: "R-000001" })).toBe(
+            "factura_F-000001_sustituida.pdf",
+        );
     });
 
     it("la fecha declarada se lee con barras, y lo que no tiene su forma sale tal cual", () => {

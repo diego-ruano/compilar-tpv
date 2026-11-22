@@ -218,6 +218,14 @@ por error, `emitir_baja_de_pago`) sigue en la lista, porque el registro se conse
 «Factura anulada» (o «Rectificativa anulada», «Sustitutiva anulada») y su importe sale tachado. Su
 PDF es el que se emitió, sin marca, y se ofrece guardarlo como `factura_…_anulada.pdf`.
 
+Una factura **sustituida** (una rectificativa por sustitución, `R1`..`R4` con `Tipo_Rectificativa =
+'S'`, la pone entre sus `rectificadas`: la corrección de los datos del cliente de una `F1`,
+`corregir_factura`) tampoco vale ya, aunque no tenga anulación: dice «Factura sustituida por R-…», su
+importe sale tachado y su PDF se ofrece como `factura_…_sustituida.pdf`. Si no, la `F1` y su `R4`, con
+los mismos importes, parecerían el doble de lo facturado; y si la corrección cambió el NIF, la ficha
+del antiguo se quedaría con la `F1` como vigente. Las sustitutivas se leen una vez por lista, por el
+índice parcial de las facturas completas (todas llevan cliente).
+
 - **PDF** pide el nombre con el diálogo de guardar (`factura_2026-000012.pdf`) y escribe en él el PDF
   que da `clientes_factura_pdf` (el de arriba: local, nube o compuesto). La app no tiene con qué abrir
   un fichero con el visor del sistema; se guarda como el PDF de Cuentas.
