@@ -209,6 +209,11 @@ la más reciente a la más antigua y 200 como mucho, con su número, su fecha de
 factura (`F1`), rectificativa (`R1`..`R5`) o sustitutiva (`F3`) y su importe. Una ficha sin NIF no
 tiene: la sección dice que añadiéndoselo saldrán. Una subsanación no sale aparte.
 
+Una factura **anulada** (un registro de anulación de su número posterior a ella: la baja de su cobro
+por error, `emitir_baja_de_pago`) sigue en la lista, porque el registro se conserva, pero dice
+«Factura anulada» (o «Rectificativa anulada», «Sustitutiva anulada») y su importe sale tachado. Su
+PDF es el que se emitió, sin marca, y se ofrece guardarlo como `factura_…_anulada.pdf`.
+
 - **PDF** pide el nombre con el diálogo de guardar (`factura_2026-000012.pdf`) y escribe en él el PDF
   que da `clientes_factura_pdf` (el de arriba: local, nube o compuesto). La app no tiene con qué abrir
   un fichero con el visor del sistema; se guarda como el PDF de Cuentas.

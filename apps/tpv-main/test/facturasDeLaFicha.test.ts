@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    descripcionDeLaFactura,
     etiquetaClase,
     fechaDeLaFactura,
     nombreDelPdf,
@@ -17,6 +18,13 @@ describe("facturas del cliente", () => {
         expect(etiquetaClase("factura")).toBe("Factura");
         expect(etiquetaClase("rectificativa")).toBe("Rectificativa");
         expect(etiquetaClase("sustitutiva")).toBe("Sustitutiva");
+    });
+
+    it("una factura anulada se dice anulada, y su PDF también", () => {
+        expect(descripcionDeLaFactura({ clase: "factura", anulada: false })).toBe("Factura");
+        expect(descripcionDeLaFactura({ clase: "factura", anulada: true })).toBe("Factura anulada");
+        expect(descripcionDeLaFactura({ clase: "sustitutiva", anulada: true })).toBe("Sustitutiva anulada");
+        expect(nombreDelPdf({ num_serie: "F-000001", anulada: true })).toBe("factura_F-000001_anulada.pdf");
     });
 
     it("la fecha declarada se lee con barras, y lo que no tiene su forma sale tal cual", () => {

@@ -171,6 +171,9 @@ pub struct FacturaDelCliente {
     /// El cobro con el que se reimprime su papel. `None` si no está en esta base (una `F3` de
     /// tickets cuyos cobros no han bajado todavía).
     pub id_pago: Option<String>,
+    /// Anulada después de emitirla (la baja de su cobro por error): fiscalmente ya no existe. La
+    /// lista lo dice; su PDF es el que se emitió, sin marca (`tickets.md`).
+    pub anulada: bool,
 }
 
 /// Las facturas de una ficha, de la más reciente a la más antigua.

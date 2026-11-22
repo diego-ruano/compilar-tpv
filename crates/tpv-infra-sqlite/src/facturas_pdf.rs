@@ -75,9 +75,17 @@ fn fila(row: &crate::ejecutor::Row) -> AppResult<EstadoPdfFactura> {
 /// repiten una factura. El NIF del destinatario se normaliza como `normalizar_nif` (sin guiones ni
 /// espacios y en mayúsculas); un JSON que no se pueda leer no casa con nada en vez de hacer fallar
 /// la lista.
+///
+/// Cada una dice si está anulada: si hay un registro de anulación de su `IDFactura` (emisor, número
+/// y fecha) posterior a ella. La baja de un cobro por error la anula (`emitir_baja_de_pago`), y la
+/// ficha no puede enseñarla como vigente. Se mira por `idx_regfact_numserie`.
 pub(crate) const SQL_FACTURAS_DEL_NIF: &str = "\
     SELECT r.ID_Registro, r.Num_Serie_Factura, r.Fecha_Expedicion, COALESCE(r.Tipo_Factura, ''), \
-           COALESCE(r.Importe_Total, ''), r.ID_Pago, r.Referencias_Json \
+           COALESCE(r.Importe_Total, ''), r.ID_Pago, r.Referencias_Json, \
+           EXISTS (SELECT 1 FROM Registros_Facturacion a \
+                   WHERE a.Num_Serie_Factura = r.Num_Serie_Factura AND a.Tipo = 'ANULACION' \
+                     AND a.Orden > r.Orden AND a.NIF_Emisor = r.NIF_Emisor \
+                     AND a.Fecha_Expedicion = r.Fecha_Expedicion) \
     FROM Registros_Facturacion r INDEXED BY idx_regfact_completas \
     WHERE r.Tipo = 'ALTA' AND r.Destinatario_Json IS NOT NULL \
       AND (r.Subsanacion IS NULL OR r.Subsanacion <> 'S') \
@@ -128,6 +136,7 @@ impl FacturasDeClienteRepository for SqliteFacturasPdf {
                     // El importe del registro es texto fiscal (`123.10`): se lee sin recalcular.
                     importe: Dinero::de_texto_fiscal(&t(4)?.unwrap_or_default()).unwrap_or(Dinero::CERO),
                     id_pago: None,
+                    anulada: v_i64(row.get_value(7).map_err(db_err)?).unwrap_or(0) != 0,
                 },
                 t(5)?,
                 t(6)?,
@@ -525,6 +534,32 @@ mod tests {
         assert!(repo.facturas_del_nif("B11111111", 10).await.unwrap().is_empty());
     }
 
+    /// La baja de un cobro por error anula su factura: la ficha la recibe dicha, no como vigente.
+    #[tokio::test]
+    async fn una_factura_anulada_llega_marcada_como_anulada() {
+        let (db, _dir) = con_facturas().await;
+        let anulacion = |id: &str, orden: i64, num: &str, fecha: &str| {
+            registro(id, orden, num, "F1", "NULL", "NULL", "'p1'")
+                .replace("'ALTA'", "'ANULACION'")
+                .replace("'02-01-2026'", &format!("'{fecha}'"))
+        };
+        sembrar(
+            &db,
+            &[
+                // La de F-000001: la anula.
+                &anulacion("00000000-0000-7000-8000-0000000000b1", 8, "F-000001", "02-01-2026"),
+                // La de otra factura con el mismo número pero otra fecha: no es la suya.
+                &anulacion("00000000-0000-7000-8000-0000000000b2", 9, "F-000002", "03-01-2026"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
+        let resumen: Vec<_> = facturas.iter().map(|f| (f.num_serie.as_str(), f.anulada)).collect();
+        assert_eq!(resumen, [("F-000002", false), ("F-000001", true)]);
+    }
+
     /// El plan de una consulta, renglón a renglón.
     async fn plan_de(sql: &str) -> Vec<String> {
         let (db, dir) = db_temporal().await;
@@ -550,6 +585,9 @@ mod tests {
         let plan = plan_de(SQL_FACTURAS_DEL_NIF).await;
         assert!(plan.iter().any(|l| l.contains("idx_regfact_completas")), "{plan:#?}");
         assert!(!plan.iter().any(|l| l == "SCAN r"), "{plan:#?}");
+        // Si está anulada se mira por el índice del número, sin recorrer los registros.
+        assert!(plan.iter().any(|l| l.contains("idx_regfact_numserie")), "{plan:#?}");
+        assert!(!plan.iter().any(|l| l == "SCAN a"), "{plan:#?}");
     }
 
     /// Cada minuto se buscan las facturas nuevas: por el índice parcial, sin recorrer los tickets.

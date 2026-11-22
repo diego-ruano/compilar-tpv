@@ -23,7 +23,7 @@ import { cn } from "../../shared/lib/cn";
 import PrintTicketModal, { type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 import { useFacturasDelCliente } from "./clientesQueries";
 import {
-    etiquetaClase,
+    descripcionDeLaFactura,
     fechaDeLaFactura,
     nombreDelPdf,
     reimpresionDe,
@@ -99,15 +99,19 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                             >
                                 <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-fg">{f.num_serie}</p>
-                                    <p className="text-xs text-fg-muted">
-                                        {fechaDeLaFactura(f.fecha_expedicion)} · {etiquetaClase(f.clase)}
+                                    <p className={cn("text-xs", f.anulada ? "font-semibold text-danger" : "text-fg-muted")}>
+                                        {fechaDeLaFactura(f.fecha_expedicion)} · {descripcionDeLaFactura(f)}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span
                                         className={cn(
                                             "text-sm font-bold tabular-nums",
-                                            f.importe < 0 ? "text-danger" : "text-fg",
+                                            f.anulada
+                                                ? "text-fg-muted line-through"
+                                                : f.importe < 0
+                                                  ? "text-danger"
+                                                  : "text-fg",
                                         )}
                                     >
                                         {eur(f.importe)}
@@ -116,7 +120,11 @@ export default function FacturasDelCliente({ idCliente }: { idCliente: string })
                                         type="button"
                                         className={BOTON}
                                         disabled={guardando}
-                                        title="Guardar el PDF de esta factura"
+                                        title={
+                                            f.anulada
+                                                ? "Guardar el PDF que se emitió: la factura está anulada y ya no vale"
+                                                : "Guardar el PDF de esta factura"
+                                        }
                                         onClick={conAviso(() => guardarPdf(f), "No se pudo guardar el PDF de la factura")}
                                     >
                                         <FileDown className="size-3.5" aria-hidden />

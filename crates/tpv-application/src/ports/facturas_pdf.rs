@@ -163,6 +163,9 @@ pub struct FacturaCompleta {
     /// El cobro con el que se imprime su papel; el de una `F3` de varios tickets, el del primero
     /// de los que canjea que esté en la base.
     pub id_pago: Option<String>,
+    /// Tiene un registro de anulación posterior: fiscalmente ya no existe (la baja de su cobro por
+    /// error, `verifactu::emitir_baja_de_pago`).
+    pub anulada: bool,
 }
 
 /// Las facturas completas de un cliente: las de su NIF.

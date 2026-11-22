@@ -375,6 +375,7 @@ pub async fn facturas_de_cliente(
                 tipo_factura: f.tipo_factura,
                 importe: f.importe,
                 id_pago: f.id_pago,
+                anulada: f.anulada,
             })
             .collect(),
         hay_mas,
@@ -888,6 +889,7 @@ mod tests_facturas_de_cliente {
                     tipo_factura: tipos[i % tipos.len()].into(),
                     importe: Dinero::de_centimos(510),
                     id_pago: Some(format!("p{i}")),
+                    anulada: i == 1,
                 })
                 .collect())
         }
@@ -921,6 +923,9 @@ mod tests_facturas_de_cliente {
             clases,
             [ClaseFactura::Factura, ClaseFactura::Sustitutiva, ClaseFactura::Rectificativa, ClaseFactura::Rectificativa]
         );
+        // La que está anulada llega dicha a la pantalla.
+        let anuladas: Vec<_> = out.facturas.iter().map(|f| f.anulada).collect();
+        assert_eq!(anuladas, [false, true, false, false]);
         assert!(!out.hay_mas);
     }
 

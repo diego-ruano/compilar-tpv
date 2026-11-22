@@ -1323,6 +1323,11 @@ export type FacturaDelCliente = {
 	 *  tickets cuyos cobros no han bajado todavía).
 	 */
 	id_pago: string | null,
+	/**
+	 *  Anulada después de emitirla (la baja de su cobro por error): fiscalmente ya no existe. La
+	 *  lista lo dice; su PDF es el que se emitió, sin marca (`tickets.md`).
+	 */
+	anulada: boolean,
 };
 
 /**  Una factura de un cobro, para elegir qué papel se imprime. */
