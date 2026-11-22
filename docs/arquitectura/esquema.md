@@ -162,6 +162,9 @@ recuperación descarta todo lo que empieza por `_`.
 (`Origen`: `generado` o `bajado`), cuándo se generó y cuándo lo confirmó la nube (`Generado_Ms`,
 `Subido_Ms`), los fallos al componerlo (`Intentos`, `Ultimo_Error`, `Proximo_Intento_Ms`) y si la
 nube lo rechazó (`Apartado`). La escribe el job `facturas_pdf` ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)).
+Un PDF compuesto aquí borra `Subido_Ms` aunque la nube lo tuviera: al subirlo se sabe si la nube tenía
+otro, que es el que se queda. Al restaurar una copia local se olvida lo local de cada fila y se
+conserva `Subido_Ms` ([recuperacion.md](recuperacion.md#lo-que-vuelve-y-lo-que-no)).
 Las facturas completas se buscan por `idx_regfact_completas`, un índice parcial de
 `Registros_Facturacion` (`WHERE Tipo = 'ALTA' AND Destinatario_Json IS NOT NULL`) que la consulta pide
 con `INDEXED BY`: sin estadísticas, SQLite prefiere `ux_regfact_idfactura`, que recorre todos los

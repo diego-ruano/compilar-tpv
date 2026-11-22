@@ -520,14 +520,18 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
 
 ## Lo que vuelve y lo que no
 
-- Vuelve el **PDF de cada factura completa** tal como se emitió: la tabla que lo anota
-  (`_Facturas_Pdf`) es del equipo y no vuelve, pero el job `facturas_pdf` pregunta primero a la nube
-  por el de cada factura sin PDF local y lo baja; sólo compone el que la nube no tiene, y no antes
-  de que acabe de bajar el histórico ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)). Tras
-  restaurar una copia local en el mismo equipo, los que ya estaban en `AppData/facturas/` se quedan
-  como estaban. Si desde la ficha del cliente se pide el PDF de una que el job todavía no ha
-  bajado, se baja en ese momento; con el histórico a medias, si la nube no lo tiene, se dice que
-  estará cuando acabe.
+- Vuelve el **PDF de cada factura completa** tal como se emitió. Tras restaurar de la nube, la tabla
+  que lo anota (`_Facturas_Pdf`, del equipo) llega vacía, y el job `facturas_pdf` pregunta primero a
+  la nube por el de cada factura sin PDF local y lo baja; sólo compone el que la nube no tiene, y no
+  antes de que acabe de bajar el histórico ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)).
+  Una copia local sí trae la tabla, con lo que tenía el equipo que la hizo, y la carpeta
+  `AppData/facturas/` puede no tener esos PDF (una `data.db` traída de otro equipo): al prepararla,
+  `prepare_restore` olvida lo local de cada factura (`olvidar_los_pdf_locales`) y conserva si la nube
+  lo tenía. El job las vuelve a documentar: la que la nube tiene se baja de ella antes de mirar la
+  carpeta; la que no, se toma de la carpeta si está, y se sube. Si desde la ficha del cliente se pide
+  el PDF de una que el job todavía no ha bajado, se baja en ese momento; si la nube no contesta, se
+  compone para enseñarlo y el job lo cambia después por el de la nube. Con el histórico a medias, si
+  la nube no lo tiene, se dice que estará cuando acabe.
 
 - Vuelve todo lo que llegó a la nube, incluida la **PII del personal**: viaja cifrada por el outbox, el
   volcado la devuelve tal cual y la DEK se recupera al activar.

@@ -52,6 +52,23 @@ pub(crate) const SQL_APUNTAR_NUEVAS: &str = "\
       AND length(r.ID_Registro) = 36 AND r.ID_Registro NOT GLOB '*[^0-9A-Fa-f-]*' \
       AND NOT EXISTS (SELECT 1 FROM _Facturas_Pdf f WHERE f.ID_Registro = r.ID_Registro);";
 
+/// Al restaurar una copia, lo que dice del PDF local de cada factura es del equipo que la hizo: esta
+/// carpeta puede no tenerlo (una `data.db` traída de otro equipo). Se olvida, con sus fallos, y el
+/// job las vuelve a documentar. `Subido_Ms` se conserva: dice que la nube lo tiene, y entonces se
+/// baja de ella antes de mirar la carpeta (`use_cases::facturas_pdf`).
+pub(crate) async fn olvidar_los_pdf_locales(db: &Db) -> AppResult<()> {
+    let w = db.write().await;
+    w.raw()
+        .execute(
+            "UPDATE _Facturas_Pdf SET Ruta = NULL, Origen = NULL, Generado_Ms = NULL, Intentos = 0, \
+               Ultimo_Error = NULL, Proximo_Intento_Ms = NULL, Apartado = 0;",
+            Vec::<Value>::new(),
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+
 /// Columnas en el mismo orden en todas las lecturas, para leer por índice.
 const COLS: &str = "f.ID_Registro, f.Origen, f.Generado_Ms, f.Subido_Ms, f.Intentos, f.Ultimo_Error, \
                     f.Proximo_Intento_Ms, f.Apartado";
@@ -249,6 +266,7 @@ impl FacturasPdfRepository for SqliteFacturasPdf {
              VALUES (?1, ?2, ?3, ?4, 0, 0) \
              ON CONFLICT(ID_Registro) DO UPDATE SET \
                Ruta = excluded.Ruta, Origen = excluded.Origen, Generado_Ms = excluded.Generado_Ms, \
+               Subido_Ms = CASE WHEN excluded.Origen = 'generado' THEN NULL ELSE Subido_Ms END, \
                Intentos = 0, Ultimo_Error = NULL, Proximo_Intento_Ms = NULL;",
             vec![
                 Value::Text(id_registro.to_string()),
@@ -304,6 +322,15 @@ impl FacturasPdfRepository for SqliteFacturasPdf {
         self.escribir(
             "UPDATE _Facturas_Pdf SET Apartado = 1, Ultimo_Error = ?2 WHERE ID_Registro = ?1;",
             vec![Value::Text(id_registro.to_string()), Value::Text(motivo.to_string())],
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn aplazar(&self, id_registro: &str, proximo_intento_ms: i64) -> AppResult<()> {
+        self.escribir(
+            "UPDATE _Facturas_Pdf SET Proximo_Intento_Ms = ?2 WHERE ID_Registro = ?1;",
+            vec![Value::Text(id_registro.to_string()), Value::Integer(proximo_intento_ms)],
         )
         .await?;
         Ok(())
@@ -462,6 +489,41 @@ mod tests {
         // Si el PDF local desaparece, se vuelve a documentar.
         repo.olvidar_local("00000000-0000-7000-8000-0000000000f1").await.unwrap();
         assert_eq!(repo.sin_pdf_local(10_000, 10).await.unwrap()[0].id_registro, "00000000-0000-7000-8000-0000000000f1");
+    }
+
+    /// Uno compuesto aquí vuelve a la subida aunque la nube lo tuviera: al subirlo, si tenía otro (el
+    /// que se emitió), se cambia el de aquí por el suyo. Uno bajado de ella no.
+    #[tokio::test]
+    async fn un_pdf_compuesto_aqui_vuelve_a_la_subida_y_uno_bajado_no() {
+        let (db, _dir) = con_facturas().await;
+        let repo = SqliteFacturasPdf::new(db);
+        let id = "00000000-0000-7000-8000-0000000000f1";
+        let ruta = "facturas/00000000-0000-7000-8000-0000000000f1.pdf";
+        repo.apuntar_nuevas().await.unwrap();
+        repo.anotar_local(id, ruta, OrigenPdf::Bajado, 1).await.unwrap();
+        repo.anotar_subido(id, 2).await.unwrap();
+
+        repo.anotar_local(id, ruta, OrigenPdf::Bajado, 3).await.unwrap();
+        assert_eq!(repo.estado(id).await.unwrap().unwrap().subido_ms, Some(2));
+        assert!(repo.sin_subir(10).await.unwrap().is_empty());
+
+        repo.anotar_local(id, ruta, OrigenPdf::Generado, 4).await.unwrap();
+        assert_eq!(repo.estado(id).await.unwrap().unwrap().subido_ms, None);
+        assert_eq!(repo.sin_subir(10).await.unwrap()[0].id_registro, id);
+    }
+
+    /// Esperar a que acabe el histórico no es un fallo de la factura: no cuenta como intento.
+    #[tokio::test]
+    async fn aplazar_saca_la_factura_de_la_lista_sin_contar_un_intento() {
+        let (db, _dir) = con_facturas().await;
+        let repo = SqliteFacturasPdf::new(db);
+        let id = "00000000-0000-7000-8000-0000000000f1";
+        repo.apuntar_nuevas().await.unwrap();
+        repo.aplazar(id, 5_000).await.unwrap();
+        let e = repo.estado(id).await.unwrap().unwrap();
+        assert_eq!((e.intentos, e.ultimo_error, e.proximo_intento_ms), (0, None, Some(5_000)));
+        assert_eq!(repo.sin_pdf_local(4_999, 10).await.unwrap().len(), 1);
+        assert_eq!(repo.sin_pdf_local(5_000, 10).await.unwrap().len(), 2);
     }
 
     #[tokio::test]

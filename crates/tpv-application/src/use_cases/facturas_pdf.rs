@@ -10,11 +10,15 @@
 //! Lo mueve el job `facturas_pdf` (`pasada`) y, cuando la pantalla pide una que todavía no está,
 //! [`pdf_de_factura`]. Lo de cada factura se anota en `_Facturas_Pdf`, estado local del equipo.
 //!
-//! - **Sin PDF local**: se baja de la nube; si no lo tiene, se compone aquí.
+//! - **Sin PDF local**: se baja de la nube; si no lo tiene, se compone aquí. Si consta que la nube
+//!   lo tiene (una copia restaurada), la nube va antes que lo que haya en la carpeta.
 //! - **Sin subir**: se sube. La nube no sobrescribe; si ya tenía uno («ya estaba») y el de aquí lo
-//!   compuso este equipo, se cambia por el de la nube, que es el que se emitió.
+//!   compuso este equipo, se cambia por el de la nube, que es el que se emitió, y no se da por
+//!   subido hasta que se ha cambiado. Por eso uno compuesto aquí vuelve siempre a la subida, aunque
+//!   la nube constara con el suyo (`anotar_local`).
 //! - **No se compone con el histórico a medias** (SYNC-19): sus líneas pueden no haber bajado
-//!   todavía, y lo compuesto se quedaría así para siempre. Bajar de la nube sí.
+//!   todavía, y lo compuesto se quedaría así para siempre. Bajar de la nube sí; la que la nube no
+//!   tiene espera [`ESPERA_HISTORICO_MS`] antes de volver a preguntar, sin contar como intento.
 //! - Un fallo al componer se anota en la fila con una espera que crece (`espera_tras_fallos`) y no
 //!   frena a las demás. Un fallo de la nube (sin red, credenciales, un fallo suyo) no es de la
 //!   factura: no cuenta como intento, y la pasada deja la nube para la siguiente.
@@ -45,6 +49,10 @@ pub const ESPERA_TECHO_MS: i64 = 6 * 60 * 60 * 1000;
 
 /// Lo más que se deja la nube sin intentar tras un fallo suyo.
 pub const PAUSA_NUBE_TECHO_MS: i64 = 30 * 60 * 1000;
+
+/// Con el histórico a medias, cuánto se tarda en volver a preguntar a la nube por una factura que
+/// no tiene: mientras, la pasada sigue con otras en vez de preguntar cada minuto por las mismas.
+pub const ESPERA_HISTORICO_MS: i64 = 15 * 60 * 1000;
 
 /// Lo que se le dice a la pantalla cuando pide el PDF de algo que no es una factura completa.
 pub const MSG_NO_ES_FACTURA_COMPLETA: &str = "Esa factura no existe o no lleva los datos de un cliente.";
@@ -213,15 +221,21 @@ async fn documentar(
 ) -> AppResult<()> {
     let id = fila.id_registro.as_str();
     let ruta = f.archivos.ruta(id);
+    // La nube ya lo tiene: lo confirmó antes de que se perdiera el local, o lo dice la copia
+    // restaurada (`olvidar_los_pdf_locales`). El suyo es el que se emitió y va antes que la carpeta.
+    let en_la_nube = fila.subido_ms.is_some();
 
     // Ya está en la carpeta: una base restaurada de una copia que no lo tenía anotado. No se
-    // vuelve a componer: es el que se hizo.
-    if f.archivos.leer(id)?.is_some_and(|b| es_pdf(&b)) {
+    // vuelve a componer: es el que se hizo. Se anota como compuesto aquí, así que se sube, y si la
+    // nube tenía otro se cambia por el suyo (`subir`).
+    let en_la_carpeta = || f.archivos.leer(id).map(|b| b.is_some_and(|b| es_pdf(&b)));
+    if !en_la_nube && en_la_carpeta()? {
         f.repo.anotar_local(id, &ruta, OrigenPdf::Generado, ahora_ms).await?;
         return Ok(());
     }
 
     // La nube primero: si lo tiene, es el que se emitió.
+    let mut no_lo_tiene = false;
     if let Some(n) = *nube {
         match n.bajar(id).await {
             Ok(Some(bajado)) if es_pdf(&bajado) => {
@@ -233,7 +247,10 @@ async fn documentar(
                 return Ok(());
             }
             // No lo tiene (o lo que tiene no es un PDF, que la nube no deja subir): se compone.
-            Ok(_) => p.nube_contesto = true,
+            Ok(_) => {
+                p.nube_contesto = true;
+                no_lo_tiene = true;
+            }
             Err(e) => {
                 p.fallo_de_la_nube = Some(e.to_string());
                 *nube = None;
@@ -241,8 +258,18 @@ async fn documentar(
         }
     }
 
+    if en_la_nube && en_la_carpeta()? {
+        f.repo.anotar_local(id, &ruta, OrigenPdf::Generado, ahora_ms).await?;
+        return Ok(());
+    }
+
     if !se_puede_generar {
         p.en_espera += 1;
+        // La nube ha dicho que no lo tiene: no se le vuelve a preguntar en cada pasada, que así
+        // sigue con las demás (no cuenta como intento: no es un fallo de la factura).
+        if no_lo_tiene {
+            f.repo.aplazar(id, ahora_ms.saturating_add(ESPERA_HISTORICO_MS)).await?;
+        }
         return Ok(());
     }
 
@@ -299,23 +326,28 @@ async fn subir(
         }
         Ok(SubidaFactura::YaEstaba) => {
             p.nube_contesto = true;
-            f.repo.anotar_subido(id, ahora_ms).await?;
-            p.subidas += 1;
             // La nube ya tenía uno y no lo cambia. Si el de aquí lo compuso este equipo (sin red,
-            // tras restaurar), el bueno es el de la nube: el que se emitió.
+            // tras restaurar), el bueno es el de la nube: el que se emitió. Hasta que se haya
+            // cambiado no se anota como subido: si la bajada falla, la pasada siguiente lo repite.
             if fila.origen == Some(OrigenPdf::Generado) {
                 match n.bajar(id).await {
-                    Ok(Some(bajado)) if es_pdf(&bajado) && bajado != local => {
-                        f.archivos.guardar(id, &bajado)?;
-                        f.repo.anotar_local(id, &f.archivos.ruta(id), OrigenPdf::Bajado, ahora_ms).await?;
+                    Ok(Some(bajado)) if es_pdf(&bajado) => {
+                        if bajado != local {
+                            f.archivos.guardar(id, &bajado)?;
+                            f.repo.anotar_local(id, &f.archivos.ruta(id), OrigenPdf::Bajado, ahora_ms).await?;
+                        }
                     }
+                    // Dice que lo tiene y no lo da: se queda el de aquí.
                     Ok(_) => {}
                     Err(e) => {
                         p.fallo_de_la_nube = Some(e.to_string());
                         *nube = None;
+                        return Ok(());
                     }
                 }
             }
+            f.repo.anotar_subido(id, ahora_ms).await?;
+            p.subidas += 1;
         }
         Ok(SubidaFactura::Rechazada { motivo }) => {
             p.nube_contesto = true;
@@ -496,6 +528,9 @@ mod tests {
         }
         async fn anotar_local(&self, id: &str, _ruta: &str, origen: OrigenPdf, ahora: i64) -> AppResult<()> {
             self.editar(id, |e| {
+                if origen == OrigenPdf::Generado {
+                    e.subido_ms = None;
+                }
                 e.origen = Some(origen);
                 e.generado_ms = Some(ahora);
                 e.intentos = 0;
@@ -530,6 +565,10 @@ mod tests {
             });
             Ok(())
         }
+        async fn aplazar(&self, id: &str, proximo: i64) -> AppResult<()> {
+            self.editar(id, |e| e.proximo_intento_ms = Some(proximo));
+            Ok(())
+        }
     }
 
     #[derive(Default)]
@@ -559,6 +598,8 @@ mod tests {
     struct Nube {
         tiene: Mutex<HashMap<String, Vec<u8>>>,
         caida: bool,
+        /// Acepta la subida pero falla al bajar (la red que se corta entre las dos peticiones).
+        falla_al_bajar: bool,
         rechaza: bool,
         bajadas: Mutex<u32>,
         subidas: Mutex<u32>,
@@ -583,7 +624,7 @@ mod tests {
         }
         async fn bajar(&self, id: &str) -> AppResult<Option<Vec<u8>>> {
             *self.bajadas.lock().unwrap() += 1;
-            if self.caida {
+            if self.caida || self.falla_al_bajar {
                 return Err(AppError::sin_conexion("prueba"));
             }
             Ok(self.tiene.lock().unwrap().get(id).cloned())
@@ -704,6 +745,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn si_la_nube_ya_tenia_otro_y_falla_la_bajada_se_vuelve_a_intentar() {
+        // La nube contesta «ya estaba» y la red se corta antes de bajar el suyo: no se da por
+        // subido, y la pasada siguiente lo cambia.
+        let (r, c, g) = (Repo::con(&["a"]), Carpeta::default(), Generador::default());
+        pasada(&facturas(&r, &c, &g, None), AHORA, true).await.unwrap();
+        assert_eq!(c.de("a").as_deref(), Some(PDF));
+
+        let cortada = Nube { falla_al_bajar: true, ..Nube::default() };
+        cortada.tiene.lock().unwrap().insert("a".into(), PDF_NUBE.to_vec());
+        let p = pasada(&facturas(&r, &c, &g, Some(&cortada)), AHORA + 60_000, true).await.unwrap();
+        assert!(p.fallo_de_la_nube.is_some());
+        assert!(r.fila("a").subido_ms.is_none());
+        assert_eq!(c.de("a").as_deref(), Some(PDF));
+
+        let n = Nube::default();
+        n.tiene.lock().unwrap().insert("a".into(), PDF_NUBE.to_vec());
+        pasada(&facturas(&r, &c, &g, Some(&n)), AHORA + 120_000, true).await.unwrap();
+        assert_eq!(c.de("a").as_deref(), Some(PDF_NUBE));
+        assert_eq!(r.fila("a").origen, Some(OrigenPdf::Bajado));
+        assert!(r.fila("a").subido_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn uno_compuesto_sin_nube_para_la_pantalla_se_cambia_por_el_que_se_emitio() {
+        // Tras restaurar: la nube lo tiene (consta subido), el equipo no, y la pantalla lo pide sin
+        // red. Se compone para enseñarlo, pero no se queda: el job sube, oye «ya estaba» y baja el
+        // de la nube.
+        let (r, c, g) = (Repo::con(&["a"]), Carpeta::default(), Generador::default());
+        r.editar("a", |e| e.subido_ms = Some(1));
+        assert_eq!(pdf_de_factura(&facturas(&r, &c, &g, None), "a", AHORA, true).await.unwrap(), PDF);
+
+        let n = Nube::default();
+        n.tiene.lock().unwrap().insert("a".into(), PDF_NUBE.to_vec());
+        pasada(&facturas(&r, &c, &g, Some(&n)), AHORA + 60_000, true).await.unwrap();
+        assert_eq!(c.de("a").as_deref(), Some(PDF_NUBE));
+        assert_eq!(n.tiene.lock().unwrap().get("a").map(Vec::as_slice), Some(PDF_NUBE));
+    }
+
+    #[tokio::test]
+    async fn si_la_nube_lo_tiene_va_antes_que_la_carpeta() {
+        // Una copia restaurada dice que la nube lo tiene, y en la carpeta hay otro: se queda el de
+        // la nube, sin subir nada.
+        let (r, c, g, n) = (Repo::con(&["a"]), Carpeta::default(), Generador::default(), Nube::default());
+        r.editar("a", |e| e.subido_ms = Some(1));
+        c.guardar("a", PDF).unwrap();
+        n.tiene.lock().unwrap().insert("a".into(), PDF_NUBE.to_vec());
+
+        let p = pasada(&facturas(&r, &c, &g, Some(&n)), AHORA, true).await.unwrap();
+        assert_eq!((p.bajadas, p.subidas, p.generadas), (1, 0, 0));
+        assert_eq!(c.de("a").as_deref(), Some(PDF_NUBE));
+        assert_eq!(*n.subidas.lock().unwrap(), 0);
+
+        // Sin nube, la de la carpeta se anota y se comprueba al subirla.
+        let (r, c, g) = (Repo::con(&["b"]), Carpeta::default(), Generador::default());
+        r.editar("b", |e| e.subido_ms = Some(1));
+        c.guardar("b", PDF).unwrap();
+        pasada(&facturas(&r, &c, &g, None), AHORA, true).await.unwrap();
+        assert_eq!(*g.veces.lock().unwrap(), 0);
+        let fila = r.fila("b");
+        assert_eq!((fila.origen, fila.subido_ms), (Some(OrigenPdf::Generado), None));
+    }
+
+    #[tokio::test]
     async fn sin_nube_se_compone_y_se_queda_por_subir() {
         let (r, c, g) = (Repo::con(&["a"]), Carpeta::default(), Generador::default());
         let p = pasada(&facturas(&r, &c, &g, None), AHORA, true).await.unwrap();
@@ -758,6 +862,24 @@ mod tests {
         assert!(c.de("b").is_none());
         // Y no cuenta como fallo: se compone cuando acabe.
         assert_eq!(r.fila("b").intentos, 0);
+    }
+
+    #[tokio::test]
+    async fn con_el_historico_a_medias_no_se_pregunta_cada_minuto_por_lo_que_la_nube_no_tiene() {
+        let (r, c, g, n) = (Repo::con(&["a"]), Carpeta::default(), Generador::default(), Nube::default());
+        let f = facturas(&r, &c, &g, Some(&n));
+        pasada(&f, AHORA, false).await.unwrap();
+        assert_eq!(*n.bajadas.lock().unwrap(), 1);
+
+        // La pasada siguiente no vuelve a preguntar por ella (sigue con las demás)…
+        let p = pasada(&f, AHORA + 60_000, false).await.unwrap();
+        assert_eq!(*n.bajadas.lock().unwrap(), 1);
+        assert_eq!(p.en_espera, 0);
+        assert_eq!(r.fila("a").intentos, 0);
+
+        // …hasta pasado un rato; y si el histórico ha acabado, se compone.
+        let p = pasada(&f, AHORA + ESPERA_HISTORICO_MS, true).await.unwrap();
+        assert_eq!((p.generadas, p.subidas), (1, 1));
     }
 
     #[tokio::test]

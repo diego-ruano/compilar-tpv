@@ -1795,6 +1795,9 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&st
         // El resumen diario de las estadísticas que trae la copia se rehace entero: es una caché,
         // y así no depende de con qué versión se hizo la copia.
         reiniciar_resumen_de_estadisticas(&db).await?;
+        // El PDF de las facturas que la copia da por guardado en el equipo puede no estar en esta
+        // carpeta (una base traída de otro equipo): el job las vuelve a documentar.
+        crate::facturas_pdf::olvidar_los_pdf_locales(&db).await?;
         {
             let w = db.write().await;
             let _ = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await;
@@ -2222,6 +2225,43 @@ mod tests {
             1
         );
         assert_eq!(cuenta(&restored, "SELECT COUNT(*) FROM _Estad_Dias_Sucios;").await, 1);
+
+        drop(restored);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn preparar_una_copia_deja_por_documentar_el_pdf_de_las_facturas() {
+        // La copia trae `_Facturas_Pdf` con lo que tenía el equipo que la hizo, y esta carpeta
+        // puede no tener esos PDF (una data.db traída de otro equipo). Se olvida lo local y se
+        // conserva que la nube lo tiene, para bajarlo de ella.
+        let dir = test_dir("pdf-facturas");
+        let db = db_operativa(&dir).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Facturas_Pdf (ID_Registro, Ruta, Origen, Generado_Ms, Subido_Ms, Intentos, Ultimo_Error, Proximo_Intento_Ms, Apartado)
+                       VALUES ('00000000-0000-7000-8000-0000000000f1', 'facturas/x.pdf', 'generado', 5, 6, 2, 'fallo', 99, 1);",
+                )
+                .await
+                .unwrap();
+        }
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
+
+        let restored = Db::open(prepared.to_str().unwrap()).await.unwrap();
+        assert_eq!(
+            cuenta(
+                &restored,
+                "SELECT COUNT(*) FROM _Facturas_Pdf WHERE Ruta IS NULL AND Origen IS NULL AND Generado_Ms IS NULL \
+                   AND Subido_Ms = 6 AND Intentos = 0 AND Ultimo_Error IS NULL AND Proximo_Intento_Ms IS NULL \
+                   AND Apartado = 0;"
+            )
+            .await,
+            1
+        );
 
         drop(restored);
         drop(db);

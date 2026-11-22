@@ -90,7 +90,9 @@ pub trait FacturasPdfRepository: Send + Sync {
     async fn cobro_de_la_factura(&self, id_registro: &str) -> AppResult<Option<CobroDeLaFactura>>;
 
     /// Ya hay PDF local: anota de dónde salió y cuándo, y borra los fallos. Si es una factura que
-    /// aún no tenía fila (la pide la pantalla antes que el job), la crea.
+    /// aún no tenía fila (la pide la pantalla antes que el job), la crea. Uno compuesto aquí
+    /// (`Generado`) borra además que la nube lo tenga: hasta subirlo no se sabe si la nube tenía
+    /// otro, el que se emitió, que es el que se queda.
     async fn anotar_local(&self, id_registro: &str, ruta: &str, origen: OrigenPdf, ahora_ms: i64)
         -> AppResult<()>;
 
@@ -106,6 +108,9 @@ pub trait FacturasPdfRepository: Send + Sync {
 
     /// La nube lo ha rechazado por lo que es: se aparta y no se vuelve a subir.
     async fn apartar(&self, id_registro: &str, motivo: &str) -> AppResult<()>;
+
+    /// Hay que esperar para volver a intentarlo, sin que sea un fallo suyo: no cuenta como intento.
+    async fn aplazar(&self, id_registro: &str, proximo_intento_ms: i64) -> AppResult<()>;
 }
 
 /// Los PDF de las facturas en la carpeta del equipo (`AppData/facturas/{ID_Registro}.pdf`).

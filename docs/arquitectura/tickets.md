@@ -184,9 +184,13 @@ propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
   imágenes y no lo sobrescribe ([worker.md](worker.md#facturas-en-pdf)). Para documentar una factura
   sin PDF local, primero se pregunta a la nube: en un equipo restaurado, el bueno es el que se subió
   el día que se emitió, no uno compuesto con los datos del negocio de hoy. Si se compuso aquí sin red
-  y al subirlo la nube ya tenía otro, se cambia el de aquí por el de la nube.
+  y al subirlo la nube ya tenía otro, se cambia el de aquí por el de la nube, y no se da por subido
+  hasta haberlo cambiado: si la bajada falla, la pasada siguiente lo repite. Por eso un PDF compuesto
+  aquí vuelve siempre a la subida, aunque constara que la nube tenía el suyo.
 - **Con el histórico a medias no se compone** (tras restaurar desde la nube, SYNC-19): las líneas de
-  una factura antigua pueden no haber bajado. Se baja de la nube lo que esté y lo demás espera.
+  una factura antigua pueden no haber bajado. Se baja de la nube lo que esté y lo demás espera; a la
+  que la nube no tiene no se le vuelve a preguntar hasta pasados 15 minutos (`ESPERA_HISTORICO_MS`,
+  sin contar como intento), así que la pasada sigue con las demás.
 - **El estado de cada una** está en `_Facturas_Pdf` (`0006_facturas_pdf.sql`, local del equipo:
   [esquema.md](esquema.md#el-andamiaje-local-16-de-0001-y-0002)): la ruta, de dónde salió (`generado`
   o `bajado`), cuándo se generó y cuándo lo confirmó la nube, y los fallos al componerla, con una
