@@ -23,9 +23,10 @@ export function etiquetaClase(clase: ClaseFactura): string {
 }
 
 /**
- * ¿Ya no vale? La anuló la baja de su cobro, o la sustituyó una rectificativa (la corrección de los
- * datos del cliente). Sigue en la lista (el registro se conserva), pero no se enseña como vigente:
- * con la que la sustituye, parecería el doble de lo facturado.
+ * ¿Ya no vale? La anuló la baja de su cobro, o la sustituyó otra al corregir los datos del cliente
+ * (la rectificativa de una `F1`, la `F3` nueva de una `F3`). Sigue en la lista (el registro se
+ * conserva), pero no se enseña como vigente: con la que la sustituye, parecería el doble de lo
+ * facturado.
  */
 export function yaNoVale(f: Pick<FacturaDelCliente, "anulada"> & { sustituida_por?: string | null }): boolean {
     return f.anulada || !!f.sustituida_por;
@@ -33,13 +34,17 @@ export function yaNoVale(f: Pick<FacturaDelCliente, "anulada"> & { sustituida_po
 
 /**
  * Lo que se dice de ella debajo del número: su clase y, si ya no vale, por qué: anulada, o
- * sustituida por la rectificativa que la reemplaza.
+ * sustituida por la que la reemplaza. La `F3` negativa de una corrección dice cuál contrarresta.
  */
 export function descripcionDeLaFactura(
-    f: Pick<FacturaDelCliente, "clase" | "anulada"> & { sustituida_por?: string | null },
+    f: Pick<FacturaDelCliente, "clase" | "anulada"> & {
+        sustituida_por?: string | null;
+        contrarresta?: string | null;
+    },
 ): string {
     if (f.anulada) return `${etiquetaClase(f.clase)} anulada`;
     if (f.sustituida_por) return `${etiquetaClase(f.clase)} sustituida por ${f.sustituida_por}`;
+    if (f.contrarresta) return `${etiquetaClase(f.clase)} que contrarresta la ${f.contrarresta}`;
     return etiquetaClase(f.clase);
 }
 

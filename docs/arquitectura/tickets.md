@@ -230,8 +230,14 @@ Una factura **sustituida** (una rectificativa por sustitución, `R1`..`R4` con `
 `corregir_factura`) tampoco vale ya, aunque no tenga anulación: dice «Factura sustituida por R-…», su
 importe sale tachado y su PDF se ofrece como `factura_…_sustituida.pdf`. Si no, la `F1` y su `R4`, con
 los mismos importes, parecerían el doble de lo facturado; y si la corrección cambió el NIF, la ficha
-del antiguo se quedaría con la `F1` como vigente. Las sustitutivas se leen una vez por lista, por el
-índice parcial de las facturas completas (todas llevan cliente).
+del antiguo se quedaría con la `F1` como vigente. Lo mismo una `F3` cuyo cliente se ha corregido,
+que no se rectifica: la corrección emite una `F3` negativa que la contrarresta (mismo cliente, mismos
+tickets) y una `F3` con el cliente nuevo sobre los mismos tickets. La negativa se reconoce como en el
+papel (`que_contrarresta`: detrás hay una `F3` positiva sobre los mismos tickets), y la errónea es la
+última positiva anterior con esos tickets y su importe: sale «Sustitutiva sustituida por F-…», y la
+negativa «Sustitutiva que contrarresta la F-…». Una negativa sin positiva detrás (la baja de un ticket
+de una `F3` de varios, o una devolución) no sustituye a nadie. Las sustitutivas y las `F3` se leen una
+vez por lista, por el índice parcial de las facturas completas (todas llevan cliente).
 
 - **PDF** pide el nombre con el diálogo de guardar (`factura_2026-000012.pdf`) y escribe en él el PDF
   que da `clientes_factura_pdf` (el de arriba: local, nube o compuesto). La app no tiene con qué abrir

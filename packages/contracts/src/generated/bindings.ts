@@ -1329,10 +1329,16 @@ export type FacturaDelCliente = {
 	 */
 	anulada: boolean,
 	/**
-	 *  El número de la rectificativa que la sustituye (la corrección de los datos del cliente de
-	 *  una `F1`): ya no es la vigente, y la lista lo dice como dice una anulada.
+	 *  El número de la factura que la sustituye tras corregir los datos del cliente (la
+	 *  rectificativa de una `F1`, o la `F3` nueva de una `F3`): ya no es la vigente, y la lista lo
+	 *  dice como dice una anulada.
 	 */
 	sustituida_por: string | null,
+	/**
+	 *  En la `F3` negativa de esa corrección de una `F3`, el número de la errónea que
+	 *  contrarresta: la lista dice lo que es en vez de «Sustitutiva» suelta.
+	 */
+	contrarresta: string | null,
 };
 
 /**  Una factura de un cobro, para elegir qué papel se imprime. */

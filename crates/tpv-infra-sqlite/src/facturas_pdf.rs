@@ -124,18 +124,93 @@ pub(crate) const SQL_SUSTITUTIVAS: &str = "\
       AND r.Tipo_Factura IN ('R1', 'R2', 'R3', 'R4') AND r.Tipo_Rectificativa = 'S' \
     ORDER BY r.Orden ASC;";
 
-/// Qué factura sustituye a cada una: número sustituido → número de la sustitutiva.
-async fn sustituciones<R: Reader>(r: &R) -> AppResult<std::collections::HashMap<String, String>> {
+/// Las `F3`, para saber cuáles ha sustituido la corrección de los datos de su cliente
+/// (`verifactu::corregir_factura`), que no emite una rectificativa: emite una `F3` negativa que
+/// contrarresta la errónea y otra `F3` con el cliente nuevo, las dos sobre los mismos tickets. Toda
+/// `F3` lleva destinatario: van por `idx_regfact_completas` sin recorrer los tickets (lo vigila un
+/// test del plan). Una subsanación repite su número: no cuenta aparte.
+pub(crate) const SQL_F3: &str = "\
+    SELECT r.Num_Serie_Factura, COALESCE(r.Importe_Total, ''), r.Referencias_Json \
+    FROM Registros_Facturacion r INDEXED BY idx_regfact_completas \
+    WHERE r.Tipo = 'ALTA' AND r.Destinatario_Json IS NOT NULL AND r.Tipo_Factura = 'F3' \
+      AND (r.Subsanacion IS NULL OR r.Subsanacion <> 'S') \
+    ORDER BY r.Orden ASC;";
+
+/// Qué facturas ya no son las vigentes y qué negativas las contrarrestan.
+#[derive(Default)]
+struct Sustituciones {
+    /// Número sustituido → número de la que la sustituye.
+    sustituida_por: std::collections::HashMap<String, String>,
+    /// La `F3` negativa de una corrección → el número de la errónea que contrarresta.
+    contrarresta: std::collections::HashMap<String, String>,
+}
+
+/// Una `F3` con lo que hace falta para emparejarla: su importe y sus tickets, ordenados.
+struct F3Leida {
+    num: String,
+    importe: Dinero,
+    tickets: Vec<String>,
+}
+
+/// Las sustituciones: las de las rectificativas por sustitución (`SQL_SUSTITUTIVAS`) y las de la
+/// corrección de una `F3` (`SQL_F3`).
+async fn sustituciones<R: Reader>(r: &R) -> AppResult<Sustituciones> {
+    let mut s = Sustituciones::default();
     let mut rows = r.query(SQL_SUSTITUTIVAS, Vec::<Value>::new()).await.map_err(db_err)?;
-    let mut por = std::collections::HashMap::new();
     while let Some(row) = rows.next().await.map_err(db_err)? {
         let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
         let refs = v_string(row.get_value(1).map_err(db_err)?);
         for sustituida in crate::verifactu::numeros_rectificados(refs.as_deref()) {
-            por.insert(sustituida.trim().to_string(), num.trim().to_string());
+            s.sustituida_por.insert(sustituida.trim().to_string(), num.trim().to_string());
         }
     }
-    Ok(por)
+    drop(rows);
+
+    let mut f3 = Vec::new();
+    let mut rows = r.query(SQL_F3, Vec::<Value>::new()).await.map_err(db_err)?;
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default().trim().to_string();
+        let importe =
+            Dinero::de_texto_fiscal(&v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default())
+                .unwrap_or(Dinero::CERO);
+        let refs = v_string(row.get_value(2).map_err(db_err)?);
+        let mut tickets: Vec<String> = crate::verifactu::numeros_sustituidos(refs.as_deref())
+            .into_iter()
+            .map(|t| t.trim().to_string())
+            .collect();
+        tickets.sort();
+        f3.push(F3Leida { num, importe, tickets });
+    }
+    drop(rows);
+    emparejar_correcciones_de_f3(&f3, &mut s);
+    Ok(s)
+}
+
+/// Una `F3` negativa es la de una corrección si después hay una `F3` positiva sobre los mismos
+/// tickets: el criterio de `tickets::que_contrarresta` (`F3Negativa::CorreccionDeDatos`). Esa
+/// positiva, la primera, es la nueva; la errónea es la última positiva anterior sobre los mismos
+/// tickets y con el mismo importe que aún no estuviera sustituida (como `verifactu::f3_vigente`).
+/// Una negativa sin positiva detrás es la baja de un ticket de una `F3` de varios, o la de una
+/// devolución: no sustituye a nadie.
+fn emparejar_correcciones_de_f3(f3: &[F3Leida], s: &mut Sustituciones) {
+    for (i, negativa) in f3.iter().enumerate() {
+        if !negativa.importe.es_negativo() || negativa.tickets.is_empty() {
+            continue;
+        }
+        let mismos = |p: &&F3Leida| !p.importe.es_negativo() && p.tickets == negativa.tickets;
+        let Some(nueva) = f3[i + 1..].iter().find(mismos) else {
+            continue;
+        };
+        let erronea = f3[..i]
+            .iter()
+            .rev()
+            .filter(mismos)
+            .find(|p| p.importe == -negativa.importe && !s.sustituida_por.contains_key(&p.num));
+        if let Some(erronea) = erronea {
+            s.sustituida_por.insert(erronea.num.clone(), nueva.num.clone());
+            s.contrarresta.insert(negativa.num.clone(), erronea.num.clone());
+        }
+    }
 }
 
 /// El cobro en pie de un número de ticket.
@@ -201,6 +276,7 @@ impl FacturasDeClienteRepository for SqliteFacturasPdf {
                     id_pago: None,
                     anulada: v_i64(row.get_value(7).map_err(db_err)?).unwrap_or(0) != 0,
                     sustituida_por: None,
+                    contrarresta: None,
                 },
                 t(5)?,
                 t(6)?,
@@ -212,7 +288,8 @@ impl FacturasDeClienteRepository for SqliteFacturasPdf {
         let mut out = Vec::with_capacity(filas.len());
         for (mut f, id_pago, referencias) in filas {
             f.id_pago = pago_de_la_factura(&r, id_pago, referencias.as_deref()).await?;
-            f.sustituida_por = sustituidas.get(f.num_serie.trim()).cloned();
+            f.sustituida_por = sustituidas.sustituida_por.get(f.num_serie.trim()).cloned();
+            f.contrarresta = sustituidas.contrarresta.get(f.num_serie.trim()).cloned();
             out.push(f);
         }
         Ok(out)
@@ -798,6 +875,133 @@ mod tests {
         assert_eq!((nuevo.len(), nuevo[0].sustituida_por.as_deref()), (1, None));
     }
 
+    /// Corregir el cliente de una F3 emite una F3 negativa que la contrarresta (mismo cliente, mismos
+    /// tickets) y otra F3 con el cliente nuevo: la errónea ya no es la vigente, como la F1 que
+    /// sustituye una R4.
+    #[tokio::test]
+    async fn una_f3_corregida_llega_con_la_que_la_sustituye() {
+        let (db, _dir) = con_facturas().await;
+        let tickets = r#"'{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000010","FechaExpedicionFactura":"02-01-2026"},{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000009","FechaExpedicionFactura":"02-01-2026"}]}'"#;
+        let corregido = r#"'{"NombreRazon":"Cliente Corregido SL","NIF":"B87654321","Domicilio":"Calle 2"}'"#;
+        sembrar(
+            &db,
+            &[
+                // La negativa: la errónea con el signo cambiado (los tickets, en otro orden).
+                &registro("00000000-0000-7000-8000-0000000000d1", 8, "F-000003", "F3", CLIENTE, tickets, "NULL")
+                    .replace("'5.10'", "'-5.10'"),
+                // La nueva, con el cliente corregido.
+                &registro("00000000-0000-7000-8000-0000000000d2", 9, "F-000004", "F3", corregido, tickets, "NULL"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
+        let resumen: Vec<_> =
+            facturas.iter().map(|f| (f.num_serie.as_str(), f.sustituida_por.as_deref())).collect();
+        assert_eq!(
+            resumen,
+            [("F-000004", None), ("F-000003", None), ("F-000002", Some("F-000004")), ("F-000001", None)]
+        );
+        // La negativa dice lo que es: contrarresta la errónea.
+        let contrarrestan: Vec<_> =
+            facturas.iter().map(|f| (f.num_serie.as_str(), f.contrarresta.as_deref())).collect();
+        assert_eq!(
+            contrarrestan,
+            [("F-000004", None), ("F-000003", Some("F-000002")), ("F-000002", None), ("F-000001", None)]
+        );
+    }
+
+    /// Una F3 corregida dos veces: cada negativa contrarresta la que estaba vigente.
+    #[tokio::test]
+    async fn una_f3_corregida_dos_veces_encadena_las_sustituciones() {
+        let (db, _dir) = con_facturas().await;
+        let tickets = r#"'{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000009","FechaExpedicionFactura":"02-01-2026"},{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000010","FechaExpedicionFactura":"02-01-2026"}]}'"#;
+        let negativa = |id: &str, orden: i64, num: &str| {
+            registro(id, orden, num, "F3", CLIENTE, tickets, "NULL").replace("'5.10'", "'-5.10'")
+        };
+        sembrar(
+            &db,
+            &[
+                &negativa("00000000-0000-7000-8000-0000000000d1", 8, "F-000003"),
+                &registro("00000000-0000-7000-8000-0000000000d2", 9, "F-000004", "F3", CLIENTE, tickets, "NULL"),
+                &negativa("00000000-0000-7000-8000-0000000000d3", 10, "F-000005"),
+                &registro("00000000-0000-7000-8000-0000000000d4", 11, "F-000006", "F3", CLIENTE, tickets, "NULL"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
+        let resumen: Vec<_> = facturas
+            .iter()
+            .map(|f| (f.num_serie.as_str(), f.sustituida_por.as_deref(), f.contrarresta.as_deref()))
+            .collect();
+        assert_eq!(
+            resumen,
+            [
+                ("F-000006", None, None),
+                ("F-000005", None, Some("F-000004")),
+                ("F-000004", Some("F-000006"), None),
+                ("F-000003", None, Some("F-000002")),
+                ("F-000002", Some("F-000004"), None),
+                ("F-000001", None, None),
+            ]
+        );
+    }
+
+    /// Una F3 negativa sin otra positiva detrás es la baja por error de uno de sus tickets: no
+    /// sustituye a nadie, la F3 sigue vigente por los demás.
+    #[tokio::test]
+    async fn la_f3_negativa_de_un_ticket_dado_de_baja_no_sustituye_a_nadie() {
+        let (db, _dir) = con_facturas().await;
+        let uno = r#"'{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000009","FechaExpedicionFactura":"02-01-2026"}]}'"#;
+        sembrar(
+            &db,
+            &[&registro("00000000-0000-7000-8000-0000000000d1", 8, "F-000003", "F3", CLIENTE, uno, "NULL")
+                .replace("'5.10'", "'-2.00'")],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+        let facturas = repo.facturas_del_nif("B87654321", 10).await.unwrap();
+        assert!(facturas.iter().all(|f| f.sustituida_por.is_none()), "{facturas:#?}");
+    }
+
+    /// Si la corrección de la F3 cambia el NIF, la ficha del antiguo se queda con la errónea y su
+    /// negativa: la errónea dice que ya no vale.
+    #[tokio::test]
+    async fn una_f3_corregida_a_otro_nif_tambien_lo_dice() {
+        let (db, _dir) = con_facturas().await;
+        let tickets = r#"'{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000009","FechaExpedicionFactura":"02-01-2026"},{"IDEmisorFactura":"B12345674","NumSerieFactura":"T-000010","FechaExpedicionFactura":"02-01-2026"}]}'"#;
+        let otro = r#"'{"NombreRazon":"Otra SL","NIF":"A58818501"}'"#;
+        sembrar(
+            &db,
+            &[
+                &registro("00000000-0000-7000-8000-0000000000d1", 8, "F-000003", "F3", CLIENTE, tickets, "NULL")
+                    .replace("'5.10'", "'-5.10'"),
+                &registro("00000000-0000-7000-8000-0000000000d2", 9, "F-000004", "F3", otro, tickets, "NULL"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let antiguo: Vec<_> = repo
+            .facturas_del_nif("B87654321", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.num_serie, f.sustituida_por))
+            .collect();
+        assert_eq!(
+            antiguo,
+            [
+                ("F-000003".to_string(), None),
+                ("F-000002".to_string(), Some("F-000004".to_string())),
+                ("F-000001".to_string(), None)
+            ]
+        );
+    }
+
     /// Una F3 de varios tickets se reimprime desde un cobro que siga en pie: desde el de un ticket
     /// dado de baja, el papel saldría marcado ANULADO aunque la factura sigue vigente.
     #[tokio::test]
@@ -848,6 +1052,14 @@ mod tests {
     #[tokio::test]
     async fn las_sustitutivas_no_recorren_los_tickets() {
         let plan = plan_de(SQL_SUSTITUTIVAS).await;
+        assert!(plan.iter().any(|l| l.contains("idx_regfact_completas")), "{plan:#?}");
+        assert!(!plan.iter().any(|l| l == "SCAN r"), "{plan:#?}");
+    }
+
+    /// Las F3, para saber cuáles ha sustituido una corrección, también.
+    #[tokio::test]
+    async fn las_f3_no_recorren_los_tickets() {
+        let plan = plan_de(SQL_F3).await;
         assert!(plan.iter().any(|l| l.contains("idx_regfact_completas")), "{plan:#?}");
         assert!(!plan.iter().any(|l| l == "SCAN r"), "{plan:#?}");
     }

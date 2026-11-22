@@ -177,9 +177,12 @@ pub struct FacturaCompleta {
     /// Tiene un registro de anulación posterior: fiscalmente ya no existe (la baja de su cobro por
     /// error, `verifactu::emitir_baja_de_pago`).
     pub anulada: bool,
-    /// El número de la rectificativa por sustitución que la reemplaza (la corrección de los datos
-    /// del cliente de una `F1`, `verifactu::corregir_factura`): ya no es la vigente.
+    /// El número de la factura que la reemplaza tras corregir los datos de su cliente
+    /// (`verifactu::corregir_factura`): la rectificativa por sustitución de una `F1`, o la `F3`
+    /// nueva de una `F3`. Ya no es la vigente.
     pub sustituida_por: Option<String>,
+    /// La `F3` negativa de esa corrección de una `F3`: el número de la errónea que contrarresta.
+    pub contrarresta: Option<String>,
 }
 
 /// Las facturas completas de un cliente: las de su NIF.

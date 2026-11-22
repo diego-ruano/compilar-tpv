@@ -39,6 +39,16 @@ describe("facturas del cliente", () => {
         );
     });
 
+    it("al corregir el cliente de una F3, la errónea se dice sustituida y la negativa dice cuál contrarresta", () => {
+        const erronea = { clase: "sustitutiva" as const, anulada: false, sustituida_por: "F-000004", contrarresta: null };
+        expect(descripcionDeLaFactura(erronea)).toBe("Sustitutiva sustituida por F-000004");
+        expect(yaNoVale(erronea)).toBe(true);
+        const negativa = { clase: "sustitutiva" as const, anulada: false, sustituida_por: null, contrarresta: "F-000002" };
+        expect(descripcionDeLaFactura(negativa)).toBe("Sustitutiva que contrarresta la F-000002");
+        // Es una factura emitida: vale, aunque deje sin efecto otra.
+        expect(yaNoVale(negativa)).toBe(false);
+    });
+
     it("la fecha declarada se lee con barras, y lo que no tiene su forma sale tal cual", () => {
         expect(fechaDeLaFactura("02-01-2026")).toBe("02/01/2026");
         expect(fechaDeLaFactura("2026-01-02")).toBe("2026-01-02");

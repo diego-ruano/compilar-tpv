@@ -174,9 +174,13 @@ pub struct FacturaDelCliente {
     /// Anulada después de emitirla (la baja de su cobro por error): fiscalmente ya no existe. La
     /// lista lo dice; su PDF es el que se emitió, sin marca (`tickets.md`).
     pub anulada: bool,
-    /// El número de la rectificativa que la sustituye (la corrección de los datos del cliente de
-    /// una `F1`): ya no es la vigente, y la lista lo dice como dice una anulada.
+    /// El número de la factura que la sustituye tras corregir los datos del cliente (la
+    /// rectificativa de una `F1`, o la `F3` nueva de una `F3`): ya no es la vigente, y la lista lo
+    /// dice como dice una anulada.
     pub sustituida_por: Option<String>,
+    /// En la `F3` negativa de esa corrección de una `F3`, el número de la errónea que
+    /// contrarresta: la lista dice lo que es en vez de «Sustitutiva» suelta.
+    pub contrarresta: Option<String>,
 }
 
 /// Las facturas de una ficha, de la más reciente a la más antigua.
