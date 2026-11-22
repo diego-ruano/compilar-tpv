@@ -19,9 +19,11 @@
 // sus datos, y el nombre que se teclea sugiere las fichas que casan. La casilla «Guardar en la ficha
 // del cliente» guarda los datos con los que se factura, pero DESPUÉS: sólo si `onConfirmar` dice que
 // el cobro o la emisión han entrado (devuelve `true`), y si falla sólo se avisa
-// (`fichaFiscal.ts`, `trasFacturar`). La Handy no cobra, y allí no aparece nada de esto.
+// (`fichaFiscal.ts`, `trasFacturar`). Si no se pueden leer las fichas, el formulario lo dice y
+// factura igual, sin guardar en ninguna. La Handy no cobra, y allí no aparece nada de esto.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { toAppError } from "@tpv/client";
 
 import { ModalShell } from "../ui/ModalShell";
 import { nifValido } from "./nif";
@@ -116,7 +118,12 @@ function Formulario({
     const esMain = useMode((st) => st.mode) === "tpv";
     const fichasQuery = useClientesParaFactura(idComanda, esMain);
     const fichas = useMemo(() => fichasQuery.data?.clientes ?? [], [fichasQuery.data]);
-    const conFichas = esMain && fichasQuery.isSuccess;
+    // Con las fichas que haya: si una relectura falla, las que ya llegaron siguen valiendo.
+    const conFichas = esMain && fichasQuery.data != null;
+    // Si no han llegado y no se pueden leer, se dice (una lista sin cargar no puede parecer vacía),
+    // pero sin parar la factura: el cobro no depende de las fichas.
+    const errorDeLasFichas =
+        esMain && fichasQuery.data == null && fichasQuery.isError ? toAppError(fichasQuery.error).message : null;
     const guardarEnFicha = useGuardarDatosFiscales();
 
     const [elegida, setElegida] = useState<ClienteParaFactura | null>(null);
@@ -422,6 +429,13 @@ function Formulario({
                             </span>
                         </span>
                     </label>
+                ) : null}
+
+                {errorDeLasFichas != null ? (
+                    <p className="mt-4 rounded-2xl border border-border bg-surface-2 px-4 py-2 text-xs text-fg-muted">
+                        No se pudieron leer las fichas de cliente: la factura se hace igual, pero sus
+                        datos no se guardarán en ninguna ficha. {errorDeLasFichas}
+                    </p>
                 ) : null}
 
                 {error ? (

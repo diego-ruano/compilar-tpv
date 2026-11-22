@@ -14,12 +14,14 @@ import { ToastProvider } from "../../src/shared/toast";
 
 const llamadas = vi.hoisted(() => [] as { comando: string; args: unknown }[]);
 const comandaConCliente = vi.hoisted(() => ({ id: null as string | null }));
+const fallaLaLectura = vi.hoisted(() => ({ si: false }));
 
 vi.mock("@tauri-apps/api/core", async (original) => ({
 	...(await original<object>()),
 	invoke: async (comando: string, args: { args?: unknown }) => {
 		llamadas.push({ comando, args: args?.args });
 		if (comando === "clientes_para_factura") {
+			if (fallaLaLectura.si) throw { code: "internal", message: "La base de datos está ocupada." };
 			return {
 				clientes: [
 					{ id_cliente: "c1", nombre: "Ana García", nif: null, razon_social: null, direccion_fiscal: null },
@@ -36,6 +38,7 @@ vi.mock("@tauri-apps/api/core", async (original) => ({
 beforeEach(() => {
 	llamadas.length = 0;
 	comandaConCliente.id = null;
+	fallaLaLectura.si = false;
 	useMode.setState({ mode: "tpv" });
 });
 afterEach(() => cleanup());
@@ -171,6 +174,17 @@ it("facturar con otro NIF a quien reservó no le cambia el suyo a su ficha", asy
 		id_cliente: null,
 		nif: "A58818501",
 	});
+});
+
+it("si no se pueden leer las fichas lo dice, con el motivo, y se puede facturar igual", async () => {
+	fallaLaLectura.si = true;
+	formulario(() => true);
+	expect(await screen.findByText(/No se pudieron leer las fichas de cliente/)).toBeTruthy();
+	expect(screen.getByText(/La base de datos está ocupada./)).toBeTruthy();
+	expect(screen.queryByRole("button", { name: "Elegir cliente" })).toBeNull();
+	fireEvent.change(campo(/Nombre o razón social/), { target: { value: "Otra Empresa SA" } });
+	fireEvent.change(campo(/NIF/), { target: { value: "A58818501" } });
+	expect((screen.getByRole("button", { name: "Cobrar y facturar" }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("la ficha elegida no sale entre las sugerencias: pulsarla desharía el NIF que se acaba de escribir", async () => {
