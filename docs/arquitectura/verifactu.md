@@ -324,13 +324,19 @@ rápida y en Cuentas) los usa en la Main:
   teclea sugiere las fichas que casan.
 - Si el cliente de la comanda que se cobra (el suyo o el de su reserva) tiene ficha con NIF, el
   formulario empieza con sus datos.
-- La casilla **Guardar en la ficha del cliente** sale marcada si los datos son nuevos o distintos de
-  los de la ficha; el nombre se compara con el que la ficha da al rellenar (su razón social o, si no
-  tiene, su nombre: `mismosDatos`). Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
+- La casilla **Guardar en la ficha del cliente** sale siempre marcada; quien cobra la desmarca si no
+  quiere guardar. Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
   ninguna, se da de alta una con la razón social de nombre. La elegida deja de serlo si el NIF con
   el que se factura es el de otra ficha (va a ésa) o distinto del que ya tenía (va a una nueva): la
   comida de empresa que reservó una persona no le cambia el NIF a su ficha (`fichaDestino`). La
   casilla lo dice.
+- Con la casilla marcada, **el gasto de lo facturado pasa a esa ficha** (FISCAL-03): quien pide la
+  factura es quien paga, aunque la mesa fuera de la reserva de otro. La comanda de cada cobro
+  facturado queda a nombre de la ficha, y el gasto de ésta y el de quien lo tuviera antes se
+  re-derivan de los cobros (`apuntar_gasto`, con la misma suma que la reconciliación). Lo hacen el
+  cobro con factura de la mesa y de la venta rápida y la F3 y la corrección de Cuentas, que devuelven
+  sus cobros a `trasFacturar` (`Facturado`). Se pasa la comanda entera: si una parte se cobró antes
+  sin factura, también cuenta para la ficha.
 
 El guardado va **después** de que el cobro o la emisión hayan entrado (`trasFacturar`), nunca dentro
 ni antes, y si falla sólo se avisa: no impide ni deshace el cobro. Quien cobra puede no tener

@@ -182,14 +182,6 @@ export function mismosDatos(d: DestinatarioInput, f: ClienteParaFactura): boolea
 }
 
 /**
- * La casilla «Guardar en la ficha del cliente» sale marcada si los datos son nuevos (no hay ficha)
- * o distintos de los que tiene.
- */
-export function guardarPorDefecto(d: DestinatarioInput, ficha: ClienteParaFactura | null): boolean {
-    return ficha == null || !mismosDatos(d, ficha);
-}
-
-/**
  * Qué se guarda en la ficha: con la ficha elegida (o la que tiene ese NIF), sus tres datos fiscales;
  * sin ninguna, el backend busca la del NIF y, si no la hay, da de alta una con la razón social de
  * nombre (`guardar_datos_fiscales`).
@@ -208,22 +200,30 @@ export function planDeGuardado(
 }
 
 /**
- * Factura y, SÓLO si ha salido bien, guarda los datos en la ficha. `facturar` devuelve si el cobro o
- * la emisión han entrado; su resultado no depende del guardado, que va después, sin esperarlo, y que
- * no puede tirar el cobro aunque lance (`guardar` avisa él mismo de su fallo).
+ * Lo que dice quien factura: `false` si el cobro o la emisión no han entrado; `true` si han entrado;
+ * o los cobros facturados, cuyo gasto pasa a la ficha al guardar en ella (FISCAL-03).
+ */
+export type Facturado = boolean | { cobros: string[] };
+
+/**
+ * Factura y, SÓLO si ha salido bien, guarda los datos en la ficha y le pasa el gasto de los cobros
+ * facturados. `facturar` devuelve si el cobro o la emisión han entrado; su resultado no depende del
+ * guardado, que va después, sin esperarlo, y que no puede tirar el cobro aunque lance (`guardar`
+ * avisa él mismo de su fallo).
  */
 export async function trasFacturar(
-    facturar: () => Promise<boolean>,
+    facturar: () => Promise<Facturado>,
     plan: GuardarDatosFiscalesInput | null,
     guardar: (plan: GuardarDatosFiscalesInput) => void,
 ): Promise<boolean> {
-    const ok = await facturar();
-    if (ok && plan) {
+    const hecho = await facturar();
+    if (hecho === false) return false;
+    if (plan) {
         try {
-            guardar(plan);
+            guardar(hecho === true ? plan : { ...plan, ids_pago: hecho.cobros });
         } catch {
             // `guardar` avisa de su propio fallo; aquí sólo se protege el resultado del cobro.
         }
     }
-    return ok;
+    return true;
 }

@@ -1453,12 +1453,16 @@ export type GuardarCategoriaIngredienteInput = {
  *  Guardar en la ficha los datos con los que se acaba de facturar. Con `id_cliente`, se actualizan
  *  los de esa ficha; sin él, los de la ficha con ese NIF y, si no hay, se da de alta una con la razón
  *  social de nombre.
+ *
+ *  `ids_pago` son los cobros que se acaban de facturar: su gasto pasa a esa ficha (FISCAL-03). Quien
+ *  pide la factura es quien paga, aunque la mesa fuera de la reserva de otro.
  */
 export type GuardarDatosFiscalesInput = {
 	id_cliente?: string | null,
 	nif: string,
 	razon_social: string,
 	direccion_fiscal?: string | null,
+	ids_pago?: string[],
 };
 
 export type GuardarIngredienteInput = {

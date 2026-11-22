@@ -567,8 +567,8 @@ atómica. Solo hay un drenaje activo; cada confirmación modifica su propia revi
 las entradas añadidas durante una subida. Los rechazos de contenido (400/413/415/422) y archivos
 locales ausentes o inválidos se apartan, sin detener las siguientes imágenes. Los errores de red,
 credenciales y servidor conservan la entrada para reintentar. Una cola ilegible devuelve un error:
-no se trata como vacía ni se sobrescribe. Configuración → Conectividad muestra el estado y permite
-reintentar; sustituir una imagen desde su ficha elimina su entrada anterior. Cada rechazo nuevo
+no se trata como vacía ni se sobrescribe. La pantalla de Conectividad (fuera del menú) muestra el
+estado y permite reintentar; sustituir una imagen desde su ficha elimina su entrada anterior. Cada rechazo nuevo
 se registra a nivel ERROR, que la integración existente con Sentry captura una sola vez.
 
 ## Facturas en PDF

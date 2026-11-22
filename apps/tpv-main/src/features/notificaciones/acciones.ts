@@ -36,7 +36,7 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   // AEAT que se hubieran creado con la rama `con-verifactu`.
   ver_fiscal: { to: "/Configuracion", state: { seccion: "NEGOCIO" } },
   // SYNC-36: un cambio de la nube atascado en su cuarentena. Conectividad explica qué pasa y ofrece
-  // traer el estado actual de la nube cuando es seguro.
+  // traer el estado actual de la nube cuando es seguro. No está en el menú: sólo se llega por aquí.
   ver_conectividad: { to: "/Configuracion", state: { seccion: "CONECTIVIDAD" } },
 };
 

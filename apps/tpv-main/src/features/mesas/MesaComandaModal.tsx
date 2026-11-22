@@ -44,6 +44,7 @@ totalRecuento,
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
 import { mesasCobrarDetalles,mesasComandaAbierta,mesasComandaSetReservaIfNull,mesasLoadMesaMeta,mesasLoadTicket,mesasUpdateDetalleIngredientes,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
 import { mesasKeys } from "./mesasQueries";
+import type { Facturado } from "../clientes/fichaFiscal";
 
 /* =========================
    Tipos
@@ -546,7 +547,7 @@ export default function MesaComandaModal({
     const cobrar = async (
         metodo: "tarjeta" | "efectivo",
         destinatario?: DestinatarioInput | null,
-    ): Promise<boolean> => {
+    ): Promise<Facturado> => {
         if (!idComanda || cobroEnCursoRef.current || cola.pendientes() > 0) return false;
 
         const ids = ticket
@@ -584,13 +585,15 @@ export default function MesaComandaModal({
             // El ticket de este cobro: imprimir saca el de su factura, con sus líneas y no las de
             // la mesa entera (RI-29).
             if (idPago && comandaActualRef.current === idComanda) setUltimoCobro({ idPago });
+            // Con factura, el gasto de este cobro pasa a la ficha a la que se factura (FISCAL-03).
+            const hecho: Facturado = idPago ? { cobros: [idPago] } : true;
 
             // La escritura ya está confirmada: estos ids están pagados aunque falle el refresco.
             if (comandaActualRef.current === idComanda) {
                 setTicket(prev => prev.map(l => ids.includes(l.id) ? { ...l, pagado: true, seleccionado: false } : l));
             }
             await leerTicket(idComanda).catch(e => toast.warning("Cobro guardado; no se pudo refrescar el ticket", toAppError(e).message));
-            if (comandaActualRef.current !== idComanda) { notifyChanged(); return true; }
+            if (comandaActualRef.current !== idComanda) { notifyChanged(); return hecho; }
 
             setCashCount({});
             setPaso("categorias");
@@ -601,7 +604,7 @@ export default function MesaComandaModal({
             setQuiereFactura(false);
             setPideFactura(null);
             setErrorFactura(null);
-            return true;
+            return hecho;
         } catch (e) {
             if (comandaActualRef.current !== idComanda) { toast.error("No se pudo cobrar", toAppError(e).message); return false; }
             // El importe pasa del límite de la simplificada: no es un fallo, es que falta un dato.

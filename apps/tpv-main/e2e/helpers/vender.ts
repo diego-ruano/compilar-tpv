@@ -57,6 +57,8 @@ export async function montarLaCarta(p: Producto): Promise<void> {
 
     await escribir("#producto-precio-venta", p.precio);
     await escribir("#producto-iva", p.iva);
+    // El lote inicial arranca apagado: se enciende para que el producto tenga stock.
+    await $("#producto-lote-interruptor").click();
     await escribir("#producto-lote-codigo", "L-E2E");
     await escribir("#producto-lote-cantidad", "50");
     await pulsar("Guardar producto");

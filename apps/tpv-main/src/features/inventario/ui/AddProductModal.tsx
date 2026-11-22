@@ -97,7 +97,7 @@ export function AddProductModal({
     const [existingImagePath, setExistingImagePath] = useState<string | null>(null);
     const [existingImageUrl, setExistingImageUrl] = useState<string>("");
 
-    const [crearLoteInicial, setCrearLoteInicial] = useState(true);
+    const [crearLoteInicial, setCrearLoteInicial] = useState(false);
     const [codigoLoteInicial, setCodigoLoteInicial] = useState("");
     const [caducidadLoteInicial, setCaducidadLoteInicial] = useState("");
     const [cantidadInicialLote, setCantidadInicialLote] = useState("");
@@ -197,7 +197,7 @@ export function AddProductModal({
                 setAlergenosOpen(false);
                 setSelectedIngredientes(new Set());
 
-                setCrearLoteInicial(true);
+                setCrearLoteInicial(false);
                 setCodigoLoteInicial("");
                 setCaducidadLoteInicial("");
                 setCantidadInicialLote("");
@@ -422,7 +422,7 @@ export function AddProductModal({
                             onChange={(e) =>
                                 setIdCategoria(e.target.value || "")
                             }
-                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="border border-border rounded-xl px-3 py-2 w-full bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             required
                             disabled={loading}
                         >
@@ -445,7 +445,7 @@ export function AddProductModal({
                             onChange={(e) =>
                                 setIdProveedor(e.target.value || "")
                             }
-                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="border border-border rounded-xl px-3 py-2 w-full bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         >
                             <option value="">—</option>
@@ -477,7 +477,7 @@ export function AddProductModal({
                             id="producto-unidad-medida"
                             value={unidadMedida}
                             onChange={(e) => setUnidadMedida(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="border border-border rounded-xl px-3 py-2 w-full bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         >
                             <option value="">Selecciona</option>
@@ -598,7 +598,9 @@ export function AddProductModal({
                             </div>
 
                             <button
+                                id="producto-lote-interruptor"
                                 type="button"
+                                aria-label={isEdit ? "Añadir lote" : "Lote inicial"}
                                 disabled={loading || !puede("stock.recibir")}
                                 onClick={() => setCrearLoteInicial((v) => !v)}
                                 className={[

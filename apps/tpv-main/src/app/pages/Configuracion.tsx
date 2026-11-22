@@ -165,11 +165,9 @@ export default function Configuracion() {
         return [
             ...baseNavItems,
             { key: "PERMISOS", title: "Permisos", desc: "Acciones permitidas por rol" },
-            {
-                key: "CONECTIVIDAD",
-                title: "Conectividad",
-                desc: "Estado de la conexión con la nube y tareas de fondo",
-            },
+            // Conectividad no está en el menú: lo que enseña no le sirve al dueño del bar. Sólo la
+            // abre el aviso de cambios de las Handy atascados (SYNC-36, `ver_conectividad`), que
+            // necesita su «Recuperar el estado actual de la nube».
             {
                 key: "VINCULAR_HANDY",
                 title: "Vincular Handy",
@@ -597,6 +595,7 @@ export default function Configuracion() {
                                             <Reservas inputTone={inputTone} isMain={isMain} />
                                         ) : null}
 
+                                        {/* Sin entrada en el menú: sólo llega el aviso de SYNC-36. */}
                                         {section === "CONECTIVIDAD" &&
                                             isMain ? (
                                             <Conectividad darkMode={darkMode} />

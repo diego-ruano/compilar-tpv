@@ -39,4 +39,9 @@ pub trait ClientesFacturaRepository: Send + Sync {
 
     /// Da de alta una ficha con ese nombre y esos datos fiscales. Devuelve su id.
     async fn alta_con_datos_fiscales(&self, nombre: &str, datos: &DatosFiscales) -> AppResult<String>;
+
+    /// FISCAL-03 · El gasto de estos cobros pasa a la ficha: su comanda queda a nombre de este
+    /// cliente, y se re-deriva el gasto suyo y el de quien lo tuviera antes (el de la comanda o el de
+    /// su reserva). Devuelve cuántas comandas han cambiado de cliente.
+    async fn apuntar_gasto(&self, id_cliente: &str, ids_pago: &[String]) -> AppResult<u64>;
 }

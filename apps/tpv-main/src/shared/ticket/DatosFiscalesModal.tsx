@@ -35,7 +35,6 @@ import {
     camposSinLaFicha,
     fichaConNif,
     fichaDestino,
-    guardarPorDefecto,
     mismosDatos,
     planDeGuardado,
     rellenoConFicha,
@@ -45,6 +44,7 @@ import {
     type CamposFiscales,
     type ClienteParaFactura,
 } from "../../features/clientes/fichaFiscal";
+import type { Facturado } from "../../features/clientes/fichaFiscal";
 import {
     useClientesParaFactura,
     useGuardarDatosFiscales,
@@ -54,10 +54,11 @@ type Props = {
     open: boolean;
     onClose: () => void;
     /**
-     * Cobra o emite con estos datos. Devuelve `true` si ha entrado: sólo entonces se guardan en la
-     * ficha del cliente (si la casilla está marcada). Cualquier otra cosa es que no ha entrado.
+     * Cobra o emite con estos datos. Devuelve `true` (o los cobros facturados) si ha entrado: sólo
+     * entonces se guardan en la ficha del cliente (si la casilla está marcada), y con los cobros, su
+     * gasto pasa a esa ficha (FISCAL-03). Cualquier otra cosa es que no ha entrado.
      */
-    onConfirmar: (d: DestinatarioInput) => boolean | void | Promise<boolean | void>;
+    onConfirmar: (d: DestinatarioInput) => Facturado | void | Promise<Facturado | void>;
     importe: Dinero;
     limite: Dinero;
     /** `true` cuando el importe OBLIGA a facturar (no es una elección del cliente). */
@@ -130,7 +131,7 @@ function Formulario({
     /** Lo que había escrito antes de elegir la ficha: vuelve con «No es esta ficha». */
     const [antesDeLaFicha, setAntesDeLaFicha] = useState<CamposFiscales | null>(null);
     const [buscador, setBuscador] = useState<string | null>(null);
-    /** `null` = lo que toque por defecto (`guardarPorDefecto`); si se toca la casilla, lo elegido. */
+    /** `null` = marcada, que es lo que sale por defecto; si se toca la casilla, lo elegido. */
     const [guardarFicha, setGuardarFicha] = useState<boolean | null>(null);
 
     useEffect(() => {
@@ -221,11 +222,11 @@ function Formulario({
         () => (buscador != null ? buscarFichas(fichas, buscador) : []),
         [buscador, fichas],
     );
-    const marcada = guardarFicha ?? guardarPorDefecto(actuales, destino);
+    const marcada = guardarFicha ?? true;
 
     const confirmar = () => {
         const plan = conFichas && marcada ? planDeGuardado(actuales, destino) : null;
-        void trasFacturar(async () => (await onConfirmar(actuales)) === true, plan, guardarEnFicha);
+        void trasFacturar(async () => (await onConfirmar(actuales)) ?? false, plan, guardarEnFicha);
     };
 
     return (
@@ -421,8 +422,8 @@ function Formulario({
                             Guardar en la ficha del cliente
                             <span className="block text-xs text-fg-muted">
                                 {destino
-                                    ? `En la ficha de ${destino.nombre}, cuando la factura esté hecha.`
-                                    : "En una ficha nueva con este nombre, cuando la factura esté hecha."}
+                                    ? `En la ficha de ${destino.nombre}, con el gasto de lo que se factura, cuando la factura esté hecha.`
+                                    : "En una ficha nueva con este nombre, con el gasto de lo que se factura, cuando la factura esté hecha."}
                                 {noEsLaElegida
                                     ? ` El NIF no es el de la ficha de ${elegida.nombre}: esa ficha no se cambia.`
                                     : null}

@@ -129,6 +129,9 @@ pub struct ClientesParaFacturaArgs {
 /// Guardar en la ficha los datos con los que se acaba de facturar. Con `id_cliente`, se actualizan
 /// los de esa ficha; sin él, los de la ficha con ese NIF y, si no hay, se da de alta una con la razón
 /// social de nombre.
+///
+/// `ids_pago` son los cobros que se acaban de facturar: su gasto pasa a esa ficha (FISCAL-03). Quien
+/// pide la factura es quien paga, aunque la mesa fuera de la reserva de otro.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct GuardarDatosFiscalesInput {
     #[serde(default)]
@@ -137,6 +140,8 @@ pub struct GuardarDatosFiscalesInput {
     pub razon_social: String,
     #[serde(default)]
     pub direccion_fiscal: Option<String>,
+    #[serde(default)]
+    pub ids_pago: Vec<String>,
 }
 
 // ── Las facturas de un cliente (sólo en la Main) ─────────────────────────────────────────────────

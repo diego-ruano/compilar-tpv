@@ -12,7 +12,6 @@ import {
     datosDeFicha,
     fichaConNif,
     fichaDestino,
-    guardarPorDefecto,
     mismosDatos,
     normalizarNif,
     planDeGuardado,
@@ -78,21 +77,18 @@ describe("con qué se rellena y qué se guarda", () => {
         expect(sirveParaFacturar(COMIDAS)).toBe(true);
     });
 
-    it("la casilla sale marcada si no hay ficha o si los datos son otros", () => {
+    it("los mismos datos se reconocen aunque cambien espacios, mayúsculas y guiones", () => {
         const iguales = { nombre_razon: " Comidas  Peñalver SL ", nif: "b-12345674", domicilio: "Calle Mayor 1, Madrid" };
         expect(mismosDatos(iguales, COMIDAS)).toBe(true);
-        expect(guardarPorDefecto(iguales, COMIDAS)).toBe(false);
-        expect(guardarPorDefecto({ ...iguales, domicilio: "Otra calle 2" }, COMIDAS)).toBe(true);
-        expect(guardarPorDefecto(iguales, null)).toBe(true);
+        expect(mismosDatos({ ...iguales, domicilio: "Otra calle 2" }, COMIDAS)).toBe(false);
     });
 
     it("una ficha sin razón social tiene los mismos datos que los que da al rellenar", () => {
         // Rosa tiene NIF y no razón social: el formulario se rellena con su nombre.
         const deRosa = datosDeFicha(ROSA);
         expect(mismosDatos(deRosa, ROSA)).toBe(true);
-        expect(guardarPorDefecto(deRosa, ROSA)).toBe(false);
         // Otro nombre sí es un dato nuevo.
-        expect(guardarPorDefecto({ ...deRosa, nombre_razon: "Rosa Pérez SL" }, ROSA)).toBe(true);
+        expect(mismosDatos({ ...deRosa, nombre_razon: "Rosa Pérez SL" }, ROSA)).toBe(false);
     });
 
     it("con ficha se guardan los suyos; sin ficha, va sin id (el backend busca el NIF o da de alta)", () => {
@@ -187,6 +183,16 @@ describe("el guardado va después del cobro, y no lo toca", () => {
         expect(ok).toBe(true);
         expect(orden).toEqual(["cobrar", "guardar"]);
         expect(guardar).toHaveBeenCalledWith(plan);
+    });
+
+    it("con los cobros facturados, su gasto va con el guardado a la ficha (FISCAL-03)", async () => {
+        const guardar = vi.fn();
+        expect(await trasFacturar(async () => ({ cobros: ["p1"] }), plan, guardar)).toBe(true);
+        expect(guardar).toHaveBeenCalledWith({ ...plan, ids_pago: ["p1"] });
+        // Sin casilla no se guarda nada, tampoco el gasto.
+        const sinCasilla = vi.fn();
+        expect(await trasFacturar(async () => ({ cobros: ["p1"] }), null, sinCasilla)).toBe(true);
+        expect(sinCasilla).not.toHaveBeenCalled();
     });
 
     it("sin casilla no se guarda, y un guardado que revienta no cambia que el cobro entró", async () => {

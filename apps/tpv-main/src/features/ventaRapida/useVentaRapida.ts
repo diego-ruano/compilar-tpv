@@ -55,6 +55,7 @@ vrUpdateNotaDetalle,
 } from "./ventaRapidaAPI";
 import { mesasUpdateDetalleIngredientes } from "../mesas/mesasApi";
 import type { CambioIngredienteInput } from "@tpv/contracts";
+import type { Facturado } from "../clientes/fichaFiscal";
 
 /* =========================
    EVENTO GLOBAL
@@ -641,7 +642,8 @@ export function useVentaRapida() {
     }
   }, [cola, cargarComandaEnTicketPanel, recargarPendientes, toast]);
 
-  const cobrar = useCallback(async (metodo: "tarjeta" | "efectivo", destinatario?: DestinatarioInput | null): Promise<boolean> => {
+  // Con factura, devuelve el cobro hecho: su gasto pasa a la ficha a la que se factura (FISCAL-03).
+  const cobrar = useCallback(async (metodo: "tarjeta" | "efectivo", destinatario?: DestinatarioInput | null): Promise<Facturado> => {
     if (hasPendingTicketWrites()) { warnPendingTicketWrites(); return false; }
     const seleccion = ticketRef.current.filter(t => !t.pagado && seleccionadosRef.current.has(t.id));
     if (!seleccion.length) return false;
@@ -651,11 +653,12 @@ export function useVentaRapida() {
     if (!idComanda) return false;
     if (recuperacion.pendientes.some(p => p.cobro.id_comanda === idComanda)) { setOpenPendientes(true); return false; }
     const idPago = crypto.randomUUID();
-    return confirmarCobro(idPago, idComanda, importe, () => commands.vrCobrarFraccionado({
+    const ok = await confirmarCobro(idPago, idComanda, importe, () => commands.vrCobrarFraccionado({
       id_pago: idPago, id_comanda: idComanda, metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
       importe_total: importe, detalles: seleccion.map(t => t.detalleId), destinatario,
       todo: cobrandoTodoRef.current,
     }));
+    return ok ? { cobros: [idPago] } : false;
   }, [hasPendingTicketWrites, warnPendingTicketWrites, quiereFactura, recuperacion.pendientes, confirmarCobro]);
 
   const resolverPendiente = useCallback(async (p: CobroPendienteDto, destinatario?: DestinatarioInput) => {
@@ -663,12 +666,13 @@ export function useVentaRapida() {
       () => commands.vrResolverCobroPendiente({ id_pago: p.cobro.id_pago, destinatario }));
   }, [confirmarCobro]);
 
-  // Devuelve si el cobro ha entrado: el formulario guarda entonces los datos en la ficha (FISCAL-02).
-  const confirmarFactura = useCallback(async (d: DestinatarioInput): Promise<boolean> => {
+  // Devuelve si el cobro ha entrado y cuál es: el formulario guarda entonces los datos en la ficha
+  // (FISCAL-02) y le pasa el gasto del cobro (FISCAL-03).
+  const confirmarFactura = useCallback(async (d: DestinatarioInput): Promise<Facturado> => {
     if (!pideFactura) return false;
     if (pideFactura.clase === "voluntario") return cobrar(pideFactura.metodo, d);
     const p = recuperacion.pendientes.find(p => p.cobro.id_pago === pideFactura.idPago);
-    return p ? resolverPendiente(p, d) : false;
+    return p && (await resolverPendiente(p, d)) ? { cobros: [p.cobro.id_pago] } : false;
   }, [pideFactura, cobrar, recuperacion.pendientes, resolverPendiente]);
   const cancelarFactura = useCallback(() => {
     if (cobroEnCursoRef.current) return;

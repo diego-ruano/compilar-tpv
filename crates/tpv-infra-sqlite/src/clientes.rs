@@ -4,7 +4,7 @@
 //! NO hay outbox ni Applied_Operations (eso era de la antigua sincronización dual).
 
 use crate::util::new_id;
-use crate::consultas::{db_err};
+use crate::consultas::{db_err, lista_json};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -289,6 +289,14 @@ impl ClientesRepository for SqliteClientesRepository {
     }
 }
 
+/// FISCAL-03 · Los clientes que tenían el gasto de las comandas de estos cobros (`?1`, lista JSON),
+/// salvo el que lo va a recibir (`?2`): el de la comanda o, si no lo tiene, el de su reserva, que es
+/// el criterio del gasto acreditado (`mesas.rs`, `reconciliacion.rs`).
+const SQL_QUIEN_TENIA_EL_GASTO: &str = "SELECT DISTINCT COALESCE(co.ID_Cliente, r.ID_Cliente)      FROM Pagos p JOIN Comandas co ON co.ID_Comanda = p.ID_Comanda      LEFT JOIN Reservas r ON r.ID_Reserva = co.ID_Reserva      WHERE p.ID_Pago IN (SELECT value FROM json_each(?1))        AND COALESCE(co.ID_Cliente, r.ID_Cliente) IS NOT NULL        AND COALESCE(co.ID_Cliente, r.ID_Cliente) <> ?2;";
+
+/// FISCAL-03 · Las comandas de estos cobros (`?2`) pasan a nombre del cliente `?1`.
+const SQL_APUNTAR_GASTO: &str = "UPDATE Comandas SET ID_Cliente = ?1      WHERE ID_Comanda IN (SELECT ID_Comanda FROM Pagos WHERE ID_Pago IN (SELECT value FROM json_each(?2)))        AND (ID_Cliente IS NULL OR ID_Cliente <> ?1);";
+
 /// FISCAL-02 · Las fichas desde el formulario de la factura completa. Sólo en la Main; las
 /// escrituras van por el `WriteGuard` como las de la ficha, así que se replican.
 #[async_trait]
@@ -385,6 +393,44 @@ impl ClientesFacturaRepository for SqliteClientesRepository {
         .map_err(write_err)?;
         Ok(id_cliente)
     }
+
+    async fn apuntar_gasto(&self, id_cliente: &str, ids_pago: &[String]) -> AppResult<u64> {
+        if ids_pago.is_empty() {
+            return Ok(0);
+        }
+        let ids = lista_json(ids_pago);
+        let cliente = Value::Text(id_cliente.to_string());
+        let g = self.db.write().await;
+        g.transaccion(async {
+            // Quién tenía hasta ahora el gasto de esas comandas: el de la comanda o el de su reserva.
+            let mut anteriores = Vec::new();
+            let mut rows = g
+                .query(SQL_QUIEN_TENIA_EL_GASTO, vec![ids.clone(), cliente.clone()])
+                .await
+                .map_err(db_err)?;
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                if let Some(id) = v_string(row.get_value(0).map_err(db_err)?) {
+                    anteriores.push(id);
+                }
+            }
+            drop(rows);
+            let cambiadas = g
+                .execute(SQL_APUNTAR_GASTO, vec![cliente.clone(), ids.clone()])
+                .await
+                .map_err(write_err)?;
+            if cambiadas > 0 {
+                // El gasto se re-deriva de los cobros, no se suma ni se resta: así coincide con la
+                // reconciliación (`SQL_REDERIVAR_GASTO`) aunque el cobro se anule después.
+                for id in anteriores.iter().map(String::as_str).chain(std::iter::once(id_cliente)) {
+                    g.execute(crate::reconciliacion::SQL_REDERIVAR_GASTO, vec![Value::Text(id.to_string())])
+                        .await
+                        .map_err(write_err)?;
+                }
+            }
+            Ok(cambiadas)
+        })
+        .await
+    }
 }
 
 
@@ -419,6 +465,45 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(e.to_string(), "Ya hay un cliente con ese correo.");
+    }
+
+    #[tokio::test]
+    async fn el_gasto_de_un_cobro_facturado_pasa_a_la_ficha_de_la_factura() {
+        // FISCAL-03: la mesa es de la reserva de Ana, pero la factura sale a nombre de la empresa: el
+        // gasto de ese cobro deja de ser de Ana y pasa a la empresa, re-derivado de los cobros.
+        let dir = crate::test_temp::dir_temporal("clientes-gasto-factura");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteClientesRepository::new(db.clone());
+        {
+            let w = db.write().await;
+            for sql in [
+                "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('ana', 'Ana', 2550), ('emp', 'Comidas SL', 0);",
+                "INSERT INTO Reservas (ID_Reserva, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Created_At, Origen) VALUES ('r1', 'ana', '2026-01-02', '13:00', 'COMIDA', 2, 'ACTIVA', '2026-01-01 10:00:00', 'TPV');",
+                "INSERT INTO Comandas (ID_Comanda, ID_Reserva, Canal, Fecha_Hora_Apertura, Estado) VALUES ('k1', 'r1', 'BARRA', '2026-01-02 13:00:00', 'Pagada');",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p1', 'k1', '2026-01-02 14:00:00', 'Efectivo', 2550, 'TOTAL');",
+            ] {
+                w.execute(sql, ()).await.unwrap();
+            }
+        }
+        let gasto = |id: &'static str| {
+            let db = db.clone();
+            async move {
+                let r = db.read().await;
+                let mut rows = r
+                    .query("SELECT Total_Gastado FROM Clientes WHERE ID_Cliente = ?1;", vec![Value::Text(id.into())])
+                    .await
+                    .unwrap();
+                v_dinero(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap()
+            }
+        };
+
+        assert_eq!(repo.apuntar_gasto("emp", &[]).await.unwrap(), 0);
+        assert_eq!(repo.apuntar_gasto("emp", &["p1".to_string()]).await.unwrap(), 1);
+        assert_eq!(gasto("ana").await, Dinero::CERO);
+        assert_eq!(gasto("emp").await, Dinero::de_centimos(2550));
+        // Repetirlo no cambia nada: la comanda ya es de la empresa.
+        assert_eq!(repo.apuntar_gasto("emp", &["p1".to_string()]).await.unwrap(), 0);
+        assert_eq!(gasto("emp").await, Dinero::de_centimos(2550));
     }
 
     #[tokio::test]

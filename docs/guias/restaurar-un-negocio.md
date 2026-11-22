@@ -131,8 +131,9 @@ pasos y sin tocar su outbox: primero lo que está abierto arriba y lo imprescind
 (la carta, las mesas, el personal, las comandas abiertas), que es lo único que esperan las Handy;
 después lo que falta de los maestros arriba se borra, luego los últimos 30 días y al final el
 histórico entero. Con una copia o un instante sólo viaja lo que arriba falta o es distinto. La Main
-sigue cobrando con normalidad todo el rato, y en su Configuración → Conectividad se ve el progreso
-(«Subiendo los datos a la nube»).
+sigue cobrando con normalidad todo el rato. Su pantalla de Conectividad tiene el progreso
+(«Subiendo los datos a la nube»), pero no está en el menú: lo que se ve desde fuera es
+`pnpm negocio:estado`.
 
 **Antes de lanzarlo**, mira que la Main tenga una versión con la subida completa: una anterior no
 la hace, y la nube se queda como antes (lo que falta lo repara el contraste por tandas). La petición

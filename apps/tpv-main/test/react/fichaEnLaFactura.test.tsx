@@ -79,8 +79,8 @@ it("un NIF que es el de una ficha ofrece rellenar con sus datos", async () => {
 	fireEvent.click(await screen.findByRole("button", { name: /Es Paco: rellenar con sus datos/ }));
 	expect(campo(/Nombre o razón social/).value).toBe("Comidas Peñalver SL");
 	expect(campo(/Domicilio/).value).toBe("Calle Mayor 1");
-	// Son los de la ficha: no hay nada nuevo que guardar.
-	expect((screen.getByRole("checkbox", { name: /Guardar en la ficha del cliente/ }) as HTMLInputElement).checked).toBe(false);
+	// La casilla sale siempre marcada, también con los datos que ya tiene la ficha.
+	expect((screen.getByRole("checkbox", { name: /Guardar en la ficha del cliente/ }) as HTMLInputElement).checked).toBe(true);
 });
 
 it("los datos nuevos se guardan en la ficha después de cobrar, y no si el cobro no entra", async () => {

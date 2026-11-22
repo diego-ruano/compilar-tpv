@@ -1030,7 +1030,8 @@ permiso para reparar, después del resumen y antes de comparar nada (`cuarentena
   `bajada_atascada` avisa a los administradores (`use_cases::sync::avisar_bajada_atascada`): una
   notificación con clave, la misma para los dos casos («Hay cambios hechos desde las Handy que el TPV
   no ha podido aplicar»), que no se repite mientras siga activa y se cierra sola cuando ya no queda
-  nada, y que no bloquea nada. Su acción lleva a Configuración → Conectividad, que lo explica y
+  nada, y que no bloquea nada. Su acción lleva a la pantalla de Conectividad (fuera del menú de
+  Configuración: sólo la abre este aviso), que lo explica y
   ofrece «Recuperar el estado actual de la nube» sólo si es seguro: sin nada de este equipo por
   subir ni apartado de la subida (se perdería al sustituir la base; la guardia de
   `bootstrap_restaurar` lo vuelve a comprobar dentro de su transacción). Pide confirmación (durante
@@ -1171,7 +1172,7 @@ Mientras, las Handy verían una nube a medias. Así que la Main **sube su base e
   otra con lo que haya.
 - **El cobro no se toca**: las lecturas van por conexiones de lectura (`foto`), el escritor sólo se
   coge para transacciones cortas por `raw()`, y nada escribe en tablas de negocio.
-- **Cómo se ve**: Configuración → Conectividad dice «Devolviendo los datos a la nube…» mientras los
+- **Cómo se ve**: la pantalla de Conectividad (fuera del menú) dice «Devolviendo los datos a la nube…» mientras los
   Handy esperan, y su panel «Subiendo los datos a la nube» enseña la fase y el progreso
   (`sync_subida_estado`, `subidaNubeQueries.ts`), y en español y sin códigos (`avisosDeSubida`) lo
   que no ha entrado a la primera, las partes que la nube no admite (las revisa el contraste; no se

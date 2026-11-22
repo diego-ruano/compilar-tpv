@@ -94,6 +94,9 @@ pub async fn clientes_para_factura(
 /// La ficha es la elegida (`id_cliente`); si no se eligió ninguna (o ya no existe), la que tenga ese
 /// NIF; y si tampoco la hay, una nueva con la razón social de nombre. Buscar por el NIF hace que
 /// repetir la llamada no dé de alta dos fichas.
+///
+/// FISCAL-03 · Con la ficha resuelta, el gasto de los cobros facturados (`ids_pago`) pasa a ella:
+/// quien pide la factura es quien paga, aunque la mesa fuera de la reserva de otro.
 pub async fn guardar_datos_fiscales(
     repo: &dyn ClientesFacturaRepository,
     input: GuardarDatosFiscalesInput,
@@ -111,17 +114,34 @@ pub async fn guardar_datos_fiscales(
     };
 
     let elegida = input.id_cliente.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let id = ficha_con_datos(repo, elegida, &d.nif, &d.nombre_razon, &datos).await?;
+    let ids_pago: Vec<String> =
+        input.ids_pago.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    if !ids_pago.is_empty() {
+        repo.apuntar_gasto(&id, &ids_pago).await?;
+    }
+    Ok(id)
+}
+
+/// La ficha donde quedan los datos: la elegida, la de ese NIF o una nueva.
+async fn ficha_con_datos(
+    repo: &dyn ClientesFacturaRepository,
+    elegida: Option<String>,
+    nif: &str,
+    nombre: &str,
+    datos: &DatosFiscales,
+) -> AppResult<String> {
     if let Some(id) = elegida {
-        if repo.actualizar_datos_fiscales(&id, &datos).await? {
+        if repo.actualizar_datos_fiscales(&id, datos).await? {
             return Ok(id);
         }
     }
-    if let Some(id) = repo.id_por_nif(&d.nif).await? {
-        if repo.actualizar_datos_fiscales(&id, &datos).await? {
+    if let Some(id) = repo.id_por_nif(nif).await? {
+        if repo.actualizar_datos_fiscales(&id, datos).await? {
             return Ok(id);
         }
     }
-    repo.alta_con_datos_fiscales(&d.nombre_razon, &datos).await
+    repo.alta_con_datos_fiscales(nombre, datos).await
 }
 
 #[cfg(test)]
@@ -152,6 +172,7 @@ mod tests {
     struct FichasEnMemoria {
         fichas: std::sync::Mutex<Vec<(String, DatosFiscales)>>,
         altas: std::sync::Mutex<Vec<String>>,
+        gastos: std::sync::Mutex<Vec<(String, Vec<String>)>>,
     }
 
     #[async_trait]
@@ -179,6 +200,10 @@ mod tests {
             self.fichas.lock().unwrap().push((id.clone(), datos.clone()));
             Ok(id)
         }
+        async fn apuntar_gasto(&self, id: &str, ids_pago: &[String]) -> AppResult<u64> {
+            self.gastos.lock().unwrap().push((id.to_string(), ids_pago.to_vec()));
+            Ok(1)
+        }
     }
 
     fn guardar(id: Option<&str>, nif: &str) -> GuardarDatosFiscalesInput {
@@ -187,6 +212,7 @@ mod tests {
             nif: nif.into(),
             razon_social: "  Comidas  SL ".into(),
             direccion_fiscal: Some(" Calle Mayor 1 ".into()),
+            ids_pago: Vec::new(),
         }
     }
 
@@ -220,11 +246,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn guardar_datos_fiscales_pasa_el_gasto_de_los_cobros_a_la_ficha() {
+        // FISCAL-03: quien pide la factura es quien paga. Sin cobros, el gasto no se toca.
+        let repo = FichasEnMemoria::default();
+        let id = guardar_datos_fiscales(&repo, guardar(None, "B12345674")).await.unwrap();
+        assert!(repo.gastos.lock().unwrap().is_empty());
+        let mut con_cobros = guardar(None, "B12345674");
+        con_cobros.ids_pago = vec![" p1 ".into(), "".into(), "p2".into()];
+        assert_eq!(guardar_datos_fiscales(&repo, con_cobros).await.unwrap(), id);
+        assert_eq!(repo.gastos.lock().unwrap().as_slice(), [(id, vec!["p1".to_string(), "p2".to_string()])]);
+    }
+
+    #[tokio::test]
     async fn guardar_datos_fiscales_con_un_nif_que_no_vale_no_toca_nada() {
         let repo = FichasEnMemoria::default();
-        let e = guardar_datos_fiscales(&repo, guardar(None, "12345678A")).await.unwrap_err();
+        let mut con_cobros = guardar(None, "12345678A");
+        con_cobros.ids_pago = vec!["p1".into()];
+        let e = guardar_datos_fiscales(&repo, con_cobros).await.unwrap_err();
         assert!(matches!(e, AppError::Validation(_)));
         assert!(repo.fichas.lock().unwrap().is_empty());
+        assert!(repo.gastos.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

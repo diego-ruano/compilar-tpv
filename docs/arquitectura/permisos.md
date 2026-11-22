@@ -69,7 +69,7 @@ selector sin tocar nada guardado, y desvincular queda para el administrador
 igual, y por el IPC no hay frontera ([arriba](#qué-garantiza-esto-y-qué-no)).
 
 Lo lleva también `sync_bootstrap_desde_nube` (traer el estado actual de la nube): sin sesión lo
-alcanza la pantalla de recuperación; con ella, Configuración → Conectividad cuando un cambio de la
+alcanza la pantalla de recuperación; con ella, la de Conectividad (que sólo abre su aviso) cuando un cambio de la
 nube se ha atascado en su cuarentena (SYNC-36,
 [sincronizacion.md](sincronizacion.md#la-salida-de-una-cuarentena-de-bajada-sync-36)).
 
