@@ -497,14 +497,8 @@ pide (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
 | La Handy | `<img>` a `GET /v1/images/{tenant}/{ruta}`, público | La base `{CLOUD_API_BASE}/v1/images/{tenant}` la da Rust (`handy_url_imagenes`, `tpv_infra_licensing::url_imagenes_del_negocio`) y `imageUrl.ts` le pega la `Ruta_Imagen` |
 | La Main | `POST /v1/images/download`, firmado, el negocio sale del token | `images_ensure_local`, que la deja en disco ([tickets.md](tickets.md) para el logo) |
 
-⚠️ **Además, el bucket sigue abierto por su dirección pública `r2.dev`** mientras no se cierre a mano:
-quien tenga `https://pub-….r2.dev/{tenant}/{ruta}` lee la imagen sin pasar por el worker (ni por su
-filtro ni por la validación de la ruta). Es lo que pide la Handy de una versión anterior a INFRA-03;
-Cloudflare reserva esa dirección para desarrollo (límite de peticiones, sin caché). El código ya no la
-usa, y se cierra cuando todas las Handy lleven la versión que lee por el worker
-([publicar-version.md](../guias/publicar-version.md#cerrar-el-r2dev-de-las-imágenes)); hasta entonces,
-en este bucket no se guarda nada que no pueda ser público. Cuando se cierre, se quita este párrafo. La CSP de
-la webview admite en `img-src` el origen del worker y no `r2.dev` (lo vigila
+El bucket no tiene acceso público: su dirección `r2.dev` está cerrada, y sólo se lee por el worker.
+La CSP de la webview admite en `img-src` el origen del worker y no `r2.dev` (lo vigila
 `lib.rs::las_imagenes_de_la_handy_salen_del_worker_y_no_de_r2_dev`).
 
 **El GET público** contesta:
