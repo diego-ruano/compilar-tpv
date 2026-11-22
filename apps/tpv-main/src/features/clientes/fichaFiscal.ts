@@ -147,11 +147,15 @@ export function sirveParaFacturar(f: ClienteParaFactura | null | undefined): f i
     return f != null && f.nif != null && nifValido(f.nif);
 }
 
-/** ¿Son éstos los datos que ya tiene la ficha? */
+/**
+ * ¿Son éstos los datos que ya tiene la ficha? El nombre se compara con el que da la ficha al
+ * rellenar (`datosDeFicha`): su razón social o, si no tiene, su nombre. Si no, una ficha sin razón
+ * social nunca tendría «los mismos datos» que ella misma.
+ */
 export function mismosDatos(d: DestinatarioInput, f: ClienteParaFactura): boolean {
     return (
         normalizarNif(d.nif) === normalizarNif(f.nif) &&
-        comparable(d.nombre_razon) === comparable(f.razon_social) &&
+        comparable(d.nombre_razon) === comparable(datosDeFicha(f).nombre_razon) &&
         comparable(d.domicilio) === comparable(f.direccion_fiscal)
     );
 }

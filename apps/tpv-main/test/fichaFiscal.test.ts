@@ -85,6 +85,15 @@ describe("con qué se rellena y qué se guarda", () => {
         expect(guardarPorDefecto(iguales, null)).toBe(true);
     });
 
+    it("una ficha sin razón social tiene los mismos datos que los que da al rellenar", () => {
+        // Rosa tiene NIF y no razón social: el formulario se rellena con su nombre.
+        const deRosa = datosDeFicha(ROSA);
+        expect(mismosDatos(deRosa, ROSA)).toBe(true);
+        expect(guardarPorDefecto(deRosa, ROSA)).toBe(false);
+        // Otro nombre sí es un dato nuevo.
+        expect(guardarPorDefecto({ ...deRosa, nombre_razon: "Rosa Pérez SL" }, ROSA)).toBe(true);
+    });
+
     it("con ficha se guardan los suyos; sin ficha, va sin id (el backend busca el NIF o da de alta)", () => {
         const d = { nombre_razon: " Comidas SL ", nif: "b-12345674 ", domicilio: "  " };
         expect(planDeGuardado(d, COMIDAS)).toEqual({ id_cliente: "c2", nif: "B12345674", razon_social: "Comidas SL", direccion_fiscal: null });

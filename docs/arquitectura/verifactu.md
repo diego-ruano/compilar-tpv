@@ -322,7 +322,8 @@ rápida y en Cuentas) los usa en la Main:
 - Si el cliente de la comanda que se cobra (el suyo o el de su reserva) tiene ficha con NIF, el
   formulario empieza con sus datos.
 - La casilla **Guardar en la ficha del cliente** sale marcada si los datos son nuevos o distintos de
-  los de la ficha. Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
+  los de la ficha; el nombre se compara con el que la ficha da al rellenar (su razón social o, si no
+  tiene, su nombre: `mismosDatos`). Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
   ninguna, se da de alta una con la razón social de nombre. La elegida deja de serlo si el NIF con
   el que se factura es el de otra ficha (va a ésa) o distinto del que ya tenía (va a una nueva): la
   comida de empresa que reservó una persona no le cambia el NIF a su ficha (`fichaDestino`). La
