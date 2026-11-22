@@ -584,8 +584,10 @@ export default function Cuentas() {
         }
     };
 
-    const confirmarFactura = async (d: DestinatarioInput) => {
-        if (!facturaDe) return;
+    /** Emite o corrige la factura. Devuelve si ha entrado: el formulario guarda entonces los datos
+     *  en la ficha del cliente (FISCAL-02). */
+    const confirmarFactura = async (d: DestinatarioInput): Promise<boolean> => {
+        if (!facturaDe) return false;
         setF3Guardando(true);
         setF3Error(null);
         try {
@@ -598,8 +600,10 @@ export default function Cuentas() {
             // Y se abre LA FACTURA NUEVA para imprimir, que es a lo que ha venido el cliente: no una
             // copia del ticket que canjea ni la factura errónea (RI-29).
             if (primera) setReimpresion({ idPago: primera.id, numFactura: bloque.num_serie_factura });
+            return true;
         } catch (err) {
             setF3Error(toAppError(err).message);
+            return false;
         } finally {
             setF3Guardando(false);
         }

@@ -4,12 +4,14 @@ export default function Campo({
 	onChange,
 	placeholder,
 	type = "text",
+	maxLength,
 }: {
 	label: string;
 	value: string;
 	onChange: (v: string) => void;
 	placeholder?: string;
 	type?: string;
+	maxLength?: number;
 }) {
 	return (
 		<div className="flex flex-col gap-1">
@@ -20,6 +22,7 @@ export default function Campo({
 				className="h-10 rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
 				placeholder={placeholder}
 				type={type}
+				maxLength={maxLength}
 			/>
 		</div>
 	);

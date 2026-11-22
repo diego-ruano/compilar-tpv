@@ -73,7 +73,8 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	horario_semana: (e) => validarConMensaje(fechaLunesSchema, e),
 	reserva_web: (e) => validarConMensaje(altaReservaWebSchema, e),
 	// El alta y la edición del cliente validan lo mismo. Fija la regla de un correo (`isValidEmail`),
-	// que comparten el alta web y el correo de recuperación (AUD-39), y el tope de las notas (AUD-36).
+	// que comparten el alta web y el correo de recuperación (AUD-39), el tope de las notas (AUD-36) y
+	// los datos fiscales de la ficha (FISCAL-02, `lib/fiscal.ts`).
 	cliente: async (e) => {
 		const alta: Resultado = await validarConMensaje(createClienteSchema, { id_cliente: null, ...e });
 		const edicion: Resultado = await validarConMensaje(updateClienteSchema, e);

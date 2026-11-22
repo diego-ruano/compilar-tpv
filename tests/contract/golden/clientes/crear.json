@@ -1,10 +1,13 @@
 {
   "Clientes": [
     {
+      "Direccion_Fiscal": "Calle Mayor 1, 28013 Madrid",
       "Email": "ana@bar.com",
       "ID_Cliente": "cliente-1",
+      "NIF": "B12345674",
       "Nombre": "Ana Gomez",
       "Notas": "VIP",
+      "Razon_Social": "Comidas Gomez SL",
       "Telefono": "600100200"
     }
   ]

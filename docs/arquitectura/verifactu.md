@@ -291,11 +291,37 @@ una `R1`, el cliente. La de una devolución parcial lleva sólo las líneas devu
 una devolución, Cuentas abre el modal de impresión con ella elegida, sin imprimirla: se entrega si el
 cliente la quiere.
 
-El esquema tiene `Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal`, pero hoy ningún camino los lee
-ni los escribe: el formulario de datos fiscales siempre empieza vacío.
-
 Una reimpresión saca el mismo número, fecha y desglose, leídos del registro (`ticket_de_pago`,
 RI-29), marcada COPIA. El orden completo del ticket está en [tickets.md](tickets.md).
+
+### Los datos fiscales en la ficha del cliente
+
+`Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal` son los datos para facturarle a un cliente. Son
+opcionales y se editan en su ficha (Clientes → Editar), en la Main y en la Handy. Se guardan como el
+destinatario de una factura (`DatosFiscales::validar`, que usa `normalizar_nif`, `nif_valido` y
+`sanear_texto`): el NIF sin blancos, guiones ni minúsculas y con su control comprobado, y la razón
+social y la dirección saneadas y recortadas a 120 y 250 caracteres. El worker hace lo mismo
+(`lib/fiscal.ts`), con los casos en `validacion_casos.json` y `nif_casos.json`. La ficha enseña
+sus datos de facturación si los tiene.
+
+El formulario de la factura completa (`DatosFiscalesModal`, en el cobro de la mesa, en la venta
+rápida y en Cuentas) los usa en la Main:
+
+- **Elegir cliente** busca las fichas por nombre, razón social o NIF y rellena los tres campos.
+- Un NIF que es el de una ficha ofrece «Es <cliente>: rellenar con sus datos», y el nombre que se
+  teclea sugiere las fichas que casan.
+- Si el cliente de la comanda que se cobra (el suyo o el de su reserva) tiene ficha con NIF, el
+  formulario empieza con sus datos.
+- La casilla **Guardar en la ficha del cliente** sale marcada si los datos son nuevos o distintos de
+  los de la ficha. Lo que se guarda va a la ficha elegida o a la que tiene ese NIF; si no hay
+  ninguna, se da de alta una con la razón social de nombre.
+
+El guardado va **después** de que el cobro o la emisión hayan entrado (`trasFacturar`), nunca dentro
+ni antes, y si falla sólo se avisa: no impide ni deshace el cobro. Quien cobra puede no tener
+`clientes.gestionar`, así que la lectura de las fichas y el guardado tienen sus propios comandos
+(`clientes_para_factura`, `clientes_guardar_datos_fiscales`) con el permiso del cobro,
+`servicio.vender`. Sólo existen en la Main: en la Handy, que no cobra, el formulario no ofrece nada de
+esto. Lo que escriben pasa por el `WriteGuard` y se replica como cualquier edición de la ficha.
 
 ---
 

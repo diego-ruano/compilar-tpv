@@ -1,6 +1,9 @@
 {
+  "direccion_fiscal": "Calle Mayor 1",
   "email": "ana@bar.com",
+  "nif": "B12345674",
   "nombre": "Ana Gomez",
   "notas": "Alergica al marisco",
+  "razon_social": "Comidas Gomez SL",
   "telefono": "600100200"
 }

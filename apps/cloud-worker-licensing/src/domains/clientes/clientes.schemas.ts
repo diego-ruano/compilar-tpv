@@ -3,6 +3,14 @@
 import * as z from "zod";
 
 import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
+import {
+	MAX_DIRECCION_FISCAL,
+	MAX_RAZON_SOCIAL,
+	MSG_NIF_NO_VALIDO,
+	nifValido,
+	normalizarNif,
+	sanearTexto,
+} from "../../lib/fiscal";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateClienteInput as ContractCreateClienteInput,
@@ -57,6 +65,27 @@ const optEmail = z
 // AUD-36: con un máximo, como en la Main.
 const notas = optStr.refine(cabeEnTextoLibre, MSG_TEXTO_DEMASIADO_LARGO);
 
+// FISCAL-02: los datos para facturarle, normalizados como el destinatario de la factura
+// (`DatosFiscales::validar` en la Main). Vacío => null; un NIF con algo tiene que pasar el control.
+const nif = z
+	.string()
+	.nullish()
+	.transform((v) => {
+		const n = normalizarNif((v ?? "").toString());
+		return n.length ? n : null;
+	})
+	.refine((v) => v === null || nifValido(v), { message: MSG_NIF_NO_VALIDO });
+
+function saneado(max: number) {
+	return z
+		.string()
+		.nullish()
+		.transform((v) => {
+			const t = sanearTexto((v ?? "").toString(), max);
+			return t.length ? t : null;
+		});
+}
+
 export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
 	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
@@ -65,6 +94,9 @@ export const createClienteSchema = z.object({
 	email: optEmail,
 	telefono: optStr,
 	notas: notas,
+	nif: nif,
+	razon_social: saneado(MAX_RAZON_SOCIAL),
+	direccion_fiscal: saneado(MAX_DIRECCION_FISCAL),
 });
 
 export const updateClienteSchema = z.object({
@@ -72,9 +104,12 @@ export const updateClienteSchema = z.object({
 	email: optEmail,
 	telefono: optStr,
 	notas: notas,
+	nif: nif,
+	razon_social: saneado(MAX_RAZON_SOCIAL),
+	direccion_fiscal: saneado(MAX_DIRECCION_FISCAL),
 });
 
-type NullableClienteFields = "email" | "telefono" | "notas";
+type NullableClienteFields = "email" | "telefono" | "notas" | "nif" | "razon_social" | "direccion_fiscal";
 
 export type CreateClienteInput = Omit<
 	ContractCreateClienteInput,

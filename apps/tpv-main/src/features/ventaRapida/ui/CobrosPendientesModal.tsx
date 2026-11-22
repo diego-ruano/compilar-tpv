@@ -6,14 +6,14 @@ import { eur } from "../../../shared/lib/dinero";
 
 export default function CobrosPendientesModal({ open, onClose, pendientes, ocupado, onResolver, onCancelar, onEditarFactura }: {
     open: boolean; onClose: () => void; pendientes: CobroPendienteDto[]; ocupado: boolean;
-    onResolver: (p: CobroPendienteDto) => Promise<void>; onCancelar: (p: CobroPendienteDto) => Promise<void>;
+    onResolver: (p: CobroPendienteDto) => Promise<unknown>; onCancelar: (p: CobroPendienteDto) => Promise<void>;
     onEditarFactura: (p: CobroPendienteDto) => void;
 }) {
     const [descartar, setDescartar] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [actuando, setActuando] = useState(false);
     const guardia = useRef(false);
-    const ejecutar = async (accion: () => Promise<void>) => {
+    const ejecutar = async (accion: () => Promise<unknown>) => {
         if (guardia.current || ocupado) return;
         guardia.current = true; setActuando(true); setError(null);
         try { await accion(); setDescartar(null); }

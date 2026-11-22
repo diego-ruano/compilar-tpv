@@ -677,6 +677,9 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				email: caso.entrada.email,
 				telefono: caso.entrada.telefono,
 				notas: caso.entrada.notas,
+				nif: caso.entrada.nif,
+				razon_social: caso.entrada.razon_social,
+				direccion_fiscal: caso.entrada.direccion_fiscal,
 			} as any));
 			return;
 		}
@@ -686,6 +689,9 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				email: caso.entrada.email,
 				telefono: caso.entrada.telefono,
 				notas: caso.entrada.notas,
+				nif: caso.entrada.nif,
+				razon_social: caso.entrada.razon_social,
+				direccion_fiscal: caso.entrada.direccion_fiscal,
 			} as any));
 			return;
 		}

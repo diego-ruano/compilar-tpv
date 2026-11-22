@@ -1,10 +1,13 @@
 {
   "Clientes": [
     {
+      "Direccion_Fiscal": null,
       "Email": "ana.lopez@bar.com",
       "ID_Cliente": "cliente-1",
+      "NIF": "B12345674",
       "Nombre": "Ana Lopez",
       "Notas": "Actualizado",
+      "Razon_Social": "Comidas Lopez SL",
       "Telefono": "600999888"
     }
   ]

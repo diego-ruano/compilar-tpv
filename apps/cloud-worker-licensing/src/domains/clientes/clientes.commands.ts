@@ -51,6 +51,10 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),
+		// FISCAL-02: llegan normalizados por el schema, como en la Main.
+		nif: cleanOrNull(input.nif),
+		razon_social: cleanOrNull(input.razon_social),
+		direccion_fiscal: cleanOrNull(input.direccion_fiscal),
 	};
 
 	const steps = [
@@ -65,6 +69,9 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 					Telefono,
 					Email,
 					Notas,
+					NIF,
+					Razon_Social,
+					Direccion_Fiscal,
 					Created_At
 				)
 				VALUES (
@@ -73,13 +80,19 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 					?3,
 					?4,
 					?5,
+					?6,
+					?7,
+					?8,
 					datetime('now','localtime')
 				)
 				ON CONFLICT(ID_Cliente) DO UPDATE SET
 					Nombre = excluded.Nombre,
 					Telefono = excluded.Telefono,
 					Email = excluded.Email,
-					Notas = excluded.Notas;
+					Notas = excluded.Notas,
+					NIF = excluded.NIF,
+					Razon_Social = excluded.Razon_Social,
+					Direccion_Fiscal = excluded.Direccion_Fiscal;
 			`,
 			args: [
 				REF_ID,
@@ -87,6 +100,9 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 				cloudPayload.telefono,
 				cloudPayload.email,
 				cloudPayload.notas,
+				cloudPayload.nif,
+				cloudPayload.razon_social,
+				cloudPayload.direccion_fiscal,
 			],
 		},
 	];
@@ -105,6 +121,9 @@ export function updateCliente(idCliente: string, input: UpdateClienteInput): Bui
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),
+		nif: cleanOrNull(input.nif),
+		razon_social: cleanOrNull(input.razon_social),
+		direccion_fiscal: cleanOrNull(input.direccion_fiscal),
 	};
 
 	return {
@@ -122,14 +141,20 @@ export function updateCliente(idCliente: string, input: UpdateClienteInput): Bui
 								Nombre = ?1,
 								Telefono = ?2,
 								Email = ?3,
-								Notas = ?4
-							WHERE ID_Cliente = ?5;
+								Notas = ?4,
+								NIF = ?5,
+								Razon_Social = ?6,
+								Direccion_Fiscal = ?7
+							WHERE ID_Cliente = ?8;
 						`,
 						args: [
 							cloudPayload.nombre,
 							cloudPayload.telefono,
 							cloudPayload.email,
 							cloudPayload.notas,
+							cloudPayload.nif,
+							cloudPayload.razon_social,
+							cloudPayload.direccion_fiscal,
 							cloudPayload.id_cliente,
 						],
 					},

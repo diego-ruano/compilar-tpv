@@ -106,7 +106,11 @@ export async function form(
 				-- Mismo criterio que el overview (ver arriba): la Main normaliza estos tres.
 				NULLIF(TRIM(Email), '') AS email,
 				NULLIF(TRIM(Telefono), '') AS telefono,
-				NULLIF(TRIM(Notas), '') AS notas
+				NULLIF(TRIM(Notas), '') AS notas,
+				-- FISCAL-02: los datos para facturarle, con el mismo criterio.
+				NULLIF(TRIM(NIF), '') AS nif,
+				NULLIF(TRIM(Razon_Social), '') AS razon_social,
+				NULLIF(TRIM(Direccion_Fiscal), '') AS direccion_fiscal
 			FROM Clientes
 			WHERE ID_Cliente = ?1
 			LIMIT 1;

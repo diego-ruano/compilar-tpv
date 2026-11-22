@@ -47,7 +47,7 @@ use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::mesas::SalonInput;
-use tpv_domain::clientes::{Cliente, NuevoCliente};
+use tpv_domain::clientes::{Cliente, DatosFiscales, NuevoCliente};
 use tpv_domain::cuentas::{normalize_metodo, GastoData, PagoData};
 use tpv_domain::inventario::{
     AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
@@ -477,6 +477,11 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 email: opt_str(&e["email"]),
                 telefono: opt_str(&e["telefono"]),
                 notas: opt_str(&e["notas"]),
+                fiscal: DatosFiscales {
+                    nif: opt_str(&e["nif"]),
+                    razon_social: opt_str(&e["razon_social"]),
+                    direccion_fiscal: opt_str(&e["direccion_fiscal"]),
+                },
             })
             .await
             .expect("alta de cliente");
@@ -489,6 +494,11 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 email: opt_str(&e["email"]),
                 telefono: opt_str(&e["telefono"]),
                 notas: opt_str(&e["notas"]),
+                fiscal: DatosFiscales {
+                    nif: opt_str(&e["nif"]),
+                    razon_social: opt_str(&e["razon_social"]),
+                    direccion_fiscal: opt_str(&e["direccion_fiscal"]),
+                },
             })
             .await
             .expect("edición de cliente");

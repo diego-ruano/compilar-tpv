@@ -4,8 +4,9 @@
 //! `AppState::clientes_repo` según el modo activo: el comando no sabe contra qué backend
 //! habla, sólo orquesta entrada/salida e invoca el caso de uso.
 //!
-//! Todos piden sesión (RI-52): son datos personales de los clientes. No piden rol: basta con haber
-//! entrado con un PIN.
+//! Todos piden sesión (RI-52): son datos personales de los clientes. La ficha pide
+//! `clientes.gestionar`; los dos del formulario de la factura completa (FISCAL-02), el permiso del
+//! cobro, porque quien cobra puede no tener el de los clientes, y sólo existen en la Main.
 
 use tpv_domain::dinero::Dinero;
 use tauri::State;
@@ -13,8 +14,8 @@ use tauri::State;
 use tpv_application::use_cases::clientes as uc;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_contracts::clientes::{
-    ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, CreateClienteInput,
-    UpdateClienteInput,
+    ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, ClientesParaFactura,
+    ClientesParaFacturaArgs, CreateClienteInput, GuardarDatosFiscalesInput, UpdateClienteInput,
 };
 
 use crate::AppState;
@@ -77,4 +78,32 @@ pub async fn clientes_update_cliente(
     state.exigir_permiso("clientes.gestionar").await?;
     let repo = state.clientes_repo().await?;
     Ok(uc::actualizar_cliente(repo.as_ref(), args).await?)
+}
+
+/// FISCAL-02 · Las fichas entre las que se elige al pedir factura completa, con lo justo para
+/// facturar (ni el correo ni el teléfono), y la del cliente de la comanda si se sabe.
+///
+/// Con el permiso del cobro y no con `clientes.gestionar`: lo pide quien está cobrando.
+#[tauri::command]
+#[specta::specta]
+pub async fn clientes_para_factura(
+    state: State<'_, AppState>,
+    args: ClientesParaFacturaArgs,
+) -> Result<ClientesParaFactura, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    let repo = state.clientes_factura_repo().await?;
+    Ok(uc::clientes_para_factura(repo.as_ref(), args).await?)
+}
+
+/// FISCAL-02 · Guarda en la ficha del cliente los datos con los que se acaba de facturar. Lo llama la
+/// pantalla **después** de cobrar o de emitir la factura: si falla, sólo se avisa.
+#[tauri::command]
+#[specta::specta]
+pub async fn clientes_guardar_datos_fiscales(
+    state: State<'_, AppState>,
+    args: GuardarDatosFiscalesInput,
+) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    let repo = state.clientes_factura_repo().await?;
+    Ok(uc::guardar_datos_fiscales(repo.as_ref(), args).await?)
 }

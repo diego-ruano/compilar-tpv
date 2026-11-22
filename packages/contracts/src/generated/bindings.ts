@@ -595,6 +595,10 @@ export type ClienteForm = {
 	email: string | null,
 	telefono: string | null,
 	notas: string | null,
+	/**  FISCAL-02: los datos para facturarle, si los tiene. */
+	nif: string | null,
+	razon_social: string | null,
+	direccion_fiscal: string | null,
 };
 
 /**  Argumento con sólo el id de cliente. */
@@ -617,9 +621,29 @@ export type ClienteOverview = {
 	reservas_pendientes: number,
 };
 
+/**  Una ficha de cliente, con lo que hace falta para elegirla y facturarle. */
+export type ClienteParaFactura = {
+	id_cliente: string,
+	nombre: string,
+	nif: string | null,
+	razon_social: string | null,
+	direccion_fiscal: string | null,
+};
+
 /**  Argumentos del overview. */
 export type ClientesOverviewArgs = {
 	ranking: string,
+};
+
+/**  Las fichas entre las que se elige, y la del cliente de la comanda si se sabe (el de su reserva). */
+export type ClientesParaFactura = {
+	clientes: ClienteParaFactura[],
+	id_cliente_de_la_comanda: string | null,
+};
+
+/**  La comanda que se cobra, si la hay: de ella sale su cliente (comanda → reserva → cliente). */
+export type ClientesParaFacturaArgs = {
+	id_comanda?: string | null,
 };
 
 export type ClientesStatsArgs = {
@@ -844,6 +868,13 @@ export type CreateClienteInput = {
 	email?: string | null,
 	telefono?: string | null,
 	notas?: string | null,
+	/**
+	 *  FISCAL-02: los datos para facturarle. Opcionales; se normalizan como el destinatario de la
+	 *  factura (`tpv_domain::clientes::DatosFiscales`).
+	 */
+	nif?: string | null,
+	razon_social?: string | null,
+	direccion_fiscal?: string | null,
 };
 
 export type CreateGastoInput = {
@@ -1359,6 +1390,18 @@ export type GuardarCategoriaIngredienteInput = {
 	/**  Sin id, una categoría nueva. */
 	id_categoria_ingrediente?: string | null,
 	nombre: string,
+};
+
+/**
+ *  Guardar en la ficha los datos con los que se acaba de facturar. Con `id_cliente`, se actualizan
+ *  los de esa ficha; sin él, los de la ficha con ese NIF y, si no hay, se da de alta una con la razón
+ *  social de nombre.
+ */
+export type GuardarDatosFiscalesInput = {
+	id_cliente?: string | null,
+	nif: string,
+	razon_social: string,
+	direccion_fiscal?: string | null,
 };
 
 export type GuardarIngredienteInput = {
@@ -3798,6 +3841,13 @@ export type UpdateClienteInput = {
 	email?: string | null,
 	telefono?: string | null,
 	notas?: string | null,
+	/**
+	 *  FISCAL-02: los datos para facturarle. Opcionales; se normalizan como el destinatario de la
+	 *  factura (`tpv_domain::clientes::DatosFiscales`).
+	 */
+	nif?: string | null,
+	razon_social?: string | null,
+	direccion_fiscal?: string | null,
 };
 
 export type UpdateGastoInput = {

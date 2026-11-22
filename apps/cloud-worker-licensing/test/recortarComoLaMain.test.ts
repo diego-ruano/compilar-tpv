@@ -23,7 +23,7 @@ const DOMINIOS = [
 const vigilados = Object.keys(fuentes).filter(
 	(ruta) =>
 		DOMINIOS.some((d) => new RegExp(`/domains/${d}/[^/]+\\.ts$`).test(ruta)) ||
-		/\/lib\/(fechas|pago|rutas)\.ts$/.test(ruta),
+		/\/lib\/(fechas|fiscal|pago|rutas)\.ts$/.test(ruta),
 );
 
 describe("las entradas del negocio se recortan como en la Main", () => {

@@ -15,6 +15,7 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
+  ReceiptText,
 } from "lucide-react";
 
 import Modal from "../../features/proveedores/Modal";
@@ -29,11 +30,13 @@ import {
   type FiltroRanking,
 } from "../../features/clientes/clientesApis";
 import {
+  useClienteForm,
   useClientesOverview,
   useRecalcularGasto,
   useCreateCliente,
   useUpdateCliente,
 } from "../../features/clientes/clientesQueries";
+import { nifValido } from "../../shared/ticket/nif";
 import { conAviso } from "../../shared/lib/conAviso";
 import { contiene, textoABuscar } from "../../shared/lib/busqueda";
 import type { Dinero } from "@tpv/contracts";
@@ -115,6 +118,16 @@ export default function Clientes() {
   const [fEmail, setFEmail] = useState("");
   const [fTelefono, setFTelefono] = useState("");
   const [fNotas, setFNotas] = useState("");
+  // FISCAL-02: los datos para facturarle. Opcionales.
+  const [fNif, setFNif] = useState("");
+  const [fRazonSocial, setFRazonSocial] = useState("");
+  const [fDireccionFiscal, setFDireccionFiscal] = useState("");
+  const nifMal = fNif.trim() !== "" && !nifValido(fNif);
+
+  // La ficha del cliente abierto, con sus datos fiscales: el overview no los trae.
+  const fichaActiva = useClienteForm(vista === "detail" ? (clienteActivo?.ID_Cliente ?? null) : null);
+  const fiscalActivo = fichaActiva.data;
+  const tieneDatosFiscales = !!(fiscalActivo?.nif || fiscalActivo?.razon_social || fiscalActivo?.direccion_fiscal);
 
   function mapRowToUI(r: ClienteOverview): ClienteUI {
     const fecha = r.ultima_reserva_fecha;
@@ -231,6 +244,9 @@ export default function Clientes() {
     setFEmail("");
     setFTelefono("");
     setFNotas("");
+    setFNif("");
+    setFRazonSocial("");
+    setFDireccionFiscal("");
     setModalClienteOpen(true);
   }
 
@@ -245,6 +261,9 @@ export default function Clientes() {
       setFEmail(r0?.email ?? clienteActivo.Email);
       setFTelefono(r0?.telefono ?? clienteActivo.Telefono);
       setFNotas(r0?.notas ?? "");
+      setFNif(r0?.nif ?? "");
+      setFRazonSocial(r0?.razon_social ?? "");
+      setFDireccionFiscal(r0?.direccion_fiscal ?? "");
       setModalClienteOpen(true);
     } catch (e) {
       toast.error("No se pudo cargar el cliente para editar", toAppError(e).message);
@@ -261,6 +280,15 @@ export default function Clientes() {
     const email = fEmail.trim();
     const telefono = fTelefono.trim();
     const notas = fNotas.trim();
+    if (nifMal) {
+      toast.info("El NIF no es válido.", "Revisa las cifras y la letra, o déjalo vacío.");
+      return;
+    }
+    const fiscal = {
+      nif: fNif.trim() || undefined,
+      razon_social: fRazonSocial.trim() || undefined,
+      direccion_fiscal: fDireccionFiscal.trim() || undefined,
+    };
 
     try {
       if (modalClienteModo === "nuevo") {
@@ -269,6 +297,7 @@ export default function Clientes() {
           email: email || undefined,
           telefono: telefono || undefined,
           notas: notas || undefined,
+          ...fiscal,
         });
 
         if (!ok) {
@@ -288,6 +317,7 @@ export default function Clientes() {
         email: email || undefined,
         telefono: telefono || undefined,
         notas: notas || undefined,
+        ...fiscal,
       });
 
       if (!ok) {
@@ -610,6 +640,26 @@ export default function Clientes() {
                 <b className="text-fg">{clienteActivo.Comensales}</b>
               </p>
             </div>
+
+            {/* FISCAL-02: los datos para facturarle, si los tiene. Hasta que llega la ficha no se
+                enseña nada en su lugar. */}
+            {tieneDatosFiscales && fiscalActivo ? (
+              <div className="mt-3 rounded-xl border border-border bg-surface-2 p-4">
+                <div className="flex items-center gap-2 text-fg-muted">
+                  <ReceiptText className="size-4" aria-hidden />
+                  <span className="text-xs font-medium">Datos de facturación</span>
+                </div>
+                <p className="mt-1 break-words font-semibold text-fg">
+                  {fiscalActivo.razon_social ?? clienteActivo.Nombre}
+                </p>
+                <p className="mt-0.5 break-words text-sm text-fg-muted">
+                  NIF: <b className="text-fg">{fiscalActivo.nif ?? "—"}</b>
+                </p>
+                {fiscalActivo.direccion_fiscal ? (
+                  <p className="mt-0.5 break-words text-sm text-fg-muted">{fiscalActivo.direccion_fiscal}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </>
       )}
@@ -657,6 +707,48 @@ export default function Clientes() {
                 rows={4}
                 className="mt-1 w-full resize-none rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="Ej: Cliente VIP, alergias, preferencias..."
+              />
+            </div>
+
+            {/* FISCAL-02: para no dictar el NIF cada vez que pide factura. */}
+            <div className="sm:col-span-2 lg:col-span-3">
+              <p className="text-sm font-semibold text-fg">Datos para facturarle</p>
+              <p className="text-xs text-fg-muted">
+                Opcionales. Con ellos, la factura completa se rellena al elegir este cliente.
+              </p>
+            </div>
+
+            <div>
+              <Campo
+                label="NIF / CIF"
+                value={fNif}
+                onChange={(v) => setFNif(v.toUpperCase())}
+                placeholder="Ej: B12345674"
+              />
+              {nifMal ? (
+                <span className="mt-1 block text-xs text-danger">
+                  Ese NIF no es válido: revisa las cifras y la letra.
+                </span>
+              ) : null}
+            </div>
+
+            <div className="lg:col-span-2">
+              <Campo
+                label="Razón social"
+                value={fRazonSocial}
+                onChange={setFRazonSocial}
+                placeholder="Ej: Comidas Juan SL"
+                maxLength={120}
+              />
+            </div>
+
+            <div className="sm:col-span-2 lg:col-span-3">
+              <Campo
+                label="Dirección fiscal"
+                value={fDireccionFiscal}
+                onChange={setFDireccionFiscal}
+                placeholder="Ej: Calle Mayor 1, 28013 Madrid"
+                maxLength={250}
               />
             </div>
           </div>

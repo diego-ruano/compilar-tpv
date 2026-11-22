@@ -852,6 +852,17 @@ impl AppState {
         Ok(Arc::new(SqliteVerifactuRepository::new(conn)) as Arc<dyn VerifactuRepository>)
     }
 
+    /// Las fichas de cliente desde el formulario de la factura completa (FISCAL-02). Sólo en la Main,
+    /// que es la que cobra y factura.
+    pub(crate) async fn clientes_factura_repo(
+        &self,
+    ) -> Result<Arc<dyn tpv_application::ports::clientes::ClientesFacturaRepository>, AppErrorDto> {
+        let conn = self
+            .base_de_la_main("Los clientes de una factura se eligen en el TPV principal")
+            .await?;
+        Ok(Arc::new(SqliteClientesRepository::new(conn)))
+    }
+
     /// El ticket de un cobro (RI-29). Tampoco es mode-switched: imprime la Main, que es la que cobra,
     /// la que tiene la impresora y la que guarda los registros de facturación.
     pub(crate) async fn tickets_repo(&self) -> Result<Arc<dyn TicketsRepository>, AppErrorDto> {
@@ -2349,6 +2360,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::clientes::clientes_create_cliente,
             commands::clientes::clientes_update_cliente,
             commands::clientes::clientes_recalcular_gasto,
+            commands::clientes::clientes_para_factura,
+            commands::clientes::clientes_guardar_datos_fiscales,
             // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
             commands::reservas::reservas_get_meta,
             commands::reservas::reservas_get_mes,

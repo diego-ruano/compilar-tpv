@@ -1,17 +1,20 @@
 {
-  "descripcion": "Edición de un cliente existente (UPDATE de nombre/telefono/email/notas). No toca Created_At.",
+  "descripcion": "Edición de un cliente existente (UPDATE de nombre/telefono/email/notas y de los datos fiscales, FISCAL-02). Cambia el NIF y la razón social y quita la dirección fiscal. No toca Created_At.",
   "comando": "clientes.actualizar",
   "seed": [
-    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) VALUES ('cliente-1', 'Ana', '600100200', 'ana@bar.com', 'x', '2026-01-01 00:00:00');"
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, NIF, Razon_Social, Direccion_Fiscal, Created_At) VALUES ('cliente-1', 'Ana', '600100200', 'ana@bar.com', 'x', '12345678Z', 'Ana Gomez', 'Calle Mayor 1', '2026-01-01 00:00:00');"
   ],
   "entrada": {
     "id_cliente": "cliente-1",
     "nombre": "Ana Lopez",
     "email": "ana.lopez@bar.com",
     "telefono": "600999888",
-    "notas": "Actualizado"
+    "notas": "Actualizado",
+    "nif": "B12345674",
+    "razon_social": "Comidas Lopez SL",
+    "direccion_fiscal": null
   },
   "snapshot": {
-    "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes"
+    "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas, NIF, Razon_Social, Direccion_Fiscal FROM Clientes"
   }
 }

@@ -96,6 +96,11 @@ proceso de réplica y los jobs no necesitan una sesión personal.
 | Gestión | Proveedores, pedidos y su correo, administrar tareas, horarios, plano, estadísticas, clientes, recalcular gasto |
 | Caja | Cobros y devoluciones, gastos/totales/edición de pagos, cierre/reapertura de caja |
 
+Las fichas de cliente piden `clientes.gestionar`, salvo en el formulario de la factura completa: elegir
+la ficha de quien pide factura y guardarle los datos fiscales tras cobrar lo hace quien cobra, con
+`servicio.vender` (`clientes_para_factura` y `clientes_guardar_datos_fiscales`, sólo en la Main), y
+lo que leen es lo justo para facturar, sin correo ni teléfono.
+
 Editar una ficha requiere catálogo; cambiar su precio o IVA exige también precios. Crear un
 producto exige ambos, y dar de alta existencias requiere recibir mercancía. SQLite revalida el
 precio bajo el cerrojo de escritura; una edición Handy sin permiso de precios conserva precio e IVA

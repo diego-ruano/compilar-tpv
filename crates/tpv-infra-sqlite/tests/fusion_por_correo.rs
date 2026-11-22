@@ -21,7 +21,7 @@ use comun::nube_de_contraste::{NubeDeContraste, Paginas};
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::sync::{ContrasteLocal, SyncRepository};
 use tpv_contracts::sync::{SqlStatement, SyncChange};
-use tpv_domain::clientes::NuevoCliente;
+use tpv_domain::clientes::{DatosFiscales, NuevoCliente};
 use tpv_infra_sqlite::clientes::SqliteClientesRepository;
 use tpv_infra_sqlite::db::{Db, Writer};
 use tpv_infra_sqlite::ejecutor::Value;
@@ -188,6 +188,7 @@ async fn la_main_da_de_alta_a_ana(db: &Arc<Db>) {
             email: Some("ana@correo.es".into()),
             telefono: None,
             notas: Some("Alérgica al marisco".into()),
+            fiscal: DatosFiscales::default(),
         })
         .await
         .unwrap();
@@ -516,6 +517,7 @@ async fn si_la_handy_le_pone_el_correo_a_una_ficha_que_ya_estaba_aqui_tambien_se
             email: Some("ana@correo.es".into()),
             telefono: None,
             notas: Some("Alérgica al marisco".into()),
+            fiscal: DatosFiscales::default(),
         })
         .await
         .unwrap();

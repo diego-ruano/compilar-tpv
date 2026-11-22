@@ -2,26 +2,34 @@
 // El formulario de datos fiscales decía siempre «Cobrar y facturar», también desde Cuentas, donde el
 // cobro ya está hecho y lo que se hace es emitir o corregir la factura. Y la F3 negativa de una
 // corrección salía como «Factura de la devolución», sin haber devolución.
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 
 import DatosFiscalesModal from "../../src/shared/ticket/DatosFiscalesModal";
 import { etiquetaFactura } from "../../src/shared/ticket/PrintTicketModal";
 import { deCentimos } from "../../src/shared/lib/dinero";
+import { ToastProvider } from "../../src/shared/toast";
 
 afterEach(() => cleanup());
 
 function formulario(accion?: { texto: string; enCurso: string }) {
+	// FISCAL-02: el formulario pide las fichas de cliente (en la Main) y puede guardarlas: va dentro
+	// de los proveedores de la aplicación.
 	render(
-		<DatosFiscalesModal
-			open
-			onClose={() => {}}
-			onConfirmar={() => {}}
-			importe={deCentimos(1250)}
-			limite={deCentimos(40000)}
-			obligatorio={false}
-			accion={accion}
-		/>,
+		<QueryClientProvider client={new QueryClient()}>
+			<ToastProvider>
+				<DatosFiscalesModal
+					open
+					onClose={() => {}}
+					onConfirmar={() => {}}
+					importe={deCentimos(1250)}
+					limite={deCentimos(40000)}
+					obligatorio={false}
+					accion={accion}
+				/>
+			</ToastProvider>
+		</QueryClientProvider>,
 	);
 }
 

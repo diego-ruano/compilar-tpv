@@ -541,24 +541,26 @@ export default function MesaComandaModal({
     const [errorFactura, setErrorFactura] = useState<string | null>(null);
     const [cobrandoFactura, setCobrandoFactura] = useState(false);
 
+    /** Cobra lo seleccionado. Devuelve `true` si el cobro ha entrado (FISCAL-02: sólo entonces se
+     *  guardan los datos de la factura en la ficha del cliente). */
     const cobrar = async (
         metodo: "tarjeta" | "efectivo",
         destinatario?: DestinatarioInput | null,
-    ) => {
-        if (!idComanda || cobroEnCursoRef.current || cola.pendientes() > 0) return;
+    ): Promise<boolean> => {
+        if (!idComanda || cobroEnCursoRef.current || cola.pendientes() > 0) return false;
 
         const ids = ticket
             .filter((t) => !t.pagado && t.seleccionado)
             .map((t) => t.id);
 
-        if (!ids.length) return;
+        if (!ids.length) return false;
 
         // Camino voluntario: se pidió factura y todavía no hay datos. Se pregunta ANTES de cobrar —
         // una vez cobrado, convertir el ticket en factura ya es otra operación (una F3 sustitutiva).
         if (quiereFactura && !destinatario) {
             setErrorFactura(null);
             setPideFactura({ metodo, obligatorio: false });
-            return;
+            return false;
         }
         cobroEnCursoRef.current = true;
         setCobrandoFactura(true);
@@ -588,7 +590,7 @@ export default function MesaComandaModal({
                 setTicket(prev => prev.map(l => ids.includes(l.id) ? { ...l, pagado: true, seleccionado: false } : l));
             }
             await leerTicket(idComanda).catch(e => toast.warning("Cobro guardado; no se pudo refrescar el ticket", toAppError(e).message));
-            if (comandaActualRef.current !== idComanda) { notifyChanged(); return; }
+            if (comandaActualRef.current !== idComanda) { notifyChanged(); return true; }
 
             setCashCount({});
             setPaso("categorias");
@@ -599,27 +601,28 @@ export default function MesaComandaModal({
             setQuiereFactura(false);
             setPideFactura(null);
             setErrorFactura(null);
+            return true;
         } catch (e) {
-            if (comandaActualRef.current !== idComanda) { toast.error("No se pudo cobrar", toAppError(e).message); return; }
+            if (comandaActualRef.current !== idComanda) { toast.error("No se pudo cobrar", toAppError(e).message); return false; }
             // El importe pasa del límite de la simplificada: no es un fallo, es que falta un dato.
             // Se abre el formulario en modo obligatorio en vez de dejar al camarero sin salida.
             if (esError(e, "factura_completa_requerida")) {
                 setErrorFactura(null);
                 setPideFactura({ metodo, obligatorio: true });
-                return;
+                return false;
             }
             // SYN-INC-05: la cuenta ha cambiado mientras se cobraba todo. Se dice por qué y se relee
             // el ticket, que vuelve a seleccionarlo todo y avisa del total nuevo.
             if (todo && esError(e, "conflict")) {
                 toast.error("No se pudo cobrar", toAppError(e).message);
                 await leerTicket(idComanda).catch((err: unknown) => captureException(err, { fase: "releer_tras_cobrar_todo" }));
-                return;
+                return false;
             }
             // Si el fallo llega con el formulario abierto, se enseña DENTRO: cerrarlo perdería los
             // datos que el cliente acaba de dictar.
             if (pideFactura) {
                 setErrorFactura(toAppError(e).message);
-                return;
+                return false;
             }
             // ⚠️ Y si no, se DICE. Esto antes no existía: cualquier error que no fuera
             // `factura_completa_requerida` acababa en un `console.error` y nada más, así que el
@@ -633,6 +636,7 @@ export default function MesaComandaModal({
             // ramifica por código: cualquier cosa que llegue hasta este punto es algo que quien
             // está cobrando tiene que ver.
             toast.error("No se pudo cobrar", toAppError(e).message);
+            return false;
         } finally {
             cobroEnCursoRef.current = false;
             setCobrandoFactura(false);
@@ -779,10 +783,8 @@ export default function MesaComandaModal({
                     // cliente puede ir a buscar el NIF y volver.
                     setQuiereFactura(false);
                 }}
-                onConfirmar={async (d) => {
-                    const metodo = pideFactura?.metodo ?? "tarjeta";
-                    await cobrar(metodo, d);
-                }}
+                onConfirmar={(d) => cobrar(pideFactura?.metodo ?? "tarjeta", d)}
+                idComanda={idComanda}
                 importe={totalSeleccionado}
                 limite={limite_simplif}
                 obligatorio={pideFactura?.obligatorio ?? false}

@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::clientes::ClientesRepository;
-use tpv_contracts::clientes::{ClienteForm, ClienteOverview};
-use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
+use tpv_application::ports::clientes::{ClientesFacturaRepository, ClientesRepository};
+use tpv_contracts::clientes::{ClienteForm, ClienteOverview, ClienteParaFactura, ClientesParaFactura};
+use tpv_domain::clientes::{Cliente, ClienteRanking, DatosFiscales, NuevoCliente};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_dinero, v_i64, v_string};
@@ -160,7 +160,7 @@ impl ClientesRepository for SqliteClientesRepository {
 
     async fn form(&self, id_cliente: &str) -> AppResult<Option<ClienteForm>> {
         let sql = r#"
-          SELECT Nombre, Email, Telefono, Notas
+          SELECT Nombre, Email, Telefono, Notas, NIF, Razon_Social, Direccion_Fiscal
           FROM Clientes
           WHERE ID_Cliente = ?
           LIMIT 1;
@@ -180,12 +180,18 @@ impl ClientesRepository for SqliteClientesRepository {
         let email = row.get_value(1).map_err(db_err)?;
         let telefono = row.get_value(2).map_err(db_err)?;
         let notas = row.get_value(3).map_err(db_err)?;
+        let nif = row.get_value(4).map_err(db_err)?;
+        let razon_social = row.get_value(5).map_err(db_err)?;
+        let direccion_fiscal = row.get_value(6).map_err(db_err)?;
 
         Ok(Some(ClienteForm {
             nombre: v_string(nombre).unwrap_or_default(),
             email: norm_opt_string(email),
             telefono: norm_opt_string(telefono),
             notas: norm_opt_string(notas),
+            nif: norm_opt_string(nif),
+            razon_social: norm_opt_string(razon_social),
+            direccion_fiscal: norm_opt_string(direccion_fiscal),
         }))
     }
 
@@ -207,6 +213,9 @@ impl ClientesRepository for SqliteClientesRepository {
                     Telefono,
                     Email,
                     Notas,
+                    NIF,
+                    Razon_Social,
+                    Direccion_Fiscal,
                     Created_At
                 )
                 VALUES (
@@ -215,13 +224,19 @@ impl ClientesRepository for SqliteClientesRepository {
                     ?3,
                     ?4,
                     ?5,
+                    ?6,
+                    ?7,
+                    ?8,
                     datetime('now','localtime')
                 )
                 ON CONFLICT(ID_Cliente) DO UPDATE SET
                     Nombre = excluded.Nombre,
                     Telefono = excluded.Telefono,
                     Email = excluded.Email,
-                    Notas = excluded.Notas;
+                    Notas = excluded.Notas,
+                    NIF = excluded.NIF,
+                    Razon_Social = excluded.Razon_Social,
+                    Direccion_Fiscal = excluded.Direccion_Fiscal;
                 "#,
             vec![
                 Value::Text(id_cliente),
@@ -229,6 +244,9 @@ impl ClientesRepository for SqliteClientesRepository {
                 opt_text(nuevo.telefono),
                 opt_text(nuevo.email),
                 opt_text(nuevo.notas),
+                opt_text(nuevo.fiscal.nif),
+                opt_text(nuevo.fiscal.razon_social),
+                opt_text(nuevo.fiscal.direccion_fiscal),
             ],
         )
         .await
@@ -247,14 +265,20 @@ impl ClientesRepository for SqliteClientesRepository {
                   Nombre = ?1,
                   Telefono = ?2,
                   Email = ?3,
-                  Notas = ?4
-                WHERE ID_Cliente = ?5;
+                  Notas = ?4,
+                  NIF = ?5,
+                  Razon_Social = ?6,
+                  Direccion_Fiscal = ?7
+                WHERE ID_Cliente = ?8;
                 "#,
                 vec![
                     Value::Text(cliente.nombre),
                     opt_text(cliente.telefono),
                     opt_text(cliente.email),
                     opt_text(cliente.notas),
+                    opt_text(cliente.fiscal.nif),
+                    opt_text(cliente.fiscal.razon_social),
+                    opt_text(cliente.fiscal.direccion_fiscal),
                     Value::Text(cliente.id),
                 ],
             )
@@ -262,6 +286,104 @@ impl ClientesRepository for SqliteClientesRepository {
             .map_err(write_err)?;
 
         Ok(affected > 0)
+    }
+}
+
+/// FISCAL-02 · Las fichas desde el formulario de la factura completa. Sólo en la Main; las
+/// escrituras van por el `WriteGuard` como las de la ficha, así que se replican.
+#[async_trait]
+impl ClientesFacturaRepository for SqliteClientesRepository {
+    async fn para_factura(&self, id_comanda: Option<&str>) -> AppResult<ClientesParaFactura> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                "SELECT ID_Cliente, Nombre, NIF, Razon_Social, Direccion_Fiscal FROM Clientes \
+                 ORDER BY Nombre, ID_Cliente;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let mut clientes = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            clientes.push(ClienteParaFactura {
+                id_cliente: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                nif: norm_opt_string(row.get_value(2).map_err(db_err)?),
+                razon_social: norm_opt_string(row.get_value(3).map_err(db_err)?),
+                direccion_fiscal: norm_opt_string(row.get_value(4).map_err(db_err)?),
+            });
+        }
+
+        // El cliente de la comanda: el que ya tiene o, si no, el de su reserva. Es el criterio del gasto
+        // acreditado (`mesas.rs`, `cuentas.rs`).
+        let mut id_cliente_de_la_comanda = None;
+        if let Some(id_comanda) = id_comanda {
+            let mut rows = db
+                .query(
+                    "SELECT COALESCE(c.ID_Cliente, r.ID_Cliente) FROM Comandas c \
+                     LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva \
+                     WHERE c.ID_Comanda = ?1 AND COALESCE(c.ID_Cliente, r.ID_Cliente) IS NOT NULL LIMIT 1;",
+                    vec![Value::Text(id_comanda.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            if let Some(row) = rows.next().await.map_err(db_err)? {
+                id_cliente_de_la_comanda = v_string(row.get_value(0).map_err(db_err)?);
+            }
+        }
+        Ok(ClientesParaFactura { clientes, id_cliente_de_la_comanda })
+    }
+
+    async fn id_por_nif(&self, nif: &str) -> AppResult<Option<String>> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                // «La más reciente» por su fecha de alta; la clave sólo desempata.
+                "SELECT ID_Cliente FROM Clientes WHERE NIF = ?1 ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;",
+                vec![Value::Text(nif.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => Ok(v_string(row.get_value(0).map_err(db_err)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn actualizar_datos_fiscales(&self, id_cliente: &str, datos: &DatosFiscales) -> AppResult<bool> {
+        let db = self.db.write().await;
+        let affected = db
+            .execute(
+                "UPDATE Clientes SET NIF = ?1, Razon_Social = ?2, Direccion_Fiscal = ?3 WHERE ID_Cliente = ?4;",
+                vec![
+                    opt_text(datos.nif.clone()),
+                    opt_text(datos.razon_social.clone()),
+                    opt_text(datos.direccion_fiscal.clone()),
+                    Value::Text(id_cliente.to_string()),
+                ],
+            )
+            .await
+            .map_err(write_err)?;
+        Ok(affected > 0)
+    }
+
+    async fn alta_con_datos_fiscales(&self, nombre: &str, datos: &DatosFiscales) -> AppResult<String> {
+        let id_cliente = new_id();
+        let db = self.db.write().await;
+        db.execute(
+            "INSERT INTO Clientes (ID_Cliente, Nombre, NIF, Razon_Social, Direccion_Fiscal, Created_At) \
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
+            vec![
+                Value::Text(id_cliente.clone()),
+                Value::Text(nombre.to_string()),
+                opt_text(datos.nif.clone()),
+                opt_text(datos.razon_social.clone()),
+                opt_text(datos.direccion_fiscal.clone()),
+            ],
+        )
+        .await
+        .map_err(write_err)?;
+        Ok(id_cliente)
     }
 }
 
@@ -284,6 +406,7 @@ mod tests {
             email: Some(email.into()),
             telefono: None,
             notas: None,
+            fiscal: DatosFiscales::default(),
         };
         repo.create(ana("c1", "ana@bar.test")).await.unwrap();
 
@@ -292,9 +415,69 @@ mod tests {
 
         repo.create(ana("c3", "bea@bar.test")).await.unwrap();
         let e = repo
-            .update(Cliente { id: "c3".into(), nombre: "Bea".into(), email: Some("ana@bar.test".into()), telefono: None, notas: None })
+            .update(Cliente { id: "c3".into(), nombre: "Bea".into(), email: Some("ana@bar.test".into()), telefono: None, notas: None, fiscal: DatosFiscales::default() })
             .await
             .unwrap_err();
         assert_eq!(e.to_string(), "Ya hay un cliente con ese correo.");
+    }
+
+    #[tokio::test]
+    async fn la_factura_lee_las_fichas_y_el_cliente_de_la_reserva_y_guarda_solo_los_datos_fiscales() {
+        // FISCAL-02: lo que lee el formulario de la factura y lo que escribe al guardar en la ficha.
+        let dir = crate::test_temp::dir_temporal("clientes-factura");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteClientesRepository::new(db.clone());
+        repo.create(NuevoCliente {
+            id: Some("c1".into()),
+            nombre: "Ana".into(),
+            email: Some("ana@bar.test".into()),
+            telefono: Some("600".into()),
+            notas: Some("VIP".into()),
+            fiscal: DatosFiscales::default(),
+        })
+        .await
+        .unwrap();
+        {
+            let w = db.write().await;
+            w.execute(
+                "INSERT INTO Reservas (ID_Reserva, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Created_At, Origen) \
+                 VALUES ('r1', 'c1', '2099-01-01', '21:00', 'CENA', 2, 'ACTIVA', '2026-01-01 10:00:00', 'TPV');",
+                (),
+            )
+            .await
+            .unwrap();
+            w.execute(
+                "INSERT INTO Comandas (ID_Comanda, ID_Reserva, Canal, Fecha_Hora_Apertura, Estado) VALUES ('k1', 'r1', 'BARRA', '2026-01-01 21:00:00', 'Abierta');",
+                (),
+            )
+            .await
+            .unwrap();
+        }
+
+        let datos = DatosFiscales {
+            nif: Some("B12345674".into()),
+            razon_social: Some("Comidas SL".into()),
+            direccion_fiscal: None,
+        };
+        assert!(repo.actualizar_datos_fiscales("c1", &datos).await.unwrap());
+        assert!(!repo.actualizar_datos_fiscales("no-existe", &datos).await.unwrap());
+        assert_eq!(repo.id_por_nif("B12345674").await.unwrap().as_deref(), Some("c1"));
+        assert_eq!(repo.id_por_nif("A58818501").await.unwrap(), None);
+
+        // Guardar los datos fiscales no toca el resto de la ficha.
+        let form = repo.form("c1").await.unwrap().unwrap();
+        assert_eq!((form.email.as_deref(), form.telefono.as_deref(), form.notas.as_deref()), (Some("ana@bar.test"), Some("600"), Some("VIP")));
+        assert_eq!((form.nif.as_deref(), form.razon_social.as_deref()), (Some("B12345674"), Some("Comidas SL")));
+
+        let nueva = repo
+            .alta_con_datos_fiscales("Otra SA", &DatosFiscales { nif: Some("A58818501".into()), razon_social: Some("Otra SA".into()), direccion_fiscal: Some("Gran Vía 1".into()) })
+            .await
+            .unwrap();
+        let lista = repo.para_factura(Some("k1")).await.unwrap();
+        assert_eq!(lista.id_cliente_de_la_comanda.as_deref(), Some("c1"));
+        assert_eq!(lista.clientes.iter().map(|c| c.nombre.as_str()).collect::<Vec<_>>(), ["Ana", "Otra SA"]);
+        assert_eq!(lista.clientes[1].id_cliente, nueva);
+        assert_eq!(lista.clientes[1].direccion_fiscal.as_deref(), Some("Gran Vía 1"));
+        assert_eq!(repo.para_factura(None).await.unwrap().id_cliente_de_la_comanda, None);
     }
 }

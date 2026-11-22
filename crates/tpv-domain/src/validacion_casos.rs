@@ -8,7 +8,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::clientes::{Cliente, NuevoCliente};
+use crate::clientes::{Cliente, DatosFiscales, NuevoCliente};
 use crate::configuracion::validate_iva_percent;
 use crate::ingredientes::{cambios_de_linea, forma_guardada, CategoriaIngredienteGuardar, IngredienteGuardar};
 use crate::dinero::Dinero;
@@ -278,14 +278,21 @@ fn trabajador(e: &Value) -> Result<Value, String> {
 
 /// El cliente, al darlo de alta y al editarlo: lo mismo en los dos. Fija la regla de un correo
 /// (`validate_email_basic`), que comparten el alta web y el correo de recuperación (AUD-39), y el
-/// tope de las notas (AUD-36).
+/// tope de las notas (AUD-36), y los datos fiscales de la ficha (FISCAL-02): el NIF con la regla del
+/// destinatario de la factura y la razón social y la dirección saneadas como él.
 fn cliente(e: &Value) -> Result<Value, String> {
+    let fiscal = || DatosFiscales {
+        nif: texto_opcional(e, "nif"),
+        razon_social: texto_opcional(e, "razon_social"),
+        direccion_fiscal: texto_opcional(e, "direccion_fiscal"),
+    };
     let alta = NuevoCliente::validar(
         None,
         texto(e, "nombre"),
         texto_opcional(e, "email"),
         texto_opcional(e, "telefono"),
         texto_opcional(e, "notas"),
+        fiscal(),
     );
     let edicion = Cliente::validar_edicion(
         "c1".into(),
@@ -293,10 +300,14 @@ fn cliente(e: &Value) -> Result<Value, String> {
         texto_opcional(e, "email"),
         texto_opcional(e, "telefono"),
         texto_opcional(e, "notas"),
+        fiscal(),
     );
     assert_eq!(alta.as_ref().err(), edicion.as_ref().err(), "el alta y la edición del cliente no dicen lo mismo");
     let c = alta?;
-    Ok(json!({ "nombre": c.nombre, "email": c.email, "telefono": c.telefono, "notas": c.notas }))
+    Ok(json!({
+        "nombre": c.nombre, "email": c.email, "telefono": c.telefono, "notas": c.notas,
+        "nif": c.fiscal.nif, "razon_social": c.fiscal.razon_social, "direccion_fiscal": c.fiscal.direccion_fiscal,
+    }))
 }
 
 /// El plano que se guarda (MESAS-01): sus zonas y los nombres de sus mesas, recortados como se guardan.

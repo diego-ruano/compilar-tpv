@@ -74,6 +74,9 @@ impl ClientesRepository for HttpClientesRepository {
             "email": nuevo.email,
             "telefono": nuevo.telefono,
             "notas": nuevo.notas,
+            "nif": nuevo.fiscal.nif,
+            "razon_social": nuevo.fiscal.razon_social,
+            "direccion_fiscal": nuevo.fiscal.direccion_fiscal,
         });
         let (resp, _): (OkFlag, _) = self
             .client
@@ -90,6 +93,9 @@ impl ClientesRepository for HttpClientesRepository {
             "email": cliente.email,
             "telefono": cliente.telefono,
             "notas": cliente.notas,
+            "nif": cliente.fiscal.nif,
+            "razon_social": cliente.fiscal.razon_social,
+            "direccion_fiscal": cliente.fiscal.direccion_fiscal,
         });
         let resp: OkFlag = self
             .client

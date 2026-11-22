@@ -20,7 +20,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
-| [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
 
@@ -301,13 +300,3 @@ Opciones, de menos a más ambiciosas:
 
 Decisión: refactor gradual después del lanzamiento, por (2) y luego (3) si la duplicación sigue
 doliendo.
-
----
-
-## Detectado al revisar la documentación
-
-Contrastando la documentación con el código salieron cosas que no son de documentación. Ninguna se ha
-tocado; están aquí para decidir.
-
-- **`Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal` existen en el esquema pero nada los lee ni los
-  escribe**: el formulario de factura completa siempre empieza vacío.
