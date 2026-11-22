@@ -560,6 +560,15 @@ export type CierreResumenDto = {
 	rect_descuadre: Dinero | null,
 };
 
+/**  Qué es una factura completa, para nombrarla en la lista. */
+export type ClaseFactura =
+/**  `F1`: la factura completa de un cobro. */
+"factura" |
+/**  `R1`..`R5`: corrige otra. */
+"rectificativa" |
+/**  `F3`: sustituye a uno o varios tickets (o anula una sustitutiva, en negativo). */
+"sustitutiva";
+
 /**  La clave pública del negocio y la línea que se pega en su web (`POST /v1/reservas-web/clave`). */
 export type ClaveReservaWebDto = {
 	clave: string,
@@ -1298,6 +1307,24 @@ export type F3Negativa =
  */
 "baja_por_error";
 
+/**  Una factura completa del cliente. */
+export type FacturaDelCliente = {
+	/**  El registro de facturación: es lo que se pide para el PDF. */
+	id_registro: string,
+	num_serie: string,
+	/**  La fecha de expedición, `DD-MM-AAAA`, como la declara la factura. */
+	fecha_expedicion: string,
+	/**  `F1`, `F3` o `R1`..`R5`. */
+	tipo_factura: string,
+	clase: ClaseFactura,
+	importe: Dinero,
+	/**
+	 *  El cobro con el que se reimprime su papel. `None` si no está en esta base (una `F3` de
+	 *  tickets cuyos cobros no han bajado todavía).
+	 */
+	id_pago: string | null,
+};
+
 /**  Una factura de un cobro, para elegir qué papel se imprime. */
 export type FacturaDelCobro = {
 	num_serie: string,
@@ -1309,6 +1336,20 @@ export type FacturaDelCobro = {
 	 *  que llamar a cada una por lo que es. `None` en todas las demás.
 	 */
 	contrarresta: F3Negativa | null,
+};
+
+/**  El PDF de una factura completa. */
+export type FacturaPdfArgs = {
+	id_registro: string,
+};
+
+/**  Las facturas de una ficha, de la más reciente a la más antigua. */
+export type FacturasDelCliente = {
+	/**  El NIF de la ficha, normalizado. `None` si no tiene: sin él no se sabe cuáles son las suyas. */
+	nif: string | null,
+	facturas: FacturaDelCliente[],
+	/**  Hay más antiguas que no caben en la lista. */
+	hay_mas: boolean,
 };
 
 /**  Un comando que ha fallado, tal como lo cuenta la pantalla. */

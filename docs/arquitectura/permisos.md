@@ -99,7 +99,8 @@ proceso de réplica y los jobs no necesitan una sesión personal.
 Las fichas de cliente piden `clientes.gestionar`, salvo en el formulario de la factura completa: elegir
 la ficha de quien pide factura y guardarle los datos fiscales tras cobrar lo hace quien cobra, con
 `servicio.vender` (`clientes_para_factura` y `clientes_guardar_datos_fiscales`, sólo en la Main), y
-lo que leen es lo justo para facturar, sin correo ni teléfono.
+lo que leen es lo justo para facturar, sin correo ni teléfono. Las facturas de una ficha y su PDF
+(`clientes_facturas`, `clientes_factura_pdf`) piden `clientes.gestionar` y sólo existen en la Main.
 
 Editar una ficha requiere catálogo; cambiar su precio o IVA exige también precios. Crear un
 producto exige ambos, y dar de alta existencias requiere recibir mercancía. SQLite revalida el

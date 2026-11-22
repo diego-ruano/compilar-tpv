@@ -165,7 +165,9 @@ nube lo rechazó (`Apartado`). La escribe el job `facturas_pdf` ([tickets.md](ti
 Las facturas completas se buscan por `idx_regfact_completas`, un índice parcial de
 `Registros_Facturacion` (`WHERE Tipo = 'ALTA' AND Destinatario_Json IS NOT NULL`) que la consulta pide
 con `INDEXED BY`: sin estadísticas, SQLite prefiere `ux_regfact_idfactura`, que recorre todos los
-registros. Lo vigila `facturas_pdf::tests::buscar_las_nuevas_no_recorre_los_tickets`.
+registros. Por el mismo índice busca la ficha del cliente las facturas de su NIF. Lo vigilan
+`facturas_pdf::tests::buscar_las_nuevas_no_recorre_los_tickets` y
+`las_facturas_de_un_nif_no_recorren_los_tickets`.
 
 Al revés, `Applied_Operations`, `Sync_Changes` y `Sync_Main_Checkpoints` sólo las usa la nube y existen
 vacías en la Main. Un volcado o una comparación que recorra tablas se las salta. `Sync_Changes` lleva

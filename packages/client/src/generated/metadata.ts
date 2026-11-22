@@ -143,6 +143,8 @@ export const nombresComandos = {
     "clientes_recalcular_gasto": "clientesRecalcularGasto",
     "clientes_para_factura": "clientesParaFactura",
     "clientes_guardar_datos_fiscales": "clientesGuardarDatosFiscales",
+    "clientes_facturas": "clientesFacturas",
+    "clientes_factura_pdf": "clientesFacturaPdf",
     "reservas_get_meta": "reservasGetMeta",
     "reservas_get_mes": "reservasGetMes",
     "reservas_save": "reservasSave",
@@ -389,6 +391,8 @@ type Argumentos = {
     "clientes_recalcular_gasto": { args: Parameters<Comandos["clientesRecalcularGasto"]>[0] };
     "clientes_para_factura": { args: Parameters<Comandos["clientesParaFactura"]>[0] };
     "clientes_guardar_datos_fiscales": { args: Parameters<Comandos["clientesGuardarDatosFiscales"]>[0] };
+    "clientes_facturas": { args: Parameters<Comandos["clientesFacturas"]>[0] };
+    "clientes_factura_pdf": { args: Parameters<Comandos["clientesFacturaPdf"]>[0] };
     "reservas_get_meta": {  };
     "reservas_get_mes": { args: Parameters<Comandos["reservasGetMes"]>[0] };
     "reservas_save": { args: Parameters<Comandos["reservasSave"]>[0] };

@@ -138,3 +138,53 @@ pub struct GuardarDatosFiscalesInput {
     #[serde(default)]
     pub direccion_fiscal: Option<String>,
 }
+
+// ── Las facturas de un cliente (sólo en la Main) ─────────────────────────────────────────────────
+//
+// La ficha enseña las facturas completas cuyo destinatario tiene el NIF de la ficha, con su PDF
+// (docs/arquitectura/tickets.md § El PDF de una factura completa). Piden `clientes.gestionar`.
+
+/// Qué es una factura completa, para nombrarla en la lista.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaseFactura {
+    /// `F1`: la factura completa de un cobro.
+    Factura,
+    /// `R1`..`R5`: corrige otra.
+    Rectificativa,
+    /// `F3`: sustituye a uno o varios tickets (o anula una sustitutiva, en negativo).
+    Sustitutiva,
+}
+
+/// Una factura completa del cliente.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct FacturaDelCliente {
+    /// El registro de facturación: es lo que se pide para el PDF.
+    pub id_registro: String,
+    pub num_serie: String,
+    /// La fecha de expedición, `DD-MM-AAAA`, como la declara la factura.
+    pub fecha_expedicion: String,
+    /// `F1`, `F3` o `R1`..`R5`.
+    pub tipo_factura: String,
+    pub clase: ClaseFactura,
+    pub importe: Dinero,
+    /// El cobro con el que se reimprime su papel. `None` si no está en esta base (una `F3` de
+    /// tickets cuyos cobros no han bajado todavía).
+    pub id_pago: Option<String>,
+}
+
+/// Las facturas de una ficha, de la más reciente a la más antigua.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct FacturasDelCliente {
+    /// El NIF de la ficha, normalizado. `None` si no tiene: sin él no se sabe cuáles son las suyas.
+    pub nif: Option<String>,
+    pub facturas: Vec<FacturaDelCliente>,
+    /// Hay más antiguas que no caben en la lista.
+    pub hay_mas: bool,
+}
+
+/// El PDF de una factura completa.
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct FacturaPdfArgs {
+    pub id_registro: String,
+}

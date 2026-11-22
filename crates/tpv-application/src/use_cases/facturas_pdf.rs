@@ -22,13 +22,16 @@
 use async_trait::async_trait;
 
 use crate::error::{AppError, AppResult};
+use crate::ports::clientes::ClientesRepository;
 use crate::ports::configuracion::ConfiguracionRepository;
 use crate::ports::facturas_pdf::{
-    ArchivoFacturas, CobroDeLaFactura, EstadoPdfFactura, FacturasNube, FacturasPdfRepository,
-    GeneradorFacturas, MaquetaFactura, OrigenPdf, SubidaFactura,
+    ArchivoFacturas, CobroDeLaFactura, EstadoPdfFactura, FacturasDeClienteRepository, FacturasNube,
+    FacturasPdfRepository, GeneradorFacturas, MaquetaFactura, OrigenPdf, SubidaFactura,
 };
 use crate::ports::tickets::TicketsRepository;
+use tpv_contracts::clientes::{ClaseFactura, FacturaDelCliente, FacturasDelCliente};
 use tpv_contracts::impresion::TicketDePagoInput;
+use tpv_domain::verifactu::normalizar_nif;
 
 /// Cuántas facturas se documentan y cuántas se suben, como mucho, en cada pasada. Tras restaurar un
 /// equipo con años de facturas, las baja a este ritmo sin acaparar la red ni el disco.
@@ -49,6 +52,12 @@ pub const MSG_NO_ES_FACTURA_COMPLETA: &str = "Esa factura no existe o no lleva l
 /// Lo que se le dice cuando el PDF no está y no se puede componer todavía.
 pub const MSG_HISTORICO_A_MEDIAS: &str =
     "Todavía se está bajando el histórico de la nube: el PDF de esta factura estará cuando acabe.";
+
+/// Cuántas facturas de un cliente enseña su ficha, como mucho: las más recientes.
+pub const LIMITE_FACTURAS_DEL_CLIENTE: i64 = 200;
+
+/// Lo que se dice cuando se piden las facturas de una ficha que no existe.
+pub const MSG_CLIENTE_NO_EXISTE: &str = "Ese cliente ya no existe: vuelve a la lista de clientes.";
 
 /// ¿Empiezan estos bytes como un PDF? Es lo que comprueba también la nube al recibirlo.
 pub fn es_pdf(bytes: &[u8]) -> bool {
@@ -319,6 +328,57 @@ async fn subir(
         }
     }
     Ok(())
+}
+
+/// Qué es una factura completa, por su tipo: una `F3` sustituye a tickets, una `R` rectifica, y lo
+/// demás (`F1`) es la factura de un cobro.
+pub fn clase_de_factura(tipo_factura: &str) -> ClaseFactura {
+    match tipo_factura.trim() {
+        "F3" => ClaseFactura::Sustitutiva,
+        t if t.starts_with('R') => ClaseFactura::Rectificativa,
+        _ => ClaseFactura::Factura,
+    }
+}
+
+/// Las facturas completas de una ficha de cliente: las de su NIF, de la más reciente a la más
+/// antigua y [`LIMITE_FACTURAS_DEL_CLIENTE`] como mucho. Una ficha sin NIF no tiene: no hay con qué
+/// saber cuáles son suyas.
+pub async fn facturas_de_cliente(
+    clientes: &dyn ClientesRepository,
+    facturas: &dyn FacturasDeClienteRepository,
+    id_cliente: &str,
+) -> AppResult<FacturasDelCliente> {
+    let id = id_cliente.trim();
+    let ficha = match id {
+        "" => None,
+        id => clientes.form(id).await?,
+    }
+    .ok_or_else(|| AppError::not_found(MSG_CLIENTE_NO_EXISTE))?;
+
+    let nif = ficha.nif.as_deref().map(normalizar_nif).filter(|n| !n.is_empty());
+    let Some(nif) = nif else {
+        return Ok(FacturasDelCliente { nif: None, facturas: Vec::new(), hay_mas: false });
+    };
+
+    let mut filas = facturas.facturas_del_nif(&nif, LIMITE_FACTURAS_DEL_CLIENTE + 1).await?;
+    let hay_mas = filas.len() as i64 > LIMITE_FACTURAS_DEL_CLIENTE;
+    filas.truncate(LIMITE_FACTURAS_DEL_CLIENTE as usize);
+    Ok(FacturasDelCliente {
+        nif: Some(nif),
+        facturas: filas
+            .into_iter()
+            .map(|f| FacturaDelCliente {
+                clase: clase_de_factura(&f.tipo_factura),
+                id_registro: f.id_registro,
+                num_serie: f.num_serie,
+                fecha_expedicion: f.fecha_expedicion,
+                tipo_factura: f.tipo_factura,
+                importe: f.importe,
+                id_pago: f.id_pago,
+            })
+            .collect(),
+        hay_mas,
+    })
 }
 
 /// Compone el PDF de una factura con su papel: el mismo `ticket_de_pago` que se imprime, pedido
@@ -778,5 +838,116 @@ mod tests {
         assert!(es_pdf(b"%PDF-1.4\n"));
         assert!(!es_pdf(b""));
         assert!(!es_pdf(b"<html>"));
+    }
+}
+
+#[cfg(test)]
+mod tests_facturas_de_cliente {
+    use super::*;
+    use std::sync::Mutex;
+    use crate::ports::facturas_pdf::FacturaCompleta;
+    use tpv_contracts::clientes::{ClienteForm, ClienteOverview};
+    use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
+    use tpv_domain::dinero::Dinero;
+
+    /// Una ficha, con o sin NIF.
+    struct Fichas(Option<ClienteForm>);
+
+    #[async_trait]
+    impl ClientesRepository for Fichas {
+        async fn overview(&self, _: ClienteRanking) -> AppResult<Vec<ClienteOverview>> {
+            unreachable!()
+        }
+        async fn form(&self, _: &str) -> AppResult<Option<ClienteForm>> {
+            Ok(self.0.clone())
+        }
+        async fn create(&self, _: NuevoCliente) -> AppResult<bool> {
+            unreachable!()
+        }
+        async fn update(&self, _: Cliente) -> AppResult<bool> {
+            unreachable!()
+        }
+    }
+
+    /// `n` facturas de un NIF, y con qué NIF y qué límite se han pedido.
+    struct Registros {
+        n: usize,
+        pedido: Mutex<Option<(String, i64)>>,
+    }
+
+    #[async_trait]
+    impl FacturasDeClienteRepository for Registros {
+        async fn facturas_del_nif(&self, nif: &str, limite: i64) -> AppResult<Vec<FacturaCompleta>> {
+            *self.pedido.lock().unwrap() = Some((nif.to_string(), limite));
+            let tipos = ["F1", "F3", "R1", "R5"];
+            Ok((0..self.n.min(limite as usize))
+                .map(|i| FacturaCompleta {
+                    id_registro: format!("id-{i}"),
+                    num_serie: format!("F-{i:06}"),
+                    fecha_expedicion: "02-01-2026".into(),
+                    tipo_factura: tipos[i % tipos.len()].into(),
+                    importe: Dinero::de_centimos(510),
+                    id_pago: Some(format!("p{i}")),
+                })
+                .collect())
+        }
+    }
+
+
+    fn ficha(nif: Option<&str>) -> Fichas {
+        Fichas(Some(ClienteForm {
+            nombre: "Cliente".into(),
+            email: None,
+            telefono: None,
+            notas: None,
+            nif: nif.map(str::to_string),
+            razon_social: None,
+            direccion_fiscal: None,
+        }))
+    }
+
+    fn registros(n: usize) -> Registros {
+        Registros { n, pedido: Mutex::new(None) }
+    }
+
+    #[tokio::test]
+    async fn se_buscan_por_el_nif_normalizado_de_la_ficha() {
+        let r = registros(4);
+        let out = facturas_de_cliente(&ficha(Some(" b-12345674 ")), &r, "c1").await.unwrap();
+        assert_eq!(out.nif.as_deref(), Some("B12345674"));
+        assert_eq!(r.pedido.lock().unwrap().clone(), Some(("B12345674".into(), LIMITE_FACTURAS_DEL_CLIENTE + 1)));
+        let clases: Vec<_> = out.facturas.iter().map(|f| f.clase).collect();
+        assert_eq!(
+            clases,
+            [ClaseFactura::Factura, ClaseFactura::Sustitutiva, ClaseFactura::Rectificativa, ClaseFactura::Rectificativa]
+        );
+        assert!(!out.hay_mas);
+    }
+
+    #[tokio::test]
+    async fn una_ficha_sin_nif_no_tiene_facturas_y_no_se_buscan() {
+        for nif in [None, Some(""), Some("  ")] {
+            let r = registros(4);
+            let out = facturas_de_cliente(&ficha(nif), &r, "c1").await.unwrap();
+            assert_eq!(out, FacturasDelCliente { nif: None, facturas: vec![], hay_mas: false });
+            assert!(r.pedido.lock().unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn la_lista_tiene_techo_y_dice_si_hay_mas() {
+        let todas = LIMITE_FACTURAS_DEL_CLIENTE as usize;
+        let out = facturas_de_cliente(&ficha(Some("B12345674")), &registros(todas), "c1").await.unwrap();
+        assert_eq!((out.facturas.len(), out.hay_mas), (todas, false));
+        let out = facturas_de_cliente(&ficha(Some("B12345674")), &registros(todas + 5), "c1").await.unwrap();
+        assert_eq!((out.facturas.len(), out.hay_mas), (todas, true));
+    }
+
+    #[tokio::test]
+    async fn una_ficha_que_no_existe_es_not_found() {
+        let e = facturas_de_cliente(&Fichas(None), &registros(1), "c1").await.unwrap_err();
+        assert_eq!(e.to_string(), MSG_CLIENTE_NO_EXISTE);
+        let e = facturas_de_cliente(&ficha(Some("B12345674")), &registros(1), "  ").await.unwrap_err();
+        assert_eq!(e.to_string(), MSG_CLIENTE_NO_EXISTE);
     }
 }

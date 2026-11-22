@@ -94,11 +94,6 @@ const IMAGENES_INTERVAL_SECS: u64 = 15 * 60;
 /// de las facturas completas (`idx_regfact_completas`).
 const FACTURAS_PDF_INTERVAL_SECS: u64 = 60;
 
-/// Cuándo vuelve a hablar con la nube el job `facturas_pdf` tras un fallo suyo (sin red, por
-/// ejemplo): en memoria, crece con cada fallo y vuelve a cero en cuanto la nube contesta.
-static PAUSA_NUBE_FACTURAS: LazyLock<std::sync::Mutex<uc_facturas_pdf::PausaNube>> =
-    LazyLock::new(Default::default);
-
 /// Cada cuánto se busca PII del personal todavía en claro. No hace falta más: sólo hay trabajo
 /// la primera vez tras activar el cifrado (y tras un cambio de equipo que traiga filas viejas).
 const CIFRADO_PII_INTERVAL_SECS: u64 = 6 * 60 * 60;
@@ -700,55 +695,21 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 /// nube (sin red, credenciales) tampoco: se deja la nube en pausa, cada vez más rato. El job sólo
 /// falla si no puede leer la base o escribir en la carpeta de las facturas.
 async fn facturas_pdf(app: AppHandle) -> Result<(), String> {
-    use tpv_application::ports::facturas_pdf::FacturasNube;
-    use tpv_infra_licensing::facturas::FacturasEnLaNube;
+    use crate::factura_pdf::{nube_en_pausa, PiezasFacturas, PAUSA_NUBE};
 
     let state = app.state::<AppState>();
     let db = state.db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
     let ahora = tpv_infra_sqlite::util::now_ms();
 
-    // SYNC-19: con el histórico a medias, las líneas de una factura antigua pueden no estar aún, y
-    // lo compuesto se quedaría así. Se baja de la nube, pero no se compone.
-    let sync = state.sync_repo().await?;
-    let se_puede_generar = uc_sync::backfill_estado(sync.as_ref()).await?.tablas_pendientes == 0;
+    // Con el histórico a medias (SYNC-19) se baja de la nube, pero no se compone; y la nube, si no
+    // está en pausa.
+    let piezas = PiezasFacturas::montar(&app, db, !nube_en_pausa(ahora)).await?;
+    let generador = piezas.generador();
+    let facturas = piezas.facturas(&generador);
 
-    // La nube, si hay conectividad, la base tiene negocio (AUD-06: se sube a la carpeta de ESE
-    // negocio) y no está en pausa.
-    let conectividad_apagada =
-        crate::load_config(&dir).connectivity == Some(crate::ConnectivityMode::Off);
-    let en_pausa = PAUSA_NUBE_FACTURAS.lock().map(|p| p.activa(ahora)).unwrap_or(false);
-    let negocio = tpv_infra_sqlite::sello::leer(&db.read().await).await.ok().flatten();
-    let nube = match negocio {
-        Some(n) if !conectividad_apagada && !en_pausa => {
-            Some(FacturasEnLaNube::new(PairingAdapter::new(dir.clone()), n))
-        }
-        _ => None,
-    };
+    let p = uc_facturas_pdf::pasada(&facturas, ahora, piezas.se_puede_generar).await?;
 
-    let repo = tpv_infra_sqlite::facturas_pdf::SqliteFacturasPdf::new(db);
-    let carpeta = crate::factura_pdf::CarpetaFacturas::new(dir.clone());
-    let tickets = state.tickets_repo().await.map_err(|e| e.message)?;
-    let config = state.configuracion_repo().await?;
-    let maqueta = crate::factura_pdf::MaquetaPdf::new(dir);
-    let generador = uc_facturas_pdf::PapelDeLaFactura {
-        tickets: tickets.as_ref(),
-        config: config.as_ref(),
-        maqueta: &maqueta,
-    };
-    let facturas = uc_facturas_pdf::Facturas {
-        repo: &repo,
-        archivos: &carpeta,
-        generador: &generador,
-        nube: nube.as_ref().map(|n| n as &dyn FacturasNube),
-    };
-
-    let p = uc_facturas_pdf::pasada(&facturas, ahora, se_puede_generar).await?;
-
-    if let Ok(mut pausa) = PAUSA_NUBE_FACTURAS.lock() {
+    if let Ok(mut pausa) = PAUSA_NUBE.lock() {
         if p.fallo_de_la_nube.is_some() {
             pausa.fallo(ahora);
         } else if p.nube_contesto {

@@ -11,12 +11,24 @@
 //! (`use_cases::facturas_pdf`). El escritor de PDF es `pdf.rs`.
 
 use std::path::PathBuf;
+use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
+use tauri::{AppHandle, Manager};
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::facturas_pdf::{ArchivoFacturas, MaquetaFactura};
+use tpv_application::ports::configuracion::ConfiguracionRepository;
+use tpv_application::ports::facturas_pdf::{ArchivoFacturas, FacturasNube, MaquetaFactura};
+use tpv_application::ports::tickets::TicketsRepository;
+use tpv_application::use_cases::facturas_pdf::{self as uc_facturas_pdf, Facturas, PapelDeLaFactura};
+use tpv_application::use_cases::sync as uc_sync;
 use tpv_contracts::impresion::PrintTicketPayload;
+use tpv_infra_licensing::facturas::FacturasEnLaNube;
+use tpv_infra_licensing::PairingAdapter;
+use tpv_infra_sqlite::db::Db;
+use tpv_infra_sqlite::facturas_pdf::SqliteFacturasPdf;
+
+use crate::AppState;
 use tpv_domain::dinero::Dinero;
 use tpv_domain::ticket::TramoIva;
 
@@ -408,6 +420,82 @@ impl MaquetaFactura for MaquetaPdf {
     }
 }
 
+/// Cuándo vuelve a hablar con la nube el PDF de las facturas tras un fallo suyo (sin red, por
+/// ejemplo): en memoria, crece con cada fallo y vuelve a cero en cuanto la nube contesta. La mueve
+/// el job `facturas_pdf`; la ficha del cliente la respeta, para no esperar a una nube que no está.
+pub(crate) static PAUSA_NUBE: LazyLock<std::sync::Mutex<uc_facturas_pdf::PausaNube>> =
+    LazyLock::new(Default::default);
+
+/// ¿Está la nube en pausa para las facturas?
+pub(crate) fn nube_en_pausa(ahora_ms: i64) -> bool {
+    PAUSA_NUBE.lock().map(|p| p.activa(ahora_ms)).unwrap_or(false)
+}
+
+/// Lo que hace falta para documentar las facturas de la base abierta. Lo montan el job
+/// `facturas_pdf` y el comando que da el PDF de una factura a la ficha del cliente, para que los dos
+/// lo hagan igual: la misma carpeta, el mismo papel y la misma nube.
+pub(crate) struct PiezasFacturas {
+    repo: SqliteFacturasPdf,
+    carpeta: CarpetaFacturas,
+    tickets: Arc<dyn TicketsRepository>,
+    config: Arc<dyn ConfiguracionRepository>,
+    maqueta: MaquetaPdf,
+    nube: Option<FacturasEnLaNube>,
+    /// `false` mientras se baja el histórico de una recuperación (SYNC-19): las líneas de una
+    /// factura antigua pueden no estar aún, y lo compuesto se quedaría así.
+    pub(crate) se_puede_generar: bool,
+}
+
+impl PiezasFacturas {
+    /// Las monta sobre `db`, la base de la Main. Con `usar_nube`, y si hay conectividad y la base
+    /// tiene negocio (AUD-06: se sube a la carpeta de ESE negocio), se habla con la nube.
+    pub(crate) async fn montar(app: &AppHandle, db: Arc<Db>, usar_nube: bool) -> Result<Self, String> {
+        let state = app.state::<AppState>();
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+        let sync = state.sync_repo().await?;
+        let se_puede_generar = uc_sync::backfill_estado(sync.as_ref()).await?.tablas_pendientes == 0;
+
+        let conectividad_apagada =
+            crate::load_config(&dir).connectivity == Some(crate::ConnectivityMode::Off);
+        let negocio = tpv_infra_sqlite::sello::leer(&db.read().await).await.ok().flatten();
+        let nube = match negocio {
+            Some(n) if usar_nube && !conectividad_apagada => {
+                Some(FacturasEnLaNube::new(PairingAdapter::new(dir.clone()), n))
+            }
+            _ => None,
+        };
+
+        Ok(Self {
+            repo: SqliteFacturasPdf::new(db),
+            carpeta: CarpetaFacturas::new(dir.clone()),
+            tickets: state.tickets_repo().await.map_err(|e| e.message)?,
+            config: state.configuracion_repo().await?,
+            maqueta: MaquetaPdf::new(dir),
+            nube,
+            se_puede_generar,
+        })
+    }
+
+    /// El que compone el PDF con el papel de la factura.
+    pub(crate) fn generador(&self) -> PapelDeLaFactura<'_> {
+        PapelDeLaFactura { tickets: self.tickets.as_ref(), config: self.config.as_ref(), maqueta: &self.maqueta }
+    }
+
+    /// Todo junto, para `use_cases::facturas_pdf`.
+    pub(crate) fn facturas<'a>(&'a self, generador: &'a PapelDeLaFactura<'a>) -> Facturas<'a> {
+        Facturas {
+            repo: &self.repo,
+            archivos: &self.carpeta,
+            generador,
+            nube: self.nube.as_ref().map(|n| n as &dyn FacturasNube),
+        }
+    }
+}
+
 /// ¿Tiene `id` la forma de un `ID_Registro` (36 cifras hexadecimales y guiones, como un UUID)? Sólo
 /// eso se convierte en un nombre de fichero: nada que pueda salir de la carpeta ni nombrar un
 /// dispositivo de Windows. Es lo mismo que pide `tpv_infra_sqlite::facturas_pdf` para apuntarla.
@@ -452,8 +540,11 @@ impl ArchivoFacturas for CarpetaFacturas {
         std::fs::create_dir_all(&carpeta)
             .map_err(|e| AppError::internal(format!("no se puede crear la carpeta de las facturas: {e}")))?;
         // Primero a un temporal y luego en su sitio: un corte a media escritura no deja un PDF
-        // partido con el nombre del bueno.
-        let temporal = destino.with_extension("pdf.tmp");
+        // partido con el nombre del bueno. El temporal es de esta escritura: el job y la ficha del
+        // cliente pueden estar guardando la misma factura a la vez, y cada uno mueve el suyo.
+        static ESCRITURA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = ESCRITURA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temporal = destino.with_extension(format!("pdf.{n}.tmp"));
         std::fs::write(&temporal, pdf)
             .and_then(|_| std::fs::rename(&temporal, &destino))
             .map_err(|e| {

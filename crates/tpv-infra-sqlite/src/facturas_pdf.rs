@@ -15,10 +15,13 @@ use async_trait::async_trait;
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::facturas_pdf::{
-    CobroDeLaFactura, EstadoPdfFactura, FacturasPdfRepository, OrigenPdf,
+    CobroDeLaFactura, EstadoPdfFactura, FacturaCompleta, FacturasDeClienteRepository,
+    FacturasPdfRepository, OrigenPdf,
 };
+use tpv_domain::dinero::Dinero;
+use tpv_domain::verifactu::normalizar_nif;
 
-use crate::db::Db;
+use crate::db::{Db, Reader};
 use crate::ejecutor::Value;
 use crate::mapping::{v_i64, v_string};
 
@@ -65,6 +68,80 @@ fn fila(row: &crate::ejecutor::Row) -> AppResult<EstadoPdfFactura> {
         proximo_intento_ms: v_i64(g(6)?),
         apartado: v_i64(g(7)?).unwrap_or(0) == 1,
     })
+}
+
+/// Las facturas completas de un NIF, para la ficha del cliente. Como la búsqueda de las nuevas, va
+/// por `idx_regfact_completas` (lo vigila un test del plan) y deja fuera las subsanaciones, que
+/// repiten una factura. El NIF del destinatario se normaliza como `normalizar_nif` (sin guiones ni
+/// espacios y en mayúsculas); un JSON que no se pueda leer no casa con nada en vez de hacer fallar
+/// la lista.
+pub(crate) const SQL_FACTURAS_DEL_NIF: &str = "\
+    SELECT r.ID_Registro, r.Num_Serie_Factura, r.Fecha_Expedicion, COALESCE(r.Tipo_Factura, ''), \
+           COALESCE(r.Importe_Total, ''), r.ID_Pago, r.Referencias_Json \
+    FROM Registros_Facturacion r INDEXED BY idx_regfact_completas \
+    WHERE r.Tipo = 'ALTA' AND r.Destinatario_Json IS NOT NULL \
+      AND (r.Subsanacion IS NULL OR r.Subsanacion <> 'S') \
+      AND upper(replace(replace(trim(CASE WHEN json_valid(r.Destinatario_Json) \
+            THEN json_extract(r.Destinatario_Json, '$.NIF') END), '-', ''), ' ', '')) = ?1 \
+    ORDER BY r.Orden DESC LIMIT ?2;";
+
+/// El cobro con el que se imprime una factura: el suyo; y una `F3` de varios tickets, que no
+/// cuelga de ningún cobro, se imprime desde cualquiera de los que canjea (`tickets.rs`): el primero
+/// que se encuentre.
+async fn pago_de_la_factura<R: Reader>(
+    r: &R,
+    id_pago: Option<String>,
+    referencias: Option<&str>,
+) -> AppResult<Option<String>> {
+    if let Some(p) = id_pago.filter(|s| !s.trim().is_empty()) {
+        return Ok(Some(p));
+    }
+    for num in crate::verifactu::numeros_sustituidos(referencias) {
+        if let Some(p) = crate::tickets::pago_de_ticket(r, &num).await? {
+            return Ok(Some(p));
+        }
+    }
+    Ok(None)
+}
+
+#[async_trait]
+impl FacturasDeClienteRepository for SqliteFacturasPdf {
+    async fn facturas_del_nif(&self, nif: &str, limite: i64) -> AppResult<Vec<FacturaCompleta>> {
+        let r = self.db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                SQL_FACTURAS_DEL_NIF,
+                vec![Value::Text(normalizar_nif(nif)), Value::Integer(limite)],
+            )
+            .await
+            .map_err(db_err)?;
+        let mut filas = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            let t = |i: i32| -> AppResult<Option<String>> { Ok(v_string(row.get_value(i).map_err(db_err)?)) };
+            filas.push((
+                FacturaCompleta {
+                    id_registro: t(0)?.unwrap_or_default(),
+                    num_serie: t(1)?.unwrap_or_default(),
+                    fecha_expedicion: t(2)?.unwrap_or_default(),
+                    tipo_factura: t(3)?.unwrap_or_default(),
+                    // El importe del registro es texto fiscal (`123.10`): se lee sin recalcular.
+                    importe: Dinero::de_texto_fiscal(&t(4)?.unwrap_or_default()).unwrap_or(Dinero::CERO),
+                    id_pago: None,
+                },
+                t(5)?,
+                t(6)?,
+            ));
+        }
+        drop(rows);
+
+        let mut out = Vec::with_capacity(filas.len());
+        for (mut f, id_pago, referencias) in filas {
+            f.id_pago = pago_de_la_factura(&r, id_pago, referencias.as_deref()).await?;
+            out.push(f);
+        }
+        Ok(out)
+    }
 }
 
 impl SqliteFacturasPdf {
@@ -147,21 +224,7 @@ impl FacturasPdfRepository for SqliteFacturasPdf {
         let referencias = v_string(row.get_value(2).map_err(db_err)?);
         drop(rows);
 
-        // Una F3 de varios tickets no cuelga de ningún cobro: se imprime desde cualquiera de los que
-        // canjea (`tickets.rs`), y se toma el primero que se encuentre.
-        let id_pago = match id_pago {
-            Some(p) => Some(p),
-            None => {
-                let mut encontrado = None;
-                for num in crate::verifactu::numeros_sustituidos(referencias.as_deref()) {
-                    if let Some(p) = crate::tickets::pago_de_ticket(&r, &num).await? {
-                        encontrado = Some(p);
-                        break;
-                    }
-                }
-                encontrado
-            }
-        };
+        let id_pago = pago_de_la_factura(&r, id_pago, referencias.as_deref()).await?;
         Ok(id_pago.map(|id_pago| CobroDeLaFactura { id_pago, num_serie }))
     }
 
@@ -416,6 +479,77 @@ mod tests {
         let mut rows = r.conn().query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
         let n = v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn las_facturas_de_un_nif_son_las_suyas_de_la_mas_reciente_a_la_mas_antigua() {
+        let (db, _dir) = con_facturas().await;
+        let otro = r#"'{"NombreRazon":"Otra SL","NIF":"A58818501"}'"#;
+        // Guardado con guion y en minúsculas: casa igual.
+        let con_guion = r#"'{"NombreRazon":"Cliente SL","NIF":"b-87654321","Domicilio":"Calle 1"}'"#;
+        let sub = registro("00000000-0000-7000-8000-00000000005b", 6, "F-000001", "F1", CLIENTE, "NULL", "'p1'")
+            .replace("ID_Pago)", "ID_Pago, Subsanacion)")
+            .replace("'p1');", "'p1', 'S');");
+        sembrar(
+            &db,
+            &[
+                &registro("00000000-0000-7000-8000-0000000000a1", 4, "F-000003", "F1", otro, "NULL", "'p1'"),
+                &registro("00000000-0000-7000-8000-0000000000a2", 5, "R-000001", "R1", con_guion, "NULL", "'p1'")
+                    .replace("'5.10'", "'-5.10'"),
+                &sub,
+                // Un destinatario que no es JSON no casa, y no hace fallar la lista.
+                &registro("00000000-0000-7000-8000-0000000000a3", 7, "F-000004", "F1", "'no es json'", "NULL", "'p1'"),
+            ],
+        )
+        .await;
+        let repo = SqliteFacturasPdf::new(db);
+
+        let facturas = repo.facturas_del_nif("b87654321", 10).await.unwrap();
+        let resumen: Vec<_> = facturas
+            .iter()
+            .map(|f| (f.num_serie.as_str(), f.tipo_factura.as_str(), f.importe.centimos(), f.id_pago.as_deref()))
+            .collect();
+        assert_eq!(
+            resumen,
+            [
+                ("R-000001", "R1", -510, Some("p1")),
+                // La F3 de varios tickets se reimprime desde el primero que está en la base.
+                ("F-000002", "F3", 510, Some("p10")),
+                ("F-000001", "F1", 510, Some("p1")),
+            ]
+        );
+        assert_eq!(facturas[2].fecha_expedicion, "02-01-2026");
+        assert_eq!(facturas[2].id_registro, "00000000-0000-7000-8000-0000000000f1");
+
+        assert_eq!(repo.facturas_del_nif("B87654321", 2).await.unwrap().len(), 2);
+        assert!(repo.facturas_del_nif("B11111111", 10).await.unwrap().is_empty());
+    }
+
+    /// El plan de una consulta, renglón a renglón.
+    async fn plan_de(sql: &str) -> Vec<String> {
+        let (db, dir) = db_temporal().await;
+        let conn = crate::ejecutor::abrir(dir.join("data.db")).unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let mut filas = stmt.raw_query();
+        let mut plan = Vec::new();
+        while let Some(fila) = filas.next().unwrap() {
+            if let Value::Text(t) = fila.get::<_, Value>(3).unwrap() {
+                plan.push(t);
+            }
+        }
+        drop(filas);
+        drop(stmt);
+        drop(conn);
+        drop(db);
+        plan
+    }
+
+    /// La ficha del cliente busca sus facturas por el índice parcial, sin recorrer los tickets.
+    #[tokio::test]
+    async fn las_facturas_de_un_nif_no_recorren_los_tickets() {
+        let plan = plan_de(SQL_FACTURAS_DEL_NIF).await;
+        assert!(plan.iter().any(|l| l.contains("idx_regfact_completas")), "{plan:#?}");
+        assert!(!plan.iter().any(|l| l == "SCAN r"), "{plan:#?}");
     }
 
     /// Cada minuto se buscan las facturas nuevas: por el índice parcial, sin recorrer los tickets.

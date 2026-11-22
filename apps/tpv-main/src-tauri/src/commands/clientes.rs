@@ -6,18 +6,22 @@
 //!
 //! Todos piden sesión (RI-52): son datos personales de los clientes. La ficha pide
 //! `clientes.gestionar`; los dos del formulario de la factura completa (FISCAL-02), el permiso del
-//! cobro, porque quien cobra puede no tener el de los clientes, y sólo existen en la Main.
+//! cobro, porque quien cobra puede no tener el de los clientes, y sólo existen en la Main. Las
+//! facturas de una ficha y su PDF también son sólo de la Main, con `clientes.gestionar`.
 
 use tpv_domain::dinero::Dinero;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use tpv_application::use_cases::clientes as uc;
+use tpv_application::use_cases::facturas_pdf as uc_facturas_pdf;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_contracts::clientes::{
     ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, ClientesParaFactura,
-    ClientesParaFacturaArgs, CreateClienteInput, GuardarDatosFiscalesInput, UpdateClienteInput,
+    ClientesParaFacturaArgs, CreateClienteInput, FacturaPdfArgs, FacturasDelCliente,
+    GuardarDatosFiscalesInput, UpdateClienteInput,
 };
 
+use crate::factura_pdf::{nube_en_pausa, PiezasFacturas};
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
@@ -106,4 +110,37 @@ pub async fn clientes_guardar_datos_fiscales(
     state.exigir_permiso("servicio.vender").await?;
     let repo = state.clientes_factura_repo().await?;
     Ok(uc::guardar_datos_fiscales(repo.as_ref(), args).await?)
+}
+
+/// Las facturas completas de una ficha: las de su NIF, de la más reciente a la más antigua. Sólo en
+/// la Main, que es la que factura (la Handy no tiene los registros de facturación).
+#[tauri::command]
+#[specta::specta]
+pub async fn clientes_facturas(
+    state: State<'_, AppState>,
+    args: ClienteIdArgs,
+) -> Result<FacturasDelCliente, AppErrorDto> {
+    state.exigir_permiso("clientes.gestionar").await?;
+    let (clientes, facturas) = state.facturas_de_clientes_repos().await?;
+    Ok(uc_facturas_pdf::facturas_de_cliente(clientes.as_ref(), facturas.as_ref(), &args.id_cliente).await?)
+}
+
+/// El PDF de una factura completa, para guardarlo desde la ficha del cliente: el del equipo; si no
+/// está, el de la nube; y si la nube no lo tiene, se compone ahora y se queda como si lo hubiera
+/// hecho el job `facturas_pdf` (`use_cases::facturas_pdf::pdf_de_factura`). Sólo en la Main.
+#[tauri::command]
+#[specta::specta]
+pub async fn clientes_factura_pdf(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: FacturaPdfArgs,
+) -> Result<Vec<u8>, AppErrorDto> {
+    state.exigir_permiso("clientes.gestionar").await?;
+    let db = state.base_de_las_facturas().await?;
+    let ahora = tpv_infra_sqlite::util::now_ms();
+    // Si el job ha visto que la nube no contesta, no se la espera: se compone aquí.
+    let piezas = PiezasFacturas::montar(&app, db, !nube_en_pausa(ahora)).await?;
+    let generador = piezas.generador();
+    let facturas = piezas.facturas(&generador);
+    Ok(uc_facturas_pdf::pdf_de_factura(&facturas, &args.id_registro, ahora, piezas.se_puede_generar).await?)
 }

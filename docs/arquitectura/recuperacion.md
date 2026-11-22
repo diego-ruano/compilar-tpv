@@ -525,7 +525,9 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
   por el de cada factura sin PDF local y lo baja; sólo compone el que la nube no tiene, y no antes
   de que acabe de bajar el histórico ([tickets.md](tickets.md#el-pdf-de-una-factura-completa)). Tras
   restaurar una copia local en el mismo equipo, los que ya estaban en `AppData/facturas/` se quedan
-  como estaban.
+  como estaban. Si desde la ficha del cliente se pide el PDF de una que el job todavía no ha
+  bajado, se baja en ese momento; con el histórico a medias, si la nube no lo tiene, se dice que
+  estará cuando acabe.
 
 - Vuelve todo lo que llegó a la nube, incluida la **PII del personal**: viaja cifrada por el outbox, el
   volcado la devuelve tal cual y la DEK se recupera al activar.

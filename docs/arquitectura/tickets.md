@@ -195,8 +195,31 @@ propio) tiene su PDF A4, que se entrega al cliente y se ve desde su ficha.
   factura: no cuenta como intento, la pasada deja de hablar con ella y no vuelve hasta pasado un
   minuto, dos, cuatro… hasta media hora.
 - **Para enseñar una**, `use_cases::facturas_pdf::pdf_de_factura` da la local; si no está, la de la
-  nube; y si no la tiene, la compone en ese momento y se queda como si la hubiera hecho el job. Lo que
-  no es una factura completa se contesta `not_found`, y con el histórico a medias, `conflict`.
+  nube (salvo que el job la haya dejado en pausa, para no esperar a una nube que no contesta); y si
+  no la tiene, la compone en ese momento y se queda como si la hubiera hecho el job. Lo que no es una
+  factura completa se contesta `not_found`, y con el histórico a medias, `conflict`. El job y la
+  pantalla montan lo mismo (`factura_pdf::PiezasFacturas`), y cada escritura del PDF local va a su
+  propio temporal antes de ponerse en su sitio, así que pueden guardar la misma factura a la vez.
+
+### En la ficha del cliente
+
+La ficha del cliente (Clientes → un cliente) tiene la sección **Facturas**, sólo en la Main: las
+facturas completas cuyo destinatario tiene el NIF de la ficha (normalizado como `normalizar_nif`), de
+la más reciente a la más antigua y 200 como mucho, con su número, su fecha de expedición, si es
+factura (`F1`), rectificativa (`R1`..`R5`) o sustitutiva (`F3`) y su importe. Una ficha sin NIF no
+tiene: la sección dice que añadiéndoselo saldrán. Una subsanación no sale aparte.
+
+- **PDF** pide el nombre con el diálogo de guardar (`factura_2026-000012.pdf`) y escribe en él el PDF
+  que da `clientes_factura_pdf` (el de arriba: local, nube o compuesto). La app no tiene con qué abrir
+  un fichero con el visor del sistema; se guarda como el PDF de Cuentas.
+- **Reimprimir** abre el `PrintTicketModal` con el papel de su cobro y su número, marcado COPIA. Una
+  `F3` de varios tickets se reimprime desde el primero de los que canjea que esté en la base; si no
+  hay ninguno, el botón queda apagado.
+
+La lista la da `clientes_facturas` (`use_cases::facturas_pdf::facturas_de_cliente`), que lee el NIF
+de la ficha y busca por el índice parcial de las facturas completas. Los dos comandos piden
+`clientes.gestionar` y sólo existen en la Main ([permisos.md](permisos.md)). En la pantalla, React
+Query (`useFacturasDelCliente`, `clientesQueries.ts`); cambiar el NIF de la ficha la vuelve a pedir.
 
 ## Los tests del generador
 

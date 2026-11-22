@@ -9,6 +9,7 @@
 //! - [`ArchivoFacturas`]: los PDF en la carpeta del equipo.
 //! - [`FacturasNube`]: subirlos y bajarlos del bucket del negocio.
 //! - [`GeneradorFacturas`]: componer el PDF de una factura.
+//! - [`FacturasDeClienteRepository`]: las facturas completas de un NIF, para la ficha del cliente.
 //!
 //! Sólo existen en la Main: es la que cobra y guarda los registros de facturación.
 
@@ -16,6 +17,7 @@ use async_trait::async_trait;
 
 use crate::error::AppResult;
 use tpv_contracts::impresion::PrintTicketPayload;
+use tpv_domain::dinero::Dinero;
 
 /// De dónde salió el PDF local de una factura.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,4 +149,26 @@ pub trait GeneradorFacturas: Send + Sync {
 #[async_trait]
 pub trait MaquetaFactura: Send + Sync {
     async fn pdf(&self, papel: PrintTicketPayload) -> AppResult<Vec<u8>>;
+}
+
+/// Una factura completa, para la lista de la ficha de su cliente.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FacturaCompleta {
+    pub id_registro: String,
+    pub num_serie: String,
+    /// `DD-MM-AAAA`, como la declara.
+    pub fecha_expedicion: String,
+    pub tipo_factura: String,
+    pub importe: Dinero,
+    /// El cobro con el que se imprime su papel; el de una `F3` de varios tickets, el del primero
+    /// de los que canjea que esté en la base.
+    pub id_pago: Option<String>,
+}
+
+/// Las facturas completas de un cliente: las de su NIF.
+#[async_trait]
+pub trait FacturasDeClienteRepository: Send + Sync {
+    /// Las facturas completas cuyo destinatario tiene este NIF (normalizado), de la más reciente a
+    /// la más antigua y `limite` como mucho. Una subsanación repite una factura: no sale aparte.
+    async fn facturas_del_nif(&self, nif: &str, limite: i64) -> AppResult<Vec<FacturaCompleta>>;
 }

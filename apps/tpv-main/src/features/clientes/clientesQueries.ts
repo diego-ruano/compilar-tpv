@@ -26,6 +26,7 @@ export const clientesKeys = {
   overview: (ranking: FiltroRanking) => ["clientes", "overview", ranking] as const,
   form: (idCliente: string) => ["clientes", "form", idCliente] as const,
   paraFactura: (idComanda: string | null) => ["clientes", "paraFactura", idComanda] as const,
+  facturas: (idCliente: string) => ["clientes", "facturas", idCliente] as const,
 };
 
 /**
@@ -125,5 +126,19 @@ export function useRecalcularGasto() {
   return useMutation({
     mutationFn: clientesRecalcularGasto,
     onSuccess: () => qc.invalidateQueries({ queryKey: clientesKeys.all }),
+  });
+}
+
+/**
+ * Las facturas completas de una ficha (las de su NIF), de la más reciente a la más antigua. Sólo en
+ * la Main (`habilitada`): la Handy no tiene los registros de facturación. Sin datos previos: al
+ * pasar de un cliente a otro no se enseñan las facturas del anterior. Como cuelga de `clientes`,
+ * cambiar el NIF de la ficha (que invalida la feature) la vuelve a pedir.
+ */
+export function useFacturasDelCliente(idCliente: string | null, habilitada: boolean) {
+  return useQuery({
+    queryKey: clientesKeys.facturas(idCliente ?? ""),
+    queryFn: () => commands.clientesFacturas({ id_cliente: idCliente ?? "" }),
+    enabled: habilitada && idCliente != null,
   });
 }

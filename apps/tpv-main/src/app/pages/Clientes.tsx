@@ -36,6 +36,7 @@ import {
   useCreateCliente,
   useUpdateCliente,
 } from "../../features/clientes/clientesQueries";
+import FacturasDelCliente from "../../features/clientes/FacturasDelCliente";
 import { nifValido } from "../../shared/ticket/nif";
 import { conAviso } from "../../shared/lib/conAviso";
 import { contiene, textoABuscar } from "../../shared/lib/busqueda";
@@ -660,6 +661,9 @@ export default function Clientes() {
                 ) : null}
               </div>
             ) : null}
+
+            {/* Sus facturas completas, con su PDF: sólo en la Main. */}
+            <FacturasDelCliente idCliente={clienteActivo.ID_Cliente} />
           </div>
         </>
       )}
