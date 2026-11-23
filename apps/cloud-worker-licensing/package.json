@@ -13,7 +13,7 @@
 	"dependencies": {
 		"@hono/zod-validator": "^0.9.1",
 		"@libsql/client": "^0.17.0",
-		"@sentry/cloudflare": "^10.78.0",
+		"@sentry/cloudflare": "^11.15.0",
 		"@tpv/contracts": "workspace:*",
 		"hono": "^4.13.7",
 		"jose": "^6.1.3",
