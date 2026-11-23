@@ -64,6 +64,18 @@ jobs:
         working-directory: apps/tpv-main
         run: pnpm tauri ios init --ci
 
+      # Los Xcode recientes ya no admiten iOS 14, que es el mínimo que Tauri pone por defecto: el
+      # mínimo es el de `bundle.iOS.minimumSystemVersion` (15.0). Si `ios init` no lo ha llevado al
+      # proyecto generado, se pone aquí, y el `grep` enseña con cuál se compila.
+      - name: Mínimo de iOS 15.0 en el proyecto generado
+        working-directory: apps/tpv-main/src-tauri/gen/apple
+        run: |
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = 14\.0/IPHONEOS_DEPLOYMENT_TARGET = 15.0/g' tpv.xcodeproj/project.pbxproj
+          sed -i '' 's/14\.0/15.0/g' project.yml
+          if [ -f Podfile ]; then sed -i '' "s/'14\.0'/'15.0'/g" Podfile; fi
+          grep -rn "DEPLOYMENT_TARGET\|deploymentTarget\|platform :ios" tpv.xcodeproj/project.pbxproj project.yml Podfile 2>/dev/null || true
+          if grep -q "IPHONEOS_DEPLOYMENT_TARGET = 14" tpv.xcodeproj/project.pbxproj; then echo "Sigue en iOS 14"; exit 1; fi
+
       # `ios init` deja los iconos de Tauri: van los de la app, que ya están en icons/ios con los
       # mismos nombres que el AppIcon que genera.
       - name: Iconos de la app
