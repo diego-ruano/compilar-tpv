@@ -80,7 +80,7 @@ rand = "0.10"
 # credenciales). Sin ella la 4 no compila, así que no puede caer en silencio en un almacén en memoria,
 # como hacía la 3 sin features. El formato de la credencial lo vigila un test de `secret_store.rs`.
 keyring = "4.2"
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 sha2 = "0.10"
 # Cifrado de campo de la PII del personal (TRAB-03, ver ports/field_cipher.rs).
 aes-gcm = "0.10"
