@@ -79,7 +79,7 @@ tauri-plugin-single-instance = "2"
 # El lector de QR con la cámara, para vincular una Handy escaneando el código de la Main. Sólo
 # existe en móvil: en escritorio no se compila (y sus permisos van en `capabilities/mobile.json`).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-tauri-plugin-barcode-scanner = "=2.4.6"
+tauri-plugin-barcode-scanner = "=2.5.3"
 
 # ───────────── Sólo iOS ─────────────
 # Para ajustar el `UIScrollView` de la WKWebView (`src/vista_ios.rs`). Las mismas versiones que ya
