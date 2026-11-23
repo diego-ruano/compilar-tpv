@@ -8,4 +8,4 @@ packages:
 catalog:
   # La misma para la app, el worker y ESLint, que analiza con el TypeScript que encuentre. Sólo
   # parches: typescript-eslint admite hasta la 6.0, así que la 6.1 y la 7 esperan a que lo amplíe.
-  typescript: ~6.0.3
+  typescript: ~7.0.2
