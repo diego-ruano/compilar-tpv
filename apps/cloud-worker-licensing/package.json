@@ -23,7 +23,7 @@
 		"@altarialights/reservas-web-tpv": "workspace:*",
 		"@cloudflare/vitest-pool-workers": "^0.21.3",
 		"@noble/ed25519": "^3.0.0",
-		"@sentry/cli": "2.58.6",
+		"@sentry/cli": "3.8.2",
 		"typescript": "catalog:",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.56.0"
