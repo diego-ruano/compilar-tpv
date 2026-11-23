@@ -56,7 +56,7 @@
     "@wdio/mocha-framework": "^9.31.5",
     "@wdio/spec-reporter": "^9.31.2",
     "@wdio/tauri-service": "^1.3.0",
-    "@wdio/types": "^9.31.2",
+    "@wdio/types": "^10.2.0",
     "expect-webdriverio": "^6.0.10",
     "jsdom": "^30.0.1",
     "tsx": "^4.23.13",
