@@ -1,5 +1,5 @@
 // src/pages/Inventario.tsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { toAppError } from "@tpv/client";
 import { useToast } from "../../shared/toast";
 
@@ -39,6 +39,7 @@ export default function Inventario() {
     const deleteProducto = useDeleteProducto();
 
     const [openAddCategory, setOpenAddCategory] = useState(false);
+    const [openEditCategory, setOpenEditCategory] = useState(false);
     const [openAddProduct, setOpenAddProduct] = useState(false);
     const [openIngredientes, setOpenIngredientes] = useState(false);
     const [openBorrarCategoria, setOpenBorrarCategoria] = useState(false);
@@ -47,6 +48,14 @@ export default function Inventario() {
     const [productDetailId, setProductDetailId] = useState<string | null>(null);
 
     const [productIdToEdit, setProductIdToEdit] = useState<string | null>(null);
+
+    // Sin categoría abierta (se ha vuelto atrás, o la ha borrado otro equipo) no hay nada que editar
+    // ni borrar: si se quedaran abiertos, saltarían al entrar en otra.
+    useEffect(() => {
+        if (categoriaSeleccionada) return;
+        setOpenEditCategory(false);
+        setOpenBorrarCategoria(false);
+    }, [categoriaSeleccionada]);
 
     const deleteProduct = async (id: string) => {
         try {
@@ -74,7 +83,7 @@ export default function Inventario() {
                     onBack={() => setCategoriaSeleccionada(null)}
                     onNewCategory={() => setOpenAddCategory(true)}
                     onIngredientes={() => setOpenIngredientes(true)}
-                    onDeleteCategory={() => setOpenBorrarCategoria(true)}
+                    onEditCategory={() => setOpenEditCategory(true)}
                     onNewProduct={() => {
                         setProductIdToEdit(null);
                         setOpenAddProduct(true);
@@ -100,21 +109,33 @@ export default function Inventario() {
 
                 <IngredientesModal open={openIngredientes} onClose={() => setOpenIngredientes(false)} />
 
+                <AddCategoryModal
+                    open={openAddCategory}
+                    onClose={() => setOpenAddCategory(false)}
+                    onSaved={async () => {
+                        await cargarCategorias();
+                    }}
+                />
+
+                <AddCategoryModal
+                    open={openEditCategory && categoriaSeleccionada != null}
+                    categoria={categoriaSeleccionada}
+                    onClose={() => setOpenEditCategory(false)}
+                    onSaved={async () => {
+                        await cargarCategorias();
+                    }}
+                    onEliminar={() => setOpenBorrarCategoria(true)}
+                />
+
+                {/* Después de la edición, para quedar encima: si se cancela, se vuelve a ella. */}
                 <BorrarCategoriaModal
                     categoria={openBorrarCategoria ? categoriaSeleccionada : null}
                     numProductos={productos.length}
                     onClose={() => setOpenBorrarCategoria(false)}
                     onBorrada={() => {
                         setOpenBorrarCategoria(false);
+                        setOpenEditCategory(false);
                         setCategoriaSeleccionada(null);
-                    }}
-                />
-
-                <AddCategoryModal
-                    open={openAddCategory}
-                    onClose={() => setOpenAddCategory(false)}
-                    onSaved={async () => {
-                        await cargarCategorias();
                     }}
                 />
 

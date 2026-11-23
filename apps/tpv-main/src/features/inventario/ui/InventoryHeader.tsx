@@ -1,7 +1,7 @@
 // components/inventario/InventoryHeader.tsx
 import React from "react";
 import { usePermisos } from "../../../shared/lib/usePermisos";
-import { Package, ArrowLeft, Plus, FolderPlus, Salad, Trash2 } from "lucide-react";
+import { Package, ArrowLeft, Plus, FolderPlus, Salad, Pencil } from "lucide-react";
 
 export default function InventoryHeader({
     titulo,
@@ -10,7 +10,7 @@ export default function InventoryHeader({
     onNewCategory,
     onNewProduct,
     onIngredientes,
-    onDeleteCategory,
+    onEditCategory,
 }: {
     titulo: string;
     categoriaSeleccionada: any | null;
@@ -19,8 +19,8 @@ export default function InventoryHeader({
     onNewProduct: () => void;
     /** Abre la lista de ingredientes (por categorías). */
     onIngredientes: () => void;
-    /** Pide confirmación para borrar la categoría abierta. */
-    onDeleteCategory: () => void;
+    /** Abre la edición de la categoría abierta (desde allí también se elimina). */
+    onEditCategory: () => void;
 }) {
     const { puede } = usePermisos();
     return (
@@ -77,14 +77,14 @@ export default function InventoryHeader({
                     <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto">
                         <button
                             type="button"
-                            disabled={!puede("catalogo.borrar")}
-                            title={puede("catalogo.borrar") ? undefined : "No tienes permiso para eliminar categorías"}
-                            onClick={onDeleteCategory}
-                            aria-label="Eliminar categoría"
-                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger shadow-sm transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed sm:flex-none"
+                            // Quien sólo puede borrar también entra: es en la edición donde se elimina.
+                            disabled={!puede("catalogo.editar") && !puede("catalogo.borrar")}
+                            title={puede("catalogo.editar") || puede("catalogo.borrar") ? undefined : "No tienes permiso para editar categorías"}
+                            onClick={onEditCategory}
+                            className="inline-flex flex-1 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none"
                         >
-                            <Trash2 className="size-4" aria-hidden />
-                            <span className="truncate">Eliminar categoría</span>
+                            <Pencil className="size-4" aria-hidden />
+                            <span className="truncate">Editar categoría</span>
                         </button>
                         <button
                             type="button"

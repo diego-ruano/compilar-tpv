@@ -48,12 +48,16 @@ export function useInventario() {
   }, [categoriaSeleccionada]);
 
   // Re-sincroniza la categoría seleccionada con la lista cacheada (p.ej. tras editar/recargar).
+  // Si otro equipo la ha borrado, se deja de enseñar: seguir con la copia vieja dejaba editarla, y
+  // guardar la volvía a crear (el guardado actualiza por id, o la da de alta si no está).
   useEffect(() => {
-    if (!categoriaSeleccionada) return;
+    if (!categoriaSeleccionada || categoriasQuery.data === undefined) return;
     const actualizada = categorias.find(
       (c) => c.ID_Categoria === categoriaSeleccionada.ID_Categoria,
     );
-    if (actualizada && actualizada !== categoriaSeleccionada) {
+    if (!actualizada) {
+      setCategoriaSeleccionada(null);
+    } else if (actualizada !== categoriaSeleccionada) {
       setCategoriaSeleccionada(actualizada);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

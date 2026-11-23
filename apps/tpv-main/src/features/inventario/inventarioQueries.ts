@@ -9,7 +9,7 @@
 // (resolveImageUrl) DENTRO del queryFn, de modo que la caché ya guarda las filas
 // "display" listas para pintar (mismo comportamiento que tenía `useInventario`).
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type {
   AjusteLoteInput,
@@ -24,6 +24,7 @@ import type {
 
 import { inventarioAPI } from "./api/inventarioAPI";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
+import { claveDeConsulta, featureKeysPorTablas } from "../../shared/lib/syncStatements";
 import type { CategoriaDisplay, ProductoDisplay } from "./hooks/useInventario";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
@@ -181,21 +182,31 @@ export function useAlergenos() {
   });
 }
 
-/** Alta de categoría; invalida la caché de inventario al confirmar. */
+/**
+ * Lo que enseña una categoría no es sólo Inventario: su nombre sale en Proveedores y en las
+ * estadísticas, y el plano cuenta lo pendiente en cocina según `Pasa_Cocina`. Se invalida lo mismo
+ * que cuando la cambia otro equipo (`syncStatements.ts`), que con la escritura propia no llega.
+ */
+function invalidarLoDeLasCategorias(qc: QueryClient) {
+  const claves = featureKeysPorTablas(["categorias_producto", "productos"]) ?? ["inventario"];
+  return Promise.all(claves.map((k) => qc.invalidateQueries({ queryKey: claveDeConsulta(k) })));
+}
+
+/** Alta o edición de una categoría (con su id, actualiza); invalida lo que la enseña. */
 export function useCreateCategoria() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: UpsertCategoriaInput) => inventarioAPI.createCategoria(args),
-    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+    onSuccess: () => invalidarLoDeLasCategorias(qc),
   });
 }
 
-/** Borrado de una categoría con sus productos; invalida la caché de inventario al confirmar. */
+/** Borrado de una categoría con sus productos; invalida lo que la enseña. */
 export function useBorrarCategoria() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (idCategoria: string) => inventarioAPI.borrarCategoria(idCategoria),
-    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+    onSuccess: () => invalidarLoDeLasCategorias(qc),
   });
 }
 

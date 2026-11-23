@@ -17,7 +17,7 @@ afterEach(() => { cleanup(); permisos.concedidos.clear(); });
 
 const cabecera = (categoria: unknown) => (
     <InventoryHeader titulo="Inventario" categoriaSeleccionada={categoria} onBack={() => {}}
-        onNewCategory={() => {}} onNewProduct={() => {}} onIngredientes={() => {}} onDeleteCategory={() => {}} />
+        onNewCategory={() => {}} onNewProduct={() => {}} onIngredientes={() => {}} onEditCategory={() => {}} />
 );
 
 it("sin permiso, el botón desactivado dice por qué al pasar por encima", () => {
@@ -30,9 +30,21 @@ it("sin permiso, el botón desactivado dice por qué al pasar por encima", () =>
     permisos.concedidos.add("catalogo.editar"); // sin precios no se puede dar de alta un producto
     render(cabecera({ ID_Categoria: "beb" }));
     expect(screen.getByRole("button", { name: "Nuevo producto" })).toHaveAttribute("title", "No tienes permiso para crear productos");
-    const eliminar = screen.getByRole("button", { name: "Eliminar categoría" });
-    expect(eliminar).toBeDisabled();
-    expect(eliminar).toHaveAttribute("title", "No tienes permiso para eliminar categorías");
+    // Con permiso de editar (aunque no de borrar) se entra a editar la categoría.
+    expect(screen.getByRole("button", { name: "Editar categoría" })).toBeEnabled();
+    cleanup();
+
+    permisos.concedidos.clear();
+    render(cabecera({ ID_Categoria: "beb" }));
+    const editar = screen.getByRole("button", { name: "Editar categoría" });
+    expect(editar).toBeDisabled();
+    expect(editar).toHaveAttribute("title", "No tienes permiso para editar categorías");
+});
+
+it("quien sólo puede borrar también entra a la edición, que es donde se elimina", () => {
+    permisos.concedidos.add("catalogo.borrar");
+    render(cabecera({ ID_Categoria: "beb" }));
+    expect(screen.getByRole("button", { name: "Editar categoría" })).toBeEnabled();
 });
 
 it("con permiso, no lleva el aviso", () => {
