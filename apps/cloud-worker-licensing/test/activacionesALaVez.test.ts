@@ -337,7 +337,7 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 			expect(pendiente).toBe(false);
 			expect([sinCentral.status, sinCentral.body]).toEqual([503, { ok: false, code: "external", error: "hub_overloaded" }]);
 
-			const tras = c.licencia(k.id);
+			const tras = await c.licencia(k.id);
 			expect(tras).toMatchObject({ status: "issued", main_device_id: null, activated_at_ms: null });
 			expect(await stub(tras.tenant_id).estaAprovisionado()).toBe(false);
 
