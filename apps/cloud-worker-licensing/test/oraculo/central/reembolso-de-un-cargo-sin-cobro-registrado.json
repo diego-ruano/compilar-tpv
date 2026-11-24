@@ -1,0 +1,783 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "charge.refunded",
+				"data": {
+					"object": {
+						"id": "ch_cs_desconocida",
+						"object": "charge",
+						"payment_intent": "pi_cs_desconocida",
+						"customer": "cus_oraculo",
+						"amount": 12000,
+						"amount_refunded": 12000
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": false,
+					"reason": "unresolved_license"
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·1›",
+							"action": "refund",
+							"license_id": null,
+							"detail": {
+								"event_uid": "evt_1",
+								"resultado": "sin_licencia_atribuible",
+								"payment_intent": "pi_cs_desconocida"
+							},
+							"at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "charge.refunded",
+							"resource_type": "charge",
+							"resource_id": "ch_cs_desconocida",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"id": "evt_1",
+								"object": "event",
+								"type": "charge.refunded",
+								"data": {
+									"object": {
+										"id": "ch_cs_desconocida",
+										"object": "charge",
+										"payment_intent": "pi_cs_desconocida",
+										"customer": "cus_oraculo",
+										"amount": 12000,
+										"amount_refunded": 12000
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_2",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_unica",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-unica@ejemplo.test",
+					"asunto": "Tu licencia del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nTu clave de licencia del TPV (1 año):\n\n    ‹clave·1›\n\nIntrodúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.\n\nGuarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·2›",
+							"license_id": "‹id·3›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_unica",
+							"stripe_payment_intent_id": "pi_cs_unica",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:02",
+							"unidad": 1
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·3›",
+							"license_key_hash": "‹hash de clave·1›",
+							"license_key_enc": "‹cifrado de clave·1›",
+							"key_short": "‹clave corta·1›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:02",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-unica@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_unica",
+							"stripe_payment_intent_id": "pi_cs_unica",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:02",
+							"updated_at_ms": "T0+0d 00:02",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:02"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_2",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_unica",
+							"sig_hex": null,
+							"body_sha256": "‹hash·2›",
+							"payload_json": {
+								"id": "evt_2",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_unica",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:02",
+							"processed_at_ms": "T0+0d 00:02",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 3,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_3",
+				"object": "event",
+				"type": "charge.refunded",
+				"data": {
+					"object": {
+						"id": "ch_cs_cargo_suelto",
+						"object": "charge",
+						"payment_intent": "pi_cs_cargo_suelto",
+						"customer": "cus_oraculo",
+						"amount": 12000,
+						"amount_refunded": 12000
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": true,
+					"license_id": "‹id·3›",
+					"accion": "revoked",
+					"licencias": [
+						{
+							"license_id": "‹id·3›",
+							"accion": "revoked"
+						}
+					]
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·4›",
+							"action": "refund",
+							"license_id": "‹id·3›",
+							"detail": {
+								"event_uid": "evt_3",
+								"accion": "revocada",
+								"term_months": null,
+								"expires_at_ms": null,
+								"dias_activada": null,
+								"payment_intent": "pi_cs_cargo_suelto"
+							},
+							"at_ms": "T0+0d 00:03"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·3›",
+							"status": "revoked",
+							"disabled": 1,
+							"updated_at_ms": "T0+0d 00:03"
+						},
+						"antes": {
+							"status": "issued",
+							"disabled": 0,
+							"updated_at_ms": "T0+0d 00:02"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_3",
+							"event_name": "charge.refunded",
+							"resource_type": "charge",
+							"resource_id": "ch_cs_cargo_suelto",
+							"sig_hex": null,
+							"body_sha256": "‹hash·3›",
+							"payload_json": {
+								"id": "evt_3",
+								"object": "event",
+								"type": "charge.refunded",
+								"data": {
+									"object": {
+										"id": "ch_cs_cargo_suelto",
+										"object": "charge",
+										"payment_intent": "pi_cs_cargo_suelto",
+										"customer": "cus_oraculo",
+										"amount": 12000,
+										"amount_refunded": 12000
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:03",
+							"processed_at_ms": "T0+0d 00:03",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 4,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_4",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_segunda",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-segunda@ejemplo.test",
+					"asunto": "Tu licencia del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nTu clave de licencia del TPV (1 año):\n\n    ‹clave·2›\n\nIntrodúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.\n\nGuarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·5›",
+							"license_id": "‹id·6›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_segunda",
+							"stripe_payment_intent_id": "pi_cs_segunda",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:04",
+							"unidad": 1
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·6›",
+							"license_key_hash": "‹hash de clave·2›",
+							"license_key_enc": "‹cifrado de clave·2›",
+							"key_short": "‹clave corta·2›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:04",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-segunda@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_segunda",
+							"stripe_payment_intent_id": "pi_cs_segunda",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:04",
+							"updated_at_ms": "T0+0d 00:04",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:04"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_4",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_segunda",
+							"sig_hex": null,
+							"body_sha256": "‹hash·4›",
+							"payload_json": {
+								"id": "evt_4",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_segunda",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:04",
+							"processed_at_ms": "T0+0d 00:04",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 5,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_5",
+				"object": "event",
+				"type": "charge.refunded",
+				"data": {
+					"object": {
+						"id": "ch_cs_otro_cargo_suelto",
+						"object": "charge",
+						"payment_intent": "pi_cs_otro_cargo_suelto",
+						"customer": "cus_oraculo",
+						"amount": 12000,
+						"amount_refunded": 12000
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": false,
+					"reason": "unresolved_license"
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·7›",
+							"action": "refund",
+							"license_id": null,
+							"detail": {
+								"event_uid": "evt_5",
+								"resultado": "sin_licencia_atribuible",
+								"payment_intent": "pi_cs_otro_cargo_suelto"
+							},
+							"at_ms": "T0+0d 00:05"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_5",
+							"event_name": "charge.refunded",
+							"resource_type": "charge",
+							"resource_id": "ch_cs_otro_cargo_suelto",
+							"sig_hex": null,
+							"body_sha256": "‹hash·5›",
+							"payload_json": {
+								"id": "evt_5",
+								"object": "event",
+								"type": "charge.refunded",
+								"data": {
+									"object": {
+										"id": "ch_cs_otro_cargo_suelto",
+										"object": "charge",
+										"payment_intent": "pi_cs_otro_cargo_suelto",
+										"customer": "cus_oraculo",
+										"amount": 12000,
+										"amount_refunded": 12000
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:05",
+							"processed_at_ms": "T0+0d 00:05",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [
+			{
+				"audit_id": "‹id·1›",
+				"action": "refund",
+				"license_id": null,
+				"detail": {
+					"event_uid": "evt_1",
+					"resultado": "sin_licencia_atribuible",
+					"payment_intent": "pi_cs_desconocida"
+				},
+				"at_ms": "T0+0d 00:01"
+			},
+			{
+				"audit_id": "‹id·4›",
+				"action": "refund",
+				"license_id": "‹id·3›",
+				"detail": {
+					"event_uid": "evt_3",
+					"accion": "revocada",
+					"term_months": null,
+					"expires_at_ms": null,
+					"dias_activada": null,
+					"payment_intent": "pi_cs_cargo_suelto"
+				},
+				"at_ms": "T0+0d 00:03"
+			},
+			{
+				"audit_id": "‹id·7›",
+				"action": "refund",
+				"license_id": null,
+				"detail": {
+					"event_uid": "evt_5",
+					"resultado": "sin_licencia_atribuible",
+					"payment_intent": "pi_cs_otro_cargo_suelto"
+				},
+				"at_ms": "T0+0d 00:05"
+			}
+		],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [
+			{
+				"payment_id": "‹id·2›",
+				"license_id": "‹id·3›",
+				"kind": "issue",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_unica",
+				"stripe_payment_intent_id": "pi_cs_unica",
+				"reversed_at_ms": null,
+				"reversed_reason": null,
+				"reversed_event_uid": null,
+				"at_ms": "T0+0d 00:02",
+				"unidad": 1
+			},
+			{
+				"payment_id": "‹id·5›",
+				"license_id": "‹id·6›",
+				"kind": "issue",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_segunda",
+				"stripe_payment_intent_id": "pi_cs_segunda",
+				"reversed_at_ms": null,
+				"reversed_reason": null,
+				"reversed_event_uid": null,
+				"at_ms": "T0+0d 00:04",
+				"unidad": 1
+			}
+		],
+		"licenses": [
+			{
+				"license_id": "‹id·3›",
+				"license_key_hash": "‹hash de clave·1›",
+				"license_key_enc": "‹cifrado de clave·1›",
+				"key_short": "‹clave corta·1›",
+				"tenant_id": null,
+				"main_device_id": null,
+				"status": "revoked",
+				"disabled": 1,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:02",
+				"activated_at_ms": null,
+				"expires_at_ms": null,
+				"customer_email": "cs-unica@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_unica",
+				"stripe_payment_intent_id": "pi_cs_unica",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:02",
+				"updated_at_ms": "T0+0d 00:03",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:02"
+			},
+			{
+				"license_id": "‹id·6›",
+				"license_key_hash": "‹hash de clave·2›",
+				"license_key_enc": "‹cifrado de clave·2›",
+				"key_short": "‹clave corta·2›",
+				"tenant_id": null,
+				"main_device_id": null,
+				"status": "issued",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:04",
+				"activated_at_ms": null,
+				"expires_at_ms": null,
+				"customer_email": "cs-segunda@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_segunda",
+				"stripe_payment_intent_id": "pi_cs_segunda",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:04",
+				"updated_at_ms": "T0+0d 00:04",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:04"
+			}
+		],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "charge.refunded",
+				"resource_type": "charge",
+				"resource_id": "ch_cs_desconocida",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"id": "evt_1",
+					"object": "event",
+					"type": "charge.refunded",
+					"data": {
+						"object": {
+							"id": "ch_cs_desconocida",
+							"object": "charge",
+							"payment_intent": "pi_cs_desconocida",
+							"customer": "cus_oraculo",
+							"amount": 12000,
+							"amount_refunded": 12000
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:01",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_2",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_unica",
+				"sig_hex": null,
+				"body_sha256": "‹hash·2›",
+				"payload_json": {
+					"id": "evt_2",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_unica",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:02",
+				"processed_at_ms": "T0+0d 00:02",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_3",
+				"event_name": "charge.refunded",
+				"resource_type": "charge",
+				"resource_id": "ch_cs_cargo_suelto",
+				"sig_hex": null,
+				"body_sha256": "‹hash·3›",
+				"payload_json": {
+					"id": "evt_3",
+					"object": "event",
+					"type": "charge.refunded",
+					"data": {
+						"object": {
+							"id": "ch_cs_cargo_suelto",
+							"object": "charge",
+							"payment_intent": "pi_cs_cargo_suelto",
+							"customer": "cus_oraculo",
+							"amount": 12000,
+							"amount_refunded": 12000
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:03",
+				"processed_at_ms": "T0+0d 00:03",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_4",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_segunda",
+				"sig_hex": null,
+				"body_sha256": "‹hash·4›",
+				"payload_json": {
+					"id": "evt_4",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_segunda",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:04",
+				"processed_at_ms": "T0+0d 00:04",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_5",
+				"event_name": "charge.refunded",
+				"resource_type": "charge",
+				"resource_id": "ch_cs_otro_cargo_suelto",
+				"sig_hex": null,
+				"body_sha256": "‹hash·5›",
+				"payload_json": {
+					"id": "evt_5",
+					"object": "event",
+					"type": "charge.refunded",
+					"data": {
+						"object": {
+							"id": "ch_cs_otro_cargo_suelto",
+							"object": "charge",
+							"payment_intent": "pi_cs_otro_cargo_suelto",
+							"customer": "cus_oraculo",
+							"amount": 12000,
+							"amount_refunded": 12000
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:05",
+				"processed_at_ms": "T0+0d 00:05",
+				"processed_ok": 1,
+				"error_text": null
+			}
+		]
+	}
+}

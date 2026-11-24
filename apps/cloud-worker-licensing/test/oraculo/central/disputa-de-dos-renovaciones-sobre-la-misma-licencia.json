@@ -1,0 +1,1398 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_base",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-base@ejemplo.test",
+					"asunto": "Tu licencia del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nTu clave de licencia del TPV (1 año):\n\n    ‹clave·1›\n\nIntrodúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.\n\nGuarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·1›",
+							"license_id": "‹id·2›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_base",
+							"stripe_payment_intent_id": "pi_cs_base",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:01",
+							"unidad": 1
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·2›",
+							"license_key_hash": "‹hash de clave·1›",
+							"license_key_enc": "‹cifrado de clave·1›",
+							"key_short": "‹clave corta·1›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:01",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-base@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_base",
+							"stripe_payment_intent_id": "pi_cs_base",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:01",
+							"updated_at_ms": "T0+0d 00:01",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_base",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"id": "evt_1",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_base",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·1›",
+				"deviceId": "equipo-del-bar",
+				"devicePubKey": "‹clave pública de equipo-del-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·3›",
+					"deviceId": "equipo-del-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·3›",
+							"deviceId": "equipo-del-bar",
+							"licHash": "‹hash de clave·1›",
+							"iat": "T0+0d 00:02",
+							"exp": "T0+30d 00:02"
+						}
+					},
+					"status": "active",
+					"expiresAt": "T0+365d 00:02",
+					"fieldDek": "‹dek·1›",
+					"cambioDeEquipo": false
+				}
+			},
+			"tenantHub": [
+				{
+					"negocio": "‹id·3›",
+					"metodo": "estaAprovisionado",
+					"argumentos": []
+				},
+				{
+					"negocio": "‹id·3›",
+					"metodo": "aprovisionar",
+					"argumentos": [
+						"‹id·3›"
+					]
+				}
+			],
+			"cambios": {
+				"devices": [
+					{
+						"nueva": {
+							"device_id": "equipo-del-bar",
+							"tenant_id": "‹id·3›",
+							"role": "tpv",
+							"first_seen_at_ms": "T0+0d 00:02",
+							"last_seen_at_ms": "T0+0d 00:02",
+							"revoked_at_ms": null,
+							"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+							"pubkey_alg": "ed25519"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"tenant_id": "‹id·3›",
+							"main_device_id": "equipo-del-bar",
+							"status": "active",
+							"activated_at_ms": "T0+0d 00:02",
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:02"
+						},
+						"antes": {
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"updated_at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"tenants": [
+					{
+						"nueva": {
+							"tenant_id": "‹id·3›",
+							"status": "active",
+							"legal_name": "Bar de Pruebas S.L.",
+							"display_name": "Bar de pruebas",
+							"email": null,
+							"phone": null,
+							"country": "ES",
+							"timezone": null,
+							"notes": null,
+							"created_at_ms": "T0+0d 00:02",
+							"updated_at_ms": "T0+0d 00:02",
+							"field_dek": "‹cifrado de dek·1›",
+							"piloto": 0
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 3,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_2",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_pack",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-pack@ejemplo.test",
+					"asunto": "Tus licencias del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nHas comprado 2 licencias del TPV. Cada clave vale para un local: introdúcela en su TPV al abrirlo por primera vez.\n\nLicencia 1 de 2 (1 año):\n    ‹clave·2›\n\nLicencia 2 de 2 (1 año):\n    ‹clave·3›\n\n¿Las quieres todas para el mismo local? Introdúcelas en ese TPV una detrás de otra (Configuración → Licencia) y el tiempo se va sumando.\n\nLa cuenta atrás de cada una empieza al activarla, no hoy. Guarda este correo: es también el buzón desde el que podrás recuperar las licencias si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·4›",
+							"license_id": "‹id·5›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_pack",
+							"stripe_payment_intent_id": "pi_cs_pack",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:03",
+							"unidad": 1
+						}
+					},
+					{
+						"nueva": {
+							"payment_id": "‹id·6›",
+							"license_id": "‹id·7›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_pack",
+							"stripe_payment_intent_id": "pi_cs_pack",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:03",
+							"unidad": 2
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·5›",
+							"license_key_hash": "‹hash de clave·2›",
+							"license_key_enc": "‹cifrado de clave·2›",
+							"key_short": "‹clave corta·2›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:03",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-pack@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_pack",
+							"stripe_payment_intent_id": "pi_cs_pack",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:03",
+							"updated_at_ms": "T0+0d 00:03",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:03"
+						}
+					},
+					{
+						"nueva": {
+							"license_id": "‹id·7›",
+							"license_key_hash": "‹hash de clave·3›",
+							"license_key_enc": "‹cifrado de clave·3›",
+							"key_short": "‹clave corta·3›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:03",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-pack@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_pack",
+							"stripe_payment_intent_id": "pi_cs_pack",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:03",
+							"updated_at_ms": "T0+0d 00:03",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:03"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_2",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_pack",
+							"sig_hex": null,
+							"body_sha256": "‹hash·2›",
+							"payload_json": {
+								"id": "evt_2",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_pack",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:03",
+							"processed_at_ms": "T0+0d 00:03",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 4,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·2›",
+				"deviceId": "equipo-del-bar",
+				"devicePubKey": "‹clave pública de equipo-del-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·3›",
+					"deviceId": "equipo-del-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·3›",
+							"deviceId": "equipo-del-bar",
+							"licHash": "‹hash de clave·1›",
+							"iat": "T0+0d 00:04",
+							"exp": "T0+30d 00:04"
+						}
+					},
+					"status": "active",
+					"expiresAt": "T0+731d 00:02",
+					"fieldDek": "‹dek·1›",
+					"cambioDeEquipo": false,
+					"tiempoSumado": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-base@ejemplo.test",
+					"asunto": "Licencia renovada",
+					"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2028.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·4›",
+							"license_id": "‹id·2›",
+							"kind": "renewal"
+						},
+						"antes": {
+							"license_id": "‹id·5›",
+							"kind": "issue"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"expires_at_ms": "T0+731d 00:02",
+							"updated_at_ms": "T0+0d 00:04"
+						},
+						"antes": {
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:02"
+						}
+					},
+					{
+						"cambiada": {
+							"license_id": "‹id·5›",
+							"status": "redeemed",
+							"redeemed_into_license_id": "‹id·2›",
+							"updated_at_ms": "T0+0d 00:04"
+						},
+						"antes": {
+							"status": "issued",
+							"redeemed_into_license_id": null,
+							"updated_at_ms": "T0+0d 00:03"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 5,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·3›",
+				"deviceId": "equipo-del-bar",
+				"devicePubKey": "‹clave pública de equipo-del-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·3›",
+					"deviceId": "equipo-del-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·3›",
+							"deviceId": "equipo-del-bar",
+							"licHash": "‹hash de clave·1›",
+							"iat": "T0+0d 00:05",
+							"exp": "T0+30d 00:05"
+						}
+					},
+					"status": "active",
+					"expiresAt": "T0+1096d 00:02",
+					"fieldDek": "‹dek·1›",
+					"cambioDeEquipo": false,
+					"tiempoSumado": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-base@ejemplo.test",
+					"asunto": "Licencia renovada",
+					"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2029.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·6›",
+							"license_id": "‹id·2›",
+							"kind": "renewal"
+						},
+						"antes": {
+							"license_id": "‹id·7›",
+							"kind": "issue"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"expires_at_ms": "T0+1096d 00:02",
+							"updated_at_ms": "T0+0d 00:05"
+						},
+						"antes": {
+							"expires_at_ms": "T0+731d 00:02",
+							"updated_at_ms": "T0+0d 00:04"
+						}
+					},
+					{
+						"cambiada": {
+							"license_id": "‹id·7›",
+							"status": "redeemed",
+							"redeemed_into_license_id": "‹id·2›",
+							"updated_at_ms": "T0+0d 00:05"
+						},
+						"antes": {
+							"status": "issued",
+							"redeemed_into_license_id": null,
+							"updated_at_ms": "T0+0d 00:03"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 6,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_3",
+				"object": "event",
+				"type": "charge.dispute.created",
+				"data": {
+					"object": {
+						"id": "du_cs_pack",
+						"object": "dispute",
+						"charge": "ch_cs_pack",
+						"payment_intent": "pi_cs_pack",
+						"amount": 24000,
+						"status": "needs_response"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": true,
+					"license_id": "‹id·2›",
+					"accion": "shortened",
+					"licencias": [
+						{
+							"license_id": "‹id·2›",
+							"accion": "shortened"
+						},
+						{
+							"license_id": "‹id·2›",
+							"accion": "shortened"
+						}
+					]
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·8›",
+							"action": "dispute",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_3",
+								"accion": "meses_restados",
+								"term_months": 12,
+								"expires_at_ms": "T0+731d 00:02",
+								"dias_activada": 0,
+								"payment_intent": "pi_cs_pack"
+							},
+							"at_ms": "T0+0d 00:06"
+						}
+					},
+					{
+						"nueva": {
+							"audit_id": "‹id·9›",
+							"action": "dispute",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_3",
+								"accion": "meses_restados",
+								"term_months": 12,
+								"expires_at_ms": "T0+365d 00:02",
+								"dias_activada": 0,
+								"payment_intent": "pi_cs_pack"
+							},
+							"at_ms": "T0+0d 00:06"
+						}
+					}
+				],
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·4›",
+							"reversed_at_ms": "T0+0d 00:06",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_3"
+						},
+						"antes": {
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						}
+					},
+					{
+						"cambiada": {
+							"payment_id": "‹id·6›",
+							"reversed_at_ms": "T0+0d 00:06",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_3"
+						},
+						"antes": {
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:06"
+						},
+						"antes": {
+							"expires_at_ms": "T0+1096d 00:02",
+							"updated_at_ms": "T0+0d 00:05"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_3",
+							"event_name": "charge.dispute.created",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_pack",
+							"sig_hex": null,
+							"body_sha256": "‹hash·3›",
+							"payload_json": {
+								"id": "evt_3",
+								"object": "event",
+								"type": "charge.dispute.created",
+								"data": {
+									"object": {
+										"id": "du_cs_pack",
+										"object": "dispute",
+										"charge": "ch_cs_pack",
+										"payment_intent": "pi_cs_pack",
+										"amount": 24000,
+										"status": "needs_response"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:06",
+							"processed_at_ms": "T0+0d 00:06",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 7,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_4",
+				"object": "event",
+				"type": "charge.dispute.closed",
+				"data": {
+					"object": {
+						"id": "du_cs_pack",
+						"object": "dispute",
+						"charge": "ch_cs_pack",
+						"payment_intent": "pi_cs_pack",
+						"amount": 24000,
+						"status": "won"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"restored": true,
+					"license_id": "‹id·2›",
+					"license_ids": [
+						"‹id·2›",
+						"‹id·2›"
+					]
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·10›",
+							"action": "reactivate",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_4",
+								"motivo": "disputa_ganada"
+							},
+							"at_ms": "T0+0d 00:07"
+						}
+					},
+					{
+						"nueva": {
+							"audit_id": "‹id·11›",
+							"action": "reactivate",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_4",
+								"motivo": "disputa_ganada"
+							},
+							"at_ms": "T0+0d 00:07"
+						}
+					}
+				],
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·4›",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						},
+						"antes": {
+							"reversed_at_ms": "T0+0d 00:06",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_3"
+						}
+					},
+					{
+						"cambiada": {
+							"payment_id": "‹id·6›",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						},
+						"antes": {
+							"reversed_at_ms": "T0+0d 00:06",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_3"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"expires_at_ms": "T0+1096d 00:02",
+							"updated_at_ms": "T0+0d 00:07"
+						},
+						"antes": {
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:06"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_4",
+							"event_name": "charge.dispute.closed",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_pack",
+							"sig_hex": null,
+							"body_sha256": "‹hash·4›",
+							"payload_json": {
+								"id": "evt_4",
+								"object": "event",
+								"type": "charge.dispute.closed",
+								"data": {
+									"object": {
+										"id": "du_cs_pack",
+										"object": "dispute",
+										"charge": "ch_cs_pack",
+										"payment_intent": "pi_cs_pack",
+										"amount": 24000,
+										"status": "won"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:07",
+							"processed_at_ms": "T0+0d 00:07",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 8,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_5",
+				"object": "event",
+				"type": "charge.refunded",
+				"data": {
+					"object": {
+						"id": "ch_cs_pack",
+						"object": "charge",
+						"payment_intent": "pi_cs_pack",
+						"customer": "cus_oraculo",
+						"amount": 24000,
+						"amount_refunded": 24000
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": true,
+					"license_id": "‹id·2›",
+					"accion": "shortened",
+					"licencias": [
+						{
+							"license_id": "‹id·2›",
+							"accion": "shortened"
+						},
+						{
+							"license_id": "‹id·2›",
+							"accion": "shortened"
+						}
+					]
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·12›",
+							"action": "refund",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_5",
+								"accion": "meses_restados",
+								"term_months": 12,
+								"expires_at_ms": "T0+731d 00:02",
+								"dias_activada": 0,
+								"payment_intent": "pi_cs_pack"
+							},
+							"at_ms": "T0+0d 00:08"
+						}
+					},
+					{
+						"nueva": {
+							"audit_id": "‹id·13›",
+							"action": "refund",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_5",
+								"accion": "meses_restados",
+								"term_months": 12,
+								"expires_at_ms": "T0+365d 00:02",
+								"dias_activada": 0,
+								"payment_intent": "pi_cs_pack"
+							},
+							"at_ms": "T0+0d 00:08"
+						}
+					}
+				],
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·4›",
+							"reversed_at_ms": "T0+0d 00:08",
+							"reversed_reason": "refund",
+							"reversed_event_uid": "evt_5"
+						},
+						"antes": {
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						}
+					},
+					{
+						"cambiada": {
+							"payment_id": "‹id·6›",
+							"reversed_at_ms": "T0+0d 00:08",
+							"reversed_reason": "refund",
+							"reversed_event_uid": "evt_5"
+						},
+						"antes": {
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:08"
+						},
+						"antes": {
+							"expires_at_ms": "T0+1096d 00:02",
+							"updated_at_ms": "T0+0d 00:07"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_5",
+							"event_name": "charge.refunded",
+							"resource_type": "charge",
+							"resource_id": "ch_cs_pack",
+							"sig_hex": null,
+							"body_sha256": "‹hash·5›",
+							"payload_json": {
+								"id": "evt_5",
+								"object": "event",
+								"type": "charge.refunded",
+								"data": {
+									"object": {
+										"id": "ch_cs_pack",
+										"object": "charge",
+										"payment_intent": "pi_cs_pack",
+										"customer": "cus_oraculo",
+										"amount": 24000,
+										"amount_refunded": 24000
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:08",
+							"processed_at_ms": "T0+0d 00:08",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [
+			{
+				"audit_id": "‹id·8›",
+				"action": "dispute",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_3",
+					"accion": "meses_restados",
+					"term_months": 12,
+					"expires_at_ms": "T0+731d 00:02",
+					"dias_activada": 0,
+					"payment_intent": "pi_cs_pack"
+				},
+				"at_ms": "T0+0d 00:06"
+			},
+			{
+				"audit_id": "‹id·9›",
+				"action": "dispute",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_3",
+					"accion": "meses_restados",
+					"term_months": 12,
+					"expires_at_ms": "T0+365d 00:02",
+					"dias_activada": 0,
+					"payment_intent": "pi_cs_pack"
+				},
+				"at_ms": "T0+0d 00:06"
+			},
+			{
+				"audit_id": "‹id·10›",
+				"action": "reactivate",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_4",
+					"motivo": "disputa_ganada"
+				},
+				"at_ms": "T0+0d 00:07"
+			},
+			{
+				"audit_id": "‹id·11›",
+				"action": "reactivate",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_4",
+					"motivo": "disputa_ganada"
+				},
+				"at_ms": "T0+0d 00:07"
+			},
+			{
+				"audit_id": "‹id·12›",
+				"action": "refund",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_5",
+					"accion": "meses_restados",
+					"term_months": 12,
+					"expires_at_ms": "T0+731d 00:02",
+					"dias_activada": 0,
+					"payment_intent": "pi_cs_pack"
+				},
+				"at_ms": "T0+0d 00:08"
+			},
+			{
+				"audit_id": "‹id·13›",
+				"action": "refund",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_5",
+					"accion": "meses_restados",
+					"term_months": 12,
+					"expires_at_ms": "T0+365d 00:02",
+					"dias_activada": 0,
+					"payment_intent": "pi_cs_pack"
+				},
+				"at_ms": "T0+0d 00:08"
+			}
+		],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [
+			{
+				"device_id": "equipo-del-bar",
+				"tenant_id": "‹id·3›",
+				"role": "tpv",
+				"first_seen_at_ms": "T0+0d 00:02",
+				"last_seen_at_ms": "T0+0d 00:02",
+				"revoked_at_ms": null,
+				"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+				"pubkey_alg": "ed25519"
+			}
+		],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [
+			{
+				"payment_id": "‹id·1›",
+				"license_id": "‹id·2›",
+				"kind": "issue",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_base",
+				"stripe_payment_intent_id": "pi_cs_base",
+				"reversed_at_ms": null,
+				"reversed_reason": null,
+				"reversed_event_uid": null,
+				"at_ms": "T0+0d 00:01",
+				"unidad": 1
+			},
+			{
+				"payment_id": "‹id·4›",
+				"license_id": "‹id·2›",
+				"kind": "renewal",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_pack",
+				"stripe_payment_intent_id": "pi_cs_pack",
+				"reversed_at_ms": "T0+0d 00:08",
+				"reversed_reason": "refund",
+				"reversed_event_uid": "evt_5",
+				"at_ms": "T0+0d 00:03",
+				"unidad": 1
+			},
+			{
+				"payment_id": "‹id·6›",
+				"license_id": "‹id·2›",
+				"kind": "renewal",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_pack",
+				"stripe_payment_intent_id": "pi_cs_pack",
+				"reversed_at_ms": "T0+0d 00:08",
+				"reversed_reason": "refund",
+				"reversed_event_uid": "evt_5",
+				"at_ms": "T0+0d 00:03",
+				"unidad": 2
+			}
+		],
+		"licenses": [
+			{
+				"license_id": "‹id·2›",
+				"license_key_hash": "‹hash de clave·1›",
+				"license_key_enc": "‹cifrado de clave·1›",
+				"key_short": "‹clave corta·1›",
+				"tenant_id": "‹id·3›",
+				"main_device_id": "equipo-del-bar",
+				"status": "active",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:01",
+				"activated_at_ms": "T0+0d 00:02",
+				"expires_at_ms": "T0+365d 00:02",
+				"customer_email": "cs-base@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_base",
+				"stripe_payment_intent_id": "pi_cs_base",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:01",
+				"updated_at_ms": "T0+0d 00:08",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:01"
+			},
+			{
+				"license_id": "‹id·5›",
+				"license_key_hash": "‹hash de clave·2›",
+				"license_key_enc": "‹cifrado de clave·2›",
+				"key_short": "‹clave corta·2›",
+				"tenant_id": null,
+				"main_device_id": null,
+				"status": "redeemed",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:03",
+				"activated_at_ms": null,
+				"expires_at_ms": null,
+				"customer_email": "cs-pack@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": "‹id·2›",
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_pack",
+				"stripe_payment_intent_id": "pi_cs_pack",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:03",
+				"updated_at_ms": "T0+0d 00:04",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:03"
+			},
+			{
+				"license_id": "‹id·7›",
+				"license_key_hash": "‹hash de clave·3›",
+				"license_key_enc": "‹cifrado de clave·3›",
+				"key_short": "‹clave corta·3›",
+				"tenant_id": null,
+				"main_device_id": null,
+				"status": "redeemed",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:03",
+				"activated_at_ms": null,
+				"expires_at_ms": null,
+				"customer_email": "cs-pack@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": "‹id·2›",
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_pack",
+				"stripe_payment_intent_id": "pi_cs_pack",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:03",
+				"updated_at_ms": "T0+0d 00:05",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:03"
+			}
+		],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [
+			{
+				"tenant_id": "‹id·3›",
+				"status": "active",
+				"legal_name": "Bar de Pruebas S.L.",
+				"display_name": "Bar de pruebas",
+				"email": null,
+				"phone": null,
+				"country": "ES",
+				"timezone": null,
+				"notes": null,
+				"created_at_ms": "T0+0d 00:02",
+				"updated_at_ms": "T0+0d 00:02",
+				"field_dek": "‹cifrado de dek·1›",
+				"piloto": 0
+			}
+		],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_base",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"id": "evt_1",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_base",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:01",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_2",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_pack",
+				"sig_hex": null,
+				"body_sha256": "‹hash·2›",
+				"payload_json": {
+					"id": "evt_2",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_pack",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:03",
+				"processed_at_ms": "T0+0d 00:03",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_3",
+				"event_name": "charge.dispute.created",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_pack",
+				"sig_hex": null,
+				"body_sha256": "‹hash·3›",
+				"payload_json": {
+					"id": "evt_3",
+					"object": "event",
+					"type": "charge.dispute.created",
+					"data": {
+						"object": {
+							"id": "du_cs_pack",
+							"object": "dispute",
+							"charge": "ch_cs_pack",
+							"payment_intent": "pi_cs_pack",
+							"amount": 24000,
+							"status": "needs_response"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:06",
+				"processed_at_ms": "T0+0d 00:06",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_4",
+				"event_name": "charge.dispute.closed",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_pack",
+				"sig_hex": null,
+				"body_sha256": "‹hash·4›",
+				"payload_json": {
+					"id": "evt_4",
+					"object": "event",
+					"type": "charge.dispute.closed",
+					"data": {
+						"object": {
+							"id": "du_cs_pack",
+							"object": "dispute",
+							"charge": "ch_cs_pack",
+							"payment_intent": "pi_cs_pack",
+							"amount": 24000,
+							"status": "won"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:07",
+				"processed_at_ms": "T0+0d 00:07",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_5",
+				"event_name": "charge.refunded",
+				"resource_type": "charge",
+				"resource_id": "ch_cs_pack",
+				"sig_hex": null,
+				"body_sha256": "‹hash·5›",
+				"payload_json": {
+					"id": "evt_5",
+					"object": "event",
+					"type": "charge.refunded",
+					"data": {
+						"object": {
+							"id": "ch_cs_pack",
+							"object": "charge",
+							"payment_intent": "pi_cs_pack",
+							"customer": "cus_oraculo",
+							"amount": 24000,
+							"amount_refunded": 24000
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:08",
+				"processed_at_ms": "T0+0d 00:08",
+				"processed_ok": 1,
+				"error_text": null
+			}
+		]
+	}
+}

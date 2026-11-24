@@ -1,0 +1,299 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_sepa",
+						"object": "checkout.session",
+						"payment_status": "unpaid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_sepa",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"id": "evt_1",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_sepa",
+										"object": "checkout.session",
+										"payment_status": "unpaid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_2",
+				"object": "event",
+				"type": "checkout.session.async_payment_succeeded",
+				"data": {
+					"object": {
+						"id": "cs_sepa",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-sepa@ejemplo.test",
+					"asunto": "Tu licencia del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nTu clave de licencia del TPV (1 año):\n\n    ‹clave·1›\n\nIntrodúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.\n\nGuarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·1›",
+							"license_id": "‹id·2›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_sepa",
+							"stripe_payment_intent_id": "pi_cs_sepa",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:02",
+							"unidad": 1
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·2›",
+							"license_key_hash": "‹hash de clave·1›",
+							"license_key_enc": "‹cifrado de clave·1›",
+							"key_short": "‹clave corta·1›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:02",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-sepa@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_sepa",
+							"stripe_payment_intent_id": "pi_cs_sepa",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:02",
+							"updated_at_ms": "T0+0d 00:02",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:02"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_2",
+							"event_name": "checkout.session.async_payment_succeeded",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_sepa",
+							"sig_hex": null,
+							"body_sha256": "‹hash·2›",
+							"payload_json": {
+								"id": "evt_2",
+								"object": "event",
+								"type": "checkout.session.async_payment_succeeded",
+								"data": {
+									"object": {
+										"id": "cs_sepa",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:02",
+							"processed_at_ms": "T0+0d 00:02",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [
+			{
+				"payment_id": "‹id·1›",
+				"license_id": "‹id·2›",
+				"kind": "issue",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_sepa",
+				"stripe_payment_intent_id": "pi_cs_sepa",
+				"reversed_at_ms": null,
+				"reversed_reason": null,
+				"reversed_event_uid": null,
+				"at_ms": "T0+0d 00:02",
+				"unidad": 1
+			}
+		],
+		"licenses": [
+			{
+				"license_id": "‹id·2›",
+				"license_key_hash": "‹hash de clave·1›",
+				"license_key_enc": "‹cifrado de clave·1›",
+				"key_short": "‹clave corta·1›",
+				"tenant_id": null,
+				"main_device_id": null,
+				"status": "issued",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:02",
+				"activated_at_ms": null,
+				"expires_at_ms": null,
+				"customer_email": "cs-sepa@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_sepa",
+				"stripe_payment_intent_id": "pi_cs_sepa",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:02",
+				"updated_at_ms": "T0+0d 00:02",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:02"
+			}
+		],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_sepa",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"id": "evt_1",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_sepa",
+							"object": "checkout.session",
+							"payment_status": "unpaid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:01",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_2",
+				"event_name": "checkout.session.async_payment_succeeded",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_sepa",
+				"sig_hex": null,
+				"body_sha256": "‹hash·2›",
+				"payload_json": {
+					"id": "evt_2",
+					"object": "event",
+					"type": "checkout.session.async_payment_succeeded",
+					"data": {
+						"object": {
+							"id": "cs_sepa",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:02",
+				"processed_at_ms": "T0+0d 00:02",
+				"processed_ok": 1,
+				"error_text": null
+			}
+		]
+	}
+}

@@ -1,0 +1,755 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_alta",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true
+				}
+			},
+			"correos": [
+				{
+					"para": "cs-alta@ejemplo.test",
+					"asunto": "Tu licencia del TPV",
+					"texto": "Hola, Bar de pruebas:\n\nTu clave de licencia del TPV (1 año):\n\n    ‹clave·1›\n\nIntrodúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.\n\nGuarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador."
+				}
+			],
+			"cambios": {
+				"license_payments": [
+					{
+						"nueva": {
+							"payment_id": "‹id·1›",
+							"license_id": "‹id·2›",
+							"kind": "issue",
+							"term_months": 12,
+							"stripe_checkout_session_id": "cs_alta",
+							"stripe_payment_intent_id": "pi_cs_alta",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null,
+							"at_ms": "T0+0d 00:01",
+							"unidad": 1
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·2›",
+							"license_key_hash": "‹hash de clave·1›",
+							"license_key_enc": "‹cifrado de clave·1›",
+							"key_short": "‹clave corta·1›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "stripe",
+							"issued_at_ms": "T0+0d 00:01",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "cs-alta@ejemplo.test",
+							"customer_name": "Bar de pruebas",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": "cus_oraculo",
+							"stripe_checkout_session_id": "cs_alta",
+							"stripe_payment_intent_id": "pi_cs_alta",
+							"stripe_price_id": "price_12_meses",
+							"created_at_ms": "T0+0d 00:01",
+							"updated_at_ms": "T0+0d 00:01",
+							"customer_business_name": "Bar de Pruebas S.L.",
+							"customer_phone": "+34 600 000 000",
+							"customer_address_json": {
+								"line1": "Calle Mayor 1",
+								"line2": null,
+								"city": "Madrid",
+								"state": null,
+								"postal_code": "28013",
+								"country": "ES"
+							},
+							"key_email_sent_at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_alta",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"id": "evt_1",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_alta",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·1›",
+				"deviceId": "equipo-del-bar",
+				"devicePubKey": "‹clave pública de equipo-del-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·3›",
+					"deviceId": "equipo-del-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·3›",
+							"deviceId": "equipo-del-bar",
+							"licHash": "‹hash de clave·1›",
+							"iat": "T0+0d 00:02",
+							"exp": "T0+30d 00:02"
+						}
+					},
+					"status": "active",
+					"expiresAt": "T0+365d 00:02",
+					"fieldDek": "‹dek·1›",
+					"cambioDeEquipo": false
+				}
+			},
+			"tenantHub": [
+				{
+					"negocio": "‹id·3›",
+					"metodo": "estaAprovisionado",
+					"argumentos": []
+				},
+				{
+					"negocio": "‹id·3›",
+					"metodo": "aprovisionar",
+					"argumentos": [
+						"‹id·3›"
+					]
+				}
+			],
+			"cambios": {
+				"devices": [
+					{
+						"nueva": {
+							"device_id": "equipo-del-bar",
+							"tenant_id": "‹id·3›",
+							"role": "tpv",
+							"first_seen_at_ms": "T0+0d 00:02",
+							"last_seen_at_ms": "T0+0d 00:02",
+							"revoked_at_ms": null,
+							"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+							"pubkey_alg": "ed25519"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"tenant_id": "‹id·3›",
+							"main_device_id": "equipo-del-bar",
+							"status": "active",
+							"activated_at_ms": "T0+0d 00:02",
+							"expires_at_ms": "T0+365d 00:02",
+							"updated_at_ms": "T0+0d 00:02"
+						},
+						"antes": {
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"updated_at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"tenants": [
+					{
+						"nueva": {
+							"tenant_id": "‹id·3›",
+							"status": "active",
+							"legal_name": "Bar de Pruebas S.L.",
+							"display_name": "Bar de pruebas",
+							"email": null,
+							"phone": null,
+							"country": "ES",
+							"timezone": null,
+							"notes": null,
+							"created_at_ms": "T0+0d 00:02",
+							"updated_at_ms": "T0+0d 00:02",
+							"field_dek": "‹cifrado de dek·1›",
+							"piloto": 0
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 3,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_2",
+				"object": "event",
+				"type": "charge.dispute.created",
+				"data": {
+					"object": {
+						"id": "du_cs_alta",
+						"object": "dispute",
+						"charge": "ch_cs_alta",
+						"payment_intent": "pi_cs_alta",
+						"amount": 12000,
+						"status": "needs_response"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": true,
+					"license_id": "‹id·2›",
+					"accion": "revoked",
+					"licencias": [
+						{
+							"license_id": "‹id·2›",
+							"accion": "revoked"
+						}
+					]
+				}
+			},
+			"tenantHub": [
+				{
+					"negocio": "‹id·3›",
+					"metodo": "releerMain",
+					"argumentos": [
+						"‹id·3›"
+					]
+				}
+			],
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·4›",
+							"action": "dispute",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_2",
+								"accion": "revocada",
+								"term_months": 12,
+								"expires_at_ms": null,
+								"dias_activada": 0,
+								"payment_intent": "pi_cs_alta"
+							},
+							"at_ms": "T0+0d 00:03"
+						}
+					}
+				],
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·1›",
+							"reversed_at_ms": "T0+0d 00:03",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_2"
+						},
+						"antes": {
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"status": "revoked",
+							"disabled": 1,
+							"updated_at_ms": "T0+0d 00:03"
+						},
+						"antes": {
+							"status": "active",
+							"disabled": 0,
+							"updated_at_ms": "T0+0d 00:02"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_2",
+							"event_name": "charge.dispute.created",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_alta",
+							"sig_hex": null,
+							"body_sha256": "‹hash·2›",
+							"payload_json": {
+								"id": "evt_2",
+								"object": "event",
+								"type": "charge.dispute.created",
+								"data": {
+									"object": {
+										"id": "du_cs_alta",
+										"object": "dispute",
+										"charge": "ch_cs_alta",
+										"payment_intent": "pi_cs_alta",
+										"amount": 12000,
+										"status": "needs_response"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:03",
+							"processed_at_ms": "T0+0d 00:03",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 4,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_3",
+				"object": "event",
+				"type": "charge.dispute.funds_withdrawn",
+				"data": {
+					"object": {
+						"id": "du_cs_alta",
+						"object": "dispute",
+						"charge": "ch_cs_alta",
+						"payment_intent": "pi_cs_alta",
+						"amount": 12000,
+						"status": "needs_response"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": false,
+					"reason": "already_reversed",
+					"license_id": "‹id·2›"
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_3",
+							"event_name": "charge.dispute.funds_withdrawn",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_alta",
+							"sig_hex": null,
+							"body_sha256": "‹hash·3›",
+							"payload_json": {
+								"id": "evt_3",
+								"object": "event",
+								"type": "charge.dispute.funds_withdrawn",
+								"data": {
+									"object": {
+										"id": "du_cs_alta",
+										"object": "dispute",
+										"charge": "ch_cs_alta",
+										"payment_intent": "pi_cs_alta",
+										"amount": 12000,
+										"status": "needs_response"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:04",
+							"processed_at_ms": "T0+0d 00:04",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 5,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_4",
+				"object": "event",
+				"type": "charge.dispute.closed",
+				"data": {
+					"object": {
+						"id": "du_cs_alta",
+						"object": "dispute",
+						"charge": "ch_cs_alta",
+						"payment_intent": "pi_cs_alta",
+						"amount": 12000,
+						"status": "won"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"restored": true,
+					"license_id": "‹id·2›",
+					"license_ids": [
+						"‹id·2›"
+					]
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·5›",
+							"action": "reactivate",
+							"license_id": "‹id·2›",
+							"detail": {
+								"event_uid": "evt_4",
+								"motivo": "disputa_ganada"
+							},
+							"at_ms": "T0+0d 00:05"
+						}
+					}
+				],
+				"license_payments": [
+					{
+						"cambiada": {
+							"payment_id": "‹id·1›",
+							"reversed_at_ms": null,
+							"reversed_reason": null,
+							"reversed_event_uid": null
+						},
+						"antes": {
+							"reversed_at_ms": "T0+0d 00:03",
+							"reversed_reason": "dispute",
+							"reversed_event_uid": "evt_2"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·2›",
+							"status": "active",
+							"disabled": 0,
+							"updated_at_ms": "T0+0d 00:05"
+						},
+						"antes": {
+							"status": "revoked",
+							"disabled": 1,
+							"updated_at_ms": "T0+0d 00:03"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_4",
+							"event_name": "charge.dispute.closed",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_alta",
+							"sig_hex": null,
+							"body_sha256": "‹hash·4›",
+							"payload_json": {
+								"id": "evt_4",
+								"object": "event",
+								"type": "charge.dispute.closed",
+								"data": {
+									"object": {
+										"id": "du_cs_alta",
+										"object": "dispute",
+										"charge": "ch_cs_alta",
+										"payment_intent": "pi_cs_alta",
+										"amount": 12000,
+										"status": "won"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:05",
+							"processed_at_ms": "T0+0d 00:05",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [
+			{
+				"audit_id": "‹id·4›",
+				"action": "dispute",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_2",
+					"accion": "revocada",
+					"term_months": 12,
+					"expires_at_ms": null,
+					"dias_activada": 0,
+					"payment_intent": "pi_cs_alta"
+				},
+				"at_ms": "T0+0d 00:03"
+			},
+			{
+				"audit_id": "‹id·5›",
+				"action": "reactivate",
+				"license_id": "‹id·2›",
+				"detail": {
+					"event_uid": "evt_4",
+					"motivo": "disputa_ganada"
+				},
+				"at_ms": "T0+0d 00:05"
+			}
+		],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [
+			{
+				"device_id": "equipo-del-bar",
+				"tenant_id": "‹id·3›",
+				"role": "tpv",
+				"first_seen_at_ms": "T0+0d 00:02",
+				"last_seen_at_ms": "T0+0d 00:02",
+				"revoked_at_ms": null,
+				"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+				"pubkey_alg": "ed25519"
+			}
+		],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [
+			{
+				"payment_id": "‹id·1›",
+				"license_id": "‹id·2›",
+				"kind": "issue",
+				"term_months": 12,
+				"stripe_checkout_session_id": "cs_alta",
+				"stripe_payment_intent_id": "pi_cs_alta",
+				"reversed_at_ms": null,
+				"reversed_reason": null,
+				"reversed_event_uid": null,
+				"at_ms": "T0+0d 00:01",
+				"unidad": 1
+			}
+		],
+		"licenses": [
+			{
+				"license_id": "‹id·2›",
+				"license_key_hash": "‹hash de clave·1›",
+				"license_key_enc": "‹cifrado de clave·1›",
+				"key_short": "‹clave corta·1›",
+				"tenant_id": "‹id·3›",
+				"main_device_id": "equipo-del-bar",
+				"status": "active",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "stripe",
+				"issued_at_ms": "T0+0d 00:01",
+				"activated_at_ms": "T0+0d 00:02",
+				"expires_at_ms": "T0+365d 00:02",
+				"customer_email": "cs-alta@ejemplo.test",
+				"customer_name": "Bar de pruebas",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": "cus_oraculo",
+				"stripe_checkout_session_id": "cs_alta",
+				"stripe_payment_intent_id": "pi_cs_alta",
+				"stripe_price_id": "price_12_meses",
+				"created_at_ms": "T0+0d 00:01",
+				"updated_at_ms": "T0+0d 00:05",
+				"customer_business_name": "Bar de Pruebas S.L.",
+				"customer_phone": "+34 600 000 000",
+				"customer_address_json": {
+					"line1": "Calle Mayor 1",
+					"line2": null,
+					"city": "Madrid",
+					"state": null,
+					"postal_code": "28013",
+					"country": "ES"
+				},
+				"key_email_sent_at_ms": "T0+0d 00:01"
+			}
+		],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [
+			{
+				"tenant_id": "‹id·3›",
+				"status": "active",
+				"legal_name": "Bar de Pruebas S.L.",
+				"display_name": "Bar de pruebas",
+				"email": null,
+				"phone": null,
+				"country": "ES",
+				"timezone": null,
+				"notes": null,
+				"created_at_ms": "T0+0d 00:02",
+				"updated_at_ms": "T0+0d 00:02",
+				"field_dek": "‹cifrado de dek·1›",
+				"piloto": 0
+			}
+		],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_alta",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"id": "evt_1",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_alta",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:01",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_2",
+				"event_name": "charge.dispute.created",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_alta",
+				"sig_hex": null,
+				"body_sha256": "‹hash·2›",
+				"payload_json": {
+					"id": "evt_2",
+					"object": "event",
+					"type": "charge.dispute.created",
+					"data": {
+						"object": {
+							"id": "du_cs_alta",
+							"object": "dispute",
+							"charge": "ch_cs_alta",
+							"payment_intent": "pi_cs_alta",
+							"amount": 12000,
+							"status": "needs_response"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:03",
+				"processed_at_ms": "T0+0d 00:03",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_3",
+				"event_name": "charge.dispute.funds_withdrawn",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_alta",
+				"sig_hex": null,
+				"body_sha256": "‹hash·3›",
+				"payload_json": {
+					"id": "evt_3",
+					"object": "event",
+					"type": "charge.dispute.funds_withdrawn",
+					"data": {
+						"object": {
+							"id": "du_cs_alta",
+							"object": "dispute",
+							"charge": "ch_cs_alta",
+							"payment_intent": "pi_cs_alta",
+							"amount": 12000,
+							"status": "needs_response"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:04",
+				"processed_at_ms": "T0+0d 00:04",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_4",
+				"event_name": "charge.dispute.closed",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_alta",
+				"sig_hex": null,
+				"body_sha256": "‹hash·4›",
+				"payload_json": {
+					"id": "evt_4",
+					"object": "event",
+					"type": "charge.dispute.closed",
+					"data": {
+						"object": {
+							"id": "du_cs_alta",
+							"object": "dispute",
+							"charge": "ch_cs_alta",
+							"payment_intent": "pi_cs_alta",
+							"amount": 12000,
+							"status": "won"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:05",
+				"processed_at_ms": "T0+0d 00:05",
+				"processed_ok": 1,
+				"error_text": null
+			}
+		]
+	}
+}

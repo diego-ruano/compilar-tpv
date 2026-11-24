@@ -1,0 +1,145 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_sin_meses",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 500,
+				"cuerpo": {
+					"ok": false,
+					"error": "fulfillment_failed",
+					"code": "internal"
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "checkout.session.completed",
+							"resource_type": "checkout.session",
+							"resource_id": "cs_sin_meses",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"id": "evt_1",
+								"object": "event",
+								"type": "checkout.session.completed",
+								"data": {
+									"object": {
+										"id": "cs_sin_meses",
+										"object": "checkout.session",
+										"payment_status": "paid"
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 0,
+							"error_text": "missing_term_months_metadata (price sin metadata.term_months: price_sin_duracion): cs_sin_meses"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "checkout.session.completed",
+				"data": {
+					"object": {
+						"id": "cs_sin_meses",
+						"object": "checkout.session",
+						"payment_status": "paid"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 500,
+				"cuerpo": {
+					"ok": false,
+					"error": "fulfillment_failed",
+					"code": "internal"
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"cambiada": {
+							"event_uid": "evt_1",
+							"processed_at_ms": "T0+0d 00:02"
+						},
+						"antes": {
+							"processed_at_ms": "T0+0d 00:01"
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [],
+		"licenses": [],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "checkout.session.completed",
+				"resource_type": "checkout.session",
+				"resource_id": "cs_sin_meses",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"id": "evt_1",
+					"object": "event",
+					"type": "checkout.session.completed",
+					"data": {
+						"object": {
+							"id": "cs_sin_meses",
+							"object": "checkout.session",
+							"payment_status": "paid"
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:02",
+				"processed_ok": 0,
+				"error_text": "missing_term_months_metadata (price sin metadata.term_months: price_sin_duracion): cs_sin_meses"
+			}
+		]
+	}
+}
