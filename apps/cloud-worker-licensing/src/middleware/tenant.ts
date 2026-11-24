@@ -12,24 +12,12 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { Env } from "../env";
 import { getDb } from "../server/db";
 import { normalizarRol, SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
+import { enSegundoPlano } from "../lib/enSegundoPlano";
+import { RechazoDeAutenticacion } from "../lib/sesion";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
 import { reportarRechazoDeDispositivo } from "../observability/axiom";
 import { scrub } from "../observability/scrub";
 import { acotar, MAX_FILTRADO } from "../observability/tope";
-
-/**
- * Mantiene viva una entrega de observabilidad más allá de la respuesta.
- *
- * El `try` es por los tests y por cualquier contexto sin `executionCtx`: ahí `c.executionCtx`
- * lanza. Perder un aviso nunca puede tumbar una petición.
- */
-function retenerEnvio(c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, p: Promise<unknown>): void {
-	try {
-		c.executionCtx.waitUntil(p);
-	} catch {
-		void p;
-	}
-}
 import { forbidden, unauthorized } from "../server/utils/response";
 import { wireToCode } from "../lib/errorCodes";
 import { vetoDeLicencia } from "../lib/licenciaEnUso";
@@ -202,7 +190,13 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("licHash", claims.licHash);
 		c.set("rol", rol);
 	} catch (e: any) {
-		const motivo = String(e?.message || e);
+		// Sólo un token o una firma que no valen son un rechazo de quien llama. Lo demás (la base central
+		// que no puede atender o que falla, sea cual sea el fallo, o un secreto sin configurar) no dice
+		// nada de él, y un 401 le haría creer que su token no vale: sube al `onError`, que lo contesta
+		// como lo que es (el 503 de `server/central/sinLaCentral.ts`, o un 500).
+		if (!(e instanceof RechazoDeAutenticacion)) throw e;
+
+		const motivo = e.message;
 
 		// Que un dispositivo no pueda autenticarse deja rastro (agregable en Axiom). Sin esto, un
 		// TPV rechazado es invisible para nosotros hasta que su dueño llama por teléfono.
@@ -212,7 +206,7 @@ export const tenantAuth: MiddlewareHandler<{
 		// AUD-32: esto pasa antes de saber quién llama, y la ruta la elige él (hasta 16 KB). Al
 		// evento sólo va su principio, 256 bytes, recortado DESPUÉS de filtrarla (`acotar`): un JWT o
 		// un correo en la ruta, partidos antes de filtrar, ya no se reconocerían y quedarían a la vista.
-		retenerEnvio(c, reportarRechazoDeDispositivo(c.env, {
+		enSegundoPlano(c, reportarRechazoDeDispositivo(c.env, {
 			motivo,
 			ruta: acotar(new URL(c.req.url).pathname, scrub, MAX_RUTA_EN_TELEMETRIA),
 			metodo: c.req.method,

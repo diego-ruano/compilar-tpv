@@ -122,5 +122,5 @@ export const PETICIONES_POR_MINUTO = 20;
  *     si desapareciera no habría ningún síntoma.
  */
 export async function pasaElFiltroExterior(env: { LIMITADOR_CLAIM?: RateLimit }, ip: string): Promise<boolean> {
-	return pasaElLimitador(env?.LIMITADOR_CLAIM, claveDeFreno(ip), "pairing");
+	return pasaElLimitador(env?.LIMITADOR_CLAIM, ip, "pairing");
 }

@@ -48,8 +48,9 @@ import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth"
 import { avisarCambioDeLicencia } from "../../lib/hub";
 import { CORREO_SOPORTE } from "../../lib/soporte";
 import { avisarBasePerdida, esBasePerdida } from "../../lib/basePerdida";
-import { pasaElLimitador } from "../../lib/limitador";
-import { ipDeLaPeticion } from "../pairing/pairing.avisos";
+import { enSegundoPlano } from "../../lib/enSegundoPlano";
+import { filtroPorIp } from "../../lib/limitador";
+import { respuestaSinLaCentral } from "../../server/central/sinLaCentral";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
 import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
 import { CLAVE_DESCONOCIDA, licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
@@ -110,8 +111,9 @@ function estaCaducada(lic: LicenseRow, nowMs: number): boolean {
  * estar si ya nació (`provisionTenantDatabase`). Devuelve el rechazo, o `null` si la base está.
  *
  * DO-PERDIDA · Si el negocio ya nació y su base no está, `tenant_db_perdida` (503) y un aviso: no
- * se crea una base vacía en su lugar. Cualquier otro fallo es el de siempre,
- * `tenant_db_provision_failed`.
+ * se crea una base vacía en su lugar. Si la base central, a la que se pregunta si el negocio nació, no
+ * puede atender, su 503 (`server/central/sinLaCentral.ts`): no es que la base no se pueda crear.
+ * Cualquier otro fallo es el de siempre, `tenant_db_provision_failed`.
  */
 async function baseDelNegocio(
 	c: Context<{ Bindings: Env }>,
@@ -124,14 +126,11 @@ async function baseDelNegocio(
 		return null;
 	} catch (e: any) {
 		if (esBasePerdida(e)) {
-			const aviso = avisarBasePerdida(c.env, { tenant_id: tenantId, device_id: deviceId, donde: "license.activate" });
-			try {
-				c.executionCtx.waitUntil(aviso);
-			} catch {
-				void aviso;
-			}
+			enSegundoPlano(c, avisarBasePerdida(c.env, { tenant_id: tenantId, device_id: deviceId, donde: "license.activate" }));
 			return c.json({ ok: false, error: "tenant_db_perdida" } satisfies ApiError, 503);
 		}
+		const sinCentral = respuestaSinLaCentral(c, e);
+		if (sinCentral) return sinCentral;
 		capturarError(e, "license.provision");
 		const detalle = String(e?.message || e);
 		// Al log (visible con `wrangler tail`): el detalle es la clave para diagnosticar. A la
@@ -183,19 +182,7 @@ async function rechazoFirmado(
  * RI-68 · Filtro por IP delante de las dos rutas anónimas que aceptan una clave de licencia. Recorta
  * el volumen de un barrido; los topes exactos (por licencia) están dentro. Ver `lib/limitador.ts`.
  */
-const filtroExterior: MiddlewareHandler<Ctx> = async (c, next) => {
-	if (!(await pasaElLimitador(c.env.LIMITADOR_LICENCIA, ipDeLaPeticion(c.req.raw), "license"))) {
-		return c.json(
-			{
-				ok: false,
-				error: "too_many_attempts",
-				message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto.",
-			} satisfies ApiError,
-			429,
-		);
-	}
-	await next();
-};
+const filtroExterior = filtroPorIp("LIMITADOR_LICENCIA", "license");
 
 // La tabla de frases (`lib/errorCodes.ts`) manda volver a vincular, que es cosa de una Handy. A quien
 // está activando se le dice lo que puede hacer él.
@@ -953,8 +940,12 @@ licenseRoutes.get("/status", async (c) => {
 // desajustado). NO se confía en el token: se leen sus claims sin verificar y se exige un
 // device-proof firmado con la clave privada del dispositivo, que solo tiene el equipo legítimo.
 // Es lo que evita que un 401 transitorio borre la licencia del cliente (bug #4).
+//
+// Por eso es anónima: con un token inventado, la clave del dispositivo se busca en la base central
+// antes de saber si la firma es buena. Lleva delante el filtro por IP de las puertas de la sesión
+// (`LIMITADOR_SESION`). Un 429 el cliente lo trata como la nube sin contestar: sigue con su gracia.
 
-licenseRoutes.post("/refresh", async (c) => {
+licenseRoutes.post("/refresh", filtroPorIp("LIMITADOR_SESION", "license_refresh"), async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, ["LICENSE_JWT_SECRET"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);

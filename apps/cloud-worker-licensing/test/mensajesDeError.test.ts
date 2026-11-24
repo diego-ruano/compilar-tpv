@@ -110,6 +110,8 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		/CopiaInservible\(\s*"([^"]+)"/g,
 		// Una subclase de `HubError` que fija su identificador y su estado en el constructor.
 		/super\(\s*"([^"]+)",\s*\d{3}\b/g,
+		// Un rechazo de `tenantAuth` (`lib/sesion.ts`): su mensaje es el `error` del 401.
+		/RechazoDeAutenticacion\(\s*"([^"]+)"/g,
 	];
 	// Un identificador de máquina; las frases («Lote no encontrado») ya se leen bien tal cual.
 	const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;

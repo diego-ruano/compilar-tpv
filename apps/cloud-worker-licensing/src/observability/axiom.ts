@@ -8,6 +8,7 @@
 // worker los retransmite. Si `AXIOM_TOKEN` no está configurado, el reenvío es un no-op silencioso.
 
 import type { Env } from "../env";
+import type { CentralNoDisponible, ErrorDeLaCentral } from "../server/central/cliente";
 import { scrub, scrubDeep } from "./scrub";
 import { acotar } from "./tope";
 
@@ -210,6 +211,36 @@ export function reportarHubNoDisponible(
 	try {
 		return ingestToAxiom(env, dataset, [
 			{ _time: new Date().toISOString(), service: "tpv-api", event: "hub_no_disponible", ...campos },
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+		return Promise.resolve();
+	}
+}
+
+/**
+ * La base central no ha podido atender una petición (`server/central/sinLaCentral.ts`). `motivo`:
+ * saturada, un fallo pasajero de la plataforma, sin contestar a tiempo (`plazo`), o el código con el
+ * que el objeto dice que no puede (`central_sin_aprovisionar`, `central_migracion_alterada`…). Es una
+ * para todo el servicio: lo que hay que mirar es la racha, sea del negocio que sea. `tenant_id` va
+ * cuando la petición es de uno, para poder cruzarlo.
+ */
+export function reportarCentralNoDisponible(
+	env: Env,
+	campos: {
+		motivo: CentralNoDisponible["motivo"] | ErrorDeLaCentral["code"];
+		metodo: string;
+		ruta: string;
+		error: string;
+		tenant_id?: string;
+	},
+): Promise<unknown> {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
+
+	try {
+		return ingestToAxiom(env, dataset, [
+			{ _time: new Date().toISOString(), service: "tpv-api", event: "central_no_disponible", ...campos },
 		]);
 	} catch {
 		/* nunca afecta a la respuesta */

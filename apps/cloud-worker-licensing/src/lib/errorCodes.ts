@@ -340,8 +340,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"La base de datos de la nube se está restaurando. Vuelve a intentarlo en unos minutos.",
 	tenant_db_migration_failed:
 		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
-	hub_overloaded:
-		"La nube está atendiendo demasiadas peticiones de este negocio. Espera unos segundos y vuelve a intentarlo.",
+	// Lo dicen el objeto del negocio y el de la base central, que es de todos: no habla de «este negocio».
+	hub_overloaded: "La nube está atendiendo demasiadas peticiones. Espera unos segundos y vuelve a intentarlo.",
 	hub_unavailable: "La nube no ha podido atender la petición. Vuelve a intentarlo en unos segundos.",
 	main_sin_comprobar:
 		"La nube no ha podido comprobar la licencia de este equipo. Vuelve a intentarlo en unos segundos.",

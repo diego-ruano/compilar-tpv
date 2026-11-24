@@ -32,7 +32,7 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { cuerpoConIdentificador } from "../../lib/validacion";
-import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
+import { DEMASIADAS_PETICIONES, pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 // Lo que viaja en el camino: una carpeta de la lista y un UUID con su extensión (OBS-06).
 import { RUTA_DE_IMAGEN } from "./rutaDeImagen";
@@ -166,9 +166,9 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	const cached = await cache.match(cacheKey);
 	if (cached) return cached;
 
-	if (!(await pasaElLimitador(c.env.LIMITADOR_IMAGENES, claveDeFreno(ipDeLaPeticion(c.req.raw)), "images"))) {
+	if (!(await pasaElLimitador(c.env.LIMITADOR_IMAGENES, ipDeLaPeticion(c.req.raw), "images"))) {
 		return c.json(
-			{ error: "too_many_attempts", message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto." },
+			{ error: "too_many_attempts", message: DEMASIADAS_PETICIONES },
 			429,
 			{ ...SIN_CACHE, "Retry-After": "60" },
 		);

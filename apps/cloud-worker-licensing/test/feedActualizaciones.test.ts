@@ -25,7 +25,9 @@ vi.mock("../src/server/db", async (original) => ({
 	getDb: () => clienteActual,
 }));
 
-const { updatesRoutes, compararVersiones } = await import("../src/domains/updates/updates.routes");
+const { updatesRoutes, compararVersiones, olvidarLoQueLeeElFeed } = await import(
+	"../src/domains/updates/updates.routes"
+);
 
 type Release = {
 	version: string;
@@ -71,6 +73,8 @@ async function feed(
 
 beforeEach(() => {
 	clienteActual = null;
+	// Cada caso siembra sus versiones: lo que el feed se guardó en el caso anterior no vale.
+	olvidarLoQueLeeElFeed();
 });
 
 describe("REV-23 · qué versión sirve el feed", () => {

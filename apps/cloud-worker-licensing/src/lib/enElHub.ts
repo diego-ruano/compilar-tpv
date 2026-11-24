@@ -40,11 +40,10 @@ import { anotarDesgloseDelHub, medirTramo } from "../observability/tiempos";
 import { acotar, MAX_FILTRADO } from "../observability/tope";
 import { hubDe } from "./hub";
 import { hubLocal } from "./hubLocal";
+import { enSegundoPlano } from "./enSegundoPlano";
+import { respuestaNoDisponible } from "./noDisponible";
 
 type Ctx = Context<{ Bindings: Env; Variables: TenantVars }>;
-
-/** Cuánto se le dice al cliente que espere antes de repetir, con el objeto saturado. */
-const ESPERA_SI_SATURADO_S = 2;
 
 /**
  * Lo que Cloudflare marca en el error de una llamada a un Durable Object
@@ -71,11 +70,10 @@ function esLectura(c: Ctx): boolean {
 }
 
 /**
- * El objeto del negocio no ha podido atender la petición: un 503 `external`, que el cliente trata
- * como la nube sin disponibilidad y no como un fallo del programa (una escritura la repite con su
- * misma clave). Saturado lleva `Retry-After`. Queda anotado en Axiom (`hub_no_disponible`), y lo
- * que la plataforma no da por pasajero va además a Sentry y al log: ahí puede haber algo que
- * arreglar (una respuesta que no cabe en el RPC, un fallo fuera de la `app`).
+ * El objeto del negocio no ha podido atender la petición: el 503 `external` de `lib/noDisponible.ts`,
+ * con `Retry-After` si está saturado. Queda anotado en Axiom (`hub_no_disponible`), y lo que la
+ * plataforma no da por pasajero va además a Sentry y al log: ahí puede haber algo que arreglar (una
+ * respuesta que no cabe en el RPC, un fallo fuera de la `app`).
  */
 function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean): Response {
 	const fallo = (error ?? {}) as FalloDelObjeto;
@@ -90,27 +88,20 @@ function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean
 		);
 	}
 
-	const anotado = reportarHubNoDisponible(c.env, {
-		tenant_id: tenantId,
-		motivo: saturado ? "saturado" : fallo.retryable === true ? "pasajero" : "otro",
-		repetida,
-		metodo: c.req.method,
-		// Como en `tenantAuth` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-		ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
-		error: String(fallo.message ?? error).slice(0, 300),
-	});
-	try {
-		c.executionCtx.waitUntil(anotado);
-	} catch {
-		// Sin contexto de ejecución (los tests): perder la anotación no puede tumbar la respuesta.
-		void anotado;
-	}
+	enSegundoPlano(
+		c,
+		reportarHubNoDisponible(c.env, {
+			tenant_id: tenantId,
+			motivo: saturado ? "saturado" : fallo.retryable === true ? "pasajero" : "otro",
+			repetida,
+			metodo: c.req.method,
+			// Como en `tenantAuth` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
+			ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
+			error: String(fallo.message ?? error).slice(0, 300),
+		}),
+	);
 
-	return saturado
-		? c.json({ ok: false, code: "external", error: "hub_overloaded" }, 503, {
-				"Retry-After": String(ESPERA_SI_SATURADO_S),
-			})
-		: c.json({ ok: false, code: "external", error: "hub_unavailable" }, 503);
+	return respuestaNoDisponible(c, saturado);
 }
 
 /** Pasa la petición, ya autenticada, al TenantHub del negocio y devuelve lo que conteste. */

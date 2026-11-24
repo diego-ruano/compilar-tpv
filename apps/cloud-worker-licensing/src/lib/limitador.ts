@@ -5,11 +5,22 @@
 //
 // Lo que es y lo que no, porque son propiedades del binding y no decisiones nuestras:
 //   · Cuenta por centro de datos y es eventualmente consistente: recorta volumen, no es un control
-//     exacto. Cada ruta que lo usa tiene detrás su propio tope exacto en la base.
+//     exacto. Cada ruta que lo usa tiene detrás lo que la protege de verdad: un tope exacto en la
+//     base, el secreto que tiene que presentar quien llama o, en el feed de actualizaciones, la caché
+//     de lo que lee.
 //   · Si el binding no está o falla, deja pasar. Es lo contrario de fallar cerrado, y aquí es lo
-//     correcto: detrás hay un control exacto, así que fallar abierto sólo devuelve la ruta a como
-//     estaba antes del filtro, mientras que fallar cerrado la dejaría inservible por una línea de
-//     configuración.
+//     correcto: fallar abierto sólo devuelve la ruta a como estaba antes del filtro, mientras que
+//     fallar cerrado la dejaría inservible por una línea de configuración.
+//
+// Con la base central en un solo objeto (`durableObjects/baseCentral.ts`), que atiende de una en una,
+// es además lo que impide que una sola red la sature con lecturas anónimas: toda ruta sin
+// autenticación que la lea lleva delante un filtro de éstos o una caché
+// (`test/centralAnonimas.test.ts`).
+
+import type { MiddlewareHandler } from "hono";
+
+import type { Env } from "../env";
+import { ipDeLaPeticion } from "../domains/pairing/pairing.avisos";
 
 /**
  * La clave con la que se frena a quien llama desde `ip` (AUD-11).
@@ -95,19 +106,45 @@ function gruposIpv6(texto: string): number[] | null {
 	return [...cabeza, ...Array<number>(faltan).fill(0), ...cola];
 }
 
-/** ¿Puede pasar `clave` (normalmente la IP)? `quien` sólo sirve para el log. */
+/**
+ * ¿Puede pasar quien llama desde `ip`? Se cuenta por su red, `claveDeFreno(ip)` (AUD-11), en todos los
+ * limitadores: contando por dirección, un solo equipo con IPv6 estrenaría cuenta en cada petición y
+ * el filtro no frenaría nada. `quien` sólo sirve para el log.
+ */
 export async function pasaElLimitador(
 	limitador: RateLimit | undefined,
-	clave: string,
+	ip: string,
 	quien: string,
 ): Promise<boolean> {
 	if (!limitador) return true;
 
 	try {
-		const { success } = await limitador.limit({ key: clave });
+		const { success } = await limitador.limit({ key: claveDeFreno(ip) });
 		return success;
 	} catch (e: any) {
 		console.error(`[${quien}] el limitador falló, se deja pasar:`, String(e?.message || e));
 		return true;
 	}
+}
+
+/** Lo que se le contesta a quien frena un filtro por IP: la ventana de estos bindings es de un minuto. */
+export const DEMASIADAS_PETICIONES = "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto.";
+
+/** Los bindings de `ratelimits` del entorno, por su nombre. */
+type NombreDeLimitador = { [K in keyof Env]-?: NonNullable<Env[K]> extends RateLimit ? K : never }[keyof Env];
+
+/**
+ * El filtro por IP de una ruta anónima, como middleware que va delante de los demás: lo que corta no
+ * llega a leer el cuerpo ni a tocar la base central. Contesta 429 `too_many_attempts`, con el minuto
+ * de la ventana en `Retry-After`.
+ */
+export function filtroPorIp(limitador: NombreDeLimitador, quien: string): MiddlewareHandler<{ Bindings: Env }> {
+	return async (c, next) => {
+		if (!(await pasaElLimitador(c.env[limitador], ipDeLaPeticion(c.req.raw), quien))) {
+			return c.json({ ok: false, error: "too_many_attempts", message: DEMASIADAS_PETICIONES }, 429, {
+				"Retry-After": "60",
+			});
+		}
+		await next();
+	};
 }

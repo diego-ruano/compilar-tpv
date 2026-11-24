@@ -77,6 +77,18 @@ export interface Env {
 	// pinta la Handy. Holgado: una Handy que estrena la carta pide cientos de golpe. Opcional como los
 	// de arriba: sin él cada imagen sigue saliendo de R2, sólo que sin techo por red.
 	LIMITADOR_IMAGENES?: RateLimit;
+
+	// Filtro por IP del feed público de actualizaciones (`domains/updates/updates.routes.ts`). Opcional
+	// como los de arriba: detrás está la caché de lo que el feed lee de la base central.
+	LIMITADOR_ACTUALIZACIONES?: RateLimit;
+
+	// Filtro por IP de las puertas anónimas por las que un equipo abre, renueva o recoge su sesión, que
+	// leen la base central antes de saber quién llama: el canje del ticket del WebSocket (`GET /ws`),
+	// `/v1/license/refresh` y la espera de la Handy que se empareja (`/v1/pair/fetch-token` y
+	// `/cancel`). Holgado: los equipos de un bar salen por la misma IP, y una Handy que espera la
+	// aprobación pregunta cada segundo y medio. Opcional como los de arriba.
+	LIMITADOR_SESION?: RateLimit;
+
 	// Turnstile del widget. La clave pública va en `vars`; el secreto, con
 	// `wrangler secret put TURNSTILE_SECRET_KEY`. Sin secreto el alta queda cerrada (503).
 	TURNSTILE_SITE_KEY?: string;

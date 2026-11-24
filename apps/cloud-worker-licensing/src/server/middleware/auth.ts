@@ -2,7 +2,7 @@
 import type { Base } from "../../lib/sql";
 
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
-import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
+import { leerBearer, RechazoDeAutenticacion, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
 import { quitarComillas } from "../../lib/texto";
 import { b64ToBytes } from "../utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../utils/crypto";
@@ -30,10 +30,11 @@ function deviceCacheKey(tenantId: string, deviceId: string): string {
 /**
  * El token y lo que afirma. Devuelve también el token porque el device-proof lo cubre con su
  * hash: quien autentica y quien comprueba la firma tienen que ver exactamente la misma cadena.
+ * Un token que no vale lanza `RechazoDeAutenticacion`.
  */
 export async function verifyJwt(env: any, req: Request): Promise<{ token: string; claims: AuthClaims }> {
 	const token = leerBearer(req);
-	if (!token) throw new Error("missing_token");
+	if (!token) throw new RechazoDeAutenticacion("missing_token");
 
 	return { token, claims: await verificarSesion(env, token) };
 }
@@ -103,6 +104,9 @@ async function resolverDevice(
  *
  * Devuelve el rol de la fila del dispositivo (`tpv` | `handy`, normalizado), que sale de la misma
  * consulta que su clave pública: quien autentica ya lo tiene y no hace falta volver a por él.
+ *
+ * Lo que no vale lanza `RechazoDeAutenticacion`; un fallo al leer el dispositivo en la base central
+ * sale tal cual, que no es un rechazo.
  */
 export async function verifyDeviceProofOrThrow(
 	req: Request,
@@ -114,19 +118,19 @@ export async function verifyDeviceProofOrThrow(
 	const tsStr = (req.headers.get("X-Device-Ts") || "").trim();
 	const sigCabecera = req.headers.get("X-Device-Sig") || "";
 	// AUD-33: una firma son 88 caracteres. Más larga se rechaza antes de tocarla y de leer la base.
-	if (sigCabecera.length > TOPE_FIRMA_B64) throw new Error("bad_device_signature");
+	if (sigCabecera.length > TOPE_FIRMA_B64) throw new RechazoDeAutenticacion("bad_device_signature");
 	const sigB64Raw = sigCabecera.trim();
-	if (!tsStr || !sigB64Raw) throw new Error("missing_device_proof");
+	if (!tsStr || !sigB64Raw) throw new RechazoDeAutenticacion("missing_device_proof");
 
 	const ts = Number(tsStr);
-	if (!Number.isFinite(ts)) throw new Error("bad_device_ts");
+	if (!Number.isFinite(ts)) throw new RechazoDeAutenticacion("bad_device_ts");
 
 	const now = Date.now();
 	const MAX_SKEW_MS = 2 * 60 * 1000;
-	if (Math.abs(now - ts) > MAX_SKEW_MS) throw new Error("device_ts_out_of_range");
+	if (Math.abs(now - ts) > MAX_SKEW_MS) throw new RechazoDeAutenticacion("device_ts_out_of_range");
 
 	const dev = await resolverDevice(dbCentral, claims.tenantId, claims.deviceId);
-	if (!dev.ok) throw new Error(dev.error);
+	if (!dev.ok) throw new RechazoDeAutenticacion(dev.error);
 	const pubB64 = dev.pubB64;
 
 	const url = new URL(req.url);
@@ -147,7 +151,7 @@ export async function verifyDeviceProofOrThrow(
 	} catch (e: any) {
 		// `cause`: sin ella se pierde la traza del fallo original (una firma mal formada y un
 		// error de la cripto llegan indistinguibles al log).
-		throw new Error(`verify_failed: ${String(e?.message || e)}`, { cause: e });
+		throw new RechazoDeAutenticacion(`verify_failed: ${String(e?.message || e)}`, { cause: e });
 	}
 	return { rol: dev.rol };
 }

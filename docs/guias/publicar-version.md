@@ -196,6 +196,10 @@ manifiesto lleva las dos.
   final), no la última insertada. A un equipo de un negocio piloto (lo dice la cabecera `X-Tpv-Device`)
   le sirve la más alta de `beta` y `stable`; a los demás, sólo de `stable`. Sin cabecera, con un equipo
   desconocido o revocado, o si falla la consulta, `stable`. Sin nada que ofrecer, 204.
+- Es público, así que no lee la base central en cada petición: cada isolate se guarda un minuto las
+  versiones activas y los equipos piloto, y delante hay un filtro por IP (`LIMITADOR_ACTUALIZACIONES`,
+  60 por minuto). **Una versión publicada, retirada o promocionada, o un bar marcado como piloto, tarda
+  como mucho un minuto en verse.**
 - `POST /v1/update/publish` y `POST /v1/update/deactivate` exigen `RELEASE_ADMIN_TOKEN`. Volver a
   publicar una versión retoca su fila (`ON CONFLICT … DO UPDATE`) y la reactiva.
 - La lista de versiones, la promoción y los pilotos van por `/v1/admin/*` (`ADMIN_API_TOKEN`, el CLI).
@@ -208,8 +212,8 @@ curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/deactivate \
   -d '{ "version": "1.2.0" }'
 ```
 
-Pone `is_active = 0` (sin `arch`, en todas las arquitecturas; sin `channel`, en `beta` y en `stable`) y
-el feed vuelve a ofrecer la anterior activa. Quien ya instaló la mala necesita una versión nueva con el arreglo: el updater no baja de
+Pone `is_active = 0` (sin `arch`, en todas las arquitecturas; sin `channel`, en `beta` y en `stable`) y,
+en menos de un minuto, el feed vuelve a ofrecer la anterior activa. Quien ya instaló la mala necesita una versión nueva con el arreglo: el updater no baja de
 versión.
 
 ## En el TPV

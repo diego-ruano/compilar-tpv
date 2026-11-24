@@ -29,6 +29,19 @@ import type { Env } from "../env";
 /** Lo que un token de sesión afirma, y lo único que se lee de él. */
 export type ClaimsSesion = { tenantId: string; deviceId: string; licHash: string };
 
+/**
+ * Quien llama no se ha identificado: un token o una firma de dispositivo que no valen, o un
+ * dispositivo que la nube no reconoce. El mensaje es el identificador que `tenantAuth` contesta en su
+ * 401. Sólo esto es un rechazo: lo demás que falla al comprobarlo (la base central, un secreto sin
+ * configurar) no dice nada de quien llama, y `tenantAuth` lo deja subir al `onError`.
+ */
+export class RechazoDeAutenticacion extends Error {
+	constructor(identificador: string, opciones?: ErrorOptions) {
+		super(identificador, opciones);
+		this.name = "RechazoDeAutenticacion";
+	}
+}
+
 /** Vida del token de sesión de la Main. Nunca se llega a ella: `/status` lo renueva cada 6 h. */
 export const MAIN_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -125,7 +138,7 @@ export async function verificarSesion(env: Env, token: string): Promise<ClaimsSe
 	} catch (e: any) {
 		// `cause`: sin ella se pierde el error original de `jose`, que es lo que distingue una
 		// firma mal formada de una que no cuadra.
-		throw new Error(identificadorDe(e), { cause: e });
+		throw new RechazoDeAutenticacion(identificadorDe(e), { cause: e });
 	}
 
 	return parsearClaims(payload);
@@ -153,7 +166,7 @@ function parsearClaims(payload: JWTPayload): ClaimsSesion {
 	const deviceId = String(payload.deviceId || "");
 	const licHash = String(payload.licHash || "");
 
-	if (!tenantId || !deviceId || !licHash) throw new Error("invalid_token_claims");
+	if (!tenantId || !deviceId || !licHash) throw new RechazoDeAutenticacion("invalid_token_claims");
 	return { tenantId, deviceId, licHash };
 }
 

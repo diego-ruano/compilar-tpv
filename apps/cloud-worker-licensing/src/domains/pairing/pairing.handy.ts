@@ -14,6 +14,7 @@
 import type { Base } from "../../lib/sql";
 import type { z } from "zod";
 
+import { DEMASIADAS_PETICIONES } from "../../lib/limitador";
 import { firmarSesion, handyTokenTtlSeconds } from "../../lib/sesion";
 import { exigirClaveSiEsDeOtroNegocio } from "../../server/licenseStore";
 import { sha256HexStr } from "../../server/utils/crypto";
@@ -32,7 +33,7 @@ import type { cancelSchema, claimSchema, fetchTokenSchema } from "./pairing.sche
  */
 export function demasiadasPeticiones(): Resultado {
 	return fallo(429, "too_many_attempts", {
-		message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto.",
+		message: DEMASIADAS_PETICIONES,
 	});
 }
 
@@ -277,7 +278,8 @@ export async function entregarToken(
 
 	const pr = prRes.rows?.[0] as any | undefined;
 
-	// AUD-10: esta ruta es anónima y no tiene freno (la Handy pregunta cada 1,5 s), así que no puede
+	// AUD-10: esta ruta es anónima y sin freno por fallos (la Handy pregunta cada 1,5 s; su filtro por
+	// IP, `LIMITADOR_SESION`, sólo recorta volumen), así que no puede
 	// decir nada de un código a quien no lo ha reclamado. Antes miraba el estado antes que la firma, y
 	// con una prueba inventada contestaba 404 si el código no existía y `not_approved` si estaba vivo
 	// y pendiente: el oráculo para adelantarse a la Handy en el `claim`. Ahora, a quien no es el

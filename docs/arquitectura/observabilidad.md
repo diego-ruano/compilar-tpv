@@ -540,6 +540,7 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
 | `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta. Lo emite el Worker (`service: tpv-api`) |
+| `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, o el código del objeto: `central_sin_aprovisionar`, `central_migracion_alterada`, `central_migracion_fallida`, `central_operacion_desconocida`), el método, la ruta y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |
 
@@ -554,6 +555,9 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 - **Errores de apply**: volumen de `apply_error` por `tenant_id`.
 - **Un negocio cuyo objeto no da abasto o no arranca**: una racha de `hub_no_disponible` del mismo
   `tenant_id`. Uno suelto con `pasajero` es normal: cada despliegue reinicia los objetos.
+- **La base central no da abasto o no arranca**: una racha de `central_no_disponible`, sea del negocio
+  que sea (es una para todos). Cualquiera con un `motivo` que empieza por `central_` necesita a alguien:
+  está sin aprovisionar o averiada.
 - **Una base que necesita a alguien**: cualquier `base_llena` o `migracion_fallida`. También llegan a
   Sentry (`tenant_db.full`, `tenant_db.migration`).
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
