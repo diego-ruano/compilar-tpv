@@ -19,7 +19,7 @@
 // (`tests_productos_en_una_pasada` en `tpv-infra-sqlite/src/stats.rs`), y el arnés de lectura fija
 // que los dos lados dan lo mismo.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import type { ProductosStatsResponse } from "@tpv/contracts";
@@ -78,13 +78,13 @@ function rangeBounds(range: StatsRange): { start: string; end: string } {
 	};
 }
 
-async function one(db: Client, sql: string, args: any[] = []): Promise<any> {
+async function one(db: Base, sql: string, args: any[] = []): Promise<any> {
 	const rs = await db.execute({ sql, args });
 	return rows(rs)[0] ?? {};
 }
 
 async function productosAntes(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 	categoriaTopId: string | null,
 	categoriaWorstId: string | null,
@@ -202,19 +202,19 @@ const CATEGORIAS = [null, "  ", "cat-platos", "cat-bebidas", "cat-postres", "cat
 /** La base de un negocio en el SQLite de un Durable Object, con la siembra de un caso de contrato. */
 async function conLaSiembra<R>(
 	nombre: string,
-	prueba: (db: Client, sql: any) => Promise<R>,
+	prueba: (db: Base, sql: any) => Promise<R>,
 	siembra: string[] = caso.seed,
 ): Promise<R> {
 	return enElHub(`stats-productos-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const sentencia of siembra) sql.exec(sentencia);
-		return prueba(clienteSobre(sql) as unknown as Client, sql);
+		return prueba(clienteSobre(sql) as unknown as Base, sql);
 	});
 }
 
 /** Lo de antes y lo de ahora, en los cuatro rangos y con cada pareja de filtros. */
-async function comparar(db: Client, siembra: string) {
+async function comparar(db: Base, siembra: string) {
 	for (const range of RANGOS) {
 		for (const top of CATEGORIAS) {
 			for (const worst of CATEGORIAS) {
@@ -286,7 +286,7 @@ describe("la estadística de productos en una pasada", () => {
 					sentencias.push(typeof entrada === "string" ? entrada : entrada.sql);
 					return db.execute(entrada);
 				},
-			} as unknown as Client;
+			} as unknown as Base;
 			// La lectura, sin lo que hace antes para dejar al día el resumen diario
 			// (`statsResumenDiario.test.ts`).
 			await productosCon(espia, sqlProductos("anio"), "cat-platos", "cat-bebidas");

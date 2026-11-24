@@ -27,7 +27,7 @@
 // Y delante de todo eso va el FILTRO EXTERIOR de abajo, que es otra cosa: no es un control de
 // seguridad, es un cortafuegos de coste.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { exec } from "../../server/db";
 import { claveDeFreno, pasaElLimitador } from "../../lib/limitador";
@@ -53,7 +53,7 @@ export function textoDeEspera(segundos: number): string {
 }
 
 /** Segundos que le quedan a esta IP para poder volver a intentarlo (0 si puede ya). */
-export async function segundosDeEspera(db: Client, ip: string, ahoraMs: number): Promise<number> {
+export async function segundosDeEspera(db: Base, ip: string, ahoraMs: number): Promise<number> {
 	const r = await exec(db, `SELECT bloqueado_hasta_ms FROM pair_claim_fallos WHERE ip = ? LIMIT 1;`, [
 		claveDeFreno(ip),
 	]);
@@ -65,7 +65,7 @@ export async function segundosDeEspera(db: Client, ip: string, ahoraMs: number):
  * Anota un fallo y devuelve la espera que impone (0 si ninguna). El contador se lee y se sube en
  * la misma sentencia: dos fallos simultáneos desde la misma IP cuentan dos.
  */
-export async function anotarFallo(db: Client, ipDeLaPeticion: string, ahoraMs: number): Promise<number> {
+export async function anotarFallo(db: Base, ipDeLaPeticion: string, ahoraMs: number): Promise<number> {
 	const ip = claveDeFreno(ipDeLaPeticion);
 	const r = await exec(
 		db,

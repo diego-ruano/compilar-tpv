@@ -1,5 +1,5 @@
 // src/server/middleware/auth.ts
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
@@ -53,7 +53,7 @@ type EstadoDevice =
 	| { ok: false; error: "device_not_registered" | "device_revoked" | "device_pubkey_not_registered" };
 
 async function resolverDevice(
-	dbCentral: Client,
+	dbCentral: Base,
 	tenantId: string,
 	deviceId: string,
 ): Promise<EstadoDevice> {
@@ -106,7 +106,7 @@ async function resolverDevice(
  */
 export async function verifyDeviceProofOrThrow(
 	req: Request,
-	dbCentral: Client,
+	dbCentral: Base,
 	claims: { tenantId: string; deviceId: string },
 	bearerToken: string,
 	rawBody: Uint8Array

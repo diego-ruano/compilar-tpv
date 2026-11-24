@@ -10,7 +10,7 @@
 //
 // Que la Main hace lo mismo lo fijan los casos de contrato `mesas/abrir_o_retomar*`.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
@@ -51,12 +51,12 @@ const SEMILLA = [
 	"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('cana', 'cat-1', 'Caña', 200);",
 ];
 
-async function conMesa<R>(nombre: string, extra: string[], prueba: (db: Client, sql: any, hub: any) => Promise<R>): Promise<R> {
+async function conMesa<R>(nombre: string, extra: string[], prueba: (db: Base, sql: any, hub: any) => Promise<R>): Promise<R> {
 	return enElHub(`abrir-o-retomar-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const s of [...SEMILLA, ...extra]) sql.exec(s);
-		return prueba(clienteSobre(sql) as unknown as Client, sql, hub);
+		return prueba(clienteSobre(sql) as unknown as Base, sql, hub);
 	});
 }
 

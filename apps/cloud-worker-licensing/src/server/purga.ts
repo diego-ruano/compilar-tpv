@@ -23,7 +23,7 @@
 // (`ws.routes.ts`), y `email_codes` está acotada por su clave (tenant, dispositivo, propósito),
 // así que no crece con los intentos.
 
-import type { Sql } from "./db";
+import type { Sql } from "../lib/sql";
 import { capturarError } from "../observability/errors";
 import { exec } from "./db";
 import { OTP_VENTANA_MS } from "../domains/licensing/licensing.helpers";

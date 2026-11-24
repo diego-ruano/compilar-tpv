@@ -23,7 +23,7 @@
 // - `resumenAlDia` lo hace con los días sucios del rango que se va a leer, antes de leerlo, y de
 //   paso contrasta un día ya resumido con los cobros (`contrastarUnDia`).
 
-import type { Client } from "@libsql/client/web";
+import type { Base, Valor } from "../../lib/sql";
 
 import selectMesaDia from "../../../../../packages/database/estadisticas/mesa_dia.sql";
 import selectProductoDia from "../../../../../packages/database/estadisticas/producto_dia.sql";
@@ -53,7 +53,7 @@ const UN_DIA = "WITH dias(Dia) AS (SELECT ?1)";
 const COLUMNAS_PRODUCTO = "Dia, ID_Producto, Nombre_Producto, Milesimas";
 const COLUMNAS_MESA = "Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo";
 
-type Sentencia = { sql: string; args: unknown[] };
+type Sentencia = { sql: string; args: Valor[] };
 
 /** Las sentencias que rehacen el resumen de `dia` y le quitan la marca, en orden. */
 export function sentenciasDeRecalculo(dia: string): Sentencia[] {
@@ -85,11 +85,11 @@ export function esEscrituraDelResumen(sql: string): boolean {
  * difusión. Es lo que se quiere para una caché local, y lo que haría invisible para la Main una
  * escritura en una tabla del negocio que se colara en el lote.
  */
-export async function anotarResumen(db: Client, sentencias: Sentencia[]): Promise<void> {
+export async function anotarResumen(db: Base, sentencias: Sentencia[]): Promise<void> {
 	if (sentencias.length === 0 || !sentencias.every((s) => esEscrituraDelResumen(s.sql))) {
 		throw new Error("El resumen diario de las estadísticas sólo escribe en sus propias tablas");
 	}
-	await db.batch(sentencias as any, "write");
+	await db.batch(sentencias);
 }
 
 /**
@@ -98,7 +98,7 @@ export async function anotarResumen(db: Client, sentencias: Sentencia[]): Promis
  * Va en un lote: dentro del DO es una transacción síncrona y nada se intercala, así que la marca
  * que se quita es la de lo que se acaba de calcular. Un cambio posterior la vuelve a poner.
  */
-export async function recalcularDia(db: Client, dia: string): Promise<void> {
+export async function recalcularDia(db: Base, dia: string): Promise<void> {
 	await anotarResumen(db, sentenciasDeRecalculo(dia));
 }
 
@@ -145,7 +145,7 @@ function primera(rs: any): Record<string, unknown> {
 }
 
 /** ¿Coincide lo guardado de `dia` con lo que sale ahora de los cobros? */
-export async function coincideElDia(db: Client, dia: string): Promise<boolean> {
+export async function coincideElDia(db: Base, dia: string): Promise<boolean> {
 	const productos = primera(await db.execute({ sql: DIFERENCIAS_PRODUCTO, args: [dia] }));
 	const mesas = primera(await db.execute({ sql: DIFERENCIAS_MESA, args: [dia] }));
 	return Number(productos.diferencias ?? 0) === 0 && Number(mesas.diferencias ?? 0) === 0;
@@ -158,7 +158,7 @@ export async function coincideElDia(db: Client, dia: string): Promise<boolean> {
  *
  * Devuelve el día que no cuadraba, o `null`.
  */
-export async function contrastarUnDia(db: Client, inicioSql: string): Promise<string | null> {
+export async function contrastarUnDia(db: Base, inicioSql: string): Promise<string | null> {
 	// Un día cualquiera entre el inicio del rango y ayer; sin días cerrados en el rango sale hoy, y
 	// la condición de abajo lo deja fuera. Un día sucio no se mira: ya se sabe que no vale.
 	const elegido = primera(
@@ -199,7 +199,7 @@ function cederElPaso(): Promise<void> {
  * se rehace por separado y entre uno y otro se cede el paso: lo que tarda lo espera esta lectura, no
  * el resto del negocio.
  */
-export async function resumenAlDia(db: Client, inicioSql: string): Promise<void> {
+export async function resumenAlDia(db: Base, inicioSql: string): Promise<void> {
 	const sucios = await db.execute(`
 		SELECT Dia AS dia FROM _Estad_Dias_Sucios
 		WHERE Dia >= date(${inicioSql}) AND Dia < date('now','localtime')

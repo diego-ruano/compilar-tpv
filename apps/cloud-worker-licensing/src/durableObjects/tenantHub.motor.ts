@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
 import { forbidden, json, serverError } from "../server/utils/response";
-import type { Client } from "@libsql/client/web";
+import type { Base, Resultado } from "../lib/sql";
 import { createDbClient } from "../server/db/clients";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
@@ -71,14 +71,13 @@ import { horaDelNegocio, horaLocalEn } from "../domains/reservas_web/horaDelNego
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
-	baseAprovisionada,
 	clienteLocal,
 	GuardaIncumplida,
 	HaceFaltaAplazar,
 	loteEnBruto,
-	type FilasEnBruto,
 	migrarBaseLocal,
 } from "./tenantHub.sqlite";
+import { baseAprovisionada, type FilasEnBruto } from "./sqliteDelObjeto";
 import { sembrarAdminInicial } from "./tenantHub.alta";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
 import {
@@ -191,11 +190,11 @@ export class MotorTenantHub {
 	// SYNC-12: instante de la última purga del log de sync (throttle en memoria del DO).
 	private lastPurgeAtMs = 0;
 
-	private centralDb: Client | null = null;
+	private centralDb: Base | null = null;
 
 	// La base del negocio es el SQLite de este DO. El cliente se monta una vez por
 	// instancia, tras comprobar que el negocio está aprovisionado y su esquema al día.
-	private baseLocal: Client | null = null;
+	private baseLocal: Base | null = null;
 	// El negocio de este DO para las trazas de un objeto que todavía no lo tiene apuntado (sin base):
 	// lo dice la primera petición que llega. Con base, manda el apuntado (`negocioParaTrazas`).
 	private tenantIdVisto: string | null = null;
@@ -284,7 +283,7 @@ export class MotorTenantHub {
 		return out;
 	}
 
-	private getCentralDb(plazoMs?: number): Client {
+	private getCentralDb(plazoMs?: number): Base {
 		// AUD-02: con plazo, un cliente que vive lo que su lectura. No se guarda: el plazo es de
 		// quien lo pide, y las demás lecturas de la base central siguen sin él.
 		if (plazoMs) {
@@ -311,7 +310,7 @@ export class MotorTenantHub {
 	 * aplica). No hay credenciales, ni red, ni plazos: una escritura entra o no entra, y se sabe en
 	 * el acto.
 	 */
-	private async getTenantDb(tenantId: string): Promise<Client> {
+	private async getTenantDb(tenantId: string): Promise<Base> {
 		this.tenantIdVisto ??= tenantId || null;
 		// DO-03: mientras la base vuelve a un instante o se restaura de una copia, nadie la toca. Para
 		// la Main es pasajero (`tenantHub.errores.ts`): su outbox espera.
@@ -736,7 +735,7 @@ export class MotorTenantHub {
 
 	private async withTenantDbRetry<T>(
 		tenantId: string,
-		run: (db: Client) => Promise<T>,
+		run: (db: Base) => Promise<T>,
 	): Promise<T> {
 		return run(await this.getTenantDb(tenantId));
 	}
@@ -932,7 +931,6 @@ export class MotorTenantHub {
 								args: [hasta, antesDe],
 							},
 						],
-						"write",
 					);
 				}
 
@@ -1336,7 +1334,7 @@ export class MotorTenantHub {
 		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`). La base es el
 		// SQLite de este DO, así que no hay credenciales que renovar a mitad del turno: la escritura
 		// entra o no entra, sin salir de él.
-		const enElTurno = async (db: Client): Promise<{ result: any; seq: number }> => {
+		const enElTurno = async (db: Base): Promise<{ result: any; seq: number }> => {
 			// AUD-15: otra vez dentro del turno, el congelado de la Main: mientras se esperaba el
 			// turno, la que estaba lista pudo irse, o reconectar y saludar congelando, y lo que la
 			// Handy decidió con ella lista no puede entrar después.
@@ -1354,13 +1352,13 @@ export class MotorTenantHub {
 			}
 			const tamanoAntes = this.state.storage.sql.databaseSize;
 
-			let batchResults: any[];
+			let batchResults: Resultado[];
 			try {
-				batchResults = await db.batch(batchStmts as any, "write");
+				batchResults = await db.batch(batchStmts as any);
 				apuntarGasto(
 					this.state.storage,
 					ahora,
-					batchResults.reduce((n: number, r: any) => n + Number(r?.rowsAffected ?? 0), 0),
+					batchResults.reduce((n, r) => n + r.rowsAffected, 0),
 					this.state.storage.sql.databaseSize - tamanoAntes,
 				);
 			} catch (e: any) {
@@ -1384,7 +1382,7 @@ export class MotorTenantHub {
 			}
 
 			// El `Seq` lo asigna el commit, y el lote es local: siempre se puede leer.
-			const seq = Number(batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0);
+			const seq = batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0;
 			let result: any = null;
 			try {
 				result = built.resolveResult(batchResults, MIDDLE_OFFSET);
@@ -1717,7 +1715,7 @@ export class MotorTenantHub {
 			return { seq: previa.seq, yaEstaba: true };
 		}
 		// El `Seq` lo asigna el log al insertar, y el lote es local: siempre se puede leer.
-		const seq = Number(filas[lote.idxLog]?.lastInsertRowid ?? 0);
+		const seq = filas[lote.idxLog]?.lastInsertRowid ?? 0;
 		this.broadcastChange(
 			{ opId: escritura.opId, seq, statements: lote.built.replicated },
 			escritura.deviceId || undefined,

@@ -74,7 +74,6 @@ describe("el plazo de una petición a la base central", () => {
 			const inicio = Date.now();
 			await expect(db.execute("SELECT 1;")).rejects.toThrow();
 			expect(Date.now() - inicio).toBeLessThan(2_000);
-			db.close();
 		} finally {
 			(globalThis as any).fetch = fetchDeVerdad;
 		}

@@ -20,7 +20,7 @@
 //   · Que quien lo cambia sea un administrador lo comprueba la Main (sesión, SEC-01): el worker no
 //     conoce las sesiones. Por eso lo que de verdad cuenta aquí es el código y el aviso.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 
 import type { Env } from "../../env";
@@ -54,7 +54,7 @@ export type ContextoCorreo = {
 };
 
 /** A dónde van los códigos de recuperación de esta licencia ahora mismo. */
-export async function correoDeRecuperacion(db: Client, lic: LicenseRow): Promise<string> {
+export async function correoDeRecuperacion(db: Base, lic: LicenseRow): Promise<string> {
 	const propio = lic.tenant_id ? await getTenantRecoveryEmail(db, lic.tenant_id) : null;
 	return recortar(propio ?? lic.customer_email ?? "");
 }
@@ -76,7 +76,7 @@ function clave(ctx: ContextoCorreo): EmailCodeKey {
 }
 
 async function licenciaDelTenant(
-	db: Client,
+	db: Base,
 	ctx: ContextoCorreo,
 ): Promise<{ ok: true; lic: LicenseRow } | { ok: false; respuesta: RespuestaCodigo }> {
 	const lic = await getLicenseByHash(db, ctx.licHash);
@@ -94,7 +94,7 @@ async function licenciaDelTenant(
 	return { ok: true, lic };
 }
 
-async function estado(db: Client, lic: LicenseRow): Promise<RespuestaCodigo> {
+async function estado(db: Base, lic: LicenseRow): Promise<RespuestaCodigo> {
 	const propio = lic.tenant_id ? await getTenantRecoveryEmail(db, lic.tenant_id) : null;
 	const correo = recortar(propio ?? lic.customer_email ?? "");
 	return {
@@ -123,7 +123,7 @@ function avisarDelCambio(
 }
 
 export async function estadoCorreoRecuperacion(
-	db: Client,
+	db: Base,
 	ctx: ContextoCorreo,
 ): Promise<RespuestaCodigo> {
 	const l = await licenciaDelTenant(db, ctx);
@@ -132,7 +132,7 @@ export async function estadoCorreoRecuperacion(
 }
 
 export async function solicitarCambioCorreo(
-	db: Client,
+	db: Base,
 	env: Env,
 	ctx: ContextoCorreo & { correo: string },
 ): Promise<RespuestaCodigo> {
@@ -183,7 +183,7 @@ export async function solicitarCambioCorreo(
 }
 
 export async function confirmarCambioCorreo(
-	db: Client,
+	db: Base,
 	env: Env,
 	ctx: ContextoCorreo & { codigo: string },
 	diferir: (p: Promise<unknown>) => void,
@@ -207,7 +207,7 @@ export async function confirmarCambioCorreo(
 }
 
 export async function usarCorreoDeLaCompra(
-	db: Client,
+	db: Base,
 	env: Env,
 	ctx: ContextoCorreo,
 	diferir: (p: Promise<unknown>) => void,

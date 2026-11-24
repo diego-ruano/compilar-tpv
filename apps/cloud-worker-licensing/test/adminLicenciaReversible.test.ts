@@ -36,7 +36,7 @@ const JWT_SECRET = "secreto-interno-de-pruebas";
 /**
  * El cliente SQL que verán las rutas. `getDb` construye un cliente de Turso y lo cachea en una
  * variable de módulo, así que no hay por dónde inyectar: se sustituye esa única función y se deja
- * el resto del módulo (`exec`, `execMany`) intacto, que es de lo que tira `licenseStore`.
+ * el resto del módulo (`exec`) intacto, que es de lo que tira `licenseStore`.
  */
 let dbDePruebas: unknown = null;
 

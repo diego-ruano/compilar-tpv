@@ -8,7 +8,7 @@
 // (`tenantClient.ts`) y las escrituras (`hub.ts`)— usan lo que tienen al lado en vez de un RPC.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Client } from "@libsql/client/web";
+import type { Base } from "./sql";
 
 import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
 
@@ -16,7 +16,7 @@ export type HubLocal = {
 	/** Quién pregunta, ya comprobado por el Worker. */
 	identidad: IdentidadDelWorker;
 	/** La base del negocio: el SQLite de este mismo DO. */
-	base: () => Promise<Client>;
+	base: () => Promise<Base>;
 	/**
 	 * La misma base, en bruto: el `SqlStorage` del DO, ya aprovisionado y con el esquema al día. Es
 	 * para lo que no puede pagar un objeto por fila: los volcados de sync recorren su cursor una vez

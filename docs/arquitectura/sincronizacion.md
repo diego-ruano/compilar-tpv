@@ -43,7 +43,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …el transporte | `tenantHub.rutas.ts`, `tenantHub.rpc.ts` | Upgrade WebSocket y contratos de aplicar, revocar y avisar |
 | …el saludo | `tenantHub.identidad.ts` | Quién llama y qué puede hacer |
 | …el lote de la Main | `tenantHub.motor.ts` (`aplicarLote`) | Lo que sube del outbox, hasta 200 operaciones por mensaje, aplicado en un turno |
-| …la base del negocio | `tenantHub.sqlite.ts` | El `Client` de libsql sobre el SQLite del DO, el lote atómico (`loteEnBruto`) y las migraciones (`migrarBaseLocal`) |
+| …la base del negocio | `tenantHub.sqlite.ts` · `sqliteDelObjeto.ts` | La `Base` (`lib/sql.ts`) sobre el SQLite del DO (`clienteLocal`), el lote atómico (`loteEnBruto`) y las migraciones (`migrarBaseLocal`, con el runner común `migrarBase`) |
 | …el lote atómico | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias (`loteDe`); el cuerpo que identifica la operación (`Request_Hash`) |
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |

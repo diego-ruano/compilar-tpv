@@ -7,7 +7,7 @@
 // `'now','localtime'` lo fija `leerConLaHoraDelNegocio` (`lecturasDeLaWeb.ts`) con la hora del negocio
 // (`horaDelNegocio.ts`).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { AjustesWeb, FranjaWeb, MesaWeb, Ocupacion } from "./disponibilidad";
 
@@ -33,7 +33,7 @@ function entero(v: unknown, def: number, min: number, max: number): number {
  * Los ajustes de la reserva web. Los topes (un año de horizonte, un día de duración…) no son reglas
  * del negocio: impiden que un valor roto convierta una lectura en un bucle de miles de días.
  */
-export async function ajustesWeb(db: Client): Promise<AjustesWeb> {
+export async function ajustesWeb(db: Base): Promise<AjustesWeb> {
 	const r =
 		filas(
 			await db.execute(`
@@ -66,7 +66,7 @@ export type NegocioPublico = {
 	cif: string;
 };
 
-export async function negocioPublico(db: Client): Promise<NegocioPublico> {
+export async function negocioPublico(db: Base): Promise<NegocioPublico> {
 	const r =
 		filas(
 			await db.execute(`
@@ -97,7 +97,7 @@ const RESERVABLES = `
 `;
 
 /** Las mesas reservables desde la web y sus franjas. */
-export async function mesasYFranjas(db: Client): Promise<{ mesas: MesaWeb[]; franjas: FranjaWeb[] }> {
+export async function mesasYFranjas(db: Base): Promise<{ mesas: MesaWeb[]; franjas: FranjaWeb[] }> {
 	const [rsMesas, rsFranjas] = await db.batch(
 		[
 			`SELECT M.ID_Mesa AS id_mesa, M.Capacidad AS capacidad ${RESERVABLES} ORDER BY M.ID_Mesa;`,
@@ -107,7 +107,6 @@ export async function mesasYFranjas(db: Client): Promise<{ mesas: MesaWeb[]; fra
 			 WHERE F.ID_Mesa IN (SELECT M.ID_Mesa ${RESERVABLES})
 			 ORDER BY F.ID_Mesa, F.Hora_Desde, F.ID_Franja;`,
 		],
-		"read",
 	);
 	const franjas = filas(rsFranjas).map((f) => ({
 		id_mesa: String(f.id_mesa),
@@ -125,7 +124,7 @@ export async function mesasYFranjas(db: Client): Promise<{ mesas: MesaWeb[]; fra
 }
 
 /** Los días cerrados entre dos fechas, las dos incluidas. */
-export async function cierresEntre(db: Client, desde: string, hasta: string): Promise<Set<string>> {
+export async function cierresEntre(db: Base, desde: string, hasta: string): Promise<Set<string>> {
 	const rs = await db.execute({
 		sql: `SELECT Dia_YMD AS dia FROM Reserva_Web_Cierres WHERE Dia_YMD >= ?1 AND Dia_YMD <= ?2;`,
 		args: [desde, hasta],
@@ -167,13 +166,12 @@ const SQL_COMANDAS_ABIERTAS = `
 	WHERE C.Estado = 'Abierta' AND C.ID_Mesa IS NOT NULL;
 `;
 
-export async function ocupacionAlrededorDe(db: Client, dia: string, duracion: number): Promise<OcupacionEnLaBase> {
+export async function ocupacionAlrededorDe(db: Base, dia: string, duracion: number): Promise<OcupacionEnLaBase> {
 	const [rsReservas, rsComandas] = await db.batch(
 		[
 			{ sql: SQL_RESERVAS_VENTANA, args: [dia, duracion] },
 			{ sql: SQL_COMANDAS_ABIERTAS, args: [] },
 		],
-		"read",
 	);
 	const ocupaciones: Ocupacion[] = [];
 	const ids = new Set<string>();
@@ -195,7 +193,7 @@ export async function ocupacionAlrededorDe(db: Client, dia: string, duracion: nu
  * Las reservas vivas de un correo desde hoy, por su id: el tope de 10 por correo. Por el cliente de
  * la reserva, sin distinguir mayúsculas, como `ux_clientes_email`.
  */
-export async function reservasVivasDelCorreo(db: Client, email: string, hoy: string): Promise<Set<string>> {
+export async function reservasVivasDelCorreo(db: Base, email: string, hoy: string): Promise<Set<string>> {
 	const rs = await db.execute({
 		sql: `SELECT R.ID_Reserva AS id_reserva
 		      FROM Reservas R JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
@@ -233,7 +231,7 @@ export type PlanoPublico = {
 	}[];
 };
 
-export async function planoPublico(db: Client): Promise<PlanoPublico> {
+export async function planoPublico(db: Base): Promise<PlanoPublico> {
 	const [rsZonas, rsMesas] = await db.batch(
 		[
 			`SELECT ID_Zona AS id, Nombre_Zona AS nombre, Room_Points AS puntos
@@ -247,7 +245,6 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 			 WHERE M.Archivada_En IS NULL AND Z.Archivada_En IS NULL
 			 ORDER BY M.ID_Zona, M.ID_Mesa LIMIT ${TECHO_MESAS + 1};`,
 		],
-		"read",
 	);
 	const zonas = filas(rsZonas);
 	const mesas = filas(rsMesas);
@@ -271,13 +268,13 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 }
 
 /** Los nombres de las mesas reservables desde la web, por su id: entre ellas elige la mesa automática. */
-export async function nombresDeLasReservables(db: Client): Promise<Map<string, string>> {
+export async function nombresDeLasReservables(db: Base): Promise<Map<string, string>> {
 	const rs = await db.execute(`SELECT M.ID_Mesa AS id, M.Numero_Mesa AS numero ${RESERVABLES};`);
 	return new Map(filas(rs).map((m) => [String(m.id), String(m.numero)]));
 }
 
 /** Lo que se enseña de una mesa: su número. */
-export async function numeroDeMesa(db: Client, idMesa: string): Promise<string | null> {
+export async function numeroDeMesa(db: Base, idMesa: string): Promise<string | null> {
 	const rs = await db.execute({ sql: `SELECT Numero_Mesa AS numero FROM Mesas WHERE ID_Mesa = ?1;`, args: [idMesa] });
 	const r = filas(rs)[0];
 	return r ? String(r.numero) : null;

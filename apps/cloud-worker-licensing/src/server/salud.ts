@@ -13,7 +13,7 @@
 // cuerpo es una opción de pago en la monitorización, y siendo nuestro el endpoint no hay razón
 // para no decirlo por donde sabe leer cualquier sonda.
 
-import type { Sql } from "./db";
+import type { Sql } from "../lib/sql";
 import { capturarError } from "../observability/errors";
 import { cifrar, descifrar, type ClavesOClave } from "./crypto";
 

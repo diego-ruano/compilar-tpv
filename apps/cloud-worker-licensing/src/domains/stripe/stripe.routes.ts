@@ -44,7 +44,8 @@ import { capturarError } from "../../observability/errors";
 import type { Env } from "../../env";
 import { avisarCambioDeLicencia } from "../../lib/hub";
 import { topeAnonimo } from "../../lib/validacion";
-import { enTransaccion, getDb, type Sql } from "../../server/db";
+import { enTransaccion, getDb } from "../../server/db";
+import type { Sql } from "../../lib/sql";
 import { sha256Hex } from "../../server/crypto";
 import {
 	attachStripeSession,

@@ -13,7 +13,7 @@
 //     caso de contrato porque la hace la ruta antes de construir el comando;
 //   · que ningún fuente del worker vuelve a componer una lista de parámetros, uno por elemento.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
@@ -38,7 +38,7 @@ describe("los asignados de una tarea", () => {
 				);
 				sql.exec("INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES (?1, ?2);", id(i), `user-${i}`);
 			}
-			const db = clienteSobre(sql) as unknown as Client;
+			const db = clienteSobre(sql) as unknown as Base;
 			const todos = Array.from({ length: N }, (_, i) => id(i + 1));
 
 			expect(await trabajadoresExisten(db, todos)).toBe(true);

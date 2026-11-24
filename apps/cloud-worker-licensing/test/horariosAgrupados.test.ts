@@ -21,7 +21,7 @@ function preparar(hub: any) {
     const db = clienteSobre(sql, hub.state.storage);
     const aplicar = async (comando: ReturnType<typeof guardarAsignacion>) => {
         const lote = buildApplyBatch(comando.command);
-        const resultados = await db.batch(lote.middle, "write");
+        const resultados = await db.batch(lote.middle);
         return { resultado: lote.resolveResult(resultados, 0), replica: lote.replicated };
     };
     const filas = () => sql.exec("SELECT * FROM Asignacion_Turnos ORDER BY Fecha, Hora_Inicio, ID_Asignacion;").toArray();
@@ -93,7 +93,7 @@ it("captura para la réplica los mismos identificadores del conjunto confirmado"
         const confirmadas = filas();
         await enElHub("horarios-replica-destino", async (destino: any) => {
             const { db, filas: recibidas } = preparar(destino);
-            await db.batch(replica, "write");
+            await db.batch(replica);
             expect(recibidas()).toEqual(confirmadas);
         });
     });

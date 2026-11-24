@@ -1,6 +1,6 @@
 // src/domains/proveedores/proveedores.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type {
 	CategoriaProveedorDto,
@@ -40,7 +40,7 @@ const PRODUCTO_COLS = `
 	(SELECT l.Caducidad FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS caducidad_proxima
 `;
 
-export async function getAll(db: Client): Promise<ProveedorDto[]> {
+export async function getAll(db: Base): Promise<ProveedorDto[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Proveedor AS id_proveedor,
@@ -59,7 +59,7 @@ export async function getAll(db: Client): Promise<ProveedorDto[]> {
 }
 
 export async function getProductos(
-	db: Client,
+	db: Base,
 	idProveedor: string,
 ): Promise<ProductoProveedorDto[]> {
 	const rs = await db.execute({
@@ -69,7 +69,7 @@ export async function getProductos(
 	return rows(rs) as ProductoProveedorDto[];
 }
 
-export async function getCategorias(db: Client): Promise<CategoriaProveedorDto[]> {
+export async function getCategorias(db: Base): Promise<CategoriaProveedorDto[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Categoria AS id_categoria,
@@ -82,7 +82,7 @@ export async function getCategorias(db: Client): Promise<CategoriaProveedorDto[]
 	return rows(rs) as CategoriaProveedorDto[];
 }
 
-export async function getProductosAll(db: Client): Promise<ProductoProveedorDto[]> {
+export async function getProductosAll(db: Base): Promise<ProductoProveedorDto[]> {
 	const rs = await db.execute(
 		`SELECT ${PRODUCTO_COLS} FROM Productos p WHERE p.Archivado_En IS NULL ORDER BY p.Nombre ASC;`,
 	);

@@ -1,4 +1,5 @@
 import type { AgendaWeb } from "./durableObjects/agendaWeb";
+import type { BaseCentral } from "./durableObjects/baseCentral";
 import type { TenantHub } from "./durableObjects/tenantHub";
 // src/env.ts
 //
@@ -100,6 +101,10 @@ export interface Env {
 	// La agenda de reservas web, una por negocio (docs/estudios/reservas-web.md §4.3). Nunca escribe
 	// en la base del negocio: guarda en su SQLite lo que espera a la Main.
 	AgendaWeb: DurableObjectNamespace<AgendaWeb>;
+
+	// La base central en su Durable Object, uno solo para todo el servicio (`durableObjects/baseCentral.ts`).
+	// Se pide sólo con `centralDe` (`lib/objetosDelNegocio.ts`), que fija su nombre y su sitio.
+	BaseCentral: DurableObjectNamespace<BaseCentral>;
 
 	// Dónde nacen los dos DO de un negocio, que guardan sus datos (`lib/objetosDelNegocio.ts`).
 	// Jurisdicción: vacía, que es ninguna (decisión del responsable, por latencia). El mismo nombre da

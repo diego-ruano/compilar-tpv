@@ -1,6 +1,6 @@
 // src/domains/cuentas/cuentas.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { deLaBase } from "../../lib/dinero";
 
@@ -174,7 +174,7 @@ const SALIDAS_Q_EXPR =
 	"fecha_hora || ' ' || tipo_gasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedor_id,'') || ' ' || proveedor_nombre";
 
 export async function entradas(
-	db: Client,
+	db: Base,
 	del: string | null,
 	al: string | null,
 	q: string | null = null,
@@ -206,7 +206,7 @@ export async function entradas(
 }
 
 export async function salidas(
-	db: Client,
+	db: Base,
 	del: string | null,
 	al: string | null,
 	q: string | null = null,
@@ -237,7 +237,7 @@ export async function salidas(
 // Resumen agregado (totales por método + conteos) sobre TODO el rango + búsqueda, para que la
 // cabecera sea correcta aunque la lista esté paginada (CUENTA-05).
 export async function resumen(
-	db: Client,
+	db: Base,
 	del: string | null,
 	al: string | null,
 	q: string | null = null,
@@ -317,7 +317,7 @@ const CIERRE_COLS = `
 `;
 
 /** Adjunta el desglose por denominación, separado en los dos momentos del recuento. */
-async function conDenominaciones(db: Client, fila: any): Promise<CierreDto> {
+async function conDenominaciones(db: Base, fila: any): Promise<CierreDto> {
 	const rs = await db.execute({
 		sql: `
 			SELECT Momento AS momento, Valor AS valor, Unidades AS unidades
@@ -368,7 +368,7 @@ async function conDenominaciones(db: Client, fila: any): Promise<CierreDto> {
  * Un cierre reabierto deja de contar como corte, así que el "último" no es el de fecha más alta
  * sino el más reciente que siga cerrado.
  */
-export async function ultimoCierre(db: Client): Promise<CierreDto | null> {
+export async function ultimoCierre(db: Base): Promise<CierreDto | null> {
 	const rs = await db.execute(`
 		SELECT ${CIERRE_COLS}
 		FROM Cierres_Caja c
@@ -381,7 +381,7 @@ export async function ultimoCierre(db: Client): Promise<CierreDto | null> {
 	return fila ? conDenominaciones(db, fila) : null;
 }
 
-export async function listarCierres(db: Client, limite: number): Promise<CierreResumenDto[]> {
+export async function listarCierres(db: Base, limite: number): Promise<CierreResumenDto[]> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -406,7 +406,7 @@ export async function listarCierres(db: Client, limite: number): Promise<CierreR
 	return rows(rs) as CierreResumenDto[];
 }
 
-export async function detalleCierre(db: Client, idCierre: string): Promise<CierreDto | null> {
+export async function detalleCierre(db: Base, idCierre: string): Promise<CierreDto | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ${CIERRE_COLS}

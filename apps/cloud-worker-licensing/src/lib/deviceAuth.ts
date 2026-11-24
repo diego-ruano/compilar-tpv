@@ -20,7 +20,7 @@
 //
 // El criterio vive aquí y solo aquí. Nadie más debe escribir `revoked_at_ms` en un WHERE.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "./sql";
 
 import type { Env } from "../env";
 import { getDb } from "../server/db";
@@ -62,7 +62,7 @@ export function normalizarRol(role: unknown): string {
  * con ella (401 `device_not_registered` vs 401 `device_revoked`, congelar el socket, etc.).
  */
 export async function cargarDevice(
-	db: Client,
+	db: Base,
 	tenantId: string,
 	deviceId: string,
 ): Promise<FilaDevice | null> {
@@ -94,7 +94,7 @@ export async function cargarDevice(
  * `isTpvDevice`/`isMainDevice` repartidas por pairing y dominios.
  */
 export async function tieneRol(
-	db: Client,
+	db: Base,
 	tenantId: string,
 	deviceId: string,
 	rol: "tpv" | "handy",

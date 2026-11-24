@@ -1,6 +1,6 @@
 // src/domains/reservas/reservas.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { ClienteCoincidente, ReservaDto, ReservasMetaDto } from "@tpv/contracts";
 
@@ -18,7 +18,7 @@ function rows(rs: any): any[] {
 	});
 }
 
-export async function meta(db: Client): Promise<ReservasMetaDto> {
+export async function meta(db: Base): Promise<ReservasMetaDto> {
 	const zonasRs = await db.execute(`
 		SELECT
 			ID_Zona AS id_zona,
@@ -80,7 +80,7 @@ const SELECT_RESERVA = `
 `;
 
 export async function mes(
-	db: Client,
+	db: Base,
 	desde: string,
 	hasta: string,
 ): Promise<ReservaDto[]> {
@@ -100,7 +100,7 @@ export async function mes(
  * borrarla, para saber si al cliente de una reserva web hay que avisarle (espejo de
  * `SqliteReservasRepository::reserva`).
  */
-export async function reserva(db: Client, idReserva: string): Promise<ReservaDto | null> {
+export async function reserva(db: Base, idReserva: string): Promise<ReservaDto | null> {
 	const rs = await db.execute({ sql: `${SELECT_RESERVA} WHERE R.ID_Reserva = ?1;`, args: [idReserva] });
 	return (rows(rs)[0] as ReservaDto | undefined) ?? null;
 }
@@ -111,7 +111,7 @@ export async function reserva(db: Client, idReserva: string): Promise<ReservaDto
  * docs/estudios/reservas-web.md §5.6).
  */
 export async function estadoYOrigen(
-	db: Client,
+	db: Base,
 	idReserva: string,
 ): Promise<{ estado: string; origen: string } | null> {
 	const rs = await db.execute({
@@ -126,7 +126,7 @@ export async function estadoYOrigen(
 export type AjustesDeReserva = { duracion: number; modo: "avisar" | "prohibir" };
 
 /** Los ajustes de reserva del negocio. Espejo de `ajustes_de_reserva`. */
-export async function ajustesDeReserva(db: Client): Promise<AjustesDeReserva> {
+export async function ajustesDeReserva(db: Base): Promise<AjustesDeReserva> {
 	const rs = await db.execute(
 		"SELECT Reserva_Duracion_Min AS duracion, Reserva_Solape AS modo FROM Business_Settings WHERE ID = 1;",
 	);
@@ -252,7 +252,7 @@ export const MSG_SOLAPE_PROHIBIDO =
  * `'now','localtime'` lo fija `tenantQuery` con la hora de quien reserva (REV-03).
  */
 export async function choqueEnLaMesa(
-	db: Client,
+	db: Base,
 	r: {
 		id_mesa: string;
 		dia_ymd: string;
@@ -307,7 +307,7 @@ const POR_TELEFONO = "Telefono = ?1";
 const POR_ID = "ID_Cliente = ?1";
 
 async function clientePor(
-	db: Client,
+	db: Base,
 	filtro: string,
 	valor: string,
 ): Promise<ClienteExistente | null> {
@@ -324,7 +324,7 @@ async function clientePor(
  * antes de asignarle la reserva. Espejo de `buscar_cliente` en la Main.
  */
 export async function buscarCliente(
-	db: Client,
+	db: Base,
 	telefono: string | null,
 	email: string | null,
 ): Promise<ClienteCoincidente | null> {
@@ -372,7 +372,7 @@ export type ClienteResuelto =
 	| { modo: "nuevo" };
 
 export async function resolverCliente(
-	db: Client,
+	db: Base,
 	datos: {
 		id_cliente?: string | null;
 		nombre_cliente?: string | null;

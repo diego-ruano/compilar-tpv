@@ -108,6 +108,8 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		// DO-PERDIDA: una copia que no se puede restaurar (`tenantHub.restaurar.ts`); la ruta lo devuelve
 		// como `error`.
 		/CopiaInservible\(\s*"([^"]+)"/g,
+		// Una subclase de `HubError` que fija su identificador y su estado en el constructor.
+		/super\(\s*"([^"]+)",\s*\d{3}\b/g,
 	];
 	// Un identificador de máquina; las frases («Lote no encontrado») ya se leen bien tal cual.
 	const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;

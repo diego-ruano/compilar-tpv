@@ -18,7 +18,7 @@
 import { esTablaDeNegocio } from "../domains/sync/bootstrap.ventana";
 import { MIGRATIONS } from "../server/tenantMigrations";
 import { LINEA_FIN, LINEA_MIGRACIONES, PRINCIPIO_DE_INSERT } from "./tenantHub.copia";
-import { ponerFk } from "./tenantHub.sqlite";
+import { ponerFk } from "./sqliteDelObjeto";
 
 /** Lo que se dice de una copia que no se puede devolver, y por qué. Sin datos de la copia. */
 export class CopiaInservible extends Error {

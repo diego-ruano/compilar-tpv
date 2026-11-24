@@ -3,7 +3,7 @@
 // LECTURAS de ingredientes: el catálogo y los de cada producto. El mismo SQL y el mismo orden que la
 // Main (`tpv-infra-sqlite/src/ingredientes.rs`), así que las filas ya salen con la forma de los DTOs.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { CatalogoIngredientesDto, CategoriaIngredienteDto, IngredienteDto } from "@tpv/contracts";
 
@@ -18,7 +18,7 @@ function filas(rs: any): any[] {
 	});
 }
 
-export async function catalogoIngredientes(db: Client): Promise<CatalogoIngredientesDto> {
+export async function catalogoIngredientes(db: Base): Promise<CatalogoIngredientesDto> {
 	const categorias = await db.execute(
 		`SELECT ID_Categoria_Ingrediente, Nombre FROM Categorias_Ingrediente
 		 ORDER BY Nombre ASC, ID_Categoria_Ingrediente ASC;`,
@@ -33,7 +33,7 @@ export async function catalogoIngredientes(db: Client): Promise<CatalogoIngredie
 	};
 }
 
-export async function ingredientesDeProducto(db: Client, idProducto: string): Promise<string[]> {
+export async function ingredientesDeProducto(db: Base, idProducto: string): Promise<string[]> {
 	const rs = await db.execute({
 		sql: `SELECT ID_Ingrediente FROM Producto_Ingredientes WHERE ID_Producto = ?1
 			  ORDER BY ID_Ingrediente ASC;`,

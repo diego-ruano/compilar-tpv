@@ -80,9 +80,9 @@ async function conCentral<R>(nombre: string, prueba: (central: Central) => Promi
 				viajes.push(`execute: ${typeof s === "string" ? s : s.sql}`);
 				return real.execute(s);
 			},
-			batch: async (ss: any[], modo?: string) => {
+			batch: async (ss: any[]) => {
 				viajes.push(`batch: ${ss.map((s) => s.sql).join(" | ")}`);
-				return real.batch(ss, modo);
+				return real.batch(ss);
 			},
 		};
 		try {

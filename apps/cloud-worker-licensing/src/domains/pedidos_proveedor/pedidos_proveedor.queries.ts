@@ -4,7 +4,7 @@
 // (`tpv-infra-sqlite/src/pedidos_proveedor.rs`): las mismas filas, en el mismo orden y con el mismo
 // techo. Lo fija el arnés de lectura (`tests/contract/lecturas/casos/pedidos_proveedor/`).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { LineaPedidoDto, PedidoProveedorDto, PedidosPageDto } from "@tpv/contracts";
 
@@ -47,7 +47,7 @@ function opcional(v: unknown): string | null {
  * escribe (`%` y `_` no son comodines). `total` es cuántos pedidos casan con la búsqueda.
  */
 export async function pagina(
-	db: Client,
+	db: Base,
 	limit: number,
 	offset: number,
 	search: string | null,
@@ -79,7 +79,6 @@ export async function pagina(
 				args: [...argsBusqueda, limit, offset],
 			},
 		],
-		"read",
 	);
 	const total = Number(filas(rsTotal)[0]?.total ?? 0);
 
@@ -131,7 +130,7 @@ export async function pagina(
 }
 
 /** El estado de un pedido, o `null` si no existe: para saber cómo quedó un cambio de estado. */
-export async function estadoDe(db: Client, idPedido: string): Promise<string | null> {
+export async function estadoDe(db: Base, idPedido: string): Promise<string | null> {
 	const rs = await db.execute({
 		sql: "SELECT Estado AS estado FROM Pedidos_Proveedor WHERE ID_Pedido = ?1;",
 		args: [idPedido],

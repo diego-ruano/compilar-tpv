@@ -7,8 +7,8 @@
 //
 // - **Leer.** Un `Lector` ejecuta las sentencias y entrega, de cada una, sus columnas y sus filas
 //   como listas posicionales que se recorren una sola vez. Dentro del TenantHub (`lib/enElHub.ts`)
-//   es el cursor del SQLite del DO, fila a fila: no se monta un `ResultSet`, ni un objeto por fila
-//   con una propiedad por celda (`aResultSet`), ni una segunda lista con las mismas filas.
+//   es el cursor del SQLite del DO, fila a fila: no se monta un `Resultado`, ni un objeto por fila
+//   con una propiedad por celda (`aResultado`), ni una segunda lista con las mismas filas.
 // - **Escribir.** Un `Escritor` recibe el JSON por partes (una fila es el `JSON.stringify` de su
 //   lista) y lo codifica a UTF-8 por trozos, contando los bytes. El texto de la respuesta entera
 //   no llega a existir.

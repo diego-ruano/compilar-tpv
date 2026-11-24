@@ -23,6 +23,7 @@
 // van también en el esquema único: en la Main quedan vacías. Así nacen al aprovisionar el negocio
 // (SYNC-28).
 
+import type { Migracion } from "../durableObjects/sqliteDelObjeto";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 import m0002 from "../../../../packages/database/migrations/0002_negocio.sql";
 import m0003 from "../../../../packages/database/migrations/0003_ingredientes.sql";
@@ -30,7 +31,7 @@ import m0004 from "../../../../packages/database/migrations/0004_producto_sin_ca
 import m0005 from "../../../../packages/database/migrations/0005_subida_completa.sql";
 import m0006 from "../../../../packages/database/migrations/0006_facturas_pdf.sql";
 
-export const MIGRATIONS: { name: string; sql: string }[] = [
+export const MIGRATIONS: Migracion[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
 	{ name: "0002_negocio.sql", sql: m0002 },
 	{ name: "0003_ingredientes.sql", sql: m0003 },
@@ -38,15 +39,5 @@ export const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0005_subida_completa.sql", sql: m0005 },
 	{ name: "0006_facturas_pdf.sql", sql: m0006 },
 ];
-
-/** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
-export function normalize(s: string): string {
-	return s.replace(/\r\n/g, "\n");
-}
-
-export async function sha256Hex(s: string): Promise<string> {
-	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-	return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 // RI-70: el esquema compartido incluye Encargado y Roles_Permisos.

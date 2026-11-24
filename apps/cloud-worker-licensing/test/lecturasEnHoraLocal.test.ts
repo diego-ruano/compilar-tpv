@@ -85,28 +85,11 @@ describe("la hora de quien pregunta se fija antes de ejecutar", () => {
 		});
 	});
 
-	it("prohibe abrir una transaccion, porque su SQL se escaparía sin fijar", () => {
-		// La tercera puerta por la que sale SQL. Si una lectura la usara, su `'now'` lo resolvería
-		// la base y el resultado sería de otro día: sin error, sin síntoma, sin nadie que lo note. Vale
-		// más que reviente aquí, delante de quien lo está escribiendo.
-		const db = conLaHoraDeQuienPregunta({ execute: async () => ({}) } as any, MADRUGADA) as any;
-		expect(() => db.transaction("write")).toThrow(/no abre transacciones/);
-	});
-
-	it("delega lo que no sea ejecutar sin romper el cliente de verdad", async () => {
-		let cerrado = false;
-		const falso = {
-			closed: false,
-			close: function () {
-				cerrado = true;
-			},
-			execute: async () => ({ rows: [], columns: [] }),
-		} as any;
-
-		const db = conLaHoraDeQuienPregunta(falso, MADRUGADA) as any;
-		expect(db.closed).toBe(false);
-		db.close();
-		expect(cerrado).toBe(true);
+	it("no deja ninguna otra puerta por la que salga SQL sin fijar", () => {
+		// Si una lectura tuviera una tercera (una transacción, por ejemplo), su `'now'` lo resolvería
+		// la base y el resultado sería de otro día: sin error, sin síntoma, sin nadie que lo note.
+		const conTodo = { execute: async () => ({}), batch: async () => [], transaction: () => ({}) } as any;
+		expect(Object.keys(conLaHoraDeQuienPregunta(conTodo, MADRUGADA)).sort()).toEqual(["batch", "execute"]);
 	});
 });
 

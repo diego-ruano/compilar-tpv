@@ -8,7 +8,7 @@
 // usa el `tenant_id` directamente: una clave aparte se revoca sin tocar el negocio y no expone un
 // identificador interno.
 
-import type { Sql } from "../../server/db";
+import type { Sql } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 
 /** `rw_` y 128 bits aleatorios en base64url: no se adivina ni se recorre. */

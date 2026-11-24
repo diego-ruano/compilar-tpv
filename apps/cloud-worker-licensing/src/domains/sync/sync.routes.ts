@@ -7,7 +7,7 @@
 //
 // Solo la Main (rol tpv) consume este endpoint: es quien tiene la BD local que mantener al día.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 import { bytesUtf8 } from "../../lib/texto";
@@ -110,7 +110,7 @@ const BYTES_POR_CAMBIO = 256;
  * lo que no cabe no llega a salir de la base, ni a montarse como texto.
  */
 export async function leerPaginaDeCambios(
-	db: Pick<Client, "batch">,
+	db: Pick<Base, "batch">,
 	since: number,
 	limit: number,
 	maxBytes: number = CAMBIOS_MAX_BYTES,
@@ -151,7 +151,6 @@ export async function leerPaginaDeCambios(
 				args: [PURGADO_HASTA],
 			},
 		],
-		"read",
 	);
 
 	const items = rows(rs) as unknown as CambioGuardado[];

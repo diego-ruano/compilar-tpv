@@ -62,12 +62,12 @@ function prepararHub(hub: any) {
 	const control = { lotes: 0, rompe: null as string | null };
 	const db = {
 		...base,
-		async batch(sentencias: any[], modo?: string) {
+		async batch(sentencias: any[]) {
 			control.lotes++;
 			if (control.rompe && JSON.stringify(sentencias).includes(control.rompe)) {
 				throw Object.assign(new Error("SQLite error: la operación no cuadra todavía"), { code: "SQLITE_ERROR" });
 			}
-			return base.batch(sentencias, modo);
+			return base.batch(sentencias);
 		},
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);

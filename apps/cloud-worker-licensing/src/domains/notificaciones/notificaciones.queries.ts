@@ -4,7 +4,7 @@
 // Visibilidad por usuario (todos / usuario / rol resuelto contra Usuarios) y estado "leído"
 // por usuario (tabla Notificacion_Lecturas). `?1` = ID_Usuario.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { NotificacionRow } from "@tpv/contracts";
 
@@ -53,7 +53,7 @@ const VISIBLE_PAPELERA = `
 const LIST_LIMIT = 200;
 
 export async function listar(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 	soloNoLeidas: boolean,
 ): Promise<NotificacionRow[]> {
@@ -63,7 +63,7 @@ export async function listar(
 
 /** Contenido de la papelera del usuario. */
 export async function listarPapelera(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 ): Promise<NotificacionRow[]> {
 	return filas(db, idUsuario, VISIBLE_PAPELERA, "");
@@ -71,7 +71,7 @@ export async function listarPapelera(
 
 /** Cuerpo común de los dos listados. El predicado sale SIEMPRE de una constante de este módulo. */
 async function filas(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 	predicado: string,
 	filtro: string,
@@ -118,7 +118,7 @@ async function filas(
  * sube el número, pero no es nueva. Espejo de `contar_no_leidas` en la Main.
  */
 export async function contarNoLeidas(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 ): Promise<{ count: number; total: number; ultima_creada_en: string | null }> {
 	const rs = await db.execute({
@@ -145,7 +145,7 @@ export async function contarNoLeidas(
 }
 
 /** IDs visibles y no leídos por el usuario (para marcar todas: el route los resuelve antes de aplicar). */
-export async function idsNoLeidas(db: Client, idUsuario: string): Promise<string[]> {
+export async function idsNoLeidas(db: Base, idUsuario: string): Promise<string[]> {
 	const rs = await db.execute({
 		sql: `
 			SELECT n.ID_Notificacion AS id
@@ -169,7 +169,7 @@ export async function idsNoLeidas(db: Client, idUsuario: string): Promise<string
  * condición que llevan las escrituras; marcar leída la mira antes para distinguir «ya estaba
  * leída» de «no es tuya», que el INSERT por sí solo no distingue.
  */
-export async function dirigidaA(db: Client, idNotificacion: string, idUsuario: string): Promise<boolean> {
+export async function dirigidaA(db: Base, idNotificacion: string, idUsuario: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `SELECT 1 AS si FROM Notificaciones WHERE ${DIRIGIDA_AL_USUARIO} LIMIT 1;`,
 		args: [idNotificacion, idUsuario],
@@ -182,7 +182,7 @@ export async function dirigidaA(db: Client, idNotificacion: string, idUsuario: s
  * sabe cuántas filas tocó un descartar o un restaurar (`decidirPorEstado`).
  */
 export async function dirigidaYEn(
-	db: Client,
+	db: Base,
 	idNotificacion: string,
 	idUsuario: string,
 	estado: "activa" | "descartada",
@@ -195,7 +195,7 @@ export async function dirigidaYEn(
 }
 
 /** AUD-26: ¿sigue existiendo? Para decidir por el estado cuando no se sabe si un eliminar borró. */
-export async function existe(db: Client, idNotificacion: string): Promise<boolean> {
+export async function existe(db: Base, idNotificacion: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: "SELECT 1 AS si FROM Notificaciones WHERE ID_Notificacion = ?1 LIMIT 1;",
 		args: [idNotificacion],
@@ -208,7 +208,7 @@ export async function existe(db: Client, idNotificacion: string): Promise<boolea
  * la emisión con clave (RI-12) y para no resolver lo que no existe.
  */
 export async function activaPorClave(
-	db: Client,
+	db: Base,
 	clave: string,
 ): Promise<{ id: string; contenido: ContenidoActivo } | null> {
 	const rs = await db.execute({

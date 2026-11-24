@@ -18,7 +18,7 @@
 //     TenantHub no lo ve;
 //   · lo que devuelve cruza el RPC (copia estructurada: valen `Map` y `Set`, no funciones).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
 import { HubError } from "../../lib/errorHttp";
@@ -57,7 +57,7 @@ export type ReservaEnLaBase = { dia: string; hora: string; personas: number; id_
  */
 const LECTURAS = {
 	/** API pública, `/negocio`: lo del negocio y lo que hace falta para su calendario. */
-	async negocio(db: Client, ahora: string, _: Record<never, never>) {
+	async negocio(db: Base, ahora: string, _: Record<never, never>) {
 		const ajustes = await ajustesWeb(db);
 		const hoy = ahora.slice(0, 10);
 		const { primero, ultimo } = horizonte(hoy, ajustes);
@@ -70,24 +70,24 @@ const LECTURAS = {
 	},
 
 	/** API pública, `/dia`: lo que hace falta para las horas de un día. */
-	async dia(db: Client, ahora: string, p: { dia: string }) {
+	async dia(db: Base, ahora: string, p: { dia: string }) {
 		const ajustes = await ajustesWeb(db);
 		const [cierres, { mesas, franjas }] = await Promise.all([cierresEntre(db, p.dia, p.dia), mesasYFranjas(db)]);
 		return { ajustes, hoy: ahora.slice(0, 10), cierres, mesas, franjas };
 	},
 
 	/** API pública, `/plano`: salones y mesas, para dibujar. */
-	async plano(db: Client, _ahora: string, _: Record<never, never>) {
+	async plano(db: Base, _ahora: string, _: Record<never, never>) {
 		return planoPublico(db);
 	},
 
 	/** Lo del negocio que sale en un correo al cliente. */
-	async negocioDelCorreo(db: Client, _ahora: string, _: Record<never, never>) {
+	async negocioDelCorreo(db: Base, _ahora: string, _: Record<never, never>) {
 		return negocioDelCorreo(db);
 	},
 
 	/** La agenda, para decidir sobre un día: los ajustes, las mesas y lo que ya ocupa la base. */
-	async diaDeLaAgenda(db: Client, ahora: string, p: { dia: string }) {
+	async diaDeLaAgenda(db: Base, ahora: string, p: { dia: string }) {
 		const ajustes = await ajustesWeb(db);
 		const [cierres, { mesas, franjas }, ocupacion] = await Promise.all([
 			cierresEntre(db, p.dia, p.dia),
@@ -101,7 +101,7 @@ const LECTURAS = {
 	 * La agenda, para un alta: lo del día, las reservas vivas del correo y el nombre de la mesa que
 	 * lleva la respuesta (la pedida o, sin ella, las de todas las que puede tocar).
 	 */
-	async alta(db: Client, ahora: string, p: { dia: string; email: string; idMesa: string; automatica: boolean }) {
+	async alta(db: Base, ahora: string, p: { dia: string; email: string; idMesa: string; automatica: boolean }) {
 		const ajustes = await ajustesWeb(db);
 		const hoy = ahora.slice(0, 10);
 		const [cierres, { mesas, franjas }, ocupacion, delCorreo, nombres] = await Promise.all([
@@ -125,7 +125,7 @@ const LECTURAS = {
 	 * nombre de su mesa. Si aún no está en la base, el de la mesa del alta que espera en la agenda
 	 * (`idMesaDelAlta`).
 	 */
-	async reserva(db: Client, ahora: string, p: { idReserva: string; idMesaDelAlta: string | null }) {
+	async reserva(db: Base, ahora: string, p: { idReserva: string; idMesaDelAlta: string | null }) {
 		const rs = await db.execute({
 			sql: `SELECT R.Dia_YMD AS dia, R.Hora AS hora, R.Comensales AS personas, R.ID_Mesa AS id_mesa,
 			             R.Estado AS estado, NULLIF(TRIM(C.Email), '') AS email
@@ -150,7 +150,7 @@ const LECTURAS = {
 	},
 
 	/** La agenda, para avisar a quien no se le pudo registrar: el negocio y el nombre de cada mesa. */
-	async fallidas(db: Client, ahora: string, p: { idsMesas: string[] }) {
+	async fallidas(db: Base, ahora: string, p: { idsMesas: string[] }) {
 		const [negocio, nombres] = await Promise.all([
 			negocioDelCorreo(db),
 			Promise.all(p.idsMesas.map(async (id) => [id, await numeroDeMesa(db, id)] as const)),
@@ -162,7 +162,7 @@ const LECTURAS = {
 	 * La agenda, en su alarma: de estas reservas, cuáles ha recibido ya la Main (`alta`) o cuáles ya
 	 * no están por llegar (`cancelacion`).
 	 */
-	async enLaBase(db: Client, _ahora: string, p: { tipo: "alta" | "cancelacion"; ids: string[] }) {
+	async enLaBase(db: Base, _ahora: string, p: { tipo: "alta" | "cancelacion"; ids: string[] }) {
 		const rs = await db.execute({ sql: p.tipo === "alta" ? SQL_ESTAN : SQL_CANCELADAS, args: [JSON.stringify(p.ids)] });
 		return (rs.rows ?? []).map((r: any) => String(r.id));
 	},
@@ -186,13 +186,13 @@ export type RespuestaDeLecturaWeb =
  * Ejecuta una lectura sobre `db`, que ya tiene «ahora» fijado a `ahora`. Es lo que hace
  * `leerConLaHoraDelNegocio` después de calcular la hora; los tests de la agenda lo llaman con la suya.
  */
-export function ejecutarLecturaWeb<N extends NombreDeLectura>(db: Client, ahora: string, lectura: LecturaWeb<N>): Promise<ResultadoDe<N>> {
-	const leer = LECTURAS[lectura.que] as (db: Client, ahora: string, p: unknown) => Promise<ResultadoDe<N>>;
+export function ejecutarLecturaWeb<N extends NombreDeLectura>(db: Base, ahora: string, lectura: LecturaWeb<N>): Promise<ResultadoDe<N>> {
+	const leer = LECTURAS[lectura.que] as (db: Base, ahora: string, p: unknown) => Promise<ResultadoDe<N>>;
 	return leer(db, ahora, lectura);
 }
 
 /** Ejecuta una lectura sobre la base del negocio, con «ahora» fijado a la hora del negocio. */
-export async function leerConLaHoraDelNegocio<N extends NombreDeLectura>(db: Client, lectura: LecturaWeb<N>): Promise<ResultadoDe<N>> {
+export async function leerConLaHoraDelNegocio<N extends NombreDeLectura>(db: Base, lectura: LecturaWeb<N>): Promise<ResultadoDe<N>> {
 	const ahora = await horaDelNegocio(db);
 	return ejecutarLecturaWeb(conLaHoraDeQuienPregunta(db, ahora), ahora, lectura);
 }

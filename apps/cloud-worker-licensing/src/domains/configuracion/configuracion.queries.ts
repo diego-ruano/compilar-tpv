@@ -1,6 +1,6 @@
 // src/domains/configuracion/configuracion.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 import { deLaBase } from "../../lib/dinero";
 
@@ -54,7 +54,7 @@ function noVino(v: unknown): number {
 	return Number.isInteger(m) && m >= 0 && m <= 24 * 60 ? m : 0;
 }
 
-export async function getBusiness(db: Client): Promise<BusinessSettings> {
+export async function getBusiness(db: Base): Promise<BusinessSettings> {
 	const rs = await db.execute(`
 		SELECT
 			Business_Name AS business_name,
@@ -106,7 +106,7 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 	};
 }
 
-export async function getContact(db: Client): Promise<ContactSettings> {
+export async function getContact(db: Base): Promise<ContactSettings> {
 	const rs = await db.execute(`
 		SELECT
 			Contact_Email AS contact_email,
@@ -122,7 +122,7 @@ export async function getContact(db: Client): Promise<ContactSettings> {
 	};
 }
 
-export async function getTicket(db: Client): Promise<TicketSettings> {
+export async function getTicket(db: Base): Promise<TicketSettings> {
 	const rs = await db.execute(`
 		SELECT
 			Show_Logo AS show_logo,

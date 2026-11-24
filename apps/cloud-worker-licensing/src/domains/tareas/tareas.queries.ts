@@ -3,7 +3,7 @@
 // Lecturas de tareas. SQL portado de tpv-infra-sqlite/src/tareas.rs y columnas
 // en PascalCase para encajar con los DTOs generados de @tpv/contracts.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 
 import type {
@@ -29,7 +29,7 @@ function rows(rs: any): any[] {
 // TAR-03: ¿existen TODOS los trabajadores dados? Espejo de la validación del repo local: no se
 // delega en la FK (en la nube puede no aplicarse, dejando asignaciones huérfanas). `ids` llega
 // ya normalizado (limpio y sin duplicados).
-export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise<boolean> {
+export async function trabajadoresExisten(db: Base, idsRaw: string[]): Promise<boolean> {
 	const ids = Array.from(
 		new Set((idsRaw ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0)),
 	);
@@ -46,7 +46,7 @@ export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise
 	return n === ids.length;
 }
 
-export async function getTrabajadores(db: Client): Promise<TrabajadorUI[]> {
+export async function getTrabajadores(db: Base): Promise<TrabajadorUI[]> {
 	const rs = await db.execute(`
 		SELECT
 			t.ID_Trabajador,
@@ -63,7 +63,7 @@ export async function getTrabajadores(db: Client): Promise<TrabajadorUI[]> {
 	return rows(rs) as TrabajadorUI[];
 }
 
-export async function getTareasAdmin(db: Client): Promise<TareaAdminRow[]> {
+export async function getTareasAdmin(db: Base): Promise<TareaAdminRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			t.ID_Tarea,
@@ -90,7 +90,7 @@ export async function getTareasAdmin(db: Client): Promise<TareaAdminRow[]> {
 }
 
 // TAR-05: la papelera es la misma lista de admin filtrada por el otro estado.
-export async function getPapelera(db: Client): Promise<TareaAdminRow[]> {
+export async function getPapelera(db: Base): Promise<TareaAdminRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			t.ID_Tarea,
@@ -117,7 +117,7 @@ export async function getPapelera(db: Client): Promise<TareaAdminRow[]> {
 }
 
 export async function getTareaById(
-	db: Client,
+	db: Base,
 	idTarea: string,
 ): Promise<TareaRow | null> {
 	const rs = await db.execute({
@@ -133,7 +133,7 @@ export async function getTareaById(
 }
 
 export async function getTareaAsignados(
-	db: Client,
+	db: Base,
 	idTarea: string,
 ): Promise<TareaAsignadoRow[]> {
 	const rs = await db.execute({
@@ -162,7 +162,7 @@ export async function getTareaAsignados(
  * cambia ninguna fila, y la ruta la daba por buena: la pantalla se cerraba como si se hubiera
  * hecho. Espejo del `affected == 0` de `marcar_finalizada` en la Main.
  */
-export async function estaAsignada(db: Client, idTarea: string, idTrabajador: string): Promise<boolean> {
+export async function estaAsignada(db: Base, idTarea: string, idTrabajador: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: "SELECT 1 AS si FROM Tarea_Asignaciones WHERE ID_Tarea = ?1 AND ID_Trabajador = ?2 LIMIT 1;",
 		args: [idTarea, idTrabajador],
@@ -171,7 +171,7 @@ export async function estaAsignada(db: Client, idTarea: string, idTrabajador: st
 }
 
 export async function getMisTareas(
-	db: Client,
+	db: Base,
 	idTrabajador: string,
 ): Promise<MisTareasRow[]> {
 	const rs = await db.execute({

@@ -66,7 +66,8 @@ const NEGOCIO: Record<string, ErrorCode> = {
 const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// La base del negocio no ha podido ponerse al día tras un despliegue (`MotorTenantHub.getTenantDb`).
 	"tenant_db_migration_failed",
-	// El objeto del negocio está saturado o no ha podido atender la petición (`lib/enElHub.ts`).
+	// El objeto del negocio (`lib/enElHub.ts`) o el de la base central (`server/central/cliente.ts`)
+	// está saturado o no ha podido atender la petición.
 	"hub_overloaded",
 	"hub_unavailable",
 	// AUD-02: el TenantHub no ha podido preguntar a la base central si este equipo sigue siendo la
@@ -78,6 +79,12 @@ const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// DO-03: la base del negocio está volviendo a un instante o restaurándose de una copia
 	// (`MotorTenantHub.getTenantDb`). Es cosa de minutos, y lo ha pedido soporte.
 	"tenant_db_restaurando",
+	// La base central no puede atender (`server/central/cliente.ts`): sin aprovisionar, en medio de
+	// un despliegue o sin poder ponerse al día.
+	"central_sin_aprovisionar",
+	"central_operacion_desconocida",
+	"central_migracion_alterada",
+	"central_migracion_fallida",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -539,6 +546,17 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"copia_de_otra_version",
 	"copia_no_valida",
 	"copia_de_otro_negocio",
+	// La base central (`durableObjects/baseCentral.rpc.ts`): o no puede atender, que para el cliente
+	// es la nube sin disponibilidad y basta su frase genérica, o es un fallo del programa o de quien
+	// la administra.
+	"central_sin_aprovisionar",
+	"central_ya_aprovisionada",
+	"central_error_sql",
+	"central_sentencia_prohibida",
+	"central_operacion_desconocida",
+	"central_operacion_fallida",
+	"central_migracion_alterada",
+	"central_migracion_fallida",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",

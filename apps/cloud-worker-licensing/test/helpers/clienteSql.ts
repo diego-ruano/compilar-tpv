@@ -63,7 +63,7 @@ export function clienteSobre(sql: any, storage?: any) {
 			return ejecutar(entrada);
 		},
 
-		async batch(sentencias: any[], _modo?: string) {
+		async batch(sentencias: any[]) {
 			// SYNC-30: la guarda de un paso `guard` decide como en `loteEnBruto`: un número distinto
 			// de 0 en la primera columna de la primera fila, o el lote se deshace con su error.
 			const correr = () =>

@@ -20,7 +20,7 @@
 // Aparte de los comodines, `instr` sólo se aparta de `LIKE` con un carácter NUL dentro del texto:
 // `LIKE` deja de mirar al llegar a él e `instr` busca en el texto entero, igual en los dos lados.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
@@ -37,7 +37,7 @@ const ACENTOS = "áéíóúñü".repeat(4).slice(0, 26);
 /** Un nombre largo de los de verdad: 71 letras y 73 bytes. */
 const LARGO = "degustación de otoño con maridaje de vinos de la tierra y postre casero";
 
-async function conProductos<R>(nombre: string, prueba: (db: Client) => Promise<R>): Promise<R> {
+async function conProductos<R>(nombre: string, prueba: (db: Base) => Promise<R>): Promise<R> {
 	return enElHub(`busqueda-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
@@ -57,15 +57,15 @@ async function conProductos<R>(nombre: string, prueba: (db: Client) => Promise<R
 				producto,
 			);
 		}
-		return prueba(clienteSobre(sql) as unknown as Client);
+		return prueba(clienteSobre(sql) as unknown as Base);
 	});
 }
 
 describe("buscar productos con lo que teclea el usuario", () => {
 	// Los dos buscadores, con la misma forma: texto → los ID que salen.
 	const BUSCADORES = {
-		mesas: async (db: Client, texto: string) => (await buscarEnMesas(db, texto)).map((p) => p.ID_Producto),
-		barra: async (db: Client, texto: string) => (await buscarEnLaBarra(db, texto, 50)).map((p) => p.ID_Producto),
+		mesas: async (db: Base, texto: string) => (await buscarEnMesas(db, texto)).map((p) => p.ID_Producto),
+		barra: async (db: Base, texto: string) => (await buscarEnLaBarra(db, texto, 50)).map((p) => p.ID_Producto),
 	};
 
 	for (const [donde, buscar] of Object.entries(BUSCADORES)) {
@@ -101,7 +101,7 @@ describe("buscar en los listados de caja con lo que teclea el usuario", () => {
 	const CLIENTA = "María Ángeles Fernández de Córdoba y Martínez de la Sierra-Núñez";
 	const RANGO = ["2026-05-01", "2026-05-31"] as const;
 
-	async function conCaja<R>(nombre: string, prueba: (db: Client) => Promise<R>): Promise<R> {
+	async function conCaja<R>(nombre: string, prueba: (db: Base) => Promise<R>): Promise<R> {
 		return enElHub(`busqueda-caja-${nombre}`, async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
@@ -140,7 +140,7 @@ describe("buscar en los listados de caja con lo que teclea el usuario", () => {
 					importe,
 				);
 			}
-			return prueba(clienteSobre(sql) as unknown as Client);
+			return prueba(clienteSobre(sql) as unknown as Base);
 		});
 	}
 

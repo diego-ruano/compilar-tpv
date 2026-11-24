@@ -134,12 +134,12 @@ function prepararHub(hub: any, main: string | null) {
 	const turno = { texto: null as string | null, pausa: retencion(), retenidos: 0 };
 	const db = {
 		...base,
-		async batch(sentencias: any[], modo?: string) {
+		async batch(sentencias: any[]) {
 			if (turno.texto && JSON.stringify(sentencias).includes(turno.texto)) {
 				turno.retenidos++;
 				await turno.pausa.espera;
 			}
-			return base.batch(sentencias, modo);
+			return base.batch(sentencias);
 		},
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);

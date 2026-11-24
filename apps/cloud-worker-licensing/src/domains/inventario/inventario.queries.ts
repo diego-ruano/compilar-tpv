@@ -5,7 +5,7 @@
 // las filas ya salen con la forma de los DTOs de @tpv/contracts. Van a la base por `tenantQuery`,
 // sin pasar por el motor de escritura: son datos de solo lectura, sin idempotencia que romper.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type {
 	CategoriaInvDto,
@@ -18,8 +18,8 @@ import type {
 	ProductoBaseDto,
 } from "@tpv/contracts";
 
-// Convierte el ResultSet de libsql en objetos planos {columna: valor}. Las filas de
-// libsql son array-like; sin esto se serializarían como arrays.
+// Convierte un `Resultado` (`lib/sql.ts`) en objetos planos {columna: valor}, leyendo cada fila
+// por su posición.
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
 	return (rs?.rows ?? []).map((r: any) => {
@@ -37,14 +37,14 @@ function rows(rs: any): any[] {
 const PRODUCTO_BASE_COLS =
 	"ID_Producto, COALESCE(ID_Categoria, '') AS ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent";
 
-export async function listCategorias(db: Client): Promise<CategoriaInvDto[]> {
+export async function listCategorias(db: Base): Promise<CategoriaInvDto[]> {
 	const rs = await db.execute(
 		"SELECT ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina FROM Categorias_Producto ORDER BY Nombre ASC;",
 	);
 	return rows(rs) as CategoriaInvDto[];
 }
 
-export async function listProveedoresMini(db: Client): Promise<ProveedorMiniDto[]> {
+export async function listProveedoresMini(db: Base): Promise<ProveedorMiniDto[]> {
 	const rs = await db.execute(
 		"SELECT ID_Proveedor, Nombre_Empresa, Email FROM Proveedores ORDER BY Nombre_Empresa ASC;",
 	);
@@ -52,7 +52,7 @@ export async function listProveedoresMini(db: Client): Promise<ProveedorMiniDto[
 }
 
 export async function listProductosByCategoria(
-	db: Client,
+	db: Base,
 	idCategoria: string,
 ): Promise<ProductoListDto[]> {
 	const rs = await db.execute({
@@ -80,7 +80,7 @@ export async function listProductosByCategoria(
 }
 
 export async function resumen(
-	db: Client,
+	db: Base,
 	limit: number,
 ): Promise<InventarioResumenResponse> {
 	const cad = await db.execute({
@@ -141,7 +141,7 @@ export async function resumen(
 	} as unknown as InventarioResumenResponse;
 }
 
-export async function listAlergenos(db: Client): Promise<AlergenoInvDto[]> {
+export async function listAlergenos(db: Base): Promise<AlergenoInvDto[]> {
 	const rs = await db.execute(
 		"SELECT ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen FROM Alergenos ORDER BY Nombre ASC;",
 	);
@@ -149,7 +149,7 @@ export async function listAlergenos(db: Client): Promise<AlergenoInvDto[]> {
 }
 
 export async function productDetail(
-	db: Client,
+	db: Base,
 	idProducto: string,
 ): Promise<ProductDetailResponse> {
 	const prodRs = await db.execute({
@@ -178,7 +178,7 @@ export async function productDetail(
 // El `Stock_Disponible` del lote si existe. Es el disponible PREVIO, que da el delta del
 // movimiento de auditoría (INV-01b) al editar o ajustar.
 export async function getLoteStock(
-	db: Client,
+	db: Base,
 	idLote: string,
 ): Promise<{ stock_disponible: number } | null> {
 	const rs = await db.execute({
@@ -193,7 +193,7 @@ export async function getLoteStock(
 // RI-55: el stock suelto de un producto, o `undefined` si el producto no existe (`null` es que
 // no lleva stock suelto).
 export async function getProductoStockSuelto(
-	db: Client,
+	db: Base,
 	idProducto: string,
 ): Promise<number | null | undefined> {
 	const rs = await db.execute({
@@ -206,7 +206,7 @@ export async function getProductoStockSuelto(
 }
 
 export async function listLotesByProducto(
-	db: Client,
+	db: Base,
 	idProducto: string,
 ): Promise<LoteDto[]> {
 	const rs = await db.execute({

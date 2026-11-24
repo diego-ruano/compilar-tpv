@@ -32,6 +32,12 @@
 			"new_sqlite_classes": [
 				"AgendaWeb"
 			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"BaseCentral"
+			]
 		}
 	],
 	"ratelimits": [
@@ -85,6 +91,10 @@
 			{
 				"class_name": "AgendaWeb",
 				"name": "AgendaWeb"
+			},
+			{
+				"class_name": "BaseCentral",
+				"name": "BaseCentral"
 			}
 		]
 	},

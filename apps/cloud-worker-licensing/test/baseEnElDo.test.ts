@@ -2,8 +2,8 @@
 //
 // La base del negocio en el SQLite del TenantHub.
 //
-// Lo que el resto del worker da por hecho de un `Client` de libsql tiene que seguir siendo verdad
-// con la base dentro del DO: `rowsAffected` cuenta filas y no índices, el `Seq` sale de
+// Lo que el resto del worker da por hecho de una `Base` (`lib/sql.ts`) tiene que seguir siendo
+// verdad con la base dentro del DO: `rowsAffected` cuenta filas y no índices, el `Seq` sale de
 // `lastInsertRowid`, un lote es todo o nada, y una clave foránea rota se rechaza sin tumbar el DO.
 
 import { describe, expect, it } from "vitest";
@@ -13,12 +13,12 @@ import { enElHub } from "./helpers/hub";
 import { leerParaLaWeb } from "../src/domains/reservas_web/lecturasDeLaWeb";
 import { provisionTenantDatabase } from "../src/domains/licensing/licensing.helpers";
 import {
-	baseAprovisionada,
 	clienteLocal,
-	ejecutarEnBruto,
+	ejecutarDelNegocio,
 	loteEnBruto,
 	migrarBaseLocal,
 } from "../src/durableObjects/tenantHub.sqlite";
+import { baseAprovisionada } from "../src/durableObjects/sqliteDelObjeto";
 
 const COMANDA = (id: string) => ({
 	sql: "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura) VALUES (?1, 'BARRA', '2026-11-11 10:00:00');",
@@ -48,21 +48,21 @@ describe("esquema", () => {
 	});
 });
 
-describe("el cliente local tiene la semántica de libsql", () => {
+describe("el cliente local tiene la semántica de una Base", () => {
 	it("rowsAffected cuenta filas (no índices) y lastInsertRowid sale del INSERT", async () => {
 		await enElHub("base-semantica", async (hub) => {
 			const st = hub.state.storage as DurableObjectStorage;
 			await migrarBaseLocal(st);
-			const insert = ejecutarEnBruto(st.sql, COMANDA("c1"));
+			const insert = ejecutarDelNegocio(st.sql, COMANDA("c1"));
 			expect(insert.rowsAffected).toBe(1);
 			expect(insert.lastInsertRowid).toBeGreaterThan(0);
 
-			const ninguna = ejecutarEnBruto(st.sql, {
+			const ninguna = ejecutarDelNegocio(st.sql, {
 				sql: "UPDATE Comandas SET Estado = 'Pagada' WHERE ID_Comanda = 'no-existe';",
 			});
 			expect(ninguna.rowsAffected).toBe(0);
 
-			const lectura = ejecutarEnBruto(st.sql, { sql: "SELECT ID_Comanda, Canal FROM Comandas;" });
+			const lectura = ejecutarDelNegocio(st.sql, { sql: "SELECT ID_Comanda, Canal FROM Comandas;" });
 			expect(lectura.rowsAffected).toBe(0);
 			expect(lectura.columns).toEqual(["ID_Comanda", "Canal"]);
 			expect(lectura.rows).toEqual([["c1", "BARRA"]]);
@@ -121,7 +121,7 @@ describe("claves foráneas aplazadas", () => {
 		await enElHub("base-fk-suelta", async (hub) => {
 			const st = hub.state.storage as DurableObjectStorage;
 			await migrarBaseLocal(st);
-			ejecutarEnBruto(st.sql, DEFER);
+			ejecutarDelNegocio(st.sql, DEFER);
 			expect(st.sql.exec("PRAGMA defer_foreign_keys;").one().defer_foreign_keys).toBe(0);
 		});
 	});

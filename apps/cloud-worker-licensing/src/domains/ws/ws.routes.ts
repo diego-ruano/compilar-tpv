@@ -64,7 +64,6 @@ wsRoutes.post("/ticket", async (c) => {
 				args: [ticket, tenantId, deviceId, now + TICKET_TTL_MS],
 			},
 		],
-		"write",
 	);
 
 	return c.json({ ok: true, ticket, expiresInMs: TICKET_TTL_MS });

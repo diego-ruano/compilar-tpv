@@ -1,6 +1,6 @@
 // src/domains/trabajadores/trabajadores.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 import { HubError } from "../../lib/errorHttp";
 
@@ -39,7 +39,7 @@ export type GrupoAsignacion = { id_grupo: string; ids: string[] };
 const DE_LA_PLANTILLA = `ID_Trabajador IN (SELECT t.ID_Trabajador FROM Trabajadores t
 	JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario WHERE u.Archivado_En IS NULL)`;
 
-export async function grupoAsignacion(db: Client, id: string): Promise<GrupoAsignacion | null> {
+export async function grupoAsignacion(db: Base, id: string): Promise<GrupoAsignacion | null> {
 	const resultado = await db.execute({ sql: "SELECT ID_Asignacion, COALESCE(ID_Grupo, ID_Asignacion) AS ID_Grupo FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1) ORDER BY Hora_Inicio, ID_Asignacion;", args: [id] });
 	const miembros = rows(resultado);
 	return miembros.length ? { id_grupo: String(miembros[0].ID_Grupo), ids: miembros.map(m => String(m.ID_Asignacion)) } : null;
@@ -53,7 +53,7 @@ export async function grupoAsignacion(db: Client, id: string): Promise<GrupoAsig
  * cuando no se sabe cuántas filas tocó el guardado (`decidirPorEstado`; salió en AUD-26).
  */
 export async function asignacionComoSePidio(
-	db: Client,
+	db: Base,
 	input: {
 		id_asignacion?: string | null;
 		id_trabajador: string;
@@ -108,7 +108,7 @@ export type FilaSemanaOrigen = {
 };
 
 export async function filasSemana(
-	db: Client,
+	db: Base,
 	fromMonday: string,
 ): Promise<FilaSemanaOrigen[]> {
 	const rs = await db.execute({
@@ -171,7 +171,7 @@ function hhmm(v: unknown): string {
 	return String(v ?? "").slice(0, 5);
 }
 
-export async function roles(db: Client): Promise<RolRow[]> {
+export async function roles(db: Base): Promise<RolRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Rol AS ID_Rol,
@@ -182,7 +182,7 @@ export async function roles(db: Client): Promise<RolRow[]> {
 	return rows(rs) as RolRow[];
 }
 
-export async function all(db: Client): Promise<TrabajadorRow[]> {
+export async function all(db: Base): Promise<TrabajadorRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			t.ID_Trabajador AS ID_Trabajador,
@@ -204,7 +204,7 @@ export async function all(db: Client): Promise<TrabajadorRow[]> {
 }
 
 export async function detail(
-	db: Client,
+	db: Base,
 	idTrabajador: string,
 ): Promise<TrabajadorDetailRow | null> {
 	const rs = await db.execute({
@@ -249,7 +249,7 @@ export async function detail(
  * de una comanda a su camarero. Resto de un tiempo en que los ids eran enteros.
  */
 /** El usuario de una ficha, esté o no retirada (`null` si no existe). Para construir `eliminarTrabajador`. */
-export async function usuarioDeTrabajador(db: Client, idTrabajador: string): Promise<string | null> {
+export async function usuarioDeTrabajador(db: Base, idTrabajador: string): Promise<string | null> {
 	const rs = await db.execute({
 		sql: "SELECT ID_Usuario AS id FROM Trabajadores WHERE ID_Trabajador = ?1;",
 		args: [idTrabajador],
@@ -259,7 +259,7 @@ export async function usuarioDeTrabajador(db: Client, idTrabajador: string): Pro
 }
 
 /** ¿Sigue en la base ese usuario? Tras eliminarlo, es que tenía historia y se ha retirado. */
-export async function usuarioExiste(db: Client, idUsuario: string): Promise<boolean> {
+export async function usuarioExiste(db: Base, idUsuario: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: "SELECT EXISTS (SELECT 1 FROM Usuarios WHERE ID_Usuario = ?1) AS hay;",
 		args: [idUsuario],
@@ -268,7 +268,7 @@ export async function usuarioExiste(db: Client, idUsuario: string): Promise<bool
 }
 
 export async function idByUsuario(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 ): Promise<string | null> {
 	const rs = await db.execute({
@@ -284,7 +284,7 @@ export async function idByUsuario(
 	return id ? id : null;
 }
 
-export async function turnos(db: Client): Promise<TurnoRow[]> {
+export async function turnos(db: Base): Promise<TurnoRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Turno AS ID_Turno,
@@ -309,7 +309,7 @@ function esLibre(idTurno: string, horaInicio: string | null | undefined): boolea
 }
 
 export async function asignacionesSemana(
-	db: Client,
+	db: Base,
 	fechaLunes: string,
 ): Promise<AsignacionRow[]> {
 	const rs = await db.execute({
@@ -403,7 +403,7 @@ export type PredeterminadoItem = {
 };
 
 export async function predeterminadoDesdeSemanaItems(
-	db: Client,
+	db: Base,
 	fechaLunes: string,
 ): Promise<PredeterminadoItem[]> {
 	const rs = await db.execute({
@@ -460,7 +460,7 @@ export async function predeterminadoDesdeSemanaItems(
 //
 // Un usuario que ya no está activo no tiene permisos, y se dice (`usuario_inactivo`, con el mismo
 // texto que la Main): la pantalla cierra la sesión en vez de quedarse en un «no tienes permiso».
-export async function permisosUsuario(db: Client, id: string): Promise<import("@tpv/contracts").AutorizacionUsuario | null> {
+export async function permisosUsuario(db: Base, id: string): Promise<import("@tpv/contracts").AutorizacionUsuario | null> {
     const rs = await db.execute({sql:"SELECT r.Nombre_Rol, p.Permiso, u.Estado FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 ORDER BY p.Permiso",args:[id]});
     const filas = rows(rs);
     if (!filas.length) return null;

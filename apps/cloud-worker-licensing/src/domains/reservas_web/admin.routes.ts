@@ -17,7 +17,8 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { cuerpo } from "../../lib/validacion";
-import { getDb, type Sql } from "../../server/db";
+import { getDb } from "../../server/db";
+import type { Sql } from "../../lib/sql";
 import { auditAdmin } from "../../server/licenseStore";
 import {
 	claveActivaDelNegocio,

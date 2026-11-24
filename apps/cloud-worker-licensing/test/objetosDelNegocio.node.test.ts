@@ -1,6 +1,7 @@
 // test/objetosDelNegocio.node.test.ts
 //
-// Nadie pide el Durable Object de un negocio por su cuenta: sólo `lib/objetosDelNegocio.ts`.
+// Nadie pide el Durable Object de un negocio, ni el de la base central, por su cuenta: sólo
+// `lib/objetosDelNegocio.ts`.
 //
 // Los DO de un negocio (`TenantHub`, `AgendaWeb`) se piden con la jurisdicción y la pista de región
 // del despliegue. Un sitio que le pidiera el objeto directamente al espacio de nombres
@@ -15,6 +16,9 @@
 //   · los métodos que convierten un nombre en un objeto (`idFromName`, `idFromString`,
 //     `newUniqueId`, `getByName`, `jurisdiction`) sólo se llaman en el ayudante;
 //   · y nadie saca el espacio de nombres desestructurando el entorno.
+//
+// El de la base central (`BaseCentral`) sólo lo nombra el ayudante, en `centralDe`: con otro nombre
+// o en otra jurisdicción sería otro objeto, vacío y sin error.
 //
 // Los tipos (`Env["TenantHub"]`, `DurableObjectStub<TenantHub>`) y los comentarios no cuentan. El
 // último bloque se lo comprueba al propio barrido con código inventado.
@@ -41,6 +45,8 @@ const AYUDANTE = "lib/objetosDelNegocio.ts";
 
 /** Los espacios de nombres de los DO de un negocio, por el nombre de su binding. */
 const ESPACIOS = new Set(["TenantHub", "AgendaWeb"]);
+/** El de la base central: sólo lo toca el ayudante (`centralDe`). */
+const CENTRAL = "BaseCentral";
 /** Lo que convierte un nombre en un objeto, o cambia de jurisdicción. */
 const METODOS = new Set(["idFromName", "idFromString", "newUniqueId", "getByName", "jurisdiction"]);
 
@@ -94,12 +100,15 @@ function analizar(fichero: string, texto: string): string[] {
 				raro(`usa el espacio de nombres \`${nombre}\` por su cuenta: pide el objeto con \`hubDe\` o \`agendaDe\``, n);
 			}
 		}
+		if (nombre === CENTRAL && fichero !== AYUDANTE) {
+			raro(`usa el espacio de nombres \`${CENTRAL}\` por su cuenta: pide la central con \`centralDe\``, n);
+		}
 		if (nombre !== null && METODOS.has(nombre) && fichero !== AYUDANTE) {
 			raro(`llama a \`${nombre}\` fuera de \`${AYUDANTE}\``, n);
 		}
 		if (ts.isBindingElement(n)) {
 			const clave = n.propertyName ?? n.name;
-			if ((ts.isIdentifier(clave) || ts.isStringLiteralLike(clave)) && ESPACIOS.has(clave.text)) {
+			if ((ts.isIdentifier(clave) || ts.isStringLiteralLike(clave)) && (ESPACIOS.has(clave.text) || clave.text === CENTRAL)) {
 				raro(`saca el espacio de nombres \`${clave.text}\` desestructurando`, n);
 			}
 		}
@@ -129,6 +138,10 @@ describe("nadie pide el objeto de un negocio por su cuenta", () => {
 		expect(todoElWorker["lib/hub.ts"]).toContain("objetoDelNegocio(env, env.TenantHub, tenantId)");
 		expect(todoElWorker["durableObjects/agendaWeb.ts"]).toContain("objetoDelNegocio(env, env.AgendaWeb, tenantId)");
 	});
+
+	it("la central sólo la nombra `centralDe`", () => {
+		expect(todoElWorker[AYUDANTE]).toMatch(/export function centralDe\([^)]*\)[^{]*\{\s*const espacio = env\.BaseCentral;/);
+	});
 });
 
 describe("el barrido caza lo que tiene que cazar", () => {
@@ -145,6 +158,9 @@ describe("el barrido caza lo que tiene que cazar", () => {
 		["cambiar de jurisdicción", 'const ns = espacio.jurisdiction("eu");'],
 		["detrás de un texto con dos barras", 'const u = "https://ejemplo.invalid"; const s = env.TenantHub.get(id);'],
 		["como segundo argumento de otra cosa", "const stub = otraCosa(env, env.TenantHub, tenantId);"],
+		["pedir la central por su cuenta", 'const central = env.BaseCentral.get(env.BaseCentral.idFromName("central"));'],
+		["la central por el ayudante de los negocios", "const central = objetoDelNegocio(env, env.BaseCentral, 'central');"],
+		["desestructurar la central", "const { BaseCentral } = c.env;"],
 	])("%s", (_que, codigo) => {
 		expect(enUnaRuta(codigo), codigo).not.toEqual([]);
 	});
@@ -157,6 +173,8 @@ describe("el barrido caza lo que tiene que cazar", () => {
 		["un comentario", "// env.TenantHub.get(env.TenantHub.idFromName(tenantId))\nconst x = 1;"],
 		["un texto", 'const ayuda = "env.TenantHub.idFromName(tenantId)";'],
 		["la clase del DO", "export class TenantHub extends DurableObject<Env> {}"],
+		["la central por su puerta", "const db = clienteCentral(() => centralDe(c.env));"],
+		["el tipo de la central", 'let ns: Env["BaseCentral"]; let s: DurableObjectStub<BaseCentral>;'],
 	])("no molesta: %s", (_que, codigo) => {
 		expect(enUnaRuta(codigo), codigo).toEqual([]);
 	});

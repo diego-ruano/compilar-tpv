@@ -9,7 +9,7 @@
 // Va aparte de `mesas.commands.ts` porque lee antes de decidir qué escribir; lo que escribe son los
 // constructores de siempre, `abrirComanda` y `setTrabajadorIfNull`.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import * as cmd from "./mesas.commands";
 import * as q from "./mesas.queries";
@@ -21,7 +21,7 @@ import type { AbrirComandaInput } from "./mesas.schemas";
  * cambia nada también se replica (su `Applied_Operations`, su `Sync_Changes`, el aviso a los demás
  * equipos y lo que releen).
  */
-export async function planAbrirORetomar(db: Client, datos: AbrirComandaInput): Promise<cmd.BuiltCommand | null> {
+export async function planAbrirORetomar(db: Base, datos: AbrirComandaInput): Promise<cmd.BuiltCommand | null> {
 	const abierta = await q.comandaAbiertaByMesa(db, datos.id_mesa);
 	const idTrabajador = await q.resolveTrabajadorId(db, datos.id_trabajador_o_usuario);
 	// MESA-10: sin autoenlace de reserva; si no viene una explícita, queda sin ella.

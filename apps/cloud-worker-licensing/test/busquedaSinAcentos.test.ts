@@ -13,7 +13,7 @@
 // Que la Main devuelve las mismas filas lo fijan los casos de lectura `*_sin_acentos`
 // (`tests/contract/lecturas/`).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import casos from "../../../crates/tpv-domain/src/busqueda_casos.json";
@@ -74,7 +74,7 @@ describe("la expresión SQL, en el SQLite del Durable Object", () => {
 });
 
 describe("las búsquedas del worker no distinguen acentos ni mayúsculas", () => {
-	async function conDatos<R>(nombre: string, prueba: (db: Client) => Promise<R>): Promise<R> {
+	async function conDatos<R>(nombre: string, prueba: (db: Base) => Promise<R>): Promise<R> {
 		return enElHub(`busqueda-sin-acentos-${nombre}`, async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
@@ -105,7 +105,7 @@ describe("las búsquedas del worker no distinguen acentos ni mayúsculas", () =>
 			sql.exec(
 				"INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-12', 'Compras', 'Limón y azúcar', 1500);",
 			);
-			return prueba(clienteSobre(sql) as unknown as Client);
+			return prueba(clienteSobre(sql) as unknown as Base);
 		});
 	}
 

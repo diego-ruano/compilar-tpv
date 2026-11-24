@@ -1,6 +1,6 @@
 // src/domains/stats/stats.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 import { CERO, deLaBase, entre } from "../../lib/dinero";
 
@@ -66,12 +66,12 @@ function bucket(range: StatsRange, expr: string): string {
 	return `strftime('%d/%m', ${expr})`;
 }
 
-async function one(db: Client, sql: string, args: any[] = []): Promise<any> {
+async function one(db: Base, sql: string, args: any[] = []): Promise<any> {
 	const rs = await db.execute({ sql, args });
 	return rows(rs)[0] ?? {};
 }
 
-async function tableExists(db: Client, table: string): Promise<boolean> {
+async function tableExists(db: Base, table: string): Promise<boolean> {
 	const r = await one(
 		db,
 		"SELECT name FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1;",
@@ -90,7 +90,7 @@ const HOY = "datetime('now','localtime','start of day')";
  * Antes de leer del resumen diario los días cerrados de un rango, rehace los que estén sucios
  * (`resumenAlDia`). El rango de hoy no lee del resumen.
  */
-async function resumenDelRangoAlDia(db: Client, range: StatsRange): Promise<void> {
+async function resumenDelRangoAlDia(db: Base, range: StatsRange): Promise<void> {
 	if (range === "hoy") return;
 	await resumenAlDia(db, rangeBounds(range).start);
 }
@@ -282,7 +282,7 @@ export function sqlMesasTopIngresos(range: StatsRange): string {
 }
 
 export async function mesas(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 ): Promise<MesasStatsResponse> {
 	// Los días cerrados del rango se leen del resumen diario: primero, que esté al día.
@@ -311,7 +311,7 @@ export type SentenciasMesas = {
  * La estadística de mesas a partir de sus cuatro sentencias. Los tests de equivalencia le pasan las
  * de antes del resumen diario, que recorren los cobros.
  */
-export async function mesasCon(db: Client, sql: SentenciasMesas): Promise<MesasStatsResponse> {
+export async function mesasCon(db: Base, sql: SentenciasMesas): Promise<MesasStatsResponse> {
 	const total = await one(
 		db,
 		"SELECT COUNT(*) AS n FROM Mesas WHERE Archivada_En IS NULL;",
@@ -348,7 +348,7 @@ export async function mesasCon(db: Client, sql: SentenciasMesas): Promise<MesasS
 	};
 }
 
-export async function listCategorias(db: Client): Promise<StatsCategoriaRow[]> {
+export async function listCategorias(db: Base): Promise<StatsCategoriaRow[]> {
 	const rs = await db.execute(`
 		SELECT ID_Categoria, Nombre
 		FROM Categorias_Producto
@@ -499,7 +499,7 @@ export function sqlProductos(range: StatsRange): string {
 }
 
 export async function productos(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 	categoriaTopId: string | null,
 	categoriaWorstId: string | null,
@@ -514,7 +514,7 @@ export async function productos(
  * le pasan la de antes del resumen diario, que recorre los cobros.
  */
 export async function productosCon(
-	db: Client,
+	db: Base,
 	sql: string,
 	categoriaTopId: string | null,
 	categoriaWorstId: string | null,
@@ -602,7 +602,7 @@ function bucketReservas(range: StatsRange): string {
 }
 
 export async function reservas(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 	turno: StatsTurno,
 ): Promise<ReservasStatsResponse> {
@@ -730,7 +730,7 @@ function fichajeDt(col: string): string {
  * lo mismo: siete consultas y un ensamblaje, exactamente las de la Main.
  */
 export async function trabajadores(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 ): Promise<TrabajadoresStatsResponse> {
 	const { start, end } = rangeBounds(range);
@@ -1023,7 +1023,7 @@ export async function trabajadores(
 }
 
 export async function clientes(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 ): Promise<ClientesStatsResponse> {
 	const { start, end } = rangeBounds(range);
@@ -1154,7 +1154,7 @@ export async function clientes(
 }
 
 export async function proveedores(
-	db: Client,
+	db: Base,
 	range: StatsRange,
 ): Promise<ProveedoresStatsResponse> {
 	if (!(await tableExists(db, "Cuentas_Gastos"))) {

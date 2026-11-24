@@ -10,7 +10,9 @@
 //
 //   · lo que dice el despliegue (`wrangler.json`): ninguna jurisdicción y la pista `weur`;
 //   · que las cuatro puertas (`hubDe`, `agendaDe`, la baja de un dispositivo y el aviso de cambio
-//     de licencia) piden el objeto con esa jurisdicción y esa pista.
+//     de licencia) piden el objeto con esa jurisdicción y esa pista;
+//   · y que la base central (`centralDe`) es siempre el mismo objeto, nazca donde nazcan los de los
+//     negocios.
 //
 // Que nadie más le pide un objeto a un espacio de nombres por su cuenta lo vigila, leyendo el
 // fuente, `objetosDelNegocio.node.test.ts`.
@@ -20,7 +22,7 @@ import { describe, expect, it } from "vitest";
 import wrangler from "../wrangler.json";
 import { agendaDe } from "../src/durableObjects/agendaWeb";
 import { avisarCambioDeLicencia, cerrarSocketsDelDispositivo, hubDe } from "../src/lib/hub";
-import { colocacionDelDespliegue, objetoDelNegocio } from "../src/lib/objetosDelNegocio";
+import { centralDe, colocacionDelDespliegue, objetoDelNegocio } from "../src/lib/objetosDelNegocio";
 
 type Peticion = { jurisdiccion: string | null; nombre: string; opciones: unknown };
 
@@ -115,5 +117,22 @@ describe("las puertas piden el objeto como dice el despliegue", () => {
 		await avisarCambioDeLicencia(env, "negocio-1");
 		expect(pedidos).toHaveLength(4);
 		expect(pedidos.every((p) => p.jurisdiccion === "eu" && p.opciones === undefined)).toBe(true);
+	});
+});
+
+describe("la base central", () => {
+	const LA_CENTRAL = { jurisdiccion: null, nombre: "central", opciones: { locationHint: "weur" } };
+
+	it("es siempre el mismo objeto: sin jurisdicción, con la pista de Europa occidental", () => {
+		const pedidos: Peticion[] = [];
+		centralDe({ ...DESPLIEGUE, BaseCentral: espacio(pedidos) } as any);
+		expect(pedidos).toEqual([LA_CENTRAL]);
+	});
+
+	it("cambiar cómo nacen los objetos de los negocios no la mueve", () => {
+		const pedidos: Peticion[] = [];
+		centralDe({ JURISDICCION_DO: "eu", UBICACION_DO: "enam", BaseCentral: espacio(pedidos) } as any);
+		centralDe({ JURISDICCION_DO: "", UBICACION_DO: "", BaseCentral: espacio(pedidos) } as any);
+		expect(pedidos).toEqual([LA_CENTRAL, LA_CENTRAL]);
 	});
 });

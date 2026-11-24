@@ -18,7 +18,7 @@
 // La Main hace lo mismo con su propia copia (`tests_resumen_diario` en
 // `tpv-infra-sqlite/src/stats.rs`), y el arnés de lectura fija que los dos lados dan lo mismo.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import casoMesas from "../../../tests/contract/lecturas/casos/stats/mesas.json";
@@ -75,7 +75,7 @@ const CASOS: [string, Caso][] = [
 	["mesas", casoMesas as Caso],
 ];
 
-async function daLoMismoQueAntes(db: Client, etiqueta: string): Promise<void> {
+async function daLoMismoQueAntes(db: Base, etiqueta: string): Promise<void> {
 	for (const range of RANGOS) {
 		const antesMesas = await mesasCon(db, mesasDeAntes(range));
 		// Primero sin rehacer los días sucios: lo que lee alguien a quien se le ha colado un cobro
@@ -106,7 +106,7 @@ async function daLoMismoQueAntes(db: Client, etiqueta: string): Promise<void> {
 }
 
 /** Todo día resumido que no esté apuntado como sucio coincide con lo que sale de los cobros. */
-async function loNoApuntadoSigueValiendo(db: Client, sql: any, etiqueta: string): Promise<void> {
+async function loNoApuntadoSigueValiendo(db: Base, sql: any, etiqueta: string): Promise<void> {
 	const dias = sql
 		.exec(
 			`SELECT dia FROM (
@@ -122,19 +122,19 @@ async function loNoApuntadoSigueValiendo(db: Client, sql: any, etiqueta: string)
 	}
 }
 
-async function rehacerTodo(db: Client, sql: any): Promise<void> {
+async function rehacerTodo(db: Base, sql: any): Promise<void> {
 	const sucios = sql.exec("SELECT Dia AS dia FROM _Estad_Dias_Sucios;").toArray();
 	for (const f of sucios) await recalcularDia(db, String(f.dia));
 	expect(Number(sql.exec("SELECT COUNT(*) AS n FROM _Estad_Dias_Sucios;").one().n)).toBe(0);
 }
 
 /** La base de un negocio en el SQLite de un Durable Object, con la siembra de un caso. */
-function conLaSiembra<R>(nombre: string, siembra: string[], prueba: (db: Client, sql: any) => Promise<R>) {
+function conLaSiembra<R>(nombre: string, siembra: string[], prueba: (db: Base, sql: any) => Promise<R>) {
 	return enElHub(`stats-resumen-${nombre}`, async (hub: any) => {
 		const storage = hub.state.storage;
 		crearEsquemaTenant(storage.sql);
 		for (const sentencia of siembra) storage.sql.exec(sentencia);
-		return prueba(clienteSobre(storage.sql, storage) as unknown as Client, storage.sql);
+		return prueba(clienteSobre(storage.sql, storage) as unknown as Base, storage.sql);
 	});
 }
 

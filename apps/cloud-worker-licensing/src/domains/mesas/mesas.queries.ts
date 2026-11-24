@@ -1,6 +1,6 @@
 // src/domains/mesas/mesas.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { recortar } from "../../lib/texto";
 import type { Dinero } from "@tpv/contracts";
@@ -52,7 +52,7 @@ function parsePoints(raw: any): number[] {
 }
 
 export async function resolveTrabajadorId(
-	db: Client,
+	db: Base,
 	idMaybe: string | null,
 ): Promise<string | null> {
 	if (!idMaybe || !recortar(idMaybe)) return null;
@@ -69,7 +69,7 @@ export async function resolveTrabajadorId(
 	return id ? id : null;
 }
 
-export async function loadLayout(db: Client): Promise<SalonOut[]> {
+export async function loadLayout(db: Base): Promise<SalonOut[]> {
 	const zonasRs = await db.execute(`
 		SELECT ID_Zona, Nombre_Zona, Room_Points
 		FROM Zonas
@@ -125,7 +125,7 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 }
 
 export async function readComanda(
-	db: Client,
+	db: Base,
 	idComanda: string,
 ): Promise<ComandaRow | null> {
 	const rs = await db.execute({
@@ -154,7 +154,7 @@ function stripMesaPrefix(id: string): string {
 }
 
 export async function comandaAbiertaByMesa(
-	db: Client,
+	db: Base,
 	idMesa: string,
 ): Promise<ComandaRow | null> {
 	const bareId = stripMesaPrefix(idMesa);
@@ -174,7 +174,7 @@ export async function comandaAbiertaByMesa(
 }
 
 export async function lineas(
-	db: Client,
+	db: Base,
 	idComanda: string,
 ): Promise<MesaLineaComandaRow[]> {
 	const rs = await db.execute({
@@ -216,7 +216,7 @@ export async function lineas(
  * su `Sync_Changes`, el aviso a los demás equipos y lo que releen. Espejo de `trabajador_por_poner`
  * en la Main.
  */
-export async function trabajadorPorPoner(db: Client, idComanda: string): Promise<boolean> {
+export async function trabajadorPorPoner(db: Base, idComanda: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `
 			SELECT 1 AS si FROM Comandas
@@ -230,7 +230,7 @@ export async function trabajadorPorPoner(db: Client, idComanda: string): Promise
 }
 
 /** La comanda abierta de la mesa con sus líneas (`/comandas/abrir-o-retomar`); `null` sin ninguna. */
-export async function comandaConLineas(db: Client, idMesa: string): Promise<ComandaConLineasOut | null> {
+export async function comandaConLineas(db: Base, idMesa: string): Promise<ComandaConLineasOut | null> {
 	const comanda = await comandaAbiertaByMesa(db, idMesa);
 	if (!comanda) return null;
 	return { comanda, lineas: await lineas(db, comanda.id_comanda) };
@@ -256,7 +256,7 @@ const SQL_RESERVAS_DEL_PLANO = `
  * del negocio desplazaría las reservas una o dos horas.
  */
 export async function mesasMetaAll(
-	db: Client,
+	db: Base,
 	ahoraLocal: string | null,
 	reloj = Date.now(),
 ): Promise<MesasMetaOut> {
@@ -292,7 +292,6 @@ export async function mesasMetaAll(
 			{ sql: SQL_RESERVAS_DEL_PLANO, args: [DURACION_POR_DEFECTO_MIN] },
 			"SELECT Zona_Horaria AS zona FROM Business_Settings WHERE ID = 1;",
 		],
-		"read",
 	);
 	const out: Record<string, MesaMetaOut> = {};
 	for (const r of rows(rs)) {
@@ -355,7 +354,7 @@ export async function mesasMetaAll(
 }
 
 // INC-20261030-005: la categoría no vendible no sale en la venta. Espejo de la Main.
-export async function categorias(db: Client): Promise<CategoriaVendibleOut[]> {
+export async function categorias(db: Base): Promise<CategoriaVendibleOut[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Categoria AS ID_Categoria,
@@ -370,7 +369,7 @@ export async function categorias(db: Client): Promise<CategoriaVendibleOut[]> {
 }
 
 export async function productosByCategoria(
-	db: Client,
+	db: Base,
 	idCategoria: string,
 ): Promise<ProductoVendibleOut[]> {
 	const rs = await db.execute({
@@ -391,7 +390,7 @@ export async function productosByCategoria(
 }
 
 export async function searchProductos(
-	db: Client,
+	db: Base,
 	query: string,
 ): Promise<ProductoVendibleOut[]> {
 	const texto = textoABuscar(query);
@@ -430,7 +429,7 @@ export async function searchProductos(
  * mira la guarda del comando, dentro del lote (RI-54, SYNC-30: `guardasDeLinea.ts`).
  */
 export async function datosDeLinea(
-	db: Client,
+	db: Base,
 	idProducto: string,
 ): Promise<{
 	pasaCocina: boolean;
@@ -463,7 +462,7 @@ export async function datosDeLinea(
 }
 
 export async function idComandaByDetalle(
-	db: Client,
+	db: Base,
 	idDetalle: string,
 ): Promise<string | null> {
 	const rs = await db.execute({
@@ -484,7 +483,7 @@ export type CobroDetallesPlan =
 	| { ok: false; error: string };
 
 export async function cobrarDetallesPlan(
-	db: Client,
+	db: Base,
 	input: CobrarDetallesInput,
 ): Promise<CobroDetallesPlan> {
 	// DO-01: las líneas van en un solo parámetro (un array JSON), no en uno por línea: el SQLite
@@ -560,7 +559,7 @@ export async function cobrarDetallesPlan(
 // tablero se refresca con cada linea que se anade. Mismo cambio que kitchen_list_today_pending.
 // RI-69: la mesa va con LEFT JOIN porque un ticket de barra no tiene; sin ella Numero_Mesa sale NULL
 // y el tablero la rotula «Barra».
-export async function kitchenList(db: Client): Promise<KitchenRow[]> {
+export async function kitchenList(db: Base): Promise<KitchenRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			c.ID_Comanda AS ID_Comanda,

@@ -5,7 +5,7 @@
 // hora no vale para nada. Manda la zona que la Main deja en `Business_Settings.Zona_Horaria`
 // (job `zona_horaria`), con el reloj del worker.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 const ZONA_POR_DEFECTO = "Europe/Madrid";
 
@@ -37,7 +37,7 @@ export function horaLocalEn(zona: string, ms: number): string {
 }
 
 /** «Ahora» en el negocio, leyendo su zona de la base. */
-export async function horaDelNegocio(db: Client, ahoraMs = Date.now()): Promise<string> {
+export async function horaDelNegocio(db: Base, ahoraMs = Date.now()): Promise<string> {
 	const rs = await db.execute("SELECT Zona_Horaria AS zona FROM Business_Settings WHERE ID = 1;");
 	const fila: any = rs.rows?.[0];
 	return horaLocalEn(zonaValida(fila?.zona ?? fila?.[0]), ahoraMs);

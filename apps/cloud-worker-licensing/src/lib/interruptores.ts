@@ -24,7 +24,7 @@ import * as z from "zod";
 import type { Interruptor, InterruptorApagado } from "@tpv/contracts";
 
 import { compararVersiones } from "../domains/updates/updates.routes";
-import type { Sql } from "../server/db";
+import type { Sql } from "./sql";
 import type { Assert } from "./typeGuards";
 
 export const INTERRUPTORES = [

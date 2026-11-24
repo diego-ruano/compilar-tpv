@@ -1,6 +1,6 @@
 // src/domains/clientes/clientes.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 
 import type { ClienteForm, ClienteOverview } from "@tpv/contracts";
@@ -75,7 +75,7 @@ function overviewBase(): string {
 }
 
 export async function overview(
-	db: Client,
+	db: Base,
 	ranking: string,
 ): Promise<ClienteOverview[]> {
 	const base = overviewBase();
@@ -96,7 +96,7 @@ export async function overview(
 }
 
 export async function form(
-	db: Client,
+	db: Base,
 	idCliente: string,
 ): Promise<ClienteForm | null> {
 	const rs = await db.execute({

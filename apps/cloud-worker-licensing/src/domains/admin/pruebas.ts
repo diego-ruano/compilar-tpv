@@ -10,7 +10,7 @@
 // ser de nadie. Un negocio que tenga además cualquier otra licencia no se toca nunca, y tampoco uno
 // al que se le haya canjeado una clave que no sea de pruebas.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
@@ -100,7 +100,7 @@ export async function borrarImagenesDelNegocio(bucket: R2Bucket, tenantId: strin
  * nada: lo ya retirado no vuelve a salir, y lo que falló se reintenta.
  */
 export async function retirarNegociosDePrueba(
-	db: Client,
+	db: Base,
 	env: EntornoDeRetirada,
 ): Promise<Retirada> {
 	const retirada: Retirada = { negocios: 0, bases: 0, imagenes: 0, licencias: 0, fallos: [], quedan: false };

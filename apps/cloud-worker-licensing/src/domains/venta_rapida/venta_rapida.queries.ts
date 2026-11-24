@@ -4,7 +4,7 @@ import { normalizada, textoABuscar } from "../../lib/busqueda";
 import { nuevoId } from "../../lib/ids";
 import { recortar } from "../../lib/texto";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type {
 	CategoriaRow,
@@ -49,7 +49,7 @@ const PENDIENTE_DE_UN_TICKET = `
 	),0)
 `;
 
-export async function categorias(db: Client): Promise<CategoriaRow[]> {
+export async function categorias(db: Base): Promise<CategoriaRow[]> {
 	const rs = await db.execute(`
 		SELECT
 			ID_Categoria AS ID_Categoria,
@@ -88,7 +88,7 @@ function productosSql(where: string, suffix = "") {
 }
 
 export async function productosByCategoria(
-	db: Client,
+	db: Base,
 	idCategoria: string,
 ): Promise<ProductoRow[]> {
 	const rs = await db.execute({
@@ -99,7 +99,7 @@ export async function productosByCategoria(
 }
 
 export async function searchProductos(
-	db: Client,
+	db: Base,
 	query: string,
 	limit: number,
 ): Promise<ProductoRow[]> {
@@ -124,7 +124,7 @@ export async function searchProductos(
  * la mesa "de sistema" BARRA, que ya no existe: ver la nota de la tabla Comandas en
  * 0001_inicial.sql.) Espejo de `find_open_barra_comanda_id` en tpv-infra-sqlite.
  */
-export async function openBarraComanda(db: Client): Promise<string> {
+export async function openBarraComanda(db: Base): Promise<string> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Comanda AS id
@@ -140,7 +140,7 @@ export async function openBarraComanda(db: Client): Promise<string> {
 }
 
 export async function resolveTrabajadorId(
-	db: Client,
+	db: Base,
 	idMaybe: string | null,
 ): Promise<string | null> {
 	if (!idMaybe || !recortar(idMaybe)) return null;
@@ -158,7 +158,7 @@ export async function resolveTrabajadorId(
 }
 
 /** Los tickets de barra con líneas, cobrados o no, de más reciente a más antiguo. */
-export async function listComandas(db: Client, limit: number): Promise<ComandaBarraRow[]> {
+export async function listComandas(db: Base, limit: number): Promise<ComandaBarraRow[]> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -194,7 +194,7 @@ export async function listComandas(db: Client, limit: number): Promise<ComandaBa
 }
 
 export async function lineas(
-	db: Client,
+	db: Base,
 	idComanda: string,
 ): Promise<LineaComandaRow[]> {
 	const rs = await db.execute({
@@ -234,7 +234,7 @@ export async function lineas(
 //
 // DO-01: los ids van en un solo parámetro (un array JSON), no en uno por ticket: «Ver tickets» pide
 // todos los del día y el SQLite del DO admite 100 parámetros por sentencia.
-export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> {
+export async function indexRows(db: Base, ids: string[]): Promise<IndexRow[]> {
 	if (!ids.length) return [];
 	const rs = await db.execute({
 		sql: `
@@ -269,7 +269,7 @@ export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> 
 }
 
 export async function detallesVerTicket(
-	db: Client,
+	db: Base,
 	idComanda: string,
 ): Promise<VerTicketsDetalleRow[]> {
 	const rs = await db.execute({
@@ -317,7 +317,7 @@ export type CobroPlan =
 		};
 
 export async function cobrarPlan(
-	db: Client,
+	db: Base,
 	input: CobrarFraccionadoInput,
 ): Promise<CobroPlan> {
 	// DO-01: las líneas, en un solo parámetro (un array JSON): un ticket puede pasar de 99.
@@ -398,7 +398,7 @@ export async function cobrarPlan(
 // de otra comanda: es la misma condicion que llevan los `DELETE` de `deleteComandaIfSafe`, y la ruta
 // tiene que decir lo mismo que ellos (si no borran nada, no se ha borrado). El borrado propio de la
 // Main sigue mirando solo `Pagos`.
-export async function hasPaidLines(db: Client, idComanda: string): Promise<boolean> {
+export async function hasPaidLines(db: Base, idComanda: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `SELECT EXISTS(SELECT 1 FROM Pagos WHERE ID_Comanda = ?1)
 			OR EXISTS(

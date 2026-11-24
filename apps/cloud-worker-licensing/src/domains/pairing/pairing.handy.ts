@@ -11,7 +11,7 @@
 // La forma de la petición la garantiza `pairing.schemas.ts` antes de llegar, así que en este
 // fichero no hay ni un `String(body.x ?? "")` ni un `if (!campo)`.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import type { z } from "zod";
 
 import { firmarSesion, handyTokenTtlSeconds } from "../../lib/sesion";
@@ -53,7 +53,7 @@ function demasiadosIntentos(segundos: number): Resultado {
  * la Handy lo suma a su propio reloj, que no tiene por qué coincidir con el del worker.
  */
 async function nuevoReto(
-	db: Client,
+	db: Base,
 	deviceId: string,
 	pr: any,
 	now: number,
@@ -87,7 +87,7 @@ async function nuevoReto(
 }
 
 /** El tope de 8 intentos sobre UN código, que lo protege contra muchas IPs a la vez. */
-async function anotarIntentoSobreElCodigo(db: Client, pairCode: string, now: number): Promise<void> {
+async function anotarIntentoSobreElCodigo(db: Base, pairCode: string, now: number): Promise<void> {
 	await db.execute({
 		sql: `
 			UPDATE pair_requests
@@ -108,7 +108,7 @@ async function anotarIntentoSobreElCodigo(db: Client, pairCode: string, now: num
  *    reclamante con la que muestra el Handy.
  */
 export async function reclamarCodigo(
-	db: Client,
+	db: Base,
 	env: any,
 	datos: z.infer<typeof claimSchema>,
 	clientIp: string,
@@ -241,7 +241,7 @@ export async function reclamarCodigo(
 	return nuevoReto(db, deviceId, pr, now, "pending_approval");
 }
 
-async function licenciaActivaDelTenant(db: Client, tenantId: string): Promise<string | null> {
+async function licenciaActivaDelTenant(db: Base, tenantId: string): Promise<string | null> {
 	const r = await db.execute({
 		sql: `
 			SELECT license_key_hash
@@ -262,7 +262,7 @@ async function licenciaActivaDelTenant(db: Client, tenantId: string): Promise<st
 
 /** La Handy recoge su token: el código está aprobado y ella prueba que es quien lo reclamó. */
 export async function entregarToken(
-	db: Client,
+	db: Base,
 	env: any,
 	datos: z.infer<typeof fetchTokenSchema>,
 	now: number,
@@ -443,7 +443,7 @@ export async function entregarToken(
  * revocar un dispositivo, y la Handy puede recoger su token volviendo a reclamar el mismo código.
  */
 export async function soltarCodigo(
-	db: Client,
+	db: Base,
 	env: any,
 	datos: z.infer<typeof cancelSchema>,
 	ahoraMs: number,

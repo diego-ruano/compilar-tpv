@@ -7,7 +7,7 @@
 // claim, sobre un reto de un solo uso: `ts \n ACCION \n código \n reto \n dispositivo`. La acción va
 // dentro para que la firma de una consulta no sirva para cancelar, ni al revés.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { quitarComillas } from "../../lib/texto";
 import { b64ToBytes } from "../../server/utils/base64";
@@ -58,7 +58,7 @@ export function relojFueraDeMargen(ts: number, ahoraMs: number): boolean {
  * gasta el reto: eso lo hace quien llama, cuando la operación sale bien.
  */
 export async function comprobarFirmaDelReclamante(
-	db: Client,
+	db: Base,
 	datos: {
 		accion: AccionFirmada;
 		pairCode: string;

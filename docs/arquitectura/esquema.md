@@ -46,7 +46,7 @@ y sin dejar nada que `foreign_key_check` vea después**, y una hija sin acción 
 ellas apagadas la tabla se reconstruye sin tocar a las hijas, y `foreign_key_check` comprueba, antes
 de confirmar, que la migración no ha dejado huérfanas.
 
-En el SQLite del Durable Object eso tiene sus condiciones (`tenantHub.sqlite.ts::migrarBaseLocal`,
+En el SQLite del Durable Object eso tiene sus condiciones (`sqliteDelObjeto.ts::migrarBase`,
 comprobadas en `test/sondaSqliteDo.test.ts`):
 
 - `PRAGMA foreign_keys` **no hace nada, y no avisa, con una transacción abierta**. El DO abre una en

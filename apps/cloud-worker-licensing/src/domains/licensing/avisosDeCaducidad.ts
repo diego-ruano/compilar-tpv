@@ -22,7 +22,7 @@
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
-import type { Sql } from "../../server/db";
+import type { Sql } from "../../lib/sql";
 import {
 	licenciasPorCaducar,
 	marcarAvisoEnviado,

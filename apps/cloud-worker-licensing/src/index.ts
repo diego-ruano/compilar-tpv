@@ -1,6 +1,6 @@
 // src/index.ts
 //
-// Entry del worker `tpv-api`: la API (`app.ts`) envuelta con Sentry, el cron diario y los dos
+// Entry del worker `tpv-api`: la API (`app.ts`) envuelta con Sentry, el cron diario y los tres
 // Durable Objects. Las rutas y lo que sirve cada una están en `app.ts`.
 
 import * as Sentry from "@sentry/cloudflare";
@@ -31,6 +31,10 @@ export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 // La agenda de reservas web (docs/estudios/reservas-web.md §4.3), instrumentada igual.
 import { AgendaWeb as AgendaWebClass } from "./durableObjects/agendaWeb";
 export const AgendaWeb = Sentry.instrumentDurableObjectWithSentry(sentryOptions, AgendaWebClass);
+
+// La base central, en su propio Durable Object (`durableObjects/baseCentral.ts`), instrumentada igual.
+import { BaseCentral as BaseCentralClass } from "./durableObjects/baseCentral";
+export const BaseCentral = Sentry.instrumentDurableObjectWithSentry(sentryOptions, BaseCentralClass);
 
 /**
  * Lo que este worker hace por su cuenta, una vez al día: avisar de las licencias que caducan

@@ -36,7 +36,7 @@
 // que para su outbox es pasajero (`tenantHub.errores.ts`) y no ofrece nada a nadie.
 
 import type { Env } from "../env";
-import type { Sql } from "../server/db";
+import type { Sql } from "./sql";
 import { HubError } from "./errorHttp";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";

@@ -12,7 +12,7 @@
 // no cambia lo fija el caso de lectura `stats/clientes` del arnés de contrato, y la Main tiene el
 // mismo test en `tpv-infra-sqlite/src/planes.rs`.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
 import caso from "../../../tests/contract/lecturas/casos/stats/clientes.json";
@@ -30,14 +30,14 @@ describe("la estadística de clientes", () => {
 			crearEsquemaTenant(sql);
 			for (const sentencia of caso.seed) sql.exec(sentencia);
 
-			const db = clienteSobre(sql) as unknown as Client;
+			const db = clienteSobre(sql) as unknown as Base;
 			const sentencias: string[] = [];
 			const espia = {
 				execute: (entrada: any) => {
 					sentencias.push(typeof entrada === "string" ? entrada : entrada.sql);
 					return db.execute(entrada);
 				},
-			} as unknown as Client;
+			} as unknown as Base;
 
 			const r = await clientes(espia, "hoy");
 			// La siembra tiene un cliente recurrente: la sentencia que se mira es la que lo calcula.

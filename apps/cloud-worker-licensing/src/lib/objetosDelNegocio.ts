@@ -23,8 +23,14 @@
 //
 // En local y en los tests las dos van vacías: workerd no implementa jurisdicciones («Jurisdiction
 // restrictions are not implemented in workerd»).
+//
+// Y de dónde sale el de la base central (`centralDe`), que es uno solo para todo el servicio. Su
+// nombre y su sitio son suyos, constantes, y no salen de `JURISDICCION_DO` ni de `UBICACION_DO`:
+// cambiar cómo nacen los objetos de los negocios no puede dejar a la central hablando con otro
+// objeto, vacío. Sin jurisdicción, como los negocios, y con la pista de Europa occidental.
 
 import type { Env } from "../env";
+import type { BaseCentral } from "../durableObjects/baseCentral";
 
 /** Dónde nace un objeto: su jurisdicción, si la lleva, y la pista de región. */
 export type Colocacion = {
@@ -50,4 +56,16 @@ export function objetoDelNegocio<T extends Rpc.DurableObjectBranded | undefined>
 	const ns = donde.jurisdiccion ? espacio.jurisdiction(donde.jurisdiccion) : espacio;
 	const id = ns.idFromName(tenantId);
 	return donde.pista ? ns.get(id, { locationHint: donde.pista }) : ns.get(id);
+}
+
+/** El nombre del objeto de la base central. Otro nombre es otro objeto: vacío, y sin error. */
+const NOMBRE_DE_LA_CENTRAL = "central";
+
+/** Dónde nace la central: Europa occidental. Sólo cuenta la primera vez que se pide. */
+const PISTA_DE_LA_CENTRAL: DurableObjectLocationHint = "weur";
+
+/** El objeto de la base central. Un stub nuevo en cada llamada: uno que ha fallado puede quedar roto. */
+export function centralDe(env: Pick<Env, "BaseCentral">): DurableObjectStub<BaseCentral> {
+	const espacio = env.BaseCentral;
+	return espacio.get(espacio.idFromName(NOMBRE_DE_LA_CENTRAL), { locationHint: PISTA_DE_LA_CENTRAL });
 }

@@ -91,8 +91,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)); la Main de
   verdad no paga nada, y la que no cuadra pregunta a la base central antes de que se la rechace.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
-  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql sobre el SQLite
-  del DO (`tenantHub.sqlite.ts`). Sólo dentro del DO: toda ruta que lo usa lleva `alHub`, y fuera
+  por `tenantQuery` (`lib/tenantClient.ts`): una `Base` (`lib/sql.ts`) sobre el SQLite del DO
+  (`tenantHub.sqlite.ts`). Sólo dentro del DO: toda ruta que lo usa lleva `alHub`, y fuera
   lanza (un router sin `alHub` que lee la base del negocio es un fallo). Un lote de lectura da una
   foto coherente: el SQL del DO es síncrono y nada se intercala.
 - **Desde fuera del DO no se lee consulta a consulta, ni hay una puerta que acepte SQL.** La agenda

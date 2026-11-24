@@ -32,7 +32,7 @@
 // Sólo se vacía su TenantHub: la agenda de reservas web y las imágenes son de un negocio con una
 // Main que haya entrado con token, y un negocio sin licencia no ha tenido nunca ninguna.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { exec, rowsAffected } from "../../server/db";
 import { hubDe, type EntornoDelHub } from "../../lib/hub";
@@ -78,7 +78,7 @@ type RetiradaDeHuerfanos = {
  * vuelve a salir, y lo que falló se reintenta.
  */
 export async function retirarNegociosHuerfanos(
-	db: Client,
+	db: Base,
 	env: EntornoDelHub,
 	opciones: { borrar: boolean; ahoraMs: number },
 ): Promise<RetiradaDeHuerfanos> {

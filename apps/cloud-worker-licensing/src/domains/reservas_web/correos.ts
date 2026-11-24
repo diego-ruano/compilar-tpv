@@ -18,10 +18,11 @@
 
 import * as z from "zod";
 import { recortar } from "../../lib/texto";
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
-import { getDb, type Sql } from "../../server/db";
+import { getDb } from "../../server/db";
+import type { Sql } from "../../lib/sql";
 import { capturarError } from "../../observability/errors";
 import { isValidEmail } from "../clientes/clientes.schemas";
 
@@ -69,7 +70,7 @@ export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "
 const correoValido = z.string().max(254).email();
 
 /** Lo del negocio para el correo, de su base. El teléfono, el público; si no, el de contacto. */
-export async function negocioDelCorreo(db: Client): Promise<NegocioDelCorreo> {
+export async function negocioDelCorreo(db: Base): Promise<NegocioDelCorreo> {
 	const rs = await db.execute(`
 		SELECT b.Business_Name AS nombre, b.Direccion AS direccion, b.Telefono AS telefono,
 		       c.Contact_Email AS correo, c.Contact_Phone AS telefono_contacto

@@ -3,8 +3,8 @@
 // El cliente de la base de cada negocio para las LECTURAS de la API.
 //
 // La base vive en el SQLite del TenantHub del negocio, y toda ruta que la lee se ejecuta dentro de él
-// (`lib/enElHub.ts`): `tenantQuery` le da a la ruta el cliente de al lado (`tenantHub.sqlite.ts`), con
-// la forma del de libsql (`execute`, `batch`). Fuera del TenantHub no hay de dónde leer: una ruta que
+// (`lib/enElHub.ts`): `tenantQuery` le da a la ruta la base de al lado (`tenantHub.sqlite.ts`), una
+// `Base` de `lib/sql.ts` (`execute`, `batch`). Fuera del TenantHub no hay de dónde leer: una ruta que
 // llamara a `tenantQuery` sin `alHub` en su router falla en el acto. La agenda de reservas web y la
 // API pública de la reserva, que no corren dentro, leen por `leerParaLaWeb`
 // (`domains/reservas_web/lecturasDeLaWeb.ts`), una lectura entera por viaje.
@@ -31,7 +31,7 @@
 // La base, que es como se comportaba antes. Es lo correcto: quien no dice su hora no puede esperar
 // que se la adivinen.
 
-import type { Client } from "@libsql/client/web";
+import type { Base, Sentencia } from "./sql";
 
 import type { Env } from "../env";
 import { hubLocal } from "./hubLocal";
@@ -48,55 +48,23 @@ export type ContextoDeLectura = {
 	req: { header: (nombre: string) => string | undefined };
 };
 
-/** Una sentencia tal y como la acepta el cliente de libsql: texto suelto, o texto con argumentos. */
-type Sentencia = string | { sql: string; args?: unknown };
-
 /**
- * REV-03: el mismo cliente, pero resolviendo «ahora» a la hora local de quien pregunta.
+ * REV-03: la misma base, pero resolviendo «ahora» a la hora local de quien pregunta.
  *
- * Va por `Proxy` y no copiando el objeto porque el cliente de libsql es una instancia con estado
- * propio: un `{...db}` perdería sus métodos (viven en el prototipo) y un `Object.create(db)`
- * rompería sus campos privados. Aquí sólo se interceptan las dos puertas por las que sale SQL
- * —`execute` y `batch`— y todo lo demás se delega tal cual, atado al cliente de verdad. La
- * tercera, `transaction()`, **revienta**: ver abajo.
+ * Una `Base` tiene dos puertas por las que sale SQL, `execute` y `batch`, y las dos fijan la hora.
+ * No hay una tercera: si alguna lectura necesitara otra (una transacción interactiva, por ejemplo),
+ * tendría que fijarla también, o su SQL saldría con el día del servidor sin que nadie lo notara.
  */
-export function conLaHoraDeQuienPregunta(db: Client, ahoraLocal: string): Client {
+export function conLaHoraDeQuienPregunta(db: Base, ahoraLocal: string): Base {
 	const reescribir = (stmt: Sentencia): Sentencia =>
 		typeof stmt === "string"
 			? rewriteNowInSql(stmt, ahoraLocal)
 			: { ...stmt, sql: rewriteNowInSql(stmt.sql, ahoraLocal) };
 
-	// Lo que venga detras se reenvia tal cual: `execute` admite `(sentencia)` y tambien `(sql, args)`,
-	// y quedarse solo con el primer argumento convertiria una consulta con parametros en una sin
-	// ellos. Hoy ninguna lectura usa esa forma; manana puede.
-	return new Proxy(db, {
-		get(target, prop) {
-			if (prop === "execute") {
-				return (stmt: Sentencia, ...resto: unknown[]) =>
-					(target.execute as any)(reescribir(stmt), ...resto);
-			}
-			if (prop === "batch") {
-				return (stmts: Sentencia[], ...resto: unknown[]) =>
-					(target.batch as any)(stmts.map(reescribir), ...resto);
-			}
-			// La tercera puerta por la que puede salir SQL. Ninguna lectura abre transacciones, y si
-			// alguna llegara a hacerlo su SQL saldría SIN fijar la hora: devolvería el día del
-			// servidor y nadie se enteraría — no hay error, sólo datos de otro día. Así que se
-			// prohibe, y quien la escriba lo sabe en el acto y con el motivo delante, en vez de
-			// descubrirlo un cliente de madrugada. Si algún día hace falta de verdad, lo que hay que
-			// hacer es envolver la transacción, no quitar esto.
-			if (prop === "transaction") {
-				return () => {
-					throw new Error(
-						"tenantQuery: una lectura no abre transacciones (REV-03). Si hace falta, envuelve " +
-							"la transaccion para que tambien fije la hora de quien pregunta.",
-					);
-				};
-			}
-			const valor = Reflect.get(target, prop, target);
-			return typeof valor === "function" ? valor.bind(target) : valor;
-		},
-	});
+	return {
+		execute: (stmt) => db.execute(reescribir(stmt)),
+		batch: (stmts) => db.batch(stmts.map(reescribir)),
+	};
 }
 
 /**
@@ -107,7 +75,7 @@ export function conLaHoraDeQuienPregunta(db: Client, ahoraLocal: string): Client
  */
 export async function tenantQuery<T>(
 	c: ContextoDeLectura,
-	fn: (db: Client) => Promise<T>,
+	fn: (db: Base) => Promise<T>,
 ): Promise<T> {
 	const local = hubLocal(c.get("tenantId"));
 	if (!local) {

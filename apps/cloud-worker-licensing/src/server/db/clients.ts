@@ -1,4 +1,7 @@
-import { createClient, type Client } from "@libsql/client/web";
+import { createClient } from "@libsql/client/web";
+
+import type { Base } from "../../lib/sql";
+import { baseSobreTurso } from "../db";
 
 export type DbConfig = {
 	url: string;
@@ -82,10 +85,12 @@ export function fetchConPlazo(plazoMs: number, base: Fetch = (p, i) => fetch(p, 
 }
 
 /** Un cliente de la base central (Turso). La base de cada negocio es el SQLite de su TenantHub. */
-export function createDbClient(cfg: DbConfig): Client {
-	return createClient({
-		url: cfg.url,
-		authToken: cfg.authToken,
-		...(cfg.plazoMs ? { fetch: fetchConPlazo(cfg.plazoMs) } : {}),
-	});
+export function createDbClient(cfg: DbConfig): Base {
+	return baseSobreTurso(
+		createClient({
+			url: cfg.url,
+			authToken: cfg.authToken,
+			...(cfg.plazoMs ? { fetch: fetchConPlazo(cfg.plazoMs) } : {}),
+		}),
+	);
 }

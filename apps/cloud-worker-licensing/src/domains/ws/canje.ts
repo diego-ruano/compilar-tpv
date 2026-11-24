@@ -12,7 +12,7 @@
 // … RETURNING`, dentro de la misma transacción que lee la fila. Dos peticiones con el mismo ticket
 // van una detrás de otra, y la segunda no encuentra nada que borrar.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { SQL_DEVICE_ACTIVO, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 
@@ -42,7 +42,7 @@ export type SocketRechazado = {
  * (lo que antes apuntaba el TenantHub al aceptar el socket); y el canje, que borra el ticket. Un
  * ticket caducado se gasta igual: no vale para nada.
  */
-export async function canjearTicket(db: Pick<Client, "batch">, ticket: string, ahoraMs: number): Promise<SocketAutorizado | SocketRechazado> {
+export async function canjearTicket(db: Pick<Base, "batch">, ticket: string, ahoraMs: number): Promise<SocketAutorizado | SocketRechazado> {
 	const [leido, , canjeado] = await db.batch(
 		[
 			{
@@ -65,7 +65,6 @@ export async function canjearTicket(db: Pick<Client, "batch">, ticket: string, a
 				args: [ticket],
 			},
 		],
-		"write",
 	);
 
 	// Sólo cuenta el ticket que ha borrado esta petición.

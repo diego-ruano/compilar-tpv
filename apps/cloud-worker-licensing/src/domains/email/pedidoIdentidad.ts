@@ -1,4 +1,4 @@
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import * as z from "zod";
 import { HubError } from "../../lib/errorHttp";
 
@@ -11,12 +11,12 @@ export type IdentidadPedido = {
 };
 
 /** RI-60: autorización y contacto salen de la misma foto de la base del negocio. */
-export async function leerIdentidadPedido(db: Client, destino: string): Promise<IdentidadPedido> {
+export async function leerIdentidadPedido(db: Base, destino: string): Promise<IdentidadPedido> {
 	const [proveedores, negocios] = await db.batch([
 		{ sql: "SELECT Nombre_Empresa FROM Proveedores WHERE lower(trim(Email)) = lower(trim(?1)) ORDER BY ID_Proveedor LIMIT 1", args: [destino] },
 		{ sql: `SELECT b.Business_Name, b.Direccion, b.Telefono, c.Contact_Email, c.Contact_Phone
 			FROM Business_Settings b LEFT JOIN Contact_Settings c ON c.ID=1 WHERE b.ID=1`, args: [] },
-	], "read");
+	]);
 	if (!proveedores.rows.length) throw new HubError("email_destino_no_autorizado", 403);
 	const negocio = negocios.rows[0];
 	const nombre = String(negocio?.Business_Name ?? "").trim();

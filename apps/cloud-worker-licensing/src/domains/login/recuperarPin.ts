@@ -26,7 +26,7 @@
 //     comprueba que quien pide ES una Main. El correo va siempre al del negocio, así que un id de
 //     usuario inventado sólo puede molestar al propio titular.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
 import { getLicenseByHash, type EmailCodeKey } from "../../server/licenseStore";
@@ -55,7 +55,7 @@ function clave(ctx: ContextoRecuperacion): EmailCodeKey {
 }
 
 export async function solicitarCodigoPin(
-	db: Client,
+	db: Base,
 	env: Env,
 	ctx: ContextoRecuperacion,
 ): Promise<RespuestaCodigo> {
@@ -104,7 +104,7 @@ export async function solicitarCodigoPin(
 }
 
 export async function verificarCodigoPin(
-	db: Client,
+	db: Base,
 	env: Env,
 	ctx: ContextoRecuperacion & { codigo: string },
 	/** Para el aviso al titular, que no puede retener la respuesta (`waitUntil` en la ruta). */

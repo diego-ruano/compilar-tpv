@@ -16,7 +16,8 @@
 import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
-import { exec, type Sql } from "./db";
+import { exec } from "./db";
+import type { Sql } from "../lib/sql";
 
 export type LicenseRow = {
 	license_id: string;

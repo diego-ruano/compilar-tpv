@@ -8,7 +8,7 @@
 // repetía `buildTenantContext` + claims vacíos + `tieneRol` + un `try/catch` que clasificaba el
 // error de autenticación comparando cadenas (`isAuthError`, cinco copias idénticas).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { rowsAffected } from "../../server/db";
 import { sha256HexStr } from "../../server/utils/crypto";
@@ -66,7 +66,7 @@ function seisCifrasAlAzar(): string {
  * (`server/purga.ts`), un día después de caducar.
  */
 export async function crearCodigo(
-	db: Client,
+	db: Base,
 	env: any,
 	tenantId: string,
 	deviceId: string,
@@ -124,7 +124,7 @@ export async function crearCodigo(
 
 /** Las solicitudes que esperan aprobación en este negocio. */
 export async function solicitudesPendientes(
-	db: Client,
+	db: Base,
 	tenantId: string,
 	now: number,
 ): Promise<Resultado> {
@@ -193,7 +193,7 @@ export async function solicitudesPendientes(
 
 /** La Main aprueba una solicitud: marca el código, y nada más. */
 export async function aprobarSolicitud(
-	db: Client,
+	db: Base,
 	tenantId: string,
 	pairCode: string,
 	now: number,
@@ -273,7 +273,7 @@ export async function aprobarSolicitud(
  * sentido si quien lo usó no era de fiar.
  */
 export async function rechazarSolicitud(
-	db: Client,
+	db: Base,
 	tenantId: string,
 	pairCode: string,
 	ahoraMs: number,

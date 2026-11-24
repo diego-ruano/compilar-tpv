@@ -85,11 +85,11 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 		let primero = true;
 		const db = {
 			...base,
-			async batch(sentencias: any[], modo?: string) {
-				if (modo !== "write" || !primero) return base.batch(sentencias, modo);
+			async batch(sentencias: any[]) {
+				if (!primero) return base.batch(sentencias);
 				primero = false;
 				for (const s of guion.antesDelLote ?? []) sql.exec(s);
-				return base.batch(sentencias, modo);
+				return base.batch(sentencias);
 			},
 		};
 		nube = base;

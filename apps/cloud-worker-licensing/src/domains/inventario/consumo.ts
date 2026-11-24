@@ -10,7 +10,7 @@
 // sentencia que se replica hace lo mismo en las dos bases. Todo va redondeado a milésimas (RI-26),
 // con `redondearCantidad` aquí y `ROUND(…, 3)` en el SQL, igual que en la Main.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { redondearCantidad } from "../../lib/cantidad";
 
 function rows(rs: any): any[] {
@@ -42,7 +42,7 @@ export type LineaConsumo = { id_detalle: string; id_producto: string; cantidad: 
  * un lote más de lo que tiene; lo que no cubren va al suelto (que sí puede quedar negativo). No
  * bloquea por falta de stock (VR-04).
  */
-export async function planConsumo(db: Client, lineas: LineaConsumo[]): Promise<PlanConsumo> {
+export async function planConsumo(db: Base, lineas: LineaConsumo[]): Promise<PlanConsumo> {
 	const lotesPorProducto = new Map<string, { id_lote: string; stock: number }[]>();
 	const lotesDe = async (idProducto: string) => {
 		let l = lotesPorProducto.get(idProducto);
@@ -71,7 +71,7 @@ export async function planConsumo(db: Client, lineas: LineaConsumo[]): Promise<P
 	return plan;
 }
 
-async function lotesConStock(db: Client, idProducto: string) {
+async function lotesConStock(db: Base, idProducto: string) {
 	const rs = await db.execute({
 		sql: `
 			SELECT

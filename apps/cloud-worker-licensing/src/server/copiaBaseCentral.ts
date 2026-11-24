@@ -31,7 +31,8 @@
 //     Tiene que ser menor que los 90 días de `RETENCION_ENVIOS_MS` (purga.ts), o los correos que la
 //     purga promete olvidar seguirían vivos dentro de las copias.
 
-import type { Client, Transaction } from "@libsql/client/web";
+import type { Sql } from "../lib/sql";
+import type { BaseCentralEnTurso } from "./db";
 
 /** Filas por consulta. Pocas peticiones para una base pequeña, sin traer una tabla entera de golpe. */
 const FILAS_POR_PAGINA = 500;
@@ -64,7 +65,7 @@ type Opciones = {
 
 /** Copia la base central entera a `bucket` y devuelve qué se subió. Lanza si algo falla. */
 export async function copiarBaseCentral(
-	db: Pick<Client, "transaction">,
+	db: Pick<BaseCentralEnTurso, "transaction">,
 	bucket: R2Bucket,
 	opciones: Opciones = {},
 ): Promise<CopiaHecha> {
@@ -90,7 +91,7 @@ export async function copiarBaseCentral(
 
 type Volcado = { trozos: string[]; tablas: number; filas: number };
 
-async function volcar(db: Pick<Client, "transaction">, ahora: Date, tope: number): Promise<Volcado> {
+async function volcar(db: Pick<BaseCentralEnTurso, "transaction">, ahora: Date, tope: number): Promise<Volcado> {
 	const trozos: string[] = [];
 	let caracteres = 0;
 	const escribir = (linea: string) => {
@@ -145,7 +146,7 @@ async function volcar(db: Pick<Client, "transaction">, ahora: Date, tope: number
 }
 
 async function volcarFilas(
-	tx: Pick<Transaction, "execute">,
+	tx: Sql,
 	tabla: string,
 	escribir: (linea: string) => void,
 ): Promise<number> {

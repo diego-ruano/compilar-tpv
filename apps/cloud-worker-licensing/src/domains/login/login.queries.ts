@@ -1,6 +1,6 @@
 // src/domains/login/login.queries.ts
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { LoginOk, PunchStatus, UserListItem } from "@tpv/contracts";
 
@@ -17,7 +17,7 @@ function rows(rs: any): any[] {
 	});
 }
 
-export async function listLoginUsers(db: Client): Promise<UserListItem[]> {
+export async function listLoginUsers(db: Base): Promise<UserListItem[]> {
 	const rs = await db.execute(`
 		SELECT
 			u.ID_Usuario AS id_usuario,
@@ -34,7 +34,7 @@ export async function listLoginUsers(db: Client): Promise<UserListItem[]> {
 	return rows(rs).map((r) => ({ ...r, sin_pin: Number(r.sin_pin) === 1 })) as UserListItem[];
 }
 
-export async function getLoginRecord(db: Client, idUsuario: string): Promise<any | null> {
+export async function getLoginRecord(db: Base, idUsuario: string): Promise<any | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -58,7 +58,7 @@ export async function getLoginRecord(db: Client, idUsuario: string): Promise<any
 	return rows(rs)[0] ?? null;
 }
 
-export async function loginOk(db: Client, idUsuario: string): Promise<LoginOk | null> {
+export async function loginOk(db: Base, idUsuario: string): Promise<LoginOk | null> {
 	const r = await getLoginRecord(db, idUsuario);
 	if (!r) return null;
 	return {
@@ -95,7 +95,7 @@ function bloqueoMs(fallidos: number): number {
 }
 
 /** Segundos que faltan para poder reintentar (0 si no está bloqueado). */
-async function throttleSecondsLeft(db: Client, idUsuario: string): Promise<number> {
+async function throttleSecondsLeft(db: Base, idUsuario: string): Promise<number> {
 	const rs = await db.execute({
 		sql: "SELECT Bloqueado_Hasta_Ms AS hasta FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
 		args: [idUsuario],
@@ -117,7 +117,7 @@ async function throttleSecondsLeft(db: Client, idUsuario: string): Promise<numbe
  * del worker, como en la reserva.
  */
 export async function throttleReset(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 	bloqueoPropioMs: number,
 	ahora: number = Date.now(),
@@ -155,7 +155,7 @@ export type ReservaDeIntento =
  * que se cruzan por milisegundos no se frenen entre sí.
  */
 export async function reservarIntento(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 	ahora: number = Date.now(),
 ): Promise<ReservaDeIntento> {
@@ -206,7 +206,7 @@ export async function reservarIntento(
 export const INICIO_MAS_ANTIGUO = "datetime('now','localtime','-16 hours')";
 
 /** «Hoy» de quien pregunta (REV-03: `tenantQuery` fija su hora antes de ejecutar). */
-export async function hoy(db: Client): Promise<string> {
+export async function hoy(db: Base): Promise<string> {
 	const fechaRs = await db.execute("SELECT date('now','localtime') AS fecha;");
 	return String(rows(fechaRs)[0]?.fecha ?? "");
 }
@@ -216,7 +216,7 @@ export async function hoy(db: Client): Promise<string> {
  * día que escribió `setTurnoPartido`, el que devuelve con su resultado. Para decidir por el estado
  * cuando no se sabe cuántas filas tocó la escritura (`decidirPorEstado`; salió en AUD-26).
  */
-export async function turnoPartidoDe(db: Client, idUsuario: string, fecha: string): Promise<boolean> {
+export async function turnoPartidoDe(db: Base, idUsuario: string, fecha: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `SELECT COALESCE((SELECT Turno_Partido FROM Fichaje_Dia
 			WHERE ID_Usuario = ?1 AND Fecha = ?2), 0) AS turno_partido;`,
@@ -230,7 +230,7 @@ export async function turnoPartidoDe(db: Client, idUsuario: string, fecha: strin
  * entre entrada y salida mirando este estado; con el de hoy, a la 01:30 un turno de noche aparecía
  * sin empezar y se fichaba una entrada nueva.
  */
-export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
+export async function punchStatus(db: Base, idUsuario: string): Promise<PunchStatus> {
 	const dia = await hoy(db);
 	const enCurso = await getOpenPunch(db, idUsuario);
 	return punchStatusForDate(db, idUsuario, enCurso ? enCurso.fecha : dia, dia);
@@ -241,7 +241,7 @@ export async function punchStatus(db: Client, idUsuario: string): Promise<PunchS
  * él, el de quien pregunta): dice si es una anterior (AUT-INC-02), como en la Main.
  */
 export async function punchStatusForDate(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 	fecha: string,
 	diaDeHoy?: string,
@@ -285,7 +285,7 @@ export async function punchStatusForDate(
 
 /** La jornada en curso del usuario (ver `INICIO_MAS_ANTIGUO`), sea del día que sea. */
 export async function getOpenPunch(
-	db: Client,
+	db: Base,
 	idUsuario: string,
 ): Promise<{ id_fichaje: string; fecha: string } | null> {
 	const rs = await db.execute({
@@ -312,7 +312,7 @@ export async function getOpenPunch(
  * Leer aquí y rechazar antes de `apply` contestaba «Tienes un fichaje abierto» al reintento de una
  * entrada que ya había entrado.
  */
-export async function parteSiguiente(db: Client, idUsuario: string, fecha: string): Promise<number> {
+export async function parteSiguiente(db: Base, idUsuario: string, fecha: string): Promise<number> {
 	const rs = await db.execute({
 		sql: `SELECT CASE WHEN EXISTS (
 			SELECT 1 FROM Fichajes WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=1

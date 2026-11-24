@@ -11,7 +11,7 @@
 // vez de mantener copias propias.
 
 import { ed25519Sign, ed25519Verify, TOPE_FIRMA_B64 } from "../../server/utils/ed25519";
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
 import type { LicenseGateState, SignedLicenseAssertion } from "../../shared";
@@ -212,7 +212,7 @@ export function emailHint(email: string): string {
 
 export async function verifyDeviceProof(
 	request: Request,
-	dbi: Client,
+	dbi: Base,
 	claims: { tenantId: string; deviceId: string },
 	target?: { method: string; path: string },
 	rawBody?: Uint8Array,
@@ -241,7 +241,7 @@ export async function verifyDeviceProof(
  */
 export async function readmitirMain(
 	request: Request,
-	dbi: Client,
+	dbi: Base,
 	claims: { tenantId: string; deviceId: string; licHash: string },
 	rawBody?: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; status: 401 | 403; error: string }> {
@@ -400,7 +400,7 @@ async function comprobarFirma(
  * objeto. Por aquí pasan la activación (también la de un equipo nuevo en un traslado, que antes
  * creaba esa base vacía sin preguntar) y `/v1/sync/initialize-empty`.
  */
-export async function provisionTenantDatabase(dbi: Client, env: Env, tenantId: string): Promise<{ reused: boolean }> {
+export async function provisionTenantDatabase(dbi: Base, env: Env, tenantId: string): Promise<{ reused: boolean }> {
 	if (await negocioAprovisionado(env, tenantId)) return { reused: true };
 	if (await negocioNacido(dbi, tenantId)) throw errorDeBasePerdida();
 	const local = hubLocal(tenantId);

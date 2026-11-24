@@ -37,7 +37,7 @@
 //   de la Main.
 
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
-import { baseAprovisionada } from "./tenantHub.sqlite";
+import { baseAprovisionada } from "./sqliteDelObjeto";
 import { olvidarSubida, pedirSubida, type OrigenDeSubida } from "./tenantHub.subida";
 
 /** Lo que se le pide a la plataforma. Un test lo sustituye: en local no existe. */

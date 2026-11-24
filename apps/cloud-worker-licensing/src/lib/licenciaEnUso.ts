@@ -25,7 +25,8 @@ import {
 	computeLicenseState,
 	stateAllowsUse,
 } from "../domains/licensing/licensing.helpers";
-import { getDb, type Sql } from "../server/db";
+import { getDb } from "../server/db";
+import type { Sql } from "./sql";
 import { getLicenseByHash, type LicenseRow } from "../server/licenseStore";
 
 /**

@@ -6,7 +6,7 @@
 // Como el resto del dominio, aquí sólo se decide: quién pregunta lo resuelven `tenantAuth` y
 // `soloLaMainVigente` en la ruta.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 
 import { SQL_DEVICE_ACTIVO } from "../../lib/deviceAuth";
 import { cerrarSocketsDelDispositivo, type EntornoDelHub } from "../../lib/hub";
@@ -14,7 +14,7 @@ import { rowsAffected } from "../../server/db";
 import { fallo, ok, type Resultado } from "./pairing.resultado";
 
 /** Los Handy vinculados (no revocados) del negocio. */
-export async function listarDispositivos(db: Client, tenantId: string): Promise<Resultado> {
+export async function listarDispositivos(db: Base, tenantId: string): Promise<Resultado> {
 	const r = await db.execute({
 		sql: `
 			SELECT device_id, device_pubkey_b64, first_seen_at_ms, last_seen_at_ms
@@ -40,7 +40,7 @@ export async function listarDispositivos(db: Client, tenantId: string): Promise<
 
 /** Desvincula un Handy y le cierra el socket para que se entere ya. */
 export async function revocarDispositivo(
-	db: Client,
+	db: Base,
 	env: EntornoDelHub,
 	tenantId: string,
 	quienPide: string,

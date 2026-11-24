@@ -20,7 +20,7 @@
 //     quien la hace cumplir es esto. Y como el intento, el envío se RESERVA en una sola sentencia
 //     (AUD-42): leer, decidir y escribir después dejaba pasar a todas las peticiones simultáneas.
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
 
 import type { Env } from "../../env";
@@ -84,7 +84,7 @@ export type CodigoEmitido =
  * y si el envío falla tiene que llamar a `anularCodigo` para que no quede uno vivo.
  */
 export async function emitirCodigo(
-	db: Client,
+	db: Base,
 	env: Env,
 	k: EmailCodeKey,
 	sujeto: string,
@@ -137,7 +137,7 @@ function porQueNoSeEnvia(previo: EmailCodeRow | null, ahora: number): RespuestaC
  * El código no llegó a nadie: se anula para que no quede uno vivo. Al anularlo deja de contar la
  * espera de un minuto (el envío fallido sí cuenta para el tope por hora).
  */
-export async function anularCodigo(db: Client, k: EmailCodeKey, ahora: number): Promise<void> {
+export async function anularCodigo(db: Base, k: EmailCodeKey, ahora: number): Promise<void> {
 	await voidEmailCode(db, k, ahora);
 }
 
@@ -150,7 +150,7 @@ export type CodigoComprobado =
  * qué se refiere (el usuario del PIN); si no se da, se devuelve el guardado (la dirección nueva).
  */
 export async function comprobarCodigo(
-	db: Client,
+	db: Base,
 	env: Env,
 	k: EmailCodeKey,
 	codigoEscrito: string,

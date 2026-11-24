@@ -17,7 +17,7 @@
 //     viva del negocio (`mainDeLaLicencia`), y eso puede cambiar con la sesión abierta. Quién lo
 //     es ahora lo guarda el hub en su propio SQL (`tenantHub.main.ts`).
 
-import type { Client } from "@libsql/client/web";
+import type { Base } from "../lib/sql";
 
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, bytesExactos } from "../server/utils/ed25519";
@@ -43,7 +43,7 @@ export function roleNormalize(r: any): Role {
  *
  * Si la base central no contesta, lanza: qué hacer entonces lo decide quien llama.
  */
-export async function mainDeLaLicencia(dbCentral: Client, tenantId: string): Promise<string | null> {
+export async function mainDeLaLicencia(dbCentral: Base, tenantId: string): Promise<string | null> {
 	const r = await dbCentral.execute({
 		sql: `
 			SELECT main_device_id

@@ -81,8 +81,8 @@ function conPuerta(base: any) {
 		dentro,
 		db: {
 			...base,
-			async batch(sentencias: any[], modo?: string) {
-				const r = await base.batch(sentencias, modo);
+			async batch(sentencias: any[]) {
+				const r = await base.batch(sentencias);
 				if (primera) {
 					primera = false;
 					avisarDentro();
@@ -186,9 +186,9 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 			const estado = { rechaza: true };
 			const db = {
 				...base,
-				async batch(sentencias: any[], modo?: string) {
+				async batch(sentencias: any[]) {
 					if (estado.rechaza) throw new Error("SQLITE_CONSTRAINT: NOT NULL constraint failed: Zonas.Nombre_Zona");
-					return base.batch(sentencias, modo);
+					return base.batch(sentencias);
 				},
 			};
 			const difundidos = prepararHub(hub, db);
