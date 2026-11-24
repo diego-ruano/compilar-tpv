@@ -7,19 +7,39 @@
 // Una operación es SÍNCRONA de principio a fin: ni `async`, ni `await`, ni promesas. Una espera
 // dentro abriría el objeto a otras llamadas a mitad de la transacción, y lo escrito después de ella
 // quedaría fuera. Lo que necesite esperar (una clave que cifrar, un hash) se calcula antes, en el
-// Worker, y llega en sus datos.
+// Worker, y llega en sus datos. Lo vigila `test/centralOperaciones.node.test.ts`.
 //
 // Lo que devuelve es un dato, que vuelve por el RPC: `null`, booleanos, números, textos,
 // `ArrayBuffer`, y arrays y objetos literales de datos (una fila de un `Resultado` también lo es).
 // Otra cosa (una instancia de una clase, una función, una fecha) se rechaza, y no queda nada escrito.
+// Un resultado de negocio (la clave ya usada, la sesión ya cumplida) es un valor; lanzar es fallar,
+// y deshace todo.
 //
 // Un nombre no cambia nunca de significado: una operación que cambia lleva un nombre nuevo. Durante
 // un despliegue, un Worker nuevo puede hablar con el objeto viejo, que contesta
 // `central_operacion_desconocida` a lo que no conoce.
 
 import type { SqlSync } from "../../../lib/sql";
+import { acortarAMano, desrevocar, extenderAMano, revocarAMano } from "./administracion";
+import { canjearClave } from "./canje";
+import { emitirCobro, revertirCobro } from "./cobros";
 
-/** Una operación de la central: recibe la base, sin esperas, y sus datos, y devuelve su resultado. */
-export type Operacion = (sql: SqlSync, datos: unknown) => unknown;
+/**
+ * Una operación de la central: recibe la base, sin esperas, y sus datos, y devuelve su resultado.
+ * Los datos llegan del Worker por el RPC con la forma que declara la operación
+ * (`ClienteCentral.operar` la exige al pedirla).
+ */
+export type Operacion = (sql: SqlSync, datos: never) => unknown;
 
-export const OPERACIONES: Readonly<Record<string, Operacion>> = {};
+export const OPERACIONES = {
+	canjearClave,
+	emitirCobro,
+	revertirCobro,
+	revocarAMano,
+	desrevocar,
+	extenderAMano,
+	acortarAMano,
+} satisfies Readonly<Record<string, Operacion>>;
+
+/** Las operaciones, con la forma de sus datos y de su resultado. */
+export type Operaciones = typeof OPERACIONES;

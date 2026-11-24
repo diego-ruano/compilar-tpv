@@ -10,7 +10,6 @@ import type { Base } from "../../lib/sql";
 
 import { SQL_DEVICE_ACTIVO } from "../../lib/deviceAuth";
 import { cerrarSocketsDelDispositivo, type EntornoDelHub } from "../../lib/hub";
-import { rowsAffected } from "../../server/db";
 import { fallo, ok, type Resultado } from "./pairing.resultado";
 
 /** Los Handy vinculados (no revocados) del negocio. */
@@ -61,7 +60,7 @@ export async function revocarDispositivo(
 		args: [now, now, tenantId, objetivo],
 	});
 
-	const cambiadas = rowsAffected(updateRes);
+	const cambiadas = updateRes.rowsAffected;
 
 	// Best-effort: si falla, el dispositivo quedará bloqueado en el próximo reconnect.
 	await cerrarSocketsDelDispositivo(env, tenantId, objetivo);

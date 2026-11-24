@@ -40,7 +40,9 @@ describe("una operación", () => {
 	it("que no se conoce no hace nada: es un despliegue a medias", async () => {
 		const { db } = await centralDePrueba();
 		for (const nombre of ["no_existe", "constructor", "toString", "__proto__", "hasOwnProperty"]) {
-			const error: any = await db.operar(nombre, {}).catch((e) => e);
+			// Un nombre que el objeto no conoce: el tipo de `operar` no lo deja escribir.
+			const operarCualquiera = db.operar as (nombre: string, datos: unknown) => Promise<unknown>;
+			const error: any = await operarCualquiera(nombre, {}).catch((e) => e);
 			expect(error, nombre).toBeInstanceOf(ErrorDeLaCentral);
 			expect(error.code, nombre).toBe("central_operacion_desconocida");
 			expect(error.status, nombre).toBe(503);
@@ -218,7 +220,7 @@ describe("el cliente, cuando la central no contesta como debe", () => {
 	])("lo que la plataforma marca como %s es CentralNoDisponible, con el código del objeto de un negocio", async (motivo, marca, code) => {
 		const causa = Object.assign(new Error("de la plataforma"), marca);
 		const db = deUnStub({ operar: async () => Promise.reject(causa) });
-		const error: any = await db.operar("x", {}).catch((e) => e);
+		const error: any = await db.operar("revocarAMano", { licenseId: "x", ahoraMs: 0 }).catch((e) => e);
 		expect(error).toBeInstanceOf(CentralNoDisponible);
 		expect(error).toMatchObject({ motivo, code, status: 503, cause: causa });
 	});
@@ -238,7 +240,7 @@ describe("el cliente, cuando la central no contesta como debe", () => {
 		await expect(db.execute("SELECT 1;")).rejects.toThrow("stub roto");
 		expect(await db.execute("SELECT 1;")).toMatchObject({ rows: [] });
 		expect(await db.batch([])).toEqual([]);
-		expect(await db.operar("x", {})).toBe(7);
+		expect(await db.operar("extenderAMano", { licenseId: "x", meses: 1, ahoraMs: 0 })).toBe(7);
 		expect(pedidos).toBe(4);
 	});
 

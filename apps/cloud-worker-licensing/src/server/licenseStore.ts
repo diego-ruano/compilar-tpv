@@ -1,12 +1,13 @@
 // src/server/licenseStore.ts
 //
-// Almacén del control-plane de licencias (Turso central). Aquí vive TODO el SQL de
-// `licenses`, del OTP de cambio de dispositivo, de los dispositivos y de los eventos de
-// webhook. Las reglas (¿está caducada? ¿avisa? ¿bloquea?) NO están aquí: son de
-// `licensing.helpers.ts` (`computeLicenseState`).
+// Lo que el Worker lee y escribe en la base central (control-plane) sentencia a sentencia: las
+// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Lo que tiene
+// que entrar entero (el canje, el cobro y su reversión, lo que la administración hace con una
+// licencia) son operaciones de la central y vive en `server/central/operaciones/`, que corre dentro
+// de su objeto; las sentencias que comparten las dos partes salen de allí. Las reglas (¿está
+// caducada? ¿avisa? ¿bloquea?) NO están aquí: son de `licensing.helpers.ts` (`computeLicenseState`).
 //
-// La estructura de esta base NO se toca desde el código: se gestiona a mano en Turso, y cómo es
-// está en `docs/sql/control-plane/esquema-actual.sql`.
+// La estructura de esta base sólo la cambian sus migraciones (`server/central/migraciones/`).
 //
 // Invariantes:
 //   · La clave en claro NUNCA se guarda: solo `sha256` (único, indexado) y AES-GCM.
@@ -18,6 +19,15 @@ import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
 import type { Sql } from "../lib/sql";
+import {
+	addMonths,
+	argumentosDeLaAuditoria,
+	argumentosDeLaLicenciaNueva,
+	INSERTAR_AUDITORIA,
+	INSERTAR_LICENCIA,
+	LICENCIA_POR_ID,
+	type LicenciaNueva,
+} from "./central/operaciones/licencias";
 
 export type LicenseRow = {
 	license_id: string;
@@ -58,29 +68,6 @@ export type LicenseRow = {
 };
 
 /* ============================================================
-   Fechas
-============================================================ */
-
-/**
- * Suma meses de calendario. Si el día no existe en el mes destino (31 de enero + 1 mes),
- * cae al último día del mes, en vez de desbordar a marzo como haría `setMonth` a pelo.
- */
-export function addMonths(fromMs: number, months: number): number {
-	const d = new Date(fromMs);
-	const day = d.getUTCDate();
-
-	d.setUTCDate(1);
-	d.setUTCMonth(d.getUTCMonth() + months);
-
-	const lastDay = new Date(
-		Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
-	).getUTCDate();
-	d.setUTCDate(Math.min(day, lastDay));
-
-	return d.getTime();
-}
-
-/* ============================================================
    Lecturas
 ============================================================ */
 
@@ -90,7 +77,7 @@ export async function getLicenseByHash(db: Sql, licHash: string): Promise<Licens
 }
 
 export async function getLicenseById(db: Sql, licenseId: string): Promise<LicenseRow | null> {
-	const r = await exec(db, `SELECT * FROM licenses WHERE license_id = ? LIMIT 1;`, [licenseId]);
+	const r = await exec(db, LICENCIA_POR_ID, [licenseId]);
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
@@ -175,90 +162,6 @@ export async function licenciaVivaDelDispositivo(
 }
 
 /**
- * ¿Sigue siendo ésta la licencia viva de la que ese equipo es la Main? Para preguntarlo DENTRO de
- * la transacción del canje (AUD-01): entre que la ruta elige la licencia y gasta la clave, la
- * licencia se puede haber anulado o trasladado a otro equipo, y sumarle tiempo entonces sería
- * gastar la clave sobre una licencia que ya no es de quien la teclea.
- */
-export async function sigueSiendoLaLicenciaDelEquipo(
-	db: Sql,
-	licenseId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await exec(
-		db,
-		`
-    SELECT 1 AS viva FROM licenses
-    WHERE license_id = ?
-      AND main_device_id = ?
-      AND disabled = 0
-      AND status IN ('active', 'expired')
-    LIMIT 1;
-    `,
-		[licenseId, deviceId],
-	);
-	return (r.rows?.length ?? 0) > 0;
-}
-
-/**
- * Gasta una clave **sin estrenar** sobre otra licencia, y dice si ha sido esta llamada la que la
- * ha gastado (REV-13).
- *
- * El `WHERE` es la mitad importante: sólo se canjea lo que sigue `issued` y sin equipo. Una
- * licencia **ya activada no suma tiempo** —decisión de producto: si lo que quieres es mover una
- * licencia a otro local, eso es un cambio de equipo y va por su propia pantalla, reciclando la que
- * hay en vez de creando otra—. Y mirar `rowsAffected` es la lección de REV-15: una condición de
- * carrera que nadie comprueba no es una condición de carrera, y aquí dos intentos a la vez
- * sumarían el doble de meses.
- *
- * AUD-09: la clave canjeada suelta el negocio que tuviera reservado (`reservarNegocioDeLaClave`):
- * ya no va a nacer, y una clave canjeada no lleva negocio. Si una activación lo llegó a crear, se
- * queda sin licencia que lo apunte, que es lo que busca la retirada de negocios huérfanos
- * (`domains/admin/huerfanos.ts`).
- */
-export async function canjearLicencia(
-	db: Sql,
-	claveId: string,
-	sobreLicenciaId: string,
-): Promise<boolean> {
-	const r = await exec(
-		db,
-		`UPDATE licenses
-        SET status = 'redeemed',
-            redeemed_into_license_id = ?,
-            tenant_id = NULL,
-            updated_at_ms = ?
-      WHERE license_id = ?
-        AND status = 'issued'
-        AND main_device_id IS NULL
-        AND disabled = 0;`,
-		[sobreLicenciaId, Date.now(), claveId],
-	);
-	return Number((r as any)?.rowsAffected ?? 0) > 0;
-}
-
-/**
- * Pasa el cobro de una clave canjeada a la licencia que recibió su tiempo, como renovación.
- *
- * Sin esto, un reembolso de esa compra no quitaría nada: `localizarCobros` (LIC-07) llega al
- * cobro por el `payment_intent`, y ese cobro seguiría apuntando a la clave gastada —que ya no
- * tiene meses que quitar— en vez de a la licencia donde de verdad fueron a parar. Se **mueve** en
- * vez de insertar otro porque `license_payments` tiene índice único por sesión y unidad: otra fila
- * con la misma es justo lo que esa barrera impide.
- */
-export async function reasignarCobrosDeLaClave(
-	db: Sql,
-	claveId: string,
-	aLicenciaId: string,
-): Promise<void> {
-	await exec(
-		db,
-		`UPDATE license_payments SET license_id = ?, kind = 'renewal' WHERE license_id = ?;`,
-		[aLicenciaId, claveId],
-	);
-}
-
-/**
  * Las licencias a las que les queda poco y hay que avisar (REV-13).
  *
  * Sólo **activadas**: una `issued` que nadie ha estrenado no tiene reloj corriendo, así que no
@@ -326,10 +229,14 @@ export async function olvidarAvisoEnviado(
 	);
 }
 
+/**
+ * Las licencias, de la más nueva a la más vieja. Las de una misma compra nacen en el mismo instante
+ * (`emitirCobro`): entre ellas desempata el orden en que se insertaron, y la última unidad va primero.
+ */
 export async function listLicenses(db: Sql, limit = 50, offset = 0): Promise<LicenseRow[]> {
 	const r = await exec(
 		db,
-		`SELECT * FROM licenses ORDER BY created_at_ms DESC LIMIT ? OFFSET ?;`,
+		`SELECT * FROM licenses ORDER BY created_at_ms DESC, rowid DESC LIMIT ? OFFSET ?;`,
 		[limit, offset],
 	);
 	return (r.rows ?? []) as unknown as LicenseRow[];
@@ -339,89 +246,48 @@ export async function listLicenses(db: Sql, limit = 50, offset = 0): Promise<Lic
    Emisión y ciclo de vida
 ============================================================ */
 
-export type IssueLicenseArgs = {
+/**
+ * Una clave de licencia nueva: en claro, su huella (`license_key_hash`), su forma corta y cifrada
+ * con `LICENSE_STORE_KEY` (`server/crypto.ts`). La clave en claro es para quien la entrega (la
+ * respuesta de la administración, el correo del comprador): no se guarda, no viaja a la base
+ * central y no se loguea.
+ */
+export async function claveNueva(
+	claves: ClavesOClave,
+): Promise<{ keyPlain: string } & Pick<LicenciaNueva, "licHash" | "keyEnc" | "keyShort">> {
+	const keyPlain = generateLicenseKey();
+	return {
+		keyPlain,
+		licHash: await licenseKeyHash(keyPlain),
+		keyEnc: await cifrar(claves, keyPlain),
+		keyShort: licenseKeyShort(keyPlain),
+	};
+}
+
+export type IssueLicenseArgs = Omit<LicenciaNueva, "licenseId" | "licHash" | "keyEnc" | "keyShort" | "ahoraMs"> & {
 	/** Con qué se cifra la clave en reposo (`LICENSE_STORE_KEY`, ver `server/crypto.ts`). */
 	claves: ClavesOClave;
-	termMonths: number;
-	origin: LicenseOrigin;
-	customerEmail: string;
-	customerName?: string | null;
-	customerBusinessName?: string | null;
-	customerPhone?: string | null;
-	customerAddressJson?: string | null;
-	plan?: string;
-
-	stripeCustomerId?: string | null;
-	stripeCheckoutSessionId?: string | null;
-	stripePaymentIntentId?: string | null;
-	stripePriceId?: string | null;
 };
 
 /**
- * Minta una licencia nueva. Devuelve la fila **y la clave en claro**: es la única vez que
- * existe fuera del email del cliente — quien llame decide si la envía o la muestra, y no
- * debe loguearla.
+ * Minta una licencia nueva (sin estrenar: `INSERTAR_LICENCIA`). Devuelve la fila **y la clave en
+ * claro**: es la única vez que existe fuera del email del cliente — quien llame decide si la envía o
+ * la muestra, y no debe loguearla.
  *
- * `status = 'issued'` y `expires_at_ms = NULL`: el reloj no arranca en la compra, sino en
- * la 1ª activación (decisión §4.1 — "compra la clave y actívala cuando montes el TPV").
+ * Es el alta a mano. Las de una compra de Stripe las da de alta la central con el cobro, juntos
+ * (`emitirCobro`, `server/central/operaciones/cobros.ts`).
  */
 export async function issueLicense(
 	db: Sql,
-	args: IssueLicenseArgs,
+	{ claves, ...licencia }: IssueLicenseArgs,
 ): Promise<{ license: LicenseRow; keyPlain: string }> {
-	const keyPlain = generateLicenseKey();
-	const licHash = await licenseKeyHash(keyPlain);
-	const keyEnc = await cifrar(args.claves, keyPlain);
-
-	const now = Date.now();
+	const { keyPlain, ...clave } = await claveNueva(claves);
 	const licenseId = crypto.randomUUID();
 
 	await exec(
 		db,
-		`
-    INSERT INTO licenses (
-      license_id, license_key_hash, license_key_enc, key_short,
-      tenant_id, main_device_id,
-      status, disabled,
-      plan, term_months, origin,
-      issued_at_ms, activated_at_ms, expires_at_ms,
-      customer_email, customer_name,
-      customer_business_name, customer_phone, customer_address_json,
-      stripe_customer_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_price_id,
-      created_at_ms, updated_at_ms
-    ) VALUES (
-      ?, ?, ?, ?,
-      NULL, NULL,
-      'issued', 0,
-      ?, ?, ?,
-      ?, NULL, NULL,
-      ?, ?,
-      ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?
-    );
-    `,
-		[
-			licenseId,
-			licHash,
-			keyEnc,
-			licenseKeyShort(keyPlain),
-			args.plan ?? "standard",
-			args.termMonths,
-			args.origin,
-			now,
-			args.customerEmail,
-			args.customerName ?? null,
-			args.customerBusinessName ?? null,
-			args.customerPhone ?? null,
-			args.customerAddressJson ?? null,
-			args.stripeCustomerId ?? null,
-			args.stripeCheckoutSessionId ?? null,
-			args.stripePaymentIntentId ?? null,
-			args.stripePriceId ?? null,
-			now,
-			now,
-		],
+		INSERTAR_LICENCIA,
+		argumentosDeLaLicenciaNueva({ ...licencia, ...clave, licenseId, ahoraMs: Date.now() }),
 	);
 
 	const license = (await getLicenseById(db, licenseId))!;
@@ -545,141 +411,7 @@ export async function reassignMainDevice(
 	);
 }
 
-/**
- * Extiende la licencia. Si aún no ha caducado, suma sobre `expires_at_ms` (no se pierde lo
- * que quedaba); si ya venció (o nunca se activó), cuenta desde ahora.
- */
-export async function extendLicense(
-	db: Sql,
-	licenseId: string,
-	months: number,
-): Promise<number> {
-	const lic = await getLicenseById(db, licenseId);
-	if (!lic) throw new Error("license_not_found");
-
-	const now = Date.now();
-	const base = lic.expires_at_ms && lic.expires_at_ms > now ? lic.expires_at_ms : now;
-	const expiresAt = addMonths(base, months);
-
-	await exec(
-		db,
-		`
-    UPDATE licenses
-    SET expires_at_ms=?,
-        status = CASE WHEN status='expired' THEN 'active' ELSE status END,
-        updated_at_ms=?
-    WHERE license_id=?;
-    `,
-		[expiresAt, now, licenseId],
-	);
-
-	return expiresAt;
-}
-
-/**
- * Sella la licencia con la sesión de Stripe que acaba de pagarla: es el ÚLTIMO cobro, y cada
- * renovación la sobrescribe. Por eso no sirve de barrera de idempotencia (REV-01): el reintento
- * de una renovación antigua ya no la encontraría aquí. La barrera es `license_payments`.
- */
-export async function attachStripeSession(
-	db: Sql,
-	licenseId: string,
-	args: {
-		sessionId: string;
-		customerId?: string | null;
-		paymentIntentId?: string | null;
-		priceId?: string | null;
-	},
-): Promise<void> {
-	await exec(
-		db,
-		`
-    UPDATE licenses
-    SET stripe_checkout_session_id=?,
-        stripe_customer_id=COALESCE(?, stripe_customer_id),
-        stripe_payment_intent_id=COALESCE(?, stripe_payment_intent_id),
-        stripe_price_id=COALESCE(?, stripe_price_id),
-        updated_at_ms=?
-    WHERE license_id=?;
-    `,
-		[
-			args.sessionId,
-			args.customerId ?? null,
-			args.paymentIntentId ?? null,
-			args.priceId ?? null,
-			Date.now(),
-			licenseId,
-		],
-	);
-}
-
-export async function revokeLicense(db: Sql, licenseId: string): Promise<void> {
-	const now = Date.now();
-	await exec(
-		db,
-		`UPDATE licenses SET status='revoked', disabled=1, updated_at_ms=? WHERE license_id=?;`,
-		[now, licenseId],
-	);
-}
-
-/**
- * LIC-07: deshace una revocación. La usan el cierre de una disputa GANADA, sólo sobre lo que revocó
- * esa disputa (el dinero vuelve, así que cortar el servicio deja de tener motivo; AUD-08), y
- * `/unrevoke` de la administración.
- *
- * El estado al que regresa depende de si la licencia llegó a activarse: una que nunca se activó
- * vuelve a `issued` (su reloj no había arrancado) y una activada a `active`. Si además caducó
- * mientras tanto, `computeLicenseState` ya lo resuelve por `expires_at_ms`: aquí no se toca.
- *
- * AUD-07: una clave canjeada vuelve a `redeemed`. Tampoco se activó nunca, así que volvía a
- * `issued`: anularla y desanularla la dejaba otra vez sin estrenar, con su tiempo ya sumado a otra.
- */
-export async function reactivateLicense(db: Sql, licenseId: string): Promise<void> {
-	const now = Date.now();
-	await exec(
-		db,
-		`
-    UPDATE licenses
-    SET status = CASE
-            WHEN redeemed_into_license_id IS NOT NULL THEN 'redeemed'
-            WHEN activated_at_ms IS NULL THEN 'issued'
-            ELSE 'active'
-        END,
-        disabled = 0,
-        updated_at_ms = ?
-    WHERE license_id = ? AND status = 'revoked';
-    `,
-		[now, licenseId],
-	);
-}
-
-/**
- * LIC-07: resta meses a la caducidad (reembolso de una renovación). Es el inverso de
- * `extendLicense`: se quitan los meses que aportó ese cobro y la licencia vuelve a la fecha que
- * tenía antes, sin tocar el periodo que el cliente sí pagó y usó.
- *
- * Puede dejar `expires_at_ms` en el pasado (renovación anticipada y devuelta): eso es
- * exactamente "caducada", y el gate ya lo interpreta así.
- */
-export async function shortenLicense(
-	db: Sql,
-	licenseId: string,
-	months: number,
-): Promise<number | null> {
-	const lic = await getLicenseById(db, licenseId);
-	if (!lic || lic.expires_at_ms == null) return null;
-
-	const expiresAt = addMonths(lic.expires_at_ms, -months);
-	await exec(
-		db,
-		`UPDATE licenses SET expires_at_ms=?, updated_at_ms=? WHERE license_id=?;`,
-		[expiresAt, Date.now(), licenseId],
-	);
-
-	return expiresAt;
-}
-
-export type LicensePaymentKind = "issue" | "renewal";
+type LicensePaymentKind = "issue" | "renewal";
 
 export type LicensePaymentRow = {
 	payment_id: string;
@@ -695,202 +427,6 @@ export type LicensePaymentRow = {
 	unidad: number;
 	at_ms: number;
 };
-
-/**
- * LIC-07: registra un cobro cumplido (alta o renovación) para poder revertirlo después. Hay uno
- * por licencia emitida: una compra de varias unidades deja uno por unidad (RI-52).
- */
-export async function recordLicensePayment(
-	db: Sql,
-	args: {
-		licenseId: string;
-		kind: LicensePaymentKind;
-		termMonths: number;
-		sessionId: string | null;
-		paymentIntentId: string | null;
-		unidad?: number;
-	},
-): Promise<void> {
-	await exec(
-		db,
-		`
-    INSERT INTO license_payments
-      (payment_id, license_id, kind, term_months, stripe_checkout_session_id,
-       stripe_payment_intent_id, unidad, at_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-    `,
-		[
-			crypto.randomUUID(),
-			args.licenseId,
-			args.kind,
-			args.termMonths,
-			args.sessionId,
-			args.paymentIntentId,
-			args.unidad ?? 1,
-			Date.now(),
-		],
-	);
-}
-
-/**
- * REV-01: un cobro de esa sesión de checkout, si ya se cumplió. Es la barrera de idempotencia del
- * webhook de pago: se cumple entera en una transacción, así que con que haya uno ya está. Y si dos
- * entregas se cruzan, el índice único `ux_license_payments_session_unidad` rechaza la unidad 1 de
- * la segunda y su transacción entera se deshace.
- */
-export async function getLicensePaymentBySession(
-	db: Sql,
-	sessionId: string,
-): Promise<LicensePaymentRow | null> {
-	const r = await exec(
-		db,
-		`SELECT * FROM license_payments WHERE stripe_checkout_session_id = ? LIMIT 1;`,
-		[sessionId],
-	);
-	return (r.rows?.[0] as unknown as LicensePaymentRow) ?? null;
-}
-
-/**
- * LIC-07: los cobros a los que apunta un cargo de Stripe (por su PaymentIntent). Uno por licencia
- * de la compra (RI-52): un reembolso total o una disputa los revierte todos.
- */
-export async function getLicensePaymentsByIntent(
-	db: Sql,
-	paymentIntentId: string,
-): Promise<LicensePaymentRow[]> {
-	const r = await exec(
-		db,
-		`
-    SELECT * FROM license_payments
-    WHERE stripe_payment_intent_id = ?
-    ORDER BY unidad ASC, at_ms ASC;
-    `,
-		[paymentIntentId],
-	);
-	return (r.rows ?? []) as unknown as LicensePaymentRow[];
-}
-
-/** LIC-07: marca un cobro como devuelto. Impide que dos eventos de Stripe lo reviertan dos veces. */
-export async function markLicensePaymentReversed(
-	db: Sql,
-	paymentId: string,
-	args: { reason: string; eventUid: string },
-): Promise<void> {
-	await exec(
-		db,
-		`
-    UPDATE license_payments
-    SET reversed_at_ms=?, reversed_reason=?, reversed_event_uid=?
-    WHERE payment_id=? AND reversed_at_ms IS NULL;
-    `,
-		[Date.now(), args.reason, args.eventUid, paymentId],
-	);
-}
-
-/**
- * LIC-07: deshace la marca de devolución (disputa ganada). Sin esto el cobro quedaría marcado
- * como revertido para siempre y un reembolso posterior del mismo cargo no haría nada.
- */
-export async function clearLicensePaymentReversal(
-	db: Sql,
-	paymentId: string,
-): Promise<void> {
-	await exec(
-		db,
-		`
-    UPDATE license_payments
-    SET reversed_at_ms=NULL, reversed_reason=NULL, reversed_event_uid=NULL
-    WHERE payment_id=?;
-    `,
-		[paymentId],
-	);
-}
-
-/**
- * AUD-08 · La marca del cobro de un alta disputada cuya licencia NO revocó esa disputa: ya estaba
- * revocada al abrirse, o se revocó a mano mientras seguía abierta. Ganar la disputa le quita la
- * marca (el dinero ha vuelto) y no toca la licencia. Perderla la deja como está.
- */
-export const DISPUTA_SIN_REVOCAR = "dispute_ya_revocada";
-
-/**
- * AUD-08 · Revocar a mano una licencia cuya alta había revocado una disputa que sigue abierta hace
- * suya la revocación: el cobro deja de figurar como revocado por la disputa, y ganarla ya no
- * resucita la licencia. Va en la misma transacción que `revokeLicense`.
- *
- * Sólo las altas: una renovación disputada no revoca nada (resta meses), y devolvérselos al
- * ganarla no reactiva una licencia revocada (`extendLicense` no toca `status = 'revoked'`).
- */
-export async function atribuirRevocacionAMano(db: Sql, licenseId: string): Promise<void> {
-	await exec(
-		db,
-		`
-    UPDATE license_payments SET reversed_reason = ?
-    WHERE license_id = ? AND kind = 'issue' AND reversed_reason = 'dispute';
-    `,
-		[DISPUTA_SIN_REVOCAR, licenseId],
-	);
-}
-
-/**
- * AUD-45 · Desrevocar a mano deshace también la marca de disputa del alta (`dispute` o
- * `dispute_ya_revocada`). Si no, el cobro seguía figurando como revertido y un reembolso total
- * posterior del mismo cargo se quedaba en `already_reversed` sin revocar nada; es lo que pasaba
- * al reparar una licencia que había revocado una consulta del banco. Va en la misma transacción
- * que `reactivateLicense`.
- *
- * Sólo las altas, como `atribuirRevocacionAMano`: desrevocar no devuelve los meses que una disputa
- * le restó a una renovación, así que quitarle la marca dejaría que otro reembolso o disputa del
- * mismo cargo se los restara otra vez, y que ganarla no se los devolviera. Las marcas `refund`
- * tampoco: un reembolso total no se repite.
- *
- * Una disputa formal que siga abierta vuelve a revertir el alta si se pierde (`closed lost`): el
- * dinero se ha ido. Ganarla ya no tiene nada que deshacer.
- */
-export async function quitarMarcasDeDisputa(db: Sql, licenseId: string): Promise<void> {
-	await exec(
-		db,
-		`
-    UPDATE license_payments
-    SET reversed_at_ms = NULL, reversed_reason = NULL, reversed_event_uid = NULL
-    WHERE license_id = ? AND kind = 'issue' AND reversed_reason IN ('dispute', ?);
-    `,
-		[licenseId, DISPUTA_SIN_REVOCAR],
-	);
-}
-
-/**
- * LIC-07: la única licencia de un cliente de Stripe, o `null` si no hay exactamente una.
- *
- * Último recurso para atribuir un reembolso cuyo cargo no está en `license_payments` (una
- * licencia anterior a esa tabla). Se exige unicidad a propósito: revocar a ojo la licencia
- * equivocada de un cliente con varias sería peor que no hacer nada y avisar.
- */
-export async function getSoleLicenseByStripeCustomer(
-	db: Sql,
-	stripeCustomerId: string,
-): Promise<LicenseRow | null> {
-	const r = await exec(
-		db,
-		`SELECT * FROM licenses WHERE stripe_customer_id = ? LIMIT 2;`,
-		[stripeCustomerId],
-	);
-	const filas = (r.rows ?? []) as unknown as LicenseRow[];
-	return filas.length === 1 ? filas[0] : null;
-}
-
-/** LIC-07: la licencia sellada con ese PaymentIntent (el último cobro que la tocó). */
-export async function getLicenseByStripeIntent(
-	db: Sql,
-	paymentIntentId: string,
-): Promise<LicenseRow | null> {
-	const r = await exec(
-		db,
-		`SELECT * FROM licenses WHERE stripe_payment_intent_id = ? LIMIT 1;`,
-		[paymentIntentId],
-	);
-	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
-}
 
 /**
  * Marca que el correo con la clave se entregó. Se llama SOLO si el envío devolvió `true`; si falla,
@@ -1791,7 +1327,7 @@ export async function auditAdmin(
 ) {
 	await exec(
 		db,
-		`INSERT INTO admin_audit (audit_id, action, license_id, detail, at_ms) VALUES (?, ?, ?, ?, ?);`,
-		[crypto.randomUUID(), action, licenseId, JSON.stringify(detail), Date.now()],
+		INSERTAR_AUDITORIA,
+		argumentosDeLaAuditoria({ auditId: crypto.randomUUID(), accion: action, licenseId, detalle: detail, ahoraMs: Date.now() }),
 	);
 }

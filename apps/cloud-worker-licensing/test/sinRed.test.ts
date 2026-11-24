@@ -3,8 +3,8 @@
 // La suite no sale a la red (docs/arquitectura/worker.md, «Los tests no salen a la red»).
 //
 // La configuración de los tests reutiliza `wrangler.json`, el de producción: con sus `vars`, un
-// test al que le faltara un doble construía un cliente contra la base central de verdad, y la
-// petición salía. Aquí se fijan las cosas que lo impiden:
+// test al que le faltara un doble saldría a un servicio de verdad (Axiom, un latido, Stripe). Aquí
+// se fijan las cosas que lo impiden:
 //
 //   · el worker de pruebas recibe los textos de `helpers/entornoDePruebas.ts` y vacío todo lo
 //     demás, digan lo que digan `wrangler.json`, el `.dev.vars` del equipo o su `.env`, y Vite no
@@ -19,7 +19,6 @@
 //
 // Todo lo que se intenta aquí va a hosts `.invalid`, que no resuelven nunca.
 
-import { createClient } from "@libsql/client/web";
 import { connect } from "cloudflare:sockets";
 import { env } from "cloudflare:test";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -144,34 +143,24 @@ describe("lo que dice una salida bloqueada", () => {
 });
 
 describe("una salida a la red sin doble", () => {
-	it("el cliente de la base central que monta el TenantHub no llega a ninguna parte", async () => {
-		// Lo que pasa cuando a un test del Durable Object le falta el doble de la base central.
-		const central = new URL(ENTORNO_DE_PRUEBAS.TURSO_DATABASE_URL).host;
-		expect(central.endsWith(".invalid")).toBe(true);
-
+	it("la base central del TenantHub no sale a la red: es su objeto, en el mismo worker", async () => {
+		// Lo que pasa cuando a un test del Durable Object le falta la central: habla con el objeto
+		// `BaseCentral` del entorno de pruebas, que está sin aprovisionar, y no sale nada.
 		await enElHub("sin-red-base-central", async (hub: any) => {
-			await expect(hub.getCentralDb().execute("SELECT 1;")).rejects.toThrow(
-				`${SALIDA_BLOQUEADA}: POST https://${central}. `,
-			);
+			await expect(hub.getCentralDb(1_000).execute("SELECT 1;")).rejects.toMatchObject({
+				code: "central_sin_aprovisionar",
+			});
 		});
 
-		const salidas = salidasSinDoble();
-		expect(salidas.length).toBeGreaterThan(0);
-		expect(salidas.filter((s) => s !== `POST https://${central}`)).toEqual([]);
+		expect(salidasSinDoble()).toEqual([]);
+		expect(await salidasCortadasPorDetras()).toEqual([]);
 	});
 
-	it("el cliente de libsql no sale ni por `fetch` ni por WebSocket", async () => {
-		const porHttp = createClient({ url: "libsql://base-sin-doble.invalid", authToken: "x" });
-		await expect(porHttp.execute("SELECT 1;")).rejects.toThrow(SALIDA_BLOQUEADA);
-
-		// Con una dirección `wss:` no usa `fetch`: abre un WebSocket.
-		const porWebSocket = async () =>
-			createClient({ url: "wss://base-sin-doble.invalid", authToken: "x" }).execute("SELECT 1;");
-		await expect(porWebSocket()).rejects.toThrow(SALIDA_BLOQUEADA);
-
-		const salidas = salidasSinDoble();
-		expect(salidas).toContain("POST https://base-sin-doble.invalid");
-		expect(salidas).toContain("WebSocket wss://base-sin-doble.invalid");
+	it("un WebSocket sin doble no se abre", () => {
+		expect(() => new WebSocket("wss://socket-sin-doble.invalid/canal?token=SECRETO")).toThrow(
+			`${SALIDA_BLOQUEADA}: WebSocket wss://socket-sin-doble.invalid. `,
+		);
+		expect(salidasSinDoble()).toEqual(["WebSocket wss://socket-sin-doble.invalid"]);
 	});
 
 	it("un doble declarado no cuenta como salida", async () => {

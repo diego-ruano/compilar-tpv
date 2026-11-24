@@ -6,7 +6,8 @@ import type { TenantHub } from "./durableObjects/tenantHub";
 // Env unificado del worker `tpv-api` (antes `tpv-licensing`).
 //
 // Tras fusionar los dos workers, este único worker concentra:
-//   - La base de datos central de Turso (`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`).
+//   - La base central (licencias, negocios, dispositivos, emparejamientos…), en su Durable Object
+//     `BaseCentral`.
 //   - Los secretos de licencias (`LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
 //     `LICENSE_SIGNING_PRIVATE_KEY`, `ADMIN_API_TOKEN`, `STRIPE_*`).
 //   - El Durable Object `TenantHub` (WebSocket + apply idempotente), que guarda además la base de
@@ -14,10 +15,6 @@ import type { TenantHub } from "./durableObjects/tenantHub";
 //   - El pepper de emparejamiento (`PAIR_PEPPER`) y el TTL opcional del token Handy.
 
 export interface Env {
-	// Turso central (DB de control: tenants, devices, licencias, pair_requests…)
-	TURSO_DATABASE_URL: string;
-	TURSO_AUTH_TOKEN: string;
-
 	// Licencias / firma de tokens
 	LICENSE_JWT_SECRET: string;
 	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra en reposo las claves y las DEK
@@ -62,7 +59,7 @@ export interface Env {
 	// Filtro exterior del claim de emparejamiento (`pairing.intentos.ts`). Declarado en
 	// `wrangler.json` (`ratelimits`), no es un recurso que haya que crear en Cloudflare.
 	// OPCIONAL a propósito: sin él la espera escalonada sigue funcionando igual, sólo se pagan
-	// las lecturas de Turso que este filtro ahorra.
+	// las lecturas de la base central que este filtro ahorra.
 	LIMITADOR_CLAIM?: RateLimit;
 
 	// RI-68 · Filtro por IP de `/v1/license/activate` y `/v1/license/device-change/request`
@@ -128,7 +125,7 @@ export interface Env {
 	// (`domains/facturas/`, `test/facturasEnElBucket.test.ts`).
 	IMAGES: R2Bucket;
 
-	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`server/copiaBaseCentral.ts`).
+	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`durableObjects/baseCentral.copia.ts`).
 	// No puede ser el de imágenes: aquél se sirve sin firma por `/v1/images`, y esto lleva correos de clientes y
 	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare.
 	COPIAS: R2Bucket;

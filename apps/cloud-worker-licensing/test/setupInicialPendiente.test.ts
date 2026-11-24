@@ -51,8 +51,6 @@ const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-aud24",
-	TURSO_DATABASE_URL: "libsql://no-se-usa",
-	TURSO_AUTH_TOKEN: "no-se-usa",
 };
 
 const TENANT = "tenant-aud24";

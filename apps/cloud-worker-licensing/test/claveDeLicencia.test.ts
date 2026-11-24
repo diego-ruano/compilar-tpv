@@ -35,8 +35,6 @@ const ENV = {
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-	TURSO_DATABASE_URL: "libsql://pruebas",
-	TURSO_AUTH_TOKEN: "t",
 } as any;
 
 const CLAVE_EQUIPO = await clavePublica(61);

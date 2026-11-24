@@ -9,13 +9,15 @@
 //     upsert cuyo WHERE no escribe);
 //   · las filas se leen por nombre y por posición, y `columns` dice cuáles son;
 //   · un lote es todo o nada;
-//   · un error lanza siempre: nunca sale como filas vacías.
+//   · un error lanza siempre: nunca sale como filas vacías;
+//   · el plazo suelta a quien espera, pero no cancela la llamada.
 
-import { describe, expect, it } from "vitest";
+import { runInDurableObject } from "cloudflare:test";
+import { describe, expect, it, vi } from "vitest";
 
 import { aResultado } from "../src/durableObjects/sqliteDelObjeto";
-import { clienteCentral, ErrorDeLaCentral } from "../src/server/central/cliente";
-import { centralDePrueba } from "./helpers/central";
+import { CentralNoDisponible, clienteCentral, ErrorDeLaCentral } from "../src/server/central/cliente";
+import { centralDePrueba, filasDe } from "./helpers/central";
 
 const TENANT = (id: string, status = "active") => ({
 	sql: "INSERT INTO tenants (tenant_id, status) VALUES (?1, ?2);",
@@ -143,6 +145,28 @@ describe("con plazo", () => {
 		await db.batch([TENANT("t1"), TENANT("t2")]);
 		expect((await db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(2);
 		await expect(db.execute(TENANT("t1"))).rejects.toThrow(/UNIQUE constraint failed/);
+	});
+
+	it("con la central ocupada, suelta a quien espera al vencer; la llamada no se cancela y escribe después", async () => {
+		const central = await centralDePrueba();
+		// La central no atiende a nadie durante medio segundo (un arranque, una copia).
+		let ocupandose = false;
+		const ocupada = runInDurableObject(central.stub, (_objeto, state) =>
+			state.blockConcurrencyWhile(async () => {
+				ocupandose = true;
+				await new Promise((r) => setTimeout(r, 500));
+			}),
+		);
+		await vi.waitFor(() => expect(ocupandose).toBe(true));
+
+		const db = clienteCentral(() => central.stub, { plazoMs: 50 });
+		const error: any = await db.execute(TENANT("tarde")).catch((e) => e);
+		expect(error).toBeInstanceOf(CentralNoDisponible);
+		expect(error).toMatchObject({ motivo: "plazo", code: "hub_unavailable" });
+
+		await ocupada;
+		// Un RPC no se puede cortar: la llamada vencida seguía en la cola y, al soltarse, ha entrado.
+		await vi.waitFor(async () => expect(await filasDe(central, "SELECT tenant_id FROM tenants;")).toEqual([{ tenant_id: "tarde" }]));
 	});
 });
 

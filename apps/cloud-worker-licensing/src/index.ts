@@ -12,7 +12,8 @@ import { capturarError } from "./observability/errors";
 import { getDb } from "./server/db";
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { purgarBaseCentral } from "./server/purga";
-import { copiarBaseCentral } from "./server/copiaBaseCentral";
+import { centralDe } from "./lib/objetosDelNegocio";
+import { ErrorDeLaCentral } from "./server/central/cliente";
 import { latir, latirA } from "./observability/latido";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
@@ -38,8 +39,8 @@ export const BaseCentral = Sentry.instrumentDurableObjectWithSentry(sentryOption
 
 /**
  * Lo que este worker hace por su cuenta, una vez al día: avisar de las licencias que caducan
- * (REV-13), recoger la basura de la base central (`server/purga.ts`) y copiarla a R2
- * (`server/copiaBaseCentral.ts`, PROD-02).
+ * (REV-13), recoger la basura de la base central (`server/purga.ts`) y pedirle que se copie a R2
+ * (`durableObjects/baseCentral.copia.ts`, PROD-02).
  *
  * Va aquí y no en una ruta porque nadie lo va a llamar: el cliente no sabe que su licencia se
  * acaba hasta que deja de funcionar. El cron está en `wrangler.json` (`triggers.crons`), y los dos
@@ -76,7 +77,9 @@ async function programado(env: Env): Promise<void> {
 	// es el único que se condiciona al éxito, y es lo contrario de lo que se hace con el de abajo por
 	// la misma razón: cada latido responde a una pregunta, y la de éste es «¿hay una copia de hoy?».
 	try {
-		const r = await copiarBaseCentral(getDb(env), env.COPIAS);
+		const copia = await centralDe(env).copiar(new Date().toISOString().slice(0, 10));
+		if (!copia.ok) throw new ErrorDeLaCentral(copia.error, copia.detalle);
+		const r = copia.valor;
 		console.log(
 			`[cron] copia de la base central: ${r.clave}, ${r.tablas} tablas, ${r.filas} filas, ` +
 				`${r.bytes} bytes`,
@@ -90,8 +93,8 @@ async function programado(env: Env): Promise<void> {
 	// El latido va AQUÍ, fuera de los `try` y sin condicionarlo a que hayan ido bien: responde a
 	// «¿se está ejecutando el cron?», no a «¿funcionó todo?». Las dos tareas son idempotentes y se
 	// recuperan solas al día siguiente, así que atar el latido a su éxito convertiría una caída
-	// pasajera de Turso en un aviso de «cron muerto» — y una falsa alarma enseña a ignorar la buena.
-	// Lo que sí falló ya lo cuentan el log y Sentry.
+	// pasajera de la base central en un aviso de «cron muerto» — y una falsa alarma enseña a ignorar
+	// la buena. Lo que sí falló ya lo cuentan el log y Sentry.
 	await latir(env);
 }
 

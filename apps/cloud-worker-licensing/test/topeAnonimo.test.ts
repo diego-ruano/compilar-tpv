@@ -64,8 +64,6 @@ const ENV = {
 	STRIPE_WEBHOOK_SECRET: "whsec_ficticio",
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
-	TURSO_DATABASE_URL: "libsql://ficticia.invalid",
-	TURSO_AUTH_TOKEN: "ficticio",
 	EMAIL_FROM_ADDRESS: "licencias@ejemplo.test",
 	LIMITADOR_CLAIM: dejaPasar,
 	LIMITADOR_LICENCIA: dejaPasar,

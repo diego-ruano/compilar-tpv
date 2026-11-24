@@ -57,7 +57,7 @@ export const puertaPublica: MiddlewareHandler<Ctx> = async (c, next) => {
 	const tenantId = await negocioDeLaClave(db, c.req.param("clave") ?? "");
 	if (!tenantId) return noDisponible(c, "clave inexistente o revocada");
 	if (!(await negocioConLicenciaEnVigor(db, tenantId))) return noDisponible(c, `licencia (${tenantId})`);
-	if (await estaApagado(() => db, tenantId, "reservas_web")) return noDisponible(c, `interruptor (${tenantId})`);
+	if (await estaApagado(db, tenantId, "reservas_web")) return noDisponible(c, `interruptor (${tenantId})`);
 	c.set("tenantId", tenantId);
 	await next();
 };

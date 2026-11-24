@@ -9,41 +9,30 @@
 // administración, `adminLicenciaReversible.test.ts`) le piden que vuelva a leer quién es la Main
 // (`releerMain`), sin nombrar a quién echar, y después de cambiarla. Aquí se fija eso, y lo que
 // contesta la consulta con la que el `TenantHub` sabe quién es la Main (`mainDeLaLicencia`),
-// contra el esquema de producción de la base central.
+// contra la base central de verdad (`helpers/central.ts`), a la que las rutas llegan por `getDb`.
 //
-// Mismo arnés que `licenciaTraslado.test.ts`: el plano de control real sobre el SQLite de un DO, el
-// aprovisionamiento y los correos sustituidos, y un `TenantHub` de mentira que anota lo que se le
-// pide. Lo que el DO hace con ese aviso está en `mainDesplazadaSocket.test.ts`.
+// El aprovisionamiento y los correos van sustituidos, y el `TenantHub` es uno de mentira que anota
+// lo que se le pide. Lo que el DO hace con ese aviso está en `mainDesplazadaSocket.test.ts`.
 
 import { describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import { mainDeLaLicencia } from "../src/durableObjects/tenantHub.identidad";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
 import { otpHash } from "../src/domains/licensing/licensing.helpers";
 import { licenseKeyHash, normalizeLicenseKey } from "../src/domains/licensing/licenseKey";
-import { stripeRoutes } from "../src/domains/stripe/stripe.routes";
+import { cumplir, stripeRoutes } from "../src/domains/stripe/stripe.routes";
 import { vetoDeLicencia } from "../src/lib/licenciaEnUso";
 import {
 	activateLicenseFirstTime,
-	extendLicense,
 	getLicenseById,
 	issueLicense,
 	putDeviceOtp,
-	reactivateLicense,
-	recordLicensePayment,
-	revokeLicense,
 } from "../src/server/licenseStore";
 
+/** El cliente de la central del escenario en curso. Las rutas llegan a la misma por `getDb`. */
 let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/domains/licensing/licensing.helpers")>();
@@ -101,41 +90,25 @@ const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props:
 const SECRETO_DEL_WEBHOOK = "whsec_de_pruebas";
 
 type Escenario = {
-	sql: any;
+	central: CentralDePrueba;
 	env: any;
 	hub: ReturnType<typeof hubDeMentira>;
 };
 
 async function escenario<T>(nombre: string, prueba: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub(`aud02-rutas-${nombre}`, async (do_: any) => {
-		const sql = do_.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const tabla of [
-			"licenses",
-			"license_payments",
-			"devices",
-			"tenants",
-			"license_device_otp",
-			"license_device_swaps",
-			"webhook_events",
-			"admin_audit",
-		]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
-		dbDePruebas = clienteSobre(sql, do_.state.storage);
+	const central = await centralDePrueba(`aud02-rutas-${nombre}-${crypto.randomUUID()}`);
+	dbDePruebas = central.db;
 
-		const hub = hubDeMentira();
-		const env = {
-			LICENSE_JWT_SECRET: "secreto-de-pruebas",
-			LICENSE_STORE_KEY: STORE_KEY,
-			TURSO_DATABASE_URL: "libsql://no-se-usa",
-			TURSO_AUTH_TOKEN: "no-se-usa",
-			STRIPE_SECRET_KEY: "sk_de_pruebas",
-			STRIPE_WEBHOOK_SECRET: SECRETO_DEL_WEBHOOK,
-			TenantHub: hub.ns,
-		};
-		return prueba({ sql, env, hub });
-	});
+	const hub = hubDeMentira();
+	const env = {
+		LICENSE_JWT_SECRET: "secreto-de-pruebas",
+		LICENSE_STORE_KEY: STORE_KEY,
+		STRIPE_SECRET_KEY: "sk_de_pruebas",
+		STRIPE_WEBHOOK_SECRET: SECRETO_DEL_WEBHOOK,
+		TenantHub: hub.ns,
+		...central.entorno,
+	};
+	return prueba({ central, env, hub });
 }
 
 /**
@@ -250,10 +223,11 @@ describe("AUD-02 · quién es la Main de un negocio para el TenantHub", () => {
 			const { licenseId, tenantId } = await licenciaEnEquipoA(e);
 			expect(await mainDeLaLicencia(dbDePruebas as any, tenantId)).toBe("equipo-a");
 
-			await revokeLicense(dbDePruebas as any, licenseId);
+			// Lo que hacen `/revoke` y `/unrevoke` de la administración en la central.
+			await e.central.db.operar("revocarAMano", { licenseId, ahoraMs: Date.now() });
 			expect(await mainDeLaLicencia(dbDePruebas as any, tenantId)).toBeNull();
 
-			await reactivateLicense(dbDePruebas as any, licenseId);
+			await e.central.db.operar("desrevocar", { licenseId, ahoraMs: Date.now() });
 			expect(await mainDeLaLicencia(dbDePruebas as any, tenantId)).toBe("equipo-a");
 		});
 	});
@@ -261,7 +235,7 @@ describe("AUD-02 · quién es la Main de un negocio para el TenantHub", () => {
 	it("la caducidad no cuenta: caducar no cierra el socket", async () => {
 		await escenario("caducada", async (e) => {
 			const { licenseId, tenantId } = await licenciaEnEquipoA(e);
-			e.sql.exec("UPDATE licenses SET expires_at_ms = ? WHERE license_id = ?;", Date.now() - 30 * 86_400_000, licenseId);
+			await filasDe(e.central, "UPDATE licenses SET expires_at_ms = ? WHERE license_id = ?;", Date.now() - 30 * 86_400_000, licenseId);
 
 			expect(await mainDeLaLicencia(dbDePruebas as any, tenantId)).toBe("equipo-a");
 		});
@@ -317,32 +291,32 @@ const disputaAbierta = (paymentIntent: string) => ({
 	data: { object: { object: "dispute", id: "dp_1", payment_intent: paymentIntent, status: "needs_response" } },
 });
 
+/** Una compra por Stripe de una licencia anual, cobrada con `paymentIntent`: su licencia. */
+async function comprar(e: Escenario, sesionId: string, paymentIntent: string): Promise<string> {
+	const r = await cumplir(e.env, e.central.db, {
+		id: sesionId,
+		object: "checkout.session",
+		payment_status: "paid",
+		payment_intent: paymentIntent,
+		customer_details: { email: "bar@ejemplo.test" },
+		line_items: { data: [{ price: { id: "price_anual", metadata: { term_months: "12" } } }] },
+	});
+	if (r.accion !== "emitida") throw new Error(`compra inesperada: ${r.accion}`);
+	return r.license_ids[0];
+}
+
 /** Una licencia comprada por Stripe, con su cobro de alta, activada o no. */
 async function licenciaDeStripe(e: Escenario, activada: boolean) {
-	const { license } = await issueLicense(dbDePruebas as any, {
-		claves: STORE_KEY,
-		termMonths: 12,
-		origin: "stripe",
-		customerEmail: "bar@ejemplo.test",
-		stripeCheckoutSessionId: "cs_alta",
-		stripePaymentIntentId: PI_ALTA,
-	});
-	await recordLicensePayment(dbDePruebas as any, {
-		licenseId: license.license_id,
-		kind: "issue",
-		termMonths: 12,
-		sessionId: "cs_alta",
-		paymentIntentId: PI_ALTA,
-	});
+	const licenseId = await comprar(e, "cs_alta", PI_ALTA);
 	if (activada) {
 		await activateLicenseFirstTime(dbDePruebas as any, {
-			licenseId: license.license_id,
+			licenseId,
 			tenantId: "negocio-1",
 			deviceId: "device-main",
 			termMonths: 12,
 		});
 	}
-	return license.license_id;
+	return licenseId;
 }
 
 describe("AUD-02 · el reembolso o la disputa de un alta avisan al TenantHub", () => {
@@ -378,14 +352,16 @@ describe("AUD-02 · el reembolso o la disputa de un alta avisan al TenantHub", (
 	it("devolver una renovación no avisa: la licencia sigue valiendo", async () => {
 		await escenario("renovacion", async (e) => {
 			const licenseId = await licenciaDeStripe(e, true);
-			await extendLicense(dbDePruebas as any, licenseId, 12);
-			await recordLicensePayment(dbDePruebas as any, {
-				licenseId,
-				kind: "renewal",
-				termMonths: 12,
-				sessionId: "cs_renovacion",
-				paymentIntentId: PI_RENOVACION,
+			// La renovación: otra compra, canjeada sobre ella. Su cobro pasa a la licencia.
+			const renovacion = await comprar(e, "cs_renovacion", PI_RENOVACION);
+			const canje = await e.central.db.operar("canjearClave", {
+				claveId: renovacion,
+				licenciaId: licenseId,
+				deviceId: "device-main",
+				meses: 12,
+				ahoraMs: Date.now(),
 			});
+			expect(canje.resultado).toBe("sumado");
 
 			const r = await webhook(e.env, cargoDevuelto(PI_RENOVACION));
 			expect(r.status).toBe(200);
@@ -414,7 +390,7 @@ describe("AUD-02 · el reembolso o la disputa de un alta avisan al TenantHub", (
 			const r = await webhook(e.env, cargoDevuelto(PI_ALTA));
 			expect(r.status).toBe(200);
 			expect((await getLicenseById(dbDePruebas as any, licenseId))?.status).toBe("revoked");
-			const evento = e.sql.exec("SELECT processed_ok FROM webhook_events;").toArray();
+			const evento = await filasDe(e.central, "SELECT processed_ok FROM webhook_events;");
 			expect(evento).toEqual([{ processed_ok: 1 }]);
 		});
 	});

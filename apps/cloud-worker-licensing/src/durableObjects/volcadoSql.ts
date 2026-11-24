@@ -1,0 +1,121 @@
+// src/durableObjects/volcadoSql.ts
+//
+// Lo que comparten las copias de las dos bases que viven en el SQLite de un objeto: la de cada
+// negocio (`tenantHub.copia.ts`) y la central (`baseCentral.copia.ts`). Las dos son un volcado SQL
+// comprimido con gzip, que abre `gunzip -c copia.sql.gz | sqlite3 copia.db` sin nada nuestro:
+//
+//   · Cada sentencia de datos va en una línea: un salto de línea dentro de un texto se escribe como
+//     `char(10)` (`literalEnUnaLinea`), y así la copia se puede restaurar leyéndola por líneas.
+//   · Se comprime a trozos mientras se lee, sin esperas (`GzipPorTrozos`): leer y comprimir es una
+//     foto, porque el objeto no atiende a nadie más entretanto, y en memoria sólo quedan el trozo
+//     que se está llenando y lo ya comprimido.
+
+import { constants, crc32, deflateRawSync } from "node:zlib";
+
+/** Cada cuántos caracteres sin comprimir se comprime un trozo. */
+const TROZO_CARACTERES = 1024 * 1024;
+
+/** El nombre de una tabla o una columna, entre comillas dobles. */
+export function identificador(nombre: string): string {
+	return `"${nombre.replaceAll('"', '""')}"`;
+}
+
+/**
+ * Un valor de SQLite como literal SQL que cabe en una línea. Un salto de línea dentro de un texto se
+ * escribe como `char(10)` (y el retorno de carro, `char(13)`).
+ */
+export function literalEnUnaLinea(v: SqlStorageValue): string {
+	if (v === null) return "NULL";
+	if (typeof v === "number") {
+		// Un NaN o un infinito no tiene literal en SQL, y escribir NULL en su lugar sería una copia
+		// que miente sin decirlo.
+		if (!Number.isFinite(v)) throw new Error(`copia_valor_no_finito: ${v}`);
+		return String(v);
+	}
+	if (typeof v === "string") {
+		// Un NUL no puede ir dentro de un literal de texto: SQLite cortaría la cadena ahí. Se escribe
+		// en hexadecimal y se vuelve a convertir en texto.
+		if (v.includes("\0")) return `CAST(X'${hex(new TextEncoder().encode(v))}' AS TEXT)`;
+		const escapado = `'${v.replaceAll("'", "''")}'`;
+		if (!/[\r\n]/.test(v)) return escapado;
+		return `(${escapado.replaceAll("\n", "'||char(10)||'").replaceAll("\r", "'||char(13)||'")})`;
+	}
+	if (v instanceof ArrayBuffer) return `X'${hex(new Uint8Array(v))}'`;
+	// El SQLite de un objeto sólo devuelve esos cuatro tipos: otro sería una copia que no se sabe leer.
+	throw new Error(`copia_valor_desconocido: ${typeof v}`);
+}
+
+function hex(bytes: Uint8Array): string {
+	let s = "";
+	for (const b of bytes) s += b.toString(16).padStart(2, "0");
+	return s;
+}
+
+/**
+ * Un gzip de un solo miembro, comprimido a trozos y sin esperas.
+ *
+ * `CompressionStream` es asíncrono, y esperar mientras se lee dejaría de ser una foto. Cada trozo se
+ * comprime por separado como deflate en bruto y se cierra con un vaciado completo (`Z_FULL_FLUSH`):
+ * queda alineado a un byte y sin referencias a lo anterior, así que los trozos seguidos son un único
+ * flujo deflate, que termina con un bloque final vacío. Delante va la cabecera de gzip y detrás su
+ * CRC-32 y el tamaño, acumulados trozo a trozo. Es lo que hace `pigz`, y lo abre cualquier `gunzip`
+ * y el `DecompressionStream` del runtime, que no acepta un gzip de varios miembros.
+ *
+ * `tope` es el techo de lo comprimido, en bytes: pasado, lanza `copia_demasiado_grande`. Al cerrar,
+ * el fichero entero se monta junto a sus trozos, así que en memoria llega a ocupar dos veces eso.
+ */
+export class GzipPorTrozos {
+	private pendiente: string[] = [];
+	private caracteres = 0;
+	private comprimido: Uint8Array[] = [];
+	private bytesComprimidos = 0;
+	private crc = 0;
+	private bytesSinComprimir = 0;
+	private readonly codificador = new TextEncoder();
+
+	constructor(private readonly tope: number) {}
+
+	linea(texto: string): void {
+		this.pendiente.push(texto, "\n");
+		this.caracteres += texto.length + 1;
+		if (this.caracteres >= TROZO_CARACTERES) this.vaciar();
+	}
+
+	private vaciar(): void {
+		if (!this.pendiente.length) return;
+		const bytes = this.codificador.encode(this.pendiente.join(""));
+		this.pendiente = [];
+		this.caracteres = 0;
+		this.crc = crc32(bytes, this.crc);
+		this.bytesSinComprimir += bytes.length;
+		this.anadir(deflateRawSync(bytes, { finishFlush: constants.Z_FULL_FLUSH }));
+	}
+
+	private anadir(trozo: Uint8Array): void {
+		this.bytesComprimidos += trozo.length;
+		if (this.bytesComprimidos > this.tope) {
+			throw new Error(`copia_demasiado_grande: pasa de ${this.tope} bytes comprimida`);
+		}
+		this.comprimido.push(trozo);
+	}
+
+	cerrar(): { gzip: Uint8Array; bytesSinComprimir: number } {
+		this.vaciar();
+		// El bloque final, vacío: `deflateRawSync` de nada con `Z_FINISH`.
+		this.anadir(deflateRawSync(new Uint8Array(0)));
+		const cabecera = new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]);
+		const pie = new Uint8Array(8);
+		const vista = new DataView(pie.buffer);
+		vista.setUint32(0, this.crc >>> 0, true);
+		vista.setUint32(4, this.bytesSinComprimir % 2 ** 32, true);
+
+		const gzip = new Uint8Array(cabecera.length + this.bytesComprimidos + pie.length);
+		let i = 0;
+		for (const parte of [cabecera, ...this.comprimido, pie]) {
+			gzip.set(parte, i);
+			i += parte.length;
+		}
+		this.comprimido = [];
+		return { gzip, bytesSinComprimir: this.bytesSinComprimir };
+	}
+}

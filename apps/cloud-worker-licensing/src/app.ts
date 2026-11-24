@@ -118,7 +118,7 @@ app.options("*", (c) =>
 app.get("/health", async (c) => {
 	// RI-73: también descifra el canario de `LICENSE_STORE_KEY` (ver `server/salud.ts`).
 	const claves = c.env.LICENSE_STORE_KEY ? c.env : undefined;
-	const salud = await comprobarSalud(() => getDb(c.env), Date.now(), claves);
+	const salud = await comprobarSalud(getDb(c.env), Date.now(), claves);
 	return json(
 		{ ok: salud.ok, service: "tpv-api", db: salud.db, cifrado: salud.cifrado, ts: Date.now() },
 		salud.ok ? 200 : 503,

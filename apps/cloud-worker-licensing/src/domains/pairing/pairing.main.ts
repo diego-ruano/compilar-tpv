@@ -10,7 +10,6 @@
 
 import type { Base } from "../../lib/sql";
 
-import { rowsAffected } from "../../server/db";
 import { sha256HexStr } from "../../server/utils/crypto";
 import { bytesToB64 } from "../../server/utils/base64";
 import { fallo, ok, type Resultado } from "./pairing.resultado";
@@ -108,7 +107,7 @@ export async function crearCodigo(
 			args: [pairCode, secretHash, tenantId, deviceId, now, expiresAtMs, CODIGOS_VIVOS_POR_NEGOCIO],
 		});
 
-		if (rowsAffected(r) > 0) return ok({ pairCode, pairSecret, expiresAtMs });
+		if (r.rowsAffected > 0) return ok({ pairCode, pairSecret, expiresAtMs });
 
 		// No ha entrado: o el número estaba cogido (se sortea otro) o el negocio está en su tope (no
 		// tiene sentido sortear más). Sólo se pregunta cuál cuando ha fallado, que es lo raro.
@@ -256,7 +255,7 @@ export async function aprobarSolicitud(
 		args: [now, pairCode, tenantId, now],
 	});
 
-	if (rowsAffected(updateRes) <= 0) return fallo(409, "pair_approve_race_or_invalid_state");
+	if (updateRes.rowsAffected <= 0) return fallo(409, "pair_approve_race_or_invalid_state");
 
 	return ok({ state: "approved" });
 }
@@ -290,7 +289,7 @@ export async function rechazarSolicitud(
 		`,
 		args: [pairCode, tenantId, ahoraMs],
 	});
-	if (rowsAffected(r) > 0) return ok({ state: "rejected" });
+	if (r.rowsAffected > 0) return ok({ state: "rejected" });
 
 	const prRes = await db.execute({
 		sql: `SELECT status, tenant_id, expires_at_ms, used_at_ms FROM pair_requests WHERE pair_code=? LIMIT 1;`,

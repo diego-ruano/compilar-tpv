@@ -9,8 +9,11 @@
 // se entera nunca. El resto de casos protegen lo de siempre: que el endpoint público no cuente de
 // más y que el latido no pueda tumbar al cron que lo lleva.
 
+import { env } from "cloudflare:test";
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 
+import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
+import { app } from "../src/app";
 import { CACHE_MS, comprobarSalud, olvidarSalud } from "../src/server/salud";
 import { latir } from "../src/observability/latido";
 
@@ -21,26 +24,26 @@ function baseViva() {
 	const llamadas = { n: 0 };
 	return {
 		llamadas,
-		abrir: () => ({
+		base: {
 			execute: async () => {
 				llamadas.n++;
 				return { rows: [] } as any;
 			},
-		}),
+		},
 	};
 }
 
-/** Una base que no contesta, con un error del estilo de los que suelta libsql. */
-function baseMuerta(mensaje = "connect failed: libsql://tpvcontrol-secreto.turso.io token=abc123") {
+/** Una base que no contesta, con un error que lleva dentro lo que no se le puede contar a nadie. */
+function baseMuerta(mensaje = "central_error_sql: no such table: cuentas_de_bar-secreto (token=abc123)") {
 	const llamadas = { n: 0 };
 	return {
 		llamadas,
-		abrir: () => ({
+		base: {
 			execute: async () => {
 				llamadas.n++;
 				throw new Error(mensaje);
 			},
-		}),
+		},
 	};
 }
 
@@ -51,38 +54,29 @@ describe("el veredicto de /health", () => {
 
 	it("con la base central viva, dice que sí", async () => {
 		const base = baseViva();
-		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
+		expect(await comprobarSalud(base.base, AHORA)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
 		expect(base.llamadas.n).toBe(1);
 	});
 
 	it("con la base central caída, dice que NO — el caso entero por el que esto existe", async () => {
 		const base = baseMuerta();
-		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
-	});
-
-	it("sin credenciales configuradas falla igual que si la base no contestara", async () => {
-		// Un worker desplegado sin `TURSO_AUTH_TOKEN` está exactamente igual de roto, y resolver
-		// las credenciales es lo que hace el thunk: por eso entra en el mismo `try`.
-		const abrir = () => {
-			throw new Error("missing_env_TURSO_AUTH_TOKEN");
-		};
-		expect(await comprobarSalud(abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
+		expect(await comprobarSalud(base.base, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
 	});
 
 	it("no cuenta POR QUÉ falla: el cuerpo lo lee cualquiera", async () => {
 		const base = baseMuerta();
-		const salud = await comprobarSalud(base.abrir, AHORA);
-		// El error de libsql llevaba dentro la URL de la base y un token. Nada de eso puede salir
-		// por un endpoint público y sin autenticar.
-		expect(JSON.stringify(salud)).not.toContain("turso.io");
+		const salud = await comprobarSalud(base.base, AHORA);
+		// El error lleva dentro el detalle de la base y un token. Nada de eso puede salir por un
+		// endpoint público y sin autenticar.
+		expect(JSON.stringify(salud)).not.toContain("bar-secreto");
 		expect(JSON.stringify(salud)).not.toContain("abc123");
 		expect(Object.keys(salud).sort()).toEqual(["cifrado", "db", "ok"]);
 	});
 
 	it("dentro de su ventana contesta de memoria, sin volver a preguntar", async () => {
 		const base = baseViva();
-		await comprobarSalud(base.abrir, AHORA);
-		await comprobarSalud(base.abrir, AHORA + CACHE_MS - 1);
+		await comprobarSalud(base.base, AHORA);
+		await comprobarSalud(base.base, AHORA + CACHE_MS - 1);
 		// Es lo que impide que un endpoint público y sin autenticar sea un generador gratuito de
 		// consultas contra la base central.
 		expect(base.llamadas.n).toBe(1);
@@ -90,10 +84,48 @@ describe("el veredicto de /health", () => {
 
 	it("pasada la ventana vuelve a preguntar, y una base que revive se nota", async () => {
 		const muerta = baseMuerta();
-		expect(await comprobarSalud(muerta.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
+		expect(await comprobarSalud(muerta.base, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
 
 		const viva = baseViva();
-		expect(await comprobarSalud(viva.abrir, AHORA + CACHE_MS)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
+		expect(await comprobarSalud(viva.base, AHORA + CACHE_MS)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
+	});
+});
+
+describe("/health toca la central de verdad", () => {
+	beforeEach(() => {
+		olvidarSalud();
+	});
+
+	/** `GET /health` con la central que lleve `entorno`. */
+	const sonda = async (entorno: Record<string, unknown>) => {
+		const res = await app.fetch(new Request("https://tpv-api.invalid/health"), { ...env, ...entorno } as any);
+		return { status: res.status, cuerpo: (await res.json()) as any };
+	};
+
+	it("con la central aprovisionada, 200", async () => {
+		const central = await centralDePrueba();
+		const r = await sonda(central.entorno);
+		expect(r.status).toBe(200);
+		expect(r.cuerpo).toMatchObject({ ok: true, db: "ok" });
+	});
+
+	it("con la central sin aprovisionar, 503", async () => {
+		const r = await sonda(centralSinAprovisionar().entorno);
+		expect(r.status).toBe(503);
+		expect(r.cuerpo).toMatchObject({ ok: false, db: "inalcanzable" });
+	});
+
+	it("si la plataforma dice que la central no está disponible, 503", async () => {
+		// Lo que marca Cloudflare en el error de una llamada a un Durable Object que no puede atender
+		// (`.retryable`, `.overloaded`): `CentralNoDisponible` en el cliente.
+		for (const marca of ["retryable", "overloaded"]) {
+			olvidarSalud();
+			const caida = Object.assign(new Error("Durable Object reset because its code was updated."), { [marca]: true });
+			const stub = { ejecutar: async () => Promise.reject(caida) };
+			const r = await sonda({ BaseCentral: { idFromName: () => ({}), get: () => stub } });
+			expect(r.status, marca).toBe(503);
+			expect(r.cuerpo, marca).toMatchObject({ ok: false, db: "inalcanzable" });
+		}
 	});
 });
 

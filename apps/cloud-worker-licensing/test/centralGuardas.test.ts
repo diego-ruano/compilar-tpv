@@ -86,7 +86,8 @@ describe("sin aprovisionar", () => {
 			"central_sin_aprovisionar",
 		);
 		expect(await codigoDe(db.batch(["SELECT 1;"]))).toBe("central_sin_aprovisionar");
-		expect(await codigoDe(db.operar("cualquiera", {}))).toBe("central_sin_aprovisionar");
+		expect(await codigoDe(db.operar("revocarAMano", { licenseId: "x", ahoraMs: 0 }))).toBe("central_sin_aprovisionar");
+		expect(await stub.copiar("2026-01-01")).toEqual({ ok: false, error: "central_sin_aprovisionar" });
 		expect(await codigoDe(db.execute("CREATE TABLE tenants (tenant_id TEXT);"))).toBe("central_sentencia_prohibida");
 
 		expect(await stub.estado()).toEqual({ aprovisionada: false, migraciones: [], averia: null });
@@ -134,7 +135,7 @@ describe("sin aprovisionar", () => {
 		expect(await codigoDe(db.execute({ sql: "INSERT INTO tenants (tenant_id) VALUES (?1);", args: ["t"] }))).toBe(
 			"central_migracion_fallida",
 		);
-		expect(await codigoDe(db.operar("cualquiera", {}))).toBe("central_migracion_fallida");
+		expect(await codigoDe(db.operar("revocarAMano", { licenseId: "x", ahoraMs: 0 }))).toBe("central_migracion_fallida");
 		expect(await runInDurableObject(stub, (_c, state) => tablasPropias(state.storage.sql))).not.toContain(
 			"de_la_migracion_rota",
 		);
@@ -340,7 +341,7 @@ describe("el objeto de producción", () => {
 describe("el prototipo RPC", () => {
 	it("sólo tiene sus métodos: lo demás vive en funciones de módulo", () => {
 		expect(Object.getOwnPropertyNames(BaseCentral.prototype).sort()).toEqual(
-			["constructor", "ejecutar", "lote", "operar", "estado", "aprovisionar"].sort(),
+			["constructor", "ejecutar", "lote", "operar", "copiar", "estado", "aprovisionar"].sort(),
 		);
 	});
 });

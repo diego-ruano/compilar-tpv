@@ -70,8 +70,6 @@ const ENV = {
 	PAIR_PEPPER: "pimienta-de-pruebas",
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
-	TURSO_DATABASE_URL: "libsql://ficticia.invalid",
-	TURSO_AUTH_TOKEN: "ficticio",
 } as any;
 
 const C = '"';

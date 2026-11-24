@@ -2,11 +2,10 @@
 //
 // El veredicto de `/health`, que es lo único que mira la monitorización externa (PROD-01).
 //
-// Antes devolvía `{ ok: true }` sin tocar nada, o sea que sólo demostraba que el isolate arranca.
-// Un worker desplegado con las credenciales de Turso caducadas —que deja tiradas a todas las Handy
-// y detiene la replicación de todos los negocios— contestaba ese 200 igual de sano, así que el
-// monitor se quedaba verde durante la avería entera. Aquí se toca la base CENTRAL, que es la
-// dependencia por la que pasa todo. No se toca ninguna base de tenant: eso es por negocio y
+// Un `{ ok: true }` que no tocara nada sólo demostraría que el isolate arranca: con la base central
+// sin aprovisionar o sin contestar —que deja tiradas a todas las Handy y detiene la replicación de
+// todos los negocios— el monitor seguiría en verde durante la avería entera. Aquí se toca la base
+// CENTRAL, que es la dependencia por la que pasa todo. No se toca ninguna base de tenant: eso es por negocio y
 // exigiría autenticación, y este endpoint es público a propósito.
 //
 // El veredicto viaja en el CÓDIGO DE ESTADO (200/503) y no en una palabra del cuerpo: leer el
@@ -27,14 +26,13 @@ export const CACHE_MS = 30_000;
 /**
  * RI-73 · El canario de `LICENSE_STORE_KEY`: un texto fijo cifrado con ella en `canario_cifrado`.
  *
- * El 27/09 se regeneraron los secretos del worker y todo lo cifrado antes —las DEK, los tokens de
- * Turso, las claves de licencia— dejó de poder leerse. `/health` siguió en verde, porque sólo tocaba
+ * El 27/09 se regeneraron los secretos del worker y todo lo cifrado antes —las DEK, las claves de
+ * licencia— dejó de poder leerse. `/health` siguió en verde, porque sólo tocaba
  * la base, y nos enteramos con la primera activación que falló. Ahora `/health` descifra esta fila:
  * con una clave equivocada contesta 503 en minutos, antes de que le pase a un cliente.
  *
  * La fila la crea el propio `/health` la primera vez que no la encuentra, con la clave de ese
- * momento. Si la tabla no existe todavía (falta el cambio a mano en Turso), no se comprueba —y se
- * dice—, pero la base sigue contando como viva: no es esa la avería que mide `db`.
+ * momento.
  */
 export const TEXTO_CANARIO = "tpv-api: LICENSE_STORE_KEY";
 
@@ -56,12 +54,11 @@ export function olvidarSalud(): void {
 }
 
 /**
- * `abrir` es un thunk y no una conexión ya hecha para que resolver las credenciales entre también
- * en el `try`: un worker desplegado sin `TURSO_AUTH_TOKEN` está igual de roto que uno cuya base no
- * contesta, y las dos averías tienen que salir por el mismo sitio.
+ * Una central sin aprovisionar, averiada o que no contesta (`ErrorDeLaCentral`,
+ * `CentralNoDisponible`) es una base que no responde: las tres averías salen por el mismo sitio.
  */
 export async function comprobarSalud(
-	abrir: () => Sql,
+	db: Sql,
 	ahoraMs: number = Date.now(),
 	claves?: ClavesOClave,
 ): Promise<Salud> {
@@ -69,14 +66,12 @@ export async function comprobarSalud(
 
 	let salud: Salud;
 	try {
-		const db = abrir();
 		await db.execute("SELECT 1");
 		const cifrado = claves ? await comprobarCanario(db, claves, ahoraMs) : "sin_comprobar";
 		salud = { ok: cifrado !== "falla", db: "ok", cifrado };
 	} catch (err) {
-		// El cuerpo de `/health` lo lee cualquiera: el error de libsql puede llevar dentro la URL
-		// de la base y el motivo exacto, y eso no se le cuenta a quien pregunte. El diagnóstico va
-		// al log, que sí es nuestro.
+		// El cuerpo de `/health` lo lee cualquiera: el error puede llevar dentro el motivo exacto, y
+		// eso no se le cuenta a quien pregunte. El diagnóstico va al log, que sí es nuestro.
 		capturarError(err, "health.database");
 		console.error("[health] la base central no responde:", (err as any)?.message || err);
 		salud = { ok: false, db: "inalcanzable", cifrado: "sin_comprobar" };
@@ -86,43 +81,47 @@ export async function comprobarSalud(
 	return salud;
 }
 
-/** Descifra el canario (o lo crea si no lo hay). Ver `TEXTO_CANARIO`. */
+/**
+ * Descifra el canario (o lo crea si no lo hay). Ver `TEXTO_CANARIO`. Sólo cuenta como «falla» lo que
+ * dice la clave; un fallo de la base sube, y es la base la que no contesta.
+ */
 async function comprobarCanario(
 	db: Sql,
 	claves: ClavesOClave,
 	ahoraMs: number,
 ): Promise<Salud["cifrado"]> {
-	let guardado: string | null;
-	try {
-		const r = await db.execute("SELECT valor FROM canario_cifrado WHERE id = 1;");
-		guardado = r.rows?.[0] ? String((r.rows[0] as any).valor) : null;
-	} catch (err) {
-		capturarError(err, "health.canary_read");
-		console.error("[health] no se puede leer canario_cifrado:", (err as any)?.message || err);
-		return "sin_comprobar";
+	const r = await db.execute("SELECT valor FROM canario_cifrado WHERE id = 1;");
+	const guardado = r.rows[0] ? String(r.rows[0].valor) : null;
+
+	if (guardado === null) {
+		const cifrado = await conLaClave(() => cifrar(claves, TEXTO_CANARIO));
+		if (cifrado === null) return "falla";
+		await db.execute({
+			sql: "INSERT INTO canario_cifrado (id, valor, creado_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING;",
+			args: [cifrado, ahoraMs],
+		});
+		return "ok";
 	}
 
+	const descifrado = await conLaClave(() => descifrar(claves, guardado));
+	if (descifrado === null || descifrado.texto !== TEXTO_CANARIO) return "falla";
+	// En plena rotación: se queda ya con la clave actual, como todo lo demás.
+	if (descifrado.recifrado) {
+		await db.execute({
+			sql: "UPDATE canario_cifrado SET valor = ? WHERE id = 1 AND valor = ?;",
+			args: [descifrado.recifrado, guardado],
+		});
+	}
+	return "ok";
+}
+
+/** Lo que hace la clave, o `null` si no puede: es lo que hace que el canario «falle». */
+async function conLaClave<T>(hacer: () => Promise<T>): Promise<T | null> {
 	try {
-		if (guardado === null) {
-			await db.execute({
-				sql: "INSERT INTO canario_cifrado (id, valor, creado_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO NOTHING;",
-				args: [await cifrar(claves, TEXTO_CANARIO), ahoraMs],
-			});
-			return "ok";
-		}
-		const { texto, recifrado } = await descifrar(claves, guardado);
-		if (texto !== TEXTO_CANARIO) return "falla";
-		// En plena rotación: se queda ya con la clave actual, como todo lo demás.
-		if (recifrado) {
-			await db.execute({
-				sql: "UPDATE canario_cifrado SET valor = ? WHERE id = 1 AND valor = ?;",
-				args: [recifrado, guardado],
-			});
-		}
-		return "ok";
+		return await hacer();
 	} catch (err) {
 		capturarError(err, "health.canary_decrypt");
 		console.error("[health] LICENSE_STORE_KEY no descifra el canario:", (err as any)?.message || err);
-		return "falla";
+		return null;
 	}
 }

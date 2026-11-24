@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { centralDe } from "../src/lib/objetosDelNegocio";
 import { bytesToB64 } from "../src/server/utils/base64";
 
 const { pendientes, entregadas } = vi.hoisted(() => ({ pendientes: new Set<Promise<unknown>>(), entregadas: { n: 0 } }));
@@ -64,16 +65,14 @@ describe("el TenantHub no se queda despierto con un socket abierto (AUD-46)", ()
 		const claves = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as CryptoKeyPair;
 		const clave = bytesToB64(new Uint8Array((await crypto.subtle.exportKey("raw", claves.publicKey)) as ArrayBuffer));
 
-		// La base del negocio con su esquema, y una base central que tarda lo que tarda la red: el
-		// bloqueo sólo salta si, al acabar el evento, al hub le queda algo propio en vuelo por
-		// `waitUntil` (aquí, el `last_seen`; en producción también Axiom o la purga del log).
-		const red = () => new Promise((r) => setTimeout(r, 50));
+		// La base del negocio con su esquema, y la base central de verdad, la que el hub pide con
+		// `centralDe` (aprovisionada): el bloqueo sólo salta si, al acabar el evento, al hub le queda
+		// algo propio en vuelo por `waitUntil` (aquí, el `last_seen`, que va a la central por RPC; en
+		// producción también Axiom o la purga del log). Las promesas de la central, que también está
+		// instrumentada, cuentan igual: tampoco puede quedarse despierta.
+		expect(await centralDe(env).aprovisionar()).toMatchObject({ ok: true });
 		await enElHub(nombre, (hub: any) => {
 			crearEsquemaTenant(hub.state.storage.sql);
-			hub.getCentralDb = () => ({
-				execute: async () => (await red(), { rows: [], rowsAffected: 0 }),
-				batch: async (ss: unknown[]) => (await red(), ss.map(() => ({ rows: [], rowsAffected: 0 }))),
-			});
 		});
 
 		const ns = env.TenantHub as DurableObjectNamespace;

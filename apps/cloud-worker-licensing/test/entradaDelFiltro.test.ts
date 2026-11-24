@@ -47,8 +47,6 @@ const enviados = (): any[] => enviar.mock.calls.flatMap(([, init]) => JSON.parse
 describe("AUD-32 · la ruta de una petición rechazada", () => {
 	const env = {
 		...AXIOM,
-		TURSO_DATABASE_URL: "libsql://ficticio.invalid",
-		TURSO_AUTH_TOKEN: "ficticio",
 		LICENSE_JWT_SECRET: "secreto-ficticio",
 	} as unknown as Env;
 	const app = new Hono<{ Bindings: Env }>().use("*", tenantAuth as any).all("*", (c) => c.text("dentro"));

@@ -7,7 +7,7 @@
 //   · Que un interruptor aplique exactamente a quien debe: global o de un tenant, en un rango de
 //     versiones, y sólo mientras no haya caducado.
 //   · Que si la base central no contesta, TODO esté encendido (lo contrario convertiría una caída
-//     de Turso en «el TPV deja de sincronizar»).
+//     de la base central en «el TPV deja de sincronizar»).
 //   · Que administración no deje apagar nada para siempre, y que encender deje rastro.
 //
 // Corre contra el esquema real del control-plane sobre el SQLite del Durable Object.
@@ -131,7 +131,7 @@ describe("PROD-06 · leer de la base central", () => {
 			ins("cifrado_pii", "*", ahora + HORA, "9.0.0");
 
 			const nombres = async (t: string, v: string | null) =>
-				(await apagadosPara(() => db as any, t, v)).map((a) => a.interruptor).sort();
+				(await apagadosPara(db as any, t, v)).map((a) => a.interruptor).sort();
 
 			expect(await nombres("t-1", "1.0.0")).toEqual(["imagenes", "reparacion_nube"]);
 			olvidarInterruptoresCacheados();
@@ -141,29 +141,23 @@ describe("PROD-06 · leer de la base central", () => {
 	});
 
 	it("si la base central no contesta, todo está encendido", async () => {
-		const rota = () => ({
+		const rota = {
 			execute: async () => {
-				throw new Error("turso caido");
+				throw new Error("la base central no contesta");
 			},
-		});
+		};
 		expect(await apagadosPara(rota as any, "t-1", "1.0.0")).toEqual([]);
 		expect(await estaApagado(rota as any, "t-1", "imagenes")).toBeNull();
-
-		// Y si ni siquiera se puede construir el cliente (falta el secreto), igual.
-		const sinCliente = () => {
-			throw new Error("missing_env_TURSO_AUTH_TOKEN");
-		};
-		expect(await apagadosPara(sinCliente as any, "t-1", null)).toEqual([]);
 	});
 
 	it("un fallo no se cachea: en cuanto la base vuelve, se obedece", async () => {
 		let caida = true;
-		const db = () => ({
+		const db = {
 			execute: async () => {
-				if (caida) throw new Error("turso caido");
+				if (caida) throw new Error("la base central no contesta");
 				return { rows: [fila({ interruptor: "imagenes", expires_at_ms: Date.now() + HORA })] };
 			},
-		});
+		};
 		expect(await apagadosPara(db as any, "t-1", null)).toEqual([]);
 		caida = false;
 		expect((await apagadosPara(db as any, "t-1", null)).map((a) => a.interruptor)).toEqual(["imagenes"]);
@@ -212,7 +206,7 @@ describe("PROD-06 · administración", () => {
 			expect(lista.interruptores[0]).toMatchObject({ interruptor: "reparacion_nube", vigente: true });
 
 			expect(
-				await estaApagado(() => dbDePruebas as any, "cualquiera", "reparacion_nube"),
+				await estaApagado(dbDePruebas as any, "cualquiera", "reparacion_nube"),
 			).toMatchObject({ motivo: "Reparación pisando filas buenas" });
 
 			const enc = await post(`/interruptores/${interruptorId}/encender`);
@@ -223,7 +217,7 @@ describe("PROD-06 · administración", () => {
 			expect(hist.interruptores[0]).toMatchObject({ interruptorId, vigente: false });
 
 			// Y la caché de este isolate se ha vaciado: se obedece al momento.
-			expect(await estaApagado(() => dbDePruebas as any, "cualquiera", "reparacion_nube")).toBeNull();
+			expect(await estaApagado(dbDePruebas as any, "cualquiera", "reparacion_nube")).toBeNull();
 
 			const acciones = sql
 				.exec("SELECT action FROM admin_audit ORDER BY at_ms, rowid;")
@@ -247,7 +241,7 @@ describe("PROD-06 · administración", () => {
 				horas: 1,
 			});
 			expect(r.status).toBe(200);
-			const db = () => dbDePruebas as any;
+			const db = dbDePruebas as any;
 			expect(await estaApagado(db, "t-9", "imagenes", "1.4.2")).not.toBeNull();
 			expect(await estaApagado(db, "t-9", "imagenes", "1.4.3")).toBeNull();
 			expect(await estaApagado(db, "t-8", "imagenes", "1.4.2")).toBeNull();

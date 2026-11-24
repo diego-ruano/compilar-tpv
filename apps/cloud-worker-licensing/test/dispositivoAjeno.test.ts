@@ -38,8 +38,6 @@ const { activateLicenseFirstTime } = await import("../src/server/licenseStore");
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-	TURSO_DATABASE_URL: "libsql://no-se-usa",
-	TURSO_AUTH_TOKEN: "no-se-usa",
 	// La ruta los exige antes de nada (fail-closed); el rechazo llega mucho antes de usarlos.
 };
 

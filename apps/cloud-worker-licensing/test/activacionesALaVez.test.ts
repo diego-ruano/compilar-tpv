@@ -11,8 +11,8 @@
 //
 // Ahora el negocio se reserva en la licencia en una sola sentencia antes de crear nada
 // (`reservarNegocioDeLaClave`), y el equipo y los datos del negocio esperan a ganarla. Aquí, por la
-// ruta entera, con la base central sobre el SQLite de un Durable Object y las bases de los negocios
-// en sus TenantHub de verdad:
+// ruta entera, con la base central de verdad (`helpers/central.ts`) y las bases de los negocios en sus
+// TenantHub de verdad:
 //
 //   · cinco activaciones simultáneas de la misma clave: una gana, cuatro reciben 409, y sólo hay un
 //     negocio y un objeto aprovisionado, sin filas de equipo de las perdedoras;
@@ -25,11 +25,13 @@ import { env as entorno } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, filasDe } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 
-/** La conexión del test en curso; la lee el `getDb` simulado. */
+/**
+ * El cliente de la central del test en curso; lo devuelve `getDb`. Es el de verdad, o uno que lo
+ * envuelve para cruzar las activaciones o cortar una a mitad.
+ */
 let clienteActual: any = null;
 /** Los negocios cuya base ha pedido crear la activación, en orden. La base es la de verdad. */
 let basesPedidas: string[] = [];
@@ -60,9 +62,7 @@ vi.mock("../src/domains/licensing/licensing.helpers", async (original) => {
 
 const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
 const { generateLicenseKey, licenseKeyHash } = await import("../src/domains/licensing/licenseKey");
-const { canjearLicencia, eraLaMainDeOtroNegocio, reservarNegocioDeLaClave } = await import(
-	"../src/server/licenseStore"
-);
+const { eraLaMainDeOtroNegocio, reservarNegocioDeLaClave } = await import("../src/server/licenseStore");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
@@ -70,8 +70,6 @@ const ENV = {
 	LICENSE_STORE_KEY: STORE_KEY,
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-	TURSO_DATABASE_URL: "libsql://pruebas",
-	TURSO_AUTH_TOKEN: "t",
 	// El limitador por IP de las rutas anónimas no es lo que se prueba: todas llegan desde la misma.
 	LIMITADOR_LICENCIA: undefined,
 };
@@ -82,7 +80,6 @@ const DIA = 24 * 60 * 60 * 1000;
 const stub = (tenantId: string) => (entorno as any).TenantHub.get((entorno as any).TenantHub.idFromName(tenantId));
 
 type Ctx = {
-	sql: any;
 	db: any;
 	/** Una clave sin estrenar: su texto y su id. */
 	emitir: () => Promise<{ clave: string; id: string }>;
@@ -92,26 +89,25 @@ type Ctx = {
 		pub: string,
 		extra?: Record<string, unknown>,
 	) => Promise<{ status: number; body: any }>;
-	licencia: (id: string) => any;
-	filas: (sql: string, ...args: unknown[]) => any[];
+	licencia: (id: string) => Promise<any>;
+	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
+	filas: (sql: string, ...args: unknown[]) => Promise<any[]>;
 };
 
-/** La base central en el SQLite de un Durable Object propio del test (`nombre`). */
+/** Una base central de verdad, propia del test (`nombre`). */
 async function escenario<T>(nombre: string, prueba: (c: Ctx) => Promise<T>): Promise<T> {
-	return enElHub(`aud09-central-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const t of ["licenses", "license_payments", "tenants", "devices"]) sql.exec(`DELETE FROM ${t};`);
-		const db = clienteSobre(sql, hub.state.storage);
+	{
+		const central = await centralDePrueba(`aud09-central-${nombre}-${crypto.randomUUID()}`);
+		const filas = (q: string, ...args: unknown[]) => filasDe(central, q, ...args);
+		const db = central.db;
 		clienteActual = db;
 		let n = 0;
 		const c: Ctx = {
-			sql,
 			db,
 			async emitir() {
 				const clave = generateLicenseKey();
 				const id = `lic-${nombre}-${++n}`;
-				sql.exec(
+				await filas(
 					`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months, origin,
 					   issued_at_ms, customer_email, created_at_ms, updated_at_ms)
 					 VALUES (?, ?, 'issued', 0, 'standard', 12, 'stripe', ?, 'bar@ejemplo.test', ?, ?);`,
@@ -133,14 +129,12 @@ async function escenario<T>(nombre: string, prueba: (c: Ctx) => Promise<T>): Pro
 				// Un fallo sin capturar sale como el texto de Hono, no como JSON.
 				return { status: res.status, body: await res.json().catch(() => null) };
 			},
-			licencia: (id) =>
-				sql
-					.exec(`SELECT status, tenant_id, main_device_id, activated_at_ms FROM licenses WHERE license_id = ?;`, id)
-					.toArray()[0],
-			filas: (q, ...args) => sql.exec(q, ...args).toArray(),
+			licencia: async (id) =>
+				(await filas(`SELECT status, tenant_id, main_device_id, activated_at_ms FROM licenses WHERE license_id = ?;`, id))[0],
+			filas,
 		};
 		return prueba(c);
-	});
+	}
 }
 
 /**
@@ -224,12 +218,12 @@ describe("AUD-09 · cinco activaciones simultáneas de la misma clave", () => {
 			expect(await stub(tenantId).estaAprovisionado()).toBe(true);
 
 			// Un negocio, con los datos de la ganadora; la licencia, suya.
-			expect(c.filas(`SELECT tenant_id, display_name FROM tenants;`)).toEqual([
+			expect(await c.filas(`SELECT tenant_id, display_name FROM tenants;`)).toEqual([
 				{ tenant_id: tenantId, display_name: `Bar ${respuestas.indexOf(ganadoras[0])}` },
 			]);
-			expect(c.licencia(k.id)).toMatchObject({ status: "active", tenant_id: tenantId, main_device_id: ganador.id });
+			expect(await c.licencia(k.id)).toMatchObject({ status: "active", tenant_id: tenantId, main_device_id: ganador.id });
 			// Y sólo la fila de su equipo: las perdedoras no han escrito la suya en su negocio.
-			expect(c.filas(`SELECT device_id, tenant_id, role FROM devices;`)).toEqual([
+			expect(await c.filas(`SELECT device_id, tenant_id, role FROM devices;`)).toEqual([
 				{ device_id: ganador.id, tenant_id: tenantId, role: "tpv" },
 			]);
 			return tenantId as string;
@@ -256,8 +250,8 @@ describe("AUD-09 · cinco activaciones simultáneas de la misma clave", () => {
 			expect(respuestas.map((r) => r.status).sort()).toEqual([200, 409, 409]);
 			const tenantId = respuestas.find((r) => r.status === 200)!.body.tenantId;
 			expect(new Set(basesPedidas)).toEqual(new Set([tenantId]));
-			expect(c.filas(`SELECT COUNT(*) AS n FROM tenants;`)[0].n).toBe(1);
-			expect(c.filas(`SELECT tenant_id FROM devices WHERE device_id = 'equipo-unico';`)).toEqual([
+			expect((await c.filas(`SELECT COUNT(*) AS n FROM tenants;`))[0].n).toBe(1);
+			expect(await c.filas(`SELECT tenant_id FROM devices WHERE device_id = 'equipo-unico';`)).toEqual([
 				{ tenant_id: tenantId },
 			]);
 		});
@@ -295,20 +289,20 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 
 					// La clave sigue sin estrenar, con su negocio reservado y su base ya creada. Ni el
 					// equipo ni el negocio sin licencia que lo reclame: sólo el reservado.
-					const tras = c.licencia(k.id);
+					const tras = await c.licencia(k.id);
 					expect(tras).toMatchObject({ status: "issued", main_device_id: null, activated_at_ms: null });
 					expect(tras.tenant_id).toBeTruthy();
 					expect(await stub(tras.tenant_id).estaAprovisionado()).toBe(true);
-					expect(c.filas(`SELECT tenant_id FROM tenants;`)).toEqual([{ tenant_id: tras.tenant_id }]);
-					expect(c.filas(`SELECT COUNT(*) AS n FROM devices;`)[0].n).toBe(0);
+					expect(await c.filas(`SELECT tenant_id FROM tenants;`)).toEqual([{ tenant_id: tras.tenant_id }]);
+					expect((await c.filas(`SELECT COUNT(*) AS n FROM devices;`))[0].n).toBe(0);
 
 					const bien = await c.activar(k.clave, segundo.id, segundo.pub);
 					expect(bien.status).toBe(200);
 					expect(bien.body.tenantId).toBe(tras.tenant_id);
 					expect(bien.body.cambioDeEquipo).toBe(false);
 					expect(basesPedidas).toEqual([tras.tenant_id, tras.tenant_id]);
-					expect(c.filas(`SELECT COUNT(*) AS n FROM tenants;`)[0].n).toBe(1);
-					expect(c.licencia(k.id)).toMatchObject({
+					expect((await c.filas(`SELECT COUNT(*) AS n FROM tenants;`))[0].n).toBe(1);
+					expect(await c.licencia(k.id)).toMatchObject({
 						status: "active",
 						tenant_id: tras.tenant_id,
 						main_device_id: segundo.id,
@@ -343,13 +337,13 @@ describe("AUD-09 · reservar no es nacer", () => {
 			const segunda = await reservarNegocioDeLaClave(c.db, k.id, "negocio-b", 2);
 			expect([primera, segunda]).toEqual(["negocio-a", "negocio-a"]);
 
-			c.sql.exec(`UPDATE licenses SET status = 'active', main_device_id = 'la-main' WHERE license_id = ?;`, k.id);
+			await c.filas(`UPDATE licenses SET status = 'active', main_device_id = 'la-main' WHERE license_id = ?;`, k.id);
 			expect(await reservarNegocioDeLaClave(c.db, k.id, "negocio-c", 3)).toBeNull();
 
 			const anulada = await c.emitir();
-			c.sql.exec(`UPDATE licenses SET disabled = 1 WHERE license_id = ?;`, anulada.id);
+			await c.filas(`UPDATE licenses SET disabled = 1 WHERE license_id = ?;`, anulada.id);
 			expect(await reservarNegocioDeLaClave(c.db, anulada.id, "negocio-d", 4)).toBeNull();
-			expect(c.licencia(anulada.id).tenant_id).toBeNull();
+			expect((await c.licencia(anulada.id)).tenant_id).toBeNull();
 		});
 	});
 });
@@ -361,8 +355,8 @@ describe("AUD-09 · una clave reservada que se canjea", () => {
 			// Un estreno que se cortó después de crear la base, como lo dejaba la ruta antes de que el
 			// equipo esperase a ganar la licencia: con la fila del equipo en el negocio reservado.
 			const tenantId = (await reservarNegocioDeLaClave(c.db, k.id, crypto.randomUUID(), Date.now()))!;
-			c.sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES (?, 'active');`, tenantId);
-			c.sql.exec(
+			await c.filas(`INSERT INTO tenants (tenant_id, status) VALUES (?, 'active');`, tenantId);
+			await c.filas(
 				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64) VALUES ('equipo-a-medias', ?, 'tpv', 'k');`,
 				tenantId,
 			);
@@ -371,23 +365,30 @@ describe("AUD-09 · una clave reservada que se canjea", () => {
 
 			// La canjea la Main de otro negocio.
 			const viva = await c.emitir();
-			c.sql.exec(
+			await c.filas(
 				`UPDATE licenses SET status = 'active', tenant_id = 'otro-negocio', main_device_id = 'otra-main',
 				        activated_at_ms = ?, expires_at_ms = ? WHERE license_id = ?;`,
 				Date.now(),
 				Date.now() + 30 * DIA,
 				viva.id,
 			);
-			expect(await canjearLicencia(c.db, k.id, viva.id)).toBe(true);
-			expect(c.licencia(k.id)).toMatchObject({ status: "redeemed", tenant_id: null, main_device_id: null });
+			const canje = await c.db.operar("canjearClave", {
+				claveId: k.id,
+				licenciaId: viva.id,
+				deviceId: "otra-main",
+				meses: 12,
+				ahoraMs: Date.now(),
+			});
+			expect(canje.resultado).toBe("sumado");
+			expect(await c.licencia(k.id)).toMatchObject({ status: "redeemed", tenant_id: null, main_device_id: null });
 
 			// Y aunque una fila canjeada vieja conservase el negocio (antes el canje no lo soltaba),
 			// tampoco: no se activó nunca.
-			c.sql.exec(`UPDATE licenses SET tenant_id = ? WHERE license_id = ?;`, tenantId, k.id);
+			await c.filas(`UPDATE licenses SET tenant_id = ? WHERE license_id = ?;`, tenantId, k.id);
 			expect(await eraLaMainDeOtroNegocio(c.db, "equipo-a-medias", tenantId)).toBe(false);
 
 			// Con una licencia que sí se activó en ese negocio, sí lo era (AUD-06).
-			c.sql.exec(
+			await c.filas(
 				`UPDATE licenses SET tenant_id = ?, activated_at_ms = ? WHERE license_id = ?;`,
 				tenantId,
 				Date.now(),

@@ -8,7 +8,7 @@
 //   GET  /v1/license/status                → estado FIRMADO (ed25519) + token renovado
 //   POST /v1/license/refresh               → reemite el token caducado, autenticando por device-proof
 //
-// La verdad comercial es NUESTRA (tabla `licenses` en la Turso central): ya no se consulta a
+// La verdad comercial es NUESTRA (tabla `licenses` de la base central): ya no se consulta a
 // ningún tercero. Y el estado que decide el gate viaja firmado: el TLS deja de ser la única
 // barrera (docs/arquitectura/licencias.md).
 
@@ -17,13 +17,12 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
 import type { ActivateResponse, ApiError, SignedLicenseAssertion, TenantInfo } from "../../shared";
-import { enTransaccion, getDb } from "../../server/db";
+import { getDb } from "../../server/db";
+import { estaAnulada } from "../../server/central/operaciones/licencias";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
 	activateLicenseFirstTime,
-	canjearLicencia,
 	exigirLaClaveDeEsteEquipo,
-	extendLicense,
 	devolverFalloDeOtp,
 	devolverIntentoDeOtp,
 	reservarEnvioDeOtp,
@@ -41,9 +40,7 @@ import {
 	getOrCreateTenantFieldDek,
 	licenciaVivaDelDispositivo,
 	eraLaMainDeOtroNegocio,
-	reasignarCobrosDeLaClave,
 	reservarNegocioDeLaClave,
-	sigueSiendoLaLicenciaDelEquipo,
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
@@ -76,7 +73,6 @@ import {
 	otpHash,
 	provisionTenantDatabase,
 	stateAllowsUse,
-	toBool01,
 	readmitirMain,
 	cabecerasDeLaFirma,
 	verificarFirmaDeActivacion,
@@ -107,11 +103,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function estaCaducada(lic: LicenseRow, nowMs: number): boolean {
 	if (!lic.expires_at_ms) return false;
 	return nowMs > lic.expires_at_ms + GRACE_DAYS * DAY_MS;
-}
-
-/** ¿La licencia está anulada? */
-function estaAnulada(lic: LicenseRow): boolean {
-	return lic.status === "revoked" || toBool01(lic.disabled);
 }
 
 /**
@@ -313,8 +304,6 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// activa, en vez de aprovisionar un tenant sin clave de cifrado que luego habría
 		// que rellenar a mano.
 		"LICENSE_STORE_KEY",
-		"TURSO_DATABASE_URL",
-		"TURSO_AUTH_TOKEN",
 	]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
@@ -473,34 +462,29 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 				licHash: actual.license_key_hash,
 			});
 
-			// Gastar la clave, sumar sus meses y mudar su cobro van juntos o no van (REV-01): con
-			// sentencias sueltas, un corte a mitad dejaba la clave gastada sin haber sumado nada. Y
-			// en este orden: si el canje no gana la carrera, no se ha sumado nada.
-			const canje = await enTransaccion(db, async (tx) => {
-				// AUD-01: la licencia se eligió fuera de la transacción. Si entretanto se ha anulado o
-				// se ha trasladado a otro equipo, la clave no se gasta sobre ella.
-				if (!(await sigueSiendoLaLicenciaDelEquipo(tx, actual.license_id, deviceId))) {
-					return "sin_licencia" as const;
-				}
-				if (!(await canjearLicencia(tx, lic.license_id, actual.license_id))) return "usada" as const;
-				const hasta = await extendLicense(tx, actual.license_id, lic.term_months);
-				// LIC-07: el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar.
-				await reasignarCobrosDeLaClave(tx, lic.license_id, actual.license_id);
-				return hasta;
+			// Gastar la clave, sumar sus meses y mudar su cobro van juntos o no van (REV-01), en una
+			// operación de la central (`canjearClave`, `server/central/operaciones/canje.ts`). Allí se
+			// comprueba también que la licencia elegida aquí siga siendo la viva de este equipo (AUD-01).
+			const canje = await db.operar("canjearClave", {
+				claveId: lic.license_id,
+				licenciaId: actual.license_id,
+				deviceId,
+				meses: lic.term_months,
+				ahoraMs: Date.now(),
 			});
-			if (canje === "sin_licencia") {
+			if (canje.resultado === "sin_licencia") {
 				return noCanjeable(
 					"Este equipo ya no tiene una licencia a la que sumarle tiempo. La clave no se ha gastado: comprueba la licencia y vuelve a intentarlo.",
 				);
 			}
-			if (canje === "usada") {
+			if (canje.resultado === "usada") {
 				// Otra petición la ha canjeado entretanto. Si ha sido este mismo equipo (un doble
 				// envío), se le dice que su tiempo ya está sumado (AUD-07).
 				const gastada = await getLicenseByHash(db, licHash);
 				const message = gastada ? await fraseDeClaveYaCanjeada(db, gastada, deviceId) : undefined;
 				return c.json({ ok: false, error: "license_already_used", message } satisfies ApiError, 409);
 			}
-			const expiresAtMs = canje;
+			const { expiresAtMs } = canje;
 
 			// Recibo. No bloquea nada —quien ha canjeado está delante del TPV y ya lo ve en
 			// pantalla—, pero deja constancia en su correo de cuánto se sumó y hasta cuándo.
@@ -806,7 +790,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 
 licenseRoutes.post("/device-change/request", filtroExterior, cuerpo(pedirCambioSchema), async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "EMAIL_FROM_ADDRESS"]);
+	const miss = assertEnv(env, ["EMAIL_FROM_ADDRESS"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
 	const body = c.req.valid("json");
@@ -877,8 +861,6 @@ licenseRoutes.get("/status", async (c) => {
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
 		"LICENSE_SIGNING_PRIVATE_KEY",
-		"TURSO_DATABASE_URL",
-		"TURSO_AUTH_TOKEN",
 	]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
@@ -974,7 +956,7 @@ licenseRoutes.get("/status", async (c) => {
 
 licenseRoutes.post("/refresh", async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["LICENSE_JWT_SECRET", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	const miss = assertEnv(env, ["LICENSE_JWT_SECRET"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
 	const bearer = leerBearer(c.req.raw);

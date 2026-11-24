@@ -24,11 +24,11 @@ import {
 	COPIAS_QUE_SE_GUARDAN,
 	claveDeCopia,
 	listarCopias,
-	literalEnUnaLinea,
 	siguienteCopiaMs,
 	volcarNegocio,
 } from "../src/durableObjects/tenantHub.copia";
 import { CLAVE_VUELTA_EN_CURSO, SALTO_DE_SEQ } from "../src/durableObjects/tenantHub.instante";
+import { literalEnUnaLinea } from "../src/durableObjects/volcadoSql";
 
 let dbDePruebas: unknown = null;
 

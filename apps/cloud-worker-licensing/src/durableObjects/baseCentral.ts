@@ -16,8 +16,13 @@
 //   nada mientras tanto. Si una ya aplicada ha cambiado, o una nueva no entra, no atiende y lo dice
 //   en cada llamada (`central_migracion_alterada`, `central_migracion_fallida`).
 // - **Al empezar cada llamada** reafirma las claves foráneas y los CHECK, y sólo ejecuta sentencias
-//   de filas, una a una (`baseCentral.guardas.ts`), con los argumentos convertidos como los guardaba
-//   libsql (`server/central/enlace.ts`).
+//   de filas, una a una (`baseCentral.guardas.ts`), con los argumentos convertidos por su enlace
+//   estricto (`server/central/enlace.ts`).
+// - **Nunca llama a otro objeto** (un `TenantHub`, una `AgendaWeb`): lo que hay que avisar después de
+//   escribir lo avisa quien llama (`test/centralOperaciones.node.test.ts`).
+//
+// Además de las sentencias y las operaciones, se copia a sí misma a R2 una vez al día
+// (`baseCentral.copia.ts`).
 //
 // Lo que no ha hecho viaja como resultado (`baseCentral.rpc.ts`), también un error de SQL: lo lanza
 // quien llama, en su lado (`server/central/cliente.ts`). Así el objeto no cuenta como fallo suyo una
@@ -37,6 +42,7 @@ import type {
 	RespuestaDeLaCentral,
 	SentenciaEnlazada,
 } from "./baseCentral.rpc";
+import { copiarLaCentral, type CopiaHecha } from "./baseCentral.copia";
 import { motivoDeRechazo, reafirmarPragmas } from "./baseCentral.guardas";
 import { ejecutarOperacion } from "./baseCentral.operar";
 import { baseAprovisionada, ejecutarEnBruto, migrarBase, type FilasEnBruto } from "./sqliteDelObjeto";
@@ -82,6 +88,21 @@ export class BaseCentral extends DurableObject<Env> {
 		const fallo = await antesDeTocarLaBase(this.ctx.storage, this.averia);
 		if (fallo) return fallo;
 		return ejecutarOperacion(this.ctx.storage, OPERACIONES, nombre, datos);
+	}
+
+	/**
+	 * La copia del día `dia` (AAAA-MM-DD) a R2 (`baseCentral.copia.ts`), la que pide el cron. Si no
+	 * llega a subirla (R2, el techo, un día mal escrito), contesta `central_copia_fallida`: lo cuenta
+	 * el cron, que es quien la ha pedido.
+	 */
+	async copiar(dia: string): Promise<RespuestaDeLaCentral<CopiaHecha>> {
+		const fallo = await antesDeTocarLaBase(this.ctx.storage, this.averia);
+		if (fallo) return fallo;
+		try {
+			return { ok: true, valor: await copiarLaCentral(this.ctx.storage.sql, this.env.COPIAS, dia) };
+		} catch (error) {
+			return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
+		}
 	}
 
 	/** Cómo está el objeto (administración). Sólo lee. */

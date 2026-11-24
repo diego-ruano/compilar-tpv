@@ -2,7 +2,8 @@ import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
 import { forbidden, json, serverError } from "../server/utils/response";
 import type { Base, Resultado } from "../lib/sql";
-import { createDbClient } from "../server/db/clients";
+import { clienteCentral } from "../server/central/cliente";
+import { centralDe } from "../lib/objetosDelNegocio";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
 import { bytesUtf8 } from "../lib/texto";
@@ -125,8 +126,9 @@ import type {
 const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
 
 // AUD-46: `last_seen` va por `waitUntil`, y un DO no hiberna mientras le quede una promesa de
-// `waitUntil` sin terminar: una base central que no contesta lo tendría despierto, facturando
-// duración, lo que tardara en soltarla. Vencido, ese `last_seen` se pierde y lo pone el siguiente.
+// `waitUntil` sin terminar: con el plazo, la suya termina aunque la base central no conteste. La
+// llamada vencida no se cancela (es un RPC, CENTRAL-PLAZO en docs/pendientes.md): si la central la
+// atiende después, el `last_seen` entra entonces, y si no, lo pone el siguiente.
 const PLAZO_LAST_SEEN_MS = 10_000;
 
 // ---- SYNC-12: purga del log de sync en la nube ------------------------------
@@ -189,8 +191,6 @@ export class MotorTenantHub {
 	private lastSeenPushedAtMs = new Map<string, number>();
 	// SYNC-12: instante de la última purga del log de sync (throttle en memoria del DO).
 	private lastPurgeAtMs = 0;
-
-	private centralDb: Base | null = null;
 
 	// La base del negocio es el SQLite de este DO. El cliente se monta una vez por
 	// instancia, tras comprobar que el negocio está aprovisionado y su esquema al día.
@@ -283,23 +283,15 @@ export class MotorTenantHub {
 		return out;
 	}
 
-	private getCentralDb(plazoMs?: number): Base {
-		// AUD-02: con plazo, un cliente que vive lo que su lectura. No se guarda: el plazo es de
-		// quien lo pide, y las demás lecturas de la base central siguen sin él.
-		if (plazoMs) {
-			return createDbClient({
-				url: this.env.TURSO_DATABASE_URL,
-				authToken: this.env.TURSO_AUTH_TOKEN,
-				plazoMs,
-			});
-		}
-		if (!this.centralDb) {
-			this.centralDb = createDbClient({
-				url: this.env.TURSO_DATABASE_URL,
-				authToken: this.env.TURSO_AUTH_TOKEN,
-			});
-		}
-		return this.centralDb;
+	/**
+	 * La base central, en su objeto (`durableObjects/baseCentral.ts`), con el plazo de quien la pide
+	 * (AUD-02): una central que no contesta no puede retener el turno del log ni la espera de la Main.
+	 * Vencido, sale como `CentralNoDisponible`, una lectura que no ha contestado. La llamada vencida no
+	 * se cancela (es un RPC): hasta que la central la atiende, este objeto no puede hibernar
+	 * (CENTRAL-PLAZO en docs/pendientes.md).
+	 */
+	private getCentralDb(plazoMs: number): Base {
+		return clienteCentral(() => centralDe(this.env), { plazoMs });
 	}
 
 	/**

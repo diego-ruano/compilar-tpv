@@ -30,6 +30,7 @@ import { hubDe } from "../../lib/hub";
 import { hubLocal } from "../../lib/hubLocal";
 import { errorDeBasePerdida, negocioNacido } from "../../lib/basePerdida";
 import { quitarComillas } from "../../lib/texto";
+import { estaAnulada } from "../../server/central/operaciones/licencias";
 
 /** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
 export const WARN_DAYS = 7;
@@ -65,18 +66,6 @@ export function assertEnv(env: Env, names: (keyof Env)[]): string | null {
 	return null;
 }
 
-/** Turso suele devolver 0/1; el cliente espera boolean. */
-export function toBool01(v: any, fallback = false): boolean {
-	if (typeof v === "boolean") return v;
-	if (typeof v === "number") return v !== 0;
-	if (typeof v === "string") {
-		const s = v.trim().toLowerCase();
-		if (s === "true" || s === "1") return true;
-		if (s === "false" || s === "0") return false;
-	}
-	return fallback;
-}
-
 // ---------------- Estado derivado de la licencia ----------------
 
 /**
@@ -91,7 +80,7 @@ export function computeLicenseState(
 	deviceId: string,
 	nowMs: number,
 ): LicenseGateState {
-	if (lic.status === "revoked" || toBool01(lic.disabled)) return "revoked";
+	if (estaAnulada(lic)) return "revoked";
 
 	if (lic.main_device_id && lic.main_device_id !== deviceId) return "device_replaced";
 

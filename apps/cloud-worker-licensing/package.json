@@ -12,7 +12,6 @@
 	},
 	"dependencies": {
 		"@hono/zod-validator": "^0.9.1",
-		"@libsql/client": "^0.17.0",
 		"@sentry/cloudflare": "^10.78.0",
 		"@tpv/contracts": "workspace:*",
 		"hono": "^4.13.7",
@@ -24,6 +23,7 @@
 		"@cloudflare/vitest-pool-workers": "^0.21.3",
 		"@noble/ed25519": "^3.0.0",
 		"@sentry/cli": "2.58.6",
+		"@types/node": "^26.4.1",
 		"typescript": "catalog:",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.56.0"

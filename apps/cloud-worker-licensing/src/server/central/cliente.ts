@@ -2,10 +2,11 @@
 //
 // Cómo se le habla a la base central desde fuera de su objeto: una `Base` (`lib/sql.ts`) sobre el
 // RPC de `BaseCentral` (`durableObjects/baseCentral.ts`), más `operar` para sus operaciones
-// (`operaciones/registro.ts`).
+// (`operaciones/registro.ts`). Lo usan el Worker (`server/db.ts::getDb`) y el `TenantHub`
+// (`getCentralDb`, con plazo).
 //
-// - Los argumentos salen convertidos como los guardaba libsql (`enlace.ts`): lo que no se puede
-//   guardar lanza aquí, sin llegar a viajar.
+// - Los argumentos salen convertidos por el enlace estricto de la central (`enlace.ts`): lo que no se
+//   puede guardar lanza aquí, sin llegar a viajar.
 // - Cada viaje suma al tramo `central` de la petición (`observability/tiempos.ts`).
 // - Cada viaje pide su stub: uno que ha lanzado puede haberse quedado roto, y Cloudflare aconseja
 //   no volver a usarlo (https://developers.cloudflare.com/durable-objects/best-practices/error-handling/).
@@ -16,7 +17,9 @@
 //   un plazo vencido, como `CentralNoDisponible`, con los códigos del objeto de un negocio que no
 //   puede atender (`lib/enElHub.ts`); cualquier otro fallo del viaje, tal cual.
 // - Con `plazoMs`, cada viaje tiene ese plazo. Un RPC no se puede cancelar: vencido el plazo, la
-//   llamada sigue viva y nadie la espera.
+//   llamada sigue viva y nadie la espera, y si escribía, escribe cuando la central la atienda. El
+//   plazo libera a quien espera, no al objeto que la hizo: mientras la llamada no termina es E/S
+//   pendiente, y ese objeto no puede hibernar.
 
 import type { BaseCentral } from "../../durableObjects/baseCentral";
 import type { CodigoDeLaCentral, RespuestaDeLaCentral } from "../../durableObjects/baseCentral.rpc";
@@ -25,11 +28,15 @@ import { HubError } from "../../lib/errorHttp";
 import type { Base } from "../../lib/sql";
 import { medirTramo } from "../../observability/tiempos";
 import { enlazar } from "./enlace";
+import type { Operaciones } from "./operaciones/registro";
 
 /** La base central: sentencias sueltas, lotes todo o nada, y sus operaciones. */
 export type ClienteCentral = Base & {
-	/** Una operación de la central, entera o nada: su resultado, o lanza. */
-	operar(nombre: string, datos: unknown): Promise<unknown>;
+	/** Una operación de la central (`operaciones/registro.ts`), entera o nada: su resultado, o lanza. */
+	operar<N extends keyof Operaciones>(
+		nombre: N,
+		datos: Parameters<Operaciones[N]>[1],
+	): Promise<ReturnType<Operaciones[N]>>;
 };
 
 /** Con qué estado HTTP sale cada cosa que el objeto contesta que no ha hecho. */
@@ -46,6 +53,8 @@ const ESTADO: Record<CodigoDeLaCentral, number> = {
 	central_operacion_fallida: 500,
 	// Un fallo del programa: una sentencia que la central no ejecuta.
 	central_sentencia_prohibida: 500,
+	// La copia diaria, que sólo pide el cron.
+	central_copia_fallida: 500,
 };
 
 /**
@@ -107,7 +116,8 @@ function conPlazo<T>(llamada: Promise<T>, plazoMs: number | undefined): Promise<
 	const vencido = new Promise<never>((_, rechazar) => {
 		temporizador = setTimeout(() => rechazar(new CentralNoDisponible("plazo")), plazoMs);
 	});
-	// El temporizador vive lo que la llamada: uno pendiente no deja hibernar al objeto que espera.
+	// El temporizador no vive más que la llamada: uno pendiente sería otra cosa que no deja hibernar
+	// al objeto que espera.
 	return Promise.race([llamada, vencido]).finally(() => clearTimeout(temporizador));
 }
 
@@ -145,6 +155,10 @@ export function clienteCentral(
 			const enlazadas = sentencias.map(enlazar);
 			return (await viaje(async () => await pedirStub().lote(enlazadas), plazoMs)).map(aResultado);
 		},
-		operar: (nombre, datos) => viaje(async () => await pedirStub().operar(nombre, datos), plazoMs),
+		operar<N extends keyof Operaciones>(nombre: N, datos: Parameters<Operaciones[N]>[1]) {
+			// El RPC no conoce el tipo de cada operación: el objeto contesta lo que devuelve la que se nombra.
+			type Respuesta = RespuestaDeLaCentral<ReturnType<Operaciones[N]>>;
+			return viaje(async () => (await pedirStub().operar(nombre, datos)) as Respuesta, plazoMs);
+		},
 	};
 }

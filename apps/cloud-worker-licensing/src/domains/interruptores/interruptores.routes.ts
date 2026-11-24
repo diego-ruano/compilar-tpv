@@ -35,6 +35,6 @@ const consultaSchema = z.unknown().transform((entrada) => {
 
 interruptoresRoutes.post("/", cuerpoTolerante(consultaSchema), async (c) => {
 	const { version } = c.req.valid("json");
-	const apagados = await apagadosPara(() => getDb(c.env), c.get("tenantId"), version);
+	const apagados = await apagadosPara(getDb(c.env), c.get("tenantId"), version);
 	return c.json({ ok: true, apagados });
 });

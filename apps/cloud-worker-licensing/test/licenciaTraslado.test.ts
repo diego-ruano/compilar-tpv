@@ -44,8 +44,6 @@ const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
 	LICENSE_STORE_KEY: STORE_KEY,
-	TURSO_DATABASE_URL: "libsql://no-se-usa",
-	TURSO_AUTH_TOKEN: "no-se-usa",
 };
 // AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
 const PUB_A = await clavePublica(1);

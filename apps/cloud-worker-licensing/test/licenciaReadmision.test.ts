@@ -34,8 +34,6 @@ vi.mock("../src/server/db", async (importOriginal) => {
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(9))),
-	TURSO_DATABASE_URL: "libsql://no-se-usa",
-	TURSO_AUTH_TOKEN: "no-se-usa",
 };
 const EQUIPO = "equipo-1";
 const BAR_A = "tenant-bar-a";

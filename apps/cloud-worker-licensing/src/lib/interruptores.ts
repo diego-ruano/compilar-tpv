@@ -146,7 +146,7 @@ const cache = new Map<string, { hasta: number; filas: FilaInterruptor[] }>();
  * contesta, devuelve lista vacía — todo encendido, que es como funcionaba antes de existir esto.
  */
 export async function apagadosPara(
-	db: () => Sql,
+	db: Sql,
 	tenantId: string,
 	version: string | null,
 ): Promise<InterruptorApagado[]> {
@@ -158,7 +158,7 @@ export async function apagadosPara(
 		filas = guardado.filas;
 	} else {
 		try {
-			filas = await leerVigentes(db(), tenantId, ahora);
+			filas = await leerVigentes(db, tenantId, ahora);
 		} catch (e: any) {
 			console.warn("interruptores: no se pudieron leer, todo encendido:", String(e?.message || e));
 			return [];
@@ -172,7 +172,7 @@ export async function apagadosPara(
 
 /** ¿Está apagado este interruptor para este tenant? Mismo fallo hacia «encendido». */
 export async function estaApagado(
-	db: () => Sql,
+	db: Sql,
 	tenantId: string,
 	interruptor: Interruptor,
 	version: string | null = null,

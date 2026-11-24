@@ -29,8 +29,6 @@ const TOKEN = "token-de-pruebas";
 const ENV = {
 	...(entorno as any),
 	ADMIN_API_TOKEN: TOKEN,
-	TURSO_DATABASE_URL: "libsql://pruebas",
-	TURSO_AUTH_TOKEN: "t",
 };
 const DIA = 24 * 60 * 60 * 1000;
 

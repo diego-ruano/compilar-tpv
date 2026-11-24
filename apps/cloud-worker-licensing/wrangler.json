@@ -123,7 +123,6 @@
 		]
 	},
 	"vars": {
-		"TURSO_DATABASE_URL": "libsql://tpv-control-altarialights.aws-eu-central-1.turso.io",
 		"EMAIL_FROM_ADDRESS": "pedidos@altarialights.com",
 		"EMAIL_FROM_NAME": "TPV",
 		"EMAIL_RESERVAS_FROM_ADDRESS": "reservas@altarialights.com",

@@ -6,44 +6,24 @@
 //   POST /v1/admin/licenses/:id/unrevoke  → deshace una revocación
 //   POST /v1/admin/licenses/:id/shorten   → resta meses (puede dejarla caducada)
 //
-// Las operaciones de fondo (`reactivateLicense`, `shortenLicense`) ya existían desde LIC-07, pero
-// sólo las alcanzaba el webhook de Stripe: no había forma de deshacer a mano una revocación hecha
-// a mano. Lo que se prueba aquí es la capa de ruta —quién contesta qué— porque es donde estaba
-// todo lo nuevo: los códigos de conflicto, que el estado al que se vuelve no se invente nada, y el
-// aviso al `TenantHub` que hace que anular surta efecto en segundos y no en seis horas.
+// Lo que hacen por debajo (`reactivateLicense`, `shortenLicense`) es lo mismo que hace el webhook de
+// Stripe (LIC-07). Lo que se prueba aquí es la capa de ruta —quién contesta qué—: los códigos de
+// conflicto, que el estado al que se vuelve no se invente nada, y el aviso al `TenantHub` que hace
+// que anular surta efecto en segundos y no en seis horas.
 //
-// Corre contra el esquema real del control-plane sobre el SQLite del Durable Object, igual que
-// `stripeReversal.test.ts`.
+// Corre contra la base central de verdad (`helpers/central.ts`), a la que la ruta llega por `getDb`,
+// igual que `stripeReversal.test.ts`.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba } from "./helpers/central";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
-import {
-	activateLicenseFirstTime,
-	getLicenseById,
-	issueLicense,
-	revokeLicense,
-	type LicenseRow,
-} from "../src/server/licenseStore";
+import type { ClienteCentral } from "../src/server/central/cliente";
+import { activateLicenseFirstTime, getLicenseById, issueLicense, type LicenseRow } from "../src/server/licenseStore";
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const TOKEN = "token-de-pruebas";
 const JWT_SECRET = "secreto-interno-de-pruebas";
-
-/**
- * El cliente SQL que verán las rutas. `getDb` construye un cliente de Turso y lo cachea en una
- * variable de módulo, así que no hay por dónde inyectar: se sustituye esa única función y se deja
- * el resto del módulo (`exec`) intacto, que es de lo que tira `licenseStore`.
- */
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 /** Una llamada que la ruta le hizo al `TenantHub`, tal cual salió. */
 type LlamadaAlHub = { nombreDO: string; aviso: "releerMain" | "revocarDispositivo"; tenantId?: string; deviceId?: string };
@@ -58,15 +38,14 @@ type Escenario = {
 	llamadasAlHub: LlamadaAlHub[];
 	/** Hace que el DO reviente, para comprobar que anular no depende de que conteste. */
 	romperElHub: () => void;
-	db: never;
+	db: ClienteCentral;
 };
 
 /**
  * Un `TenantHub` de mentira que anota lo que le llega.
  *
- * No se puede usar el binding de verdad: `enElHub` ya está *dentro* de un Durable Object y lo que
- * interesa comprobar no es lo que el DO hace con el aviso (eso es cosa suya y de sus tests) sino
- * que la ruta se lo manda —al DO correcto y por el RPC correcto—, que es lo único que puede
+ * Lo que interesa comprobar no es lo que el DO hace con el aviso (eso es cosa suya y de sus tests)
+ * sino que la ruta se lo manda —al DO correcto y por el RPC correcto—, que es lo único que puede
  * romperse desde aquí sin que nadie se entere.
  */
 function hubDeMentira() {
@@ -90,30 +69,24 @@ function hubDeMentira() {
 	return { ns, llamadas, romper: () => (roto = true) };
 }
 
-/**
- * Un único Durable Object para todos los casos, limpiando filas entre ellos: las tablas se crean
- * una vez, a partir del esquema de producción (`helpers/planoDeControl.ts`).
- */
+/** Cada caso, con una base central nueva. */
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub("admin-reversible", async (hub: any) => {
-		const db = clienteSobre(hub.state.storage.sql);
-		dbDePruebas = db;
-		prepararPlanoDeControl(hub.state.storage.sql);
-		for (const tabla of ["licenses", "license_payments", "admin_audit"]) {
-			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
-		}
+	{
+		const central = await centralDePrueba();
+		const db = central.db;
 
-		// El `Env` que ven las rutas: el token de admin y una `getDb` que devuelve este SQLite.
+		// El `Env` que ven las rutas: el token de admin, el `TenantHub` de mentira y la central.
 		const hubFalso = hubDeMentira();
 		const env = {
 			ADMIN_API_TOKEN: TOKEN,
 			LICENSE_STORE_KEY: STORE_KEY,
 			LICENSE_JWT_SECRET: JWT_SECRET,
 			TenantHub: hubFalso.ns,
+			...central.entorno,
 		} as unknown as Parameters<typeof adminRoutes.fetch>[1];
 
 		const e: Escenario = {
-			db: db as never,
+			db,
 			llamadasAlHub: hubFalso.llamadas,
 			romperElHub: hubFalso.romper,
 			// `Hono.fetch` está tipado como `Response | Promise<Response>`; aquí siempre es lo
@@ -153,7 +126,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		};
 
 		return fn(e);
-	});
+	}
 }
 
 describe("admin · anular corta el socket de la Main", () => {
@@ -228,7 +201,7 @@ describe("admin · deshacer una revocación", () => {
 		await escenario(async (e) => {
 			const lic = await e.emitir();
 			await e.activar(lic.license_id);
-			await revokeLicense(e.db as never, lic.license_id);
+			await e.db.operar("revocarAMano", { licenseId: lic.license_id, ahoraMs: Date.now() });
 
 			const res = await e.post(`/licenses/${lic.license_id}/unrevoke`);
 
@@ -245,7 +218,7 @@ describe("admin · deshacer una revocación", () => {
 		// Su reloj no había arrancado: devolverla a `active` le inventaría una caducidad.
 		await escenario(async (e) => {
 			const lic = await e.emitir();
-			await revokeLicense(e.db as never, lic.license_id);
+			await e.db.operar("revocarAMano", { licenseId: lic.license_id, ahoraMs: Date.now() });
 
 			const res = await e.post(`/licenses/${lic.license_id}/unrevoke`);
 

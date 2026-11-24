@@ -86,7 +86,9 @@ export function ejecutarOperacion(
 	const { base, cerrar } = baseSincrona(storage.sql);
 	try {
 		const valor = storage.transactionSync(() => {
-			const resultado = operacion(base, datos);
+			// Los datos llegan del RPC sin tipo: su forma la exige quien pide la operación
+			// (`ClienteCentral.operar`).
+			const resultado = operacion(base, datos as never);
 			if (esPromesa(resultado)) {
 				resultado.then(undefined, () => {});
 				throw new Error(`La operación '${nombre}' de la base central ha devuelto una promesa: tiene que ser síncrona.`);

@@ -19,6 +19,9 @@
 // fila sin clave registrada no se da por buena con la que llegue, un rechazo por la clave no deja
 // nada hecho, el canje va atado al negocio que el equipo dice tener, y qué pasa al repetir una
 // activación ya aceptada mientras su firma sigue en hora (FABLE-E).
+//
+// La base central es la de verdad (`helpers/central.ts`): `getDb` devuelve su cliente, o uno que lo
+// envuelve para cambiar algo a mitad de una activación.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -26,12 +29,10 @@ import * as ed from "@noble/ed25519";
 
 import vectorJson from "../../../crates/tpv-infra-licensing/src/firma_activacion_casos.json?raw";
 import { activacionFirmada, firmarActivacion, mensajeDeActivacion, parDeClaves, parDeSemilla } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, filasDe } from "./helpers/central";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 
-/** La conexión del test en curso; la lee el `getDb` simulado. */
+/** El cliente de la central del test en curso; lo devuelve `getDb`. */
 let clienteActual: any = null;
 /** Bases de tenant que se han llegado a aprovisionar (en producción, la de su TenantHub). */
 let basesCreadas: string[] = [];
@@ -76,8 +77,6 @@ const ENV = {
 	LICENSE_STORE_KEY: STORE_KEY,
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-	TURSO_DATABASE_URL: "libsql://pruebas",
-	TURSO_AUTH_TOKEN: "t",
 	EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
 	PAIR_PEPPER: "pimienta-de-pruebas",
 	EMAIL: {
@@ -98,19 +97,6 @@ const DIA = 24 * 60 * 60 * 1000;
 const MINUTO = 60 * 1000;
 const IP = "203.0.113.7";
 
-const TABLAS = [
-	"licenses",
-	"license_payments",
-	"license_device_otp",
-	"license_device_swaps",
-	"license_otp_eventos",
-	"pair_requests",
-	"device_challenges",
-	"pair_claim_fallos",
-	"devices",
-	"tenants",
-];
-
 type Par = { seed: Uint8Array; pub: string };
 
 async function firmar(mensaje: string, seed: Uint8Array): Promise<string> {
@@ -129,7 +115,11 @@ type Negocio = {
 	dek: string;
 };
 
-type Ctx = { sql: any; db: any };
+type Ctx = {
+	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
+	sql: (texto: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
+	db: any;
+};
 
 /** Un negocio con su licencia viva, su Main dada de alta y su DEK guardada (cifrada). */
 async function negocio(
@@ -145,12 +135,12 @@ async function negocio(
 	const licHash = await licenseKeyHash(clave);
 	const ahora = Date.now();
 
-	sql.exec(
+	await sql(
 		`INSERT INTO tenants (tenant_id, status, field_dek) VALUES (?, 'active', ?);`,
 		tenantId,
 		await cifrar(STORE_KEY, dek),
 	);
-	sql.exec(
+	await sql(
 		`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled,
 		   plan, term_months, origin, issued_at_ms, activated_at_ms, expires_at_ms, customer_email,
 		   created_at_ms, updated_at_ms)
@@ -166,7 +156,7 @@ async function negocio(
 		ahora,
 		ahora,
 	);
-	sql.exec(
+	await sql(
 		`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
 		 VALUES (?, ?, 'tpv', ?, 'ed25519');`,
 		mainId,
@@ -196,7 +186,7 @@ async function dosNegocios(c: Ctx) {
 /** Una clave sin estrenar comprada con el correo indicado. */
 async function emitir({ sql }: Ctx, email: string, id: string, meses = 12) {
 	const clave = generateLicenseKey();
-	sql.exec(
+	await sql(
 		`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months, origin,
 		   issued_at_ms, customer_email, created_at_ms, updated_at_ms)
 		 VALUES (?, ?, 'issued', 0, 'standard', ?, 'stripe', ?, ?, ?, ?);`,
@@ -211,17 +201,12 @@ async function emitir({ sql }: Ctx, email: string, id: string, meses = 12) {
 	return { clave, id };
 }
 
-function fila({ sql }: Ctx, deviceId: string) {
-	return sql
-		.exec(
-			`SELECT tenant_id, role, revoked_at_ms, device_pubkey_b64 FROM devices WHERE device_id = ?;`,
-			deviceId,
-		)
-		.toArray()[0];
+async function fila({ sql }: Ctx, deviceId: string) {
+	return (await sql(`SELECT tenant_id, role, revoked_at_ms, device_pubkey_b64 FROM devices WHERE device_id = ?;`, deviceId))[0];
 }
 
-function contar({ sql }: Ctx, tabla: string, donde = "1=1"): number {
-	return Number(sql.exec(`SELECT COUNT(*) AS n FROM ${tabla} WHERE ${donde};`).toArray()[0].n);
+async function contar({ sql }: Ctx, tabla: string, donde = "1=1"): Promise<number> {
+	return Number((await sql(`SELECT COUNT(*) AS n FROM ${tabla} WHERE ${donde};`))[0].n);
 }
 
 /** Manda a `/activate` una petición ya montada (`activacionFirmada`) y espera a sus correos. */
@@ -318,18 +303,9 @@ async function vincularComoHandy({ db }: Ctx, n: Negocio, deviceId: string, clav
 }
 
 async function escenario<T>(nombre: string, fn: (c: Ctx) => Promise<T>): Promise<T> {
-	return enElHub(`aud01-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql, hub.state.storage);
-		prepararPlanoDeControl(sql);
-		for (const t of TABLAS) sql.exec(`DELETE FROM ${t};`);
-		clienteActual = db;
-		try {
-			return await fn({ sql, db });
-		} finally {
-			for (const t of TABLAS) sql.exec(`DELETE FROM ${t};`);
-		}
-	});
+	const central = await centralDePrueba(`aud01-${nombre}-${crypto.randomUUID()}`);
+	clienteActual = central.db;
+	return fn({ sql: (texto, ...args) => filasDe(central, texto, ...args), db: central.db });
 }
 
 beforeEach(() => {
@@ -358,14 +334,14 @@ describe("AUD-01 · la Handy de otro negocio", () => {
 			expect(apuntada.devicePubKeyB64).toBe(handy.pub);
 			expect((await vincularComoHandy(c, victima, HANDY, handy)).status).toBe(200);
 			const enSuSitio = { tenant_id: victima.tenantId, role: "handy", revoked_at_ms: null, device_pubkey_b64: handy.pub };
-			expect(fila(c, HANDY)).toEqual(enSuSitio);
+			expect(await fila(c, HANDY)).toEqual(enSuSitio);
 
 			const tokenHandy = await firmarSesion(ENV, {
 				tenantId: victima.tenantId,
 				deviceId: HANDY,
 				licHash: victima.licHash,
 			});
-			const negocios = contar(c, "tenants");
+			const negocios = await contar(c, "tenants");
 
 			// El atacante: una clave suya sin estrenar y lo apuntado. Sin firma, y firmando con la
 			// única clave privada que tiene, la de su Main.
@@ -386,13 +362,13 @@ describe("AUD-01 · la Handy de otro negocio", () => {
 				expect(r.body.tenantId).toBeUndefined();
 			}
 			// La fila no se ha movido y la Handy sigue trabajando en su negocio…
-			expect(fila(c, HANDY)).toEqual(enSuSitio);
+			expect(await fila(c, HANDY)).toEqual(enSuSitio);
 			expect(await cargarDevice(c.db, victima.tenantId, HANDY)).not.toBeNull();
 			await expect(pasaTenantAuth(victima.tenantId, HANDY, victima.licHash, handy.seed)).resolves.toBeUndefined();
 			expect((await conPrueba("POST", "/refresh", tokenHandy, handy.seed)).status).toBe(200);
 			// …y la clave del atacante sigue sin estrenar: ni negocio ni base nuevos.
 			expect(await getLicenseById(c.db, k.id)).toMatchObject({ status: "issued", main_device_id: null, tenant_id: null });
-			expect(contar(c, "tenants")).toBe(negocios);
+			expect(await contar(c, "tenants")).toBe(negocios);
 			expect(basesCreadas).toEqual([]);
 			expect(correos).toEqual([]);
 		});
@@ -411,7 +387,7 @@ describe("AUD-01 · la Handy de otro negocio", () => {
 
 			expect(r.status).toBe(200);
 			expect(r.body.cambioDeEquipo).toBe(false);
-			expect(fila(c, TABLET)).toEqual({
+			expect(await fila(c, TABLET)).toEqual({
 				tenant_id: r.body.tenantId,
 				role: "tpv",
 				revoked_at_ms: null,
@@ -533,18 +509,16 @@ describe("AUD-01 · la Main de otro negocio", () => {
 			expect([conOtroCodigo.status, conOtroCodigo.body.error]).toEqual([401, "bad_device_signature"]);
 
 			// La fila sigue en su negocio, la licencia del atacante en su equipo…
-			expect(fila(c, victima.mainId)).toEqual(enSuSitio);
+			expect(await fila(c, victima.mainId)).toEqual(enSuSitio);
 			expect((await getLicenseById(c.db, atacante.licenseId))!.main_device_id).toBe(atacante.mainId);
-			expect(contar(c, "license_device_swaps")).toBe(0);
+			expect(await contar(c, "license_device_swaps")).toBe(0);
 			await expect(
 				pasaTenantAuth(victima.tenantId, victima.mainId, victima.licHash, victima.main.seed),
 			).resolves.toBeUndefined();
 			// …y el código, sin gastar y sin un solo intento anotado: ni el suyo ni el de la licencia.
-			const otp = c.sql
-				.exec(`SELECT attempts, consumed_at_ms FROM license_device_otp WHERE license_id = ?;`, atacante.licenseId)
-				.toArray();
+			const otp = await c.sql(`SELECT attempts, consumed_at_ms FROM license_device_otp WHERE license_id = ?;`, atacante.licenseId);
 			expect(otp).toEqual([{ attempts: 0, consumed_at_ms: null }]);
-			expect(contar(c, "license_otp_eventos", "tipo = 'fallo'")).toBe(0);
+			expect(await contar(c, "license_otp_eventos", "tipo = 'fallo'")).toBe(0);
 			// A nadie se le avisa de un traslado que no ha ocurrido.
 			expect(correos.filter((m) => !/otro equipo/.test(m.subject))).toEqual([]);
 		});
@@ -620,7 +594,7 @@ describe("AUD-01 · la Main de otro negocio", () => {
 			expect(r.body.tenantId).toBe(dueno.tenantId);
 			expect(r.body.fieldDek).toBe(dueno.dek);
 			expect((await getLicenseById(c.db, dueno.licenseId))!.main_device_id).toBe(NUEVO);
-			expect(fila(c, NUEVO)).toMatchObject({ tenant_id: dueno.tenantId, role: "tpv", device_pubkey_b64: nuevo.pub });
+			expect(await fila(c, NUEVO)).toMatchObject({ tenant_id: dueno.tenantId, role: "tpv", device_pubkey_b64: nuevo.pub });
 		});
 	});
 });
@@ -637,7 +611,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	it.each(SIN_CLAVE)("canje sobre una Main con la clave en $como: 409 sin DEK y sin gastar nada", async ({ valor, id }) => {
 		await escenario(`sin-clave-canje-${id}`, async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
-			c.sql.exec(`UPDATE devices SET device_pubkey_b64 = ? WHERE device_id = ?;`, valor, victima.mainId);
+			await c.sql(`UPDATE devices SET device_pubkey_b64 = ? WHERE device_id = ?;`, valor, victima.mainId);
 			const antes = await getLicenseById(c.db, victima.licenseId);
 			const k = await emitir(c, atacante.email, "lic-clave-del-atacante");
 
@@ -660,7 +634,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			// Ni clave gastada, ni meses, ni recibo; y la fila sigue como estaba, sin clave.
 			expect(await getLicenseById(c.db, k.id)).toMatchObject({ status: "issued", redeemed_into_license_id: null });
 			expect((await getLicenseById(c.db, victima.licenseId))!.expires_at_ms).toBe(antes!.expires_at_ms);
-			expect(fila(c, victima.mainId)).toEqual({
+			expect(await fila(c, victima.mainId)).toEqual({
 				tenant_id: victima.tenantId,
 				role: "tpv",
 				revoked_at_ms: null,
@@ -673,7 +647,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	it("canje sobre una Main que no tiene fila: tampoco", async () => {
 		await escenario("sin-fila-canje", async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
-			c.sql.exec(`DELETE FROM devices WHERE device_id = ?;`, victima.mainId);
+			await c.sql(`DELETE FROM devices WHERE device_id = ?;`, victima.mainId);
 			const antes = await getLicenseById(c.db, victima.licenseId);
 			const k = await emitir(c, atacante.email, "lic-clave-del-atacante");
 
@@ -691,7 +665,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 
 			expect(await getLicenseById(c.db, k.id)).toMatchObject({ status: "issued", redeemed_into_license_id: null });
 			expect((await getLicenseById(c.db, victima.licenseId))!.expires_at_ms).toBe(antes!.expires_at_ms);
-			expect(fila(c, victima.mainId)).toBeUndefined();
+			expect(await fila(c, victima.mainId)).toBeUndefined();
 			expect(basesCreadas).toEqual([]);
 		});
 	});
@@ -699,7 +673,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	it("y a quien le pasa se le dice qué hacer: contactar con soporte", async () => {
 		await escenario("sin-clave-frase", async (c) => {
 			const { victima } = await dosNegocios(c);
-			c.sql.exec(`UPDATE devices SET device_pubkey_b64 = NULL WHERE device_id = ?;`, victima.mainId);
+			await c.sql(`UPDATE devices SET device_pubkey_b64 = NULL WHERE device_id = ?;`, victima.mainId);
 			const k = await emitir(c, victima.email, "lic-renovacion");
 			const app = new Hono().use("*", completarErrores).route("/v1/license", licenseRoutes);
 
@@ -729,34 +703,34 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 		await escenario(`sin-clave-handy-${id}`, async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			const HANDY = "handy-sin-clave";
-			c.sql.exec(
+			await c.sql(
 				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64) VALUES (?, ?, 'handy', ?);`,
 				HANDY,
 				victima.tenantId,
 				valor,
 			);
 			const enSuSitio = { tenant_id: victima.tenantId, role: "handy", revoked_at_ms: null, device_pubkey_b64: valor };
-			const negocios = contar(c, "tenants");
+			const negocios = await contar(c, "tenants");
 
 			// Por la puerta de la activación, con una clave sin estrenar y firmando con la suya.
 			const k = await emitir(c, atacante.email, "lic-clave-del-atacante");
 			const r = await activar({ activationKey: k.clave, deviceId: HANDY, devicePubKey: atacante.main.pub });
 			expect([r.status, r.body.error]).toEqual([409, "device_key_missing"]);
-			expect(fila(c, HANDY)).toEqual(enSuSitio);
+			expect(await fila(c, HANDY)).toEqual(enSuSitio);
 			expect(await getLicenseById(c.db, k.id)).toMatchObject({ status: "issued", main_device_id: null, tenant_id: null });
-			expect(contar(c, "tenants")).toBe(negocios);
+			expect(await contar(c, "tenants")).toBe(negocios);
 			expect(basesCreadas).toEqual([]);
 
 			// Por la del emparejamiento: la reclama en su negocio, la aprueba él mismo y firma el reto.
 			const suya = await parDeClaves(0x41);
 			const vinculada = await vincularComoHandy(c, atacante, HANDY, suya);
 			expect([vinculada.status, vinculada.cuerpo.error]).toEqual([409, "device_key_missing"]);
-			expect(fila(c, HANDY)).toEqual(enSuSitio);
+			expect(await fila(c, HANDY)).toEqual(enSuSitio);
 
 			// La salida es la de siempre: volver a vincularla en SU negocio, que lo aprueba su dueño.
 			const deVerdad = await parDeClaves(0x42);
 			expect((await vincularComoHandy(c, victima, HANDY, deVerdad)).status).toBe(200);
-			expect(fila(c, HANDY)).toEqual({ ...enSuSitio, device_pubkey_b64: deVerdad.pub });
+			expect(await fila(c, HANDY)).toEqual({ ...enSuSitio, device_pubkey_b64: deVerdad.pub });
 		});
 	});
 
@@ -788,7 +762,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			const escrituras = sentencias.filter((s) => /\b(INSERT INTO|UPDATE)\s+devices\b/i.test(s));
 			expect(escrituras).toHaveLength(1);
 			expect(escrituras[0]).toContain("device_pubkey_b64");
-			expect(fila(c, "equipo-nuevo")).toMatchObject({ role: "tpv", device_pubkey_b64: equipo.pub });
+			expect(await fila(c, "equipo-nuevo")).toMatchObject({ role: "tpv", device_pubkey_b64: equipo.pub });
 
 			// Con la fila a medias, otro no se la queda firmando con su clave…
 			const otro = await parDeClaves(0x44);
@@ -798,7 +772,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			// …y el reintento del equipo entra.
 			const bien = await activar(datos);
 			expect(bien.status).toBe(200);
-			expect(fila(c, "equipo-nuevo")).toEqual({
+			expect(await fila(c, "equipo-nuevo")).toEqual({
 				tenant_id: bien.body.tenantId,
 				role: "tpv",
 				revoked_at_ms: null,
@@ -816,8 +790,8 @@ describe("AUD-01 · un rechazo por la clave no deja nada hecho", () => {
 			const handy = await parDeClaves(0x51);
 			expect((await vincularComoHandy(c, dueno, HANDY, handy)).status).toBe(200);
 			// Dada de baja después, como una tablet que se retiró.
-			c.sql.exec(`UPDATE devices SET revoked_at_ms = 1700000000000 WHERE device_id = ?;`, HANDY);
-			const antes = fila(c, HANDY);
+			await c.sql(`UPDATE devices SET revoked_at_ms = 1700000000000 WHERE device_id = ?;`, HANDY);
+			const antes = await fila(c, HANDY);
 			expect(antes).toEqual({
 				tenant_id: dueno.tenantId,
 				role: "handy",
@@ -834,23 +808,21 @@ describe("AUD-01 · un rechazo por la clave no deja nada hecho", () => {
 
 			expect([r.status, r.body.error]).toEqual([409, "device_key_mismatch"]);
 			// La Handy sigue siendo una Handy dada de baja…
-			expect(fila(c, HANDY)).toEqual(antes);
+			expect(await fila(c, HANDY)).toEqual(antes);
 			// …el código, sin gastar y sin intentos…
 			expect(
-				c.sql
-					.exec(`SELECT attempts, consumed_at_ms FROM license_device_otp WHERE license_id = ?;`, dueno.licenseId)
-					.toArray(),
+				await c.sql(`SELECT attempts, consumed_at_ms FROM license_device_otp WHERE license_id = ?;`, dueno.licenseId),
 			).toEqual([{ attempts: 0, consumed_at_ms: null }]);
-			expect(contar(c, "license_otp_eventos", "tipo = 'fallo'")).toBe(0);
+			expect(await contar(c, "license_otp_eventos", "tipo = 'fallo'")).toBe(0);
 			// …y la licencia, en su equipo.
 			expect((await getLicenseById(c.db, dueno.licenseId))!.main_device_id).toBe(dueno.mainId);
-			expect(contar(c, "license_device_swaps")).toBe(0);
+			expect(await contar(c, "license_device_swaps")).toBe(0);
 
 			// Con su clave de verdad y ese mismo código, que sigue vivo, el traslado entra.
 			const bien = await activar({ ...datos, devicePubKey: handy.pub });
 			expect(bien.status).toBe(200);
 			expect(bien.body.cambioDeEquipo).toBe(true);
-			expect(fila(c, HANDY)).toEqual({ ...antes, role: "tpv", revoked_at_ms: null });
+			expect(await fila(c, HANDY)).toEqual({ ...antes, role: "tpv", revoked_at_ms: null });
 			expect((await getLicenseById(c.db, dueno.licenseId))!.main_device_id).toBe(HANDY);
 		});
 	});
@@ -863,7 +835,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	 */
 	async function conDosLicenciasSobreElEquipo(c: Ctx) {
 		const { victima, atacante: otro } = await dosNegocios(c);
-		c.sql.exec(`UPDATE licenses SET main_device_id = ? WHERE license_id = ?;`, victima.mainId, otro.licenseId);
+		await c.sql(`UPDATE licenses SET main_device_id = ? WHERE license_id = ?;`, victima.mainId, otro.licenseId);
 		return { victima, otro };
 	}
 
@@ -907,7 +879,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 		await escenario("dos-licencias-sin-la-suya", async (c) => {
 			const { victima, otro } = await conDosLicenciasSobreElEquipo(c);
 			// La suya está anulada: la única viva que apunta al equipo es la del otro negocio.
-			c.sql.exec(`UPDATE licenses SET status = 'revoked' WHERE license_id = ?;`, victima.licenseId);
+			await c.sql(`UPDATE licenses SET status = 'revoked' WHERE license_id = ?;`, victima.licenseId);
 			const otraAntes = await getLicenseById(c.db, otro.licenseId);
 			const k = await emitir(c, victima.email, "lic-nueva");
 			const datos = {
@@ -995,7 +967,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 				const { victima } = await dosNegocios(c);
 				const antes = await getLicenseById(c.db, victima.licenseId);
 				const k = await emitir(c, victima.email, "lic-renovacion");
-				const negocios = contar(c, "tenants");
+				const negocios = await contar(c, "tenants");
 
 				// La licencia cambia en cuanto la ruta termina de leerla por primera vez.
 				let cambiada = false;
@@ -1006,7 +978,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 						const texto = String(typeof q === "string" ? q : q.sql);
 						if (!cambiada && /FROM licenses\s+WHERE main_device_id = \?/.test(texto)) {
 							cambiada = true;
-							c.sql.exec(sentencia, victima.licenseId);
+							await c.sql(sentencia, victima.licenseId);
 						}
 						return leido;
 					},
@@ -1027,7 +999,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 				expect(r.body.fieldDek).toBeUndefined();
 				expect(r.body.tenantId).toBeUndefined();
 				// Ni negocio nuevo, ni base, ni clave gastada, ni meses sumados, ni recibo.
-				expect(contar(c, "tenants")).toBe(negocios);
+				expect(await contar(c, "tenants")).toBe(negocios);
 				expect(basesCreadas).toEqual([]);
 				expect(await getLicenseById(c.db, k.id)).toMatchObject({
 					status: "issued",
@@ -1062,8 +1034,8 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 			const licencia = await getLicenseById(c.db, k.id);
 
 			// Después de activar, el equipo se da de baja y el negocio cambia de nombre.
-			c.sql.exec(`UPDATE devices SET revoked_at_ms = 1700000000000 WHERE device_id = 'equipo-nuevo';`);
-			c.sql.exec(`UPDATE tenants SET display_name = 'Otro nombre' WHERE tenant_id = ?;`, tenantId);
+			await c.sql(`UPDATE devices SET revoked_at_ms = 1700000000000 WHERE device_id = 'equipo-nuevo';`);
+			await c.sql(`UPDATE tenants SET display_name = 'Otro nombre' WHERE tenant_id = ?;`, tenantId);
 
 			// La misma petición, con la misma hora y la misma firma.
 			const repetida = await enviar(peticion);
@@ -1075,14 +1047,14 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 			expect(repetida.body.fieldDek).toBe(primera.body.fieldDek);
 			expect(leerClaimsSinVerificar(repetida.body.token)).toMatchObject({ tenantId, deviceId: "equipo-nuevo" });
 			// …quita la baja del equipo y repone el nombre del negocio…
-			expect(fila(c, "equipo-nuevo")).toMatchObject({ tenant_id: tenantId, role: "tpv", revoked_at_ms: null });
+			expect(await fila(c, "equipo-nuevo")).toMatchObject({ tenant_id: tenantId, role: "tpv", revoked_at_ms: null });
 			expect(
-				c.sql.exec(`SELECT display_name FROM tenants WHERE tenant_id = ?;`, tenantId).toArray()[0].display_name,
+				(await c.sql(`SELECT display_name FROM tenants WHERE tenant_id = ?;`, tenantId))[0].display_name,
 			).toBe("Bar de Pruebas");
 			// …y vuelve a pasar por el aprovisionamiento de su base. No abre otro negocio ni mueve la
 			// caducidad.
 			expect(basesCreadas).toEqual([tenantId, tenantId]);
-			expect(contar(c, "tenants")).toBe(1);
+			expect(await contar(c, "tenants")).toBe(1);
 			expect((await getLicenseById(c.db, k.id))!.expires_at_ms).toBe(licencia!.expires_at_ms);
 		});
 	});
@@ -1134,8 +1106,8 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 			expect(primera.body.tiempoSumado).toBe(true);
 			const sumado = (await getLicenseById(c.db, victima.licenseId))!.expires_at_ms;
 
-			c.sql.exec(sentencia, victima.licenseId);
-			const negocios = contar(c, "tenants");
+			await c.sql(sentencia, victima.licenseId);
+			const negocios = await contar(c, "tenants");
 			basesCreadas = [];
 			correos = [];
 
@@ -1147,7 +1119,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 			expect(repetida.body.fieldDek).toBeUndefined();
 			expect(repetida.body.tenantId).toBeUndefined();
 			// Ni negocio ni base nuevos, y la clave sigue gastada donde se gastó.
-			expect(contar(c, "tenants")).toBe(negocios);
+			expect(await contar(c, "tenants")).toBe(negocios);
 			expect(basesCreadas).toEqual([]);
 			expect(await getLicenseById(c.db, renovacion.id)).toMatchObject({
 				status: "redeemed",
@@ -1183,7 +1155,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 			expect(repetida.status).toBe(200);
 			expect(repetida.body.cambioDeEquipo).toBe(false);
 			expect(repetida.body.fieldDek).toBe(dueno.dek);
-			expect(contar(c, "license_device_swaps")).toBe(1);
+			expect(await contar(c, "license_device_swaps")).toBe(1);
 			expect((await getLicenseById(c.db, dueno.licenseId))!.main_device_id).toBe(NUEVO);
 		});
 	});
@@ -1203,7 +1175,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 
 	async function sinEstrenar(c: Ctx, id: string) {
 		expect(await getLicenseById(c.db, id)).toMatchObject({ status: "issued", main_device_id: null });
-		expect(fila(c, "equipo-nuevo")).toBeUndefined();
+		expect(await fila(c, "equipo-nuevo")).toBeUndefined();
 		expect(basesCreadas).toEqual([]);
 	}
 

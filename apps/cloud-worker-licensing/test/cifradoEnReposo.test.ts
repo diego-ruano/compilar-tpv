@@ -13,9 +13,12 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { centralDePrueba } from "./helpers/central";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import type { Sentencia } from "../src/lib/sql";
+import { CentralNoDisponible } from "../src/server/central/cliente";
 import { cifrar, descifrar, versionDe } from "../src/server/crypto";
 import { getOrCreateTenantFieldDek, recifrarConLaActual } from "../src/server/licenseStore";
 import { comprobarSalud, olvidarSalud, TEXTO_CANARIO } from "../src/server/salud";
@@ -136,34 +139,43 @@ describe("RI-73 · el canario de /health", () => {
 
 	it("la primera vez lo crea, y con la misma clave sigue en verde", async () => {
 		await conBaseCentral("canario-ok", async ({ db }) => {
-			expect(await comprobarSalud(() => db, 1_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
+			expect(await comprobarSalud(db, 1_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
 			olvidarSalud();
-			expect(await comprobarSalud(() => db, 2_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
+			expect(await comprobarSalud(db, 2_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
 		});
 	});
 
 	it("con otra clave contesta que NO: el 27/09 entero, visto en minutos", async () => {
 		await conBaseCentral("canario-falla", async ({ db }) => {
-			await comprobarSalud(() => db, 1_000, K1);
+			await comprobarSalud(db, 1_000, K1);
 			olvidarSalud();
-			expect(await comprobarSalud(() => db, 2_000, OTRA)).toEqual({ ok: false, db: "ok", cifrado: "falla" });
+			expect(await comprobarSalud(db, 2_000, OTRA)).toEqual({ ok: false, db: "ok", cifrado: "falla" });
 		});
 	});
 
 	it("en plena rotación sigue en verde, y el canario se pasa a la actual", async () => {
 		await conBaseCentral("canario-rotacion", async ({ sql, db }) => {
-			await comprobarSalud(() => db, 1_000, K1);
+			await comprobarSalud(db, 1_000, K1);
 			olvidarSalud();
-			expect((await comprobarSalud(() => db, 2_000, ROTANDO)).cifrado).toBe("ok");
+			expect((await comprobarSalud(db, 2_000, ROTANDO)).cifrado).toBe("ok");
 			const valor = String(sql.exec(`SELECT valor FROM canario_cifrado;`).toArray()[0].valor);
 			expect(await descifrar(ROTANDO, valor)).toEqual({ texto: TEXTO_CANARIO, recifrado: null });
 		});
 	});
 
-	it("sin la tabla todavía, lo dice pero no tumba la sonda", async () => {
-		await conBaseCentral("canario-sin-tabla", async ({ sql, db }) => {
-			sql.exec(`DROP TABLE canario_cifrado;`);
-			expect(await comprobarSalud(() => db, 1_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
-		});
+	it.each([
+		["al leerlo", 2],
+		["al guardarlo la primera vez", 3],
+	])("si la central no contesta %s, es la base la que no responde, no la clave", async (_cuando, cortada) => {
+		const { db } = await centralDePrueba();
+		let llamadas = 0;
+		const conCorte = {
+			execute: async (sentencia: Sentencia) => {
+				if (++llamadas === cortada) throw new CentralNoDisponible("pasajera");
+				return await db.execute(sentencia);
+			},
+		};
+		expect(await comprobarSalud(conCorte, 1_000, K1)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
+		expect(llamadas).toBe(cortada);
 	});
 });

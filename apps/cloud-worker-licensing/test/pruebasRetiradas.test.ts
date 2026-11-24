@@ -6,29 +6,23 @@
 // Es una ruta que borra bases en producción, así que lo que más importa aquí es lo que NO toca: un
 // negocio con una licencia que no sea de pruebas, aunque tenga también una de pruebas, ni uno al
 // que se le haya canjeado una clave de verdad, también si el canje llega mientras se retira. Corre
-// contra el esquema real del control-plane sobre el SQLite de un Durable Object, como
-// `adminLicenciaReversible.test.ts`. Los objetos de los negocios y el bucket son de mentira: sólo
-// apuntan qué se borró. Lo que borra cada uno de verdad está en `retirarUnNegocio.test.ts`.
+// contra la base central de verdad (`helpers/central.ts`), como `adminLicenciaReversible.test.ts`; lo
+// que `getDb` le da a la ruta es su cliente, con un gancho para intercalar algo a mitad de la
+// retirada. Los objetos de los negocios y el bucket son de mentira: sólo apuntan qué se borró. Lo que
+// borra cada uno de verdad está en `retirarUnNegocio.test.ts`.
 
 import { describe, expect, it, vi } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe } from "./helpers/central";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { CORREO_DE_PRUEBAS, NEGOCIOS_POR_LLAMADA } from "../src/domains/admin/pruebas";
-import {
-	activateLicenseFirstTime,
-	getLicenseById,
-	issueLicense,
-	reactivateLicense,
-	sigueSiendoLaLicenciaDelEquipo,
-} from "../src/server/licenseStore";
+import { activateLicenseFirstTime, getLicenseById, issueLicense } from "../src/server/licenseStore";
 import type { LicenseOrigin } from "../src/shared";
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const TOKEN = "token-de-pruebas";
 
+/** Lo que `getDb` le da a la ruta: el cliente de la central del escenario, con sus ganchos. */
 let dbDePruebas: unknown = null;
 
 vi.mock("../src/server/db", async (importOriginal) => {
@@ -40,7 +34,7 @@ type Escenario = {
 	post: (ruta: string, cuerpo?: unknown) => Promise<Response>;
 	/** Emite una licencia y, si se da `tenantId`, la activa en ese negocio, que tendrá su base. */
 	negocio: (origen: LicenseOrigin, correo: string, tenantId?: string) => Promise<string>;
-	estadoDelNegocio: (tenantId: string) => string | null;
+	estadoDelNegocio: (tenantId: string) => Promise<string | null>;
 	tieneBase: (tenantId: string) => boolean;
 	estadoDeLicencia: (licenseId: string) => Promise<string>;
 	/** Las bases que se borraron, en orden. */
@@ -54,7 +48,7 @@ type Escenario = {
 	/** Las claves que hay en el bucket de imágenes. */
 	imagenes: Set<string>;
 	/** Canjea la clave `claveId` (sin activar) sobre la licencia `sobreLicenciaId`: le suma su tiempo. */
-	canjear: (claveId: string, sobreLicenciaId: string) => void;
+	canjear: (claveId: string, sobreLicenciaId: string) => Promise<void>;
 	/** Algo que pasa justo después de que la ruta liste los negocios que va a retirar. */
 	trasListar: (fn: () => Promise<void>) => void;
 	/** Algo que pasa justo después de que la ruta anule las licencias de pruebas. */
@@ -64,16 +58,17 @@ type Escenario = {
 	/** Algo que pasa cuando la ruta va a borrar la base de un negocio: lo último antes de lo que no se deshace. */
 	alBorrarLaBase: (fn: (tenantId: string) => Promise<void>) => void;
 	/**
-	 * Lo que pregunta el canje dentro de su transacción, antes de gastar una clave sobre esta licencia
+	 * Lo que pregunta el canje dentro de su operación, antes de gastar una clave sobre esta licencia
 	 * (`/v1/license/activate`): ¿sigue siendo la licencia viva de su Main?
 	 */
 	admiteUnCanje: (licenseId: string) => Promise<boolean>;
 };
 
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub("pruebas-retiradas", async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql);
+	{
+		const central = await centralDePrueba();
+		const db = central.db;
+		const sql = (texto: string, ...args: unknown[]) => filasDe(central, texto, ...args);
 		let alListar: (() => Promise<void>) | null = null;
 		let alAnular: (() => Promise<void>) | null = null;
 		dbDePruebas = {
@@ -94,10 +89,6 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				return r;
 			},
 		};
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "tenants", "admin_audit"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
 
 		const conBase = new Set<string>();
 		const borradas: string[] = [];
@@ -140,8 +131,6 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		const env = {
 			ADMIN_API_TOKEN: TOKEN,
 			LICENSE_STORE_KEY: STORE_KEY,
-			TURSO_DATABASE_URL: "libsql://central.turso.io",
-			TURSO_AUTH_TOKEN: "token-central",
 			TenantHub,
 			AgendaWeb,
 			IMAGES,
@@ -153,8 +142,8 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			agendas,
 			sinAgenda,
 			imagenes,
-			canjear: (claveId, sobreLicenciaId) => {
-				sql.exec(
+			canjear: async (claveId, sobreLicenciaId) => {
+				await sql(
 					`UPDATE licenses SET status = 'redeemed', redeemed_into_license_id = ? WHERE license_id = ?;`,
 					sobreLicenciaId,
 					claveId,
@@ -166,12 +155,25 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			trasAnular: (fn) => {
 				alAnular = fn;
 			},
-			desanular: (licenseId) => reactivateLicense(db, licenseId),
+			desanular: async (licenseId) => {
+				await db.operar("desrevocar", { licenseId, ahoraMs: Date.now() });
+			},
 			alBorrarLaBase: (fn) => {
 				alBorrar = fn;
 			},
-			// El equipo con el que `negocio` activa cada licencia.
-			admiteUnCanje: (licenseId) => sigueSiendoLaLicenciaDelEquipo(db, licenseId, `equipo-${licenseId}`),
+			// El canje de verdad (`canjearClave`), con el equipo con el que `negocio` activa cada licencia
+			// y una clave que no existe: si la licencia no lo admite contesta `sin_licencia`, y si lo
+			// admite no encuentra la clave que gastar (`usada`). En los dos casos no escribe nada.
+			admiteUnCanje: async (licenseId) => {
+				const canje = await db.operar("canjearClave", {
+					claveId: "clave-que-no-existe",
+					licenciaId: licenseId,
+					deviceId: `equipo-${licenseId}`,
+					meses: 12,
+					ahoraMs: Date.now(),
+				});
+				return canje.resultado !== "sin_licencia";
+			},
 			post: async (ruta, cuerpo) =>
 				await adminRoutes.fetch(
 					new Request(`https://api${ruta}`, {
@@ -189,7 +191,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 					customerEmail: correo,
 				});
 				if (tenantId) {
-					sql.exec(`INSERT OR IGNORE INTO tenants (tenant_id) VALUES (?);`, tenantId);
+					await sql(`INSERT OR IGNORE INTO tenants (tenant_id) VALUES (?);`, tenantId);
 					conBase.add(tenantId);
 					await activateLicenseFirstTime(db, {
 						licenseId: license.license_id,
@@ -200,12 +202,12 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				}
 				return license.license_id;
 			},
-			estadoDelNegocio: (tenantId) =>
-				sql.exec(`SELECT status FROM tenants WHERE tenant_id = ?;`, tenantId).toArray()[0]?.status ?? null,
+			estadoDelNegocio: async (tenantId) =>
+				(await sql(`SELECT status FROM tenants WHERE tenant_id = ?;`, tenantId))[0]?.status ?? null,
 			tieneBase: (tenantId) => conBase.has(tenantId),
 			estadoDeLicencia: async (licenseId) => (await getLicenseById(db, licenseId))!.status,
 		});
-	});
+	}
 }
 
 describe("admin · retirar los negocios de pruebas del E2E", () => {
@@ -222,7 +224,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 
 			expect(e.borradas.sort()).toEqual(["t-antigua", "t-tanda"]);
 			for (const t of ["t-tanda", "t-antigua"]) {
-				expect(e.estadoDelNegocio(t)).toBe("deleted");
+				expect(await e.estadoDelNegocio(t)).toBe("deleted");
 				expect(e.tieneBase(t)).toBe(false);
 			}
 			for (const id of [deTanda, antigua, sinActivar]) {
@@ -244,7 +246,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 
 			expect(e.borradas).toEqual([]);
 			for (const t of ["t-bar", "t-stripe", "t-mezcla"]) {
-				expect(e.estadoDelNegocio(t)).toBe("active");
+				expect(await e.estadoDelNegocio(t)).toBe("active");
 				expect(e.tieneBase(t)).toBe(true);
 			}
 			for (const id of [deVerdad, deStripe, mezclaDeVerdad, mezclaDePruebas]) {
@@ -259,19 +261,19 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 		await escenario(async (e) => {
 			const dePruebas = await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-con-canje");
 			const comprada = await e.negocio("stripe", "cliente@ejemplo.test");
-			e.canjear(comprada, dePruebas);
+			await e.canjear(comprada, dePruebas);
 			e.imagenes.add("t-con-canje/images/logo/logo.png");
 			// Y uno de pruebas al que se le canjeó otra clave de pruebas: ése sí se retira.
 			const otra = await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-canje-de-pruebas");
 			const claveDePruebas = await e.negocio("pruebas", CORREO_DE_PRUEBAS);
-			e.canjear(claveDePruebas, otra);
+			await e.canjear(claveDePruebas, otra);
 
 			const res = await e.post("/pruebas/retirar");
 			expect(await res.json()).toMatchObject({ negocios: 1, bases: 1, fallos: [] });
 
 			expect(e.borradas).toEqual(["t-canje-de-pruebas"]);
 			expect(e.agendas).toEqual(["t-canje-de-pruebas"]);
-			expect(e.estadoDelNegocio("t-con-canje")).toBe("active");
+			expect(await e.estadoDelNegocio("t-con-canje")).toBe("active");
 			expect(e.tieneBase("t-con-canje")).toBe(true);
 			expect([...e.imagenes]).toEqual(["t-con-canje/images/logo/logo.png"]);
 			expect(await e.estadoDeLicencia(dePruebas)).toBe("active");
@@ -293,7 +295,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 
 			expect(e.borradas).toEqual(["t-a"]);
 			expect(e.agendas).toEqual(["t-a"]);
-			expect(e.estadoDelNegocio("t-b")).toBe("active");
+			expect(await e.estadoDelNegocio("t-b")).toBe("active");
 			expect(e.tieneBase("t-b")).toBe(true);
 			expect([...e.imagenes]).toEqual(["t-b/images/productos/p.jpg"]);
 		});
@@ -309,7 +311,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(await res.json()).toMatchObject({ negocios: 0, bases: 0, licencias: 0, fallos: [] });
 
 			expect(e.borradas).toEqual([]);
-			expect(e.estadoDelNegocio("t-canje-a-tiempo")).toBe("active");
+			expect(await e.estadoDelNegocio("t-canje-a-tiempo")).toBe("active");
 			expect(e.tieneBase("t-canje-a-tiempo")).toBe(true);
 			expect(await e.estadoDeLicencia(dePruebas)).toBe("active");
 			expect(await e.admiteUnCanje(dePruebas)).toBe(true);
@@ -354,7 +356,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			const primero = await (await e.post("/pruebas/retirar")).json();
 			expect(primero).toMatchObject({ negocios: 1, bases: 1, licencias: 2, fallos: [] });
 			expect(e.borradas).toEqual(["t-otro"]);
-			expect(e.estadoDelNegocio("t-desanulado")).toBe("active");
+			expect(await e.estadoDelNegocio("t-desanulado")).toBe("active");
 			expect(e.tieneBase("t-desanulado")).toBe(true);
 			expect(e.imagenes.size).toBe(1);
 			expect(await e.estadoDeLicencia(licencia)).toBe("active");
@@ -362,7 +364,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			const segundo = await (await e.post("/pruebas/retirar")).json();
 			expect(segundo).toMatchObject({ negocios: 1, bases: 1, licencias: 1, fallos: [] });
 			expect(e.borradas).toEqual(["t-otro", "t-desanulado"]);
-			expect(e.estadoDelNegocio("t-desanulado")).toBe("deleted");
+			expect(await e.estadoDelNegocio("t-desanulado")).toBe("deleted");
 			expect(await e.estadoDeLicencia(licencia)).toBe("revoked");
 		});
 	});
@@ -398,14 +400,14 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			const primero = (await (await e.post("/pruebas/retirar")).json()) as any;
 			expect(primero).toMatchObject({ negocios: 0, bases: 1, imagenes: 0 });
 			expect(primero.fallos).toEqual([{ tenantId: "t-agenda", error: "la agenda no contesta" }]);
-			expect(e.estadoDelNegocio("t-agenda")).toBe("active");
+			expect(await e.estadoDelNegocio("t-agenda")).toBe("active");
 			expect(e.imagenes.size).toBe(1);
 
 			e.sinAgenda.delete("t-agenda");
 			const segundo = await (await e.post("/pruebas/retirar")).json();
 			expect(segundo).toMatchObject({ negocios: 1, imagenes: 1, fallos: [] });
 			expect(e.agendas).toEqual(["t-agenda"]);
-			expect(e.estadoDelNegocio("t-agenda")).toBe("deleted");
+			expect(await e.estadoDelNegocio("t-agenda")).toBe("deleted");
 			expect(e.imagenes.size).toBe(0);
 		});
 	});
@@ -421,14 +423,14 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(primero.fallos).toHaveLength(1);
 			expect(primero.fallos[0].tenantId).toBe("t-uno");
 			expect(e.tieneBase("t-uno")).toBe(true);
-			expect(e.estadoDelNegocio("t-uno")).toBe("active");
+			expect(await e.estadoDelNegocio("t-uno")).toBe("active");
 
 			e.noContestan.delete("t-uno");
 			e.borradas.length = 0;
 			const segundo = await (await e.post("/pruebas/retirar")).json();
 			expect(segundo).toMatchObject({ negocios: 1, bases: 1, fallos: [] });
 			expect(e.borradas).toEqual(["t-uno"]);
-			expect(e.estadoDelNegocio("t-uno")).toBe("deleted");
+			expect(await e.estadoDelNegocio("t-uno")).toBe("deleted");
 		});
 	});
 
@@ -437,7 +439,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-una-vez");
 
 			expect(await (await e.post("/pruebas/retirar")).json()).toMatchObject({ negocios: 1, bases: 1 });
-			expect(e.estadoDelNegocio("t-una-vez")).toBe("deleted");
+			expect(await e.estadoDelNegocio("t-una-vez")).toBe("deleted");
 
 			e.borradas.length = 0;
 			expect(await (await e.post("/pruebas/retirar")).json()).toMatchObject({

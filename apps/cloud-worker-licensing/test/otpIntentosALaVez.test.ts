@@ -8,8 +8,8 @@
 // el contador, se comparase y se anotase después, las peticiones que llegan a la vez leerían todas
 // antes de que escribiera ninguna y se compararían todas; la que acertase se llevaría la Main.
 //
-// En producción cada sentencia es una ida y vuelta a Turso, y entre la de una petición y la
-// siguiente caben las de las demás. El doble de los tests (`clienteSobre`) contesta al momento, así
+// En producción cada sentencia es una ida y vuelta a la base central, y entre la de una petición y
+// la siguiente caben las de las demás. El doble de los tests (`clienteSobre`) contesta al momento, así
 // que ese orden se reproduce con una barrera: cada petición se queda parada justo después de su
 // primera sentencia sobre la tabla del tope hasta que todas han hecho la suya.
 //
@@ -62,8 +62,6 @@ const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
 	LICENSE_STORE_KEY: STORE_KEY,
-	TURSO_DATABASE_URL: "libsql://no-se-usa",
-	TURSO_AUTH_TOKEN: "no-se-usa",
 	EMAIL_FROM_ADDRESS: "no-responder@ejemplo.test",
 };
 // AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.

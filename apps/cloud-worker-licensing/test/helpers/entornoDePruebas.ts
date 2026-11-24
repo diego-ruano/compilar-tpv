@@ -31,7 +31,6 @@ const SIN_CONFIGURAR = "";
  */
 export const ENTORNO_DE_PRUEBAS: Record<ClaveDeTexto, string> = {
 	// ── Lo que `wrangler.json` (`vars`) apunta a un servicio o a una cuenta de verdad ──
-	TURSO_DATABASE_URL: "libsql://base-central.invalid",
 	EMAIL_FROM_ADDRESS: "pedidos@correo.invalid",
 	EMAIL_RESERVAS_FROM_ADDRESS: "reservas@correo.invalid",
 	TURNSTILE_SITE_KEY: "clave-de-sitio-de-pruebas",
@@ -48,7 +47,6 @@ export const ENTORNO_DE_PRUEBAS: Record<ClaveDeTexto, string> = {
 
 	// ── Secretos que la suite necesita: deterministas y de pruebas ──
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-no-usar-en-produccion",
-	TURSO_AUTH_TOKEN: "token-de-pruebas-no-usar-en-produccion",
 
 	// ── Lo demás, sin configurar: el test que lo necesita lo pasa en su propio entorno ──
 	LICENSE_STORE_KEY: SIN_CONFIGURAR,

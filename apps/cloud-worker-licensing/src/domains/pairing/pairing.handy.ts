@@ -16,7 +16,6 @@ import type { z } from "zod";
 
 import { firmarSesion, handyTokenTtlSeconds } from "../../lib/sesion";
 import { exigirClaveSiEsDeOtroNegocio } from "../../server/licenseStore";
-import { rowsAffected } from "../../server/db";
 import { sha256HexStr } from "../../server/utils/crypto";
 import { bytesToB64 } from "../../server/utils/base64";
 import { avisarSolicitudALaMain } from "./pairing.avisos";
@@ -224,7 +223,7 @@ export async function reclamarCodigo(
 		args: [now, deviceId, devicePubKey, deviceName || null, now, pairCode, now, deviceId],
 	});
 
-	if (rowsAffected(claimRes) <= 0) {
+	if (claimRes.rowsAffected <= 0) {
 		// FABLE-D: un claim rechazado (código ya reclamado por otro dispositivo, o estado
 		// inválido) cuenta como intento. Antes solo se contaban los secretos inválidos, así
 		// que por la ruta de "solo código" —donde no hay secreto que fallar— el tope de 8
@@ -365,7 +364,7 @@ export async function entregarToken(
 		args: [now, deviceId, nonceB64, now],
 	});
 
-	if (rowsAffected(challengeUpdate) <= 0) return fallo(409, "challenge_used_or_expired");
+	if (challengeUpdate.rowsAffected <= 0) return fallo(409, "challenge_used_or_expired");
 
 	const pairUpdate = await db.execute({
 		sql: `
@@ -381,7 +380,7 @@ export async function entregarToken(
 		args: [now, pairCode, deviceId, now],
 	});
 
-	if (rowsAffected(pairUpdate) <= 0) return fallo(409, "pair_code_used_or_invalid_state");
+	if (pairUpdate.rowsAffected <= 0) return fallo(409, "pair_code_used_or_invalid_state");
 
 	// Ahora, y no al aprobar, es cuando el dispositivo existe de verdad: el código está gastado,
 	// la firma es la de la clave que la Main aprobó y el token sale en esta respuesta. Si ya
@@ -423,7 +422,7 @@ export async function entregarToken(
 		args: [deviceId, tenantId, now, now, pubB64Raw],
 	});
 
-	if (rowsAffected(alta) <= 0) return fallo(409, "device_key_mismatch");
+	if (alta.rowsAffected <= 0) return fallo(409, "device_key_mismatch");
 
 	// La lista de vinculados de la Main cambia en este momento, no al aprobar.
 	await avisarSolicitudALaMain(env, tenantId);
@@ -493,7 +492,7 @@ export async function soltarCodigo(
 		args: [ahoraMs, deviceId, nonceB64],
 	});
 
-	const liberado = rowsAffected(soltado) > 0;
+	const liberado = soltado.rowsAffected > 0;
 	if (liberado) await avisarSolicitudALaMain(env, String(pr.tenant_id || ""));
 
 	return ok({ liberado });

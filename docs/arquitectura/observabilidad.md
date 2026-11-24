@@ -447,9 +447,9 @@ salida del job que compila, y el que despliega lo exige antes de leer el artefac
 hashes y el Debug ID remoto sólo prueban que el artefacto es coherente consigo mismo, y otro job de
 la ejecución podría sustituirlo por uno con el Debug ID legítimo copiado. Después se comprueban los
 hashes y el Debug ID remoto. Wrangler recibe `no_bundle`, y ningún `build`, para ejecutar los mismos
-bytes que se subieron. `verify-worker-sentry.mjs` ejecuta ese artefacto en workerd local sin
-credenciales de Turso y exige que Sentry reciba el fallo con archivo, línea y contexto TypeScript.
-Las pruebas van a `sentry-verification` y fallan antes de abrir una conexión o escribir datos.
+bytes que se subieron. `verify-worker-sentry.mjs` ejecuta ese artefacto en workerd local, con la
+base central sin aprovisionar, y exige que Sentry reciba el fallo de `/health` con archivo, línea y
+contexto TypeScript. Las pruebas van a `sentry-verification` y fallan sin escribir datos.
 
 Los `catch` de correo, Stripe, aprovisionamiento, cron y sincronización notifican errores técnicos
 y conservan su respuesta o reintento. Se filtran rechazos HTTP tipados de entrada/autorización y

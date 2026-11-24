@@ -16,6 +16,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [SUBIDA-TECHO](#subida-techo--el-techo-total-de-la-subida-completa) | 🔵 | El techo de 60 millones de filas de la subida completa, sin medir con bares reales | Medir en producción |
+| [CENTRAL-PLAZO](#central-plazo--una-llamada-vencida-a-la-base-central-no-deja-hibernar-al-tenanthub) | 🔵 | Una llamada vencida a la base central no se cancela, y el TenantHub no hiberna mientras tanto | Sin decidir |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -242,6 +243,21 @@ El 60 es una estimación: un bar de mil comandas diarias escribe unos 70-80 mill
 años, así que uno con mucho movimiento, años de histórico y una base vacía llegaría al techo. Subirlo
 es también subir lo que puede escribir un cliente que abuse. Falta medir cuánto escribe un bar real
 al año (las filas de su base y las escritas por la subida) y ajustarlo con ese dato.
+
+### CENTRAL-PLAZO · Una llamada vencida a la base central no deja hibernar al TenantHub
+
+El `TenantHub` lee de la base central quién es la Main (`mainEnCentral`, con 5 s de plazo) y apunta
+el `last_seen` (`touchLastSeen`, con 10 s) por `clienteCentral(…, { plazoMs })`. Vencido el plazo, el
+TenantHub sigue (el turno del log, la respuesta a la Main), pero la llamada no se cancela: es un RPC
+al objeto `BaseCentral`, y Cloudflare no da forma de cortarlo. Mientras no termina es E/S pendiente,
+y un objeto con E/S pendiente no hiberna
+([ciclo de vida](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/));
+el `last_seen` vencido, además, entra cuando la central lo atiende.
+
+Sólo pasa si la central tarda más que el plazo, y la central no espera a nada de fuera mientras
+atiende: su SQL es síncrono. La alternativa es que esas dos llamadas vayan por `fetch` al objeto con
+`AbortSignal.timeout(plazo)`, a cambio de una segunda puerta a la central además del RPC; antes habría
+que comprobar que cortar así la petición libera de verdad al TenantHub.
 
 ---
 

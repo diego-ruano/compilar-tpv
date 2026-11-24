@@ -34,7 +34,7 @@
 
 import type { Base } from "../../lib/sql";
 
-import { exec, rowsAffected } from "../../server/db";
+import { exec } from "../../server/db";
 import { hubDe, type EntornoDelHub } from "../../lib/hub";
 
 /**
@@ -128,7 +128,7 @@ export async function retirarNegociosHuerfanos(
 				`UPDATE tenants AS t SET status = 'deleted', updated_at_ms = ?3 WHERE t.tenant_id = ?2 AND ${ES_HUERFANO};`,
 				[creadoAntesDe, tenantId, opciones.ahoraMs],
 			);
-			if (rowsAffected(marcado) > 0) retirada.retirados++;
+			if (marcado.rowsAffected > 0) retirada.retirados++;
 		} catch (e: any) {
 			retirada.fallos.push({ tenantId, error: String(e?.message || e) });
 		}

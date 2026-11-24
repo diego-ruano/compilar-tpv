@@ -29,7 +29,9 @@ export type CodigoDeLaCentral =
 	/** Una migración ya aplicada ha cambiado: el objeto no atiende hasta que se arregle. */
 	| "central_migracion_alterada"
 	/** Una migración no ha podido aplicarse: el objeto no atiende hasta que se arregle. */
-	| "central_migracion_fallida";
+	| "central_migracion_fallida"
+	/** La copia diaria no ha llegado a R2 (`baseCentral.copia.ts`): no ha subido nada. */
+	| "central_copia_fallida";
 
 export type FalloDeLaCentral = { ok: false; error: CodigoDeLaCentral; detalle?: string };
 

@@ -70,10 +70,6 @@ export type Purgado = {
 	retosDeEmparejamiento: number;
 };
 
-function borradas(r: any): number {
-	return Number(r?.rowsAffected ?? r?.rows_affected ?? 0);
-}
-
 /**
  * Borra lo caducado de cada tabla y devuelve cuánto se llevó de cada una.
  *
@@ -94,7 +90,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		const r = await exec(db, `DELETE FROM pair_claim_fallos WHERE ultimo_fallo_ms < ?1;`, [
 			ahoraMs - RETENCION_FALLOS_MS,
 		]);
-		purgado.fallosDeEmparejamiento = borradas(r);
+		purgado.fallosDeEmparejamiento = r.rowsAffected;
 	} catch (e: any) {
 		capturarError(e, "purge.pair_claim_failures");
 		console.error("[purga] pair_claim_fallos falló:", String(e?.message || e));
@@ -104,7 +100,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		const r = await exec(db, `DELETE FROM email_sends WHERE sent_at_ms < ?1;`, [
 			ahoraMs - RETENCION_ENVIOS_MS,
 		]);
-		purgado.trazasDeCorreo = borradas(r);
+		purgado.trazasDeCorreo = r.rowsAffected;
 	} catch (e: any) {
 		capturarError(e, "purge.email_audit");
 		console.error("[purga] email_sends falló:", String(e?.message || e));
@@ -116,7 +112,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		const r = await exec(db, `DELETE FROM license_otp_eventos WHERE at_ms < ?1;`, [
 			ahoraMs - OTP_VENTANA_MS,
 		]);
-		purgado.eventosDeCodigo = borradas(r);
+		purgado.eventosDeCodigo = r.rowsAffected;
 	} catch (e: any) {
 		capturarError(e, "purge.license_otp_events");
 		console.error("[purga] license_otp_eventos falló:", String(e?.message || e));
@@ -126,7 +122,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		const r = await exec(db, `DELETE FROM pair_requests WHERE expires_at_ms < ?1;`, [
 			ahoraMs - RETENCION_CODIGOS_MS,
 		]);
-		purgado.codigosDeEmparejamiento = borradas(r);
+		purgado.codigosDeEmparejamiento = r.rowsAffected;
 	} catch (e: any) {
 		capturarError(e, "purge.pair_requests");
 		console.error("[purga] pair_requests falló:", String(e?.message || e));
@@ -135,7 +131,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 	// Sin retención: un reto caducado no lo puede usar nadie, y lo que pesa lo elige quien reclama.
 	try {
 		const r = await exec(db, `DELETE FROM device_challenges WHERE expires_at_ms < ?1;`, [ahoraMs]);
-		purgado.retosDeEmparejamiento = borradas(r);
+		purgado.retosDeEmparejamiento = r.rowsAffected;
 	} catch (e: any) {
 		capturarError(e, "purge.device_challenges");
 		console.error("[purga] device_challenges falló:", String(e?.message || e));

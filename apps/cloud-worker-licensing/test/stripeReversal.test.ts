@@ -8,25 +8,17 @@
 // una renovación (solo se pierden los meses que esa compra añadió, no el año anterior que el
 // cliente pagó y usó).
 //
-// Los casos se ejecutan contra el esquema real del control-plane, sobre el SQLite del Durable
-// Object: las tablas salen del esquema de producción (`helpers/planoDeControl.ts`) y el SQL es el
-// mismo que corre en Turso. Lo que NO cubre: la verificación de la firma de Stripe y el enrutado HTTP, que viven en
-// el handler del webhook (y que dependen de qué eventos estén suscritos en el Dashboard).
+// Los casos se ejecutan contra la base central de verdad (`helpers/central.ts`): la compra la emite
+// `cumplir` y la renovación es el canje de una segunda clave, como en producción. Lo que NO cubre: la
+// verificación de la firma de Stripe y el enrutado HTTP, que viven en el handler del webhook (y que
+// dependen de qué eventos estén suscritos en el Dashboard).
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { revertir } from "../src/domains/stripe/stripe.routes";
-import {
-	activateLicenseFirstTime,
-	extendLicense,
-	getLicenseById,
-	issueLicense,
-	recordLicensePayment,
-	type LicenseRow,
-} from "../src/server/licenseStore";
+import { centralDePrueba, conFalloEnLasOperaciones, type CentralDePrueba } from "./helpers/central";
+import { cumplir, revertir } from "../src/domains/stripe/stripe.routes";
+import type { ClienteCentral } from "../src/server/central/cliente";
+import { activateLicenseFirstTime, getLicenseById, type LicenseRow } from "../src/server/licenseStore";
 
 /** Clave AES de pruebas (32 bytes) para el cifrado de la clave de licencia. */
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -34,6 +26,27 @@ const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const PI_ALTA = "pi_alta";
 const PI_RENOVACION = "pi_renovacion";
 const CUSTOMER = "cus_de_pruebas";
+
+/** Sin `EMAIL_FROM_ADDRESS` el correo no sale: el cobro sigue igual. */
+const ENV = { LICENSE_STORE_KEY: STORE_KEY } as any;
+
+/** Una sesión de checkout pagada de una licencia anual, cobrada con `paymentIntent`. */
+const sesion = (id: string, paymentIntent: string) => ({
+	id,
+	object: "checkout.session",
+	payment_status: "paid",
+	customer: CUSTOMER,
+	payment_intent: paymentIntent,
+	customer_details: { email: "bar@ejemplo.test", name: "Bar de pruebas" },
+	line_items: { data: [{ price: { id: "price_anual", metadata: { term_months: "12" } } }] },
+});
+
+/** Compra una licencia anual y devuelve su id. */
+async function comprar(db: ClienteCentral, id: string, paymentIntent: string): Promise<string> {
+	const r = await cumplir(ENV, db, sesion(id, paymentIntent));
+	if (r.accion !== "emitida") throw new Error(`compra inesperada: ${r.accion}`);
+	return r.license_ids[0];
+}
 
 const cargoDevuelto = (paymentIntent: string, total = 12000, devuelto = 12000) => ({
 	type: "charge.refunded",
@@ -66,70 +79,49 @@ const disputa = (paymentIntent: string, tipo: "created" | "closed", status = "ne
 type Escenario = {
 	/** Licencia recién comprada y activada, con su cobro de alta registrado. */
 	licenciaActivada: () => Promise<LicenseRow>;
-	/** Le añade una renovación de 12 meses (cobro aparte). */
+	/** Le añade una renovación de 12 meses: otra compra, canjeada sobre ella (su cobro pasa a renovación). */
 	renovar: (licenseId: string) => Promise<number>;
 	leer: (licenseId: string) => Promise<LicenseRow>;
-	db: any;
+	central: CentralDePrueba;
+	db: ClienteCentral;
 };
 
-/**
- * Todos los escenarios comparten un mismo Durable Object y se limpian las filas entre casos.
- *
- * Las tablas se crean una vez, a partir del esquema de producción (`helpers/planoDeControl.ts`).
- */
+/** Cada escenario, con una base central nueva. */
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub("lic07", async (hub: any) => {
-		const db = clienteSobre(hub.state.storage.sql, hub.state.storage);
-		prepararPlanoDeControl(hub.state.storage.sql);
-		for (const tabla of ["licenses", "license_payments", "admin_audit"]) {
-			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
-		}
+	const central = await centralDePrueba();
+	const db = central.db;
 
-		const e: Escenario = {
-			db,
-			async licenciaActivada() {
-				const { license } = await issueLicense(db, {
-					claves: STORE_KEY,
-					termMonths: 12,
-					origin: "stripe",
-					customerEmail: "bar@ejemplo.test",
-					stripeCustomerId: CUSTOMER,
-					stripeCheckoutSessionId: "cs_alta",
-					stripePaymentIntentId: PI_ALTA,
-				});
-				await recordLicensePayment(db, {
-					licenseId: license.license_id,
-					kind: "issue",
-					termMonths: 12,
-					sessionId: "cs_alta",
-					paymentIntentId: PI_ALTA,
-				});
-				await activateLicenseFirstTime(db, {
-					licenseId: license.license_id,
-					tenantId: "tenant-1",
-					deviceId: "device-main",
-					termMonths: 12,
-				});
-				return (await getLicenseById(db, license.license_id))!;
-			},
-			async renovar(licenseId: string) {
-				const expiresAt = await extendLicense(db, licenseId, 12);
-				await recordLicensePayment(db, {
-					licenseId,
-					kind: "renewal",
-					termMonths: 12,
-					sessionId: "cs_renovacion",
-					paymentIntentId: PI_RENOVACION,
-				});
-				return expiresAt;
-			},
-			async leer(licenseId: string) {
-				return (await getLicenseById(db, licenseId))!;
-			},
-		};
+	const e: Escenario = {
+		central,
+		db,
+		async licenciaActivada() {
+			const licenseId = await comprar(db, "cs_alta", PI_ALTA);
+			await activateLicenseFirstTime(db, {
+				licenseId,
+				tenantId: "tenant-1",
+				deviceId: "device-main",
+				termMonths: 12,
+			});
+			return (await getLicenseById(db, licenseId))!;
+		},
+		async renovar(licenseId: string) {
+			const clave = await comprar(db, "cs_renovacion", PI_RENOVACION);
+			const canje = await db.operar("canjearClave", {
+				claveId: clave,
+				licenciaId: licenseId,
+				deviceId: "device-main",
+				meses: 12,
+				ahoraMs: Date.now(),
+			});
+			if (canje.resultado !== "sumado") throw new Error(`canje inesperado: ${canje.resultado}`);
+			return canje.expiresAtMs;
+		},
+		async leer(licenseId: string) {
+			return (await getLicenseById(db, licenseId))!;
+		},
+	};
 
-		return fn(e);
-	});
+	return fn(e);
 }
 
 describe("LIC-07 · reembolsos", () => {
@@ -264,7 +256,7 @@ describe("REV-01 · un fallo a mitad de una reversión no la aplica dos veces", 
 			const antes = lic.expires_at_ms!;
 			const conRenovacion = await e.renovar(lic.license_id);
 
-			const conFallo = conFalloSimulado(e.db, /UPDATE license_payments/);
+			const conFallo = conFalloEnLasOperaciones(e.central, /UPDATE license_payments/).db;
 			const error = await revertir(conFallo, cargoDevuelto(PI_RENOVACION)).catch((err) => err);
 			const trasFallo = (await e.leer(lic.license_id)).expires_at_ms;
 
@@ -272,7 +264,7 @@ describe("REV-01 · un fallo a mitad de una reversión no la aplica dos veces", 
 			return { antes, conRenovacion, error, trasFallo, final: (await e.leer(lic.license_id)).expires_at_ms };
 		});
 
-		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(String(r.error?.message)).toMatch(/fallo_simulado/);
 		expect(r.trasFallo).toBe(r.conRenovacion);
 		expect(r.final).toBe(r.antes);
 	});
@@ -284,7 +276,7 @@ describe("REV-01 · un fallo a mitad de una reversión no la aplica dos veces", 
 			await revertir(e.db, disputa(PI_RENOVACION, "created"));
 			const recortada = (await e.leer(lic.license_id)).expires_at_ms;
 
-			const conFallo = conFalloSimulado(e.db, /UPDATE license_payments/);
+			const conFallo = conFalloEnLasOperaciones(e.central, /UPDATE license_payments/).db;
 			const error = await revertir(conFallo, disputa(PI_RENOVACION, "closed", "won")).catch((err) => err);
 			const trasFallo = (await e.leer(lic.license_id)).expires_at_ms;
 
@@ -292,7 +284,7 @@ describe("REV-01 · un fallo a mitad de una reversión no la aplica dos veces", 
 			return { conRenovacion, recortada, error, trasFallo, final: (await e.leer(lic.license_id)).expires_at_ms };
 		});
 
-		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(String(r.error?.message)).toMatch(/fallo_simulado/);
 		expect(r.trasFallo).toBe(r.recortada);
 		expect(r.final).toBe(r.conRenovacion);
 	});

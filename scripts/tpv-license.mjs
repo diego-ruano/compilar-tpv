@@ -129,7 +129,15 @@ async function api(method, path, body) {
 
 	if (!r.ok || data.ok === false) {
 		if (r.status === 401) fail("Token rechazado. ¿ADMIN_API_TOKEN es el correcto?");
-		if (r.status === 503) fail("El worker no tiene ADMIN_API_TOKEN configurado (wrangler secret put).");
+		if (data.error === "admin_disabled") fail("El worker no tiene ADMIN_API_TOKEN configurado (wrangler secret put).");
+		// La nube no ha podido atender (la base central saturada, sin aprovisionar…): la respuesta no
+		// dice si el cambio llegó a entrar, y repetir un extend o un shorten lo aplicaría dos veces.
+		if (data.code === "external" && r.status === 503) {
+			fail(
+				`La nube no ha podido atender ahora (${data.error}). Si era un cambio, no se sabe si ha entrado: ` +
+					"compruébalo con license:list antes de repetirlo.",
+			);
+		}
 		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}`);
 	}
 

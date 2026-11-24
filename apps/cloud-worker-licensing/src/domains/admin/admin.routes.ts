@@ -29,23 +29,17 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { avisarCambioDeLicencia } from "../../lib/hub";
-import { enTransaccion, getDb } from "../../server/db";
+import { getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
-	atribuirRevocacionAMano,
 	auditAdmin,
-	extendLicense,
 	guardarClaveRecifrada,
 	getLicenseById,
 	issueLicense,
 	listLicenses,
 	markKeyEmailSent,
 	negocioActivadoDe,
-	quitarMarcasDeDisputa,
 	recifrarConLaActual,
-	reactivateLicense,
-	revokeLicense,
-	shortenLicense,
 } from "../../server/licenseStore";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
@@ -88,7 +82,7 @@ const issueSchema = z.object({
 
 adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	const miss = assertEnv(env, ["LICENSE_STORE_KEY"]);
 	if (miss) return c.json({ ok: false, error: miss }, 500);
 
 	const { termMonths, email, name, sendKey, pruebas } = c.req.valid("json");
@@ -139,7 +133,7 @@ adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
  */
 adminRoutes.post("/licenses/:id/resend-key", async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	const miss = assertEnv(env, ["LICENSE_STORE_KEY"]);
 	if (miss) return c.json({ ok: false, error: miss }, 500);
 
 	const db = getDb(env);
@@ -185,7 +179,7 @@ const TECHO_RECIFRADO = 200;
  */
 adminRoutes.post("/store-key/recifrar", async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	const miss = assertEnv(env, ["LICENSE_STORE_KEY"]);
 	if (miss) return c.json({ ok: false, error: miss }, 500);
 
 	const db = getDb(env);
@@ -234,11 +228,9 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
 	// AUD-08: la revocación es del operador aunque una disputa abierta ya hubiera revocado el alta.
-	// Su cobro deja de figurar como revocado por la disputa, y ganarla ya no la resucita.
-	await enTransaccion(db, async (tx) => {
-		await revokeLicense(tx, licenseId);
-		await atribuirRevocacionAMano(tx, licenseId);
-	});
+	// Su cobro deja de figurar como revocado por la disputa, y ganarla ya no la resucita. Las dos
+	// cosas, juntas, en la central (`revocarAMano`).
+	await db.operar("revocarAMano", { licenseId, ahoraMs: Date.now() });
 	await auditAdmin(db, "revoke", licenseId, { keyShort: lic.key_short });
 
 	// Y se le corta el WebSocket a la Main, que es lo que convierte "anulada" en "bloqueada" ahora
@@ -264,15 +256,15 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 /**
  * Deshace una revocación.
  *
- * La operación ya existía (`reactivateLicense`, LIC-07) pero sólo la alcanzaba el cierre de una
- * disputa ganada en el webhook de Stripe. Aquí se expone porque revocar a mano es justo donde se
- * mete la pata —una tecla en el `licenseId` y le cortas el TPV a quien no debías—, y hasta ahora
- * la única salida era emitir otra licencia y hacer pasar al cliente por el cambio de dispositivo.
+ * Es lo mismo que hace el cierre de una disputa ganada en el webhook de Stripe (`reactivateLicense`,
+ * LIC-07), expuesto porque revocar a mano es justo donde se mete la pata —una tecla en el
+ * `licenseId` y le cortas el TPV a quien no debías—: sin esto, la única salida sería emitir otra
+ * licencia y hacer pasar al cliente por el cambio de dispositivo.
  *
  * A qué estado vuelve lo decide `reactivateLicense`: `issued` si nunca se activó, `active` si sí.
  * Una caducidad de por medio la resuelve el gate por `expires_at_ms`, aquí no se toca.
  *
- * AUD-45: le quita además al alta la marca de una disputa (`quitarMarcasDeDisputa`), para que un
+ * AUD-45: le quita además al alta la marca de una disputa (`desrevocar`, en la central), para que un
  * reembolso total posterior la vuelva a revocar. Las renovaciones conservan la suya.
  */
 adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
@@ -287,10 +279,7 @@ adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
 
 	// AUD-45: con la marca de disputa del alta, un reembolso total posterior ya no la revocaría
 	// (`already_reversed`). Es la reparación de una licencia que revocó una consulta del banco.
-	await enTransaccion(db, async (tx) => {
-		await reactivateLicense(tx, licenseId);
-		await quitarMarcasDeDisputa(tx, licenseId);
-	});
+	await db.operar("desrevocar", { licenseId, ahoraMs: Date.now() });
 	// La acción se registra como `reactivate`: es la misma operación que cierra una disputa ganada
 	// en Stripe, y tener dos nombres para un mismo hecho parte la auditoría en dos.
 	await auditAdmin(db, "reactivate", licenseId, { keyShort: lic.key_short, via: "admin" });
@@ -313,7 +302,9 @@ adminRoutes.post("/licenses/:id/extend", cuerpo(extendSchema), async (c) => {
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	const expiresAtMs = await extendLicense(db, licenseId, months);
+	// Leer la caducidad y escribir la nueva van juntos (`extenderAMano`): dos a la vez no pierden
+	// ninguno de los dos cambios.
+	const expiresAtMs = await db.operar("extenderAMano", { licenseId, meses: months, ahoraMs: Date.now() });
 	await auditAdmin(db, "extend", licenseId, { months, expiresAtMs });
 
 	return c.json({
@@ -327,10 +318,9 @@ adminRoutes.post("/licenses/:id/extend", cuerpo(extendSchema), async (c) => {
  * Resta meses a la caducidad. Es el inverso de `extend`, y puede dejar la fecha en el pasado — que
  * es exactamente "caducada", tal y como lo interpreta el gate.
  *
- * Como `unrevoke`, la operación (`shortenLicense`, LIC-07) ya existía para el reembolso de una
- * renovación en Stripe. Se expone por dos motivos: corregir a mano un `extend` de más, y poder
- * comprobar de verdad qué hace la aplicación cuando la licencia caduca — hasta ahora eso no se
- * podía ensayar sin esperar meses.
+ * Como `unrevoke`, es lo que hace el reembolso de una renovación en Stripe (`shortenLicense`,
+ * LIC-07). Se expone por dos motivos: corregir a mano un `extend` de más, y poder comprobar de
+ * verdad qué hace la aplicación cuando la licencia caduca, sin esperar meses.
  *
  * ⚠️ Deja al cliente sin servicio pasada la gracia. No hay confirmación aquí: la protección es que
  * el token de administración no lo tiene nadie más.
@@ -347,7 +337,7 @@ adminRoutes.post("/licenses/:id/shorten", cuerpo(shortenSchema), async (c) => {
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	const expiresAtMs = await shortenLicense(db, licenseId, months);
+	const expiresAtMs = await db.operar("acortarAMano", { licenseId, meses: months, ahoraMs: Date.now() });
 	if (expiresAtMs === null) {
 		// Sin `expires_at_ms` no hay nada que acortar: la licencia no se ha activado todavía, así
 		// que su reloj ni siquiera ha arrancado.

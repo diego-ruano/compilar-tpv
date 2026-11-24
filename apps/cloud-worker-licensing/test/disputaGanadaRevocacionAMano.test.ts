@@ -12,40 +12,23 @@
 // Recorre las rutas de verdad: la revocación por `POST /v1/admin/licenses/:id/revoke` (con su
 // token) y los eventos por `POST /v1/stripe/webhook`, firmados con HMAC como los firma Stripe. La
 // compra la cumple `cumplir` con la sesión ya leída, igual que el webhook de pago tras pedírsela a
-// Stripe, así que no se llama a su API. La base es el esquema de producción del control-plane
-// (`helpers/planoDeControl.ts`) sobre el SQLite del Durable Object; `getDb` se sustituye para que
-// las dos rutas la usen. El `TenantHub` al que la revocación avisa es un doble, y sin
-// `EMAIL_FROM_ADDRESS` el correo de las claves no sale.
+// Stripe, así que no se llama a su API. La base es la central de verdad (`helpers/central.ts`), a la
+// que las dos rutas llegan por `getDb`, como en producción. El `TenantHub` al que la revocación avisa
+// es un doble, y sin `EMAIL_FROM_ADDRESS` el correo de las claves no sale.
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
-import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, conFalloEnLasOperaciones, filasDe } from "./helpers/central";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { cumplir, stripeRoutes } from "../src/domains/stripe/stripe.routes";
 import { computeLicenseState } from "../src/domains/licensing/licensing.helpers";
-import {
-	activateLicenseFirstTime,
-	canjearLicencia,
-	extendLicense,
-	getLicenseById,
-	issueLicense,
-	recordLicensePayment,
-	type LicenseRow,
-} from "../src/server/licenseStore";
+import type { ClienteCentral } from "../src/server/central/cliente";
+import { activateLicenseFirstTime, getLicenseById, issueLicense, type LicenseRow } from "../src/server/licenseStore";
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ADMIN_TOKEN = "token-admin-de-pruebas-aud08";
 const WHSEC = "whsec_de_pruebas_aud08";
 const CUSTOMER = "cus_aud08";
-
-/** `getDb` construye un cliente de Turso: se sustituye por el SQLite del DO (como en adminLicenciaReversible). */
-let dbDePruebas: unknown = null;
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 /** El TenantHub al que la revocación le pide cerrar el socket de la Main: aquí no hace nada. */
 const hubFalso = {
@@ -53,15 +36,13 @@ const hubFalso = {
 	get: () => ({ revocarDispositivo: async () => {} }),
 };
 
-/** El `Env` que ven las rutas. Los de Turso sólo tienen que existir (`assertEnv`); no se usan. */
+/** El `Env` que ven las rutas, sin la central: cada escenario le pone la suya. */
 const ENV = {
 	ADMIN_API_TOKEN: ADMIN_TOKEN,
 	LICENSE_STORE_KEY: STORE_KEY,
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-aud08",
 	STRIPE_SECRET_KEY: "sk_test_ficticia",
 	STRIPE_WEBHOOK_SECRET: WHSEC,
-	TURSO_DATABASE_URL: "libsql://ficticia.invalid",
-	TURSO_AUTH_TOKEN: "ficticio",
 	TenantHub: hubFalso,
 } as any;
 
@@ -134,7 +115,9 @@ const sesion = (id: string, unidades: number) => ({
 });
 
 type Escenario = {
-	db: any;
+	db: ClienteCentral;
+	/** El `Env` con el que llegan las rutas a la central del escenario. */
+	env: any;
 	/** Compra por Stripe con `cumplir`: una licencia (y un cobro) por unidad. Devuelve sus ids. */
 	comprar: (sesionId: string, unidades?: number) => Promise<string[]>;
 	activar: (licenseId: string, deviceId: string) => Promise<void>;
@@ -145,13 +128,19 @@ type Escenario = {
 	/** `POST /v1/stripe/webhook` firmado. Devuelve el estado HTTP y el JSON. */
 	webhook: (evento: unknown) => Promise<{ status: number; body: any }>;
 	leer: (licenseId: string) => Promise<LicenseRow>;
-	cobros: (licenseId: string) => any[];
-	auditoria: (licenseId: string) => { action: string; detail: any }[];
-	/** Cambia la base que ven las rutas (para simular un fallo a mitad). */
-	usarBase: (db: unknown) => void;
+	cobros: (licenseId: string) => Promise<any[]>;
+	auditoria: (licenseId: string) => Promise<{ action: string; detail: any }[]>;
+	/**
+	 * A partir de aquí, las operaciones que piden las rutas fallan tras la primera sentencia que case
+	 * con `patron` (para simular un fallo a mitad); con `null`, ya no.
+	 */
+	conFallo: (patron: RegExp | null) => void;
 };
 
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
+	const central = await centralDePrueba();
+	const db = central.db;
+	let env = { ...ENV, ...central.entorno };
 	const admin = async (ruta: string) =>
 		await adminRoutes.fetch(
 			new Request(`https://api${ruta}`, {
@@ -159,20 +148,15 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
 				body: "{}",
 			}),
-			ENV,
+			env,
 		);
 
-	return enElHub("aud08", async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql, hub.state.storage);
-		dbDePruebas = db;
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "license_payments", "admin_audit", "webhook_events"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
-
+	{
 		const e: Escenario = {
 			db,
+			get env() {
+				return env;
+			},
 			async comprar(sesionId, unidades = 1) {
 				const r = await cumplir(ENV, db, sesion(sesionId, unidades));
 				if (r.accion !== "emitida") throw new Error(`compra inesperada: ${r.accion}`);
@@ -201,7 +185,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 						headers: { "stripe-signature": await firmar(raw), "content-type": "application/json" },
 						body: raw,
 					}),
-					ENV,
+					env,
 				);
 				return { status: res.status, body: await res.json() };
 			},
@@ -209,30 +193,28 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				return (await getLicenseById(db, licenseId))!;
 			},
 			cobros(licenseId) {
-				return sql
-					.exec(
-						`SELECT kind, unidad, reversed_reason, reversed_at_ms FROM license_payments
-						 WHERE license_id = ? ORDER BY unidad;`,
-						licenseId,
-					)
-					.toArray();
+				return filasDe(
+					central,
+					`SELECT kind, unidad, reversed_reason, reversed_at_ms FROM license_payments
+					 WHERE license_id = ? ORDER BY unidad;`,
+					licenseId,
+				);
 			},
-			auditoria(licenseId) {
-				return sql
-					.exec(
-						`SELECT action, detail FROM admin_audit WHERE license_id = ? ORDER BY at_ms, rowid;`,
-						licenseId,
-					)
-					.toArray()
-					.map((f: any) => ({ action: String(f.action), detail: JSON.parse(String(f.detail)) }));
+			async auditoria(licenseId) {
+				const filas = await filasDe(
+					central,
+					`SELECT action, detail FROM admin_audit WHERE license_id = ? ORDER BY at_ms, rowid;`,
+					licenseId,
+				);
+				return filas.map((f) => ({ action: String(f.action), detail: JSON.parse(String(f.detail)) }));
 			},
-			usarBase(otra) {
-				dbDePruebas = otra;
+			conFallo(patron) {
+				env = { ...ENV, ...(patron ? conFalloEnLasOperaciones(central, patron) : central).entorno };
 			},
 		};
 
 		return fn(e);
-	});
+	}
 }
 
 /** Lo que decide si el TPV trabaja: el estado de la fila y lo que firma `/status`. */
@@ -254,7 +236,7 @@ async function revocadaAntes(e: Escenario) {
 	const revocar = await e.revocarAMano(lic);
 
 	const abrir = await e.webhook(disputa("pi_cs_uno", "created"));
-	const cobroTrasAbrir = e.cobros(lic)[0];
+	const cobroTrasAbrir = (await e.cobros(lic))[0];
 	const ganar = await e.webhook(disputa("pi_cs_uno", "closed", "won"));
 
 	return {
@@ -263,9 +245,9 @@ async function revocadaAntes(e: Escenario) {
 		abrir,
 		cobroTrasAbrir,
 		ganar,
-		cobroTrasGanar: e.cobros(lic)[0],
+		cobroTrasGanar: (await e.cobros(lic))[0],
 		final: estado(await e.leer(lic), "device-main"),
-		auditoria: e.auditoria(lic),
+		auditoria: await e.auditoria(lic),
 	};
 }
 
@@ -274,9 +256,9 @@ async function revocadaDurante(e: Escenario) {
 	const [lic] = await e.comprar("cs_dos");
 	await e.activar(lic, "device-main");
 	const abrir = await e.webhook(disputa("pi_cs_dos", "created"));
-	const cobroTrasAbrir = e.cobros(lic)[0];
+	const cobroTrasAbrir = (await e.cobros(lic))[0];
 	const revocar = await e.revocarAMano(lic);
-	const cobroTrasRevocar = e.cobros(lic)[0];
+	const cobroTrasRevocar = (await e.cobros(lic))[0];
 	const ganar = await e.webhook(disputa("pi_cs_dos", "closed", "won"));
 	return {
 		abrir,
@@ -284,7 +266,7 @@ async function revocadaDurante(e: Escenario) {
 		revocar,
 		cobroTrasRevocar,
 		ganar,
-		cobroTrasGanar: e.cobros(lic)[0],
+		cobroTrasGanar: (await e.cobros(lic))[0],
 		final: estado(await e.leer(lic), "device-main"),
 	};
 }
@@ -306,7 +288,13 @@ async function reembolsoParcialYDisputa(e: Escenario) {
 
 	// ¿Se puede gastar la clave reembolsada? El canje (REV-13) la exige `issued`, sin Main y viva.
 	await e.activar(primera, "device-bar");
-	const canjeada = await canjearLicencia(e.db, segunda, primera);
+	const canje = await e.db.operar("canjearClave", {
+		claveId: segunda,
+		licenciaId: primera,
+		deviceId: "device-bar",
+		meses: 12,
+		ahoraMs: Date.now(),
+	});
 
 	return {
 		parcial,
@@ -315,7 +303,7 @@ async function reembolsoParcialYDisputa(e: Escenario) {
 		ganar,
 		primera: estado(primeraFinal, ""),
 		segunda: estado(segundaFinal, ""),
-		segundaCanjeable: canjeada,
+		segundaCanjeable: canje.resultado === "sumado",
 	};
 }
 
@@ -347,24 +335,27 @@ async function viva(e: Escenario) {
 	const abrir = await e.webhook(disputa("pi_cs_viva", "created"));
 	const tras = estado(await e.leer(lic), "device-main");
 	const ganar = await e.webhook(disputa("pi_cs_viva", "closed", "won"));
-	return { abrir, tras, ganar, cobro: e.cobros(lic)[0], final: estado(await e.leer(lic), "device-main") };
+	return { abrir, tras, ganar, cobro: (await e.cobros(lic))[0], final: estado(await e.leer(lic), "device-main") };
 }
 
 /** La disputa de una RENOVACIÓN de una licencia revocada a mano sólo mueve meses. */
 async function renovacionDisputada(e: Escenario) {
 	const [lic] = await e.comprar("cs_base");
 	await e.activar(lic, "device-main");
-	const conRenovacion = await extendLicense(e.db, lic, 12);
-	await recordLicensePayment(e.db, {
-		licenseId: lic,
-		kind: "renewal",
-		termMonths: 12,
-		sessionId: "cs_renovacion",
-		paymentIntentId: "pi_renovacion",
+	// La renovación: otra compra, canjeada sobre ella. Su cobro pasa a la licencia como renovación.
+	const [renovacion] = await e.comprar("cs_renovacion");
+	const canje = await e.db.operar("canjearClave", {
+		claveId: renovacion,
+		licenciaId: lic,
+		deviceId: "device-main",
+		meses: 12,
+		ahoraMs: Date.now(),
 	});
+	if (canje.resultado !== "sumado") throw new Error(`canje inesperado: ${canje.resultado}`);
+	const conRenovacion = canje.expiresAtMs;
 	await e.revocarAMano(lic);
-	await e.webhook(disputa("pi_renovacion", "created"));
-	const ganar = await e.webhook(disputa("pi_renovacion", "closed", "won"));
+	await e.webhook(disputa("pi_cs_renovacion", "created"));
+	const ganar = await e.webhook(disputa("pi_cs_renovacion", "closed", "won"));
 	const l = await e.leer(lic);
 	return { ganar, conRenovacion, expira: l.expires_at_ms, final: estado(l, "device-main") };
 }
@@ -447,11 +438,11 @@ describe("AUD-08 · cómo queda el cobro", () => {
 			await e.desrevocarAMano(lic);
 
 			// Revocar escribe la licencia y luego el cobro: falla lo segundo.
-			e.usarBase(conFalloSimulado(e.db, /UPDATE license_payments/));
+			e.conFallo(/UPDATE license_payments/);
 			const revocar = await e.revocarAMano(lic);
-			e.usarBase(e.db);
+			e.conFallo(null);
 
-			return { revocar, cobro: e.cobros(lic)[0], final: estado(await e.leer(lic), "device-main") };
+			return { revocar, cobro: (await e.cobros(lic))[0], final: estado(await e.leer(lic), "device-main") };
 		});
 		expect(r.revocar).toBe(500);
 		// Sin marca: se la quitó desrevocar (AUD-45), y la revocación fallida no le ha puesto ninguna.
@@ -524,9 +515,9 @@ describe("AUD-08 · lo que la disputa sí revirtió vuelve (LIC-07)", () => {
 					headers: { "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=${"0".repeat(64)}` },
 					body: raw,
 				}),
-				ENV,
+				e.env,
 			);
-			return { status: res.status, cobro: e.cobros(lic)[0], final: estado(await e.leer(lic), "device-main") };
+			return { status: res.status, cobro: (await e.cobros(lic))[0], final: estado(await e.leer(lic), "device-main") };
 		});
 		expect(r.status).toBe(400);
 		expect(r.cobro.reversed_reason).toBeNull();

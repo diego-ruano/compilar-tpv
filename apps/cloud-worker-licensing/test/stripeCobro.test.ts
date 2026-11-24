@@ -8,23 +8,26 @@
 // cobro iban sueltas, y un reintento tras un fallo a mitad sumaba los meses dos veces. Aquí se
 // prueban las dos mitades: que el reintento se procesa y que lo hace exactamente una vez.
 //
-// Corre contra el esquema real del control-plane (`helpers/planoDeControl.ts`), índice único de
-// `license_payments` incluido. Lo que NO cubre: la firma de Stripe ni la lectura de la sesión por
-// HTTP, que viven en el handler; `cumplir` recibe la sesión ya leída.
+// Corre contra la base central de verdad (`helpers/central.ts`), índice único de `license_payments`
+// incluido. Lo que NO cubre: la firma de Stripe ni la lectura de la sesión por HTTP, que viven en el
+// handler; `cumplir` recibe la sesión ya leída.
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import {
+	centralDePrueba,
+	conFalloEnLasOperaciones,
+	filasDe,
+	interceptar,
+	type CentralDePrueba,
+} from "./helpers/central";
 import { cumplir, revertir } from "../src/domains/stripe/stripe.routes";
 import { MAX_LICENCIAS_POR_COMPRA } from "../src/domains/stripe/stripe.helpers";
+import { CentralNoDisponible, clienteCentral, type ClienteCentral } from "../src/server/central/cliente";
 import {
 	activateLicenseFirstTime,
-	canjearLicencia,
-	extendLicense,
 	getLicenseById,
-	reasignarCobrosDeLaClave,
+	listLicenses,
 	markWebhookProcessed,
 	upsertWebhookEvent,
 	type LicenseRow,
@@ -49,70 +52,46 @@ const sesion = (id: string, meses = 12) => ({
 	line_items: { data: [{ price: { id: "price_anual", metadata: { term_months: String(meses) } } }] },
 });
 
-/**
- * Una sesión de RENOVACIÓN (REV-13). Se distingue de la de alta en dos cosas, y hacen falta las
- * dos: el Price lleva `metadata.intent = renewal` —QUE es una renovación— y el enlace lleva el
- * `license_id` en `client_reference_id` —CUÁL renueva—. Antes no hacía falta ninguna: bastaba con
- * que el cliente de Stripe ya tuviera una licencia viva, que es el bug.
- */
-const sesionRenovacion = (id: string, licenseId: string, meses = 12) => ({
-	...sesion(id, meses),
-	client_reference_id: licenseId,
-	line_items: {
-		data: [
-			{
-				price: {
-					id: "price_renovacion",
-					metadata: { term_months: String(meses), intent: "renewal" },
-				},
-			},
-		],
-	},
-});
-
 type Escenario = {
-	db: any;
-	sql: any;
+	central: CentralDePrueba;
+	db: ClienteCentral;
 	/** Compra y activa la licencia del cliente (el alta por Stripe, cumplida). */
 	licenciaActivada: () => Promise<LicenseRow>;
 	leer: (licenseId: string) => Promise<LicenseRow>;
-	contar: (tabla: string) => number;
+	contar: (tabla: string) => Promise<number>;
+	/** Una sentencia directa en el SQLite de la central (`filasDe`). */
+	filas: (texto: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
 };
 
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub("rev01-cobro", async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql, hub.state.storage);
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "license_payments", "admin_audit", "webhook_events"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
+	const central = await centralDePrueba();
+	const db = central.db;
 
-		const e: Escenario = {
-			db,
-			sql,
-			async licenciaActivada() {
-				const r = await cumplir(ENV, db, sesion("cs_alta"));
-				if (r.accion !== "emitida") throw new Error(`alta inesperada: ${r.accion}`);
-				const [licenseId] = r.license_ids;
-				await activateLicenseFirstTime(db, {
-					licenseId,
-					tenantId: "tenant-1",
-					deviceId: "device-main",
-					termMonths: 12,
-				});
-				return (await getLicenseById(db, licenseId))!;
-			},
-			async leer(licenseId) {
-				return (await getLicenseById(db, licenseId))!;
-			},
-			contar(tabla) {
-				return Number(sql.exec(`SELECT COUNT(*) AS n FROM ${tabla};`).toArray()[0].n);
-			},
-		};
+	const e: Escenario = {
+		central,
+		db,
+		async licenciaActivada() {
+			const r = await cumplir(ENV, db, sesion("cs_alta"));
+			if (r.accion !== "emitida") throw new Error(`alta inesperada: ${r.accion}`);
+			const [licenseId] = r.license_ids;
+			await activateLicenseFirstTime(db, {
+				licenseId,
+				tenantId: "tenant-1",
+				deviceId: "device-main",
+				termMonths: 12,
+			});
+			return (await getLicenseById(db, licenseId))!;
+		},
+		async leer(licenseId) {
+			return (await getLicenseById(db, licenseId))!;
+		},
+		async contar(tabla) {
+			return Number((await filasDe(central, `SELECT COUNT(*) AS n FROM ${tabla};`))[0].n);
+		},
+		filas: (texto, ...args) => filasDe(central, texto, ...args),
+	};
 
-		return fn(e);
-	});
+	return fn(e);
 }
 
 const evento = (id: string) => ({
@@ -134,7 +113,7 @@ describe("REV-01 · el reintento de un evento", () => {
 	it("un evento que FALLÓ se vuelve a procesar cuando Stripe lo reintenta", async () => {
 		const r = await escenario(async (e) => {
 			await upsertWebhookEvent(e.db, evento("evt_1"));
-			await markWebhookProcessed(e.db, "evt_1", false, "turso caído");
+			await markWebhookProcessed(e.db, "evt_1", false, "la central no contesta");
 			return upsertWebhookEvent(e.db, evento("evt_1"));
 		});
 		expect(r.already).toBe(false);
@@ -155,11 +134,13 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 		const r = await escenario(async (e) => {
 			const primera = await cumplir(ENV, e.db, sesion("cs_alta"));
 			const segunda = await cumplir(ENV, e.db, sesion("cs_alta"));
-			return { primera, segunda, licencias: e.contar("licenses"), cobros: e.contar("license_payments") };
+			return { primera, segunda, licencias: await e.contar("licenses"), cobros: await e.contar("license_payments") };
 		});
 
 		expect(r.primera.accion).toBe("emitida");
 		expect(r.segunda.accion).toBe("ya_cumplida");
+		// Con las licencias de la primera: la central dice cuáles son.
+		expect(r.segunda).toEqual({ accion: "ya_cumplida", license_ids: (r.primera as { license_ids: string[] }).license_ids });
 		expect(r.licencias).toBe(1);
 		expect(r.cobros).toBe(1);
 	});
@@ -176,7 +157,7 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 			return {
 				primera,
 				segunda,
-				licencias: e.contar("licenses"),
+				licencias: await e.contar("licenses"),
 				primeraFinal: await e.leer(primera.license_id),
 			};
 		});
@@ -189,17 +170,17 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 
 	it("la base rechaza dos cobros con la misma sesión", async () => {
 		// Si dos entregas se cruzan y las dos pasan la comprobación, la segunda revienta aquí y su
-		// transacción entera se deshace.
+		// operación entera se deshace.
 		await escenario(async (e) => {
 			const insertar = (id: string) =>
-				e.sql.exec(
+				e.filas(
 					`INSERT INTO license_payments (payment_id, license_id, kind, term_months,
 					   stripe_checkout_session_id, stripe_payment_intent_id, at_ms)
 					 VALUES (?, 'lic', 'renewal', 12, 'cs_dup', 'pi_dup', 0);`,
 					id,
 				);
-			insertar("p1");
-			expect(() => insertar("p2")).toThrow(/UNIQUE/i);
+			await insertar("p1");
+			await expect(insertar("p2")).rejects.toThrow(/UNIQUE/i);
 		});
 	});
 });
@@ -207,27 +188,128 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 describe("REV-01 · un fallo a mitad no deja nada a medias", () => {
 	it("alta: si falla el registro del cobro no queda licencia, y el reintento emite una", async () => {
 		const r = await escenario(async (e) => {
-			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);
+			const conFallo = conFalloEnLasOperaciones(e.central, /INSERT INTO license_payments/).db;
 			const error = await cumplir(ENV, conFallo, sesion("cs_alta")).catch((err) => err);
-			const licenciasTrasFallo = e.contar("licenses");
+			const licenciasTrasFallo = await e.contar("licenses");
 
 			const reintento = await cumplir(ENV, e.db, sesion("cs_alta"));
 			return {
 				error,
 				licenciasTrasFallo,
 				reintento,
-				licencias: e.contar("licenses"),
-				cobros: e.contar("license_payments"),
+				licencias: await e.contar("licenses"),
+				cobros: await e.contar("license_payments"),
 			};
 		});
 
-		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(r.error).toMatchObject({ code: "central_operacion_fallida" });
+		expect(String(r.error?.message)).toMatch(/fallo_simulado/);
 		// Sin esto, el reintento vería la sesión sellada en `licenses` y saldría sin registrar el
 		// cobro: un reembolso posterior no sabría qué fue y revocaría a ciegas.
 		expect(r.licenciasTrasFallo).toBe(0);
 		expect(r.reintento.accion).toBe("emitida");
 		expect(r.licencias).toBe(1);
 		expect(r.cobros).toBe(1);
+	});
+});
+
+describe("REV-01 · la plataforma corta la llamada que emite el cobro", () => {
+	/** Los correos que manda `cumplir` con el correo configurado. */
+	let correos: { to: string; text: string }[] = [];
+	const CON_CORREO = {
+		...ENV,
+		EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
+		EMAIL: {
+			send: async (m: { to: string; text: string }) => {
+				correos.push({ to: m.to, text: m.text });
+			},
+		},
+	} as any;
+
+	/**
+	 * El cliente de la central, pero la plataforma corta la primera llamada a `operar` con `marca`
+	 * (lo que pone Cloudflare en el error: `retryable`, un fallo pasajero; `overloaded`, saturada). Si
+	 * `confirma`, el objeto llega a hacer la operación antes del corte, y quien llama no lo sabe.
+	 */
+	function conCorteEnLaPrimera(central: CentralDePrueba, { confirma, marca }: { confirma: boolean; marca: object }) {
+		let llamadas = 0;
+		const stub = interceptar(central.stub, async (metodo, _argumentos, llamar) => {
+			if (metodo !== "operar" || ++llamadas > 1) return await llamar();
+			if (confirma) await llamar();
+			throw Object.assign(new Error("Network connection lost."), marca);
+		});
+		return { db: clienteCentral(() => stub), llamadas: () => llamadas };
+	}
+
+	const enviadas = async (e: Escenario) =>
+		Number((await e.filas("SELECT COUNT(*) AS n FROM licenses WHERE key_email_sent_at_ms IS NOT NULL;"))[0].n);
+
+	it("pasajera y ya confirmada: se repite una vez, la central contesta con estas licencias y la emisión sigue", async () => {
+		correos = [];
+		const r = await escenario(async (e) => {
+			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { retryable: true } });
+			const resultado = await cumplir(CON_CORREO, cortada.db, sesionVarias("cs_cortada", [[12, 2]]));
+			return { resultado, llamadas: cortada.llamadas(), licencias: await e.contar("licenses"), enviadas: await enviadas(e) };
+		});
+
+		// La primera llamada llegó a emitir; el reintento lo ve (`ya_cumplida` con las mismas
+		// licencias) y sigue como si la hubiera emitido él: el correo con las claves y sus marcas.
+		expect(r.llamadas).toBe(2);
+		expect(r.resultado.accion).toBe("emitida");
+		expect(r.licencias).toBe(2);
+		expect(correos).toHaveLength(1);
+		expect(r.enviadas).toBe(2);
+	});
+
+	it("pasajera y sin confirmar: se repite una vez y emite", async () => {
+		correos = [];
+		const r = await escenario(async (e) => {
+			const cortada = conCorteEnLaPrimera(e.central, { confirma: false, marca: { retryable: true } });
+			const resultado = await cumplir(CON_CORREO, cortada.db, sesion("cs_sin_confirmar"));
+			return { resultado, llamadas: cortada.llamadas(), licencias: await e.contar("licenses") };
+		});
+
+		expect(r.llamadas).toBe(2);
+		expect(r.resultado.accion).toBe("emitida");
+		expect(r.licencias).toBe(1);
+		expect(correos).toHaveLength(1);
+	});
+
+	it("saturada: no se repite; falla, y la entrega siguiente de Stripe la encuentra cumplida por otra", async () => {
+		correos = [];
+		const r = await escenario(async (e) => {
+			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { overloaded: true } });
+			const error = await cumplir(CON_CORREO, cortada.db, sesion("cs_saturada")).catch((err) => err);
+			const llamadas = cortada.llamadas();
+			// Stripe reintenta el evento: es otra entrega, con sus claves y sus ids.
+			const reintento = await cumplir(CON_CORREO, e.db, sesion("cs_saturada"));
+			return { error, llamadas, reintento, licencias: await e.contar("licenses") };
+		});
+
+		expect(r.llamadas).toBe(1);
+		expect(r.error).toBeInstanceOf(CentralNoDisponible);
+		expect(r.error).toMatchObject({ motivo: "saturada", code: "hub_overloaded" });
+		// Lo que emitió la primera se queda, y la segunda entrega no manda otro correo: no son suyas.
+		expect(r.reintento.accion).toBe("ya_cumplida");
+		expect(r.licencias).toBe(1);
+		expect(correos).toHaveLength(0);
+	});
+
+	it("dos cortes seguidos: se repite una sola vez y falla", async () => {
+		const r = await escenario(async (e) => {
+			let llamadas = 0;
+			const stub = interceptar(e.central.stub, async (metodo, _argumentos, llamar) => {
+				if (metodo !== "operar") return await llamar();
+				llamadas++;
+				throw Object.assign(new Error("Network connection lost."), { retryable: true });
+			});
+			const error = await cumplir(ENV, clienteCentral(() => stub), sesion("cs_dos_cortes")).catch((err) => err);
+			return { error, llamadas, licencias: await e.contar("licenses") };
+		});
+
+		expect(r.llamadas).toBe(2);
+		expect(r.error).toMatchObject({ motivo: "pasajera", code: "hub_unavailable" });
+		expect(r.licencias).toBe(0);
 	});
 });
 
@@ -278,15 +360,10 @@ describe("RI-52 · una licencia por unidad", () => {
 		const r = await escenario(async (e) => {
 			const primera = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
 			const segunda = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
-			const unidades = e.sql
-				.exec("SELECT unidad FROM license_payments ORDER BY unidad;")
-				.toArray()
-				.map((f: any) => Number(f.unidad));
-			const meses = e.sql
-				.exec("SELECT term_months FROM licenses;")
-				.toArray()
-				.map((f: any) => Number(f.term_months));
-			return { primera, segunda, unidades, meses, licencias: e.contar("licenses") };
+			const unidades = (await e.filas("SELECT unidad FROM license_payments ORDER BY unidad;")).map((f) => Number(f.unidad));
+			const meses = (await e.filas("SELECT term_months FROM licenses;")).map((f) => Number(f.term_months));
+			const listadas = (await listLicenses(e.db)).map((l) => l.license_id);
+			return { primera, segunda, unidades, meses, listadas, licencias: await e.contar("licenses") };
 		});
 
 		expect(r.primera.accion).toBe("emitida");
@@ -295,8 +372,10 @@ describe("RI-52 · una licencia por unidad", () => {
 		// Tres licencias de un año, no una de tres: quien compra varias puede querer varios locales.
 		expect(r.meses).toEqual([12, 12, 12]);
 		expect(r.unidades).toEqual([1, 2, 3]);
-		expect(r.segunda.accion).toBe("ya_cumplida");
+		expect(r.segunda).toEqual({ accion: "ya_cumplida", license_ids: ids });
 		expect(r.licencias).toBe(3);
+		// Nacen en el mismo instante: en la lista de la administración, la última unidad va primero.
+		expect(r.listadas).toEqual([...ids].reverse());
 	});
 
 	it("con varias líneas, cada unidad lleva la duración de la suya", async () => {
@@ -305,10 +384,7 @@ describe("RI-52 · una licencia por unidad", () => {
 				[12, 2],
 				[3, 1],
 			]);
-			return e.sql
-				.exec("SELECT term_months FROM licenses ORDER BY term_months;")
-				.toArray()
-				.map((f: any) => Number(f.term_months));
+			return (await e.filas("SELECT term_months FROM licenses ORDER BY term_months;")).map((f) => Number(f.term_months));
 		});
 		expect(meses).toEqual([3, 12, 12]);
 	});
@@ -331,7 +407,7 @@ describe("RI-52 · una licencia por unidad", () => {
 					(err) => String(err?.message),
 				),
 			];
-			return { errores, licencias: e.contar("licenses"), cobros: e.contar("license_payments") };
+			return { errores, licencias: await e.contar("licenses"), cobros: await e.contar("license_payments") };
 		});
 
 		expect(r.errores[0]).toMatch(/missing_term_months_metadata/);
@@ -343,14 +419,14 @@ describe("RI-52 · una licencia por unidad", () => {
 
 	it("si falla a mitad no queda ninguna, y el reintento emite todas", async () => {
 		const r = await escenario(async (e) => {
-			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);
+			const conFallo = conFalloEnLasOperaciones(e.central, /INSERT INTO license_payments/).db;
 			const error = await cumplir(ENV, conFallo, sesionVarias("cs_pack", [[12, 3]])).catch((err) => err);
-			const trasFallo = e.contar("licenses");
+			const trasFallo = await e.contar("licenses");
 			const reintento = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
-			return { error, trasFallo, reintento, licencias: e.contar("licenses") };
+			return { error, trasFallo, reintento, licencias: await e.contar("licenses") };
 		});
 
-		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(String(r.error?.message)).toMatch(/fallo_simulado/);
 		expect(r.trasFallo).toBe(0);
 		expect(r.reintento.accion).toBe("emitida");
 		expect(r.licencias).toBe(3);
@@ -359,16 +435,16 @@ describe("RI-52 · una licencia por unidad", () => {
 	it("la base admite varias unidades de una sesión, pero no la misma dos veces", async () => {
 		await escenario(async (e) => {
 			const insertar = (id: string, unidad: number) =>
-				e.sql.exec(
+				e.filas(
 					`INSERT INTO license_payments (payment_id, license_id, kind, term_months,
 					   stripe_checkout_session_id, stripe_payment_intent_id, unidad, at_ms)
 					 VALUES (?, 'lic', 'issue', 12, 'cs_dup', 'pi_dup', ?, 0);`,
 					id,
 					unidad,
 				);
-			insertar("p1", 1);
-			insertar("p2", 2);
-			expect(() => insertar("p3", 1)).toThrow(/UNIQUE/i);
+			await insertar("p1", 1);
+			await insertar("p2", 2);
+			await expect(insertar("p3", 1)).rejects.toThrow(/UNIQUE/i);
 		});
 	});
 });
@@ -388,20 +464,25 @@ describe("RI-52 · deshacer una compra de varias unidades", () => {
 			const otroLocal = await e.licenciaActivada();
 			const [canjeada, sinUsar] = await emitidas(e, "cs_pack", [[12, 2]]);
 			// Lo que hace la activación al teclear una clave nueva en un equipo con licencia (REV-13).
-			await canjearLicencia(e.db, canjeada, otroLocal.license_id);
-			const conCanje = await extendLicense(e.db, otroLocal.license_id, 12);
-			await reasignarCobrosDeLaClave(e.db, canjeada, otroLocal.license_id);
+			const canje = await e.db.operar("canjearClave", {
+				claveId: canjeada,
+				licenciaId: otroLocal.license_id,
+				deviceId: "device-main",
+				meses: 12,
+				ahoraMs: Date.now(),
+			});
 
 			const resultado = await revertir(e.db, reembolso("pi_cs_pack", 24000, 24000));
 			return {
+				canje,
 				resultado,
 				otroLocal: await e.leer(otroLocal.license_id),
 				antes: otroLocal.expires_at_ms,
-				conCanje,
 				sinUsar: await e.leer(sinUsar),
 			};
 		});
 
+		expect(r.canje.resultado).toBe("sumado");
 		expect(r.resultado.reversed).toBe(true);
 		// El otro local sigue vivo, con la fecha que tenía antes del canje.
 		expect(r.otroLocal.status).toBe("active");
@@ -413,9 +494,7 @@ describe("RI-52 · deshacer una compra de varias unidades", () => {
 		const r = await escenario(async (e) => {
 			const ids = await emitidas(e, "cs_pack", [[12, 3]]);
 			const resultado = await revertir(e.db, reembolso("pi_cs_pack", 36000, 12000));
-			const auditoria = JSON.parse(
-				String(e.sql.exec("SELECT detail FROM admin_audit WHERE action = 'refund';").toArray()[0].detail),
-			);
+			const auditoria = JSON.parse(String((await e.filas("SELECT detail FROM admin_audit WHERE action = 'refund';"))[0].detail));
 			return {
 				ids,
 				resultado,

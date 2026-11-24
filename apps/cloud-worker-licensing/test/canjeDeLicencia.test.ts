@@ -16,11 +16,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, conFalloEnLasOperaciones, filasDe, type CentralDePrueba } from "./helpers/central";
 
-/** La conexión del test en curso; la lee el `getDb` simulado. */
+/**
+ * El cliente de la central del test en curso; lo devuelve `getDb`. Es el de verdad, o uno que lo
+ * envuelve para cortar una sentencia a mitad de un estreno.
+ */
 let clienteActual: any = null;
 /** Bases de tenant que se han llegado a aprovisionar: el canje no puede crear ninguna. */
 let basesCreadas: string[] = [];
@@ -46,8 +47,9 @@ const { licenseRoutes } = await import("../src/domains/licensing/licensing.route
 const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
-const { activateLicenseFirstTime, ensureDevice, getLicenseById, reactivateLicense, reassignMainDevice, revokeLicense } =
-	await import("../src/server/licenseStore");
+const { activateLicenseFirstTime, ensureDevice, getLicenseById, reassignMainDevice } = await import(
+	"../src/server/licenseStore"
+);
 const { cifrar } = await import("../src/server/crypto");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -55,8 +57,6 @@ const ENV = {
 	LICENSE_STORE_KEY: STORE_KEY,
 	LICENSE_JWT_SECRET: "secreto-de-pruebas-con-longitud-suficiente-32",
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-	TURSO_DATABASE_URL: "libsql://pruebas",
-	TURSO_AUTH_TOKEN: "t",
 	EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
 	EMAIL: { send: async () => {} },
 } as any;
@@ -67,7 +67,9 @@ const EQUIPO = "equipo-del-bar";
 const CLAVE_EQUIPO = await clavePublica(1);
 
 type Escenario = {
-	sql: any;
+	central: CentralDePrueba;
+	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
+	sql: (texto: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
 	db: any;
 	/** Emite una clave sin estrenar y devuelve el texto de la clave y su id. */
 	emitir: (meses?: number) => Promise<{ clave: string; id: string }>;
@@ -83,24 +85,22 @@ type Escenario = {
 };
 
 async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub(`rev13-canje-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql, hub.state.storage);
-		prepararPlanoDeControl(sql);
-		for (const t of ["licenses", "license_payments", "tenants", "devices"]) {
-			sql.exec(`DELETE FROM ${t};`);
-		}
+	{
+		const central = await centralDePrueba(`rev13-canje-${nombre}-${crypto.randomUUID()}`);
+		const db = central.db;
+		const sql = (texto: string, ...args: unknown[]) => filasDe(central, texto, ...args);
 		clienteActual = db;
 		basesCreadas = [];
 
 		let n = 0;
 		const e: Escenario = {
+			central,
 			sql,
 			db,
 			async emitir(meses = 12) {
 				const clave = generateLicenseKey();
 				const id = `lic-${++n}`;
-				sql.exec(
+				await sql(
 					`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan,
 					   term_months, origin, issued_at_ms, customer_email, created_at_ms, updated_at_ms)
 					 VALUES (?, ?, 'issued', 0, 'standard', ?, 'stripe', ?, 'bar@ejemplo.test', ?, ?);`,
@@ -115,14 +115,14 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 			},
 			async licenciaDelEquipo({ diasRestantes = 30, status = "active" } = {}) {
 				const { id } = await e.emitir();
-				sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('tenant-del-bar', 'active');`);
-				sql.exec(
+				await sql(`INSERT INTO tenants (tenant_id, status) VALUES ('tenant-del-bar', 'active');`);
+				await sql(
 					`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64)
 					 VALUES (?, 'tenant-del-bar', 'tpv', ?);`,
 					EQUIPO,
 					CLAVE_EQUIPO,
 				);
-				sql.exec(
+				await sql(
 					`UPDATE licenses SET status=?, tenant_id='tenant-del-bar', main_device_id=?,
 					        activated_at_ms=?, expires_at_ms=? WHERE license_id=?;`,
 					status,
@@ -151,8 +151,14 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 		};
 
 		return fn(e);
-	});
+	}
 }
+
+/** Lo que hace `POST /v1/admin/licenses/:id/revoke` en la central. */
+const revocar = (e: Escenario, licenseId: string) => e.db.operar("revocarAMano", { licenseId, ahoraMs: Date.now() });
+
+/** Lo que hace `POST /v1/admin/licenses/:id/unrevoke` en la central. */
+const desrevocar = (e: Escenario, licenseId: string) => e.db.operar("desrevocar", { licenseId, ahoraMs: Date.now() });
 
 beforeEach(() => {
 	clienteActual = null;
@@ -173,7 +179,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 				antes,
 				vieja: await e.leer(viejaId),
 				clave: await e.leer(nueva.id),
-				tenants: Number(e.sql.exec(`SELECT COUNT(*) AS n FROM tenants;`).toArray()[0].n),
+				tenants: Number((await e.sql(`SELECT COUNT(*) AS n FROM tenants;`))[0].n),
 			};
 		});
 
@@ -251,8 +257,8 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 				tras,
 				vieja: await e.leer(viejaId),
 				clave: await e.leer(nueva.id),
-				tenants: Number(e.sql.exec(`SELECT COUNT(*) AS n FROM tenants;`).toArray()[0].n),
-				equipoNuevo: e.sql.exec(`SELECT 1 FROM devices WHERE device_id = 'equipo-sin-licencia';`).toArray(),
+				tenants: Number((await e.sql(`SELECT COUNT(*) AS n FROM tenants;`))[0].n),
+				equipoNuevo: await e.sql(`SELECT 1 FROM devices WHERE device_id = 'equipo-sin-licencia';`),
 			};
 		});
 
@@ -317,9 +323,9 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 			await e.activar(nueva.clave);
 			const tras = await e.leer(viejaId);
 
-			await revokeLicense(e.db, nueva.id);
+			await revocar(e, nueva.id);
 			const anulada = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4));
-			await reactivateLicense(e.db, nueva.id);
+			await desrevocar(e, nueva.id);
 			const desanulada = await e.leer(nueva.id);
 
 			const enOtroEquipo = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4));
@@ -390,7 +396,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 		const r = await escenario("cobro", async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const nueva = await e.emitir(12);
-			e.sql.exec(
+			await e.sql(
 				`INSERT INTO license_payments (payment_id, license_id, kind, term_months,
 				   stripe_checkout_session_id, stripe_payment_intent_id, at_ms)
 				 VALUES ('p1', ?, 'issue', 12, 'cs_1', 'pi_1', ?);`,
@@ -401,7 +407,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 			await e.activar(nueva.clave);
 			return {
 				viejaId,
-				pago: e.sql.exec(`SELECT license_id, kind FROM license_payments;`).toArray()[0],
+				pago: (await e.sql(`SELECT license_id, kind FROM license_payments;`))[0],
 			};
 		});
 
@@ -471,8 +477,8 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 	// después sube sus filas a la nube del nuevo. La Main sólo aparta la base si se lo dicen.
 
 	/** El negocio en el que está la fila del equipo, o `null` si no la tiene. */
-	const negocioDelEquipo = (e: Escenario): string | null => {
-		const fila = e.sql.exec(`SELECT tenant_id FROM devices WHERE device_id = ?;`, EQUIPO).toArray()[0];
+	const negocioDelEquipo = async (e: Escenario): Promise<string | null> => {
+		const fila = (await e.sql(`SELECT tenant_id FROM devices WHERE device_id = ?;`, EQUIPO))[0];
 		return fila ? String(fila.tenant_id) : null;
 	};
 
@@ -497,7 +503,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 			const r = await escenario(`aud06-${previo}`, async (e) => {
 				const viejaId = await e.licenciaDelEquipo();
 				if (previo === "anulada") {
-					await revokeLicense(e.db, viejaId);
+					await revocar(e, viejaId);
 				} else {
 					// Lo que hace `/activate` en un cambio de equipo con el código del correo.
 					const otra = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
@@ -515,7 +521,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 					res,
 					vieja: await e.leer(viejaId),
 					nueva: await e.leer(nueva.id),
-					negocio: negocioDelEquipo(e),
+					negocio: await negocioDelEquipo(e),
 				};
 			});
 
@@ -551,8 +557,8 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 		const r = await escenario("aud06-mismo-negocio", async (e) => {
 			const mia = await e.emitir(12);
 			const estreno = await e.activar(mia.clave);
-			await revokeLicense(e.db, mia.id);
-			await reactivateLicense(e.db, mia.id);
+			await revocar(e, mia.id);
+			await desrevocar(e, mia.id);
 			const vuelta = await e.activar(mia.clave);
 			return { estreno, vuelta };
 		});
@@ -571,18 +577,18 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 			const estreno = await e.activar(mia.clave);
 
 			const ajena = await e.emitir(12);
-			e.sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('otro-negocio', 'active');`);
-			e.sql.exec(
+			await e.sql(`INSERT INTO tenants (tenant_id, status) VALUES ('otro-negocio', 'active');`);
+			await e.sql(
 				`UPDATE licenses SET status='active', tenant_id='otro-negocio', main_device_id='main-del-otro',
 				        activated_at_ms=?, expires_at_ms=? WHERE license_id=?;`,
 				Date.now(),
 				Date.now() + 200 * DIA,
 				ajena.id,
 			);
-			e.sql.exec(`UPDATE devices SET tenant_id='otro-negocio', role='handy' WHERE device_id=?;`, EQUIPO);
+			await e.sql(`UPDATE devices SET tenant_id='otro-negocio', role='handy' WHERE device_id=?;`, EQUIPO);
 
 			const vuelta = await e.activar(mia.clave);
-			return { estreno, vuelta, negocio: negocioDelEquipo(e) };
+			return { estreno, vuelta, negocio: await negocioDelEquipo(e) };
 		});
 
 		expect(r.vuelta.status).toBe(200);
@@ -601,11 +607,11 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 
 			clienteActual = conCorte(e.db, /UPDATE licenses\s+SET status='active'/);
 			const fallo = await e.activar(nueva.clave);
-			const trasElFallo = { negocio: negocioDelEquipo(e), clave: await e.leer(nueva.id) };
+			const trasElFallo = { negocio: await negocioDelEquipo(e), clave: await e.leer(nueva.id) };
 
 			clienteActual = e.db;
 			const bien = await e.activar(nueva.clave);
-			return { fallo, trasElFallo, bien, negocio: negocioDelEquipo(e) };
+			return { fallo, trasElFallo, bien, negocio: await negocioDelEquipo(e) };
 		});
 
 		expect(r.fallo.status).toBe(500);
@@ -628,13 +634,13 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 			// Y una clave canjeada después lo arrastraba con su `tenant_id` (ahora el canje lo suelta).
 			const r = await escenario(`aud09-reservada-${como === "sin estrenar" ? "issued" : "redeemed"}`, async (e) => {
 				const reservada = await e.emitir(12);
-				e.sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('negocio-reservado', 'active');`);
-				e.sql.exec(
+				await e.sql(`INSERT INTO tenants (tenant_id, status) VALUES ('negocio-reservado', 'active');`);
+				await e.sql(
 					`UPDATE licenses SET tenant_id='negocio-reservado', status=? WHERE license_id=?;`,
 					como === "sin estrenar" ? "issued" : "redeemed",
 					reservada.id,
 				);
-				e.sql.exec(
+				await e.sql(
 					`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64)
 					 VALUES (?, 'negocio-reservado', 'tpv', ?);`,
 					EQUIPO,
@@ -656,8 +662,8 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 		// carpeta de datos recién borrada.
 		const r = await escenario("aud06-retirado", async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
-			await revokeLicense(e.db, viejaId);
-			e.sql.exec(`UPDATE tenants SET status='deleted' WHERE tenant_id='tenant-del-bar';`);
+			await revocar(e, viejaId);
+			await e.sql(`UPDATE tenants SET status='deleted' WHERE tenant_id='tenant-del-bar';`);
 			const nueva = await e.emitir(12);
 			return e.activar(nueva.clave);
 		});
@@ -676,9 +682,7 @@ describe("REV-13 · una licencia ya activada no canjea", () => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			// La misma clave con la que se activó.
-			const fila = e.sql
-				.exec(`SELECT license_key_hash FROM licenses WHERE license_id=?;`, viejaId)
-				.toArray()[0];
+			const fila = (await e.sql(`SELECT license_key_hash FROM licenses WHERE license_id=?;`, viejaId))[0];
 
 			// Se reactiva por el camino de siempre (mismo equipo), que no pasa por el canje.
 			const res = await e.activar("no-importa-el-texto");
@@ -696,7 +700,7 @@ describe("REV-13 · una licencia ya activada no canjea", () => {
 
 			// Una licencia de otro bar, ya activada en su propio equipo.
 			const ajena = await e.emitir(12);
-			e.sql.exec(
+			await e.sql(
 				`UPDATE licenses SET status='active', tenant_id='tenant-ajeno',
 				        main_device_id='equipo-ajeno', activated_at_ms=?, expires_at_ms=?
 				  WHERE license_id=?;`,
@@ -731,7 +735,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 			const nueva = await e.emitir(12);
 
 			const dek = btoa(String.fromCharCode(...new Uint8Array(32).fill(5)));
-			e.sql.exec(
+			await e.sql(
 				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
 				await cifrar(OTRA_CLAVE, dek),
 			);
@@ -740,7 +744,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 
 			// Con la variable arreglada —aquí, la DEK cifrada con la clave que tiene el worker—, el
 			// MISMO código entra a la primera.
-			e.sql.exec(
+			await e.sql(
 				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
 				await cifrar(STORE_KEY, dek),
 			);
@@ -766,7 +770,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
 
-			clienteActual = conFalloSimulado(e.db, /UPDATE license_payments/);
+			clienteActual = conFalloEnLasOperaciones(e.central, /UPDATE license_payments/).db;
 			const fallo = await e.activar(nueva.clave);
 			const tras = { vieja: await e.leer(viejaId), clave: await e.leer(nueva.id) };
 
@@ -805,7 +809,7 @@ describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 		const r = await escenario("solo-sumar-otro", async (e) => {
 			await e.licenciaDelEquipo();
 			const { clave, id } = await e.emitir(12);
-			e.sql.exec(
+			await e.sql(
 				`UPDATE licenses SET status='active', main_device_id='otro-equipo', tenant_id='otro',
 				        activated_at_ms=?, expires_at_ms=? WHERE license_id=?;`,
 				Date.now(),
@@ -837,7 +841,7 @@ describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 		const r = await escenario("solo-sumar-misma", async (e) => {
 			const actual = await e.licenciaDelEquipo();
 			const clave = generateLicenseKey();
-			e.sql.exec(
+			await e.sql(
 				"UPDATE licenses SET license_key_hash = ? WHERE license_id = ?;",
 				await licenseKeyHash(clave),
 				actual,

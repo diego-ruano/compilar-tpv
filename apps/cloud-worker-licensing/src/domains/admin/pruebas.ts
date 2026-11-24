@@ -14,7 +14,7 @@ import type { Base } from "../../lib/sql";
 
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
-import { exec, rowsAffected } from "../../server/db";
+import { exec } from "../../server/db";
 import { hubDe, type EntornoDelHub } from "../../lib/hub";
 import { prefijoDelNegocio } from "../images/images.routes";
 
@@ -139,7 +139,7 @@ export async function retirarNegociosDePrueba(
 		  );`,
 		[CORREO_DE_PRUEBAS, Date.now()],
 	);
-	retirada.licencias = rowsAffected(anuladas);
+	retirada.licencias = anuladas.rowsAffected;
 
 	for (const fila of filas.slice(0, NEGOCIOS_POR_LLAMADA)) {
 		const tenantId = String(fila.tenant_id);

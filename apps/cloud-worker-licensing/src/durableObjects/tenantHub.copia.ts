@@ -13,7 +13,8 @@
 //   · **Una foto de la base.** Todo se lee de una pasada y sin esperas: el SQL del DO es síncrono y
 //     un negocio es un hilo, así que mientras se lee no se intercala ninguna escritura y la copia no
 //     puede tener una línea sin su comanda. Por eso se comprime también aquí, a trozos y sin
-//     esperas (`node:zlib`); sólo la subida a R2, que ya es de lo leído, espera a la red.
+//     esperas (`GzipPorTrozos`, `volcadoSql.ts`); sólo la subida a R2, que ya es de lo leído, espera
+//     a la red.
 //   · **Sólo las tablas del negocio** (`esTablaDeNegocio`, la misma lista que el volcado de la
 //     recuperación): ni las que empiezan por `_` (el sello, la Main vigente, el resumen de las
 //     estadísticas, `_migrations`), ni el andamiaje de la réplica (`Sync_Changes`,
@@ -21,7 +22,7 @@
 //     dónde numeró (`seq`, en los metadatos del objeto de R2): sobrevive a perder el objeto, y es con
 //     lo que se abre por encima el log de una base devuelta (DO-PERDIDA, `seqDeLasCopias`).
 //   · **Legible sin nuestro código**: es un volcado SQL comprimido con gzip, como el de la base
-//     central (`server/copiaBaseCentral.ts`). `gunzip -c copia.sql.gz | sqlite3 copia.db` la abre.
+//     central (`baseCentral.copia.ts`). `gunzip -c copia.sql.gz | sqlite3 copia.db` la abre.
 //     Cada sentencia de datos va en una línea (un salto de línea dentro de un texto se escribe como
 //     `char(10)`), y es lo que permite restaurarla leyéndola por líneas (`cargarCopia`).
 //   · **Datos personales**: clientes, personal, reservas. El bucket es privado y no es el de las
@@ -30,10 +31,9 @@
 //     de vida del bucket: una regla por antigüedad borraría también las últimas copias de un negocio
 //     cuyo objeto se ha perdido (ya no hace copias nuevas), que son justo las que hacen falta.
 
-import { constants, crc32, deflateRawSync } from "node:zlib";
-
 import { esTablaDeNegocio } from "../domains/sync/bootstrap.ventana";
 import { seqMasAlto } from "./tenantHub.instante";
+import { GzipPorTrozos, identificador, literalEnUnaLinea } from "./volcadoSql";
 
 /** Dónde caen las copias de los negocios dentro de su bucket: `negocios/<negocio>/<día>.sql.gz`. */
 export const PREFIJO_COPIAS_NEGOCIOS = "negocios/";
@@ -52,9 +52,6 @@ export const COPIAS_QUE_SE_GUARDAN = 30;
  * de reventar el objeto; el día que se acerque, lo que toca es archivar lo antiguo (DB-14).
  */
 export const TOPE_COMPRIMIDO = 64 * 1024 * 1024;
-
-/** Cada cuántos caracteres sin comprimir se comprime un trozo. */
-const TROZO_CARACTERES = 1024 * 1024;
 
 /** La primera línea de los datos de cada tabla. Es lo único que se ejecuta al restaurar. */
 export const PRINCIPIO_DE_INSERT = 'INSERT INTO "';
@@ -144,113 +141,10 @@ function volcarFilas(sql: SqlStorage, tabla: string, gz: GzipPorTrozos): number 
 	const principio = `INSERT INTO ${nombre} (${lista}) VALUES (`;
 	let n = 0;
 	for (const fila of cursor.raw()) {
-		gz.linea(`${principio}${(fila as unknown[]).map(literalEnUnaLinea).join(", ")});`);
+		gz.linea(`${principio}${fila.map(literalEnUnaLinea).join(", ")});`);
 		n++;
 	}
 	return n;
-}
-
-export function identificador(nombre: string): string {
-	return `"${nombre.replaceAll('"', '""')}"`;
-}
-
-/**
- * Un valor de SQLite como literal SQL que cabe en una línea. Como `literal` de la copia de la base
- * central, pero un salto de línea dentro de un texto se escribe como `char(10)` (y el retorno de
- * carro, `char(13)`): cada sentencia de datos es una línea, y así se lee al restaurar.
- */
-export function literalEnUnaLinea(v: unknown): string {
-	if (v === null || v === undefined) return "NULL";
-	if (typeof v === "bigint") return v.toString();
-	if (typeof v === "boolean") return v ? "1" : "0";
-	if (typeof v === "number") {
-		// Un NaN o un infinito no tiene literal en SQL, y escribir NULL en su lugar sería una copia
-		// que miente sin decirlo.
-		if (!Number.isFinite(v)) throw new Error(`copia_valor_no_finito: ${v}`);
-		return String(v);
-	}
-	if (typeof v === "string") {
-		// Un NUL no puede ir dentro de un literal de texto: SQLite cortaría la cadena ahí.
-		if (v.includes("\0")) return `CAST(X'${hex(new TextEncoder().encode(v))}' AS TEXT)`;
-		const escapado = `'${v.replaceAll("'", "''")}'`;
-		if (!/[\r\n]/.test(v)) return escapado;
-		return `(${escapado.replaceAll("\n", "'||char(10)||'").replaceAll("\r", "'||char(13)||'")})`;
-	}
-	if (v instanceof ArrayBuffer) return `X'${hex(new Uint8Array(v))}'`;
-	if (ArrayBuffer.isView(v)) return `X'${hex(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))}'`;
-	throw new Error(`copia_valor_desconocido: ${typeof v}`);
-}
-
-function hex(bytes: Uint8Array): string {
-	let s = "";
-	for (const b of bytes) s += b.toString(16).padStart(2, "0");
-	return s;
-}
-
-/**
- * Un gzip de un solo miembro, comprimido a trozos y sin esperas.
- *
- * `CompressionStream` es asíncrono, y esperar mientras se lee dejaría de ser una foto. Cada trozo se
- * comprime por separado como deflate en bruto y se cierra con un vaciado completo (`Z_FULL_FLUSH`):
- * queda alineado a un byte y sin referencias a lo anterior, así que los trozos seguidos son un único
- * flujo deflate, que termina con un bloque final vacío. Delante va la cabecera de gzip y detrás su
- * CRC-32 y el tamaño, acumulados trozo a trozo. Es lo que hace `pigz`, y lo abre cualquier `gunzip`
- * y el `DecompressionStream` del runtime, que no acepta un gzip de varios miembros.
- */
-class GzipPorTrozos {
-	private pendiente: string[] = [];
-	private caracteres = 0;
-	private comprimido: Uint8Array[] = [];
-	private bytesComprimidos = 0;
-	private crc = 0;
-	private bytesSinComprimir = 0;
-	private readonly codificador = new TextEncoder();
-
-	constructor(private readonly tope: number) {}
-
-	linea(texto: string): void {
-		this.pendiente.push(texto, "\n");
-		this.caracteres += texto.length + 1;
-		if (this.caracteres >= TROZO_CARACTERES) this.vaciar();
-	}
-
-	private vaciar(): void {
-		if (!this.pendiente.length) return;
-		const bytes = this.codificador.encode(this.pendiente.join(""));
-		this.pendiente = [];
-		this.caracteres = 0;
-		this.crc = crc32(bytes, this.crc);
-		this.bytesSinComprimir += bytes.length;
-		this.anadir(deflateRawSync(bytes, { finishFlush: constants.Z_FULL_FLUSH }));
-	}
-
-	private anadir(trozo: Uint8Array): void {
-		this.bytesComprimidos += trozo.length;
-		if (this.bytesComprimidos > this.tope) {
-			throw new Error(`copia_demasiado_grande: pasa de ${this.tope} bytes comprimida`);
-		}
-		this.comprimido.push(trozo);
-	}
-
-	cerrar(): { gzip: Uint8Array; bytesSinComprimir: number } {
-		this.vaciar();
-		// El bloque final, vacío: `deflateRawSync` de nada con `Z_FINISH`.
-		this.anadir(deflateRawSync(new Uint8Array(0)));
-		const cabecera = new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]);
-		const pie = new Uint8Array(8);
-		const vista = new DataView(pie.buffer);
-		vista.setUint32(0, this.crc >>> 0, true);
-		vista.setUint32(4, this.bytesSinComprimir % 2 ** 32, true);
-
-		const gzip = new Uint8Array(cabecera.length + this.bytesComprimidos + pie.length);
-		let i = 0;
-		for (const parte of [cabecera, ...this.comprimido, pie]) {
-			gzip.set(parte, i);
-			i += parte.length;
-		}
-		this.comprimido = [];
-		return { gzip, bytesSinComprimir: this.bytesSinComprimir };
-	}
 }
 
 export type CopiaHecha = {
