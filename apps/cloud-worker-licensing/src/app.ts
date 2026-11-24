@@ -28,8 +28,11 @@ import { capturarError } from "./observability/errors";
 import { registrarPeticion } from "./observability/requestContext";
 import { cabeceraServerTiming, conMedida } from "./observability/tiempos";
 import { getDb } from "./server/db";
+import { respuestaSinLaCentral } from "./server/central/sinLaCentral";
 import { comprobarSalud } from "./server/salud";
 import { hubDe } from "./lib/hub";
+import { enSegundoPlano } from "./lib/enSegundoPlano";
+import { filtroPorIp } from "./lib/limitador";
 import { cuerpoDeErrorConStatus } from "./lib/errorHttp";
 import { avisarBasePerdida, esBasePerdida, negocioNacido } from "./lib/basePerdida";
 import {
@@ -127,7 +130,10 @@ app.get("/health", async (c) => {
 });
 
 // ---------------- WebSocket → TenantHub ----------------
-app.get("/ws", async (c) => {
+//
+// Es anónima: cualquier ticket, también uno inventado, cuesta el lote del canje en la base central.
+// Delante va el filtro por IP de las puertas de la sesión (`LIMITADOR_SESION`).
+app.get("/ws", filtroPorIp("LIMITADOR_SESION", "ws"), async (c) => {
 	const request = c.req.raw;
 	const env = c.env;
 
@@ -166,6 +172,8 @@ app.get("/ws", async (c) => {
 
 		return await stub.fetch(new Request(doUrl.toString(), new Request(request, { headers: h })));
 	} catch (e: any) {
+		const sinCentral = respuestaSinLaCentral(c, e);
+		if (sinCentral) return sinCentral;
 		capturarError(e, "websocket.open");
 		// FABLE-B: la traza se queda aquí (`wrangler tail`) y en Sentry; la respuesta no la lleva.
 		console.error(
@@ -238,7 +246,8 @@ app.route("/v1/device", dispositivosRoutes);
  * Si el negocio ya nació, no es un negocio sin estrenar: contesta `tenant_db_perdida` (503) y avisa,
  * en vez del `tenant_db_not_provisioned` con el que la Main ofrece crear una base vacía. Si no ha
  * nacido, o la ruta no tiene negocio (las públicas), devuelve `null` y sale lo de siempre. Si la
- * base central no contesta, no se sabe: un 500, que tampoco ofrece nada.
+ * base central no contesta, no se sabe: su 503 (`server/central/sinLaCentral.ts`) o, si es otro
+ * fallo, un 500; ninguno de los dos ofrece nada.
  */
 async function siLaBaseSeHaPerdido(err: unknown, c: Context<{ Bindings: Env }>): Promise<Response | null> {
 	const yaLoEs = esBasePerdida(err);
@@ -251,28 +260,31 @@ async function siLaBaseSeHaPerdido(err: unknown, c: Context<{ Bindings: Env }>):
 		try {
 			if (!(await negocioNacido(getDb(c.env), tenantId))) return null;
 		} catch (e) {
+			const sinCentral = respuestaSinLaCentral(c, e);
+			if (sinCentral) return sinCentral;
 			capturarError(e, "tenant_db.perdida");
 			return serverError(c.req.raw, "internal_error");
 		}
 	}
 
-	const aviso = avisarBasePerdida(c.env, {
-		tenant_id: tenantId,
-		device_id: variables.get("deviceId"),
-		donde: `${c.req.method} ${c.req.routePath}`,
-	});
-	try {
-		c.executionCtx.waitUntil(aviso);
-	} catch {
-		// Sin contexto de ejecución (los tests): perder el aviso no puede tumbar la respuesta.
-		void aviso;
-	}
+	enSegundoPlano(
+		c,
+		avisarBasePerdida(c.env, {
+			tenant_id: tenantId,
+			device_id: variables.get("deviceId"),
+			donde: `${c.req.method} ${c.req.routePath}`,
+		}),
+	);
 	return c.json({ ok: false, error: "tenant_db_perdida" }, 503);
 }
 
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
 // idempotency_*) a JSON; el resto cae a un 500 sin detalle (FABLE-B).
 app.onError(async (err, c) => {
+	// La base central no ha podido atender: lo mismo que el objeto de un negocio, un 503 `external`.
+	const sinCentral = respuestaSinLaCentral(c, err);
+	if (sinCentral) return sinCentral;
+
 	const perdida = await siLaBaseSeHaPerdido(err, c);
 	if (perdida) return perdida;
 

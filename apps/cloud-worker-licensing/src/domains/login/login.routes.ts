@@ -4,6 +4,7 @@ import { Hono } from "hono";
 
 import { parseClientNow } from "../../durableObjects/tenantHub.tiempo";
 import type { Env } from "../../env";
+import { enSegundoPlano } from "../../lib/enSegundoPlano";
 import { diaDeInstante } from "../../lib/fechas";
 import { HubError } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
@@ -180,14 +181,7 @@ const soloLaMainRecupera = soloLaMain("recuperacion_solo_en_main", 403);
 
 /** Para los avisos por correo, que no pueden retener la respuesta. */
 function diferirEn(c: any): (p: Promise<unknown>) => void {
-	return (promesa) => {
-		// Sin `executionCtx` (tests) lanza: perder el aviso no puede tumbar la respuesta.
-		try {
-			c.executionCtx.waitUntil(promesa);
-		} catch {
-			void promesa;
-		}
-	};
+	return (promesa) => enSegundoPlano(c, promesa);
 }
 
 loginRoutes.post(
@@ -230,14 +224,7 @@ loginRoutes.post(
 				codigo: datos.codigo,
 				ahora: Date.now(),
 			},
-			(promesa) => {
-				// Sin `executionCtx` (tests) lanza: perder el aviso no puede tumbar la respuesta.
-				try {
-					c.executionCtx.waitUntil(promesa);
-				} catch {
-					void promesa;
-				}
-			},
+			diferirEn(c),
 		);
 		return c.json(r.body, r.status);
 	},

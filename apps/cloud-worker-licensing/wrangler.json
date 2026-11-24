@@ -80,6 +80,22 @@
 				"limit": 3000,
 				"period": 60
 			}
+		},
+		{
+			"name": "LIMITADOR_ACTUALIZACIONES",
+			"namespace_id": "6",
+			"simple": {
+				"limit": 60,
+				"period": 60
+			}
+		},
+		{
+			"name": "LIMITADOR_SESION",
+			"namespace_id": "7",
+			"simple": {
+				"limit": 600,
+				"period": 60
+			}
 		}
 	],
 	"durable_objects": {

@@ -52,7 +52,7 @@ import { assertEnv } from "../licensing/licensing.helpers";
 import { retirarNegociosDePrueba } from "./pruebas";
 import { retirarNegociosHuerfanos } from "./huerfanos";
 import { cuerpo } from "../../lib/validacion";
-import { TARGETS } from "../updates/updates.routes";
+import { olvidarLoQueLeeElFeed, TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
 import { basesDeNegociosRoutes } from "./basesDeNegocios";
 import {
@@ -544,6 +544,7 @@ adminRoutes.post("/pilotos", cuerpo(pilotoSchema), async (c) => {
 	if (Number((r as any)?.rowsAffected ?? 0) === 0) {
 		return c.json({ ok: false, error: "not_found", message: "No hay ningún negocio con ese id." }, 404);
 	}
+	olvidarLoQueLeeElFeed();
 	await auditAdmin(db, piloto ? "piloto_poner" : "piloto_quitar", null, { tenantId });
 	return c.json({ ok: true, tenantId, piloto });
 });
@@ -609,6 +610,7 @@ adminRoutes.post("/releases/promote", cuerpo(promocionarSchema), async (c) => {
 			404,
 		);
 	}
+	olvidarLoQueLeeElFeed();
 	await auditAdmin(db, "release_promocionar", null, { version, target: target || "windows", arch: arch ?? "todos" });
 	return c.json({ ok: true, version });
 });

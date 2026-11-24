@@ -26,6 +26,7 @@ import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
+import { filtroPorIp } from "../../lib/limitador";
 import { cuerpoConIdentificador, topeAnonimo } from "../../lib/validacion";
 import { soloLaMainVigente, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
@@ -75,11 +76,19 @@ pairingRoutes.post("/claim", filtroExterior, cuerpoConIdentificador(S.claimSchem
 	),
 );
 
-pairingRoutes.post("/fetch-token", cuerpoConIdentificador(S.fetchTokenSchema), async (c) =>
+/**
+ * La espera de la Handy: `fetch-token` y `cancel` leen el código en la base central antes de
+ * comprobar la firma, y `fetch-token` se pregunta cada segundo y medio mientras la Main no aprueba.
+ * Su filtro es el de las puertas de la sesión (`LIMITADOR_SESION`), holgado para eso; el de `claim`,
+ * mucho más estrecho.
+ */
+const filtroDeLaEspera = filtroPorIp("LIMITADOR_SESION", "pairing_espera");
+
+pairingRoutes.post("/fetch-token", filtroDeLaEspera, cuerpoConIdentificador(S.fetchTokenSchema), async (c) =>
 	responder(c, await entregarToken(getDb(c.env), c.env, c.req.valid("json"), Date.now())),
 );
 
-pairingRoutes.post("/cancel", cuerpoConIdentificador(S.cancelSchema), async (c) =>
+pairingRoutes.post("/cancel", filtroDeLaEspera, cuerpoConIdentificador(S.cancelSchema), async (c) =>
 	responder(c, await soltarCodigo(getDb(c.env), c.env, c.req.valid("json"), Date.now())),
 );
 

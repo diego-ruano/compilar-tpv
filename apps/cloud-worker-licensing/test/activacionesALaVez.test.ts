@@ -17,7 +17,8 @@
 //   · cinco activaciones simultáneas de la misma clave: una gana, cuatro reciben 409, y sólo hay un
 //     negocio y un objeto aprovisionado, sin filas de equipo de las perdedoras;
 //   · un fallo después de crear la base deja la clave sin estrenar y con su negocio reservado, y el
-//     reintento —del mismo equipo o de otro— vuelve a ese negocio y a esa base;
+//     reintento —del mismo equipo o de otro— vuelve a ese negocio y a esa base; si el que falla es la
+//     base central antes de crearla, sale su 503 y no `tenant_db_provision_failed`;
 //   · reservar no es nacer: la base de un negocio reservado se puede crear, y no se toma por perdida;
 //   · una clave reservada que se canjea suelta su negocio.
 
@@ -63,6 +64,7 @@ const { generateLicenseKey, licenseKeyHash } = await import("../src/domains/lice
 const { canjearLicencia, eraLaMainDeOtroNegocio, reservarNegocioDeLaClave } = await import(
 	"../src/server/licenseStore"
 );
+const { CentralNoDisponible } = await import("../src/server/central/cliente");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
@@ -317,6 +319,39 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 			});
 		}
 	}
+
+	it("si la base central no puede atender al preguntar si el negocio nació: su 503, no que la base no se pueda crear", async () => {
+		await escenario("central-saturada", async (c) => {
+			const k = await c.emitir();
+			const equipo = { id: "equipo-sin-central", pub: await clavePublica(0x74) };
+
+			// La pregunta de `negocioNacido`, la que hace crear la base: la central saturada.
+			let pendiente = true;
+			clienteActual = {
+				...c.db,
+				async execute(q: any) {
+					const texto = String(typeof q === "string" ? q : q.sql);
+					if (pendiente && /WHERE tenant_id = \? AND activated_at_ms IS NOT NULL/.test(texto)) {
+						pendiente = false;
+						throw new CentralNoDisponible("saturada");
+					}
+					return c.db.execute(q);
+				},
+			};
+			const sinCentral = await c.activar(k.clave, equipo.id, equipo.pub);
+			clienteActual = c.db;
+			expect(pendiente).toBe(false);
+			expect([sinCentral.status, sinCentral.body]).toEqual([503, { ok: false, code: "external", error: "hub_overloaded" }]);
+
+			const tras = c.licencia(k.id);
+			expect(tras).toMatchObject({ status: "issued", main_device_id: null, activated_at_ms: null });
+			expect(await stub(tras.tenant_id).estaAprovisionado()).toBe(false);
+
+			const bien = await c.activar(k.clave, equipo.id, equipo.pub);
+			expect(bien.status).toBe(200);
+			expect(bien.body.tenantId).toBe(tras.tenant_id);
+		});
+	});
 });
 
 describe("AUD-09 · reservar no es nacer", () => {

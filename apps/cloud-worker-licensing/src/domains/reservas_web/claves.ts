@@ -67,18 +67,27 @@ export function codigoParaLaWeb(origen: string, clave: string): string {
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 1000;
-const cache = new Map<string, { hasta: number; tenantId: string | null }>();
+/** Las claves que existen, con su negocio. Sólo las crea la Main de un negocio, así que caben todas. */
+const cache = new Map<string, { hasta: number; tenantId: string }>();
+/**
+ * Las que no existen o están revocadas, con hasta cuándo se recuerdan. Van aparte porque cualquiera
+ * puede inventarlas, con la forma buena y sin límite: llenar ésta no vacía la de arriba. Llegada a su
+ * tope, se olvida la más antigua.
+ */
+const cacheNegativa = new Map<string, number>();
+const CACHE_NEGATIVA_MAX = 1000;
 
 /**
  * El negocio de una clave, o `null` si no existe o está revocada. Se cachea por isolate un minuto,
  * como la licencia (`lib/licenciaEnUso.ts`): sin caché, cada visita a un widget sería una consulta
- * más a la base central. Revocar una clave tarda, como mucho, ese minuto en notarse.
+ * más a la base central. Revocar una clave tarda, como mucho, ese minuto en notarse. Una clave que no
+ * vale también se recuerda ese minuto (la de una web que la sigue teniendo pegada), en su caché.
  */
 export async function negocioDeLaClave(db: Sql, clave: string): Promise<string | null> {
 	if (!CLAVE_RE.test(clave)) return null;
 	const ahora = Date.now();
-	const guardado = cache.get(clave);
-	if (guardado && guardado.hasta > ahora) return guardado.tenantId;
+	const cacheado = deLaCache(clave, ahora);
+	if (cacheado !== undefined) return cacheado;
 
 	const rs = await db.execute({
 		sql: "SELECT tenant_id FROM reserva_web_claves WHERE clave = ? AND revoked_at_ms IS NULL LIMIT 1;",
@@ -86,9 +95,29 @@ export async function negocioDeLaClave(db: Sql, clave: string): Promise<string |
 	});
 	const tenantId = ((rs.rows?.[0] as any)?.tenant_id as string | undefined) ?? null;
 
-	if (cache.size >= CACHE_MAX) cache.clear();
-	cache.set(clave, { hasta: ahora + CACHE_MS, tenantId });
+	if (tenantId) {
+		cacheNegativa.delete(clave);
+		if (cache.size >= CACHE_MAX) cache.clear();
+		cache.set(clave, { hasta: ahora + CACHE_MS, tenantId });
+	} else {
+		cache.delete(clave);
+		// Se borra antes de apuntarla para que quede la última en el orden en que se olvidan.
+		cacheNegativa.delete(clave);
+		if (cacheNegativa.size >= CACHE_NEGATIVA_MAX) {
+			const masAntigua = cacheNegativa.keys().next();
+			if (!masAntigua.done) cacheNegativa.delete(masAntigua.value);
+		}
+		cacheNegativa.set(clave, ahora + CACHE_MS);
+	}
 	return tenantId;
+}
+
+/** El negocio de la clave según las cachés: el negocio, `null` si no vale, o `undefined` si no lo saben. */
+function deLaCache(clave: string, ahora: number): string | null | undefined {
+	const buena = cache.get(clave);
+	if (buena && buena.hasta > ahora) return buena.tenantId;
+	const mala = cacheNegativa.get(clave);
+	return mala !== undefined && mala > ahora ? null : undefined;
 }
 
 /**
@@ -97,8 +126,7 @@ export async function negocioDeLaClave(db: Sql, clave: string): Promise<string |
  * cortado antes de resolver la clave (el limitador) no puede abrir la puerta a un barrido de claves.
  */
 export function negocioCacheado(clave: string): string | null | undefined {
-	const guardado = cache.get(clave);
-	return guardado && guardado.hasta > Date.now() ? guardado.tenantId : undefined;
+	return deLaCache(clave, Date.now());
 }
 
 const cacheDominios = new Map<string, { hasta: number; dominios: string[] }>();
@@ -182,5 +210,6 @@ export async function quitarDominio(db: Sql, tenantId: string, origen: string): 
 /** Sólo para los tests: un isolate de vitest se reutiliza entre casos. */
 export function olvidarClavesCacheadas(): void {
 	cache.clear();
+	cacheNegativa.clear();
 	cacheDominios.clear();
 }

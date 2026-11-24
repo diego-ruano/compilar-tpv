@@ -35,6 +35,7 @@ import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { codigoDeReserva, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
 import { reportarReservaWeb } from "../../observability/axiom";
+import { enSegundoPlano } from "../../lib/enSegundoPlano";
 import { msDelId } from "../../lib/ids";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { RETENCION_ENVIOS_MS } from "../../server/purga";
@@ -80,13 +81,7 @@ function rechazada(c: any, r: RechazoAgenda) {
 
 /** El evento a Axiom, retenido más allá de la respuesta (ver `observability/axiom.ts`). */
 function anotar(c: any, campos: Parameters<typeof reportarReservaWeb>[1]): void {
-	const envio = reportarReservaWeb(c.env, campos);
-	try {
-		c.executionCtx.waitUntil(envio);
-	} catch {
-		// Sin contexto de ejecución (los tests): perder un evento no tumba la petición.
-		void envio;
-	}
+	enSegundoPlano(c, reportarReservaWeb(c.env, campos));
 }
 
 reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {

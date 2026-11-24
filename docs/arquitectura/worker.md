@@ -34,7 +34,11 @@ DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (las imágenes y el PDF d
 por el worker, [Imágenes](#imágenes) y [Facturas en PDF](#facturas-en-pdf)),
 `tpv-copias-control` (privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los
 limitadores por IP `LIMITADOR_CLAIM`, `LIMITADOR_LICENCIA`, `LIMITADOR_RESERVA_WEB`,
-`LIMITADOR_RESERVA_WEB_ALTA` y `LIMITADOR_IMAGENES` (`lib/limitador.ts`) y el cron diario `0 7 * * *`.
+`LIMITADOR_RESERVA_WEB_ALTA`, `LIMITADOR_IMAGENES`, `LIMITADOR_ACTUALIZACIONES` (el feed) y
+`LIMITADOR_SESION` (`/ws`, `/v1/license/refresh` y la espera de la Handy al emparejarse)
+(`lib/limitador.ts`) y el cron diario `0 7 * * *`. Todos cuentan por red: la IPv4 tal cual y la IPv6
+por su /64 (AUD-11). Toda ruta anónima que lee la base central lleva delante uno de esos filtros o una
+caché; lo vigila `test/centralAnonimas.test.ts`.
 
 RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`; lo de los TPV
 (imágenes y facturas) va en `IMAGES`, separado por carpetas. En desarrollo local, R2 y
@@ -139,6 +143,15 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Los dos salen como `external` (lo que la Main y la Handy tratan como la nube sin disponibilidad),
   quedan en Axiom (`hub_no_disponible`) y, si la plataforma no lo da por pasajero, van también a
   Sentry (`hub.ejecutar_ruta`). Lo cubre `test/alHubSinElObjeto.test.ts`.
+
+  Cuando la que no puede atender es la base central, la respuesta es la misma
+  (`server/central/sinLaCentral.ts`): saturada, `hub_overloaded` con `Retry-After`; un fallo pasajero,
+  un plazo vencido, la central sin aprovisionar o averiada, `hub_unavailable`. La traducen el
+  `onError`, el `/ws` y la activación al crear la base del negocio. `tenantAuth` sólo contesta 401 a
+  un token o una firma que no valen (`RechazoDeAutenticacion`); cualquier fallo de la central sube al
+  `onError`. Queda en Axiom
+  (`central_no_disponible`, con el motivo) y, si no es carga ni un fallo pasajero, en Sentry. Lo cubre
+  `test/centralNoDisponible.test.ts`.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
   Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de

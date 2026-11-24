@@ -19,7 +19,7 @@
 //     vuelve a servir la anterior activa. Sin tocar el equipo del cliente.
 //
 // Los binarios (instalador + .sig) se hospedan donde quieras (R2, etc.); aquí solo guardamos su
-// URL y la firma. La fuente de versiones es la tabla `app_releases` de la Turso central.
+// URL y la firma. La fuente de versiones es la tabla `app_releases` de la base central.
 //
 // QUÉ SISTEMA Y QUÉ CANAL son dos cosas distintas. El sistema va en el `target`: `windows` es el de
 // Windows 10/11 y `windows7` la variante de Windows 7, que se lo fija ella misma al updater. El canal
@@ -33,7 +33,10 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
+import { esPasajeroDeLaCentral } from "../../server/central/sinLaCentral";
 import { checkAdminToken } from "../../middleware/requireAdmin";
+import { filtroPorIp } from "../../lib/limitador";
+import type { Sql } from "../../lib/sql";
 import { cuerpo } from "../../lib/validacion";
 
 export const updatesRoutes = new Hono<{ Bindings: Env }>();
@@ -108,59 +111,110 @@ type Release = {
 	url: string;
 };
 
+/* ── Lo que el feed lee de la base central ───────────────────────────────────
+ *
+ * El feed es público: lo pide cada equipo de escritorio cada seis horas, y cualquiera puede pedirlo
+ * con el sistema, la arquitectura y el equipo que quiera. Para que nada de eso llegue a la base
+ * central, el feed no la consulta por petición: lee de una vez TODAS las versiones activas y los
+ * equipos de los bares piloto, se los guarda en el isolate `VIDA_EN_CACHE_MS`, y cada petición
+ * escoge de ahí. Ninguna combinación de camino ni de cabecera vuelve a la base antes de tiempo, y
+ * delante va además el filtro por IP (`LIMITADOR_ACTUALIZACIONES`).
+ *
+ * Lo que cambia el feed —publicar, retirar o promocionar una versión, marcar un bar piloto— vacía la
+ * caché del isolate que lo atiende (`olvidarLoQueLeeElFeed`), y lo que ese isolate estuviera leyendo
+ * en ese momento ya no se guarda; los demás lo ven, como mucho, un minuto después. También tarda ese
+ * minuto, como mucho, en dejar de contar como piloto un equipo revocado.
+ */
+const VIDA_EN_CACHE_MS = 60_000;
+
+/** Una versión activa, con lo que la identifica: el sistema, la arquitectura y el canal. */
+type VersionActiva = Release & { target: string; arch: string; channel: string };
+
+let versionesEnCache: { hastaMs: number; versiones: VersionActiva[] } | null = null;
+let pilotosEnCache: { hastaMs: number; equipos: Set<string> } | null = null;
+/**
+ * Cuántas veces se ha vaciado lo guardado. Una lectura que empezó antes de un vaciado no guarda lo que
+ * trae: es lo de antes del cambio, y quedaría un minuto más.
+ */
+let vaciados = 0;
+
+/** Las versiones activas de todos los sistemas, arquitecturas y canales. Si la base falla, lanza. */
+async function versionesActivas(db: Sql, ahoraMs: number): Promise<VersionActiva[]> {
+	if (versionesEnCache && versionesEnCache.hastaMs > ahoraMs) return versionesEnCache.versiones;
+	const vaciadosAlLeer = vaciados;
+	const r = await db.execute(`
+		SELECT version, target, arch, channel, notes, pub_date, signature, url
+		FROM app_releases
+		WHERE is_active = 1
+	`);
+	const versiones = (r.rows ?? []) as unknown as VersionActiva[];
+	if (vaciadosAlLeer === vaciados) versionesEnCache = { hastaMs: ahoraMs + VIDA_EN_CACHE_MS, versiones };
+	return versiones;
+}
+
 /**
  * RI-30 · ¿Es este equipo de un negocio piloto? El `device_id` llega sin firmar, y no hace falta más:
  * quien se haga pasar por un piloto sólo consigue una versión antes, y el instalador va firmado igual.
  *
- * Cualquier fallo (sin cabecera, equipo desconocido, la columna aún sin crear en Turso) es «no»: el
- * canal normal es siempre una respuesta segura.
+ * Cualquier fallo (sin cabecera, equipo desconocido o revocado, la base que no contesta) es «no»: el
+ * canal normal es siempre una respuesta segura. Un fallo no se guarda: la petición siguiente vuelve a
+ * preguntar. La central saturada o un fallo pasajero de la plataforma se pasan solos y no van a Sentry.
  */
-async function esPiloto(db: ReturnType<typeof getDb>, deviceId: string): Promise<boolean> {
+async function esPiloto(db: Sql, deviceId: string, ahoraMs: number): Promise<boolean> {
 	if (!deviceId) return false;
+	if (pilotosEnCache && pilotosEnCache.hastaMs > ahoraMs) return pilotosEnCache.equipos.has(deviceId);
+
+	const vaciadosAlLeer = vaciados;
+	let equipos: Set<string>;
 	try {
-		const r = await db.execute({
-			sql: `
-				SELECT t.piloto AS piloto
-				FROM devices d JOIN tenants t ON t.tenant_id = d.tenant_id
-				WHERE d.device_id = ? AND d.revoked_at_ms IS NULL
-				LIMIT 1
-			`,
-			args: [deviceId],
-		});
-		return Number((r.rows?.[0] as any)?.piloto ?? 0) === 1;
+		const r = await db.execute(`
+			SELECT d.device_id AS device_id
+			FROM devices d JOIN tenants t ON t.tenant_id = d.tenant_id
+			WHERE t.piloto = 1 AND d.revoked_at_ms IS NULL
+		`);
+		equipos = new Set((r.rows ?? []).map((f) => String((f as any).device_id)));
 	} catch (e: any) {
-		capturarError(e, "update.pilot_lookup");
-		console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
+		if (!esPasajeroDeLaCentral(e)) {
+			capturarError(e, "update.pilot_lookup");
+			console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
+		}
 		return false;
 	}
+	if (vaciadosAlLeer === vaciados) pilotosEnCache = { hastaMs: ahoraMs + VIDA_EN_CACHE_MS, equipos };
+	return equipos.has(deviceId);
 }
 
-updatesRoutes.get("/:target/:arch/:current", async (c) => {
+/** Lo que el feed tiene guardado deja de valer: lo llama quien cambia una versión o un bar piloto. */
+export function olvidarLoQueLeeElFeed(): void {
+	versionesEnCache = null;
+	pilotosEnCache = null;
+	vaciados++;
+}
+
+updatesRoutes.get("/:target/:arch/:current", filtroPorIp("LIMITADOR_ACTUALIZACIONES", "update"), async (c) => {
 	const target = c.req.param("target"); // p. ej. "windows"
 	const arch = c.req.param("arch"); // p. ej. "x86_64"
 	const current = c.req.param("current"); // versión instalada (sólo para observabilidad)
 
 	const db = getDb(c.env);
-	const piloto = await esPiloto(db, String(c.req.header("X-Tpv-Device") || "").trim());
+	const ahoraMs = Date.now();
+	// Las versiones antes que el piloto: si la base no puede atender, la petición falla en el primer
+	// viaje (su 503, por el `onError`) sin hacer otro.
+	const activas = await versionesActivas(db, ahoraMs);
+	const piloto = await esPiloto(db, String(c.req.header("X-Tpv-Device") || "").trim(), ahoraMs);
 
 	// REV-23: se filtra por `arch`, que antes se ignoraba —llegaba en la ruta, no entraba en la
 	// consulta y sólo servía para componer la clave de `platforms`—. O sea que un equipo aarch64
 	// se llevaba el instalador x86_64 etiquetado como suyo. En Windows arranca emulado y por eso
 	// no se ha notado; el día que exista una build aarch64 se notaría instalando la que no es.
 	//
-	// Y se traen TODAS las activas en vez de la última insertada: cuál es la más nueva lo decide
+	// Y se miran TODAS las activas en vez de la última insertada: cuál es la más nueva lo decide
 	// la versión, no la fecha de la fila. Son unas pocas decenas de filas como mucho.
-	const r = await db.execute({
-		sql: `
-			SELECT version, notes, pub_date, signature, url
-			FROM app_releases
-			WHERE target = ? AND arch = ? AND is_active = 1
-			  AND (channel = 'stable' OR (?3 = 1 AND channel = 'beta'))
-		`,
-		args: [target, arch, piloto ? 1 : 0],
-	});
+	const candidatas = activas.filter(
+		(v) => v.target === target && v.arch === arch && (v.channel === "stable" || (piloto && v.channel === "beta")),
+	);
 
-	const row = ((r.rows ?? []) as unknown as Release[]).reduce<Release | undefined>(
+	const row = candidatas.reduce<Release | undefined>(
 		(mejor, fila) =>
 			!mejor || compararVersiones(fila.version, mejor.version) > 0 ? fila : mejor,
 		undefined,
@@ -244,6 +298,7 @@ updatesRoutes.post("/publish", soloConTokenDeRelease, cuerpo(publishSchema), asy
 			datos.url,
 		],
 	});
+	olvidarLoQueLeeElFeed();
 
 	return c.json({ ok: true, version: datos.version, target, arch, channel });
 });
@@ -276,6 +331,7 @@ updatesRoutes.post("/deactivate", soloConTokenDeRelease, cuerpo(deactivateSchema
 		`,
 		args: [datos.version, target, channel ?? null, arch ?? null],
 	});
+	olvidarLoQueLeeElFeed();
 
 	return c.json({
 		ok: true,
