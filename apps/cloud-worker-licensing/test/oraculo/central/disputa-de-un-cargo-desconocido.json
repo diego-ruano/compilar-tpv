@@ -1,0 +1,337 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"paso": 1,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_1",
+				"object": "event",
+				"type": "charge.dispute.created",
+				"data": {
+					"object": {
+						"id": "du_cs_desconocida",
+						"object": "dispute",
+						"charge": "ch_cs_desconocida",
+						"payment_intent": "pi_cs_desconocida",
+						"amount": 12000,
+						"status": "needs_response"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"reversed": false,
+					"reason": "unresolved_license"
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·1›",
+							"action": "dispute",
+							"license_id": null,
+							"detail": {
+								"‹texto json›": {
+									"event_uid": "evt_1",
+									"resultado": "sin_licencia_atribuible",
+									"payment_intent": "pi_cs_desconocida"
+								}
+							},
+							"at_ms": "T0+0d 00:01"
+						}
+					}
+				],
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_1",
+							"event_name": "charge.dispute.created",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_desconocida",
+							"sig_hex": null,
+							"body_sha256": "‹hash·1›",
+							"payload_json": {
+								"‹texto json›": {
+									"id": "evt_1",
+									"object": "event",
+									"type": "charge.dispute.created",
+									"data": {
+										"object": {
+											"id": "du_cs_desconocida",
+											"object": "dispute",
+											"charge": "ch_cs_desconocida",
+											"payment_intent": "pi_cs_desconocida",
+											"amount": 12000,
+											"status": "needs_response"
+										}
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:01",
+							"processed_at_ms": "T0+0d 00:01",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_2",
+				"object": "event",
+				"type": "charge.dispute.closed",
+				"data": {
+					"object": {
+						"id": "du_cs_desconocida",
+						"object": "dispute",
+						"charge": "ch_cs_desconocida",
+						"payment_intent": "pi_cs_desconocida",
+						"amount": 12000,
+						"status": "won"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"restored": false,
+					"reason": "unresolved_license"
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_2",
+							"event_name": "charge.dispute.closed",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_desconocida",
+							"sig_hex": null,
+							"body_sha256": "‹hash·2›",
+							"payload_json": {
+								"‹texto json›": {
+									"id": "evt_2",
+									"object": "event",
+									"type": "charge.dispute.closed",
+									"data": {
+										"object": {
+											"id": "du_cs_desconocida",
+											"object": "dispute",
+											"charge": "ch_cs_desconocida",
+											"payment_intent": "pi_cs_desconocida",
+											"amount": 12000,
+											"status": "won"
+										}
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:02",
+							"processed_at_ms": "T0+0d 00:02",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 3,
+			"peticion": "POST /v1/stripe/webhook",
+			"cuerpo": {
+				"id": "evt_3",
+				"object": "event",
+				"type": "charge.dispute.closed",
+				"data": {
+					"object": {
+						"id": "du_cs_desconocida",
+						"object": "dispute",
+						"charge": "ch_cs_desconocida",
+						"payment_intent": "pi_cs_desconocida",
+						"amount": 12000,
+						"status": "lost"
+					}
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"received": true,
+					"restored": false,
+					"reason": "lost"
+				}
+			},
+			"cambios": {
+				"webhook_events": [
+					{
+						"nueva": {
+							"event_uid": "evt_3",
+							"event_name": "charge.dispute.closed",
+							"resource_type": "dispute",
+							"resource_id": "du_cs_desconocida",
+							"sig_hex": null,
+							"body_sha256": "‹hash·3›",
+							"payload_json": {
+								"‹texto json›": {
+									"id": "evt_3",
+									"object": "event",
+									"type": "charge.dispute.closed",
+									"data": {
+										"object": {
+											"id": "du_cs_desconocida",
+											"object": "dispute",
+											"charge": "ch_cs_desconocida",
+											"payment_intent": "pi_cs_desconocida",
+											"amount": 12000,
+											"status": "lost"
+										}
+									}
+								}
+							},
+							"received_at_ms": "T0+0d 00:03",
+							"processed_at_ms": "T0+0d 00:03",
+							"processed_ok": 1,
+							"error_text": null
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [
+			{
+				"audit_id": "‹id·1›",
+				"action": "dispute",
+				"license_id": null,
+				"detail": {
+					"‹texto json›": {
+						"event_uid": "evt_1",
+						"resultado": "sin_licencia_atribuible",
+						"payment_intent": "pi_cs_desconocida"
+					}
+				},
+				"at_ms": "T0+0d 00:01"
+			}
+		],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [],
+		"licenses": [],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [],
+		"webhook_events": [
+			{
+				"event_uid": "evt_1",
+				"event_name": "charge.dispute.created",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_desconocida",
+				"sig_hex": null,
+				"body_sha256": "‹hash·1›",
+				"payload_json": {
+					"‹texto json›": {
+						"id": "evt_1",
+						"object": "event",
+						"type": "charge.dispute.created",
+						"data": {
+							"object": {
+								"id": "du_cs_desconocida",
+								"object": "dispute",
+								"charge": "ch_cs_desconocida",
+								"payment_intent": "pi_cs_desconocida",
+								"amount": 12000,
+								"status": "needs_response"
+							}
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:01",
+				"processed_at_ms": "T0+0d 00:01",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_2",
+				"event_name": "charge.dispute.closed",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_desconocida",
+				"sig_hex": null,
+				"body_sha256": "‹hash·2›",
+				"payload_json": {
+					"‹texto json›": {
+						"id": "evt_2",
+						"object": "event",
+						"type": "charge.dispute.closed",
+						"data": {
+							"object": {
+								"id": "du_cs_desconocida",
+								"object": "dispute",
+								"charge": "ch_cs_desconocida",
+								"payment_intent": "pi_cs_desconocida",
+								"amount": 12000,
+								"status": "won"
+							}
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:02",
+				"processed_at_ms": "T0+0d 00:02",
+				"processed_ok": 1,
+				"error_text": null
+			},
+			{
+				"event_uid": "evt_3",
+				"event_name": "charge.dispute.closed",
+				"resource_type": "dispute",
+				"resource_id": "du_cs_desconocida",
+				"sig_hex": null,
+				"body_sha256": "‹hash·3›",
+				"payload_json": {
+					"‹texto json›": {
+						"id": "evt_3",
+						"object": "event",
+						"type": "charge.dispute.closed",
+						"data": {
+							"object": {
+								"id": "du_cs_desconocida",
+								"object": "dispute",
+								"charge": "ch_cs_desconocida",
+								"payment_intent": "pi_cs_desconocida",
+								"amount": 12000,
+								"status": "lost"
+							}
+						}
+					}
+				},
+				"received_at_ms": "T0+0d 00:03",
+				"processed_at_ms": "T0+0d 00:03",
+				"processed_ok": 1,
+				"error_text": null
+			}
+		]
+	}
+}

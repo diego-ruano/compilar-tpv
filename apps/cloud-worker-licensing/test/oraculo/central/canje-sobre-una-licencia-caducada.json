@@ -1,5 +1,5 @@
 {
-	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
 	"pasos": [
 		{
 			"paso": 1,
@@ -77,12 +77,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:01"
 						}
@@ -98,14 +100,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·1›",
 							"payload_json": {
-								"id": "evt_1",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_base",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_1",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_base",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -147,7 +151,7 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+365d 00:02",
+					"expiresAt": "iso:T0+365d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false
 				}
@@ -302,12 +306,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+400d 00:03"
 						}
@@ -323,14 +329,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·2›",
 							"payload_json": {
-								"id": "evt_2",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_renovacion",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_2",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_renovacion",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -372,19 +380,12 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+766d 00:04",
+					"expiresAt": "iso:T0+766d 00:04:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false,
 					"tiempoSumado": true
 				}
 			},
-			"correos": [
-				{
-					"para": "cs-base@ejemplo.test",
-					"asunto": "Licencia renovada",
-					"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 6 de abril de 2028.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
-				}
-			],
 			"cambios": {
 				"license_payments": [
 					{
@@ -423,6 +424,15 @@
 							"redeemed_into_license_id": null,
 							"updated_at_ms": "T0+400d 00:03"
 						}
+					}
+				]
+			},
+			"enSegundoPlano": {
+				"correos": [
+					{
+						"para": "cs-base@ejemplo.test",
+						"asunto": "Licencia renovada",
+						"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 6 de abril de 2028.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
 					}
 				]
 			}
@@ -509,12 +519,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:01"
 			},
@@ -545,12 +557,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+400d 00:03"
 			}
@@ -586,14 +600,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·1›",
 				"payload_json": {
-					"id": "evt_1",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_base",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_1",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_base",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -610,14 +626,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·2›",
 				"payload_json": {
-					"id": "evt_2",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_renovacion",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_2",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_renovacion",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},

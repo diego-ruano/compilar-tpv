@@ -1,5 +1,5 @@
 {
-	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
 	"pasos": [
 		{
 			"paso": 1,
@@ -77,12 +77,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:01"
 						}
@@ -98,14 +100,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·1›",
 							"payload_json": {
-								"id": "evt_1",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_base",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_1",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_base",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -147,7 +151,7 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+365d 00:02",
+					"expiresAt": "iso:T0+365d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false
 				}
@@ -314,12 +318,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:03"
 						}
@@ -352,12 +358,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:03"
 						}
@@ -373,14 +381,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·2›",
 							"payload_json": {
-								"id": "evt_2",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_pack",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_2",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_pack",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -422,19 +432,12 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+731d 00:02",
+					"expiresAt": "iso:T0+731d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false,
 					"tiempoSumado": true
 				}
 			},
-			"correos": [
-				{
-					"para": "cs-base@ejemplo.test",
-					"asunto": "Licencia renovada",
-					"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2028.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
-				}
-			],
 			"cambios": {
 				"license_payments": [
 					{
@@ -475,6 +478,15 @@
 						}
 					}
 				]
+			},
+			"enSegundoPlano": {
+				"correos": [
+					{
+						"para": "cs-base@ejemplo.test",
+						"asunto": "Licencia renovada",
+						"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2028.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
+					}
+				]
 			}
 		},
 		{
@@ -506,19 +518,12 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+1096d 00:02",
+					"expiresAt": "iso:T0+1096d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false,
 					"tiempoSumado": true
 				}
 			},
-			"correos": [
-				{
-					"para": "cs-base@ejemplo.test",
-					"asunto": "Licencia renovada",
-					"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2029.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
-				}
-			],
 			"cambios": {
 				"license_payments": [
 					{
@@ -557,6 +562,15 @@
 							"redeemed_into_license_id": null,
 							"updated_at_ms": "T0+0d 00:03"
 						}
+					}
+				]
+			},
+			"enSegundoPlano": {
+				"correos": [
+					{
+						"para": "cs-base@ejemplo.test",
+						"asunto": "Licencia renovada",
+						"texto": "Hola, Bar de pruebas:\n\nHemos añadido 1 año a tu licencia. Ya está activa hasta el 2 de marzo de 2029.\n\nNo tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo."
 					}
 				]
 			}
@@ -607,12 +621,14 @@
 							"action": "dispute",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_3",
-								"accion": "meses_restados",
-								"term_months": 12,
-								"expires_at_ms": "T0+731d 00:02",
-								"dias_activada": 0,
-								"payment_intent": "pi_cs_pack"
+								"‹texto json›": {
+									"event_uid": "evt_3",
+									"accion": "meses_restados",
+									"term_months": 12,
+									"expires_at_ms": "T0+731d 00:02",
+									"dias_activada": 0,
+									"payment_intent": "pi_cs_pack"
+								}
 							},
 							"at_ms": "T0+0d 00:06"
 						}
@@ -623,12 +639,14 @@
 							"action": "dispute",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_3",
-								"accion": "meses_restados",
-								"term_months": 12,
-								"expires_at_ms": "T0+365d 00:02",
-								"dias_activada": 0,
-								"payment_intent": "pi_cs_pack"
+								"‹texto json›": {
+									"event_uid": "evt_3",
+									"accion": "meses_restados",
+									"term_months": 12,
+									"expires_at_ms": "T0+365d 00:02",
+									"dias_activada": 0,
+									"payment_intent": "pi_cs_pack"
+								}
 							},
 							"at_ms": "T0+0d 00:06"
 						}
@@ -685,17 +703,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·3›",
 							"payload_json": {
-								"id": "evt_3",
-								"object": "event",
-								"type": "charge.dispute.created",
-								"data": {
-									"object": {
-										"id": "du_cs_pack",
-										"object": "dispute",
-										"charge": "ch_cs_pack",
-										"payment_intent": "pi_cs_pack",
-										"amount": 24000,
-										"status": "needs_response"
+								"‹texto json›": {
+									"id": "evt_3",
+									"object": "event",
+									"type": "charge.dispute.created",
+									"data": {
+										"object": {
+											"id": "du_cs_pack",
+											"object": "dispute",
+											"charge": "ch_cs_pack",
+											"payment_intent": "pi_cs_pack",
+											"amount": 24000,
+											"status": "needs_response"
+										}
 									}
 								}
 							},
@@ -747,8 +767,10 @@
 							"action": "reactivate",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_4",
-								"motivo": "disputa_ganada"
+								"‹texto json›": {
+									"event_uid": "evt_4",
+									"motivo": "disputa_ganada"
+								}
 							},
 							"at_ms": "T0+0d 00:07"
 						}
@@ -759,8 +781,10 @@
 							"action": "reactivate",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_4",
-								"motivo": "disputa_ganada"
+								"‹texto json›": {
+									"event_uid": "evt_4",
+									"motivo": "disputa_ganada"
+								}
 							},
 							"at_ms": "T0+0d 00:07"
 						}
@@ -817,17 +841,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·4›",
 							"payload_json": {
-								"id": "evt_4",
-								"object": "event",
-								"type": "charge.dispute.closed",
-								"data": {
-									"object": {
-										"id": "du_cs_pack",
-										"object": "dispute",
-										"charge": "ch_cs_pack",
-										"payment_intent": "pi_cs_pack",
-										"amount": 24000,
-										"status": "won"
+								"‹texto json›": {
+									"id": "evt_4",
+									"object": "event",
+									"type": "charge.dispute.closed",
+									"data": {
+										"object": {
+											"id": "du_cs_pack",
+											"object": "dispute",
+											"charge": "ch_cs_pack",
+											"payment_intent": "pi_cs_pack",
+											"amount": 24000,
+											"status": "won"
+										}
 									}
 								}
 							},
@@ -886,12 +912,14 @@
 							"action": "refund",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_5",
-								"accion": "meses_restados",
-								"term_months": 12,
-								"expires_at_ms": "T0+731d 00:02",
-								"dias_activada": 0,
-								"payment_intent": "pi_cs_pack"
+								"‹texto json›": {
+									"event_uid": "evt_5",
+									"accion": "meses_restados",
+									"term_months": 12,
+									"expires_at_ms": "T0+731d 00:02",
+									"dias_activada": 0,
+									"payment_intent": "pi_cs_pack"
+								}
 							},
 							"at_ms": "T0+0d 00:08"
 						}
@@ -902,12 +930,14 @@
 							"action": "refund",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_5",
-								"accion": "meses_restados",
-								"term_months": 12,
-								"expires_at_ms": "T0+365d 00:02",
-								"dias_activada": 0,
-								"payment_intent": "pi_cs_pack"
+								"‹texto json›": {
+									"event_uid": "evt_5",
+									"accion": "meses_restados",
+									"term_months": 12,
+									"expires_at_ms": "T0+365d 00:02",
+									"dias_activada": 0,
+									"payment_intent": "pi_cs_pack"
+								}
 							},
 							"at_ms": "T0+0d 00:08"
 						}
@@ -964,17 +994,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·5›",
 							"payload_json": {
-								"id": "evt_5",
-								"object": "event",
-								"type": "charge.refunded",
-								"data": {
-									"object": {
-										"id": "ch_cs_pack",
-										"object": "charge",
-										"payment_intent": "pi_cs_pack",
-										"customer": "cus_oraculo",
-										"amount": 24000,
-										"amount_refunded": 24000
+								"‹texto json›": {
+									"id": "evt_5",
+									"object": "event",
+									"type": "charge.refunded",
+									"data": {
+										"object": {
+											"id": "ch_cs_pack",
+											"object": "charge",
+											"payment_intent": "pi_cs_pack",
+											"customer": "cus_oraculo",
+											"amount": 24000,
+											"amount_refunded": 24000
+										}
 									}
 								}
 							},
@@ -996,12 +1028,14 @@
 				"action": "dispute",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_3",
-					"accion": "meses_restados",
-					"term_months": 12,
-					"expires_at_ms": "T0+731d 00:02",
-					"dias_activada": 0,
-					"payment_intent": "pi_cs_pack"
+					"‹texto json›": {
+						"event_uid": "evt_3",
+						"accion": "meses_restados",
+						"term_months": 12,
+						"expires_at_ms": "T0+731d 00:02",
+						"dias_activada": 0,
+						"payment_intent": "pi_cs_pack"
+					}
 				},
 				"at_ms": "T0+0d 00:06"
 			},
@@ -1010,12 +1044,14 @@
 				"action": "dispute",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_3",
-					"accion": "meses_restados",
-					"term_months": 12,
-					"expires_at_ms": "T0+365d 00:02",
-					"dias_activada": 0,
-					"payment_intent": "pi_cs_pack"
+					"‹texto json›": {
+						"event_uid": "evt_3",
+						"accion": "meses_restados",
+						"term_months": 12,
+						"expires_at_ms": "T0+365d 00:02",
+						"dias_activada": 0,
+						"payment_intent": "pi_cs_pack"
+					}
 				},
 				"at_ms": "T0+0d 00:06"
 			},
@@ -1024,8 +1060,10 @@
 				"action": "reactivate",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_4",
-					"motivo": "disputa_ganada"
+					"‹texto json›": {
+						"event_uid": "evt_4",
+						"motivo": "disputa_ganada"
+					}
 				},
 				"at_ms": "T0+0d 00:07"
 			},
@@ -1034,8 +1072,10 @@
 				"action": "reactivate",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_4",
-					"motivo": "disputa_ganada"
+					"‹texto json›": {
+						"event_uid": "evt_4",
+						"motivo": "disputa_ganada"
+					}
 				},
 				"at_ms": "T0+0d 00:07"
 			},
@@ -1044,12 +1084,14 @@
 				"action": "refund",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_5",
-					"accion": "meses_restados",
-					"term_months": 12,
-					"expires_at_ms": "T0+731d 00:02",
-					"dias_activada": 0,
-					"payment_intent": "pi_cs_pack"
+					"‹texto json›": {
+						"event_uid": "evt_5",
+						"accion": "meses_restados",
+						"term_months": 12,
+						"expires_at_ms": "T0+731d 00:02",
+						"dias_activada": 0,
+						"payment_intent": "pi_cs_pack"
+					}
 				},
 				"at_ms": "T0+0d 00:08"
 			},
@@ -1058,12 +1100,14 @@
 				"action": "refund",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_5",
-					"accion": "meses_restados",
-					"term_months": 12,
-					"expires_at_ms": "T0+365d 00:02",
-					"dias_activada": 0,
-					"payment_intent": "pi_cs_pack"
+					"‹texto json›": {
+						"event_uid": "evt_5",
+						"accion": "meses_restados",
+						"term_months": 12,
+						"expires_at_ms": "T0+365d 00:02",
+						"dias_activada": 0,
+						"payment_intent": "pi_cs_pack"
+					}
 				},
 				"at_ms": "T0+0d 00:08"
 			}
@@ -1159,12 +1203,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:01"
 			},
@@ -1195,12 +1241,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:03"
 			},
@@ -1231,12 +1279,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:03"
 			}
@@ -1272,14 +1322,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·1›",
 				"payload_json": {
-					"id": "evt_1",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_base",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_1",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_base",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -1296,14 +1348,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·2›",
 				"payload_json": {
-					"id": "evt_2",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_pack",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_2",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_pack",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -1320,17 +1374,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·3›",
 				"payload_json": {
-					"id": "evt_3",
-					"object": "event",
-					"type": "charge.dispute.created",
-					"data": {
-						"object": {
-							"id": "du_cs_pack",
-							"object": "dispute",
-							"charge": "ch_cs_pack",
-							"payment_intent": "pi_cs_pack",
-							"amount": 24000,
-							"status": "needs_response"
+					"‹texto json›": {
+						"id": "evt_3",
+						"object": "event",
+						"type": "charge.dispute.created",
+						"data": {
+							"object": {
+								"id": "du_cs_pack",
+								"object": "dispute",
+								"charge": "ch_cs_pack",
+								"payment_intent": "pi_cs_pack",
+								"amount": 24000,
+								"status": "needs_response"
+							}
 						}
 					}
 				},
@@ -1347,17 +1403,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·4›",
 				"payload_json": {
-					"id": "evt_4",
-					"object": "event",
-					"type": "charge.dispute.closed",
-					"data": {
-						"object": {
-							"id": "du_cs_pack",
-							"object": "dispute",
-							"charge": "ch_cs_pack",
-							"payment_intent": "pi_cs_pack",
-							"amount": 24000,
-							"status": "won"
+					"‹texto json›": {
+						"id": "evt_4",
+						"object": "event",
+						"type": "charge.dispute.closed",
+						"data": {
+							"object": {
+								"id": "du_cs_pack",
+								"object": "dispute",
+								"charge": "ch_cs_pack",
+								"payment_intent": "pi_cs_pack",
+								"amount": 24000,
+								"status": "won"
+							}
 						}
 					}
 				},
@@ -1374,17 +1432,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·5›",
 				"payload_json": {
-					"id": "evt_5",
-					"object": "event",
-					"type": "charge.refunded",
-					"data": {
-						"object": {
-							"id": "ch_cs_pack",
-							"object": "charge",
-							"payment_intent": "pi_cs_pack",
-							"customer": "cus_oraculo",
-							"amount": 24000,
-							"amount_refunded": 24000
+					"‹texto json›": {
+						"id": "evt_5",
+						"object": "event",
+						"type": "charge.refunded",
+						"data": {
+							"object": {
+								"id": "ch_cs_pack",
+								"object": "charge",
+								"payment_intent": "pi_cs_pack",
+								"customer": "cus_oraculo",
+								"amount": 24000,
+								"amount_refunded": 24000
+							}
 						}
 					}
 				},

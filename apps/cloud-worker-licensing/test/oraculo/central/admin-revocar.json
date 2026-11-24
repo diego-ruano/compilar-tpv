@@ -1,5 +1,5 @@
 {
-	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
 	"pasos": [
 		{
 			"paso": 1,
@@ -29,10 +29,12 @@
 							"action": "issue",
 							"license_id": "‹id·1›",
 							"detail": {
-								"termMonths": 12,
-								"email": "activada@ejemplo.test",
-								"keyShort": "‹clave corta·1›",
-								"sendKey": false
+								"‹texto json›": {
+									"termMonths": 12,
+									"email": "activada@ejemplo.test",
+									"keyShort": "‹clave corta·1›",
+									"sendKey": false
+								}
 							},
 							"at_ms": "T0+0d 00:01"
 						}
@@ -102,7 +104,7 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+365d 00:02",
+					"expiresAt": "iso:T0+365d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false
 				}
@@ -207,7 +209,9 @@
 							"action": "revoke",
 							"license_id": "‹id·1›",
 							"detail": {
-								"keyShort": "‹clave corta·1›"
+								"‹texto json›": {
+									"keyShort": "‹clave corta·1›"
+								}
 							},
 							"at_ms": "T0+0d 00:03"
 						}
@@ -250,7 +254,9 @@
 							"action": "revoke",
 							"license_id": "‹id·1›",
 							"detail": {
-								"keyShort": "‹clave corta·1›"
+								"‹texto json›": {
+									"keyShort": "‹clave corta·1›"
+								}
 							},
 							"at_ms": "T0+0d 00:04"
 						}
@@ -297,10 +303,12 @@
 							"action": "issue",
 							"license_id": "‹id·6›",
 							"detail": {
-								"termMonths": 12,
-								"email": "sin-activar@ejemplo.test",
-								"keyShort": "‹clave corta·2›",
-								"sendKey": false
+								"‹texto json›": {
+									"termMonths": 12,
+									"email": "sin-activar@ejemplo.test",
+									"keyShort": "‹clave corta·2›",
+									"sendKey": false
+								}
 							},
 							"at_ms": "T0+0d 00:05"
 						}
@@ -361,7 +369,9 @@
 							"action": "revoke",
 							"license_id": "‹id·6›",
 							"detail": {
-								"keyShort": "‹clave corta·2›"
+								"‹texto json›": {
+									"keyShort": "‹clave corta·2›"
+								}
 							},
 							"at_ms": "T0+0d 00:06"
 						}
@@ -406,10 +416,12 @@
 				"action": "issue",
 				"license_id": "‹id·1›",
 				"detail": {
-					"termMonths": 12,
-					"email": "activada@ejemplo.test",
-					"keyShort": "‹clave corta·1›",
-					"sendKey": false
+					"‹texto json›": {
+						"termMonths": 12,
+						"email": "activada@ejemplo.test",
+						"keyShort": "‹clave corta·1›",
+						"sendKey": false
+					}
 				},
 				"at_ms": "T0+0d 00:01"
 			},
@@ -418,7 +430,9 @@
 				"action": "revoke",
 				"license_id": "‹id·1›",
 				"detail": {
-					"keyShort": "‹clave corta·1›"
+					"‹texto json›": {
+						"keyShort": "‹clave corta·1›"
+					}
 				},
 				"at_ms": "T0+0d 00:03"
 			},
@@ -427,7 +441,9 @@
 				"action": "revoke",
 				"license_id": "‹id·1›",
 				"detail": {
-					"keyShort": "‹clave corta·1›"
+					"‹texto json›": {
+						"keyShort": "‹clave corta·1›"
+					}
 				},
 				"at_ms": "T0+0d 00:04"
 			},
@@ -436,10 +452,12 @@
 				"action": "issue",
 				"license_id": "‹id·6›",
 				"detail": {
-					"termMonths": 12,
-					"email": "sin-activar@ejemplo.test",
-					"keyShort": "‹clave corta·2›",
-					"sendKey": false
+					"‹texto json›": {
+						"termMonths": 12,
+						"email": "sin-activar@ejemplo.test",
+						"keyShort": "‹clave corta·2›",
+						"sendKey": false
+					}
 				},
 				"at_ms": "T0+0d 00:05"
 			},
@@ -448,7 +466,9 @@
 				"action": "revoke",
 				"license_id": "‹id·6›",
 				"detail": {
-					"keyShort": "‹clave corta·2›"
+					"‹texto json›": {
+						"keyShort": "‹clave corta·2›"
+					}
 				},
 				"at_ms": "T0+0d 00:06"
 			}

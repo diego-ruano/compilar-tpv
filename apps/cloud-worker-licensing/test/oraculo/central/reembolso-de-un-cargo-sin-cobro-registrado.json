@@ -1,5 +1,5 @@
 {
-	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
 	"pasos": [
 		{
 			"paso": 1,
@@ -36,9 +36,11 @@
 							"action": "refund",
 							"license_id": null,
 							"detail": {
-								"event_uid": "evt_1",
-								"resultado": "sin_licencia_atribuible",
-								"payment_intent": "pi_cs_desconocida"
+								"‹texto json›": {
+									"event_uid": "evt_1",
+									"resultado": "sin_licencia_atribuible",
+									"payment_intent": "pi_cs_desconocida"
+								}
 							},
 							"at_ms": "T0+0d 00:01"
 						}
@@ -54,17 +56,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·1›",
 							"payload_json": {
-								"id": "evt_1",
-								"object": "event",
-								"type": "charge.refunded",
-								"data": {
-									"object": {
-										"id": "ch_cs_desconocida",
-										"object": "charge",
-										"payment_intent": "pi_cs_desconocida",
-										"customer": "cus_oraculo",
-										"amount": 12000,
-										"amount_refunded": 12000
+								"‹texto json›": {
+									"id": "evt_1",
+									"object": "event",
+									"type": "charge.refunded",
+									"data": {
+										"object": {
+											"id": "ch_cs_desconocida",
+											"object": "charge",
+											"payment_intent": "pi_cs_desconocida",
+											"customer": "cus_oraculo",
+											"amount": 12000,
+											"amount_refunded": 12000
+										}
 									}
 								}
 							},
@@ -153,12 +157,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:02"
 						}
@@ -174,14 +180,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·2›",
 							"payload_json": {
-								"id": "evt_2",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_unica",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_2",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_unica",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -236,12 +244,14 @@
 							"action": "refund",
 							"license_id": "‹id·3›",
 							"detail": {
-								"event_uid": "evt_3",
-								"accion": "revocada",
-								"term_months": null,
-								"expires_at_ms": null,
-								"dias_activada": null,
-								"payment_intent": "pi_cs_cargo_suelto"
+								"‹texto json›": {
+									"event_uid": "evt_3",
+									"accion": "revocada",
+									"term_months": null,
+									"expires_at_ms": null,
+									"dias_activada": null,
+									"payment_intent": "pi_cs_cargo_suelto"
+								}
 							},
 							"at_ms": "T0+0d 00:03"
 						}
@@ -272,17 +282,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·3›",
 							"payload_json": {
-								"id": "evt_3",
-								"object": "event",
-								"type": "charge.refunded",
-								"data": {
-									"object": {
-										"id": "ch_cs_cargo_suelto",
-										"object": "charge",
-										"payment_intent": "pi_cs_cargo_suelto",
-										"customer": "cus_oraculo",
-										"amount": 12000,
-										"amount_refunded": 12000
+								"‹texto json›": {
+									"id": "evt_3",
+									"object": "event",
+									"type": "charge.refunded",
+									"data": {
+										"object": {
+											"id": "ch_cs_cargo_suelto",
+											"object": "charge",
+											"payment_intent": "pi_cs_cargo_suelto",
+											"customer": "cus_oraculo",
+											"amount": 12000,
+											"amount_refunded": 12000
+										}
 									}
 								}
 							},
@@ -371,12 +383,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:04"
 						}
@@ -392,14 +406,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·4›",
 							"payload_json": {
-								"id": "evt_4",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_segunda",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_4",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_segunda",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -447,9 +463,11 @@
 							"action": "refund",
 							"license_id": null,
 							"detail": {
-								"event_uid": "evt_5",
-								"resultado": "sin_licencia_atribuible",
-								"payment_intent": "pi_cs_otro_cargo_suelto"
+								"‹texto json›": {
+									"event_uid": "evt_5",
+									"resultado": "sin_licencia_atribuible",
+									"payment_intent": "pi_cs_otro_cargo_suelto"
+								}
 							},
 							"at_ms": "T0+0d 00:05"
 						}
@@ -465,17 +483,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·5›",
 							"payload_json": {
-								"id": "evt_5",
-								"object": "event",
-								"type": "charge.refunded",
-								"data": {
-									"object": {
-										"id": "ch_cs_otro_cargo_suelto",
-										"object": "charge",
-										"payment_intent": "pi_cs_otro_cargo_suelto",
-										"customer": "cus_oraculo",
-										"amount": 12000,
-										"amount_refunded": 12000
+								"‹texto json›": {
+									"id": "evt_5",
+									"object": "event",
+									"type": "charge.refunded",
+									"data": {
+										"object": {
+											"id": "ch_cs_otro_cargo_suelto",
+											"object": "charge",
+											"payment_intent": "pi_cs_otro_cargo_suelto",
+											"customer": "cus_oraculo",
+											"amount": 12000,
+											"amount_refunded": 12000
+										}
 									}
 								}
 							},
@@ -497,9 +517,11 @@
 				"action": "refund",
 				"license_id": null,
 				"detail": {
-					"event_uid": "evt_1",
-					"resultado": "sin_licencia_atribuible",
-					"payment_intent": "pi_cs_desconocida"
+					"‹texto json›": {
+						"event_uid": "evt_1",
+						"resultado": "sin_licencia_atribuible",
+						"payment_intent": "pi_cs_desconocida"
+					}
 				},
 				"at_ms": "T0+0d 00:01"
 			},
@@ -508,12 +530,14 @@
 				"action": "refund",
 				"license_id": "‹id·3›",
 				"detail": {
-					"event_uid": "evt_3",
-					"accion": "revocada",
-					"term_months": null,
-					"expires_at_ms": null,
-					"dias_activada": null,
-					"payment_intent": "pi_cs_cargo_suelto"
+					"‹texto json›": {
+						"event_uid": "evt_3",
+						"accion": "revocada",
+						"term_months": null,
+						"expires_at_ms": null,
+						"dias_activada": null,
+						"payment_intent": "pi_cs_cargo_suelto"
+					}
 				},
 				"at_ms": "T0+0d 00:03"
 			},
@@ -522,9 +546,11 @@
 				"action": "refund",
 				"license_id": null,
 				"detail": {
-					"event_uid": "evt_5",
-					"resultado": "sin_licencia_atribuible",
-					"payment_intent": "pi_cs_otro_cargo_suelto"
+					"‹texto json›": {
+						"event_uid": "evt_5",
+						"resultado": "sin_licencia_atribuible",
+						"payment_intent": "pi_cs_otro_cargo_suelto"
+					}
 				},
 				"at_ms": "T0+0d 00:05"
 			}
@@ -596,12 +622,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:02"
 			},
@@ -632,12 +660,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:04"
 			}
@@ -657,17 +687,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·1›",
 				"payload_json": {
-					"id": "evt_1",
-					"object": "event",
-					"type": "charge.refunded",
-					"data": {
-						"object": {
-							"id": "ch_cs_desconocida",
-							"object": "charge",
-							"payment_intent": "pi_cs_desconocida",
-							"customer": "cus_oraculo",
-							"amount": 12000,
-							"amount_refunded": 12000
+					"‹texto json›": {
+						"id": "evt_1",
+						"object": "event",
+						"type": "charge.refunded",
+						"data": {
+							"object": {
+								"id": "ch_cs_desconocida",
+								"object": "charge",
+								"payment_intent": "pi_cs_desconocida",
+								"customer": "cus_oraculo",
+								"amount": 12000,
+								"amount_refunded": 12000
+							}
 						}
 					}
 				},
@@ -684,14 +716,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·2›",
 				"payload_json": {
-					"id": "evt_2",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_unica",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_2",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_unica",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -708,17 +742,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·3›",
 				"payload_json": {
-					"id": "evt_3",
-					"object": "event",
-					"type": "charge.refunded",
-					"data": {
-						"object": {
-							"id": "ch_cs_cargo_suelto",
-							"object": "charge",
-							"payment_intent": "pi_cs_cargo_suelto",
-							"customer": "cus_oraculo",
-							"amount": 12000,
-							"amount_refunded": 12000
+					"‹texto json›": {
+						"id": "evt_3",
+						"object": "event",
+						"type": "charge.refunded",
+						"data": {
+							"object": {
+								"id": "ch_cs_cargo_suelto",
+								"object": "charge",
+								"payment_intent": "pi_cs_cargo_suelto",
+								"customer": "cus_oraculo",
+								"amount": 12000,
+								"amount_refunded": 12000
+							}
 						}
 					}
 				},
@@ -735,14 +771,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·4›",
 				"payload_json": {
-					"id": "evt_4",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_segunda",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_4",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_segunda",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -759,17 +797,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·5›",
 				"payload_json": {
-					"id": "evt_5",
-					"object": "event",
-					"type": "charge.refunded",
-					"data": {
-						"object": {
-							"id": "ch_cs_otro_cargo_suelto",
-							"object": "charge",
-							"payment_intent": "pi_cs_otro_cargo_suelto",
-							"customer": "cus_oraculo",
-							"amount": 12000,
-							"amount_refunded": 12000
+					"‹texto json›": {
+						"id": "evt_5",
+						"object": "event",
+						"type": "charge.refunded",
+						"data": {
+							"object": {
+								"id": "ch_cs_otro_cargo_suelto",
+								"object": "charge",
+								"payment_intent": "pi_cs_otro_cargo_suelto",
+								"customer": "cus_oraculo",
+								"amount": 12000,
+								"amount_refunded": 12000
+							}
 						}
 					}
 				},

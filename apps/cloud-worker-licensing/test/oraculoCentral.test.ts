@@ -9,8 +9,9 @@
 // con Stripe, el correo y los `TenantHub` sustituidos por dobles), y de él queda una foto: cada
 // respuesta, cada efecto y lo que cambió en la central paso a paso, y la central entera al final.
 // Las fotos están en `test/oraculo/central/` y se comparan enteras: cualquier diferencia en una
-// respuesta, en un correo, en un aviso a un `TenantHub` o en una sola columna de la central hace
-// fallar el escenario.
+// respuesta, en un correo, en un aviso a un `TenantHub`, en una sola columna de la central o en
+// si algo de eso estaba hecho al responder o terminó después (`waitUntil`) hace fallar el
+// escenario.
 //
 // Sirven para cambiar la implementación de la central sin cambiar lo que hace: con la central en
 // otro sitio, se cambia `test/oraculo/montaje.ts` (dónde vive y cómo llegan a ella las rutas) y
@@ -69,6 +70,18 @@ describe("Stripe · un cobro se convierte en licencias", () => {
 			o.caeElCorreo();
 			await o.comprar("cs_alta", { lineas: [{ meses: 12, unidades: 2 }] });
 		}));
+
+	it("lo que no se cumple: una firma que no es de Stripe, un evento sin suscribir, una sesión que Stripe aún no da (y su reintento) y una sin correo", () =>
+		oraculo("webhook-que-no-se-cumple", async (o) => {
+			await o.webhookFalso(o.eventos.pagoDiferido("cs_falsa"));
+			await o.webhook(o.eventos.otro("customer.updated", { id: "cus_oraculo", object: "customer" }));
+			const adelantado = o.eventos.pagoDiferido("cs_tardia");
+			await o.webhook(adelantado);
+			await o.comprar("cs_tardia", { pagada: false });
+			o.pagar("cs_tardia");
+			await o.webhook(adelantado);
+			await o.comprar("cs_sin_correo", { sinCorreo: true });
+		}));
 });
 
 describe("Stripe · un reembolso (LIC-07)", () => {
@@ -123,6 +136,13 @@ describe("Stripe · un reembolso (LIC-07)", () => {
 			await o.comprar("cs_unica");
 			await o.webhook(o.eventos.reembolso("cs_cargo_suelto", "total"));
 			await o.comprar("cs_segunda");
+			await o.webhook(o.eventos.reembolso("cs_otro_cargo_suelto", "total"));
+		}));
+
+	it("de dos cargos sin cobro registrado del mismo cliente: el segundo la encuentra ya revocada", () =>
+		oraculo("reembolso-de-dos-cargos-sin-cobro-registrado", async (o) => {
+			await o.comprar("cs_unica");
+			await o.webhook(o.eventos.reembolso("cs_cargo_suelto", "total"));
 			await o.webhook(o.eventos.reembolso("cs_otro_cargo_suelto", "total"));
 		}));
 });
@@ -218,6 +238,49 @@ describe("Stripe · una disputa (LIC-07, AUD-08, AUD-45)", () => {
 			await o.webhook(o.eventos.disputa("cs_pack", "closed", "won"));
 			await o.webhook(o.eventos.reembolso("cs_pack", "total"));
 		}));
+
+	// Desde un 29 de febrero, restar 12 meses y después 1 no es lo mismo que restar 13 de una vez,
+	// ni que restarlos en el otro orden: aquí se ve si los meses se componen cobro a cobro.
+	it("dos renovaciones del mismo cargo desde un día 31: recortan al último día del mes, cobro a cobro y en orden", () =>
+		oraculo("disputa-de-dos-renovaciones-desde-un-dia-31", async (o) => {
+			const bar = await o.equipo("equipo-del-bar");
+			o.pasanDias(304); // al 31 de diciembre
+			const alta = await o.comprar("cs_base", { lineas: [{ meses: 1 }] });
+			await o.activar(alta.claves[0], bar);
+			const pack = await o.comprar("cs_pack", { lineas: [{ meses: 12 }, { meses: 1 }] });
+			await o.activar(pack.claves[0], bar);
+			await o.activar(pack.claves[1], bar);
+			await o.webhook(o.eventos.disputa("cs_pack", "created", "needs_response"));
+			await o.webhook(o.eventos.disputa("cs_pack", "closed", "won"));
+			await o.webhook(o.eventos.reembolso("cs_pack", "total"));
+		}));
+
+	it("la de una renovación de una licencia revocada a mano: sólo resta meses, y ganarla no la reactiva (AUD-08)", () =>
+		oraculo("disputa-de-una-renovacion-de-una-licencia-revocada-a-mano", async (o) => {
+			const bar = await o.equipo("equipo-del-bar");
+			const alta = await o.comprar("cs_base");
+			await o.activar(alta.claves[0], bar);
+			const renovacion = await o.comprar("cs_renovacion");
+			await o.activar(renovacion.claves[0], bar);
+			await o.admin(`/licenses/${await o.licenciaDeLaClave(alta.claves[0])}/revoke`);
+			await o.webhook(o.eventos.disputa("cs_renovacion", "created", "needs_response"));
+			await o.webhook(o.eventos.disputa("cs_renovacion", "closed", "won"));
+		}));
+
+	it("la de un pack con una licencia revocada a mano: revoca la otra, y ganarla sólo devuelve ésa (AUD-08, RI-52)", () =>
+		oraculo("disputa-ganada-de-un-pack-con-una-revocada-a-mano", async (o) => {
+			const pack = await o.comprar("cs_pack", { lineas: [{ meses: 12, unidades: 2 }] });
+			await o.admin(`/licenses/${await o.licenciaDeLaClave(pack.claves[0])}/revoke`);
+			await o.webhook(o.eventos.disputa("cs_pack", "created", "needs_response"));
+			await o.webhook(o.eventos.disputa("cs_pack", "closed", "won"));
+		}));
+
+	it("la de un cargo desconocido: se audita sin licencia, y su cierre no hace nada", () =>
+		oraculo("disputa-de-un-cargo-desconocido", async (o) => {
+			await o.webhook(o.eventos.disputa("cs_desconocida", "created", "needs_response"));
+			await o.webhook(o.eventos.disputa("cs_desconocida", "closed", "won"));
+			await o.webhook(o.eventos.disputa("cs_desconocida", "closed", "lost"));
+		}));
 });
 
 describe("Canje de una clave sin estrenar (REV-13)", () => {
@@ -278,6 +341,18 @@ describe("Canje de una clave sin estrenar (REV-13)", () => {
 			await o.activar(otra.claves[0], sinLicencia, { soloSumar: true });
 			await o.activar(alta.claves[0], bar, { soloSumar: true });
 		}));
+
+	it("una clave revocada por el reembolso de su compra no se canjea ni se estrena (LIC-07)", () =>
+		oraculo("canje-de-una-clave-revocada-por-un-reembolso", async (o) => {
+			const bar = await o.equipo("equipo-del-bar");
+			const sinLicencia = await o.equipo("equipo-sin-licencia");
+			const alta = await o.comprar("cs_base");
+			await o.activar(alta.claves[0], bar);
+			const pack = await o.comprar("cs_pack", { lineas: [{ meses: 12, unidades: 2 }] });
+			await o.webhook(o.eventos.reembolso("cs_pack", "total"));
+			await o.activar(pack.claves[0], bar);
+			await o.activar(pack.claves[1], sinLicencia);
+		}));
 });
 
 describe("Administración de una licencia", () => {
@@ -311,6 +386,22 @@ describe("Administración de una licencia", () => {
 			await o.admin("/licenses/no-existe/unrevoke");
 		}));
 
+	it("revocar y desrevocar con el alta y una renovación disputadas: la marca del alta va y viene, la de la renovación se queda (AUD-08, AUD-45)", () =>
+		oraculo("admin-revocar-y-desrevocar-con-marcas-de-disputa", async (o) => {
+			const bar = await o.equipo("equipo-del-bar");
+			const alta = await o.comprar("cs_base");
+			await o.activar(alta.claves[0], bar);
+			const renovacion = await o.comprar("cs_renovacion");
+			await o.activar(renovacion.claves[0], bar);
+			await o.webhook(o.eventos.disputa("cs_renovacion", "created", "needs_response"));
+			await o.webhook(o.eventos.disputa("cs_base", "created", "needs_response"));
+			const licencia = await o.licenciaDeLaClave(alta.claves[0]);
+			await o.admin(`/licenses/${licencia}/revoke`);
+			await o.admin(`/licenses/${licencia}/unrevoke`);
+			await o.webhook(o.eventos.reembolso("cs_renovacion", "total"));
+			await o.webhook(o.eventos.reembolso("cs_base", "total"));
+		}));
+
 	it("desrevocar le quita al alta la marca de la disputa: un reembolso posterior la revoca (AUD-45)", () =>
 		oraculo("admin-desrevocar-tras-una-disputa", async (o) => {
 			const bar = await o.equipo("equipo-del-bar");
@@ -336,5 +427,21 @@ describe("Administración de una licencia", () => {
 			await o.admin("/licenses/no-existe/shorten", { months: 1 });
 			await o.admin(`/licenses/${activada.licenseId}/extend`, { months: 5 });
 			await o.admin(`/licenses/${activada.licenseId}/shorten`, { months: 0 });
+		}));
+
+	it("extender y acortar desde un día 31: recortan al último día del mes, no son inversas, y extender una caducada cuenta desde hoy", () =>
+		oraculo("admin-extender-y-acortar-desde-un-dia-31", async (o) => {
+			const bar = await o.equipo("equipo-del-bar");
+			const otroBar = await o.equipo("equipo-de-otro-bar");
+			o.pasanDias(29); // al 31 de marzo
+			const una = await o.emitirAMano("una@ejemplo.test");
+			await o.activar(una.clave, bar);
+			await o.admin(`/licenses/${una.licenseId}/extend`, { months: 1 });
+			await o.admin(`/licenses/${una.licenseId}/shorten`, { months: 1 });
+			const otra = await o.emitirAMano("otra@ejemplo.test");
+			await o.activar(otra.clave, otroBar);
+			await o.admin(`/licenses/${otra.licenseId}/shorten`, { months: 1 });
+			await o.admin(`/licenses/${otra.licenseId}/shorten`, { months: 12 });
+			await o.admin(`/licenses/${otra.licenseId}/extend`, { months: 1 });
 		}));
 });

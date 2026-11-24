@@ -1,5 +1,5 @@
 {
-	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens, abiertos). Los instantes, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición. Detalle: test/oraculo/normalizar.ts.",
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
 	"pasos": [
 		{
 			"paso": 1,
@@ -77,12 +77,14 @@
 							"customer_business_name": "Bar de Pruebas S.L.",
 							"customer_phone": "+34 600 000 000",
 							"customer_address_json": {
-								"line1": "Calle Mayor 1",
-								"line2": null,
-								"city": "Madrid",
-								"state": null,
-								"postal_code": "28013",
-								"country": "ES"
+								"‹texto json›": {
+									"line1": "Calle Mayor 1",
+									"line2": null,
+									"city": "Madrid",
+									"state": null,
+									"postal_code": "28013",
+									"country": "ES"
+								}
 							},
 							"key_email_sent_at_ms": "T0+0d 00:01"
 						}
@@ -98,14 +100,16 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·1›",
 							"payload_json": {
-								"id": "evt_1",
-								"object": "event",
-								"type": "checkout.session.completed",
-								"data": {
-									"object": {
-										"id": "cs_alta",
-										"object": "checkout.session",
-										"payment_status": "paid"
+								"‹texto json›": {
+									"id": "evt_1",
+									"object": "event",
+									"type": "checkout.session.completed",
+									"data": {
+										"object": {
+											"id": "cs_alta",
+											"object": "checkout.session",
+											"payment_status": "paid"
+										}
 									}
 								}
 							},
@@ -147,7 +151,7 @@
 						}
 					},
 					"status": "active",
-					"expiresAt": "T0+365d 00:02",
+					"expiresAt": "iso:T0+365d 00:02:00.000Z",
 					"fieldDek": "‹dek·1›",
 					"cambioDeEquipo": false
 				}
@@ -274,12 +278,14 @@
 							"action": "dispute",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_2",
-								"accion": "revocada",
-								"term_months": 12,
-								"expires_at_ms": null,
-								"dias_activada": 0,
-								"payment_intent": "pi_cs_alta"
+								"‹texto json›": {
+									"event_uid": "evt_2",
+									"accion": "revocada",
+									"term_months": 12,
+									"expires_at_ms": null,
+									"dias_activada": 0,
+									"payment_intent": "pi_cs_alta"
+								}
 							},
 							"at_ms": "T0+0d 00:03"
 						}
@@ -325,17 +331,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·2›",
 							"payload_json": {
-								"id": "evt_2",
-								"object": "event",
-								"type": "charge.dispute.created",
-								"data": {
-									"object": {
-										"id": "du_cs_alta",
-										"object": "dispute",
-										"charge": "ch_cs_alta",
-										"payment_intent": "pi_cs_alta",
-										"amount": 12000,
-										"status": "needs_response"
+								"‹texto json›": {
+									"id": "evt_2",
+									"object": "event",
+									"type": "charge.dispute.created",
+									"data": {
+										"object": {
+											"id": "du_cs_alta",
+											"object": "dispute",
+											"charge": "ch_cs_alta",
+											"payment_intent": "pi_cs_alta",
+											"amount": 12000,
+											"status": "needs_response"
+										}
 									}
 								}
 							},
@@ -387,17 +395,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·3›",
 							"payload_json": {
-								"id": "evt_3",
-								"object": "event",
-								"type": "charge.dispute.funds_withdrawn",
-								"data": {
-									"object": {
-										"id": "du_cs_alta",
-										"object": "dispute",
-										"charge": "ch_cs_alta",
-										"payment_intent": "pi_cs_alta",
-										"amount": 12000,
-										"status": "needs_response"
+								"‹texto json›": {
+									"id": "evt_3",
+									"object": "event",
+									"type": "charge.dispute.funds_withdrawn",
+									"data": {
+										"object": {
+											"id": "du_cs_alta",
+											"object": "dispute",
+											"charge": "ch_cs_alta",
+											"payment_intent": "pi_cs_alta",
+											"amount": 12000,
+											"status": "needs_response"
+										}
 									}
 								}
 							},
@@ -448,8 +458,10 @@
 							"action": "reactivate",
 							"license_id": "‹id·2›",
 							"detail": {
-								"event_uid": "evt_4",
-								"motivo": "disputa_ganada"
+								"‹texto json›": {
+									"event_uid": "evt_4",
+									"motivo": "disputa_ganada"
+								}
 							},
 							"at_ms": "T0+0d 00:05"
 						}
@@ -495,17 +507,19 @@
 							"sig_hex": null,
 							"body_sha256": "‹hash·4›",
 							"payload_json": {
-								"id": "evt_4",
-								"object": "event",
-								"type": "charge.dispute.closed",
-								"data": {
-									"object": {
-										"id": "du_cs_alta",
-										"object": "dispute",
-										"charge": "ch_cs_alta",
-										"payment_intent": "pi_cs_alta",
-										"amount": 12000,
-										"status": "won"
+								"‹texto json›": {
+									"id": "evt_4",
+									"object": "event",
+									"type": "charge.dispute.closed",
+									"data": {
+										"object": {
+											"id": "du_cs_alta",
+											"object": "dispute",
+											"charge": "ch_cs_alta",
+											"payment_intent": "pi_cs_alta",
+											"amount": 12000,
+											"status": "won"
+										}
 									}
 								}
 							},
@@ -527,12 +541,14 @@
 				"action": "dispute",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_2",
-					"accion": "revocada",
-					"term_months": 12,
-					"expires_at_ms": null,
-					"dias_activada": 0,
-					"payment_intent": "pi_cs_alta"
+					"‹texto json›": {
+						"event_uid": "evt_2",
+						"accion": "revocada",
+						"term_months": 12,
+						"expires_at_ms": null,
+						"dias_activada": 0,
+						"payment_intent": "pi_cs_alta"
+					}
 				},
 				"at_ms": "T0+0d 00:03"
 			},
@@ -541,8 +557,10 @@
 				"action": "reactivate",
 				"license_id": "‹id·2›",
 				"detail": {
-					"event_uid": "evt_4",
-					"motivo": "disputa_ganada"
+					"‹texto json›": {
+						"event_uid": "evt_4",
+						"motivo": "disputa_ganada"
+					}
 				},
 				"at_ms": "T0+0d 00:05"
 			}
@@ -612,12 +630,14 @@
 				"customer_business_name": "Bar de Pruebas S.L.",
 				"customer_phone": "+34 600 000 000",
 				"customer_address_json": {
-					"line1": "Calle Mayor 1",
-					"line2": null,
-					"city": "Madrid",
-					"state": null,
-					"postal_code": "28013",
-					"country": "ES"
+					"‹texto json›": {
+						"line1": "Calle Mayor 1",
+						"line2": null,
+						"city": "Madrid",
+						"state": null,
+						"postal_code": "28013",
+						"country": "ES"
+					}
 				},
 				"key_email_sent_at_ms": "T0+0d 00:01"
 			}
@@ -653,14 +673,16 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·1›",
 				"payload_json": {
-					"id": "evt_1",
-					"object": "event",
-					"type": "checkout.session.completed",
-					"data": {
-						"object": {
-							"id": "cs_alta",
-							"object": "checkout.session",
-							"payment_status": "paid"
+					"‹texto json›": {
+						"id": "evt_1",
+						"object": "event",
+						"type": "checkout.session.completed",
+						"data": {
+							"object": {
+								"id": "cs_alta",
+								"object": "checkout.session",
+								"payment_status": "paid"
+							}
 						}
 					}
 				},
@@ -677,17 +699,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·2›",
 				"payload_json": {
-					"id": "evt_2",
-					"object": "event",
-					"type": "charge.dispute.created",
-					"data": {
-						"object": {
-							"id": "du_cs_alta",
-							"object": "dispute",
-							"charge": "ch_cs_alta",
-							"payment_intent": "pi_cs_alta",
-							"amount": 12000,
-							"status": "needs_response"
+					"‹texto json›": {
+						"id": "evt_2",
+						"object": "event",
+						"type": "charge.dispute.created",
+						"data": {
+							"object": {
+								"id": "du_cs_alta",
+								"object": "dispute",
+								"charge": "ch_cs_alta",
+								"payment_intent": "pi_cs_alta",
+								"amount": 12000,
+								"status": "needs_response"
+							}
 						}
 					}
 				},
@@ -704,17 +728,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·3›",
 				"payload_json": {
-					"id": "evt_3",
-					"object": "event",
-					"type": "charge.dispute.funds_withdrawn",
-					"data": {
-						"object": {
-							"id": "du_cs_alta",
-							"object": "dispute",
-							"charge": "ch_cs_alta",
-							"payment_intent": "pi_cs_alta",
-							"amount": 12000,
-							"status": "needs_response"
+					"‹texto json›": {
+						"id": "evt_3",
+						"object": "event",
+						"type": "charge.dispute.funds_withdrawn",
+						"data": {
+							"object": {
+								"id": "du_cs_alta",
+								"object": "dispute",
+								"charge": "ch_cs_alta",
+								"payment_intent": "pi_cs_alta",
+								"amount": 12000,
+								"status": "needs_response"
+							}
 						}
 					}
 				},
@@ -731,17 +757,19 @@
 				"sig_hex": null,
 				"body_sha256": "‹hash·4›",
 				"payload_json": {
-					"id": "evt_4",
-					"object": "event",
-					"type": "charge.dispute.closed",
-					"data": {
-						"object": {
-							"id": "du_cs_alta",
-							"object": "dispute",
-							"charge": "ch_cs_alta",
-							"payment_intent": "pi_cs_alta",
-							"amount": 12000,
-							"status": "won"
+					"‹texto json›": {
+						"id": "evt_4",
+						"object": "event",
+						"type": "charge.dispute.closed",
+						"data": {
+							"object": {
+								"id": "du_cs_alta",
+								"object": "dispute",
+								"charge": "ch_cs_alta",
+								"payment_intent": "pi_cs_alta",
+								"amount": 12000,
+								"status": "won"
+							}
 						}
 					}
 				},

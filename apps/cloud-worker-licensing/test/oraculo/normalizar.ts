@@ -5,10 +5,13 @@
 //
 // Lo que no es determinista se cambia por un marcador estable: el mismo valor lleva el mismo
 // marcador en todo el escenario, y los marcadores se numeran por orden de aparición (los pasos, en
-// orden, y después la foto final de la central).
+// orden, y después la foto final de la central). Un marcador no junta valores de tipo o de forma
+// distintos: un instante en número no sale igual que en texto, ni una lista igual que su texto
+// JSON, ni un UUID en minúsculas igual que en mayúsculas.
 //
-//   · ‹id·N›                 un UUID (licencias, negocios, cobros, auditoría…). También dentro de un
-//                            texto.
+//   · ‹id·N›                 un UUID (licencias, negocios, cobros, auditoría…), en minúsculas, que
+//                            es como los escribe `crypto.randomUUID`. También dentro de un texto.
+//                            Uno que lleve alguna mayúscula sale como ‹id en mayúsculas·N›.
 //   · ‹clave·N›              una clave de licencia en claro (`TPV-XXXXX-…`), también dentro de un
 //                            texto (los correos).
 //   · ‹hash de clave·N›      el sha256 de la clave N, que es lo que guarda `license_key_hash`.
@@ -25,16 +28,23 @@
 // Así, si una clave, su hash y su cifrado acabaran en filas distintas, o el token llevara el hash
 // de otra licencia, se ve en la foto; con marcadores sueltos por valor no se vería.
 //
-// Los instantes (un número entero de milisegundos entre 2001 y 2286, una fecha ISO, y el `iat` y el
-// `exp` de un token, que van en segundos) se escriben como `T0±Nd hh:mm`: N días de calendario desde
-// el día en que empieza el escenario, y la hora UTC. El reloj de los escenarios es simulado
-// (`escenario.ts`): empieza a las 00:00 UTC de un día fijo y avanza un minuto exacto antes de cada
-// petición, así que no hay ruido que redondear —«00:03» es lo escrito en el tercer paso—, y un mes
-// de más son entre 28 y 31 días de más. Si un instante no cae en un minuto exacto, lleva también
-// los segundos y los milisegundos.
+// Los instantes en número (un entero de milisegundos entre 2001 y 2286, y el `iat` y el `exp` de un
+// token, que van en segundos) se escriben como `T0±Nd hh:mm`: N días de calendario desde el día en
+// que empieza el escenario, y la hora UTC. El reloj de los escenarios es simulado (`escenario.ts`):
+// empieza a las 00:00 UTC de un día fijo y avanza un minuto exacto antes de cada petición, así que
+// no hay ruido que redondear —«00:03» es lo escrito en el tercer paso—, y un mes de más son entre
+// 28 y 31 días de más. Si un instante no cae en un minuto exacto, lleva también los segundos y los
+// milisegundos.
+//
+// Un instante escrito como texto ISO (`2027-03-02T00:01:00.000Z`) sale como `iso:T0±Nd` seguido de
+// su hora tal como se escribió (`iso:T0+365d 00:01:00.000Z`): así no se confunde con el mismo
+// instante en milisegundos, y se ve si cambia la forma (sin milisegundos, por ejemplo).
 //
 // Un texto que es un objeto o una lista JSON (la auditoría, el cuerpo de un webhook, la dirección
-// del cliente) se enseña ya interpretado, con las claves en el orden en que se escribieron.
+// del cliente) se enseña ya interpretado, con las claves en el orden en que se escribieron, dentro
+// de { "‹texto json›": … }, para que no se confunda con el objeto o la lista sin pasar a texto. Si
+// el texto no es exactamente el que escribe `JSON.stringify` (con espacios o saltos de línea, por
+// ejemplo), la envoltura es { "‹texto json con otra forma›": … }.
 
 import { descifrar } from "../../src/server/crypto";
 
@@ -57,7 +67,7 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CIFRADO = /^k[0-9a-z]+:[A-Za-z0-9+/]+={0,2}$/;
 const JWT = /^eyJ[\w-]*\.[\w-]+\.[\w-]+$/;
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const ISO = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)$/;
 
 /** ¿Es un instante en milisegundos? Entre 2001 y 2286: ningún importe, cantidad ni plazo llega. */
 function esInstante(n: number): boolean {
@@ -71,7 +81,12 @@ function esTextoJson(texto: string): boolean {
 
 const dosCifras = (n: number) => String(n).padStart(2, "0");
 
-/** `T0±Nd hh:mm` (ver la cabecera). */
+/** `T0±Nd`: el día, contado desde el primero del escenario. */
+function dia(dias: number): string {
+	return `T0${dias < 0 ? "-" : "+"}${Math.abs(dias)}d`;
+}
+
+/** Un instante en milisegundos: `T0±Nd hh:mm` (ver la cabecera). */
 function instante(ms: number, t0: number): string {
 	const dias = Math.floor((ms - t0) / DIA_MS);
 	const resto = ms - t0 - dias * DIA_MS;
@@ -82,7 +97,13 @@ function instante(ms: number, t0: number): string {
 	const hora =
 		`${dosCifras(horas)}:${dosCifras(minutos)}` +
 		(segundos || milis ? `:${dosCifras(segundos)}.${String(milis).padStart(3, "0")}` : "");
-	return `T0${dias < 0 ? "-" : "+"}${Math.abs(dias)}d ${hora}`;
+	return `${dia(dias)} ${hora}`;
+}
+
+/** Un instante escrito como texto ISO: `iso:T0±Nd` y la hora tal como se escribió (ver la cabecera). */
+function instanteIso(fecha: string, hora: string, t0: number): string {
+	// `t0` es una medianoche UTC: la diferencia con la de `fecha` son días exactos.
+	return `iso:${dia(Math.round((Date.parse(`${fecha}T00:00:00Z`) - t0) / DIA_MS))} ${hora}`;
 }
 
 /** Los claims de un token, con sus instantes en milisegundos (en el token van en segundos). */
@@ -103,14 +124,20 @@ function claimsDe(token: string): Record<string, unknown> {
 function recorrer(valor: unknown, t0: number, texto: (s: string) => unknown): unknown {
 	if (typeof valor === "string") {
 		if (esTextoJson(valor)) {
+			let interpretado: unknown;
 			try {
-				return recorrer(JSON.parse(valor), t0, texto);
+				interpretado = JSON.parse(valor);
 			} catch {
 				// No era JSON: es un texto más.
 			}
+			if (interpretado !== undefined) {
+				const envoltura = JSON.stringify(interpretado) === valor ? "‹texto json›" : "‹texto json con otra forma›";
+				return { [envoltura]: recorrer(interpretado, t0, texto) };
+			}
 		}
 		if (JWT.test(valor)) return { "‹jwt›": recorrer(claimsDe(valor), t0, texto) };
-		if (ISO.test(valor)) return instante(Date.parse(valor), t0);
+		const iso = ISO.exec(valor);
+		if (iso) return instanteIso(iso[1], iso[2], t0);
 		return texto(valor);
 	}
 	if (typeof valor === "number") return esInstante(valor) ? instante(valor, t0) : valor;
@@ -218,6 +245,8 @@ export async function normalizar(salida: unknown, ctx: Contexto): Promise<unknow
 		}
 		return s
 			.replace(CLAVE_DE_LICENCIA, (clave) => `‹clave·${numClave.numero(clave)}›`)
-			.replace(UUID, (id) => `‹id·${numId.numero(id.toLowerCase())}›`);
+			.replace(UUID, (id) =>
+				id === id.toLowerCase() ? `‹id·${numId.numero(id)}›` : `‹id en mayúsculas·${numId.numero(id)}›`,
+			);
 	});
 }

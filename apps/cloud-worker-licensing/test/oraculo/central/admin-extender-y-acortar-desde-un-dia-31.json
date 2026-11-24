@@ -1,0 +1,823 @@
+{
+	"normalizacion": "Salida del oráculo de la central (test/oraculoCentral.test.ts): cada paso con su petición, su respuesta, sus correos, lo que se pidió a un TenantHub y lo que cambió en la central, y en enSegundoPlano lo que terminó después de responder; después, la central entera. Lo aleatorio va con marcadores ‹…› numerados por orden de aparición (ids; cada clave con su hash, su forma corta y su cifrado; las DEK; los tokens y los textos JSON, abiertos). Los instantes en milisegundos, como T0±Nd hh:mm: días desde el primero del escenario y hora UTC, con un reloj simulado que empieza a las 00:00 y avanza un minuto antes de cada petición; los escritos en texto ISO, como iso:T0±Nd y su hora tal cual. Detalle: test/oraculo/normalizar.ts.",
+	"pasos": [
+		{
+			"reloj": "pasan 29 días"
+		},
+		{
+			"paso": 1,
+			"peticion": "POST /v1/admin/licenses",
+			"cuerpo": {
+				"termMonths": 12,
+				"email": "una@ejemplo.test",
+				"name": "Bar a mano"
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·1›",
+					"key": "‹clave·1›",
+					"keyShort": "‹clave corta·1›",
+					"termMonths": 12,
+					"email": "una@ejemplo.test",
+					"emailSent": null
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·2›",
+							"action": "issue",
+							"license_id": "‹id·1›",
+							"detail": {
+								"‹texto json›": {
+									"termMonths": 12,
+									"email": "una@ejemplo.test",
+									"keyShort": "‹clave corta·1›",
+									"sendKey": false
+								}
+							},
+							"at_ms": "T0+29d 00:01"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·1›",
+							"license_key_hash": "‹hash de clave·1›",
+							"license_key_enc": "‹cifrado de clave·1›",
+							"key_short": "‹clave corta·1›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "manual",
+							"issued_at_ms": "T0+29d 00:01",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "una@ejemplo.test",
+							"customer_name": "Bar a mano",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": null,
+							"stripe_checkout_session_id": null,
+							"stripe_payment_intent_id": null,
+							"stripe_price_id": null,
+							"created_at_ms": "T0+29d 00:01",
+							"updated_at_ms": "T0+29d 00:01",
+							"customer_business_name": null,
+							"customer_phone": null,
+							"customer_address_json": null,
+							"key_email_sent_at_ms": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 2,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·1›",
+				"deviceId": "equipo-del-bar",
+				"devicePubKey": "‹clave pública de equipo-del-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·3›",
+					"deviceId": "equipo-del-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·3›",
+							"deviceId": "equipo-del-bar",
+							"licHash": "‹hash de clave·1›",
+							"iat": "T0+29d 00:02",
+							"exp": "T0+59d 00:02"
+						}
+					},
+					"status": "active",
+					"expiresAt": "iso:T0+394d 00:02:00.000Z",
+					"fieldDek": "‹dek·1›",
+					"cambioDeEquipo": false
+				}
+			},
+			"tenantHub": [
+				{
+					"negocio": "‹id·3›",
+					"metodo": "estaAprovisionado",
+					"argumentos": []
+				},
+				{
+					"negocio": "‹id·3›",
+					"metodo": "aprovisionar",
+					"argumentos": [
+						"‹id·3›"
+					]
+				}
+			],
+			"cambios": {
+				"devices": [
+					{
+						"nueva": {
+							"device_id": "equipo-del-bar",
+							"tenant_id": "‹id·3›",
+							"role": "tpv",
+							"first_seen_at_ms": "T0+29d 00:02",
+							"last_seen_at_ms": "T0+29d 00:02",
+							"revoked_at_ms": null,
+							"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+							"pubkey_alg": "ed25519"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·1›",
+							"tenant_id": "‹id·3›",
+							"main_device_id": "equipo-del-bar",
+							"status": "active",
+							"activated_at_ms": "T0+29d 00:02",
+							"expires_at_ms": "T0+394d 00:02",
+							"updated_at_ms": "T0+29d 00:02"
+						},
+						"antes": {
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"updated_at_ms": "T0+29d 00:01"
+						}
+					}
+				],
+				"tenants": [
+					{
+						"nueva": {
+							"tenant_id": "‹id·3›",
+							"status": "active",
+							"legal_name": "Bar de Pruebas S.L.",
+							"display_name": "Bar de pruebas",
+							"email": null,
+							"phone": null,
+							"country": "ES",
+							"timezone": null,
+							"notes": null,
+							"created_at_ms": "T0+29d 00:02",
+							"updated_at_ms": "T0+29d 00:02",
+							"field_dek": "‹cifrado de dek·1›",
+							"piloto": 0
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 3,
+			"peticion": "POST /v1/admin/licenses/‹id·1›/extend",
+			"cuerpo": {
+				"months": 1
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·1›",
+					"expiresAt": "iso:T0+424d 00:02:00.000Z"
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·4›",
+							"action": "extend",
+							"license_id": "‹id·1›",
+							"detail": {
+								"‹texto json›": {
+									"months": 1,
+									"expiresAtMs": "T0+424d 00:02"
+								}
+							},
+							"at_ms": "T0+29d 00:03"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·1›",
+							"expires_at_ms": "T0+424d 00:02",
+							"updated_at_ms": "T0+29d 00:03"
+						},
+						"antes": {
+							"expires_at_ms": "T0+394d 00:02",
+							"updated_at_ms": "T0+29d 00:02"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 4,
+			"peticion": "POST /v1/admin/licenses/‹id·1›/shorten",
+			"cuerpo": {
+				"months": 1
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·1›",
+					"expiresAt": "iso:T0+393d 00:02:00.000Z",
+					"caducada": false
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·5›",
+							"action": "shorten",
+							"license_id": "‹id·1›",
+							"detail": {
+								"‹texto json›": {
+									"months": 1,
+									"expiresAtMs": "T0+393d 00:02"
+								}
+							},
+							"at_ms": "T0+29d 00:04"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·1›",
+							"expires_at_ms": "T0+393d 00:02",
+							"updated_at_ms": "T0+29d 00:04"
+						},
+						"antes": {
+							"expires_at_ms": "T0+424d 00:02",
+							"updated_at_ms": "T0+29d 00:03"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 5,
+			"peticion": "POST /v1/admin/licenses",
+			"cuerpo": {
+				"termMonths": 12,
+				"email": "otra@ejemplo.test",
+				"name": "Bar a mano"
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·6›",
+					"key": "‹clave·2›",
+					"keyShort": "‹clave corta·2›",
+					"termMonths": 12,
+					"email": "otra@ejemplo.test",
+					"emailSent": null
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·7›",
+							"action": "issue",
+							"license_id": "‹id·6›",
+							"detail": {
+								"‹texto json›": {
+									"termMonths": 12,
+									"email": "otra@ejemplo.test",
+									"keyShort": "‹clave corta·2›",
+									"sendKey": false
+								}
+							},
+							"at_ms": "T0+29d 00:05"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"nueva": {
+							"license_id": "‹id·6›",
+							"license_key_hash": "‹hash de clave·2›",
+							"license_key_enc": "‹cifrado de clave·2›",
+							"key_short": "‹clave corta·2›",
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"disabled": 0,
+							"plan": "standard",
+							"term_months": 12,
+							"origin": "manual",
+							"issued_at_ms": "T0+29d 00:05",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"customer_email": "otra@ejemplo.test",
+							"customer_name": "Bar a mano",
+							"redeemed_into_license_id": null,
+							"stripe_customer_id": null,
+							"stripe_checkout_session_id": null,
+							"stripe_payment_intent_id": null,
+							"stripe_price_id": null,
+							"created_at_ms": "T0+29d 00:05",
+							"updated_at_ms": "T0+29d 00:05",
+							"customer_business_name": null,
+							"customer_phone": null,
+							"customer_address_json": null,
+							"key_email_sent_at_ms": null
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 6,
+			"peticion": "POST /v1/license/activate",
+			"cuerpo": {
+				"activationKey": "‹clave·2›",
+				"deviceId": "equipo-de-otro-bar",
+				"devicePubKey": "‹clave pública de equipo-de-otro-bar›",
+				"tenantInfo": {
+					"displayName": "Bar de pruebas",
+					"legalName": "Bar de Pruebas S.L.",
+					"country": "ES"
+				}
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"tenantId": "‹id·8›",
+					"deviceId": "equipo-de-otro-bar",
+					"token": {
+						"‹jwt›": {
+							"tenantId": "‹id·8›",
+							"deviceId": "equipo-de-otro-bar",
+							"licHash": "‹hash de clave·2›",
+							"iat": "T0+29d 00:06",
+							"exp": "T0+59d 00:06"
+						}
+					},
+					"status": "active",
+					"expiresAt": "iso:T0+394d 00:06:00.000Z",
+					"fieldDek": "‹dek·2›",
+					"cambioDeEquipo": false
+				}
+			},
+			"tenantHub": [
+				{
+					"negocio": "‹id·8›",
+					"metodo": "estaAprovisionado",
+					"argumentos": []
+				},
+				{
+					"negocio": "‹id·8›",
+					"metodo": "aprovisionar",
+					"argumentos": [
+						"‹id·8›"
+					]
+				}
+			],
+			"cambios": {
+				"devices": [
+					{
+						"nueva": {
+							"device_id": "equipo-de-otro-bar",
+							"tenant_id": "‹id·8›",
+							"role": "tpv",
+							"first_seen_at_ms": "T0+29d 00:06",
+							"last_seen_at_ms": "T0+29d 00:06",
+							"revoked_at_ms": null,
+							"device_pubkey_b64": "‹clave pública de equipo-de-otro-bar›",
+							"pubkey_alg": "ed25519"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·6›",
+							"tenant_id": "‹id·8›",
+							"main_device_id": "equipo-de-otro-bar",
+							"status": "active",
+							"activated_at_ms": "T0+29d 00:06",
+							"expires_at_ms": "T0+394d 00:06",
+							"updated_at_ms": "T0+29d 00:06"
+						},
+						"antes": {
+							"tenant_id": null,
+							"main_device_id": null,
+							"status": "issued",
+							"activated_at_ms": null,
+							"expires_at_ms": null,
+							"updated_at_ms": "T0+29d 00:05"
+						}
+					}
+				],
+				"tenants": [
+					{
+						"nueva": {
+							"tenant_id": "‹id·8›",
+							"status": "active",
+							"legal_name": "Bar de Pruebas S.L.",
+							"display_name": "Bar de pruebas",
+							"email": null,
+							"phone": null,
+							"country": "ES",
+							"timezone": null,
+							"notes": null,
+							"created_at_ms": "T0+29d 00:06",
+							"updated_at_ms": "T0+29d 00:06",
+							"field_dek": "‹cifrado de dek·2›",
+							"piloto": 0
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 7,
+			"peticion": "POST /v1/admin/licenses/‹id·6›/shorten",
+			"cuerpo": {
+				"months": 1
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·6›",
+					"expiresAt": "iso:T0+363d 00:06:00.000Z",
+					"caducada": false
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·9›",
+							"action": "shorten",
+							"license_id": "‹id·6›",
+							"detail": {
+								"‹texto json›": {
+									"months": 1,
+									"expiresAtMs": "T0+363d 00:06"
+								}
+							},
+							"at_ms": "T0+29d 00:07"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·6›",
+							"expires_at_ms": "T0+363d 00:06",
+							"updated_at_ms": "T0+29d 00:07"
+						},
+						"antes": {
+							"expires_at_ms": "T0+394d 00:06",
+							"updated_at_ms": "T0+29d 00:06"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 8,
+			"peticion": "POST /v1/admin/licenses/‹id·6›/shorten",
+			"cuerpo": {
+				"months": 12
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·6›",
+					"expiresAt": "iso:T0-2d 00:06:00.000Z",
+					"caducada": true
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·10›",
+							"action": "shorten",
+							"license_id": "‹id·6›",
+							"detail": {
+								"‹texto json›": {
+									"months": 12,
+									"expiresAtMs": "T0-2d 00:06"
+								}
+							},
+							"at_ms": "T0+29d 00:08"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·6›",
+							"expires_at_ms": "T0-2d 00:06",
+							"updated_at_ms": "T0+29d 00:08"
+						},
+						"antes": {
+							"expires_at_ms": "T0+363d 00:06",
+							"updated_at_ms": "T0+29d 00:07"
+						}
+					}
+				]
+			}
+		},
+		{
+			"paso": 9,
+			"peticion": "POST /v1/admin/licenses/‹id·6›/extend",
+			"cuerpo": {
+				"months": 1
+			},
+			"respuesta": {
+				"status": 200,
+				"cuerpo": {
+					"ok": true,
+					"licenseId": "‹id·6›",
+					"expiresAt": "iso:T0+59d 00:09:00.000Z"
+				}
+			},
+			"cambios": {
+				"admin_audit": [
+					{
+						"nueva": {
+							"audit_id": "‹id·11›",
+							"action": "extend",
+							"license_id": "‹id·6›",
+							"detail": {
+								"‹texto json›": {
+									"months": 1,
+									"expiresAtMs": "T0+59d 00:09"
+								}
+							},
+							"at_ms": "T0+29d 00:09"
+						}
+					}
+				],
+				"licenses": [
+					{
+						"cambiada": {
+							"license_id": "‹id·6›",
+							"expires_at_ms": "T0+59d 00:09",
+							"updated_at_ms": "T0+29d 00:09"
+						},
+						"antes": {
+							"expires_at_ms": "T0-2d 00:06",
+							"updated_at_ms": "T0+29d 00:08"
+						}
+					}
+				]
+			}
+		}
+	],
+	"central": {
+		"Ws_Tickets": [],
+		"admin_audit": [
+			{
+				"audit_id": "‹id·2›",
+				"action": "issue",
+				"license_id": "‹id·1›",
+				"detail": {
+					"‹texto json›": {
+						"termMonths": 12,
+						"email": "una@ejemplo.test",
+						"keyShort": "‹clave corta·1›",
+						"sendKey": false
+					}
+				},
+				"at_ms": "T0+29d 00:01"
+			},
+			{
+				"audit_id": "‹id·4›",
+				"action": "extend",
+				"license_id": "‹id·1›",
+				"detail": {
+					"‹texto json›": {
+						"months": 1,
+						"expiresAtMs": "T0+424d 00:02"
+					}
+				},
+				"at_ms": "T0+29d 00:03"
+			},
+			{
+				"audit_id": "‹id·5›",
+				"action": "shorten",
+				"license_id": "‹id·1›",
+				"detail": {
+					"‹texto json›": {
+						"months": 1,
+						"expiresAtMs": "T0+393d 00:02"
+					}
+				},
+				"at_ms": "T0+29d 00:04"
+			},
+			{
+				"audit_id": "‹id·7›",
+				"action": "issue",
+				"license_id": "‹id·6›",
+				"detail": {
+					"‹texto json›": {
+						"termMonths": 12,
+						"email": "otra@ejemplo.test",
+						"keyShort": "‹clave corta·2›",
+						"sendKey": false
+					}
+				},
+				"at_ms": "T0+29d 00:05"
+			},
+			{
+				"audit_id": "‹id·9›",
+				"action": "shorten",
+				"license_id": "‹id·6›",
+				"detail": {
+					"‹texto json›": {
+						"months": 1,
+						"expiresAtMs": "T0+363d 00:06"
+					}
+				},
+				"at_ms": "T0+29d 00:07"
+			},
+			{
+				"audit_id": "‹id·10›",
+				"action": "shorten",
+				"license_id": "‹id·6›",
+				"detail": {
+					"‹texto json›": {
+						"months": 12,
+						"expiresAtMs": "T0-2d 00:06"
+					}
+				},
+				"at_ms": "T0+29d 00:08"
+			},
+			{
+				"audit_id": "‹id·11›",
+				"action": "extend",
+				"license_id": "‹id·6›",
+				"detail": {
+					"‹texto json›": {
+						"months": 1,
+						"expiresAtMs": "T0+59d 00:09"
+					}
+				},
+				"at_ms": "T0+29d 00:09"
+			}
+		],
+		"app_releases": [],
+		"canario_cifrado": [],
+		"device_challenges": [],
+		"devices": [
+			{
+				"device_id": "equipo-del-bar",
+				"tenant_id": "‹id·3›",
+				"role": "tpv",
+				"first_seen_at_ms": "T0+29d 00:02",
+				"last_seen_at_ms": "T0+29d 00:02",
+				"revoked_at_ms": null,
+				"device_pubkey_b64": "‹clave pública de equipo-del-bar›",
+				"pubkey_alg": "ed25519"
+			},
+			{
+				"device_id": "equipo-de-otro-bar",
+				"tenant_id": "‹id·8›",
+				"role": "tpv",
+				"first_seen_at_ms": "T0+29d 00:06",
+				"last_seen_at_ms": "T0+29d 00:06",
+				"revoked_at_ms": null,
+				"device_pubkey_b64": "‹clave pública de equipo-de-otro-bar›",
+				"pubkey_alg": "ed25519"
+			}
+		],
+		"email_codes": [],
+		"email_sends": [],
+		"interruptores": [],
+		"license_device_otp": [],
+		"license_device_swaps": [],
+		"license_notices": [],
+		"license_otp_eventos": [],
+		"license_payments": [],
+		"licenses": [
+			{
+				"license_id": "‹id·1›",
+				"license_key_hash": "‹hash de clave·1›",
+				"license_key_enc": "‹cifrado de clave·1›",
+				"key_short": "‹clave corta·1›",
+				"tenant_id": "‹id·3›",
+				"main_device_id": "equipo-del-bar",
+				"status": "active",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "manual",
+				"issued_at_ms": "T0+29d 00:01",
+				"activated_at_ms": "T0+29d 00:02",
+				"expires_at_ms": "T0+393d 00:02",
+				"customer_email": "una@ejemplo.test",
+				"customer_name": "Bar a mano",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": null,
+				"stripe_checkout_session_id": null,
+				"stripe_payment_intent_id": null,
+				"stripe_price_id": null,
+				"created_at_ms": "T0+29d 00:01",
+				"updated_at_ms": "T0+29d 00:04",
+				"customer_business_name": null,
+				"customer_phone": null,
+				"customer_address_json": null,
+				"key_email_sent_at_ms": null
+			},
+			{
+				"license_id": "‹id·6›",
+				"license_key_hash": "‹hash de clave·2›",
+				"license_key_enc": "‹cifrado de clave·2›",
+				"key_short": "‹clave corta·2›",
+				"tenant_id": "‹id·8›",
+				"main_device_id": "equipo-de-otro-bar",
+				"status": "active",
+				"disabled": 0,
+				"plan": "standard",
+				"term_months": 12,
+				"origin": "manual",
+				"issued_at_ms": "T0+29d 00:05",
+				"activated_at_ms": "T0+29d 00:06",
+				"expires_at_ms": "T0+59d 00:09",
+				"customer_email": "otra@ejemplo.test",
+				"customer_name": "Bar a mano",
+				"redeemed_into_license_id": null,
+				"stripe_customer_id": null,
+				"stripe_checkout_session_id": null,
+				"stripe_payment_intent_id": null,
+				"stripe_price_id": null,
+				"created_at_ms": "T0+29d 00:05",
+				"updated_at_ms": "T0+29d 00:09",
+				"customer_business_name": null,
+				"customer_phone": null,
+				"customer_address_json": null,
+				"key_email_sent_at_ms": null
+			}
+		],
+		"pair_claim_fallos": [],
+		"pair_requests": [],
+		"reserva_web_claves": [],
+		"reserva_web_dominios": [],
+		"tenant_recovery_emails": [],
+		"tenants": [
+			{
+				"tenant_id": "‹id·3›",
+				"status": "active",
+				"legal_name": "Bar de Pruebas S.L.",
+				"display_name": "Bar de pruebas",
+				"email": null,
+				"phone": null,
+				"country": "ES",
+				"timezone": null,
+				"notes": null,
+				"created_at_ms": "T0+29d 00:02",
+				"updated_at_ms": "T0+29d 00:02",
+				"field_dek": "‹cifrado de dek·1›",
+				"piloto": 0
+			},
+			{
+				"tenant_id": "‹id·8›",
+				"status": "active",
+				"legal_name": "Bar de Pruebas S.L.",
+				"display_name": "Bar de pruebas",
+				"email": null,
+				"phone": null,
+				"country": "ES",
+				"timezone": null,
+				"notes": null,
+				"created_at_ms": "T0+29d 00:06",
+				"updated_at_ms": "T0+29d 00:06",
+				"field_dek": "‹cifrado de dek·2›",
+				"piloto": 0
+			}
+		],
+		"webhook_events": []
+	}
+}
