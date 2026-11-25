@@ -234,11 +234,6 @@ export async function podarCopias(
 	return sobran.length;
 }
 
-/** Borra todas las copias de un negocio (al retirarlo). Devuelve cuántas. */
-export async function borrarCopias(bucket: R2Bucket, tenantId: string): Promise<number> {
-	return podarCopias(bucket, tenantId, 0);
-}
-
 /**
  * Cuándo toca la siguiente copia: la madrugada siguiente, entre las 3:00 y las 5:00 UTC (de 4 a 6
  * de la mañana en la península en invierno, de 5 a 7 en verano), cuando un bar está cerrado y la
