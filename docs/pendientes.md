@@ -398,9 +398,12 @@ El cron de avisos de caducidad (`avisosDeCaducidad.ts`) pone una marca por licen
 (`marcarAvisoEnviado`) antes de mandar el correo, y la suelta si no sale (`olvidarAvisoEnviado`). Lo
 que ya está en el código (E7a-7): una licencia que falla no corta a las demás. Lo que queda: si la
 central falla al soltar la marca, o después de ponerla (la marca entra y su respuesta no vuelve), la
-marca se queda y ese peldaño no sale nunca (`test/avisoDeCaducidad.test.ts`, «al soltar la marca de un
-aviso que no ha salido…»). Arreglo posible: una marca «enviando» con caducidad, que el ciclo de otro
-día pueda retomar.
+marca se queda, y el ciclo de otro día no la gana (`INSERT OR IGNORE`) y cuenta esa licencia como ya
+avisada: ese peldaño no sale nunca. Eso se lee en el código
+(`avisosDeCaducidad.ts::avisarDeCaducidades`) y no lo prueba ningún test: el de «al soltar la marca de
+un aviso que no ha salido…» (`test/avisoDeCaducidad.test.ts`) sólo fija que ese fallo no corta a las
+demás, sin correr otro ciclo, y el de la marca que entra sin respuesta no existe. Arreglo posible: una
+marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
 
 ### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
 
