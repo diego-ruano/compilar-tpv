@@ -33,9 +33,11 @@ import { ponerFk } from "./sqliteDelObjeto";
 import { identificador, LINEA_FIN, LINEA_MIGRACIONES, literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "./volcadoSql";
 
 /**
- * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta,
- * al log y a Axiom: sin nada que traiga la copia (ni sus nombres ni sus datos), sólo números de línea,
- * posiciones, recuentos, códigos y lo que es de este worker (sus migraciones, sus tablas).
+ * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta
+ * y, de la copia de un negocio, también a Axiom (`copia_no_restaurada`); de la central, al rastro de la
+ * administración va sólo su código (`motivoDe`, en `domains/admin/central.ts`). Sin nada que traiga la
+ * copia (ni sus nombres ni sus datos): sólo números de línea, posiciones, recuentos, códigos y lo que
+ * es de este worker (sus migraciones, sus tablas).
  */
 export class CopiaInservible extends Error {
 	constructor(

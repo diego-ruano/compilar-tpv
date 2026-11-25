@@ -7,7 +7,8 @@
 //
 //   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con una tabla que no es
 //     de la base, con una clave foránea rota) deja el objeto como estaba: sin aprovisionar, sin marca,
-//     y el error dice por qué, sin nada de lo que trae la copia (va al log y a Axiom);
+//     y el error dice por qué, sin nada de lo que trae la copia (va en el `detalle` de la respuesta, y
+//     al rastro de la administración, sólo su código: `motivoDe`, en `domains/admin/central.ts`);
 //   · en una central aprovisionada no toca nada;
 //   · con la marca de una restauración a medias no atiende nadie, tampoco al arrancar, y la siguiente
 //     restauración la vacía entera (también lo que la de antes dio por migrado) y termina; volver a
@@ -128,7 +129,7 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 		t.replace(/^-- Fin de la copia: (\d+)/m, (_m, n) => `${linea}\n-- Fin de la copia: ${Number(n) + 1}`);
 	/**
 	 * Qué se ha estropeado, cómo, qué dice el motivo y lo que el motivo no puede decir, porque es de la
-	 * copia: va en `detalle`, que llega al log y a Axiom.
+	 * copia: va en el `detalle` de la respuesta (al rastro de la administración, sólo su código).
 	 */
 	const casos: [string, (texto: string) => string, RegExp, string[]][] = [
 		[

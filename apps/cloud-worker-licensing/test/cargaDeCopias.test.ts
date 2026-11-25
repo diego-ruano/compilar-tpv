@@ -207,7 +207,10 @@ describe("lo que ha escrito alguna vez una copia vuelve igual, con su tipo", () 
 });
 
 describe("una línea de datos que no es exactamente una fila hace inservible la copia, y no se ejecuta nada", () => {
-	/** Lo que no puede salir en el motivo: es de la copia, y el motivo va al log y a Axiom. */
+	/**
+	 * Lo que no puede salir en el motivo: es de la copia, y el motivo va en la respuesta y, el de un
+	 * negocio, también a Axiom.
+	 */
 	const DE_LA_COPIA = "ana.gil@correo.es";
 	const BUENA = linea("1", "1", "'bien'", "NULL", "NULL", "NULL");
 	/** Una fila de la tabla de prueba que sí vale, con lo de la copia dentro, delante de lo que se le añade. */

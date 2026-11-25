@@ -275,7 +275,7 @@ export function reportarAdministracionDeLaCentral(
 		copiaDeAntes?: string;
 		/**
 		 * Por qué no sirve la copia de una restauración: el código del cargador (`copia_cortada`…). Nunca
-		 * el `detalle` del objeto, que trae texto que no es nuestro (SQLite, R2, la propia copia).
+		 * el `detalle` del objeto, que trae texto que no es nuestro (SQLite, R2, la plataforma).
 		 */
 		motivo?: string;
 	},

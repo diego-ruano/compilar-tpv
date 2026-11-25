@@ -20,8 +20,8 @@
 // una restauración que pasa de 30 s reinicia el objeto, y una vuelta se aplica aunque la respuesta no
 // llegue. Aplicar una vuelta ya preparada lo deja antes de reiniciar (`reinicia`). El rastro sólo lleva
 // lo nuestro: códigos, claves y marcadores que han pasado su gramática (`esClaveDeCopiaDeLaCentral`,
-// `esMarcador`), recuentos. El `detalle` del objeto (lo que dice SQLite o R2, o lo que trae una copia)
-// va en la respuesta, a quien administra, y nunca al rastro.
+// `esMarcador`), recuentos. El `detalle` del objeto (lo que dicen SQLite, R2 o la plataforma) va en
+// la respuesta, a quien administra, y nunca al rastro.
 
 import { Hono, type Context } from "hono";
 import * as z from "zod";
