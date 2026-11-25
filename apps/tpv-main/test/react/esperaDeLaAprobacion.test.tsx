@@ -95,9 +95,16 @@ describe("la espera de la aprobación", () => {
 		expect(result.current.codigoGastado).toBe(false);
 	});
 
-	for (const fallo of [
-		{ code: "pair_rejected", message: "El TPV principal ha rechazado la vinculación." },
-		{ code: "pair_code_expired", message: "El código de vinculación ha caducado." },
+	for (const { fallo, seVe } of [
+		{
+			fallo: { code: "pair_rejected", message: "El TPV principal ha rechazado la vinculación." },
+			seVe: "El TPV principal ha rechazado la vinculación.",
+		},
+		{
+			// EMPAREJAR-ESPERA: el código caducado en la nube se cuenta como el plazo que se acaba.
+			fallo: { code: "pair_code_expired", message: "El código de vinculación ha caducado." },
+			seVe: "El código ha caducado sin que el TPV principal aprobara la vinculación. Genera un código nuevo en el TPV principal y vuelve a intentarlo.",
+		},
 	]) {
 		it(`${fallo.code} termina la espera y da el código por gastado`, async () => {
 			nube.respuestas = [
@@ -109,7 +116,7 @@ describe("la espera de la aprobación", () => {
 
 			await pasar(ESPERA_ENTRE_CONSULTAS_MS);
 			expect(result.current.estado.step).toBe("idle");
-			expect(result.current.error).toBe(fallo.message);
+			expect(result.current.error).toBe(seVe);
 			expect(result.current.codigoGastado).toBe(true);
 			expect(result.current.aviso).toBeNull();
 		});

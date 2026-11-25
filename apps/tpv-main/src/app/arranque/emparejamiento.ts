@@ -42,14 +42,14 @@ const SE_SIGUE_ESPERANDO = "Se sigue esperando la aprobación.";
 
 /**
  * EMPAREJAR-ESPERA: lo que termina la espera, porque preguntar otra vez no lo va a cambiar. La Main ha
- * rechazado la vinculación o el código ha caducado; el código no está reclamado por este equipo
- * (`not_found`); ya se usó o el reto no vale (`conflict`); o la nube no deja entrar a este equipo ni a
- * su negocio. Lo demás (la red, un 503 de la central o del worker, un 429 del filtro por IP, un 5xx)
- * es pasajero y se sigue esperando, hasta que caduca el código.
+ * rechazado la vinculación; el código no está reclamado por este equipo (`not_found`); ya se usó o el
+ * reto no vale (`conflict`); o la nube no deja entrar a este equipo ni a su negocio. El código caducado
+ * (`pair_code_expired`) también termina, pero como se acaba el plazo: diciendo si la Main no aprobó o
+ * si la nube no contestaba. Lo demás (la red, un 503 de la central o del worker, un 429 del filtro por
+ * IP, un 5xx) es pasajero y se sigue esperando, hasta que caduca el código.
  */
 const TERMINALES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
 	"pair_rejected",
-	"pair_code_expired",
 	"not_found",
 	"conflict",
 	"validation",
@@ -181,7 +181,8 @@ async function firmar(
  * `null` si la espera dejó de interesar. «Todavía sin aprobar» no es un fallo: se sigue
  * preguntando hasta que caduca el código. Lo pasajero tampoco (EMPAREJAR-ESPERA): se sigue
  * preguntando, cada vez más espaciado, y se dice. Sólo corta lo que no va a cambiar (`TERMINALES`),
- * que llega tal como lo da el IPC; el código que caduca esperando sale como `pair_code_expired`.
+ * que llega tal como lo da el IPC. El código que caduca esperando, lo diga el reloj de la Handy o la
+ * nube, sale como `pair_code_expired`, con la frase de si la Main no aprobó o la nube no contestaba.
  */
 export async function emparejarHandy(
 	codigo: CodigoDeVinculacion,
@@ -242,6 +243,10 @@ export async function emparejarHandy(
 		} catch (e: unknown) {
 			// ARCH-05: se ramifica por CÓDIGO del catálogo, nunca por el texto del mensaje.
 			const fallo = toAppError(e);
+			// EMPAREJAR-ESPERA: el código ha caducado en la nube. Pasa casi siempre en la última consulta,
+			// que llega algo después de `limite` (la nube calculó `caducaEnMs` antes de contestar al
+			// claim), y cuenta como el plazo que se acaba: con lo que dijeron las consultas de antes.
+			if (fallo.code === "pair_code_expired") break;
 			if (TERMINALES.has(fallo.code)) throw e;
 			if (fallo.code === "not_approved") {
 				// Todavía sin aprobar en la Main: no es un fallo, es que seguimos esperando.

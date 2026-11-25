@@ -21,6 +21,9 @@ const CLAVE = "P".repeat(44);
 const CODIGO = { pairCode: "123456", pairSecret: "s3cr3t" };
 /** Lo que le queda al código según la nube, en los dobles. */
 const CADUCA_EN_MS = 30_000;
+/** Lo que tarda en volver la respuesta al claim: lo que el código caduca antes en la nube. */
+const LATENCIA_MS = 50;
+const CODIGO_CADUCADO_EN_LA_NUBE = "El código de vinculación ha caducado. Genera uno nuevo en el TPV principal.";
 
 /** Un IPC y una nube en memoria. La Main aprueba tras `pendientesAntesDeAprobar` consultas. */
 function crearDobles() {
@@ -46,6 +49,12 @@ function crearDobles() {
 		horaNube: null as number | null,
 		pendiente: null as unknown,
 		vivo: true,
+		/**
+		 * EMPAREJAR-ESPERA: desde cuándo la nube contesta que el código ha caducado. La nube calcula
+		 * `caducaEnMs` antes de contestar al claim, así que el código caduca allí un poco antes de lo
+		 * que la Handy apunta: la latencia. `null`: no caduca en la nube durante la prueba.
+		 */
+		caducaEnLaNube: null as number | null,
 	};
 	const deps: DependenciasEmparejamiento = {
 		commands: {
@@ -64,6 +73,9 @@ function crearDobles() {
 			if (ruta === "/v1/pair/fetch-token") {
 				estado.consultas.push(cuerpo);
 				estado.horasDeConsulta.push(Date.now());
+				if (estado.caducaEnLaNube !== null && Date.now() > estado.caducaEnLaNube) {
+					throw { code: "pair_code_expired", message: CODIGO_CADUCADO_EN_LA_NUBE };
+				}
 				if (estado.fallosPasajeros.length > 0) throw estado.fallosPasajeros.shift();
 				if (estado.errorAlConsultar) throw estado.errorAlConsultar;
 				if (estado.consultas.length <= estado.pendientesAntesDeAprobar) {
@@ -172,8 +184,8 @@ h1`);
 		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS);
 	});
 
-	it("el rechazo de la Main y el código caducado cortan en el acto y no guardan nada", async () => {
-		for (const code of ["pair_rejected", "pair_code_expired", "conflict", "not_found", "device_revoked"]) {
+	it("el rechazo de la Main y lo que no va a cambiar cortan en el acto y no guardan nada", async () => {
+		for (const code of ["pair_rejected", "conflict", "not_found", "validation", "device_revoked"]) {
 			const { estado, deps } = crearDobles();
 			estado.errorAlConsultar = { code, message: `fallo ${code}` };
 			const resultado = arrancar(deps);
@@ -243,7 +255,52 @@ h1`);
 
 		const { error } = await resultado;
 		expect(error).toMatchObject({ code: "pair_code_expired" });
+		expect((error as Error).message).toContain("la nube no contestaba");
 		expect((error as Error).message).toContain("No se ha podido conectar con el servidor.");
+		expect(estado.tokenGuardado).toBeNull();
+	});
+
+	// EMPAREJAR-ESPERA: la última consulta llega siempre un poco después de que el código caduque en
+	// la nube. Lo que contestaba entonces era un fallo pasajero para la Handy, y la espera de una Main
+	// que no aprobaba acababa diciendo que la nube no contestaba, con dos instrucciones contradictorias.
+	it("la Main que no aprueba: la nube dice que el código ha caducado, y la espera dice que la Main no aprobó", async () => {
+		const { estado, deps } = crearDobles();
+		estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
+		estado.caducaEnLaNube = Date.now() + CADUCA_EN_MS - LATENCIA_MS;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS + 5 * ESPERA_ENTRE_CONSULTAS_MS);
+
+		const { error } = await resultado;
+		expect(error).toMatchObject({ code: "pair_code_expired" });
+		expect((error as Error).message).toContain("sin que el TPV principal aprobara");
+		expect((error as Error).message).not.toContain("la nube no contestaba");
+		expect(estado.avisos).toEqual([]);
+		expect(estado.tokenGuardado).toBeNull();
+	});
+
+	it("si la nube falla y luego dice que el código ha caducado, la espera dice que la nube no contestaba", async () => {
+		const { estado, deps } = crearDobles();
+		estado.errorAlConsultar = { code: "external", message: "No se ha podido conectar con el servidor." };
+		estado.caducaEnLaNube = Date.now() + CADUCA_EN_MS - LATENCIA_MS;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS + 20 * ESPERA_ENTRE_CONSULTAS_MS);
+
+		const { error } = await resultado;
+		expect(error).toMatchObject({ code: "pair_code_expired" });
+		expect((error as Error).message).toContain("la nube no contestaba");
+		expect((error as Error).message).toContain("No se ha podido conectar con el servidor.");
+	});
+
+	it("el código que la nube da por caducado en la primera consulta corta en el acto", async () => {
+		const { estado, deps } = crearDobles();
+		estado.caducaEnLaNube = Date.now();
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS * 5);
+
+		const { error } = await resultado;
+		expect(error).toMatchObject({ code: "pair_code_expired" });
+		expect((error as Error).message).toContain("sin que el TPV principal aprobara");
+		expect(estado.consultas).toHaveLength(1);
 		expect(estado.tokenGuardado).toBeNull();
 	});
 

@@ -34,6 +34,7 @@ import {
 	textoDeEspera,
 } from "../src/domains/pairing/pairing.intentos";
 import { claveDeFreno } from "../src/lib/limitador";
+import { wireToCode } from "../src/lib/errorCodes";
 import configuracionDelWorker from "../wrangler.json";
 import { mensajeFirmado, type AccionFirmada } from "../src/domains/pairing/pairing.firma";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
@@ -437,6 +438,24 @@ describe("el reto y la recogida del token", () => {
 		});
 	});
 
+	it("la consulta que llega con el reto caducado oye que el código ha caducado (EMPAREJAR-ESPERA)", async () => {
+		// El reto vive lo que el código, y la última consulta de la Handy llega siempre un poco después
+		// de que caduque en la nube. Contestaba `challenge_expired`, que para la Handy era `external`, un
+		// fallo pasajero: el aviso decía «Se sigue esperando» y la espera acababa culpando a la nube.
+		const a = await dispositivo("handy-a", 1);
+		await conLaCentral(async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			const tarde = T0 + 10 * MIN + 1;
+
+			const recogida = await m.recoger(a, CODIGO, body.nonceB64, tarde);
+			expect([recogida.status, recogida.body.error]).toEqual([410, "pair_code_expired"]);
+			expect(wireToCode(recogida.body.error, recogida.status)).toBe("pair_code_expired");
+
+			const cancelacion = await m.cancelar(a, CODIGO, body.nonceB64, tarde);
+			expect([cancelacion.status, cancelacion.body.error]).toEqual([410, "pair_code_expired"]);
+		});
+	});
+
 	it("una aprobación que nadie recoge no deja ningún dispositivo", async () => {
 		const a = await dispositivo("handy-a", 1);
 		await conLaCentral(async (m) => {
@@ -726,7 +745,7 @@ describe("recoger el token, todo o nada (EMPAREJAR-TOKEN)", () => {
 				"bad_device_signature",
 			);
 			// El reto caduca con el código: después, la Handy renueva su token como cualquier otra (`/v1/license/refresh`).
-			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 11 * MIN)).body.error).toBe("challenge_expired");
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 11 * MIN)).body.error).toBe("pair_code_expired");
 		});
 	});
 

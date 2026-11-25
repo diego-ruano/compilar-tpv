@@ -90,7 +90,10 @@ export async function comprobarFirmaDelReclamante(
 	const ch = chRes.rows?.[0] as any | undefined;
 	if (!ch) return { status: 404, error: "challenge_not_found" };
 	if (datos.retoGastadoEn === undefined && ch.used_at_ms) return { status: 409, error: "challenge_used" };
-	if (Number(ch.expires_at_ms || 0) < datos.ahoraMs) return { status: 410, error: "challenge_expired" };
+	// EMPAREJAR-ESPERA: el reto caduca con su código (`nuevoReto`), así que un reto caducado es el código
+	// caducado, y se dice así. Como `challenge_expired` era para la Handy un fallo pasajero: su última
+	// consulta, que llega siempre algo después de que caduque aquí, acababa culpando a la nube.
+	if (Number(ch.expires_at_ms || 0) < datos.ahoraMs) return { status: 410, error: "pair_code_expired" };
 
 	let sigU8: Uint8Array;
 	let pubU8: Uint8Array;
