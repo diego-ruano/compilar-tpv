@@ -205,6 +205,17 @@ describe("sólo sentencias de filas, una a una", () => {
 		expect((await db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(0);
 	});
 
+	it("una suelta que falla no deja nada escrito, aunque su cláusula de conflicto conserve lo de antes del fallo (OR FAIL)", async () => {
+		const { stub } = await centralDePrueba();
+		const r = await stub.ejecutar({
+			sql: `INSERT OR FAIL INTO tenants (tenant_id, created_at_ms, updated_at_ms) SELECT value, 1, 1 FROM json_each('["x","y","x"]');`,
+			args: [],
+		});
+		expect(r).toMatchObject({ ok: false, error: "central_error_sql", detalle: expect.stringMatching(/UNIQUE/) });
+		const tenants = await runInDurableObject(stub, (_c, state) => state.storage.sql.exec("SELECT tenant_id FROM tenants;").toArray());
+		expect(tenants).toEqual([]);
+	});
+
 	it("el detalle dice por qué, para quien escribió la sentencia", async () => {
 		const { db } = await centralDePrueba();
 		const error: any = await db.execute("SELECT 1; SELECT 2;").catch((e) => e);
