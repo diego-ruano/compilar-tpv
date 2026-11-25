@@ -4,7 +4,7 @@ import { useCatalogoServicio } from "../../shared/lib/useCatalogoServicio";
 import { Modal,NotaLineaModal,ProductCard } from "./ComandaElementos";
 import { abrirORetomarMesa,addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
 import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
-// components/mesasComponents/MesaComandaModal.tsx
+// src/features/mesas/MesaComandaModal.tsx
 import { useQuery,useQueryClient } from "@tanstack/react-query";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import { ImageOff,Printer,Salad } from "lucide-react";

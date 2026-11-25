@@ -1,4 +1,4 @@
-// src/pages/Tareas.tsx
+// src/app/pages/Tareas.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { commands } from "@tpv/client";
 import {

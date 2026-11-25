@@ -1,4 +1,4 @@
-// src/pages/Estadisticas.tsx
+// src/app/pages/Estadisticas.tsx
 import { useMemo, useState } from "react";
 import { BarChart3, CloudDownload } from "lucide-react";
 

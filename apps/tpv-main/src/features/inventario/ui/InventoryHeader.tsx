@@ -1,4 +1,4 @@
-// components/inventario/InventoryHeader.tsx
+// src/features/inventario/ui/InventoryHeader.tsx
 import { usePermisos } from "../../../shared/lib/usePermisos";
 import { Package, ArrowLeft, Plus, FolderPlus, Salad, Pencil } from "lucide-react";
 

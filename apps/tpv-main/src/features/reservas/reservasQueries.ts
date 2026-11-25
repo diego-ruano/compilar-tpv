@@ -3,7 +3,7 @@
 //  - Lecturas  -> useQuery con queryKey con el nombre de la feature como prefijo.
 //  - Escrituras -> useMutation que, en onSuccess, invalida lo que enseña una reserva para que las
 //    listas en caché se refresquen solas (`refrescarTrasCambiarReservas`).
-//  - El hook envuelve las funciones de `reservasApis.ts` (commands) sin tocar su firma.
+//  - El hook llama a los `commands` de `@tpv/client` sin tocar su firma.
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 

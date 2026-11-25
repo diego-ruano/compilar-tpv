@@ -6,8 +6,8 @@ import type { commands } from "@tpv/client";
 // cancelación de esa espera.
 //
 // El bucle recibe sus dependencias (el IPC, la nube, si la espera sigue en pie) en vez de
-// importarlas, igual que `recoverySync.ts`: así se prueba con dobles y un reloj falso
-// (`test/emparejamientoHandy.test.ts`), y la pantalla sólo lo arranca y pinta lo que devuelve.
+// importarlas: así se prueba con dobles y un reloj falso (`test/emparejamientoHandy.test.ts`), y
+// la pantalla sólo lo arranca y pinta lo que devuelve.
 
 import { esError } from "@tpv/client";
 

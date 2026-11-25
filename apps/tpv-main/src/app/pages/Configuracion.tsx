@@ -1,5 +1,5 @@
 import { commands, toAppError } from "@tpv/client";
-// src/pages/Configuracion.tsx
+// src/app/pages/Configuracion.tsx
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";

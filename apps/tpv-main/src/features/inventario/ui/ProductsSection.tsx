@@ -1,4 +1,4 @@
-// components/inventario/ProductsSection.tsx
+// src/features/inventario/ui/ProductsSection.tsx
 import Product from "../Product";
 import type { ProductoDisplay } from "../hooks/useInventario";
 

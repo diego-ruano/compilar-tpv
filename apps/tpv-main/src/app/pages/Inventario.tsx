@@ -1,4 +1,4 @@
-// src/pages/Inventario.tsx
+// src/app/pages/Inventario.tsx
 import { useEffect, useState } from "react";
 import { toAppError } from "@tpv/client";
 import { useToast } from "../../shared/toast";

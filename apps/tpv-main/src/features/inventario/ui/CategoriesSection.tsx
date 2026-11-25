@@ -1,4 +1,4 @@
-// components/inventario/CategoriesSection.tsx
+// src/features/inventario/ui/CategoriesSection.tsx
 import Category from "../Category";
 import type { CategoriaDisplay } from "../hooks/useInventario";
 

@@ -52,9 +52,9 @@ function applyThemeClass(theme: Theme) {
     const dark = theme === "dark";
     if (dark) root.classList.add("dark");
     else root.classList.remove("dark");
-    // Mantiene sincronizado el fondo inline que fija el script anti-FOUC de
-    // index.html, para que un cambio de tema en caliente no deje al <html>
-    // con un color de fondo obsoleto detrás del body.
+    // Mantiene sincronizado el fondo inline que fija `public/tema-inicial.js` (lo carga
+    // index.html antes del primer pintado), para que un cambio de tema en caliente no deje al
+    // <html> con un color de fondo obsoleto detrás del body.
     root.style.backgroundColor = dark ? "#0e0f13" : "#f3f8ff";
     root.style.colorScheme = dark ? "dark" : "light";
     applyNativeBackground(dark);
