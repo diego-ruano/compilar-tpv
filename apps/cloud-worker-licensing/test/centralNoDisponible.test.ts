@@ -366,3 +366,55 @@ describe("en los sitios que no pasan por el `onError`", () => {
 		expect((await eventosDeLaCentral(1))[0]).toMatchObject({ motivo: "pasajera", ruta: "/ws" });
 	});
 });
+
+describe("lo que queda en el log", () => {
+	/** Lo que se escribe en la consola mientras dura el caso: cada llamada, con sus argumentos juntos. */
+	function espiarLaConsola() {
+		const escrito: { nivel: string; texto: string }[] = [];
+		for (const nivel of ["error", "warn", "log"] as const) {
+			vi.spyOn(console, nivel).mockImplementation((...argumentos: unknown[]) => {
+				escrito.push({ nivel, texto: argumentos.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ") });
+			});
+		}
+		return escrito;
+	}
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	/** El camino lo escribe quien llama: aquí, con un correo en el lugar de la versión instalada. */
+	const CON_UN_CORREO = "https://tpv-api.test/v1/update/windows/x86_64/ana@example.com";
+
+	it("sin la central, la ruta va por su patrón, no por su camino: el correo no llega a la consola", async () => {
+		const escrito = espiarLaConsola();
+		const res = await app.request(CON_UN_CORREO, {}, {
+			...env,
+			...AXIOM,
+			LIMITADOR_ACTUALIZACIONES: undefined,
+			...centralSinAprovisionar().entorno,
+		});
+		await eventosDeLaCentral(1);
+
+		expect(res.status).toBe(503);
+		expect(escrito.filter((e) => e.texto.includes("ana@example.com"))).toEqual([]);
+		expect(escrito).toContainEqual({
+			nivel: "error",
+			texto: expect.stringMatching(/^\[central\] GET \/v1\/update\/:target\/:arch\/:current → central_sin_aprovisionar/),
+		});
+	});
+
+	it("en el `onError`, igual, y lo que dice el error sale filtrado", async () => {
+		const escrito = espiarLaConsola();
+		// Un error de SQL que cita lo que le ha llegado: sale por el `onError`, como un 500.
+		const central = centralQue(async () => ({ ok: false, error: "central_error_sql", detalle: 'near "ana@example.com": syntax error' }));
+		const res = await app.request(CON_UN_CORREO, {}, { ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno });
+
+		expect(res.status).toBe(500);
+		expect(escrito.filter((e) => e.texto.includes("ana@example.com"))).toEqual([]);
+		expect(escrito).toContainEqual({
+			nivel: "error",
+			texto: expect.stringMatching(/^\[onError\] GET \/v1\/update\/:target\/:arch\/:current → ErrorDeLaCentral: central_error_sql: near "\[email\]": syntax error/),
+		});
+	});
+});

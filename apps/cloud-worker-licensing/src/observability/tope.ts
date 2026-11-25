@@ -5,10 +5,11 @@
 // El filtro de datos personales (`scrub.ts`) corre síncrono sobre cada cadena de cada evento, antes
 // de contestar, y muchas las elige quien llama: los campos de un lote de telemetría, la ruta de una
 // petición, la clave o el nombre de una operación que la Main manda por el WebSocket. Cada sitio que
-// emite un evento no puede acordarse de acotar las suyas, así que va aquí, una vez, en las tres
-// salidas: `ingestToAxiom` (todo evento que sale a Axiom, del worker, del `TenantHub` o de un
-// dispositivo), el `beforeSend` de Sentry y el aviso que se escribe en la consola cuando Axiom
-// rechaza un lote. Se acota la copia que sale, nunca el dato con el que se trabaja.
+// emite un evento no puede acordarse de acotar las suyas, así que va aquí, una vez, en sus salidas:
+// `ingestToAxiom` (todo evento que sale a Axiom, del worker, del `TenantHub` o de un dispositivo), el
+// `beforeSend` de Sentry, el aviso que se escribe en la consola cuando Axiom rechaza un lote y las
+// líneas de la consola que pueden citar lo que llegó en la petición (las del `onError` de la app y de
+// `respuestaSinLaCentral`). Se acota la copia que sale, nunca el dato con el que se trabaja.
 //
 // Dos topes, y el orden importa:
 //

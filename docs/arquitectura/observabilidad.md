@@ -215,8 +215,10 @@ cabecera, el mismo código que la del worker.
 **Lo que entra al filtro del worker tiene techo** (`observability/tope.ts`). Todas sus salidas a
 telemetría filtran cada cadena con dos topes: `ingestToAxiom` (todo evento a Axiom, del worker, del
 `TenantHub` o de un dispositivo), el `beforeSend` de Sentry (mensaje, excepciones, migas, extra,
-etiquetas y URL) y el aviso de la consola cuando Axiom rechaza un lote. Se acota la copia que sale,
-nunca el dato con el que se trabaja.
+etiquetas y URL), el aviso de la consola cuando Axiom rechaza un lote y las líneas de la consola que
+pueden citar lo que llegó en la petición: las del `onError` de la app y de `respuestaSinLaCentral`, que
+además llevan la ruta por su patrón (`/v1/update/:target/:arch/:current`) y no por su camino, que lo
+escribe quien llama. Se acota la copia que sale, nunca el dato con el que se trabaja.
 
 - **Lo que sale**: 16 KiB (16.384 bytes) en UTF-8, con la marca `…[recortado]` dentro, cortado entre
   caracteres completos (un emoji no se parte). Se corta **después** de filtrar: cortar un texto ya

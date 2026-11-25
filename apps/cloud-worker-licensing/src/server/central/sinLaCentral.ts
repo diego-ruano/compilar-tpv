@@ -61,11 +61,12 @@ export function respuestaSinLaCentral(c: Context, error: unknown): Response | nu
 	const motivo = motivoSinLaCentral(error);
 	if (!motivo) return null;
 
-	const ruta = new URL(c.req.url).pathname;
 	if (!esPasajeroDeLaCentral(error)) {
 		capturarError(error, `${c.req.method} ${c.req.routePath}`);
-		// FABLE-B: el detalle se queda aquí y en Sentry; la respuesta no lo lleva.
-		console.error(`[central] ${c.req.method} ${ruta} → ${(error as Error).message}`);
+		// FABLE-B: el detalle se queda aquí y en Sentry; la respuesta no lo lleva. En el log, la ruta va
+		// por su patrón y no por su camino, que lo escribe quien llama (un correo en el lugar de la
+		// versión del feed), y el mensaje, filtrado y acotado como lo que va a telemetría.
+		console.error(acotar(`[central] ${c.req.method} ${c.req.routePath} → ${(error as Error).message}`, scrub));
 	}
 
 	// Lo que dijo la plataforma, si fue ella; si no, lo que dijo el objeto.
@@ -77,7 +78,7 @@ export function respuestaSinLaCentral(c: Context, error: unknown): Response | nu
 			motivo,
 			metodo: c.req.method,
 			// Como en `sinElObjeto` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-			ruta: acotar(ruta, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
+			ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
 			error: String(causa.message ?? error).slice(0, 300),
 			...(tenantId ? { tenant_id: tenantId } : {}),
 		}),
