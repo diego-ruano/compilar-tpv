@@ -39,6 +39,8 @@ const GRAVEDAD: Record<ErrorCode, GravedadFallo | "ignorar"> = {
     factura_completa_requerida: "normal",
     reserva_solapada: "normal",
     usuario_inactivo: "normal",
+    pair_rejected: "normal",
+    pair_code_expired: "normal",
     not_approved: "ignorar",
 };
 

@@ -29,6 +29,8 @@ function emparejamiento() {
         estado: { step: "idle" as const },
         ocupado: false,
         error: null,
+        aviso: null,
+        codigoGastado: false,
         huella: "",
         hayVinculoGuardado: false,
         vincular: vi.fn(),

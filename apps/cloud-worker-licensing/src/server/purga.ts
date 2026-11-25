@@ -17,7 +17,7 @@
 //     una viva, y nada lo liberaba.
 //   · `device_challenges` (AUD-13) — un reto por cada reclamo de un código, que el propio
 //     dispositivo puede repetir sin gastar nada mientras su código vive. Caduca con su código, y
-//     caducado ya no sirve para nada (`challenge_expired`).
+//     caducado ya no sirve para nada (`pair_code_expired`).
 //
 // Lo que NO se purga, para que no parezca un olvido: `Ws_Tickets` ya se limpia sola al usarse
 // (`ws.routes.ts`), y `email_codes` está acotada por su clave (tenant, dispositivo, propósito),

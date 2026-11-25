@@ -25,8 +25,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
-| [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
-| [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
 | [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
@@ -388,26 +386,6 @@ Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar ante
 de gastar el código, gastarlo y cambiar el correo en un solo lote, que la respuesta salga de lo que
 ya se sabe (el correo nuevo) y no de una relectura, y que la espera sólo cuente desde un envío que ha
 salido.
-
-### EMPAREJAR-TOKEN · Recoger el token de una Handy son tres escrituras sueltas
-
-`/v1/pair/fetch-token` (`pairing.handy.ts`) gasta el reto (`device_challenges`), gasta el código
-(`pair_requests`) y da de alta la Handy (`devices`) en tres sentencias seguidas, no en un lote. Si
-falla el alta, el reto y el código ya están gastados y hay que emparejar otra vez; si se pierde la
-respuesta, queda un dispositivo dado de alta que no tiene su token. Arreglo posible: las tres en un
-lote todo o nada, con la condición de cada una dentro de su sentencia, como ya van.
-
-### EMPAREJAR-ESPERA · La Handy deja de esperar la aprobación al primer 503 o 429
-
-Mientras espera a que la Main la apruebe, la Handy pregunta por su token cada 1,5 s
-(`emparejamiento.ts::emparejarHandy`, `/v1/pair/fetch-token`), y sólo sigue esperando con
-`not_approved`. Cualquier otro fallo termina la espera, también lo que no es definitivo: un 503 de la
-central o del worker que no atienden, o un 429 del filtro por IP (`LIMITADOR_SESION`). La pantalla
-enseña el error y vuelve a la vinculación (`useEmparejamientoHandy.ts::iniciar`), y quien empareja
-tiene que volver a vincular a mano (el mismo código vale mientras no caduque). Arreglo posible: seguir
-esperando ante lo que no es terminal, hasta el límite de siempre, y que `pair_rejected` y
-`pair_code_expired`, que hoy llegan como `External`, tengan su código propio, para terminar sólo con
-ellos.
 
 ### CUPO-SATURADA · El cupo diario de correo no se aplica con la central saturada
 

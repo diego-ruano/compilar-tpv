@@ -49,6 +49,15 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	factura_completa_requerida: "factura_completa_requerida",
 	reserva_solapada: "reserva_solapada",
 	usuario_inactivo: "usuario_inactivo",
+	// EMPAREJAR-ESPERA: lo que termina la espera de la Handy. Lo demás que no es `not_approved` (la red,
+	// un 503, un 429) lo sigue esperando.
+	pair_rejected: "pair_rejected",
+	pair_code_expired: "pair_code_expired",
+	// La firma de una consulta de la Handy que se vincula (`pairing.firma.ts`): un dato que no vale, y
+	// con la misma clave repetirlo no lo cambia, así que también termina la espera. La hora fuera de
+	// margen (`timestamp_out_of_range`) no: su respuesta trae la hora de la nube, y la siguiente
+	// consulta se firma con ella (PROD-04).
+	pair_signature_invalid: "validation",
 	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
 	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
 	escritura_solo_en_main: "permiso_denegado",
@@ -146,6 +155,8 @@ const CODIGOS: Record<ErrorCode, true> = {
 	factura_completa_requerida: true,
 	reserva_solapada: true,
 	usuario_inactivo: true,
+	pair_rejected: true,
+	pair_code_expired: true,
 };
 
 export function esCodigoDelCatalogo(valor: unknown): valor is ErrorCode {
@@ -186,6 +197,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	invalid_pair_secret: "El QR no es válido. Vuelve a escanearlo o escribe el código a mano.",
 	pair_code_not_found:
 		"Ese código de vinculación no existe. Revisa las cifras o genera uno nuevo en el TPV principal.",
+	// El mismo texto que la Main (`tpv_contracts::errors::PAIR_CODE_EXPIRED`).
 	pair_code_expired: "El código de vinculación ha caducado. Genera uno nuevo en el TPV principal.",
 	pair_code_used: CODIGO_USADO,
 	already_used: CODIGO_USADO,
@@ -200,6 +212,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	challenge_not_found: SOLICITUD_CADUCADA,
 	challenge_used: SOLICITUD_CADUCADA,
 	challenge_used_or_expired: SOLICITUD_CADUCADA,
+	pair_signature_invalid:
+		"La firma de este dispositivo no es válida. Vuelve a pulsar «Vincular dispositivo» y, si se repite, genera un código nuevo en el TPV principal.",
 	no_claim_to_approve: "Ningún dispositivo ha usado todavía ese código.",
 	pair_approve_race_or_invalid_state: "Esa solicitud ya no está pendiente. Actualiza la lista.",
 	cannot_revoke_self: "Un dispositivo no puede revocarse a sí mismo.",
@@ -208,6 +222,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	too_many_attempts: "Demasiados intentos fallidos. Espera un poco antes de volver a intentarlo.",
 	// AUD-36: lo que puede escribir el negocio en la nube en una hora (`tenantHub.presupuesto.ts`).
 	presupuesto_agotado: "Este negocio ha guardado demasiados cambios en la nube en la última hora. Vuelve a intentarlo dentro de un rato.",
+	// El mismo texto que la Main (`tpv_contracts::errors::PAIR_REJECTED`).
 	pair_rejected: "El TPV principal ha rechazado la vinculación. Si es un error, genera un código nuevo en el TPV principal.",
 
 	// Autorización del dispositivo
@@ -446,8 +461,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_json",
 	"bad_jwt_payload",
 	"bad_jwt_signature",
-	"bad_pubkey_len",
-	"bad_signature_len",
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",

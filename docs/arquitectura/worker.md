@@ -388,6 +388,7 @@ cuando el Worker la hacía con una transacción abierta por la red:
 | `revertirCobro` | El webhook: reembolsos y disputas | Después, marcar el evento y avisar al `TenantHub` de las altas anuladas |
 | `revocarAMano`, `desrevocar` | `/v1/admin/licenses/:id/revoke` y `/unrevoke` | Antes, que la licencia exista; después, la auditoría y el aviso al `TenantHub` |
 | `extenderAMano`, `acortarAMano` | `/v1/admin/licenses/:id/extend` y `/shorten` | Después, la auditoría. Leer la caducidad y escribir la nueva van juntos: dos a la vez no pierden ninguno de los dos cambios |
+| `recogerTokenDeLaHandy` | `/v1/pair/fetch-token` (`pairing.handy.ts`) | Antes, la firma del reto, el estado del código, la clave del equipo si está en otro negocio y el token firmado; después, el aviso a la Main. Gasta el reto, gasta el código y da de alta la Handy, o nada ([emparejamiento.md](emparejamiento.md#el-flujo)) |
 
 - **Es síncrona de principio a fin**: ni `async`, ni `await`, ni promesas, ni temporizadores, ni
   `fetch` o `crypto.subtle`, tampoco en lo que importa. Una espera dentro abriría el objeto a otras
@@ -413,17 +414,20 @@ cuando el Worker la hacía con una transacción abierta por la red:
   nada ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
   Una central saturada no se repite: Stripe reintenta más tarde.
 - Lo demás son sentencias sueltas condicionadas y lotes todo o nada, con sus ventanas de siempre: la
-  primera activación, los códigos por correo, el emparejamiento, los cupos de correo, el ticket del
-  socket.
+  primera activación, los códigos por correo, reclamar y soltar un código de emparejamiento, los
+  cupos de correo, el ticket del socket.
 
 Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma operación pedida a la
 vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`
 (un fallo tras cada sentencia de cada operación, y la central entera tiene que quedar como estaba) y el
-oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones conducidos
-sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada
-efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar
-en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
-`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. El traslado de licencia, que
+oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones que había
+cuando la central pasó a su objeto (todas menos `recogerTokenDeLaHandy`) conducidos sólo por HTTP, con
+Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada efecto y cada
+cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar en su objeto,
+y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
+`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. `recogerTokenDeLaHandy`, que
+nació ya en el objeto, no tiene foto de antes con la que compararse: la cubren
+`test/centralFalloInyectado.test.ts` y `test/emparejamiento.test.ts`. El traslado de licencia, que
 desde E7a-1 es un lote, lo compara `test/licenciaTraslado.test.ts` con el de antes: las mismas
 columnas en su traza, la misma hora en la licencia y en la traza (`updated_at_ms` y `at_ms`) y
 ninguna otra fila cambiada.

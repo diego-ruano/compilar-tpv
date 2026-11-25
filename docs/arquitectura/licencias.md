@@ -29,7 +29,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Compra | `…/domains/stripe/{stripe.routes,stripe.helpers}.ts` | Webhook: emitir, revertir, restaurar |
 | Administración | `…/domains/admin/admin.routes.ts` + `scripts/tpv-license.mjs` | Emitir, listar, reenviar, revocar, desrevocar, extender, acortar |
 | Almacén | `…/src/server/licenseStore.ts` | Las lecturas y las escrituras de una sentencia en la base central |
-| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el cobro y su reversión (`emitirCobro`, `revertirCobro`) y lo que la administración hace con una licencia ([worker.md](worker.md#las-operaciones)) |
+| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el cobro y su reversión (`emitirCobro`, `revertirCobro`), lo que la administración hace con una licencia y la recogida del token de una Handy (`recogerTokenDeLaHandy`) ([worker.md](worker.md#las-operaciones)) |
 | Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
 | Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |

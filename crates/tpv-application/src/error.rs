@@ -296,6 +296,37 @@ mod tests_respuesta_api {
         }
     }
 
+    /// EMPAREJAR-ESPERA: lo que termina la espera de la Handy llega con su código, tal como lo
+    /// contesta `/v1/pair/fetch-token`. Antes el rechazo llegaba como `conflict` (409) y el código
+    /// caducado como `external` (410), que es también lo que trae un 503 o un 429 pasajeros: la
+    /// espera no podía seguir ante éstos sin seguir también ante aquéllos.
+    #[test]
+    fn el_rechazo_y_el_codigo_caducado_llegan_con_su_codigo() {
+        for (status, body, esperado) in [
+            (409, r#"{"ok":false,"code":"pair_rejected","error":"pair_rejected"}"#, ErrorCode::PairRejected),
+            (409, r#"{"ok":false,"error":"pair_rejected"}"#, ErrorCode::PairRejected),
+            (410, r#"{"ok":false,"code":"pair_code_expired","error":"pair_code_expired"}"#, ErrorCode::PairCodeExpired),
+            (410, r#"{"ok":false,"error":"pair_code_expired"}"#, ErrorCode::PairCodeExpired),
+        ] {
+            assert_eq!(code_de(status, body), esperado, "body: {body}");
+        }
+        // Lo pasajero sigue siendo `external`: la espera lo distingue por el código.
+        for (status, body) in [
+            (503, r#"{"ok":false,"code":"external","error":"hub_overloaded"}"#),
+            (429, r#"{"ok":false,"code":"external","error":"too_many_attempts"}"#),
+        ] {
+            assert_eq!(code_de(status, body), ErrorCode::External, "body: {body}");
+        }
+    }
+
+    /// Sin frase propia en la respuesta, se enseña la del catálogo, que es la misma del worker.
+    #[test]
+    fn el_rechazo_sin_frase_se_ensena_con_la_del_catalogo() {
+        let dto: AppErrorDto = AppError::from_wire("pair_rejected").into();
+        assert_eq!(dto.code, ErrorCode::PairRejected);
+        assert_eq!(dto.message, tpv_contracts::errors::PAIR_REJECTED);
+    }
+
     /// Un 502 de un proxy, un HTML de error, un cuerpo vacío: nada de eso es JSON.
     #[test]
     fn un_cuerpo_que_no_es_json_no_rompe_nada() {

@@ -1,4 +1,4 @@
-import { commands, toAppError } from "@tpv/client";
+import { commands, esError, toAppError } from "@tpv/client";
 // src/app/arranque/useEmparejamientoHandy.ts
 //
 // El estado de la vinculación de un Handy con su Main durante el arranque: si ya está emparejado, la
@@ -60,6 +60,12 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	const [estado, setEstado] = useState<EstadoEmparejamiento>({ step: "leyendo" });
 	const [ocupado, setOcupado] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// EMPAREJAR-ESPERA: por qué no contesta la nube mientras se espera la aprobación, sin dejar de
+	// esperar. Se va en cuanto vuelve a contestar.
+	const [aviso, setAviso] = useState<string | null>(null);
+	// El último intento terminó con el código muerto (la Main lo rechazó o caducó): la pantalla lo
+	// vacía, para que no se vuelva a mandar. Con cualquier otro fallo el código sigue valiendo.
+	const [codigoGastado, setCodigoGastado] = useState(false);
 	// Huella propia del dispositivo: el operador de la Main la compara con la que ve en la
 	// lista de solicitudes antes de aprobar (sobre todo en la ruta de "solo código").
 	const [huella, setHuella] = useState("");
@@ -109,6 +115,8 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		);
 		setOcupado(false);
 		setError(null);
+		setAviso(null);
+		setCodigoGastado(false);
 		setEstado({ step: "leyendo" });
 		try {
 			setEstado(await leerVinculoGuardado());
@@ -152,6 +160,8 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 
 		setOcupado(true);
 		setError(null);
+		setAviso(null);
+		setCodigoGastado(false);
 
 		try {
 			await soltandoRef.current;
@@ -166,11 +176,15 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 					guardarEspera(p);
 					setEstado({ step: "waiting_approval", ...p });
 				},
+				alCambiarElAviso: (a) => {
+					if (esElActual()) setAviso(a);
+				},
 			});
 			if (emparejado && esElActual()) setEstado({ step: "paired", ...emparejado });
-		} catch (e: any) {
+		} catch (e: unknown) {
 			if (!esElActual()) return;
-			setError(String(e?.message || e));
+			setError(toAppError(e).message);
+			setCodigoGastado(esError(e, "pair_rejected") || esError(e, "pair_code_expired"));
 			setEstado({ step: "idle" });
 		} finally {
 			// Terminada (vinculada, rechazada o caducada) no la espera nadie ni hay nada que soltar.
@@ -179,6 +193,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 			if (esElActual()) {
 				olvidarEspera();
 				setOcupado(false);
+				setAviso(null);
 			}
 		}
 	}
@@ -205,6 +220,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		intentoRef.current++;
 		setOcupado(false);
 		setError(null);
+		setAviso(null);
 		setEstado({ step: "idle" });
 		olvidarEspera();
 
@@ -221,10 +237,11 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	/** Vuelve a la pantalla de vinculación (re-emparejar o cambiar de TPV). */
 	function volverAVincular() {
 		setError(null);
+		setCodigoGastado(false);
 		setEstado({ step: "idle" });
 	}
 
-	return { estado, ocupado, error, huella, hayVinculoGuardado, vincular, cancelar, volverAVincular };
+	return { estado, ocupado, error, aviso, codigoGastado, huella, hayVinculoGuardado, vincular, cancelar, volverAVincular };
 }
 
 export type EmparejamientoHandy = ReturnType<typeof useEmparejamientoHandy>;

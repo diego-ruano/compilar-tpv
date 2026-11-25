@@ -151,7 +151,7 @@ describe("purga de la base central", () => {
 	});
 
 	it("de los retos de emparejamiento se va lo caducado y se queda lo vivo (AUD-13)", async () => {
-		// El reto vive lo que su código: caducado, ya no sirve para nada (`challenge_expired`).
+		// El reto vive lo que su código: caducado, ya no sirve para nada (`pair_code_expired`).
 		const r = await escenario(async (e) => {
 			const reto = (deviceId: string, expiraMs: number) =>
 				filasDe(

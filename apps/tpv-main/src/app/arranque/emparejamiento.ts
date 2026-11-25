@@ -9,11 +9,18 @@ import type { commands } from "@tpv/client";
 // importarlas: así se prueba con dobles y un reloj falso (`test/emparejamientoHandy.test.ts`), y
 // la pantalla sólo lo arranca y pinta lo que devuelve.
 
-import { esError } from "@tpv/client";
+import { toAppError, type ErrorCode } from "@tpv/client";
 
 
 /** Cada cuánto se pregunta si la Main ya ha aprobado. */
 export const ESPERA_ENTRE_CONSULTAS_MS = 1500;
+/**
+ * Lo más que se espera entre dos consultas mientras la nube falla: tras cada fallo seguido, la pausa
+ * se dobla desde `ESPERA_ENTRE_CONSULTAS_MS` hasta aquí. Así un filtro por IP que ha dicho que no
+ * (`LIMITADOR_SESION`, que cuenta por minuto) o una central saturada no reciben una consulta cada
+ * segundo y medio, y la aprobación que llegue entretanto se recoge como mucho este rato después.
+ */
+export const ESPERA_MAXIMA_TRAS_FALLOS_MS = 15_000;
 /**
  * Cuánto se espera si la nube no dice cuánto le queda al código. Un worker actual siempre lo dice
  * (`caducaEnMs`); esto cubre uno anterior, cuyo reto caducaba a los dos minutos.
@@ -29,6 +36,43 @@ const RESPUESTA_INESPERADA =
 	"La nube ha respondido algo inesperado al vincular. Inténtalo de nuevo y, si se repite, genera un código nuevo en el TPV principal.";
 const SIN_APROBACION =
 	"El código ha caducado sin que el TPV principal aprobara la vinculación. Genera un código nuevo en el TPV principal y vuelve a intentarlo.";
+const SIN_RESPUESTA_HASTA_CADUCAR =
+	"El código ha caducado sin poder recoger la aprobación del TPV principal, porque la nube no contestaba. Genera un código nuevo en el TPV principal y vuelve a intentarlo.";
+const SE_SIGUE_ESPERANDO = "Se sigue esperando la aprobación.";
+
+/**
+ * EMPAREJAR-ESPERA: lo que termina la espera, porque preguntar otra vez no lo va a cambiar. La Main ha
+ * rechazado la vinculación; el código no está reclamado por este equipo (`not_found`); ya se usó o el
+ * reto no vale (`conflict`); la firma no vale (`validation`: con la misma clave saldría igual); o la
+ * nube no deja entrar a este equipo ni a su negocio. La hora fuera de margen no termina: su respuesta
+ * trae la hora de la nube, y la siguiente consulta se firma con ella (PROD-04). El código caducado
+ * (`pair_code_expired`) también termina, pero como se acaba el plazo: diciendo si la Main no aprobó o
+ * si la nube no contestaba. Lo demás (la red, un 503 de la central o del worker, un 429 del filtro por
+ * IP, un 5xx) es pasajero y se sigue esperando, hasta que caduca el código.
+ */
+const TERMINALES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+	"pair_rejected",
+	"not_found",
+	"conflict",
+	"validation",
+	"device_revoked",
+	"license_expired",
+	"license_not_found",
+	"permiso_denegado",
+]);
+
+/**
+ * Un fallo del propio emparejamiento con su código del catálogo (`isAppError` lo reconoce), para que la
+ * pantalla lo trate como el que da la nube: el código que caduca esperando es `pair_code_expired`.
+ */
+class FalloDeLaVinculacion extends Error {
+	constructor(
+		readonly code: ErrorCode,
+		message: string,
+	) {
+		super(message);
+	}
+}
 
 export type CodigoDeVinculacion = { pairCode: string; pairSecret: string };
 
@@ -90,6 +134,11 @@ export type DependenciasEmparejamiento = {
 	sigueVivo: () => boolean;
 	/** Se llama al reclamar, cuando empieza la espera de la aprobación. */
 	alQuedarPendiente: (pendiente: EsperaDeAprobacion) => void;
+	/**
+	 * Lo que la pantalla dice mientras espera: por qué falla la consulta mientras falla (sin dejar de
+	 * esperar), y `null` en cuanto la nube vuelve a contestar.
+	 */
+	alCambiarElAviso?: (aviso: string | null) => void;
 };
 
 export type Identidad = { deviceId: string; devicePubKeyB64: string };
@@ -132,8 +181,10 @@ async function firmar(
  *
  * Devuelve el emparejamiento ya guardado (el token queda en el keyring vía `handy_set_token`), o
  * `null` si la espera dejó de interesar. «Todavía sin aprobar» no es un fallo: se sigue
- * preguntando hasta que caduca el código. Cualquier otro error corta en el acto, también que la
- * Main lo rechace; los de la nube llegan tal como los da el IPC.
+ * preguntando hasta que caduca el código. Lo pasajero tampoco (EMPAREJAR-ESPERA): se sigue
+ * preguntando, cada vez más espaciado, y se dice. Sólo corta lo que no va a cambiar (`TERMINALES`),
+ * que llega tal como lo da el IPC. El código que caduca esperando, lo diga el reloj de la Handy o la
+ * nube, sale como `pair_code_expired`, con la frase de si la Main no aprobó o la nube no contestaba.
  */
 export async function emparejarHandy(
 	codigo: CodigoDeVinculacion,
@@ -166,45 +217,72 @@ export async function emparejarHandy(
 
 	deps.alQuedarPendiente({ pairCode, pairSecret, nonceB64, nonceExpiresAtMs });
 
+	let pausa = ESPERA_ENTRE_CONSULTAS_MS;
+	// El fallo pasajero de la última consulta, mientras dure: si el código caduca con la nube sin
+	// contestar, se dice eso y no que la Main no aprobó.
+	let fallando: string | null = null;
+	const avisar = (fallo: string | null) => {
+		if (fallo !== fallando) deps.alCambiarElAviso?.(fallo === null ? null : `${fallo} ${SE_SIGUE_ESPERANDO}`);
+		fallando = fallo;
+	};
+
 	while (Date.now() < limite) {
-		await new Promise((r) => setTimeout(r, ESPERA_ENTRE_CONSULTAS_MS));
+		// La última pausa no pasa de lo que le queda al código.
+		await new Promise((r) => setTimeout(r, Math.min(pausa, Math.max(limite - Date.now(), ESPERA_ENTRE_CONSULTAS_MS))));
 		if (!deps.sigueVivo()) return null;
 
 		const { ts, sigB64 } = await firmar(deps.commands, "PAIR_FETCH", pairCode, nonceB64);
 
+		let ft: any;
 		try {
-			const ft = (await deps.pedirALaNube("/v1/pair/fetch-token", {
+			ft = await deps.pedirALaNube("/v1/pair/fetch-token", {
 				pairCode,
 				deviceId: ident.deviceId,
 				nonceB64,
 				ts,
 				sigB64,
-			})) as any;
-
-			const tenantId = String(ft.tenantId ?? ft.tenant_id ?? "");
-			const token = String(ft.token ?? "");
-
-			if (!tenantId || !token) {
-				throw new Error(RESPUESTA_INESPERADA);
-			}
-
-			// Si se canceló mientras volvía la respuesta, no se guarda: quien canceló espera ver la
-			// pantalla de vinculación, no un Handy vinculado a sus espaldas.
-			if (!deps.sigueVivo()) return null;
-
-			await deps.commands.handySetToken({ token, tenant_id: tenantId });
-
-			return { tenantId, token, deviceId: ident.deviceId };
+			});
 		} catch (e: unknown) {
-			// ARCH-05: "todavía sin aprobar en la Main" no es un fallo, es que seguimos esperando.
-			// Se ramifica por CÓDIGO del catálogo, nunca por el texto del mensaje.
-			if (esError(e, "not_approved")) continue;
-			throw e;
+			// ARCH-05: se ramifica por CÓDIGO del catálogo, nunca por el texto del mensaje.
+			const fallo = toAppError(e);
+			// EMPAREJAR-ESPERA: el código ha caducado en la nube. Pasa casi siempre en la última consulta,
+			// que llega algo después de `limite` (la nube calculó `caducaEnMs` antes de contestar al
+			// claim), y cuenta como el plazo que se acaba: con lo que dijeron las consultas de antes.
+			if (fallo.code === "pair_code_expired") break;
+			if (TERMINALES.has(fallo.code)) throw e;
+			if (fallo.code === "not_approved") {
+				// Todavía sin aprobar en la Main: no es un fallo, es que seguimos esperando.
+				avisar(null);
+				pausa = ESPERA_ENTRE_CONSULTAS_MS;
+			} else {
+				// EMPAREJAR-ESPERA: pasajero. Se sigue esperando, más espaciado, y se dice por qué.
+				avisar(fallo.message);
+				pausa = Math.min(pausa * 2, ESPERA_MAXIMA_TRAS_FALLOS_MS);
+			}
+			continue;
 		}
+
+		const tenantId = String(ft?.tenantId ?? ft?.tenant_id ?? "");
+		const token = String(ft?.token ?? "");
+
+		if (!tenantId || !token) {
+			throw new Error(RESPUESTA_INESPERADA);
+		}
+
+		// Si se canceló mientras volvía la respuesta, no se guarda: quien canceló espera ver la
+		// pantalla de vinculación, no un Handy vinculado a sus espaldas.
+		if (!deps.sigueVivo()) return null;
+
+		await deps.commands.handySetToken({ token, tenant_id: tenantId });
+
+		return { tenantId, token, deviceId: ident.deviceId };
 	}
 
 	if (!deps.sigueVivo()) return null;
-	throw new Error(SIN_APROBACION);
+	throw new FalloDeLaVinculacion(
+		"pair_code_expired",
+		fallando === null ? SIN_APROBACION : `${SIN_RESPUESTA_HASTA_CADUCAR} (${fallando})`,
+	);
 }
 
 /**

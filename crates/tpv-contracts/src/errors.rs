@@ -104,11 +104,27 @@ pub enum ErrorCode {
     /// Tiene código propio porque la UI **hace algo distinto**: cierra la sesión y el login dice por
     /// qué. Con `PermisoDenegado` la aplicación se quedaba en una pantalla de error sin salida.
     UsuarioInactivo,
+    /// La Main ha **rechazado la vinculación** de la Handy.
+    ///
+    /// Tiene código propio porque la espera de la Handy **hace algo distinto** (EMPAREJAR-ESPERA):
+    /// deja de preguntar y da el código por gastado. Lo demás que no es `NotApproved` y no es
+    /// definitivo (la red, un 503, un 429) lo sigue esperando.
+    PairRejected,
+    /// El **código de vinculación ha caducado**: la espera de la Handy termina y la pantalla pide un
+    /// código nuevo (EMPAREJAR-ESPERA).
+    PairCodeExpired,
 }
 
 /// Lo que se dice cuando el usuario de la sesión ya no está activo. El mismo texto en la Main y en el
 /// worker (`MENSAJES.usuario_inactivo` en `lib/errorCodes.ts`).
 pub const USUARIO_INACTIVO: &str = "Tu usuario ya no está activo. Habla con un administrador.";
+
+/// La Main ha rechazado la vinculación. El mismo texto en el worker (`MENSAJES.pair_rejected`).
+pub const PAIR_REJECTED: &str =
+    "El TPV principal ha rechazado la vinculación. Si es un error, genera un código nuevo en el TPV principal.";
+
+/// El código de vinculación ha caducado. El mismo texto en el worker (`MENSAJES.pair_code_expired`).
+pub const PAIR_CODE_EXPIRED: &str = "El código de vinculación ha caducado. Genera uno nuevo en el TPV principal.";
 
 impl ErrorCode {
     /// Catálogo generado desde el enum; no hay listas paralelas (RI-48).
@@ -146,6 +162,8 @@ impl ErrorCode {
             }
             ErrorCode::ReservaSolapada => "La reserva se pisa con otra de la misma mesa",
             ErrorCode::UsuarioInactivo => USUARIO_INACTIVO,
+            ErrorCode::PairRejected => PAIR_REJECTED,
+            ErrorCode::PairCodeExpired => PAIR_CODE_EXPIRED,
         }
     }
 
@@ -194,7 +212,9 @@ impl ErrorCode {
             // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
-            "validation_error" => ErrorCode::Validation,
+            // EMPAREJAR-ESPERA: la firma de una consulta de la Handy que se vincula no vale. Con la
+            // misma clave, repetir no lo cambia, y la Handy deja de esperar.
+            "validation_error" | "pair_signature_invalid" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
             "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,
             "bootstrap_demasiado_grande" | "bootstrap_too_large" => ErrorCode::BootstrapTooLarge,
@@ -205,6 +225,8 @@ impl ErrorCode {
             "factura_completa_requerida" => ErrorCode::FacturaCompletaRequerida,
             "reserva_solapada" => ErrorCode::ReservaSolapada,
             "usuario_inactivo" => ErrorCode::UsuarioInactivo,
+            "pair_rejected" => ErrorCode::PairRejected,
+            "pair_code_expired" => ErrorCode::PairCodeExpired,
             _ => ErrorCode::External,
         }
     }
