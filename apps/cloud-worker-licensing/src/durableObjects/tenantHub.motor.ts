@@ -871,11 +871,17 @@ export class MotorTenantHub {
 		const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
 		if (now - last < LAST_SEEN_THROTTLE_MS) return;
 		this.lastSeenPushedAtMs.set(deviceId, now);
-		const dbCentral = this.getCentralDb(PLAZO_LAST_SEEN_MS);
-		await dbCentral.execute({
-			sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
-			args: [now, tenantId, deviceId],
-		});
+		// Va por `waitUntil`, sin nadie que espere su resultado: el fallo se recoge aquí (que la
+		// central no conteste a tiempo, no esté aprovisionada o rechace la sentencia). El `last_seen`
+		// lo pone entonces la siguiente actividad pasada la ventana.
+		try {
+			await this.getCentralDb(PLAZO_LAST_SEEN_MS).execute({
+				sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
+				args: [now, tenantId, deviceId],
+			});
+		} catch (e) {
+			capturarError(e, "sync.last_seen");
+		}
 	}
 
 	// SYNC-12: purga (throttled) del log de sync en el tenant. Solo borra filas por DEBAJO del
