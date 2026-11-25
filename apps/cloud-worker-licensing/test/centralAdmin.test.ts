@@ -409,6 +409,9 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			},
 		});
 		expect(llamadas).toEqual(["de:number", "actual", `restaurar:${MARCADORES.destino}`, "reiniciar"]);
+		// Cuándo se cerró la central, con la hora del worker: la de la clave de la copia de antes. Es el
+		// instante al que se vuelve si se pierde el marcador (V-OP-3).
+		expect(r.body.copiaDeAntes).toBe(`base-central/antes-de-volver-${String(r.body.cerradaDesde).replaceAll(":", "-")}.sql.gz`);
 		// Que empieza, antes de llamar al objeto; y con qué se deshace, antes de reiniciar: si la llamada no
 		// terminara, estaría ahí.
 		const destino = new Date(instanteMs).toISOString();
@@ -447,6 +450,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				message: expect.stringContaining("Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si"),
 				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
+				cerradaDesde: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
 			},
 		});
 		expect(r.body.message).not.toMatch(/Repite la misma orden/);
@@ -469,6 +473,8 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				destino: MARCADOR,
 				deshacer: MARCADORES.actual,
 				copiaDeAntes: r.body.copiaDeAntes,
+				// Aplicada después, dice la misma hora: la de cuando se cerró la central para prepararla.
+				cerradaDesde: r.body.cerradaDesde,
 				estado: { aprovisionada: true, averia: null, enCurso: { restauracion: null, vuelta: null } },
 			},
 		});

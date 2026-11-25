@@ -126,12 +126,15 @@ async function aplicarCon(contestar, deshacer) {
 	});
 }
 
-/** Que dice a qué instante volver si se pierde el marcador, y que es el de justo antes de pedir la vuelta. */
-function diceElInstanteDeAntes(r) {
+/**
+ * Que dice a qué instante volver si se pierde el marcador, y que es el de la respuesta: cuándo se cerró
+ * la central, con la hora del worker (V-OP-3), no la de este equipo.
+ */
+function diceElInstanteDeAntes(r, respuesta) {
 	const instante = /pnpm central:volver -- --instante (\S+) --si/.exec(r.salida)?.[1];
 	assert.ok(instante, `no dice a qué instante volver:\n${r.salida}`);
-	const ms = Date.parse(instante);
-	assert.ok(ms >= r.antesMs && ms <= r.llegadaMs, `${instante} no es de justo antes de la vuelta`);
+	assert.ok(respuesta.cuerpo.cerradaDesde, "la respuesta no dice cuándo se cerró la central");
+	assert.equal(instante, respuesta.cuerpo.cerradaDesde);
 }
 
 test("la vuelta que ha vuelto sin atender (503 external por completarErrores) dice con qué se deshace, la copia de antes y el instante de antes", async () => {
@@ -144,7 +147,7 @@ test("la vuelta que ha vuelto sin atender (503 external por completarErrores) di
 	assert.ok(r.salida.includes(`Motivo: ${detalle}`), r.salida);
 	assert.ok(r.salida.includes(`Para deshacerla: ${conElMarcador(deshacer)}`), r.salida);
 	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${copiaDeAntes}`), r.salida);
-	diceElInstanteDeAntes(r);
+	diceElInstanteDeAntes(r, respuesta);
 	// Ha pasado lo que dice la respuesta: no es «no se sabe si ha entrado».
 	assert.doesNotMatch(r.salida, /no se sabe si ha entrado/i);
 });
@@ -158,7 +161,7 @@ test("la vuelta preparada que no se ha aplicado (503 internal) da la orden que l
 	assert.ok(r.salida.includes(`Para anularla, o deshacerla una vez aplicada: ${conElMarcador(respuesta.cuerpo.deshacer)}`), r.salida);
 	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
 	assert.doesNotMatch(r.salida, /Repite la misma orden/i);
-	diceElInstanteDeAntes(r);
+	diceElInstanteDeAntes(r, respuesta);
 });
 
 test("la vuelta que el objeto ya no tenía preparada al ir a reiniciarla (409, C1) dice que no se sabe cuál se ha aplicado, y con qué se deshace si fue ésta", async () => {
@@ -190,6 +193,8 @@ for (const [que, contestar] of [
 		assert.ok(r.salida.includes("· Si no la hay, no se ha pedido: no hay nada que deshacer."), r.salida);
 		assert.ok(r.salida.includes("· Si la hay con hora en «pedida», se ha pedido."), r.salida);
 		assert.ok(r.salida.includes("No repitas la vuelta sin mirarlo"), r.salida);
+		// Si se perdiera el marcador, el instante es el de la clave, que pone el worker (V-OP-3).
+		assert.match(r.salida, /se vuelve al instante de la hora de su clave \(antes-de-volver-<hora>/);
 		// Sin nada en R2 no se ha pedido: volver a justo antes sería una vuelta de más.
 		assert.doesNotMatch(r.salida, /--instante|Para deshacerla:/);
 	});
@@ -202,6 +207,7 @@ test("aplicar la vuelta preparada (--reiniciar) dice que ha vuelto y con qué se
 	assert.ok(r.salida.includes(`✔ La vuelta preparada se ha aplicado: la central ha vuelto al marcador ${respuesta.cuerpo.destino}.`), r.salida);
 	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
 	assert.ok(r.salida.includes(conElMarcador(respuesta.cuerpo.deshacer)), r.salida);
+	diceElInstanteDeAntes(r, respuesta);
 });
 
 test("aplicarla otra vez, ya aplicada, dice que no hay ninguna preparada, y nada más", async () => {
@@ -261,7 +267,7 @@ test("la vuelta hecha dice con qué se deshace, la copia de antes y el instante 
 	assert.ok(r.salida.includes(`✔ La central ha vuelto a ${INSTANTE}.`), r.salida);
 	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
 	assert.ok(r.salida.includes(conElMarcador(respuesta.cuerpo.deshacer)), r.salida);
-	diceElInstanteDeAntes(r);
+	diceElInstanteDeAntes(r, respuesta);
 });
 
 test("con la vuelta preparada y sin aplicar, central:estado da la orden exacta que la aplica (no la de la vuelta) y la que la deshace", async () => {

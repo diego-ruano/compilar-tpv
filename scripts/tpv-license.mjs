@@ -670,10 +670,14 @@ const centralAlMarcador = (marcador) => `pnpm central:volver -- --marcador ${mar
  */
 const centralAplicar = (deshacer) => `pnpm central:volver -- --reiniciar ${deshacer} --si`;
 
-/** Lo que se hace si se pierde el marcador para deshacer una vuelta pedida en `antesDeVolver` (ISO). */
-const siSePierdeElMarcador = (antesDeVolver) =>
+/**
+ * Lo que se hace si se pierde el marcador para deshacer una vuelta. `cerrada` (ISO) es cuándo se cerró
+ * la central para prepararla, con la hora del worker (`cerradaDesde` en la respuesta, V-OP-3); sólo si
+ * la respuesta no lo trae, la de este equipo justo antes de pedirla.
+ */
+const siSePierdeElMarcador = (cerrada) =>
 	"    Si se pierde este marcador, está también en pnpm central:copias (columna marcador); y si tampoco,\n" +
-	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si`;
+	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${cerrada} --si`;
 
 /**
  * ¿Es de la ruta de la central esta respuesta de error? Lo es un 4xx (no ha llegado a hacer nada) y
@@ -704,6 +708,7 @@ function esDeLaRuta(data, status) {
 const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 	if (data?.deshacer) {
 		const sinAplicar = data.error === "central_vuelta_sin_aplicar";
+		const cerrada = data.cerradaDesde ?? antesDeVolver;
 		const quizaOtra = data.error === "central_sin_vuelta_preparada" || data.error === "central_vuelta_a_la_vez";
 		const para = sinAplicar
 			? "anularla, o deshacerla una vez aplicada"
@@ -714,7 +719,7 @@ const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 			...(sinAplicar ? [`    Para aplicarla: ${centralAplicar(data.deshacer)}  (si ya se ha aplicado, no hace nada)`] : []),
 			`    Para ${para}: ${centralAlMarcador(data.deshacer)}`,
 			`    Copia de cómo estaba antes: ${data.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`,
-			...(antesDeVolver ? [siSePierdeElMarcador(antesDeVolver)] : []),
+			...(cerrada ? [siSePierdeElMarcador(cerrada)] : []),
 		].join("\n");
 	}
 	if (esDeLaRuta(data, status)) return "";
@@ -729,7 +734,9 @@ const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 		`    va a R2, en una antes-de-volver de justo después de ${antesDeVolver} (con la hora de este equipo).`,
 		"    · Si no la hay, no se ha pedido: no hay nada que deshacer.",
 		"    · Si la hay con hora en «pedida», se ha pedido. Si pnpm central:estado no tiene ninguna vuelta en curso, se",
-		"      ha aplicado, y se deshace volviendo a su marcador; si la tiene preparada, da la orden que la aplica.",
+		"      ha aplicado, y se deshace volviendo a su marcador; si la tiene preparada, da la orden que la aplica. Si",
+		"      se perdiera su marcador, se vuelve al instante de la hora de su clave (antes-de-volver-<hora>, con «:»",
+		"      en vez de «-» entre las horas, los minutos y los segundos): es cuándo cerró la central el worker.",
 		"    · Si la hay sin hora en «pedida», no consta que se pidiera: casi siempre es que no llegó a pedirse, y no hay",
 		"      nada que deshacer.",
 		"    No repitas la vuelta sin mirarlo: si se ha aplicado, volvería otra vez y se llevaría lo escrito desde entonces.",
@@ -755,6 +762,7 @@ async function centralAplicarLaPreparada(args) {
 	console.log(`\n  ✔ La vuelta preparada se ha aplicado: la central ha vuelto al marcador ${r.destino}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
+	if (r.cerradaDesde) console.log(`${siSePierdeElMarcador(r.cerradaDesde)}\n`);
 }
 
 async function centralVolver(args) {
@@ -778,13 +786,14 @@ async function centralVolver(args) {
 		args,
 		`Esto devuelve la central ENTERA ${adonde}: lo escrito después se pierde (antes se deja en R2 una copia de cómo está o, si no atiende, su marcador), y mientras vuelve no atiende.`,
 	);
-	// Justo antes de la vuelta: si se pierde el marcador para deshacerla, se vuelve aquí.
+	// Justo antes de la vuelta, con la hora de este equipo: dónde buscarla en R2 si no hay respuesta, y a
+	// qué instante volver si se pierde el marcador y la respuesta no dice cuándo se cerró la central.
 	const antesDeVolver = new Date().toISOString();
 	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, recuperar: paraSalirDeLaVuelta(antesDeVolver) });
 	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
-	console.log(`${siSePierdeElMarcador(antesDeVolver)}\n`);
+	console.log(`${siSePierdeElMarcador(r.cerradaDesde ?? antesDeVolver)}\n`);
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */

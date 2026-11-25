@@ -7,6 +7,7 @@
       "destino": "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "cerradaDesde": "2026-11-25T01:00:00.000Z",
       "estado": {
         "aprovisionada": true,
         "migraciones": [
@@ -74,10 +75,11 @@
     "cuerpo": {
       "ok": false,
       "error": "central_restauracion_a_medias",
-      "message": "La central ha vuelto, pero no atiende. Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.",
+      "message": "La central ha vuelto, pero no atiende. Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta, cuando se cerró la central (cerradaDesde, con la hora del worker).",
       "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "cerradaDesde": "2026-11-25T01:00:00.000Z",
       "estado": {
         "aprovisionada": false,
         "migraciones": [],
@@ -104,9 +106,10 @@
     "cuerpo": {
       "ok": false,
       "error": "central_vuelta_sin_aplicar",
-      "message": "La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si, con el deshacer de esta respuesta: sólo reinicia la central si esta vuelta sigue preparada, y si ya se ha aplicado, no hace nada. No repitas la orden de la vuelta: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.",
+      "message": "La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si, con el deshacer de esta respuesta: sólo reinicia la central si esta vuelta sigue preparada, y si ya se ha aplicado, no hace nada. No repitas la orden de la vuelta: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta, cuando se cerró la central (cerradaDesde, con la hora del worker).",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "cerradaDesde": "2026-11-25T01:00:00.000Z",
       "code": "internal"
     }
   },
@@ -118,6 +121,7 @@
       "message": "Al ir a reiniciar la central para aplicar esta vuelta, ya no había ninguna preparada: o la central se ha reiniciado entretanto y ha vuelto a ésta, u otra vuelta se ha preparado encima y es la que se ha aplicado. No se sabe cuál: en pnpm central:copias, si después de la copia de antes de ésta hay otra antes-de-volver con hora en «pedida», se aplicó la otra; si no, ésta. Míralo antes de repetir nada.",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "cerradaDesde": "2026-11-25T01:00:00.000Z",
       "estado": {
         "aprovisionada": true,
         "migraciones": [
@@ -183,7 +187,8 @@
           "preparada": {
             "marcador": "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
             "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
-            "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz"
+            "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+            "desdeMs": 1764036000000
           }
         }
       },
@@ -198,6 +203,7 @@
       "destino": "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "cerradaDesde": "2026-11-25T01:00:00.000Z",
       "estado": {
         "aprovisionada": true,
         "migraciones": [

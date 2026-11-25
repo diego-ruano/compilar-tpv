@@ -63,10 +63,10 @@ type CodigoDeLaVuelta = "central_vuelta_sin_comprobar" | "central_vuelta_sin_apl
 /**
  * Lo que se dice de una vuelta que devuelve con qué se deshace, por si se pierde: el objeto lo deja
  * en R2 antes de pedirla (`baseCentral.instante.ts`), y si aun así no está, se deshace volviendo a un
- * instante de justo antes.
+ * instante de justo antes, el de `cerradaDesde` en la respuesta (V-OP-3).
  */
 const SI_SE_PIERDE_EL_MARCADOR =
-	"El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.";
+	"El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta, cuando se cerró la central (cerradaDesde, con la hora del worker).";
 
 /**
  * Lo que se dice cuando, al ir a reiniciar la central para aplicar una vuelta recién preparada, el
@@ -320,6 +320,8 @@ async function aplicarLaPreparada(c: Context<{ Bindings: Env }>, deshacer: strin
 async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada: VueltaPreparada) {
 	const env = c.env;
 	const { deshacer, copiaDeAntes } = preparada;
+	/** Con qué se sale de la vuelta, en toda respuesta: su marcador, su copia de antes y cuándo se cerró la central. */
+	const conQueSeSale = { deshacer, copiaDeAntes, cerradaDesde: new Date(preparada.desdeMs).toISOString() };
 	let estado: EstadoDeLaCentral | null = null;
 	/** Lo que ha contestado el objeto si no ha reiniciado para ésta: ya no es la que tiene preparada. */
 	let rechazo: FalloDeLaCentral | null = null;
@@ -353,7 +355,7 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 	if (rechazo) {
 		return noHecho(c, rechazo, {
 			quePasa: rechazo.error === "central_vuelta_a_la_vez" ? OTRA_AL_REINICIAR : NINGUNA_AL_REINICIAR,
-			extra: { deshacer, copiaDeAntes, estado },
+			extra: { ...conQueSeSale, estado },
 		});
 	}
 	if (!estado) {
@@ -362,8 +364,7 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 				ok: false,
 				error: "central_vuelta_sin_comprobar",
 				message: QUE_PASA.central_vuelta_sin_comprobar,
-				deshacer,
-				copiaDeAntes,
+				...conQueSeSale,
 			},
 			503,
 		);
@@ -374,8 +375,7 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 				ok: false,
 				error: "central_vuelta_sin_aplicar",
 				message: QUE_PASA.central_vuelta_sin_aplicar,
-				deshacer,
-				copiaDeAntes,
+				...conQueSeSale,
 			},
 			503,
 		);
@@ -384,7 +384,7 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 		return noHecho(c, { ok: false, error: "central_vuelta_a_la_vez" }, {
 			quePasa:
 				"Otra vuelta a un instante ha empezado después de preparar ésta, y es la que sigue: la central no se ha reiniciado, para no cortarla. Mira cómo va con pnpm central:estado antes de repetir nada.",
-			extra: { deshacer, copiaDeAntes, estado },
+			extra: { ...conQueSeSale, estado },
 		});
 	}
 	if (noAtiende) {
@@ -396,10 +396,10 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 			despues: sinEsquema
 				? `Se sale ${SALIDAS_DE_LA_VUELTA} O restaurándola desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). ${SI_SE_PIERDE_EL_MARCADOR}`
 				: `Se sale también ${SALIDAS_DE_LA_VUELTA} ${SI_SE_PIERDE_EL_MARCADOR}`,
-			extra: { deshacer, copiaDeAntes, estado },
+			extra: { ...conQueSeSale, estado },
 		});
 	}
-	return c.json({ ok: true, destino: preparada.marcador, deshacer, copiaDeAntes, estado });
+	return c.json({ ok: true, destino: preparada.marcador, ...conQueSeSale, estado });
 }
 
 /** ¿Es la vuelta en curso la preparada que se deshace con `deshacer`? */

@@ -219,7 +219,7 @@ export async function prepararVueltaDeLaCentral(
 	} catch (error) {
 		capturarError(error, "central.vuelta_pedida");
 	}
-	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes };
+	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes, desdeMs: ahora };
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "preparada", preparada, anterior: null } satisfies MarcaDeVuelta);
 	return { ok: true, valor: preparada };
 }

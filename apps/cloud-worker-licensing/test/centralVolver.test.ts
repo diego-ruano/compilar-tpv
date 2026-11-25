@@ -50,6 +50,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		const llamadas: string[] = [];
 		await conDobleDeInstantes(central, llamadas);
 
+		const antes = Date.now();
 		const r = await central.stub.prepararVuelta({ instanteMs: Date.now() - HORA });
 		expect(r).toEqual({
 			ok: true,
@@ -57,10 +58,15 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 				marcador: MARCADORES.destino,
 				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.sql\.gz$/),
+				desdeMs: expect.any(Number),
 			},
 		});
 		expect(llamadas).toEqual(["de:number", "actual", `restaurar:${MARCADORES.destino}`]);
 		if (!r.ok) return;
+		// Desde cuándo está cerrada: la hora del worker, la misma que la de la clave de su copia de antes (V-OP-3).
+		expect(r.valor.desdeMs).toBeGreaterThanOrEqual(antes);
+		expect(r.valor.copiaDeAntes).toBe(`base-central/antes-de-volver-${new Date(r.valor.desdeMs).toISOString().replaceAll(":", "-")}.sql.gz`);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ desdeMs: r.valor.desdeMs });
 		const copia = await bucket().get(r.valor.copiaDeAntes!);
 		const texto = await new Response(copia!.body.pipeThrough(new DecompressionStream("gzip"))).text();
 		expect(texto).toContain("'Bar de antes'");
@@ -287,7 +293,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 
 		expect(await central.stub.prepararVuelta({ marcador: "m-de-salida" })).toEqual({
 			ok: true,
-			valor: { marcador: "m-de-salida", deshacer: MARCADORES.actual, copiaDeAntes: null },
+			valor: { marcador: "m-de-salida", deshacer: MARCADORES.actual, copiaDeAntes: null, desdeMs: expect.any(Number) },
 		});
 		expect(llamadas).toEqual(["actual", "restaurar:m-de-salida"]);
 		expect(await central.stub.aprovisionar({ claveDeCopia: "base-central/cualquiera.sql.gz" })).toMatchObject({
