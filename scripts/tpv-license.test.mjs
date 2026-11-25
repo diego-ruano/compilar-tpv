@@ -161,6 +161,17 @@ test("la vuelta preparada que no se ha aplicado (503 internal) da la orden que l
 	diceElInstanteDeAntes(r);
 });
 
+test("la vuelta que el objeto ya no tenía preparada al ir a reiniciarla (409, C1) dice que no se sabe cuál se ha aplicado, y con qué se deshace si fue ésta", async () => {
+	const respuesta = RESPUESTAS["vuelta-cruzada"];
+	const r = await volverCon(enJson(respuesta));
+	assert.equal(r.codigo, 1);
+	assert.ok(r.salida.includes(`✖ 409: central_sin_vuelta_preparada — ${respuesta.cuerpo.message}`), r.salida);
+	assert.match(r.salida, /No se sabe cuál/);
+	assert.ok(r.salida.includes(`Para deshacerla, si la que se ha aplicado es ésta: ${conElMarcador(respuesta.cuerpo.deshacer)}`), r.salida);
+	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
+	assert.doesNotMatch(r.salida, /✔|Para aplicarla/);
+});
+
 for (const [que, contestar] of [
 	["la llamada al objeto no vuelve (el 500 del onError)", enJson(RESPUESTAS["vuelta-sin-respuesta"])],
 	[

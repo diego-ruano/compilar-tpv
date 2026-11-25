@@ -529,6 +529,97 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		expect(plataforma.llamadas.filter((l) => l.startsWith("restaurar:"))).toEqual([`restaurar:${objetivo}`]);
 	});
 
+	describe("si el objeto no reinicia para la suya, no la da por aplicada: una central sana sin marca no dice qué vuelta se aplicó (C1)", () => {
+		const alta = (id: string) => `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('${id}', 1, 1);`;
+		const LOS_NEGOCIOS = "SELECT tenant_id FROM tenants ORDER BY tenant_id;";
+		const pausa = () => new Promise((r) => setTimeout(r, 5));
+
+		/** Una central con t-1, t-2 y t-3, y la foto de cuando sólo tenía t-1 (`aA`) y t-1 y t-2 (`aB`). */
+		async function conDosInstantes() {
+			const central = await centralDePrueba();
+			const plataforma = await conPlataformaQueVuelve(central);
+			await filasDe(central, alta("t-1"));
+			const aA = await plataforma.fotografiar();
+			await filasDe(central, alta("t-2"));
+			const aB = await plataforma.fotografiar();
+			await filasDe(central, alta("t-3"));
+			return { central, plataforma, aA, aB };
+		}
+
+		/** La central vista por la ruta de A: su reinicio (y, si se dice, su primer estado) espera a que el test lo suelte. */
+		function laDeA(central: CentralDePrueba, retener: { estado: boolean }) {
+			const senal = { reiniciando: false, sueltaReinicio: false, preguntando: false, sueltaEstado: false };
+			let estados = 0;
+			const deA = centralInterceptada(central, async (metodo, _a, llamar) => {
+				if (metodo === "reiniciar") {
+					senal.reiniciando = true;
+					while (!senal.sueltaReinicio) await pausa();
+				}
+				if (metodo === "estado" && senal.reiniciando && retener.estado && ++estados === 1) {
+					senal.preguntando = true;
+					while (!senal.sueltaEstado) await pausa();
+				}
+				return llamar();
+			});
+			return { deA, senal };
+		}
+
+		it("la de A, preparada y con el reinicio retenido; B prepara otra encima y la aplica; el reinicio de A ya no tiene ninguna: lo dice, con lo de A", async () => {
+			const { central, plataforma, aA, aB } = await conDosInstantes();
+			const { deA, senal } = laDeA(central, { estado: false });
+			const log = vi.spyOn(console, "log");
+
+			const a = pedir(entornoCon(deA), "POST", "/volver", { cuerpo: json({ marcador: aA }) });
+			await vi.waitFor(() => expect(senal.reiniciando).toBe(true));
+			const b = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: aB }) });
+			expect(b).toMatchObject({ status: 200, body: { ok: true, destino: aB } });
+			expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-2" }]);
+
+			senal.sueltaReinicio = true;
+			const r = await a;
+			expect(r).toMatchObject({
+				status: 409,
+				body: {
+					ok: false,
+					error: "central_sin_vuelta_preparada",
+					message: expect.stringContaining("No se sabe cuál"),
+					deshacer: expect.any(String),
+					copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
+					estado: { enCurso: { vuelta: null } },
+				},
+			});
+			// La central está donde la dejó B, y nadie ha vuelto a la de A.
+			expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-2" }]);
+			expect(plataforma.llamadas.filter((l) => l === "reiniciar")).toHaveLength(1);
+			expect(rastrosDe(log).filter((x) => x.destino === aA).map((x) => x.resultado)).toEqual([
+				"empieza",
+				"preparada",
+				"central_sin_vuelta_preparada",
+			]);
+		});
+
+		it("la de A con el reinicio retenido; B prepara otra encima y el objeto dice que la de A no es la que sigue; B se aplica antes de que A pregunte cómo ha quedado: dice que hay otra", async () => {
+			const { central, aA, aB } = await conDosInstantes();
+			const { deA, senal } = laDeA(central, { estado: true });
+
+			const a = pedir(entornoCon(deA), "POST", "/volver", { cuerpo: json({ marcador: aA }) });
+			await vi.waitFor(() => expect(senal.reiniciando).toBe(true));
+			const b = await central.stub.prepararVuelta({ marcador: aB });
+			if (!b.ok) throw new Error(b.error);
+
+			senal.sueltaReinicio = true;
+			await vi.waitFor(() => expect(senal.preguntando).toBe(true));
+			await central.stub.reiniciar(b.valor.deshacer);
+			senal.sueltaEstado = true;
+
+			expect(await a).toMatchObject({
+				status: 409,
+				body: { ok: false, error: "central_vuelta_a_la_vez", deshacer: expect.any(String), estado: { enCurso: { vuelta: null } } },
+			});
+			expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-2" }]);
+		});
+	});
+
 	it("si la plataforma no acepta la vuelta, lo dice con su código, no como una llamada que no vuelve: no se ha pedido, la central atiende, y lo que subió a R2 no consta como pedido", async () => {
 		const alta = (id: string) => `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('${id}', 1, 1);`;
 		const central = await centralDePrueba();

@@ -68,6 +68,15 @@ type CodigoDeLaVuelta = "central_vuelta_sin_comprobar" | "central_vuelta_sin_apl
 const SI_SE_PIERDE_EL_MARCADOR =
 	"El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.";
 
+/**
+ * Lo que se dice cuando, al ir a reiniciar la central para aplicar una vuelta recién preparada, el
+ * objeto contesta que ya no la tiene (C1): otra ha empezado encima, o ya no hay ninguna.
+ */
+const OTRA_AL_REINICIAR =
+	"Al ir a reiniciar la central para aplicar esta vuelta, la que había en curso era otra, que empezó después: no se ha reiniciado para ésta, que ya no sigue. Mira cómo está con pnpm central:estado antes de repetir nada: si la otra ya se ha aplicado, la central está donde la dejó ella.";
+const NINGUNA_AL_REINICIAR =
+	"Al ir a reiniciar la central para aplicar esta vuelta, ya no había ninguna preparada: o la central se ha reiniciado entretanto y ha vuelto a ésta, u otra vuelta se ha preparado encima y es la que se ha aplicado. No se sabe cuál: en pnpm central:copias, si después de la copia de antes de ésta hay otra antes-de-volver con hora en «pedida», se aplicó la otra; si no, ésta. Míralo antes de repetir nada.";
+
 /** Por dónde se sale de una vuelta que deja la central sin atender. */
 const SALIDAS_DE_LA_VUELTA = "deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así.";
 
@@ -303,32 +312,50 @@ async function aplicarLaPreparada(c: Context<{ Bindings: Env }>, deshacer: strin
  * llega a terminar. Antes de eso, el objeto lo ha dejado en R2, por si no llega ni la respuesta de
  * `prepararVuelta`. Una central que ha vuelto pero no atiende (vuelve a un instante con algo a
  * medias, sin esquema, o una migración no entra) no se da por buena.
+ *
+ * Si el objeto contesta que no reinicia para ésta (C1), es lo que se dice, aunque después la central
+ * conteste sana y sin marca: ya no la tenía preparada, y una central sana sin marca no dice qué vuelta
+ * se ha aplicado, si ésta (se reinició por su cuenta) u otra preparada encima.
  */
 async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada: VueltaPreparada) {
 	const env = c.env;
 	const { deshacer, copiaDeAntes } = preparada;
 	let estado: EstadoDeLaCentral | null = null;
+	/** Lo que ha contestado el objeto si no ha reiniciado para ésta: ya no es la que tiene preparada. */
+	let rechazo: FalloDeLaCentral | null = null;
 	try {
-		estado = await reiniciarYEsperar(env, deshacer);
-		if (esLaPreparada(estado, deshacer)) estado = await reiniciarYEsperar(env, deshacer);
+		rechazo = await reiniciarLaPreparada(env, deshacer);
+		estado = await cuandoConteste(env);
+		if (!rechazo && esLaPreparada(estado, deshacer)) {
+			rechazo = await reiniciarLaPreparada(env, deshacer);
+			estado = await cuandoConteste(env);
+		}
 	} catch {
 		// No contesta: no se sabe si ha vuelto. Se dice, con lo necesario para deshacerlo.
 	}
-	const sinAplicar = estado !== null && esLaPreparada(estado, deshacer);
+	const sinAplicar = !rechazo && estado !== null && esLaPreparada(estado, deshacer);
 	// Otra vuelta en curso: ha empezado después de preparar ésta, y es de quien la prepara.
 	const otra = !sinAplicar && Boolean(estado?.enCurso.vuelta);
 	// Sin esquema no es una avería del objeto, pero tampoco atiende.
 	const noAtiende: FalloDeLaCentral | null =
 		estado?.averia ?? (estado && !estado.aprovisionada ? { ok: false, error: "central_sin_aprovisionar" } : null);
-	const resultado = !estado
-		? "central_vuelta_sin_comprobar"
-		: sinAplicar
-			? "central_vuelta_sin_aplicar"
-			: otra
-				? "central_vuelta_a_la_vez"
-				: (noAtiende?.error ?? "ok");
+	const resultado = rechazo
+		? rechazo.error
+		: !estado
+			? "central_vuelta_sin_comprobar"
+			: sinAplicar
+				? "central_vuelta_sin_aplicar"
+				: otra
+					? "central_vuelta_a_la_vez"
+					: (noAtiende?.error ?? "ok");
 	rastro(c, { accion: "volver", resultado, destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
 
+	if (rechazo) {
+		return noHecho(c, rechazo, {
+			quePasa: rechazo.error === "central_vuelta_a_la_vez" ? OTRA_AL_REINICIAR : NINGUNA_AL_REINICIAR,
+			extra: { deshacer, copiaDeAntes, estado },
+		});
+	}
 	if (!estado) {
 		return c.json(
 			{
@@ -382,16 +409,23 @@ function esLaPreparada(estado: EstadoDeLaCentral, deshacer: string): boolean {
 }
 
 /**
- * Reinicia la central para aplicar la vuelta preparada que se deshace con `deshacer`, y espera a que
- * vuelva a contestar: cómo está después. El objeto sólo se reinicia si esa vuelta sigue preparada
- * (`BaseCentral.reiniciar`); si no, lo dice el estado. Lanza si no contesta.
+ * Reinicia la central para aplicar la vuelta preparada que se deshace con `deshacer`. El objeto sólo
+ * se reinicia si esa vuelta sigue preparada (`BaseCentral.reiniciar`): si no, contesta por qué
+ * (`central_vuelta_a_la_vez`, `central_sin_vuelta_preparada`), y es lo que se devuelve. Si se
+ * reinicia, la llamada falla, y es lo esperado: `null`.
  */
-async function reiniciarYEsperar(env: Env, deshacer: string): Promise<EstadoDeLaCentral> {
+async function reiniciarLaPreparada(env: Env, deshacer: string): Promise<FalloDeLaCentral | null> {
 	try {
-		await centralDe(env).reiniciar(deshacer);
+		const r = await centralDe(env).reiniciar(deshacer);
+		return r.ok ? null : r;
 	} catch {
 		// `ctx.abort()` corta la llamada que lo pide: es lo que tiene que pasar.
+		return null;
 	}
+}
+
+/** Espera a que la central vuelva a contestar tras reiniciarla: cómo está. Lanza si no contesta. */
+async function cuandoConteste(env: Env): Promise<EstadoDeLaCentral> {
 	for (let intento = 1; ; intento++) {
 		try {
 			return await centralDe(env).estado();

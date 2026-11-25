@@ -3,9 +3,10 @@
 // Lo que contesta la aplicación entera (`app`: la ruta, `completarErrores` y el `onError`) a la vuelta
 // de la central a un instante (`POST /v1/admin/central/volver`) en cada desenlace que el CLI tiene
 // que saber leer: la vuelta hecha; la que ha vuelto pero no atiende, que sale como 503 `external` por
-// `completarErrores`; la que no se ha aplicado; la llamada al objeto que no vuelve (el 500 del
-// `onError`); la que no se hace porque la copia de antes no llega a R2; la que la plataforma no
-// acepta; y los dos rechazos del token.
+// `completarErrores`; la que no se ha aplicado; la que el objeto ya no tiene preparada al ir a
+// reiniciarla, porque otra se ha preparado encima y se ha aplicado (C1); la llamada al objeto que no
+// vuelve (el 500 del `onError`); la que no se hace porque la copia de antes no llega a R2; la que la
+// plataforma no acepta; y los dos rechazos del token.
 // Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer; el
 // estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
 // aplica; aplicarla con esa orden (`reiniciar`), y otra vez, ya aplicada; la lista de las copias con
@@ -146,6 +147,25 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		return { ...lista, cuerpo: { ...cuerpo, copias: cuerpo.copias.filter((c) => c.clave.startsWith(deLaVuelta)) } };
 	}
 
+	// Una vuelta (A) con su reinicio retenido; otra (B) se prepara encima y se aplica; después llega el
+	// reinicio de A, que el objeto ya no tiene preparada.
+	const cruzada = await centralDePrueba();
+	await conDobleDeInstantes(cruzada, []);
+	const reinicioDeA = { retenido: false, suelto: false };
+	const deA = centralInterceptada(cruzada, async (metodo, _a, llamar) => {
+		if (metodo === "reiniciar" && !reinicioDeA.suelto) {
+			reinicioDeA.retenido = true;
+			while (!reinicioDeA.suelto) await new Promise((r) => setTimeout(r, 5));
+		}
+		return llamar();
+	});
+	const vueltaDeA = volver(entornoCon(deA));
+	await vi.waitFor(() => expect(reinicioDeA.retenido).toBe(true));
+	const vueltaDeB = await pedir("POST", "/volver", entornoCon(cruzada), { marcador: MARCADORES.deshacer });
+	expect(vueltaDeB).toMatchObject({ status: 200, cuerpo: { ok: true } });
+	reinicioDeA.suelto = true;
+	const vueltaCruzada = await vueltaDeA;
+
 	const vueltaHecha = await volver(entornoCon(hecha));
 	const respuestas = {
 		"//":
@@ -157,6 +177,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"copias-tras-la-vuelta": await copiasDeLaVuelta(vueltaHecha),
 		"vuelta-que-no-atiende": await volver(entornoCon(sinAtender)),
 		"vuelta-sin-aplicar": await volver(entornoCon(sinAplicar)),
+		"vuelta-cruzada": vueltaCruzada,
 		"estado-con-la-vuelta-sin-aplicar": await pedir("GET", "/estado", entornoCon(sinAplicar)),
 		"aplicar-la-preparada": await aplicarLaPreparada(sinAplicar),
 		"aplicar-ya-aplicada": await pedir("POST", "/volver", entornoCon(sinAplicar), { reiniciar: MARCADORES.actual }),
@@ -182,6 +203,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 			cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias", deshacer: expect.any(String) },
 		},
 		"vuelta-sin-aplicar": { status: 503, cuerpo: { ok: false, error: "central_vuelta_sin_aplicar", deshacer: expect.any(String) } },
+		"vuelta-cruzada": { status: 409, cuerpo: { ok: false, error: "central_sin_vuelta_preparada", deshacer: expect.any(String) } },
 		"estado-con-la-vuelta-sin-aplicar": {
 			status: 200,
 			cuerpo: { ok: true, enCurso: { vuelta: { fase: "preparada", preparada: { deshacer: expect.any(String) } } } },

@@ -693,7 +693,8 @@ function esDeLaRuta(data, status) {
  *
  * - Si la respuesta trae con qué se deshace, la vuelta está preparada, y puede que aplicada: si sigue
  *   sin aplicar, la orden que la aplica; la que la deshace, la copia de antes y qué hacer si se pierde
- *   el marcador.
+ *   el marcador. Si el objeto ya no la tenía preparada al ir a reiniciarla (C1), no se sabe si se ha
+ *   aplicado ésta u otra preparada encima: la orden que la deshace vale si fue ésta.
  * - Si la ruta dice que no la ha pedido (`esDeLaRuta`, sin `deshacer`), nada.
  * - Si no hay respuesta de la ruta, no se sabe si se ha pedido. Lo dice R2: su marcador va antes de
  *   pedirla, y en cuanto la plataforma la tiene, la constancia (`pedida` en `central:copias`). Sin
@@ -703,9 +704,15 @@ function esDeLaRuta(data, status) {
 const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 	if (data?.deshacer) {
 		const sinAplicar = data.error === "central_vuelta_sin_aplicar";
+		const quizaOtra = data.error === "central_sin_vuelta_preparada" || data.error === "central_vuelta_a_la_vez";
+		const para = sinAplicar
+			? "anularla, o deshacerla una vez aplicada"
+			: quizaOtra
+				? "deshacerla, si la que se ha aplicado es ésta"
+				: "deshacerla";
 		return [
 			...(sinAplicar ? [`    Para aplicarla: ${centralAplicar(data.deshacer)}  (si ya se ha aplicado, no hace nada)`] : []),
-			`    Para ${sinAplicar ? "anularla, o deshacerla una vez aplicada" : "deshacerla"}: ${centralAlMarcador(data.deshacer)}`,
+			`    Para ${para}: ${centralAlMarcador(data.deshacer)}`,
 			`    Copia de cómo estaba antes: ${data.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`,
 			...(antesDeVolver ? [siSePierdeElMarcador(antesDeVolver)] : []),
 		].join("\n");
