@@ -24,6 +24,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [WIDGET-LOGO](#widget-logo--el-widget-de-reservas-no-enseña-el-logo) | 🔵 | El widget de reservas no enseña el logo del negocio | Sin hacer: pide una ruta pública nueva |
+| [TRASLADO-CORREO](#traslado-correo--el-correo-del-traslado-se-repite-en-cada-reintento) | 🔵 | El correo «tu licencia ha cambiado de equipo» sale otra vez en cada reintento reconocido del traslado, sin tope | Lo decide el responsable |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -286,7 +287,11 @@ la marca dentro (`durableObjects/instantes.ts`). Al deshacer, el objeto arrancar
 `trasVolver` contestaría `vuelta_sin_aplicar`, y `getTenantDb`, `tenant_db_restaurando`, para siempre.
 La base central lo resuelve quitando al arrancar la marca que quede (`baseCentral.ts`, `ponerAlDia`);
 en el negocio no vale tal cual, porque `trasVolver` usa la marca para saber que tiene que abrir el log
-por encima.
+por encima. Y desde VUELTA-REPETIR la marca lleva el `deshacer` de la vuelta (`vueltaPreparada`), que
+es lo que decide si una vuelta sigue preparada: tras deshacer, la marca que trae el objeto dice que la
+primera vuelta sigue sin aplicar, y aplicarla con ese `deshacer` (`--reiniciar`,
+`reiniciarParaAplicar`) sólo reiniciaría el objeto, que seguiría cerrado. El arreglo tiene que
+distinguir esa marca de una vuelta preparada de verdad.
 
 En local no se puede comprobar (no hay vuelta a un instante). Toca en el simulacro de vuelta en
 producción: volver, deshacer y ver si el negocio atiende.
@@ -335,6 +340,20 @@ ruta por la clave (`GET /v1/publico/reservas/:clave/logo`, detrás de `puertaPub
 `Logo_DataUrl` en el `TenantHub` y sirva la imagen de R2 con las cabeceras del GET de imágenes, el
 campo `logo` de vuelta en `Negocio` del SDK (un booleano o esa URL) y el `<img>` en `App.tsx`. La
 CSP del widget (`img-src 'self'`) ya lo admite: la ruta es del mismo origen.
+
+### TRASLADO-CORREO · El correo del traslado se repite en cada reintento
+
+Un reintento reconocido del traslado de licencia (TRASLADO-REINTENTO: el mismo equipo, con su firma
+y el código que ya gastó, menos de un día después; `trasladoQueSeRepite`) vuelve a mandar al titular
+el correo «tu licencia ha cambiado de equipo» (`licensing.routes.ts`, `sendDeviceChangedNoticeEmail`),
+cada vez y sin tope durante ese día. Sólo lo puede repetir el equipo legítimo, una activación cada vez
+(el cerrojo `ACTIVACIONES` de la Main, `use_cases/licensing.rs`), y [licencias.md](arquitectura/licencias.md#3-cambio-de-equipo-la-licencia-ya-está-en-otro) ya dice que
+puede llegar dos veces. Acotarlo a una vez por traslado pide saber si el traslado original llegó a
+mandarlo: sin una marca, «el 200 se perdió» (el correo ya salió) no se distingue de «la central no
+contestó y tampoco la lectura de la traza» (el reintento es el único que lo manda), y quitar el correo
+del reintento perdería el aviso en el segundo caso. La marca sería una columna en
+`license_device_swaps` (una migración nueva de la central). Lo decide el responsable: dejarlo así o
+poner la marca.
 
 ---
 
