@@ -172,12 +172,23 @@ Si no sale a la primera:
   ```
 
   Sólo reinicia la central si esa vuelta sigue preparada: si ya se ha aplicado, o no llegó a pedirse,
-  contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. Lo mismo si, al ir
-  a reiniciarla, el objeto ya no la tiene preparada: no se ha reiniciado para ésta, y la respuesta dice
-  cómo saber qué ha pasado (con otra en curso, `central_vuelta_a_la_vez`: si la otra no sale, ésta
-  puede volver a quedar preparada). **No repitas la
+  contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. **No repitas la
   orden de la vuelta**: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez
   llevándose lo escrito desde entonces.
+- **Al ir a reiniciarla, el objeto ya no la tiene preparada** (409, en la orden de la vuelta o con
+  `--reiniciar`): no se ha reiniciado para ésta, y la vuelta no se da por aplicada. La respuesta trae
+  su `deshacer`, su `copiaDeAntes`, `cerradaDesde` y el `estado` de la central.
+  - Con otra en curso (`central_vuelta_a_la_vez`), ésta no se pierde: si la otra no sale, el objeto
+    vuelve a poner la que seguía en pie, que puede ser ésta, preparada y con la central cerrada, y
+    `pnpm central:estado` da la orden que la aplica.
+  - Sin ninguna (`central_sin_vuelta_preparada`): o la central se ha reiniciado entretanto y ha
+    vuelto a ésta, u otra se ha preparado encima y es la que se ha aplicado. Lo dice
+    `pnpm central:copias`: sin otra `antes-de-volver` después de la de ésta, se ha aplicado ésta; con
+    otra con hora en `pedida`, la central está donde la dejó la otra; con otra sin `pedida`, no se
+    sabe (puede que no llegara a pedirse, o que la constancia no llegara a R2).
+
+  El marcador de cada vuelta es cómo estaba la central justo antes de ella: no des por hecho que
+  deshacer con el de una o con el de la otra deja la central igual. Mira antes cuál se ha aplicado.
 - **`central_vuelta_sin_comprobar`**: se ha reiniciado y todavía no contesta. Mira cómo está con
   `pnpm central:estado`.
 - **«La central ha vuelto, pero no atiende»** (503, con su código: `central_restauracion_a_medias`,
@@ -186,7 +197,8 @@ Si no sale a la primera:
   deshaciendo la vuelta o volviendo a otro instante; a medio restaurar o sin esquema, también
   restaurando una copia. **Sin esquema, nunca el esquema vacío**: atendería sin ninguna licencia.
 - **`central_vuelta_rechazada`**: la plataforma no ha aceptado la vuelta (el motivo dice qué ha
-  contestado: un marcador que no es de este objeto, uno caducado…). No se ha pedido, la central sigue
+  contestado: un marcador que no es de este objeto, uno caducado…), o el marcador de cómo está ahora
+  que ha dado no tiene la forma de los suyos, y con él no se podría deshacer. No se ha pedido, la central sigue
   como estaba, y lo que se haya subido a R2 para ella (sin hora en `pedida`) no es de ninguna vuelta:
   no hay nada que deshacer.
 - **`central_vuelta_a_la_vez`**: otra vuelta se estaba preparando a la vez, o, al aplicarla, la que
@@ -197,10 +209,12 @@ Si no sale a la primera:
   justo después de la orden, no se pidió y no hay nada que deshacer. Con hora en `pedida`, se pidió:
   si `pnpm central:estado` no tiene ninguna vuelta en curso, se ha aplicado, y se deshace volviendo a
   su marcador; si la tiene preparada, da la orden que la aplica. Sin hora, el resultado es
-  desconocido: puede que no llegara a pedirse, o que se pidiera y la constancia no llegara a R2. Si
+  desconocido: puede que no llegara a pedirse, o que se pidiera y la constancia no llegara a R2 (en
+  Sentry, `central.vuelta_pedida`), o que el objeto se reiniciara entre pedirla y apuntarlo. Si
   `pnpm central:estado` la tiene preparada, da la orden que la aplica; si no tiene ninguna, se mira si
-  a la central le falta lo escrito entre el instante y la hora de la clave: si le falta, se ha
-  aplicado. No repitas la vuelta sin mirarlo.
+  a la central le falta lo escrito entre el instante al que volvía y la hora de la clave: si le
+  falta, se ha aplicado, y se deshace con `pnpm central:volver -- --marcador <el de esa fila> --si`.
+  No repitas la vuelta sin mirarlo.
 - **`central_instante_fuera_de_plazo`**: el instante es del futuro o de hace más de 30 días.
 - **`central_vuelta_no_disponible`**: ese despliegue no vuelve a instantes. En local (`wrangler dev`)
   no existe.
@@ -287,7 +301,9 @@ acaba en `.sql.gz` y no se restaura. Caducan a los 30 días, como todo lo de `ba
 Lo que no sale bien contesta su código, una frase con qué pasa y, aparte, el motivo técnico si lo hay
 («Motivo: …»). Los códigos que son «la central no puede atender» los enseña precedidos de «La nube no
 ha podido atender ahora»: si la orden cambiaba algo, no se sabe si ha entrado, y se mira con
-`pnpm central:estado` antes de repetirla.
+`pnpm central:estado` antes de repetirla. Las respuestas de una vuelta ya preparada, también las que
+no salen, traen con qué se sale de ella: `deshacer`, `copiaDeAntes` y `cerradaDesde` (cuándo cerró
+la central el worker para prepararla, el `--instante` de reserva si se pierde el marcador).
 
 | Código | Qué pasa | Qué hacer |
 |---|---|---|
@@ -299,7 +315,7 @@ ha podido atender ahora»: si la orden cambiaba algo, no se sabe si ha entrado, 
 | `central_vuelta_en_curso`, `central_vuelta_sin_aplicar` | Hay una vuelta en curso: preparándose, o preparada y sin aplicar. No atiende hasta que se aplique | Preparada: `pnpm central:volver -- --reiniciar <deshacer> --si` (la orden entera la da `pnpm central:estado`), nunca la orden de la vuelta otra vez. Preparándose: esperar |
 | `central_vuelta_sin_comprobar` | Se ha reiniciado y todavía no contesta | `pnpm central:estado` |
 | `central_vuelta_a_la_vez` | Otra vuelta se prepara a la vez, o la que está en curso no es la de ese marcador: ésta no ha pedido ni reiniciado nada | `pnpm central:estado` antes de repetir nada |
-| `central_sin_vuelta_preparada` | Con `--reiniciar`: ya no hay ninguna vuelta preparada con ese marcador (se ha aplicado o no llegó a pedirse), y no se ha reiniciado nada | `pnpm central:estado` |
+| `central_sin_vuelta_preparada` | Con `--reiniciar`, o al ir a reiniciar la central en la orden de la vuelta: ya no hay ninguna vuelta preparada (se ha aplicado, o no llegó a pedirse, u otra se ha aplicado encima), y no se ha reiniciado nada | `pnpm central:estado`; en la orden de la vuelta, `pnpm central:copias` dice cuál se aplicó ([arriba](#volver-a-un-instante)) |
 | `central_vuelta_rechazada` | La plataforma no ha aceptado la vuelta: no se ha pedido, y la central sigue como estaba | Nada que deshacer; el motivo dice qué ha contestado |
 | `central_instante_fuera_de_plazo` | El instante no es de los últimos 30 días | Otro instante |
 | `central_vuelta_no_disponible` | Ese despliegue no vuelve a instantes (en local no existe) | — |

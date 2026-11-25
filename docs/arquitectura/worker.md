@@ -1083,7 +1083,10 @@ llamadas al objeto, cada una con su stub:
 2. **`reiniciar(deshacer)`**: `ctx.abort()`, sólo si la vuelta preparada es la que se deshace con
    `deshacer`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto vuelve. Con otra
    vuelta en curso contesta `central_vuelta_a_la_vez`, y sin ninguna, `central_sin_vuelta_preparada`,
-   sin reiniciar: el reinicio es de quien la ha preparado.
+   sin reiniciar: el reinicio es de quien la ha preparado. La ruta, entonces, no da la vuelta por
+   aplicada: contesta ese 409 con `deshacer`, `copiaDeAntes`, `cerradaDesde` y el `estado`, y qué
+   mirar para saber qué ha pasado (C1). Con otra en curso, ésta no se pierde: si la otra no sale, el
+   objeto vuelve a poner la que seguía en pie (`laQueSigueEnPie`), que puede ser ésta.
 
 - **También con la central sin atender** (a medio restaurar, con una migración que falla o alterada,
   o sin esquema), que es como la puede dejar una vuelta: deshacerla, o volver a otro instante, es la
@@ -1098,8 +1101,9 @@ llamadas al objeto, cada una con su stub:
   atender.
 - **Lo que la plataforma no acepta vuelve como valor**: si el marcador del instante, el de ahora o la
   propia vuelta fallan, la marca vuelve a como estaba y contesta `central_vuelta_rechazada`, con lo que
-  ha dicho la plataforma en `detalle`, y avisa a Sentry (`central.vuelta`). La vuelta no se ha pedido,
-  y lo subido a R2 no lleva `.pedida`. En local, `central_vuelta_no_disponible`.
+  ha dicho la plataforma en `detalle`, y avisa a Sentry (`central.vuelta`). Lo mismo si el marcador de
+  ahora no tiene la forma de uno (`esMarcador`): con él no se podría deshacer (V-OP-4). La vuelta no
+  se ha pedido, y lo subido a R2 no lleva `.pedida`. En local, `central_vuelta_no_disponible`.
 - **Al arrancar, la marca de una vuelta se quita**: la vuelta se aplica en el arranque, sea cual sea
   su causa, y lo que queda de la marca es de antes. Así, deshacer una vuelta (volver a su marcador,
   que es el estado de justo antes de reiniciar, con la marca puesta) no deja la central cerrada.
@@ -1107,7 +1111,9 @@ llamadas al objeto, cada una con su stub:
   aplicar, la reinicia otra vez; si la vuelta en curso es otra, no la toca (`central_vuelta_a_la_vez`).
   Una central que ha vuelto pero no atiende (a medio restaurar, sin esquema, una migración que no
   entra) no se da por buena: contesta su código con el marcador que la deshace, la copia de antes y
-  cómo salir.
+  cómo salir. Toda respuesta de la vuelta preparada lleva además `cerradaDesde`, la hora del worker en
+  que se cerró la central (la de la clave de su copia de antes): es el `--instante` de reserva si se
+  pierde el marcador (V-OP-3).
 - **Aplicar una vuelta preparada es una orden propia**: con `{ reiniciar: <deshacer> }`, la ruta sólo
   hace la segunda llamada, y sólo si esa vuelta sigue preparada, así que repetirla no vuelve dos veces.
   La misma orden de vuelta con la vuelta aún preparada devuelve la que hay, pero si la central se ha
@@ -1177,9 +1183,9 @@ la ruta que vuelve a un instante. Su estado HTTP lo fija `server/central/cliente
 | `central_copia_inservible` | 422 | La copia no se puede restaurar: el objeto se queda sin aprovisionar, como estaba |
 | `central_instante_fuera_de_plazo` | 400 | Un instante del futuro o de hace más de 30 días |
 | `central_vuelta_no_disponible` | 501 | La plataforma no devuelve objetos a un instante (en local) |
-| `central_vuelta_rechazada` | 422 | La plataforma no ha aceptado la vuelta (el marcador del instante, el de ahora o la propia vuelta): no se ha pedido, y la central sigue como estaba |
+| `central_vuelta_rechazada` | 422 | La plataforma no ha aceptado la vuelta (el marcador del instante, el de ahora o la propia vuelta), o el marcador de ahora no tiene la forma de uno: no se ha pedido, y la central sigue como estaba |
 | `central_vuelta_a_la_vez` | 409 | Otra vuelta se prepara o se pide a la vez, o la que está en curso no es la de ese `deshacer`: ésta no ha pedido ni reiniciado nada |
-| `central_sin_vuelta_preparada` | 409 | Al aplicar una vuelta preparada (`reiniciar`), no hay ninguna en curso: se ha aplicado o no llegó a pedirse, y no se reinicia nada |
+| `central_sin_vuelta_preparada` | 409 | Al aplicar una vuelta preparada (`reiniciar`, o el reinicio de la orden de la vuelta), no hay ninguna en curso: se ha aplicado, no llegó a pedirse u otra se ha aplicado encima, y no se reinicia nada |
 | `central_vuelta_sin_aplicar` | 503 | La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada: se aplica con `reiniciar` y su `deshacer`, nunca repitiendo la orden de la vuelta |
 | `central_vuelta_sin_comprobar` | 503 | La central se ha reiniciado pero todavía no contesta: se mira cómo está |
 
