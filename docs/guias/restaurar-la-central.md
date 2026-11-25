@@ -45,7 +45,8 @@ pnpm central:copiar    # una ahora, con la hora en la clave: no pisa la del día
 - `central:copias` dice de cada una sus bytes, sus filas, sus tablas y la última migración con la que
   se hizo: se puede restaurar si este worker sabe poner esas migraciones. De las de antes de volver
   dice además el `marcador` (cómo estaba la central: volver a él deshace aquella vuelta) y `pedida`
-  (cuándo se le pidió aquella vuelta a la plataforma; sin hora, no consta que se pidiera).
+  (cuándo se le pidió aquella vuelta a la plataforma; sin hora, no consta, y no se sabe si se pidió:
+  la constancia se apunta después y puede no haber llegado).
 - **Se guardan 30 días**, y con ellas los `.marcador` y los `.pedida`: lo dice la regla de ciclo de
   vida del bucket, `caducar-copias` (prefijo `base-central/`, «Expire objects after 30 days»), no el
   código. Se mira desde `apps/cloud-worker-licensing/`:
@@ -90,7 +91,8 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
   estaba, sin aprovisionar: prueba con otra.
 - **Si se corta a mitad** (el objeto se reinicia), se queda con la marca de la restauración a medias y
   no atiende (`central_restauracion_a_medias`). Repite la orden: la siguiente restauración lo vacía y
-  empieza de nuevo.
+  empieza de nuevo. Si se cortó por tiempo con una copia de más filas de las que se restauran de una
+  vez, se volverá a cortar ([abajo](#si-no-cabe-en-30-s-central-restaurar)).
 - **Con una vuelta a un instante en curso no se restaura** (`central_vuelta_en_curso`): restaurar
   empieza vaciando el objeto, y la central atendería con una vuelta pedida a la plataforma. Primero se
   aplica o se deja acabar ([abajo](#volver-a-un-instante)).
@@ -121,7 +123,9 @@ medias, y cada intento vuelve a cortarse. Lo que manda son las filas, no lo que 
 cron avisa a Sentry (`cron.backup`) en cuanto la copia del día pasa de 150.000, que se restauran con
 holgura. **Ese aviso es la señal para partir la carga en varias llamadas antes de necesitarla**
 ([pendientes.md](../pendientes.md#central-restaurar--la-central-se-restaura-en-una-sola-llamada)):
-cuando hace falta restaurar, ya es tarde. Las filas de cada tabla las dice `pnpm central:estado`.
+cuando hace falta restaurar, ya es tarde. Las filas de cada tabla las dice `pnpm central:estado`;
+`pnpm central:copias` avisa de las copias que pasan de ese tope, y `central:aprovisionar --copia`,
+antes de empezar, si la copia lo pasa.
 
 Si se llega sin haberlo hecho, la copia no se puede restaurar tal cual, y el CLI no tiene atajo.
 Mientras el objeto esté vivo, volver a un instante no carga filas, y no depende de ese límite.
@@ -155,7 +159,8 @@ pnpm central:volver -- --instante 2026-11-20T10:30:00+01:00 --si
   Deshacer es otra vuelta, con su propia copia de antes y su propio marcador. El CLI escribe esa
   orden también cuando la vuelta no ha salido entera. El marcador queda en R2 antes de pedir la vuelta
   (`pnpm central:copias`, columna `marcador`); si aun así se pierde, se deshace volviendo con
-  `--instante` a justo antes de la vuelta.
+  `--instante` a justo antes de la vuelta: cuando el worker cerró la central para prepararla, que trae
+  la respuesta (`cerradaDesde`) y es la hora de la clave de su `antes-de-volver`.
 
 Si no sale a la primera:
 
@@ -167,7 +172,10 @@ Si no sale a la primera:
   ```
 
   Sólo reinicia la central si esa vuelta sigue preparada: si ya se ha aplicado, o no llegó a pedirse,
-  contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. **No repitas la
+  contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. Lo mismo si, al ir
+  a reiniciarla, el objeto ya no la tiene preparada: no se ha reiniciado para ésta, y la respuesta dice
+  cómo saber qué ha pasado (con otra en curso, `central_vuelta_a_la_vez`: si la otra no sale, ésta
+  puede volver a quedar preparada). **No repitas la
   orden de la vuelta**: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez
   llevándose lo escrito desde entonces.
 - **`central_vuelta_sin_comprobar`**: se ha reiniciado y todavía no contesta. Mira cómo está con
@@ -188,8 +196,11 @@ Si no sale a la primera:
   a pedirse, y el CLI dice cómo saberlo con `pnpm central:copias`. Sin ninguna `antes-de-volver` de
   justo después de la orden, no se pidió y no hay nada que deshacer. Con hora en `pedida`, se pidió:
   si `pnpm central:estado` no tiene ninguna vuelta en curso, se ha aplicado, y se deshace volviendo a
-  su marcador; si la tiene preparada, da la orden que la aplica. Sin hora, no consta que se pidiera
-  (casi siempre, no se pidió). No repitas la vuelta sin mirarlo.
+  su marcador; si la tiene preparada, da la orden que la aplica. Sin hora, el resultado es
+  desconocido: puede que no llegara a pedirse, o que se pidiera y la constancia no llegara a R2. Si
+  `pnpm central:estado` la tiene preparada, da la orden que la aplica; si no tiene ninguna, se mira si
+  a la central le falta lo escrito entre el instante y la hora de la clave: si le falta, se ha
+  aplicado. No repitas la vuelta sin mirarlo.
 - **`central_instante_fuera_de_plazo`**: el instante es del futuro o de hace más de 30 días.
 - **`central_vuelta_no_disponible`**: ese despliegue no vuelve a instantes. En local (`wrangler dev`)
   no existe.
@@ -236,16 +247,18 @@ copia ([worker.md](../arquitectura/worker.md#la-copia-diaria)):
   Sin ella, o con otro número, está cortada.
 
 Se comprime, se sube a `base-central/` y se aprovisiona desde ahí, en un objeto sin aprovisionar. El
-`<nombre>` es de hasta 100 caracteres de `A-Z`, `a-z`, `0-9`, punto, guion y guion bajo, sin dos puntos
-seguidos ni un punto al final (`traspaso-turso-2026-11-25`, por ejemplo): con otro, `central:copias`
-la enseña, pero no se restaura.
+`<nombre>` de una base subida a mano es `subida-<AAAA-MM-DD>`, o `subida-<AAAA-MM-DD>-<N>` si hay más
+de una el mismo día (N de 1 a 999); la del traspaso desde Turso, `traspaso-turso-<AAAA-MM-DD>`. Las
+claves son una gramática cerrada (`NOMBRES_DE_UNA_COPIA`, `baseCentral.copia.ts`), sin texto libre,
+porque van al rastro de la administración: con otro nombre, `central:copias` la enseña, pero no se
+restaura.
 
 ```bash
 gzip -k base.sql
 # desde apps/cloud-worker-licensing/
-pnpm exec wrangler r2 object put tpv-copias-control/base-central/<nombre>.sql.gz --file base.sql.gz --remote
+pnpm exec wrangler r2 object put tpv-copias-control/base-central/subida-<AAAA-MM-DD>.sql.gz --file base.sql.gz --remote
 # desde la raíz
-pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
+pnpm central:aprovisionar -- --copia base-central/subida-<AAAA-MM-DD>.sql.gz --si
 ```
 
 ### El traspaso desde Turso (2026-11-25)

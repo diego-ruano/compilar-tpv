@@ -100,7 +100,8 @@ su `unidad` (1…N), todas en una sola operación de la central (`emitirCobro`,
 claro no llega a la central: el Worker la prepara antes, y a la operación le pasa su huella y su
 cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y
 `pnpm license:list` las enseña pendientes de `pnpm license:resend`; lo mismo si una entrega de Stripe
-encuentra la sesión ya cumplida por otra que no llegó a mandar el correo
+encuentra la sesión ya cumplida por otra que no llegó a mandar el correo, y entonces lo avisa en
+Sentry (`stripe.correo_de_claves`), con las licencias
 ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)). La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
@@ -760,10 +761,14 @@ marca en `license_notices` antes de enviar y sólo envía quien gana la marca; s
 marca se suelta. La clave de `license_notices` incluye `expires_at_ms`, para que un aviso de un ciclo
 no silencie el del siguiente.
 
-Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o al soltar su marca, va
-a Sentry (`cron.license_expiry`), cuenta entre los `fallidos` del resumen del cron y el ciclo sigue
-con las demás. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó puesta, ese
-peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
+Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o al soltar su marca,
+cuenta entre los `fallidos` del resumen del cron y el ciclo sigue con las demás. Si es que la central
+no ha podido atender, queda como en el resto del Worker (`registrarSinLaCentral`): su
+`central_no_disponible` en Axiom, con `metodo` `cron`, y Sentry (`cron.license_expiry`) sólo si no es
+carga ni un fallo pasajero; cualquier otro fallo va a Sentry. **Con la central saturada, el ciclo se
+corta**: las que faltan cuentan como fallidas, sin más viajes a una central que no atiende, y se
+avisan al día siguiente. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó
+puesta, ese peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
 
 ## Lo que guarda el equipo
 

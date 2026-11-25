@@ -308,7 +308,8 @@ Object, `BaseCentral` (`durableObjects/baseCentral.ts`), en este mismo worker
   (`index.ts`).
 - **Se le habla con `getDb(env)`** (`server/db.ts`), que da `clienteCentral`
   (`server/central/cliente.ts`): una `Base` de `lib/sql.ts` (`execute`, y `batch`, todo o nada) sobre
-  el RPC del objeto (`ejecutar` y `lote`), más `operar(nombre, datos)` para
+  el RPC del objeto (`ejecutar`, una sentencia en su transacción, que si falla no deja nada escrito, y
+  `lote`), más `operar(nombre, datos)` para
   [sus operaciones](#las-operaciones), tipado por operación. El `TenantHub` usa el mismo cliente, con
   plazo ([abajo](#el-plazo-del-tenanthub-central-plazo)). Cada viaje suma al tramo `central` del
   `Server-Timing` (`observability/tiempos.ts`). El resto de su RPC es de la administración y del cron
@@ -992,7 +993,7 @@ La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copi
   (`test/copiaCentralSinNuestroCodigo.node.test.ts` la abre con `node:sqlite`). En la cabecera, con qué
   migraciones se hizo (`-- Migraciones: …`), cómo abrirla y cómo devolverla; después, cada tabla con
   su `CREATE` y sus filas, una sentencia `INSERT INTO "<tabla>" (<columnas>) VALUES (…);` por línea y
-  en el orden en que entraron; los índices al final, y la línea del fin con las filas y las tablas
+  en el orden en que entraron (una tabla `WITHOUT ROWID`, sin orden); los índices al final, y la línea del fin con las filas y las tablas
   (`-- Fin de la copia: …`). Un salto de línea dentro de un texto va como `char(10)`, y un texto con
   más de 40, o con un NUL, en hexadecimal.
 - **Va todo lo que es de la base**, también una tabla que se cree mañana, sin tocar la copia. Fuera
@@ -1039,7 +1040,7 @@ la plataforma. Una central con datos malos no se restaura: [vuelve a un instante
   tabla, la hace inservible, y también una de más de 17 MiB, `CARACTERES_POR_LINEA`: la de la fila
   más grande que admite un objeto ocupa 16 MiB y poco); mira que esté entera (su línea del fin, con
   las mismas filas) y que no deje ninguna clave foránea rota; aplica sobre sus datos las migraciones
-  que le falten, y quita la marca en la misma transacción que da la central por buena.
+  que le falten y, con todas aplicadas, quita la marca.
 - **Si falla, como estaba**: vacía el objeto entero, marca incluida, y contesta
   `central_copia_inservible` con el motivo (`copia_no_encontrada`, `copia_no_valida`, `copia_cortada`,
   `copia_de_otra_version`, o que no se ha podido cargar, que va además a Sentry: `central.restaurar`).
@@ -1286,7 +1287,11 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   entera (su línea de fin, con las mismas filas; si no, `copia_cortada`) y `foreign_key_check`
   (`copia_no_valida`). Con una copia que no vale, el objeto se queda vacío y la ruta contesta 422 con
   el código y lo que dice el cargador (`detalle`, sin nada de la copia), y lo deja en Axiom
-  (`copia_no_restaurada`, el evento de toda restauración que el objeto no hace). Los disparadores
+  (`copia_no_restaurada`, el evento de toda restauración que el objeto no hace). También con el gzip
+  roto (puede ser una lectura de R2 cortada a mitad) o con unas filas que SQLite no acepta, que van
+  además a Sentry (`hub.restaurar_copia`), porque pueden ser un fallo de este worker. Una línea que se
+  lee y acaba en CR es de una copia con fines de línea de Windows, y lo dice (`copia_no_valida`), en
+  la central también. Los disparadores
   saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
   apuntan días.
 - **`crearBaseVacia`** es el alta (`aprovisionar`: esquema, sello y administrador inicial).
