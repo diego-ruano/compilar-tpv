@@ -17,7 +17,6 @@ import { commands } from "@tpv/client";
 import { create } from "zustand";
 
 import { toAppError } from "@tpv/client";
-import type { PairCreateResult } from "@tpv/contracts";
 
 type PairCodeStore = {
 	code: string;

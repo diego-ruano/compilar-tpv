@@ -61,8 +61,6 @@ export default function Mesas() {
     );
     const loading = layoutQuery.isFetching;
 
-    const loadMesaMeta = () => metaQuery.refetch();
-
     // Mantener un salón activo válido cuando cambia el layout (equivale al
     // setActiveSalonId(prev => ...) del loader anterior).
     useEffect(() => {
@@ -110,11 +108,6 @@ export default function Mesas() {
         setMesaSel({ mesaId, mesaNombre });
         setModalOpen(true);
     }, []);
-
-    const handleReloadAll = () => {
-        void layoutQuery.refetch();
-        void metaQuery.refetch();
-    };
 
     return (
         <div className="flex h-full min-h-0 w-full touch-pan-y flex-col items-center gap-3 overflow-y-auto overscroll-contain bg-bg p-2 pt-3 sm:gap-4 sm:p-4 lg:overflow-hidden lg:p-6 lg:pt-5">

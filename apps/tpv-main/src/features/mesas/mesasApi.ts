@@ -15,7 +15,6 @@ import type {
     CambioIngredienteInput,
     CategoriaVendibleOut,
     ComandaConLineasOut,
-    ComandaRow,
     DestinatarioInput,
     KitchenRow,
     MesaLineaComandaRow,

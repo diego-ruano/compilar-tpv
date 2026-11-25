@@ -2,7 +2,7 @@ import { commands } from "@tpv/client";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toAppError } from "@tpv/client";
-import type { ConfiguracionPermisos, GuardarPermisosInput } from "@tpv/contracts";
+import type { GuardarPermisosInput } from "@tpv/contracts";
 import { queryClient } from "../../../shared/lib/queryClient";
 import { conAviso } from "../../../shared/lib/conAviso";
 

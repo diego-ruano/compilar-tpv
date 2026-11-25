@@ -9,9 +9,7 @@ import type {
   LineaPedidoDto,
   PedidoProveedorDto,
   PedidosActualizarInput,
-  PedidosCambiarEstadoInput,
   PedidosCrearInput,
-  PedidosPageDto,
 } from "@tpv/contracts";
 
 export type { LineaPedidoDto, PedidoProveedorDto, PedidosActualizarInput, PedidosCrearInput };

@@ -2,7 +2,7 @@ import { commands } from "@tpv/client";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
-import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
+import type { RolRow as Rol } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { ROL_ADMIN } from "../../../shared/lib/permisos";

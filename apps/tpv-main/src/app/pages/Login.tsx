@@ -130,7 +130,6 @@ export default function Login() {
     const canType = Boolean(selectedUser) && !isSubmitting;
     // El teclado numérico; «Entrar» va aparte (`canEnter`).
     const puedeTeclear = canType && !sinPin;
-    const pinMasked = useMemo(() => "•".repeat(pin.length), [pin.length]);
 
     const p1 = useMemo(
         () => punchStatus?.partes?.find((p) => p.parte === 1) ?? null,

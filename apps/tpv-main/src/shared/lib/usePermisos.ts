@@ -2,7 +2,6 @@ import { commands } from "@tpv/client";
 // RI-70: el backend devuelve las concesiones efectivas; sin ninguna respuesta se deniega.
 import { useQuery } from "@tanstack/react-query";
 
-import type { AutorizacionUsuario } from "@tpv/contracts";
 import { useAuth } from "../stores/useAuth";
 
 /** Cada cuánto se reintenta leer los permisos mientras la lectura falla. */
