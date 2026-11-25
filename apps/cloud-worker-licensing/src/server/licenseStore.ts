@@ -19,7 +19,7 @@ import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
-import type { Sql } from "../lib/sql";
+import type { Base, Sql } from "../lib/sql";
 import { CentralNoDisponible, type ClienteCentral } from "./central/cliente";
 import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
 import type { ResultadoDelTraslado } from "./central/operaciones/traslado";
