@@ -220,7 +220,6 @@ impl SubidaCompleta for FakeSubida {
         Ok(!pendiente || *self.pasos.lock().unwrap() >= self.nucleo_en)
     }
     async fn paso(&self, _: &mut dyn EnvioDeSubida) -> AppResult<PasoHecho> { *self.pasos.lock().unwrap() += 1; Ok(PasoHecho::Avanza) }
-    async fn abandonar(&self, _: &str) -> AppResult<()> { Ok(()) }
 }
 #[async_trait]
 impl ContextoReplicacion for Contexto {

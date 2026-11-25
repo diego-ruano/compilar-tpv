@@ -2154,12 +2154,6 @@ impl SubidaCompleta for SqliteSubidaCompleta {
         }
     }
 
-    async fn abandonar(&self, motivo: &str) -> AppResult<()> {
-        let w = self.db.write().await;
-        abandonar_en(w.raw(), motivo).await?;
-        Ok(())
-    }
-
     fn sueltas_sin_nucleo(&self) {
         tracing::warn!(target: "tpv::sync", evento = "subida_suelta_sin_nucleo", "DO-SUBIDA: se sueltan las Handy sin el núcleo subido");
     }

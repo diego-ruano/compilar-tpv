@@ -92,8 +92,6 @@ pub trait SubidaCompleta: Send + Sync {
     async fn nucleo_hecho(&self) -> AppResult<bool>;
     /// Un paso: lo siguiente que toca, mandado y confirmado aquí.
     async fn paso(&self, envio: &mut dyn EnvioDeSubida) -> AppResult<PasoHecho>;
-    /// Deja la subida en curso (traer la nube, otra recuperación). Sin subida, nada.
-    async fn abandonar(&self, motivo: &str) -> AppResult<()>;
     /// Las Handy se sueltan sin el núcleo subido (`NUCLEO_COMO_MUCHO`): se avisa.
     fn sueltas_sin_nucleo(&self) {}
 }

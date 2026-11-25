@@ -571,8 +571,15 @@ async fn la_misma_peticion_reabierta_sigue_por_donde_iba() {
     }
     let leidas = numero(&main, "SELECT SUM(Filas_Leidas) FROM _Sync_Subida_Tablas;").await;
     assert!(leidas > 0);
+    // La nube rechaza un paso por el techo agotado y la subida se deja aquí, como hace el paso.
+    sembrar(
+        &main,
+        "UPDATE _Sync_Subida SET Estado = 'abandonada', Ultimo_Error = 'subida_presupuesto_superado' \
+         WHERE Id = 1 AND Estado IN ('subiendo', 'contrastando');",
+    )
+    .await;
+    assert_eq!(numero(&main, "SELECT COUNT(*) FROM _Sync_Subida WHERE Estado = 'abandonada';").await, 1);
     let s = SqliteSubidaCompleta::new(main.clone());
-    s.abandonar("subida_presupuesto_superado").await.unwrap();
     assert_eq!(s.conciliar(Some(&peticion("s1", "base_vacia"))).await.unwrap(), Conciliacion::Seguir);
     assert_eq!(numero(&main, "SELECT SUM(Filas_Leidas) FROM _Sync_Subida_Tablas;").await, leidas);
     assert!(s.pendiente().await.unwrap());
