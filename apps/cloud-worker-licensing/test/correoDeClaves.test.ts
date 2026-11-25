@@ -103,6 +103,14 @@ describe("CLAVES-SIN-CORREO · el cron reenvía el correo de claves que no const
 			customerName: null,
 		});
 		await filasDe(central, "UPDATE licenses SET issued_at_ms = issued_at_ms - 3600000 WHERE license_id = ?;", manual.license_id);
+		// Con un cobro antiguo, como una de Stripe: así sólo la deja fuera su origen.
+		await filasDe(
+			central,
+			`INSERT INTO license_payments (payment_id, license_id, kind, term_months, at_ms)
+			 VALUES ('pago-de-la-manual', ?, 'purchase', 12, ?);`,
+			manual.license_id,
+			Date.now() - 3600_000,
+		);
 
 		const { env, correos } = conCorreo();
 		const hoy = await reenviarClavesSinCorreo(env, central.db, Date.now());
