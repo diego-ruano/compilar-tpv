@@ -176,9 +176,13 @@ Si no sale a la primera:
   contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. **No repitas la
   orden de la vuelta**: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez
   llevándose lo escrito desde entonces.
-- **Al ir a reiniciarla, el objeto ya no la tiene preparada** (409, en la orden de la vuelta o con
-  `--reiniciar`): no se ha reiniciado para ésta, y la vuelta no se da por aplicada. La respuesta trae
-  su `deshacer`, su `copiaDeAntes`, `cerradaDesde` y el `estado` de la central.
+- **Al ir a reiniciarla, el objeto ya no la tiene preparada** (409, en la orden de la vuelta): no se
+  ha reiniciado para ésta, y la vuelta no se da por aplicada. La respuesta trae su `deshacer`, su
+  `copiaDeAntes`, `cerradaDesde` y el `estado` de la central. Con `--reiniciar` pasa lo mismo sólo si
+  el objeto la deja de tener preparada entre que el worker lo mira y le pide reiniciar; lo normal es que el
+  worker vea antes de pedir nada que ya no lo está, y entonces el 409 (`central_sin_vuelta_preparada`
+  o `central_vuelta_a_la_vez`) trae sólo el `estado`. En los dos casos se sigue igual, con
+  `pnpm central:estado` y `pnpm central:copias`:
   - Con otra en curso (`central_vuelta_a_la_vez`), ésta no se pierde: si la otra no sale, el objeto
     vuelve a poner la que seguía en pie, que puede ser ésta, preparada y con la central cerrada, y
     `pnpm central:estado` da la orden que la aplica.
@@ -304,7 +308,9 @@ Lo que no sale bien contesta su código, una frase con qué pasa y, aparte, el m
 ha podido atender ahora»: si la orden cambiaba algo, no se sabe si ha entrado, y se mira con
 `pnpm central:estado` antes de repetirla. Las respuestas de una vuelta ya preparada, también las que
 no salen, traen con qué se sale de ella: `deshacer`, `copiaDeAntes` y `cerradaDesde` (cuándo cerró
-la central el worker para prepararla, el `--instante` de reserva si se pierde el marcador).
+la central el worker para prepararla, el `--instante` de reserva si se pierde el marcador). La
+excepción es `--reiniciar` con una vuelta que el worker ya no ve preparada antes de pedir nada: su
+409 trae sólo el `estado` de la central.
 
 | Código | Qué pasa | Qué hacer |
 |---|---|---|
