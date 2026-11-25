@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
-use tpv_application::error::AppResult;
+use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
@@ -14,6 +14,10 @@ use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::client::leer_campo;
 use crate::CloudClient;
+
+/// Lo que dice una Handy que intenta cobrar: el mismo texto que el worker (`cobro_solo_en_main` en
+/// `lib/errorCodes.ts`), lo diga quien lo diga.
+pub(crate) const COBRO_SOLO_EN_MAIN: &str = "Los cobros sólo se hacen desde el TPV principal.";
 
 pub struct HttpMesasRepository {
     client: Arc<CloudClient>,
@@ -202,19 +206,10 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
-    /// El worker rechaza el cobro desde un Handy (solo cobra la Main, que es la que tiene
-    /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un pago. Se
-    /// mantiene el camino por si algún día se retoma.
-    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String> {
-        let body = json!({
-            "id_comanda": data.id_comanda,
-            "metodo": data.metodo,
-            "tipo": data.tipo,
-            "detalle_ids": data.detalle_ids,
-            "id_usuario": data.id_usuario,
-        });
-        let _: JsonValue = self.client.post_json("/v1/mesas/cobrar-detalles", &body).await?;
-        Ok(String::new())
+    /// Cobra sólo la Main, que es la que tiene impresora y cajón; el worker lo veta a una Handy
+    /// (`soloLaMainCobra`). Aquí se dice lo mismo sin salir a la red (M-083).
+    async fn cobrar_detalles(&self, _data: CobroDetalles) -> AppResult<String> {
+        Err(AppError::conflict(COBRO_SOLO_EN_MAIN))
     }
 
     /* Cocina */
@@ -238,5 +233,68 @@ impl MesasRepository for HttpMesasRepository {
             .put_json("/v1/mesas/kitchen/line-state", &body)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_cobro_solo_en_la_main {
+    //! M-083: una Handy no cobra. Lo veta el worker (`soloLaMainCobra`), y el adaptador lo dice sin
+    //! salir a la red, con el mismo texto: antes mandaba el cobro igualmente, a recibir un 403.
+
+    use super::*;
+    use crate::venta_rapida::HttpVentaRapidaRepository;
+    use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+    use tpv_domain::dinero::Dinero;
+    use tpv_domain::pago::MetodoPago;
+    use tpv_domain::venta_rapida::CobroFraccionado;
+
+    /// Un host que no existe: si algo saliera a la red, el error sería de red, no el del cobro.
+    fn cliente() -> Arc<CloudClient> {
+        Arc::new(CloudClient::new("http://127.0.0.1:1", std::env::temp_dir()).unwrap())
+    }
+
+    #[tokio::test]
+    async fn cobrar_una_mesa_desde_la_handy_dice_lo_mismo_que_el_worker() {
+        let e = HttpMesasRepository::new(cliente())
+            .cobrar_detalles(CobroDetalles {
+                todo: false,
+                id_comanda: "c1".into(),
+                metodo: MetodoPago::Efectivo,
+                tipo: "fraccionado".into(),
+                detalle_ids: vec!["d1".into()],
+                id_usuario: Some("u1".into()),
+                destinatario: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), COBRO_SOLO_EN_MAIN);
+    }
+
+    #[tokio::test]
+    async fn cobrar_en_la_barra_desde_la_handy_dice_lo_mismo_que_el_worker() {
+        let e = HttpVentaRapidaRepository::new(cliente())
+            .cobrar_fraccionado(CobroFraccionado {
+                todo: false,
+                id_pago: "p1".into(),
+                id_comanda: "c1".into(),
+                metodo: MetodoPago::Tarjeta,
+                importe_total: Dinero::de_centimos(300),
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["d1".into()],
+                destinatario: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), COBRO_SOLO_EN_MAIN);
+    }
+
+    #[test]
+    fn el_texto_es_el_del_worker() {
+        let worker = include_str!("../../../apps/cloud-worker-licensing/src/lib/errorCodes.ts");
+        assert!(
+            worker.contains(&format!("cobro_solo_en_main: \"{COBRO_SOLO_EN_MAIN}\"")),
+            "el texto de `cobro_solo_en_main` del worker ya no es «{COBRO_SOLO_EN_MAIN}»"
+        );
     }
 }
