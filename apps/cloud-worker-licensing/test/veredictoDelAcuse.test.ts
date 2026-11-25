@@ -115,8 +115,11 @@ describe("el acuse dice de qué clase es el fallo", () => {
 				// Los límites del SQLite del DO.
 				["un patrón de LIKE de más de 50 bytes", "UPDATE Zonas SET Nombre_Zona = 'x' WHERE Nombre_Zona LIKE ?1;", ["%" + "a".repeat(60) + "%"]],
 				["más de 5 SELECT en un compuesto", `INSERT INTO Zonas (ID_Zona, Nombre_Zona) ${Array.from({ length: 6 }, (_, i) => `SELECT 'u${i}', 'U${i}'`).join(" UNION ALL ")};`, []],
-				// Pasa del tope de un valor en el SQLite del DO (algo más de 2 MiB) y cabe en un mensaje.
-				["un valor que no cabe en una fila", ALTA, ["z-grande", "a".repeat(3_000_000)]],
+				// Un valor de 9 MB, que no cabe en una fila del SQLite del DO ni con el tope de local (algo más
+				// de 2 MiB) ni con el de producción (8 MiB y 34 bytes): así no cambia de sentido con otro
+				// workerd. Lo junta la sentencia con un argumento de 1 MB, para que el mensaje que lo lleva
+				// quepa en `MAX_MENSAJE`.
+				["un valor que no cabe en una fila", `INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ${Array(9).fill("?2").join(" || ")});`, ["z-grande", "a".repeat(1_000_000)]],
 			];
 			for (const [caso, texto, args] of CASOS) {
 				const v = await aplicar(`op-${caso}`, texto, args);

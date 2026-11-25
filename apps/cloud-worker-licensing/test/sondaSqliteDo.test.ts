@@ -415,6 +415,10 @@ describe("límites del SQL", () => {
 				params101SinNumerar: error(() =>
 					sql.exec(`SELECT 1 WHERE 'x' NOT IN (${Array.from({ length: 101 }, () => "?").join(", ")});`, ...valores(101)).toArray(),
 				),
+				// Lo que miden los `valor*` es el workerd local de las pruebas, no producción: aquí entra un
+				// valor de 2 MiB y un byte y uno de 3 MB ya no («string or blob too big»). En producción la
+				// fila más grande es de 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd, cargaDeCopias.ts):
+				// allí el de 3 MB entra y el de 9 MB no. Van al informe, sin `expect`.
 				valor1MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(1_000_000)).toArray()),
 				valor2MB: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(2_000_000)).toArray()),
 				valor2MiBYUnByte: error(() => sql.exec("SELECT length(?1) AS n;", "a".repeat(2 * 1024 * 1024 + 1)).toArray()),
