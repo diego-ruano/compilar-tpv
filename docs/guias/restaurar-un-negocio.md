@@ -105,7 +105,11 @@ línea, su número, el carácter y un código (`columna_desconocida`, `tabla_aje
 `valor_no_literal`…), o que es demasiado larga. Prueba con la de otro día. Si es una columna o una
 tabla que el esquema de hoy no tiene (`columna_desconocida`, `tabla_ajena`) en una copia de antes de
 una migración que la quitó o le cambió el nombre, fallarán igual todas las de antes de esa
-migración: este worker no las sabe cargar.
+migración: este worker no las sabe cargar. Y una copia hecha por un worker que aún no escribía en
+hexadecimal los textos con más de 40 saltos de línea (`SALTOS_CON_CHAR`) los lleva todos con
+`char(10)`, 14 caracteres por salto: si una fila tiene más de 1,27 millones (o es de 8 MB y tiene
+más de unos 726.000), es demasiado larga y no se puede restaurar. Las que hace este worker llevan ese
+texto en hexadecimal.
 
 **Crearle una base vacía**, con su administrador inicial, como la del alta:
 

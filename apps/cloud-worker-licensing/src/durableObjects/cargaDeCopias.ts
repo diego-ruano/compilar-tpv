@@ -6,11 +6,11 @@
 // migraciones que sabe poner su worker, qué tablas puede traer la copia y cómo se prepara la base.
 //
 // La copia se lee de R2 según llega (descomprimida y partida en líneas, sin tenerla entera en
-// memoria), y una línea más larga que la de la fila más grande que admite un objeto la hace
-// inservible (`CARACTERES_POR_LINEA`). El esquema lo ponen las migraciones del worker, no la copia: de
-// ella sólo cuentan las líneas de datos, las que empiezan por `INSERT INTO "`, y de ninguna se
-// ejecuta su texto. Cada una se lee entera con la misma gramática, sea corta o larga
-// (`LectorDeFilas`):
+// memoria), y una línea más larga que la de la fila más grande que admite un objeto, como la escribe
+// hoy la copia, la hace inservible (`CARACTERES_POR_LINEA`). El esquema lo ponen las migraciones del
+// worker, no la copia: de ella sólo cuentan las líneas de datos, las que empiezan por
+// `INSERT INTO "`, y de ninguna se ejecuta su texto. Cada una se lee entera con la misma gramática,
+// sea corta o larga (`LectorDeFilas`):
 //
 //     INSERT INTO "<tabla>" ("<columna>", …) VALUES (<literal>, …);
 //
@@ -93,9 +93,13 @@ const CARACTERES_POR_LOTE = 4 * 1024 * 1024;
 /**
  * Lo más largo que puede ser una línea de una copia, en caracteres. La fila más grande que admite el
  * SQLite de un objeto en producción es de 8 MB (8 MiB y 34 bytes, `MAX_ROW_LENGTH` de workerd), y su
- * línea ocupa como mucho dos veces sus bytes, más los nombres de su tabla y de sus columnas
- * (`literalEnUnaLinea`): 16 MiB y unos KB. Una más larga no la ha escrito ninguna copia, y juntarla
- * podría agotar la memoria del objeto, que es de 128 MB.
+ * línea, como la escribe hoy la copia, ocupa como mucho dos veces sus bytes, más los nombres de su
+ * tabla y de sus columnas (`literalEnUnaLinea`): 16 MiB y unos KB. Juntar una más larga podría agotar
+ * la memoria del objeto, que es de 128 MB.
+ *
+ * La copia de un negocio hecha por un worker anterior a `SALTOS_CON_CHAR` escribe con `char(10)` todos
+ * los saltos de línea de un texto, 14 caracteres cada uno: si una fila suya lleva más de 1,27 millones
+ * (o es de 8 MB y lleva más de unos 726.000), su línea pasa del tope, y esa copia no se restaura.
  */
 export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
 
@@ -261,7 +265,8 @@ class Lectura {
 	 * - un texto entre comillas simples, con la comilla doblada dentro: `'Ana O''Neil'`;
 	 * - un texto con saltos de línea, entre paréntesis: sus trozos entre comillas, unidos por
 	 *   `||char(10)||` o `||char(13)||`, uno por salto y alguno: `('a'||char(13)||''||char(10)||'b')`.
-	 *   Cuántos, da igual: la copia de un negocio anterior a `SALTOS_CON_CHAR` los escribe todos así;
+	 *   Cuántos, da igual, mientras quepan en la línea (`CARACTERES_POR_LINEA`): la copia de un negocio
+	 *   anterior a `SALTOS_CON_CHAR` los escribe todos así;
 	 * - unos bytes en hexadecimal, `X'00ff'`, o un texto en UTF-8 en hexadecimal, `CAST(X'…' AS TEXT)`
 	 *   (uno con un NUL o con muchos saltos de línea).
 	 */

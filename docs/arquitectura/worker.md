@@ -1194,7 +1194,11 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
 - **`restaurarDesdeCopia`** (`durableObjects/tenantHub.restaurar.ts`, con el cargador que comparte con
   la base central, `cargaDeCopias.ts`) lee la copia de R2 según llega,
   descomprimida y por líneas, sin tenerla entera en memoria; una línea de más de 17 MiB la hace
-  inservible en cuanto se pasa, sin juntarla entera (`copia_no_valida`). Antes de tocar nada mira que
+  inservible en cuanto se pasa, sin juntarla entera (`copia_no_valida`). La de la fila más grande
+  que admite un objeto, como la escribe hoy la copia, ocupa 16 MiB y poco; la copia de un worker
+  anterior a `SALTOS_CON_CHAR` escribe con `char(10)` todos los saltos de línea de un texto, 14
+  caracteres cada uno, y pasa del tope si una fila lleva más de 1,27 millones (o es de 8 MB y lleva
+  más de unos 726.000): esa copia no se restaura. Antes de tocar nada mira que
   la copia sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de
   aquí; si no, `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
   carga las filas de la copia en tablas del negocio. De la copia no se ejecuta ningún texto: cada

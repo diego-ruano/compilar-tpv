@@ -14,9 +14,10 @@
 //     guardaría como infinito…) hace inservible la copia: dice en qué línea y carácter y por qué, sin
 //     nada de lo que lleva, y no se ejecuta nada;
 //   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido;
-//   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción
-//     sale entera, y una más larga que el tope hace inservible la copia en cuanto se pasa, sin
-//     esperar a su final.
+//   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción,
+//     como la escribe hoy la copia, sale entera, y una más larga que el tope hace inservible la copia
+//     en cuanto se pasa, sin esperar a su final. También la de una copia de un negocio de antes, con
+//     cada salto escrito con `char(10)`, si una fila lleva más de 1,27 millones: no se restaura.
 
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
@@ -348,7 +349,7 @@ describe("las líneas de una copia (lineasDe)", () => {
 		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
 	});
 
-	it("la línea de la fila más grande que admite un objeto en producción cabe en el tope, escrita de cualquier forma", async () => {
+	it("la línea de la fila más grande que admite un objeto en producción cabe en el tope, escrita de cualquier forma de las de hoy", async () => {
 		// 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd): lo más que ocupa una fila, con todas sus columnas.
 		const fila = 8 * 1024 * 1024 + 34;
 		const peores: [string, SqlStorageValue][] = [
@@ -370,5 +371,24 @@ describe("las líneas de una copia (lineasDe)", () => {
 		expect(error).toBeUndefined();
 		// Se comparan así, y no con un `toEqual` de las líneas, que pintaría 16 MiB al fallar.
 		expect(dadas.map((l, i) => [l.length, l === copia[i]])).toEqual(copia.map((l) => [l.length, true]));
+	}, 60_000);
+
+	it("la de una copia de un negocio de antes de SALTOS_CON_CHAR, con cada salto escrito con char(10), pasa del tope si una fila lleva más de 1,27 millones: esa copia no se restaura", async () => {
+		// Así escribe todos los saltos de un texto, lleve los que lleve, la copia de un negocio de un worker
+		// anterior: 14 caracteres por salto. La línea de una fila de 8 MB puede pasar de 100 MiB, y ésa no
+		// se puede juntar.
+		const conSaltos = (texto: string) => `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${conChar(texto)});`;
+		const sinSaltos = conSaltos("").length;
+		expect(conSaltos(`${"\n".repeat(1000)}${"x".repeat(500)}`).length).toBe(sinSaltos + 14 * 1000 + 500);
+		// Los que caben: solos, y en un texto de 8 MiB, el valor más grande que admite un objeto.
+		expect(Math.floor((CARACTERES_POR_LINEA - sinSaltos) / 14)).toBe(1_273_268);
+		expect(Math.floor((CARACTERES_POR_LINEA - sinSaltos - 8 * 1024 * 1024) / 13)).toBe(725_934);
+		// Con uno más, la línea es demasiado larga en cuanto pasa del tope.
+		const copia = ["-- Migraciones: m1", conSaltos("\n".repeat(1_273_269)), "-- Fin de la copia: 1 filas en 1 tablas"];
+		expect(copia[1].length).toBeGreaterThan(CARACTERES_POR_LINEA);
+		expect(await leer(gzipDe(`${copia.join("\n")}\n`))).toEqual({
+			dadas: ["-- Migraciones: m1"],
+			error: `copia_no_valida: la línea 2 es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres`,
+		});
 	}, 60_000);
 });
