@@ -10,7 +10,9 @@
 //
 // Los datos personales (`datos_json`) sólo están mientras la reserva espera a la Main: se borran al
 // verla en la base o al anularla. De una fallida queda sólo el correo, para avisar al cliente, hasta
-// que se purga.
+// que sale el aviso o se purga. Y de un correo al cliente que la ruta no pudo mandar
+// (`correos_pendientes`, RESERVA-CORREOS), la dirección y los datos de ese correo (día, hora,
+// comensales y mesa), hasta que sale, pasa la hora de la reserva o llega la semana.
 
 import type { Ocupacion } from "../domains/reservas_web/disponibilidad";
 import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";

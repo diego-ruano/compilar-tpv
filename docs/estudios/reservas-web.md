@@ -245,7 +245,10 @@ Ciclo de una petición:
 - Los enlaces caducan un día después de la reserva (con margen por la zona: 36 h desde su hora).
 - Todo está en `durableObjects/agendaWeb.almacen.ts`, síncrono a propósito.
 
-Los datos personales sólo están en la agenda mientras la reserva espera.
+Los datos personales sólo están en la agenda mientras la reserva espera, con dos excepciones: de una
+fallida, su correo, para avisar al cliente, hasta que sale el aviso o se purga; y de un correo que
+la ruta no pudo mandar (`correos_pendientes`), la dirección y los datos de ese correo (día, hora,
+comensales y mesa), hasta que sale, pasa la hora de la reserva o llega la semana.
 
 ---
 
