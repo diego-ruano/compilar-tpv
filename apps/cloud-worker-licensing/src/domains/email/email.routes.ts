@@ -196,11 +196,11 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  * mandarse nunca. Para que eso sea lo raro, `terminarEnvio` insiste antes de rendirse.
  *
  * **Si la base central no contesta, se envía igual** (`sin_base`), y `terminarEnvio` apunta el envío
- * si para entonces puede. Turso caído no puede impedir que un bar mande su pedido: un tope que
+ * si para entonces puede. Una central caída no puede impedir que un bar mande su pedido: un tope que
  * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Ese hueco no lo
  * abre quien llama: no puede tirar la base central a voluntad. Sin la base no se sabe tampoco si ese
- * envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de Turso se queda lo
- * segundo (los correos de las reservas web, al revés, no salen).
+ * envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de la central se queda
+ * lo segundo (los correos de las reservas web, al revés, no salen).
  */
 export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
 	const ahora = Date.now();
@@ -253,7 +253,7 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
  * salió. Si se quedara la de la reserva, un envío que tarda 30 s dejaría de contar 30 s antes de
  * cumplir sus 24 h, y una ráfaga lenta dejaría sitio a otra entera antes de tiempo.
  *
- * Es **best-effort a propósito**: si Turso falla, se registra en el log del worker y ya está. Un
+ * Es **best-effort a propósito**: si la central falla, se registra en el log del worker y ya está. Un
  * fallo del registro no puede impedir que un bar mande su pedido, y la reserva que se queda en
  * `enviando` sigue contando para el cupo de hoy. Pero se insiste unas veces: un pedido que salió y se
  * queda en `enviando` se puede volver a reservar pasados unos minutos (`reservarCupo`), y un

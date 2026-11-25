@@ -54,10 +54,8 @@ function seisCifrasAlAzar(): string {
  * Crea un código nuevo para este negocio.
  *
  * El bucle reintenta sólo si el código sorteado **ya existe**, y eso se comprueba mirando la
- * tabla, no el texto de la excepción: antes era `msg.includes("UNIQUE") || …("constraint")`, que
- * es la misma clasificación por cadenas que se ha quitado del resto del fichero — y que al
- * primer cambio de redacción en libsql habría convertido una colisión (normal: hay un millón de
- * códigos y los vivos duran diez minutos) en un 500.
+ * tabla, no el texto de una excepción: clasificar por el texto convertiría una colisión (normal: hay
+ * un millón de códigos y los vivos duran diez minutos) en un 500 al primer cambio de redacción.
  *
  * AUD-12: el tope de códigos vivos del negocio va DENTRO de la misma sentencia, no en una lectura
  * previa: en la base central cada escritura va con el cerrojo del escritor, así que el recuento y el

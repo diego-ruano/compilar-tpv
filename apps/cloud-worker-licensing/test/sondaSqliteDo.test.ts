@@ -1,9 +1,9 @@
 // test/sondaSqliteDo.test.ts
 //
-// Sondas de la rama prueba/sqlite-do: qué hace el SQLite del Durable Object con lo que hacía
-// Turso. No prueba código del worker, prueba el sustrato: claves foráneas, límites, jurisdicción y
-// tiempos con un volumen de restaurante. Cada sonda deja su resultado en el informe que se imprime
-// al final.
+// Sondas del SQLite de un Durable Object: qué hace con lo que le piden el TenantHub y la base
+// central. No prueba código del worker, prueba el sustrato: claves foráneas, límites, transacciones,
+// jurisdicción y tiempos con un volumen de restaurante. Cada sonda deja su resultado en el informe
+// que se imprime al final.
 
 import { afterAll, describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";

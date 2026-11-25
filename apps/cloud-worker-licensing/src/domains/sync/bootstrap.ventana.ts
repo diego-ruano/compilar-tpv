@@ -127,7 +127,7 @@ export const TABLAS_NO_RESTAURADAS = new Set(["Intentos_Login"]);
 
 export function esTablaDeNegocio(nombre: string): boolean {
 	if (!nombre) return false;
-	if (nombre.startsWith("_") || nombre.startsWith("sqlite_") || nombre.startsWith("libsql_")) {
+	if (nombre.startsWith("_") || nombre.startsWith("sqlite_")) {
 		return false;
 	}
 	return !TABLAS_DE_ANDAMIAJE.has(nombre) && !TABLAS_NO_RESTAURADAS.has(nombre);

@@ -1,6 +1,6 @@
 // El informe de una tanda, en `informe.md`. Se construye sólo con lo que la tanda dejó en su carpeta
-// (estado.json, peticiones.jsonl, turso-local.json, coste.json), así que `--medir` puede rehacerlo
-// cuando los datos de Cloudflare terminan de asentarse.
+// (estado.json, peticiones.jsonl, coste.json), así que `--medir` puede rehacerlo cuando los datos de
+// Cloudflare terminan de asentarse.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,36 +18,54 @@ function percentil(valores, q) {
   return orden[Math.min(orden.length - 1, Math.ceil(q * orden.length) - 1)];
 }
 
-const sumaTurso = (porEtapa, etapas, base) =>
-  etapas.reduce(
-    (t, e) => {
-      const b = porEtapa?.[e]?.[base];
-      if (b) for (const k of Object.keys(t)) t[k] += b[k];
-      return t;
-    },
-    { http: 0, sentencias: 0, lecturas: 0, escrituras: 0 },
-  );
-
 function leerEntradas(carpeta) {
   const ruta = join(carpeta, "peticiones.jsonl");
   if (!existsSync(ruta)) return [];
   return readFileSync(ruta, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l));
 }
 
+/**
+ * Los viajes a los Durable Objects que cuenta el propio worker en el `Server-Timing` de cada
+ * respuesta a un dispositivo autenticado (`observability/tiempos.ts`): a la base central (`central`,
+ * y `en-hub-central` los del TenantHub mientras atiende la ruta) y al TenantHub (`hub-*`). Cada
+ * llamada a un Durable Object es una petición facturable.
+ */
+function viajesDe(entradas) {
+  const v = { conDesglose: 0, central: 0, hub: 0 };
+  for (const e of entradas) {
+    if (!e.tiempos) continue;
+    v.conDesglose += 1;
+    for (const [nombre, tramo] of Object.entries(e.tiempos)) {
+      const veces = Number(tramo?.n ?? 0);
+      if (nombre === "central" || nombre === "en-hub-central") v.central += veces;
+      else if (nombre.startsWith("hub-")) v.hub += veces;
+    }
+  }
+  return v;
+}
+
+/**
+ * Lo de la base central que es de la carga: lo de la ventana de la carga menos lo de la de control,
+ * que es del mismo largo y acaba justo antes de la tanda. La central es una para todos los negocios,
+ * y en esos minutos también la usan los equipos de verdad.
+ */
+function centralDeLaCarga(cf) {
+  const carga = cf.carga?.central;
+  const control = cf.control?.central;
+  if (!carga || !control) return null;
+  const menos = campo => Math.max(0, carga[campo] - control[campo]);
+  return { invocaciones: menos("invocaciones"), filasLeidas: menos("filasLeidas"), filasEscritas: menos("filasEscritas") };
+}
+
 export function escribirInforme(carpeta) {
   const estado = leer(carpeta, "estado.json") ?? {};
   const entradas = leerEntradas(carpeta);
-  const tursoLocal = leer(carpeta, "turso-local.json");
-  // Las bases que midió el proxy local: la central (la del negocio es el SQLite de su TenantHub).
-  const basesTurso = [...new Set(Object.values(tursoLocal ?? {}).flatMap(e => Object.keys(e)))].sort();
-  const sumaBases = etapas =>
-    basesTurso.map(b => sumaTurso(tursoLocal, etapas, b)).reduce((s, x) => ({ lecturas: s.lecturas + x.lecturas, escrituras: s.escrituras + x.escrituras }), { lecturas: 0, escrituras: 0 });
   const coste = leer(carpeta, "coste.json");
+  const local = estado.destino === "local";
 
   const carga = entradas.filter(e => e.fase === "carga");
   const preparacion = entradas.filter(e => e.fase === "preparacion");
   const etapasCarga = [...new Set(carga.map(e => e.etapa))];
-  const etapasResto = Object.keys(tursoLocal ?? {}).filter(e => !etapasCarga.includes(e));
   const pasos = etapasCarga.length;
   const duracion = v => (v?.desde && v?.hasta ? (Date.parse(v.hasta) - Date.parse(v.desde)) / 1000 : null);
   const httpCarga = carga.filter(e => e.http && e.actor !== "admin").length;
@@ -63,7 +81,7 @@ export function escribirInforme(carpeta) {
   l.push(estado.error ? `**Se paró:** ${estado.error}` : `**${bien} de ${carga.length} peticiones de la carga respondieron bien.**`, "");
 
   l.push("## Resumen", "", "| | |", "|---|---|");
-  l.push(`| Destino | ${estado.destino === "local" ? "worker en este equipo (wrangler dev) con la base central en sqld del WSL" : `worker desplegado (${estado.base})`} |`);
+  l.push(`| Destino | ${local ? "worker en este equipo (`wrangler dev`), con la base central y la del negocio en sus Durable Objects" : `worker desplegado (${estado.base})`} |`);
   l.push(`| Negocio de pruebas | \`${estado.tenantId ?? "—"}\` · licencia ${estado.claveCorta ?? "—"} |`);
   // Una operación de la Main viaja dentro de su lote: el mensaje es el lote.
   const mensajesWs = es => es.filter(e => e.metodo === "WS" && e.tipo !== "main-ws" && e.tipo !== "propagacion").length;
@@ -77,20 +95,11 @@ export function escribirInforme(carpeta) {
 
   if (pasos) {
     l.push("## Las peticiones de la carga", "");
-    const conTurso = Boolean(tursoLocal);
-    l.push(`| # | Paso | Tipo | Petición | Estado | ms |${conTurso ? basesTurso.map(b => ` Turso ${b} (leídas / escritas) |`).join("") : ""}`);
-    l.push(`|---|---|---|---|---|---|${conTurso ? "---|".repeat(basesTurso.length) : ""}`);
-    const vistas = new Set();
+    l.push("| # | Paso | Tipo | Petición | Estado | ms | Viajes a la base central / al TenantHub |", "|---|---|---|---|---|---|---|");
     for (const e of carga) {
-      let turso = "";
-      if (conTurso) {
-        const primera = !vistas.has(e.etapa);
-        vistas.add(e.etapa);
-        const t = tursoLocal[e.etapa];
-        turso = primera ? basesTurso.map(b => ` ${n(t?.[b]?.lecturas ?? 0)} / ${n(t?.[b]?.escrituras ?? 0)} |`).join("") : " |".repeat(basesTurso.length);
-      }
       const estadoTexto = e.ok ? String(e.status) : `${e.status ?? "—"} ✗ ${e.error ?? ""}`;
-      l.push(`| ${e.n} | ${e.etapa} | ${e.tipo} | ${e.metodo} ${e.ruta} | ${estadoTexto} | ${n(e.ms)} |${turso}`);
+      const v = e.tiempos ? viajesDe([e]) : null;
+      l.push(`| ${e.n} | ${e.etapa} | ${e.tipo} | ${e.metodo} ${e.ruta} | ${estadoTexto} | ${n(e.ms)} | ${v ? `${v.central} / ${v.hub}` : ""} |`);
     }
     l.push("");
 
@@ -134,56 +143,58 @@ export function escribirInforme(carpeta) {
     }
   }
 
-  // Lo que cuesta un paso medio de la carga, con su fuente.
+  // Lo que cuesta un paso medio de la carga, con su fuente. De lo que gastan los Durable Objects se
+  // guarda además cuánto es del negocio y cuánto de la base central.
   const porPaso = {};
   const fuente = {};
-  const anotar = (clave, valor, de) => {
+  const partes = {};
+  const anotar = (clave, valor, de, desglose) => {
     if (pasos && valor != null && Number.isFinite(valor)) {
       porPaso[clave] = valor / pasos;
       fuente[clave] = de;
+      if (desglose) partes[clave] = { negocio: desglose.negocio / pasos, central: desglose.central / pasos };
+      else delete partes[clave];
     }
   };
   // Las peticiones al worker las cuenta el generador: cada HTTP que manda es una petición facturable.
   anotar("workerPeticiones", httpCarga, "contadas por el generador");
 
   l.push("## Coste", "");
-  if (tursoLocal) {
-    l.push("### Turso (medido en local con sqld)", "");
-    l.push("Filas que cuenta el propio motor de Turso, que es lo que factura. Sólo la base central: la del negocio es el SQLite de su TenantHub, que no pasa por Turso.", "");
-    l.push("| Fase | Base | Llamadas | Sentencias | Filas leídas | Filas escritas |", "|---|---|---|---|---|---|");
-    for (const [fase, etapas] of [["Preparación (alta, semilla, emparejamiento)", etapasResto], ["Carga", etapasCarga]]) {
-      for (const base of basesTurso) {
-        const t = sumaTurso(tursoLocal, etapas, base);
-        l.push(`| ${fase} | ${base} | ${n(t.http)} | ${n(t.sentencias)} | ${n(t.lecturas)} | ${n(t.escrituras)} |`);
-      }
+  const viajesPrep = viajesDe(preparacion);
+  const viajesCarga = viajesDe(carga);
+  l.push("### Viajes a los Durable Objects (los cuenta el worker)", "");
+  l.push(
+    "El worker dice en el `Server-Timing` de cada respuesta a un dispositivo autenticado cuántas llamadas ha hecho a la base central (también las del TenantHub mientras atendía la ruta) y al TenantHub. Cada llamada a un Durable Object es una petición facturable. No salen aquí las peticiones sin autenticar (el alta y el emparejamiento) ni lo que llega por el socket (los lotes de la Main), que no lleva cabecera.",
+    "",
+  );
+  l.push("| Fase | Peticiones con desglose | Viajes a la base central | Viajes al TenantHub |", "|---|---|---|---|");
+  l.push(`| Preparación (alta, semilla, emparejamiento) | ${n(viajesPrep.conDesglose)} | ${n(viajesPrep.central)} | ${n(viajesPrep.hub)} |`);
+  l.push(`| Carga | ${n(viajesCarga.conDesglose)} | ${n(viajesCarga.central)} | ${n(viajesCarga.hub)} |`);
+  if (pasos) {
+    // El tipo de un paso es el de su petición o su operación, no el del lote en que viajó ni el de la
+    // propagación que se anota con él (como en la consola, `ejecutarPlan`).
+    const tipoDelPaso = new Map();
+    for (const e of carga) {
+      const propio = e.tipo !== "main-lote" && e.tipo !== "propagacion";
+      if (!tipoDelPaso.has(e.etapa) || (propio && !tipoDelPaso.get(e.etapa).propio)) tipoDelPaso.set(e.etapa, { tipo: e.tipo, propio });
     }
-    if (pasos) {
-      l.push("", `Por tipo de paso de la carga (media de filas por paso, ${basesTurso.join(" + ")}):`, "", "| Tipo | Pasos | Leídas por paso | Escritas por paso |", "|---|---|---|---|");
-      for (const tipo of [...new Set(carga.map(e => e.tipo))]) {
-        const etapas = [...new Set(carga.filter(e => e.tipo === tipo).map(e => e.etapa))];
-        const s = sumaBases(etapas);
-        l.push(`| ${tipo} | ${etapas.length} | ${n(s.lecturas / etapas.length, 1)} | ${n(s.escrituras / etapas.length, 1)} |`);
-      }
-      const s = sumaBases(etapasCarga);
-      anotar("tursoFilasLeidas", s.lecturas, "medidas en local");
-      anotar("tursoFilasEscritas", s.escrituras, "medidas en local");
+    l.push("", "Por tipo de paso de la carga (media de viajes por paso):", "", "| Tipo | Pasos | A la base central | Al TenantHub |", "|---|---|---|---|");
+    for (const tipo of [...new Set([...tipoDelPaso.values()].map(t => t.tipo))]) {
+      const etapas = new Set([...tipoDelPaso].filter(([, t]) => t.tipo === tipo).map(([etapa]) => etapa));
+      const v = viajesDe(carga.filter(e => etapas.has(e.etapa)));
+      l.push(`| ${tipo} | ${etapas.size} | ${n(v.central / etapas.size, 2)} | ${n(v.hub / etapas.size, 2)} |`);
     }
-    l.push("", "En local hay un solo isolate, y sus cachés de 60 s hacen que la base central se lea mucho menos que en la nube.", "");
-    l.push("### Cloudflare (estimado: en local no hay contadores)", "");
-    l.push(`- Peticiones al worker en la carga: ${httpCarga} (las ${opsMainCarga} operaciones de la Main van en ${wsCarga} lotes por el socket abierto y no son peticiones).`);
-    l.push(`- Peticiones al TenantHub: una por cada escritura de la Handy (${escriturasHandy}) más los lotes de la Main, mensajes de socket a razón de 20:1.`);
-    anotar("doPeticiones", escriturasHandy + wsCarga / 20, "estimadas");
-    l.push("");
+    // Lo que el TenantHub atiende de la carga: estos viajes y los lotes de la Main, que como mensajes
+    // de socket se facturan a razón de 20:1.
+    anotar("doPeticiones", viajesCarga.central + viajesCarga.hub + wsCarga / 20, "contadas por el worker (`Server-Timing`); los lotes de la Main, a 20:1", {
+      negocio: viajesCarga.hub + wsCarga / 20,
+      central: viajesCarga.central,
+    });
   }
-
-  const t = coste?.turso;
-  if (t?.plan) {
-    l.push("### Turso (la base central)", "");
-    l.push(
-      "En la nube no se miden sus filas: allí sólo queda la base central (`tpv-control`), compartida con los equipos de verdad, y su uso cambia con cualquiera de ellos. Las de cada paso salen de una tanda en local; la base del negocio es el SQLite de su TenantHub, y sus filas van en la tabla de Cloudflare.",
-      "",
-    );
-    l.push("Uso del mes de toda la organización al empezar:", "", "```", t.plan, "```", "");
+  l.push("");
+  if (local) {
+    l.push("En local hay un solo isolate, y sus cachés de 60 s hacen que la base central se lea mucho menos que en la nube. La duración de los Durable Objects y las filas que leen y escriben no tienen contadores en local: salen de una tanda en la nube.", "");
+    l.push(`Las peticiones al worker de la carga son ${httpCarga}: las ${opsMainCarga} operaciones de la Main van en ${wsCarga} lotes por el socket abierto y no son peticiones.`, "");
   }
 
   const cf = coste?.cloudflare;
@@ -201,17 +212,23 @@ export function escribirInforme(carpeta) {
     ].filter(([c]) => cf[c]);
     const fila = (titulo, f) => `| ${titulo} | ${columnas.map(([c]) => f(cf[c])).join(" | ")} |`;
     const delDo = v => (cf.filtroPorNegocio === false ? v.doTodos : v.doNegocio);
+    const deLaCentral = (v, f) => (v.central ? f(v.central) : "—");
     l.push(`| | ${columnas.map(([, t]) => t).join(" | ")} |`, `|---|${columnas.map(() => "---").join("|")}|`);
     l.push(fila("Invocaciones del script por tipo", v => lista(v.worker.porTipo)));
     l.push(fila("Peticiones `fetch` al worker", v => n(v.worker.fetch)));
     l.push(fila("CPU de esas peticiones (ms)", v => n(v.worker.cpuMsFetch)));
     l.push(fila("Subpeticiones por destino", v => lista(v.subpeticionesPorDestino)));
     l.push(fila("Invocaciones del DO del negocio por tipo", v => `${n(delDo(v).invocaciones)} (${lista(delDo(v).porTipo)})`));
-    l.push(fila("DO activo (ms)", v => n(delDo(v).activoMs)));
-    l.push(fila("Duración facturable del DO (GB·s)", v => n(delDo(v).gbs, 3)));
-    l.push(fila("Filas del SQLite del DO (leídas / escritas)", v => `${n(delDo(v).filasLeidas)} / ${n(delDo(v).filasEscritas)}`));
+    l.push(fila("DO del negocio activo (ms)", v => n(delDo(v).activoMs)));
+    l.push(fila("Duración facturable del DO del negocio (GB·s)", v => n(delDo(v).gbs, 3)));
+    l.push(fila("Filas del SQLite del DO del negocio (leídas / escritas)", v => `${n(delDo(v).filasLeidas)} / ${n(delDo(v).filasEscritas)}`));
+    l.push(fila("Invocaciones de la base central por tipo", v => deLaCentral(v, c => `${n(c.invocaciones)} (${lista(c.porTipo)})`)));
+    l.push(fila("Base central activa (ms)", v => deLaCentral(v, c => n(c.activoMs))));
+    l.push(fila("Duración facturable de la base central (GB·s)", v => deLaCentral(v, c => n(c.gbs, 3))));
+    l.push(fila("Filas del SQLite de la base central (leídas / escritas)", v => deLaCentral(v, c => `${n(c.filasLeidas)} / ${n(c.filasEscritas)}`)));
     l.push("");
     l.push(`El generador mandó en la carga ${httpCarga} peticiones HTTP y ${wsCarga} mensajes de socket de la Main (sus lotes, con ${opsMainCarga} operaciones). La ventana «${cf.cierre ? "Cierre de los sockets" : "Carga"}» recoge las conexiones de la Main y la Handy, que Cloudflare apunta al cerrarse: es coste de la sesión, no de cada paso.`, "");
+    l.push("La base central es una para todos los negocios, también los de verdad: lo suyo en cada ventana lleva lo que hicieran los demás equipos en esos minutos. Lo que gasta la carga en ella es lo de su ventana menos lo de la de control, que es del mismo largo.", "");
     if (cf.ociosa) {
       const minutos = (Date.parse(cf.ociosa.hasta) - Date.parse(cf.ociosa.desde)) / 60_000;
       const sesion = delDo(cf.ociosa);
@@ -234,10 +251,14 @@ export function escribirInforme(carpeta) {
       // Los mensajes de socket entrantes se facturan a razón de 20:1; el resto de invocaciones, 1:1.
       const restoDo = Math.max(0, doCarga.invocaciones - wsCarga);
       if (restoDo < escriturasHandy) l.push(`> Cloudflare cuenta ${restoDo} invocaciones del DO además de los mensajes de socket, menos que las ${escriturasHandy} escrituras de la Handy: revisa la medida.`, "");
-      anotar("doPeticiones", restoDo + wsCarga / 20, "medidas en la nube");
-      // La duración del DO no va por paso: depende del tiempo que está despierto (ver la sesión abierta).
-      anotar("doFilasLeidas", doCarga.filasLeidas, "medidas en la nube");
-      anotar("doFilasEscritas", doCarga.filasEscritas, "medidas en la nube");
+      // Una medida sin la base central (de antes de que fuera un objeto) se queda en el negocio.
+      const central = centralDeLaCarga(cf);
+      const de = central ? "medidas en la nube (la base central, menos la ventana de control)" : "medidas en la nube (sólo el negocio)";
+      const conLaCentral = (negocio, campo) => [negocio + (central?.[campo] ?? 0), de, central ? { negocio, central: central[campo] } : undefined];
+      anotar("doPeticiones", ...conLaCentral(restoDo + wsCarga / 20, "invocaciones"));
+      // La duración de los DO no va por paso: depende del tiempo que están despiertos (ver la sesión abierta).
+      anotar("doFilasLeidas", ...conLaCentral(doCarga.filasLeidas, "filasLeidas"));
+      anotar("doFilasEscritas", ...conLaCentral(doCarga.filasEscritas, "filasEscritas"));
       anotar("workerCpuMs", cf.carga.worker.cpuMsFetch, "medida en la nube");
     }
   }
@@ -245,30 +266,27 @@ export function escribirInforme(carpeta) {
   const dimensiones = [
     ["Peticiones al worker", "workerPeticiones"],
     ["CPU del worker (ms)", "workerCpuMs"],
-    ["Peticiones al Durable Object", "doPeticiones"],
-    ["Filas leídas en el SQLite del DO", "doFilasLeidas"],
-    ["Filas escritas en el SQLite del DO", "doFilasEscritas"],
-    ["Filas leídas en Turso (base central)", "tursoFilasLeidas"],
-    ["Filas escritas en Turso (base central)", "tursoFilasEscritas"],
+    ["Peticiones a los Durable Objects (negocio y base central)", "doPeticiones"],
+    ["Filas leídas en el SQLite de los Durable Objects (negocio y base central)", "doFilasLeidas"],
+    ["Filas escritas en el SQLite de los Durable Objects (negocio y base central)", "doFilasEscritas"],
   ];
   const medidas = dimensiones.filter(([, clave]) => porPaso[clave] > 0);
   if (medidas.length) {
     l.push("### Lo que cabe en lo incluido cada mes", "");
-    l.push("Con la mezcla de esta carga (un paso medio), cuántos pasos caben al mes en lo que ya se paga (Workers Paid) o en lo gratuito (Turso). La fila más baja es el primer límite.", "");
-    l.push("| Dimensión | Por paso | Fuente | Incluido al mes | Pasos al mes | Al día |", "|---|---|---|---|---|---|");
+    l.push("Con la mezcla de esta carga (un paso medio), cuántos pasos caben al mes en lo que ya se paga (Workers Paid). Lo incluido de los Durable Objects es de toda la cuenta: lo gastan juntos los TenantHub, la base central y las agendas de las reservas web. La fila más baja es el primer límite.", "");
+    l.push("| Dimensión | Por paso | De ello, base central | Fuente | Incluido al mes | Pasos al mes | Al día |", "|---|---|---|---|---|---|---|");
     for (const [titulo, clave] of medidas) {
       const caben = INCLUIDO[clave] / porPaso[clave];
-      l.push(`| ${titulo} | ${n(porPaso[clave], 3)} | ${fuente[clave]} | ${n(INCLUIDO[clave])} | ${n(caben)} | ${n(caben / 30)} |`);
+      l.push(`| ${titulo} | ${n(porPaso[clave], 3)} | ${partes[clave] ? n(partes[clave].central, 3) : ""} | ${fuente[clave]} | ${n(INCLUIDO[clave])} | ${n(caben)} | ${n(caben / 30)} |`);
     }
     const faltan = dimensiones.filter(([, clave]) => porPaso[clave] == null).map(([titulo]) => (/^[A-Z][a-z]/.test(titulo) ? titulo[0].toLowerCase() + titulo.slice(1) : titulo));
     if (faltan.length) l.push("", `Sin medir en esta tanda: ${faltan.join(", ")}.`);
     l.push("");
     const total = clave => (porPaso[clave] != null ? porPaso[clave] * pasos : null);
-    const filasEscritas =
-      porPaso.doFilasEscritas != null
-        ? `${pct(total("doFilasEscritas"), INCLUIDO.doFilasEscritas)} de las filas escritas del SQLite de los DO`
-        : `${pct(total("tursoFilasEscritas"), INCLUIDO.tursoFilasEscritas)} de las filas escritas de Turso`;
-    l.push(`La carga gastó ${pct(total("workerPeticiones"), INCLUIDO.workerPeticiones)} de las peticiones del worker del mes y ${filasEscritas}.`, "");
+    const gastado = [`${pct(total("workerPeticiones"), INCLUIDO.workerPeticiones)} de las peticiones del worker del mes`];
+    if (porPaso.doFilasEscritas != null) gastado.push(`${pct(total("doFilasEscritas"), INCLUIDO.doFilasEscritas)} de las filas escritas del SQLite de los Durable Objects`);
+    else if (porPaso.doPeticiones != null) gastado.push(`${pct(total("doPeticiones"), INCLUIDO.doPeticiones)} de las peticiones a los Durable Objects`);
+    l.push(`La carga gastó ${gastado.join(" y ")}.`, "");
   }
 
   if (estado.avisos?.length) l.push("## Avisos", "", ...estado.avisos.map(a => `- ${a}`), "");
@@ -285,12 +303,17 @@ export function escribirInforme(carpeta) {
     l.push("");
   }
 
-  l.push("## Ficheros", "", "- `peticiones.jsonl`: cada petición con su tiempo y su resultado.", "- `estado.json`: identificadores del negocio, ventanas de tiempo y contadores.");
-  if (tursoLocal) l.push("- `turso-local.json`: filas de Turso por paso.", "- `worker.log`: la salida de `wrangler dev`, con los logs del worker.");
-  if (coste) l.push("- `coste.json`: lo medido en Cloudflare y el plan de Turso al empezar.");
+  l.push("## Ficheros", "", "- `peticiones.jsonl`: cada petición con su tiempo, su resultado y su `Server-Timing`.", "- `estado.json`: identificadores del negocio, ventanas de tiempo y contadores.");
+  if (local) {
+    l.push(
+      "- `worker.log`: la salida de `wrangler dev`, con los logs del worker; `worker-compilacion.log`, la del empaquetado.",
+      "- `worker/estado/`: lo que guardó `wrangler dev`, con la base central y la del negocio en el SQLite de sus objetos.",
+    );
+  }
+  if (coste) l.push("- `coste.json`: lo medido en Cloudflare.");
   l.push("");
 
   const texto = l.join("\n");
   writeFileSync(join(carpeta, "informe.md"), texto);
-  return { texto, porPaso };
+  return { texto, porPaso, partes };
 }

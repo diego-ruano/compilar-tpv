@@ -1,14 +1,12 @@
-// Cuánto ha gastado una tanda contra la nube. Cloudflare, por su API GraphQL de analítica con la
-// sesión de wrangler de este equipo (no se crea ningún token): el worker y el Durable Object del
-// negocio, también las filas que lee y escribe su SQLite, que es la base del negocio. De Turso, donde
-// sólo queda la base central, compartida con los equipos de verdad, se mira el plan de la organización
-// con la CLI del WSL: cuánto le queda al mes, no lo que gasta la tanda. Ninguna de las dos
-// credenciales se imprime ni se guarda.
+// Cuánto ha gastado una tanda contra la nube, por la API GraphQL de analítica de Cloudflare con la
+// sesión de wrangler de este equipo (no se crea ningún token, y el de la sesión no se imprime ni se
+// guarda): el worker y los dos Durable Objects por los que pasa la tanda, el TenantHub del negocio y
+// la base central (`BaseCentral`), cada uno con su duración y las filas que lee y escribe su SQLite.
 //
-// Las cuotas incluidas son las publicadas el 2026-11-10:
+// Las cuotas incluidas son las publicadas el 2026-11-10. Las de los Durable Objects son de toda la
+// cuenta: las gastan juntos los TenantHub, la base central y las agendas de las reservas web.
 // - Workers Paid: https://developers.cloudflare.com/workers/platform/pricing/
 // - Durable Objects: https://developers.cloudflare.com/durable-objects/platform/pricing/
-// - Turso (plan gratuito, «starter» en la CLI): https://turso.tech/pricing
 
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -26,8 +24,6 @@ export const INCLUIDO = {
   doGbs: 400_000,
   doFilasLeidas: 25_000_000_000,
   doFilasEscritas: 50_000_000,
-  tursoFilasLeidas: 500_000_000,
-  tursoFilasEscritas: 10_000_000,
 };
 
 /** Duerme a trozos de un segundo para que Ctrl+C no tenga que esperar a que acabe. */
@@ -81,7 +77,7 @@ async function graphql(token, query, variables) {
   return j.data.viewer.accounts[0];
 }
 
-/** La cuenta y el namespace de `TenantHub`. Devuelve `{ error }` si no se puede medir. */
+/** La cuenta y los namespaces de `TenantHub` y `BaseCentral`. Devuelve `{ error }` si no se puede medir. */
 export async function prepararCloudflare() {
   const token = tokenDeWrangler();
   if (!token) return { error: "No hay sesión de wrangler en este equipo (`pnpm exec wrangler login`)." };
@@ -90,16 +86,20 @@ export async function prepararCloudflare() {
     const cuenta = process.env.CLOUDFLARE_ACCOUNT_ID ?? (cuentas.length === 1 ? cuentas[0].id : null);
     if (!cuenta) return { error: "La sesión ve varias cuentas: indica cuál con CLOUDFLARE_ACCOUNT_ID." };
     const namespaces = await api(token, `/accounts/${cuenta}/workers/durable_objects/namespaces?per_page=1000`);
-    const hub = namespaces.find(n => n.class === "TenantHub" && n.script === "tpv-api");
+    const delWorker = clase => namespaces.find(n => n.class === clase && n.script === "tpv-api")?.id;
+    const hub = delWorker("TenantHub");
+    const central = delWorker("BaseCentral");
     if (!hub) return { error: "No se encuentra el namespace de TenantHub del worker tpv-api." };
-    return { token, cuenta, namespace: hub.id };
+    if (!central) return { error: "No se encuentra el namespace de BaseCentral del worker tpv-api." };
+    return { token, cuenta, namespace: hub, namespaceCentral: central };
   } catch (e) {
     return { error: e.message };
   }
 }
 
+// La base central es un solo objeto: su namespace entero es ella.
 const CONSULTA = `
-query Carga($cuenta: string!, $desde: Time!, $hasta: Time!, $ns: string!, $negocio: string!) {
+query Carga($cuenta: string!, $desde: Time!, $hasta: Time!, $ns: string!, $nsCentral: string!, $negocio: string!) {
   viewer { accounts(filter: { accountTag: $cuenta }) {
     worker: workersInvocationsAdaptive(limit: 100, filter: { scriptName: "tpv-api", datetime_geq: $desde, datetime_lt: $hasta }) {
       dimensions { eventType }
@@ -121,6 +121,13 @@ query Carga($cuenta: string!, $desde: Time!, $hasta: Time!, $ns: string!, $negoc
       sum { activeTime cpuTime duration rowsRead rowsWritten inboundWebsocketMsgCount outboundWebsocketMsgCount subrequests }
     }
     doPeriodicoTodos: durableObjectsPeriodicGroups(limit: 100, filter: { namespaceId: $ns, datetime_geq: $desde, datetime_lt: $hasta }) {
+      sum { activeTime cpuTime duration rowsRead rowsWritten inboundWebsocketMsgCount outboundWebsocketMsgCount subrequests }
+    }
+    central: durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: { scriptName: "tpv-api", namespaceId: $nsCentral, datetime_geq: $desde, datetime_lt: $hasta }) {
+      dimensions { type }
+      sum { requests errors }
+    }
+    centralPeriodico: durableObjectsPeriodicGroups(limit: 100, filter: { namespaceId: $nsCentral, datetime_geq: $desde, datetime_lt: $hasta }) {
       sum { activeTime cpuTime duration rowsRead rowsWritten inboundWebsocketMsgCount outboundWebsocketMsgCount subrequests }
     }
   } }
@@ -149,7 +156,14 @@ function durableObject(invocaciones, periodicas) {
 }
 
 async function medirVentana(cf, { desde, hasta }, tenantId) {
-  const d = await graphql(cf.token, CONSULTA, { cuenta: cf.cuenta, desde, hasta, ns: cf.namespace, negocio: tenantId ?? "-" });
+  const d = await graphql(cf.token, CONSULTA, {
+    cuenta: cf.cuenta,
+    desde,
+    hasta,
+    ns: cf.namespace,
+    nsCentral: cf.namespaceCentral,
+    negocio: tenantId ?? "-",
+  });
   // El dataset del worker recoge todo lo que ejecuta el script, también las invocaciones de los
   // Durable Objects (rpc, websocket, alarm). Lo que se factura como petición del worker es `fetch`.
   const fetch = d.worker.filter(f => f.dimensions?.eventType === "fetch");
@@ -166,6 +180,8 @@ async function medirVentana(cf, { desde, hasta }, tenantId) {
     subpeticionesPorDestino: porDimension(d.subpeticiones, "hostname", "subrequests"),
     doNegocio: durableObject(d.doNegocio, d.doPeriodicoNegocio),
     doTodos: durableObject(d.doTodos, d.doPeriodicoTodos),
+    // Compartida con los equipos de verdad: lo de la ventana lleva lo que hicieran ellos.
+    central: durableObject(d.central, d.centralPeriodico),
   };
 }
 
@@ -228,53 +244,4 @@ export async function medirCloudflare(cf, ventanas, tenantId, { minimos = {}, es
     }
   }
   return medida ? { ...medida, asentado: false, lecturas: maxMinutos } : null;
-}
-
-/* ===== Turso ===== */
-
-function turso(orden) {
-  return spawnSync("wsl.exe", ["-e", "bash", "-lc", `~/.turso/turso ${orden}`], { encoding: "utf8", timeout: 90_000, windowsHide: true });
-}
-
-/**
- * `turso plan show`: el uso del mes de toda la organización, en porcentajes. Un recurso sin tope
- * («Unlimited») da null; uno que no se entiende, NaN, y quien llama decide que eso no vale.
- */
-export function planDeTurso() {
-  const r = turso("plan show");
-  if (r.status !== 0) return null;
-  const texto = r.stdout.trim();
-  const porcentaje = recurso => {
-    const fila = texto.match(new RegExp(`^${recurso}\\s.*$`, "m"))?.[0];
-    if (!fila) return NaN;
-    if (/unlimited/i.test(fila)) return null;
-    return Number(fila.match(/\s(\d+(?:\.\d+)?)%/)?.[1] ?? NaN);
-  };
-  return {
-    texto,
-    porcentajes: {
-      almacenamiento: porcentaje("storage"),
-      filasLeidas: porcentaje("rows read"),
-      filasEscritas: porcentaje("rows written"),
-      bases: porcentaje("databases"),
-    },
-  };
-}
-
-/**
- * El uso del mes de una base: filas leídas y escritas y espacio. null si no existe o no hay CLI. Sirve
- * para saber que la CLI mira la organización de producción (la que tiene `tpv-control`); lo que gasta
- * la tanda en ella no sale de aquí: es compartida y cambia con cualquier equipo.
- */
-export function usoDeBase(nombre) {
-  if (!/^[a-z0-9-]{1,64}$/.test(nombre)) throw new Error(`Nombre de base inesperado: ${nombre}`);
-  const r = turso(`db inspect ${nombre}`);
-  if (r.status !== 0) return null;
-  const numero = re => Number(r.stdout.match(re)?.[1] ?? NaN);
-  const uso = {
-    filasLeidas: numero(/Number of rows read:\s*(\d+)/),
-    filasEscritas: numero(/Number of rows written:\s*(\d+)/),
-    espacio: r.stdout.match(/Total space used:\s*(.+)/)?.[1]?.trim() ?? null,
-  };
-  return Number.isFinite(uso.filasLeidas) && Number.isFinite(uso.filasEscritas) ? uso : null;
 }

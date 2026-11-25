@@ -19,9 +19,9 @@
 // que lo corta y lo apunta (`outboundService` en `vitest.config.ts`). Lo suyo se recoge aquí
 // también, al terminar cada test.
 
-// ⚠️ Nada de `cloudflare:test` aquí: cargarlo carga el worker, y con él el cliente de libsql, que se
-// guarda el `WebSocket` global al cargarse; la guarda tiene que estar puesta antes. Y en un fichero
-// de tests que no lo usa, cargarlo desde el gancho tarda más que el plazo del gancho.
+// ⚠️ Nada de `cloudflare:test` aquí: cargarlo carga el worker, y lo que se guarde al cargarse el
+// `fetch` o el `WebSocket` globales se saltaría la guarda, que tiene que estar puesta antes. Y en un
+// fichero de tests que no lo usa, cargarlo desde el gancho tarda más que el plazo del gancho.
 // `cloudflare:workers` es del runtime: no carga nada.
 import { env } from "cloudflare:workers";
 
@@ -66,7 +66,7 @@ export function ponerGuardaDeRed(): void {
 		return Promise.reject(rechazar(describirSalida(metodo, peticion ? peticion.url : String(entrada))));
 	};
 
-	// El cliente de libsql abre un WebSocket si la dirección de la base es `ws:` o `wss:`.
+	// Un `new WebSocket(dirección)` sale a la red sin pasar por `fetch`.
 	// `instanceof WebSocket` y las constantes siguen valiendo: el `Proxy` sólo corta el `new`.
 	global.WebSocket = new Proxy(globalThis.WebSocket, {
 		construct(_clase, [direccion]) {

@@ -30,7 +30,7 @@ export class Registro {
     this.tope = tope;
     this.entradas = [];
     this.fase = "preparacion";
-    /** El paso en curso: el proxy local le atribuye las filas de Turso que se lean o escriban. */
+    /** El paso en curso: lo lleva cada entrada, y el informe junta por él lo de cada paso. */
     this.etapa = "arranque";
     this.http = 0;
     this.errores5xx = 0;

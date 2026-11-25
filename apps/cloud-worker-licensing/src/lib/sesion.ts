@@ -19,8 +19,7 @@
 // identificador sale la frase que acaba leyendo la persona (`lib/errorCodes.ts`). Así que
 // `verificarSesion` traduce lo que lanza `jose` a los identificadores de siempre, y lo hace por
 // `e.code` y **nunca** por el texto: la redacción de un error de librería cambia entre versiones
-// y esa comparación se pudre sin que nada falle de forma visible. Es la misma regla que el DO
-// aplica a los errores de libsql.
+// y esa comparación se pudre sin que nada falle de forma visible.
 
 import { SignJWT, jwtVerify, decodeJwt, type JWTPayload } from "jose";
 
