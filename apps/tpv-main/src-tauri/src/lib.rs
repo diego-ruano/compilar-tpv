@@ -3960,11 +3960,14 @@ mod tests_exenciones_del_gate {
         for (comando, porque) in [
             (
                 "tpv_server_signed_headers",
-                "firma cualquier petición sin gate: es la vuelta a la esquina del candado de                  `tpv_server_post_json` (SEC-01)",
+                "firma cualquier petición sin gate: es la vuelta a la esquina del candado de \
+                 `tpv_server_post_json` (SEC-01)",
             ),
             (
                 "printer_print_ticket",
-                "imprimía lo que la pantalla le mandara, número y QR incluidos: un papel con número que                  no era el de su factura (RI-29). El ticket de un cobro se compone en Rust desde la base",
+                "imprimía lo que la pantalla le mandara, número y QR incluidos: un papel con número \
+                 que no era el de su factura (RI-29). El ticket de un cobro se compone en Rust desde \
+                 la base",
             ),
             (
                 "cobrar_venta_rapida",
@@ -4009,6 +4012,11 @@ mod tests_exenciones_del_gate {
                  no firma nada: el emparejamiento y el saludo los firma Rust con esa hora (PROD-04)",
             ),
         ] {
+            // Un porqué partido en dos líneas sin su `\` arrastra la sangría de la segunda.
+            assert!(
+                !porque.contains("  "),
+                "el porqué de `{comando}` lleva espacios de más: a su línea partida le falta el `\\`"
+            );
             assert!(
                 !registro.contains(comando),
                 "`{comando}` ha vuelto al registro de comandos, y no puede: {porque} (REV-26).
