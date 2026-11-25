@@ -5,9 +5,10 @@ import * as z from "zod";
 //
 // - Auth de tenant en todas las rutas (JWT + device proof) vía `tenantAuth`.
 // - LECTURAS (GET): directas a la base con `tenantQuery`.
-// - ESCRITURAS (POST/PUT/PATCH/DELETE): pasan por el DO (`applyViaHub`), que aplica
-//   en transacción con idempotencia por Op_Id (cabecera X-Idempotency-Key) y hace
-//   broadcast del cambio. Requieren que haya una Main conectada (si no, main_offline).
+// - ESCRITURAS (POST/PUT/PATCH/DELETE): pasan por el DO (`apply` de lib/rutas, que llama a
+//   `applyViaHub`), que aplica en transacción con idempotencia por Op_Id (cabecera
+//   X-Idempotency-Key) y hace broadcast del cambio. Requieren que haya una Main conectada
+//   (si no, main_offline).
 
 import { Hono } from "hono";
 
@@ -15,7 +16,6 @@ import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { alHub } from "../../lib/enElHub";
 import { tenantQuery } from "../../lib/tenantClient";
-import { applyViaHub } from "../../lib/hub";
 
 import * as q from "./inventario.queries";
 import * as cmd from "./inventario.commands";

@@ -30,7 +30,7 @@ import { bytesUtf8 } from "../../lib/texto";
 import { PURGADO_HASTA } from "./cambiosJson";
 import { esTablaDeNegocio, sentenciaVolcado, ventanasCandidatas } from "./bootstrap.ventana";
 import { SQL_SEQ, contadorDeVentanas, leerPuntoDePartida, seqDe } from "./puntoDePartida";
-import { FiltroDeCubos, Resumidor, cubosPara, type ResumenCubos } from "./resumenCubos";
+import { FiltroDeCubos, Resumidor, type ResumenCubos } from "./resumenCubos";
 import {
 	Escritor,
 	enBytes,
