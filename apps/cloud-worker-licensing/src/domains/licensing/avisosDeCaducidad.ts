@@ -50,7 +50,7 @@ const DIA_MS = 24 * 60 * 60 * 1000;
  * termine de mandar el correo, y mucho menos que un día, para que el ciclo del día siguiente retome
  * la que se ha quedado puesta sin que conste enviada.
  */
-export const MARCA_ENVIANDO_MS = 60 * 60 * 1000;
+const MARCA_ENVIANDO_MS = 60 * 60 * 1000;
 
 /**
  * Los peldaños, **de más urgente a menos**. El orden es lo que hace que `find` devuelva el que

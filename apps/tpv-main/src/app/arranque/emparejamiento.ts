@@ -20,7 +20,7 @@ export const ESPERA_ENTRE_CONSULTAS_MS = 1500;
  * (`LIMITADOR_SESION`, que cuenta por minuto) o una central saturada no reciben una consulta cada
  * segundo y medio, y la aprobación que llegue entretanto se recoge como mucho este rato después.
  */
-export const ESPERA_MAXIMA_TRAS_FALLOS_MS = 15_000;
+const ESPERA_MAXIMA_TRAS_FALLOS_MS = 15_000;
 /**
  * Cuánto se espera si la nube no dice cuánto le queda al código. Un worker actual siempre lo dice
  * (`caducaEnMs`); esto cubre uno anterior, cuyo reto caducaba a los dos minutos.

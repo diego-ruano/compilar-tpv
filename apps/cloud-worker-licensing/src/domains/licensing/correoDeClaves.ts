@@ -38,7 +38,7 @@ import { sendLicenseKeyEmail, sendLicenseKeysEmail } from "./licenseEmails";
 export const CORREO_DE_CLAVES_MAX_MS = 5 * 60_000;
 
 /** CLAVES-SIN-CORREO · Cuántos correos de claves reenvía como mucho el cron en un día. */
-export const REENVIOS_DE_CLAVES_AL_DIA = 25;
+const REENVIOS_DE_CLAVES_AL_DIA = 25;
 
 /** La operación del cron, en Sentry y en el evento de la central que no atiende. */
 const OPERACION_DEL_CRON = "cron.correo_de_claves";

@@ -49,7 +49,7 @@ export const REENVIO_MIN_MS = 5 * 60_000;
  * Lo que frena un código reservado cuyo correo aún no ha dicho que ha salido: más de lo que tarda un
  * envío, para que las peticiones a la vez no manden cada una el suyo (AUD-42).
  */
-export const ENVIO_EN_VUELO_MS = 60_000;
+const ENVIO_EN_VUELO_MS = 60_000;
 /** Tope de envíos por equipo y propósito dentro de esta ventana, se usen o no. */
 export const VENTANA_ENVIOS_MS = 60 * 60_000;
 export const MAX_ENVIOS_POR_VENTANA = 5;
