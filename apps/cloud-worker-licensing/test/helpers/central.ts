@@ -144,19 +144,27 @@ export const MARCADORES = {
 /**
  * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
  * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
- * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar).
+ * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar). Con
+ * `alRestaurar`, dejar preparada la vuelta espera a lo que devuelva (para retenerla a mitad).
  */
 export async function conDobleDeInstantes(
 	central: Pick<CentralDePrueba, "stub">,
 	llamadas: string[],
-	opciones: { alReiniciar?: (state: DurableObjectState) => void } = {},
+	opciones: {
+		alReiniciar?: (state: DurableObjectState) => void;
+		alRestaurar?: (marcador: string) => Promise<void> | void;
+	} = {},
 ): Promise<void> {
-	const { alReiniciar = vuelto } = opciones;
+	const { alReiniciar = vuelto, alRestaurar } = opciones;
 	await enElObjeto(central, (state, objeto) => {
 		(objeto as { instantes: unknown }).instantes = {
 			marcadorActual: async () => (llamadas.push("actual"), MARCADORES.actual),
 			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), MARCADORES.destino),
-			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), MARCADORES.deshacer),
+			restaurarAlReiniciar: async (m: string) => {
+				llamadas.push(`restaurar:${m}`);
+				await alRestaurar?.(m);
+				return MARCADORES.deshacer;
+			},
 			reiniciar: () => {
 				llamadas.push("reiniciar");
 				alReiniciar(state);

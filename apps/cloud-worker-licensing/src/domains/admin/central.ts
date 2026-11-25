@@ -56,6 +56,8 @@ const QUE_PASA: Partial<Record<CodigoDeLaCentral, string>> = {
 	central_copia_inservible: "Esa copia no se puede restaurar: la central se queda sin aprovisionar, como estaba.",
 	central_vuelta_en_curso:
 		"Hay una vuelta a un instante preparada y sin aplicar: la central no atiende hasta reiniciarse. Se reinicia repitiendo la misma orden de pnpm central:volver.",
+	central_vuelta_a_la_vez:
+		"Otra vuelta a un instante se estaba preparando a la vez, y sólo sigue una: mira cuál con pnpm central:estado antes de repetir nada.",
 	central_instante_fuera_de_plazo: "Sólo se puede volver a un instante pasado de los últimos 30 días.",
 	central_vuelta_no_disponible: "Este despliegue no puede devolver un objeto a un instante (en local no existe).",
 	central_copia_fallida: "La copia no ha llegado a R2.",

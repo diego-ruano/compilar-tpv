@@ -8,7 +8,9 @@
 // un doble de `Instantes` dentro del objeto (`instantes.ts`), que es lo único que se sustituye: que
 // deja la copia de antes en R2, que devuelve el marcador para deshacer, que la central no atiende
 // entre preparar y reiniciar (tampoco mientras sube la copia de antes), que una vuelta que no sale deja
-// en pie la que ya estuviera preparada, y que rechaza un instante fuera de los 30 días.
+// en pie la que ya estuviera preparada, y que rechaza un instante fuera de los 30 días. Y con dos
+// preparaciones a la vez, cruzadas con barreras, que sólo sigue una y que la que pierde la marca no la
+// toca ni pide su vuelta a la plataforma.
 
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
@@ -164,6 +166,105 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect(await codigoDe(central.db.execute("SELECT 1;"))).toBe("central_vuelta_en_curso");
 		expect((await central.stub.estado()).enCurso.vuelta).toEqual(primera);
 		expect(primera).toMatchObject({ destino: "m-primera" });
+	});
+});
+
+describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la pone", () => {
+	const A = "000000a0-00000000-00000000-0000000000000000000000000000000a";
+	const B = "000000b0-00000000-00000000-0000000000000000000000000000000b";
+	const pausa = () => new Promise((r) => setTimeout(r, 5));
+	const copiasDeAntes = async () => (await bucket().list({ prefix: "base-central/antes-de-volver-" })).objects.length;
+
+	/** La primera subida (la de A) espera a que el test la suelte; después, sube o falla según `falla`. */
+	async function conLaSubidaDeARetenida(central: CentralDePrueba, falla: boolean) {
+		const senal = { primera: true, subiendo: false, suelta: false };
+		await conCopiasDentro(central, (real) => ({
+			put: async (clave: string, valor: Uint8Array, opciones: R2PutOptions) => {
+				if (!senal.primera) return real.put(clave, valor, opciones);
+				senal.primera = false;
+				senal.subiendo = true;
+				while (!senal.suelta) await pausa();
+				if (falla) throw new Error("R2 no contesta");
+				return real.put(clave, valor, opciones);
+			},
+		}));
+		return senal;
+	}
+
+	it("B se queda la marca mientras A sube su copia y prepara bien; después falla A: la marca de B sigue, y la central sigue cerrada", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		const subidaDeA = await conLaSubidaDeARetenida(central, true);
+
+		const a = central.stub.prepararVuelta({ marcador: A });
+		await vi.waitFor(() => expect(subidaDeA.subiendo).toBe(true));
+		expect(await central.stub.prepararVuelta({ marcador: B })).toMatchObject({ ok: true, valor: { marcador: B } });
+
+		subidaDeA.suelta = true;
+		expect(await a).toMatchObject({ ok: false, error: "central_copia_fallida" });
+		expect(llamadas).toEqual([`restaurar:${B}`]);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
+		const escribir = central.db.execute({
+			sql: "INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('t-tras', 1, 1);",
+		});
+		expect(await codigoDe(escribir)).toBe("central_vuelta_en_curso");
+		expect(await filasDe(central, "SELECT tenant_id FROM tenants ORDER BY tenant_id;")).toEqual([{ tenant_id: "t-1" }]);
+	});
+
+	it("si la copia de A sube después de que B se haya quedado la marca, A no pide su vuelta a la plataforma: sigue la de B", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		const subidaDeA = await conLaSubidaDeARetenida(central, false);
+
+		const a = central.stub.prepararVuelta({ marcador: A });
+		await vi.waitFor(() => expect(subidaDeA.subiendo).toBe(true));
+		expect((await central.stub.prepararVuelta({ marcador: B })).ok).toBe(true);
+
+		subidaDeA.suelta = true;
+		expect(await a).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
+		expect(llamadas).toEqual([`restaurar:${B}`]);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
+	});
+
+	it("mientras a A se le pide la vuelta a la plataforma, B no entra ni toca la marca", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		const senal = { pidiendo: false, suelta: false };
+		await conDobleDeInstantes(central, llamadas, {
+			alRestaurar: async () => {
+				senal.pidiendo = true;
+				while (!senal.suelta) await pausa();
+			},
+		});
+
+		const a = central.stub.prepararVuelta({ marcador: A });
+		await vi.waitFor(() => expect(senal.pidiendo).toBe(true));
+		expect(await central.stub.prepararVuelta({ marcador: B })).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: A, fase: "programando" });
+
+		senal.suelta = true;
+		expect(await a).toMatchObject({ ok: true, valor: { marcador: A } });
+		expect(llamadas).toEqual([`restaurar:${A}`]);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: A, fase: "preparada" });
+	});
+
+	it("repetir la misma orden con la vuelta ya preparada devuelve la misma, sin otra copia ni otra petición; a otro destino, prepara otra", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		const copias = await copiasDeAntes();
+
+		const primera = await central.stub.prepararVuelta({ marcador: A });
+		expect(primera.ok).toBe(true);
+		expect(await central.stub.prepararVuelta({ marcador: A })).toEqual(primera);
+		expect(llamadas).toEqual([`restaurar:${A}`]);
+		expect(await copiasDeAntes()).toBe(copias + 1);
+
+		expect(await central.stub.prepararVuelta({ marcador: B })).toMatchObject({ ok: true, valor: { marcador: B } });
+		expect(llamadas).toEqual([`restaurar:${A}`, `restaurar:${B}`]);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
 	});
 });
 

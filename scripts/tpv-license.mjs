@@ -554,11 +554,19 @@ async function centralEstado() {
 		console.log(`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.`);
 	}
 	if (r.enCurso.vuelta) {
-		const { destino, desdeMs } = r.enCurso.vuelta;
-		console.log(
-			`  VUELTA         preparada a ${destino} (${cuando(desdeMs)}) y sin aplicar: no atiende hasta reiniciarse.\n` +
-				"                 Se reinicia repitiendo la misma orden de pnpm central:volver (con su --instante o su --marcador).",
-		);
+		const { destino, desdeMs, fase, preparada } = r.enCurso.vuelta;
+		if (fase === "preparada") {
+			console.log(
+				`  VUELTA         preparada a ${destino} (${cuando(desdeMs)}) y sin aplicar: no atiende hasta reiniciarse.\n` +
+					"                 Se reinicia repitiendo la misma orden de pnpm central:volver (con su --instante o su --marcador).",
+			);
+			if (preparada) console.log(`                 Para deshacerla, una vez aplicada: ${centralAlMarcador(preparada.deshacer)}`);
+		} else {
+			console.log(
+				`  VUELTA         preparándose a ${destino} (desde ${cuando(desdeMs)}): no atiende mientras tanto.\n` +
+					"                 Espera a que termine y vuelve a mirar con pnpm central:estado.",
+			);
+		}
 	}
 	console.log(`  Avería         ${r.averia ? `${r.averia.error}${r.averia.detalle ? ` — ${r.averia.detalle}` : ""}` : "ninguna"}`);
 	console.log(`  Migraciones    ${r.migraciones.map((m) => m.nombre).join(", ") || "(ninguna)"}`);

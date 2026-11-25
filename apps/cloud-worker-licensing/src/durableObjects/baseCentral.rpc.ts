@@ -45,6 +45,11 @@ export type CodigoDeLaCentral =
 	| "central_copia_inservible"
 	/** La vuelta a un instante está preparada y el objeto no se ha reiniciado: no atiende (`baseCentral.instante.ts`). */
 	| "central_vuelta_en_curso"
+	/**
+	 * Otra vuelta a un instante se estaba preparando a la vez, y sólo sigue una: o se la estaba pidiendo
+	 * a la plataforma, o se ha quedado la marca mientras ésta esperaba (`baseCentral.instante.ts`).
+	 */
+	| "central_vuelta_a_la_vez"
 	/** Volver a un instante del futuro o de hace más de 30 días. */
 	| "central_instante_fuera_de_plazo"
 	/** La plataforma no devuelve objetos a un instante (en local no existe). */
@@ -57,8 +62,29 @@ export type RespuestaDeLaCentral<T> = { ok: true; valor: T } | FalloDeLaCentral;
 /** La marca de una restauración desde una copia que ha empezado (`baseCentral.restaurar.ts`). */
 export type MarcaDeRestauracion = { clave: string; desdeMs: number };
 
-/** La marca de una vuelta a un instante preparada y sin aplicar (`baseCentral.instante.ts`). */
-export type MarcaDeVuelta = { destino: string; desdeMs: number };
+/**
+ * La marca de una vuelta a un instante, desde que empieza a prepararse hasta que el objeto se
+ * reinicia (`baseCentral.instante.ts`). Hay una sola, y es de la preparación que la ha puesto (`id`):
+ * sólo ella la cambia o la quita.
+ */
+export type MarcaDeVuelta = {
+	/** De qué preparación es. */
+	id: string;
+	/** Adónde vuelve: el marcador, o el instante en ISO. */
+	destino: string;
+	desdeMs: number;
+	/**
+	 * - `preparando`: saca el marcador y deja la copia de antes. Otra preparación puede quedarse con
+	 *   la marca, y ésta lo deja.
+	 * - `programando`: se le está pidiendo a la plataforma. Ninguna otra entra.
+	 * - `preparada`: la plataforma la tiene, y se aplica en el siguiente arranque.
+	 */
+	fase: "preparando" | "programando" | "preparada";
+	/** Ya preparada, lo que contestó: lo que se devuelve si se repite la misma orden. */
+	preparada?: VueltaPreparada;
+	/** La vuelta que ya estaba preparada cuando empezó ésta: si ésta no sale, es la que sigue en pie. */
+	anterior?: MarcaDeVuelta | null;
+};
 
 /** Lo que el objeto tiene a medias. Mientras haya algo, no atiende. */
 export type MarcasDeLaCentral = { restauracion: MarcaDeRestauracion | null; vuelta: MarcaDeVuelta | null };

@@ -19,9 +19,21 @@
 // marca que haya al arrancar ya no dice nada (la vuelta se aplica en el arranque, sea cual sea su
 // causa) y se quita entonces (`BaseCentral`).
 //
-// Si algo falla antes de dejar la vuelta preparada, la central vuelve a atender, salvo que ya hubiera
-// otra vuelta preparada de antes: ésa sigue en pie (lo que se escribiera se perdería al reiniciar), y
-// su marca, con su destino, vuelve a ser la que se ve.
+// **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
+// plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
+// preparaciones cruzadas no pueden dejar la central abierta con una vuelta pedida, ni pedir la suya
+// encima de la otra sin que se sepa. Así que:
+//
+// - Una preparación nueva se queda la marca de una que está sacando el marcador o haciendo la copia
+//   (`preparando`), y ésa, al ver que ya no es suya, lo deja sin pedir nada a la plataforma ni tocar
+//   la marca (`central_vuelta_a_la_vez`). Mientras una se le está pidiendo a la plataforma
+//   (`programando`), no entra ninguna otra.
+// - Lo que no sale sólo devuelve la marca a como estaba si sigue siendo suya: a la vuelta que ya
+//   estaba preparada antes, que sigue en pie (lo que se escribiera se perdería al reiniciar), o a
+//   ninguna, y entonces la central vuelve a atender.
+// - Repetir la misma orden con la vuelta ya preparada (el reinicio no llegó a pasar) no prepara
+//   otra: devuelve la que hay, con su marcador de deshacer y su copia, para reiniciar. A otro destino,
+//   prepara otra encima, como una nueva.
 
 import { copiarLaCentral, claveConHora, type CopiaHecha } from "./baseCentral.copia";
 import { CLAVE_VUELTA_EN_CURSO, falloPorLasMarcas, marcasDe } from "./baseCentral.guardas";
@@ -34,6 +46,17 @@ import type {
 } from "./baseCentral.rpc";
 import { esInstanteDeLaVentana, esSinVueltaAUnInstante, type Instantes } from "./instantes";
 import { baseAprovisionada } from "./sqliteDelObjeto";
+
+/**
+ * La vuelta que sigue en pie si la que empieza ahora no sale: la que ya estaba preparada, o la que
+ * iba a seguir en pie para la preparación a la que ésta le quita la marca.
+ */
+function laQueSigueEnPie(actual: MarcaDeVuelta | null): MarcaDeVuelta | null {
+	if (!actual) return null;
+	return actual.fase === "preparada" ? actual : (actual.anterior ?? null);
+}
+
+const otraALaVez = (detalle: string): FalloDeLaCentral => ({ ok: false, error: "central_vuelta_a_la_vez", detalle });
 
 /**
  * La primera mitad de la vuelta (ver la cabecera). Sólo con la central aprovisionada, sin avería y
@@ -56,15 +79,26 @@ export async function prepararVueltaDeLaCentral(
 	if ("instanteMs" in destino && !esInstanteDeLaVentana(destino.instanteMs, ahora)) {
 		return { ok: false, error: "central_instante_fuera_de_plazo" };
 	}
+	const adonde = "marcador" in destino ? destino.marcador : new Date(destino.instanteMs).toISOString();
 
-	// La vuelta que ya estuviera preparada, si la hay: si ésta no sale, es la que sigue en pie.
-	const anterior = marcas.vuelta;
-	const marca: MarcaDeVuelta = {
-		destino: "marcador" in destino ? destino.marcador : new Date(destino.instanteMs).toISOString(),
-		desdeMs: ahora,
-	};
+	const actual = marcas.vuelta;
+	if (actual?.fase === "preparada" && actual.destino === adonde && actual.preparada) {
+		return { ok: true, valor: actual.preparada };
+	}
+	if (actual?.fase === "programando") {
+		return otraALaVez(`Se le está pidiendo a la plataforma la vuelta a ${actual.destino}.`);
+	}
+
+	const id = crypto.randomUUID();
+	const anterior = laQueSigueEnPie(actual);
+	const marca: MarcaDeVuelta = { id, destino: adonde, desdeMs: ahora, fase: "preparando", anterior };
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, marca);
+	/** ¿Sigue siendo suya la marca? Otra preparación ha podido quedársela mientras ésta esperaba. */
+	const esMia = () => marcasDe(storage).vuelta?.id === id;
+	const sinLaMarca = () => otraALaVez(`Otra vuelta ha empezado mientras se preparaba la vuelta a ${adonde}, y es la que sigue.`);
+	/** Si no sale, y la marca sigue siendo suya: la vuelta que sigue en pie, o ninguna. */
 	const reabrir = () => {
+		if (!esMia()) return;
 		if (anterior) storage.kv.put(CLAVE_VUELTA_EN_CURSO, anterior);
 		else storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
 	};
@@ -77,6 +111,7 @@ export async function prepararVueltaDeLaCentral(
 		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
 		throw error;
 	}
+	if (!esMia()) return sinLaMarca();
 
 	let copia: CopiaHecha;
 	try {
@@ -85,7 +120,9 @@ export async function prepararVueltaDeLaCentral(
 		reabrir();
 		return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
 	}
+	if (!esMia()) return sinLaMarca();
 
+	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "programando" } satisfies MarcaDeVuelta);
 	let deshacer: string;
 	try {
 		deshacer = await instantes.restaurarAlReiniciar(marcador);
@@ -94,5 +131,7 @@ export async function prepararVueltaDeLaCentral(
 		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
 		throw error;
 	}
-	return { ok: true, valor: { marcador, deshacer, copiaDeAntes: copia.clave } };
+	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes: copia.clave };
+	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "preparada", preparada, anterior: null } satisfies MarcaDeVuelta);
+	return { ok: true, valor: preparada };
 }
