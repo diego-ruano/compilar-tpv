@@ -21,6 +21,7 @@ import {
 import { solicitarCodigoPin, verificarCodigoPin } from "../src/domains/login/recuperarPin";
 import {
 	activateLicenseFirstTime,
+	consumeEmailCodeAndSetRecoveryEmail,
 	getTenantRecoveryEmail,
 	issueLicense,
 } from "../src/server/licenseStore";
@@ -353,6 +354,31 @@ describe("correo de recuperación · confirmar con la central fallando (CORREO-C
 			// Y avisa al de antes, que era el de la compra.
 			await Promise.all(e.avisos);
 			expect(e.correos.slice(1).map((c) => c.to)).toEqual([COMPRA]);
+		});
+	});
+
+	it("el lote sólo cambia el correo si ha gastado el código él mismo: con uno ya gastado no escribe ni borra", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const k = { tenantId: TENANT, deviceId: MAIN, purpose: "cambio_correo" as const };
+			const codeHash = String(
+				(
+					(
+						await e.db.execute({
+							sql: `SELECT code_hash FROM email_codes WHERE tenant_id = ?1 AND device_id = ?2 AND purpose = ?3;`,
+							args: [k.tenantId, k.deviceId, k.purpose],
+						})
+					).rows[0] as any
+				).code_hash,
+			);
+			expect(await consumeEmailCodeAndSetRecoveryEmail(e.db, k, { codeHash, email: NUEVO, nowMs: T0 + 1_000 })).toBe(true);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			// El que llega después con el mismo código (el perdedor de una carrera) no lo gasta: ni
+			// escribe otro correo ni vuelve al de la compra.
+			expect(await consumeEmailCodeAndSetRecoveryEmail(e.db, k, { codeHash, email: "otro@bar.test", nowMs: T0 + 2_000 })).toBe(false);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			expect(await consumeEmailCodeAndSetRecoveryEmail(e.db, k, { codeHash, email: null, nowMs: T0 + 3_000 })).toBe(false);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
 		});
 	});
 
