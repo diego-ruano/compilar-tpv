@@ -411,6 +411,12 @@ describe("las líneas de una copia (lineasDe)", () => {
 	/** `texto`, comprimido con gzip, como llega de R2. */
 	const gzipDe = (texto: string) => new Blob([texto]).stream().pipeThrough(new CompressionStream("gzip"));
 
+	/**
+	 * Lo más que la descompresión puede ir por delante de lo que se ha leído, en bytes de la copia: unos
+	 * trozos de los que se le dan (`BYTES_POR_TROZO`) y lo que queda en las colas de por medio.
+	 */
+	const ADELANTO_MAXIMO = 1024 * 1024;
+
 	/** Las líneas que da `lineasDe`, o el mensaje con el que se para y las que ha dado antes. */
 	async function leer(cuerpo: ReadableStream<Uint8Array>, tope?: number) {
 		const dadas: string[] = [];
@@ -449,6 +455,51 @@ describe("las líneas de una copia (lineasDe)", () => {
 		});
 		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
 		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
+	});
+
+	it("no se le pide a la copia más de lo que se lee: mientras quien lee espera a otra cosa, la descompresión no sigue (RESTAURAR-CONTRAPRESION)", async () => {
+		// Se leen 256 KiB y se espera 300 ms, cinco veces. Con la copia por un `pipeThrough` sin más, la
+		// descompresión del runtime seguía pidiendo mientras tanto, sin esperar a que se leyera: más de
+		// 64 MiB en la primera espera (en un origen sin fin, hasta que se rompe; de R2, lo que diera la red).
+		const { gzip, pedido } = gzipSinFin("", "-- relleno\n");
+		const lineas = lineasDe(gzip)[Symbol.asyncIterator]();
+		let leido = 0;
+		let adelanto = 0;
+		for (let vez = 0; vez < 5; vez++) {
+			for (let ahora = 0; ahora < 256 * 1024; ) {
+				const { value } = await lineas.next();
+				ahora += String(value).length + 1;
+				leido += String(value).length + 1;
+			}
+			await new Promise((r) => setTimeout(r, 300));
+			adelanto = Math.max(adelanto, pedido.bytes - leido);
+		}
+		await lineas.return?.();
+		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
+		expect(adelanto).toBeLessThan(ADELANTO_MAXIMO);
+	});
+
+	it("tampoco mientras la carga prepara la base", async () => {
+		// Como restaurar un negocio, que pone sus migraciones en exclusiva (`blockConcurrencyWhile`) con la
+		// cabecera de la copia ya leída.
+		const { gzip, pedido } = gzipSinFin("-- Migraciones: m1\n", "-- relleno\n");
+		const { stub } = centralSinAprovisionar();
+		const pedidoAlPreparar = await runInDurableObject(stub, async (_objeto, state) => {
+			let medido = -1;
+			await cargarCopia(state.storage, lineasDe(gzip), {
+				migraciones: ["m1"],
+				esTablaDeLaCopia: (t) => t === "t",
+				prepararBase: async () => {
+					await new Promise((r) => setTimeout(r, 300));
+					medido = pedido.bytes;
+					throw new Error("basta");
+				},
+			}).catch(() => undefined);
+			return medido;
+		});
+		expect(pedidoAlPreparar).toBeGreaterThanOrEqual(0);
+		expect(pedidoAlPreparar).toBeLessThan(ADELANTO_MAXIMO);
+		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
 	});
 
 	it("la línea de la fila más grande que admite un objeto en producción cabe en el tope, escrita de cualquier forma de las de hoy", async () => {

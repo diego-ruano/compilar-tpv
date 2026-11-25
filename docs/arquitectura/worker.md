@@ -1310,7 +1310,13 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   `copia_no_valida`, nunca un 500. De todo eso, sólo las filas que SQLite no acepta van además a
   Sentry (`hub.restaurar_copia`, con el texto de SQLite como causa), porque pueden ser un fallo de este
   worker; el gzip roto se queda en Axiom. Una línea que se lee y acaba en CR es de una copia con fines
-  de línea de Windows, y lo dice (`copia_no_valida`), en la central también. Si la carga se para antes
+  de línea de Windows, y lo dice (`copia_no_valida`), en la central también. La descompresión va a demanda
+  (`aDemanda`, RESTAURAR-CONTRAPRESION): sólo se le da un trozo de la copia, de 16 KiB, cuando se espera
+  lo que sale de ella y no ha salido nada. La del runtime acepta lo que se le dé sin mirar si se ha
+  leído, y detrás de la copia con `pipeThrough` seguía pidiendo a R2 mientras la carga escribía o ponía
+  las migraciones (medido en workerd: 64 MiB en 300 ms de espera, sin límite); ahora no va más de un
+  trozo por delante (16 MiB descomprimidos en lo peor, una copia toda de ceros; con una de verdad,
+  unos cientos de KB), y restaurar 300.000 filas tarda lo mismo que antes. Si la carga se para antes
   del final, se cancelan la lectura de R2 y la descompresión (`cargarCopia` cierra el iterador). Los disparadores
   saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
   apuntan días.

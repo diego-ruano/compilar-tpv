@@ -32,7 +32,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
-| [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -452,18 +451,6 @@ aparta. En el workerd local de las pruebas el tope de un valor es algo más de 2
 (`test/sondaSqliteDo.test.ts`), así que eso sólo se ve en producción. Lo decide el
 responsable: subir el tope (antes, mirar en la página de límites de Cloudflare el de un mensaje de
 WebSocket que recibe un Durable Object), o dejarlo.
-
-### RESTAURAR-CONTRAPRESION · La descompresión de una copia no espera a la carga
-
-Restaurar una copia, de la central o de un negocio, lee el gzip de R2 con `DecompressionStream` y
-`TextDecoderStream` (`cargaDeCopias.ts::lineasDe`), y entre lote y lote la carga escribe en el SQLite
-del objeto. La descompresión de workerd no espera a que se lea lo que da: una sonda (un gzip sin fin
-hecho a mano; se leen 256 KiB y se para 300 ms) vio que, mientras tanto, pedía a la fuente 64 MiB. Si
-la carga va más despacio que R2, lo descomprimido se acumula en la memoria del objeto (128 MB). La
-sonda no se ha quedado en el repositorio. Lo que ya está en el código: si la carga se para antes del
-final (una copia que no vale, unas filas que SQLite no acepta), se cancelan la lectura y la
-descompresión (`cargarCopia` cierra el iterador, y `lineasDe` cancela la copia). Falta medir una restauración grande en producción; si se
-confirma, descomprimir a demanda (pidiendo a R2 sólo cuando se ha cargado lo anterior).
 
 ---
 
