@@ -13,8 +13,7 @@
       "project": ["scripts/**/*.mjs", "eslint.config.mjs"],
       // RI-25 y AUD-44: los workflows ejecutan el firmante y Wrangler desde su lockfile aislado
       // (.github/tools/*), fuera del workspace; no son dependencias que falten en la raíz.
-      // wsl.exe: el generador de carga arranca sqld y la CLI de Turso en el WSL de Windows.
-      "ignoreBinaries": ["tauri", "wrangler", "wsl.exe"]
+      "ignoreBinaries": ["tauri", "wrangler"]
     },
     "apps/tpv-main": {
       "entry": ["src/app/main.tsx", "test/**/*.test.{ts,tsx}", "test/react/setup.ts", "test/**/*.types.ts", "e2e/wdio.conf.ts", "e2e/construir.ts", "e2e/specs/**/*.ts"],

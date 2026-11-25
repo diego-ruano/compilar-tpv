@@ -1,8 +1,9 @@
 # Pruebas de carga
 
 `pnpm carga` monta un negocio de pruebas con una Main y una Handy sintéticas, lanza un plan de
-peticiones variadas de un servicio y mide lo que cuesta: en local, las filas de la base central
-(Turso); en la nube, el worker y el Durable Object del negocio con la analítica de Cloudflare. El
+peticiones variadas de un servicio y mide lo que cuesta: los viajes de cada paso a la base central y
+al `TenantHub`, que cuenta el propio worker, y en la nube, además, el worker y los dos Durable Objects
+por los que pasa la tanda (el del negocio y la base central) con la analítica de Cloudflare. El
 código está en [scripts/carga/](../../scripts/carga/) y cada tanda deja su carpeta en
 `target/carga/`.
 
@@ -48,10 +49,10 @@ Las peticiones son las de la app:
 Las operaciones de la Main llevan el SQL que sube su outbox (`crates/tpv-infra-sqlite`), con la hora
 en literal, en lotes de hasta 200 operaciones y 256 KB de sentencias, y el acuse trae el veredicto
 de cada una (aplicada, ya estaba, sin intentar o rechazada). De cada petición se guarda el desglose
-de `Server-Timing` que el worker da a un dispositivo autenticado: lo que se fue en la base central y
-en el `TenantHub`. Si cambia el formato de la firma, del socket o de una ruta, la tanda recibe un 401
-o un rechazo y se para: hay que poner al día `scripts/carga/`. `node --test
-scripts/carga/firma.test.mjs` fija la firma contra los valores de `device.rs`.
+de `Server-Timing` que el worker da a un dispositivo autenticado: cuántos viajes hizo a la base
+central y al `TenantHub`, y lo que tardaron. Si cambia el formato de la firma, del socket o de una
+ruta, la tanda recibe un 401 o un rechazo y se para: hay que poner al día `scripts/carga/`. `node
+--test scripts/carga/firma.test.mjs` fija la firma contra los valores de `device.rs`.
 
 ## En este equipo: `pnpm carga --local`
 
@@ -59,25 +60,25 @@ No sale nada a internet ni gasta cuota.
 
 **Requisitos:**
 - `pnpm install`;
-- el widget compilado en `apps/reservas-web/dist` (`pnpm --filter @tpv/reservas-web build`);
-- la CLI de Turso en el WSL (usa `~/.turso/sqld`).
+- el widget compilado en `apps/reservas-web/dist` (`pnpm --filter @tpv/reservas-web build`).
 
 **Qué monta:**
-- Un `sqld` en el WSL con la base central, cargada con su primera migración
-  (`apps/cloud-worker-licensing/src/server/central/migraciones/0001_inicial.sql`).
-- Delante del `sqld`, un proxy que suma las filas leídas y escritas de cada paso. Son las que factura
-  Turso, contadas por el mismo motor.
 - El worker empaquetado con `wrangler deploy --dry-run` y arrancado con `wrangler dev --local`, sin
-  cron, con secretos de usar y tirar y `TURSO_DATABASE_URL` apuntando a la central local.
-- La base del negocio es el SQLite de su `TenantHub`, que `wrangler dev` guarda en la carpeta de la
-  tanda: el alta la crea igual que en la nube.
+  cron y con secretos de usar y tirar. Sus Durable Objects guardan lo suyo en la carpeta de la tanda.
+- La base central es su objeto `BaseCentral`, que nace sin aprovisionar: la tanda le da esquema con
+  `/v1/admin/central/aprovisionar` y el token de administración local, como a la de producción.
+- La base del negocio es el SQLite de su `TenantHub`: el alta la crea igual que en la nube.
 
-Antes de empezar se comprueba que `/health` pasa por la base central local. Al acabar se paran
-wrangler y el `sqld` y se borra su base.
+Antes de empezar se comprueba que la base central local nace sin aprovisionar (la de producción lo
+está) y que, ya aprovisionada, `/health` llega a ella. Al acabar se para wrangler; lo que guardó se
+queda en la carpeta de la tanda.
 
-**Qué no mide:** la CPU, la duración del Durable Object, sus filas leídas y escritas, la latencia
-real ni el coste de los isolates. Hay un solo isolate, así que sus cachés de 60 s hacen que la base
-central se lea mucho menos que en la nube.
+**Qué mide:** los viajes de cada paso a la base central y al `TenantHub` que cuenta el worker, y con
+ellos y los lotes de la Main, las peticiones a los Durable Objects por paso.
+
+**Qué no mide:** la CPU, la duración de los Durable Objects y las filas que leen y escriben (tampoco
+las de la base central), la latencia real ni el coste de los isolates. Hay un solo isolate, así que
+sus cachés de 60 s hacen que la base central se lea mucho menos que en la nube.
 
 ## En la nube: `node scripts/carga/carga.mjs --nube`
 
@@ -88,10 +89,7 @@ mientras la tanda sigue detrás, y un segundo Ctrl+C la mataría sin limpiar.
 **Antes de empezar se niega si:**
 - es entre las 06:20 y las 07:30 UTC, porque una tanda con sus medidas puede durar media hora y
   pisaría el cron diario de las 07:00;
-- hay licencias de pruebas sin anular, porque la retirada se las llevaría también: es global;
-- no puede leer el plan de Turso con la CLI del WSL, o Turso va por encima del 80 % en algo. En el plan
-  gratuito, pasarse bloquea todas las bases de la organización, también `tpv-control`;
-- la CLI no ve `tpv-control`: estaría mirando otra organización.
+- hay licencias de pruebas sin anular, porque la retirada se las llevaría también: es global.
 
 **Frenos durante la tanda.** Se para ante cualquiera de estos:
 - un 401 o un 403;
@@ -105,9 +103,9 @@ lo que falle.
 
 **Medida:** con el GraphQL de analítica de Cloudflare y la sesión de wrangler de este equipo
 (`wrangler auth token`, sin dejar el token en los logs de wrangler): las peticiones y la CPU del
-worker, y del Durable Object del negocio sus invocaciones, su duración y las filas que lee y escribe
-su SQLite, que es la base del negocio. Mide cinco ventanas, cada una en sus propios minutos porque
-los Durable Objects se agregan por minuto:
+worker, y de los dos Durable Objects por los que pasa la tanda, el del negocio y la base central
+(`BaseCentral`), sus invocaciones, su duración y las filas que lee y escribe su SQLite. Mide cinco
+ventanas, cada una en sus propios minutos porque los Durable Objects se agregan por minuto:
 - la preparación;
 - los minutos entre la preparación y la carga, con la sesión abierta y sin tráfico: lo que cuesta una
   Main conectada sin que nadie toque nada;
@@ -118,12 +116,12 @@ los Durable Objects se agregan por minuto:
 Empieza a leer 5 minutos después de la carga. Da la medida por buena cuando dos lecturas coinciden y
 recogen al menos las peticiones que el generador sabe que mandó. Si no se asienta,
 `pnpm carga --medir <carpeta>` vuelve a medir y rehace el informe. Las peticiones al worker no salen
-del GraphQL, que mezcla las invocaciones del Durable Object: las cuenta el propio generador.
+del GraphQL, que mezcla las invocaciones de los Durable Objects: las cuenta el propio generador.
 
-**Qué no mide en la nube:** las filas de Turso. Allí sólo queda la base central (`tpv-control`),
-compartida con los equipos de verdad, y su uso cambia con cualquiera de ellos: las filas que cada
-paso lee y escribe en ella salen de una tanda en local. De Turso, en la nube sólo se mira el plan de
-la organización al empezar, que va en el informe.
+La base central es una para todos los negocios, también los de verdad: lo suyo en cada ventana lleva
+lo que hicieran los demás equipos en esos minutos. Lo que gasta la carga en ella es lo de su ventana
+menos lo de la de control, que es del mismo largo. Lo incluido de los Durable Objects es de toda la
+cuenta, así que el informe suma los dos objetos al calcular cuántos pasos caben al mes.
 
 **Limpieza:** `/v1/admin/pruebas/retirar` anula la licencia y borra lo que el negocio guarda en la
 nube: su base en el `TenantHub`, su agenda de reservas web y sus imágenes. El negocio sólo se da por
@@ -146,17 +144,18 @@ No se lanza a la vez que una tanda de E2E: cada una retira todos los negocios de
 | `--vueltas <n>` | Repite el servicio sobre el mismo negocio (1 por defecto, 20 como mucho); el tope tiene que dar para todas |
 | `--tope <n>` | Peticiones como mucho antes de limpiar (150 por defecto, 70 como mínimo) |
 | `--sin-retirar` | En la nube, deja vivo el negocio de pruebas |
-| `--sin-medir` | En la nube, no espera a medir Cloudflare y contrasta la subida de la Main (la cuota de Turso se mira igual) |
+| `--sin-medir` | En la nube, no espera a medir Cloudflare y contrasta la subida de la Main |
 | `--medir <carpeta>` | Vuelve a medir Cloudflare de una tanda en la nube |
 | `--retirar [--si]` | Lista los negocios de pruebas; con `--si`, los retira todos |
 
 ## Lo que deja cada tanda
 
 En `target/carga/<fecha>-<local|nube>/`:
-- `informe.md`: el resultado de cada paso, los tiempos por tipo, la subida de la Main (sus lotes y
-  el contraste con el log de la nube), el coste y cuántos pasos de esa mezcla caben al mes en lo
-  incluido.
+- `informe.md`: el resultado de cada paso con sus viajes a la base central y al `TenantHub`, los
+  tiempos por tipo, la subida de la Main (sus lotes y el contraste con el log de la nube), el coste
+  y cuántos pasos de esa mezcla caben al mes en lo incluido.
 - `peticiones.jsonl`: cada petición con su tiempo, su resultado y su `Server-Timing`.
 - `estado.json`: los identificadores del negocio, las ventanas de tiempo y lo que dio el contraste.
-- En local: `turso-local.json`, `worker.log` y el log del `sqld`.
+- En local: `worker.log` y `worker-compilacion.log`, y en `worker/estado/` lo que guardó
+  `wrangler dev` (la base central y la del negocio).
 - En la nube: `coste.json`.

@@ -1,7 +1,7 @@
 // Generador de carga del TPV: monta un negocio de pruebas con una Main y una Handy sintéticas, lanza un
 // plan de peticiones variadas y mide lo que cuesta. Guía: docs/guias/pruebas-de-carga.md.
 //
-//   pnpm carga --local                todo en este equipo (wrangler dev + sqld del WSL): no gasta nada
+//   pnpm carga --local                todo en este equipo (wrangler dev, con sus Durable Objects): no gasta nada
 //   node scripts/carga/carga.mjs --nube    contra el worker desplegado, con una licencia de pruebas
 //   pnpm carga --medir <carpeta>      vuelve a medir Cloudflare de una tanda en la nube
 //   pnpm carga --retirar [--si]       lista (y con --si retira) los negocios de pruebas
@@ -12,7 +12,7 @@ import { setTimeout as dormir } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 import { pedirAdmin } from "./cliente.mjs";
-import { esperarSalvoCancelacion, medirCloudflare, planDeTurso, prepararCloudflare, usoDeBase } from "./coste.mjs";
+import { esperarSalvoCancelacion, medirCloudflare, prepararCloudflare } from "./coste.mjs";
 import { cerrarSockets, comprobarSubida, ejecutarPlan, planDeCarga, prepararNegocio } from "./escenario.mjs";
 import { escribirInforme } from "./informe.mjs";
 import { levantarLocal } from "./local.mjs";
@@ -26,7 +26,7 @@ const TOPE_MINIMO = 70;
 const AYUDA = `
 Generador de carga del TPV (docs/guias/pruebas-de-carga.md)
 
-  pnpm carga --local                     el worker en este equipo, con la base central en sqld del WSL
+  pnpm carga --local                     el worker en este equipo (wrangler dev), con la base central en local
   node scripts/carga/carga.mjs --nube    el worker desplegado, con un negocio de pruebas que se retira al final
   pnpm carga --medir <carpeta>           vuelve a medir Cloudflare de una tanda en la nube
   pnpm carga --retirar                   lista los negocios de pruebas; con --si, los retira todos
@@ -160,19 +160,6 @@ async function comprobacionesPrevias(ctx, a) {
       );
     }
   }
-  // La cuota de Turso se mira siempre: allí sigue la base central, y en el plan gratuito pasarse
-  // bloquea todas las bases de la organización.
-  const plan = planDeTurso();
-  if (!plan) throw new Error("No se pudo leer el plan de Turso con la CLI del WSL (¿sesión caducada? «turso auth login» en el WSL): sin él no se sabe si la tanda cabe en la cuota.");
-  const sinLeer = Object.entries(plan.porcentajes).filter(([, p]) => p !== null && !Number.isFinite(p));
-  if (sinLeer.length) throw new Error(`No se entiende la salida de «turso plan show» (${sinLeer.map(([k]) => k).join(", ")}).`);
-  const altos = Object.entries(plan.porcentajes).filter(([, p]) => p >= 80);
-  if (altos.length) {
-    throw new Error(`Turso va al ${altos.map(([k, p]) => `${p} % en ${k}`).join(", ")}: en el plan gratuito pasarse bloquea TODAS las bases, también la de producción.`);
-  }
-  // Que la CLI mire la organización de producción: si no ve tpv-control, el plan sería el de otra.
-  if (!usoDeBase("tpv-control")) throw new Error("La CLI de Turso del WSL no ve la base tpv-control: está en otra organización o la sesión no sirve.");
-  ctx.coste.turso = { plan: plan.texto };
 }
 
 /** Hasta el minuto siguiente y un segundo: Cloudflare agrega los Durable Objects por minuto. */
@@ -279,7 +266,7 @@ async function tanda(a) {
     registro.fase = "comprobaciones";
     if (destino === "local") {
       console.log("Entorno local");
-      ctx.local = await levantarLocal({ carpeta, tanda: nombre, registro });
+      ctx.local = await levantarLocal({ carpeta });
       ctx.base = ctx.local.base;
       ctx.admin = { base: ctx.base, token: ctx.local.adminToken, registro };
     } else {
@@ -289,7 +276,6 @@ async function tanda(a) {
       ctx.admin = { base: ctx.base, token: process.env.ADMIN_API_TOKEN, registro };
       console.log(`Comprobaciones previas contra ${ctx.base}`);
       await comprobacionesPrevias(ctx, a);
-      guardarCoste();
     }
     guardarEstado();
 
@@ -336,9 +322,6 @@ async function tanda(a) {
     guardarEstado();
 
     if (destino === "local") {
-      sinFallar(registro, "guardar turso-local.json", () =>
-        writeFileSync(join(carpeta, "turso-local.json"), JSON.stringify(ctx.local?.medida.porEtapa ?? {}, null, 2)),
-      );
       await ctx.local?.parar();
     } else {
       registro.etapa = "limpieza";
@@ -373,9 +356,17 @@ async function tanda(a) {
     const resumen = sinFallar(registro, "escribir el informe", () => escribirInforme(carpeta));
     const carga = registro.entradas.filter(e => e.fase === "carga");
     console.log(`\nResultado: ${carga.filter(e => e.ok).length} de ${carga.length} peticiones de la carga bien${ctx.estado.error ? ` · se paró: ${ctx.estado.error}` : ""}`);
-    const porPaso = resumen?.porPaso ?? {};
-    if (porPaso.tursoFilasEscritas != null) console.log(`Base central: ${porPaso.tursoFilasLeidas.toFixed(1)} filas leídas y ${porPaso.tursoFilasEscritas.toFixed(1)} escritas por paso de la carga`);
-    if (porPaso.doFilasEscritas != null) console.log(`Base del negocio (SQLite del DO): ${porPaso.doFilasLeidas.toFixed(1)} filas leídas y ${porPaso.doFilasEscritas.toFixed(1)} escritas por paso de la carga`);
+    const { porPaso = {}, partes = {} } = resumen ?? {};
+    const deLaCentral = (clave, que, decimales = 1) => (partes[clave] ? ` (${partes[clave].central.toFixed(decimales)} ${que})` : "");
+    if (porPaso.doPeticiones != null) {
+      console.log(`Durable Objects: ${porPaso.doPeticiones.toFixed(2)} peticiones por paso de la carga${deLaCentral("doPeticiones", "a la base central", 2)}`);
+    }
+    if (porPaso.doFilasEscritas != null) {
+      console.log(
+        `SQLite de los Durable Objects: ${porPaso.doFilasLeidas.toFixed(1)} filas leídas${deLaCentral("doFilasLeidas", "en la base central")} y ` +
+          `${porPaso.doFilasEscritas.toFixed(1)} escritas${deLaCentral("doFilasEscritas", "en la base central")} por paso de la carga`,
+      );
+    }
     if (destino === "nube") console.log(ctx.estado.retirado ? "Limpieza: negocio retirado." : `Limpieza: ${ctx.estado.motivoSinRetirar ?? "sin retirar."}`);
     console.log(`Informe: ${relative(RAIZ, join(carpeta, "informe.md"))}\n`);
     const sinLimpiar = destino === "nube" && ctx.estado.licenseId && !a.sinRetirar && !ctx.estado.retirado;
