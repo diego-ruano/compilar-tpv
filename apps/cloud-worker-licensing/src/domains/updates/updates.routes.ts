@@ -33,7 +33,7 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
-import { esPasajeroDeLaCentral } from "../../server/central/sinLaCentral";
+import { laCentralNoAtiende } from "../../server/central/sinLaCentral";
 import { checkAdminToken } from "../../middleware/requireAdmin";
 import { filtroPorIp } from "../../lib/limitador";
 import type { Sql } from "../../lib/sql";
@@ -156,9 +156,11 @@ async function versionesActivas(db: Sql, ahoraMs: number): Promise<VersionActiva
  * RI-30 · ¿Es este equipo de un negocio piloto? El `device_id` llega sin firmar, y no hace falta más:
  * quien se haga pasar por un piloto sólo consigue una versión antes, y el instalador va firmado igual.
  *
- * Cualquier fallo (sin cabecera, equipo desconocido o revocado, la base que no contesta) es «no»: el
- * canal normal es siempre una respuesta segura. Un fallo no se guarda: la petición siguiente vuelve a
- * preguntar. La central saturada o un fallo pasajero de la plataforma se pasan solos y no van a Sentry.
+ * Sin cabecera, o con un equipo desconocido o revocado, es «no»: el canal normal es siempre una
+ * respuesta segura. Si la central no puede atender (saturada, sin aprovisionar…), lanza, y la petición
+ * sale con su 503 (`respuestaSinLaCentral`): leído como «no», un piloto con sólo una beta publicada
+ * se llevaría el 204 de «estás al día». Cualquier otro fallo de la lectura (un error de SQL) es «no» y
+ * va a Sentry. Un fallo no se guarda: la petición siguiente vuelve a preguntar.
  */
 async function esPiloto(db: Sql, deviceId: string, ahoraMs: number): Promise<boolean> {
 	if (!deviceId) return false;
@@ -174,10 +176,9 @@ async function esPiloto(db: Sql, deviceId: string, ahoraMs: number): Promise<boo
 		`);
 		equipos = new Set((r.rows ?? []).map((f) => String((f as any).device_id)));
 	} catch (e: any) {
-		if (!esPasajeroDeLaCentral(e)) {
-			capturarError(e, "update.pilot_lookup");
-			console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
-		}
+		if (laCentralNoAtiende(e)) throw e;
+		capturarError(e, "update.pilot_lookup");
+		console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
 		return false;
 	}
 	if (vaciadosAlLeer === vaciados) pilotosEnCache = { hastaMs: ahoraMs + VIDA_EN_CACHE_MS, equipos };

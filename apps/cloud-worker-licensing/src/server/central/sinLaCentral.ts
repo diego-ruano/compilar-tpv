@@ -3,7 +3,9 @@
 // Lo que se contesta cuando la base central no ha podido atender una petición HTTP. Lo usan los sitios
 // donde un error se convierte en respuesta: el `onError` de la `app`, el `/ws` (`app.ts`) y los
 // `catch` que, si no, contestarían un código propio (la base del negocio que nace al activar). Lo que
-// lanza la central en `tenantAuth` no es un rechazo de quien llama: sube al `onError`.
+// lanza la central en `tenantAuth` no es un rechazo de quien llama: sube al `onError`. Y un `catch` que
+// sigue sin la central si la lectura falla (el piloto del feed de actualizaciones) deja subir esto
+// (`laCentralNoAtiende`): seguir sería contestar como si la central hubiera dicho que no hay nada.
 //
 // Es lo mismo que cuando no atiende el objeto de un negocio (`lib/enElHub.ts::sinElObjeto`): el 503
 // `external` de `lib/noDisponible.ts`.
@@ -33,20 +35,30 @@ import { CentralNoDisponible, ErrorDeLaCentral } from "./cliente";
 
 /**
  * ¿La central saturada, o un fallo pasajero de la plataforma? Se pasa solo: no hay nada que arreglar
- * y no va a Sentry. Quien lo encuentra lo repite o sigue sin la central si puede.
+ * y no va a Sentry.
  */
-export function esPasajeroDeLaCentral(error: unknown): boolean {
+function esPasajeroDeLaCentral(error: unknown): boolean {
 	return error instanceof CentralNoDisponible && (error.motivo === "saturada" || error.motivo === "pasajera");
+}
+
+/** Por qué no ha podido atender la central, si es eso lo que dice `error`; `null` si es otra cosa. */
+function motivoSinLaCentral(error: unknown): CentralNoDisponible["motivo"] | ErrorDeLaCentral["code"] | null {
+	if (error instanceof CentralNoDisponible) return error.motivo;
+	if (error instanceof ErrorDeLaCentral && error.status === 503) return error.code;
+	return null;
+}
+
+/**
+ * ¿Dice `error` que la central no ha podido atender? Es lo que `respuestaSinLaCentral` contesta con su
+ * 503.
+ */
+export function laCentralNoAtiende(error: unknown): boolean {
+	return motivoSinLaCentral(error) !== null;
 }
 
 /** La respuesta si `error` es que la central no ha podido atender; `null` si es cualquier otra cosa. */
 export function respuestaSinLaCentral(c: Context, error: unknown): Response | null {
-	const motivo =
-		error instanceof CentralNoDisponible
-			? error.motivo
-			: error instanceof ErrorDeLaCentral && error.status === 503
-				? error.code
-				: null;
+	const motivo = motivoSinLaCentral(error);
 	if (!motivo) return null;
 
 	const ruta = new URL(c.req.url).pathname;

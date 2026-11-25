@@ -9,7 +9,9 @@
 //   · sin aprovisionar, una operación que no conoce, una migración alterada o fallida
 //     (`ErrorDeLaCentral` con 503): `hub_unavailable`, sin `Retry-After`;
 //   · cada vez, un evento `central_no_disponible` en Axiom con el motivo; a Sentry, sólo lo que no es
-//     carga ni un fallo pasajero de la plataforma, tampoco desde el `catch` del piloto del feed;
+//     carga ni un fallo pasajero de la plataforma;
+//   · el feed de actualizaciones no lee la central que no atiende como «no es piloto»: sale su 503,
+//     no el 204 de «estás al día». Un error de SQL al mirarlo sigue siendo «no», y va a Sentry;
 //   · en `tenantAuth`, sólo un token o una firma que no valen son un 401: cualquier fallo de la central,
 //     marcado o no, sube al `onError`.
 //
@@ -178,26 +180,38 @@ describe("la central saturada", () => {
 		expect((await eventosDeLaCentral(1))[0].motivo).toBe("saturada");
 	});
 
-	it("con las versiones ya leídas, saturada al mirar si el equipo es piloto: `stable`, sin Sentry", async () => {
+	it("con las versiones ya guardadas, saturada al mirar si el equipo es piloto: 503 `hub_overloaded`, no 204", async () => {
+		// Sólo hay una beta. Leída la central saturada como «no es piloto», el equipo se quedaría sin
+		// candidatas, y el 204 de entonces el updater lo entiende como «estás al día».
 		const real = await centralDePrueba();
 		await real.db.execute({
 			sql: `INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature, url, is_active)
-			      VALUES ('1.1.0', 'windows', 'x86_64', 'stable', '', '2026-01-01', 'sig', 'https://cdn.test/1.1.0.exe', 1);`,
+			      VALUES ('1.2.0', 'windows', 'x86_64', 'beta', '', '2026-01-01', 'sig', 'https://cdn.test/1.2.0.exe', 1);`,
 		});
-		const central = centralInterceptada(real, (metodo, [sentencia], llamar) =>
-			metodo === "ejecutar" && /JOIN tenants/.test((sentencia as SentenciaEnlazada).sql)
-				? Promise.reject(saturada())
-				: llamar(),
-		);
-		const res = await app.request(
-			"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
-			{ headers: { "X-Tpv-Device": "equipo-de-un-bar" } },
-			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
-		);
+		const viajes: string[] = [];
+		const central = centralInterceptada(real, (metodo, [sentencia], llamar) => {
+			const piloto = metodo === "ejecutar" && /JOIN tenants/.test((sentencia as SentenciaEnlazada).sql);
+			viajes.push(piloto ? "piloto" : metodo);
+			return piloto ? Promise.reject(saturada()) : llamar();
+		});
+		const pedir = (cabeceras: Record<string, string>) =>
+			app.request(
+				"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
+				{ headers: cabeceras },
+				{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
+			);
 
-		expect(res.status).toBe(200);
-		expect(((await res.json()) as any).version).toBe("1.1.0");
+		// Sin equipo no se pregunta por el piloto: las versiones se guardan, y no hay estable que dar.
+		expect((await pedir({})).status).toBe(204);
+		const res = await pedir({ "X-Tpv-Device": "equipo-de-un-bar" });
+
+		// Las versiones salen de lo guardado: el único viaje de la segunda es el del piloto.
+		expect(viajes).toEqual(["ejecutar", "piloto"]);
+		expect(res.status).toBe(503);
+		expect(res.headers.get("Retry-After")).toBe("2");
+		expect(((await res.json()) as any).error).toBe("hub_overloaded");
 		expect(capturados).toEqual([]);
+		expect((await eventosDeLaCentral(1))[0].motivo).toBe("saturada");
 	});
 });
 
@@ -279,6 +293,29 @@ describe("lo que no es «no puede atender» sigue su camino", () => {
 		expect(res.status).toBe(500);
 		expect(JSON.stringify(await res.json())).not.toContain("no such table");
 		expect(capturados.map((c) => c.mensaje)).toEqual(["central_error_sql: no such table: x"]);
+		expect(enviados.filter((e) => e.event === "central_no_disponible")).toEqual([]);
+	});
+
+	it("un error de SQL al mirar si el equipo es piloto: «no es piloto» y a Sentry, como siempre", async () => {
+		const real = await centralDePrueba();
+		await real.db.execute({
+			sql: `INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature, url, is_active)
+			      VALUES ('1.1.0', 'windows', 'x86_64', 'stable', '', '2026-01-01', 'sig', 'https://cdn.test/1.1.0.exe', 1);`,
+		});
+		const central = centralInterceptada(real, (metodo, [sentencia], llamar) =>
+			metodo === "ejecutar" && /JOIN tenants/.test((sentencia as SentenciaEnlazada).sql)
+				? Promise.resolve({ ok: false, error: "central_error_sql", detalle: "no such column: t.piloto" })
+				: llamar(),
+		);
+		const res = await app.request(
+			"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
+			{ headers: { "X-Tpv-Device": "equipo-de-un-bar" } },
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
+		);
+
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as any).version).toBe("1.1.0");
+		expect(capturados).toEqual([{ operacion: "update.pilot_lookup", mensaje: "central_error_sql: no such column: t.piloto" }]);
 		expect(enviados.filter((e) => e.event === "central_no_disponible")).toEqual([]);
 	});
 

@@ -149,9 +149,11 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Cuando la que no puede atender es la base central, la respuesta es la misma
   (`server/central/sinLaCentral.ts`): saturada, `hub_overloaded` con `Retry-After`; un fallo pasajero,
   un plazo vencido, la central sin aprovisionar o averiada, `hub_unavailable`. La traducen el
-  `onError`, el `/ws` y la activación al crear la base del negocio. `tenantAuth` sólo contesta 401 a
-  un token o una firma que no valen (`RechazoDeAutenticacion`); cualquier fallo de la central sube al
-  `onError`. Queda en Axiom
+  `onError`, el `/ws` y la activación al crear la base del negocio. Un `catch` que seguiría sin la
+  central la deja subir (`laCentralNoAtiende`): el feed de actualizaciones no la lee como «no es
+  piloto», que con sólo una beta publicada sería el 204 de «estás al día». `tenantAuth` sólo contesta
+  401 a un token o una firma que no valen (`RechazoDeAutenticacion`); cualquier fallo de la central
+  sube al `onError`. Queda en Axiom
   (`central_no_disponible`, con el motivo) y, si no es carga ni un fallo pasajero, en Sentry. Lo cubre
   `test/centralNoDisponible.test.ts`.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
