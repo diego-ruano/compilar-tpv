@@ -1,7 +1,7 @@
 /* =========================================================
-   TPV SCHEMA — MIGRACION INICIAL (0001) · UNICA Y COMPARTIDA (app local + nube Turso)
+   TPV SCHEMA — MIGRACION INICIAL (0001) · COMPARTIDA (app local + nube)
    - La FUENTE UNICA DE VERDAD del esquema son los ficheros .sql de
-     packages/database/migrations/, aplicados EN ORDEN. Hoy este es el UNICO:
+     packages/database/migrations/, aplicados EN ORDEN. Este es el primero:
      antes del lanzamiento se CONSOLIDARON aqui todas las incrementales
      (contact settings, email unico de cliente, movimientos de stock, intentos
      de login, comanda unica por mesa, stock suelto, notificaciones, traza del
@@ -15,7 +15,8 @@
        * App de escritorio (Rust): crates/tpv-infra-sqlite/src/migrations.rs los
          embebe con include_dir! y aplica lo pendiente en cada arranque.
        * Worker tpv-api: apps/cloud-worker-licensing/src/server/tenantMigrations.ts
-         los registra y aplica igual sobre cada BD por-tenant (Turso).
+         los registra, y el TenantHub (Durable Object) de cada negocio los aplica
+         igual sobre su SQLite, que es la base del negocio en la nube.
      Cada BD lleva una tabla _migrations (name, hash, applied_at): una BD nueva se
      construye desde 0001 y una existente solo aplica lo que le falte.
    - REGLA DE ORO (vigente desde el lanzamiento): nunca edites una migracion ya
@@ -36,7 +37,7 @@
      codigo tapaba con (x*100).round()/100 repetido en 35 sitios y tres lenguajes
      -con tres modos de redondeo distintos: Rust aleja del cero, JavaScript lleva
      la mitad hacia +infinito y ROUND() de SQLite hace lo suyo-. Con enteros, SUM
-     es exacto y ASOCIATIVO: la Main y Turso obtienen el mismo numero sin importar
+     es exacto y ASOCIATIVO: la Main y la nube obtienen el mismo numero sin importar
      el orden de las filas ni el motor, que es lo que permite dejar los agregados
      derivados dentro del SQL (Total_Comanda tiene dos escritores, la Main por el
      outbox y la Handy por el Durable Object, y solo converge si se re-deriva).
@@ -74,15 +75,16 @@
    - Ninguna columna lleva DEFAULT de hora: la pone siempre quien inserta.
      Un DEFAULT con la hora actual lo evaluaria cada base por su cuenta, y
      en la nube eso es otro instante y en UTC. La fila de la Main y su copia
-     en Turso tienen que decir la misma hora. Lo vigila un test de db.rs.
+     en la nube tienen que decir la misma hora. Lo vigila un test de db.rs.
 ========================================================= */
 
 -- NOTA: aqui NO va `PRAGMA foreign_keys = ON`. Seria un no-op: (1) es un ajuste
 -- POR CONEXION que no persiste en el fichero, y (2) el runner aplica cada migracion
 -- dentro de una transaccion, donde el PRAGMA se ignora. Las FK se activan en cada conexion:
 --   * App local (Rust): `tune()` en crates/tpv-infra-sqlite/src/db.rs, al abrirla.
---   * Nube (worker):    Turso las trae activadas en cada conexion y el worker no las toca
---                       (RI-06, ver `probeTenantDb()` en src/durableObjects/tenantHub.motor.ts).
+--   * Nube (worker):    el SQLite del TenantHub las trae activadas (RI-06). El runner las apaga
+--                       alrededor de la tanda de migraciones y las vuelve a encender
+--                       (`migrarBase` y `ponerFk` en src/durableObjects/sqliteDelObjeto.ts).
 
 /* =========================================================
    1. Seguridad y Usuarios
@@ -155,12 +157,12 @@ CREATE TABLE IF NOT EXISTS Usuarios (
 );
 
 -- Anti brute-force del PIN (LOGIN-01): estado de intentos fallidos y bloqueo temporal por usuario.
--- Tabla del ESQUEMA COMPARTIDO (existe igual en la BD local de la Main y en la de tenant en Turso),
--- pero su contenido es DEVICE-LOCAL: no se sincroniza.
+-- Tabla del ESQUEMA COMPARTIDO (existe igual en la BD local de la Main y en la del negocio en la
+-- nube, el SQLite de su TenantHub), pero su contenido es DEVICE-LOCAL: no se sincroniza.
 --   - MAIN:  escribe/lee su propio estado con la conexion `raw` (sin outbox), para throttlear los
 --            logins locales. No se replica a la nube.
---   - WORKER: escribe/lee este estado en la BD de tenant (directo, sin hub), para throttlear los
---            logins de Handy.
+--   - WORKER: escribe/lee este estado en la base del negocio con sentencias sueltas, fuera de un
+--            comando (no pasan por Sync_Changes), para throttlear los logins de Handy.
 -- Cada lado throttlea de forma independiente; las filas de uno no viajan al otro.
 --
 -- Bloqueado_Hasta_Ms / Ultimo_Intento_Ms: epoch en milisegundos (reloj del dispositivo/worker). Se
@@ -1101,8 +1103,8 @@ ON Pago_Detalles(ID_Detalle);
 -- cree que `Estado = 'ACTIVO'` es selectivo (casi todos los cobros lo son) y resuelve
 -- `EXISTS (... WHERE ID_Detalle = X)` recorriendo TODOS los cobros activos y probando cada uno:
 -- segundos por mesa con un ano de datos. Con el `+` entra por idx_pago_detalles_detalle. No depende
--- de estadisticas, que es lo que importa: las lecturas de la Handy corren en Turso, donde no hay
--- ANALYZE.
+-- de estadisticas, que es lo que importa: las lecturas de la Handy corren en el SQLite del TenantHub,
+-- donde nadie lanza ANALYZE (en la Main tampoco).
 --
 -- Y por lo mismo esta vista se consulta con `NOT EXISTS`, nunca como operando derecho de un
 -- `LEFT JOIN ... IS NULL`: ahi SQLite no puede aplanarla (es un JOIN) y la materializa entera, o sea
@@ -1245,7 +1247,8 @@ ON Movimientos_Caja(Fecha_Hora);
 -- RI-04: un movimiento por (Tipo, apunte). Es la idempotencia que caja_movimientos::registrar ya
 -- garantiza con su WHERE NOT EXISTS, y es tambien lo que hace barata esa comprobacion: sin estos
 -- indices era un SCAN de la tabla en cada cobro, gasto y anulacion, y como la sentencia se replica
--- tal cual, en Turso cada cobro leia (y facturaba) el historial entero. Parciales porque cada fila
+-- tal cual, en la nube cada cobro leia el historial entero (y las filas leidas del SQLite del
+-- Durable Object se facturan). Parciales porque cada fila
 -- apunta a un pago O a un gasto. SQLite parte el OR de aquella sentencia y usa uno por rama.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_movcaja_pago
 ON Movimientos_Caja(Tipo, ID_Pago) WHERE ID_Pago IS NOT NULL;
@@ -1514,7 +1517,8 @@ ON Notificacion_Lecturas(ID_Usuario);
 ========================================================= */
 -- Stock por producto + caducidad proxima + lote FEFO siguiente. Reescrita (DB-12) para NO usar
 -- subconsultas correlacionadas por producto (que re-escaneaban Lotes_Producto una vez por producto
--- y disparaban lecturas -> coste de Turso). Ahora son 2 pasadas unicas sobre Lotes_Producto:
+-- y disparaban lecturas: tiempo y, en la nube, filas leidas que se facturan). Ahora son 2 pasadas
+-- unicas sobre Lotes_Producto:
 --   * agg:      SUM(stock) por producto + MIN(caducidad) de los lotes con stock (= caducidad proxima).
 --   * lote_fefo: ROW_NUMBER() en UNA pasada para elegir el lote FEFO siguiente (rn = 1).
 -- Columnas de salida IDENTICAS a la version anterior (Stock_Actual, Caducidad_Proxima, Lote_Proximo).
@@ -1880,7 +1884,8 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
    por `_migrations`, no entraba en el snapshot anti-drift y solo se podia leer
    ejecutandolo mentalmente. Un cambio en aquel no dejaba rastro en ningun sitio.
 
-   Que estas tablas se creen tambien en el tenant de Turso es DELIBERADO y no molesta:
+   Que estas tablas se creen tambien en la base del negocio en la nube (el SQLite de su
+   TenantHub) es DELIBERADO y no molesta:
    se quedan vacias, como ya dice la cabecera de este fichero. El volcado de recuperacion
    no las mira (`esTablaDeNegocio` descarta todo lo que empieza por `_`, ver
    domains/sync/bootstrap.ventana.ts), asi que no viajan ni de vuelta.
