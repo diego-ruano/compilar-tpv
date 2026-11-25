@@ -116,7 +116,6 @@ export default tseslint.config(
         rules: {
             "no-restricted-imports": ["error", { paths: [
                 { name: "@tauri-apps/api/core", importNames: ["invoke"], message: "Usa commands de @tpv/client: nombre, argumentos y respuesta proceden de Rust." },
-                { name: "@tpv/client", importNames: ["invokeClient", "rawInvoke"], message: "Usa las funciones commands generadas." },
             ] }],
         },
     },

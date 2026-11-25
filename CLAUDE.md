@@ -143,7 +143,7 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
   campo ni inglés, y con el mismo texto en la Main y en el worker. En el frontend,
   `toAppError(e)` / `esError(e, "…")`.
 - **Nombre, argumentos y respuesta están tipados**: usar `commands.*` de `@tpv/client`, nunca
-  `invoke`/`invokeClient` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
+  `invoke` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
   sólo conservar helpers de orquestación o estado de presentación. CI comprueba la exportación real.
   Un comando que nadie invoca no se registra.
 
