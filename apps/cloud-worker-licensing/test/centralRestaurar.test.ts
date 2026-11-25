@@ -179,6 +179,22 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 			["_migrations"],
 		],
 		[
+			"con otra sentencia detrás de una fila, que dejaría la central sin licencias",
+			(t) => conUnaFilaMas(t, `INSERT INTO "admin_audit" ("audit_id", "action", "at_ms") VALUES ('a', 'x', 1); DELETE FROM licenses;`),
+			/^copia_no_valida: la línea \d+ no se puede cargar: sobra_texto \(carácter \d+\)$/,
+			["DELETE", "licenses"],
+		],
+		[
+			"con una subconsulta en una fila, que llevaría un correo a otra tabla",
+			(t) =>
+				conUnaFilaMas(
+					t,
+					`INSERT INTO "admin_audit" ("audit_id", "action", "detail", "at_ms") VALUES ('a', 'x', (SELECT customer_email FROM licenses LIMIT 1), 1);`,
+				),
+			/^copia_no_valida: la línea \d+ no se puede cargar: valor_no_literal \(carácter \d+\)$/,
+			["SELECT", "customer_email"],
+		],
+		[
 			"con una clave foránea rota",
 			(t) =>
 				conUnaFilaMas(

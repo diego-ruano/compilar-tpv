@@ -317,7 +317,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		expect(metadatos?.seq).toBe(String(numerado));
 	});
 
-	it("una copia cortada o de otra versión no se restaura y el objeto se queda vacío", async () => {
+	it("una copia cortada, de otra versión o con una fila que no es sólo una fila no se restaura y el objeto se queda vacío", async () => {
 		const t = "perdida-copia-mala";
 		await negocioConCopia(t);
 		await stub(t).borrarTodo();
@@ -327,17 +327,23 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		await bucket.put(claveDeCopia(t, "2026-01-01"), await gzip(cortada));
 		const deOtraVersion = buena.replace(/^-- Migraciones: (.*)$/m, "-- Migraciones: $1,9999_del_futuro");
 		await bucket.put(claveDeCopia(t, "2026-01-02"), await gzip(deOtraVersion));
+		// Una fila con otra sentencia detrás, que vaciaría las zonas si se ejecutara.
+		const manipulada = buena.replace(/^(INSERT INTO "Clientes" .*\);)$/m, "$1 DELETE FROM Zonas;");
+		expect(manipulada).not.toBe(buena);
+		await bucket.put(claveDeCopia(t, "2026-01-03"), await gzip(manipulada));
 
 		const r = await conCentral(async (central) => {
 			await central.nacer(t);
 			return {
 				cortada: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-01", modo: "main", motivo: "abc" }),
 				otra: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-02", modo: "main", motivo: "abc" }),
+				manipulada: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-03", modo: "main", motivo: "abc" }),
 				noHay: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2025-01-01", modo: "main", motivo: "abc" }),
 			};
 		});
 		expect(r.cortada).toMatchObject({ status: 422, body: { error: "copia_cortada" } });
 		expect(r.otra).toMatchObject({ status: 422, body: { error: "copia_de_otra_version" } });
+		expect(r.manipulada).toMatchObject({ status: 422, body: { error: "copia_no_valida" } });
 		expect(r.noHay).toMatchObject({ status: 404, body: { error: "copia_no_encontrada" } });
 		expect(await stub(t).estaAprovisionado()).toBe(false);
 		expect(await enElHub(t, (hub: any) => hub.state.storage.getAlarm())).toBeNull();
