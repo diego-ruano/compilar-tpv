@@ -160,6 +160,7 @@ describe("lo que la base central tiene que tener", () => {
  */
 const APLICADAS: Readonly<Record<string, string>> = {
 	"0001_inicial.sql": "ccc5a3b4868fcd6c3328833ca9ece143cd09ae6eac0fd6f7e1becf6b6ec8cf7e",
+	"0002_avisos_enviando.sql": "42a152566b7b14116ae7b7641b09dffcf468242a261f3de865b0c2bfa64395aa",
 };
 
 describe("las migraciones aplicadas no cambian", () => {

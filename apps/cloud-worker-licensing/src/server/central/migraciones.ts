@@ -15,5 +15,9 @@
 
 import type { Migracion } from "../../durableObjects/sqliteDelObjeto";
 import m0001 from "./migraciones/0001_inicial.sql";
+import m0002 from "./migraciones/0002_avisos_enviando.sql";
 
-export const MIGRACIONES_DE_LA_CENTRAL: readonly Migracion[] = [{ name: "0001_inicial.sql", sql: m0001 }];
+export const MIGRACIONES_DE_LA_CENTRAL: readonly Migracion[] = [
+	{ name: "0001_inicial.sql", sql: m0001 },
+	{ name: "0002_avisos_enviando.sql", sql: m0002 },
+];

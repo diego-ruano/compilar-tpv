@@ -15,6 +15,11 @@
             "nombre": "0001_inicial.sql",
             "hash": "‹el hash de la migración›",
             "aplicadaMs": 1764036000000
+          },
+          {
+            "nombre": "0002_avisos_enviando.sql",
+            "hash": "‹el hash de la migración›",
+            "aplicadaMs": 1764036000000
           }
         ],
         "averia": null,
@@ -62,7 +67,7 @@
           "generada": "2026-11-25T01:00:00.000Z",
           "filas": 0,
           "tablas": 22,
-          "ultimaMigracion": "0001_inicial.sql",
+          "ultimaMigracion": "0002_avisos_enviando.sql",
           "marcador": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
           "pedida": "2026-11-25T01:00:00.000Z"
         }
@@ -128,6 +133,11 @@
         "migraciones": [
           {
             "nombre": "0001_inicial.sql",
+            "hash": "‹el hash de la migración›",
+            "aplicadaMs": 1764036000000
+          },
+          {
+            "nombre": "0002_avisos_enviando.sql",
             "hash": "‹el hash de la migración›",
             "aplicadaMs": 1764036000000
           }
@@ -212,6 +222,11 @@
             "nombre": "0001_inicial.sql",
             "hash": "‹el hash de la migración›",
             "aplicadaMs": 1764036000000
+          },
+          {
+            "nombre": "0002_avisos_enviando.sql",
+            "hash": "‹el hash de la migración›",
+            "aplicadaMs": 1764036000000
           }
         ],
         "averia": null,
@@ -258,6 +273,11 @@
         "migraciones": [
           {
             "nombre": "0001_inicial.sql",
+            "hash": "‹el hash de la migración›",
+            "aplicadaMs": 1764036000000
+          },
+          {
+            "nombre": "0002_avisos_enviando.sql",
             "hash": "‹el hash de la migración›",
             "aplicadaMs": 1764036000000
           }
