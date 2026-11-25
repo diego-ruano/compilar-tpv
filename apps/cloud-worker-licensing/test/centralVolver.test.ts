@@ -141,7 +141,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 			enCurso: { restauracion: null, vuelta: { destino: new Date(antes).toISOString(), desdeMs: expect.any(Number) } },
 		});
 
-		await central.stub.reiniciar();
+		await central.stub.reiniciar(MARCADORES.actual);
 		expect(llamadas.at(-1)).toBe("reiniciar");
 		expect((await central.db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(1);
 		expect((await central.stub.estado()).enCurso).toEqual({ restauracion: null, vuelta: null });
@@ -328,6 +328,47 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 		expect(await a).toMatchObject({ ok: true, valor: { marcador: A } });
 		expect(pedidas(llamadas)).toEqual([`restaurar:${A}`]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: A, fase: "preparada" });
+	});
+
+	it("el reinicio es de quien la prepara: sólo reinicia la vuelta preparada que se deshace con ese marcador; sin ninguna, con otra o con una pidiéndose a la plataforma, no reinicia y dice por qué", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		const deshacerDeA = "000000d0-00000000-00000000-0000000000000000000000000000000a";
+		const deshacerDeB = "000000d0-00000000-00000000-0000000000000000000000000000000b";
+		const actuales = [deshacerDeA, deshacerDeB];
+		const senal = { pidiendoB: false, sueltaB: false };
+		await conDobleDeInstantes(central, llamadas, {
+			marcadorActual: () => actuales.shift()!,
+			alRestaurar: async (m) => {
+				if (m !== B) return;
+				senal.pidiendoB = true;
+				while (!senal.sueltaB) await pausa();
+			},
+		});
+		const reinicios = () => llamadas.filter((l) => l === "reiniciar").length;
+
+		expect(await central.stub.reiniciar(deshacerDeA)).toEqual({ ok: false, error: "central_sin_vuelta_preparada" });
+
+		expect((await central.stub.prepararVuelta({ marcador: A })).ok).toBe(true);
+		expect(await central.stub.reiniciar(deshacerDeB)).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
+
+		// B se queda la marca, y se le está pidiendo a la plataforma: nadie la reinicia, tampoco A.
+		const b = central.stub.prepararVuelta({ marcador: B });
+		await vi.waitFor(() => expect(senal.pidiendoB).toBe(true));
+		for (const deshacer of [deshacerDeA, deshacerDeB]) {
+			expect(await central.stub.reiniciar(deshacer)).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
+		}
+		expect(reinicios()).toBe(0);
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "programando" });
+
+		senal.sueltaB = true;
+		expect(await b).toMatchObject({ ok: true, valor: { marcador: B, deshacer: deshacerDeB } });
+		expect(await central.stub.reiniciar(deshacerDeA)).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
+		expect(reinicios()).toBe(0);
+
+		await central.stub.reiniciar(deshacerDeB);
+		expect(reinicios()).toBe(1);
+		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 	});
 
 	it("repetir la misma orden con la vuelta ya preparada devuelve la misma, sin otra copia ni otra petición; a otro destino, prepara otra", async () => {

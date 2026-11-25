@@ -470,6 +470,56 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 	});
 
+	it("el reinicio es de quien prepara la vuelta: si tras reiniciar la suya otra se le está pidiendo a la plataforma, no reinicia otra vez, dice que sigue la otra, y la otra termina", async () => {
+		const A = "000000a0-00000000-00000000-0000000000000000000000000000000a";
+		const B = "000000b0-00000000-00000000-0000000000000000000000000000000b";
+		const deshacerDeA = "000000d0-00000000-00000000-0000000000000000000000000000000a";
+		const deshacerDeB = "000000d0-00000000-00000000-0000000000000000000000000000000b";
+		const actuales = [deshacerDeA, deshacerDeB];
+		const pausa = () => new Promise((r) => setTimeout(r, 5));
+		const central = await centralDePrueba();
+		const llamadas: string[] = [];
+		const senal = { pidiendoB: false, sueltaB: false };
+		await conDobleDeInstantes(central, llamadas, {
+			marcadorActual: () => actuales.shift()!,
+			alRestaurar: async (m) => {
+				if (m !== B) return;
+				senal.pidiendoB = true;
+				while (!senal.sueltaB) await pausa();
+			},
+		});
+		// Tras reiniciar la de A, la central no contesta a la primera (arrancando); a la segunda, contesta
+		// cuando la vuelta de B ya se le está pidiendo a la plataforma.
+		let estados = 0;
+		const deA = centralInterceptada(central, async (metodo, _a, llamar) => {
+			if (metodo !== "estado") return llamar();
+			if (++estados === 1) throw new Error("arrancando");
+			while (!senal.pidiendoB) await pausa();
+			return llamar();
+		});
+
+		const a = pedir(entornoCon(deA), "POST", "/volver", { cuerpo: json({ marcador: A }) });
+		await vi.waitFor(() => expect(estados).toBe(1));
+		const b = pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: B }) });
+
+		expect(await a).toMatchObject({
+			status: 409,
+			body: {
+				ok: false,
+				error: "central_vuelta_a_la_vez",
+				message: expect.stringContaining("no se ha reiniciado, para no cortarla"),
+				deshacer: deshacerDeA,
+				estado: { enCurso: { vuelta: { destino: B, fase: "programando" } } },
+			},
+		});
+		// A ha reiniciado una vez, para la suya; a la de B no la ha tocado.
+		expect(llamadas).toEqual(["actual", `restaurar:${A}`, "reiniciar", "actual", `restaurar:${B}`]);
+
+		senal.sueltaB = true;
+		expect(await b).toMatchObject({ status: 200, body: { ok: true, destino: B, deshacer: deshacerDeB } });
+		expect(llamadas).toEqual(["actual", `restaurar:${A}`, "reiniciar", "actual", `restaurar:${B}`, "reiniciar"]);
+	});
+
 	it("en local, sin el doble, dice que no hay vuelta a un instante y la central sigue atendiendo", async () => {
 		const central = await centralDePrueba();
 		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ instanteMs: Date.now() - 60_000 }) });

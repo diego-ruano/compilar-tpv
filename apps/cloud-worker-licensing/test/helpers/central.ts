@@ -146,7 +146,9 @@ export const MARCADORES = {
  * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
  * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
  * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar). Con
- * `alRestaurar`, dejar preparada la vuelta espera a lo que devuelva (para retenerla a mitad).
+ * `alRestaurar`, dejar preparada la vuelta espera a lo que devuelva (para retenerla a mitad). El
+ * marcador de ahora (con el que se deshace) es siempre `MARCADORES.actual`, salvo que `marcadorActual`
+ * dé otro: para distinguir dos preparaciones.
  */
 export async function conDobleDeInstantes(
 	central: Pick<CentralDePrueba, "stub">,
@@ -154,12 +156,13 @@ export async function conDobleDeInstantes(
 	opciones: {
 		alReiniciar?: (state: DurableObjectState) => void;
 		alRestaurar?: (marcador: string) => Promise<void> | void;
+		marcadorActual?: () => string;
 	} = {},
 ): Promise<void> {
-	const { alReiniciar = vuelto, alRestaurar } = opciones;
+	const { alReiniciar = vuelto, alRestaurar, marcadorActual = () => MARCADORES.actual } = opciones;
 	await enElObjeto(central, (state, objeto) => {
 		(objeto as { instantes: unknown }).instantes = {
-			marcadorActual: async () => (llamadas.push("actual"), MARCADORES.actual),
+			marcadorActual: async () => (llamadas.push("actual"), marcadorActual()),
 			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), MARCADORES.destino),
 			restaurarAlReiniciar: async (m: string) => {
 				llamadas.push(`restaurar:${m}`);
@@ -279,6 +282,12 @@ export async function conPlataformaQueVuelve(central: Pick<CentralDePrueba, "stu
 		alPedirUnInstante: (marcador: string) => void (instante = marcador),
 		/** Deja el objeto como la foto de `marcador`, por debajo: lo que pasó antes de la prueba. */
 		ponerLaFoto: (marcador: string) => enElObjeto(central, (state) => ponerLaFoto(state.storage, fotos.get(marcador)!)),
+		/**
+		 * Reinicia el objeto por su cuenta, como un despliegue: vuelve a arrancar y, si había una vuelta
+		 * pedida, vuelve. No pasa por `BaseCentral.reiniciar`, que sólo reinicia para aplicar la suya.
+		 */
+		reiniciar: () =>
+			enElObjeto(central, (_state, objeto) => (objeto as { instantes: Instantes }).instantes.reiniciar("prueba")),
 	};
 }
 

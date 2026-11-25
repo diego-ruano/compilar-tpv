@@ -84,14 +84,15 @@ const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = 
 /**
  * La respuesta de lo que la central contesta que no ha hecho: su código, qué pasa (`message`, entre
  * lo que haya pasado `antes` y lo que se puede hacer `despues`) y, si el objeto lo dice, por qué
- * (`detalle`, el motivo técnico, que el CLI enseña aparte). `extra` va tal cual.
+ * (`detalle`, el motivo técnico, que el CLI enseña aparte). `quePasa` sustituye a lo que dice
+ * `QUE_PASA` de ese código, cuando en ese sitio no es lo que hay que hacer. `extra` va tal cual.
  */
 function noHecho(
 	c: Context<{ Bindings: Env }>,
 	fallo: FalloDeLaCentral,
-	opciones: { antes?: string; despues?: string; extra?: Record<string, unknown> } = {},
+	opciones: { antes?: string; quePasa?: string; despues?: string; extra?: Record<string, unknown> } = {},
 ) {
-	const quePasa = QUE_PASA[fallo.error] ?? "La central no lo ha hecho.";
+	const quePasa = opciones.quePasa ?? QUE_PASA[fallo.error] ?? "La central no lo ha hecho.";
 	return c.json(
 		{
 			ok: false,
@@ -213,14 +214,17 @@ const volverSchema = z
  *
  * 1. `prepararVuelta`: cierra la central, deja la copia de antes en R2 (si se puede copiar) y la
  *    vuelta preparada. Contesta el marcador con el que se deshace.
- * 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, vuelve.
+ * 2. `reiniciar(deshacer)`: `ctx.abort()`, sólo si la vuelta preparada es ésta. La llamada falla, y
+ *    es lo esperado: al arrancar, vuelve.
  *
- * Después se espera a que conteste: si sigue con la vuelta sin aplicar, se reinicia otra vez. Lo que
- * se devuelve, también si algo no sale, es con qué se deshace y dónde está la copia de antes; y queda
- * en el rastro en cuanto la vuelta está preparada, antes de reiniciar, por si esta llamada no llega a
- * terminar. Antes de eso, el objeto lo ha dejado en R2, por si no llega ni la respuesta de
- * `prepararVuelta`. Una central que ha vuelto pero no atiende (vuelve a un instante con algo a medias, sin
- * esquema, o una migración no entra) no se da por buena.
+ * Después se espera a que conteste: si sigue con esta vuelta sin aplicar, se reinicia otra vez. Si la
+ * que hay en curso es otra, no se toca: es de quien la está preparando, y reiniciar cortaría su
+ * preparación o aplicaría su vuelta (`central_vuelta_a_la_vez`). Lo que se devuelve, también si algo
+ * no sale, es con qué se deshace y dónde está la copia de antes; y queda en el rastro en cuanto la
+ * vuelta está preparada, antes de reiniciar, por si esta llamada no llega a terminar. Antes de eso, el
+ * objeto lo ha dejado en R2, por si no llega ni la respuesta de `prepararVuelta`. Una central que ha
+ * vuelto pero no atiende (vuelve a un instante con algo a medias, sin esquema, o una migración no
+ * entra) no se da por buena.
  */
 centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 	const env = c.env;
@@ -238,16 +242,24 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 
 	let estado: EstadoDeLaCentral | null = null;
 	try {
-		estado = await reiniciarYEsperar(env);
-		if (estado.enCurso.vuelta) estado = await reiniciarYEsperar(env);
+		estado = await reiniciarYEsperar(env, deshacer);
+		if (esLaPreparada(estado, deshacer)) estado = await reiniciarYEsperar(env, deshacer);
 	} catch {
 		// No contesta: no se sabe si ha vuelto. Se dice, con lo necesario para deshacerlo.
 	}
-	const aplicada = estado !== null && !estado.enCurso.vuelta;
+	const sinAplicar = estado !== null && esLaPreparada(estado, deshacer);
+	// Otra vuelta en curso: ha empezado después de preparar ésta, y es de quien la prepara.
+	const otra = !sinAplicar && Boolean(estado?.enCurso.vuelta);
 	// Sin esquema no es una avería del objeto, pero tampoco atiende.
 	const noAtiende: FalloDeLaCentral | null =
 		estado?.averia ?? (estado && !estado.aprovisionada ? { ok: false, error: "central_sin_aprovisionar" } : null);
-	const resultado = !estado ? "central_vuelta_sin_comprobar" : !aplicada ? "central_vuelta_sin_aplicar" : (noAtiende?.error ?? "ok");
+	const resultado = !estado
+		? "central_vuelta_sin_comprobar"
+		: sinAplicar
+			? "central_vuelta_sin_aplicar"
+			: otra
+				? "central_vuelta_a_la_vez"
+				: (noAtiende?.error ?? "ok");
 	rastro(c, { accion: "volver", resultado, destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
 
 	if (!estado) {
@@ -262,7 +274,7 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 			503,
 		);
 	}
-	if (!aplicada) {
+	if (sinAplicar) {
 		return c.json(
 			{
 				ok: false,
@@ -274,6 +286,13 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 			503,
 		);
 	}
+	if (otra) {
+		return noHecho(c, { ok: false, error: "central_vuelta_a_la_vez" }, {
+			quePasa:
+				"Otra vuelta a un instante ha empezado después de preparar ésta, y es la que sigue: la central no se ha reiniciado, para no cortarla. Mira cómo va con pnpm central:estado antes de repetir nada.",
+			extra: { deshacer, copiaDeAntes, estado },
+		});
+	}
 	if (noAtiende) {
 		return noHecho(c, noAtiende, {
 			antes: "La central ha vuelto, pero no atiende.",
@@ -284,10 +303,20 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 	return c.json({ ok: true, destino: prep.valor.marcador, deshacer, copiaDeAntes, estado });
 });
 
-/** Reinicia la central y espera a que vuelva a contestar: cómo está después. Lanza si no contesta. */
-async function reiniciarYEsperar(env: Env): Promise<EstadoDeLaCentral> {
+/** ¿Es la vuelta en curso la preparada que se deshace con `deshacer`? */
+function esLaPreparada(estado: EstadoDeLaCentral, deshacer: string): boolean {
+	const vuelta = estado.enCurso.vuelta;
+	return vuelta?.fase === "preparada" && vuelta.preparada?.deshacer === deshacer;
+}
+
+/**
+ * Reinicia la central para aplicar la vuelta preparada que se deshace con `deshacer`, y espera a que
+ * vuelva a contestar: cómo está después. El objeto sólo se reinicia si esa vuelta sigue preparada
+ * (`BaseCentral.reiniciar`); si no, lo dice el estado. Lanza si no contesta.
+ */
+async function reiniciarYEsperar(env: Env, deshacer: string): Promise<EstadoDeLaCentral> {
 	try {
-		await centralDe(env).reiniciar();
+		await centralDe(env).reiniciar(deshacer);
 	} catch {
 		// `ctx.abort()` corta la llamada que lo pide: es lo que tiene que pasar.
 	}

@@ -566,6 +566,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"central_instante_fuera_de_plazo",
 	"central_vuelta_no_disponible",
 	"central_vuelta_a_la_vez",
+	"central_sin_vuelta_preparada",
 	"central_vuelta_sin_aplicar",
 	"central_vuelta_sin_comprobar",
 	"ts_out_of_range",

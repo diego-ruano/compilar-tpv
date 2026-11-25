@@ -66,7 +66,7 @@ import {
 	motivoDeRechazo,
 	reafirmarPragmas,
 } from "./baseCentral.guardas";
-import { prepararVueltaDeLaCentral } from "./baseCentral.instante";
+import { prepararVueltaDeLaCentral, reiniciarParaAplicar } from "./baseCentral.instante";
 import { ejecutarOperacion } from "./baseCentral.operar";
 import { restaurarLaCentral } from "./baseCentral.restaurar";
 import { instantesDe, type Instantes } from "./instantes";
@@ -180,9 +180,14 @@ export class BaseCentral extends DurableObject<Env> {
 		return prepararVueltaDeLaCentral(this.ctx.storage, this.env.COPIAS, this.instantes, this.averia, destino);
 	}
 
-	/** Reinicia el objeto, que al arrancar vuelve al instante preparado. Lanza en quien lo llama. */
-	reiniciar(): void {
-		this.instantes.reiniciar("central_devuelta");
+	/**
+	 * Reinicia el objeto, que al arrancar vuelve al instante preparado, sólo si la vuelta preparada es
+	 * la que se deshace con `deshacer` (`baseCentral.instante.ts`): si lo reinicia, lanza en quien lo
+	 * llama. Con otra vuelta en curso contesta `central_vuelta_a_la_vez`, y sin ninguna,
+	 * `central_sin_vuelta_preparada`, sin reiniciar.
+	 */
+	reiniciar(deshacer: string): RespuestaDeLaCentral<null> {
+		return reiniciarParaAplicar(this.ctx.storage, this.instantes, deshacer);
 	}
 }
 

@@ -10,8 +10,11 @@
 //    ahora, que es con el que se deshace; deja en R2 una copia de cómo está
 //    (`base-central/antes-de-volver-<hora>.sql.gz`), con ese marcador en sus metadatos, y deja la
 //    vuelta preparada para el siguiente arranque.
-// 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto
-//    vuelve.
+// 2. `reiniciar(deshacer)`: `ctx.abort()`, y al arrancar el objeto vuelve. La llamada falla en quien
+//    la hace, y es lo esperado. Sólo reinicia si la vuelta preparada es la que se deshace con
+//    `deshacer` (`reiniciarParaAplicar`): el reinicio es de quien la ha preparado, y con otra en curso
+//    (preparándose, pidiéndose a la plataforma o preparada) cortaría su preparación o aplicaría
+//    una vuelta que no es la suya.
 //
 // **La marca de vuelta en curso** (`CLAVE_VUELTA_EN_CURSO`) cierra la central desde antes de la copia
 // hasta el reinicio: lo que se escribiera entretanto no estaría en la copia de antes y se perdería al
@@ -170,4 +173,24 @@ export async function prepararVueltaDeLaCentral(
 	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes };
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "preparada", preparada, anterior: null } satisfies MarcaDeVuelta);
 	return { ok: true, valor: preparada };
+}
+
+/**
+ * La segunda mitad de la vuelta (ver la cabecera): reinicia el objeto, que al arrancar vuelve, sólo
+ * si la vuelta en curso es la preparada que se deshace con `deshacer`. Con otra en curso, o sin
+ * ninguna, no lo reinicia y dice por qué. Si lo reinicia, no vuelve: lanza en quien lo ha llamado.
+ */
+export function reiniciarParaAplicar(
+	storage: DurableObjectStorage,
+	instantes: Instantes,
+	deshacer: string,
+): RespuestaDeLaCentral<null> {
+	const vuelta = marcasDe(storage).vuelta;
+	if (!vuelta) return { ok: false, error: "central_sin_vuelta_preparada" };
+	if (vuelta.fase !== "preparada" || vuelta.preparada?.deshacer !== deshacer) {
+		const como = vuelta.fase === "preparada" ? "preparada" : "preparándose";
+		return otraALaVez(`La vuelta en curso es otra: la vuelta a ${vuelta.destino}, ${como}.`);
+	}
+	instantes.reiniciar("central_devuelta");
+	return { ok: true, valor: null };
 }

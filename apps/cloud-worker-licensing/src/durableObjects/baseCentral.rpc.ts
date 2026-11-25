@@ -47,9 +47,15 @@ export type CodigoDeLaCentral =
 	| "central_vuelta_en_curso"
 	/**
 	 * Otra vuelta a un instante se estaba preparando a la vez, y sólo sigue una: o se la estaba pidiendo
-	 * a la plataforma, o se ha quedado la marca mientras ésta esperaba (`baseCentral.instante.ts`).
+	 * a la plataforma, o se ha quedado la marca mientras ésta esperaba (`baseCentral.instante.ts`). O se
+	 * ha pedido reiniciar para aplicar una vuelta, y la que hay en curso es otra.
 	 */
 	| "central_vuelta_a_la_vez"
+	/**
+	 * Se ha pedido reiniciar la central para aplicar una vuelta preparada, y no hay ninguna: o ya se ha
+	 * aplicado (el objeto se ha reiniciado desde entonces), o no llegó a pedirse. No se ha reiniciado.
+	 */
+	| "central_sin_vuelta_preparada"
 	/** Volver a un instante del futuro o de hace más de 30 días. */
 	| "central_instante_fuera_de_plazo"
 	/** La plataforma no devuelve objetos a un instante (en local no existe). */
@@ -80,7 +86,10 @@ export type MarcaDeVuelta = {
 	 * - `preparada`: la plataforma la tiene, y se aplica en el siguiente arranque.
 	 */
 	fase: "preparando" | "programando" | "preparada";
-	/** Ya preparada, lo que contestó: lo que se devuelve si se repite la misma orden. */
+	/**
+	 * Ya preparada, lo que contestó: lo que se devuelve si se repite la misma orden, y con su `deshacer`
+	 * se pide el reinicio que la aplica (`BaseCentral.reiniciar`).
+	 */
 	preparada?: VueltaPreparada;
 	/** La vuelta que ya estaba preparada cuando empezó ésta: si ésta no sale, es la que sigue en pie. */
 	anterior?: MarcaDeVuelta | null;
