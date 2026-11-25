@@ -12,12 +12,14 @@
 //   · un pedido con su clave de envío (`id_envio`) no sale dos veces: un reintento de uno que ya
 //     salió contesta ok sin mandar otro, uno que falló se puede repetir y uno que está saliendo
 //     ahora mismo no se manda otra vez;
+//   · con la central saturada o con un fallo pasajero, el pedido sale igual, y el cupo y la traza que
+//     no se han podido apuntar quedan como en el resto del Worker: su evento en Axiom, sin Sentry;
 //   · las demás rutas de reservas web, que no leen la base del negocio, se quedan en el Worker.
 //
 // La base central es la de verdad, la del negocio (`helpers/negocioFirmado.ts`): la ruta que se
 // ejecuta dentro del TenantHub llega a ella como en producción.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { conNegocioFirmado, pedirFirmado, viajes, type Negocio } from "./helpers/negocioFirmado";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
@@ -26,6 +28,24 @@ import { firmarSesion } from "../src/lib/sesion";
 import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
 const deps = { firmarSesion, olvidarLicenciasCacheadas };
+
+/** Lo que se manda a Sentry: la operación. */
+const { capturados } = vi.hoisted(() => ({ capturados: [] as string[] }));
+
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			if (!original.esRechazoEsperado(error)) capturados.push(operacion);
+			original.capturarError(error, operacion);
+		},
+	};
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 /** Lo que se ha mandado, y el binding de correo que lo apunta. */
 const enviados: any[] = [];
@@ -51,9 +71,10 @@ const HUELLA_ANA = "80ec301799f952e798d6387318dc4616444dc00c3963ed5c1845cf85c0e6
  * binding de correo puesto en el entorno de su TenantHub: dentro del DO la ruta usa el entorno del DO,
  * no el del Worker.
  */
-async function conNegocio(nombre: string, prueba: (n: Negocio) => Promise<void>): Promise<void> {
+async function conNegocio(nombre: string, prueba: (n: Negocio, hub: any) => Promise<void>): Promise<void> {
 	enviados.length = 0;
 	correoCaido = false;
+	capturados.length = 0;
 	await conNegocioFirmado(
 		deps,
 		`correo-hub-${nombre}`,
@@ -77,7 +98,7 @@ async function conNegocio(nombre: string, prueba: (n: Negocio) => Promise<void>)
 				ID_RESERVA,
 			);
 			await n.enCentral("INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', ?, 1);", n.tenantId);
-			await prueba(n);
+			await prueba(n, hub);
 		},
 	);
 }
@@ -255,6 +276,56 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(await res.json()).toEqual({ ok: true });
 			expect(enviados).toHaveLength(1);
+		});
+	});
+});
+
+describe("el pedido sin la central: sale igual, y sin Sentry si es carga o un fallo pasajero", () => {
+	it("el cupo y la traza que no se apuntan dejan su evento en Axiom, con la ruta por su patrón", async () => {
+		for (const [motivo, marca] of [
+			["saturada", { overloaded: true }],
+			["pasajera", { retryable: true }],
+		] as const) {
+			await conNegocio(`pedido-central-${motivo}`, async (n, hub) => {
+				const eventos: any[] = [];
+				vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+					eventos.push(...JSON.parse(String(init.body)));
+					return new Response("{}", { status: 200 });
+				});
+				hub.env = { ...hub.env, AXIOM_TOKEN: "token-de-pruebas", AXIOM_DATASET_SYNC: "sync-de-pruebas" };
+				// Todo lo que toca `email_sends` falla como lo marca la plataforma; lo demás llega.
+				n.interceptarLaCentral((metodo, [s], llamar) =>
+					metodo === "ejecutar" && /email_sends/.test((s as SentenciaEnlazada).sql)
+						? Promise.reject(Object.assign(new Error("Durable Object is overloaded."), marca))
+						: llamar(),
+				);
+
+				const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
+				expect(await res.json()).toEqual({ ok: true });
+				expect(enviados).toHaveLength(1);
+
+				// El cupo (`email.quota`) y la traza (`email.audit`, tras sus intentos): ni uno a Sentry.
+				const deLaCentral = () => eventos.filter((e) => e.event === "central_no_disponible");
+				await vi.waitFor(() => expect(deLaCentral()).toHaveLength(2));
+				expect(deLaCentral().map((e) => [e.motivo, e.metodo, e.ruta, e.tenant_id])).toEqual([
+					[motivo, "POST", "/v1/email/enviar-pedido", n.tenantId],
+					[motivo, "POST", "/v1/email/enviar-pedido", n.tenantId],
+				]);
+				expect(capturados).toEqual([]);
+			});
+		}
+	});
+
+	it("un fallo que no es de carga ni pasajero sigue yendo a Sentry, con su operación", async () => {
+		await conNegocio("pedido-central-rechazo", async (n) => {
+			n.interceptarLaCentral((metodo, [s], llamar) =>
+				metodo === "ejecutar" && /email_sends/.test((s as SentenciaEnlazada).sql)
+					? Promise.reject(new Error("Durable Object exceeded its memory limit and was reset."))
+					: llamar(),
+			);
+			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
+			expect(await res.json()).toEqual({ ok: true });
+			expect(capturados).toEqual(["email.quota", "email.audit"]);
 		});
 	});
 });

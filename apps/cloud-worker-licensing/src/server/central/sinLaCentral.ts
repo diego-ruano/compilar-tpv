@@ -24,7 +24,9 @@
 // o averiada) va además a Sentry, con su causa, y al log: ahí hay algo que mirar.
 //
 // Lo mismo queda cuando la central no le atiende al `TenantHub`, que le habla por su cuenta (quién es
-// la Main, el `last_seen`): `registrarSinLaCentral`, con lo que hacía el hub en lugar de la ruta.
+// la Main, el `last_seen`): `registrarSinLaCentral`, con lo que hacía el hub en lugar de la ruta. Y
+// donde una petición sigue sin ella (el cupo y la traza de un pedido a un proveedor): con
+// `enLaPeticion`, la ruta por su patrón y la operación de siempre.
 //
 // Lo demás que lanza la central (un error de SQL, una sentencia prohibida) no es «no puede atender»:
 // sigue el camino de cualquier otro error.
@@ -73,7 +75,10 @@ export type DondeSinLaCentral = {
 	 * o lo que hacía el `TenantHub` (`sync.main_vigente`).
 	 */
 	operacion: string;
-	/** El método y la ruta del evento de Axiom. */
+	/**
+	 * El método y la ruta del evento de Axiom. La ruta, como `operacion`, es un valor que no elige
+	 * quien llama (AUD-27): el patrón de la ruta, o lo que hacía el `TenantHub` o el cron.
+	 */
 	metodo: string;
 	ruta: string;
 	tenantId?: string;
@@ -109,25 +114,36 @@ export function registrarSinLaCentral(
 			motivo,
 			metodo: donde.metodo,
 			ruta: donde.ruta,
-			error: String(causa.message ?? error).slice(0, 300),
+			// AUD-32: filtrado antes de recortarlo. Recortado antes, un correo o un JWT partidos por el
+			// corte ya no se reconocen y su principio queda a la vista.
+			error: acotar(String(causa.message ?? error), scrub, { bytes: 300, filtrado: MAX_FILTRADO }),
 			...(donde.tenantId ? { tenant_id: donde.tenantId } : {}),
 		}),
 	);
 	return motivo;
 }
 
+/**
+ * Dónde no ha atendido la central, en una petición HTTP: la ruta por su patrón y su negocio, si lo
+ * tiene. `operacion` es la de Sentry y del log, si no es la ruta (`email.quota`).
+ */
+export function enLaPeticion(c: Context, operacion = `${c.req.method} ${c.req.routePath}`): DondeSinLaCentral {
+	return {
+		env: c.env,
+		enSegundoPlano: (promesa) => enSegundoPlano(c, promesa),
+		operacion,
+		metodo: c.req.method,
+		// AUD-27: la ruta por su patrón, y no por su camino, que lo escribe quien llama (un nombre en el
+		// lugar de la versión del feed, que el filtro no reconoce).
+		ruta: c.req.routePath,
+		tenantId: (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId"),
+	};
+}
+
 /** La respuesta si `error` es que la central no ha podido atender; `null` si es cualquier otra cosa. */
 export function respuestaSinLaCentral(c: Context, error: unknown): Response | null {
 	if (!laCentralNoAtiende(error)) return null;
 
-	const motivo = registrarSinLaCentral(error, {
-		env: c.env,
-		enSegundoPlano: (promesa) => enSegundoPlano(c, promesa),
-		operacion: `${c.req.method} ${c.req.routePath}`,
-		metodo: c.req.method,
-		// Como en `sinElObjeto` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-		ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
-		tenantId: (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId"),
-	});
+	const motivo = registrarSinLaCentral(error, enLaPeticion(c));
 	return respuestaNoDisponible(c, motivo === "saturada");
 }

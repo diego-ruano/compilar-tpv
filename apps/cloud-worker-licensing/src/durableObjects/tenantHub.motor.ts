@@ -7,6 +7,8 @@ import { registrarSinLaCentral } from "../server/central/sinLaCentral";
 import { centralDe } from "../lib/objetosDelNegocio";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
+import { scrub } from "../observability/scrub";
+import { acotar, MAX_FILTRADO } from "../observability/tope";
 import { bytesUtf8 } from "../lib/texto";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
@@ -395,7 +397,11 @@ export class MotorTenantHub {
 			await storage.setAlarm(siguienteCopiaMs(negocio, Date.now()));
 		} catch (e) {
 			capturarError(e, "hub.copia_diaria");
-			this.emitSyncEvent("copia_diaria_fallida", { error: String((e as Error)?.message ?? e).slice(0, 300) });
+			// AUD-32: el mensaje, filtrado antes de recortarlo (un correo o un JWT partidos por el corte ya
+			// no se reconocen).
+			this.emitSyncEvent("copia_diaria_fallida", {
+				error: acotar(String((e as Error)?.message ?? e), scrub, { bytes: 300, filtrado: MAX_FILTRADO }),
+			});
 			await storage.setAlarm(Date.now() + REINTENTO_COPIA_MS);
 		}
 	}

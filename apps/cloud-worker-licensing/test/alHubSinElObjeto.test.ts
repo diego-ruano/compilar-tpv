@@ -269,6 +269,27 @@ describe("lo que queda anotado", () => {
 		]);
 		expect(JSON.stringify(enviados)).not.toContain("Ana López");
 	});
+
+	it("AUD-32: el error del evento se filtra antes de recortarlo: un correo o un JWT que cruzan el corte no asoman", async () => {
+		const enviados: any[] = [];
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			enviados.push(...JSON.parse(String(init.body)));
+			return new Response("{}", { status: 200 });
+		});
+		const axiom = { AXIOM_TOKEN: "token-de-pruebas", AXIOM_DATASET_SYNC: "sync-de-pruebas" };
+		// 290 caracteres que el filtro no toca; detrás, lo que cruza el corte de 300 y filtrado cabe.
+		const relleno = "la plataforma dice algo largo ".repeat(10).slice(0, 290);
+		const correo = "pepe.garcia@ejemplo.test";
+		const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+		for (const dato of [correo, jwt]) {
+			await montar([() => Object.assign(new Error(`${relleno} ${dato}`), { overloaded: true })]).pedir("GET", "/lectura", undefined, axiom);
+		}
+
+		await vi.waitFor(() => expect(enviados).toHaveLength(2));
+		expect(enviados.map((e) => e.error)).toEqual([`${relleno} [email]`, `${relleno} [jwt]`]);
+		expect(JSON.stringify(enviados)).not.toMatch(/pepe|eyJ/);
+	});
 });
 
 describe("por el RPC de verdad", () => {

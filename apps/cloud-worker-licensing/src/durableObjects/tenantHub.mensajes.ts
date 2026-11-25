@@ -34,6 +34,9 @@
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
+import { scrub } from "../observability/scrub";
+import { acotar } from "../observability/tope";
+import { HubError } from "../lib/errorHttp";
 import { bytesUtf8 } from "../lib/texto";
 import { buildInternalPayloadForHash, safeJsonParse, stableStringify } from "./tenantHub.envelope";
 import { formaDelPaso, type PasoDeSubida, type SubidaEnElSaludo } from "./tenantHub.subida";
@@ -302,11 +305,10 @@ export async function atenderHelloSigned(
 				// Echada o cerrada mientras se verificaba: su salida ya está contabilizada.
 				const ahora = sesionAbierta(ctx, ws);
 				if (!ahora) return;
-				const err = String(e?.message || e);
 				ctx.send(ws, {
 					type: "error",
 					error: "hello_failed",
-					details: err,
+					details: motivoDelSaludoFallido(e),
 				});
 				// Por `cerrar`, como todo cierre que inicia el DO: contabiliza la salida sin contar
 				// con que el runtime avise. Si era la Main reconectando, su sesión anterior ya se
@@ -317,6 +319,24 @@ export async function atenderHelloSigned(
 		})(),
 	);
 	return;
+}
+
+/** Un código, como los que lanza el saludo (`bad_ws_signature`, `device_replaced`…). */
+const CODIGO = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * El `details` de un `hello_failed`: el código de por qué no ha entrado (`device_replaced`,
+ * `license_revoked`, `challenge_expired`, `hub_unavailable`…), nunca texto interno. Un error que no
+ * es un código (el texto de SQLite de un error de la central, el de un `TypeError`) sale como
+ * `internal_error`, y su texto se queda en el log, filtrado (FABLE-B). Los clientes no leen `details`
+ * (`saludo_socket.rs` sólo mira el tipo): es para quien mira el tráfico, como el generador de carga.
+ */
+function motivoDelSaludoFallido(e: unknown): string {
+	if (e instanceof HubError) return e.code;
+	const mensaje = String((e as Error | undefined)?.message || e);
+	if (CODIGO.test(mensaje)) return mensaje;
+	console.error(acotar(`[ws] hello_failed → ${(e as Error | undefined)?.name || "Error"}: ${mensaje}`, scrub));
+	return "internal_error";
 }
 
 export function atenderRecoveryReady(

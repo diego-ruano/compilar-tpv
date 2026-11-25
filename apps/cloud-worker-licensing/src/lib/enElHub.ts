@@ -102,7 +102,8 @@ function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean
 			metodo: c.req.method,
 			// Como en `tenantAuth` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
 			ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
-			error: String(fallo.message ?? error).slice(0, 300),
+			// Igual: filtrado antes de recortarlo.
+			error: acotar(String(fallo.message ?? error), scrub, { bytes: 300, filtrado: MAX_FILTRADO }),
 		}),
 	);
 

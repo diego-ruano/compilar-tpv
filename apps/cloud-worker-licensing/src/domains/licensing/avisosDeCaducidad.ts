@@ -20,10 +20,15 @@
 //     mandan dos correos. Si el envío falla se suelta la marca, para que el ciclo siguiente lo
 //     reintente: un aviso que no ha salido no puede quedar contado como enviado.
 //   · **Cada licencia va por su cuenta.** Si la central falla con una, al poner o al soltar su
-//     marca, esa cuenta como fallida (y va a Sentry) y el ciclo sigue con las demás.
+//     marca, esa cuenta como fallida y el ciclo sigue con las demás. Si es que no ha podido atender,
+//     queda como en el resto del Worker (`registrarSinLaCentral`): su evento en Axiom, y Sentry sólo si
+//     no es carga ni un fallo pasajero. Cualquier otro fallo va a Sentry.
+//   · **Con la central saturada, el ciclo se corta**: las que faltan cuentan como fallidas, sin más
+//     viajes a una central que no atiende. Mañana se avisa de ellas, como de cualquier otra fallida.
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
+import { registrarSinLaCentral } from "../../server/central/sinLaCentral";
 import type { Sql } from "../../lib/sql";
 import {
 	licenciasPorCaducar,
@@ -81,17 +86,25 @@ export type ResumenDeAvisos = {
 	sinEnlace: boolean;
 };
 
+/** El peldaño que le toca a una licencia que caduca dentro de `restanteMs`, el más urgente; ninguno si no está en la escalera. */
+const peldanoDe = (restanteMs: number) => PELDANOS.find((p) => restanteMs <= p.dias * DIA_MS);
+
+/** La operación del cron, en Sentry y en el evento de la central que no atiende. */
+const OPERACION = "cron.license_expiry";
+
 /**
  * Un ciclo completo. Lo llama el `scheduled` del worker una vez al día; es idempotente, así que
  * adelantarlo o repetirlo no manda nada de más.
  *
  * La base llega de fuera, como en `cumplir`: así el ciclo se prueba entero contra una base central
- * de pruebas, con el esquema de verdad.
+ * de pruebas, con el esquema de verdad. `enSegundoPlano` mantiene viva la entrega a Axiom del evento
+ * de la central que no atiende: el `waitUntil` del cron.
  */
 export async function avisarDeCaducidades(
 	env: Env,
 	db: Sql,
 	ahoraMs = Date.now(),
+	enSegundoPlano: (promesa: Promise<unknown>) => void = (promesa) => void promesa,
 ): Promise<ResumenDeAvisos> {
 	const resumen: ResumenDeAvisos = {
 		revisadas: 0,
@@ -110,15 +123,15 @@ export async function avisarDeCaducidades(
 	const candidatas = await licenciasPorCaducar(db, ahoraMs, ahoraMs + DIAS_MAX * DIA_MS);
 	resumen.revisadas = candidatas.length;
 
-	for (const license of candidatas) {
+	for (const [i, license] of candidatas.entries()) {
 		const expiresAtMs = Number(license.expires_at_ms);
 		const restanteMs = expiresAtMs - ahoraMs;
-		const peldano = PELDANOS.find((p) => restanteMs <= p.dias * DIA_MS);
+		const peldano = peldanoDe(restanteMs);
 		if (!peldano) continue;
 
 		// Cada licencia, por su cuenta (E7a-7): lo que falle con una (la central, al poner o al soltar
-		// su marca) va a Sentry, cuenta como fallida y no corta a las demás. Si falla al soltarla, o
-		// después de ponerla, ese peldaño no sale (AVISO-CADUCIDAD, en docs/pendientes.md).
+		// su marca) cuenta como fallida y no corta a las demás, salvo la central saturada. Si falla al
+		// soltarla, o después de ponerla, ese peldaño no sale (AVISO-CADUCIDAD, en docs/pendientes.md).
 		try {
 			const gane = await marcarAvisoEnviado(db, {
 				licenseId: license.license_id,
@@ -155,9 +168,25 @@ export async function avisarDeCaducidades(
 				resumen.fallidos += 1;
 			}
 		} catch (err) {
-			capturarError(err, "cron.license_expiry");
-			console.error(`[avisos] la licencia ${license.license_id} falló:`, (err as any)?.message || err);
+			const sinLaCentral = registrarSinLaCentral(err, {
+				env,
+				enSegundoPlano,
+				operacion: OPERACION,
+				metodo: "cron",
+				ruta: OPERACION,
+			});
+			if (!sinLaCentral) {
+				capturarError(err, OPERACION);
+				console.error(`[avisos] la licencia ${license.license_id} falló:`, (err as any)?.message || err);
+			}
 			resumen.fallidos += 1;
+			// Saturada, seguir sería un viaje más por licencia a una central que no atiende (en
+			// 8e9eff7c, el primer fallo cortaba el ciclo). Las que faltan, fallidas: mañana se reintentan.
+			if (sinLaCentral === "saturada") {
+				const faltan = candidatas.slice(i + 1).filter((l) => peldanoDe(Number(l.expires_at_ms) - ahoraMs));
+				resumen.fallidos += faltan.length;
+				break;
+			}
 		}
 	}
 

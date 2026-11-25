@@ -50,7 +50,7 @@ import { CORREO_SOPORTE } from "../../lib/soporte";
 import { avisarBasePerdida, esBasePerdida } from "../../lib/basePerdida";
 import { enSegundoPlano } from "../../lib/enSegundoPlano";
 import { filtroPorIp } from "../../lib/limitador";
-import { respuestaSinLaCentral } from "../../server/central/sinLaCentral";
+import { enLaPeticion, registrarSinLaCentral, respuestaSinLaCentral } from "../../server/central/sinLaCentral";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
 import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
 import { CLAVE_DESCONOCIDA, licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
@@ -715,11 +715,15 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 			throw e;
 		}
 	} else if (esCambioDeEquipo) {
-		await reassignMainDevice(db, {
+		const respuestaPerdida = await reassignMainDevice(db, {
 			licenseId: lic.license_id,
 			fromDeviceId: lic.main_device_id,
 			toDeviceId: deviceId,
 		});
+		// El traslado entró y su respuesta se perdió por el camino (lo dijo su traza): la petición sigue
+		// como si hubiera llegado, y el viaje que no volvió queda como cualquier otro en el que la
+		// central no ha atendido: su evento en Axiom, y Sentry sólo si no es carga ni un fallo pasajero.
+		if (respuestaPerdida) registrarSinLaCentral(respuestaPerdida, enLaPeticion(c));
 
 		// AUD-02: y el equipo anterior deja de ser Main también en el `TenantHub`. Su socket seguía
 		// abierto con el rol `tpv` de cuando saludó, mandando SQL que la nube confirmaba y este

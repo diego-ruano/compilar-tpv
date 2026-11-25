@@ -299,6 +299,37 @@ describe("el saludo de un `tpv`, que sin la central no entra", () => {
 		expect(resumen(await eventosDeLaCentral(1))).toEqual([["rechazo", "hub", "sync.main_vigente", TENANT]]);
 	});
 
+	it("`hello_failed` dice por qué con un código, nunca con texto interno: ni el de SQLite ni el de un fallo del programa", async () => {
+		const respuestas: unknown[] = [];
+		await enElHub("hub-sin-central-saludo-sql", async (hub: any) => {
+			conLaCentral(hub, centralConErrorDeSql());
+			const main = conectar(hub, "main-1", false);
+			try {
+				respuestas.push(await saludaUnTpv(hub, main));
+			} finally {
+				cerrar(main);
+			}
+		});
+		await enElHub("hub-sin-central-saludo-roto", async (hub: any) => {
+			conLaCentral(hub, centralQueFalla(sinMarcas));
+			const main = conectar(hub, "main-1", false);
+			try {
+				respuestas.push(
+					await saludaUnTpv(hub, main, async () => {
+						throw new TypeError("Cannot read properties of undefined (reading 'pubkey') en ana@example.com");
+					}),
+				);
+			} finally {
+				cerrar(main);
+			}
+		});
+
+		expect(respuestas).toEqual([
+			{ type: "error", error: "hello_failed", details: "central_error_sql" },
+			{ type: "error", error: "hello_failed", details: "internal_error" },
+		]);
+	});
+
 	it("un saludo cuya firma no vale no llega a la central y no deja nada", async () => {
 		await enElHub("hub-sin-central-saludo-firma", async (hub: any) => {
 			conLaCentral(hub, centralQueFalla(sinMarcas));

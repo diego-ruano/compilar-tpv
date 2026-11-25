@@ -54,6 +54,7 @@ import {
 	claveNueva,
 	getLicenseById,
 	licenciasDeUnaSesionCumplida,
+	licenciasSinCorreoDeClaves,
 	markKeyEmailSent,
 	markWebhookProcessed,
 	negocioActivadoDe,
@@ -266,7 +267,10 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// entrega repetida en un 500. La comprobación que vale para dos entregas a la vez sigue siendo la
 	// de `emitirCobro`, dentro de su transacción.
 	const yaEmitidas = await licenciasDeUnaSesionCumplida(db, sessionId);
-	if (yaEmitidas.length > 0) return { accion: "ya_cumplida", license_ids: yaEmitidas };
+	if (yaEmitidas.length > 0) {
+		await avisarSiFaltaElCorreoDeClaves(db, sessionId);
+		return { accion: "ya_cumplida", license_ids: yaEmitidas };
+	}
 
 	// Lo que el cobro escribe se prepara aquí: la clave de cada unidad (en claro, sólo para el correo),
 	// su huella, su forma corta y su cifrado, y los ids de su licencia y de su cobro. A la central no
@@ -302,6 +306,11 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// Con `ya_cumplida`, las licencias son las de otra entrega, salvo que sean exactamente las que se
 	// han preparado aquí: entonces la primera llamada llegó a confirmarse antes de cortarse
 	// (`emitirEnLaCentral`), y la emisión es ésta.
+	//
+	// Aquí no se mira si falta el correo de claves (`avisarSiFaltaElCorreoDeClaves`): la lectura de
+	// arriba, con la misma consulta, no encontró la sesión cumplida, así que el cobro de la otra entrega
+	// acaba de entrar y esa entrega sigue en curso, mandando su correo. Ese cobro nunca tiene más de
+	// `CORREO_DE_CLAVES_MAX_MS`, así que el aviso no podría salir.
 	const ids = preparadas.map((u) => u.licenseId);
 	const deEstaEntrega = hecho.licenseIds.length === ids.length && hecho.licenseIds.every((id, i) => id === ids[i]);
 	if (!deEstaEntrega) return { accion: "ya_cumplida", license_ids: hecho.licenseIds };
@@ -320,6 +329,41 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	}
 
 	return { accion: "emitida", license_ids: ids };
+}
+
+/**
+ * Lo que tarda como mucho una entrega viva entre que su cobro entra y apunta que el correo con las
+ * claves ha salido: el cobro (con su repetición), el correo y las marcas, que son segundos.
+ */
+const CORREO_DE_CLAVES_MAX_MS = 5 * 60_000;
+
+/**
+ * Una entrega que encuentra la sesión ya cumplida al empezar no manda el correo con las claves: las de otra
+ * entrega no las tiene en claro. Si la primera entrega se cortó después de que su cobro entrara (su
+ * respuesta se perdió, o falló al mandar o al apuntar el correo, y Stripe la repitió), el correo no
+ * consta como entregado y nadie lo va a repetir: Stripe recibe ahora su 200. Eso se avisa en Sentry,
+ * con las licencias, para que un operador lo mire y lo reenvíe (`pnpm license:resend`). No se reenvía
+ * aquí: dos entregas a la vez mandarían dos correos.
+ *
+ * Sólo cuenta un cobro de hace más de `CORREO_DE_CLAVES_MAX_MS`: uno más reciente puede ser el de otra
+ * entrega que está mandando el correo ahora mismo. Leerlo no puede hacer fallar la entrega: si la
+ * central no contesta, el aviso no sale.
+ */
+async function avisarSiFaltaElCorreoDeClaves(db: ClienteCentral, sessionId: string): Promise<void> {
+	let sinCorreo: string[];
+	try {
+		sinCorreo = await licenciasSinCorreoDeClaves(db, sessionId, Date.now() - CORREO_DE_CLAVES_MAX_MS);
+	} catch {
+		return;
+	}
+	if (sinCorreo.length === 0) return;
+	capturarError(
+		new Error(
+			`Cobro cumplido sin el correo de claves apuntado: si el cliente no lo tiene, ` +
+				`pnpm license:resend -- --id <licencia> (licencias ${sinCorreo.join(", ")})`,
+		),
+		"stripe.correo_de_claves",
+	);
 }
 
 /**

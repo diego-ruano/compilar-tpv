@@ -400,7 +400,9 @@ export async function activateLicenseFirstTime(
  *
  * Un viaje que no vuelve con su respuesta (`CentralNoDisponible`) puede haber entrado: la plataforma
  * da el mismo fallo cuando la respuesta se pierde por el camino. Lo dice la traza, cuyo `swap_id`
- * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado. Si no está
+ * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado, con el fallo del
+ * viaje para que la ruta lo deje registrado (`registrarSinLaCentral`); si la respuesta llegó, con
+ * `null`. Si no está
  * cuando se mira, o la central tampoco contesta a esa lectura, lanza el fallo del viaje; si aun así
  * había entrado, la licencia queda en el equipo nuevo con su traza y sin los avisos, y el reintento
  * de ese equipo ya no es un traslado (`cambioDeEquipo: false`): TRASLADO-REINTENTO, en
@@ -409,7 +411,7 @@ export async function activateLicenseFirstTime(
 export async function reassignMainDevice(
 	db: Base,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
-): Promise<void> {
+): Promise<CentralNoDisponible | null> {
 	const now = Date.now();
 	const swapId = crypto.randomUUID();
 
@@ -427,8 +429,10 @@ export async function reassignMainDevice(
 				args: [swapId, args.licenseId, args.fromDeviceId, args.toDeviceId, now],
 			},
 		]);
+		return null;
 	} catch (error) {
 		if (!(error instanceof CentralNoDisponible) || !(await hayTrazaDelTraslado(db, swapId, error))) throw error;
+		return error;
 	}
 }
 
@@ -1326,6 +1330,22 @@ export async function markWebhookProcessed(
  */
 export async function licenciasDeUnaSesionCumplida(db: Sql, sessionId: string): Promise<string[]> {
 	const r = await exec(db, COBROS_DE_LA_SESION, [sessionId]);
+	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
+}
+
+/**
+ * Las licencias de la sesión de checkout `sessionId` cobradas antes de `cobradasAntesDeMs` cuyo
+ * correo con las claves no consta como entregado (`key_email_sent_at_ms` a NULL), en el orden de sus
+ * unidades. Sólo se lee: lo que se haga con ellas lo decide un operador (`pnpm license:resend`).
+ */
+export async function licenciasSinCorreoDeClaves(db: Sql, sessionId: string, cobradasAntesDeMs: number): Promise<string[]> {
+	const r = await exec(
+		db,
+		`SELECT p.license_id FROM license_payments p JOIN licenses l ON l.license_id = p.license_id
+		 WHERE p.stripe_checkout_session_id = ? AND p.at_ms < ? AND l.key_email_sent_at_ms IS NULL
+		 ORDER BY p.unidad;`,
+		[sessionId, cobradasAntesDeMs],
+	);
 	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
 }
 

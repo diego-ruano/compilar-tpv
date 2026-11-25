@@ -190,8 +190,8 @@ describe("la central saturada", () => {
 		expect(capturados).toEqual([]);
 		const eventos = await eventosDeLaCentral(2);
 		expect(eventos.map((e) => [e.motivo, e.metodo, e.ruta])).toEqual([
-			["saturada", "GET", "/v1/update/windows/x86_64/1.0.0"],
-			["saturada", "GET", "/v1/update/windows/x86_64/1.0.0"],
+			["saturada", "GET", "/v1/update/:target/:arch/:current"],
+			["saturada", "GET", "/v1/update/:target/:arch/:current"],
 		]);
 		expect(eventos[0].error).toContain("overloaded");
 	});
@@ -429,7 +429,8 @@ describe("en los sitios que no pasan por el `onError`", () => {
 		expect(res.headers.get("Retry-After")).toBe("2");
 		expect(((await res.json()) as any).error).toBe("hub_overloaded");
 		const [evento] = await eventosDeLaCentral(1);
-		expect(evento.ruta).toBe("/v1/interruptores");
+		// La ruta del middleware que lee la central, por su patrón: `tenantAuth`, en `/v1/interruptores/*`.
+		expect(evento.ruta).toBe("/v1/interruptores/*");
 		expect(enviados.filter((e) => e.event === "device_auth_rechazado")).toEqual([]);
 	});
 
@@ -509,5 +510,42 @@ describe("lo que queda en el log", () => {
 			nivel: "error",
 			texto: expect.stringMatching(/^\[onError\] GET \/v1\/update\/:target\/:arch\/:current → ErrorDeLaCentral: central_error_sql: near "\[email\]": syntax error/),
 		});
+	});
+});
+
+/**
+ * Un texto de 290 caracteres que el filtro de datos personales no toca: detrás, lo que cruza el corte
+ * de 300 del evento, y que filtrado cabe.
+ */
+const RELLENO = "la plataforma dice algo largo ".repeat(10).slice(0, 290);
+const CORREO = "pepe.garcia@ejemplo.test";
+const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+
+describe("lo que llega a Axiom", () => {
+	it("AUD-32: el error del evento se filtra antes de recortarlo: un correo o un JWT que cruzan el corte no asoman", async () => {
+		for (const dato of [CORREO, JWT]) {
+			const fallo = () => Object.assign(new Error(`${RELLENO} ${dato}`), { retryable: true });
+			expect((await pedirElFeed(centralQue(lanza(fallo)))).status).toBe(503);
+		}
+
+		const [conCorreo, conJwt] = await eventosDeLaCentral(2);
+		expect(conCorreo.error).toBe(`${RELLENO} [email]`);
+		expect(conJwt.error).toBe(`${RELLENO} [jwt]`);
+		expect(JSON.stringify(enviados)).not.toMatch(/pepe|eyJ/);
+	});
+
+	it("AUD-27: el evento lleva la ruta por su patrón, no por su camino: el nombre que escribe quien llama no sale", async () => {
+		// El camino lo escribe quien llama, y un nombre no lo reconoce el filtro de datos personales.
+		const res = await app.request(
+			"https://tpv-api.test/v1/update/windows/x86_64/Ana-Gil",
+			{},
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...centralQue(lanza(pasajera)).entorno },
+		);
+
+		expect(res.status).toBe(503);
+		expect(((await res.json()) as any).error).toBe("hub_unavailable");
+		const [evento] = await eventosDeLaCentral(1);
+		expect(evento).toMatchObject({ motivo: "pasajera", metodo: "GET", ruta: "/v1/update/:target/:arch/:current" });
+		expect(JSON.stringify(enviados)).not.toContain("Ana-Gil");
 	});
 });

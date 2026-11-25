@@ -35,6 +35,7 @@ import { getDb } from "../../server/db";
 import type { Sql } from "../../lib/sql";
 import { cuerpo } from "../../lib/validacion";
 import { capturarError } from "../../observability/errors";
+import { enLaPeticion, registrarSinLaCentral } from "../../server/central/sinLaCentral";
 import { leerIdentidadPedido, type IdentidadPedido } from "./pedidoIdentidad";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
@@ -107,7 +108,11 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 		toEmail: email_destino,
 		proveedor: identidad.proveedor,
 	};
-	const reserva = await reservarCupo(db, envio);
+	// La central que no atiende al cupo o a la traza queda como en el resto del Worker: su evento en
+	// Axiom, y Sentry sólo si no es carga ni un fallo pasajero. Con la central saturada, cada pedido no
+	// puede mandar dos eventos a Sentry.
+	const sinLaCentral: SinLaCentral = (e, operacion) => registrarSinLaCentral(e, enLaPeticion(c, operacion)) !== null;
+	const reserva = await reservarCupo(db, envio, sinLaCentral);
 	if (reserva === "tope") return c.json({ error: "email_limite_diario" }, 429);
 	// Un reintento de un pedido que ya salió: la respuesta del primero se perdió por el camino (el
 	// viaje de vuelta desde el TenantHub, la red de la Main). Se contesta lo que se habría contestado,
@@ -130,12 +135,12 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
-		await terminarEnvio(db, envio, false, e.code ?? null);
+		await terminarEnvio(db, envio, false, e.code ?? null, sinLaCentral);
 		// El código del binding va en `detalle`: `code` es el del catálogo compartido.
 		return c.json({ error: "email_send_failed", detalle: e.code ?? null }, 500);
 	}
 
-	await terminarEnvio(db, envio, true, null);
+	await terminarEnvio(db, envio, true, null, sinLaCentral);
 	return c.json({ ok: true });
 });
 
@@ -162,6 +167,13 @@ export type Envio = { id: string; tenantId: string; deviceId: string; toEmail: s
  * envío lo está mandando otra petición ahora.
  */
 type ReservaDeCupo = "reservado" | "tope" | "sin_base" | "ya_enviado" | "en_curso";
+
+/**
+ * Si `error` dice que la base central no ha podido atender, lo deja registrado y devuelve `true`
+ * (`registrarSinLaCentral`, con la operación `operacion`); si es otra cosa, `false` sin registrar
+ * nada, y va a Sentry y al log como cualquier fallo.
+ */
+export type SinLaCentral = (error: unknown, operacion: "email.quota" | "email.audit") => boolean;
 
 /** Lo que tarda como mucho un envío: una reserva más vieja sin terminar es de uno que murió a medias. */
 const ENVIANDO_MAX_MS = 5 * 60_000;
@@ -205,7 +217,7 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  * tampoco si ese envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de la
  * central se queda lo segundo (los correos de las reservas web, al revés, no salen).
  */
-export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
+export async function reservarCupo(db: Sql, envio: Envio, sinLaCentral: SinLaCentral = () => false): Promise<ReservaDeCupo> {
 	const ahora = Date.now();
 	try {
 		const rs = await db.execute({
@@ -241,8 +253,10 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
 		if (fila?.error_code === "enviando" && Number(fila.sent_at_ms) > ahora - ENVIANDO_MAX_MS) return "en_curso";
 		return "tope";
 	} catch (e: any) {
-		capturarError(e, "email.quota");
-		console.error("[email] no se pudo reservar el cupo diario:", String(e?.message || e));
+		if (!sinLaCentral(e, "email.quota")) {
+			capturarError(e, "email.quota");
+			console.error("[email] no se pudo reservar el cupo diario:", String(e?.message || e));
+		}
 		return "sin_base";
 	}
 }
@@ -256,21 +270,29 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
  * salió. Si se quedara la de la reserva, un envío que tarda 30 s dejaría de contar 30 s antes de
  * cumplir sus 24 h, y una ráfaga lenta dejaría sitio a otra entera antes de tiempo.
  *
- * Es **best-effort a propósito**: si la central falla, se registra en el log del worker y ya está. Un
- * fallo del registro no puede impedir que un bar mande su pedido, y la reserva que se queda en
+ * Es **best-effort a propósito**: si la central falla, se registra (`sinLaCentral`, o Sentry y el log
+ * del worker) y ya está. Un fallo del registro no puede impedir que un bar mande su pedido, y la reserva que se queda en
  * `enviando` sigue contando para el cupo de hoy. Pero se insiste unas veces: un pedido que salió y se
  * queda en `enviando` se puede volver a reservar pasados unos minutos (`reservarCupo`), y un
  * reintento con la misma clave lo mandaría otra vez. Un `ok = 1` no se toca nunca.
  */
-async function terminarEnvio(db: Sql, envio: Envio, ok: boolean, errorCode: string | null): Promise<void> {
+async function terminarEnvio(
+	db: Sql,
+	envio: Envio,
+	ok: boolean,
+	errorCode: string | null,
+	sinLaCentral: SinLaCentral,
+): Promise<void> {
 	for (let intento = 1; ; intento++) {
 		try {
 			await apuntarComoAcabo(db, envio, ok, errorCode);
 			return;
 		} catch (e: any) {
 			if (intento >= INTENTOS_DE_TERMINAR) {
-				capturarError(e, "email.audit");
-				console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
+				if (!sinLaCentral(e, "email.audit")) {
+					capturarError(e, "email.audit");
+					console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
+				}
 				return;
 			}
 			await new Promise((r) => setTimeout(r, ESPERA_TERMINAR_MS * intento));

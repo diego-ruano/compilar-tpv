@@ -10,13 +10,14 @@
 // Y que el traslado mueve la licencia con su traza (`license_device_swaps`), o no la mueve. Si el
 // viaje del traslado no llega a la central, la licencia sigue donde estaba; si entra y se pierde su
 // respuesta, la ruta lo ve en la traza y sigue como si hubiera llegado: el equipo sabe que es un
-// traslado, y se avisa al titular y al `TenantHub`.
+// traslado, y se avisa al titular y al `TenantHub`. El viaje que no volvió queda en Axiom
+// (`central_no_disponible`), como cualquier otro en el que la central no ha atendido.
 //
 // Cada caso tiene su base central de verdad (`helpers/central.ts`), a la que la ruta llega a través
 // de su stub (`centralInterceptada`), por donde se le hace fallar un viaje. El aprovisionamiento de
 // la base del negocio, los correos y el `TenantHub` se sustituyen: no son lo que se prueba.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
 import {
@@ -32,8 +33,35 @@ import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { otpHash } from "../src/domains/licensing/licensing.helpers";
 import { getLicenseById, issueLicense, putDeviceOtp } from "../src/server/licenseStore";
 
-/** A quién ha ido el aviso al titular de que su licencia ha cambiado de equipo. */
-const { avisosAlTitular } = vi.hoisted(() => ({ avisosAlTitular: [] as string[] }));
+/** A quién ha ido el aviso al titular de que su licencia ha cambiado de equipo, y lo que va a Sentry. */
+const { avisosAlTitular, capturados } = vi.hoisted(() => ({ avisosAlTitular: [] as string[], capturados: [] as string[] }));
+
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			if (!original.esRechazoEsperado(error)) capturados.push(operacion);
+			original.capturarError(error, operacion);
+		},
+	};
+});
+
+/** Lo que se manda a Axiom. */
+let eventos: any[] = [];
+
+beforeEach(() => {
+	capturados.length = 0;
+	eventos = [];
+	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+		eventos.push(...JSON.parse(String(init.body)));
+		return new Response("{}", { status: 200 });
+	});
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/domains/licensing/licensing.helpers")>();
@@ -68,6 +96,8 @@ const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
 	LICENSE_STORE_KEY: STORE_KEY,
 	TenantHub: TENANT_HUB,
+	AXIOM_TOKEN: "token-de-pruebas",
+	AXIOM_DATASET_SYNC: "sync-de-pruebas",
 };
 // AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
 const PUB_A = await clavePublica(1);
@@ -289,6 +319,12 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 				avisosAlTitular: ["bar@ejemplo.test"],
 				avisosAlHub: [a.body.tenantId],
 			});
+			// El viaje que no volvió queda en Axiom, con la ruta por su patrón; un fallo pasajero no va a
+			// Sentry.
+			const deLaCentral = () => eventos.filter((e) => e.event === "central_no_disponible");
+			await vi.waitFor(() => expect(deLaCentral()).toHaveLength(1));
+			expect(deLaCentral()[0]).toMatchObject({ motivo: "pasajera", metodo: "POST", ruta: "/v1/license/activate" });
+			expect(capturados).toEqual([]);
 		});
 	});
 
