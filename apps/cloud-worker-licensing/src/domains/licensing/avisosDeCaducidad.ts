@@ -19,6 +19,8 @@
 //   · **Se marca ANTES de enviar y sólo se envía si se ganó la marca.** Dos ejecuciones cruzadas no
 //     mandan dos correos. Si el envío falla se suelta la marca, para que el ciclo siguiente lo
 //     reintente: un aviso que no ha salido no puede quedar contado como enviado.
+//   · **Cada licencia va por su cuenta.** Si la central falla con una, al poner o al soltar su
+//     marca, esa cuenta como fallida (y va a Sentry) y el ciclo sigue con las demás.
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
@@ -114,38 +116,46 @@ export async function avisarDeCaducidades(
 		const peldano = PELDANOS.find((p) => restanteMs <= p.dias * DIA_MS);
 		if (!peldano) continue;
 
-		const gane = await marcarAvisoEnviado(db, {
-			licenseId: license.license_id,
-			kind: peldano.kind,
-			expiresAtMs,
-			nowMs: ahoraMs,
-		});
-		if (!gane) {
-			resumen.yaAvisadas += 1;
-			continue;
-		}
+		// Cada licencia, por su cuenta (E7a-7): lo que falle con una (la central, al poner o al soltar
+		// su marca) va a Sentry, cuenta como fallida y no corta a las demás.
+		try {
+			const gane = await marcarAvisoEnviado(db, {
+				licenseId: license.license_id,
+				kind: peldano.kind,
+				expiresAtMs,
+				nowMs: ahoraMs,
+			});
+			if (!gane) {
+				resumen.yaAvisadas += 1;
+				continue;
+			}
 
-		const enlace = enlaceDeCompra(env, license);
-		if (!enlace) {
-			await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
-			resumen.fallidos += 1;
-			continue;
-		}
+			const enlace = enlaceDeCompra(env, license);
+			if (!enlace) {
+				await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
+				resumen.fallidos += 1;
+				continue;
+			}
 
-		const enviado = await sendLicenseExpiringEmail(env, {
-			to: license.customer_email,
-			name: license.customer_name,
-			expiresAtMs,
-			// Hacia arriba: a quien le quedan 6 días y medio hay que decirle 7, no 6.
-			diasRestantes: Math.max(1, Math.ceil(restanteMs / DIA_MS)),
-			enlace,
-		});
+			const enviado = await sendLicenseExpiringEmail(env, {
+				to: license.customer_email,
+				name: license.customer_name,
+				expiresAtMs,
+				// Hacia arriba: a quien le quedan 6 días y medio hay que decirle 7, no 6.
+				diasRestantes: Math.max(1, Math.ceil(restanteMs / DIA_MS)),
+				enlace,
+			});
 
-		if (enviado) {
-			resumen.enviados += 1;
-		} else {
-			// El correo no salió: se suelta la marca para que el ciclo de mañana lo reintente.
-			await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
+			if (enviado) {
+				resumen.enviados += 1;
+			} else {
+				// El correo no salió: se suelta la marca para que el ciclo de mañana lo reintente.
+				await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
+				resumen.fallidos += 1;
+			}
+		} catch (err) {
+			capturarError(err, "cron.license_expiry");
+			console.error(`[avisos] la licencia ${license.license_id} falló:`, (err as any)?.message || err);
 			resumen.fallidos += 1;
 		}
 	}
