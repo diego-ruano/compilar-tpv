@@ -228,6 +228,8 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	}
 
 	const seqAntes = Math.max(prep.seqAntes, conocido);
+	// «Repite la misma orden» vuelve a preparar la vuelta sin mirar si la de antes ya se aplicó: si el
+	// objeto se ha reiniciado entretanto, volvería otra vez (VUELTA-REPETIR, en docs/pendientes.md).
 	try {
 		await reservarLog(env, { tenantId, operacion: "instante", seqAntes });
 	} catch {

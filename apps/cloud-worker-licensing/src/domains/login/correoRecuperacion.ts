@@ -200,6 +200,8 @@ export async function confirmarCambioCorreo(
 	const anterior = await correoDeRecuperacion(db, l.lic);
 	const compra = normalizar(l.lic.customer_email);
 
+	// Gastar el código (arriba) y cambiar el correo no van en un lote (CORREO-CONFIRMAR, en
+	// docs/pendientes.md).
 	await setTenantRecoveryEmail(db, ctx.tenantId, nuevo === compra ? null : nuevo, ctx.ahora);
 	avisarDelCambio(env, diferir, [anterior, l.lic.customer_email], nuevo);
 
