@@ -6,13 +6,10 @@
 //! negativo (`-2,8e-17`) lo sacaba como stock negativo.
 //!
 //! Por eso cada cantidad que se escribe se redondea a **milésimas** (un gramo, un mililitro): en Rust
-//! con [`redondear_cantidad`] y en SQL con `ROUND(…, 3)` ([`DECIMALES_CANTIDAD`]). El worker hace lo
-//! mismo (`lib/cantidad.ts`), y la tabla `cantidad_casos.json` los mantiene iguales.
+//! con [`redondear_cantidad`] y en SQL con `ROUND(…, 3)`. El worker hace lo mismo
+//! (`lib/cantidad.ts`), y la tabla `cantidad_casos.json` los mantiene iguales.
 //!
 //! [decisión 0005]: ../../../docs/decisiones/0005-dinero-en-centimos.md
-
-/// Decimales con los que se guarda una cantidad de stock. Es el `3` de los `ROUND(…, 3)` del SQL.
-pub const DECIMALES_CANTIDAD: i32 = 3;
 
 /// Redondea una cantidad a milésimas, con la mitad lejos del cero. El cero negativo sale como cero.
 pub fn redondear_cantidad(x: f64) -> f64 {

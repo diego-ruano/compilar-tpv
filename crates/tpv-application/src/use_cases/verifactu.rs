@@ -9,7 +9,7 @@ use crate::error::{AppError, AppResult};
 use crate::ports::verifactu::VerifactuRepository;
 use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, DestinatarioInput, EstadoFiscal};
 
-/// ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal.
+/// ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Negocio.
 pub async fn estado(repo: &dyn VerifactuRepository) -> AppResult<EstadoFiscal> {
     repo.estado().await
 }

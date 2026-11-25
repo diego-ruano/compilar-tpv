@@ -99,9 +99,11 @@ enum DeviceMode {
 
 /// SYNC-17: qué hace la Main respecto a la nube. **Ya no es una elección del usuario**: la
 /// conectividad es un estado derivado del WebSocket (se intenta siempre y el badge refleja lo que
-/// hay). Esto es solo la palanca de emergencia, sin UI, para el caso patológico —una red que tira
-/// el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano en
-/// `device_config.json` o desde `set_connection_mode`.
+/// hay). Esto es solo la palanca de emergencia, sin UI ni comando, para el caso patológico —una red
+/// que tira el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano, en
+/// el campo `connectivity` de `device_config.json`. Nadie avisa al motor de la réplica: la ve en
+/// su siguiente comprobación (con la sesión abierta, a los 10 s como mucho con actividad y hasta
+/// 30 s en reposo; en `Off`, al acabar su espera, de hasta un minuto).
 ///
 /// `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
 /// `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
@@ -169,11 +171,6 @@ struct SetDeviceModeArgs {
 struct DestinoArgs {
     #[serde(default)]
     destino: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-struct SetConnectionModeArgs {
-    mode: ConnectivityMode,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -460,8 +457,9 @@ pub(crate) struct Sesion {
     /// Identidad de la ficha de trabajador para comandas y tareas propias (RI-22).
     pub id_trabajador: Option<String>,
     pub rol: String,
-    /// Diagnóstico: desde cuándo está abierta la sesión que autorizó algo.
-    #[allow(dead_code)]
+    /// Cuándo se abrió (ms). Con `id_usuario` identifica la sesión: la autorización guardada
+    /// (PERM-CACHE) sólo vale para la misma, y `autorizacion()` descarta la respuesta de una
+    /// consulta que termina después de un logout o de un cambio de usuario.
     pub iniciada_en: i64,
 }
 
@@ -491,7 +489,6 @@ pub(crate) fn configure_outbox_notifier(app: &AppHandle, db: &Arc<Db>) {
     let h = app.clone();
     db.set_outbox_notifier(move || {
         if let Some(sync) = h.try_state::<replicacion::SyncNativo>() { sync.despertar.notify_one(); }
-        let _ = h.emit("outbox:pending", ());
     });
 }
 
@@ -1017,37 +1014,6 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
     Ok(load_config(&app_data_dir).connectivity)
-}
-
-/// Persiste la palanca de conectividad en `device_config.json`. **Sin UI**: es la salida de
-/// emergencia de SYNC-17 (ver [`ConnectivityMode`]), no un ajuste que se ofrezca al usuario.
-///
-/// La captura de escrituras para el outbox está SIEMPRE activa (el outbox es el log de cambios
-/// local), así que apagar y volver a encender no pierde nada: al volver a `Auto` se drena.
-///
-/// Aquí ya NO se valida la licencia. Antes se hacía porque activar "online" era una acción
-/// explícita del usuario; ahora la autoridad es el worker (`/v1/ws/ticket` exige JWT + device
-/// proof y rechaza una licencia no activa) y, antes que eso, el gate de AppBoot ya bloquea la app
-/// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
-/// red a un camino que no la necesita.
-#[tauri::command(async)]
-#[specta::specta]
-fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, AppErrorDto> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
-
-    let mut cfg = load_config(&app_data_dir);
-    cfg.connectivity = Some(args.mode);
-    save_config(&app_data_dir, &cfg)?;
-    // El motor de la réplica no relee la palanca en cada mensaje (`COMPROBAR_DISPONIBLE_CADA`):
-    // se le avisa para que la mire ya, y para que conecte sin esperar si se ha vuelto a encender.
-    if let Some(sync) = app.try_state::<replicacion::SyncNativo>() {
-        sync.reintentar();
-    }
-
-    Ok("OK".into())
 }
 
 #[tauri::command]
@@ -1782,7 +1748,7 @@ async fn imprimir_ticket(
 }
 
 /// Imprime una **precuenta**: lo que se le enseña al cliente antes de cobrar, compuesto en la
-/// pantalla. Sale sin número, sin QR y sin marca de copia aunque la pantalla los mande
+/// pantalla. Sale sin número y sin marca de copia aunque la pantalla los mande
 /// (`como_precuenta`, RI-29): el ticket de un cobro sólo sale de `printer_imprimir_pago`.
 #[tauri::command]
 #[specta::specta]
@@ -2238,7 +2204,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             get_device_mode,
             set_device_mode,
             get_connection_mode,
-            set_connection_mode,
             init_main,
             device_reset_mode,
             // genéricos
@@ -2287,7 +2252,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::recovery::recovery_import_backup,
             commands::recovery::recovery_restore_backup,
 
-            // mesass
+            // mesas
             commands::mesas::save_layout,
             commands::mesas::load_layout,
             commands::mesas::set_reserva_estado,
@@ -2309,7 +2274,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mesas::cobrar_detalles,
             commands::mesas::kitchen_list_today_pending,
             commands::mesas::kitchen_set_line_state,
-            // inventario (migrado a arquitectura hexagonal — commands/inventario.rs)
+            // inventario (commands/inventario.rs)
             commands::inventario::inventario_list_categorias,
             commands::inventario::inventario_create_categoria,
             commands::inventario::inventario_list_proveedores_mini,
@@ -2356,13 +2321,11 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::trabajadores::horarios_marcar_libre,
             commands::trabajadores::turnos_get_all,
             commands::trabajadores::horarios_get_asignaciones_semana,
-            commands::trabajadores::horarios_create_asignacion,
             commands::trabajadores::horarios_guardar_asignacion,
-            commands::trabajadores::horarios_update_asignacion,
             commands::trabajadores::horarios_delete_asignacion,
             commands::trabajadores::horarios_copy_semana_asignaciones,
             commands::trabajadores::horarios_set_predeterminado_desde_semana,
-            // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
+            // cuentas (commands/cuentas.rs)
             commands::cuentas::cuentas_get_entradas,
             commands::cuentas::cuentas_get_salidas,
             commands::cuentas::cuentas_get_resumen,
@@ -2379,7 +2342,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::cierre_caja::cierre_listar,
             commands::cierre_caja::cierre_detalle,
             commands::cierre_caja::cierre_reabrir,
-            // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
+            // clientes (commands/clientes.rs)
             commands::clientes::clientes_get_overview,
             commands::clientes::clientes_get_cliente_form,
             commands::clientes::clientes_create_cliente,
@@ -2389,7 +2352,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::clientes::clientes_guardar_datos_fiscales,
             commands::clientes::clientes_facturas,
             commands::clientes::clientes_factura_pdf,
-            // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
+            // reservas (commands/reservas.rs)
             commands::reservas::reservas_get_meta,
             commands::reservas::reservas_get_mes,
             commands::reservas::reservas_save,
@@ -2403,7 +2366,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reservas_web::reserva_web_clave,
             commands::reservas_web::reserva_web_mesas,
             commands::reservas_web::reserva_web_guardar_mesa,
-            // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
+            // proveedores (commands/proveedores.rs)
             commands::proveedores::proveedores_get_all,
             commands::proveedores::proveedores_save,
             commands::proveedores::proveedores_delete,
@@ -2458,7 +2421,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::stats::stats_trabajadores_resumen,
             commands::stats::stats_clientes_resumen,
             commands::stats::stats_proveedores_resumen,
-            // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
+            // licensing (commands/licensing.rs)
             commands::licensing::license_get_state,
             commands::licensing::license_activate,
             commands::licensing::license_sumar_clave,
@@ -2466,22 +2429,18 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::licensing::license_clear_state,
             commands::licensing::license_gate,
             commands::licensing::license_check_now,
-            // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
+            // pairing (commands/pairing.rs)
             commands::pairing::handy_set_token,
             commands::pairing::handy_get_tenant,
             commands::pairing::handy_url_imagenes,
 
             commands::pairing::device_get_identity,
             commands::pairing::device_firmar_emparejamiento,
-            commands::pairing::device_hora_para_firmar,
             // RELOJ-01: el aviso del reloj desfasado (sin sesión: commands/reloj.rs)
             commands::reloj::reloj_desfase,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
-            // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
-
-            // sincronización Main → nube (outbox de escrituras locales)
-
+            // sincronización con la nube, permisos de la sesión y socket de la Handy
             commands::sync::sync_health,
             commands::permisos::permisos_sesion,
             commands::permisos::permisos_configuracion,
@@ -2504,20 +2463,17 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             // tamaño de la interfaz (zoom de la ventana)
             commands::ventana::ventana_zoom_estado,
             commands::ventana::ventana_zoom_cambiar,
-            // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
+            // configuración (commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
             commands::configuracion::config_get_ticket_settings,
             commands::configuracion::config_patch_ticket_settings,
             commands::configuracion::config_get_contact_settings,
             commands::configuracion::config_patch_contact_settings,
-            // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
+            // correo electrónico (lo envía el worker, DB-04)
             commands::email_config::email_enviar_pedido,
         ])
-        .typ::<tpv_contracts::inventario::AlergenoMiniDto>()
         .typ::<tpv_contracts::inventario::ProductoDetalleDto>()
-        .typ::<tpv_contracts::licensing::ApiSignedHeaders>()
-        .typ::<tpv_contracts::licensing::TpvServerSignedHeadersArgs>()
         .typ::<tpv_contracts::notificaciones::CrearNotificacionInput>()
         // Reservas desde la web: el alta que manda el widget al worker (lo usa su drift-guard).
         .typ::<tpv_contracts::reservas_web::ReservaWebAltaInput>()
@@ -2526,22 +2482,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         .typ::<tpv_contracts::reservas_web::RecogidasReservaWebInput>()
         .typ::<tpv_contracts::reservas_web::AvisoReservaWebInput>()
         .typ::<tpv_contracts::socket_handy::AvisoSocketHandy>()
-        .typ::<tpv_contracts::sync::SqlStatement>()
-        .typ::<tpv_contracts::sync::SyncChange>()
-        .typ::<tpv_contracts::sync::ApplySyncChangesArgs>()
-        .typ::<tpv_contracts::sync::AplicacionSync>()
-        .typ::<tpv_contracts::sync::OutboxEntry>()
-        .typ::<tpv_contracts::sync::OutboxFallo>()
-        .typ::<tpv_contracts::sync::BootstrapTabla>()
         .typ::<tpv_contracts::sync::BootstrapSnapshot>()
-        .typ::<tpv_contracts::sync::HistoricoPagina>()
         .typ::<tpv_contracts::sync::ResumenNube>()
-        .typ::<tpv_contracts::sync::ResumenTabla>()
-        .typ::<tpv_contracts::sync::FilasDeCubos>()
-        .typ::<tpv_contracts::sync::FilasPorClave>()
-        .typ::<tpv_contracts::sync::ClavesPagina>()
-        .typ::<tpv_contracts::sync::DescuadreTabla>()
-        .typ::<tpv_contracts::sync::ResultadoVerificacion>()
         .typ::<tpv_contracts::sync::ComandaReplicada>()
         .typ::<tpv_contracts::sync::CambioReplicado>()
         .error_handling(tauri_specta::ErrorHandlingMode::Throw)
@@ -3988,17 +3930,19 @@ mod tests_exenciones_del_gate {
 
     /// REV-26: lo registrado es lo invocable, así que lo que no se invoca no se registra.
     ///
-    /// Había trece comandos en el `generate_handler!` que ningún sitio del frontend ni del E2E
-    /// llamaba por su nombre. No es sólo limpieza: **todo lo registrado es alcanzable por el IPC**,
-    /// y el modelo de amenaza de §14 asume que quien tiene la máquina delante puede invocarlo. Dos
-    /// de ellos eran de verdad incómodos: `tpv_server_signed_headers` devolvía la firma de
-    /// cualquier petición **sin pasar por ningún gate** —mientras su hermano `tpv_server_post_json`
-    /// sí exige Administrador para `/v1/pair/…` y `/v1/device/…`, o sea que era la vuelta a esa
-    /// esquina—, y `cobrar_venta_rapida` era un segundo camino de cobro de barra, no idempotente y
-    /// sin nadie que lo usara.
+    /// No es sólo limpieza: **todo lo registrado es alcanzable por el IPC**, y el modelo de amenaza
+    /// de §14 asume que quien tiene la máquina delante puede invocarlo. Algunos de los retirados eran
+    /// de verdad incómodos: `tpv_server_signed_headers` devolvía la firma de cualquier petición
+    /// **sin pasar por ningún gate** —mientras su hermano `tpv_server_post_json` sí exige
+    /// Administrador para `/v1/pair/…` y `/v1/device/…`, o sea que era la vuelta a esa esquina—, y
+    /// `cobrar_venta_rapida` era un segundo camino de cobro de barra, no idempotente y sin nadie que
+    /// lo usara.
     ///
-    /// Esto vigila los dos que importan. El resto se fue con ellos y lo cubre
-    /// `scripts/check-comandos-tauri.mjs`, que rompe si el frontend invoca algo que no está.
+    /// Esto vigila que no vuelvan los retirados, cada uno con su porqué. Que lo que se invoca exista
+    /// lo da el propio registro (`collect_commands!` en `command_builder`): de él salen las funciones
+    /// de `@tpv/client` y los nombres que invoca el E2E (`nombresComandos`), así que un comando que
+    /// no está no compila, y CI comprueba con `generate-types --check` y el typecheck que lo generado
+    /// está al día.
     #[test]
     fn los_comandos_retirados_no_vuelven_por_la_puerta_de_atras() {
         // Sólo el registro, no el fichero entero: si no, este propio test —que nombra los
@@ -4052,6 +3996,17 @@ mod tests_exenciones_del_gate {
                 "config_upload_initial_setup",
                 "subía a la nube, sin sesión ni `Requiere_Setup`, el PIN que le dijeran para el \
                  usuario que le dijeran; el setup inicial sube por el outbox (AUD-24)",
+            ),
+            (
+                "set_connection_mode",
+                "apagaba la réplica de la Main sin sesión ni gate, y ninguna pantalla lo usaba; la \
+                 palanca de emergencia es el campo `connectivity` de `device_config.json`, que se \
+                 toca a mano (SYNC-17)",
+            ),
+            (
+                "device_hora_para_firmar",
+                "daba a la pantalla, sin sesión, la hora de la nube para firmar con ella; la pantalla \
+                 no firma nada: el emparejamiento y el saludo los firma Rust con esa hora (PROD-04)",
             ),
         ] {
             assert!(

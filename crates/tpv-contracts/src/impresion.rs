@@ -2,7 +2,7 @@
 //!
 //! Vivían en `src-tauri/src/printing.rs` sin `#[derive(specta::Type)]`, así que el frontend los redeclaraba
 //! a mano, con el dinero como `number` (RI-53). El generador ESC/POS sigue allí; lo que cruza la
-//! frontera vive aquí, como el resto de DTOs, y llega a TypeScript por ts-rs.
+//! frontera vive aquí, como el resto de DTOs, y llega a TypeScript con Specta (`pnpm generate-types`).
 
 use tpv_domain::dinero::Dinero;
 
@@ -47,7 +47,7 @@ pub struct DestinatarioTicket {
 /// Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
 ///
 /// **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
-/// de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+/// de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
 /// facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
 /// **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
 /// con número no puede salir de lo que diga la pantalla.

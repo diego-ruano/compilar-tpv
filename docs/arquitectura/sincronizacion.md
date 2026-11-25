@@ -208,11 +208,14 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   (`COMPROBAR_DISPONIBLE_CADA`, `use_cases/replicacion.rs`), no con cada mensaje del socket: es leer
   `device_config.json`, mirar si hay un traslado y dos consultas. Se mira al volver de cada espera
   del socket, así que en reposo es cuando vence la espera (hasta 30 s), como antes. Cambiar el modo
-  (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor, y entonces se mira
-  en el momento.
-- **Palanca de emergencia sin interfaz**: `connectivity: "auto" | "off"` en `device_config.json`
-  (`get/set_connection_mode`), con `auto` por defecto. Los antiguos valores `online`/`offline` y
-  cualquier valor desconocido se leen como ausencia del campo, que también implica `auto`.
+  (`contexto_cambiado`) despierta al motor, y entonces se mira en el momento.
+- **Palanca de emergencia sin interfaz ni comando**: `connectivity: "auto" | "off"` en
+  `device_config.json`, con `auto` por defecto; se cambia editando el fichero, y la pantalla sólo la
+  lee (`get_connection_mode`). Nadie avisa al motor: con la sesión abierta, pasar a `off` se nota en
+  la comprobación siguiente (10 s como mucho con actividad, hasta 30 s en reposo), y volver a
+  `auto`, cuando acaba la espera del motor parado (hasta un minuto). Los antiguos valores
+  `online`/`offline` y cualquier valor desconocido se leen como ausencia del campo, que también
+  implica `auto`.
   La captura del outbox no depende de ella. Para todos los equipos a la vez están los interruptores
   remotos ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
 - **La autoridad es el worker.** El cliente no decide si puede conectarse: lo intenta y obedece. La
@@ -437,9 +440,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
   Sentry el diagnóstico (op, comando y error, nunca las sentencias), al usuario la consecuencia. Ver
   la reparación abajo.
-- El camino normal es el evento `outbox:pending`, que Rust emite al confirmar cada escritura. Además
-  hay un sondeo de seguridad, para los reintentos: cada 3 s mientras queda algo pendiente, y cada 30 s
-  con el outbox vacío (RI-33).
+- El camino normal es el aviso `despertar` del motor nativo, que da cada escritura al confirmarse
+  (`configure_outbox_notifier`): el motor sube lo pendiente en el momento. Además, para los
+  reintentos, el motor mira el outbox cada 3 s mientras queda algo pendiente y cada 30 s con el
+  outbox vacío (RI-33).
 
 ### El lote en el `TenantHub` (`aplicarLote`)
 
@@ -1257,7 +1261,7 @@ demás. Por eso **lo que decide si la escritura entra va en un paso de guarda de
   a decidir, porque no quedó aplicada: con la base igual, contesta lo mismo. El de una que sí entró
   choca antes con el gate y contesta lo guardado sin mirar la guarda. Por eso la ruta no mira antes lo
   que decide una guarda: el reintento de una línea que entró antes de un cobro contestaba
-  `comanda_cobrada`, y el de un turno asignado se encontraba a sí mismo (`asignacion_duplicada`).
+  `comanda_cobrada`.
 - La ruta sí lee antes lo que necesita para construir el comando o para contestar sin escribir (una
   reserva que ya no existe o ya está cancelada, el estado desde el que se marca la llegada) o para
   decir más que la guarda (con qué choca un solape: la guarda contesta el mismo código con el texto
@@ -1269,10 +1273,9 @@ reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`
 `reserva_solapada`), con la duración y el modo del negocio leídos al aplicar, que su cliente siga
 existiendo (`cliente_no_encontrado`) y que el email de un cliente nuevo no sea de otro
 (`email_duplicado`), en el orden en que lo mira la ruta; el último administrador
-(`ultimo_administrador`) y que la ficha que se edita exista (`trabajador_no_encontrado`); el turno
-repetido de un trabajador (`asignacion_duplicada`) y editar una asignación que tiene dos tramos o
-que ya no está (`horario_editar_conjunto`, `asignacion_no_encontrada`); una línea de un producto
-archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivado`,
+(`ultimo_administrador`) y que la ficha que se edita exista (`trabajador_no_encontrado`); que a quien
+se le guarda un horario o un día libre siga en la plantilla (`trabajador_no_encontrado`); una línea
+de un producto archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivado`,
 `comanda_cobrada`, `mesas/guardasDeLinea.ts`); quitar un producto que está en una comanda abierta
 (`producto_en_comanda_abierta`), y ajustar las existencias de un lote o el stock suelto con lo que
 se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está como se pide, y el
@@ -1295,8 +1298,8 @@ Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las q
 por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
 el guardado de un horario, enviar o cancelar un pedido a un proveedor) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
 operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-10 lo afina después
-de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
-y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
+de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha y quitar un producto
+decidían así o por una lectura que devolvía el lote, y en ese reintento
 contestaban `ok` sin saber si lo editado seguía existiendo, o el 409 de un producto que ya se había
 quitado (SYNC-35): ahora lo decide su guarda. El ajuste de existencias miraba lo visto en la ruta, y
 el reintento de uno que ya había entrado veía lo nuevo y contestaba `stock_cambiado`.

@@ -77,7 +77,8 @@ impl SqliteNotificacionesRepository {
     }
 
     /// Filas de notificación de un usuario bajo el predicado que se le pase (centro o papelera).
-    /// El `where_extra` sale SIEMPRE de una constante de este módulo, nunca de la entrada.
+    /// El `predicado` y el `filtro_no_leidas` salen SIEMPRE de una constante de este módulo, nunca
+    /// de la entrada.
     async fn filas(
         &self,
         id_usuario: &str,

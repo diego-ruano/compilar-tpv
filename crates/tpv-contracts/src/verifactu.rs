@@ -29,7 +29,7 @@ pub struct DestinatarioInput {
     pub domicilio: Option<String>,
 }
 
-/// ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal.
+/// ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Negocio.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EstadoFiscal {
     /// ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir la factura, y

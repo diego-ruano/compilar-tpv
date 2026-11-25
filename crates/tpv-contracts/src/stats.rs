@@ -1,6 +1,6 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **stats** (analítica, solo lectura).
-//! Campos idénticos a los structs antiguos (snake_case y PascalCase tal cual) para
-//! mantener la compatibilidad con el frontend. Los enums conservan sus `#[serde(rename)]`.
+//! Los campos van en snake_case o en PascalCase, según lo que lee la pantalla de cada gráfica, y los
+//! enums con sus `#[serde(rename)]`.
 //!
 //! Como es un módulo puramente de lectura no tiene entidades de dominio: todos los
 //! tipos viven aquí (incluidos los enums de filtro y las series de gráfica compartidas).

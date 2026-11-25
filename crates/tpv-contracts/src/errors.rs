@@ -34,7 +34,9 @@ pub enum ErrorCode {
     NotFound,
     /// El estado actual no admite la operación (comanda cerrada, stock insuficiente…).
     Conflict,
-    /// Fallo de persistencia (SQLite/libsql).
+    /// Fallo de la base SQLite local de la Main. Sólo lo emite Rust: las bases de la nube (la de
+    /// cada negocio, en el SQLite de su Durable Object, y la central, en el objeto `BaseCentral`)
+    /// son cosa del worker, que no manda este código.
     Repository,
     /// Fallo de un servicio externo (red, worker, licencias).
     External,
@@ -54,8 +56,6 @@ pub enum ErrorCode {
     LicenseExpired,
     /// No existe licencia activa para este tenant.
     LicenseNotFound,
-    /// PIN incorrecto en login/fichaje.
-    InvalidPin,
     /// El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
     /// permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
     TenantDbNotProvisioned,
@@ -69,14 +69,16 @@ pub enum ErrorCode {
     /// (SEC-01). La UI ramifica por él para llevar al login en vez de enseñar un fallo
     /// genérico: "no puedes" y "ha fallado" piden cosas distintas de quien está delante.
     PermisoDenegado,
-    /// Faltan el NIF o la razón social del obligado, así que no se puede generar el registro de
-    /// facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el registro se crea de forma
-    /// simultánea o inmediatamente anterior a la expedición de la factura).
+    /// Faltan el NIF o la razón social del obligado (o el NIF no es válido), así que no se puede
+    /// generar el registro de facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el
+    /// registro se crea de forma simultánea o inmediatamente anterior a la expedición de la factura).
     ///
-    /// Tiene código propio porque la UI **hace algo distinto**: lleva al formulario de datos
-    /// fiscales en vez de enseñar "no se puede cobrar", que es lo único que vería el camarero con
-    /// un código genérico. Es la única puerta que Veri*factu añade al camino de la venta, y va
-    /// antes de la primera venta y no a mitad de servicio.
+    /// Es la única puerta que Veri*factu añade al camino de la venta. La pantalla **no** ramifica por
+    /// él: enseña su mensaje, que dice qué falta, y lo que lleva al formulario de datos fiscales es el
+    /// aviso de antes de cobrar (`verifactu_estado`), antes de la primera venta y no a mitad de
+    /// servicio. Tiene código propio porque es lo que dice en el registro de fallos por qué no se
+    /// cobró, y porque con la remisión (rama `con-verifactu`) el job lo distingue: no remite y lo
+    /// dice con un mensaje, no con una traza.
     DatosFiscalesIncompletos,
     /// El importe del cobro **pasa del límite de la factura simplificada** (3.000 € con IVA en
     /// hostelería, art. 4.2 RD 1619/2012) y no se han dado los datos del cliente.
@@ -126,7 +128,6 @@ impl ErrorCode {
             ErrorCode::DeviceRevoked => "Este dispositivo ha sido revocado",
             ErrorCode::LicenseExpired => "La licencia ha caducado",
             ErrorCode::LicenseNotFound => "No hay una licencia activa",
-            ErrorCode::InvalidPin => "PIN incorrecto",
             ErrorCode::TenantDbNotProvisioned => "No existe una base de datos en la nube",
             ErrorCode::BootstrapTooLarge => {
                 // DO-02: sólo llega si ni lo imprescindible para trabajar cabe en una descarga.
@@ -193,7 +194,6 @@ impl ErrorCode {
             // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
-            "invalid_pin" => ErrorCode::InvalidPin,
             "validation_error" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
             "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,

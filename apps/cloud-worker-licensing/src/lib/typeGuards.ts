@@ -1,6 +1,6 @@
 // src/lib/typeGuards.ts
 //
-// Drift-guard de tipos entre los validadores zod del worker y los DTOs que ts-rs
+// Drift-guard de tipos entre los validadores zod del worker y los DTOs que Specta
 // genera desde Rust (ARCH-03).
 //
 // ## El problema que resuelve

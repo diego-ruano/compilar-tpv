@@ -2,10 +2,10 @@
 //
 // Catálogo de códigos de error del worker (ARCH-02 / ARCH-05).
 //
-// `ErrorCode` NO se define aquí: se importa de `@tpv/contracts`, que lo genera ts-rs
-// desde `crates/tpv-contracts/src/errors.rs`. Rust, el worker y el frontend comparten
-// exactamente el mismo conjunto cerrado, y añadir un código en Rust sin contemplarlo
-// aquí es un error de compilación, no una sorpresa en producción.
+// `ErrorCode` NO se define aquí: se importa de `@tpv/contracts`, que lo genera Specta
+// (`pnpm generate-types`) desde `crates/tpv-contracts/src/errors.rs`. Rust, el worker y el
+// frontend comparten exactamente el mismo conjunto cerrado, y añadir un código en Rust sin
+// contemplarlo aquí es un error de compilación, no una sorpresa en producción.
 //
 // Forma de la respuesta de error del worker:
 //
@@ -38,7 +38,6 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	device_not_registered: "device_revoked",
 	no_active_license_for_tenant: "license_not_found",
 	license_not_found: "license_not_found",
-	invalid_pin: "invalid_pin",
 	tenant_db_not_provisioned: "tenant_db_not_provisioned",
 	bootstrap_demasiado_grande: "bootstrap_too_large",
 	bootstrap_too_large: "bootstrap_too_large",
@@ -138,7 +137,6 @@ const CODIGOS: Record<ErrorCode, true> = {
 	device_revoked: true,
 	license_expired: true,
 	license_not_found: true,
-	invalid_pin: true,
 	tenant_db_not_provisioned: true,
 	bootstrap_too_large: true,
 	tenant_migration_altered: true,
@@ -232,10 +230,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// Operativa
 	email_duplicado: "Ya hay un cliente con ese correo.",
 	horario_solapado: "Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.",
-	horario_editar_conjunto: "Edita los dos tramos del horario como un conjunto.",
 	horario_invalido: "El horario contiene una fecha o unas horas inválidas.",
 	asignacion_no_encontrada: "Asignación no encontrada.",
-	asignacion_duplicada: "Ese trabajador ya tiene ese turno asignado ese día.",
 	// RI-62: el mismo texto que da la Main (`MSG_ULTIMO_ADMINISTRADOR`).
 	ultimo_administrador:
 		"No se puede dejar el negocio sin ningún administrador activo. Da antes el rol de Administrador a otra persona.",

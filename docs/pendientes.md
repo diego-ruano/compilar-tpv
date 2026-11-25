@@ -34,7 +34,10 @@ Esta rama no remite a la AEAT. Veri\*factu entero —remisión, certificado, QR 
 anomalías, exportación, declaración responsable y modo prueba— está en `con-verifactu` (Windows 10
 y 11) y `con-verifactu-windows-7`, tal como estaba el 25-10-2026. La retirada es un solo commit de
 `main` (`git log --oneline --grep "sin Veri"`): volver a ponerlo empieza por revertirlo sobre la
-rama de trabajo y resolver lo que haya cambiado desde entonces.
+rama de trabajo y resolver lo que haya cambiado desde entonces. Lo que se ha escrito después para
+esta rama no lo devuelve la reversión: [tickets.md](arquitectura/tickets.md) y los comentarios del
+papel (`impresion.rs`, `printing.rs`, `printerApis.ts`, `PrintTicketModal.tsx`) describen un ticket
+sin el QR, y hay que volver a ponerlo en ellos.
 
 Con él vuelve lo que estaba pendiente allí:
 
@@ -324,7 +327,7 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ### ARCH-01 · Doble implementación Main/worker
 
 Cada escritura existe en Rust (`tpv-infra-sqlite`, para la Main) y en TypeScript
-(`domains/*/*.commands.ts`, para la Handy), con dos sistemas de tipos (ts-rs y zod) y dos
+(`domains/*/*.commands.ts`, para la Handy), con dos sistemas de tipos (Specta y zod) y dos
 validaciones. Tienen que producir lo mismo para que la replicación converja. La red que hay: los dos
 arneses de contrato ([tests/contract/README.md](../tests/contract/README.md)) y
 `scripts/check-contract-coverage.mjs`, que lista en CI lo que se quede sin caso.

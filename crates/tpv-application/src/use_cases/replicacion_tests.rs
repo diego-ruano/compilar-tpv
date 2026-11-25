@@ -165,7 +165,6 @@ impl PairingService for Nube {
 fn device_identity(&self) -> AppResult<DeviceIdentity> { panic!("Capacidad ajena a esta prueba") }
 fn firmar_hello(&self, _mode: &str, _nonce_b64: &str) -> AppResult<FirmaDispositivo> { panic!("Capacidad ajena a esta prueba") }
 fn firmar_emparejamiento(&self, _args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> { panic!("Capacidad ajena a esta prueba") }
-fn hora_para_firmar(&self) -> i64 { panic!("Capacidad ajena a esta prueba") }
 fn desfase_del_reloj_ms(&self) -> Option<i64> { panic!("Capacidad ajena a esta prueba") }
 fn handy_set_token(&self, _token: &str, _tenant_id: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 fn handy_clear_token(&self) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
@@ -220,7 +219,6 @@ impl SubidaCompleta for FakeSubida {
         Ok(!pendiente || *self.pasos.lock().unwrap() >= self.nucleo_en)
     }
     async fn paso(&self, _: &mut dyn EnvioDeSubida) -> AppResult<PasoHecho> { *self.pasos.lock().unwrap() += 1; Ok(PasoHecho::Avanza) }
-    async fn abandonar(&self, _: &str) -> AppResult<()> { Ok(()) }
 }
 #[async_trait]
 impl ContextoReplicacion for Contexto {

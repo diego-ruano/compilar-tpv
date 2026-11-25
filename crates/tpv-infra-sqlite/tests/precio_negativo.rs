@@ -123,7 +123,7 @@ impl Base {
         (l.id_detalle.clone(), l.precio_unitario)
     }
 
-    /// El cobro de mesa en efectivo por el caso de uso del comando `mesas_cobrar_detalles`.
+    /// El cobro de mesa en efectivo por el caso de uso del comando `cobrar_detalles`.
     async fn cobrar(&self, detalles: &[&str]) -> Result<String, AppError> {
         let repo = SqliteMesasRepository::new(self.db.clone());
         tpv_application::use_cases::mesas::cobrar_detalles(

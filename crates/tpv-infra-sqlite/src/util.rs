@@ -7,10 +7,9 @@ pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// Canal de una comanda (`Comandas.Canal`). 'MESA' = consumo en sala (lleva mesa);
-/// 'BARRA' = venta rápida (sin mesa). Ver la nota de la tabla `Comandas` en
+/// Canal de una comanda de venta rápida (`Comandas.Canal`), sin mesa. El de una de sala es 'MESA',
+/// el valor por defecto de la columna. Ver la nota de la tabla `Comandas` en
 /// `packages/database/migrations/0001_inicial.sql`.
-pub const CANAL_MESA: &str = "MESA";
 pub const CANAL_BARRA: &str = "BARRA";
 
 /// UUID FIJO del administrador inicial. DEBE ser idéntico en la Main (`seed_admin_if_empty`) y en

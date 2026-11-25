@@ -17,7 +17,6 @@ impl MetodoDevolucion {
 impl std::fmt::Display for MetodoDevolucion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.como_texto()) }
 }
-pub const METODO_OTRO: &str = "Otro";
 pub fn normalize_metodo(input: &str) -> Result<MetodoPago, String> {
     match input.trim().to_ascii_lowercase().as_str() {
         "efectivo" => Ok(MetodoPago::Efectivo), "tarjeta" => Ok(MetodoPago::Tarjeta),

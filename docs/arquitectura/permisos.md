@@ -365,10 +365,12 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
   AppData. Un fichero propio nuevo va a ese
   `deny`; lo vigila `la_webview_no_puede_escribir_sobre_los_ficheros_del_equipo`, que además rechaza
   cualquier `fs:allow-write*` sin ámbito.
-- **Lo registrado es lo invocable.** Un comando que nadie llama no se registra en el
-  `generate_handler!`. `scripts/check-comandos-tauri.mjs` comprueba en CI que todo lo que el frontend y
-  el E2E invocan por nombre existe; `los_comandos_retirados_no_vuelven_por_la_puerta_de_atras` vigila
-  que no vuelvan `tpv_server_signed_headers` (firmaba cualquier petición sin gate) ni
+- **Lo registrado es lo invocable.** Un comando que nadie llama no se registra en `command_builder()`
+  (`collect_commands!`). Las funciones del frontend (`@tpv/client`) y los nombres que invoca el E2E
+  (`nombresComandos`) se generan desde ese registro: un comando que no está no compila, y CI comprueba
+  con `generate-types --check` y el typecheck que lo generado está al día.
+  `los_comandos_retirados_no_vuelven_por_la_puerta_de_atras` vigila que no vuelvan los retirados,
+  cada uno con su porqué, como `tpv_server_signed_headers` (firmaba cualquier petición sin gate) o
   `cobrar_venta_rapida` (un segundo camino de cobro no idempotente).
 - **Secretos fuera de la base**: `device_id`, clave ed25519, token de la Handy y DEK en el keyring o en
   Android Keystore. El build de E2E (identificador `….e2e`) los guarda con otro nombre

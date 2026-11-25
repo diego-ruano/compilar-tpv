@@ -13,7 +13,7 @@
 //     nube confirme que los dos lados coinciden;
 //   · el tenant es el de la tanda, recién estrenado, así que un catch-up no tiene nada de otras
 //     tandas que reproducir contra tablas con `UNIQUE` en el nombre. Eso acabaría en cuarentena, y
-//     `recovery_complete` se niega a desbloquear con cuarentenas.
+//     el desbloqueo (`completar`) se niega con cuarentenas.
 //
 // Que el equipo llegue con ventas dentro no es un atajo: es lo que tiene un bar el día de la avería,
 // y la reconciliación tiene que converger con las tablas del dinero dentro, no sólo con una

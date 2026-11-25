@@ -4,8 +4,8 @@
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DesfaseReloj, DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
-    PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    DesfaseReloj, DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs, PairCreateResult,
+    FirmaDispositivo, TpvServerPostJsonArgs,
 };
 
 use crate::error::{AppError, AppResult};
@@ -39,19 +39,11 @@ pub fn device_identity(svc: &dyn PairingService) -> AppResult<DeviceIdentity> {
     svc.device_identity()
 }
 
-pub fn firmar_hello(svc: &dyn PairingService, mode: &str, nonce: &str) -> AppResult<FirmaDispositivo> {
-    svc.firmar_hello(mode, nonce)
-}
-
 pub fn firmar_emparejamiento(svc: &dyn PairingService, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
     if args.pair_code.len() != 6 || !args.pair_code.bytes().all(|b| b.is_ascii_digit()) {
         return Err(AppError::validation("El código debe tener seis cifras"));
     }
     svc.firmar_emparejamiento(args)
-}
-
-pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
-    svc.hora_para_firmar()
 }
 
 /// RELOJ-01: el desfase medido del reloj, para el aviso de la pantalla.
@@ -65,24 +57,8 @@ pub fn handy_set_token(svc: &dyn PairingService, args: HandySetTokenArgs) -> App
     svc.handy_set_token(&token, &tenant_id)
 }
 
-pub fn handy_clear_token(svc: &dyn PairingService) -> AppResult<()> {
-    svc.handy_clear_token()
-}
-
 pub fn handy_get_tenant(svc: &dyn PairingService) -> AppResult<Option<String>> {
     svc.handy_get_tenant()
-}
-
-
-pub fn tpv_server_signed_headers(
-    svc: &dyn PairingService,
-    args: TpvServerSignedHeadersArgs,
-) -> AppResult<ApiSignedHeaders> {
-    let mode = normalize_mode(&args.mode)?;
-    let method = requerido(&args.method, "Falta el método de la petición.")?;
-    let path = normalize_path(&args.path)?;
-    let body = args.body.unwrap_or_default();
-    svc.tpv_server_signed_headers(&mode, &method, &path, body.as_bytes())
 }
 
 pub async fn tpv_server_post_json(

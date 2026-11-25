@@ -161,33 +161,6 @@ pub struct AsignacionGuardarInput {
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct AsignacionCreateInput {
-    pub id_trabajador: String,
-    pub fecha: String,
-    pub id_turno: String,
-    pub area: String,
-    #[serde(default)]
-    pub hora_inicio: Option<String>,
-    #[serde(default)]
-    pub hora_fin: Option<String>,
-    #[serde(default)]
-    pub notas: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct AsignacionUpdateInput {
-    pub id_asignacion: String,
-    pub id_turno: String,
-    pub area: String,
-    #[serde(default)]
-    pub hora_inicio: Option<String>,
-    #[serde(default)]
-    pub hora_fin: Option<String>,
-    #[serde(default)]
-    pub notas: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct AsignacionDeleteInput {
     pub id_asignacion: String,
 }

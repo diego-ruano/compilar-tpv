@@ -243,19 +243,11 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
 
 #[cfg(test)]
 mod tests {
-    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
-    /// se compara son centimos.
-    #[allow(dead_code)]
-    fn e(euros: f64) -> Dinero {
-        Dinero::de_euros(euros)
-    }
-
     use super::*;
     use crate::ejecutor::Connection;
 
     /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
     /// se compara son centimos.
-    #[allow(dead_code)]
     fn eur(euros: f64) -> Dinero {
         Dinero::de_euros(euros)
     }

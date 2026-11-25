@@ -63,8 +63,9 @@ pub(crate) const MAX_APPLY_ATTEMPTS: i64 = 5;
 /// reintentando sola — dejaba detenido todo lo que viniera detrás, que es un día de ventas.
 ///
 /// Es más generoso que el de bajada a propósito. Un fallo de subida se reintenta en cada pasada
-/// del drenado, que puede dispararse varias veces por minuto (el evento `outbox:pending`), no una
-/// vez por ciclo de catch-up. Con 5 se apartaría una operación por un bache de red de segundos.
+/// del drenado, que puede dispararse varias veces por minuto (cada escritura despierta al motor, y
+/// con algo pendiente mira cada 3 s), no una vez por ciclo de catch-up. Con 5 se apartaría una
+/// operación por un bache de red de segundos.
 const MAX_SUBIDA_ATTEMPTS: i64 = 20;
 
 /// SYNC-26 · Las apartadas que repara la fila `alias` de `_Sync_Outbox`, como tabla (`json_each`) de
@@ -2930,8 +2931,8 @@ mod tests_backfill {
     //! - si la fase 2 pisara una fila que ya está, machacaría con una versión vieja del histórico
     //!   lo que el catch-up acaba de traer al día;
     //! - si sus escrituras pasaran por la captura del outbox, el equipo devolvería a la nube —fila
-    //!   a fila, y facturado como escrituras en Turso— el histórico entero que acaba de bajarse de
-    //!   ella, para no cambiar absolutamente nada.
+    //!   a fila, y pagando cada una como escritura en el SQLite del Durable Object del negocio— el
+    //!   histórico entero que acaba de bajarse de ella, para no cambiar absolutamente nada.
     //!
     //! Ninguno de los dos da un error. El primero da un dato incorrecto que nadie mira y el segundo
     //! da una factura.

@@ -9,7 +9,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 
 - **El ticket de un cobro lo compone Rust desde la base** (`use_cases::tickets::ticket_de_pago`): las
   líneas que cobró ese pago (`Pago_Detalles`) y, de su registro de facturación, el número, el NIF y la
-  razón social declarados, la fecha de expedición, el QR, el desglose y el total. La pantalla lo pide
+  razón social declarados, la fecha de expedición, el desglose y el total. La pantalla lo pide
   para enseñarlo (`printer_ticket_de_pago`) y lo imprime por el id del pago
   (`printer_imprimir_pago`): el papel no viaja, así que no puede no ser el de su factura.
 - **La precuenta la compone la pantalla** (`payloadDePrecuenta`) con las líneas de la comanda, y
@@ -17,7 +17,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 
 | Pieza | Archivo | Rol |
 |---|---|---|
-| Generador | `src-tauri/src/printing.rs` | Ancho, columnas, desglose, QR, logo, corte, cajón, arqueo |
+| Generador | `src-tauri/src/printing.rs` | Ancho, columnas, desglose, logo, corte, cajón, arqueo |
 | Comandos | `src-tauri/src/lib.rs` | `printer_ticket_de_pago`, `printer_imprimir_pago`, `printer_imprimir_precuenta`, `printer_print_arqueo`, `printer_ticket_cols`, `printer_open_drawer`, `printer_print_test`, selección de impresora |
 | Ticket de un cobro | `crates/tpv-application/src/use_cases/tickets.rs` + `crates/tpv-infra-sqlite/src/tickets.rs` | El payload desde el pago y su factura |
 | Desglose de IVA y agrupación | `crates/tpv-domain/src/ticket.rs` | Papel, vista previa y registro fiscal ([verifactu.md](verifactu.md)); `agrupar_lineas` es la gemela de `agruparLineas` |
@@ -63,7 +63,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   su `Importe_Total`, no un recálculo ni los ajustes de hoy.
 - **El último cobro se olvida al cambiar de comanda**: el modal sólo ofrece el ticket del último
   cobro de la comanda abierta; el de otro se reimprime desde Cuentas.
-- **La precuenta** no lleva número ni registro ni QR, y dice que no es un ticket de venta.
+- **La precuenta** no lleva número ni registro, y dice que no es un ticket de venta.
 - **Una factura completa** (`F1`/`F3`) se titula FACTURA y lleva el nombre, el NIF y el domicilio del
   cliente (`bloque_tipo_de_factura`); una `F3` dice qué factura sustituye. Un ticket canjeado se
   sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
@@ -134,7 +134,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 - **El logo se lee y el ticket se maqueta en el hilo de bloqueo que lo manda a la impresora**, no en
   la tarea del comando. Si ese hilo se cae, la pantalla recibe «No se pudo completar la impresión.
   Vuelve a intentarlo.» y el detalle va al registro.
-- **Nada de lo que rodea al ticket puede impedir cobrar**: ni el logo, ni el QR, ni la impresora.
+- **Nada de lo que rodea al ticket puede impedir cobrar**: ni el logo ni la impresora.
 - **Un carácter, un byte**: `encode_cp858` mapea uno a uno y lo que no está en la tabla sale `?`. Los
   bytes de control se convierten en espacio: el nombre de un producto lo escribe una persona, y un
   `ESC` ahí sería un comando.

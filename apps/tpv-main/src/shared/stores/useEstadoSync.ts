@@ -12,9 +12,9 @@ import { commands } from "@tpv/client";
 // Dos cosas distintas conviven en este store, y conviene no confundirlas:
 //
 //   · `estado`      → lo que ESTÁ pasando (lo escribe `useMainSocket` en cada transición).
-//   · `preferencia` → la palanca de emergencia (`auto` | `off`), persistida en
-//                     `device_config.json`. NO tiene UI: se toca a mano o con el comando
-//                     `set_connection_mode`. Por defecto `auto`.
+//   · `preferencia` → la palanca de emergencia (`auto` | `off`), el campo `connectivity` de
+//                     `device_config.json`. NO tiene UI ni comando que la cambie: se toca a
+//                     mano, y aquí sólo se lee (`get_connection_mode`). Por defecto `auto`.
 
 import { create } from "zustand";
 

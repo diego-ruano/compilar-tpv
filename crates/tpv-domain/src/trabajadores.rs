@@ -128,16 +128,6 @@ pub struct AsignacionNueva {
     pub notas: Option<String>,
 }
 
-/// Cambios sobre una asignación existente (no se mueve de trabajador/fecha).
-#[derive(Debug, Clone)]
-pub struct AsignacionCambios {
-    pub id_turno: String,
-    pub area: String,
-    pub hora_inicio: Option<String>,
-    pub hora_fin: Option<String>,
-    pub notas: Option<String>,
-}
-
 /// Normaliza el estado de un usuario/trabajador a "Activo" | "Inactivo".
 /// Cualquier valor que no sea "Inactivo" (case-insensitive) se considera "Activo".
 pub fn normalizar_estado(estado: &str) -> String {

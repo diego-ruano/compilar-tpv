@@ -6,7 +6,6 @@ export const nombresComandos = {
     "get_device_mode": "getDeviceMode",
     "set_device_mode": "setDeviceMode",
     "get_connection_mode": "getConnectionMode",
-    "set_connection_mode": "setConnectionMode",
     "init_main": "initMain",
     "device_reset_mode": "deviceResetMode",
     "save_image": "saveImage",
@@ -114,9 +113,7 @@ export const nombresComandos = {
     "horarios_marcar_libre": "horariosMarcarLibre",
     "turnos_get_all": "turnosGetAll",
     "horarios_get_asignaciones_semana": "horariosGetAsignacionesSemana",
-    "horarios_create_asignacion": "horariosCreateAsignacion",
     "horarios_guardar_asignacion": "horariosGuardarAsignacion",
-    "horarios_update_asignacion": "horariosUpdateAsignacion",
     "horarios_delete_asignacion": "horariosDeleteAsignacion",
     "horarios_copy_semana_asignaciones": "horariosCopySemanaAsignaciones",
     "horarios_set_predeterminado_desde_semana": "horariosSetPredeterminadoDesdeSemana",
@@ -218,7 +215,6 @@ export const nombresComandos = {
     "handy_url_imagenes": "handyUrlImagenes",
     "device_get_identity": "deviceGetIdentity",
     "device_firmar_emparejamiento": "deviceFirmarEmparejamiento",
-    "device_hora_para_firmar": "deviceHoraParaFirmar",
     "reloj_desfase": "relojDesfase",
     "tpv_server_post_json": "tpvServerPostJson",
     "pair_create": "pairCreate",
@@ -254,7 +250,6 @@ type Argumentos = {
     "get_device_mode": {  };
     "set_device_mode": { args: Parameters<Comandos["setDeviceMode"]>[0] };
     "get_connection_mode": {  };
-    "set_connection_mode": { args: Parameters<Comandos["setConnectionMode"]>[0] };
     "init_main": {  };
     "device_reset_mode": {  };
     "save_image": { args: Parameters<Comandos["saveImage"]>[0] };
@@ -362,9 +357,7 @@ type Argumentos = {
     "horarios_marcar_libre": { args: Parameters<Comandos["horariosMarcarLibre"]>[0] };
     "turnos_get_all": {  };
     "horarios_get_asignaciones_semana": { args: Parameters<Comandos["horariosGetAsignacionesSemana"]>[0] };
-    "horarios_create_asignacion": { args: Parameters<Comandos["horariosCreateAsignacion"]>[0] };
     "horarios_guardar_asignacion": { args: Parameters<Comandos["horariosGuardarAsignacion"]>[0] };
-    "horarios_update_asignacion": { args: Parameters<Comandos["horariosUpdateAsignacion"]>[0] };
     "horarios_delete_asignacion": { args: Parameters<Comandos["horariosDeleteAsignacion"]>[0] };
     "horarios_copy_semana_asignaciones": { args: Parameters<Comandos["horariosCopySemanaAsignaciones"]>[0] };
     "horarios_set_predeterminado_desde_semana": { args: Parameters<Comandos["horariosSetPredeterminadoDesdeSemana"]>[0] };
@@ -466,7 +459,6 @@ type Argumentos = {
     "handy_url_imagenes": {  };
     "device_get_identity": {  };
     "device_firmar_emparejamiento": { args: Parameters<Comandos["deviceFirmarEmparejamiento"]>[0] };
-    "device_hora_para_firmar": {  };
     "reloj_desfase": {  };
     "tpv_server_post_json": { args: Parameters<Comandos["tpvServerPostJson"]>[0] };
     "pair_create": {  };

@@ -4,8 +4,8 @@
 //!
 //! Implementa los puertos de repositorio definidos en `tpv-application::ports`
 //! ejecutando SQL real contra la base de datos SQLite local (rusqlite, por medio de
-//! `ejecutor`). Toda sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se
-//! reubica aquí, dentro de repositorios que reciben la `Connection` del ejecutor.
+//! `ejecutor`). Todo el SQL de la Main vive aquí, en repositorios que reciben la `Connection` del
+//! ejecutor.
 
 // Tests de contrato Main(Rust)↔worker(TS). Son dos y fijan las dos mitades del contrato:
 //   · escritura → el EFECTO de un comando (las filas que deja) es el mismo en los dos lados.

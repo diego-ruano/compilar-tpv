@@ -535,7 +535,7 @@ impl TicketsImpresos {
 }
 
 /// Lo que la pantalla manda a imprimir es **siempre una precuenta** (RI-29): se le quita todo lo
-/// fiscal. Un papel con número, QR o la marca de copia sólo sale de `ticket_de_pago`, que lo lee
+/// fiscal. Un papel con número o con la marca de copia sólo sale de `ticket_de_pago`, que lo lee
 /// de la base; si la pantalla pudiera ponerlos, podría imprimir una factura que no es la del cobro.
 pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.numero_ticket = None;

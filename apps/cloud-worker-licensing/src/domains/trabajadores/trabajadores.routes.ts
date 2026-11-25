@@ -91,14 +91,6 @@ trabajadoresRoutes.delete("/:id", async (c) => {
 	return c.json({ retirado });
 });
 
-trabajadoresRoutes.post("/horarios/asignaciones", cuerpo(S.asignacionCreateSchema), async (c) => {
-	const datos = c.req.valid("json");
-	// TRAB-04: el mismo turno para el mismo trabajador y día (aunque cambie el área) lo rechaza la
-	// guarda del comando, dentro del lote (SYNC-30): `asignacion_duplicada`.
-	const id = await apply(c, cmd.createAsignacion(datos));
-	return c.json({ ok: true, id_asignacion: id });
-});
-
 trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), async (c) => {
 	const datos = c.req.valid("json");
 	const existente = datos.id_asignacion ? await tenantQuery(c, db => q.grupoAsignacion(db, datos.id_asignacion!)) : null;
@@ -117,16 +109,6 @@ trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), 
 // Marcar libre el día de un trabajador: tapa la plantilla. Se quita borrando esa asignación.
 trabajadoresRoutes.post("/horarios/libre", cuerpo(S.horarioLibreSchema), async (c) => {
 	await apply(c, cmd.marcarLibre(c.req.valid("json")));
-	return c.json({ ok: true });
-});
-
-trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSchema), async (c) => {
-	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_asignacion_invalido");
-	const datos = c.req.valid("json");
-	// Una de dos tramos (`horario_editar_conjunto`) y una que ya no está (`asignacion_no_encontrada`)
-	// las rechazan las guardas del comando, dentro del lote (SYNC-35).
-	await apply(c, cmd.updateAsignacion(id, datos));
 	return c.json({ ok: true });
 });
 

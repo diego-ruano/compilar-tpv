@@ -45,13 +45,11 @@ import {
 } from "../src/domains/notificaciones/notificaciones.queries";
 import {
 	copySemana,
-	createAsignacion,
 	guardarAsignacion,
 	deleteAsignacion,
 	eliminarTrabajador,
 	marcarLibre,
 	setPredeterminadoDesdeSemana,
-	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
 import {
 	filasSemana,
@@ -377,12 +375,8 @@ import casoLoginPunchSalidaNoche from "../../../tests/contract/casos/login/punch
 import goldenLoginPunchSalidaNoche from "../../../tests/contract/golden/login/punch_salida_turno_noche.json";
 import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partido.json";
 import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
-import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
-import goldenHorCreate from "../../../tests/contract/golden/horarios/create_asignacion.json";
 import casoHorGuardar from "../../../tests/contract/casos/horarios/guardar_asignacion.json";
 import goldenHorGuardar from "../../../tests/contract/golden/horarios/guardar_asignacion.json";
-import casoHorUpdate from "../../../tests/contract/casos/horarios/update_asignacion.json";
-import goldenHorUpdate from "../../../tests/contract/golden/horarios/update_asignacion.json";
 import casoHorDelete from "../../../tests/contract/casos/horarios/delete_asignacion.json";
 import goldenHorDelete from "../../../tests/contract/golden/horarios/delete_asignacion.json";
 
@@ -562,9 +556,7 @@ const CASOS = [
 		golden: goldenLoginPunchSalidaNoche,
 	},
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
-	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
 	{ nombre: "horarios_guardar_asignacion", caso: casoHorGuardar, golden: goldenHorGuardar },
-	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
 	{ nombre: "horarios_delete_asignacion", caso: casoHorDelete, golden: goldenHorDelete },
 ];
 
@@ -1159,14 +1151,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "horarios.guardar_asignacion": {
 			aplicar(hub, sql, guardarAsignacion(caso.entrada as any));
-			return;
-		}
-		case "horarios.create_asignacion": {
-			aplicar(hub, sql, createAsignacion(caso.entrada as any));
-			return;
-		}
-		case "horarios.update_asignacion": {
-			aplicar(hub, sql, updateAsignacion(caso.entrada.id_asignacion, caso.entrada as any));
 			return;
 		}
 		case "horarios.delete_asignacion": {

@@ -75,50 +75,12 @@ export type AnularPagoInput = {
 	clase?: string | null,
 };
 
-/**  Cabeceras firmadas para tpv-server (campos camelCase, compat frontend). */
-export type ApiSignedHeaders = {
-	authorization: string,
-	xDeviceTs: string,
-	xDeviceSig: string,
-};
-
-/**
- *  Resultado de aplicar un lote de cambios.
- *
- *  Lo importante es `aplicadas`: los `op_id` que se aplicaron **de verdad**. El frontend reacciona
- *  (invalidar caché, recargar el POS, releer ajustes) sólo a esos. Antes reaccionaba a todo lo que
- *  RECIBÍA, incluidas sus propias operaciones que vuelven de la nube y las que el gate de
- *  idempotencia descarta — así que una sola vuelta del catch-up recargaba media aplicación sin que
- *  nada hubiera cambiado, y en el caso de los ajustes eso realimentaba un bucle.
- */
-export type AplicacionSync = {
-	/**  `op_id` de las operaciones aplicadas en esta llamada (sin las ya aplicadas ni las saltadas). */
-	aplicadas: string[],
-	/**  Checkpoint local tras el lote (último `seq` aplicado). */
-	last_seq: number,
-};
-
 /**  Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri. */
 export type AppErrorDto = {
 	/**  Código estable. Es lo único por lo que se debe ramificar. */
 	code: ErrorCode,
 	/**  Texto diagnóstico, legible. Se muestra y se registra; nunca se compara. */
 	message: string,
-};
-
-/**  Args del comando que aplica un lote de cambios en orden de `seq`. */
-export type ApplySyncChangesArgs = {
-	changes: SyncChange[],
-};
-
-export type AsignacionCreateInput = {
-	id_trabajador: string,
-	fecha: string,
-	id_turno: string,
-	area: string,
-	hora_inicio?: string | null,
-	hora_fin?: string | null,
-	notas?: string | null,
 };
 
 export type AsignacionDeleteInput = {
@@ -149,15 +111,6 @@ export type AsignacionRow = {
 	Nombre_Turno: string,
 	/**  Es el día libre del trabajador (el turno LIBRE, sin horas): tapa la plantilla. */
 	Libre?: boolean,
-};
-
-export type AsignacionUpdateInput = {
-	id_asignacion: string,
-	id_turno: string,
-	area: string,
-	hora_inicio?: string | null,
-	hora_fin?: string | null,
-	notas?: string | null,
 };
 
 export type AutorizacionUsuario = {
@@ -575,16 +528,6 @@ export type ClaveReservaWebDto = {
 	codigo: string,
 };
 
-/**  Una página de `/v1/sync/verificar/claves`: claves primarias de una tabla, en orden de clave. */
-export type ClavesPagina = {
-	tabla: string,
-	columnas?: string[],
-	claves?: unknown[][],
-	/**  La última clave de la página si queda algo detrás; `None` si era la última. */
-	siguiente_cursor?: unknown[] | null,
-	hasta_seq?: number,
-};
-
 /**
  *  El cliente que ya tiene ese teléfono o ese email. Se busca primero por email, que identifica
  *  (índice único), y luego por teléfono. `coincide_por` es `"email"` o `"telefono"`: con el email
@@ -804,9 +747,11 @@ export type ConfirmarCodigoPinInput = {
 /**
  *  SYNC-17: qué hace la Main respecto a la nube. **Ya no es una elección del usuario**: la
  *  conectividad es un estado derivado del WebSocket (se intenta siempre y el badge refleja lo que
- *  hay). Esto es solo la palanca de emergencia, sin UI, para el caso patológico —una red que tira
- *  el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano en
- *  `device_config.json` o desde `set_connection_mode`.
+ *  hay). Esto es solo la palanca de emergencia, sin UI ni comando, para el caso patológico —una red
+ *  que tira el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano, en
+ *  el campo `connectivity` de `device_config.json`. Nadie avisa al motor de la réplica: la ve en
+ *  su siguiente comprobación (con la sesión abierta, a los 10 s como mucho con actividad y hasta
+ *  30 s en reposo; en `Off`, al acabar su espera, de hasta un minuto).
  *
  *  `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
  *  `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
@@ -974,20 +919,6 @@ export type DenominacionInput = {
 	unidades: number,
 };
 
-/**  Lo que no cuadra en una tabla. */
-export type DescuadreTabla = {
-	tabla: string,
-	/**  Filas que la Main tiene y la nube no. Se suben por estado. */
-	faltan: number,
-	/**
-	 *  Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir: se borran arriba
-	 *  sólo si esta Main puede afirmar que está al día.
-	 */
-	sobran: number,
-	/**  Filas que están en los dos sitios con contenido distinto. Se reparan con el de la Main. */
-	distintas: number,
-};
-
 /**  RELOJ-01 · Cuánto se aparta el reloj de este equipo del de la nube, para el aviso del reloj. */
 export type DesfaseReloj = {
 	/**
@@ -1102,7 +1033,7 @@ export type EnsureImageArgs = {
 };
 
 /**
- *  Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+ *  Fila de entradas (cobros). `id` es el `ID_Pago`, como texto.
  *
  *  Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
  *  descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo
@@ -1157,7 +1088,11 @@ export type ErrorCode =
 "not_found" |
 /**  El estado actual no admite la operación (comanda cerrada, stock insuficiente…). */
 "conflict" |
-/**  Fallo de persistencia (SQLite/libsql). */
+/**
+ *  Fallo de la base SQLite local de la Main. Sólo lo emite Rust: las bases de la nube (la de
+ *  cada negocio, en el SQLite de su Durable Object, y la central, en el objeto `BaseCentral`)
+ *  son cosa del worker, que no manda este código.
+ */
 "repository" |
 /**  Fallo de un servicio externo (red, worker, licencias). */
 "external" |
@@ -1177,8 +1112,6 @@ export type ErrorCode =
 "license_expired" |
 /**  No existe licencia activa para este tenant. */
 "license_not_found" |
-/**  PIN incorrecto en login/fichaje. */
-"invalid_pin" |
 /**
  *  El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
  *  permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
@@ -1197,14 +1130,16 @@ export type ErrorCode =
  */
 "permiso_denegado" |
 /**
- *  Faltan el NIF o la razón social del obligado, así que no se puede generar el registro de
- *  facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el registro se crea de forma
- *  simultánea o inmediatamente anterior a la expedición de la factura).
+ *  Faltan el NIF o la razón social del obligado (o el NIF no es válido), así que no se puede
+ *  generar el registro de facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el
+ *  registro se crea de forma simultánea o inmediatamente anterior a la expedición de la factura).
  *
- *  Tiene código propio porque la UI **hace algo distinto**: lleva al formulario de datos
- *  fiscales en vez de enseñar "no se puede cobrar", que es lo único que vería el camarero con
- *  un código genérico. Es la única puerta que Veri*factu añade al camino de la venta, y va
- *  antes de la primera venta y no a mitad de servicio.
+ *  Es la única puerta que Veri*factu añade al camino de la venta. La pantalla **no** ramifica por
+ *  él: enseña su mensaje, que dice qué falta, y lo que lleva al formulario de datos fiscales es el
+ *  aviso de antes de cobrar (`verifactu_estado`), antes de la primera venta y no a mitad de
+ *  servicio. Tiene código propio porque es lo que dice en el registro de fallos por qué no se
+ *  cobró, y porque con la remisión (rama `con-verifactu`) el job lo distingue: no remite y lo
+ *  dice con un mensaje, no con una traza.
  */
 "datos_fiscales_incompletos" |
 /**
@@ -1252,7 +1187,7 @@ export type EstadoCorreoRecuperacion = {
 	es_el_de_la_compra: boolean,
 };
 
-/**  ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal. */
+/**  ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Negocio. */
 export type EstadoFiscal = {
 	/**
 	 *  ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir la factura, y
@@ -1387,29 +1322,6 @@ export type FalloDeComando = {
 	veces: number,
 };
 
-/**  Una página de `/v1/sync/verificar/filas`: las filas de los cubos que no cuadraban. */
-export type FilasDeCubos = {
-	tabla: string,
-	columnas?: string[],
-	filas?: unknown[][],
-	/**  `None` = no quedan más. Cualquier otra cosa es «sigue pidiendo desde aquí». */
-	siguiente_cursor?: number | null,
-	hasta_seq?: number,
-};
-
-/**
- *  Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
- *  Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
- *  ha venido se vuelve a pedir.
- */
-export type FilasPorClave = {
-	tabla: string,
-	columnas?: string[],
-	filas?: unknown[][],
-	cortada?: boolean,
-	hasta_seq?: number,
-};
-
 export type FinalizarTareaInput = {
 	id_tarea: string,
 	id_trabajador: string,
@@ -1481,18 +1393,6 @@ export type GuardarPermisosInput = {
 export type HandySetTokenArgs = {
 	token: string,
 	tenant_id: string,
-};
-
-/**
- *  Una página de `/v1/sync/historico`. `filas` es posicional respecto a `columnas`, igual que en
- *  el volcado; el cursor viaja aparte y **no** es una columna más.
- */
-export type HistoricoPagina = {
-	tabla: string,
-	columnas: string[],
-	filas: unknown[][],
-	/**  `None` = esta tabla está completa. Cualquier otra cosa es "sigue pidiendo desde aquí". */
-	siguiente_cursor: number | null,
 };
 
 /**  Marcar libre el día de un trabajador: sustituye lo que tuviera ese día. */
@@ -2240,37 +2140,6 @@ export type NotificacionesListArgs = {
 	solo_no_leidas?: boolean | null,
 };
 
-/**  Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo. */
-export type OutboxEntry = {
-	seq: number,
-	op_id: string,
-	command_name: string,
-	statements: SqlStatement[],
-};
-
-/**
- *  Lo que el drenado necesita saber tras un `apply_ack` fallido (SYNC-20): si esta operación se
- *  aparta o se sigue reintentando, y con qué contexto contarlo.
- */
-export type OutboxFallo = {
-	/**  Rechazos acumulados por esta operación. */
-	intentos: number,
-	/**  `true` si acaba de apartarse: el drenado debe SEGUIR con la siguiente, no parar. */
-	apartada: boolean,
-	/**
-	 *  Para el informe de telemetría. El `Statements_Json` NO sale de aquí: lleva datos del
-	 *  negocio y PII, y lo que hace falta para diagnosticar es qué comando falló, no con qué datos.
-	 */
-	command_name: string,
-	/**
-	 *  SYNC-22: filas cuya reparación se ha encolado al apartar esta operación. Cero puede
-	 *  significar dos cosas distintas y las dos importan: que no había nada que reparar, o que las
-	 *  sentencias no se supieron leer (queda en el log). Nunca significa "ya está igualado": eso
-	 *  sólo lo prueba que la reparación llegue a subir.
-	 */
-	reparadas: number,
-};
-
 /**  Una página de entradas. `siguiente` es `None` cuando no hay más filas (o no se pidió paginar). */
 export type PaginaEntradas = {
 	filas: EntradaDto[],
@@ -2285,7 +2154,8 @@ export type PaginaSalidas = {
 
 /**
  *  Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
- *  worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+ *  worker. Campos en camelCase, como los manda el worker y los lee la pantalla (`pairCode`,
+ *  `pairSecret`, `expiresAtMs`).
  */
 export type PairCreateResult = {
 	ok: boolean,
@@ -2495,7 +2365,7 @@ export type PrintTicketLine_Serialize = {
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.
@@ -2506,7 +2376,7 @@ export type PrintTicketPayload = PrintTicketPayload_Serialize | PrintTicketPaylo
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.
@@ -2617,7 +2487,7 @@ export type PrintTicketPayload_Deserialize = {
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.
@@ -3202,38 +3072,6 @@ export type ResultadoRecogidaWeb =
 /**  No se ha podido guardar: al cliente se le avisa por correo. */
 "fallida";
 
-/**  Lo que dejó una pasada del contraste. */
-export type ResultadoVerificacion = {
-	descuadres: DescuadreTabla[],
-	/**  Filas cuya reparación se ha encolado en esta pasada. */
-	reparadas: number,
-	/**
-	 *  La nube no pudo resumir la ventana: sólo se han comparado los conteos (y las claves de lo
-	 *  que no cuadraba).
-	 */
-	ventana_omitida: boolean,
-	/**  Filas de más en la nube cuyo borrado se ha encolado. */
-	borradas?: number,
-	/**
-	 *  Se encontraron diferencias que NO se han tocado: esta Main no podía afirmar que estuviera
-	 *  al día (un fallo de bajada, histórico por bajar, la base se movió antes de escribir), la
-	 *  reparación está apagada, o la pasada llegó a su tope antes de mirarlo todo.
-	 *
-	 *  Se informa: es la diferencia entre «no hay nada que arreglar» y «lo hay y no me atrevo».
-	 */
-	aplazado?: boolean,
-	/**
-	 *  Filas que se han bajado de la nube para compararlas una a una: las de los cubos que no
-	 *  cuadraban. Cero es lo normal.
-	 */
-	filas_examinadas?: number,
-	/**
-	 *  Tablas que no se han podido comparar por valores: sin clave primaria, con otras columnas
-	 *  que en la nube (otra versión del programa), o cuyas filas no llegaron como en el resumen.
-	 */
-	tablas_sin_comparar?: string[],
-};
-
 /**
  *  Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
  *  rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
@@ -3373,10 +3211,6 @@ export type SetAsignacionesTareaInput = {
 	ids_trabajadores?: string[],
 };
 
-export type SetConnectionModeArgs = {
-	mode: ConnectivityMode,
-};
-
 export type SetDeviceModeArgs = {
 	mode: DeviceMode,
 };
@@ -3444,15 +3278,6 @@ export type SpoolEvent = {
 	environment: string,
 };
 
-/**
- *  Una sentencia de escritura ya resuelta. `args` son escalares JSON (string/number/bool/null)
- *  que se enlazan a los `?` del `sql`.
- */
-export type SqlStatement = {
-	sql: string,
-	args: unknown[],
-};
-
 export type StatsCategoriaRow = {
 	ID_Categoria: string,
 	Nombre: string,
@@ -3490,16 +3315,6 @@ export type SubidaNubeEstado = {
 
 export type SummaryArgs = {
 	limit?: number | null,
-};
-
-/**
- *  Una operación a aplicar de forma atómica e idempotente (por `op_id`). `seq` es el cursor
- *  monotono del log de la nube; la Main lo usa como checkpoint del catch-up.
- */
-export type SyncChange = {
-	op_id: string,
-	seq: number,
-	statements: SqlStatement[],
 };
 
 /**
@@ -3697,17 +3512,6 @@ export type TpvServerPostJsonArgs = {
 	mode: string,
 	path: string,
 	body: unknown,
-};
-
-export type TpvServerSignedHeadersArgs = {
-	mode: string,
-	method: string,
-	path: string,
-	/**
-	 *  Cuerpo exacto que se enviará con esas cabeceras (vacío si la petición no lleva). Entra en
-	 *  la firma (FABLE-E): pedir cabeceras para un cuerpo y mandar otro da 401 en el worker.
-	 */
-	body?: string | null,
 };
 
 export type TrabajadorCardStats = TrabajadorCardStats_Serialize | TrabajadorCardStats_Deserialize;

@@ -1,6 +1,6 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **inventario**.
-//! ⚠️ Las salidas usan claves PascalCase (`#[serde(rename = ...)]`) y `flatten`,
-//! idénticas al backend antiguo (ts-rs las respeta vía serde-compat).
+//! ⚠️ Las salidas usan claves PascalCase (`#[serde(rename = ...)]`) y `flatten`, y Specta las lleva
+//! tal cual a TypeScript: la pantalla lee esas claves.
 
 use tpv_domain::dinero::Dinero;
 

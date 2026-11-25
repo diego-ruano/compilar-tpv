@@ -1,10 +1,9 @@
-//! Contratos (DTOs) de la frontera UI<->Rust para **cuentas** (caja).
-//! Campos snake_case idénticos a los structs antiguos (compat frontend).
+//! Contratos (DTOs) de la frontera UI<->Rust para **cuentas** (caja). Campos en snake_case.
 
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-/// Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+/// Fila de entradas (cobros). `id` es el `ID_Pago`, como texto.
 ///
 /// Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
 /// descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo

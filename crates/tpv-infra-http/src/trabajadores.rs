@@ -10,9 +10,7 @@ use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorRow, TurnoRow,
 };
-use tpv_domain::trabajadores::{
-    AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
-};
+use tpv_domain::trabajadores::{AsignacionNueva, TrabajadorCambios, TrabajadorNuevo};
 
 use crate::CloudClient;
 
@@ -139,23 +137,6 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
             .await
     }
 
-    async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
-        let body = json!({
-            "id_trabajador": data.id_trabajador,
-            "fecha": data.fecha,
-            "id_turno": data.id_turno,
-            "area": data.area,
-            "hora_inicio": data.hora_inicio,
-            "hora_fin": data.hora_fin,
-            "notas": data.notas,
-        });
-        let _: JsonValue = self
-            .client
-            .post_json("/v1/trabajadores/horarios/asignaciones", &body)
-            .await?;
-        Ok(true)
-    }
-
     async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool> {
         let primero = &tramos[0];
         let body = json!({ "id_asignacion": id_asignacion, "id_trabajador": primero.id_trabajador,
@@ -163,28 +144,6 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
             "notas": primero.notas, "tramos": tramos.iter().map(|t| json!({
                 "hora_inicio": t.hora_inicio, "hora_fin": t.hora_fin })).collect::<Vec<_>>() });
         let _: JsonValue = self.client.post_json("/v1/trabajadores/horarios/guardar", &body).await?;
-        Ok(true)
-    }
-
-    async fn update_asignacion(
-        &self,
-        id_asignacion: &str,
-        cambios: AsignacionCambios,
-    ) -> AppResult<bool> {
-        let body = json!({
-            "id_turno": cambios.id_turno,
-            "area": cambios.area,
-            "hora_inicio": cambios.hora_inicio,
-            "hora_fin": cambios.hora_fin,
-            "notas": cambios.notas,
-        });
-        let _: JsonValue = self
-            .client
-            .put_json(
-                &format!("/v1/trabajadores/horarios/asignaciones/{id_asignacion}"),
-                &body,
-            )
-            .await?;
         Ok(true)
     }
 

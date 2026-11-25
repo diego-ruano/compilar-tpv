@@ -16,7 +16,7 @@ use tpv_contracts::verifactu::{BloqueFiscal, CanjeableDto, EstadoFiscal};
 use crate::{AppState, ADMIN};
 
 /// ¿Están los datos fiscales del negocio? Lo leen el aviso de datos fiscales y Configuración →
-/// Fiscal.
+/// Negocio.
 ///
 /// Sin exigir rol: el aviso sale a quien esté delante, porque sin esos datos el siguiente cobro
 /// va a fallar.

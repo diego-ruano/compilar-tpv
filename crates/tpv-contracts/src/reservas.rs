@@ -1,5 +1,5 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **reservas**.
-//! Campos snake_case idénticos a los structs del backend antiguo (compat frontend).
+//! Campos en snake_case.
 
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

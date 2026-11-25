@@ -122,16 +122,6 @@ pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejami
     Ok(uc::firmar_emparejamiento(&svc(&app)?, args)?)
 }
 
-/// PROD-04: la hora con la que el frontend firma el saludo del WebSocket y el emparejamiento. Es
-/// la de la nube, no la del equipo: con un reloj desfasado más de 2 min la nube rechaza la firma.
-/// Sin sesión, como los comandos de firma acotada: se usa en el emparejamiento de la Handy, antes de que nadie
-/// entre.
-#[tauri::command(async)]
-#[specta::specta]
-pub fn device_hora_para_firmar(app: AppHandle) -> Result<i64, AppErrorDto> {
-    Ok(uc::hora_para_firmar(&svc(&app)?))
-}
-
 #[tauri::command]
 #[specta::specta]
 pub async fn tpv_server_post_json(

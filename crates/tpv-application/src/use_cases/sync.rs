@@ -4,9 +4,8 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use tpv_contracts::sync::{
-    AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
-    ClavesPagina, FilasDeCubos, FilasPorClave, HistoricoPagina, OutboxEntry, OutboxFallo,
-    ResultadoVerificacion, ResumenNube, SyncHealth,
+    BackfillEstado, BootstrapResultado, BootstrapSnapshot, ClavesPagina, FilasDeCubos, FilasPorClave,
+    HistoricoPagina, ResultadoVerificacion, ResumenNube, SyncHealth,
 };
 
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
@@ -70,50 +69,6 @@ fn leer_respuesta<T: DeserializeOwned>(
             e.column()
         ))
     })
-}
-
-/// Aplica un lote de cambios recibidos de la nube. Si viene vacío, solo devuelve el checkpoint.
-pub async fn apply_changes(
-    repo: &dyn SyncRepository,
-    args: ApplySyncChangesArgs,
-) -> AppResult<AplicacionSync> {
-    if args.changes.is_empty() {
-        return Ok(AplicacionSync {
-            aplicadas: Vec::new(),
-            last_seq: repo.get_checkpoint().await?,
-        });
-    }
-    let r = repo.apply_changes(args.changes).await?;
-    Ok(AplicacionSync { aplicadas: r.aplicadas, last_seq: r.last_seq })
-}
-
-/// Último `seq` aplicado localmente (cursor del catch-up).
-pub async fn get_checkpoint(repo: &dyn SyncRepository) -> AppResult<i64> {
-    repo.get_checkpoint().await
-}
-
-/// Operaciones pendientes de subir a la nube (outbox), en orden.
-pub async fn outbox_pending(repo: &dyn SyncRepository, limit: i64) -> AppResult<Vec<OutboxEntry>> {
-    let limit = if limit <= 0 { 50 } else { limit.min(500) };
-    repo.outbox_pending(limit).await
-}
-
-/// SYNC-20: la nube rechazó una operación del outbox. Devuelve si se aparta (y el drenado debe
-/// seguir con la siguiente) o si se sigue reintentando.
-///
-/// Un `op_id` vacío no se acepta: sin él no hay fila que anotar y el contador de intentos nunca
-/// subiría, así que la operación se reintentaría eternamente — justo el atasco que esto arregla,
-/// pero con la cuarentena puesta y sin funcionar.
-pub async fn outbox_mark_failed(
-    repo: &dyn SyncRepository,
-    op_id: &str,
-    error: &str,
-    permanente: bool,
-) -> AppResult<OutboxFallo> {
-    if op_id.trim().is_empty() {
-        return Err(AppError::Validation("op_id vacío".into()));
-    }
-    repo.outbox_mark_failed(op_id, error, permanente).await
 }
 
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo lo ya subido a la nube). Se invoca cuando el
@@ -551,143 +506,6 @@ impl Contraste {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct FakeRepo {
-        limits: Mutex<Vec<i64>>,
-        checkpoints: Mutex<usize>,
-    }
-    #[async_trait]
-    impl SyncRepository for FakeRepo {
-        async fn apply_changes(
-            &self,
-            changes: Vec<tpv_contracts::sync::SyncChange>,
-        ) -> AppResult<crate::ports::sync::BajadaAplicada> {
-            Ok(crate::ports::sync::BajadaAplicada {
-                aplicadas: changes.into_iter().map(|c| c.op_id).collect(),
-                last_seq: 99,
-                detenida: None,
-            })
-        }
-        async fn cambio_detenido(&self) -> AppResult<Option<tpv_contracts::sync::SyncChange>> {
-            Ok(None)
-        }
-        async fn get_checkpoint(&self) -> AppResult<i64> {
-            *self.checkpoints.lock().unwrap() += 1;
-            Ok(42)
-        }
-        async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>> {
-            self.limits.lock().unwrap().push(limit);
-            Ok(vec![])
-        }
-        async fn outbox_confirmar_lote(&self, _: &[(String, i64)]) -> AppResult<()> {
-            Ok(())
-        }
-        async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
-            Ok(OutboxFallo::default())
-        }
-        async fn contraste_marca(&self) -> AppResult<crate::ports::sync::MarcaLocal> {
-            Ok(crate::ports::sync::MarcaLocal::default())
-        }
-        async fn contrastar_con_la_nube(
-            &self,
-            _: ResumenNube,
-            _: crate::ports::sync::MarcaLocal,
-            _: &dyn PaginasDelContraste,
-            _: bool,
-        ) -> AppResult<ContrasteLocal> {
-            Ok(ContrasteLocal::Hecho(ResultadoVerificacion::default()))
-        }
-        async fn purge_applied_ops(&self) -> AppResult<()> {
-            Ok(())
-        }
-        async fn marcar_anterior_a_la_nube(&self) -> AppResult<()> {
-            panic!("no usado")
-        }
-        async fn health(&self) -> AppResult<SyncHealth> {
-            panic!("no usado")
-        }
-        async fn bootstrap_restaurar(
-            &self,
-            _: tpv_contracts::sync::BootstrapSnapshot,
-            _: &str,
-        ) -> AppResult<tpv_contracts::sync::BootstrapResultado> {
-            panic!("no se debe llegar a restaurar en estas pruebas")
-        }
-        async fn backfill_siguiente(&self) -> AppResult<Option<(String, i64)>> {
-            Ok(None)
-        }
-        async fn backfill_aplicar_pagina(&self, _: i64, _: HistoricoPagina) -> AppResult<i64> {
-            panic!("no usado")
-        }
-        async fn backfill_marcar_error(&self, _: &str, _: &str) -> AppResult<()> {
-            Ok(())
-        }
-        async fn backfill_estado(&self) -> AppResult<BackfillEstado> {
-            panic!("no usado")
-        }
-        async fn ultima_escritura_ms(&self, _: i64) -> AppResult<Option<i64>> {
-            panic!("no usado")
-        }
-    }
-
-    #[tokio::test]
-    async fn lote_vacio_devuelve_checkpoint_sin_aplicar() {
-        let repo = FakeRepo::default();
-        let r = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![] })
-            .await
-            .unwrap();
-        assert_eq!(r.last_seq, 42);
-        assert!(r.aplicadas.is_empty(), "un lote vacío no aplica nada");
-        assert_eq!(*repo.checkpoints.lock().unwrap(), 1);
-    }
-
-    #[tokio::test]
-    async fn limite_outbox_se_acota_y_usa_default() {
-        let repo = FakeRepo::default();
-        outbox_pending(&repo, 0).await.unwrap();
-        outbox_pending(&repo, 900).await.unwrap();
-        assert_eq!(*repo.limits.lock().unwrap(), vec![50, 500]);
-    }
-
-    #[tokio::test]
-    async fn lote_no_vacio_se_delega_y_devuelve_checkpoint_nuevo() {
-        let repo = FakeRepo::default();
-        let change = tpv_contracts::sync::SyncChange {
-            op_id: "op-1".into(),
-            seq: 99,
-            statements: vec![tpv_contracts::sync::SqlStatement {
-                sql: "UPDATE Configuracion SET Valor=?1".into(),
-                args: vec![serde_json::json!("nuevo")],
-            }],
-        };
-        let r = apply_changes(
-            &repo,
-            ApplySyncChangesArgs {
-                changes: vec![change],
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(r.last_seq, 99);
-        assert_eq!(r.aplicadas, vec!["op-1".to_string()]);
-        assert_eq!(*repo.checkpoints.lock().unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn cualquier_limite_no_positivo_usa_cincuenta() {
-        let repo = FakeRepo::default();
-        outbox_pending(&repo, -100).await.unwrap();
-        outbox_pending(&repo, i64::MIN).await.unwrap();
-        assert_eq!(*repo.limits.lock().unwrap(), vec![50, 50]);
-    }
-}
-
-#[cfg(test)]
 mod tests_leer_respuesta {
     //! De los bytes de la respuesta al tipo, sin un `Value` de por medio: lo que añada un worker más
     //! nuevo no estorba, lo que falte no se adivina, y un cuerpo que no encaja se dice sin citar lo
@@ -844,9 +662,6 @@ mod tests_leer_respuesta {
             &self,
             _: tpv_contracts::licensing::DeviceFirmarEmparejamientoArgs,
         ) -> AppResult<tpv_contracts::licensing::FirmaDispositivo> {
-            unimplemented!()
-        }
-        fn hora_para_firmar(&self) -> i64 {
             unimplemented!()
         }
         fn desfase_del_reloj_ms(&self) -> Option<i64> {

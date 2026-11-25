@@ -70,9 +70,6 @@ impl PairingService for Nube {
     fn firmar_emparejamiento(&self, _: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
         unimplemented!()
     }
-    fn hora_para_firmar(&self) -> i64 {
-        unimplemented!()
-    }
     fn desfase_del_reloj_ms(&self) -> Option<i64> {
         unimplemented!()
     }

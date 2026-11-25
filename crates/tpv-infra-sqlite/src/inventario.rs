@@ -15,8 +15,8 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_contracts::inventario::{
-    AlergenoInvDto, AlergenoMiniDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
-    ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoResumenDto,
+    AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
+    ProductDetailResponse, ProductoBaseDto, ProductoListDto, ProductoResumenDto,
     ProveedorMiniDto,
 };
 use tpv_domain::cantidad::redondear_cantidad;
@@ -468,36 +468,6 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(ProductDetailResponse { producto, alergenos })
     }
 
-    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
-        let db = self.db.read().await;
-        let Some(producto) = fetch_producto(&db, id_producto).await? else {
-            return Ok(None);
-        };
-        let mut rows = db
-            .query(
-                r#"
-                SELECT a.ID_Alergeno, a.Nombre, a.Ruta_Imagen
-                FROM Producto_Alergenos pa
-                JOIN Alergenos a ON a.ID_Alergeno = pa.ID_Alergeno
-                WHERE pa.ID_Producto=?1
-                ORDER BY a.Nombre ASC;
-                "#,
-                vec![Value::Text(id_producto.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-        let mut alergs = Vec::new();
-        while let Some(row) = rows.next().await.map_err(db_err)? {
-            let g = |idx: i32| row.get_value(idx).map_err(db_err);
-            alergs.push(AlergenoMiniDto {
-                id_alergeno: s(g(0)?),
-                nombre: s(g(1)?),
-                ruta_imagen: v_string(g(2)?),
-            });
-        }
-        Ok(Some(ProductoDetalleDto { producto, alergs }))
-    }
-
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {
         let sql = r#"
           SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
@@ -619,9 +589,6 @@ impl InventarioRepository for SqliteInventarioRepository {
         .await
     }
 
-    async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
-        self.guardar_producto(actor, p, true, true).await
-    }
     async fn upsert_producto_autorizado(&self, actor: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
         self.guardar_producto(actor, p, precios, recibir).await
     }
@@ -1717,7 +1684,7 @@ mod tests_alta_del_suelto {
     /// Guarda la ficha de `hielo` con su stock suelto y devuelve lo que replica esa escritura.
     async fn guardar_hielo(db: &Arc<Db>, stock: f64, op_id: &str, seq: i64) -> SyncChange {
         SqliteInventarioRepository::new(db.clone())
-            .upsert_producto(
+            .upsert_producto_autorizado(
                 "autor",
                 ProductoUpsert {
                     id: Some("hielo".into()),
@@ -1735,6 +1702,8 @@ mod tests_alta_del_suelto {
                     ids_alergenos: vec![],
                     ids_ingredientes: None,
                 },
+                true,
+                true,
             )
             .await
             .unwrap();

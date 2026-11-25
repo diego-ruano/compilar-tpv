@@ -155,8 +155,8 @@
       { "nombre": "AUD-31: ruta_imagen SVG", "cambios": { "ruta_imagen": "images/productos/0190f3a1-7b2c-4d4e-8f00-123456789abc.svg" }, "acepta": false, "mensaje": "La imagen no es válida: vuelve a elegirla." }
     ]
   },
-  "horario_alta": {
-    "base": { "id_trabajador": "t1", "fecha": "2026-03-03", "id_turno": "turno-1", "area": "Sala" },
+  "horario_libre": {
+    "base": { "id_trabajador": "t1", "fecha": "2026-03-03" },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "fecha": "2026-03-03" } },
       { "nombre": "31 de febrero: no pasa a ser 3 de marzo", "cambios": { "fecha": "2026-02-31" }, "acepta": false, "mensaje": "El día del turno no es válido." },

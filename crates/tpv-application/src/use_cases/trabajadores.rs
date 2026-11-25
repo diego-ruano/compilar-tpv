@@ -2,14 +2,14 @@
 //! e invocan el puerto.
 
 use tpv_contracts::trabajadores::{
-    AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorarioLibreInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
-    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
-    TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
+    AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, CopySemanaInput, HorarioLibreInput,
+    HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput, TrabajadorDetailArgs,
+    TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput, TrabajadorIdByUsuarioArgs,
+    TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
 use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
-    dia_de_horario, limpiar_opcional, normalizar_estado, requerido, validar_contrato, AsignacionCambios, AsignacionNueva,
+    dia_de_horario, limpiar_opcional, normalizar_estado, requerido, validar_contrato, AsignacionNueva,
     TrabajadorCambios, TrabajadorNuevo, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO,
     MSG_SEMANA_ORIGEN,
 };
@@ -75,59 +75,6 @@ pub async fn guardar_asignacion(repo: &dyn TrabajadoresRepository, input: Asigna
     }).collect();
     tpv_domain::trabajadores::validar_tramos(&tramos).map_err(AppError::validation)?;
     repo.guardar_asignacion(input.id_asignacion, tramos).await
-}
-
-pub async fn create_asignacion(
-    repo: &dyn TrabajadoresRepository,
-    input: AsignacionCreateInput,
-) -> AppResult<bool> {
-    if input.id_trabajador.trim().is_empty() {
-        return Err(AppError::validation("Falta el trabajador."));
-    }
-    if input.id_turno.trim().is_empty() {
-        return Err(AppError::validation("Elige un turno."));
-    }
-
-    // RI-78: una fecha real. El caso de uso es la única validación que corre igual en la Main y
-    // en la Handy (el repositorio HTTP no comprueba nada).
-    let fecha = dia_de_horario(&input.fecha, MSG_DIA_DEL_TURNO).map_err(AppError::validation)?;
-    let area = requerido(&input.area, "Elige el área.").map_err(AppError::validation)?;
-
-    let data = AsignacionNueva {
-        id_trabajador: input.id_trabajador,
-        fecha,
-        id_turno: input.id_turno,
-        area,
-        hora_inicio: limpiar_opcional(input.hora_inicio),
-        hora_fin: limpiar_opcional(input.hora_fin),
-        notas: limpiar_opcional(input.notas),
-    };
-
-    repo.create_asignacion(data).await
-}
-
-pub async fn update_asignacion(
-    repo: &dyn TrabajadoresRepository,
-    input: AsignacionUpdateInput,
-) -> AppResult<bool> {
-    if input.id_asignacion.trim().is_empty() {
-        return Err(AppError::validation("Falta la asignación."));
-    }
-    if input.id_turno.trim().is_empty() {
-        return Err(AppError::validation("Elige un turno."));
-    }
-
-    let area = requerido(&input.area, "Elige el área.").map_err(AppError::validation)?;
-
-    let cambios = AsignacionCambios {
-        id_turno: input.id_turno,
-        area,
-        hora_inicio: limpiar_opcional(input.hora_inicio),
-        hora_fin: limpiar_opcional(input.hora_fin),
-        notas: limpiar_opcional(input.notas),
-    };
-
-    repo.update_asignacion(&input.id_asignacion, cambios).await
 }
 
 pub async fn delete_asignacion(

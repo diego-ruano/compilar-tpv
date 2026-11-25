@@ -748,7 +748,7 @@ fn verifying_key(b64: &str) -> Option<VerifyingKey> {
 }
 
 /// ¿Firma `sig` el mensaje con alguna de las claves? Una clave pineada que no se pueda leer no cuenta
-/// (y la prueba `las_claves_pineadas_son_validas` impide que llegue a compilarse una así).
+/// (y la prueba `las_claves_pineadas_son_validas_y_distintas` impide que llegue a compilarse una así).
 fn firmado_por_alguna(claves: &[&str], msg: &[u8], sig: &Signature) -> bool {
     claves
         .iter()
@@ -1628,10 +1628,6 @@ impl PairingService for PairingAdapter {
         let ts = reloj::ahora_ms();
         let payload = format!("{accion}\n{ts}\n{}\n{}\n{device_id}", args.pair_code, args.nonce_b64);
         Ok(FirmaDispositivo { ts, sig_b64: sign_payload_b64(&sk, &payload).map_err(ext)? })
-    }
-
-    fn hora_para_firmar(&self) -> i64 {
-        reloj::ahora_ms()
     }
 
     fn desfase_del_reloj_ms(&self) -> Option<i64> {

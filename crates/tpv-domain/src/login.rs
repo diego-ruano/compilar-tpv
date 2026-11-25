@@ -14,6 +14,8 @@ const PBKDF2_PREFIX: &str = "$pbkdf2-sha256$";
 // worker los VERIFICA en el login de Handy (que no tiene BD local), el número tiene que ser uno
 // que ambos runtimes acepten → 100k es el techo común. Espejo de `DEFAULT_ITERS` en el worker
 // (login.crypto.ts). Para PINs numéricos la protección real es el rate-limit, no las iteraciones.
+// Son las de los hashes NUEVOS: subirlo rompería el login de la Handy y el alta del administrador del
+// negocio, y los hashes con menos migran solos al iniciar sesión (`hash_needs_upgrade`).
 const PBKDF2_ITERS: u32 = 100_000;
 const SALT_LEN: usize = 16;
 const DK_LEN: usize = 32;
@@ -219,14 +221,6 @@ pub fn hash_pin(pin: &str) -> Result<String, String> {
     ))
 }
 
-/// Iteraciones objetivo para los hashes **nuevos**. Fijado en 100k porque es el máximo que admite
-/// el `crypto.subtle` PBKDF2 de Cloudflare Workers, que es quien verifica los PIN en el login de
-/// Handy (online). Subirlo rompería ese login y la creación del admin del tenant. Los hashes con
-/// menos iteraciones migran solos por **rehash-en-login** (ver `hash_needs_upgrade`).
-pub const fn target_pbkdf2_iters() -> u32 {
-    PBKDF2_ITERS
-}
-
 /// `true` si el hash almacenado usa **menos** iteraciones que el objetivo actual → conviene
 /// recomputarlo (rehash-en-login) con el PIN ya verificado. Solo debe llamarse tras un `verify_pin`
 /// exitoso (entonces el hash es pbkdf2 válido y parseable).
@@ -360,7 +354,7 @@ mod tests {
         let hash = hash_pin("Abc123!").unwrap();
         assert!(hash.starts_with("$pbkdf2-sha256$i=100000$"));
         let (iters, salt, dk) = parse_pbkdf2_phc(&hash).unwrap();
-        assert_eq!(iters, target_pbkdf2_iters());
+        assert_eq!(iters, PBKDF2_ITERS);
         assert_eq!(salt.len(), SALT_LEN);
         assert_eq!(dk.len(), DK_LEN);
     }

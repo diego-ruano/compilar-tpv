@@ -62,8 +62,8 @@ pub struct LicenseGateResult {
    Cabeceras firmadas / identidad
 ========================================================= */
 
-/// Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+/// Cabeceras firmadas para el worker (campos en camelCase).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiSignedHeaders {
     pub authorization: String,
@@ -74,7 +74,8 @@ pub struct ApiSignedHeaders {
 }
 
 /// Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
-/// worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+/// worker. Campos en camelCase, como los manda el worker y los lee la pantalla (`pairCode`,
+/// `pairSecret`, `expiresAtMs`).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PairCreateResult {
@@ -187,17 +188,6 @@ pub enum AccionEmparejamiento {
     Consultar,
     #[serde(rename = "PAIR_CANCEL")]
     Cancelar,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct TpvServerSignedHeadersArgs {
-    pub mode: String,
-    pub method: String,
-    pub path: String,
-    /// Cuerpo exacto que se enviará con esas cabeceras (vacío si la petición no lleva). Entra en
-    /// la firma (FABLE-E): pedir cabeceras para un cuerpo y mandar otro da 401 en el worker.
-    #[serde(default)]
-    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

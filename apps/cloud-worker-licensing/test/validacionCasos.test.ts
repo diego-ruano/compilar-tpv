@@ -34,9 +34,9 @@ import {
 } from "../src/domains/mesas/mesas.schemas";
 import { altaReservaWebSchema } from "../src/domains/reservas_web/reservasWeb.schemas";
 import {
-	asignacionCreateSchema,
 	copySemanaSchema,
 	fechaLunesSchema,
+	horarioLibreSchema,
 	trabajadorCreateSchema,
 	trabajadorUpdateSchema,
 } from "../src/domains/trabajadores/trabajadores.schemas";
@@ -68,7 +68,7 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
 	lote: (e) => validarConMensaje(createLoteSchema, e),
 	lote_edicion: (e) => validarConMensaje(updateLoteSchema, e),
 	producto: (e) => validarConMensaje(upsertProductoSchema, e),
-	horario_alta: (e) => validarConMensaje(asignacionCreateSchema, e),
+	horario_libre: (e) => validarConMensaje(horarioLibreSchema, e),
 	horario_copia: (e) => validarConMensaje(copySemanaSchema, e),
 	horario_semana: (e) => validarConMensaje(fechaLunesSchema, e),
 	reserva_web: (e) => validarConMensaje(altaReservaWebSchema, e),

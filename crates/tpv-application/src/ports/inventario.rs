@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use tpv_contracts::inventario::{
     AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
-    ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
+    ProductoBaseDto, ProductoListDto, ProveedorMiniDto,
 };
 use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
@@ -26,7 +26,6 @@ pub trait InventarioRepository: Send + Sync {
     async fn list_alergenos(&self) -> AppResult<Vec<AlergenoInvDto>>;
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>>;
     async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse>;
-    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>>;
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>>;
 
     // ── Escrituras ──
@@ -38,12 +37,11 @@ pub trait InventarioRepository: Send + Sync {
     /// Borra una categoría con sus productos: cada uno se archiva si tiene historia (y se queda sin
     /// categoría) o se borra si no. Nada, si alguno está en una comanda abierta.
     async fn borrar_categoria(&self, id_categoria: &str) -> AppResult<()>;
-    /// Upsert de producto + alérgenos. Devuelve el id de producto.
+    /// Upsert de producto + alérgenos, con los límites de la sesión: `precios` deja tocar el precio y
+    /// `recibir`, dar de alta existencias. SQLite valida bajo su cerrojo. Devuelve el id de producto.
     ///
     /// El stock suelto sólo se escribe al **crear** (con su movimiento de alta); editando la ficha
     /// no se toca (RI-55).
-    async fn upsert_producto(&self, id_usuario: &str, producto: ProductoUpsert) -> AppResult<String>;
-    /// Escritura interactiva con límites de precio y alta de existencias. SQLite valida bajo su cerrojo.
     async fn upsert_producto_autorizado(&self, actor: &str, producto: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String>;
     async fn create_lote(&self, id_usuario: &str, lote: LoteNuevo) -> AppResult<()>;
     /// Los datos de un lote, sin tocar sus existencias (RI-55).

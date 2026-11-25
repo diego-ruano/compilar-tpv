@@ -1,5 +1,5 @@
-//! Casos de uso de **notificaciones**. Orquestan dominio + puertos; sin SQL ni detalles de Tauri.
-//! Lecturas/gestión van por `NotificacionesRepository`; la emisión, por `Notifier`.
+//! Casos de uso de **notificaciones**: leerlas y gestionarlas, por `NotificacionesRepository`. Sin SQL
+//! ni detalles de Tauri. Las emite quien las provoca (el cierre de caja, la licencia…), por `Notifier`.
 //!
 //! AUD-26: el `id_usuario` que reciben es el de la sesión del backend, y lo pone el comando: la
 //! pantalla no elige en nombre de quién se lee ni se marca. Marcar leída y la papelera se lo pasan
@@ -8,13 +8,10 @@
 //! puerto). Aquí no se comprueba antes con una lectura: entre esa lectura y la escritura se podía
 //! colar otro (restaurar lo que este usuario iba a borrar para siempre).
 
-use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, NoLeidasDto, NotificacionIdInput, NotificacionRow, NotificacionesListArgs,
-};
-use tpv_domain::notificaciones::NuevaNotificacion;
+use tpv_contracts::notificaciones::{NoLeidasDto, NotificacionIdInput, NotificacionRow, NotificacionesListArgs};
 
 use crate::error::{AppError, AppResult};
-use crate::ports::notificaciones::{NotificacionesRepository, Notifier};
+use crate::ports::notificaciones::NotificacionesRepository;
 
 /// Lista las notificaciones visibles de un usuario. Sin usuario => lista vacía (sin tocar el repo).
 pub async fn listar(
@@ -125,25 +122,6 @@ fn usuario_no_vacio(id_usuario: &str) -> AppResult<&str> {
     Ok(id_usuario)
 }
 
-/// Emite una notificación manual (validando en el dominio). Devuelve su `ID_Notificacion`.
-pub async fn crear(notifier: &dyn Notifier, input: CrearNotificacionInput) -> AppResult<String> {
-    let nueva = NuevaNotificacion::validar(tpv_domain::notificaciones::NotificacionEntrada {
-        tipo: input.tipo,
-        severidad: input.severidad.as_deref().unwrap_or("info"),
-        titulo: input.titulo,
-        cuerpo: input.cuerpo,
-        destino_tipo: &input.destino_tipo,
-        destino_valor: input.destino_valor,
-        accion: input.accion,
-        payload: input.payload,
-        clave_dedupe: input.clave_dedupe,
-        expira_en: input.expira_en,
-    })
-    .map_err(AppError::validation)?;
-
-    notifier.emitir(nueva).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,18 +155,6 @@ mod tests {
         }
         async fn eliminar(&self, _: &str, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
-        }
-    }
-
-    struct NotifierQueNoDebeLlamarse;
-
-    #[async_trait]
-    impl Notifier for NotifierQueNoDebeLlamarse {
-        async fn emitir(&self, _: NuevaNotificacion) -> AppResult<String> {
-            panic!("notifier llamado")
-        }
-        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
-            panic!("notifier llamado")
         }
     }
 
@@ -244,27 +210,6 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-    }
-
-    #[tokio::test]
-    async fn crear_invalido_no_toca_notifier() {
-        // 'usuario' sin valor => validación de dominio falla antes de tocar el notifier.
-        let input = CrearNotificacionInput {
-            tipo: "aviso_manual".into(),
-            severidad: None,
-            titulo: "Hola".into(),
-            cuerpo: None,
-            destino_tipo: "usuario".into(),
-            destino_valor: None,
-            accion: None,
-            payload: None,
-            clave_dedupe: None,
-            expira_en: None,
-        };
-        assert!(matches!(
-            crear(&NotifierQueNoDebeLlamarse, input).await,
-            Err(AppError::Validation(_))
-        ));
     }
 
     // ── AUD-26: el usuario llega a la escritura ─────────────────────────────────────────────

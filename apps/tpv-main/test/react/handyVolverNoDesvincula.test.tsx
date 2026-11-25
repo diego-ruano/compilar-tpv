@@ -93,7 +93,7 @@ const { invoke, backend, confirmar } = vi.hoisted(() => {
 			case "get_today_punch_status":
 				return { fecha: hoy(), turno_partido: 0, partes: [{ parte: 1, entrada: "09:00", salida: null, estado: "ACTIVO" }] };
 			case "login_user":
-				if (args?.args?.pin !== "1234") throw { code: "invalid_pin", message: "PIN incorrecto" };
+				if (args?.args?.pin !== "1234") throw { code: "validation", message: "PIN incorrecto" };
 				backend.sesion = { id_usuario: "u-cam", rol: "Camarero" };
 				return { id_usuario: "u-cam", id_trabajador: "t-cam", nombre: "Lucía", apellido: null, rol: "Camarero", email: "", requiere_setup: 0 };
 			case "permisos_sesion":

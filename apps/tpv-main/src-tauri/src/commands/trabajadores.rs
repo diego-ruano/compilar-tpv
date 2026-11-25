@@ -11,10 +11,10 @@ use tauri::State;
 
 use tpv_application::use_cases::trabajadores as uc;
 use tpv_contracts::trabajadores::{
-    AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorarioLibreInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
-    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput,
-    TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
+    AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, CopySemanaInput, HorarioLibreInput,
+    HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput, TrabajadorDetailArgs,
+    TrabajadorDetailRow, TrabajadorEliminado, TrabajadorEliminarInput, TrabajadorIdByUsuarioArgs,
+    TrabajadorRow, TrabajadorUpdateInput, TurnoRow,
 };
 use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
@@ -131,28 +131,6 @@ pub async fn horarios_guardar_asignacion(state: State<'_, AppState>, args: Asign
     state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::guardar_asignacion(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn horarios_create_asignacion(
-    state: State<'_, AppState>,
-    args: AsignacionCreateInput,
-) -> Result<bool, AppErrorDto> {
-    state.exigir_permiso("horarios.gestionar").await?;
-    let repo = state.trabajadores_repo().await?;
-    Ok(uc::create_asignacion(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn horarios_update_asignacion(
-    state: State<'_, AppState>,
-    args: AsignacionUpdateInput,
-) -> Result<bool, AppErrorDto> {
-    state.exigir_permiso("horarios.gestionar").await?;
-    let repo = state.trabajadores_repo().await?;
-    Ok(uc::update_asignacion(repo.as_ref(), args).await?)
 }
 
 /// Marcar libre el día de un trabajador (tapa su horario predeterminado). Se quita con

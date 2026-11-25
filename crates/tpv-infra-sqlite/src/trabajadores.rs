@@ -18,7 +18,7 @@ use tpv_contracts::trabajadores::{
 };
 use tpv_domain::login::hash_pin;
 use tpv_domain::trabajadores::{
-    limpiar_opcional, AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
+    limpiar_opcional, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
     AREA_LIBRE, ID_TURNO_LIBRE,
 };
 
@@ -983,115 +983,6 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         resultado
     }
 
-    async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
-        let db = self.db.write().await;
-        exigir_de_la_plantilla(&db, &data.id_trabajador).await?;
-
-        // TRAB-04: no permitir asignar el mismo turno al mismo trabajador el mismo día dos veces.
-        // (El área puede diferir; el duplicado que se bloquea es trabajador+fecha+turno.) El lock de
-        // escritura serializa el check-then-insert, así que no hace falta transacción explícita.
-        let mut dup = db
-            .query(
-                "SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3 LIMIT 1;",
-                vec![
-                    Value::Text(data.id_trabajador.clone()),
-                    Value::Text(data.fecha.clone()),
-                    Value::Text(data.id_turno.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-        if dup.next().await.map_err(db_err)?.is_some() {
-            return Err(AppError::conflict(
-                "Ese trabajador ya tiene ese turno asignado ese día.",
-            ));
-        }
-
-        db.execute(
-            r#"
-            INSERT INTO Asignacion_Turnos (
-              ID_Asignacion,
-              ID_Trabajador,
-              Fecha,
-              ID_Turno,
-              Area,
-              Hora_Inicio,
-              Hora_Fin,
-              Notas
-            )
-            VALUES (
-              ?1,
-              ?2,
-              date(?3),
-              ?4,
-              ?5,
-              ?6,
-              ?7,
-              ?8
-            );
-            "#,
-            vec![
-                Value::Text(new_id()),
-                Value::Text(data.id_trabajador.clone()),
-                Value::Text(data.fecha.clone()),
-                Value::Text(data.id_turno.clone()),
-                Value::Text(data.area.clone()),
-                opt_text(data.hora_inicio.clone()),
-                opt_text(data.hora_fin.clone()),
-                opt_text(data.notas.clone()),
-            ],
-        )
-        .await
-        .map_err(db_err)?;
-
-        Ok(true)
-    }
-
-    async fn update_asignacion(
-        &self,
-        id_asignacion: &str,
-        cambios: AsignacionCambios,
-    ) -> AppResult<bool> {
-        let db = self.db.write().await;
-
-        let mut miembros = db.query("SELECT COUNT(*) FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);", vec![Value::Text(id_asignacion.to_owned())]).await.map_err(db_err)?;
-        if let Some(fila) = miembros.next().await.map_err(db_err)? {
-            if v_i64(fila.get_value(0).map_err(db_err)?).unwrap_or(0) > 1 {
-                return Err(AppError::conflict("Edita los dos tramos del horario como un conjunto."));
-            }
-        }
-
-        let affected = db
-            .execute(
-                r#"
-                UPDATE Asignacion_Turnos
-                SET
-                  ID_Turno = ?2,
-                  Area = ?3,
-                  Hora_Inicio = ?4,
-                  Hora_Fin = ?5,
-                  Notas = ?6
-                WHERE ID_Asignacion = ?1;
-                "#,
-                vec![
-                    Value::Text(id_asignacion.to_string()),
-                    Value::Text(cambios.id_turno.clone()),
-                    Value::Text(cambios.area.clone()),
-                    opt_text(cambios.hora_inicio.clone()),
-                    opt_text(cambios.hora_fin.clone()),
-                    opt_text(cambios.notas.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-        if affected == 0 {
-            return Err(AppError::not_found("Asignación no encontrada"));
-        }
-
-        Ok(true)
-    }
-
     async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool> {
         let db = self.db.write().await;
 
@@ -1410,23 +1301,16 @@ mod tests_horarios_agrupados {
 
     /// RI-78: la fecha de un horario la valida el caso de uso, que es lo que corre igual en la Main
     /// y en la Handy. Antes sólo exigía que no viniera vacía, y el `date()` del SQL convertía un 31
-    /// de febrero en 3 de marzo sin decir nada.
+    /// de febrero en 3 de marzo sin decir nada. El día libre la lee con la misma regla y la misma
+    /// frase que tenía el alta de un turno suelto.
     #[tokio::test]
     async fn una_fecha_que_no_existe_se_rechaza_en_vez_de_pasar_al_mes_siguiente() {
         use tpv_application::use_cases::trabajadores as uc;
         use tpv_contracts::trabajadores::{
-            AsignacionCreateInput, CopySemanaInput, HorariosSemanaArgs, SetPredeterminadoInput,
+            CopySemanaInput, HorarioLibreInput, HorariosSemanaArgs, SetPredeterminadoInput,
         };
         let (_db, repo) = preparar().await;
-        let alta = |fecha: &str| AsignacionCreateInput {
-            id_trabajador: "t".into(),
-            fecha: fecha.into(),
-            id_turno: "00000000-0000-7000-8000-000000000102".into(),
-            area: "Sala".into(),
-            hora_inicio: None,
-            hora_fin: None,
-            notas: None,
-        };
+        let libre = |fecha: &str| HorarioLibreInput { id_trabajador: "t".into(), fecha: fecha.into() };
         let copia = |desde: &str, hasta: &str| CopySemanaInput {
             from_monday: desde.into(),
             to_monday: hasta.into(),
@@ -1434,7 +1318,7 @@ mod tests_horarios_agrupados {
         };
         let es_validacion = |r: AppResult<_>| matches!(r, Err(AppError::Validation(_)));
 
-        assert!(es_validacion(uc::create_asignacion(&repo, alta("2026-02-31")).await));
+        assert!(es_validacion(uc::marcar_libre(&repo, libre("2026-02-31")).await));
         assert!(
             repo.get_asignaciones_semana("2026-03-02".into()).await.unwrap().is_empty(),
             "el 31 de febrero no puede acabar guardado como 3 de marzo"
@@ -1447,7 +1331,7 @@ mod tests_horarios_agrupados {
         assert!(uc::get_asignaciones_semana(&repo, HorariosSemanaArgs { fecha_lunes: "2026-13-01".into() }).await.is_err());
 
         // Y una fecha real sigue entrando, también con una hora detrás.
-        uc::create_asignacion(&repo, alta("2026-03-03T00:00:00")).await.unwrap();
+        uc::marcar_libre(&repo, libre("2026-03-03T00:00:00")).await.unwrap();
         let semana = uc::get_asignaciones_semana(&repo, HorariosSemanaArgs { fecha_lunes: " 2026-03-02 ".into() })
             .await
             .unwrap();
@@ -1550,11 +1434,9 @@ mod tests_horarios_agrupados {
 
     /// Un retirado (`Archivado_En`) conserva sus turnos pasados, que no se ven en el cuadrante ni se
     /// pueden borrar desde él. Copiar esa semana o hacerla predeterminada no se los devuelve, y una
-    /// pantalla vieja no puede ponerle un turno nuevo.
+    /// pantalla vieja no puede ponerle un turno nuevo ni un día libre.
     #[tokio::test]
     async fn copiar_o_hacer_predeterminada_una_semana_no_resucita_a_un_retirado() {
-        use tpv_domain::trabajadores::AsignacionNueva;
-
         let (db, repo) = preparar().await;
         db.write()
             .await
@@ -1600,17 +1482,7 @@ mod tests_horarios_agrupados {
         turno.id_trabajador = "tr".into();
         let r = guardar_asignacion(&repo, turno).await;
         assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
-        let r = repo
-            .create_asignacion(AsignacionNueva {
-                id_trabajador: "tr".into(),
-                fecha: "2026-10-20".into(),
-                id_turno: "00000000-0000-7000-8000-000000000103".into(),
-                area: "Sala".into(),
-                hora_inicio: Some("09:00".into()),
-                hora_fin: Some("14:00".into()),
-                notas: None,
-            })
-            .await;
+        let r = repo.marcar_libre("tr", "2026-10-20".into()).await;
         assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
         assert_eq!(
             de("SELECT ID_Asignacion FROM Asignacion_Turnos WHERE ID_Trabajador = 'tr';").await,

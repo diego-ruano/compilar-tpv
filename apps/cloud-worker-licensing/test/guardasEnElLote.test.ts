@@ -11,7 +11,7 @@
 // con la misma clave vuelve a decidir. Después, cada comprobación que se ha pasado a una guarda, con
 // la ruta de verdad y una escritura que entra en la base entre su lectura y su lote.
 //
-// SYNC-35 · Al final, las tres rutas que decidían por el recuento o por una lectura que devolvía el
+// SYNC-35 · Al final, las dos rutas que decidían por el recuento o por una lectura que devolvía el
 // lote, y que en el reintento de una escritura cuyo resultado no se guardó entero contestaban mal:
 // ahora lo decide una guarda, y la ruta no mira el resultado.
 
@@ -611,35 +611,6 @@ describe("SYNC-30 · el último administrador", () => {
 	});
 });
 
-describe("SYNC-30 · el turno repetido de un trabajador", () => {
-	const turno = { id_trabajador: "trab-ana", fecha: "2030-05-10", id_turno: "manana", area: "Sala" };
-	const asignaciones = (n: Negocio) => n.n("SELECT COUNT(*) FROM Asignacion_Turnos");
-
-	it("si otro dispositivo lo asigna entre la lectura y el lote, no se repite", async () => {
-		await conNegocio("turno-carrera", USUARIOS, async (n) => {
-			const r = await n.pedir("POST", "/v1/trabajadores/horarios/asignaciones", turno, {
-				antesDelLote: [
-					"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('otra', 'trab-ana', '2030-05-10', 'manana', 'Barra')",
-				],
-			});
-			expect(r).toEqual({ status: 409, json: { ok: false, error: "asignacion_duplicada" } });
-			expect(asignaciones(n)).toBe(1);
-		});
-	});
-
-	// Antes la ruta lo miraba antes de mandar el lote, y el reintento de una asignación que sí entró
-	// se encontraba a sí misma: contestaba `asignacion_duplicada`. Ahora el gate contesta lo guardado.
-	it("el reintento de una que entró contesta lo mismo que la primera vez", async () => {
-		await conNegocio("turno-reintento", USUARIOS, async (n) => {
-			const primera = await n.pedir("POST", "/v1/trabajadores/horarios/asignaciones", turno, { clave: "clave-del-turno-repetido" });
-			expect(primera.status).toBe(200);
-			const reintento = await n.pedir("POST", "/v1/trabajadores/horarios/asignaciones", turno, { clave: "clave-del-turno-repetido" });
-			expect(reintento).toEqual(primera);
-			expect(asignaciones(n)).toBe(1);
-		});
-	});
-});
-
 const CARTA = [
 	"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar')",
 	"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('cafe', 'cat', 'Café', 130)",
@@ -757,57 +728,6 @@ describe("SYNC-35 · editar la ficha de un trabajador", () => {
 			n.sql.exec("DELETE FROM Trabajadores WHERE ID_Trabajador = 'trab-ana'");
 			expect(await n.pedir("PUT", "/v1/trabajadores/trab-ana", cambio, { clave })).toEqual({ status: 200, json: { ok: true } });
 			expect(n.n("SELECT COUNT(*) FROM Sync_Changes")).toBe(1);
-		});
-	});
-});
-
-describe("SYNC-35 · editar una asignación de un tramo", () => {
-	const ASIGNACIONES = [
-		...USUARIOS,
-		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('sola', 'trab-ana', '2030-05-10', 'manana', 'Sala', '09:00', '14:00')",
-		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('t1', 'g', 'trab-ana', '2030-05-11', 'manana', 'Sala', '09:00', '12:00')",
-		"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('t2', 'g', 'trab-ana', '2030-05-11', 'manana', 'Sala', '17:00', '20:00')",
-	];
-	const cambio = { id_turno: "manana", area: "Barra", hora_inicio: "10:00", hora_fin: "15:00", notas: null };
-	const areaDe = (n: Negocio, id: string) =>
-		n.sql.exec("SELECT Area AS a FROM Asignacion_Turnos WHERE ID_Asignacion = ?;", id).toArray()[0]?.a ?? null;
-
-	it("una de dos tramos se edita como un conjunto, y una que no está es asignacion_no_encontrada", async () => {
-		await conNegocio("asignacion-guardas", ASIGNACIONES, async (n) => {
-			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/t1", { ...cambio, id_asignacion: "t1" })).toEqual({
-				status: 409,
-				json: { ok: false, error: "horario_editar_conjunto" },
-			});
-			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/no-esta", { ...cambio, id_asignacion: "no-esta" })).toEqual({
-				status: 404,
-				json: { ok: false, error: "asignacion_no_encontrada" },
-			});
-			expect((await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" })).status).toBe(200);
-			expect([areaDe(n, "sola"), areaDe(n, "t1")]).toEqual(["Barra", "Sala"]);
-		});
-	});
-
-	it("si otro la borra antes del lote, el reintento contesta lo mismo; si entró, ok aunque su recuento no se guardara", async () => {
-		await conNegocio("asignacion-reintento", ASIGNACIONES, async (n) => {
-			const borrada = "clave-de-la-asignacion-borrada";
-			const primera = await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" }, {
-				clave: borrada,
-				antesDelLote: ["DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = 'sola'"],
-			});
-			expect(primera).toEqual({ status: 404, json: { ok: false, error: "asignacion_no_encontrada" } });
-			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/sola", { ...cambio, id_asignacion: "sola" }, { clave: borrada })).toEqual(primera);
-
-			n.sql.exec(
-				"INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('otra-sola', 'trab-ana', '2030-05-12', 'manana', 'Sala')",
-			);
-			const editada = "clave-de-la-asignacion-editada";
-			expect((await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/otra-sola", { ...cambio, id_asignacion: "otra-sola" }, { clave: editada })).status).toBe(200);
-			sinResultadoGuardado(n, editada);
-			n.sql.exec("DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = 'otra-sola'");
-			expect(await n.pedir("PUT", "/v1/trabajadores/horarios/asignaciones/otra-sola", { ...cambio, id_asignacion: "otra-sola" }, { clave: editada })).toEqual({
-				status: 200,
-				json: { ok: true },
-			});
 		});
 	});
 });
@@ -1163,16 +1083,6 @@ describe("Un turno sólo se le pone a alguien de la plantilla", () => {
 			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
 			expect(turnos(n)).toBe(0);
 			expect(n.difundidos).toEqual([]);
-		});
-	});
-
-	it("crear una asignación a un retirado es trabajador_no_encontrado", async () => {
-		await conNegocio("turno-retirado-crear", [...USUARIOS, RETIRAR], async (n) => {
-			const r = await n.pedir("POST", "/v1/trabajadores/horarios/asignaciones", {
-				id_trabajador: "trab-ana", fecha: "2099-01-06", id_turno: "manana", area: "Sala", hora_inicio: "09:00", hora_fin: "14:00", notas: null,
-			});
-			expect(r).toEqual({ status: 404, json: { ok: false, error: "trabajador_no_encontrado" } });
-			expect(turnos(n)).toBe(0);
 		});
 	});
 });

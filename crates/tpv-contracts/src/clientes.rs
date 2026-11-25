@@ -1,9 +1,7 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **clientes**.
 //!
-//! Los nombres de campo son snake_case e IDÉNTICOS a los structs del backend antiguo
-//! (`ClienteRow`, `ClienteFormRow`, …) para que el frontend actual siga funcionando sin
-//! cambios. Los IDs `i64` se anotan `` (los ID de SQLite caben en
-//! number) para mantener compatibilidad con el frontend (que usa `number`, no `bigint`).
+//! Los nombres de campo van en snake_case. Los `i64` llegan a TypeScript como `number`, no como
+//! `bigint` (`dangerously_cast_bigints_to_number` en `command_builder`): los de SQLite caben.
 
 use tpv_domain::dinero::Dinero;
 

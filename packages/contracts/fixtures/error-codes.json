@@ -14,7 +14,6 @@
     { "wire": "device_replaced", "code": "device_revoked", "porque": "la licencia se activó en otro equipo (§6.4): este Main deja de serlo, así que para él equivale a estar revocado" },
     { "wire": "license_not_found", "code": "license_not_found", "porque": "el servidor no reconoce la licencia" },
     { "wire": "no_active_license_for_tenant", "code": "license_not_found", "porque": "el tenant no tiene licencia activa" },
-    { "wire": "invalid_pin", "code": "invalid_pin", "porque": "PIN incorrecto en login/fichaje" },
     { "wire": "validation_error", "code": "validation", "porque": "fallo de validación genérico del worker" },
     { "wire": "not_found", "code": "not_found", "porque": "entidad inexistente" },
     { "wire": "tenant_db_not_provisioned", "code": "tenant_db_not_provisioned", "porque": "el servidor confirma que el tenant no tiene base de datos y permite ofrecer una inicialización vacía" },
@@ -22,7 +21,7 @@
     { "wire": "migration_altered", "code": "tenant_migration_altered", "porque": "una migración ya aplicada cambió de contenido" },
     { "wire": "backup_corrupt", "code": "backup_corrupt", "porque": "la copia local no supera la validación SQLite" },
     { "wire": "permiso_denegado", "code": "permiso_denegado", "porque": "SEC-01: sin sesión o con un rol que no basta. Hoy sólo lo emite Rust, pero el string es el mismo por si el worker llega a rechazar por rol de usuario" },
-    { "wire": "datos_fiscales_incompletos", "code": "datos_fiscales_incompletos", "porque": "FISCAL-01: faltan el NIF o la razón social del obligado; la UI lleva a Configuración → Fiscal en vez de decir que no se puede cobrar" },
+    { "wire": "datos_fiscales_incompletos", "code": "datos_fiscales_incompletos", "porque": "FISCAL-01: faltan el NIF o la razón social del obligado, o el NIF no vale. La UI no ramifica por él: enseña el mensaje, y lo que lleva a Configuración → Negocio es el aviso de antes de cobrar (verifactu_estado). El código dice en el registro de fallos por qué no se cobró, y con Veri*factu el job de remisión lo distingue" },
     { "wire": "factura_completa_requerida", "code": "factura_completa_requerida", "porque": "FISCAL-02: el importe pasa del límite de la simplificada sin datos del cliente; la UI abre el formulario del NIF y reintenta el mismo cobro" },
     { "wire": "reserva_solapada", "code": "reserva_solapada", "porque": "RI-61: la reserva se pisa con otra de la misma mesa (o con una comanda abierta) y los solapes están en «permitir con aviso»; la UI enseña el choque y ofrece guardar igualmente" },
     { "wire": "usuario_inactivo", "code": "usuario_inactivo", "porque": "un administrador ha desactivado al usuario con la sesión abierta; la UI cierra la sesión y el login dice por qué" }
@@ -32,7 +31,7 @@
     { "wire": "  not_approved  ", "code": "not_approved", "porque": "espacios alrededor: hay que recortarlos antes de buscar" },
     { "wire": "MAIN_OFFLINE", "code": "main_offline", "porque": "la búsqueda no puede depender de mayúsculas" },
     { "wire": "Device_Revoked", "code": "device_revoked", "porque": "mayúsculas mezcladas" },
-    { "wire": "\tinvalid_pin\n", "code": "invalid_pin", "porque": "tabuladores y saltos de línea también son espacio en blanco" }
+    { "wire": "\tusuario_inactivo\n", "code": "usuario_inactivo", "porque": "tabuladores y saltos de línea también son espacio en blanco" }
   ],
 
   "desconocidos": [
@@ -61,7 +60,6 @@
     "device_revoked",
     "license_expired",
     "license_not_found",
-    "invalid_pin",
     "tenant_db_not_provisioned",
     "bootstrap_too_large",
     "tenant_migration_altered",

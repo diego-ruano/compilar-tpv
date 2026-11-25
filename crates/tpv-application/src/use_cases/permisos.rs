@@ -28,18 +28,6 @@ pub async fn usuario(repo: &dyn PermisosRepository, id: &str) -> AppResult<Autor
     Ok(usuario)
 }
 
-pub async fn exigir(
-    repo: &dyn PermisosRepository,
-    id: &str,
-    permiso: &str,
-) -> AppResult<AutorizacionUsuario> {
-    let usuario = usuario(repo, id).await?;
-    if !permisos::permite(&usuario.rol, &usuario.permisos, permiso) {
-        return Err(denegado());
-    }
-    Ok(usuario)
-}
-
 pub async fn configuracion(
     repo: &dyn PermisosRepository,
     actor: &str,

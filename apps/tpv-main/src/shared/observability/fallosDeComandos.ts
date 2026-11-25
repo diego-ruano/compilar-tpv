@@ -30,7 +30,6 @@ const GRAVEDAD: Record<ErrorCode, GravedadFallo | "ignorar"> = {
     validation: "normal",
     not_found: "normal",
     conflict: "normal",
-    invalid_pin: "normal",
     permiso_denegado: "normal",
     device_revoked: "normal",
     license_expired: "normal",
