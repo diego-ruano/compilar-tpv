@@ -159,8 +159,9 @@ fn lo_que_falta_del_obligado(nif: &str, razon_social: &str) -> Option<&'static s
 /// Lee y **valida** los datos fiscales del obligado.
 ///
 /// Devuelve `DatosFiscalesIncompletos` si falta el NIF o la razón social, o si el NIF no supera su
-/// dígito de control. Es la única puerta que Veri\*factu añade al camino de la venta, y tiene
-/// código propio para que la UI lleve al formulario en vez de enseñar «no se puede cobrar».
+/// dígito de control. Es la única puerta que Veri\*factu añade al camino de la venta. La pantalla
+/// enseña el mensaje, que dice qué falta; lo que lleva al formulario es el aviso de antes de cobrar
+/// (`verifactu_estado`). El código dice en el registro de fallos por qué no se cobró.
 pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObligado> {
     let mut rows = conn
         .query(

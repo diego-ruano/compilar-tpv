@@ -71,14 +71,16 @@ pub enum ErrorCode {
     /// (SEC-01). La UI ramifica por él para llevar al login en vez de enseñar un fallo
     /// genérico: "no puedes" y "ha fallado" piden cosas distintas de quien está delante.
     PermisoDenegado,
-    /// Faltan el NIF o la razón social del obligado, así que no se puede generar el registro de
-    /// facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el registro se crea de forma
-    /// simultánea o inmediatamente anterior a la expedición de la factura).
+    /// Faltan el NIF o la razón social del obligado (o el NIF no es válido), así que no se puede
+    /// generar el registro de facturación — y sin registro no se puede cobrar (art. 9 RRSIF: el
+    /// registro se crea de forma simultánea o inmediatamente anterior a la expedición de la factura).
     ///
-    /// Tiene código propio porque la UI **hace algo distinto**: lleva al formulario de datos
-    /// fiscales en vez de enseñar "no se puede cobrar", que es lo único que vería el camarero con
-    /// un código genérico. Es la única puerta que Veri*factu añade al camino de la venta, y va
-    /// antes de la primera venta y no a mitad de servicio.
+    /// Es la única puerta que Veri*factu añade al camino de la venta. La pantalla **no** ramifica por
+    /// él: enseña su mensaje, que dice qué falta, y lo que lleva al formulario de datos fiscales es el
+    /// aviso de antes de cobrar (`verifactu_estado`), antes de la primera venta y no a mitad de
+    /// servicio. Tiene código propio porque es lo que dice en el registro de fallos por qué no se
+    /// cobró, y porque con la remisión (rama `con-verifactu`) el job lo distingue: no remite y lo
+    /// dice con un mensaje, no con una traza.
     DatosFiscalesIncompletos,
     /// El importe del cobro **pasa del límite de la factura simplificada** (3.000 € con IVA en
     /// hostelería, art. 4.2 RD 1619/2012) y no se han dado los datos del cliente.
