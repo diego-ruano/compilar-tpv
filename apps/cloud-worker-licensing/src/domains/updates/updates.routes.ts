@@ -32,6 +32,8 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
+import { scrub } from "../../observability/scrub";
+import { acotar } from "../../observability/tope";
 import { getDb } from "../../server/db";
 import { laCentralNoAtiende } from "../../server/central/sinLaCentral";
 import { checkAdminToken } from "../../middleware/requireAdmin";
@@ -221,14 +223,11 @@ updatesRoutes.get("/:target/:arch/:current", filtroPorIp("LIMITADOR_ACTUALIZACIO
 		undefined,
 	);
 
-	// Visibilidad de versiones: queda en los logs del worker (observability ya activa).
-	console.log("[update] check", {
-		target,
-		arch,
-		current,
-		piloto,
-		serving: row?.version ?? null,
-	});
+	// Visibilidad de versiones: queda en los logs del worker (observability ya activa). El sistema, la
+	// arquitectura y la versión instalada van en el camino y los escribe quien llama: la línea lleva la
+	// ruta por su patrón, y sale filtrada y acotada como lo que va a telemetría (AUD-27).
+	const servida = { target, arch, current, piloto, serving: row?.version ?? null };
+	console.log(acotar(`[update] check ${c.req.method} ${c.req.routePath} ${JSON.stringify(servida)}`, scrub));
 
 	// Sin release publicada para esta plataforma → 204: el plugin entiende "estás al día".
 	if (!row) return new Response(null, { status: 204 });

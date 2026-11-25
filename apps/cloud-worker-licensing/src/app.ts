@@ -177,9 +177,15 @@ app.get("/ws", filtroPorIp("LIMITADOR_SESION", "ws"), async (c) => {
 		const sinCentral = respuestaSinLaCentral(c, e);
 		if (sinCentral) return sinCentral;
 		capturarError(e, "websocket.open");
-		// FABLE-B: la traza se queda aquí (`wrangler tail`) y en Sentry; la respuesta no la lleva.
+		// FABLE-B: la traza se queda aquí (`wrangler tail`) y en Sentry; la respuesta no la lleva. Como
+		// en el `onError` (AUD-27): la ruta por su patrón, y el mensaje y la traza, que pueden citar lo
+		// que llegó en la petición, filtrados y acotados como lo que va a telemetría.
 		console.error(
-			`[ws] no se pudo abrir el WebSocket → ${e?.name || "Error"}: ${e?.message || e}\n${e?.stack || ""}`,
+			acotar(
+				`[ws] ${c.req.method} ${c.req.routePath} → no se pudo abrir el WebSocket: ` +
+					`${e?.name || "Error"}: ${e?.message || e}\n${e?.stack || ""}`,
+				scrub,
+			),
 		);
 		return serverError(request, "internal_error");
 	}

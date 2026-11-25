@@ -81,10 +81,15 @@ function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean
 	const pasajero = saturado || fallo.retryable === true;
 	if (!pasajero) {
 		capturarError(error, "hub.ejecutar_ruta");
-		// FABLE-B: la traza se queda aquí y en Sentry; la respuesta no la lleva.
+		// FABLE-B: la traza se queda aquí y en Sentry; la respuesta no la lleva. Como en el `onError`
+		// (AUD-27): la ruta va por su patrón y no por su camino, que lo escribe quien llama, y el mensaje
+		// y la traza, filtrados y acotados como lo que va a telemetría.
 		console.error(
-			`[alHub] ${c.req.method} ${new URL(c.req.url).pathname} → ${(error as any)?.name || "Error"}: ` +
-				`${(error as any)?.message || error}\n${(error as any)?.stack || ""}`,
+			acotar(
+				`[alHub] ${c.req.method} ${c.req.routePath} → ${(error as any)?.name || "Error"}: ` +
+					`${(error as any)?.message || error}\n${(error as any)?.stack || ""}`,
+				scrub,
+			),
 		);
 	}
 
