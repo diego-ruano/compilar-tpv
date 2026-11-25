@@ -67,6 +67,16 @@ type CodigoDeLaVuelta = "central_vuelta_sin_comprobar" | "central_vuelta_sin_apl
 const SI_SE_PIERDE_EL_MARCADOR =
 	"El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.";
 
+/** Por dónde se sale de una vuelta que deja la central sin atender. */
+const SALIDAS_DE_LA_VUELTA = "deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así.";
+
+/**
+ * Lo que se dice de una vuelta que deja la central sin esquema, en vez de lo de `QUE_PASA`: antes de
+ * volver tenía sus licencias, y el esquema vacío la pondría a atender sin ninguna.
+ */
+const SIN_ESQUEMA_TRAS_VOLVER =
+	"La vuelta la ha dejado sin esquema. No le des el esquema vacío (pnpm central:aprovisionar sin --copia): atendería sin ninguna licencia, y los TPV que preguntaran por la suya la borrarían.";
+
 /** Lo que se le dice a quien administra cuando la central no ha hecho lo que se le pedía. */
 const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = {
 	central_sin_aprovisionar: "La central no está aprovisionada: dale esquema o restáurala con pnpm central:aprovisionar.",
@@ -350,9 +360,14 @@ async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada
 		});
 	}
 	if (noAtiende) {
+		// Sin esquema, lo de siempre («dale esquema») la pondría a atender sin licencias.
+		const sinEsquema = noAtiende.error === "central_sin_aprovisionar";
 		return noHecho(c, noAtiende, {
 			antes: "La central ha vuelto, pero no atiende.",
-			despues: `Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. ${SI_SE_PIERDE_EL_MARCADOR}`,
+			...(sinEsquema ? { quePasa: SIN_ESQUEMA_TRAS_VOLVER } : {}),
+			despues: sinEsquema
+				? `Se sale ${SALIDAS_DE_LA_VUELTA} O restaurándola desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). ${SI_SE_PIERDE_EL_MARCADOR}`
+				: `Se sale también ${SALIDAS_DE_LA_VUELTA} ${SI_SE_PIERDE_EL_MARCADOR}`,
 			extra: { deshacer, copiaDeAntes, estado },
 		});
 	}

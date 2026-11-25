@@ -167,6 +167,12 @@ const AVERIADAS: [string, () => Promise<Averiada>][] = [
 			const vuelta = await volver(central, { instanteMs: Date.now() - HORA });
 			await noAtiende(central, vuelta, "central_sin_aprovisionar", { aprovisionada: false, averia: null });
 			expect(vuelta.body.copiaDeAntes).toMatch(/^base-central\/antes-de-volver-/);
+			// Antes de volver tenía sus licencias: la salida no es darle el esquema vacío, que la pondría a
+			// atender sin ninguna, sino deshacer, otro instante o una copia.
+			expect(vuelta.body.message).not.toMatch(/dale esquema/i);
+			expect(vuelta.body.message).toContain("No le des el esquema vacío");
+			expect(vuelta.body.message).toMatch(/Se sale deshaciendo la vuelta, o volviendo a otro instante/);
+			expect(vuelta.body.message).toContain("pnpm central:aprovisionar -- --copia <clave> --si");
 			return { central, plataforma, vuelta, sana, negocios: [{ tenant_id: "t-1", legal_name: "Bar Uno" }] };
 		},
 	],
