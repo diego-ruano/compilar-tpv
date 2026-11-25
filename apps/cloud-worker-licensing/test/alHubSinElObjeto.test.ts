@@ -63,8 +63,11 @@ const otro = () => new Error("Serialized RPC arguments or return values are limi
 
 type Llamada = { metodo: string; ruta: string; cuerpo: string; rol: string; stub: number };
 
-/** Lo que hace el objeto en cada llamada, en orden: contestar o fallar. */
-function montar(guion: (() => Response | Error)[]) {
+/**
+ * Lo que hace el objeto en cada llamada, en orden: contestar o fallar. Con `prefijo`, el router va
+ * montado ahí, como en la `app` (`app.route("/v1/clientes", clientesRoutes)`).
+ */
+function montar(guion: (() => Response | Error)[], prefijo?: string) {
 	const llamadas: Llamada[] = [];
 	let stubs = 0;
 	const TenantHub = {
@@ -108,8 +111,9 @@ function montar(guion: (() => Response | Error)[]) {
 	// Con `alHub` delante, estas no llegan a ejecutarse en el Worker.
 	rutas.all("*", (c) => c.json({ donde: "worker" }));
 
+	const montado = prefijo ? new Hono<any>().route(prefijo, rutas) : rutas;
 	const pedir = (metodo: string, ruta: string, cuerpo?: unknown, entorno: Record<string, unknown> = {}) =>
-		rutas.request(
+		montado.request(
 			ruta,
 			{
 				method: metodo,
@@ -262,10 +266,11 @@ describe("lo que queda anotado", () => {
 		await esc.pedir("POST", "/escritura", { nombre: "Ana López" }, axiom);
 
 		await vi.waitFor(() => expect(enviados).toHaveLength(3));
+		// La ruta, por el patrón de `alHub`: aquí, sin montar debajo de nada, `/*` (AUD-27, abajo).
 		expect(enviados.map((e) => [e.event, e.tenant_id, e.motivo, e.repetida, e.metodo, e.ruta])).toEqual([
-			["hub_no_disponible", "negocio-del-doble", "saturado", false, "GET", "/lectura"],
-			["hub_no_disponible", "negocio-del-doble", "pasajero", true, "GET", "/lectura"],
-			["hub_no_disponible", "negocio-del-doble", "otro", false, "POST", "/escritura"],
+			["hub_no_disponible", "negocio-del-doble", "saturado", false, "GET", "/*"],
+			["hub_no_disponible", "negocio-del-doble", "pasajero", true, "GET", "/*"],
+			["hub_no_disponible", "negocio-del-doble", "otro", false, "POST", "/*"],
 		]);
 		expect(JSON.stringify(enviados)).not.toContain("Ana López");
 	});
@@ -289,6 +294,24 @@ describe("lo que queda anotado", () => {
 		await vi.waitFor(() => expect(enviados).toHaveLength(2));
 		expect(enviados.map((e) => e.error)).toEqual([`${relleno} [email]`, `${relleno} [jwt]`]);
 		expect(JSON.stringify(enviados)).not.toMatch(/pepe|eyJ/);
+	});
+
+	it("AUD-27: el evento lleva la ruta por su patrón, no por su camino: lo que escribe quien llama no sale", async () => {
+		const enviados: any[] = [];
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			enviados.push(...JSON.parse(String(init.body)));
+			return new Response("{}", { status: 200 });
+		});
+		const axiom = { AXIOM_TOKEN: "token-de-pruebas", AXIOM_DATASET_SYNC: "sync-de-pruebas" };
+
+		// El camino lo escribe quien llama, y un nombre no lo reconoce el filtro de datos personales.
+		const res = await montar([saturado], "/v1/clientes").pedir("GET", "/v1/clientes/Ana-Gil", undefined, axiom);
+
+		expect(res.status).toBe(503);
+		await vi.waitFor(() => expect(enviados).toHaveLength(1));
+		// La ruta del middleware que hace el viaje, por su patrón: `alHub`, en `/v1/clientes/*`.
+		expect(enviados[0]).toMatchObject({ event: "hub_no_disponible", motivo: "saturado", metodo: "GET", ruta: "/v1/clientes/*" });
+		expect(JSON.stringify(enviados)).not.toContain("Ana-Gil");
 	});
 });
 

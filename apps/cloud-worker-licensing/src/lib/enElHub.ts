@@ -100,9 +100,11 @@ function sinElObjeto(c: Ctx, tenantId: string, error: unknown, repetida: boolean
 			motivo: saturado ? "saturado" : fallo.retryable === true ? "pasajero" : "otro",
 			repetida,
 			metodo: c.req.method,
-			// Como en `tenantAuth` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-			ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
-			// Igual: filtrado antes de recortarlo.
+			// AUD-27: la ruta por su patrón, y no por su camino, que lo escribe quien llama (un nombre en
+			// el lugar de un identificador, que el filtro no reconoce). Como `central_no_disponible`
+			// (`sinLaCentral.ts::enLaPeticion`).
+			ruta: c.req.routePath,
+			// AUD-32: filtrado antes de recortarlo.
 			error: acotar(String(fallo.message ?? error), scrub, { bytes: 300, filtrado: MAX_FILTRADO }),
 		}),
 	);
