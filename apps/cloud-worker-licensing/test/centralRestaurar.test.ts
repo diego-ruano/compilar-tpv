@@ -23,11 +23,13 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { NOMBRES_DE_UNA_COPIA } from "../src/durableObjects/baseCentral.copia";
 import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import type { Migracion } from "../src/durableObjects/sqliteDelObjeto";
 import {
 	centralDePrueba,
 	centralSinAprovisionar,
+	claveDeCopiaNueva,
 	codigoDe,
 	conCopiasDentro,
 	filasDe,
@@ -65,7 +67,7 @@ afterEach(() => {
 const bucket = () => (env as any).COPIAS as R2Bucket;
 
 /** Una clave nueva en la carpeta de las copias de la central. */
-const claveNueva = () => `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+const claveNueva = claveDeCopiaNueva;
 
 /** Lo que hay en las tablas de la central, en orden, sin `_migrations`: para comparar dos centrales. */
 const contenido = (central: Pick<CentralDePrueba, "stub">) => fotoDeLaCentral(central, { sinMigraciones: true });
@@ -259,13 +261,14 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 			"base-central/.sql.gz",
 			"Ana Gil ana.gil@correo.es\n",
 			"base-central/Ana Gil ana.gil@correo.es.sql.gz",
+			"base-central/Ana-Gil.sql.gz",
 		];
 		for (const clave of claves) {
 			const r = await central.stub.aprovisionar({ claveDeCopia: clave });
 			expect(r, clave).toEqual({
 				ok: false,
 				error: "central_copia_inservible",
-				detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
+				detalle: `copia_no_valida: la clave no es la de una copia de la central: va como ${NOMBRES_DE_UNA_COPIA}`,
 			});
 		}
 		await comoAntes(central);

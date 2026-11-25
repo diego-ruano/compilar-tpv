@@ -116,23 +116,38 @@ export async function guardarQueSePidio(bucket: R2Bucket, ahora: Date, marcador:
 	return clave;
 }
 
-/** Lo más largo que puede ser el nombre de una copia, entre la carpeta y `.sql.gz`. */
-const TOPE_DEL_NOMBRE = 100;
+/**
+ * Los nombres que puede tener una copia de la central (entre la carpeta y `.sql.gz`), y nada más (C4):
+ * la del día (`AAAA-MM-DD`), las que llevan la hora con guiones (`a-mano-…` y `antes-de-volver-…`,
+ * `claveConHora`), la del traspaso desde Turso y la de una base subida a mano (con un número detrás
+ * si hay más de una el mismo día). Lo que se dice si una clave no es ninguna de éstas.
+ */
+export const NOMBRES_DE_UNA_COPIA =
+	"base-central/ y, delante de .sql.gz, AAAA-MM-DD (la del día), a-mano-<hora> o antes-de-volver-<hora> (con la hora como la escribe el worker, AAAA-MM-DDTHH-MM-SS.mmmZ), traspaso-turso-AAAA-MM-DD, o subida-AAAA-MM-DD o subida-AAAA-MM-DD-N para una base subida a mano (N de 1 a 999)";
 
-/** Las letras del nombre de una copia: sin acentos, sin espacios, sin `/` ni `@`. */
-const LETRAS_DEL_NOMBRE = /^[A-Za-z0-9._-]+$/;
+/** El nombre de una copia, por partes: qué es, y su día o su hora. */
+const NOMBRE_DE_UNA_COPIA =
+	/^(?:(\d{4}-\d{2}-\d{2})|(?:a-mano|antes-de-volver)-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)|traspaso-turso-(\d{4}-\d{2}-\d{2})|subida-(\d{4}-\d{2}-\d{2})(?:-[1-9]\d{0,2})?)$/;
 
 /**
- * ¿Puede ser `clave` la de una copia de la central? Una gramática cerrada: la carpeta, un nombre de
- * hasta `TOPE_DEL_NOMBRE` letras de `[A-Za-z0-9._-]` sin `..`, y `.sql.gz`. Caben todas las que
- * escribe el worker (la del día, `a-mano-…` y `antes-de-volver-…`) y la del traspaso desde Turso
- * (`traspaso-turso-AAAA-MM-DD`); un texto libre, no. La clave va al rastro de la administración
- * (Axiom y el log), donde no puede llegar ni un nombre ni un correo.
+ * ¿Puede ser `clave` la de una copia de la central? Una gramática cerrada, sin texto libre
+ * (`NOMBRES_DE_UNA_COPIA`): caben todas las que escribe el worker (la del día, `a-mano-…` y
+ * `antes-de-volver-…`), la del traspaso desde Turso y la de una base subida a mano, con un día o una
+ * hora que existen. La clave va al rastro de la administración (Axiom y el log), donde no puede
+ * llegar ni un nombre ni un correo (AUD-27).
  */
 export function esClaveDeCopiaDeLaCentral(clave: string): boolean {
 	if (!clave.startsWith(PREFIJO_COPIAS) || !clave.endsWith(".sql.gz")) return false;
-	const nombre = clave.slice(PREFIJO_COPIAS.length, -".sql.gz".length);
-	return nombre.length <= TOPE_DEL_NOMBRE && LETRAS_DEL_NOMBRE.test(nombre) && !clave.includes("..");
+	const partes = NOMBRE_DE_UNA_COPIA.exec(clave.slice(PREFIJO_COPIAS.length, -".sql.gz".length));
+	if (!partes) return false;
+	const [, dia, hora, traspaso, subida] = partes;
+	if (hora !== undefined) {
+		// La hora de `claveConHora`: la de `toISOString`, con guiones en vez de dos puntos.
+		const iso = hora.replace(/T(\d{2})-(\d{2})-/, "T$1:$2:");
+		const ms = Date.parse(iso);
+		return Number.isFinite(ms) && new Date(ms).toISOString() === iso;
+	}
+	return esFechaYmd(dia ?? traspaso ?? subida ?? "");
 }
 
 export type CopiaHecha = {

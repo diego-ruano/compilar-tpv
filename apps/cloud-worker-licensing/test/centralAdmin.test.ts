@@ -27,6 +27,7 @@ import {
 	claveDelDia,
 	copiarLaCentral,
 	esClaveDeCopiaDeLaCentral,
+	NOMBRES_DE_UNA_COPIA,
 } from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
@@ -34,6 +35,7 @@ import {
 	centralDePrueba,
 	centralInterceptada,
 	centralSinAprovisionar,
+	claveDeCopiaNueva,
 	conDobleDeInstantes,
 	conPlataformaQueVuelve,
 	filasDe,
@@ -152,31 +154,49 @@ describe("aprovisionar desde una copia", () => {
 		["con acentos", "base-central/copia-de-María.sql.gz"],
 		["en una carpeta de dentro", "base-central/otra/2026-01-01.sql.gz"],
 		["sin nombre", "base-central/.sql.gz"],
+		// Con las letras que valen, pero texto libre (C4): un nombre llegaría al rastro.
+		["un nombre con guiones", "base-central/Ana-Gil.sql.gz"],
+		["un nombre detrás de una forma buena", "base-central/subida-2026-11-25-Ana-Gil.sql.gz"],
+		["un nombre delante de una forma buena", "base-central/Ana-Gil-2026-11-25.sql.gz"],
+		["un traspaso sin día", "base-central/traspaso-turso-ana.sql.gz"],
+		["un día que no existe", "base-central/2026-02-30.sql.gz"],
+		["una hora que no existe", "base-central/a-mano-2026-11-25T25-00-00.000Z.sql.gz"],
+		["una hora sin milésimas", "base-central/antes-de-volver-2026-11-25T10-30-00Z.sql.gz"],
+		["una subida con el número 0", "base-central/subida-2026-11-25-0.sql.gz"],
+		["una subida con un número de cuatro cifras", "base-central/subida-2026-11-25-1000.sql.gz"],
 	])("valida la clave antes de llegar a la central: %s", async (_que, claveDeCopia) => {
 		const central = centralSinAprovisionar();
 		const log = vi.spyOn(console, "log");
 		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia }) });
 		expect(r).toMatchObject({ status: 400, body: { ok: false, error: "validation_error", message: expect.any(String) } });
+		// Dice qué formas valen (k), sin repetir la clave.
+		expect(r.body.message).toContain(NOMBRES_DE_UNA_COPIA);
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 		expect(rastrosDe(log)).toEqual([]);
 	});
 
-	it("la gramática admite todas las claves que escribe el worker, y la del traspaso desde Turso", () => {
+	it("la gramática admite todas las claves que escribe el worker, la del traspaso desde Turso y la de una base subida a mano, y nada más", () => {
 		const ahora = new Date("2026-11-25T10:30:00.000Z");
 		for (const clave of [
 			claveDelDia("2026-11-25"),
 			claveConHora("a-mano", ahora),
 			claveConHora("antes-de-volver", ahora),
+			claveConHora("antes-de-volver", new Date("2024-02-29T23:59:59.999Z")),
 			"base-central/traspaso-turso-2026-11-25.sql.gz",
-			`base-central/${"x".repeat(100)}.sql.gz`,
+			"base-central/subida-2026-11-25.sql.gz",
+			"base-central/subida-2026-11-25-1.sql.gz",
+			"base-central/subida-2026-11-25-999.sql.gz",
 		]) {
 			expect(esClaveDeCopiaDeLaCentral(clave), clave).toBe(true);
+		}
+		for (const clave of [`base-central/${"x".repeat(100)}.sql.gz`, "base-central/prueba-0123.sql.gz", "base-central/a-mano.sql.gz"]) {
+			expect(esClaveDeCopiaDeLaCentral(clave), clave).toBe(false);
 		}
 	});
 
 	it("una copia que no vale lo dice, con su motivo aparte, y la central sigue sin aprovisionar; al rastro sólo va el código del motivo", async () => {
 		const central = centralSinAprovisionar();
-		const clave = `base-central/no-existe-${crypto.randomUUID()}.sql.gz`;
+		const clave = claveDeCopiaNueva();
 		const log = vi.spyOn(console, "log");
 		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
 		expect(r).toEqual({
@@ -197,7 +217,7 @@ describe("aprovisionar desde una copia", () => {
 
 	it("lo que trae la copia no llega al rastro: ni una migración inventada en su cabecera", async () => {
 		const origen = await centralDePrueba();
-		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const clave = claveDeCopiaNueva();
 		const bucket = (env as any).COPIAS as R2Bucket;
 		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
 		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
@@ -219,7 +239,7 @@ describe("aprovisionar desde una copia", () => {
 
 	it("una línea más larga que el tope dice cuál es, y al rastro va el código con el que empieza el motivo", async () => {
 		const origen = await centralDePrueba();
-		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const clave = claveDeCopiaNueva();
 		const bucket = (env as any).COPIAS as R2Bucket;
 		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
 		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
@@ -253,7 +273,7 @@ describe("aprovisionar desde una copia", () => {
 	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro", async () => {
 		const origen = await centralDePrueba();
 		await filasDe(origen, `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('t-1', 1, 2);`);
-		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const clave = claveDeCopiaNueva();
 		const bucket = (env as any).COPIAS as R2Bucket;
 		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
 		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();

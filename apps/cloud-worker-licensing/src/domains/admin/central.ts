@@ -37,6 +37,7 @@ import {
 	COPIA_A_MANO,
 	esClaveDeCopiaDeLaCentral,
 	listarCopiasDeLaCentral,
+	NOMBRES_DE_UNA_COPIA,
 } from "../../durableObjects/baseCentral.copia";
 import type {
 	CodigoDeLaCentral,
@@ -189,11 +190,11 @@ centralRoutes.post("/copiar-ahora", async (c) => {
 });
 
 const aprovisionarSchema = z.object({
-	/** La copia desde la que se restaura (`base-central/<nombre>.sql.gz`). Sin ella, el esquema vacío. */
+	/** La copia desde la que se restaura (`base-central/<nombre>.sql.gz`, `NOMBRES_DE_UNA_COPIA`). Sin ella, el esquema vacío. */
 	claveDeCopia: z
 		.string()
 		.overwrite(recortar)
-		.refine(esClaveDeCopiaDeLaCentral, "La copia va como base-central/<nombre>.sql.gz: sácala de pnpm central:copias.")
+		.refine(esClaveDeCopiaDeLaCentral, `Esa no es la clave de una copia de la central: sácala de pnpm central:copias. Va como ${NOMBRES_DE_UNA_COPIA}.`)
 		.optional(),
 });
 
