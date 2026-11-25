@@ -1,6 +1,7 @@
 // src/app/pages/Tareas.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { commands } from "@tpv/client";
+import type { TrabajadorUI } from "@tpv/contracts";
 import {
   useCreateTarea,
   useDeleteTarea,
@@ -32,15 +33,6 @@ type TareaUI = {
   Finalizada_At?: string | null;
   Total_Asignados?: number;
   Total_Finalizadas?: number;
-};
-
-type TrabajadorUI = {
-  ID_Trabajador: string;
-  ID_Usuario: string;
-  Nombre: string;
-  Apellido: string | null;
-  Puesto: string | null;
-  Email: string;
 };
 
 function fmtFechaHora(s?: string | null) {
@@ -211,7 +203,7 @@ export default function Tareas() {
   const papelera = (papeleraQuery.data ?? []) as TareaUI[];
 
   const trabajadores = useMemo<TrabajadorUI[]>(
-    () => (trabajadoresQuery.data ?? []) as TrabajadorUI[],
+    () => trabajadoresQuery.data ?? [],
     [trabajadoresQuery.data],
   );
   const tareasAdmin = useMemo<TareaUI[]>(

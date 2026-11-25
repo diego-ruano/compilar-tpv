@@ -13,6 +13,7 @@ import { commands } from "@tpv/client";
 import { useCallback, useEffect, useState } from "react";
 
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import type { UpdateStatus } from "@tpv/contracts";
 import { DownloadCloud, RefreshCw } from "lucide-react";
 
 import { Panel } from "../ui/Panel";
@@ -21,21 +22,6 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { BotonDiagnostico } from "../../../shared/ui/BotonDiagnostico";
 import { CORREO_SOPORTE } from "../../../shared/lib/soporte";
-
-/** Espejo de `UpdateInfo` (src-tauri/src/lib.rs). */
-type UpdateInfo = {
-	version: string;
-	current_version: string;
-	notes: string | null;
-};
-
-/** Espejo de `UpdateStatus` (src-tauri/src/lib.rs). Nunca falla: el fallo viaja en `error`. */
-type UpdateStatus = {
-	current_version: string;
-	supported: boolean;
-	update: UpdateInfo | null;
-	error: string | null;
-};
 
 function horaCorta(d: Date): string {
 	return d.toLocaleTimeString(undefined, {

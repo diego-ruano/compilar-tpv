@@ -5,27 +5,7 @@ import type { ApexOptions } from "apexcharts";
 import { APEX_CHART_BASE } from "./apexBase";
 import { useClientesStats } from "./statsQueries";
 import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
-import type { Dinero } from "@tpv/contracts";
-
-/* =========================
-   Tipos
-========================= */
-export type StatsRange = "hoy" | "semana" | "mes" | "anio";
-
-type ChartSeriesI64 = { labels: string[]; values: number[] }; // counts
-type ChartSeriesF64 = { labels: string[]; values: number[] }; // euros
-
-export type ClientesStatsResponse = {
-    // KPI
-    nuevos: number;
-    recurrentes: number;
-    no_recurrentes: number;
-    ticket_medio_cliente: Dinero;
-
-    // Charts
-    nuevos_por_bucket: ChartSeriesI64;
-    top_clientes_gasto: ChartSeriesF64;
-};
+import type { ClientesStatsResponse, StatsRange } from "@tpv/contracts";
 
 /* =========================
    Helpers
@@ -145,8 +125,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
     const query = useClientesStats(range);
 
-    const data: ClientesStatsResponse | null =
-        (query.data as ClientesStatsResponse | undefined) ?? null;
+    const data: ClientesStatsResponse | null = query.data ?? null;
     const loading = query.isFetching;
     // Sólo la primera carga deja el hueco; una relectura atenúa lo que hay (sin «Cargando…»).
     const cargando = query.isPending;

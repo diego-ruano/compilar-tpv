@@ -3,13 +3,13 @@
 // El primer inicio: ¿este equipo es el TPV principal o un Handy?
 
 import React from "react";
+import type { DeviceMode } from "@tpv/contracts";
 import { ArrowRight, Check, Database, Monitor, Smartphone, Wifi } from "lucide-react";
 
 import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { cn } from "../../shared/lib/cn";
 import { conAviso } from "../../shared/lib/conAviso";
 import { useToqueDeliberado } from "../../shared/lib/toqueDeliberado";
-import type { DeviceMode } from "../../shared/stores/useMode";
 import { Badge, Card } from "../../shared/ui";
 import FondoDecorado from "./FondoDecorado";
 
