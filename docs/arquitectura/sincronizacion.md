@@ -286,7 +286,10 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
   contestaron a ese saludo: si su respuesta no se apuntó porque ya había una más nueva, manda la
   nueva. Un `tpv` que no es la Main no entra (`hello_failed` con `device_replaced` o
   `license_revoked`): el ticket del socket dura 30 s y pudo emitirse antes de un traslado. Sin
-  respuesta de la base central tampoco entra.
+  respuesta de la base central tampoco entra. El `details` de un `hello_failed` es siempre un código
+  (`device_replaced`, `license_revoked`, `bad_ws_signature`, `hub_unavailable`…); lo que no lo es, como
+  el texto de SQLite de un error de la central, sale como `internal_error`, y su texto se queda,
+  filtrado, en el log del DO (`motivoDelSaludoFallido`).
 - **Por actividad, como mucho una vez por minuto y por negocio** (`comprobarMain`), si hay alguna
   sesión `tpv` dentro. Quien pregunta se queda la marca de la tabla antes de esperar
   (`tocaComprobar`) y los demás siguen con lo que dice la tabla: veinte mensajes a la vez son una

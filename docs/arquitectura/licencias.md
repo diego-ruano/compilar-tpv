@@ -385,7 +385,9 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
    `reassignMainDevice` cambia la Main y deja su traza en `license_device_swaps` **en un solo lote**
    (entran las dos o ninguna, E7a-1), **conservando el tenant**, y se avisa al `TenantHub` y por correo
    al titular. Si el lote no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
-   está, ha entrado, y la ruta sigue con los avisos y `cambioDeEquipo: true`; si no está, o la central
+   está, ha entrado, y la ruta sigue con los avisos y `cambioDeEquipo: true`, y el viaje que no
+   volvió queda en Axiom (`central_no_disponible`; en Sentry, sólo si no es carga ni un fallo
+   pasajero); si no está, o la central
    tampoco contesta a esa lectura, el 503 de siempre y ningún aviso. El código ya está gastado: lo
    que queda está en [TRASLADO-REINTENTO](../pendientes.md#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias).
 

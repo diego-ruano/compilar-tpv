@@ -152,7 +152,8 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   - lo demás, o la repetición que también falla: 503 `hub_unavailable`.
 
   Los dos salen como `external` (lo que la Main y la Handy tratan como la nube sin disponibilidad),
-  quedan en Axiom (`hub_no_disponible`) y, si la plataforma no lo da por pasajero, van también a
+  quedan en Axiom (`hub_no_disponible`, con la ruta por su patrón, la del `alHub` de su router, nunca
+  el camino, que lo escribe quien llama) y, si la plataforma no lo da por pasajero, van también a
   Sentry (`hub.ejecutar_ruta`). Lo cubre `test/alHubSinElObjeto.test.ts`.
 
   Cuando la que no puede atender es la base central, la respuesta es la misma
@@ -416,7 +417,10 @@ oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete
 sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada
 efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar
 en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
-`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`.
+`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. El traslado de licencia, que
+desde E7a-1 es un lote, lo compara `test/licenciaTraslado.test.ts` con el de antes: las mismas
+columnas en su traza, la misma hora en la licencia y en la traza (`updated_at_ms` y `at_ms`) y
+ninguna otra fila cambiada.
 
 ### Cuando no puede atender
 
@@ -443,7 +447,10 @@ Sentry, con el error del viaje como causa, y en el log, que ahí hay algo que mi
 ([observabilidad.md](observabilidad.md#eventos-de-tpv-sync)). Lo mismo queda cuando la central no le
 atiende al `TenantHub`, que le habla por su cuenta (quién es la Main, el `last_seen`): el mismo evento,
 con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo demás que le falle al
-hub con la central (un error de SQL) va a Sentry, como siempre.
+hub con la central (un error de SQL) va a Sentry, como siempre. La misma regla siguen el cron de los
+avisos de caducidad (`metodo` `cron`, también en la lectura con la que empieza), el cupo y la traza
+de un pedido a un proveedor (`email.quota`, `email.audit`) y el traslado de licencia que entró y
+cuya respuesta se perdió.
 
 - **Nunca una respuesta que diga algo de la licencia o del equipo.** Una central vacía o a medias
   contestaría como definitivo lo que no lo es: `license_not_found` a todos, y los clientes lo toman
@@ -717,7 +724,9 @@ sentencia (`reservarCupo`), justo antes de enviar y después de comprobar el des
 apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AUD-41). Un pedido cuenta
 desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
 que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
-pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
+pedido sale igual y se apunta después si se puede; la central que no atiende al cupo o a la traza
+queda en Axiom (`central_no_disponible`, `email.quota` o `email.audit`) y en Sentry sólo si no es
+carga ni un fallo pasajero ([arriba](#cuando-no-puede-atender)). Las trazas se purgan a los 90 días
 (`RETENCION_ENVIOS_MS`).
 
 **Un pedido no sale dos veces.** La Main o la Handy manda con cada pedido su clave de envío (`id_envio`, la
