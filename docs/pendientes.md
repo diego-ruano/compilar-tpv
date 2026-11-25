@@ -547,9 +547,10 @@ de su personal:
 
 El bucket no tiene ninguna regla de ciclo de vida por antigüedad (sólo la que aborta las subidas por
 partes sin terminar a los 7 días), y una sin más borraría también las del objeto perdido. Lo decide
-el responsable: que la retirada borre las copias (`podarCopias` con cero, en `tenantHub.copia.ts`), una regla por antigüedad larga en
-Cloudflare (p. ej. 90 días, que no alcanza a las de un negocio vivo pero sí, pasado ese plazo, a las
-de un objeto perdido), o las dos, con el marco de [LEGAL-01](#legal-01--rgpd).
+el responsable: que la retirada borre las copias (`podarCopias` con cero, en `tenantHub.copia.ts`),
+una regla por antigüedad larga en Cloudflare, que habría que crear (de un plazo que no alcance a las
+de un negocio vivo pero sí, pasado ese plazo, a las de un objeto perdido), o las dos, con el marco de
+[LEGAL-01](#legal-01--rgpd).
 
 ---
 
