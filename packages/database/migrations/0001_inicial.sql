@@ -1565,8 +1565,7 @@ LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
    no se negocian:
      1. El registro se crea EN LA MISMA TRANSACCION que el cobro (art. 9 RRSIF: "de forma
         simultanea o inmediatamente anterior a la expedicion").
-     2. NO SE MODIFICA. Una correccion es OTRA fila (subsanacion), nunca un UPDATE (la unica
-        escritura posterior, en Sistema_Json, se explica en Registros_Facturacion).
+     2. NO SE MODIFICA. Una correccion es OTRA fila (subsanacion), nunca un UPDATE.
      3. Nada de lo que rodea al envio puede impedir cobrar.
 
    Se replica a la nube por el outbox como el resto del esquema: es lo que permite que una Main que
@@ -1591,10 +1590,7 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
   Ultimo INTEGER NOT NULL DEFAULT 0
 );
 
--- El corazon. Append-only: se inserta y no se borra ni se corrige. La unica escritura posterior
--- rellena en Sistema_Json la identidad del productor o el numero de instalacion que faltaban, y solo
--- en registros que la AEAT no ha aceptado (asegurar_sistema_reparado en tpv-infra-sqlite/src/
--- verifactu.rs): ese bloque no entra en la huella ni en los datos de la factura.
+-- El corazon. Append-only: se inserta y no se borra ni se corrige; ninguna escritura la toca despues.
 --
 -- Tres decisiones que parecen detalles y no lo son:
 --
@@ -1689,7 +1685,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_regfact_idfactura
 ON Registros_Facturacion(NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Tipo)
 WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
 
--- La ruta caliente del envio ("dame los pendientes por Orden ascendente") la sirve el UNIQUE (Orden)
+-- El ultimo eslabon de la cadena (ORDER BY Orden DESC LIMIT 1, en cada cobro) lo sirve el UNIQUE (Orden)
 -- de la tabla, que ya es un indice por Orden. Tenia ademas uno propio identico (RI-17): una escritura
 -- mas en la transaccion de cada cobro para nada.
 
