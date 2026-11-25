@@ -553,7 +553,8 @@ export class MotorTenantHub {
 	 * DO-PERDIDA · Devuelve a un objeto vacío la base de una copia diaria de R2
 	 * (`/v1/admin/negocios/restaurar-copia`, `tenantHub.restaurar.ts`), y abre el log como
 	 * `crearBaseVacia`. La copia tiene que ser de este negocio. Si no vale (cortada, de un esquema
-	 * que este worker no sabe poner), el objeto se queda vacío y se dice por qué.
+	 * que este worker no sabe poner, con una línea que no es una fila), el objeto se queda vacío y se
+	 * dice por qué: el código y lo que dice el cargador (`detalle`), sin nada de la copia.
 	 */
 	async restaurarDesdeCopia(params: {
 		tenantId: string;
@@ -577,7 +578,7 @@ export class MotorTenantHub {
 				return { clave, ...cargada };
 			});
 		} catch (e) {
-			if (e instanceof CopiaInservible) return { ok: false, error: e.codigo, status: 422 };
+			if (e instanceof CopiaInservible) return { ok: false, error: e.codigo, status: 422, detalle: e.message };
 			throw e;
 		}
 	}

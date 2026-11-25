@@ -99,7 +99,12 @@ pnpm negocio:restaurar-copia -- --tenant <tenantId> [--dia AAAA-MM-DD] --modo ma
 Mientras se carga, la base no atiende (`tenant_db_restaurando`, como en la vuelta a un instante). Si
 la copia no vale, el objeto se queda vacío y contesta por qué: `copia_cortada` (le falta el final),
 `copia_de_otra_version` (es de un esquema que este worker no sabe poner: un worker anterior a la
-copia) o `copia_no_valida`; prueba con la de otro día.
+copia) o `copia_no_valida` (una línea que no es una fila, o una clave foránea rota). El CLI enseña
+además el motivo, que queda también en Axiom (`copia_no_restaurada`): de una línea, su número, el
+carácter y un código (`columna_desconocida`, `tabla_ajena`, `valor_no_literal`…). Prueba con la de
+otro día. Si es una columna o una tabla que el esquema de hoy no tiene (`columna_desconocida`,
+`tabla_ajena`) en una copia de antes de una migración que la quitó o le cambió el nombre, fallarán
+igual todas las de antes de esa migración: este worker no las sabe cargar.
 
 **Crearle una base vacía**, con su administrador inicial, como la del alta:
 

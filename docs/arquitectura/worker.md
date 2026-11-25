@@ -777,8 +777,11 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   (varias filas por llamada; una de más de 100 KB, sola y con sus textos como argumentos) y con las
   claves foráneas apagadas (la copia va tabla a tabla, no padres primero). Al acabar mira que esté
   entera (su línea de fin, con las mismas filas; si no, `copia_cortada`) y `foreign_key_check`
-  (`copia_no_valida`). Los disparadores saltan al cargar: los de validación aceptan lo que ya
-  aceptaron, y los del resumen diario sólo apuntan días.
+  (`copia_no_valida`). Con una copia que no vale, el objeto se queda vacío y la ruta contesta 422 con
+  el código y lo que dice el cargador (`detalle`, sin nada de la copia), y lo deja en Axiom
+  (`copia_no_restaurada`, el evento de toda restauración que el objeto no hace). Los disparadores
+  saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
+  apuntan días.
 - **`crearBaseVacia`** es el alta (`aprovisionar`: esquema, sello y administrador inicial).
 - **Las dos cierran la base mientras tanto** con la misma marca que la vuelta a un instante
   (`tenant_db_restaurando`), porque esperan a la red con la base a medias y las claves foráneas

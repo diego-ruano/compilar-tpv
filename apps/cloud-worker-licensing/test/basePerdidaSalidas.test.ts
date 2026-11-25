@@ -25,21 +25,27 @@ import { claveDeCopia } from "../src/durableObjects/tenantHub.copia";
 import { SALTO_DE_SEQ } from "../src/durableObjects/tenantHub.instante";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
+import { MIGRATIONS } from "../src/server/tenantMigrations";
 
 const env = entorno as any;
 const TOKEN = "token-de-pruebas";
 const ENV = { ...env, ADMIN_API_TOKEN: TOKEN };
 const bucket = env.COPIAS_NEGOCIOS as R2Bucket;
 const ADMIN = "00000000-0000-7000-8000-000000000501";
+/** Con Axiom configurado (el conjunto de datos y el dominio son los de la suite). */
+const AXIOM = { AXIOM_TOKEN: "token-de-pruebas" };
 
 const stub = (tenantId: string) => env.TenantHub.get(env.TenantHub.idFromName(tenantId));
 
-/** Una orden a la administración, con la base central `central` (sin ella, la del despliegue). */
+/**
+ * Una orden a la administración, con lo que se ponga en el entorno: la base central (sin ella, la del
+ * despliegue) o Axiom.
+ */
 async function pedir(
 	ruta: string,
 	cuerpo: unknown,
 	token: string | null = TOKEN,
-	central: Partial<Pick<CentralDePrueba, "entorno">> = {},
+	entorno: Partial<CentralDePrueba["entorno"] & typeof AXIOM> = {},
 ) {
 	const res = await adminRoutes.fetch(
 		new Request(`https://api${ruta}`, {
@@ -47,7 +53,7 @@ async function pedir(
 			headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
 			body: JSON.stringify(cuerpo),
 		}),
-		{ ...ENV, ...central.entorno },
+		{ ...ENV, ...entorno },
 	);
 	// Un fallo sin capturar sale del `onError` de Hono como texto: sin cuerpo que leer.
 	return { status: res.status, body: (await res.json().catch(() => null)) as any };
@@ -64,8 +70,11 @@ type Central = {
 	contestar: () => void;
 };
 
-/** Corre `cuerpo` con una base central nueva. Lo que se le hace fallar va en su stub. */
-async function conCentral<R>(cuerpo: (central: Central) => Promise<R>): Promise<R> {
+/**
+ * Corre `cuerpo` con una base central nueva, y `entorno` en el de cada orden. Lo que se le hace fallar
+ * a la central va en su stub.
+ */
+async function conCentral<R>(cuerpo: (central: Central) => Promise<R>, entorno: Partial<typeof AXIOM> = {}): Promise<R> {
 	const base = await centralDePrueba();
 	let fallarAlApuntar: string | null = null;
 	const vista = centralInterceptada(base, (metodo, [sentencia], llamar) => {
@@ -78,7 +87,7 @@ async function conCentral<R>(cuerpo: (central: Central) => Promise<R>): Promise<
 			: llamar();
 	});
 	return cuerpo({
-		pedir: (ruta, c) => pedir(ruta, c, TOKEN, vista),
+		pedir: (ruta, c) => pedir(ruta, c, TOKEN, { ...vista.entorno, ...entorno }),
 		auditoria: async () =>
 			(await filasDe(base, "SELECT action FROM admin_audit ORDER BY at_ms, rowid;")).map((f) => String(f.action)),
 		fallarAlApuntar: (action) => void (fallarAlApuntar = action),
@@ -317,34 +326,74 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		expect(metadatos?.seq).toBe(String(numerado));
 	});
 
-	it("una copia cortada, de otra versión o con una fila que no es sólo una fila no se restaura y el objeto se queda vacío", async () => {
+	it("una copia cortada, de otra versión o con una línea que no es una fila no se restaura, el objeto se queda vacío y se dice por qué", async () => {
 		const t = "perdida-copia-mala";
 		await negocioConCopia(t);
 		await stub(t).borrarTodo();
 		const buena = await leer(claveDeCopia(t, hoy()));
+		const lineas = buena.split("\n");
+		/** La primera fila de Clientes, y dónde está en la copia (su número de línea es éste más uno). */
+		const enClientes = lineas.findIndex((l) => l.startsWith('INSERT INTO "Clientes" ('));
+		const deClientes = lineas[enClientes];
+		/** La copia con la fila de Clientes cambiada por `otra`. */
+		const conClientes = (otra: string) => lineas.with(enClientes, otra).join("\n");
 
-		const cortada = buena.split("\n").filter((l) => !l.startsWith("-- Fin de la copia")).join("\n");
+		const cortada = lineas.filter((l) => !l.startsWith("-- Fin de la copia")).join("\n");
 		await bucket.put(claveDeCopia(t, "2026-01-01"), await gzip(cortada));
 		const deOtraVersion = buena.replace(/^-- Migraciones: (.*)$/m, "-- Migraciones: $1,9999_del_futuro");
 		await bucket.put(claveDeCopia(t, "2026-01-02"), await gzip(deOtraVersion));
 		// Una fila con otra sentencia detrás, que vaciaría las zonas si se ejecutara.
-		const manipulada = buena.replace(/^(INSERT INTO "Clientes" .*\);)$/m, "$1 DELETE FROM Zonas;");
-		expect(manipulada).not.toBe(buena);
-		await bucket.put(claveDeCopia(t, "2026-01-03"), await gzip(manipulada));
+		await bucket.put(claveDeCopia(t, "2026-01-03"), await gzip(conClientes(`${deClientes} DELETE FROM Zonas;`)));
+		// Una columna que el esquema de hoy no tiene: así se quedan las copias de antes de una migración
+		// que la quite o le cambie el nombre.
+		const conColumnaRetirada = deClientes.replace(
+			/^INSERT INTO "Clientes" \((.*?)\) VALUES \(/,
+			(_, columnas: string) => `INSERT INTO "Clientes" ("Columna_Retirada", ${columnas}) VALUES ('x', `,
+		);
+		expect(conColumnaRetirada).not.toBe(deClientes);
+		await bucket.put(claveDeCopia(t, "2026-01-04"), await gzip(conClientes(conColumnaRetirada)));
 
+		const enviados: Record<string, unknown>[] = [];
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			enviados.push(...JSON.parse(String(init.body)));
+			return new Response("{}", { status: 200 });
+		});
 		const r = await conCentral(async (central) => {
 			await central.nacer(t);
+			const restaurar = (dia: string) =>
+				central.pedir("/negocios/restaurar-copia", { tenantId: t, dia, modo: "main", motivo: "se perdió al migrar" });
 			return {
-				cortada: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-01", modo: "main", motivo: "abc" }),
-				otra: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-02", modo: "main", motivo: "abc" }),
-				manipulada: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-03", modo: "main", motivo: "abc" }),
-				noHay: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2025-01-01", modo: "main", motivo: "abc" }),
+				cortada: await restaurar("2026-01-01"),
+				otra: await restaurar("2026-01-02"),
+				manipulada: await restaurar("2026-01-03"),
+				columnaRetirada: await restaurar("2026-01-04"),
+				noHay: await restaurar("2025-01-01"),
 			};
-		});
-		expect(r.cortada).toMatchObject({ status: 422, body: { error: "copia_cortada" } });
-		expect(r.otra).toMatchObject({ status: 422, body: { error: "copia_de_otra_version" } });
-		expect(r.manipulada).toMatchObject({ status: 422, body: { error: "copia_no_valida" } });
+		}, AXIOM).finally(() => vi.unstubAllGlobals());
+
+		// Por qué no vale (`detalle`): la línea, el carácter y un código, y nada de lo que lleva la copia.
+		const aqui = MIGRATIONS.map((m) => m.name);
+		const porQue = {
+			cortada: "copia_cortada: le falta la línea del final",
+			otra: `copia_de_otra_version: la copia trae ${aqui.length + 1} migraciones y este worker sabe poner ${aqui.length}, hasta ${aqui.at(-1)}`,
+			manipulada: `copia_no_valida: la línea ${enClientes + 1} no se puede cargar: sobra_texto (carácter ${deClientes.length + 1})`,
+			columnaRetirada: `copia_no_valida: la línea ${enClientes + 1} no se puede cargar: columna_desconocida (carácter ${'INSERT INTO "Clientes" ('.length + 1})`,
+		};
+		for (const [copia, detalle] of Object.entries(porQue)) {
+			expect(r[copia as keyof typeof porQue], copia).toMatchObject({ status: 422, body: { ok: false, error: detalle.split(":")[0], detalle } });
+		}
 		expect(r.noHay).toMatchObject({ status: 404, body: { error: "copia_no_encontrada" } });
+		expect(r.noHay.body).not.toHaveProperty("detalle");
+		// Y queda en Axiom, sin el motivo de la orden, que es texto libre.
+		expect(enviados.filter((e) => e.event === "copia_no_restaurada").map(({ error, detalle }) => [error, detalle])).toEqual([
+			["copia_cortada", porQue.cortada],
+			["copia_de_otra_version", porQue.otra],
+			["copia_no_valida", porQue.manipulada],
+			["copia_no_valida", porQue.columnaRetirada],
+			["copia_no_encontrada", undefined],
+		]);
+		expect(JSON.stringify(enviados)).not.toContain("al migrar");
+
 		expect(await stub(t).estaAprovisionado()).toBe(false);
 		expect(await enElHub(t, (hub: any) => hub.state.storage.getAlarm())).toBeNull();
 	});
