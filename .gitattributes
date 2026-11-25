@@ -1,3 +1,34 @@
+# Todo lo que Git reconoce como texto se guarda en el índice con LF y se deja en el disco con LF,
+# también en Windows y aunque core.autocrlf sea true. Las herramientas del repositorio escriben LF
+# (generate-types, el Cargo.toml que reescribe la compilación de Android, los -u de los tests): con
+# la copia de trabajo en CRLF, cada una dejaba el fichero «modificado» en git status sin cambiar
+# nada más que sus saltos, y movía la huella de los E2E (e2e/helpers/huella.ts).
+* text=auto eol=lf
+# Lo que lee cmd.exe o el instalador de Windows se queda en CRLF en el disco.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.nsh text eol=crlf
+# Binarios del repositorio: nunca se convierten ni se comparan como texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.bmp binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.wasm binary
+*.db binary
 # Migraciones de BD: forzar finales de línea LF y tratarlas como texto.
 # El runner calcula el hash del contenido (normalizado a LF) para detectar manipulación; mantener
 # el EOL determinista evita falsos positivos de "migración modificada" al clonar en distinto SO.
