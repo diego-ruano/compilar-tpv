@@ -424,13 +424,18 @@ La respuesta es la del objeto de un negocio que no puede atender (`lib/noDisponi
 
 La traducen el `onError` de la `app`, el `/ws` y la activación cuando crea la base del negocio. Un
 `catch` que seguiría sin la central la deja subir (`laCentralNoAtiende`): el feed de actualizaciones no
-la lee como «no es piloto», que con sólo una beta publicada sería el 204 de «estás al día». **En
+la lee como «no es piloto», que con sólo una beta publicada sería el 204 de «estás al día», y el aviso
+al cliente de un cambio de su reserva web no sale sin su enlace de cancelar como si el negocio no
+tuviera clave, que ya no se repetiría: contesta el 503 y la Main lo vuelve a mandar. **En
 `tenantAuth` sólo un token o una firma que no valen son un 401** (`RechazoDeAutenticacion`): cualquier
 fallo de la central sube al `onError`, porque un 401 le haría creer al equipo que su token no vale. El
 motivo exacto no viaja: queda en Axiom (`central_no_disponible`, con el `motivo`: `saturada`,
 `pasajera`, `plazo`, `rechazo` o el código del objeto) y, si no es carga ni un fallo pasajero, en
 Sentry, con el error del viaje como causa, y en el log, que ahí hay algo que mirar
-([observabilidad.md](observabilidad.md#eventos-de-tpv-sync)).
+([observabilidad.md](observabilidad.md#eventos-de-tpv-sync)). Lo mismo queda cuando la central no le
+atiende al `TenantHub`, que le habla por su cuenta (quién es la Main, el `last_seen`): el mismo evento,
+con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo demás que le falle al
+hub con la central (un error de SQL) va a Sentry, como siempre.
 
 - **Nunca una respuesta que diga algo de la licencia o del equipo.** Una central vacía o a medias
   contestaría `license_not_found` a todos, y los clientes lo toman por un rechazo: la Main deja de
@@ -485,7 +490,8 @@ al crecer, sin decidir, está en [pendientes.md](../pendientes.md): `tenantAuth`
   (`mainEnCentral`, AUD-02) y 10 s para apuntar el `last_seen` de un equipo (`touchLastSeen`). Vencido,
   sale como `CentralNoDisponible` (`plazo`) y el hub sigue: el turno del log y la espera de la Main no
   se quedan colgados, y la tabla de la Main se queda como estaba. El `last_seen` que no se apunta se
-  recoge en el hub y va a Sentry (`sync.last_seen`); lo pone la siguiente actividad pasada la ventana.
+  recoge en el hub, deja su `central_no_disponible` y, con el plazo vencido, va a Sentry
+  (`sync.last_seen`); lo pone la siguiente actividad pasada la ventana.
 - **La llamada vencida no se cancela.** Es un RPC, y Cloudflare no da forma de cortarlo: sigue viva
   sin nadie que la espere, y si escribía (el `last_seen`), escribe cuando la central la atiende.
   Mientras no termina es E/S pendiente, y el `TenantHub` no hiberna

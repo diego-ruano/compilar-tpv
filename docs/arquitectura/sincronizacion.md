@@ -348,7 +348,10 @@ mira los códigos de cierre ni depende de un mensaje nuevo.
 (`sync.main_vigente`) y no se rechaza ningún mensaje: la Main sigue replicando y las Handy trabajando,
 y se vuelve a preguntar al minuto. Una Main cerrada no puede reconectar sin la base central (el
 ticket la necesita), así que cortar por no saber la dejaría sin replicar durante toda la avería.
-Sólo el saludo de un `tpv` no entra sin respuesta.
+Sólo el saludo de un `tpv` no entra sin respuesta. Cualquiera de estas lecturas, también la del
+saludo, se registra como en el Worker: si la central no ha podido atender, el `central_no_disponible`
+de Axiom y, si no es carga ni un fallo pasajero, Sentry; si ha rechazado la consulta, Sentry
+([worker.md](worker.md#cuando-no-puede-atender)).
 
 **Los límites**, tal como están:
 

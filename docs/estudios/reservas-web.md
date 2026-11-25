@@ -440,9 +440,12 @@ cambió. Qué contesta:
   o hubo otro después.
 - **409** (se descarta): no es una reserva web (`reserva_no_web`), o un cambio de una reserva que ya
   no está por venir o que el cliente canceló desde su enlace (`aviso_superado`).
-- **503** (se repite): la agenda no responde, o ese correo está saliendo por otro lado.
+- **503** (se repite): la agenda no responde, la base central no atiende al leer la clave del negocio
+  para el enlace (el `hub_unavailable` o `hub_overloaded` de siempre), o ese correo está saliendo por
+  otro lado. La Main lo repite desde su cola; la Handy, que lo manda una vez, no.
 - En un cambio, la agenda da un enlace de cancelar nuevo para el correo (`enlaceParaUnCambio`), que
-  vale hasta un día después de la hora nueva, y alarga los que ya tenía.
+  vale hasta un día después de la hora nueva, y alarga los que ya tenía. Si la clave no se puede leer
+  por otra cosa (un error de SQL), el correo sale sin el enlace y el fallo va a Sentry.
 
 La Main, antes de mandarlo, compara el aviso con su copia: un «cambiada» que ya no coincide (hubo
 otro cambio, también de una Handy, que ya avisó) o de una reserva que ya no está por venir se

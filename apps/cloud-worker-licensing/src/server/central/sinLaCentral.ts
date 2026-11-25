@@ -4,8 +4,9 @@
 // donde un error se convierte en respuesta: el `onError` de la `app`, el `/ws` (`app.ts`) y los
 // `catch` que, si no, contestarían un código propio (la base del negocio que nace al activar). Lo que
 // lanza la central en `tenantAuth` no es un rechazo de quien llama: sube al `onError`. Y un `catch` que
-// sigue sin la central si la lectura falla (el piloto del feed de actualizaciones) deja subir esto
-// (`laCentralNoAtiende`): seguir sería contestar como si la central hubiera dicho que no hay nada.
+// sigue sin la central si la lectura falla (el piloto del feed de actualizaciones, la clave del enlace
+// del aviso de una reserva web) deja subir esto (`laCentralNoAtiende`): seguir sería contestar como si
+// la central hubiera dicho que no hay nada.
 //
 // Es lo mismo que cuando no atiende el objeto de un negocio (`lib/enElHub.ts::sinElObjeto`): el 503
 // `external` de `lib/noDisponible.ts`.
@@ -22,11 +23,15 @@
 // viaje sin marcas, que puede ser un fallo del programa dentro del objeto, la central sin aprovisionar
 // o averiada) va además a Sentry, con su causa, y al log: ahí hay algo que mirar.
 //
+// Lo mismo queda cuando la central no le atiende al `TenantHub`, que le habla por su cuenta (quién es
+// la Main, el `last_seen`): `registrarSinLaCentral`, con lo que hacía el hub en lugar de la ruta.
+//
 // Lo demás que lanza la central (un error de SQL, una sentencia prohibida) no es «no puede atender»:
 // sigue el camino de cualquier otro error.
 
 import type { Context } from "hono";
 
+import type { Env } from "../../env";
 import { enSegundoPlano } from "../../lib/enSegundoPlano";
 import { respuestaNoDisponible } from "../../lib/noDisponible";
 import { reportarCentralNoDisponible } from "../../observability/axiom";
@@ -58,8 +63,31 @@ export function laCentralNoAtiende(error: unknown): boolean {
 	return motivoSinLaCentral(error) !== null;
 }
 
-/** La respuesta si `error` es que la central no ha podido atender; `null` si es cualquier otra cosa. */
-export function respuestaSinLaCentral(c: Context, error: unknown): Response | null {
+/** Dónde no ha atendido la central: lo que lleva lo que queda registrado. */
+export type DondeSinLaCentral = {
+	env: Env;
+	/** Mantiene viva la entrega a Axiom: el `waitUntil` de la petición, o el del objeto. */
+	enSegundoPlano: (promesa: Promise<unknown>) => void;
+	/**
+	 * La operación de Sentry y del log: la ruta por su patrón (`GET /v1/update/:target/:arch/:current`),
+	 * o lo que hacía el `TenantHub` (`sync.main_vigente`).
+	 */
+	operacion: string;
+	/** El método y la ruta del evento de Axiom. */
+	metodo: string;
+	ruta: string;
+	tenantId?: string;
+};
+
+/**
+ * Si `error` dice que la central no ha podido atender, lo deja registrado y devuelve el motivo: el
+ * evento en Axiom, siempre, y si no es carga ni un fallo pasajero de la plataforma, Sentry y el log. Si
+ * es cualquier otra cosa, `null`, sin registrar nada: lo que haga con ella quien llama.
+ */
+export function registrarSinLaCentral(
+	error: unknown,
+	donde: DondeSinLaCentral,
+): CentralNoDisponible["motivo"] | ErrorDeLaCentral["code"] | null {
 	const motivo = motivoSinLaCentral(error);
 	if (!motivo) return null;
 
@@ -67,27 +95,39 @@ export function respuestaSinLaCentral(c: Context, error: unknown): Response | nu
 	const causa = ((error as Error).cause ?? error) as { message?: unknown };
 	if (!esPasajeroDeLaCentral(error)) {
 		// A Sentry va con su causa: el SDK la enseña enlazada.
-		capturarError(error, `${c.req.method} ${c.req.routePath}`);
+		capturarError(error, donde.operacion);
 		// FABLE-B: el detalle se queda aquí y en Sentry; la respuesta no lo lleva. En el log, la ruta va
 		// por su patrón y no por su camino, que lo escribe quien llama (un correo en el lugar de la
 		// versión del feed), y el mensaje, con el de su causa, filtrado y acotado como lo que va a
 		// telemetría.
 		const conCausa = causa === error ? "" : `: ${String(causa.message ?? causa)}`;
-		console.error(acotar(`[central] ${c.req.method} ${c.req.routePath} → ${(error as Error).message}${conCausa}`, scrub));
+		console.error(acotar(`[central] ${donde.operacion} → ${(error as Error).message}${conCausa}`, scrub));
 	}
 
-	const tenantId = (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId");
-	enSegundoPlano(
-		c,
-		reportarCentralNoDisponible(c.env, {
+	donde.enSegundoPlano(
+		reportarCentralNoDisponible(donde.env, {
 			motivo,
-			metodo: c.req.method,
-			// Como en `sinElObjeto` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-			ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
+			metodo: donde.metodo,
+			ruta: donde.ruta,
 			error: String(causa.message ?? error).slice(0, 300),
-			...(tenantId ? { tenant_id: tenantId } : {}),
+			...(donde.tenantId ? { tenant_id: donde.tenantId } : {}),
 		}),
 	);
+	return motivo;
+}
 
+/** La respuesta si `error` es que la central no ha podido atender; `null` si es cualquier otra cosa. */
+export function respuestaSinLaCentral(c: Context, error: unknown): Response | null {
+	if (!laCentralNoAtiende(error)) return null;
+
+	const motivo = registrarSinLaCentral(error, {
+		env: c.env,
+		enSegundoPlano: (promesa) => enSegundoPlano(c, promesa),
+		operacion: `${c.req.method} ${c.req.routePath}`,
+		metodo: c.req.method,
+		// Como en `sinElObjeto` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
+		ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
+		tenantId: (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId"),
+	});
 	return respuestaNoDisponible(c, motivo === "saturada");
 }

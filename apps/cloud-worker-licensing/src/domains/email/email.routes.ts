@@ -197,10 +197,13 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  *
  * **Si la base central no contesta, se envía igual** (`sin_base`), y `terminarEnvio` apunta el envío
  * si para entonces puede. Una central caída no puede impedir que un bar mande su pedido: un tope que
- * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Ese hueco no lo
- * abre quien llama: no puede tirar la base central a voluntad. Sin la base no se sabe tampoco si ese
- * envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de la central se queda
- * lo segundo (los correos de las reservas web, al revés, no salen).
+ * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Mientras no contesta,
+ * el tope no se aplica, y no sólo en una avería: la central es un único objeto que atiende de una en
+ * una lo de todos los negocios, y saturada (`hub_overloaded`) también es `sin_base`. La satura la carga
+ * de todo el servicio, y también la puede empujar ahí quien tenga un dispositivo dado de alta: mientras
+ * dure, sus pedidos salen sin contar. Sin la base no se sabe tampoco si ese envío ya salió, y entre no
+ * mandar un pedido y mandarlo dos veces en una caída de la central se queda lo segundo (los correos de
+ * las reservas web, al revés, no salen).
  */
 export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
 	const ahora = Date.now();

@@ -216,9 +216,11 @@ cabecera, el mismo código que la del worker.
 telemetría filtran cada cadena con dos topes: `ingestToAxiom` (todo evento a Axiom, del worker, del
 `TenantHub` o de un dispositivo), el `beforeSend` de Sentry (mensaje, excepciones, migas, extra,
 etiquetas y URL), el aviso de la consola cuando Axiom rechaza un lote y las líneas de la consola que
-pueden citar lo que llegó en la petición: las del `onError` de la app y de `respuestaSinLaCentral`, que
-además llevan la ruta por su patrón (`/v1/update/:target/:arch/:current`) y no por su camino, que lo
-escribe quien llama. Se acota la copia que sale, nunca el dato con el que se trabaja.
+pueden citar lo que llegó en la petición: las del `onError` de la app, de `respuestaSinLaCentral`, del
+objeto de un negocio que no atiende (`[alHub]`), del `/ws` que no se abre y la de cada consulta al feed
+de actualizaciones (`[update] check`, con el sistema, la arquitectura y la versión instalada del
+camino). Llevan además la ruta por su patrón (`/v1/update/:target/:arch/:current`) y no por su camino,
+que lo escribe quien llama (AUD-27). Se acota la copia que sale, nunca el dato con el que se trabaja.
 
 - **Lo que sale**: 16 KiB (16.384 bytes) en UTF-8, con la marca `…[recortado]` dentro, cortado entre
   caracteres completos (un emoji no se parte). Se corta **después** de filtrar: cortar un texto ya
@@ -542,7 +544,7 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
 | `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta. Lo emite el Worker (`service: tpv-api`) |
-| `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, `rechazo` —un rechazo del viaje que la plataforma no marca—, o el código del objeto: `central_sin_aprovisionar`, `central_operacion_desconocida`, `central_migracion_alterada`, `central_migracion_fallida`, `central_restauracion_a_medias`, `central_vuelta_en_curso`), el método, la ruta, el error de la plataforma o del objeto y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry, con el error del viaje como causa |
+| `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, `rechazo` —un rechazo del viaje que la plataforma no marca—, o el código del objeto: `central_sin_aprovisionar`, `central_operacion_desconocida`, `central_migracion_alterada`, `central_migracion_fallida`, `central_restauracion_a_medias`, `central_vuelta_en_curso`), el método, la ruta, el error de la plataforma o del objeto y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry, con el error del viaje como causa. Lo deja también el `TenantHub` cuando la central no le atiende a él, con la misma regla para Sentry: con `metodo` `hub` y, en `ruta`, lo que hacía (`sync.main_vigente`, saber quién es la Main; `sync.last_seen`) |
 | `central_administrada` | La administración ha copiado, aprovisionado o restaurado la base central, o la ha devuelto a un instante (`domains/admin/central.ts`): `accion`, `resultado` (`ok`, el código con el que no se ha hecho o, al volver, `preparada` antes de reiniciar) y, según la acción, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer y la copia de antes. Sin datos personales. Es el rastro de lo que cambia la central: no va a `admin_audit`, que es una tabla suya ([worker.md](worker.md#las-rutas-de-administración-de-la-central)) |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |

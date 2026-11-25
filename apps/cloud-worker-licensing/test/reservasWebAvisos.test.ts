@@ -5,6 +5,9 @@
 //   · el destinatario es el cliente de esa reserva en la nube, y sólo de una reserva web;
 //   · una reserva que aún no ha subido es un 404, para que la Main lo repita;
 //   · el mismo aviso no manda dos correos, y uno que no salió se puede repetir;
+//   · el correo de un cambio no sale sin su enlace de cancelar porque la central no ha atendido: el
+//     503 de siempre, y quien lo manda lo repite. Cualquier otro fallo al leer la clave va a Sentry,
+//     y el correo sale sin el enlace;
 //   · lo que llega en el cuerpo tiene su forma y su tope: sale en un correo de nuestro dominio.
 
 import { describe, expect, it, vi } from "vitest";
@@ -12,8 +15,25 @@ import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enLaAgenda } from "./helpers/agenda";
-import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
+import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
+
+const { capturados } = vi.hoisted(() => ({ capturados: [] as { operacion: string; mensaje: string }[] }));
+
+// Lo que se manda a Sentry, con su operación.
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			if (!original.esRechazoEsperado(error)) {
+				capturados.push({ operacion, mensaje: String((error as any)?.message ?? error) });
+			}
+			original.capturarError(error, operacion);
+		},
+	};
+});
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
@@ -58,6 +78,8 @@ const { reservasWebMainRoutes } = await import("../src/domains/reservas_web/main
 const { avisoReservaWebSchema } = await import("../src/domains/reservas_web/reservasWeb.schemas");
 const { codigoDeReserva } = await import("../src/durableObjects/agendaWeb.motor");
 const { sha256HexStr } = await import("../src/server/utils/crypto");
+/** La `app` entera, con los mismos dobles: su `onError` es quien contesta cuando la central no atiende. */
+const { app: laApp } = await import("../src/app");
 
 const app = new Hono();
 app.route("/v1/reservas-web", reservasWebMainRoutes);
@@ -93,14 +115,25 @@ function aviso(extra: Record<string, unknown> = {}) {
 	};
 }
 
-async function mandar(cuerpo: unknown) {
-	const res = await app.request(
+async function mandar(
+	cuerpo: unknown,
+	por: { request: (ruta: string, init: RequestInit, env: any) => Response | Promise<Response> } = app,
+) {
+	const res = await por.request(
 		"/v1/reservas-web/avisos",
 		{ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cuerpo) },
 		{ ...ENV, ...entornoDeLaCentral } as any,
 	);
 	return { status: res.status, json: (await res.json()) as any };
 }
+
+/** Un fallo pasajero de la plataforma, como lo marca Cloudflare. */
+const pasajera = () =>
+	Object.assign(new Error("Durable Object reset because its code was updated."), { retryable: true });
+
+/** ¿Es la lectura de la clave del negocio (`claveActivaDelNegocio`)? */
+const leeLaClave = (metodo: string, sentencia: unknown) =>
+	metodo === "ejecutar" && /FROM reserva_web_claves/.test((sentencia as SentenciaEnlazada).sql);
 
 async function conNegocio(nombre: string, prueba: (sql: SqlStorage, central: CentralDePrueba) => Promise<void>) {
 	const central = await centralDePrueba();
@@ -114,6 +147,7 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage, central: Cen
 		base = clienteLocal(state.storage);
 		entornoDeLaCentral = central.entorno;
 		enviados.length = 0;
+		capturados.length = 0;
 		correoCaido = false;
 		agenda.prolongadas.length = 0;
 		agenda.canceladaPorElCliente = false;
@@ -202,6 +236,48 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 			agenda.caida = true;
 			expect(await mandar(aviso())).toMatchObject({ status: 503, json: { error: "agenda_no_disponible" } });
 			expect(enviados).toEqual([]);
+		});
+	});
+
+	it("si la central no atiende al leer la clave del enlace, el 503 de siempre: no sale sin su enlace, y repetido sale entero", async () => {
+		await conNegocio("sin-central", async (sql, central) => {
+			reserva(sql, "WEB");
+			let caida = true;
+			entornoDeLaCentral = centralInterceptada(central, (metodo, [sentencia], llamar) =>
+				caida && leeLaClave(metodo, sentencia) ? Promise.reject(pasajera()) : llamar(),
+			).entorno;
+
+			expect(await mandar(aviso(), laApp)).toMatchObject({
+				status: 503,
+				json: { ok: false, code: "external", error: "hub_unavailable" },
+			});
+			expect(enviados).toEqual([]);
+			// Un fallo pasajero de la plataforma: no va a Sentry.
+			expect(capturados).toEqual([]);
+
+			// Quien lo manda lo repite con el mismo aviso, y sale con su enlace.
+			caida = false;
+			expect(await mandar(aviso(), laApp)).toEqual({ status: 200, json: { ok: true, enviado: true } });
+			expect(enviados).toHaveLength(1);
+			expect(String(enviados[0].text)).toContain("Cancelar la reserva: ");
+		});
+	});
+
+	it("cualquier otro fallo al leer la clave va a Sentry, y el correo sale sin el enlace", async () => {
+		await conNegocio("clave-con-error", async (sql, central) => {
+			reserva(sql, "WEB");
+			entornoDeLaCentral = centralInterceptada(central, (metodo, [sentencia], llamar) =>
+				leeLaClave(metodo, sentencia)
+					? Promise.resolve({ ok: false, error: "central_error_sql", detalle: "no such table: reserva_web_claves" })
+					: llamar(),
+			).entorno;
+
+			expect(await mandar(aviso())).toEqual({ status: 200, json: { ok: true, enviado: true } });
+			expect(enviados).toHaveLength(1);
+			expect(String(enviados[0].text)).not.toContain("Cancelar la reserva");
+			expect(capturados).toEqual([
+				{ operacion: "reservas_web.aviso.clave", mensaje: "central_error_sql: no such table: reserva_web_claves" },
+			]);
 		});
 	});
 

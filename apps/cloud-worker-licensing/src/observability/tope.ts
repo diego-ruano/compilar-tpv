@@ -8,8 +8,9 @@
 // emite un evento no puede acordarse de acotar las suyas, así que va aquí, una vez, en sus salidas:
 // `ingestToAxiom` (todo evento que sale a Axiom, del worker, del `TenantHub` o de un dispositivo), el
 // `beforeSend` de Sentry, el aviso que se escribe en la consola cuando Axiom rechaza un lote y las
-// líneas de la consola que pueden citar lo que llegó en la petición (las del `onError` de la app y de
-// `respuestaSinLaCentral`). Se acota la copia que sale, nunca el dato con el que se trabaja.
+// líneas de la consola que pueden citar lo que llegó en la petición (las del `onError` de la app, de
+// `respuestaSinLaCentral`, de `sinElObjeto`, del `/ws` y del feed de actualizaciones). Se acota la
+// copia que sale, nunca el dato con el que se trabaja.
 //
 // Dos topes, y el orden importa:
 //
