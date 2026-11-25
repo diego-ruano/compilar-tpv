@@ -591,7 +591,7 @@ async fn equipo_de_a(nombre: &str) -> Equipo {
     std::fs::write(e.dir.join("images").join("productos").join("de-a.jpg"), "foto de A").unwrap();
     std::fs::write(
         e.dir.join("image_uploads.json"),
-        r#"[{"rel_path":"images/productos/de-a.jpg","content_type":"image/jpeg"}]"#,
+        r#"[{"rel_path":"images/productos/de-a.jpg","content_type":"image/jpeg","revision":"r1"}]"#,
     )
     .unwrap();
     std::fs::write(e.dir.join("data.db.bak.8000"), "base de antes de una migración").unwrap();
