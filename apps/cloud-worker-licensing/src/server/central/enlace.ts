@@ -2,31 +2,29 @@
 //
 // Cómo se convierte un argumento de una sentencia de la base central en lo que guarda su SQLite.
 //
-// La central siempre ha guardado lo que dejaba pasar libsql, que rechazaba lo que no sabía guardar
-// (un `undefined`, un número que no lo es) y convertía lo demás de una forma fija. El SQLite de un
-// Durable Object, en cambio, guarda un booleano como el texto 'true' y una fecha como su texto en
-// inglés, sin avisar (`test/centralEnlace.test.ts`). Así que todo lo que va a la central pasa por
-// aquí: en el Worker, antes de salir (`cliente.ts`), y en el objeto, antes de ejecutar
-// (`durableObjects/baseCentral.ts`). Lo que acepta y lo que rechaza es lo de libsql
-// (`@libsql/hrana-client`, `valueToProto`):
+// El SQLite de un Durable Object guarda lo que se le pase sin avisar de nada: un booleano, como el
+// texto 'true'; una fecha, como su texto en inglés (`test/centralEnlace.test.ts`). Así que todo lo
+// que va a la central pasa por aquí: en el Worker, antes de salir (`cliente.ts`), y en el objeto,
+// antes de ejecutar (`durableObjects/baseCentral.ts`). Lo que no se puede guardar tal como se pasó
+// lanza, y lo demás se convierte siempre igual:
 //
 //   null, texto, ArrayBuffer      tal cual
 //   número                        tal cual; NaN o ±Infinity lanzan
 //   booleano                      1 o 0
-//   bigint                        el mismo número; si no cabe sin perder precisión, lanza
+//   bigint                        el mismo número; si no cabe en uno sin perder precisión, lanza
 //   Date                          sus milisegundos; una fecha no válida lanza
-//   Uint8Array                    sus bytes
+//   Uint8Array (y Buffer)         una copia de los bytes de su vista, y sólo ésos
 //   undefined, símbolo, función   lanzan
 //   cualquier otro objeto         su `toString()`
 //
-// Dos diferencias en lo que rechaza, las dos para no guardar algo distinto de lo que se pasó: un
-// `bigint` entre 2^53 y 2^63, que libsql guardaba exacto y el SQLite de un DO no puede recibir
-// (sólo admite `number`), y una `Date` no válida, que libsql mandaba como NaN.
+// Lo que lanza es lo que se guardaría distinto de lo que se pasó, o lo que no es un valor: un número
+// que no es finito; un `bigint` más allá de ±(2^53 − 1), que el SQLite de un DO sólo puede recibir
+// como `number`, ya redondeado; una fecha no válida, que no tiene milisegundos; y un `undefined`, un
+// símbolo o una función, que son un fallo de quien llama y no un NULL.
 //
-// Y una en lo que guarda: el SQLite de un DO enlaza todo número como REAL, y no hay forma de
-// enlazar un entero. libsql también mandaba así los números, pero un booleano o un `bigint` los
-// mandaba como enteros. En una columna INTEGER o REAL se guarda lo mismo; en un texto (una columna
-// TEXT, `CAST(? AS TEXT)`, `json_object`), `true` sale «1.0» donde con libsql salía «1».
+// Y un número se enlaza siempre como REAL: el SQLite de un DO no deja enlazar un entero. En una
+// columna INTEGER o REAL se guarda lo mismo; en un texto (una columna TEXT, `CAST(? AS TEXT)`,
+// `json_object`), un booleano o un `bigint` salen «1.0», no «1».
 
 import type { Sentencia, Valor } from "../../lib/sql";
 import type { SentenciaEnlazada } from "../../durableObjects/baseCentral.rpc";
@@ -49,7 +47,9 @@ export function valorEstricto(v: unknown): Valor {
 		return Number(v);
 	}
 	if (v instanceof ArrayBuffer) return v;
-	if (v instanceof Uint8Array) return v.slice().buffer;
+	// `new Uint8Array(v)` copia los bytes de la vista a un almacén propio. `v.slice()` no vale: el de un
+	// `Buffer` de Node no copia, y su `.buffer` es el almacén entero, con lo que haya a los lados.
+	if (v instanceof Uint8Array) return new Uint8Array(v).buffer;
 	if (v instanceof Date) {
 		const ms = v.valueOf();
 		if (!Number.isFinite(ms)) throw new RangeError("La base central no guarda una fecha no válida.");
