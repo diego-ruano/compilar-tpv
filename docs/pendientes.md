@@ -30,7 +30,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
 | [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
-| [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -424,18 +423,6 @@ avisada: ese peldaño no sale nunca. Eso se lee en el código
 un aviso que no ha salido…» (`test/avisoDeCaducidad.test.ts`) sólo fija que ese fallo no corta a las
 demás, sin correr otro ciclo, y el de la marca que entra sin respuesta no existe. Arreglo posible: una
 marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
-
-### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
-
-`MAX_MENSAJE` (`tenantHub.mensajes.ts`) es de 4 MiB: un mensaje mayor de la Main se rechaza
-(`payload_too_large`) antes de leerlo, sin llegar a la base. Una operación va sola en su lote aunque
-sea grande, y el SQLite de un objeto admite en producción filas de hasta 8 MiB y 34 bytes
-(`MAX_ROW_LENGTH` de workerd; [worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)):
-una operación cuyo mensaje pasa de 4 MiB por un valor que la base admite se rechaza, y la Main la
-aparta. En el workerd local de las pruebas el tope de un valor es algo más de 2 MiB
-(`test/sondaSqliteDo.test.ts`), así que eso sólo se ve en producción. Lo decide el
-responsable: subir el tope (antes, mirar en la página de límites de Cloudflare el de un mensaje de
-WebSocket que recibe un Durable Object), o dejarlo.
 
 ---
 

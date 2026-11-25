@@ -131,18 +131,33 @@ export interface ContextoDeMensajes {
 }
 
 /**
- * Lo más que ocupa un mensaje que se llega a leer: por encima no se intenta ni trocear el JSON. Un
- * lote de la Main son como mucho 256 KB de sentencias, pero una operación va sola en su lote aunque
- * pase de ahí, y tendría que poder llegar a la base con cualquier valor que la base admita. El SQLite
- * del DO de producción acepta filas de hasta 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd,
- * cargaDeCopias.ts), y el workerd local de las pruebas un valor de algo más de 2 MiB
- * (`test/sondaSqliteDo.test.ts`, `valor2MiBYUnByte`). Con el tope en 2 MiB, una operación que la base
- * sí aceptaría se rechazaba por grande; que una de unos 3 MB se lee y la juzga la base lo prueba
- * `test/veredictoDelAcuse.test.ts`. Con 4 MiB, una operación cuyo mensaje pasa de ahí por un valor de
- * los que la base admite (de unos 4 a 8 MB) se rechaza por grande, y la Main la aparta: qué tope poner
- * está sin decidir (MAX-MENSAJE, en docs/pendientes.md).
+ * Lo más que ocupa un mensaje que se llega a leer, en bytes de UTF-8: por encima no se intenta ni
+ * trocear el JSON (`payload_too_large`). Un lote de la Main son como mucho 256 KB de sentencias, pero
+ * una operación va sola en su lote aunque pase de ahí, y tiene que poder llegar a la base con
+ * cualquier valor que la base admita (MAX-MENSAJE):
+ *
+ * - **Lo más grande que la base acepta cabe.** El SQLite del DO admite filas de hasta 8 MiB y 34 bytes
+ *   (`MAX_ROW_LENGTH` de workerd, cargaDeCopias.ts; «8 MB» en
+ *   https://developers.cloudflare.com/durable-objects/platform/limits/), y una operación que entra
+ *   deja además en `Sync_Changes` una fila con todas sus sentencias y sus valores en JSON
+ *   (`loteDe`), con los mismos escapes que el mensaje. Así que el JSON de cualquier operación que la
+ *   base acepta ocupa como mucho 8 MiB y 34 bytes, y su mensaje, eso y el sobre (`type`, `loteId`,
+ *   `opId`…): 9 MiB deja un MiB de margen. Lo que pasa de ahí, la base tampoco lo aceptaría: un
+ *   valor con muchos escapes, que en el JSON ocupa más que en su fila, no cabe en la del log.
+ * - **Por debajo del límite de la plataforma**: un mensaje de WebSocket que recibe un Durable Object,
+ *   32 MiB (la misma página). Los valores van como parámetros: no cuentan en los 100 KB de una
+ *   sentencia.
+ * - **Con margen de memoria** (128 MB por aislado, que puede tener otros objetos;
+ *   https://developers.cloudflare.com/workers/platform/limits/): mientras se aplica, el mensaje está
+ *   varias veces (el texto, el JSON leído, el cuerpo que se hashea, el del log y lo que recibe
+ *   SQLite). Medido en workerd con una operación de N MiB, el proceso entero crece unas cinco veces
+ *   N: unos 31 MB con 4 MiB, 42 con 8 y 59 con 12.
+ *
+ * Que una operación de más de 4 MiB se lee y la juzga la base, y que una de más del tope no se lee,
+ * lo prueban `test/veredictoDelAcuse.test.ts` y `test/loteDeLaMain.test.ts`. El workerd local de las
+ * pruebas admite un valor de algo más de 2 MiB (`test/sondaSqliteDo.test.ts`, `valor2MiBYUnByte`).
  */
-const MAX_MENSAJE = 4 * 1024 * 1024;
+const MAX_MENSAJE = 9 * 1024 * 1024;
 
 /**
  * El orden es el contrato. Lo demás son las ramas de abajo.
