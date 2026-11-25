@@ -53,6 +53,11 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	// un 503, un 429) lo sigue esperando.
 	pair_rejected: "pair_rejected",
 	pair_code_expired: "pair_code_expired",
+	// La firma de una consulta de la Handy que se vincula (`pairing.firma.ts`): un dato que no vale, y
+	// con la misma clave repetirlo no lo cambia, así que también termina la espera. La hora fuera de
+	// margen (`timestamp_out_of_range`) no: su respuesta trae la hora de la nube, y la siguiente
+	// consulta se firma con ella (PROD-04).
+	pair_signature_invalid: "validation",
 	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
 	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
 	escritura_solo_en_main: "permiso_denegado",
@@ -207,6 +212,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	challenge_not_found: SOLICITUD_CADUCADA,
 	challenge_used: SOLICITUD_CADUCADA,
 	challenge_used_or_expired: SOLICITUD_CADUCADA,
+	pair_signature_invalid:
+		"La firma de este dispositivo no es válida. Vuelve a pulsar «Vincular dispositivo» y, si se repite, genera un código nuevo en el TPV principal.",
 	no_claim_to_approve: "Ningún dispositivo ha usado todavía ese código.",
 	pair_approve_race_or_invalid_state: "Esa solicitud ya no está pendiente. Actualiza la lista.",
 	cannot_revoke_self: "Un dispositivo no puede revocarse a sí mismo.",
@@ -454,8 +461,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_json",
 	"bad_jwt_payload",
 	"bad_jwt_signature",
-	"bad_pubkey_len",
-	"bad_signature_len",
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",

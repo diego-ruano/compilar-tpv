@@ -43,7 +43,9 @@ const SE_SIGUE_ESPERANDO = "Se sigue esperando la aprobación.";
 /**
  * EMPAREJAR-ESPERA: lo que termina la espera, porque preguntar otra vez no lo va a cambiar. La Main ha
  * rechazado la vinculación; el código no está reclamado por este equipo (`not_found`); ya se usó o el
- * reto no vale (`conflict`); o la nube no deja entrar a este equipo ni a su negocio. El código caducado
+ * reto no vale (`conflict`); la firma no vale (`validation`: con la misma clave saldría igual); o la
+ * nube no deja entrar a este equipo ni a su negocio. La hora fuera de margen no termina: su respuesta
+ * trae la hora de la nube, y la siguiente consulta se firma con ella (PROD-04). El código caducado
  * (`pair_code_expired`) también termina, pero como se acaba el plazo: diciendo si la Main no aprobó o
  * si la nube no contestaba. Lo demás (la red, un 503 de la central o del worker, un 429 del filtro por
  * IP, un 5xx) es pasajero y se sigue esperando, hasta que caduca el código.

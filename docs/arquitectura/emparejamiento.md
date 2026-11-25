@@ -51,11 +51,14 @@ y la Main aprueba.
    Pregunta cada 1,5 s mientras le contesten `not_approved`, hasta que caduca el código
    (`emparejamiento.ts::emparejarHandy`). **Sólo termina con lo que no va a cambiar** (`TERMINALES`,
    EMPAREJAR-ESPERA): el rechazo de la Main (`pair_rejected`), que tiene su código en el catálogo; el
-   código que no es de este equipo (`not_found`), gastado o con el reto inservible (`conflict`), o la
-   nube que no deja entrar al equipo o a su negocio. Lo demás es pasajero —sin red, un 503 de la central
-   o del worker, un 429 del filtro por IP, un 5xx— y se sigue esperando: tras cada fallo seguido la
-   pausa se dobla, hasta 15 s (`ESPERA_MAXIMA_TRAS_FALLOS_MS`), y vuelve a 1,5 s en cuanto la nube
-   contesta. La pausa no la dice la respuesta: el `Retry-After` del 429 no cruza el IPC, que sólo lleva
+   código que no es de este equipo (`not_found`), gastado o con el reto inservible (`conflict`), la
+   firma que no vale (`pair_signature_invalid`, que es `validation`: con la misma clave saldría igual;
+   no es el `bad_device_signature` de las rutas con token, que es `external`), o la nube que no deja
+   entrar al equipo o a su negocio. Lo demás es pasajero —sin red, un 503 de la central o del worker,
+   un 429 del filtro por IP, un 5xx, y también la hora fuera de margen (`timestamp_out_of_range`), cuya
+   respuesta trae la hora de la nube con la que se firma la siguiente consulta— y se sigue esperando:
+   tras cada fallo seguido la pausa se dobla, hasta 15 s (`ESPERA_MAXIMA_TRAS_FALLOS_MS`), y vuelve a
+   1,5 s en cuanto la nube contesta. La pausa no la dice la respuesta: el `Retry-After` del 429 no cruza el IPC, que sólo lleva
    `code` y `message`. Mientras falla, la pantalla lo dice («… Se sigue esperando la aprobación.»).
 
    La espera termina también cuando caduca el código, lo diga el reloj de la Handy o la nube

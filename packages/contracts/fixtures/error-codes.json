@@ -26,7 +26,8 @@
     { "wire": "reserva_solapada", "code": "reserva_solapada", "porque": "RI-61: la reserva se pisa con otra de la misma mesa (o con una comanda abierta) y los solapes están en «permitir con aviso»; la UI enseña el choque y ofrece guardar igualmente" },
     { "wire": "usuario_inactivo", "code": "usuario_inactivo", "porque": "un administrador ha desactivado al usuario con la sesión abierta; la UI cierra la sesión y el login dice por qué" },
     { "wire": "pair_rejected", "code": "pair_rejected", "porque": "EMPAREJAR-ESPERA: la Main ha rechazado la vinculación. La Handy deja de esperar; ante la red, un 503 o un 429 sigue esperando" },
-    { "wire": "pair_code_expired", "code": "pair_code_expired", "porque": "EMPAREJAR-ESPERA: el código de vinculación ha caducado. La Handy deja de esperar y la pantalla pide un código nuevo" }
+    { "wire": "pair_code_expired", "code": "pair_code_expired", "porque": "EMPAREJAR-ESPERA: el código de vinculación ha caducado. La Handy deja de esperar y la pantalla pide un código nuevo" },
+    { "wire": "pair_signature_invalid", "code": "validation", "porque": "EMPAREJAR-ESPERA: la firma de una consulta de la Handy que se vincula no vale. Con la misma clave, repetir no lo cambia: la Handy deja de esperar. No es el bad_device_signature de las rutas con token, que sigue siendo external" }
   ],
 
   "normalizacion": [

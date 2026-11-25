@@ -95,6 +95,12 @@ export async function comprobarFirmaDelReclamante(
 	// consulta, que llega siempre algo después de que caduque aquí, acababa culpando a la nube.
 	if (Number(ch.expires_at_ms || 0) < datos.ahoraMs) return { status: 410, error: "pair_code_expired" };
 
+	// EMPAREJAR-ESPERA: una firma que no vale, por lo que sea, es `pair_signature_invalid`, y no el
+	// `bad_device_signature` de las rutas con token: ése es `external` para quien lo recibe, y la Handy
+	// lo esperaba como un fallo pasajero hasta que caducaba el código. Con la misma clave, repetir no lo
+	// cambia; para la Handy es `validation`, que termina la espera.
+	const firmaInvalida: ProblemaDeFirma = { status: 401, error: "pair_signature_invalid" };
+
 	let sigU8: Uint8Array;
 	let pubU8: Uint8Array;
 
@@ -102,18 +108,17 @@ export async function comprobarFirmaDelReclamante(
 		sigU8 = bytesExactos(b64ToBytes(sanitizeB64(datos.sigB64)));
 		pubU8 = bytesExactos(b64ToBytes(sanitizeB64(datos.pubB64)));
 	} catch {
-		return { status: 401, error: "bad_b64" };
+		return firmaInvalida;
 	}
 
-	if (sigU8.length !== 64) return { status: 401, error: "bad_signature_len" };
-	if (pubU8.length !== 32) return { status: 401, error: "bad_pubkey_len" };
+	if (sigU8.length !== 64 || pubU8.length !== 32) return firmaInvalida;
 
 	const mensaje = new TextEncoder().encode(
 		mensajeFirmado(datos.accion, datos.ts, datos.pairCode, datos.nonceB64, datos.deviceId),
 	);
 
 	const ok = await ed25519Verify(sigU8, bytesExactos(mensaje), pubU8);
-	if (!ok) return { status: 401, error: "bad_device_signature" };
+	if (!ok) return firmaInvalida;
 	// Lo que se sabe del código gastado, sólo a quien firma como su reclamante (AUD-10).
 	if (datos.retoGastadoEn !== undefined && Number(ch.used_at_ms || 0) !== datos.retoGastadoEn) {
 		return { status: 409, error: "already_used" };

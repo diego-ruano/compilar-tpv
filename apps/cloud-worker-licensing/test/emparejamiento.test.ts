@@ -635,8 +635,46 @@ describe("el reto y la recogida del token", () => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 			await m.aprobar(CODIGO, a, T0 + MIN);
 			const r = await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN, "PAIR_CANCEL");
-			expect(r.body.error).toBe("bad_device_signature");
+			expect(r.body.error).toBe("pair_signature_invalid");
 			expect((await m.solicitud(CODIGO)).status).toBe("approved");
+		});
+	});
+
+	it("una firma que no vale termina la espera de la Handy; una hora fuera de margen, no (EMPAREJAR-ESPERA)", async () => {
+		// Con la misma clave, repetir no cambia la firma. Salía con 401 `bad_device_signature`, que para
+		// la Handy es `external`, pasajero: seguía preguntando hasta que caducaba el código, y al final
+		// decía que la nube no contestaba.
+		const a = await dispositivo("handy-a", 1);
+		const otraClave = { ...(await dispositivo("handy-a", 3)), id: "handy-a" };
+		await conLaCentral(async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			const ahora = T0 + MIN;
+			// La misma consulta a `fetch-token` y a `cancel`: lo que no vale para una no vale para la otra.
+			const consulta = async (cambios: Record<string, unknown>) => {
+				const datos = {
+					pairCode: CODIGO,
+					deviceId: a.id,
+					nonceB64: body.nonceB64,
+					ts: ahora,
+					sigB64: await firmar(a, "PAIR_FETCH", ahora, CODIGO, body.nonceB64),
+					...cambios,
+				};
+				const r = await entregarToken(m.db, ENV, fetchTokenSchema.parse(datos), ahora);
+				const s = await soltarCodigo(m.db, ENV, cancelSchema.parse(datos), ahora);
+				return [r, s].map((x) => wireToCode(String(x.cuerpo.error), x.status));
+			};
+
+			const deOtraClave = await firmar(otraClave, "PAIR_FETCH", ahora, CODIGO, body.nonceB64);
+			expect(await consulta({ sigB64: deOtraClave })).toEqual(["validation", "validation"]);
+			expect(await consulta({ sigB64: bytesToB64(new Uint8Array(63).fill(7)) })).toEqual(["validation", "validation"]);
+			// La hora sí cambia repitiendo: la respuesta trae la de la nube en su `Date`, Rust la anota, y
+			// la siguiente consulta se firma con ella (PROD-04). Sigue siendo pasajera.
+			const horaMala = ahora - 3 * MIN;
+			expect(await consulta({ ts: horaMala, sigB64: await firmar(a, "PAIR_FETCH", horaMala, CODIGO, body.nonceB64) })).toEqual([
+				"external",
+				"external",
+			]);
+			expect((await m.solicitud(CODIGO)).claimed_by_device_id).toBe(a.id);
 		});
 	});
 });
@@ -740,9 +778,9 @@ describe("recoger el token, todo o nada (EMPAREJAR-TOKEN)", () => {
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).status).toBe(200);
 
 			expect((await m.recoger(a, CODIGO, otroReto, T0 + 2 * MIN)).body.error).toBe("already_used");
-			expect((await m.recoger(suplantador, CODIGO, body.nonceB64, T0 + 2 * MIN)).body.error).toBe("bad_device_signature");
+			expect((await m.recoger(suplantador, CODIGO, body.nonceB64, T0 + 2 * MIN)).body.error).toBe("pair_signature_invalid");
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN, "PAIR_CANCEL")).body.error).toBe(
-				"bad_device_signature",
+				"pair_signature_invalid",
 			);
 			// El reto caduca con el código: después, la Handy renueva su token como cualquier otra (`/v1/license/refresh`).
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 11 * MIN)).body.error).toBe("pair_code_expired");
@@ -950,7 +988,7 @@ describe("cancelar en la Handy", () => {
 
 			expect((await m.cancelar(b, CODIGO, body.nonceB64, T0)).body.error).toBe("pair_code_not_found");
 			expect((await m.cancelar(a, CODIGO, body.nonceB64, T0, "PAIR_FETCH")).body.error).toBe(
-				"bad_device_signature",
+				"pair_signature_invalid",
 			);
 			expect((await m.solicitud(CODIGO)).claimed_by_device_id).toBe(a.id);
 		});

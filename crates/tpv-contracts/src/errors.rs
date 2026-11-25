@@ -212,7 +212,9 @@ impl ErrorCode {
             // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
-            "validation_error" => ErrorCode::Validation,
+            // EMPAREJAR-ESPERA: la firma de una consulta de la Handy que se vincula no vale. Con la
+            // misma clave, repetir no lo cambia, y la Handy deja de esperar.
+            "validation_error" | "pair_signature_invalid" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
             "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,
             "bootstrap_demasiado_grande" | "bootstrap_too_large" => ErrorCode::BootstrapTooLarge,
