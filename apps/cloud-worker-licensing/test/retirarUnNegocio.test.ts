@@ -11,7 +11,7 @@
 // Qué negocios se retiran lo decide `retirarNegociosDePrueba` (`test/pruebasRetiradas.test.ts`).
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { enLaAgenda, stubDeLaAgenda } from "./helpers/agenda";
 import { enElHub } from "./helpers/hub";
@@ -141,6 +141,13 @@ describe("AgendaWeb.borrarTodo", () => {
 
 describe("las imágenes de un negocio", () => {
 	const JPEG = new Uint8Array([255, 216, 255, 224]);
+
+	// El bucket es el mismo para todo el fichero: cada caso se lleva lo que ha dejado, para que el
+	// siguiente lo encuentre vacío, corran en el orden que corran.
+	afterEach(async () => {
+		const { objects } = await env.IMAGES.list();
+		if (objects.length > 0) await env.IMAGES.delete(objects.map((o: R2Object) => o.key));
+	});
 
 	it("se borra su carpeta del bucket, y sólo la suya", async () => {
 		const claves = [

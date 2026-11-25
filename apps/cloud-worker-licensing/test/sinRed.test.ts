@@ -229,7 +229,9 @@ function apuntarComoAcaba(final: Final): void {
 	});
 }
 
-describe("el gancho hace fallar al test, aunque el código se trague el error", () => {
+// En este orden siempre, también al barajar (`--sequence.shuffle`): el último mira cómo acabaron los
+// anteriores.
+describe("el gancho hace fallar al test, aunque el código se trague el error", { shuffle: false }, () => {
 	// `it.fails`: Vitest da por bueno el test sólo si falla. El cuerpo no falla: lo hace fallar el
 	// `afterEach` de `helpers/sinRed.setup.ts`. Sin ese gancho, estos tests salen en rojo.
 

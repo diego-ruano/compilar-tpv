@@ -167,21 +167,24 @@ describe("las etiquetas de una petición acaban con ella", () => {
 
 	it("ni se quedan en el ámbito global del isolate", async () => {
 		await conNegocioFirmado(deps, "sentry-global", async (n) => {
-			const res = await app.request(
-				await peticionFirmada(deps, n, MAIN, "POST", "/v1/inventario/categorias", {
-					cabeceras: { "X-TPV-Version": "9.9.9", "X-TPV-Variant": "android" },
-					cuerpo: { id_categoria: null, nombre: "Bebidas", vendible: true, pasa_cocina: false },
-				}),
-				undefined,
-				{ ...env, ...n.entorno },
-			);
+			const peticion = await peticionFirmada(deps, n, MAIN, "POST", "/v1/inventario/categorias", {
+				cabeceras: { "X-TPV-Version": "9.9.9", "X-TPV-Variant": "android" },
+				cuerpo: { id_categoria: null, nombre: "Bebidas", vendible: true, pasa_cocina: false },
+			});
+			// `app.request` no pasa por `withSentry`: la parte del Worker tiene aquí su propio ámbito de
+			// aislamiento, como se lo daría `withSentry`, para que lo que apunta (`registrarPeticion`)
+			// no se quede en el global para las pruebas siguientes. Lo del DO va por su cuenta.
+			const res = await Sentry.withIsolationScope(() => app.request(peticion, undefined, { ...env, ...n.entorno }));
 			expect(res.status).toBe(400);
 			expect(viajes(res, "hub-ruta")).toBe(1);
 
 			// Aquí fuera no hay ninguna petición en curso: es el ámbito que ven todas al empezar. El
 			// cuerpo se valida dentro del DO (`cuerpo(schema)` va detrás de `alHub`), y lo que se
-			// apunta de él (`registrarCuerpoValidado`) no puede quedarse aquí.
-			expect(Sentry.getIsolationScope().getScopeData().contexts.request_input).toBeUndefined();
+			// apunta allí (`registrarCuerpoValidado`, `registrarPeticion`) no puede quedarse aquí.
+			const global = Sentry.getIsolationScope().getScopeData();
+			expect(global.contexts.request_input).toBeUndefined();
+			expect(global.tags).not.toHaveProperty("client_version");
+			expect(global.tags).not.toHaveProperty("client_variant");
 		});
 	});
 });
