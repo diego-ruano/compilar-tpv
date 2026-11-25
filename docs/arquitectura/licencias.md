@@ -29,7 +29,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Compra | `…/domains/stripe/{stripe.routes,stripe.helpers}.ts` | Webhook: emitir, revertir, restaurar |
 | Administración | `…/domains/admin/admin.routes.ts` + `scripts/tpv-license.mjs` | Emitir, listar, reenviar, revocar, desrevocar, extender, acortar |
 | Almacén | `…/src/server/licenseStore.ts` | Las lecturas y las escrituras de una sentencia en la base central |
-| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el cobro y su reversión (`emitirCobro`, `revertirCobro`), lo que la administración hace con una licencia y la recogida del token de una Handy (`recogerTokenDeLaHandy`) ([worker.md](worker.md#las-operaciones)) |
+| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el traslado (`trasladarLicencia`), el cobro y su reversión (`emitirCobro`, `revertirCobro`), lo que la administración hace con una licencia y la recogida del token de una Handy (`recogerTokenDeLaHandy`) ([worker.md](worker.md#las-operaciones)) |
 | Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
 | Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
@@ -98,16 +98,32 @@ varios locales; quien quiera todo el tiempo en un equipo canjea las claves una t
 su `unidad` (1…N), todas en una sola operación de la central (`emitirCobro`,
 [worker.md](worker.md#las-operaciones)), y cuando ha entrado van **juntas en un correo**. La clave en
 claro no llega a la central: el Worker la prepara antes, y a la operación le pasa su huella y su
-cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y
-`pnpm license:list` las enseña pendientes de `pnpm license:resend`; lo mismo si una entrega de Stripe
-encuentra la sesión ya cumplida por otra que no llegó a mandar el correo, y entonces lo avisa en
-Sentry (`stripe.correo_de_claves`, «Cobro cumplido sin el correo de claves apuntado…»), con las
-licencias
-([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
-Sólo sale si la entrega encuentra la sesión cumplida al empezar y el cobro tiene más de cinco
-minutos (antes, puede ser otra entrega que está mandando el correo). Ante ese aviso: comprobar con el
-cliente o con `pnpm license:list` y reenviar con `pnpm license:resend -- --id <licencia>`. Puede ser
-falso: el correo salió y lo que falló fue apuntarlo. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL`, y
+`pnpm license:list` las enseña pendientes.
+
+**El correo de claves que no consta se reenvía solo** (CLAVES-SIN-CORREO,
+`domains/licensing/correoDeClaves.ts`), y se apunta si sale. Sólo una licencia de Stripe que sigue
+sin estrenar (`issued`, sin anular) y se cobró hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`:
+antes, puede ser la entrega que lo está mandando). Lo reenvían:
+
+- la entrega de Stripe que encuentra la sesión ya cumplida al empezar (la que la emitió no llegó a
+  mandarlo o a apuntarlo): el correo de la compra, uno solo con las claves de esa sesión que faltan,
+  en tres viajes a la central sean cuantas sean, para no retener la respuesta a Stripe;
+- el cron diario, con cualquiera, el de `pnpm license:resend`, uno por licencia, como mucho 25 al día
+  (`REENVIOS_DE_CLAVES_AL_DIA`), las más recientes primero; las que no caben, al día siguiente.
+
+Una licencia manual no: se emite sin `--send-key` a propósito, y la suya no consta nunca. Puede llegar
+dos veces (dos entregas a la vez, o un correo que salió y no se llegó a apuntar): mejor eso que un
+comprador sin sus claves. Si el reenvío no sale, Sentry (`stripe.correo_de_claves`, «Correo de claves
+sin entregar, y su reenvío no ha salido…»), con las licencias: comprobar con el cliente y, si hace
+falta, `pnpm license:resend -- --id <licencia>`, que enseña la clave aunque el correo vuelva a fallar.
+El cron lo vuelve a intentar al día siguiente. Si el correo sale y lo que falla es apuntarlo, no es
+eso: el comprador tiene sus claves. Queda como cualquier central que no atiende (el evento
+`central_no_disponible`, y Sentry sólo si no es carga ni un fallo pasajero), o, si es otra cosa, en
+Sentry con «El correo de claves ha salido, pero no se ha podido apuntar…»; el cron lo cuenta como
+reenviado y sin apuntar, y lo repite al día siguiente.
+
+La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
 Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
@@ -386,15 +402,22 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
 2. `POST /v1/license/device-change/request` manda el código: hash guardado en `license_device_otp`,
    ligado a ese `deviceId`, 10 minutos y 5 intentos, como mucho uno por minuto. Responde siempre lo
    mismo, exista o no la clave.
-3. Activar con el código: se verifica (tiempo constante), se consume de forma atómica,
-   `reassignMainDevice` cambia la Main y deja su traza en `license_device_swaps` **en un solo lote**
-   (entran las dos o ninguna, E7a-1), **conservando el tenant**, y se avisa al `TenantHub` y por correo
-   al titular. Si el lote no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
+3. Activar con el código: se compara con su huella (tiempo constante, con sus topes) y, después,
+   gastar el código, dar de alta el equipo nuevo en el negocio y mover la Main con su traza en
+   `license_device_swaps` son **una sola operación de la central** (`trasladarLicencia`,
+   `server/central/operaciones/traslado.ts`), todo o nada, **conservando el tenant**. Si falla, el
+   código sigue valiendo y basta con repetir. Después se avisa al `TenantHub` y por correo al titular.
+   Si la operación no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
    está, ha entrado, y la ruta sigue con los avisos y `cambioDeEquipo: true`, y el viaje que no
    volvió queda en Axiom (`central_no_disponible`; en Sentry, sólo si no es carga ni un fallo
-   pasajero); si no está, o la central
-   tampoco contesta a esa lectura, el 503 de siempre y ningún aviso. El código ya está gastado: lo
-   que queda está en [TRASLADO-REINTENTO](../pendientes.md#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias).
+   pasajero); si no está, o la central tampoco contesta a esa lectura, el 503 de siempre.
+4. **El reintento del mismo traslado** (TRASLADO-REINTENTO). Si el 200 se pierde camino del equipo, o
+   la central no contestó a la lectura de la traza, el equipo repite con el mismo código, y la
+   licencia ya está en él. Se le reconoce: con ese código, ya gastado por él, y el último traslado de
+   la licencia hacia él a la misma hora, hace menos de un día (`REINTENTO_DE_TRASLADO_MS`,
+   `trasladoQueSeRepite`), se le contesta `cambioDeEquipo: true` y se repiten los avisos, que no
+   hacen daño repetidos (el `TenantHub` vuelve a leer quién es la Main; el titular puede recibir el
+   correo dos veces). Con otro código, o más tarde, es el mismo equipo de siempre.
 
 **Qué pasa con el equipo anterior** (AUD-02). Su fila de `devices` no se toca (sigue con rol `tpv`
 y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
@@ -449,8 +472,8 @@ no comparan más códigos que los del tope, y quien no reserva sale sin que se c
 es el tope lo que se lo impide. Primero el intento del código, que devuelve la huella con la que
 comparar, y después el fallo del día. Si el día no concede el suyo, el intento del código se devuelve:
 un rechazo sin comparación no gasta intentos, y el código sigue valiendo cuando el día se libera. Si
-el código es el bueno, el fallo reservado se devuelve y se consume justo el código que se comparó,
-siempre que no haya caducado. Un código caducado no gasta intento.
+el código es el bueno, el fallo reservado se devuelve, y el traslado (`trasladarLicencia`) gasta justo
+el código que se comparó, siempre que no haya caducado. Un código caducado no gasta intento.
 
 El traslado va siempre al correo de la compra, no al de recuperación: si siguiera a éste, quien sepa
 el PIN de un administrador podría cambiarlo y llevarse la licencia.
@@ -461,14 +484,15 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
   ([arriba](#activar)).
 - Dan de alta el dispositivo, o mudan su fila, con `ensureDevice`: **una sola sentencia, que escribe
   la fila con su clave** y sólo toca una que ya existe si su clave registrada es la presentada. Un
-  corte a mitad de la activación no deja una fila sin clave.
+  corte a mitad de la activación no deja una fila sin clave. En un cambio de equipo, el alta va en la
+  operación del traslado (`trasladarLicencia`), con la misma condición.
 - **Límite conocido.** La comparación de la clave y el alta no son un lote. Si la clave registrada de
   ese mismo `device_id` cambia justo entre las dos —sólo puede hacerlo un emparejamiento suyo que
   recoja el token en ese instante, en el negocio donde está su fila—, se rechaza
-  (`device_key_mismatch`) sin escribir la fila ni entregar credenciales, pero lo anterior ya está
-  hecho: en un cambio de equipo el código queda consumido y hay que pedir otro, y si la fila era de
-  ese mismo negocio, su `updated_at_ms` ya se ha movido. El negocio se crea o se toca después de
-  `exigirClaveSiEsDeOtroNegocio`, así que un rechazo suyo no deja un negocio recién creado.
+  (`device_key_mismatch`) sin escribir la fila ni entregar credenciales. Si la fila era de ese mismo
+  negocio, su `updated_at_ms` ya se ha movido; en un cambio de equipo no queda nada hecho y el código
+  sigue valiendo. El negocio se crea o se toca después de `exigirClaveSiEsDeOtroNegocio`, así que un
+  rechazo suyo no deja un negocio recién creado.
 - Justo antes, `exigirClaveSiEsDeOtroNegocio`, la regla que comparten con el emparejamiento: una
   fila de **otro** negocio no se mueve con otra clave (`device_key_mismatch`) ni si no tiene clave
   registrada (`device_key_missing`). Toda puerta que dé de alta un dispositivo comprueba la firma de
@@ -768,15 +792,24 @@ marca en `license_notices` antes de enviar y sólo envía quien gana la marca; s
 marca se suelta. La clave de `license_notices` incluye `expires_at_ms`, para que un aviso de un ciclo
 no silencie el del siguiente.
 
-Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o al soltar su marca,
+La marca es **«enviando» hasta que el correo sale** (AVISO-CADUCIDAD; `enviando_hasta_ms`, de la
+migración `0002_avisos_enviando.sql` de la central): es de quien la puso durante una hora
+(`MARCA_ENVIANDO_MS`), lo bastante para que termine de mandar el correo, y cuando sale pasa a enviada
+(`enviando_hasta_ms` a `NULL`), que ya no la gana nadie. Pasada esa hora, una marca que sigue
+«enviando» la gana otro ciclo, porque no consta que su aviso haya salido: la central falló al
+soltarla, o la marca entró y su respuesta no volvió. Si el correo sale y la central no llega a
+apuntarlo, el aviso cuenta como enviado y su marca caduca igual: otro día se repite. Mejor dos avisos
+que ninguno.
+
+Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner, al soltar o al confirmar su marca,
 cuenta entre los `fallidos` del resumen del cron y el ciclo sigue con las demás. Si es que la central
 no ha podido atender, queda como en el resto del Worker (`registrarSinLaCentral`): su
 `central_no_disponible` en Axiom, con `metodo` `cron`, y Sentry (`cron.license_expiry`) sólo si no es
 carga ni un fallo pasajero; cualquier otro fallo va a Sentry. Lo mismo si no atiende la lectura de
 las que caducan, con la que empieza el ciclo (`index.ts::programado`): ese día no se avisa de ninguna.
 **Con la central saturada, el ciclo se corta**: las que faltan cuentan como fallidas, sin más viajes a una central que no atiende, y se
-avisan al día siguiente. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó
-puesta, ese peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
+avisan al día siguiente. Si la marca no llegó a ponerse, o se quedó «enviando», su aviso sale al día
+siguiente.
 
 ## Lo que guarda el equipo
 

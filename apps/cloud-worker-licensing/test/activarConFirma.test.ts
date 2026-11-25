@@ -1143,7 +1143,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 		});
 	});
 
-	it("el traslado no se repite con su código: ya consumido, la repetición entra como el mismo equipo", async () => {
+	it("el traslado no se repite con su código: ya consumido, la repetición es el reintento del mismo traslado", async () => {
 		await escenario(async (c) => {
 			const { atacante: dueno } = await dosNegocios(c);
 			const NUEVO = "pc-nuevo";
@@ -1162,10 +1162,11 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 
 			const repetida = await enviar(peticion);
 
-			// La licencia ya es de ese equipo, así que no es un traslado ni mira el código: contesta
-			// como una reactivación, con la DEK y un token, y no anota otro cambio de equipo.
+			// La licencia ya es de ese equipo, así que no se traslada otra vez ni gasta otro código: con el
+			// código de ese traslado, es su reintento (TRASLADO-REINTENTO), que contesta como el traslado,
+			// con la DEK y un token, y no anota otro cambio de equipo.
 			expect(repetida.status).toBe(200);
-			expect(repetida.body.cambioDeEquipo).toBe(false);
+			expect(repetida.body.cambioDeEquipo).toBe(true);
 			expect(repetida.body.fieldDek).toBe(dueno.dek);
 			expect(await contar(c, "license_device_swaps")).toBe(1);
 			expect((await getLicenseById(c.db, dueno.licenseId))!.main_device_id).toBe(NUEVO);

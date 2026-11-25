@@ -13,7 +13,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Migracion } from "../src/durableObjects/sqliteDelObjeto";
-import { centralDePrueba, centralSinAprovisionar, codigoDe, tablasPropias } from "./helpers/central";
+import { centralDePrueba, centralSinAprovisionar, codigoDe, MIGRACIONES_DE_VERDAD, tablasPropias } from "./helpers/central";
 
 const { deMas, capturados } = vi.hoisted(() => ({
 	/** Las migraciones de la central que «trae el despliegue», detrás de las de verdad. */
@@ -95,7 +95,7 @@ describe("sin aprovisionar", () => {
 		expect(primera.ok).toBe(true);
 		const estado = await stub.estado();
 		expect(estado.aprovisionada).toBe(true);
-		expect(estado.migraciones.map((m) => m.nombre)).toEqual(["0001_inicial.sql"]);
+		expect(estado.migraciones.map((m) => m.nombre)).toEqual(MIGRACIONES_DE_VERDAD);
 		expect(estado.migraciones[0].hash).toMatch(/^[0-9a-f]{64}$/);
 		expect(await stub.aprovisionar()).toEqual({ ok: false, error: "central_ya_aprovisionada" });
 		expect(await runInDurableObject(stub, (_c, state) => tablasPropias(state.storage.sql))).toContain("licenses");
@@ -115,7 +115,7 @@ describe("sin aprovisionar", () => {
 
 		const estado = await stub.estado();
 		expect(estado.aprovisionada).toBe(true);
-		expect(estado.migraciones.map((m) => m.nombre)).toEqual(["0001_inicial.sql"]);
+		expect(estado.migraciones.map((m) => m.nombre)).toEqual(MIGRACIONES_DE_VERDAD);
 		expect(estado.averia?.error).toBe("central_migracion_fallida");
 		expect(await codigoDe(db.execute("SELECT COUNT(*) AS n FROM tenants;"))).toBe("central_migracion_fallida");
 		expect(await codigoDe(db.execute({ sql: "INSERT INTO tenants (tenant_id) VALUES (?1);", args: ["t"] }))).toBe(
@@ -286,7 +286,7 @@ describe("las migraciones de la central, al arrancar", () => {
 			return { estado, tablas: tablasPropias(state.storage.sql) };
 		});
 		expect(resultado.estado.averia).toBeNull();
-		expect(resultado.estado.migraciones.map((m) => m.nombre)).toEqual(["0001_inicial.sql", "9001_prueba.sql"]);
+		expect(resultado.estado.migraciones.map((m) => m.nombre)).toEqual([...MIGRACIONES_DE_VERDAD, "9001_prueba.sql"]);
 		expect(resultado.tablas).toContain("prueba_de_la_central");
 	});
 

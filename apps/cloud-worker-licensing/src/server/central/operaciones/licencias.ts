@@ -4,8 +4,8 @@
 // sumarle o restarle meses, anularla y desanularla. Corre dentro de la transacción de la operación
 // que lo llama.
 //
-// Y las sentencias que el Worker también ejecuta sueltas: leer una licencia por su id, darla de alta
-// y apuntar en la auditoría. Su texto y sus argumentos salen de aquí, y `server/licenseStore.ts` los
+// Y las sentencias que el Worker también ejecuta sueltas: leer una licencia por su id, darla de alta,
+// apuntar en la auditoría y dar de alta el negocio y el equipo. Su texto y sus argumentos salen de aquí, y `server/licenseStore.ts` los
 // importa, para que lo que se escribe dentro y fuera de una operación no pueda divergir.
 
 import { toBool01 } from "../../../lib/booleanos";
@@ -129,6 +129,59 @@ export function argumentosDeLaAuditoria(a: {
 	ahoraMs: number;
 }): Valor[] {
 	return [a.auditId, a.accion, a.licenseId, JSON.stringify(a.detalle), a.ahoraMs];
+}
+
+/**
+ * El alta del negocio: su fila de `tenants`, o sólo su `updated_at_ms` si ya la tiene. La ejecutan
+ * `ensureTenantExistsMinimal` y el traslado (`operaciones/traslado.ts`).
+ */
+export const ALTA_DEL_NEGOCIO = `
+    INSERT INTO tenants (tenant_id, status, created_at_ms, updated_at_ms)
+    VALUES (?, 'active', ?, ?)
+    ON CONFLICT(tenant_id) DO UPDATE SET
+      updated_at_ms=excluded.updated_at_ms;
+    `;
+
+/** Los argumentos de `ALTA_DEL_NEGOCIO`, en su orden. */
+export function argumentosDelAltaDelNegocio(tenantId: string, ahoraMs: number): Valor[] {
+	return [tenantId, ahoraMs, ahoraMs];
+}
+
+/**
+ * El alta o la readmisión de un equipo, **con su clave y en una sola sentencia**. La ejecutan
+ * `ensureDevice` (la primera activación, el mismo equipo, `readmitirMain`) y el traslado
+ * (`operaciones/traslado.ts`).
+ *
+ * AUD-01: la fila nace con su clave, y una que ya existe sólo se toca si su clave registrada es ésta
+ * (el `WHERE` del `DO UPDATE`). Si existe con otra clave, o sin ninguna, no escribe nada
+ * (`rowsAffected` 0), y quien la ejecuta lo da por `device_key_mismatch`.
+ *
+ * `revoked_at_ms=NULL` no sobra: el `device_id` sobrevive a reinstalar la app y a cambiar de
+ * licencia, y sin esa línea una revocación vieja seguiría en la fila (ver `ensureDevice`).
+ */
+export const ALTA_DEL_EQUIPO = `
+    INSERT INTO devices (
+      device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms,
+      device_pubkey_b64, pubkey_alg
+    )
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 'ed25519')
+    ON CONFLICT(device_id) DO UPDATE SET
+      tenant_id=excluded.tenant_id,
+      role=excluded.role,
+      last_seen_at_ms=excluded.last_seen_at_ms,
+      revoked_at_ms=NULL
+    WHERE devices.device_pubkey_b64 = excluded.device_pubkey_b64;
+    `;
+
+/** Los argumentos de `ALTA_DEL_EQUIPO`, en su orden. La clave va recortada. */
+export function argumentosDelAltaDelEquipo(e: {
+	deviceId: string;
+	tenantId: string;
+	rol: "tpv" | "handy";
+	devicePubKeyB64: string;
+	ahoraMs: number;
+}): Valor[] {
+	return [e.deviceId, e.tenantId, e.rol, e.ahoraMs, e.ahoraMs, e.devicePubKeyB64.trim()];
 }
 
 /* ============================================================

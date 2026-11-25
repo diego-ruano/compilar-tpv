@@ -20,6 +20,7 @@ import {
 	codigoDe,
 	conPlataformaQueVuelve,
 	filasDe,
+	MIGRACIONES_DE_VERDAD,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -136,7 +137,7 @@ const AVERIADAS: [string, () => Promise<Averiada>][] = [
 			await filasDe(central, "UPDATE tenants SET legal_name = 'Bar Dos' WHERE tenant_id = 't-2';");
 			deMas.push({ name: "9001_nombre_unico.sql", sql: "CREATE UNIQUE INDEX ux_prueba_nombre_unico ON tenants (legal_name);" });
 			await plataforma.reiniciar();
-			expect((await central.stub.estado()).migraciones.map((m) => m.nombre)).toEqual(["0001_inicial.sql", "9001_nombre_unico.sql"]);
+			expect((await central.stub.estado()).migraciones.map((m) => m.nombre)).toEqual([...MIGRACIONES_DE_VERDAD, "9001_nombre_unico.sql"]);
 			const sana = await plataforma.fotografiar();
 			plataforma.alPedirUnInstante(antesDeLaMigracion);
 

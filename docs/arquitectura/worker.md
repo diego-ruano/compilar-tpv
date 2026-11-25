@@ -384,6 +384,7 @@ cuando el Worker la hacía con una transacción abierta por la red:
 | Operación | La pide | Lo que hace el Worker antes y después |
 |---|---|---|
 | `canjearClave` | `/v1/license/activate`, al sumar una clave (`licensing.routes.ts`) | Antes, la DEK y el token; después, la frase de una clave ya usada y el recibo por correo |
+| `trasladarLicencia` | `/v1/license/activate`, al trasladar la licencia con el código del correo | Antes, comparar el código con su huella (con sus topes) y el id de la traza; después, si la respuesta se pierde, mirar la traza, y los avisos al `TenantHub` y al titular |
 | `emitirCobro` | El webhook de Stripe (`stripe.routes.ts`) | Antes, si la sesión ya se cumplió, con la consulta de la operación (`COBROS_DE_LA_SESION`: si lo está, sale sin preparar nada), y las claves (su huella, su forma corta y cifradas: la clave en claro no viaja), los ids y la hora; después, el correo con las claves y su marca |
 | `revertirCobro` | El webhook: reembolsos y disputas | Después, marcar el evento y avisar al `TenantHub` de las altas anuladas |
 | `revocarAMano`, `desrevocar` | `/v1/admin/licenses/:id/revoke` y `/unrevoke` | Antes, que la licencia exista; después, la auditoría y el aviso al `TenantHub` |
@@ -406,12 +407,14 @@ cuando el Worker la hacía con una transacción abierta por la red:
 - **Una sola implementación**: lo que escribe licencias y cobros en más de una sentencia vive sólo
   aquí. En el Worker quedan las lecturas y las escrituras de una sentencia (`server/licenseStore.ts`:
   la auditoría, la marca del correo…). Las que corren también dentro de una operación (leer una
-  licencia, darla de alta, apuntar en la auditoría) salen de constantes de `operaciones/licencias.ts`,
-  que `licenseStore.ts` importa, para que no puedan divergir.
+  licencia, darla de alta, apuntar en la auditoría, dar de alta el negocio y el equipo con la
+  condición de su clave de AUD-01) salen de constantes de `operaciones/licencias.ts`, que
+  `licenseStore.ts` importa, para que no puedan divergir.
 - **`emitirCobro` se repite una vez** si la plataforma corta la llamada por un fallo pasajero, porque
   no se sabe si entró. Si entró, contesta `ya_cumplida` con las licencias que preparó este Worker, y
-  la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, y no se manda
-  nada ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
+  la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, que no tiene
+  sus claves en claro; si a la sesión le falta el correo, lo reenvía la entrega siguiente o el cron
+  ([licencias.md](licencias.md#comprar)).
   Una central saturada no se repite: Stripe reintenta más tarde.
 - Lo demás son sentencias sueltas condicionadas y lotes todo o nada, con sus ventanas de siempre: la
   primera activación, los códigos por correo, reclamar y soltar un código de emparejamiento, los
@@ -421,16 +424,16 @@ Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma
 vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`
 (un fallo tras cada sentencia de cada operación, y la central entera tiene que quedar como estaba) y el
 oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones que había
-cuando la central pasó a su objeto (todas menos `recogerTokenDeLaHandy`) conducidos sólo por HTTP, con
-Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada efecto y cada
-cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar en su objeto,
-y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
-`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. `recogerTokenDeLaHandy`, que
-nació ya en el objeto, no tiene foto de antes con la que compararse: la cubren
-`test/centralFalloInyectado.test.ts` y `test/emparejamiento.test.ts`. El traslado de licencia, que
-desde E7a-1 es un lote, lo compara `test/licenciaTraslado.test.ts` con el de antes: las mismas
-columnas en su traza, la misma hora en la licencia y en la traza (`updated_at_ms` y `at_ms`) y
-ninguna otra fila cambiada.
+cuando la central pasó a su objeto (todas menos `trasladarLicencia` y `recogerTokenDeLaHandy`)
+conducidos sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada
+respuesta, cada efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central
+de antes de estar en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la
+central cambia, con `pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`.
+`recogerTokenDeLaHandy`, que nació ya en el objeto, no tiene foto de antes con la que compararse: la
+cubren `test/centralFalloInyectado.test.ts` y `test/emparejamiento.test.ts`. El traslado de
+licencia, que no lleva escenario del oráculo, lo fija `test/licenciaTraslado.test.ts`: lo que
+escribe su operación (el código gastado, el equipo nuevo, la licencia y su traza, todo con la misma
+hora) y ninguna otra fila cambiada.
 
 ### Cuando no puede atender
 
@@ -458,7 +461,8 @@ Sentry, con el error del viaje como causa, y en el log, que ahí hay algo que mi
 atiende al `TenantHub`, que le habla por su cuenta (quién es la Main, el `last_seen`): el mismo evento,
 con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo demás que le falle al
 hub con la central (un error de SQL) va a Sentry, como siempre. La misma regla siguen el cron de los
-avisos de caducidad (`metodo` `cron`, también en la lectura con la que empieza), el cupo y la traza
+avisos de caducidad y el del correo de claves (`metodo` `cron`, también en la lectura con la que
+empiezan), el cupo y la traza
 de un pedido a un proveedor (`email.quota`, `email.audit`) y el traslado de licencia que entró y
 cuya respuesta se perdió.
 
@@ -540,7 +544,8 @@ llamada escribe después) y `test/elHubPuedeHibernar.test.ts`.
   en `server/central/migraciones.ts` (`MIGRACIONES_DE_LA_CENTRAL`): el bundler no recoge una carpeta
   entera. `scripts/check-migration-registry.mjs` comprueba en CI que la carpeta y el registro
   coinciden y que ninguna abre o cierra transacciones. La primera, `0001_inicial.sql`, es el esquema
-  entero.
+  de partida; las siguientes lo amplían (`0002_avisos_enviando.sql`: la marca «enviando» de los
+  avisos de caducidad).
 - Las aplica el objeto con el mismo runner que la base de cada negocio
   (`sqliteDelObjeto.ts::migrarBase`, [esquema.md](esquema.md#cómo-se-aplica)): cada una en su
   transacción, con las claves foráneas apagadas alrededor de la tanda y `foreign_key_check` antes de
@@ -980,16 +985,18 @@ además `test/mainDesplazadaRest.test.ts`.
 `scheduled` en `src/index.ts`. Cada tarea va en su `try` y ninguna propaga:
 
 1. **Avisos de caducidad** de licencias ([licencias.md](licencias.md#avisos-de-caducidad)).
-2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo,
+2. **El correo de claves que no consta** de una compra de Stripe, reenviado
+   (`domains/licensing/correoDeClaves.ts`, [licencias.md](licencias.md#comprar)).
+3. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo,
    eventos del código de cambio de equipo, códigos de emparejamiento caducados hace más de un día,
    que liberan su número (AUD-12), y retos de emparejamiento caducados (AUD-13). Va antes de la
    copia, para no guardar lo que se tira.
-3. **Copia de la base central a R2**: se la pide a su objeto (`centralDe(env).copiar(<día>)`,
+4. **Copia de la base central a R2**: se la pide a su objeto (`centralDe(env).copiar(<día>)`,
    [abajo](#la-copia-diaria)) y, sólo si se subió, late `BETTERSTACK_HEARTBEAT_COPIAS_URL`. Si no, a
    Sentry (`cron.backup`). Si la copia pasa de 150.000 filas (`FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ`),
    avisa también a Sentry: la copia vale, pero ya no se restauraría de una vez
    ([CENTRAL-RESTAURAR](../pendientes.md#central-restaurar--la-central-se-restaura-en-una-sola-llamada)).
-4. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea
+5. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea
    haya fallado: responde a «¿se ejecuta el cron?». Un latido nunca propaga (`observability/latido.ts`).
 
 ## Las copias de la base central, restaurarla y volver a un instante

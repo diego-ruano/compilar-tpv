@@ -31,17 +31,15 @@ import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { avisarCambioDeLicencia } from "../../lib/hub";
 import { getDb } from "../../server/db";
-import { descifrar } from "../../server/crypto";
 import {
 	auditAdmin,
-	guardarClaveRecifrada,
 	getLicenseById,
 	issueLicense,
 	listLicenses,
-	markKeyEmailSent,
 	negocioActivadoDe,
 	recifrarConLaActual,
 } from "../../server/licenseStore";
+import { reenviarCorreoDeClave } from "../licensing/correoDeClaves";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { retirarNegociosDePrueba } from "./pruebas";
@@ -146,17 +144,8 @@ adminRoutes.post("/licenses/:id/resend-key", async (c) => {
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 	if (!lic.license_key_enc) return c.json({ ok: false, error: "key_unavailable" }, 409);
 
-	const { texto: keyPlain, recifrado } = await descifrar(env, lic.license_key_enc);
-	// RI-73: si estaba con la clave anterior, se guarda ya con la actual.
-	if (recifrado) await guardarClaveRecifrada(db, licenseId, lic.license_key_enc, recifrado);
-
-	const emailSent = await sendLicenseKeyEmail(env, {
-		to: lic.customer_email,
-		name: lic.customer_name,
-		key: keyPlain,
-		termMonths: lic.term_months,
-	});
-	if (emailSent) await markKeyEmailSent(db, licenseId);
+	// El mismo correo que reenvían solos la entrega del webhook y el cron (CLAVES-SIN-CORREO).
+	const { key: keyPlain, emailSent } = await reenviarCorreoDeClave(env, db, lic);
 
 	await auditAdmin(db, "resend", licenseId, { email: lic.customer_email, emailSent });
 

@@ -28,7 +28,6 @@ import {
 	reservarEnvioDeOtp,
 	reservarFalloDeOtp,
 	reservarIntentoDeOtp,
-	consumeDeviceOtp,
 	ensureDevice,
 	ensureTenantExistsMinimal,
 	exigirClaveSiEsDeOtroNegocio,
@@ -36,7 +35,8 @@ import {
 	getLicenseByHash,
 	getLicenseById,
 	putDeviceOtp,
-	reassignMainDevice,
+	trasladarLicencia,
+	trasladoQueSeRepite,
 	getOrCreateTenantFieldDek,
 	licenciaVivaDelDispositivo,
 	eraLaMainDeOtroNegocio,
@@ -71,6 +71,7 @@ import {
 	OTP_MAX_ATTEMPTS,
 	OTP_TTL_MS,
 	OTP_VENTANA_MS,
+	REINTENTO_DE_TRASLADO_MS,
 	otpHash,
 	provisionTenantDatabase,
 	stateAllowsUse,
@@ -516,6 +517,8 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	}
 
 	// ── Cambio de equipo: exige el OTP del email ──────────────────────────
+	/** La huella del código de traslado, ya comparada con el tecleado: la gasta el traslado. */
+	let codigoComprobado = "";
 	if (esCambioDeEquipo) {
 		if (!deviceChangeCode) {
 			return c.json(
@@ -585,15 +588,29 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		}
 
 		// El código es el bueno, así que su reserva no es un fallo del día. Se devuelve ANTES de
-		// consumirlo: si esta sentencia fallara, el código sigue vivo y basta con reintentar.
+		// gastarlo: si esta sentencia fallara, el código sigue vivo y basta con reintentar.
 		await devolverFalloDeOtp(db, lic.license_id, now);
 
-		// Consumo atómico: si dos peticiones llegan a la vez con el código bueno, solo una gana.
-		const consumido = await consumeDeviceOtp(db, lic.license_id, deviceId, reserva.codeHash);
-		if (!consumido) {
-			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
-		}
+		// TRASLADO-REINTENTO: el código no se gasta aquí, sino con el alta del equipo y el traslado, en
+		// la misma operación de la central (abajo, `trasladarLicencia`).
+		codigoComprobado = reserva.codeHash;
 	}
+
+	// TRASLADO-REINTENTO · El equipo que ya es la Main y repite su activación con el código con el que
+	// se trasladó la licencia hacia él: es el reintento de un traslado cuya respuesta no le llegó (el
+	// 200 perdido, o la central que no contestó a la lectura de su traza). Su base es de antes del
+	// traslado, y los avisos pueden no haber salido: se le contesta como al traslado, y se repiten.
+	// Lo dice la central: ese código, ya gastado, y el último traslado de la licencia hacia este
+	// equipo, a la misma hora y hace menos de `REINTENTO_DE_TRASLADO_MS`.
+	const reintentoDelTraslado =
+		esMismoEquipo &&
+		!!deviceChangeCode &&
+		(await trasladoQueSeRepite(db, {
+			licenseId: lic.license_id,
+			deviceId,
+			codeHash: await otpHash(deviceChangeCode),
+			desdeMs: now - REINTENTO_DE_TRASLADO_MS,
+		}));
 
 	// REV-15 · AUD-07 · La clave ha dejado de estar sin estrenar mientras ésta seguía: o la ha
 	// activado otro equipo, o la ha canjeado otro. A la perdedora se le dice lo mismo que a cualquier
@@ -653,19 +670,23 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 			negocioAnterior !== tenantId &&
 			(await eraLaMainDeOtroNegocio(db, deviceId, negocioAnterior));
 
-		// El negocio se crea (o se toca) después de esa comprobación y no antes: si rechaza, no
-		// queda ni un tenant recién creado ni su `updated_at_ms` movido. Tiene que ir delante del
-		// alta, que apunta a él.
-		await ensureTenantExistsMinimal(db, tenantId);
+		// En un traslado, el negocio y el alta del equipo van con el traslado, en su operación
+		// (TRASLADO-REINTENTO).
+		if (!esCambioDeEquipo) {
+			// El negocio se crea (o se toca) después de esa comprobación y no antes: si rechaza, no
+			// queda ni un tenant recién creado ni su `updated_at_ms` movido. Tiene que ir delante del
+			// alta, que apunta a él.
+			await ensureTenantExistsMinimal(db, tenantId);
 
-		// Da de alta el dispositivo con su clave, o muda su fila, en UNA sentencia (AUD-01): la
-		// fila nace con clave, y una que ya existe sólo se toca si la registrada es ésta. Si no
-		// lo es, lanza `device_key_mismatch` sin haber escrito la fila.
-		//
-		// AUD-09: en la primera activación, no aquí sino cuando la licencia ya es de este equipo
-		// (abajo). El negocio es el mismo para todas las peticiones de la clave, así que el equipo
-		// que pierde la carrera habría dejado su fila en el negocio del que gana, como un `tpv` más.
-		if (!esPrimeraActivacion) await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
+			// Da de alta el dispositivo con su clave, o muda su fila, en UNA sentencia (AUD-01): la
+			// fila nace con clave, y una que ya existe sólo se toca si la registrada es ésta. Si no
+			// lo es, lanza `device_key_mismatch` sin haber escrito la fila.
+			//
+			// AUD-09: en la primera activación, no aquí sino cuando la licencia ya es de este equipo
+			// (abajo). El negocio es el mismo para todas las peticiones de la clave, así que el equipo
+			// que pierde la carrera habría dejado su fila en el negocio del que gana, como un `tpv` más.
+			if (!esPrimeraActivacion) await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
+		}
 	} catch (e: any) {
 		const rechazo = rechazoPorLaClave(c, e);
 		if (rechazo) return rechazo;
@@ -715,16 +736,31 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 			throw e;
 		}
 	} else if (esCambioDeEquipo) {
-		const respuestaPerdida = await reassignMainDevice(db, {
+		// TRASLADO-REINTENTO: gastar el código, dar de alta este equipo y mover la licencia con su traza,
+		// todo o nada. Si falla, el código sigue valiendo para repetirlo.
+		const { resultado, respuestaPerdida } = await trasladarLicencia(db, {
 			licenseId: lic.license_id,
 			fromDeviceId: lic.main_device_id,
 			toDeviceId: deviceId,
+			devicePubKey,
+			tenantId,
+			codeHash: codigoComprobado,
 		});
+		if (resultado === "codigo_invalido") {
+			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
+		}
+		if (resultado === "clave_distinta") {
+			return c.json({ ok: false, error: "device_key_mismatch" } satisfies ApiError, 409);
+		}
+		// Otra petición ha movido la licencia entre la lectura del principio y el traslado.
+		if (resultado === "movida") return carreraPerdida();
 		// El traslado entró y su respuesta se perdió por el camino (lo dijo su traza): la petición sigue
 		// como si hubiera llegado, y el viaje que no volvió queda como cualquier otro en el que la
 		// central no ha atendido: su evento en Axiom, y Sentry sólo si no es carga ni un fallo pasajero.
 		if (respuestaPerdida) registrarSinLaCentral(respuestaPerdida, enLaPeticion(c));
+	}
 
+	if (esCambioDeEquipo || reintentoDelTraslado) {
 		// AUD-02: y el equipo anterior deja de ser Main también en el `TenantHub`. Su socket seguía
 		// abierto con el rol `tpv` de cuando saludó, mandando SQL que la nube confirmaba y este
 		// equipo ejecutaba, y recibiendo todo lo del negocio. Después de cambiar la licencia, para
@@ -765,7 +801,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		status: esPrimeraActivacion ? "active" : lic.status,
 		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
 		fieldDek,
-		cambioDeEquipo: esCambioDeEquipo || estrenoSobreOtroNegocio,
+		cambioDeEquipo: esCambioDeEquipo || reintentoDelTraslado || estrenoSobreOtroNegocio,
 	};
 
 	return c.json(out);

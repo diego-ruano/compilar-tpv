@@ -22,9 +22,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
-| [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
-| [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
-| [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -326,57 +323,6 @@ objeto, y se vería como 503 `hub_overloaded` y más reintentos. Opciones, sin d
 respetar el `Retry-After` del 503, o sacar el ticket del socket de la central (firmado, o en el
 `TenantHub`). Es un cambio en Rust, y como CENTRAL-AUTH no aprieta hasta los 1.000 negocios o así.
 
-### CLAVES-SIN-CORREO · Las claves de un cobro que no llegaron a salir
-
-El correo con las claves de una compra sale después de la operación de la central
-(`emitirCobro`), y sólo si la emisión es de esa entrega del webhook
-([worker.md](arquitectura/worker.md#las-operaciones)). Si la primera llamada entra pero su respuesta se
-pierde, el reintento también falla y Stripe vuelve a entregar el evento, la entrega nueva encuentra la
-sesión ya cumplida con otras licencias y no manda nada: el comprador no recibe sus claves. Lo mismo si
-el worker se corta entre la operación y el correo. Las licencias se quedan con `key_email_sent_at_ms`
-a `NULL`, que es lo que `pnpm license:list` enseña como pendiente y `pnpm license:resend` reenvía
-([licencias.md](arquitectura/licencias.md#comprar)).
-
-Lo que ya está en el código (E7b definitivo-2): la entrega que encuentra la sesión cumplida con
-licencias sin `key_email_sent_at_ms`, cobradas hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`:
-una más reciente puede ser de otra entrega que está mandando el correo), lo avisa en Sentry
-(`stripe.correo_de_claves`, `stripe.routes.ts::avisarSiFaltaElCorreoDeClaves`), con las licencias y
-la orden que las reenvía. No las reenvía: dos entregas a la vez mandarían dos correos. Lo decide el
-responsable (G7): que se reenvíen solas, o dejarlo a mano tras el aviso, como ahora.
-
-### TRASLADO-REINTENTO · Un traslado de licencia que falla a medias
-
-Activar en otro equipo con su código (`/v1/license/activate`, `licensing.routes.ts`) gasta el código
-del correo (`consumeDeviceOtp`) antes de dar de alta el equipo y de mover la licencia
-(`reassignMainDevice`, `licenseStore.ts`). Lo que ya está en el código (E7a-1): la licencia y su traza
-(`license_device_swaps`) se mueven en un solo lote, y si ese viaje no vuelve, la traza dice si ha
-entrado, y entonces la ruta sigue con los avisos (`test/licenciaTraslado.test.ts`). Lo que queda:
-
-- Un fallo después de gastar el código (la central, el alta del equipo) obliga a pedir otro.
-- Si el 200 se pierde camino del equipo, o el lote entra y la central no contesta a la lectura de su
-  traza (`licenciaTraslado.test.ts`, «si tampoco se puede mirar la traza…»), el reintento de ese
-  equipo ya no es un traslado: la licencia ya está en él, y contesta `cambioDeEquipo: false`. No salen
-  los avisos (al titular y al `TenantHub`), y la Main no sabe que su base es de antes del traslado,
-  que es lo que decide `cambioDeEquipo`.
-
-Arreglo posible: que gastar el código y mover la licencia sean una sola operación de la central, o
-reconocer el reintento: con el código de este equipo ya gastado y una traza reciente hacia él,
-contestar `cambioDeEquipo: true` y avisar otra vez.
-
-
-### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
-
-El cron de avisos de caducidad (`avisosDeCaducidad.ts`) pone una marca por licencia y peldaño
-(`marcarAvisoEnviado`) antes de mandar el correo, y la suelta si no sale (`olvidarAvisoEnviado`). Lo
-que ya está en el código (E7a-7): una licencia que falla no corta a las demás, salvo la central
-saturada, que corta el ciclo (las que faltan, fallidas, se avisan al día siguiente). Lo que queda: si la
-central falla al soltar la marca, o después de ponerla (la marca entra y su respuesta no vuelve), la
-marca se queda, y el ciclo de otro día no la gana (`INSERT OR IGNORE`) y cuenta esa licencia como ya
-avisada: ese peldaño no sale nunca. Eso se lee en el código
-(`avisosDeCaducidad.ts::avisarDeCaducidades`) y no lo prueba ningún test: el de «al soltar la marca de
-un aviso que no ha salido…» (`test/avisoDeCaducidad.test.ts`) sólo fija que ese fallo no corta a las
-demás, sin correr otro ciclo, y el de la marca que entra sin respuesta no existe. Arreglo posible: una
-marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
 
 ---
 

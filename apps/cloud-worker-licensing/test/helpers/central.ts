@@ -29,7 +29,14 @@ import type { FilasEnBruto } from "../../src/durableObjects/sqliteDelObjeto";
 import type { Env } from "../../src/env";
 import type { SqlSync } from "../../src/lib/sql";
 import { clienteCentral, ErrorDeLaCentral, type ClienteCentral } from "../../src/server/central/cliente";
+import { MIGRACIONES_DE_LA_CENTRAL } from "../../src/server/central/migraciones";
 import { OPERACIONES, type Operacion, type Operaciones } from "../../src/server/central/operaciones/registro";
+
+/**
+ * Los nombres de las migraciones de la central de este despliegue, en orden: los que tiene una central
+ * recién aprovisionada. Se leen al cargar, antes de que un test añada las suyas.
+ */
+export const MIGRACIONES_DE_VERDAD: readonly string[] = MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
 
 export type CentralDePrueba = {
 	db: ClienteCentral;

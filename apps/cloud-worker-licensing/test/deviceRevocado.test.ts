@@ -18,12 +18,15 @@ import {
 	centralDePrueba,
 	centralInterceptada,
 	filasDe,
+	negocioEnLaCentral,
+	operarConFallo,
 	type CentralDePrueba,
 } from "./helpers/central";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { cargarDevice, estaRevocado, normalizarRol } from "../src/lib/deviceAuth";
 import { verifyDeviceProofOrThrow } from "../src/server/middleware/auth";
-import { ensureDevice } from "../src/server/licenseStore";
+import { ALTA_DEL_EQUIPO, ALTA_DEL_NEGOCIO } from "../src/server/central/operaciones/licencias";
+import { ensureDevice, ensureTenantExistsMinimal, putDeviceOtp } from "../src/server/licenseStore";
 
 /** Una base central nueva con los negocios `t-nuevo` y `t-viejo`, y las filas de `dispositivos`. */
 async function centralCon(
@@ -223,5 +226,49 @@ describe("activar una licencia readmite el dispositivo", () => {
 			});
 		}
 		expect([await filaDe(central, "d-con-clave"), await filaDe(central, "d-sin-clave")]).toEqual(antes);
+	});
+
+	it("el traslado da de alta el negocio y el equipo con las mismas sentencias que la activación", async () => {
+		// La condición de AUD-01 se escribe en un solo sitio (`operaciones/licencias.ts`): un cambio en
+		// el alta del equipo llega a la activación y al traslado a la vez.
+		const central = await centralDePrueba();
+		await negocioEnLaCentral(central, { tenantId: "t-1", main: "equipo-del-bar" });
+		await putDeviceOtp(central.db, {
+			licenseId: "lic-t-1",
+			newDeviceId: "equipo-nuevo",
+			codeHash: "huella-del-codigo",
+			expiresAtMs: Date.now() + 60_000,
+		});
+		const delTraslado: string[] = [];
+		const r = await operarConFallo(
+			central,
+			"trasladarLicencia",
+			{
+				licenciaId: "lic-t-1",
+				deDeviceId: "equipo-del-bar",
+				aDeviceId: "equipo-nuevo",
+				devicePubKey: "clave-del-equipo-nuevo",
+				tenantId: "t-1",
+				codeHash: "huella-del-codigo",
+				swapId: crypto.randomUUID(),
+				ahoraMs: Date.now(),
+			},
+			(texto) => {
+				delTraslado.push(texto);
+				return false;
+			},
+		);
+		expect(r).toMatchObject({ ok: true, valor: { resultado: "trasladada" } });
+		expect(delTraslado).toContain(ALTA_DEL_EQUIPO);
+		expect(delTraslado).toContain(ALTA_DEL_NEGOCIO);
+
+		const deLaActivacion: string[] = [];
+		const vista = centralInterceptada(central, (metodo, [sentencia], llamar) => {
+			if (metodo === "ejecutar") deLaActivacion.push((sentencia as SentenciaEnlazada).sql);
+			return llamar();
+		});
+		await ensureTenantExistsMinimal(vista.db, "t-2");
+		await ensureDevice(vista.db, "t-2", "equipo-otro", "tpv", "clave-del-otro");
+		expect(deLaActivacion).toEqual([ALTA_DEL_NEGOCIO, ALTA_DEL_EQUIPO]);
 	});
 });
