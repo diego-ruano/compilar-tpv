@@ -724,7 +724,11 @@ sentencia (`reservarCupo`), justo antes de enviar y después de comprobar el des
 apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AUD-41). Un pedido cuenta
 desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
 que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
-pedido sale igual y se apunta después si se puede; la central que no atiende al cupo o a la traza
+pedido sale igual, sin contar en el cupo, y se apunta después si se puede. Saturada
+(`hub_overloaded`) es lo mismo, aunque la puede empujar ahí quien tenga un dispositivo dado de alta:
+mientras dure, sus pedidos salen sin contar. Es a propósito (CUPO-SATURADA, lo fija
+`test/correoTopeDiario.test.ts`): una caída o una saturación de la central no puede impedir que un
+bar mande su pedido. La central que no atiende al cupo o a la traza
 queda en Axiom (`central_no_disponible`, con la ruta del pedido por su patrón,
 `/v1/email/enviar-pedido`) y, como `email.quota` o `email.audit`, en Sentry sólo si no es carga ni
 un fallo pasajero ([arriba](#cuando-no-puede-atender)). Las trazas se purgan a los 90 días

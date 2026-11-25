@@ -27,7 +27,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
 | [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
-| [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
@@ -383,15 +382,6 @@ tiene que volver a vincular a mano (el mismo código vale mientras no caduque). 
 esperando ante lo que no es terminal, hasta el límite de siempre, y que `pair_rejected` y
 `pair_code_expired`, que hoy llegan como `External`, tengan su código propio, para terminar sólo con
 ellos.
-
-### CUPO-SATURADA · El cupo diario de correo no se aplica con la central saturada
-
-El correo de un pedido sale aunque la central no conteste (`email.routes.ts::reservarCupo`,
-`sin_base`): una caída nuestra no impide mandar un pedido. Pero una central saturada
-(`hub_overloaded`) también es `sin_base`, y la puede saturar quien tenga un dispositivo dado de alta:
-mientras dure, sus pedidos salen sin contar en el cupo. Lo fija `test/correoTopeDiario.test.ts` («con
-la central saturada, también…»). Lo decide el responsable: contestar 503 con la central saturada
-(el pedido se repite después), o dejarlo así.
 
 ### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
 
