@@ -6,3 +6,5 @@ apps/cloud-worker-licensing/src/server/central/migraciones/*.sql text eol=lf
 # Snapshots del esquema (generados por el test anti-drift): EOL determinista para comparación estable.
 packages/database/schema.snapshot.sql text eol=lf
 apps/cloud-worker-licensing/src/server/central/esquema.snapshot.sql text eol=lf
+# Las respuestas de la vuelta de la central que lee el CLI (las escribe un test del worker con -u).
+scripts/tpv-license.respuestas.json text eol=lf

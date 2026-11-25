@@ -61,6 +61,9 @@ const ESTADO: Record<CodigoDeLaCentral, number> = {
 	central_copia_inservible: 422,
 	central_instante_fuera_de_plazo: 400,
 	central_vuelta_no_disponible: 501,
+	central_vuelta_a_la_vez: 409,
+	central_sin_vuelta_preparada: 409,
+	central_vuelta_rechazada: 422,
 };
 
 /** El estado HTTP con el que sale lo que el objeto de la central contesta que no ha hecho. */

@@ -252,16 +252,18 @@ export function reportarCentralNoDisponible(
 /**
  * Lo que la administración hace con la base central (`domains/admin/central.ts`): copiarla, darle
  * esquema o restaurarla, y devolverla a un instante. No va en `admin_audit`, que es una tabla de la
- * propia central: restaurarla o devolverla a un instante la reescriben. Sin datos personales: la
- * acción, la clave de la copia, las filas, los marcadores y el resultado.
+ * propia central: restaurarla o devolverla a un instante la reescriben. Sin datos personales ni texto
+ * que no sea nuestro: la acción, la clave de la copia, las filas, los marcadores y el resultado.
  */
 export function reportarAdministracionDeLaCentral(
 	env: Env,
 	campos: {
 		accion: "copiar" | "aprovisionar" | "restaurar" | "volver";
 		/**
-		 * `ok`, o el código con el que no se ha hecho. Al volver, antes de reiniciar, `preparada`: si la
-		 * llamada no termina, es lo que queda de con qué se deshace.
+		 * `ok`, o el código con el que no se ha hecho. Al restaurar y al volver, antes de llamar al
+		 * objeto, `empieza`, y si la llamada no vuelve, `sin_respuesta`. Al volver, antes de reiniciar,
+		 * `preparada`: si la llamada no termina, es lo que queda de con qué se deshace. Al aplicar una
+		 * vuelta ya preparada (`reiniciar`), antes de reiniciar, `reinicia`.
 		 */
 		resultado: string;
 		clave?: string;
@@ -271,8 +273,11 @@ export function reportarAdministracionDeLaCentral(
 		destino?: string;
 		deshacer?: string;
 		copiaDeAntes?: string;
-		/** Por qué no se ha hecho, si lo dice el objeto. */
-		detalle?: string;
+		/**
+		 * Por qué no sirve la copia de una restauración: el código del cargador (`copia_cortada`…). Nunca
+		 * el `detalle` del objeto, que trae texto que no es nuestro (SQLite, R2, la propia copia).
+		 */
+		motivo?: string;
 	},
 ): Promise<unknown> {
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;

@@ -44,10 +44,14 @@ export function falloPorLasMarcas(marcas: MarcasDeLaCentral): FalloDeLaCentral |
 		};
 	}
 	if (vuelta) {
+		const desde = new Date(vuelta.desdeMs).toISOString();
 		return {
 			ok: false,
 			error: "central_vuelta_en_curso",
-			detalle: `La vuelta a ${vuelta.destino} está preparada desde el ${new Date(vuelta.desdeMs).toISOString()}: se aplica al reiniciar el objeto.`,
+			detalle:
+				vuelta.fase === "preparada"
+					? `La vuelta a ${vuelta.destino} está preparada desde el ${desde}: se aplica al reiniciar el objeto.`
+					: `La vuelta a ${vuelta.destino} se está preparando desde el ${desde}.`,
 		};
 	}
 	return null;

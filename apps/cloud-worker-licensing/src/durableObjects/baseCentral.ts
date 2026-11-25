@@ -66,7 +66,7 @@ import {
 	motivoDeRechazo,
 	reafirmarPragmas,
 } from "./baseCentral.guardas";
-import { prepararVueltaDeLaCentral } from "./baseCentral.instante";
+import { prepararVueltaDeLaCentral, reiniciarParaAplicar } from "./baseCentral.instante";
 import { ejecutarOperacion } from "./baseCentral.operar";
 import { restaurarLaCentral } from "./baseCentral.restaurar";
 import { instantesDe, type Instantes } from "./instantes";
@@ -145,7 +145,9 @@ export class BaseCentral extends DurableObject<Env> {
 	 * Crea el esquema de un objeto que no lo tiene (administración): vacío, con todas sus migraciones,
 	 * o con `claveDeCopia`, restaurado desde esa copia de R2 (`baseCentral.restaurar.ts`). En uno que
 	 * ya lo tiene no toca nada y contesta `central_ya_aprovisionada`. Con una restauración a medias,
-	 * sólo otra restauración lo vacía y termina: vacío no se aprovisiona.
+	 * sólo otra restauración lo vacía y termina: vacío no se aprovisiona. Con una vuelta a un instante
+	 * en curso, nada (`central_vuelta_en_curso`): restaurar empieza vaciando el objeto, marca incluida,
+	 * y la central atendería con una vuelta pedida a la plataforma.
 	 *
 	 * Sin copia, cada migración entra en su propia transacción: si una falla detrás de otras que ya han
 	 * entrado, la base queda aprovisionada a medias, y el objeto no atiende hasta que vuelva a arrancar
@@ -155,8 +157,9 @@ export class BaseCentral extends DurableObject<Env> {
 		const storage = this.ctx.storage;
 		const { claveDeCopia } = opciones;
 		const hecho = await this.ctx.blockConcurrencyWhile(async (): Promise<RespuestaDeLaCentral<CopiaRestaurada | null>> => {
-			if (claveDeCopia !== undefined) return restaurarLaCentral(storage, this.env.COPIAS, claveDeCopia);
 			const marcas = marcasDe(storage);
+			if (marcas.vuelta) return falloPorLasMarcas({ restauracion: null, vuelta: marcas.vuelta })!;
+			if (claveDeCopia !== undefined) return restaurarLaCentral(storage, this.env.COPIAS, claveDeCopia);
 			if (marcas.restauracion) return falloPorLasMarcas(marcas)!;
 			if (baseAprovisionada(storage.sql)) return { ok: false, error: "central_ya_aprovisionada" };
 			const fallo = await migrar(storage);
@@ -168,17 +171,23 @@ export class BaseCentral extends DurableObject<Env> {
 	}
 
 	/**
-	 * La primera mitad de la vuelta a un instante, o a un marcador (`baseCentral.instante.ts`): deja una
-	 * copia de cómo está, la vuelta preparada para el siguiente arranque y la central cerrada hasta
-	 * entonces. Contesta el marcador con el que se deshace.
+	 * La primera mitad de la vuelta a un instante, o a un marcador (`baseCentral.instante.ts`), esté
+	 * como esté la central: deja una copia de cómo está (si se puede copiar), la vuelta preparada para
+	 * el siguiente arranque y la central cerrada hasta entonces. Contesta el marcador con el que se
+	 * deshace.
 	 */
 	async prepararVuelta(destino: DestinoDeLaVuelta): Promise<RespuestaDeLaCentral<VueltaPreparada>> {
 		return prepararVueltaDeLaCentral(this.ctx.storage, this.env.COPIAS, this.instantes, this.averia, destino);
 	}
 
-	/** Reinicia el objeto, que al arrancar vuelve al instante preparado. Lanza en quien lo llama. */
-	reiniciar(): void {
-		this.instantes.reiniciar("central_devuelta");
+	/**
+	 * Reinicia el objeto, que al arrancar vuelve al instante preparado, sólo si la vuelta preparada es
+	 * la que se deshace con `deshacer` (`baseCentral.instante.ts`): si lo reinicia, lanza en quien lo
+	 * llama. Con otra vuelta en curso contesta `central_vuelta_a_la_vez`, y sin ninguna,
+	 * `central_sin_vuelta_preparada`, sin reiniciar.
+	 */
+	reiniciar(deshacer: string): RespuestaDeLaCentral<null> {
+		return reiniciarParaAplicar(this.ctx.storage, this.instantes, deshacer);
 	}
 }
 
@@ -259,8 +268,9 @@ function estadoDe(storage: DurableObjectStorage, averia: FalloDeLaCentral | null
 	const bytes = sql.databaseSize;
 	const aMedias = falloPorLasMarcas(enCurso);
 	if (aMedias) {
-		// Una vuelta sólo se prepara con la central aprovisionada; una restauración la aprovisiona al terminar.
-		return { aprovisionada: enCurso.restauracion === null, migraciones: [], averia: aMedias, enCurso, filas: {}, bytes };
+		// Una restauración la aprovisiona al terminar; una vuelta se prepara también sin esquema.
+		const aprovisionada = enCurso.restauracion === null && baseAprovisionada(sql);
+		return { aprovisionada, migraciones: [], averia: aMedias, enCurso, filas: {}, bytes };
 	}
 	const aprovisionada = baseAprovisionada(sql);
 	if (!aprovisionada) return { aprovisionada, migraciones: [], averia, enCurso, filas: {}, bytes };

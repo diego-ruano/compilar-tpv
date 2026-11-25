@@ -180,6 +180,12 @@ jobs:
       - name: Tests del worker
         run: pnpm --filter tpv-api test
 
+      # El CLI de administración ante lo que contesta el worker a la vuelta de la central a un
+      # instante: lo que enseña para salir en cada error. Las respuestas las vigila un test del worker
+      # de arriba (`centralVueltaEnElCli.test.ts`).
+      - name: CLI de administración ante las respuestas del worker
+        run: node --test scripts/tpv-license.test.mjs
+
       - name: Anti-drift del registro de migraciones del worker
         run: node scripts/check-migration-registry.mjs
 

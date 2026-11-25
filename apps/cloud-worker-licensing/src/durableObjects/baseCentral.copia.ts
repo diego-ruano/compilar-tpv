@@ -5,6 +5,15 @@
 // (`/v1/admin/central/copiar-ahora`), y la de antes de volver a un instante, la propia vuelta
 // (`baseCentral.instante.ts`). Se devuelven a un objeto vacío con `baseCentral.restaurar.ts`.
 //
+// La de antes de volver lleva además en sus metadatos el marcador de la central cuando se hizo
+// (`marcador`), que es con el que se deshace la vuelta: fuera del objeto, porque lo que guarda el
+// objeto vuelve con él. Si la central no se podía copiar, ese marcador va solo, en
+// `base-central/antes-de-volver-<hora>.marcador`, que no es una copia y no se restaura. Los dos salen
+// en la lista de las copias. Y cuando la plataforma ya tiene la vuelta, se deja constancia al lado,
+// en `base-central/antes-de-volver-<hora>.pedida`: sin ella, una vuelta pedida y una que no llegó a
+// pedirse se ven igual desde fuera (la central atiende en los dos casos). Va en la fila de su copia
+// de antes, o de su `.marcador`, como `pedida`.
+//
 // La base vive en el SQLite de su objeto, y Cloudflare la puede devolver a cualquier instante de los
 // últimos 30 días. Eso no cubre que el objeto se pierda (un borrado por error, otro nombre, el propio
 // proveedor), ni lo que se descubre pasado ese plazo: para eso está esta copia, fuera del objeto.
@@ -71,18 +80,59 @@ export function claveDelDia(dia: string): string {
  * (`antes-de-volver`). La hora va en ISO con guiones en vez de dos puntos, para que la clave sirva
  * de nombre de fichero también en Windows al bajarla.
  */
-export function claveConHora(que: "a-mano" | "antes-de-volver", ahora: Date): string {
-	return `${PREFIJO_COPIAS}${que}-${ahora.toISOString().replaceAll(":", "-")}.sql.gz`;
+export function claveConHora(que: "a-mano" | "antes-de-volver", ahora: Date, extension = ".sql.gz"): string {
+	return `${PREFIJO_COPIAS}${que}-${ahora.toISOString().replaceAll(":", "-")}${extension}`;
 }
 
-/** ¿Puede ser `clave` la de una copia de la central? Dentro de su carpeta, de un `.sql.gz` y sin `..`. */
+/**
+ * Guarda en R2 el marcador de cómo estaba la central antes de volver a un instante, cuando no se
+ * podía copiar (ver la cabecera). Lanza si no llega.
+ */
+export async function guardarElMarcadorDeAntes(bucket: R2Bucket, ahora: Date, marcador: string): Promise<string> {
+	const clave = claveConHora("antes-de-volver", ahora, ".marcador");
+	await bucket.put(clave, `${marcador}\n`, {
+		httpMetadata: { contentType: "text/plain; charset=utf-8" },
+		customMetadata: { generada: ahora.toISOString(), marcador },
+	});
+	return clave;
+}
+
+/** La constancia de que una vuelta se pidió (`guardarQueSePidio`): no es una copia, y va en la fila de la suya. */
+const EXTENSION_PEDIDA = ".pedida";
+
+/** Lo que comparten las claves de una misma vuelta: la copia de antes, su `.marcador` y su `.pedida`. */
+const deLaMismaVuelta = (clave: string) => clave.replace(/\.(?:sql\.gz|marcador|pedida)$/, "");
+
+/**
+ * Deja en R2 que la vuelta preparada en `ahora` ya se le ha pedido a la plataforma, al lado de su
+ * copia de antes o de su `.marcador` (ver la cabecera), con su marcador de deshacer. Lanza si no llega.
+ */
+export async function guardarQueSePidio(bucket: R2Bucket, ahora: Date, marcador: string): Promise<string> {
+	const clave = claveConHora("antes-de-volver", ahora, EXTENSION_PEDIDA);
+	await bucket.put(clave, `${marcador}\n`, {
+		httpMetadata: { contentType: "text/plain; charset=utf-8" },
+		customMetadata: { generada: ahora.toISOString(), marcador, pedida: new Date().toISOString() },
+	});
+	return clave;
+}
+
+/** Lo más largo que puede ser el nombre de una copia, entre la carpeta y `.sql.gz`. */
+const TOPE_DEL_NOMBRE = 100;
+
+/** Las letras del nombre de una copia: sin acentos, sin espacios, sin `/` ni `@`. */
+const LETRAS_DEL_NOMBRE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * ¿Puede ser `clave` la de una copia de la central? Una gramática cerrada: la carpeta, un nombre de
+ * hasta `TOPE_DEL_NOMBRE` letras de `[A-Za-z0-9._-]` sin `..`, y `.sql.gz`. Caben todas las que
+ * escribe el worker (la del día, `a-mano-…` y `antes-de-volver-…`) y la del traspaso desde Turso
+ * (`traspaso-turso-AAAA-MM-DD`); un texto libre, no. La clave va al rastro de la administración
+ * (Axiom y el log), donde no puede llegar ni un nombre ni un correo.
+ */
 export function esClaveDeCopiaDeLaCentral(clave: string): boolean {
-	return (
-		clave.startsWith(PREFIJO_COPIAS) &&
-		clave.endsWith(".sql.gz") &&
-		clave.length > PREFIJO_COPIAS.length + ".sql.gz".length &&
-		!clave.includes("..")
-	);
+	if (!clave.startsWith(PREFIJO_COPIAS) || !clave.endsWith(".sql.gz")) return false;
+	const nombre = clave.slice(PREFIJO_COPIAS.length, -".sql.gz".length);
+	return nombre.length <= TOPE_DEL_NOMBRE && LETRAS_DEL_NOMBRE.test(nombre) && !clave.includes("..");
 }
 
 export type CopiaHecha = {
@@ -96,13 +146,15 @@ type Volcado = { gzip: Uint8Array; tablas: number; filas: number; migraciones: s
 
 /**
  * Copia la base central entera a `bucket`, con la clave `clave`, y devuelve qué se subió. Lanza si
- * algo falla. `tope` sólo lo cambian los tests.
+ * algo falla. `tope` sólo lo cambian los tests. `marcador`, el de la central al hacerla, va en sus
+ * metadatos (la de antes de volver a un instante: ver la cabecera).
  */
 export async function copiarLaCentral(
 	sql: SqlStorage,
 	bucket: R2Bucket,
 	clave: string,
 	tope: number = TOPE_COMPRIMIDO,
+	marcador?: string,
 ): Promise<CopiaHecha> {
 	const ahora = new Date();
 	// La foto, entera, comprimida y sin esperas. Lo que viene después ya no la toca.
@@ -115,6 +167,7 @@ export async function copiarLaCentral(
 			tablas: String(volcado.tablas),
 			filas: String(volcado.filas),
 			ultimaMigracion: volcado.migraciones.at(-1) ?? "",
+			...(marcador ? { marcador } : {}),
 		},
 		// R2 recalcula el hash al recibirlo y rechaza la subida si no coincide.
 		sha256: await crypto.subtle.digest("SHA-256", volcado.gzip),
@@ -183,9 +236,25 @@ export type CopiaGuardadaDeLaCentral = {
 	tablas: number | null;
 	/** La última migración del esquema con el que se hizo: si este worker la sabe poner, se puede restaurar. */
 	ultimaMigracion: string | null;
+	/**
+	 * El marcador de la central cuando se hizo, si lo lleva (la de antes de volver a un instante, y el
+	 * `….marcador` que va solo cuando no se podía copiar): volver a él deshace aquella vuelta.
+	 */
+	marcador: string | null;
+	/**
+	 * De antes de volver a un instante: cuándo se le pidió aquella vuelta a la plataforma (ISO), si
+	 * consta (`….pedida`). Si no consta, no llegó a pedirse, salvo que el objeto se reiniciara justo
+	 * entre pedirla y apuntarlo.
+	 */
+	pedida: string | null;
 };
 
-/** Las copias de la central, de la más reciente a la más vieja: las `techo` primeras, y si hay más. */
+/**
+ * Las copias de la central, de la más reciente a la más vieja: las `techo` primeras, y si hay más.
+ * También los marcadores de antes de volver que van solos (`….marcador`), que no se restauran. La
+ * constancia de que una vuelta se pidió (`….pedida`) no es una fila: va en la de su copia de antes o
+ * de su `.marcador`, y sólo si no está ninguna de las dos, sola.
+ */
 export async function listarCopiasDeLaCentral(
 	bucket: R2Bucket,
 	techo: number,
@@ -206,11 +275,19 @@ export async function listarCopiasDeLaCentral(
 				filas: numero(meta.filas),
 				tablas: numero(meta.tablas),
 				ultimaMigracion: meta.ultimaMigracion || null,
+				marcador: meta.marcador || null,
+				pedida: meta.pedida || null,
 			});
 		}
 		cursor = pagina.truncated ? pagina.cursor : undefined;
 	} while (cursor);
+	const esPedida = (c: { clave: string }) => c.clave.endsWith(EXTENSION_PEDIDA);
+	const pedidas = new Map(todas.filter(esPedida).map((c) => [deLaMismaVuelta(c.clave), c.pedida]));
+	const conFila = new Set(todas.filter((c) => !esPedida(c)).map((c) => deLaMismaVuelta(c.clave)));
+	const filas = todas
+		.filter((c) => !esPedida(c) || !conFila.has(deLaMismaVuelta(c.clave)))
+		.map((c) => (esPedida(c) ? c : { ...c, pedida: pedidas.get(deLaMismaVuelta(c.clave)) ?? null }));
 	// Las claves no se ordenan por fecha (las del día, las de a mano…): manda cuándo llegó cada una.
-	todas.sort((a, b) => b.subidaMs - a.subidaMs || (a.clave < b.clave ? 1 : -1));
-	return { copias: todas.slice(0, techo).map(({ subidaMs: _, ...c }) => c), hayMas: todas.length > techo };
+	filas.sort((a, b) => b.subidaMs - a.subidaMs || (a.clave < b.clave ? 1 : -1));
+	return { copias: filas.slice(0, techo).map(({ subidaMs: _, ...c }) => c), hayMas: filas.length > techo };
 }

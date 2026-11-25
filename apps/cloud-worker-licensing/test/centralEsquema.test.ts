@@ -1,6 +1,6 @@
 // test/centralEsquema.test.ts
 //
-// El esquema de la base central, en dos comprobaciones:
+// El esquema de la base central, en tres comprobaciones:
 //
 // - **La foto.** Las migraciones de la central (`server/central/migraciones/`) dan exactamente el
 //   esquema de `server/central/esquema.snapshot.sql`: el SQL que guarda SQLite de cada tabla e
@@ -13,6 +13,11 @@
 //   sin vistas ni triggers; las columnas de `tenants`, con su DEFAULT y sus CHECK; el índice único y
 //   parcial de `license_payments` por sesión y unidad; y las claves foráneas que borran en cascada.
 //   La foto se regenera con `-u`; esto sólo cambia a mano.
+// - **Las migraciones aplicadas no cambian.** La central de producción guarda en `_migrations` el
+//   hash de cada migración que ha aplicado, del texto entero, y si una cambia deja de atender al
+//   arrancar (`central_migracion_alterada`). La foto no lo ve: se regenera con `-u`, y ni un
+//   comentario entre sentencias ni un espacio llegan a ella. Así que el hash de cada una va escrito
+//   aquí, a mano: cambiarlo es decidirlo.
 
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
@@ -143,6 +148,29 @@ describe("lo que la base central tiene que tener", () => {
 			expect(tablas[hija].foraneas, hija).toEqual([
 				expect.objectContaining({ table: "tenants", from: "tenant_id", to: "tenant_id", on_delete: "CASCADE" }),
 			]);
+		}
+	});
+});
+
+/**
+ * Las migraciones que la central de producción tiene aplicadas, o que va a tener en cuanto le lleguen
+ * los datos de Turso (la 0001, la del traspaso), con el hash que guarda de cada una en `_migrations`:
+ * el SHA-256 del texto entero, con sus comentarios y sus espacios y con finales LF. Una que se añade
+ * a la central de producción se añade aquí en el mismo despliegue.
+ */
+const APLICADAS: Readonly<Record<string, string>> = {
+	"0001_inicial.sql": "ccc5a3b4868fcd6c3328833ca9ece143cd09ae6eac0fd6f7e1becf6b6ec8cf7e",
+};
+
+describe("las migraciones aplicadas no cambian", () => {
+	it("ni su SQL, ni un comentario, ni un espacio: cada una da el hash que guarda la central de producción", async () => {
+		const { migraciones } = await (await centralDePrueba()).stub.estado();
+		const hashes = Object.fromEntries(migraciones.map((m) => [m.nombre, m.hash]));
+		for (const [nombre, hash] of Object.entries(APLICADAS)) {
+			expect(
+				hashes[nombre],
+				`${nombre} ha cambiado: la central de producción dejaría de atender (central_migracion_alterada). Lo nuevo va en una migración nueva.`,
+			).toBe(hash);
 		}
 	});
 });

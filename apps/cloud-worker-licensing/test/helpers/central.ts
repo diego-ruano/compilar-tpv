@@ -23,6 +23,7 @@ import type { BaseCentral } from "../../src/durableObjects/baseCentral";
 import { CLAVE_VUELTA_EN_CURSO } from "../../src/durableObjects/baseCentral.guardas";
 import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../../src/durableObjects/baseCentral.rpc";
 import { ejecutarOperacion } from "../../src/durableObjects/baseCentral.operar";
+import type { Instantes } from "../../src/durableObjects/instantes";
 import type { FilasEnBruto } from "../../src/durableObjects/sqliteDelObjeto";
 import type { Env } from "../../src/env";
 import type { SqlSync } from "../../src/lib/sql";
@@ -131,27 +132,172 @@ export async function codigoDe(promesa: Promise<unknown>): Promise<string> {
 const vuelto = (state: DurableObjectState) => state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
 
 /**
+ * Los marcadores que contesta el doble de la plataforma, con la forma de los de Cloudflare
+ * (`esMarcador`): el del instante al que se vuelve, el de ahora y el que devuelve la plataforma al
+ * dejar preparada la vuelta.
+ */
+export const MARCADORES = {
+	destino: "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
+	actual: "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+	deshacer: "0000007c-ffffffff-0000153a-2e50a9dd59d5fd7ee740ffd15ef5db8d",
+} as const;
+
+/** Lo que contesta el doble de la plataforma cuando una llamada falla (`fallaAl`). */
+export const RECHAZO_DE_LA_PLATAFORMA = "La plataforma no acepta ese marcador";
+
+/**
  * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
  * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
- * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar).
+ * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar). Con
+ * `alRestaurar`, dejar preparada la vuelta espera a lo que devuelva (para retenerla a mitad). El
+ * marcador de ahora (con el que se deshace) es siempre `MARCADORES.actual`, salvo que `marcadorActual`
+ * dé otro: para distinguir dos preparaciones. Con `fallaAl`, esa llamada a la plataforma falla con
+ * `RECHAZO_DE_LA_PLATAFORMA`, como cuando no acepta un marcador.
  */
 export async function conDobleDeInstantes(
 	central: Pick<CentralDePrueba, "stub">,
 	llamadas: string[],
-	opciones: { alReiniciar?: (state: DurableObjectState) => void } = {},
+	opciones: {
+		alReiniciar?: (state: DurableObjectState) => void;
+		alRestaurar?: (marcador: string) => Promise<void> | void;
+		marcadorActual?: () => string;
+		fallaAl?: "marcadorDe" | "marcadorActual" | "restaurarAlReiniciar";
+	} = {},
 ): Promise<void> {
-	const { alReiniciar = vuelto } = opciones;
+	const { alReiniciar = vuelto, alRestaurar, marcadorActual = () => MARCADORES.actual, fallaAl } = opciones;
+	const siFalla = (metodo: typeof fallaAl) => {
+		if (metodo === fallaAl) throw new Error(RECHAZO_DE_LA_PLATAFORMA);
+	};
 	await enElObjeto(central, (state, objeto) => {
 		(objeto as { instantes: unknown }).instantes = {
-			marcadorActual: async () => (llamadas.push("actual"), "m-actual"),
-			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), "m-destino"),
-			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), "m-deshacer"),
+			marcadorActual: async () => (llamadas.push("actual"), siFalla("marcadorActual"), marcadorActual()),
+			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), siFalla("marcadorDe"), MARCADORES.destino),
+			restaurarAlReiniciar: async (m: string) => {
+				llamadas.push(`restaurar:${m}`);
+				siFalla("restaurarAlReiniciar");
+				await alRestaurar?.(m);
+				return MARCADORES.deshacer;
+			},
 			reiniciar: () => {
 				llamadas.push("reiniciar");
 				alReiniciar(state);
 			},
 		};
 	});
+}
+
+/** Lo que guarda un objeto, tal cual: cada tabla con su SQL y sus filas, el resto de su esquema y sus marcas. */
+type FotoDelObjeto = {
+	tablas: { nombre: string; sql: string; columnas: string[]; filas: unknown[][] }[];
+	resto: string[];
+	marcas: [string, unknown][];
+};
+
+function fotografiar(storage: DurableObjectStorage): FotoDelObjeto {
+	const sql = storage.sql;
+	const esquema = sql
+		.exec(
+			`SELECT type, name, sql FROM sqlite_master
+			  WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'
+			  ORDER BY rowid;`,
+		)
+		.toArray() as { type: string; name: string; sql: string }[];
+	const tablas = esquema
+		.filter((o) => o.type === "table")
+		.map((t) => {
+			const cursor = sql.exec(`SELECT * FROM "${t.name}";`);
+			const columnas = [...cursor.columnNames];
+			return { nombre: t.name, sql: t.sql, columnas, filas: [...cursor.raw()] };
+		});
+	return { tablas, resto: esquema.filter((o) => o.type !== "table").map((o) => o.sql), marcas: [...storage.kv.list()] };
+}
+
+/** Deja el objeto exactamente como `foto`: lo vacía entero y lo vuelve a llenar. */
+async function ponerLaFoto(storage: DurableObjectStorage, foto: FotoDelObjeto): Promise<void> {
+	await storage.deleteAll();
+	const sql = storage.sql;
+	storage.transactionSync(() => {
+		// Una hija puede ir antes que su madre: las claves foráneas se miran al confirmar.
+		sql.exec("PRAGMA defer_foreign_keys = ON;");
+		for (const t of foto.tablas) {
+			sql.exec(t.sql);
+			const columnas = t.columnas.map((c) => `"${c}"`).join(", ");
+			const huecos = t.columnas.map(() => "?").join(", ");
+			for (const fila of t.filas) sql.exec(`INSERT INTO "${t.nombre}" (${columnas}) VALUES (${huecos});`, ...fila);
+		}
+		for (const s of foto.resto) sql.exec(s);
+	});
+	for (const [clave, valor] of foto.marcas) storage.kv.put(clave, valor);
+}
+
+/**
+ * Una plataforma de mentira que vuelve de verdad, dentro del objeto (la de verdad no existe en local,
+ * `instantes.ts`). Cada marcador es una foto de lo que guarda el objeto: sus tablas, con sus filas, y
+ * sus marcas. `marcadorActual` saca una de cómo está; `marcadorDe`, para cualquier instante, da el
+ * que diga `alPedirUnInstante`; y al reiniciar, el objeto se queda como la foto del marcador
+ * preparado y vuelve a arrancar como al despertar (su constructor: quita la marca de la vuelta y se
+ * pone al día con sus migraciones). Sin nada preparado, reiniciar sólo vuelve a arrancar.
+ */
+export async function conPlataformaQueVuelve(central: Pick<CentralDePrueba, "stub">) {
+	const { BaseCentral } = await import("../../src/durableObjects/baseCentral");
+	const fotos = new Map<string, FotoDelObjeto>();
+	let siguiente = 0;
+	const nuevoMarcador = () => `${(++siguiente).toString(16).padStart(8, "0")}-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b`;
+	const fotoNueva = (storage: DurableObjectStorage) => {
+		const marcador = nuevoMarcador();
+		fotos.set(marcador, fotografiar(storage));
+		return marcador;
+	};
+	const llamadas: string[] = [];
+	let instante: string | null = null;
+	let preparada: { marcador: string; deshacer: string } | null = null;
+
+	await enElObjeto(central, (state, objeto) => {
+		const instancia = objeto as { instantes: Instantes; averia: Promise<unknown>; env: Env };
+		instancia.instantes = {
+			marcadorActual: async () => (llamadas.push("actual"), fotoNueva(state.storage)),
+			marcadorDe: async () => {
+				llamadas.push("de");
+				if (!instante) throw new Error("La prueba no ha dicho qué instante da la plataforma");
+				return instante;
+			},
+			restaurarAlReiniciar: async (marcador) => {
+				llamadas.push(`restaurar:${marcador}`);
+				if (!fotos.has(marcador)) throw new Error("Ese marcador no es de este objeto");
+				preparada = { marcador, deshacer: nuevoMarcador() };
+				return preparada.deshacer;
+			},
+			reiniciar: () => {
+				llamadas.push("reiniciar");
+				const vuelta = preparada;
+				preparada = null;
+				const vuelto = state.blockConcurrencyWhile(async () => {
+					if (!vuelta) return;
+					// El marcador que devolvió la plataforma: cómo estaba justo antes de volver.
+					fotos.set(vuelta.deshacer, fotografiar(state.storage));
+					await ponerLaFoto(state.storage, fotos.get(vuelta.marcador)!);
+				});
+				instancia.averia = vuelto.then(
+					() => (new BaseCentral(state, instancia.env) as unknown as { averia: Promise<unknown> }).averia,
+				);
+			},
+		} satisfies Instantes;
+	});
+	return {
+		llamadas,
+		/** Una foto de cómo está el objeto ahora: su marcador. */
+		fotografiar: () => enElObjeto(central, (state) => fotoNueva(state.storage)),
+		/** El marcador que da la plataforma para cualquier instante que se le pida. */
+		alPedirUnInstante: (marcador: string) => void (instante = marcador),
+		/** Deja el objeto como la foto de `marcador`, por debajo: lo que pasó antes de la prueba. */
+		ponerLaFoto: (marcador: string) => enElObjeto(central, (state) => ponerLaFoto(state.storage, fotos.get(marcador)!)),
+		/**
+		 * Reinicia el objeto por su cuenta, como un despliegue: vuelve a arrancar y, si había una vuelta
+		 * pedida, vuelve. No pasa por `BaseCentral.reiniciar`, que sólo reinicia para aplicar la suya.
+		 */
+		reiniciar: () =>
+			enElObjeto(central, (_state, objeto) => (objeto as { instantes: Instantes }).instantes.reiniciar("prueba")),
+	};
 }
 
 /**

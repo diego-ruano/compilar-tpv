@@ -10,7 +10,8 @@
 //     y el error dice por qué, sin nada de lo que trae la copia (va al log y a Axiom);
 //   · en una central aprovisionada no toca nada;
 //   · con la marca de una restauración a medias no atiende nadie, tampoco al arrancar, y la siguiente
-//     restauración la vacía entera (también lo que la de antes dio por migrado) y termina;
+//     restauración la vacía entera (también lo que la de antes dio por migrado) y termina; volver a
+//     un instante sí se puede, que es la otra salida (`centralVolverAveriada.test.ts`);
 //   · mientras restaura la marca está puesta, y no se intercala nada: lo que llega a la vez espera y
 //     ve la central entera;
 //   · las migraciones que le faltan a la copia se aplican después de cargar, sobre sus datos;
@@ -303,7 +304,9 @@ describe("una restauración a medias", () => {
 			"central_restauracion_a_medias",
 		);
 		expect(await central.stub.copiar("2031-02-01")).toMatchObject({ ok: false, error: "central_restauracion_a_medias" });
-		expect(await central.stub.prepararVuelta({ marcador: "m" })).toMatchObject({ ok: false, error: "central_restauracion_a_medias" });
+		// Volver a un instante sí se puede, que es una de sus salidas (`centralVolverAveriada.test.ts`).
+		// En local no hay vuelta: lo dice, y no toca nada.
+		expect(await central.stub.prepararVuelta({ marcador: "m" })).toEqual({ ok: false, error: "central_vuelta_no_disponible" });
 		expect(await central.stub.aprovisionar()).toMatchObject({ ok: false, error: "central_restauracion_a_medias" });
 
 		const estado = await central.stub.estado();
