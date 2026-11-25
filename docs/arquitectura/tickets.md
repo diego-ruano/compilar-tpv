@@ -115,12 +115,14 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   función de `save_image`. Lo que no se lee, no cumple las cotas o hace fallar al decodificador
   (también con un pánico) deja el ticket sin logo, con un aviso en el registro si es la imagen la
   que se rechaza.
-- **Sólo se decodifican JPEG y PNG**, al guardar una imagen y al imprimir el logo: 8192 px de lado,
+- **Rust sólo decodifica JPEG y PNG**, al guardar una imagen y al imprimir el logo: 8192 px de lado,
   24 Mpx y 128 MiB de imagen decodificada, comprobados con la cabecera antes de reservar los
-  píxeles. WebP no se admite ni se compila (`image` va sin esa característica) y la interfaz no lo
-  ofrece: su decodificador reserva lo que declara el fichero antes de comprobarlo, y con unos bytes
-  pedía gigas. Un logo que ya estuviera guardado en WebP se sigue viendo en pantalla, que lo pinta
-  la webview, pero no sale en el papel.
+  píxeles. El decodificador de WebP no se compila (`image` va sin esa característica): reserva lo
+  que declara el fichero antes de comprobarlo, y con unos bytes pedía gigas. Un WebP se puede
+  elegir igualmente: lo convierte la webview, con su propio decodificador, a JPEG (o a PNG si tiene
+  transparencia) y con 1024 px de lado como mucho, antes de mandarlo a `save_image`
+  (`guardarImagen.ts`). Lo guardado es siempre JPEG o PNG, así que el ticket y el PDF de una
+  factura lo pueden leer.
 - **128 MiB acotan la imagen decodificada, no la memoria del proceso.** Con ella conviven otros
   búferes en cada paso. Al decodificarla, los coeficientes de un JPEG progresivo (hasta 8 bytes por
   píxel) o el perfil de color de un PNG (hasta otros 128 MiB). Al girarla por su orientación, la

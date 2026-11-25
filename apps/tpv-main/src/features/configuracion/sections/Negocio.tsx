@@ -1,4 +1,4 @@
-import { guardarImagen } from "../../../shared/lib/guardarImagen";
+import { ACEPTA_IMAGENES, guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
 //
 // Configuración → Negocio: los datos que salen en el ticket, quién factura (FISCAL-01), el correo de
@@ -318,7 +318,7 @@ export function Negocio({
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                            accept={ACEPTA_IMAGENES}
                             className="hidden"
                             onChange={conAviso((e) => onLogoFile(e.target.files?.[0]))}
                         />

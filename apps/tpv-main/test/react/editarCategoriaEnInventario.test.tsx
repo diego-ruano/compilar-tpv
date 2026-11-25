@@ -37,7 +37,7 @@ vi.mock("../../src/features/inventario/inventarioQueries", () => ({
 vi.mock("../../src/shared/lib/usePermisos", () => ({ usePermisos: () => ({ puede: () => true }) }));
 vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), info: vi.fn(), success: vi.fn(), warning: vi.fn() }) }));
 vi.mock("../../src/shared/lib/imageUrl", () => ({ triggerImageUploadDrain: vi.fn() }));
-vi.mock("../../src/shared/lib/guardarImagen", () => ({ guardarImagen: vi.fn() }));
+vi.mock("../../src/shared/lib/guardarImagen", () => ({ ACEPTA_IMAGENES: "image/*", guardarImagen: vi.fn() }));
 vi.mock("@tpv/client", () => ({
     commands: { imagesDelete: vi.fn() },
     toAppError: (e: unknown) => ({ code: "internal", message: String(e) }),

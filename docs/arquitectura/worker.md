@@ -862,8 +862,8 @@ pinta cada equipo, también en la pantalla de entrada, así que:
 - La pantalla (`imageUrl.ts`) pinta sólo eso o un icono de alérgeno de la app (`/alergenos/…`); lo
   demás, o una imagen que la Main no tiene en disco, da `""` y el `<img>` pinta su marcador. La CSP de
   la webview no admite `data:` en `img-src`.
-- El PUT exige JPEG o PNG (no WebP, que la Main no decodifica, AUD-30) cuya cabecera declare como
-  mucho 8192 px de lado y 24 Mpx, las cotas de RI-07 (`imagenes::decodificar`); lo demás es
+- El PUT exige JPEG o PNG (no WebP, que la Main no decodifica, AUD-30: uno elegido en la pantalla
+  lo convierte antes la webview) cuya cabecera declare como mucho 8192 px de lado y 24 Mpx, las cotas de RI-07 (`imagenes::decodificar`); lo demás es
   `image_too_large` (413) o `bad_image_path` (400). La app sube siempre lo que ya ha reconstruido
   `imagenes::procesar` (1024 px de lado como mucho).
 - Lo que la Main baja de R2 (`images_ensure_local`) pasa por `imagenes::procesar` antes de escribirse

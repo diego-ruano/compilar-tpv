@@ -109,10 +109,14 @@ pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, Strin
 /// ningún límite: con unos bytes pedía gigas, dentro de todas las cotas de arriba. Los de PNG y
 /// JPEG reservan según los bytes que hay o según las dimensiones ya comprobadas, y el perfil de
 /// color de un PNG, que va comprimido, no pasa de `max_alloc`.
+///
+/// Quien elige un WebP en la pantalla lo puede guardar: lo convierte antes la WebView, con su propio
+/// decodificador, a JPEG o PNG (`shared/lib/guardarImagen.ts`), así que lo guardado es siempre JPEG
+/// o PNG. El mensaje de rechazo nombra los tres porque es lo que la persona puede elegir.
 pub fn decodificar(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err("La imagen debe pesar como máximo 5 MB".into()); }
     let formato = image::guess_format(bytes).map_err(|_| "Imagen no válida")?;
-    if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten JPEG y PNG".into()); }
+    if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten imágenes JPEG, PNG y WebP.".into()); }
     let mut lector = ImageReader::with_format(Cursor::new(bytes), formato);
     let mut limites = Limits::default();
     limites.max_image_width = Some(MAX_LADO_ENTRADA);
@@ -228,9 +232,10 @@ mod tests {
     }
     #[test]
     fn no_admite_webp_aunque_sea_valido() {
-        // AUD-30: un WebP sin pérdida de 1×1, correcto. Lo que no se admite es el formato.
+        // AUD-30: un WebP sin pérdida de 1×1, correcto. Lo que no se admite es el formato: el que
+        // se elige en la pantalla llega aquí ya convertido por la WebView (`guardarImagen.ts`).
         let webp = b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0";
         assert_eq!(image::guess_format(webp).unwrap(), ImageFormat::WebP);
-        assert_eq!(procesar(webp).unwrap_err(), "Solo se admiten JPEG y PNG");
+        assert_eq!(procesar(webp).unwrap_err(), "Solo se admiten imágenes JPEG, PNG y WebP.");
     }
 }
