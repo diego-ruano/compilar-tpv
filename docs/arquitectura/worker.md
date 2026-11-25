@@ -414,11 +414,14 @@ cuando el Worker la hacía con una transacción abierta por la red:
 Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma operación pedida a la
 vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`
 (un fallo tras cada sentencia de cada operación, y la central entera tiene que quedar como estaba) y el
-oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones conducidos
-sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada
-efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar
-en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
-`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. El traslado de licencia, que
+oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones que había
+cuando la central pasó a su objeto (todas menos `recogerTokenDeLaHandy`) conducidos sólo por HTTP, con
+Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada efecto y cada
+cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar en su objeto,
+y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
+`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. `recogerTokenDeLaHandy`, que
+nació ya en el objeto, no tiene foto de antes con la que compararse: la cubren
+`test/centralFalloInyectado.test.ts` y `test/emparejamiento.test.ts`. El traslado de licencia, que
 desde E7a-1 es un lote, lo compara `test/licenciaTraslado.test.ts` con el de antes: las mismas
 columnas en su traza, la misma hora en la licencia y en la traza (`updated_at_ms` y `at_ms`) y
 ninguna otra fila cambiada.
