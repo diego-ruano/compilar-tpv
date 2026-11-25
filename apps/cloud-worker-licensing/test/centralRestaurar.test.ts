@@ -6,8 +6,9 @@
 // no atiende nunca:
 //
 //   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con una tabla que no es
-//     de la base, con una clave foránea rota) deja el objeto como estaba: sin aprovisionar, sin marca,
-//     y el error dice por qué, sin nada de lo que trae la copia (va al log y a Axiom);
+//     de la base, con una línea demasiado larga, con una clave foránea rota) deja el objeto como
+//     estaba: sin aprovisionar, sin marca, y el error dice por qué, sin nada de lo que trae la copia
+//     (va al log y a Axiom);
 //   · en una central aprovisionada no toca nada;
 //   · con la marca de una restauración a medias no atiende nadie, tampoco al arrancar, y la siguiente
 //     restauración la vacía entera (también lo que la de antes dio por migrado) y termina;
@@ -20,6 +21,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import type { Migracion } from "../src/durableObjects/sqliteDelObjeto";
 import {
 	centralDePrueba,
@@ -193,6 +195,16 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 				),
 			/^copia_no_valida: la línea \d+ no se puede cargar: valor_no_literal \(carácter \d+\)$/,
 			["SELECT", "customer_email"],
+		],
+		[
+			"con una línea más larga que la de la fila más grande que admite un objeto",
+			(t) =>
+				conUnaFilaMas(
+					t,
+					`INSERT INTO "admin_audit" ("audit_id", "action", "detail", "at_ms") VALUES ('a', 'x', '${"x".repeat(CARACTERES_POR_LINEA)}', 1);`,
+				),
+			new RegExp(`^copia_no_valida: la línea \\d+ es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres$`),
+			[],
 		],
 		[
 			"con una clave foránea rota",

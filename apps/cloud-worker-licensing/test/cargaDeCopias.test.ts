@@ -13,13 +13,16 @@
 //     función, una subconsulta, varias filas, una columna que no es de la tabla, un número que SQLite
 //     guardaría como infinito…) hace inservible la copia: dice en qué línea y carácter y por qué, sin
 //     nada de lo que lleva, y no se ejecuta nada;
-//   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido.
+//   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido;
+//   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción
+//     sale entera, y una más larga que el tope hace inservible la copia en cuanto se pasa, sin
+//     esperar a su final.
 
 import { runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { cargarCopia } from "../src/durableObjects/cargaDeCopias";
-import { literalEnUnaLinea } from "../src/durableObjects/volcadoSql";
+import { CARACTERES_POR_LINEA, cargarCopia, lineasDe } from "../src/durableObjects/cargaDeCopias";
+import { literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "../src/durableObjects/volcadoSql";
 import { centralSinAprovisionar } from "./helpers/central";
 
 /** La tabla de prueba: `a` y `c` sin tipo, que guardan cada valor con el tipo con el que llega. */
@@ -280,4 +283,92 @@ describe("una línea de datos que no es exactamente una fila hace inservible la 
 			enT: 0,
 		});
 	});
+});
+
+describe("las líneas de una copia (lineasDe)", () => {
+	/** `texto`, comprimido con gzip, como llega de R2. */
+	const gzipDe = (texto: string) => new Blob([texto]).stream().pipeThrough(new CompressionStream("gzip"));
+
+	/** Las líneas que da `lineasDe`, o el mensaje con el que se para y las que ha dado antes. */
+	async function leer(cuerpo: ReadableStream<Uint8Array>, tope?: number) {
+		const dadas: string[] = [];
+		try {
+			for await (const linea of lineasDe(cuerpo, tope)) dadas.push(linea);
+			return { dadas };
+		} catch (error) {
+			return { dadas, error: String((error as Error).message) };
+		}
+	}
+
+	it("una línea de hasta el tope sale entera, aunque llegue en muchos trozos; la de un carácter más hace inservible la copia, y dice cuál", async () => {
+		const tope = 10_000;
+		const justa = "x".repeat(tope);
+		expect(await leer(gzipDe(`uno\n${justa}\ndos\n`), tope)).toEqual({ dadas: ["uno", justa, "dos"] });
+		expect(await leer(gzipDe(`uno\n${justa}\ndos\n${"y".repeat(tope + 1)}\ntres\n`), tope)).toEqual({
+			dadas: ["uno", justa, "dos"],
+			error: `copia_no_valida: la línea 4 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+		// También la última, sin su salto.
+		expect(await leer(gzipDe(`uno\n${"y".repeat(tope + 1)}`), tope)).toMatchObject({
+			error: `copia_no_valida: la línea 2 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+	});
+
+	it("una línea que no acaba nunca no se junta: en cuanto pasa del tope se deja de leer, y de pedir la copia", async () => {
+		// Un gzip hecho a mano que no se acaba: bloques sin comprimir de 4 KB de «x», ninguno el último.
+		// La descompresión del runtime pide lo que llega sin esperar a que se lea, así que, si no se
+		// cancela, se lo traga entero; para que el test no se coma la memoria, el origen se rompe a los
+		// 64 MiB.
+		const pedido = { bytes: 0, cancelado: false };
+		const datos = new Uint8Array(4096).fill(0x78);
+		let cabecera = true;
+		const gzip = new ReadableStream<Uint8Array>({
+			pull(c) {
+				if (cabecera) {
+					cabecera = false;
+					return c.enqueue(new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]));
+				}
+				if (pedido.bytes >= 64 * 1024 * 1024) return c.error(new Error("el origen se rompe a los 64 MiB"));
+				const bloque = new Uint8Array(5 + datos.length);
+				bloque.set([0, datos.length & 0xff, datos.length >> 8, ~datos.length & 0xff, (~datos.length >> 8) & 0xff]);
+				bloque.set(datos, 5);
+				pedido.bytes += datos.length;
+				c.enqueue(bloque);
+			},
+			cancel() {
+				pedido.cancelado = true;
+			},
+		});
+		const tope = 256 * 1024;
+		expect(await leer(gzip, tope)).toEqual({
+			dadas: [],
+			error: `copia_no_valida: la línea 1 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
+		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
+	});
+
+	it("la línea de la fila más grande que admite un objeto en producción cabe en el tope, escrita de cualquier forma", async () => {
+		// 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd): lo más que ocupa una fila, con todas sus columnas.
+		const fila = 8 * 1024 * 1024 + 34;
+		const peores: [string, SqlStorageValue][] = [
+			["en hexadecimal", "\n".repeat(fila)],
+			["unos bytes", new Uint8Array(fila).buffer],
+			["comillas dobladas", "'".repeat(fila)],
+			["comillas dobladas y los saltos que van con char(10)", "\n".repeat(40) + "'".repeat(fila - 40)],
+		];
+		// Lo que pueden sumar los nombres y los demás valores de una fila de hasta 100 columnas (lo más
+		// que admite una tabla de un objeto): cada nombre con sus comillas, su coma y un número.
+		const resto = 100 * (64 + 4 + 24 + 2);
+		for (const [que, valor] of peores) {
+			const linea = `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${literalEnUnaLinea(valor)});`;
+			expect(linea.length + resto, que).toBeLessThan(CARACTERES_POR_LINEA);
+		}
+		// Y sale entera por `lineasDe`, con el tope de verdad.
+		const copia = ["-- Migraciones: m1", `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${literalEnUnaLinea(peores[0][1])});`, "-- Fin de la copia: 1 filas en 1 tablas"];
+		const { dadas, error } = await leer(gzipDe(`${copia.join("\n")}\n`));
+		expect(error).toBeUndefined();
+		// Se comparan así, y no con un `toEqual` de las líneas, que pintaría 16 MiB al fallar.
+		expect(dadas.map((l, i) => [l.length, l === copia[i]])).toEqual(copia.map((l) => [l.length, true]));
+	}, 60_000);
 });

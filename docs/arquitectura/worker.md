@@ -210,8 +210,9 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   lejos. Por lo mismo, cambiar `JURISDICCION_DO` con negocios dados de alta es empezar de cero. En
   local y en los tests las dos van vacías: workerd no implementa jurisdicciones.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
-  `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, unos 2 MB por valor (uno de
-  3 MB se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por valor o por fila (8 MiB
+  y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún tiene unos 2 MB, y uno de 3 MB
+  se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
   de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
   más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo
@@ -1006,15 +1007,17 @@ central con datos malos no se restaura: [vuelve a un instante](#volver-a-un-inst
   datos se lee entera con la gramática cerrada del cargador (`INSERT INTO "<tabla>" ("<columna>", …)
   VALUES (<literal>, …);` y nada más, como la de [un negocio](#las-copias-de-la-base-de-cada-negocio-do-03)),
   y se ejecuta la sentencia que escribe él con lo leído (una línea que no se lee así, o de otra
-  tabla, la hace inservible); mira que esté entera (su línea del fin, con las mismas filas) y que no
-  deje ninguna clave foránea rota; aplica sobre sus datos las migraciones que le falten, y quita la
-  marca en la misma transacción que da la central por buena.
+  tabla, la hace inservible, y también una de más de 17 MiB, `CARACTERES_POR_LINEA`: la de la fila
+  más grande que admite un objeto ocupa 16 MiB y poco); mira que esté entera (su línea del fin, con
+  las mismas filas) y que no deje ninguna clave foránea rota; aplica sobre sus datos las migraciones
+  que le falten, y quita la marca en la misma transacción que da la central por buena.
 - **Si falla, como estaba**: vacía el objeto entero, marca incluida, y contesta
   `central_copia_inservible` con el motivo (`copia_no_encontrada`, `copia_no_valida`, `copia_cortada`,
   `copia_de_otra_version`, o que no se ha podido cargar, que va además a Sentry: `central.restaurar`).
   El motivo no lleva nada de la copia: de una línea que no se lee, su número, el carácter y un código
-  (`tabla_ajena`, `columna_desconocida`, `valor_no_literal`…); de unas filas que SQLite no acepta, sus
-  líneas, sus tablas y el código de SQLite, cuyo texto va sólo a Sentry, como causa.
+  (`tabla_ajena`, `columna_desconocida`, `valor_no_literal`…), o que es demasiado larga (`la línea N
+  es demasiado larga: pasa de 17825792 caracteres`); de unas filas que SQLite no acepta, sus líneas,
+  sus tablas y el código de SQLite, cuyo texto va sólo a Sentry, como causa.
 - **Si el objeto se reinicia a mitad**, al arrancar la marca sigue ahí: no atiende
   (`central_restauracion_a_medias`) ni se pone al día con sus migraciones, y la siguiente restauración
   empieza vaciándolo.
@@ -1190,9 +1193,10 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
 
 - **`restaurarDesdeCopia`** (`durableObjects/tenantHub.restaurar.ts`, con el cargador que comparte con
   la base central, `cargaDeCopias.ts`) lee la copia de R2 según llega,
-  descomprimida y por líneas, sin tenerla entera en memoria. Antes de tocar nada mira que la copia
-  sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí; si no,
-  `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
+  descomprimida y por líneas, sin tenerla entera en memoria; una línea de más de 17 MiB la hace
+  inservible en cuanto se pasa, sin juntarla entera (`copia_no_valida`). Antes de tocar nada mira que
+  la copia sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de
+  aquí; si no, `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
   carga las filas de la copia en tablas del negocio. De la copia no se ejecuta ningún texto: cada
   línea de datos se lee entera con una gramática cerrada (`INSERT INTO "<tabla>" ("<columna>", …)
   VALUES (<literal>, …);` y nada más, con columnas de esa tabla y los literales que escribe la copia;

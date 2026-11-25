@@ -6,9 +6,11 @@
 // migraciones que sabe poner su worker, qué tablas puede traer la copia y cómo se prepara la base.
 //
 // La copia se lee de R2 según llega (descomprimida y partida en líneas, sin tenerla entera en
-// memoria). El esquema lo ponen las migraciones del worker, no la copia: de ella sólo cuentan las
-// líneas de datos, las que empiezan por `INSERT INTO "`, y de ninguna se ejecuta su texto. Cada una
-// se lee entera con la misma gramática, sea del tamaño que sea (`LectorDeFilas`):
+// memoria), y una línea más larga que la de la fila más grande que admite un objeto la hace
+// inservible (`CARACTERES_POR_LINEA`). El esquema lo ponen las migraciones del worker, no la copia: de
+// ella sólo cuentan las líneas de datos, las que empiezan por `INSERT INTO "`, y de ninguna se
+// ejecuta su texto. Cada una se lee entera con la misma gramática, sea corta o larga
+// (`LectorDeFilas`):
 //
 //     INSERT INTO "<tabla>" ("<columna>", …) VALUES (<literal>, …);
 //
@@ -88,21 +90,59 @@ function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila):
  */
 const CARACTERES_POR_LOTE = 4 * 1024 * 1024;
 
-/** Las líneas de un gzip, de una en una, según llegan. */
-export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+/**
+ * Lo más largo que puede ser una línea de una copia, en caracteres. La fila más grande que admite el
+ * SQLite de un objeto en producción es de 8 MB (8 MiB y 34 bytes, `MAX_ROW_LENGTH` de workerd), y su
+ * línea ocupa como mucho dos veces sus bytes, más los nombres de su tabla y de sus columnas
+ * (`literalEnUnaLinea`): 16 MiB y unos KB. Una más larga no la ha escrito ninguna copia, y juntarla
+ * podría agotar la memoria del objeto, que es de 128 MB.
+ */
+export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
+
+/**
+ * Las líneas de un gzip, de una en una, según llegan. De la que no ha acabado se guardan sus trozos,
+ * y se juntan una vez, cuando llega su salto: un texto que creciera trozo a trozo se copiaría entero
+ * con cada uno (el gzip llega a trozos de 4 KB), y una línea de 16 MiB tardaría segundos en juntarse.
+ * Una de más de `tope` caracteres hace inservible la copia en cuanto se pasa, sin esperar a su final
+ * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests), y se deja de leer la copia: la
+ * descompresión del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con
+ * el resto.
+ */
+export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARACTERES_POR_LINEA): AsyncGenerator<string> {
 	const lector = cuerpo
 		.pipeThrough(new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>)
 		.pipeThrough(new TextDecoderStream())
 		.getReader();
-	let resto = "";
+	/** Los trozos de la línea que no ha acabado, y cuántos caracteres suman. */
+	let trozos: string[] = [];
+	let caracteres = 0;
+	/** Cuántas líneas se han dado: la que se está leyendo es la siguiente. */
+	let dadas = 0;
+	const demasiadoLarga = async () => {
+		await lector.cancel().catch(() => undefined);
+		return new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
+	};
 	for (;;) {
 		const { value, done } = await lector.read();
 		if (done) break;
-		const partes = (resto + value).split("\n");
-		resto = partes.pop() ?? "";
-		yield* partes;
+		const partes = value.split("\n");
+		const resto = partes.pop() ?? "";
+		for (const parte of partes) {
+			if (caracteres + parte.length > tope) throw await demasiadoLarga();
+			trozos.push(parte);
+			const linea = trozos.length === 1 ? parte : trozos.join("");
+			trozos = [];
+			caracteres = 0;
+			dadas++;
+			yield linea;
+		}
+		if (caracteres + resto.length > tope) throw await demasiadoLarga();
+		if (resto) {
+			trozos.push(resto);
+			caracteres += resto.length;
+		}
 	}
-	if (resto) yield resto;
+	if (trozos.length) yield trozos.join("");
 }
 
 /**
@@ -110,8 +150,8 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>): AsyncGenera
  * texto de más de 100 KB por llamada (SQLITE_TOOBIG), y un carácter de un texto de JavaScript son, como
  * mucho, 3 bytes en UTF-8: por debajo de esto, cabe seguro. Las filas van de varias en varias porque
  * cada llamada tiene su coste fijo (también la traza de Sentry, que envuelve el SQL del objeto): una a
- * una, restaurar tarda el doble. Una fila de una línea más larga que esto (puede llegar a 2 MB) va
- * sola, con sus textos y sus bytes como argumentos (`conArgumentos`).
+ * una, restaurar tarda el doble. Una fila de una línea más larga que esto (hasta los 8 MB que admite
+ * un objeto en producción) va sola, con sus textos y sus bytes como argumentos (`conArgumentos`).
  */
 const CARACTERES_POR_LLAMADA = Math.floor(100_000 / 3);
 

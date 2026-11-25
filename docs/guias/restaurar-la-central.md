@@ -81,7 +81,7 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 - Vacía el objeto, carga la copia entera de una vez, sin atender nada mientras tanto, y le aplica
   las migraciones que le falten. Contesta las filas y las tablas que han entrado y las migraciones.
 - **Si la copia no vale** (no existe, está cortada, es de una versión que este worker no sabe poner,
-  tiene una línea que no es una fila, deja una clave foránea rota…), contesta
+  tiene una línea que no es una fila o una de más de 17 MiB, deja una clave foránea rota…), contesta
   `central_copia_inservible` con el motivo, que no lleva nada de la copia, y el objeto se queda como
   estaba, sin aprovisionar: prueba con otra.
 - **Si se corta a mitad** (el objeto se reinicia), se queda con la marca de la restauración a medias y
@@ -181,6 +181,9 @@ copia ([worker.md](../arquitectura/worker.md#la-copia-diaria)):
   escribe él la sentencia. Una línea que empieza por `INSERT INTO "` y no se lee así hace inservible
   la copia (`copia_no_valida`, con su número, el carácter y un código: `tabla_ajena`,
   `columna_desconocida`, `valor_no_literal`…).
+- Ninguna línea de más de 17 MiB (`CARACTERES_POR_LINEA`): la de la fila más grande que admite un
+  objeto, de 8 MB, ocupa 16 MiB y poco. Una más larga hace inservible la copia (`copia_no_valida: la
+  línea N es demasiado larga`).
 - Las líneas que no empiezan por `INSERT INTO "` no se cargan: el esquema lo ponen las migraciones.
   Tampoco un `INSERT` sin comillas en la tabla, como los de `sqlite3 .dump`, que además no llevan las
   columnas: hay que convertirlo.

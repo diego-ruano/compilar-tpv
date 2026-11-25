@@ -6,7 +6,8 @@
 //   `COPIAS_NEGOCIOS` (el de los tests es local): sólo las tablas del negocio, en un volcado SQL
 //   que se lee sin nuestro código, y con las 30 más nuevas guardadas. Cada fila es una línea de unas
 //   dos veces la fila como mucho, y la copia vuelve igual a un objeto vacío (`restaurarDesdeCopia`),
-//   también con textos de más de mil saltos de línea y con la fila más grande que admite la base.
+//   también con textos de más de mil saltos de línea y con la fila más grande que admite la base en
+//   local (en producción admite 8 MB: `copiaDeFilasGrandes.node.test.ts`).
 // - La vuelta a un instante no existe en local (workerd: «does not implement point-in-time
 //   recovery»): lo que se prueba con la plataforma de verdad es que la ruta lo dice. El resto, con un
 //   doble de `Instantes` dentro del objeto: el orden de las llamadas, que la base queda cerrada
@@ -271,12 +272,13 @@ describe("DO-03 · la copia diaria", () => {
 		}
 	});
 
-	it("ida y vuelta: textos con más de mil saltos de línea, también la fila más grande que admite la base, vuelven iguales", async () => {
+	it("ida y vuelta: textos con más de mil saltos de línea, también la fila más grande que admite la base en local, vuelven iguales", async () => {
 		const t = "copia-ida-y-vuelta";
 		await stub(t).aprovisionar(t);
 		// Más saltos de los que caben escritos con `char(10)`: van en hexadecimal. Uno corto, que se carga
 		// con otras líneas; uno de más de 100 KB, que va con sus textos como argumentos; y 2 MB de saltos,
-		// casi lo más que admite una fila del SQLite de un objeto.
+		// casi lo más que admite una fila del SQLite de un objeto en local. En producción admite 8 MB, y
+		// esa fila se escribe y se lee en `copiaDeFilasGrandes.node.test.ts` y en `cargaDeCopias.test.ts`.
 		const notas = {
 			c1: `${"línea\n".repeat(1200)}fin`,
 			c2: `${"nota con 'comillas'\r\n".repeat(6000)}fin`,

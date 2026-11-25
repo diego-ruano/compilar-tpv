@@ -57,11 +57,15 @@ function nombresDeLasMigraciones(): string[] {
 	return MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
 }
 
-/** Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. */
+/**
+ * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
+ * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
+ */
 async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
 	try {
 		yield* lineas;
 	} catch (error) {
+		if (error instanceof CopiaInservible) throw error;
 		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
 	}
 }
