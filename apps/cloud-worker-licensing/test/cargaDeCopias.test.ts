@@ -10,8 +10,9 @@
 //     una llamada (100 KB), que va con sus textos como argumentos. También los textos con más saltos
 //     escritos con `char(10)` de los que admite el SQLite de un objeto en una expresión;
 //   · una línea de datos que no es exactamente una fila (otra sentencia detrás, un comentario, una
-//     función, una subconsulta, varias filas, una columna que no es de la tabla…) hace inservible la
-//     copia: dice en qué línea y carácter y por qué, sin nada de lo que lleva, y no se ejecuta nada;
+//     función, una subconsulta, varias filas, una columna que no es de la tabla, un número que SQLite
+//     guardaría como infinito…) hace inservible la copia: dice en qué línea y carácter y por qué, sin
+//     nada de lo que lleva, y no se ejecuta nada;
 //   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido.
 
 import { runInDurableObject } from "cloudflare:test";
@@ -160,7 +161,7 @@ describe("lo que ha escrito alguna vez una copia vuelve igual, con su tipo", () 
 		const valores: SqlStorageValue[] = [
 			null,
 			0, -3, 7, 1790000000123, 9007199254740991, -9007199254740991, 2 ** 53 + 2,
-			1e21, -1e21, 1e300, 1.5, -0.25, 0.1, 1e-7, -1.2345678901234566e-7, 5e-324, 1.7976931348623157e308, 12.5,
+			1e21, -1e21, 1e300, 1.5, -0.25, 0.1, 1e-7, -1.2345678901234566e-7, 5e-324, 1.7976931348623157e308, -1.7976931348623157e308, 12.5,
 			"", "x", "a'b", "''", "Café ☕ 🍺 «Ñandú»", "-- no es un comentario", "/* tampoco */", "'); DELETE FROM t; --",
 			"a||char(10)||b", "||char(13)||", "\uFEFFcon BOM delante",
 			"uno\r\ndos\rtres\ncuatro", "\n", "\r", "\r\n", "fin\n", "\nprincipio", "a\n\nb", "x\n".repeat(40) + "y",
@@ -240,6 +241,11 @@ describe("una línea de datos que no es exactamente una fila hace inservible la 
 		["un número en hexadecimal", fila("0x10", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "0x10"],
 		["un número con +", fila("+1", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "+1"],
 		["un exponente sin signo", fila("1e5", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "1e5"],
+		// SQLite los guardaría como infinito, que ninguna copia escribe y con el que la base ya no se puede copiar.
+		["un número que no cabe en un REAL", fila("1e+999", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "1e+999"],
+		["uno negativo que no cabe", fila("-1e+999", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "-1e+999"],
+		["uno que pasa justo del REAL más grande", fila("1.7976931348623159e+308", `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", "1.7976931348623159e+308"],
+		["un entero de 401 cifras", fila(`1${"0".repeat(400)}`, `'${DE_LA_COPIA}'`, "NULL", "NULL", "NULL"), "valor_no_literal", `1${"0".repeat(400)}`],
 		["unos bytes que no son hexadecimal", fila("1", `'${DE_LA_COPIA}'`, "NULL", "NULL", "X'0g'"), "valor_no_literal", "X'0g'"],
 		["unos bytes a medias", fila("1", `'${DE_LA_COPIA}'`, "NULL", "NULL", "X'abc'"), "valor_no_literal", "X'abc'"],
 		["un texto en hexadecimal que no es UTF-8", fila("1", "CAST(X'ff' AS TEXT)", `'${DE_LA_COPIA}'`, "NULL", "NULL"), "valor_no_literal", "CAST"],

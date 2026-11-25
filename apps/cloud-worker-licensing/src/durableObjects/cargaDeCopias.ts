@@ -113,9 +113,13 @@ const CIERRA = 0x29; // )
 const COMA = 0x2c; // ,
 
 /**
- * Un número: el signo menos si lo lleva, sin ceros de más a la izquierda, sus decimales y el exponente
- * con su signo. Así lo escribe `String(n)` de JavaScript (`-3`, `12.5`, `1e+21`, `5e-324`), y así se
- * escribe también un REAL entero con su `.0` (`5.0`), sin JavaScript de por medio.
+ * La forma de un número: el signo menos si lo lleva, sin ceros de más a la izquierda, sus decimales y
+ * el exponente con su signo. Así lo escribe `String(n)` de JavaScript (`-3`, `12.5`, `1e+21`,
+ * `5e-324`), y así se escribe también un REAL entero con su `.0` (`5.0`), sin JavaScript de por medio.
+ *
+ * La forma no basta: `1e+999` o un entero de 400 cifras también la tienen, y SQLite los guarda como
+ * infinito, que ninguna copia escribe (`literalEnUnaLinea` no tiene literal para él) y con el que la
+ * base ya no se podría copiar. Un número tiene que ser además finito (`Lectura.valor`).
  */
 const NUMERO = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]\d+)?/y;
 
@@ -208,7 +212,7 @@ class Lectura {
 	 * Un literal desde `i`, y deja `i` detrás. Es uno de éstos:
 	 *
 	 * - `NULL`;
-	 * - un número, como lo escribe `String(n)` (`NUMERO`);
+	 * - un número finito, como lo escribe `String(n)` (`NUMERO`);
 	 * - un texto entre comillas simples, con la comilla doblada dentro: `'Ana O''Neil'`;
 	 * - un texto con saltos de línea, entre paréntesis: sus trozos entre comillas, unidos por
 	 *   `||char(10)||` o `||char(13)||`, uno por salto y alguno: `('a'||char(13)||''||char(10)||'b')`.
@@ -251,7 +255,10 @@ class Lectura {
 		} else {
 			NUMERO.lastIndex = desde;
 			const numero = NUMERO.exec(this.linea);
-			if (numero) {
+			// Finito para JavaScript es finito para SQLite: lo que JavaScript redondea al REAL más grande,
+			// SQLite también. Al revés no siempre: uno justo por encima, que ninguna copia escribe, SQLite
+			// lo deja en el más grande y JavaScript lo lee infinito, y aquí no entra.
+			if (numero && Number.isFinite(Number(numero[0]))) {
 				this.i += numero[0].length;
 				return new Numero(numero[0]);
 			}
