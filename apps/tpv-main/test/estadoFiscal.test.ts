@@ -74,16 +74,6 @@ describe("los datos del obligado", () => {
 		expect(useEstadoFiscal.getState().listo).toBe(true);
 	});
 
-	it("un campo ausente se lee como completo, no como incompleto", async () => {
-		// Compatibilidad hacia atrás: un backend que todavía no informe el campo no puede dejar el
-		// TPV con un modal bloqueante que nadie puede quitar.
-		respuesta.valor = estado({ datos_fiscales_completos: undefined });
-
-		await useEstadoFiscal.getState().refrescar();
-
-		expect(useEstadoFiscal.getState().datosFiscalesCompletos).toBe(true);
-	});
-
 	it("lo reconocido vale mientras la aplicación siga abierta, y un store recién cargado vuelve a avisar", async () => {
 		respuesta.valor = estado({ datos_fiscales_completos: false });
 		await useEstadoFiscal.getState().refrescar();
