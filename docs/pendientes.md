@@ -25,7 +25,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
-| [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
 | [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
@@ -364,27 +363,6 @@ entrado, y entonces la ruta sigue con los avisos (`test/licenciaTraslado.test.ts
 Arreglo posible: que gastar el código y mover la licencia sean una sola operación de la central, o
 reconocer el reintento: con el código de este equipo ya gastado y una traza reciente hacia él,
 contestar `cambioDeEquipo: true` y avisar otra vez.
-
-### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
-
-- `/v1/login/correo-recuperacion/confirmar` (`correoRecuperacion.ts::confirmarCambioCorreo`) gasta el
-  código (`comprobarCodigo`, que acaba en `consumeEmailCode`) y, después, hace tres viajes sueltos a
-  la central: lee el correo de antes para avisarle (`correoDeRecuperacion`), cambia el correo
-  (`setTenantRecoveryEmail`) y lo vuelve a leer para contestar (`estado`). Si falla la lectura de antes o el
-  cambio, el código está gastado y el correo sigue siendo el de antes: hay que pedir otro. Si falla la
-  relectura, el correo ya ha cambiado pero la respuesta es un 503 (`onError`), y el reintento contesta
-  «Este código no es válido» (`invalid_code`: un código gastado no vuelve a valer,
-  `codigosPorCorreo.ts::comprobarCodigo`).
-- Al pedirlo (`/solicitar`), si la reserva del envío entra en la central pero su respuesta no vuelve,
-  la petición falla sin mandar el correo, y la siguiente choca con la espera entre códigos que ha puesto
-  esa reserva (`REENVIO_MIN_MS`, cinco minutos): «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
-  salido ninguno.
-
-Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar antes de gastar el código
-(`recuperarPin.ts::verificarCodigoPin`). Arreglo posible: leer aquí también el correo de antes antes
-de gastar el código, gastarlo y cambiar el correo en un solo lote, que la respuesta salga de lo que
-ya se sabe (el correo nuevo) y no de una relectura, y que la espera sólo cuente desde un envío que ha
-salido.
 
 ### EMPAREJAR-TOKEN · Recoger el token de una Handy son tres escrituras sueltas
 

@@ -34,6 +34,7 @@ import { sendPinChangedNoticeEmail, sendPinRecoveryCodeEmail } from "../licensin
 import { emailHint } from "../licensing/licensing.helpers";
 import {
 	anularCodigo,
+	codigoEnviado,
 	comprobarCodigo,
 	emitirCodigo,
 	fallo,
@@ -91,6 +92,7 @@ export async function solicitarCodigoPin(
 			"external",
 		);
 	}
+	await codigoEnviado(db, clave(ctx), emitido, ctx.ahora);
 
 	return {
 		status: 200,

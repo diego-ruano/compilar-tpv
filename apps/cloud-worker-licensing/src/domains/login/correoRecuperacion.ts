@@ -25,6 +25,7 @@ import { recortar } from "../../lib/texto";
 
 import type { Env } from "../../env";
 import {
+	consumeEmailCodeAndSetRecoveryEmail,
 	getLicenseByHash,
 	getTenantRecoveryEmail,
 	setTenantRecoveryEmail,
@@ -39,7 +40,9 @@ import { emailHint } from "../licensing/licensing.helpers";
 import { isValidEmail } from "../clientes/clientes.schemas";
 import {
 	anularCodigo,
-	comprobarCodigo,
+	codigoEnviado,
+	codigoNoValido,
+	comprobarSinGastar,
 	emitirCodigo,
 	fallo,
 	type RespuestaCodigo,
@@ -170,6 +173,7 @@ export async function solicitarCambioCorreo(
 			"external",
 		);
 	}
+	await codigoEnviado(db, clave(ctx), emitido, ctx.ahora);
 
 	return {
 		status: 200,
@@ -191,21 +195,38 @@ export async function confirmarCambioCorreo(
 	const l = await licenciaDelTenant(db, ctx);
 	if (!l.ok) return l.respuesta;
 
+	// CORREO-CONFIRMAR · A quién avisar se lee ANTES de tocar el código, como al recuperar el PIN
+	// (E7a-2): una lectura que falla no se lleva el código.
+	const anterior = await correoDeRecuperacion(db, l.lic);
+
 	// Sin sujeto esperado: el código lleva guardada la dirección que se pidió, y es ésa —no una que
 	// llegue ahora en el cuerpo— la que queda confirmada.
-	const comprobado = await comprobarCodigo(db, env, clave(ctx), ctx.codigo, ctx.ahora);
+	const comprobado = await comprobarSinGastar(db, env, clave(ctx), ctx.codigo, ctx.ahora);
 	if (!comprobado.ok) return comprobado.respuesta;
 
 	const nuevo = normalizar(comprobado.sujeto);
-	const anterior = await correoDeRecuperacion(db, l.lic);
-	const compra = normalizar(l.lic.customer_email);
+	const esElDeLaCompra = nuevo === normalizar(l.lic.customer_email);
 
-	// Gastar el código (arriba) y cambiar el correo no van en un lote (CORREO-CONFIRMAR, en
-	// docs/pendientes.md).
-	await setTenantRecoveryEmail(db, ctx.tenantId, nuevo === compra ? null : nuevo, ctx.ahora);
+	// Gastar el código y cambiar el correo, en un solo lote: entran los dos o ninguno, y si no entra,
+	// el mismo código vale al reintentar.
+	const gastado = await consumeEmailCodeAndSetRecoveryEmail(db, clave(ctx), {
+		codeHash: comprobado.huella,
+		email: esElDeLaCompra ? null : nuevo,
+		nowMs: ctx.ahora,
+	});
+	if (!gastado) return codigoNoValido();
 	avisarDelCambio(env, diferir, [anterior, l.lic.customer_email], nuevo);
 
-	return estado(db, l.lic);
+	// Lo que ya se sabe, sin volver a leerlo: una relectura que fallara contestaría un error con el
+	// correo ya cambiado, y el reintento, que el código no vale.
+	return {
+		status: 200,
+		body: {
+			ok: true,
+			emailHint: emailHint(esElDeLaCompra ? recortar(l.lic.customer_email ?? "") : nuevo),
+			esElDeLaCompra,
+		},
+	};
 }
 
 export async function usarCorreoDeLaCompra(

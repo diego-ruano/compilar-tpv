@@ -268,6 +268,163 @@ describe("correo de recuperación · lo que no se puede", () => {
 	});
 });
 
+/** Las sentencias de una llamada a la central: la de `ejecutar`, o las del lote. */
+function sentenciasDe(metodo: string, argumentos: unknown[]): string[] {
+	if (metodo === "ejecutar") return [(argumentos[0] as SentenciaEnlazada).sql];
+	if (metodo === "lote") return (argumentos[0] as SentenciaEnlazada[]).map((s) => s.sql);
+	return [];
+}
+
+/** La central del caso, que falla (sin hacer nada) en cada llamada con una sentencia que cumpla `falla`. */
+function centralQueFalla(central: CentralDePrueba, falla: (sql: string) => boolean): CentralDePrueba["db"] {
+	return centralInterceptada(central, async (metodo, argumentos, llamar) => {
+		if (sentenciasDe(metodo, argumentos).some(falla)) throw new Error("la base central no contesta");
+		return llamar();
+	}).db;
+}
+
+/**
+ * La central del caso, en la que falla lo que se lea del correo de recuperación después de haberlo
+ * cambiado: una respuesta que lo volviera a leer fallaría.
+ */
+function centralSinRelectura(central: CentralDePrueba): CentralDePrueba["db"] {
+	let cambiado = false;
+	return centralInterceptada(central, async (metodo, argumentos, llamar) => {
+		const sentencias = sentenciasDe(metodo, argumentos);
+		if (cambiado && sentencias.some(leeElCorreo)) throw new Error("la base central no contesta");
+		const r = await llamar();
+		if (sentencias.some(escribeElCorreo)) cambiado = true;
+		return r;
+	}).db;
+}
+
+const escribeElCorreo = (sql: string) => /\b(INSERT INTO|DELETE FROM)\s+tenant_recovery_emails\b/.test(sql);
+const leeElCorreo = (sql: string) => /\bSELECT\b[\s\S]*\bFROM\s+tenant_recovery_emails\b/.test(sql);
+
+// CORREO-CONFIRMAR: gastar el código y cambiar el correo entran juntos o no entra ninguno; a quién
+// avisar se lee antes de gastarlo, y la respuesta no vuelve a leer nada.
+describe("correo de recuperación · confirmar con la central fallando (CORREO-CONFIRMAR)", () => {
+	it("si el cambio no entra, el código no se gasta: el mismo vale al reintentar", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const codigo = e.ultimoCodigo();
+
+			const caida = centralQueFalla(e.central, escribeElCorreo);
+			await expect(
+				confirmarCambioCorreo(caida, e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo }, e.diferir),
+			).rejects.toThrow();
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBeNull();
+
+			const otra = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2_000 }), codigo }, e.diferir);
+			expect(otra.status).toBe(200);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			await Promise.all(e.avisos);
+		});
+	});
+
+	it("si no se puede leer a quién avisar, el código no se gasta", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const codigo = e.ultimoCodigo();
+
+			const caida = centralQueFalla(e.central, leeElCorreo);
+			await expect(
+				confirmarCambioCorreo(caida, e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo }, e.diferir),
+			).rejects.toThrow();
+
+			const otra = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2_000 }), codigo }, e.diferir);
+			expect(otra.status).toBe(200);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			await Promise.all(e.avisos);
+		});
+	});
+
+	it("la respuesta sale del correo nuevo, sin volver a leerlo: cambiado, no contesta un error", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const codigo = e.ultimoCodigo();
+
+			const r = await confirmarCambioCorreo(centralSinRelectura(e.central), e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo }, e.diferir);
+			expect(r.status).toBe(200);
+			const estado = await estadoCorreoRecuperacion(e.db, e.ctx());
+			expect(r.body).toEqual(estado.body);
+			expect(cuerpo(r).esElDeLaCompra).toBe(false);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			// Y avisa al de antes, que era el de la compra.
+			await Promise.all(e.avisos);
+			expect(e.correos.slice(1).map((c) => c.to)).toEqual([COMPRA]);
+		});
+	});
+
+	it("cambiado al de la compra, la respuesta lo dice sin volver a leer", async () => {
+		await escenario(async (e) => {
+			await e.cambiarA(NUEVO, T0);
+			// Con uno propio, pedir el de la compra sí manda el código, al de la compra.
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 10 * MINUTO }), correo: COMPRA.toUpperCase() });
+			const codigo = e.ultimoCodigo();
+
+			const r = await confirmarCambioCorreo(centralSinRelectura(e.central), e.env, { ...e.ctx({ ahora: T0 + 11 * MINUTO }), codigo }, e.diferir);
+			expect(r.status).toBe(200);
+			expect(r.body).toEqual((await estadoCorreoRecuperacion(e.db, e.ctx())).body);
+			expect(cuerpo(r).esElDeLaCompra).toBe(true);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBeNull();
+			await Promise.all(e.avisos);
+		});
+	});
+});
+
+// CORREO-CONFIRMAR: la espera entre códigos cuenta desde un envío que ha salido. Mientras sale, sólo
+// lo que puede tardar un envío: lo justo para que las peticiones a la vez no manden cada una el suyo
+// (AUD-42, «peticiones a la vez», más abajo).
+describe("correo de recuperación · la espera entre códigos (CORREO-CONFIRMAR)", () => {
+	it("si la reserva del código entra pero su respuesta no vuelve, el siguiente no espera cinco minutos", async () => {
+		await escenario(async (e) => {
+			const perdida = centralInterceptada(e.central, async (metodo, argumentos, llamar) => {
+				const r = await llamar();
+				if (sentenciasDe(metodo, argumentos).some((s) => /\bINSERT INTO email_codes\b/.test(s))) {
+					throw new Error("la respuesta de la base central no ha vuelto");
+				}
+				return r;
+			}).db;
+			await expect(solicitarCambioCorreo(perdida, e.env, { ...e.ctx(), correo: NUEVO })).rejects.toThrow();
+			expect(e.correos).toHaveLength(0);
+
+			const otra = await solicitarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2 * MINUTO }), correo: NUEVO });
+			expect(otra.status).toBe(200);
+			expect(e.correos.map((c) => c.to)).toEqual([NUEVO]);
+		});
+	});
+
+	it("uno que ha salido sí hace esperar cinco minutos desde que salió", async () => {
+		await escenario(async (e) => {
+			expect((await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO })).status).toBe(200);
+			const pronto = await solicitarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2 * MINUTO }), correo: NUEVO });
+			expect(pronto.status).toBe(429);
+			expect(pronto.body.error).toBe("espera_reenvio");
+			expect(pronto.body.message).toContain("3 minutos");
+			expect((await solicitarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 5 * MINUTO }), correo: NUEVO })).status).toBe(200);
+		});
+	});
+
+	it("si el correo sale y no se puede apuntar que ha salido, contesta que ha salido, y el código vale", async () => {
+		await escenario(async (e) => {
+			let reservado = false;
+			const db = centralInterceptada(e.central, async (metodo, argumentos, llamar) => {
+				const sentencias = sentenciasDe(metodo, argumentos);
+				if (reservado && sentencias.some((s) => /\bUPDATE email_codes\b/.test(s))) throw new Error("la base central no contesta");
+				const r = await llamar();
+				if (sentencias.some((s) => /\bINSERT INTO email_codes\b/.test(s))) reservado = true;
+				return r;
+			}).db;
+			const r = await solicitarCambioCorreo(db, e.env, { ...e.ctx(), correo: NUEVO });
+			expect(r.status).toBe(200);
+			const c = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo: e.ultimoCodigo() }, e.diferir);
+			expect(c.status).toBe(200);
+			await Promise.all(e.avisos);
+		});
+	});
+});
+
 /**
  * La base central del caso con una barrera en su stub: la primera sentencia de cada petición sobre
  * `email_codes` (la que decide si toca mandar otro código) se queda parada, ya ejecutada, hasta que
