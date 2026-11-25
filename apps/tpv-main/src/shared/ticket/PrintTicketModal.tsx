@@ -11,7 +11,7 @@
 //
 // Las dos se previsualizan con `TicketPaper`, que pinta el mismo payload que imprime Rust.
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { FacturaDelCobro, PrintTicketPayload_Serialize as PrintTicketPayload } from "@tpv/contracts";
 import { useToast } from "../toast";

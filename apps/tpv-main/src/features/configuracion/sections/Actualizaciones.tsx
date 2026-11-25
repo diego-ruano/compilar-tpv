@@ -10,7 +10,7 @@ import { commands } from "@tpv/client";
 // app. La INSTALACIÓN nunca es automática: la dispara el usuario cuando le conviene (p. ej. al
 // cerrar caja), porque reiniciar el TPV en mitad de un servicio sería peor que esperar.
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { DownloadCloud, RefreshCw } from "lucide-react";

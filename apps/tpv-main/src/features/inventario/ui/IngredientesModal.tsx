@@ -2,7 +2,7 @@
 // cantidades ni stock: sólo los nombres que luego se marcan en cada producto y se quitan o se
 // piden de más en una comanda. Se abre desde la cabecera de Inventario.
 
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, ChevronDown, Pencil, Plus, Trash2, X } from "lucide-react";
 
 import Modal from "./Modal";

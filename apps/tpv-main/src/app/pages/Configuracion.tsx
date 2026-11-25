@@ -1,7 +1,7 @@
 import { commands, toAppError } from "@tpv/client";
 // src/pages/Configuracion.tsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 

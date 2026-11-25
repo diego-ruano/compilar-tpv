@@ -4,8 +4,6 @@
 // la ventana de aviso (`warn`) o ya caducada dentro del margen del servidor (`expiry_grace`). No
 // bloquea: informa.
 
-import React from "react";
-
 import { cn } from "../../shared/lib/cn";
 import type { AvisoCaducidad as Aviso } from "./pantallaDeArranque";
 import { textoAvisoCaducidad } from "./textosLicencia";

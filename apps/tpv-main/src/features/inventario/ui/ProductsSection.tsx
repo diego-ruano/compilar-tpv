@@ -1,5 +1,4 @@
 // components/inventario/ProductsSection.tsx
-import React from "react";
 import Product from "../Product";
 import type { ProductoDisplay } from "../hooks/useInventario";
 

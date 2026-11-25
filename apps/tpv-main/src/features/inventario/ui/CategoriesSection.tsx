@@ -1,5 +1,4 @@
 // components/inventario/CategoriesSection.tsx
-import React from "react";
 import Category from "../Category";
 import type { CategoriaDisplay } from "../hooks/useInventario";
 

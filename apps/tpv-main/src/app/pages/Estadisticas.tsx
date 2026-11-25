@@ -1,5 +1,5 @@
 // src/pages/Estadisticas.tsx
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BarChart3, CloudDownload } from "lucide-react";
 
 import { useBackfillHistorico } from "../../shared/lib/backfillQueries";

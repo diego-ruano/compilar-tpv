@@ -1,5 +1,5 @@
 // src/features/estadisticas/MesasStats.tsx
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import Chart from "react-apexcharts";
 
 import { APEX_CHART_BASE } from "./apexBase";

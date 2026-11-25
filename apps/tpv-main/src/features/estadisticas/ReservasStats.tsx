@@ -1,5 +1,5 @@
 // src/features/estadisticas/ReservasStats.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toAppError } from "@tpv/client";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";

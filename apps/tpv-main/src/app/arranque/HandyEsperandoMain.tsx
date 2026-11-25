@@ -8,8 +8,6 @@
 // revocado el acceso, o la licencia del negocio no está activa. Ahí un spinner es mentira: hace
 // esperar a alguien por algo que no va a pasar, y le esconde lo único que lo arregla.
 
-import React from "react";
-
 import type { MotivoRechazo } from "../../shared/stores/useMainPresence";
 
 export default function HandyEsperandoMain({
