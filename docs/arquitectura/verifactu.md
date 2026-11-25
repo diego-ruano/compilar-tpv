@@ -107,7 +107,8 @@ eslabón anterior es la fila de `MAX(Orden)`.
 - **`Sistema_Json`** congela el bloque `SistemaInformatico` tal como iba: el registro de ayer sigue
   diciendo con qué versión se generó.
 - **`QR_Url`** guarda la URL de cotejo, aunque el papel no la imprima. Su base la decide
-  `Business_Settings.Verifactu_Entorno`, que no tiene pantalla en esta rama.
+  `Business_Settings.Verifactu_Entorno`, que en esta rama no se cambia (ni pantalla ni ajuste en
+  `config_patch_business_settings`): es siempre la de producción.
 
 ### `FechaOperacion`
 

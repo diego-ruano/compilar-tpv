@@ -54,6 +54,19 @@ esta rama no lo devuelve la reversión: [tickets.md](arquitectura/tickets.md) y 
 papel (`impresion.rs`, `printing.rs`, `printerApis.ts`, `PrintTicketModal.tsx`) describen un ticket
 sin el QR, y hay que volver a ponerlo en ellos.
 
+Tampoco devuelve lo que se quitó de `main` después por no tener uso sin Veri\*factu, y que la
+reversión vuelve a usar; hay que volver a ponerlo al traer la rama:
+
+- La prop `solo` de `AvisoInterruptores`, con la que la pantalla Fiscal enseñaba sólo su
+  interruptor (M-076).
+- El destino `ver_fiscal` de las notificaciones (`features/notificaciones/acciones.ts`), al que
+  llevan los avisos de envío a la AEAT (M-077).
+- `Entorno::es_pruebas` y el campo `verifactu_entorno` de `BusinessSettingsPatch`, con su rama en
+  `SqliteConfiguracionRepository::patch_business` y en el schema del worker
+  (`configuracion.schemas.ts`) (M-082). Sin `es_pruebas` la reversión no compila; sin el campo
+  compila, pero el cambio de entorno de `Fiscal.tsx` lo rechazan `deny_unknown_fields` y el
+  `.strict()` del worker.
+
 Con él vuelve lo que estaba pendiente allí:
 
 - **La identidad del productor**: `PRODUCTOR_NIF` está vacío y sin él no se remite. Falta saber si
