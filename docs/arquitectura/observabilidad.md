@@ -566,13 +566,21 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
   está sin aprovisionar, averiada o con algo a medias, y `pnpm central:estado` dice qué
   ([restaurar-la-central.md](../guias/restaurar-la-central.md)). En Sentry, lo mismo desde dentro del
   objeto: `central.migracion` (una migración que no entra), `central.pragmas` (alguien cambió a mano las
-  claves foráneas o los CHECK) y `central.restaurar` (una copia que no se ha podido cargar). Uno con
-  `rechazo` también necesita a alguien: la plataforma no ha dicho por qué, o es un fallo del programa
-  dentro del objeto, que está en Sentry con su causa.
+  claves foráneas o los CHECK), `central.restaurar` (una copia que no se ha podido cargar),
+  `central.vuelta` (la plataforma no ha aceptado una vuelta a un instante, y no se ha pedido) y
+  `central.vuelta_pedida` (la vuelta se ha pedido, pero no ha quedado en R2 que se pidió:
+  `pnpm central:copias` la enseña sin `pedida`). Uno con `rechazo` también necesita a alguien: la
+  plataforma no ha dicho por qué, o es un fallo del programa dentro del objeto, que está en Sentry con
+  su causa.
 - **La copia de la central**: su latido (`BETTERSTACK_HEARTBEAT_COPIAS_URL`) deja de sonar si no se
   sube; `cron.backup` en Sentry dice por qué, y también avisa cuando la copia pasa de las filas que se
-  restauran de una vez (CENTRAL-RESTAURAR). Y un `central_administrada` con un `resultado` que no es
-  `ok` (ni `preparada`, que va antes de reiniciar) es una administración de la central que no ha salido.
+  restauran de una vez (CENTRAL-RESTAURAR). Y un `central_administrada` cuyo `resultado` no es `ok` ni
+  uno de los de paso (`empieza`, `preparada`, `reinicia`, que salen también cuando todo va bien) es una
+  administración de la central que no ha salido. Uno de paso sin ningún resultado detrás es una orden
+  que se ha cortado antes de saber cómo acababa (una llamada al objeto que no vuelve sí deja el suyo:
+  `sin_respuesta`, o `central_vuelta_sin_comprobar` al reiniciar), y cómo ha quedado la central lo dice
+  `pnpm central:estado`. Un `central_sin_vuelta_preparada` tras un `--reiniciar` de una vuelta que ya
+  se había aplicado no es un fallo: no ha reiniciado nada.
 - **Una base que necesita a alguien**: cualquier `base_llena` o `migracion_fallida`. También llegan a
   Sentry (`tenant_db.full`, `tenant_db.migration`).
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
