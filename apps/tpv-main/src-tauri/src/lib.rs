@@ -460,8 +460,9 @@ pub(crate) struct Sesion {
     /// Identidad de la ficha de trabajador para comandas y tareas propias (RI-22).
     pub id_trabajador: Option<String>,
     pub rol: String,
-    /// Diagnóstico: desde cuándo está abierta la sesión que autorizó algo.
-    #[allow(dead_code)]
+    /// Cuándo se abrió (ms). Con `id_usuario` identifica la sesión: la autorización guardada
+    /// (PERM-CACHE) sólo vale para la misma, y `autorizacion()` descarta la respuesta de una
+    /// consulta que termina después de un logout o de un cambio de usuario.
     pub iniciada_en: i64,
 }
 
