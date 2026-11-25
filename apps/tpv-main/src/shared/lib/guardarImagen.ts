@@ -2,7 +2,6 @@ import { commands } from "@tpv/client";
 
 
 const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
-export const FORMATOS_IMAGEN = "image/jpeg,image/png,.jpg,.jpeg,.png";
 
 function validarImagen(file: File): void {
     if (!file.size || file.size > MAX_IMAGEN_BYTES) throw new Error("La imagen debe pesar como máximo 5 MB.");
