@@ -3932,17 +3932,19 @@ mod tests_exenciones_del_gate {
 
     /// REV-26: lo registrado es lo invocable, así que lo que no se invoca no se registra.
     ///
-    /// Había trece comandos en el `generate_handler!` que ningún sitio del frontend ni del E2E
-    /// llamaba por su nombre. No es sólo limpieza: **todo lo registrado es alcanzable por el IPC**,
-    /// y el modelo de amenaza de §14 asume que quien tiene la máquina delante puede invocarlo. Dos
-    /// de ellos eran de verdad incómodos: `tpv_server_signed_headers` devolvía la firma de
-    /// cualquier petición **sin pasar por ningún gate** —mientras su hermano `tpv_server_post_json`
-    /// sí exige Administrador para `/v1/pair/…` y `/v1/device/…`, o sea que era la vuelta a esa
-    /// esquina—, y `cobrar_venta_rapida` era un segundo camino de cobro de barra, no idempotente y
-    /// sin nadie que lo usara.
+    /// No es sólo limpieza: **todo lo registrado es alcanzable por el IPC**, y el modelo de amenaza
+    /// de §14 asume que quien tiene la máquina delante puede invocarlo. Algunos de los retirados eran
+    /// de verdad incómodos: `tpv_server_signed_headers` devolvía la firma de cualquier petición
+    /// **sin pasar por ningún gate** —mientras su hermano `tpv_server_post_json` sí exige
+    /// Administrador para `/v1/pair/…` y `/v1/device/…`, o sea que era la vuelta a esa esquina—, y
+    /// `cobrar_venta_rapida` era un segundo camino de cobro de barra, no idempotente y sin nadie que
+    /// lo usara.
     ///
-    /// Esto vigila los dos que importan. El resto se fue con ellos y lo cubre
-    /// `scripts/check-comandos-tauri.mjs`, que rompe si el frontend invoca algo que no está.
+    /// Esto vigila que no vuelvan los retirados, cada uno con su porqué. Que lo que se invoca exista
+    /// lo da el propio registro (`collect_commands!` en `command_builder`): de él salen las funciones
+    /// de `@tpv/client` y los nombres que invoca el E2E (`nombresComandos`), así que un comando que
+    /// no está no compila, y CI comprueba con `generate-types --check` y el typecheck que lo generado
+    /// está al día.
     #[test]
     fn los_comandos_retirados_no_vuelven_por_la_puerta_de_atras() {
         // Sólo el registro, no el fichero entero: si no, este propio test —que nombra los
