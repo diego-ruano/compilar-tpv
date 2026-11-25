@@ -67,15 +67,15 @@ export async function centralDePrueba(nombre: string = nombreNuevo()): Promise<C
 }
 
 /**
- * Corre `fn` dentro del objeto de la central. Con un stub pedido aquí: el de `central.stub` es del
- * contexto en el que se creó, y dentro de otro Durable Object (una prueba que corre en su TenantHub)
- * no se puede usar.
+ * Corre `fn` dentro del objeto de la central, con su `state` y la instancia. Con un stub pedido aquí:
+ * el de `central.stub` es del contexto en el que se creó, y dentro de otro Durable Object (una prueba
+ * que corre en su TenantHub) no se puede usar.
  */
 function enElObjeto<R>(
 	central: Pick<CentralDePrueba, "stub">,
-	fn: (state: DurableObjectState) => R | Promise<R>,
+	fn: (state: DurableObjectState, objeto: unknown) => R | Promise<R>,
 ): Promise<R> {
-	return runInDurableObject(env.BaseCentral.get(central.stub.id), (_objeto, state) => fn(state));
+	return runInDurableObject(env.BaseCentral.get(central.stub.id), (objeto, state) => fn(state, objeto));
 }
 
 /**
@@ -141,8 +141,8 @@ export async function conDobleDeInstantes(
 	opciones: { alReiniciar?: (state: DurableObjectState) => void } = {},
 ): Promise<void> {
 	const { alReiniciar = vuelto } = opciones;
-	await runInDurableObject(central.stub, (objeto, state) => {
-		(objeto as unknown as { instantes: unknown }).instantes = {
+	await enElObjeto(central, (state, objeto) => {
+		(objeto as { instantes: unknown }).instantes = {
 			marcadorActual: async () => (llamadas.push("actual"), "m-actual"),
 			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), "m-destino"),
 			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), "m-deshacer"),
@@ -163,8 +163,8 @@ export async function conCopiasDentro(
 	central: Pick<CentralDePrueba, "stub">,
 	sustituto: (real: R2Bucket, state: DurableObjectState) => unknown,
 ): Promise<void> {
-	await runInDurableObject(central.stub, (objeto, state) => {
-		const conEntorno = objeto as unknown as { env: Record<string, unknown> };
+	await enElObjeto(central, (state, objeto) => {
+		const conEntorno = objeto as { env: Record<string, unknown> };
 		conEntorno.env = { ...conEntorno.env, COPIAS: sustituto(conEntorno.env.COPIAS as R2Bucket, state) };
 	});
 }
