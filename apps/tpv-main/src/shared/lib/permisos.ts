@@ -14,21 +14,8 @@ import { esError } from "@tpv/client";
 /** El rol privilegiado. Espejo de `ADMIN` en `apps/tpv-main/src-tauri/src/lib.rs`. */
 export const ROL_ADMIN = "Administrador";
 
-/** Espejo de `CAMARERO` en `apps/tpv-main/src-tauri/src/lib.rs`. */
-export const ROL_CAMARERO = "Camarero";
-
 export function esAdmin(role: string | null | undefined): boolean {
     return role === ROL_ADMIN;
-}
-
-/**
- * ¿Entra en Cuentas? El administrador, entero; el camarero, sólo a los cobros y sus bajas
- * (reimprimir, devolver, dar de baja un error), que es lo que pasa a mitad de servicio sin el
- * encargado delante. Gastos, cierre de caja, facturas con NIF y exportar siguen siendo del
- * administrador.
- */
-export function entraEnCuentas(role: string | null | undefined): boolean {
-    return role === ROL_ADMIN || role === ROL_CAMARERO;
 }
 
 /**
