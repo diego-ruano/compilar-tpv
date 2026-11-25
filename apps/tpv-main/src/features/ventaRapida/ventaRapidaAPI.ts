@@ -12,15 +12,12 @@ import { commands } from "@tpv/client";
 import type {
     CategoriaRow,
     ComandaBarraRow,
-    DestinatarioInput,
     Dinero,
     IndexRow,
     LineaComandaRow,
     ProductoRow,
     VerTicketsDetalleRow,
     VrAddLineaComandaInput,
-    VrLineaAnadida,
-    VrCobrarFraccionadoInput,
     VrCreateComandaBarraInput,
 } from "@tpv/contracts";
 
@@ -33,10 +30,6 @@ export type VrAddLineaComandaResult = {
     idDetalle: string | null;
     /** El precio que se le ha puesto a la línea: el del catálogo, no el de la carta en caché (RI-27). */
     precioUnitario: Dinero;
-};
-
-export type VrCobrarFraccionadoResult = {
-    ok: boolean;
 };
 
 export type VrBootstrapResult = {
@@ -175,42 +168,6 @@ export async function vrUpdateNotaDetalle(
             id_detalle: idDetalle,
             nota,
         });
-}
-
-export async function vrCobrarFraccionado(argsInput: {
-    idComanda: string;
-    metodo: "Tarjeta" | "Efectivo";
-    importeTotal: Dinero;
-    detalles: string[];
-    /** El id del cobro, generado al encolarlo: repetir la llamada con él no cobra dos veces. */
-    idPago: string;
-    /**
-     * FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe pasa
-     * del límite de la simplificada y entonces no hay alternativa.
-     *
-     * Ausente = ticket normal (`F2`). Si el importe pasa del límite y no va, el backend rechaza el
-     * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
-     */
-    destinatario?: DestinatarioInput;
-}): Promise<VrCobrarFraccionadoResult> {
-    // RI-52: un fallo llega tal cual a quien llama, que deshace el marcado y enseña su message.
-    // Antes se buscaba «insufficient_stock» dentro del texto, y el cobro de la Main no lo
-    // produce nunca: vender sin stock no se bloquea (lo que falta sale del stock suelto).
-    const args: VrCobrarFraccionadoInput = {
-        id_pago: argsInput.idPago,
-        id_comanda: argsInput.idComanda,
-        metodo: argsInput.metodo,
-        importe_total: argsInput.importeTotal,
-        // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
-        // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
-        detalles: argsInput.detalles.map((v) => v.trim()).filter((s) => s.length > 0),
-        destinatario: argsInput.destinatario,
-    };
-    // Devuelve el número del ticket, pero la pantalla no lo necesita: el ticket se pide por el
-    // pago, cuyo id ya se conoce (RI-29).
-    await commands.vrCobrarFraccionado(args);
-
-    return { ok: true };
 }
 
 export async function vrDeleteComandaIfSafe(
