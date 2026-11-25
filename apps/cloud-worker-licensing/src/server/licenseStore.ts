@@ -1,11 +1,13 @@
 // src/server/licenseStore.ts
 //
 // Lo que el Worker lee y escribe en la base central (control-plane) sentencia a sentencia: las
-// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Lo que tiene
-// que entrar entero (el canje, el cobro y su reversión, lo que la administración hace con una
-// licencia) son operaciones de la central y vive en `server/central/operaciones/`, que corre dentro
-// de su objeto; las sentencias que comparten las dos partes salen de allí. Las reglas (¿está
-// caducada? ¿avisa? ¿bloquea?) NO están aquí: son de `licensing.helpers.ts` (`computeLicenseState`).
+// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Dos
+// sentencias fijas que tienen que entrar juntas van en un lote (el traslado de la Main y su traza,
+// `reassignMainDevice`). Lo que tiene que entrar entero y decide por el camino (el canje, el cobro y
+// su reversión, lo que la administración hace con una licencia) son operaciones de la central y vive
+// en `server/central/operaciones/`, que corre dentro de su objeto; las sentencias que comparten las
+// dos partes salen de allí. Las reglas (¿está caducada? ¿avisa? ¿bloquea?) NO están aquí: son de
+// `licensing.helpers.ts` (`computeLicenseState`).
 //
 // La estructura de esta base sólo la cambian sus migraciones (`server/central/migraciones/`).
 //
@@ -18,7 +20,8 @@ import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
-import type { Sql } from "../lib/sql";
+import type { Base, Sql } from "../lib/sql";
+import { CentralNoDisponible } from "./central/cliente";
 import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
 import {
 	addMonths,
@@ -29,6 +32,7 @@ import {
 	LICENCIA_POR_ID,
 	type LicenciaNueva,
 } from "./central/operaciones/licencias";
+import { laCentralNoAtiende } from "./central/sinLaCentral";
 
 export type LicenseRow = {
 	license_id: string;
@@ -389,27 +393,55 @@ export async function activateLicenseFirstTime(
 	return Number((r as any)?.rowsAffected ?? 0) > 0 ? expiresAt : null;
 }
 
-/** Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría. */
+/**
+ * Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría, en un solo lote: entran las
+ * dos o ninguna (E7a-1). Vuelve cuando el traslado ha entrado, y la ruta sigue con los avisos (al
+ * `TenantHub` y al titular). Lanza si no ha entrado o no se sabe, y la ruta no avisa de nada.
+ *
+ * Un viaje que no vuelve con su respuesta (`CentralNoDisponible`) puede haber entrado: la plataforma
+ * da el mismo fallo cuando la respuesta se pierde por el camino. Lo dice la traza, cuyo `swap_id`
+ * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado. Si no está
+ * cuando se mira, o la central tampoco contesta a esa lectura, lanza el fallo del viaje; si aun así
+ * había entrado, la licencia queda en el equipo nuevo con su traza y sin los avisos, y el reintento
+ * de ese equipo ya no es un traslado (`cambioDeEquipo: false`).
+ */
 export async function reassignMainDevice(
-	db: Sql,
+	db: Base,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
 ): Promise<void> {
 	const now = Date.now();
+	const swapId = crypto.randomUUID();
 
-	await exec(
-		db,
-		`UPDATE licenses SET main_device_id=?, updated_at_ms=? WHERE license_id=?;`,
-		[args.toDeviceId, now, args.licenseId],
-	);
-
-	await exec(
-		db,
-		`
+	try {
+		await db.batch([
+			{
+				sql: `UPDATE licenses SET main_device_id=?, updated_at_ms=? WHERE license_id=?;`,
+				args: [args.toDeviceId, now, args.licenseId],
+			},
+			{
+				sql: `
     INSERT INTO license_device_swaps (swap_id, license_id, from_device_id, to_device_id, at_ms)
     VALUES (?, ?, ?, ?, ?);
     `,
-		[crypto.randomUUID(), args.licenseId, args.fromDeviceId, args.toDeviceId, now],
-	);
+				args: [swapId, args.licenseId, args.fromDeviceId, args.toDeviceId, now],
+			},
+		]);
+	} catch (error) {
+		if (!(error instanceof CentralNoDisponible) || !(await hayTrazaDelTraslado(db, swapId, error))) throw error;
+	}
+}
+
+/**
+ * ¿Está la traza `swapId`, o sea, ha entrado su traslado? Si la central tampoco contesta a esto, no se
+ * sabe: lanza `falloDelViaje`, el del lote. Cualquier otro fallo de la lectura sale tal cual.
+ */
+async function hayTrazaDelTraslado(db: Sql, swapId: string, falloDelViaje: unknown): Promise<boolean> {
+	try {
+		const r = await exec(db, `SELECT 1 AS si FROM license_device_swaps WHERE swap_id = ?;`, [swapId]);
+		return r.rows.length > 0;
+	} catch (e) {
+		throw laCentralNoAtiende(e) ? falloDelViaje : e;
+	}
 }
 
 type LicensePaymentKind = "issue" | "renewal";

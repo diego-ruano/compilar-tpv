@@ -8,12 +8,16 @@
 //
 // Lo que se fija es lo que haría que esto dejara de ser seguro sin que nada fallara a la vista:
 // que un código valga dos veces, en otro equipo o para otro usuario; que los intentos no se agoten;
-// que se guarde en algo reversible; y que el botón sirva para bombardear el buzón del titular.
+// que se guarde en algo reversible; y que el botón sirva para bombardear el buzón del titular. Y que
+// un fallo de la central no gaste el código sin que el PIN se pueda restablecer ni sin avisar al
+// titular: la central se ve a través de su stub (`centralInterceptada`), por donde se le hace fallar
+// un viaje.
 
 import { describe, it, expect } from "vitest";
 
-import { centralDePrueba } from "./helpers/central";
-import type { ClienteCentral } from "../src/server/central/cliente";
+import { centralDePrueba, centralInterceptada, desvio, type Atender } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import { CentralNoDisponible, type ClienteCentral } from "../src/server/central/cliente";
 import {
 	solicitarCodigoPin,
 	verificarCodigoPin,
@@ -55,11 +59,14 @@ type Escenario = {
 	) => Promise<RespuestaCodigo>;
 	avisos: Promise<unknown>[];
 	romperCorreo: (roto: boolean) => void;
+	/** Cambia lo que contesta la central (`desvio`); con `null`, vuelve a dejarlo pasar. */
+	desviar: (atender: Atender | null) => void;
 };
 
 /** Una licencia activada en la Main, en una base central propia. */
 async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
-	const { db } = await centralDePrueba();
+	const { atender, desviar } = desvio();
+	const { db } = centralInterceptada(await centralDePrueba(), atender);
 
 	const correos: Correo[] = [];
 	let correoRoto = false;
@@ -112,12 +119,31 @@ async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
 			verificarCodigoPin(db, env as any, { ...ctx(extra), codigo }, (p) => avisos.push(p)),
 		avisos,
 		romperCorreo: (roto) => (correoRoto = roto),
+		desviar,
 	});
 }
 
 /** Un código de 6 cifras que seguro no es `bueno`. */
 function otroCodigo(bueno: string): string {
 	return bueno === "000000" ? "111111" : "000000";
+}
+
+/**
+ * Un `Atender` que rechaza, como la plataforma ante un fallo pasajero, el primer viaje que lleve una
+ * sentencia que case con `patron`, sin que llegue a la central. Lo demás pasa.
+ */
+function fallaUnaVez(patron: RegExp): Atender {
+	let pendiente = true;
+	return (metodo, argumentos, llamar) => {
+		const sentencias = (
+			metodo === "ejecutar" ? [argumentos[0]] : metodo === "lote" ? argumentos[0] : []
+		) as SentenciaEnlazada[];
+		if (!pendiente || !sentencias.some((s) => patron.test(s.sql))) return llamar();
+		pendiente = false;
+		return Promise.reject(
+			Object.assign(new Error("Durable Object reset because its code was updated."), { retryable: true }),
+		);
+	};
 }
 
 describe("recuperar el PIN · el código", () => {
@@ -346,6 +372,37 @@ describe("recuperar el PIN · aislamiento entre negocios", () => {
 			const sinSecreto = { ...e.env, LICENSE_JWT_SECRET: "" };
 			expect((await solicitarCodigoPin(e.db, sinSecreto, e.ctx())).status).toBe(500);
 			expect(e.correos).toHaveLength(0);
+		});
+	});
+});
+
+describe("recuperar el PIN · si la central falla", () => {
+	it.each([
+		{ que: "la licencia", patron: /FROM licenses WHERE license_key_hash/ },
+		{ que: "el correo de recuperación", patron: /FROM tenant_recovery_emails/ },
+	])("al leer $que del aviso, el código sigue valiendo, y al repetir se avisa al titular", async ({ patron }) => {
+		await escenario(async (e) => {
+			await solicitarCodigoPin(e.db, e.env, e.ctx());
+			const codigo = e.ultimoCodigo();
+
+			e.desviar(fallaUnaVez(patron));
+			// La ruta lo contesta como cualquier central que no atiende: un 503 que la Main puede repetir.
+			const fallo = await e.verificar(codigo, { ahora: T0 + 1_000 }).then(
+				() => null,
+				(error: unknown) => error,
+			);
+			e.desviar(null);
+			expect(fallo).toBeInstanceOf(CentralNoDisponible);
+			expect(fallo).toMatchObject({ code: "hub_unavailable", status: 503 });
+			expect(e.avisos).toHaveLength(0);
+
+			// El código no se ha gastado: el mismo vale, y el titular se entera.
+			const r = await e.verificar(codigo, { ahora: T0 + 2_000 });
+			expect(r.status).toBe(200);
+			expect(e.avisos).toHaveLength(1);
+			await Promise.all(e.avisos);
+			expect(e.correos.map((c) => c.to)).toEqual([CORREO, CORREO]);
+			expect(e.correos[1].subject).toContain("PIN");
 		});
 	});
 });

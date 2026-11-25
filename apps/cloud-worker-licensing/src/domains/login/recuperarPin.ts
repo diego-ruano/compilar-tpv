@@ -110,6 +110,12 @@ export async function verificarCodigoPin(
 	/** Para el aviso al titular, que no puede retener la respuesta (`waitUntil` en la ruta). */
 	diferir: (p: Promise<unknown>) => void,
 ): Promise<RespuestaCodigo> {
+	// A quién va el aviso se lee ANTES de comprobar el código (E7a-2): después de gastarlo no queda
+	// nada que leer, así que una lectura que falla no se lleva el código, y el aviso sale siempre que
+	// el código vale.
+	const lic = await getLicenseByHash(db, ctx.licHash);
+	const correo = lic ? await correoDeRecuperacion(db, lic) : "";
+
 	const comprobado = await comprobarCodigo(
 		db,
 		env,
@@ -122,8 +128,6 @@ export async function verificarCodigoPin(
 
 	// Aviso al negocio: si no ha sido él, que se entere hoy. Es entrega, no autorización, así que
 	// no retiene la respuesta ni la hace fallar.
-	const lic = await getLicenseByHash(db, ctx.licHash);
-	const correo = lic ? await correoDeRecuperacion(db, lic) : "";
 	if (correo) diferir(sendPinChangedNoticeEmail(env, { to: correo }));
 
 	return { status: 200, body: { ok: true } };
