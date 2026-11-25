@@ -194,7 +194,7 @@ Están en la primera migración de la base central,
 |---|---|
 | `reserva_web_claves` | `clave TEXT PRIMARY KEY` (`rw_` + 128 bits aleatorios en base64url), `tenant_id TEXT NOT NULL` → `tenants` `ON DELETE CASCADE`, `created_at_ms`, `revoked_at_ms`. Índice por `tenant_id`. Una activa por negocio |
 | `reserva_web_dominios` | `tenant_id`, `origen TEXT` (esquema + host + puerto, p. ej. `https://www.barpepe.es`), `created_at_ms`, `PRIMARY KEY (tenant_id, origen)` |
-| `email_sends` | Columna nueva `tipo TEXT NOT NULL DEFAULT 'pedido'` (`pedido` o `reserva_web`) y el índice `idx_email_sends_to_ts (to_email, sent_at_ms)` para el tope por destinatario. El tope de 100 diarios de los pedidos cuenta sólo los suyos. Los correos públicos llevan `device_id = 'web'`, y los de la agenda, `agenda`. **Antes de desplegar la fase 5** |
+| `email_sends` | La columna `tipo TEXT NOT NULL DEFAULT 'pedido'` (`pedido` o `reserva_web`) y el índice `idx_email_sends_to_ts (to_email, sent_at_ms)` para el tope por destinatario. El tope de 100 diarios de los pedidos cuenta sólo los suyos. Los correos públicos llevan `device_id = 'web'`, y los de la agenda, `agenda` |
 
 La administración va por `/v1/admin/reservas-web/:tenantId` (token de administración, todo a
 `admin_audit`; `domains/reservas_web/admin.routes.ts`) y por `pnpm reservas-web:ver`,
