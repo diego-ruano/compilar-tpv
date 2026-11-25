@@ -265,8 +265,8 @@ export type CopiaGuardadaDeLaCentral = {
 	marcador: string | null;
 	/**
 	 * De antes de volver a un instante: cuándo se le pidió aquella vuelta a la plataforma (ISO), si
-	 * consta (`….pedida`). Si no consta, no llegó a pedirse, salvo que el objeto se reiniciara justo
-	 * entre pedirla y apuntarlo.
+	 * consta (`….pedida`). Si no consta, no se sabe (C2): o no llegó a pedirse, o se pidió y la constancia
+	 * no llegó a R2 (se avisa a Sentry), o el objeto se reinició justo entre pedirla y apuntarlo.
 	 */
 	pedida: string | null;
 };

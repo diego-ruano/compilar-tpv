@@ -622,7 +622,7 @@ async function centralCopias() {
 	);
 	if (r.copias.some((c) => c.marcador)) {
 		console.log("  marcador: cómo estaba la central al hacerla, antes de volver a un instante; volver a él deshace aquella vuelta.");
-		console.log("  pedida: cuándo se le pidió aquella vuelta a la plataforma. Sin hora, no consta que se pidiera.");
+		console.log("  pedida: cuándo se le pidió aquella vuelta a la plataforma. Sin hora, no consta, y no se sabe si se pidió: la constancia se apunta después y puede no haber llegado.");
 		console.log("  Las que acaban en .marcador no son copias: la central no se podía copiar, y va sólo su marcador.\n");
 	}
 	if (r.hayMas) console.log("  (hay más copias de las que caben en la lista)\n");
@@ -702,7 +702,8 @@ function esDeLaRuta(data, status) {
  * - Si la ruta dice que no la ha pedido (`esDeLaRuta`, sin `deshacer`), nada.
  * - Si no hay respuesta de la ruta, no se sabe si se ha pedido. Lo dice R2: su marcador va antes de
  *   pedirla, y en cuanto la plataforma la tiene, la constancia (`pedida` en `central:copias`). Sin
- *   nada de esa hora, no se pidió, y no hay nada que deshacer. Al aplicar una ya preparada, basta con
+ *   nada de esa hora, no se pidió, y no hay nada que deshacer; con el marcador y sin la constancia, no
+ *   se sabe (C2), y se dice cómo comprobarlo y con qué deshacerla. Al aplicar una ya preparada, basta con
  *   repetir la orden, que no vuelve dos veces.
  */
 const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
@@ -737,8 +738,13 @@ const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 		"      ha aplicado, y se deshace volviendo a su marcador; si la tiene preparada, da la orden que la aplica. Si",
 		"      se perdiera su marcador, se vuelve al instante de la hora de su clave (antes-de-volver-<hora>, con «:»",
 		"      en vez de «-» entre las horas, los minutos y los segundos): es cuándo cerró la central el worker.",
-		"    · Si la hay sin hora en «pedida», no consta que se pidiera: casi siempre es que no llegó a pedirse, y no hay",
-		"      nada que deshacer.",
+		"    · Si la hay sin hora en «pedida», el resultado es DESCONOCIDO: puede que no llegara a pedirse, o que se pidiera",
+		"      y la constancia no llegara a R2 (se avisa a Sentry, central.vuelta_pedida) o el objeto se reiniciara justo",
+		"      entre pedirla y apuntarlo. Compruébalo: si pnpm central:estado tiene la vuelta preparada, da la orden que la",
+		"      aplica; si no tiene ninguna, mira si a la central le falta lo que se escribió entre el instante al que volvía y",
+		"      la hora de su clave (pnpm license:list, por ejemplo). Si no le falta, no se ha aplicado: no hay nada que",
+		"      deshacer. Si le falta, se ha aplicado, y se deshace con:",
+		"        pnpm central:volver -- --marcador <el marcador de esa fila> --si",
 		"    No repitas la vuelta sin mirarlo: si se ha aplicado, volvería otra vez y se llevaría lo escrito desde entonces.",
 		"    (Si la orden repetía una vuelta que ya estaba preparada, su antes-de-volver es la de entonces.)",
 	].join("\n");

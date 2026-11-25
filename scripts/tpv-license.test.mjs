@@ -193,6 +193,13 @@ for (const [que, contestar] of [
 		assert.ok(r.salida.includes("· Si no la hay, no se ha pedido: no hay nada que deshacer."), r.salida);
 		assert.ok(r.salida.includes("· Si la hay con hora en «pedida», se ha pedido."), r.salida);
 		assert.ok(r.salida.includes("No repitas la vuelta sin mirarlo"), r.salida);
+		// Sin «pedida» no se sabe (C2): la constancia puede no haber llegado a R2 con la vuelta pedida. Dice
+		// cómo comprobarlo y la orden que la deshace con su marcador, sin darla por no pedida.
+		assert.ok(r.salida.includes("· Si la hay sin hora en «pedida», el resultado es DESCONOCIDO"), r.salida);
+		assert.match(r.salida, /pnpm central:estado/);
+		assert.match(r.salida, /si a la central le falta lo que se escribió entre el instante al que volvía y\s+la hora de su clave/);
+		assert.ok(r.salida.includes("pnpm central:volver -- --marcador <el marcador de esa fila> --si"), r.salida);
+		assert.doesNotMatch(r.salida, /casi siempre es que no llegó a pedirse/);
 		// Si se perdiera el marcador, el instante es el de la clave, que pone el worker (V-OP-3).
 		assert.match(r.salida, /se vuelve al instante de la hora de su clave \(antes-de-volver-<hora>/);
 		// Sin nada en R2 no se ha pedido: volver a justo antes sería una vuelta de más.
