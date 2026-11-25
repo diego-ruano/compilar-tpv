@@ -442,8 +442,9 @@ de Axiom y, si no es carga ni un fallo pasajero, Sentry; si ha rechazado la cons
 - Una operación con **20 intentos** contados (`MAX_SUBIDA_ATTEMPTS`) o un rechazo permanente se
   **aparta** (`outbox_mark_failed`, SYNC-20): sale de la cola, se cuenta aparte de lo pendiente
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
-  Sentry el diagnóstico (`op_id`, el comando y cuántas se han reparado, `replicacion.rs::fallo_subida`;
-  nunca las sentencias ni el error), al usuario la consecuencia. Ver
+  Sentry el diagnóstico (`op_id`, el comando y cuántas filas se han encolado para repararlas,
+  `reparadas`, que no dice que ya estén igualadas; `replicacion.rs::fallo_subida`; nunca las
+  sentencias ni el error), al usuario la consecuencia. Ver
   la reparación abajo.
 - El camino normal es el aviso `despertar` del motor nativo, que da cada escritura al confirmarse
   (`configure_outbox_notifier`): el motor sube lo pendiente en el momento. Además, para los
