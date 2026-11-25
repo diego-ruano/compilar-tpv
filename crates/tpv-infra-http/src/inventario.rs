@@ -1,7 +1,7 @@
 //! Adaptador HTTP del repositorio de inventario (dominio `/v1/inventario` del worker).
 //!
-//! `get_producto` y `producto_detalle` no tienen endpoint propio: se derivan del detalle de
-//! producto (`GET /productos/:id`), que devuelve `{ producto, alergenos }`.
+//! `get_producto` no tiene endpoint propio: sale del detalle de producto (`GET /productos/:id`),
+//! que devuelve `{ producto, alergenos }`.
 
 use std::sync::Arc;
 
@@ -11,8 +11,8 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_contracts::inventario::{
-    AlergenoInvDto, AlergenoMiniDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
-    ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
+    AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
+    ProductDetailResponse, ProductoBaseDto, ProductoListDto, ProveedorMiniDto,
 };
 use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
@@ -34,14 +34,6 @@ impl HttpInventarioRepository {
         self.client
             .get_json(&format!("/v1/inventario/productos/{id_producto}"))
             .await
-    }
-}
-
-fn alergeno_mini(a: AlergenoInvDto) -> AlergenoMiniDto {
-    AlergenoMiniDto {
-        id_alergeno: a.id_alergeno,
-        nombre: a.nombre,
-        ruta_imagen: a.ruta_imagen,
     }
 }
 
@@ -135,14 +127,6 @@ impl InventarioRepository for HttpInventarioRepository {
 
     async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse> {
         self.detalle(id_producto).await
-    }
-
-    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
-        let resp = self.detalle(id_producto).await?;
-        Ok(resp.producto.map(|producto| ProductoDetalleDto {
-            producto,
-            alergs: resp.alergenos.into_iter().map(alergeno_mini).collect(),
-        }))
     }
 
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {

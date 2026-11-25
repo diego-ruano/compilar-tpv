@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use tpv_contracts::inventario::{
     AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
-    ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
+    ProductoBaseDto, ProductoListDto, ProveedorMiniDto,
 };
 use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_domain::inventario::{
@@ -26,7 +26,6 @@ pub trait InventarioRepository: Send + Sync {
     async fn list_alergenos(&self) -> AppResult<Vec<AlergenoInvDto>>;
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>>;
     async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse>;
-    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>>;
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>>;
 
     // ── Escrituras ──

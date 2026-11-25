@@ -3,7 +3,7 @@
 use tpv_contracts::inventario::{
     AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto,
     CreateLoteInput, GuardarCategoriaIngredienteInput, GuardarIngredienteInput, InventarioResumenResponse,
-    LoteDto, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto,
+    LoteDto, ProductDetailResponse, ProductoListDto,
     ProveedorMiniDto, SummaryArgs, UpdateLoteInput,
     UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
@@ -40,19 +40,8 @@ pub async fn list_alergenos(repo: &R) -> AppResult<Vec<AlergenoInvDto>> {
     repo.list_alergenos().await
 }
 
-pub async fn get_producto(repo: &R, id_producto: String) -> AppResult<Option<ProductoBaseDto>> {
-    repo.get_producto(&id_producto).await
-}
-
 pub async fn get_product_detail(repo: &R, id_producto: String) -> AppResult<ProductDetailResponse> {
     repo.product_detail(&id_producto).await
-}
-
-pub async fn get_producto_detalle(
-    repo: &R,
-    id_producto: String,
-) -> AppResult<Option<ProductoDetalleDto>> {
-    repo.producto_detalle(&id_producto).await
 }
 
 pub async fn list_lotes_by_producto(repo: &R, id_producto: String) -> AppResult<Vec<LoteDto>> {

@@ -15,8 +15,8 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_domain::ingredientes::{CategoriaIngredienteGuardar, IngredienteGuardar};
 use tpv_contracts::inventario::{
-    AlergenoInvDto, AlergenoMiniDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
-    ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoResumenDto,
+    AlergenoInvDto, CatalogoIngredientesDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
+    ProductDetailResponse, ProductoBaseDto, ProductoListDto, ProductoResumenDto,
     ProveedorMiniDto,
 };
 use tpv_domain::cantidad::redondear_cantidad;
@@ -466,36 +466,6 @@ impl InventarioRepository for SqliteInventarioRepository {
             });
         }
         Ok(ProductDetailResponse { producto, alergenos })
-    }
-
-    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
-        let db = self.db.read().await;
-        let Some(producto) = fetch_producto(&db, id_producto).await? else {
-            return Ok(None);
-        };
-        let mut rows = db
-            .query(
-                r#"
-                SELECT a.ID_Alergeno, a.Nombre, a.Ruta_Imagen
-                FROM Producto_Alergenos pa
-                JOIN Alergenos a ON a.ID_Alergeno = pa.ID_Alergeno
-                WHERE pa.ID_Producto=?1
-                ORDER BY a.Nombre ASC;
-                "#,
-                vec![Value::Text(id_producto.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-        let mut alergs = Vec::new();
-        while let Some(row) = rows.next().await.map_err(db_err)? {
-            let g = |idx: i32| row.get_value(idx).map_err(db_err);
-            alergs.push(AlergenoMiniDto {
-                id_alergeno: s(g(0)?),
-                nombre: s(g(1)?),
-                ruta_imagen: v_string(g(2)?),
-            });
-        }
-        Ok(Some(ProductoDetalleDto { producto, alergs }))
     }
 
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {
