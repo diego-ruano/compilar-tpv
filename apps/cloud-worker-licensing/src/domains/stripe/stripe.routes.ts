@@ -305,12 +305,14 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// Con `ya_cumplida`, las licencias son las de otra entrega, salvo que sean exactamente las que se
 	// han preparado aquí: entonces la primera llamada llegó a confirmarse antes de cortarse
 	// (`emitirEnLaCentral`), y la emisión es ésta.
+	//
+	// Aquí no se mira si falta el correo de claves (`avisarSiFaltaElCorreoDeClaves`): la lectura de
+	// arriba, con la misma consulta, no encontró la sesión cumplida, así que el cobro de la otra entrega
+	// acaba de entrar y esa entrega sigue en curso, mandando su correo. Ese cobro nunca tiene más de
+	// `CORREO_DE_CLAVES_MAX_MS`, así que el aviso no podría salir.
 	const ids = preparadas.map((u) => u.licenseId);
 	const deEstaEntrega = hecho.licenseIds.length === ids.length && hecho.licenseIds.every((id, i) => id === ids[i]);
-	if (!deEstaEntrega) {
-		await avisarSiFaltaElCorreoDeClaves(db, sessionId);
-		return { accion: "ya_cumplida", license_ids: hecho.licenseIds };
-	}
+	if (!deEstaEntrega) return { accion: "ya_cumplida", license_ids: hecho.licenseIds };
 
 	const emailSent = await sendLicenseKeysEmail(env, {
 		to: email,
@@ -335,7 +337,7 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 const CORREO_DE_CLAVES_MAX_MS = 5 * 60_000;
 
 /**
- * Una entrega que encuentra la sesión ya cumplida no manda el correo con las claves: las de otra
+ * Una entrega que encuentra la sesión ya cumplida al empezar no manda el correo con las claves: las de otra
  * entrega no las tiene en claro. Si la primera entrega se cortó después de que su cobro entrara (su
  * respuesta se perdió, o falló al mandar o al apuntar el correo, y Stripe la repitió), el correo no
  * consta como entregado y nadie lo va a repetir: Stripe recibe ahora su 200. Eso se avisa en Sentry,
