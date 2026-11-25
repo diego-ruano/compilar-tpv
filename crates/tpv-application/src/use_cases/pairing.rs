@@ -39,10 +39,6 @@ pub fn device_identity(svc: &dyn PairingService) -> AppResult<DeviceIdentity> {
     svc.device_identity()
 }
 
-pub fn firmar_hello(svc: &dyn PairingService, mode: &str, nonce: &str) -> AppResult<FirmaDispositivo> {
-    svc.firmar_hello(mode, nonce)
-}
-
 pub fn firmar_emparejamiento(svc: &dyn PairingService, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
     if args.pair_code.len() != 6 || !args.pair_code.bytes().all(|b| b.is_ascii_digit()) {
         return Err(AppError::validation("El código debe tener seis cifras"));
@@ -63,10 +59,6 @@ pub fn handy_set_token(svc: &dyn PairingService, args: HandySetTokenArgs) -> App
     let token = requerido(&args.token, "Falta el token de la Handy.")?;
     let tenant_id = requerido(&args.tenant_id, "Falta el negocio de la Handy.")?;
     svc.handy_set_token(&token, &tenant_id)
-}
-
-pub fn handy_clear_token(svc: &dyn PairingService) -> AppResult<()> {
-    svc.handy_clear_token()
 }
 
 pub fn handy_get_tenant(svc: &dyn PairingService) -> AppResult<Option<String>> {
