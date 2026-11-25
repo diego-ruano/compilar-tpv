@@ -117,7 +117,7 @@ exhaustiva (`GRAVEDAD`: un código nuevo no compila hasta tener la suya) y lo cu
 |---|---|---|---|---|
 | `programa` | `internal`, `repository`, `tenant_migration_altered`, `bootstrap_too_large` | `error!` | Sí | Sí, desde la Webview |
 | `entorno` | `external`, `main_offline`, `backup_corrupt` | `warn!` | Sí | No |
-| `normal` | los de respuesta esperada: validación, PIN, permisos, licencia… | `info!` | No | No |
+| `normal` | los de respuesta esperada: validación, PIN, permisos, licencia, la vinculación rechazada o caducada (`pair_rejected`, `pair_code_expired`)… | `info!` | No | No |
 | no se cuenta | `not_approved` (la respuesta del sondeo mientras se vincula una Handy) | — | — | — |
 
 - **Va a Rust siempre**, con `telemetria_fallo_de_comando` (sin sesión: también cuenta lo de antes del

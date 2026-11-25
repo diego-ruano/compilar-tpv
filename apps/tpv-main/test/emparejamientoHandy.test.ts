@@ -30,7 +30,13 @@ function crearDobles() {
 		respuestaToken: { tenantId: "t1", token: "jwt" } as Record<string, unknown>,
 		pendientesAntesDeAprobar: 2,
 		errorAlConsultar: null as unknown,
+		/** EMPAREJAR-ESPERA: lo que contestan las primeras consultas, una cada una, antes que lo demás. */
+		fallosPasajeros: [] as unknown[],
 		consultas: [] as Record<string, unknown>[],
+		/** Cuándo llegó cada consulta, en el reloj de Vitest. */
+		horasDeConsulta: [] as number[],
+		/** Lo que la espera ha ido diciendo de las consultas que fallan (`null`: la nube vuelve a contestar). */
+		avisos: [] as (string | null)[],
 		claims: [] as Record<string, unknown>[],
 		cancelaciones: [] as Record<string, unknown>[],
 			/** Se ejecuta justo antes de contestar a una consulta: sirve para cancelar «mientras vuelve». */
@@ -57,6 +63,8 @@ function crearDobles() {
 			}
 			if (ruta === "/v1/pair/fetch-token") {
 				estado.consultas.push(cuerpo);
+				estado.horasDeConsulta.push(Date.now());
+				if (estado.fallosPasajeros.length > 0) throw estado.fallosPasajeros.shift();
 				if (estado.errorAlConsultar) throw estado.errorAlConsultar;
 				if (estado.consultas.length <= estado.pendientesAntesDeAprobar) {
 					throw { code: "not_approved", message: "Emparejamiento pendiente de aprobación" };
@@ -73,6 +81,9 @@ function crearDobles() {
 		sigueVivo: () => estado.vivo,
 		alQuedarPendiente: (p) => {
 			estado.pendiente = p;
+		},
+		alCambiarElAviso: (aviso) => {
+			estado.avisos.push(aviso);
 		},
 	};
 	return { estado, deps };
@@ -161,14 +172,78 @@ h1`);
 		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS);
 	});
 
-	it("un error que no es «pendiente de aprobación» corta en el acto y no guarda nada", async () => {
-		const { estado, deps } = crearDobles();
-		estado.errorAlConsultar = { code: "external", message: "El código de vinculación ha caducado" };
-		const resultado = arrancar(deps);
-		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS * 5);
+	it("el rechazo de la Main y el código caducado cortan en el acto y no guardan nada", async () => {
+		for (const code of ["pair_rejected", "pair_code_expired", "conflict", "not_found", "device_revoked"]) {
+			const { estado, deps } = crearDobles();
+			estado.errorAlConsultar = { code, message: `fallo ${code}` };
+			const resultado = arrancar(deps);
+			await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS * 5);
 
-		expect((await resultado).error).toEqual(estado.errorAlConsultar);
-		expect(estado.consultas).toHaveLength(1);
+			expect((await resultado).error, code).toEqual(estado.errorAlConsultar);
+			expect(estado.consultas, code).toHaveLength(1);
+			expect(estado.tokenGuardado, code).toBeNull();
+		}
+	});
+
+	// EMPAREJAR-ESPERA: un 503 de la central o del worker, un 429 del filtro por IP o un corte de red
+	// terminaban la espera, y quien vinculaba tenía que volver a pulsar «Vincular» con la Main
+	// esperando a aprobar.
+	it("un fallo pasajero (la red, un 503, un 429, un 5xx) no corta la espera, y la aprobación entra", async () => {
+		const { estado, deps } = crearDobles();
+		estado.fallosPasajeros = [
+			{ code: "external", message: "La nube está atendiendo demasiadas peticiones. Espera unos segundos y vuelve a intentarlo." },
+			{ code: "external", message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto." },
+			{ code: "internal", message: "Error interno" },
+			{ code: "main_offline", message: "No hay ningún TPV principal conectado" },
+		];
+		// Las cuatro consultas que fallan cuentan: la quinta ya trae el token.
+		estado.pendientesAntesDeAprobar = 4;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS);
+
+		expect(await resultado).toEqual({ valor: { tenantId: "t1", token: "jwt", deviceId: "h1" }, error: null });
+		expect(estado.consultas).toHaveLength(5);
+		expect(estado.tokenGuardado).toEqual({ token: "jwt", tenant_id: "t1" });
+	});
+
+	it("mientras la nube falla, espacia las consultas; en cuanto contesta, vuelve a cada 1,5 s", async () => {
+		const { estado, deps } = crearDobles();
+		const pasajero = { code: "external", message: "sin red" };
+		estado.fallosPasajeros = [pasajero, pasajero, pasajero];
+		estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
+		const inicio = Date.now();
+		void arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS - ESPERA_ENTRE_CONSULTAS_MS);
+
+		const entre = estado.horasDeConsulta.map((h, i) => h - (i === 0 ? inicio : estado.horasDeConsulta[i - 1]!));
+		const B = ESPERA_ENTRE_CONSULTAS_MS;
+		expect(entre.slice(0, 5)).toEqual([B, 2 * B, 4 * B, 8 * B, B]);
+		estado.vivo = false;
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS);
+	});
+
+	it("dice que la nube no contesta mientras falla, y lo retira cuando vuelve a contestar", async () => {
+		const { estado, deps } = crearDobles();
+		estado.fallosPasajeros = [{ code: "external", message: "No se ha podido conectar con el servidor." }];
+		estado.pendientesAntesDeAprobar = 2;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS);
+
+		expect((await resultado).valor).toBeTruthy();
+		expect(estado.avisos[0]).toContain("No se ha podido conectar con el servidor.");
+		expect(estado.avisos[0]).toContain("Se sigue esperando");
+		expect(estado.avisos[estado.avisos.length - 1]).toBeNull();
+	});
+
+	it("si el código caduca con la nube sin contestar, lo dice, y el código se da por caducado", async () => {
+		const { estado, deps } = crearDobles();
+		estado.errorAlConsultar = { code: "external", message: "No se ha podido conectar con el servidor." };
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS + 20 * ESPERA_ENTRE_CONSULTAS_MS);
+
+		const { error } = await resultado;
+		expect(error).toMatchObject({ code: "pair_code_expired" });
+		expect((error as Error).message).toContain("No se ha podido conectar con el servidor.");
 		expect(estado.tokenGuardado).toBeNull();
 	});
 
@@ -182,6 +257,8 @@ h1`);
 
 		const { error } = await resultado;
 		expect(error).toBeInstanceOf(Error);
+		// Lo mismo que si la nube contestara que el código ha caducado: la pantalla lo da por gastado.
+		expect(error).toMatchObject({ code: "pair_code_expired" });
 		expect((error as Error).message).toContain("caducado");
 		expect(estado.consultas.length).toBe(CADUCA_EN_MS / ESPERA_ENTRE_CONSULTAS_MS);
 		expect(estado.tokenGuardado).toBeNull();

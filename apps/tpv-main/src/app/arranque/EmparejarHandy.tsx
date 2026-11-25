@@ -22,9 +22,17 @@ export default function EmparejarHandy({
 	/** Al selector de modo, sin tocar el vínculo guardado (AUD-23). */
 	onVolver: () => void;
 }) {
-	const { estado, ocupado, error, huella } = emparejamiento;
+	const { estado, ocupado, error, aviso, codigoGastado, huella } = emparejamiento;
 	const [contenidoQr, setContenidoQr] = useState("");
 	const [codigoManual, setCodigoManual] = useState("");
+
+	// EMPAREJAR-ESPERA: la Main ha rechazado el código o ha caducado. Ya no vale, así que se vacía para
+	// que no se vuelva a mandar; con cualquier otro fallo se queda, y «Vincular» lo reintenta.
+	useEffect(() => {
+		if (!codigoGastado) return;
+		setContenidoQr("");
+		setCodigoManual("");
+	}, [codigoGastado]);
 
 	// El lector de QR con la cámara, sólo en móvil. Lo leído sigue el mismo camino que pegarlo.
 	const conCamara = puedeEscanear();
@@ -233,6 +241,7 @@ export default function EmparejarHandy({
 										<p className="mt-1 text-xs text-fg-muted">
 											Código <span className="font-mono font-bold text-fg">{estado.pairCode}</span>
 										</p>
+										{aviso ? <p className="mt-1 text-xs text-fg">{aviso}</p> : null}
 									</div>
 									{/* Sin esto, un código equivocado dejaba la pantalla esperando hasta que caducara. */}
 									<Button variant="secondary" size="sm" onClick={emparejamiento.cancelar}>

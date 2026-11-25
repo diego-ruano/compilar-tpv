@@ -49,6 +49,10 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	factura_completa_requerida: "factura_completa_requerida",
 	reserva_solapada: "reserva_solapada",
 	usuario_inactivo: "usuario_inactivo",
+	// EMPAREJAR-ESPERA: lo que termina la espera de la Handy. Lo demás que no es `not_approved` (la red,
+	// un 503, un 429) lo sigue esperando.
+	pair_rejected: "pair_rejected",
+	pair_code_expired: "pair_code_expired",
 	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
 	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
 	escritura_solo_en_main: "permiso_denegado",
@@ -146,6 +150,8 @@ const CODIGOS: Record<ErrorCode, true> = {
 	factura_completa_requerida: true,
 	reserva_solapada: true,
 	usuario_inactivo: true,
+	pair_rejected: true,
+	pair_code_expired: true,
 };
 
 export function esCodigoDelCatalogo(valor: unknown): valor is ErrorCode {
@@ -186,6 +192,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	invalid_pair_secret: "El QR no es válido. Vuelve a escanearlo o escribe el código a mano.",
 	pair_code_not_found:
 		"Ese código de vinculación no existe. Revisa las cifras o genera uno nuevo en el TPV principal.",
+	// El mismo texto que la Main (`tpv_contracts::errors::PAIR_CODE_EXPIRED`).
 	pair_code_expired: "El código de vinculación ha caducado. Genera uno nuevo en el TPV principal.",
 	pair_code_used: CODIGO_USADO,
 	already_used: CODIGO_USADO,
@@ -208,6 +215,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	too_many_attempts: "Demasiados intentos fallidos. Espera un poco antes de volver a intentarlo.",
 	// AUD-36: lo que puede escribir el negocio en la nube en una hora (`tenantHub.presupuesto.ts`).
 	presupuesto_agotado: "Este negocio ha guardado demasiados cambios en la nube en la última hora. Vuelve a intentarlo dentro de un rato.",
+	// El mismo texto que la Main (`tpv_contracts::errors::PAIR_REJECTED`).
 	pair_rejected: "El TPV principal ha rechazado la vinculación. Si es un error, genera un código nuevo en el TPV principal.",
 
 	// Autorización del dispositivo

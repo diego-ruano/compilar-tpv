@@ -75,6 +75,17 @@ describe("el registro de los fallos de comandos", () => {
         expect(contados).toHaveLength(0);
     });
 
+    it("el rechazo de la vinculación o su código caducado son respuestas esperadas (EMPAREJAR-ESPERA)", () => {
+        registrar(fallo("tpv_server_post_json", "pair_rejected"));
+        registrar(fallo("tpv_server_post_json", "pair_code_expired"));
+
+        expect(contados.map((c) => [c.code, c.gravedad, c.mensaje])).toEqual([
+            ["pair_rejected", "normal", null],
+            ["pair_code_expired", "normal", null],
+        ]);
+        expect(aSentry).toHaveLength(0);
+    });
+
     it("el fallo del propio registro no se cuenta: sería un bucle", () => {
         registrar(fallo("telemetria_fallo_de_comando", "internal"));
 

@@ -1171,7 +1171,20 @@ export type ErrorCode =
  *  Tiene código propio porque la UI **hace algo distinto**: cierra la sesión y el login dice por
  *  qué. Con `PermisoDenegado` la aplicación se quedaba en una pantalla de error sin salida.
  */
-"usuario_inactivo";
+"usuario_inactivo" |
+/**
+ *  La Main ha **rechazado la vinculación** de la Handy.
+ *
+ *  Tiene código propio porque la espera de la Handy **hace algo distinto** (EMPAREJAR-ESPERA):
+ *  deja de preguntar y da el código por gastado. Lo demás que no es `NotApproved` y no es
+ *  definitivo (la red, un 503, un 429) lo sigue esperando.
+ */
+"pair_rejected" |
+/**
+ *  El **código de vinculación ha caducado**: la espera de la Handy termina y la pantalla pide un
+ *  código nuevo (EMPAREJAR-ESPERA).
+ */
+"pair_code_expired";
 
 export type EstadoColaImagenes = {
 	pendientes: number,

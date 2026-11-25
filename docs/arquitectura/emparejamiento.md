@@ -37,8 +37,18 @@ y la Main aprueba.
 4. La Handy pregunta por el token (`/fetch-token`) firmando el reto con su clave y la acción
    `PAIR_FETCH`. **El dispositivo se da de alta en `devices` al recoger el token**, no al aprobar, y es
    entonces cuando la Main recibe el aviso. Pregunta cada 1,5 s mientras le contesten `not_approved`,
-   hasta que caduca el código; cualquier otro fallo termina la espera, también un 503 o un 429
-   pasajeros ([EMPAREJAR-ESPERA](../pendientes.md#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429)).
+   hasta que caduca el código (`emparejamiento.ts::emparejarHandy`). **Sólo termina con lo que no va
+   a cambiar** (`TERMINALES`, EMPAREJAR-ESPERA): el rechazo de la Main (`pair_rejected`) y el código
+   caducado (`pair_code_expired`), que tienen su código en el catálogo; el código que no es de este
+   equipo (`not_found`), gastado o con el reto inservible (`conflict`), o la nube que no deja entrar al
+   equipo o a su negocio. Lo demás es pasajero —sin red, un 503 de la central o del worker, un 429 del
+   filtro por IP, un 5xx— y se sigue esperando: tras cada fallo seguido la pausa se dobla, hasta 15 s
+   (`ESPERA_MAXIMA_TRAS_FALLOS_MS`), y vuelve a 1,5 s en cuanto la nube contesta. La pausa no la dice
+   la respuesta: el `Retry-After` del 429 no cruza el IPC, que sólo lleva `code` y `message`. Mientras
+   falla, la pantalla lo dice («… Se sigue esperando la aprobación.»), y si el código caduca así, dice
+   que la nube no contestaba en vez de que la Main no aprobó. El código caducado esperando sale también
+   como `pair_code_expired`. Con éste o con el rechazo, la pantalla da el código por gastado y lo vacía;
+   con cualquier otro fallo lo deja, y «Vincular dispositivo» lo vuelve a intentar.
 5. Cancelar en la Handy (`/v1/pair/cancel`, acción `PAIR_CANCEL`) suelta el código en la nube, para que
    la solicitud no siga en la lista de la Main. Lo ya aprobado no se deshace cancelando: eso es revocar.
 6. Si la Handy se cierra o se reinicia esperando, nadie pulsa «Cancelar»: mientras espera, apunta la
