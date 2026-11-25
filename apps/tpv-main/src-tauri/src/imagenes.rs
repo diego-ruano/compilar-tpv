@@ -100,10 +100,13 @@ pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, Strin
 ///
 /// Quien elige un WebP en la pantalla lo puede guardar: lo convierte antes la WebView, con su propio
 /// decodificador, a JPEG o PNG (`shared/lib/guardarImagen.ts`), así que lo guardado es siempre JPEG
-/// o PNG. El mensaje de rechazo nombra los tres porque es lo que la persona puede elegir.
+/// o PNG. El rechazo de otro formato nombra los tres porque es lo que la persona puede elegir; el
+/// de un WebP, no: sólo llega uno sin convertir (por réplica, o de R2 a `images_ensure_local`), y
+/// lo que se registra no puede decir que WebP se admite justo al rechazarlo.
 pub fn decodificar(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err("La imagen debe pesar como máximo 5 MB".into()); }
     let formato = image::guess_format(bytes).map_err(|_| "Imagen no válida")?;
+    if formato == ImageFormat::WebP { return Err("Esta imagen WebP no se ha convertido: vuelve a elegirla.".into()); }
     if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten imágenes JPEG, PNG y WebP.".into()); }
     let mut lector = ImageReader::with_format(Cursor::new(bytes), formato);
     let mut limites = Limits::default();
@@ -211,6 +214,11 @@ mod tests {
         // se elige en la pantalla llega aquí ya convertido por la WebView (`guardarImagen.ts`).
         let webp = b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0";
         assert_eq!(image::guess_format(webp).unwrap(), ImageFormat::WebP);
-        assert_eq!(procesar(webp).unwrap_err(), "Solo se admiten imágenes JPEG, PNG y WebP.");
+        // El rechazo de un WebP no dice que se admite WebP: lo registran `images_ensure_local` y el
+        // logo del ticket y del PDF cuando llega uno por réplica.
+        assert_eq!(procesar(webp).unwrap_err(), "Esta imagen WebP no se ha convertido: vuelve a elegirla.");
+        let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff!\xf9\x04\x01\0\0\0\0,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
+        assert_eq!(image::guess_format(gif).unwrap(), ImageFormat::Gif);
+        assert_eq!(procesar(gif).unwrap_err(), "Solo se admiten imágenes JPEG, PNG y WebP.");
     }
 }

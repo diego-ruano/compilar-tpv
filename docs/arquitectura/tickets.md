@@ -123,7 +123,9 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   transparencia) y con 1024 px de lado como mucho, antes de mandarlo a `save_image`
   (`guardarImagen.ts`). Antes de dárselo, las mismas cotas se miran en su cabecera: uno que declara
   más de 8192 px de lado o 24 Mpx no llega a decodificarse. Lo guardado es siempre JPEG o PNG, así que el ticket y el PDF de una
-  factura lo pueden leer.
+  factura lo pueden leer. Un WebP que llega sin convertir (por réplica, o de R2 a
+  `images_ensure_local`) se rechaza con «Esta imagen WebP no se ha convertido: vuelve a elegirla.»;
+  otro formato, con «Solo se admiten imágenes JPEG, PNG y WebP.», que es lo que se puede elegir.
 - **128 MiB acotan la imagen decodificada, no la memoria del proceso.** Con ella conviven otros
   búferes en cada paso. Al decodificarla, los coeficientes de un JPEG progresivo (hasta 8 bytes por
   píxel) o el perfil de color de un PNG (hasta otros 128 MiB). Al girarla por su orientación, la

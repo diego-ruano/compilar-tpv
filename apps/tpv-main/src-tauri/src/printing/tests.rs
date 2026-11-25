@@ -1797,7 +1797,7 @@ mod tests_logo_replicado {
             se_rechaza_sin_reservar(nombre, &fichero);
             assert_eq!(
                 crate::imagenes::procesar(&fichero).unwrap_err(),
-                "Solo se admiten imágenes JPEG, PNG y WebP.",
+                "Esta imagen WebP no se ha convertido: vuelve a elegirla.",
                 "{nombre}"
             );
         }
