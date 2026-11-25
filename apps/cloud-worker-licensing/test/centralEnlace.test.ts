@@ -16,6 +16,7 @@ import { Buffer } from "node:buffer";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
+import type { BaseCentral } from "../src/durableObjects/baseCentral";
 import { argumentosEstrictos, valorEstricto } from "../src/server/central/enlace";
 import { clienteCentral } from "../src/server/central/cliente";
 import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
@@ -181,11 +182,14 @@ describe("el cliente y el objeto enlazan así", () => {
 		const { stub } = await centralDePrueba();
 		const r = await stub.ejecutar({ sql: "SELECT ?1 AS v;", args: [true as any] });
 		expect(r.ok && r.valor.rows).toEqual([[1]]);
-		// `return await`: una llamada RPC que falla sin nadie que la espere en el acto cuenta como
-		// «unhandled rejection» en workerd.
-		const conUndefined = async () => {
-			return await stub.ejecutar({ sql: "SELECT ?1;", args: [undefined as any] });
-		};
-		await expect(conUndefined()).rejects.toThrow(/\?1: /);
+		// Lo que no se guarda se prueba en la instancia, no por RPC: cuando un método RPC lanza, workerd
+		// escribe del lado del objeto un «uncaught exception» aunque quien llama recoja el rechazo (un
+		// `return await` del que llama no lo quita), y saldría en cada pasada de la suite. Dentro del
+		// objeto, el rechazo se recoge en el mismo isolate. Lo que se mira es lo mismo: que `ejecutar`
+		// enlaza los argumentos él también, sin fiarse de que lo haya hecho el cliente.
+		await runInDurableObject(stub, async (instancia) => {
+			const objeto = instancia as unknown as BaseCentral;
+			await expect(objeto.ejecutar({ sql: "SELECT ?1;", args: [undefined as any] })).rejects.toThrow(/\?1: /);
+		});
 	});
 });
