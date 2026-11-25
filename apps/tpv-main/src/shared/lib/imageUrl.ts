@@ -62,7 +62,7 @@ async function baseDeLaHandy(): Promise<string> {
 /**
  * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en el camino
  * del GET de imágenes del worker, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el
- * UUID que le pone la app (una heredada que la Main no ha podido renombrar, con el nombre que alguien le dio).
+ * UUID que le pone la app.
  * Lo mismo que piden la Main (`imagenes::ruta_segura`) y el worker (`RUTA_DE_IMAGEN`): el prefijo y la
  * carpeta en minúsculas, y el UUID y la extensión en cualquier caja.
  */

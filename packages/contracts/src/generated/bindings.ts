@@ -2401,7 +2401,7 @@ export type PrintTicketPayload_Deserialize = {
 	iva_percent?: number | null,
 	show_logo?: boolean,
 	/**
-	 *  Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
+	 *  Ruta relativa del logo en AppData (`images/logo/{uuid}.{jpg|png}`). La lee el comando,
 	 *  no el builder: aquí dentro no se toca el disco.
 	 */
 	logo_path?: string | null,
@@ -2512,7 +2512,7 @@ export type PrintTicketPayload_Serialize = {
 	iva_percent: number | null,
 	show_logo: boolean,
 	/**
-	 *  Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
+	 *  Ruta relativa del logo en AppData (`images/logo/{uuid}.{jpg|png}`). La lee el comando,
 	 *  no el builder: aquí dentro no se toca el disco.
 	 */
 	logo_path?: string | null,

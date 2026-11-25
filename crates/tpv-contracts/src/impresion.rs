@@ -82,7 +82,7 @@ pub struct PrintTicketPayload {
     // el total no tienen interruptor: salen siempre.
     #[serde(default)]
     pub show_logo: bool,
-    /// Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
+    /// Ruta relativa del logo en AppData (`images/logo/{uuid}.{jpg|png}`). La lee el comando,
     /// no el builder: aquí dentro no se toca el disco.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logo_path: Option<String>,
