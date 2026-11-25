@@ -149,4 +149,17 @@ describe("REV-14 · el cupo diario de correo", () => {
 		});
 		expect(r).toEqual({ reserva: "sin_base", filas: 0 });
 	});
+
+	it("con la central saturada, también: con el cupo lleno, el pedido sale sin contar", async () => {
+		// La central es un único objeto, y la carga la satura (`overloaded`): para el cupo es lo mismo
+		// que una caída. Es lo que dice `reservarCupo`; si eso cambia, cambian los dos.
+		const r = await escenario(async (e) => {
+			await e.apuntar(TOPE_DIARIO);
+			const saturada = centralInterceptada(e.central, () =>
+				Promise.reject(Object.assign(new Error("Durable Object is overloaded. Too many requests queued."), { overloaded: true })),
+			);
+			return { reserva: await reservarCupo(saturada.db, envio()), filas: await filas(e.central) };
+		});
+		expect(r).toEqual({ reserva: "sin_base", filas: TOPE_DIARIO });
+	});
 });
