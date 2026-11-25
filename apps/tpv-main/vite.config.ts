@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import svgr from '@svgr/rollup'
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { sentryBuildConfig } from "../../scripts/release/sentry-config.mjs";
 
@@ -35,7 +34,7 @@ const sentryPlugins = sentry.enabled
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   // El plugin de Sentry debe ir el último de la lista.
-  plugins: [svgr(), react(), tailwindcss(), ...sentryPlugins],
+  plugins: [react(), tailwindcss(), ...sentryPlugins],
 
   // `TAURI_ENV_*` las pone Tauri al compilar el frontend; `TAURI_ENV_PLATFORM` dice si es Android
   // (`shared/lib/plataforma.ts`).

@@ -143,7 +143,7 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
   campo ni inglés, y con el mismo texto en la Main y en el worker. En el frontend,
   `toAppError(e)` / `esError(e, "…")`.
 - **Nombre, argumentos y respuesta están tipados**: usar `commands.*` de `@tpv/client`, nunca
-  `invoke`/`invokeClient` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
+  `invoke` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
   sólo conservar helpers de orquestación o estado de presentación. CI comprueba la exportación real.
   Un comando que nadie invoca no se registra.
 
@@ -331,7 +331,8 @@ cuatro reglas:
 | `@typescript-eslint/no-misused-promises` | Una promesa entregada a quien no la espera (`onClick={guardar}`) | error |
 
 Antes de añadir una quinta: «¿habría cazado un bug que hemos tenido?». Lo apagado lleva su motivo en
-`eslint.config.mjs`. Los `packages/*` quedan fuera del análisis con tipos porque no tienen `tsconfig.json`.
+`eslint.config.mjs`. Los `packages/*` quedan fuera del análisis con tipos porque no tienen `tsconfig.json`;
+`reservas-web-sdk`, que sí lo tiene, va con tipos.
 
 `pnpm check:dead-code` (RI-22) informa sobre ficheros, exportaciones y dependencias TS con Knip,
 y sobre dependencias Rust con cargo-machete. Necesita Node >=22.12, `pnpm install` y

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { toAppError } from "@tpv/client";
-import type { EstadoColaImagenes, ImagenApartada, ReintentarImagenArgs } from "@tpv/contracts";
+import type { ImagenApartada, ReintentarImagenArgs } from "@tpv/contracts";
 import { useMode } from "../../../shared/stores/useMode";
 import { useImageUrl } from "../../../shared/lib/useImageUrl";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";

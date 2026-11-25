@@ -8,7 +8,7 @@
 // interruptores cada 5 minutos; en la Handy, cada petición). Aquí sólo se lee: al montar y cada
 // minuto, sin salir a la red.
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { commands } from "@tpv/client";
 
 import { esMovil } from "../../shared/lib/plataforma";

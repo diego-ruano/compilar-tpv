@@ -26,6 +26,3 @@ dist-ssr
 *.sln
 *.sw?
 
-# Rust/Cargo custom target dir
-.cargo-target/
-

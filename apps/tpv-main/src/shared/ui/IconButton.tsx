@@ -2,8 +2,8 @@
 import React from "react";
 import { cn } from "../lib/cn";
 
-export type IconButtonVariant = "secondary" | "ghost" | "danger";
-export type IconButtonSize = "sm" | "md" | "lg";
+type IconButtonVariant = "secondary" | "ghost" | "danger";
+type IconButtonSize = "sm" | "md" | "lg";
 
 const VARIANTS: Record<IconButtonVariant, string> = {
     secondary:

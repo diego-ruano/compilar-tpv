@@ -1,5 +1,5 @@
 import type { Salon } from "./types";
-import { cn } from "./cn";
+import { cn } from "../../shared/lib/cn";
 
 export default function SalonTabs({
     salons,

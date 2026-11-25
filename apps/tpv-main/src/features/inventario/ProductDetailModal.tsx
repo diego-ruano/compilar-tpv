@@ -1,5 +1,5 @@
 import { usePermisos } from "../../shared/lib/usePermisos";
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toAppError } from "@tpv/client";
 import { useToast } from "../../shared/toast";
 import {

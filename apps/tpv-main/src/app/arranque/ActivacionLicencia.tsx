@@ -6,7 +6,6 @@ import { commands } from "@tpv/client";
 
 import React, { useState } from "react";
 import { toAppError } from "@tpv/client";
-import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome } from "@tpv/contracts";
 import { Building2, KeyRound, MapPin, Phone, ShieldCheck, Store } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";

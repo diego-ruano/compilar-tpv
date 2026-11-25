@@ -23,7 +23,6 @@ vi.mock("../../src/shared/lib/usePermisos", () => ({ usePermisos: () => ({ puede
 vi.mock("../../src/shared/lib/imageUrl", () => ({ resolveImageUrl: async () => "" }));
 vi.mock("../../src/shared/toast", () => ({ useToast: () => toast }));
 vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: string }) => unknown) => fn({ mode: "tpv" }) }));
-vi.mock("../../src/features/ventaRapida/ui/AddProductModal", () => ({ default: () => null }));
 vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });

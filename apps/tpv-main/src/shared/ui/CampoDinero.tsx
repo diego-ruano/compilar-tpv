@@ -25,7 +25,7 @@ import type { Dinero } from "@tpv/contracts";
 import { cn } from "../lib/cn";
 import { aTexto, deTexto, esVacio } from "../lib/dinero";
 
-export type CampoDineroProps = {
+type CampoDineroProps = {
     /** Lo que vale ahora. `null` = sin rellenar (o, con `legible` false, sin entender). */
     valor: Dinero | null;
     /** Cada pulsación: el importe leído y si el texto se entiende. */
@@ -166,5 +166,3 @@ export function useImporte(inicial: Dinero | null = null) {
         campo: { valor, reinicio, onCambio },
     };
 }
-
-export default CampoDinero;

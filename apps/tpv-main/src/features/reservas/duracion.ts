@@ -4,7 +4,7 @@
 // formulario, la de cada reserva). El backend acepta cualquiera entre 1 minuto y 24 horas; esto es
 // sólo lo que se ofrece en el desplegable.
 
-export const DURACIONES_MIN = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360];
+const DURACIONES_MIN = [30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360];
 
 /** 90 → «1 h 30 min», 120 → «2 h», 45 → «45 min». */
 export function etiquetaDuracion(minutos: number): string {
@@ -21,7 +21,7 @@ export function opcionesDuracion(actual: number | null | undefined): number[] {
 }
 
 /** Lo que se ofrece para marcar «No vino» (minutos tras la hora de la reserva; 0, nunca, va aparte). */
-export const NO_VINO_MIN = [15, 30, 45, 60, 90, 120];
+const NO_VINO_MIN = [15, 30, 45, 60, 90, 120];
 
 /** Las de la lista y, si no está, la que ya tiene guardada; 0 (nunca) no entra. */
 export function opcionesNoVino(actual: number): number[] {

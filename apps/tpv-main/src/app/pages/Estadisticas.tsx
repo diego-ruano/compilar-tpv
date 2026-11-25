@@ -1,6 +1,7 @@
-// src/pages/Estadisticas.tsx
-import React, { useMemo, useState } from "react";
+// src/app/pages/Estadisticas.tsx
+import { useMemo, useState } from "react";
 import { BarChart3, CloudDownload } from "lucide-react";
+import type { StatsRange } from "@tpv/contracts";
 
 import { useBackfillHistorico } from "../../shared/lib/backfillQueries";
 
@@ -12,7 +13,6 @@ import ProveedoresStats from "../../features/estadisticas/ProveedoresStats";
 import TrabajadoresStats from "../../features/estadisticas/TrabajadoresStats";
 import ClientesStats from "../../features/estadisticas/ClientesStats";
 
-type StatsRange = "hoy" | "semana" | "mes" | "anio";
 type StatsKey =
     | "mesas"
     | "productos"

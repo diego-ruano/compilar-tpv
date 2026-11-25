@@ -6,11 +6,12 @@ import { commands } from "@tpv/client";
 
 import { useEffect, useRef, useState } from "react";
 import { toAppError } from "@tpv/client";
+import type { DeviceMode } from "@tpv/contracts";
 
 import { queryClient } from "../../shared/lib/queryClient";
 import { limpiarCacheImagenes } from "../../shared/lib/imageUrl";
 import { useAuth } from "../../shared/stores/useAuth";
-import { useMode, type DeviceMode, type ModeStateValue } from "../../shared/stores/useMode";
+import { useMode, type ModeStateValue } from "../../shared/stores/useMode";
 
 function isDeviceMode(value: unknown): value is DeviceMode | null {
 	return value === "tpv" || value === "handy" || value === null;

@@ -7,7 +7,7 @@ import { commands } from "@tpv/client";
 
 import { useQuery } from "@tanstack/react-query";
 
-export const subidaNubeKeys = {
+const subidaNubeKeys = {
 	estado: ["sync", "subida-nube"] as const,
 };
 

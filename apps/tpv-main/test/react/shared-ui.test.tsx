@@ -23,22 +23,13 @@ import { describe, expect, it, vi } from "vitest";
 import Badge from "../../src/shared/ui/Badge";
 import Button from "../../src/shared/ui/Button";
 import Card from "../../src/shared/ui/Card";
-import EmptyState from "../../src/shared/ui/EmptyState";
 import Input from "../../src/shared/ui/Input";
-import SectionHeader from "../../src/shared/ui/SectionHeader";
 
 /** Renderiza y espera al primer pintado (ver la nota de arriba). */
 async function pintar(ui: ReactElement) {
 	const utils = render(ui);
 	await esperarPintado(utils.container);
-	return {
-		...utils,
-		/** `rerender` tiene el mismo problema que `render`: hay que esperarlo igual. */
-		async repintar(siguiente: ReactElement) {
-			utils.rerender(siguiente);
-			await esperarPintado(utils.container);
-		},
-	};
+	return utils;
 }
 
 async function esperarPintado(container: HTMLElement) {
@@ -109,30 +100,5 @@ describe("componentes base compartidos", () => {
 		expect(card).not.toHaveClass("p-4");
 		expect(card).toHaveClass("cursor-pointer");
 		expect(card).toHaveTextContent("Contenido");
-	});
-
-	it("SectionHeader muestra sólo las zonas opcionales recibidas", async () => {
-		const { repintar } = await pintar(<SectionHeader title="Inventario" />);
-		expect(screen.getByRole("heading", { name: "Inventario" })).toBeInTheDocument();
-		expect(screen.queryByText("Resumen")).not.toBeInTheDocument();
-
-		await repintar(<SectionHeader title="Inventario" subtitle="Resumen" actions={<button>Crear</button>} />);
-		await waitFor(() => expect(screen.getByText("Resumen")).toBeInTheDocument());
-		expect(screen.getByRole("button", { name: "Crear" })).toBeInTheDocument();
-	});
-
-	it("EmptyState compone icono, descripción y acción", async () => {
-		await pintar(
-			<EmptyState
-				icon={<span data-testid="icono" />}
-				title="Sin productos"
-				description="Añade el primero"
-				action={<button>Nuevo</button>}
-			/>,
-		);
-		expect(screen.getByTestId("icono")).toBeInTheDocument();
-		expect(screen.getByText("Sin productos")).toBeInTheDocument();
-		expect(screen.getByText("Añade el primero")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Nuevo" })).toBeInTheDocument();
 	});
 });

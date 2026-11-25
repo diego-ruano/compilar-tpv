@@ -3,8 +3,9 @@
 Seis recorridos sobre la aplicación **compilada**, encadenados sobre un mismo equipo: la Main en Windows
 y, en uno de ellos, una Handy de Android a la vez. Prueban la costura
 que no prueba nada más: React → IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubren el frontend
-(la cobertura de componentes está descartada a propósito, ver `vitest.config.ts`). Van sobre
-WebdriverIO + `@wdio/tauri-service` (la Handy, por Appium) y tardan menos de dos minutos.
+(los componentes tienen sus tests de regresión en `test/react/`, con jsdom sólo en los ficheros que lo
+declaran: ver `vitest.config.ts`). Van sobre WebdriverIO + `@wdio/tauri-service` (la Handy, por Appium)
+y tardan menos de dos minutos.
 
 ```bash
 cargo install tauri-driver --locked          # una vez por máquina (y Appium: abajo)
@@ -22,7 +23,7 @@ corre antes de cada versión ([publicar-version.md](../../../docs/guias/publicar
 
 | Recorrido | Fichero | Qué hace |
 |---|---|---|
-| El camino del dinero | `specs/venta.e2e.ts` | Equipo nuevo → modo TPV → **activar una licencia real** → PIN → fichar y entrar → declarar los datos fiscales (la pantalla avisa de que faltan) → categoría y producto con precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → el registro de facturación existe, es `F2` y su número es el del ticket → el ticket lleva su QR y una reimpresión saca el mismo → una segunda venta avanza la cadena sin anomalías → las dos quedan en cola diciendo por qué no salen → **cierre de caja con descuadre 0** |
+| El camino del dinero | `specs/venta.e2e.ts` | Equipo nuevo → modo TPV → **activar una licencia real** → PIN → fichar y entrar → declarar los datos fiscales (la pantalla avisa de que faltan) → categoría y producto con precio, IVA y stock → zona y mesa → en la venta rápida, una nota y un «quitar con −» siguen ahí al volver al ticket (RI-71) → dos líneas → **cobro en efectivo exacto** → el registro de facturación existe, es `F2` y su número es el del ticket → el ticket dice lo que su factura y una reimpresión saca el mismo → la segunda venta expide la factura siguiente → **cierre de caja con descuadre 0** |
 | La Main y la Handy | `specs/handy.e2e.ts` | La Main enseña el código → una Handy de Android recién instalada se configura como Handy y lo escribe → la Main acepta la solicitud → el administrador entra en la Handy → la Handy apunta una caña en la mesa → a la Main le llega por la nube y la cobra → la Handy ve la mesa libre → la Main da de alta una camarera **sin PIN** y entra en la Handy sin teclear nada |
 | Copias, 1 | `specs/copias-1-copia.e2e.ts` | Crea algo más, espera a que la nube lo tenga todo y guarda una copia |
 | Copias, 2 | `specs/copias-2-recuperar.e2e.ts` | Con la base rota: la app arranca igual y ofrece recuperar; la copia ilegible se aparta con la base rota y no se ofrece (AUD-06); restaura la buena, reconcilia y abre el login |
@@ -143,5 +144,7 @@ APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al termina
 - Las reglas de `recovery.rs` (retención, copias importadas, exportar): tests de Rust sobre ficheros, sin
   React ni IPC.
 - La guardia del outbox al restaurar: la interfaz no puede producir ese caso.
-- La reconciliación bloqueada tras cinco ciclos: serían unos quince minutos; está en
-  `test/estadoSync.test.ts` y `test/recoverySync.test.ts`.
+- La reconciliación bloqueada tras cinco ciclos: serían unos quince minutos. La cuenta la lleva
+  `src-tauri/src/replicacion.rs` (`fallos >= 5`), sin test propio; lo que enseña la pantalla bloqueada
+  está en `test/react/recuperarDatos.test.tsx`, y que reintentar quita el bloqueo, en
+  `test/estadoSync.test.ts`.

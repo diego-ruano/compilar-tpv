@@ -45,7 +45,7 @@ export type EntradaArranque = {
 };
 
 /** Por qué espera un Handy, y si es una espera que termina sola. */
-export type EsperaHandy = {
+type EsperaHandy = {
 	conectando: boolean;
 	volcando: boolean;
 	rechazo: MotivoRechazo | null;
@@ -53,7 +53,7 @@ export type EsperaHandy = {
 
 export type AvisoCaducidad = { motivo: "warn" | "expiry_grace"; expiresAtMs: number | null };
 
-export type Pantalla =
+type Pantalla =
 	| { tipo: "cargando" }
 	| { tipo: "elegir_modo" }
 	| { tipo: "handy_vincular" }

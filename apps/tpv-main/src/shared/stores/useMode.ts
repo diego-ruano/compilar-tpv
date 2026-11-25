@@ -5,8 +5,8 @@
 // backend tuviera modo, y todo lo que se carga al entrar fallaba con «Modo de dispositivo no
 // seleccionado».
 import { create } from "zustand";
+import type { DeviceMode } from "@tpv/contracts";
 
-export type DeviceMode = "tpv" | "handy";
 export type ModeStateValue = DeviceMode | null | "loading";
 
 type ModeStore = {

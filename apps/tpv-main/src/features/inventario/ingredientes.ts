@@ -13,7 +13,7 @@ import type {
     IngredienteDto,
 } from "@tpv/contracts";
 
-export type TipoCambio = "SIN" | "EXTRA";
+type TipoCambio = "SIN" | "EXTRA";
 export type CambioIngrediente = { id: string; nombre: string; tipo: TipoCambio };
 
 /** Los cambios guardados en una línea. Lo que no se entienda se ignora: nunca impide enseñarla. */

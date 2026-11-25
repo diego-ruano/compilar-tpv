@@ -18,8 +18,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 		if (fallaElComando) throw { code: "internal", message: "IPC caído" };
 		return null;
 	},
-	toAppError: (e: unknown) => e,
-	esError: (e: unknown, code: string) => (e as { code?: string })?.code === code,
 }));
 
 const { useAuth } = await import("../src/shared/stores/useAuth");

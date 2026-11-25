@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
 import type { UserListItem as DbUser, PunchStatus } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Delete,
     LogIn,
@@ -130,7 +130,6 @@ export default function Login() {
     const canType = Boolean(selectedUser) && !isSubmitting;
     // El teclado numérico; «Entrar» va aparte (`canEnter`).
     const puedeTeclear = canType && !sinPin;
-    const pinMasked = useMemo(() => "•".repeat(pin.length), [pin.length]);
 
     const p1 = useMemo(
         () => punchStatus?.partes?.find((p) => p.parte === 1) ?? null,

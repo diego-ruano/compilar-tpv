@@ -1,4 +1,4 @@
-// components/mesasComponents/Legend.tsx
+// src/features/mesas/Legend.tsx
 import { useTheme } from "../../shared/stores/useTheme";
 
 export default function Legend() {

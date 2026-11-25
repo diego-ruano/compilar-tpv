@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const version = applicationVersion({});
+const version = applicationVersion();
 const release = `tpv-desktop@${version}`;
 const env = { TPV_RELEASE_BUILD: "1", SENTRY_AUTH_TOKEN: "token-de-prueba", SENTRY_ORG: "altaria-lights",
   SENTRY_PROJECT: "tpv-desktop", TPV_SENTRY_DSN: "https://public@ingest.de.sentry.io/123", SENTRY_RELEASE: release };

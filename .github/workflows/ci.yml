@@ -58,9 +58,10 @@ jobs:
         continue-on-error: true
         run: pnpm check:dead-code
 
-  # ESLint del monorepo (INFRA-04). Tres reglas de ANÁLISIS, no de estilo: hooks mal colocados,
-  # dependencias de efecto incompletas y promesas sin gestionar. El criterio de por qué son tan
-  # pocas está en `eslint.config.mjs` y conviene leerlo antes de añadir la cuarta.
+  # ESLint del monorepo (INFRA-04). Cuatro reglas de ANÁLISIS, no de estilo: hooks mal colocados,
+  # dependencias de efecto incompletas, promesas sin gestionar y promesas entregadas a quien no las
+  # espera. El criterio de por qué son tan pocas está en `eslint.config.mjs` y conviene leerlo antes
+  # de añadir la quinta.
   #
   # `--max-warnings` NO se pone a 0 a propósito: `react-hooks/exhaustive-deps` es un aviso porque a
   # veces la dependencia se omite a sabiendas. Lo que rompe el build son los errores.

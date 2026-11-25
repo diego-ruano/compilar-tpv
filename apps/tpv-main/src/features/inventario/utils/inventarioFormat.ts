@@ -16,16 +16,6 @@ export function formatCantidad(
   return `${n} ${u}`;
 }
 
-export const sqlEscape = (value: string) => value.replace(/'/g, "''");
-
-export const convertirABase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
-  });
-
 /**
  * INC-20261030-001: las existencias de un producto son sus lotes **más** el stock suelto, como en el
  * resumen de Inventario, la ficha del proveedor y el aviso de stock bajo

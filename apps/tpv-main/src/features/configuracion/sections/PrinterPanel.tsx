@@ -4,7 +4,7 @@ import { commands, toAppError } from "@tpv/client";
 // Panel de selección de impresora de tickets. Lista las impresoras del sistema (locales y de
 // red/WiFi), permite elegir una (se persiste en el dispositivo) y lanzar una impresión de prueba.
 
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useToast } from "../../../shared/toast";
 import { cn } from "../utils";

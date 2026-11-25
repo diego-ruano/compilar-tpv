@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { commands } from "@tpv/client";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
-export const tareasKeys = {
+const tareasKeys = {
   all: ["tareas"] as const,
   trabajadores: () => ["tareas", "trabajadores"] as const,
   admin: () => ["tareas", "admin"] as const,

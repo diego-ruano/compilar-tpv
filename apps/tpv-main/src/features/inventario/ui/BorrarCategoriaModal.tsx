@@ -1,5 +1,4 @@
 // La confirmación de borrar una categoría, que se lleva sus productos.
-import React from "react";
 import Modal from "./Modal";
 import { useBorrarCategoria } from "../inventarioQueries";
 import { conAviso } from "../../../shared/lib/conAviso";

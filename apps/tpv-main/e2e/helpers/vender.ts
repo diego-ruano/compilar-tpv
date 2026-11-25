@@ -233,7 +233,7 @@ export async function esperarTotalPendiente(importe: string, b: WebdriverIO.Brow
 }
 
 /** Suma un billete en el contador de efectivo del cobro (el "+" de esa denominación). */
-export async function sumarBillete(etiqueta: string, b: WebdriverIO.Browser = browser): Promise<void> {
+async function sumarBillete(etiqueta: string, b: WebdriverIO.Browser = browser): Promise<void> {
     await gestosEn(b).pulsarXPath(
         `//p[normalize-space(text())=${literalXPath(etiqueta)}]` +
             `/ancestor::div[contains(@class,"flex-col")][1]//button[normalize-space(.)="+"]`,

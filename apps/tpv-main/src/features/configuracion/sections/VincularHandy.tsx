@@ -1,5 +1,5 @@
 // src/features/configuracion/sections/VincularHandy.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";

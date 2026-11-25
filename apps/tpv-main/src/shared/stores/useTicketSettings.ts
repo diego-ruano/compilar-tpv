@@ -47,8 +47,6 @@ type TicketSettingsState = {
         key: K,
         value: TicketSettings[K],
     ) => void;
-    setAll: (next: TicketSettings) => void;
-    reset: () => void;
 };
 
 // debounce (module-level)
@@ -140,31 +138,6 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
         } as Partial<TicketSettings>);
 
         // 3) debounce write
-        scheduleFlush();
-    },
-
-    setAll: (next) => {
-        const merged: TicketSettings = {
-            ...DEFAULTS,
-            ...next,
-            paper_width_mm: clampPaperWidthMm(
-                Number((next as any)?.paper_width_mm ?? DEFAULTS.paper_width_mm),
-            ),
-        };
-
-        set({ settings: merged });
-
-        // guarda todo (con debounce igual)
-        pending = sanitizePatch({ ...pending, ...merged });
-
-        scheduleFlush();
-    },
-
-    reset: () => {
-        set({ settings: DEFAULTS });
-
-        pending = sanitizePatch({ ...pending, ...DEFAULTS });
-
         scheduleFlush();
     },
 }));

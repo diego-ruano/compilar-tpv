@@ -22,7 +22,7 @@
 // (`fichaFiscal.ts`, `trasFacturar`). Si no se pueden leer las fichas, el formulario lo dice y
 // factura igual, sin guardar en ninguna. La Handy no cobra, y allí no aparece nada de esto.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toAppError } from "@tpv/client";
 
 import { ModalShell } from "../ui/ModalShell";

@@ -11,16 +11,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deCentimos, deEuros, redondear } from "../src/shared/lib/dinero";
 
-// El módulo llama a `invokeClient` en las funciones de impresora; los tests de payload no lo tocan,
-// pero importar el módulo arrastra el cliente de Tauri, que en node no existe.
+// Las funciones de impresora del módulo llaman a `commands` de @tpv/client, que invoca por
+// `@tauri-apps/api/core`, y en node no hay Tauri: se sustituye y se apunta cada invocación, que es
+// lo que miran los casos de la impresora. Los del payload no invocan nada.
 const invocaciones: Array<{ cmd: string; args: unknown }> = [];
 vi.mock("@tauri-apps/api/core", () => ({
 	invoke: async (cmd: string, args: unknown) => {
 		invocaciones.push({ cmd, args });
 		return null;
 	},
-	toAppError: (e: unknown) => e,
-	esError: () => false,
 }));
 
 const {

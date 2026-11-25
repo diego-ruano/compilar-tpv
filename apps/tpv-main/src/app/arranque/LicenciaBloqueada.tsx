@@ -2,8 +2,6 @@
 //
 // La Main no puede trabajar porque la licencia no lo permite: por qué, y qué se puede hacer.
 
-import React from "react";
-
 import { textoBloqueo } from "./textosLicencia";
 
 export default function LicenciaBloqueada({

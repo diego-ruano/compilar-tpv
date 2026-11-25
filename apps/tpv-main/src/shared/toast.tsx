@@ -1,14 +1,13 @@
 import React, {
     createContext,
     useCallback,
-    useContext,
     useEffect,
     useMemo,
     useRef,
     useState,
 } from "react";
 
-export type ToastVariant = "info" | "warning" | "success" | "error";
+type ToastVariant = "info" | "warning" | "success" | "error";
 
 export type ToastItem = {
     id: number;

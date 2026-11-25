@@ -1,5 +1,4 @@
 // src/features/configuracion/ui/Toggles.tsx
-import React from "react";
 import { cn } from "../utils";
 
 export function Switch({

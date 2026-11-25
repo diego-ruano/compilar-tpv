@@ -13,13 +13,8 @@ import { commands } from "@tpv/client";
 import { useEffect, useState } from "react";
 
 import { listen } from "@tauri-apps/api/event";
+import type { UpdateInfo } from "@tpv/contracts";
 import { conAviso } from "../lib/conAviso";
-
-type UpdateInfo = {
-    version: string;
-    current_version: string;
-    notes: string | null;
-};
 
 export default function UpdateBanner() {
     const [update, setUpdate] = useState<UpdateInfo | null>(null);

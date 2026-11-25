@@ -60,16 +60,6 @@ type BusinessSettingsState = BusinessSettings & {
      * los demás campos se quedan como estén, también si otro equipo los acaba de cambiar.
      */
     guardar: (patch: Partial<BusinessSettings>) => Promise<void>;
-
-    // opcionales (por comodidad)
-    setBusinessName: (v: string) => void;
-    setLogoDataUrl: (v: string | null) => void;
-    setDireccion: (v: string) => void;
-    setTelefono: (v: string) => void;
-    setCif: (v: string) => void;
-    setMensajeFooter: (v: string) => void;
-    setIvaPercent: (v: number) => void;
-    setRazonSocial: (v: string) => void;
 };
 
 // debounce (module-level)
@@ -150,14 +140,5 @@ export const useBusinessSettings = create<BusinessSettingsState>(
             await get().guardarYa();
             if (vigente === contexto) set(patch);
         },
-
-        setBusinessName: (v) => get().setMany({ business_name: v }),
-        setLogoDataUrl: (v) => get().setMany({ logo_data_url: v }),
-        setDireccion: (v) => get().setMany({ direccion: v }),
-        setTelefono: (v) => get().setMany({ telefono: v }),
-        setCif: (v) => get().setMany({ cif: v }),
-        setMensajeFooter: (v) => get().setMany({ mensaje_footer: v }),
-        setIvaPercent: (v) => get().setMany({ iva_percent: v }),
-        setRazonSocial: (v) => get().setMany({ razon_social: v }),
     }),
 );

@@ -1,4 +1,4 @@
-// components/reservas/ReservaMesaMapModal.tsx
+// src/features/reservas/ReservaMesaMapModal.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import MapCanvas from "../mesas/MapCanvas";

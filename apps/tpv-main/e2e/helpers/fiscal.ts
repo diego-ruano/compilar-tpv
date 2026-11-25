@@ -1,14 +1,10 @@
 // Los datos del obligado y lo que el registro de facturación deja ver desde fuera (FISCAL-01).
-//
-// Los tipos se declaran aquí en vez de importarse de `@tpv/contracts` a propósito, igual que hace
-// `nube.ts` con `Salud`: al recorrido sólo le interesan cuatro campos, y atarlo al DTO completo
-// haría que añadir un campo nuevo a `EstadoFiscal` rompiera el E2E sin que nada esté mal.
 
 import { $, browser } from "@wdio/globals";
 
 import { escribir, irA, leerDeLaApp, literalXPath, pulsarXPath } from "./ui.js";
 
-export type { EstadoFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
+export type { PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
 import type { EstadoFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
 
 /**

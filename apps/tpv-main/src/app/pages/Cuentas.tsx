@@ -283,7 +283,6 @@ export default function Cuentas() {
         () => proveedoresQuery.data ?? [],
         [proveedoresQuery.data],
     );
-    const loadingProveedores = proveedoresQuery.isFetching;
     const errProveedores = proveedoresQuery.isError
         ? String(
               (proveedoresQuery.error as any)?.message ??

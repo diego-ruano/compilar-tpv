@@ -1,10 +1,9 @@
 import { commands } from "@tpv/client";
 
 
-export const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
-export const FORMATOS_IMAGEN = "image/jpeg,image/png,.jpg,.jpeg,.png";
+const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
 
-export function validarImagen(file: File): void {
+function validarImagen(file: File): void {
     if (!file.size || file.size > MAX_IMAGEN_BYTES) throw new Error("La imagen debe pesar como máximo 5 MB.");
     // AUD-30: WebP no se admite; Rust tampoco lo decodifica (`imagenes::decodificar`).
     if (!/\.(jpe?g|png)$/i.test(file.name)) throw new Error("Solo se admiten imágenes JPEG y PNG.");

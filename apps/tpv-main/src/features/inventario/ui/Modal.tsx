@@ -1,4 +1,4 @@
-// components/ui/Modal.tsx
+// src/features/inventario/ui/Modal.tsx
 import React from "react";
 import { X } from "lucide-react";
 

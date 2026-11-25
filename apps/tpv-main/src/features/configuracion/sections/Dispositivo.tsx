@@ -6,7 +6,7 @@ import { commands, toAppError } from "@tpv/client";
 // (keypair / device_id), así que se puede volver a emparejar sin reinstalar. Tras desvincular,
 // la app vuelve al selector Main/Handy.
 
-import React, { useState } from "react";
+import { useState } from "react";
 
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 

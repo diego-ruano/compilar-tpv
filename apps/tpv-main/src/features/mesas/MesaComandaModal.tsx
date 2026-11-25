@@ -4,7 +4,7 @@ import { useCatalogoServicio } from "../../shared/lib/useCatalogoServicio";
 import { Modal,NotaLineaModal,ProductCard } from "./ComandaElementos";
 import { abrirORetomarMesa,addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
 import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
-// components/mesasComponents/MesaComandaModal.tsx
+// src/features/mesas/MesaComandaModal.tsx
 import { useQuery,useQueryClient } from "@tanstack/react-query";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import { ImageOff,Printer,Salad } from "lucide-react";
@@ -57,14 +57,12 @@ export default function MesaComandaModal({
     mesaId,
     mesaNombre,
     mesaMeta,
-    onChanged,
 }: {
     open: boolean;
     onClose: () => void;
     mesaId: string;
     mesaNombre: string;
     mesaMeta?: MesaMetaOut | null;
-    onChanged?: () => void;
 }) {
     const { categorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos, query, setQuery, q, busqueda, loadingBusqueda } = useCatalogoServicio(open, apiCatalogo);
     const toast = useToast();
@@ -151,22 +149,6 @@ export default function MesaComandaModal({
         return estadoReserva ? { ...reservaAhora, estado: estadoReserva } : reservaAhora;
     }, [reservaAhora, estadoReserva]);
 
-    // `onChanged` llega como arrow nueva en cada render del padre; la guardamos en un ref
-    // para que `notifyChanged` (y, en cascada, reloadTicket/addProducto…) sea estable y
-    // React.memo de ProductCard pueda evitar re-renders de las tarjetas no afectadas.
-    const onChangedRef = useRef(onChanged);
-    useEffect(() => {
-        onChangedRef.current = onChanged;
-    });
-
-    const notifyChanged = useCallback(() => {
-        try {
-            onChangedRef.current?.();
-        } finally {
-            window.dispatchEvent(new CustomEvent("mesas:changed"));
-        }
-    }, []);
-
     const [openNota, setOpenNota] = useState(false);
     const [notaTarget, setNotaTarget] = useState<TicketItem | null>(null);
 
@@ -187,7 +169,6 @@ export default function MesaComandaModal({
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleNota({ idDetalle, nota: nota.trim() || null });
             await leerTicket(cId, true);
-            notifyChanged();
         });
     };
 
@@ -201,7 +182,6 @@ export default function MesaComandaModal({
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleIngredientes({ idDetalle, cambios });
             await leerTicket(cId, true);
-            notifyChanged();
         });
     };
 
@@ -251,7 +231,6 @@ export default function MesaComandaModal({
                 comandaActualRef.current = cId;
                 setIdComanda(cId);
                 setTicket(t);
-                notifyChanged();
             } catch (e) {
                 if (!cancelado) {
                     toast.error("No se pudo abrir la comanda", toAppError(e).message);
@@ -332,10 +311,10 @@ export default function MesaComandaModal({
                     // La reserva ha cambiado con la mesa abierta (la canceló el cliente, pasó a «No
                     // vino»): que el plano y Reservas la relean. El aviso, con el texto del backend,
                     // lo da `conAviso`.
-                    invalidarReservas(); notifyChanged();
+                    invalidarReservas();
                     throw e;
                 }
-                invalidarReservas(); notifyChanged();
+                invalidarReservas();
                 if (ciclo !== cicloVista.current.valor) return;
                 setEstadoReserva("ACTIVA");
                 await enlazarCuentaAbierta(reserva);
@@ -347,15 +326,14 @@ export default function MesaComandaModal({
                 await leerTicket(cId);
             });
         } finally { if (ciclo === cicloVista.current.valor) setLoadingTicket(false); }
-    }, [reserva, cola, mesaId, operador, invalidarReservas, notifyChanged, leerTicket, enlazarCuentaAbierta]);
+    }, [reserva, cola, mesaId, operador, invalidarReservas, leerTicket, enlazarCuentaAbierta]);
 
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
         // Los refrescos remotos esperan a que las escrituras de la propia pantalla terminen.
         await cola.esperar();
         await leerTicket(idComanda);
-        notifyChanged();
-    }, [idComanda, cola, leerTicket, notifyChanged]);
+    }, [idComanda, cola, leerTicket]);
 
     // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
     // abierta, recargar el ticket SOLO si el cambio afecta a esta comanda (no a otra que edite
@@ -395,7 +373,6 @@ export default function MesaComandaModal({
             cobrandoTodoRef.current = null;
             setIdComanda(abierta);
             setTicket(t);
-            notifyChanged();
         })().catch((e: unknown) => captureException(e, { fase: "pasar_a_comanda_abierta" }));
         return () => { cancelado = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -431,9 +408,8 @@ export default function MesaComandaModal({
             }
             ++lecturaTicketRef.current.version;
             aplicarTicket(destino, t, true);
-            notifyChanged();
         });
-    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged, mesaId, reserva, ponerEnEspera]);
+    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, mesaId, reserva, ponerEnEspera]);
 
     const removeProductoFromTicket = useCallback(async (productoId: string) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current) return;
@@ -441,9 +417,8 @@ export default function MesaComandaModal({
         await cola.ejecutar(async () => {
             await removeOnePendingDetalle(idComanda, productoId);
             await leerTicket(idComanda, true);
-            notifyChanged();
         });
-    }, [idComanda, loadingTicket, cola, leerTicket, notifyChanged]);
+    }, [idComanda, loadingTicket, cola, leerTicket]);
 
     const anadirConAviso = useMemo(() => conAviso(addProductoToTicket), [addProductoToTicket]);
     const quitarConAviso = useMemo(() => conAviso(removeProductoFromTicket), [removeProductoFromTicket]);
@@ -514,7 +489,6 @@ export default function MesaComandaModal({
             await cola.ejecutar(async () => {
                 await deleteDetalleById(idDetalle);
                 await leerTicket(cId, true);
-                notifyChanged();
             });
         } catch (e) {
             toast.error("No se pudo quitar la línea", toAppError(e).message);
@@ -593,14 +567,12 @@ export default function MesaComandaModal({
                 setTicket(prev => prev.map(l => ids.includes(l.id) ? { ...l, pagado: true, seleccionado: false } : l));
             }
             await leerTicket(idComanda).catch(e => toast.warning("Cobro guardado; no se pudo refrescar el ticket", toAppError(e).message));
-            if (comandaActualRef.current !== idComanda) { notifyChanged(); return hecho; }
+            if (comandaActualRef.current !== idComanda) return hecho;
 
             setCashCount({});
             setPaso("categorias");
             setCategoriaSeleccionada(null);
             setQuery("");
-            window.dispatchEvent(new CustomEvent("mesas:changed"));
-            notifyChanged();
             setQuiereFactura(false);
             setPideFactura(null);
             setErrorFactura(null);
@@ -884,12 +856,10 @@ export default function MesaComandaModal({
                                         await reservaFinalizar(reserva.idReserva);
                                         setEstadoReserva("FINALIZADA");
                                         invalidarReservas();
-                                        notifyChanged();
                                     } catch (e) {
                                         // Antes se tragaba el error. Si la reserva ha cambiado con la
                                         // mesa abierta, que se relea y se diga (`conAviso`).
                                         invalidarReservas();
-                                        notifyChanged();
                                         throw e;
                                     }
                                 })}

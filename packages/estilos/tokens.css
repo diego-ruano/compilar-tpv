@@ -43,7 +43,6 @@
     --danger-fg: #ffffff;
     --danger-soft: rgba(239, 68, 68, 0.12);
     --warning: #f59e0b;
-    --warning-fg: #1e2128;
     --warning-soft: rgba(245, 158, 11, 0.14);
 
     /* Foco */
@@ -83,7 +82,6 @@
     --danger-fg: #18090a;
     --danger-soft: rgba(245, 101, 101, 0.16);
     --warning: #f7b955;
-    --warning-fg: #1a1304;
     --warning-soft: rgba(247, 185, 85, 0.18);
 
     /* Foco (glow más visible) */
@@ -124,7 +122,6 @@
     --color-danger-fg: var(--danger-fg);
     --color-danger-soft: var(--danger-soft);
     --color-warning: var(--warning);
-    --color-warning-fg: var(--warning-fg);
     --color-warning-soft: var(--warning-soft);
 
     --color-ring: var(--ring);

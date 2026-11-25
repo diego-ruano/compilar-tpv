@@ -21,7 +21,7 @@ import { RAIZ } from "./entorno.js";
 import { diferencias, huellaDelCodigo, type Huella } from "./huella.js";
 
 /** El paquete de la app. Es el mismo que el de producción: el emulador es de pruebas. */
-export const PAQUETE = "com.altarialights.tpv";
+const PAQUETE = "com.altarialights.tpv";
 
 /** El APK de depuración (sólo ése deja entrar a Appium en la WebView) y su huella. */
 export const APK = path.join(RAIZ, "target", "e2e", "tpv-e2e-handy.apk");
@@ -46,7 +46,7 @@ export function jdkAndroid(): string | undefined {
 }
 
 /** Dónde está Appium en esta máquina. */
-export function appiumHome(): string {
+function appiumHome(): string {
     return (
         process.env.TPV_E2E_APPIUM_HOME ??
         path.join(process.env.LOCALAPPDATA ?? os.homedir(), "tpv-e2e", "appium")

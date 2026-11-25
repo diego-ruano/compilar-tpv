@@ -3,8 +3,6 @@
 // Los dos halos de color de fondo que llevan las pantallas de arranque (selector de modo, activación y
 // vinculación del Handy). El contenedor tiene que ser `relative` y `overflow-hidden`.
 
-import React from "react";
-
 export default function FondoDecorado() {
 	return (
 		<>

@@ -25,7 +25,7 @@ import {
 } from "./notificacionesApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca lista y contador. */
-export const notificacionesKeys = {
+const notificacionesKeys = {
   all: ["notificaciones"] as const,
   lista: (idUsuario: string, soloNoLeidas: boolean) =>
     ["notificaciones", "lista", idUsuario, soloNoLeidas] as const,

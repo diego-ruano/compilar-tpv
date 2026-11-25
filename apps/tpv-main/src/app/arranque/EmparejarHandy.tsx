@@ -3,7 +3,7 @@
 // La vinculación de un Handy con su Main: se escanea el QR con la cámara (en móvil), se pega su
 // contenido o se escribe el código, y se espera a que la Main apruebe la solicitud.
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Camera, Fingerprint, Link2, QrCode, RotateCcw, ScanLine, ShieldCheck, Smartphone } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";

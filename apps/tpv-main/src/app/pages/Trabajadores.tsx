@@ -1183,7 +1183,6 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 function Trabajadores() {
   const navigate = useNavigate();
   const location = useLocation();
-  const auth = useAuth();
   const isAdmin = esAdmin(usePermisos().rol);
   // A quién se va a eliminar (el modal de confirmación abierto).
   const [aEliminar, setAEliminar] = useState<TrabajadorRow | null>(null);

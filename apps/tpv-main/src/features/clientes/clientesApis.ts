@@ -8,9 +8,6 @@ import { commands } from "@tpv/client";
 import type {
     ClienteForm,
     ClienteOverview,
-    CreateClienteInput,
-    Dinero,
-    UpdateClienteInput,
 } from "@tpv/contracts";
 
 export type { ClienteOverview };

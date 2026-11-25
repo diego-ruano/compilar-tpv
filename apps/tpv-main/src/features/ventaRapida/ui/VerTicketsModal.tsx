@@ -1,5 +1,5 @@
 // src/features/ventaRapida/ui/VerTicketsModal.tsx
-import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen, X } from "lucide-react";
 import { cn } from "../utils";
 

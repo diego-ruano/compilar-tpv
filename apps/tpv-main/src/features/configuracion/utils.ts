@@ -1,4 +1,4 @@
-// src/pages/Configuracion/utils.ts
+// src/features/configuracion/utils.ts
 export function cn(...classes: Array<string | false | undefined | null>) {
 	return classes.filter(Boolean).join(" ");
 }

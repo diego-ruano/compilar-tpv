@@ -2,7 +2,7 @@
 // como los alérgenos. Con muchos ingredientes, el buscador filtra sin perder lo marcado. El catálogo
 // sólo se pide al desplegarlo.
 
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 
 import SearchInput from "../../../shared/ui/SearchInput";

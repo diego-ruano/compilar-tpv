@@ -20,14 +20,12 @@ import type {
     GuardarIngredienteInput,
     InventarioResumenResponse,
     LoteDto,
-    ProductDetailResponse,
     ProductoDetalleDto,
     ProductoListDto,
     ProveedorMiniDto,
     UpdateLoteInput,
     UpsertCategoriaInput,
     UpsertProductoInput,
-    UpsertProductoResult,
 } from "@tpv/contracts";
 
 export const inventarioAPI = {

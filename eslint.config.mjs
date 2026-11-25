@@ -116,18 +116,17 @@ export default tseslint.config(
         rules: {
             "no-restricted-imports": ["error", { paths: [
                 { name: "@tauri-apps/api/core", importNames: ["invoke"], message: "Usa commands de @tpv/client: nombre, argumentos y respuesta proceden de Rust." },
-                { name: "@tpv/client", importNames: ["invokeClient", "rawInvoke"], message: "Usa las funciones commands generadas." },
             ] }],
         },
     },
 
     // `packages/*` y los scripts de Node: SIN información de tipos.
     //
-    // No es una preferencia: estos `packages/` no tienen `tsconfig.json` (su tarea `lint` es un
-    // `tsc --noEmit` que no encuentra proyecto), y los `.mjs` de `scripts/` no están en ninguno. Sin
-    // proyecto no hay tipos, y sin tipos `no-floating-promises` no puede funcionar — así que aquí
-    // sólo quedan las reglas que se deducen del texto. Si algún día esos paquetes ganan su
-    // `tsconfig.json`, muévelos al bloque de arriba y ganarán la regla de las promesas.
+    // No es una preferencia: estos `packages/` no tienen `tsconfig.json`, y los `.mjs` de `scripts/`
+    // no están en ninguno. Sin proyecto no hay tipos, y sin tipos `no-floating-promises` no puede
+    // funcionar — así que aquí sólo quedan las reglas que se deducen del texto. Si algún día esos
+    // paquetes ganan su `tsconfig.json`, muévelos al bloque de arriba y ganarán la regla de las
+    // promesas.
     {
         files: ["packages/*/src/**/*.{ts,tsx}", "scripts/**/*.mjs", "*.config.mjs"],
         // El SDK tiene el suyo y va en el bloque de arriba, con tipos.

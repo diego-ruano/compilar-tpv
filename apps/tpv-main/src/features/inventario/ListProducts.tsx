@@ -1,4 +1,4 @@
-// components/InventaryComponents/ListProducts.tsx
+// src/features/inventario/ListProducts.tsx
 import React from "react";
 
 function ListProducts({

@@ -3,7 +3,7 @@ import { Moon, Sun } from "lucide-react";
 import { useTheme } from "../stores/useTheme";
 import IconButton, { type IconButtonProps } from "./IconButton";
 
-export type ThemeToggleProps = Omit<IconButtonProps, "label" | "onClick" | "children">;
+type ThemeToggleProps = Omit<IconButtonProps, "label" | "onClick" | "children">;
 
 /**
  * Botón para alternar claro/oscuro. Usa el store useTheme (persistido).

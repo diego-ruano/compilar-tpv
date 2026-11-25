@@ -1,14 +1,11 @@
 // src/features/estadisticas/MesasStats.tsx
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import Chart from "react-apexcharts";
 
 import { APEX_CHART_BASE } from "./apexBase";
-import type { MesasStatsResponse } from "@tpv/contracts";
+import type { MesasStatsResponse, StatsRange } from "@tpv/contracts";
 import { useMesasStats } from "./statsQueries";
 import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
-
-export type StatsRange = "hoy" | "semana" | "mes" | "anio";
-
 
 function cn(...classes: Array<string | false | null | undefined>) {
     return classes.filter(Boolean).join(" ");

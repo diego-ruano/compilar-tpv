@@ -27,11 +27,6 @@ type CategoriaMini = { ID_Categoria: string; Nombre: string };
 
 const UNIDADES_MEDIDA = ["UD", "KG", "GR", "MG", "L", "CL", "ML"] as const;
 
-function toNum(v: any, fallback = 0) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-}
-
 /** Una cantidad escrita a mano; vacía o ilegible = sin informar. */
 function numeroOpcional(texto: string): number | undefined {
     if (!texto.trim()) return undefined;

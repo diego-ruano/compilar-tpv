@@ -1,4 +1,4 @@
-// src/pages/Configuracion/types.ts
+// src/features/configuracion/types.ts
 export type SectionKey =
 	| "NEGOCIO"
 	| "PERMISOS"

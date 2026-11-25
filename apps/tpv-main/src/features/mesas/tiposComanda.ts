@@ -1,6 +1,5 @@
-import type { CategoriaVendibleOut, ProductoVendibleOut, Dinero } from "@tpv/contracts";
+import type { ProductoVendibleOut, Dinero } from "@tpv/contracts";
 
-export type CategoriaDisplay = CategoriaVendibleOut & { urlImagen: string };
 export type ProductoDisplay = ProductoVendibleOut & { urlImagen: string };
 
 export type TicketItem = {

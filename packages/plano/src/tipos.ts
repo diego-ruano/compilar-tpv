@@ -2,7 +2,7 @@
 // de `GET /v1/publico/reservas/:clave/plano`. Sólo la forma; el estado de cada mesa (ocupada,
 // libre, elegida…) lo decide quien dibuja y llega como `AspectoMesa`.
 
-export type FormaMesa = "rect" | "rounded" | "circle" | string;
+type FormaMesa = "rect" | "rounded" | "circle" | string;
 
 export type MesaPlano = {
     id: string;

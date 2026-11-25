@@ -192,11 +192,6 @@ function HorasBarChart({
         [workers],
     );
 
-    const height = useMemo(
-        () => Math.max(260, Math.min(620, labels.length * 30)),
-        [labels.length],
-    );
-
     const options: ApexOptions = useMemo(
         () => ({
             chart: { ...APEX_CHART_BASE, type: "bar", toolbar: { show: false }, fontFamily: "inherit" },

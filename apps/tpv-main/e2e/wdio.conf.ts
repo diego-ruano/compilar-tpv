@@ -1,7 +1,8 @@
 // Configuración de WebdriverIO para los E2E del TPV (TEST-01).
 //
-// NO entra en `turbo run test`: necesita un binario compilado y licencias reales, así que no puede
-// romperle la tanda a quien sólo quiere correr los tests normales. Se lanza a mano:
+// NO entra en `pnpm --filter @tpv/main test` (vitest): necesita un binario compilado y licencias
+// reales, así que no puede romperle la tanda a quien sólo quiere correr los tests normales. Se lanza
+// a mano:
 //
 //   pnpm --filter @tpv/main build:e2e     (una vez por cambio de código)
 //   pnpm --filter @tpv/main test:e2e

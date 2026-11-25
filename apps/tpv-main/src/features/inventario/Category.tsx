@@ -1,5 +1,4 @@
 // src/features/inventario/Category.tsx
-import React from "react";
 import { ImageOff } from "lucide-react";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 

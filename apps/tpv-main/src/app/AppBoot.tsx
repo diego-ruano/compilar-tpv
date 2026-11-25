@@ -10,7 +10,7 @@ import { commands } from "@tpv/client";
 // sin Main no trabaja, una Main no enseña nada sin licencia) está en `pantallaDeArranque.ts`, con sus
 // tests en `test/arranque.test.ts`.
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 
 

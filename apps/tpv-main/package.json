@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview",
     "test": "vitest run",
     "build:e2e": "tsx e2e/construir.ts",
     "build:e2e:android": "tsx e2e/construir-android.ts",
@@ -40,7 +39,6 @@
   },
   "devDependencies": {
     "@sentry/vite-plugin": "^5.4.0",
-    "@svgr/rollup": "^8.1.0",
     "@tailwindcss/vite": "^4.1.17",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.1",

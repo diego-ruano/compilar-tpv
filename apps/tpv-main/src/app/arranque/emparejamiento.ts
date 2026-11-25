@@ -6,8 +6,8 @@ import type { commands } from "@tpv/client";
 // cancelación de esa espera.
 //
 // El bucle recibe sus dependencias (el IPC, la nube, si la espera sigue en pie) en vez de
-// importarlas, igual que `recoverySync.ts`: así se prueba con dobles y un reloj falso
-// (`test/emparejamientoHandy.test.ts`), y la pantalla sólo lo arranca y pinta lo que devuelve.
+// importarlas: así se prueba con dobles y un reloj falso (`test/emparejamientoHandy.test.ts`), y
+// la pantalla sólo lo arranca y pinta lo que devuelve.
 
 import { esError } from "@tpv/client";
 
@@ -117,7 +117,6 @@ async function firmar(
 	accion: "PAIR_FETCH" | "PAIR_CANCEL",
 	pairCode: string,
 	nonceB64: string,
-	_deviceId: string,
 ): Promise<{ ts: number; sigB64: string }> {
 	// PROD-04: la hora de la nube, que Rust ya tiene de la respuesta al `claim`. Con la del equipo,
 	// una Handy con el reloj desfasado más de 2 minutos no conseguiría vincularse nunca.
@@ -171,7 +170,7 @@ export async function emparejarHandy(
 		await new Promise((r) => setTimeout(r, ESPERA_ENTRE_CONSULTAS_MS));
 		if (!deps.sigueVivo()) return null;
 
-		const { ts, sigB64 } = await firmar(deps.commands, "PAIR_FETCH", pairCode, nonceB64, ident.deviceId);
+		const { ts, sigB64 } = await firmar(deps.commands, "PAIR_FETCH", pairCode, nonceB64);
 
 		try {
 			const ft = (await deps.pedirALaNube("/v1/pair/fetch-token", {
@@ -220,7 +219,7 @@ export async function cancelarEmparejamiento(
 	deps: Pick<DependenciasEmparejamiento, "commands" | "pedirALaNube">,
 ): Promise<void> {
 	const ident = await identidadDelDispositivo(deps.commands);
-	const { ts, sigB64 } = await firmar(deps.commands, "PAIR_CANCEL", espera.pairCode, espera.nonceB64, ident.deviceId);
+	const { ts, sigB64 } = await firmar(deps.commands, "PAIR_CANCEL", espera.pairCode, espera.nonceB64);
 
 	await deps.pedirALaNube("/v1/pair/cancel", {
 		pairCode: espera.pairCode,
@@ -245,7 +244,7 @@ export type EsperaGuardada = Pick<EsperaDeAprobacion, "pairCode" | "nonceB64">;
 const CLAVE_ESPERA = "tpv:emparejamiento:espera:v1";
 
 /** El almacenamiento de la aplicación, o `null` si no está (entonces la espera no se recuerda). */
-export function almacenDeLaApp(): Storage | null {
+function almacenDeLaApp(): Storage | null {
 	try {
 		return typeof window === "undefined" ? null : window.localStorage;
 	} catch {

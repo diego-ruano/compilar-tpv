@@ -13,7 +13,7 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "../stores/useAuth";
 
 /** Minutos de inactividad total antes de cerrar sesión. Ajustable (podría venir de Configuración). */
-export const INACTIVITY_MINUTES = 10;
+const INACTIVITY_MINUTES = 10;
 
 // Eventos que cuentan como "actividad". `mousemove` es el más sensible (reinicia ante cualquier
 // movimiento), así que basta con estar usando la app para no caer nunca en el timeout.

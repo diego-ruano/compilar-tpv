@@ -5,7 +5,7 @@ import { commands } from "@tpv/client";
 // administrador. Vive en la base central, así que todo esto necesita internet.
 
 
-import type { CodigoEnviado, EstadoCorreoRecuperacion } from "@tpv/contracts";
+import type { EstadoCorreoRecuperacion } from "@tpv/contracts";
 
 export type { EstadoCorreoRecuperacion };
 

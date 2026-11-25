@@ -1,5 +1,4 @@
 // src/features/ventaRapida/ui/CashPanel.tsx
-import React from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Denom } from "../types";
 import { cn } from "../utils";
