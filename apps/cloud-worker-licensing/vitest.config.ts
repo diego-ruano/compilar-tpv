@@ -115,6 +115,13 @@ export default defineConfig({
 					exclude: [...configDefaults.exclude, EN_NODE],
 					// La guarda de red, antes de cada fichero de tests.
 					setupFiles: ["./test/helpers/sinRed.setup.ts"],
+					// Cada petición de un test cruza al objeto de la base central (`BaseCentral`), y muchos
+					// casos y ganchos aprovisionan la suya con todas sus migraciones. Con la suite entera en
+					// paralelo, casos que en su fichero solo tardan de 100 a 470 ms pasan de los 5 s por
+					// defecto, cada vez en un fichero distinto: el plazo es para una máquina cargada, no para
+					// un caso lento. Los ficheros que necesitan más ponen el suyo con `vi.setConfig`.
+					testTimeout: 20_000,
+					hookTimeout: 20_000,
 				},
 			},
 			{
