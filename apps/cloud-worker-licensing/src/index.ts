@@ -14,6 +14,7 @@ import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { purgarBaseCentral } from "./server/purga";
 import { centralDe } from "./lib/objetosDelNegocio";
 import { ErrorDeLaCentral } from "./server/central/cliente";
+import { registrarSinLaCentral } from "./server/central/sinLaCentral";
 import { latir, latirA } from "./observability/latido";
 import { FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } from "./durableObjects/baseCentral.restaurar";
 
@@ -51,15 +52,22 @@ export const BaseCentral = Sentry.instrumentDurableObjectWithSentry(sentryOption
  * mantenimiento— no puede llevarse por delante un aviso que alguien está esperando para renovar.
  */
 async function programado(env: Env, ctx: ExecutionContext): Promise<void> {
+	const enSegundoPlano = (promesa: Promise<unknown>) => ctx.waitUntil(promesa);
 	try {
-		const r = await avisarDeCaducidades(env, getDb(env), Date.now(), (promesa) => ctx.waitUntil(promesa));
+		const r = await avisarDeCaducidades(env, getDb(env), Date.now(), enSegundoPlano);
 		console.log(
 			`[cron] avisos de caducidad: ${r.enviados} enviados, ${r.yaAvisadas} ya avisadas, ` +
 				`${r.fallidos} fallidos, de ${r.revisadas} revisadas`,
 		);
 	} catch (err) {
-		capturarError(err, "cron.license_expiry");
-		console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
+		// Lo que llega aquí es la lectura de las que caducan (`licenciasPorCaducar`): la central que no
+		// la atiende queda como en el resto del ciclo (`registrarSinLaCentral`, su evento en Axiom, y
+		// Sentry sólo si no es carga ni un fallo pasajero); lo demás, a Sentry.
+		const operacion = "cron.license_expiry";
+		if (!registrarSinLaCentral(err, { env, enSegundoPlano, operacion, metodo: "cron", ruta: operacion })) {
+			capturarError(err, operacion);
+			console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
+		}
 	}
 
 	try {

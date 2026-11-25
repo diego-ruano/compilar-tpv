@@ -10,12 +10,15 @@
 // Corre contra una base central de verdad (`helpers/central.ts`), nueva en cada caso, vista a través
 // de su stub (`centralInterceptada`), por donde se le hace fallar un viaje.
 
+import { createExecutionContext, createScheduledController, env as entornoDePruebas, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 import { centralDePrueba, centralInterceptada, desvio, filasDe, type Atender, type CentralDePrueba } from "./helpers/central";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { avisarDeCaducidades, enlaceDeCompra } from "../src/domains/licensing/avisosDeCaducidad";
 import { CentralNoDisponible } from "../src/server/central/cliente";
+
+const worker = (await import("../src/index")).default as ExportedHandler<any>;
 
 /** Lo que se manda a Sentry: la operación y el error. */
 const { capturados } = vi.hoisted(() => ({ capturados: [] as { operacion: string; error: unknown }[] }));
@@ -436,5 +439,49 @@ describe("REV-13 · con la central saturada, el ciclo se corta", () => {
 		expect(r.manana).toMatchObject({ revisadas: 3, enviados: 3, fallidos: 0 });
 		expect(r.enviados).toEqual(["lic-a@ejemplo.test", "lic-b@ejemplo.test", "lic-c@ejemplo.test"]);
 		expect(r.avisos).toHaveLength(3);
+	});
+});
+
+describe("REV-13 · si la central no contesta a la lectura de las que caducan", () => {
+	/**
+	 * El `scheduled` del worker con una central de verdad que rechaza, como la plataforma con `marca`,
+	 * la lectura de las licencias que caducan (`licenciasPorCaducar`). La copia no llega a R2 (contesta
+	 * que no se ha subido): aquí sólo se mira lo de los avisos.
+	 */
+	async function cronSinLaLectura(marca: object) {
+		const central = await centralDePrueba();
+		const interceptada = centralInterceptada(central, (metodo, argumentos, llamar) => {
+			if (metodo === "copiar") return Promise.resolve({ ok: false, error: "central_copia_fallida", detalle: "no en este test" });
+			const sentencia = argumentos[0] as SentenciaEnlazada | undefined;
+			if (metodo === "ejecutar" && /SELECT \* FROM licenses/.test(sentencia?.sql ?? "")) {
+				return Promise.reject(Object.assign(new Error("Durable Object is overloaded. Too many requests queued."), marca));
+			}
+			return llamar();
+		});
+		const ctx = createExecutionContext();
+		await worker.scheduled!(
+			createScheduledController({ scheduledTime: Date.now(), cron: "0 7 * * *" }),
+			{ ...(entornoDePruebas as any), ...entorno(AXIOM).env, ...interceptada.entorno },
+			ctx,
+		);
+		await waitOnExecutionContext(ctx);
+		return capturados.filter((c) => c.operacion === "cron.license_expiry");
+	}
+
+	it("saturada o pasajera, queda en Axiom como en el resto del Worker, y no va a Sentry", async () => {
+		expect(await cronSinLaLectura(SATURADA)).toEqual([]);
+		expect(await sinLaCentral(1)).toEqual([["saturada", "cron", "cron.license_expiry"]]);
+
+		eventos = [];
+		expect(await cronSinLaLectura(PASAJERA)).toEqual([]);
+		expect(await sinLaCentral(1)).toEqual([["pasajera", "cron", "cron.license_expiry"]]);
+	});
+
+	it("sin marcas de la plataforma, va además a Sentry, con la operación del cron", async () => {
+		const aSentry = await cronSinLaLectura({});
+
+		expect(aSentry).toHaveLength(1);
+		expect(aSentry[0].error).toBeInstanceOf(CentralNoDisponible);
+		expect(await sinLaCentral(1)).toEqual([["rechazo", "cron", "cron.license_expiry"]]);
 	});
 });

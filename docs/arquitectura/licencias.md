@@ -765,8 +765,9 @@ Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o 
 cuenta entre los `fallidos` del resumen del cron y el ciclo sigue con las demás. Si es que la central
 no ha podido atender, queda como en el resto del Worker (`registrarSinLaCentral`): su
 `central_no_disponible` en Axiom, con `metodo` `cron`, y Sentry (`cron.license_expiry`) sólo si no es
-carga ni un fallo pasajero; cualquier otro fallo va a Sentry. **Con la central saturada, el ciclo se
-corta**: las que faltan cuentan como fallidas, sin más viajes a una central que no atiende, y se
+carga ni un fallo pasajero; cualquier otro fallo va a Sentry. Lo mismo si no atiende la lectura de
+las que caducan, con la que empieza el ciclo (`index.ts::programado`): ese día no se avisa de ninguna.
+**Con la central saturada, el ciclo se corta**: las que faltan cuentan como fallidas, sin más viajes a una central que no atiende, y se
 avisan al día siguiente. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó
 puesta, ese peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
 
