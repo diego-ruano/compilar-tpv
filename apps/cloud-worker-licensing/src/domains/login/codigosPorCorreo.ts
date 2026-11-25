@@ -208,6 +208,10 @@ export async function comprobarCodigo(
 /**
  * Comprueba el código sin gastarlo: lo gasta quien llama, en el mismo lote que lo que el código
  * autoriza (CORREO-CONFIRMAR), con `huella`, la del código comprobado. El intento sí queda contado.
+ *
+ * Si el código ya está gastado pero es éste y no ha caducado, lo dice en `yaGastado` (con su sujeto
+ * y cuándo se gastó), para que quien llama reconozca el reintento de un lote que entró y cuya
+ * respuesta se perdió. La respuesta sigue siendo que el código no vale: reconocerlo es cosa suya.
  */
 export async function comprobarSinGastar(
 	db: Base,
@@ -216,7 +220,10 @@ export async function comprobarSinGastar(
 	codigoEscrito: string,
 	ahora: number,
 	sujetoEsperado?: string,
-): Promise<{ ok: true; sujeto: string; huella: string } | { ok: false; respuesta: RespuestaCodigo }> {
+): Promise<
+	| { ok: true; sujeto: string; huella: string }
+	| { ok: false; respuesta: RespuestaCodigo; yaGastado?: { sujeto: string; gastadoEnMs: number } }
+> {
 	const mal = sinSecreto(env);
 	if (mal) return { ok: false, respuesta: mal };
 
@@ -228,7 +235,16 @@ export async function comprobarSinGastar(
 	const invalido = { ok: false as const, respuesta: codigoNoValido() };
 
 	const fila = await getEmailCode(db, k);
-	if (!fila || fila.consumed_at_ms) return invalido;
+	if (!fila) return invalido;
+	if (fila.consumed_at_ms) {
+		const esEste =
+			ahora <= fila.expires_at_ms &&
+			(sujetoEsperado === undefined || fila.subject === sujetoEsperado) &&
+			timingSafeEqualHex(await huella(env, k, fila.subject, codigo), fila.code_hash);
+		return esEste
+			? { ...invalido, yaGastado: { sujeto: fila.subject, gastadoEnMs: fila.consumed_at_ms } }
+			: invalido;
+	}
 	if (sujetoEsperado !== undefined && fila.subject !== sujetoEsperado) return invalido;
 	if (ahora > fila.expires_at_ms) {
 		return { ok: false, respuesta: fallo(400, "code_expired", "El código ha caducado. Pide uno nuevo.") };

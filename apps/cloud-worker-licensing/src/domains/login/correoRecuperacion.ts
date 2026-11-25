@@ -28,6 +28,7 @@ import {
 	consumeEmailCodeAndSetRecoveryEmail,
 	getLicenseByHash,
 	getTenantRecoveryEmail,
+	getTenantRecoveryEmailVerificado,
 	setTenantRecoveryEmail,
 	type EmailCodeKey,
 	type LicenseRow,
@@ -202,28 +203,63 @@ export async function confirmarCambioCorreo(
 	// Sin sujeto esperado: el código lleva guardada la dirección que se pidió, y es ésa —no una que
 	// llegue ahora en el cuerpo— la que queda confirmada.
 	const comprobado = await comprobarSinGastar(db, env, clave(ctx), ctx.codigo, ctx.ahora);
-	if (!comprobado.ok) return comprobado.respuesta;
+	if (!comprobado.ok) {
+		// CORREO-CONFIRMAR · El lote entró y su respuesta se perdió: el reintento trae el mismo código,
+		// ya gastado. Es ése si el correo vigente es justo el que dejó su lote; entonces se contesta
+		// como entonces y salen los avisos, que no llegaron a salir.
+		const g = comprobado.yaGastado;
+		if (!g || !(await esElCambioDeEseCodigo(db, l.lic, g))) return comprobado.respuesta;
+		return cambiado(env, diferir, l.lic, anterior, normalizar(g.sujeto));
+	}
 
 	const nuevo = normalizar(comprobado.sujeto);
-	const esElDeLaCompra = nuevo === normalizar(l.lic.customer_email);
 
 	// Gastar el código y cambiar el correo, en un solo lote: entran los dos o ninguno, y si no entra,
 	// el mismo código vale al reintentar.
 	const gastado = await consumeEmailCodeAndSetRecoveryEmail(db, clave(ctx), {
 		codeHash: comprobado.huella,
-		email: esElDeLaCompra ? null : nuevo,
+		email: nuevo === normalizar(l.lic.customer_email) ? null : nuevo,
 		nowMs: ctx.ahora,
 	});
 	if (!gastado) return codigoNoValido();
-	avisarDelCambio(env, diferir, [anterior, l.lic.customer_email], nuevo);
+	return cambiado(env, diferir, l.lic, anterior, nuevo);
+}
 
-	// Lo que ya se sabe, sin volver a leerlo: una relectura que fallara contestaría un error con el
-	// correo ya cambiado, y el reintento, que el código no vale.
+/**
+ * Si el correo de recuperación vigente es el que dejó el lote de un código ya gastado: el propio,
+ * con ese correo y verificado en el mismo instante en que se gastó el código; o, si el código era
+ * el de la compra, ninguno propio.
+ */
+async function esElCambioDeEseCodigo(
+	db: Base,
+	lic: LicenseRow,
+	g: { sujeto: string; gastadoEnMs: number },
+): Promise<boolean> {
+	if (!lic.tenant_id) return false;
+	const nuevo = normalizar(g.sujeto);
+	const propio = await getTenantRecoveryEmailVerificado(db, lic.tenant_id);
+	if (nuevo === normalizar(lic.customer_email)) return propio === null;
+	return propio !== null && normalizar(propio.email) === nuevo && propio.verifiedAtMs === g.gastadoEnMs;
+}
+
+/**
+ * El correo ya ha cambiado a `nuevo`: avisa y contesta. Lo que ya se sabe, sin volver a leerlo: una
+ * relectura que fallara contestaría un error con el correo ya cambiado.
+ */
+function cambiado(
+	env: Env,
+	diferir: (p: Promise<unknown>) => void,
+	lic: LicenseRow,
+	anterior: string,
+	nuevo: string,
+): RespuestaCodigo {
+	const esElDeLaCompra = nuevo === normalizar(lic.customer_email);
+	avisarDelCambio(env, diferir, [anterior, lic.customer_email], nuevo);
 	return {
 		status: 200,
 		body: {
 			ok: true,
-			emailHint: emailHint(esElDeLaCompra ? recortar(l.lic.customer_email ?? "") : nuevo),
+			emailHint: emailHint(esElDeLaCompra ? recortar(lic.customer_email ?? "") : nuevo),
 			esElDeLaCompra,
 		},
 	};

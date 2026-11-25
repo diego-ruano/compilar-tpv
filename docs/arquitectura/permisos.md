@@ -328,6 +328,12 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
   código y cambiar el correo van en **un solo lote** de la central
   (`consumeEmailCodeAndSetRecoveryEmail`, CORREO-CONFIRMAR): si no entra, el correo sigue siendo el
   de antes y el mismo código vale al repetir. La respuesta sale del correo nuevo, sin volver a leerlo.
+  Si el lote entra y su respuesta se pierde, el reintento trae el código ya gastado: se reconoce
+  como reintento (`esElCambioDeEseCodigo`) si es ese código, no ha caducado y el correo vigente es
+  el que dejó su lote (el propio, verificado en el instante en que se gastó el código, o ninguno
+  propio si era el de la compra). Entonces contesta como la primera vez y salen los avisos. El
+  correo anterior ya no se sabe: el aviso va sólo al de la compra, y si se volvía al de la compra no
+  sale ninguno.
 - **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con la cuenta atrás en pantalla, y **cinco
   por hora** (`MAX_ENVIOS_POR_VENTANA`), por equipo y propósito. Los dos se deciden en la misma
   sentencia que guarda el código (`reserveEmailCodeSend`), así que tampoco se los saltan peticiones

@@ -299,6 +299,18 @@ function centralSinRelectura(central: CentralDePrueba): CentralDePrueba["db"] {
 	}).db;
 }
 
+/**
+ * La central del caso, en la que el lote que cambia el correo entra pero su respuesta no vuelve: el
+ * RPC falla después de aplicarse.
+ */
+function centralTrasEscribir(central: CentralDePrueba): CentralDePrueba["db"] {
+	return centralInterceptada(central, async (metodo, argumentos, llamar) => {
+		const r = await llamar();
+		if (sentenciasDe(metodo, argumentos).some(escribeElCorreo)) throw new Error("la respuesta no vuelve");
+		return r;
+	}).db;
+}
+
 const escribeElCorreo = (sql: string) => /\b(INSERT INTO|DELETE FROM)\s+tenant_recovery_emails\b/.test(sql);
 const leeElCorreo = (sql: string) => /\bSELECT\b[\s\S]*\bFROM\s+tenant_recovery_emails\b/.test(sql);
 
@@ -379,6 +391,71 @@ describe("correo de recuperación · confirmar con la central fallando (CORREO-C
 			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
 			expect(await consumeEmailCodeAndSetRecoveryEmail(e.db, k, { codeHash, email: null, nowMs: T0 + 3_000 })).toBe(false);
 			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+		});
+	});
+
+	it("si el lote entra y su respuesta no vuelve, el reintento con el mismo código contesta que ha cambiado y avisa", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const codigo = e.ultimoCodigo();
+
+			await expect(
+				confirmarCambioCorreo(centralTrasEscribir(e.central), e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo }, e.diferir),
+			).rejects.toThrow();
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBe(NUEVO);
+			expect(e.avisos).toHaveLength(0);
+
+			const otra = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2_000 }), codigo }, e.diferir);
+			expect(otra.status).toBe(200);
+			expect(otra.body).toEqual((await estadoCorreoRecuperacion(e.db, e.ctx())).body);
+			expect(cuerpo(otra).esElDeLaCompra).toBe(false);
+			// El aviso al de la compra sale con el reintento.
+			await Promise.all(e.avisos);
+			expect(e.correos.slice(1).map((c) => c.to)).toEqual([COMPRA]);
+		});
+	});
+
+	it("vuelto al de la compra con la respuesta perdida, el reintento también contesta que ha cambiado", async () => {
+		await escenario(async (e) => {
+			await e.cambiarA(NUEVO, T0);
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 10 * MINUTO }), correo: COMPRA });
+			const codigo = e.ultimoCodigo();
+
+			await expect(
+				confirmarCambioCorreo(centralTrasEscribir(e.central), e.env, { ...e.ctx({ ahora: T0 + 11 * MINUTO }), codigo }, e.diferir),
+			).rejects.toThrow();
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBeNull();
+
+			const otra = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 12 * MINUTO }), codigo }, e.diferir);
+			expect(otra.status).toBe(200);
+			expect(otra.body).toEqual((await estadoCorreoRecuperacion(e.db, e.ctx())).body);
+			expect(cuerpo(otra).esElDeLaCompra).toBe(true);
+		});
+	});
+
+	it("un código ya gastado no es un reintento si no es ese código, si ha caducado o si el correo ya no es el suyo", async () => {
+		await escenario(async (e) => {
+			await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: NUEVO });
+			const codigo = e.ultimoCodigo();
+			const otroCodigo = codigo === "000000" ? "111111" : "000000";
+			await expect(
+				confirmarCambioCorreo(centralTrasEscribir(e.central), e.env, { ...e.ctx({ ahora: T0 + 1_000 }), codigo }, e.diferir),
+			).rejects.toThrow();
+
+			const mal = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 2_000 }), codigo: otroCodigo }, e.diferir);
+			expect(mal.status).toBe(400);
+			expect((mal.body as { error: string }).error).toBe("invalid_code");
+
+			const tarde = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 60 * MINUTO }), codigo }, e.diferir);
+			expect(tarde.status).toBe(400);
+
+			// Vuelto después al de la compra, el código ya no describe el correo vigente.
+			await usarCorreoDeLaCompra(e.db, e.env, e.ctx({ ahora: T0 + 3_000 }), e.diferir);
+			const despues = await confirmarCambioCorreo(e.db, e.env, { ...e.ctx({ ahora: T0 + 4_000 }), codigo }, e.diferir);
+			expect(despues.status).toBe(400);
+			expect((despues.body as { error: string }).error).toBe("invalid_code");
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBeNull();
+			await Promise.all(e.avisos);
 		});
 	});
 

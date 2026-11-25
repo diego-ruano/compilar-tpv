@@ -1098,6 +1098,25 @@ export async function getTenantRecoveryEmail(db: Sql, tenantId: string): Promise
 	return email || null;
 }
 
+/**
+ * El correo propio con el instante en que se verificó, o `null` si no hay. Para reconocer el
+ * reintento de una confirmación que entró (CORREO-CONFIRMAR): el lote escribe `verified_at_ms`
+ * con el mismo instante con que gasta el código.
+ */
+export async function getTenantRecoveryEmailVerificado(
+	db: Sql,
+	tenantId: string,
+): Promise<{ email: string; verifiedAtMs: number } | null> {
+	const r = await exec(
+		db,
+		`SELECT email, verified_at_ms FROM tenant_recovery_emails WHERE tenant_id=? LIMIT 1;`,
+		[tenantId],
+	);
+	const row = r.rows?.[0] as any;
+	const email = String(row?.email ?? "").trim();
+	return email ? { email, verifiedAtMs: Number(row.verified_at_ms) } : null;
+}
+
 /** `null` vuelve al de la compra (borra la fila). Sólo se llama tras verificar el buzón nuevo. */
 export async function setTenantRecoveryEmail(
 	db: Sql,
