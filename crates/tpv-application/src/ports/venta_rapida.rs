@@ -55,9 +55,6 @@ pub trait VentaRapidaRepository: Send + Sync {
     /// es lo que permite que una reimpresión saque el mismo.
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String>;
     /// Recuperación de cobros de la Main, compartida por operadores con permiso de vender.
-    async fn guardar_cobro_pendiente(&self, _data: CobroFraccionado) -> AppResult<()> {
-        Err(crate::error::AppError::validation("Los cobros se preparan en la Main"))
-    }
     async fn listar_cobros_pendientes(&self) -> AppResult<Vec<CobroPendienteDto>> { Ok(vec![]) }
     async fn resolver_cobro_pendiente(&self, _input: ResolverCobroPendienteInput) -> AppResult<String> {
         Err(crate::error::AppError::validation("Los cobros se resuelven en la Main"))

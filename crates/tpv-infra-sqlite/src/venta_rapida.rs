@@ -959,12 +959,6 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         self.confirmar_pendiente(&g, pendiente).await
     }
 
-    async fn guardar_cobro_pendiente(&self, data: CobroFraccionado) -> AppResult<()> {
-        let g = self.db.write().await;
-        crate::cobros_pendientes::preparar(&g, data).await?;
-        Ok(())
-    }
-
     async fn listar_cobros_pendientes(&self) -> AppResult<Vec<tpv_contracts::venta_rapida::CobroPendienteDto>> {
         crate::cobros_pendientes::listar(&self.db.read().await).await
     }
@@ -1144,34 +1138,6 @@ mod tests_total_negativo {
         // Y se puede cancelar: la línea vuelve a quedar libre.
         assert!(repo.cancelar_cobro_pendiente(ID).await.unwrap());
         assert!(repo.listar_cobros_pendientes().await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn un_pendiente_guardado_antes_tampoco_se_cobra() {
-        // Un cobro que se guardó como pendiente (la pantalla lo conserva al arrancar) pasa por la
-        // misma comprobación al resolverse.
-        let (db, _dir) = preparar().await;
-        let repo = SqliteVentaRapidaRepository::new(db.clone());
-        repo.guardar_cobro_pendiente(CobroFraccionado {
-            todo: false,
-            id_pago: ID.into(),
-            id_comanda: "com".into(),
-            metodo: tpv_domain::pago::MetodoPago::Efectivo,
-            importe_total: Dinero::CERO,
-            id_usuario_cobrador: Some("u1".into()),
-            id_trabajador_cobrador: None,
-            detalles: vec!["det-neg".into()],
-            destinatario: None,
-        })
-        .await
-        .unwrap();
-
-        let e = repo
-            .resolver_cobro_pendiente(ResolverCobroPendienteInput { id_pago: ID.into(), destinatario: None })
-            .await
-            .unwrap_err();
-        assert!(es_importe_negativo(&e), "{e:?}");
-        assert_eq!(rastro(&db).await, vec![0.0; 5]);
     }
 }
 
@@ -1416,11 +1382,11 @@ mod tests_cobro_repetido {
             destinatario: Some(tpv_domain::verifactu::Destinatario { nombre_razon: "Señor Prueba".into(), nif: "12345678Z".into(), direccion: None }),
         };
         let antes = numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await;
-        repo.guardar_cobro_pendiente(datos(ID)).await.unwrap();
+        crate::cobros_pendientes::preparar(&db.write().await, datos(ID)).await.unwrap();
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, antes);
         let restaurado = repo.listar_cobros_pendientes().await.unwrap();
         assert_eq!(restaurado[0].cobro.destinatario.as_ref().unwrap().nombre_razon, "Señor Prueba");
-        assert!(repo.guardar_cobro_pendiente(datos("0192f7a4-3b1c-7d2e-8f00-123456789abd")).await.is_err());
+        assert!(crate::cobros_pendientes::preparar(&db.write().await, datos("0192f7a4-3b1c-7d2e-8f00-123456789abd")).await.is_err());
         assert!(repo.cancelar_cobro_pendiente(ID).await.unwrap());
         assert_eq!(numero(&db, "SELECT COUNT(*) FROM Pagos;").await, 0.0);
     }

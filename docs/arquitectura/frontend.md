@@ -155,13 +155,9 @@ La recuperación de venta rápida usa `_Cobros_Pendientes` en SQLite, escrita po
 outbox. El backend fija el operador al preparar; cualquier operador con `servicio.vender` puede
 resolver, corregir los datos de factura o descartar una preparación. La confirmación del pago
 elimina la preparación en la misma transacción. El `ID_Pago` hace idempotente el reintento.
-Descartar una preparación nunca anula un pago. Las colas antiguas de todos los usuarios se importan
-sin cambiar el identificador ni perder el destinatario; cada copia se elimina únicamente tras el
-acuse de SQLite. Sólo se importan las que son de esta base, porque su ticket está en ella con todas
-las líneas que cobran: el navegador se queda aunque la licencia del equipo pase a otro negocio, y la
-clave antigua no dice de cuál era. Las demás se apartan en el propio `localStorage` como desconocidas,
-sin borrarlas (AUD-06, `cobrosLegados.ts`). Al no tener firma de backend, esas preparaciones antiguas quedan atribuidas a la
-sesión que las importa. La recuperación exige una acción explícita, sin cobros automáticos al abrir.
+Descartar una preparación nunca anula un pago. Una preparación sólo nace de un cobro de venta
+rápida que no se pudo confirmar: la pantalla no guarda cobros por su cuenta. La recuperación exige
+una acción explícita, sin cobros automáticos al abrir.
 
 ## Componentes y estado de servicio
 

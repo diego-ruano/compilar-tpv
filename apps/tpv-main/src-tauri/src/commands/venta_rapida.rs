@@ -171,14 +171,6 @@ pub async fn vr_cobrar_fraccionado(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn vr_guardar_cobro_pendiente(state: State<'_, AppState>, args: VrCobrarFraccionadoInput) -> Result<(), AppErrorDto> {
-    let sesion = state.exigir_permiso("servicio.vender").await?;
-    let repo = state.venta_rapida_repo().await?;
-    Ok(uc::guardar_cobro_pendiente(repo.as_ref(), &sesion.id_usuario, sesion.id_trabajador.as_deref(), args).await?)
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn vr_listar_cobros_pendientes(state: State<'_, AppState>) -> Result<Vec<tpv_contracts::venta_rapida::CobroPendienteDto>, AppErrorDto> {
     state.exigir_permiso("servicio.vender").await?;
     Ok(state.venta_rapida_repo().await?.listar_cobros_pendientes().await?)

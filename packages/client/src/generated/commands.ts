@@ -509,7 +509,6 @@ export const commands = {
 	vrDeleteLineaIfUnpaid: (args: VrDeleteLineaIfUnpaidInput) => __TAURI_INVOKE<boolean>("vr_delete_linea_if_unpaid", { args }),
 	vrUpdateNotaDetalle: (args: VrUpdateNotaDetalleInput) => __TAURI_INVOKE<boolean>("vr_update_nota_detalle", { args }),
 	vrCobrarFraccionado: (args: VrCobrarFraccionadoInput) => __TAURI_INVOKE<string>("vr_cobrar_fraccionado", { args }),
-	vrGuardarCobroPendiente: (args: VrCobrarFraccionadoInput) => __TAURI_INVOKE<null>("vr_guardar_cobro_pendiente", { args }),
 	vrListarCobrosPendientes: () => __TAURI_INVOKE<CobroPendienteDto[]>("vr_listar_cobros_pendientes"),
 	vrResolverCobroPendiente: (args: ResolverCobroPendienteInput) => __TAURI_INVOKE<string>("vr_resolver_cobro_pendiente", { args }),
 	vrCancelarCobroPendiente: (idPago: string) => __TAURI_INVOKE<boolean>("vr_cancelar_cobro_pendiente", { idPago }),

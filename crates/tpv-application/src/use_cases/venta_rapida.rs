@@ -174,13 +174,6 @@ pub async fn cobrar_fraccionado(
     repo.cobrar_fraccionado(datos_cobro(id_usuario, id_trabajador, input)?).await
 }
 
-pub async fn guardar_cobro_pendiente(
-    repo: &dyn VentaRapidaRepository, id_usuario: &str, id_trabajador: Option<&str>,
-    input: VrCobrarFraccionadoInput,
-) -> AppResult<()> {
-    repo.guardar_cobro_pendiente(datos_cobro(id_usuario, id_trabajador, input)?).await
-}
-
 pub fn datos_cobro(
     id_usuario: &str, id_trabajador: Option<&str>, input: VrCobrarFraccionadoInput,
 ) -> AppResult<CobroFraccionado> {

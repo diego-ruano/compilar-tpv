@@ -2375,7 +2375,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::venta_rapida::vr_delete_linea_if_unpaid,
             commands::venta_rapida::vr_update_nota_detalle,
             commands::venta_rapida::vr_cobrar_fraccionado,
-            commands::venta_rapida::vr_guardar_cobro_pendiente,
             commands::venta_rapida::vr_listar_cobros_pendientes,
             commands::venta_rapida::vr_resolver_cobro_pendiente,
             commands::venta_rapida::vr_cancelar_cobro_pendiente,
