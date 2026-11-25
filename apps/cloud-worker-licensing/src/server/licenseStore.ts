@@ -403,7 +403,8 @@ export async function activateLicenseFirstTime(
  * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado. Si no está
  * cuando se mira, o la central tampoco contesta a esa lectura, lanza el fallo del viaje; si aun así
  * había entrado, la licencia queda en el equipo nuevo con su traza y sin los avisos, y el reintento
- * de ese equipo ya no es un traslado (`cambioDeEquipo: false`).
+ * de ese equipo ya no es un traslado (`cambioDeEquipo: false`): TRASLADO-REINTENTO, en
+ * docs/pendientes.md.
  */
 export async function reassignMainDevice(
 	db: Base,

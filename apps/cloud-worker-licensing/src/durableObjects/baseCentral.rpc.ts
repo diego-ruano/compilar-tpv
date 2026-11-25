@@ -43,7 +43,11 @@ export type CodigoDeLaCentral =
 	 * se ha quedado como estaba, sin aprovisionar. El detalle dice por qué.
 	 */
 	| "central_copia_inservible"
-	/** La vuelta a un instante está preparada y el objeto no se ha reiniciado: no atiende (`baseCentral.instante.ts`). */
+	/**
+	 * Hay una vuelta a un instante en curso: se está preparando (la copia de antes, la petición a la
+	 * plataforma) o está preparada y el objeto no se ha reiniciado. No atiende (`baseCentral.instante.ts`);
+	 * el detalle dice en qué fase está (`falloPorLasMarcas`).
+	 */
 	| "central_vuelta_en_curso"
 	/**
 	 * Otra vuelta a un instante se estaba preparando a la vez, y sólo sigue una: o se la estaba pidiendo

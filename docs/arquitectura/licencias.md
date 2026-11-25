@@ -69,7 +69,19 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 1. Firma HMAC-SHA256 de Stripe sobre el cuerpo **crudo**, comparación de tiempo constante.
 2. El timestamp de la firma no se desvía más de 5 minutos.
 3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
-   falló sí, y por eso se contestó 500.
+   falló sí, y por eso se contestó con un error. Apuntar el fallo es otra escritura en la central
+   (`markWebhookProcessed`), y lo que queda depende de que conteste:
+   - Si contesta (la operación falló por otra cosa, o la central no la atendió y a esto sí, un fallo
+     pasajero), el motivo queda en `webhook_events.error_text`: el mensaje del error, que, si es la
+     central la que no ha atendido, es su identificador (`hub_unavailable` o `hub_overloaded`), no
+     el texto de la plataforma; ése va como causa del error (`e.cause`) a Sentry. Stripe recibe un
+     500 (`fulfillment_failed` o `reversal_failed`).
+   - Si tampoco contesta (la central caída del todo), no queda nada en `error_text` y el error sube
+     al `onError`, que contesta 503
+     ([worker.md](worker.md#cuando-no-puede-atender)). Lo mismo si no contesta ya al apuntar el
+     evento, antes de procesarlo.
+
+   Con los dos, Stripe reintenta.
 4. Idempotencia por sesión de checkout (índice único en `license_payments` por sesión y unidad),
    comprobada dentro de la operación de la central que emite el cobro (`emitirCobro`). Antes de
    preparar las claves se mira con la misma consulta: una sesión ya cumplida sale sin cifrar nada,
@@ -369,8 +381,12 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
    ligado a ese `deviceId`, 10 minutos y 5 intentos, como mucho uno por minuto. Responde siempre lo
    mismo, exista o no la clave.
 3. Activar con el código: se verifica (tiempo constante), se consume de forma atómica,
-   `reassignMainDevice` cambia la Main (registro en `license_device_swaps`) **conservando el
-   tenant**, y se avisa por correo al titular.
+   `reassignMainDevice` cambia la Main y deja su traza en `license_device_swaps` **en un solo lote**
+   (entran las dos o ninguna, E7a-1), **conservando el tenant**, y se avisa al `TenantHub` y por correo
+   al titular. Si el lote no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
+   está, ha entrado, y la ruta sigue con los avisos y `cambioDeEquipo: true`; si no está, o la central
+   tampoco contesta a esa lectura, el 503 de siempre y ningún aviso. El código ya está gastado: lo
+   que queda está en [TRASLADO-REINTENTO](../pendientes.md#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias).
 
 **Qué pasa con el equipo anterior** (AUD-02). Su fila de `devices` no se toca (sigue con rol `tpv`
 y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
@@ -743,6 +759,11 @@ por licencia y ciclo, con el enlace de compra `CHECKOUT_URL`. Sin esa variable n
 marca en `license_notices` antes de enviar y sólo envía quien gana la marca; si el correo falla, la
 marca se suelta. La clave de `license_notices` incluye `expires_at_ms`, para que un aviso de un ciclo
 no silencie el del siguiente.
+
+Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o al soltar su marca, va
+a Sentry (`cron.license_expiry`), cuenta entre los `fallidos` del resumen del cron y el ciclo sigue
+con las demás. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó puesta, ese
+peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
 
 ## Lo que guarda el equipo
 

@@ -234,7 +234,10 @@ export async function podarCopias(
 	return sobran.length;
 }
 
-/** Borra todas las copias de un negocio (al retirarlo). Devuelve cuántas. */
+/**
+ * Borra todas las copias de un negocio. Devuelve cuántas. Nadie la llama todavía: retirar un negocio
+ * (`pruebas.ts`, `huerfanos.ts`) no toca sus copias (COPIAS-RETENCION, en `docs/pendientes.md`).
+ */
 export async function borrarCopias(bucket: R2Bucket, tenantId: string): Promise<number> {
 	return podarCopias(bucket, tenantId, 0);
 }

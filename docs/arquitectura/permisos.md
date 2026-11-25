@@ -316,7 +316,10 @@ casos se quitan sus turnos de hoy en adelante, su horario predeterminado y sus t
 - **Sólo administradores**, y el `UPDATE` filtra por rol. A los demás se lo cambia un administrador
   desde Trabajadores.
 - Verificar el código y guardar el PIN son **un** comando; el PIN no sale del equipo (sube por el
-  outbox).
+  outbox). Al verificar, la licencia y el correo al que va el aviso se leen **antes** de gastar el
+  código (`recuperarPin.ts::verificarCodigoPin`, E7a-2): si la central falla en esas lecturas, la
+  Main recibe un 503 y el mismo código sigue valiendo al repetir, y el aviso al titular sale siempre
+  que el código vale.
 - Va al **correo de recuperación**, que es el de la compra (`licenses.customer_email`) hasta que se
   cambie. En la pantalla del PIN inicial se puede elegir otro; se confirma con un código antes de
   guardar el PIN o se salta, y mientras no se confirme manda el de la compra. Cambiarlo después exige un código enviado al

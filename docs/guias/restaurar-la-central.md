@@ -46,8 +46,9 @@ pnpm central:copiar    # una ahora, con la hora en la clave: no pisa la del día
   se hizo: se puede restaurar si este worker sabe poner esas migraciones. De las de antes de volver
   dice además el `marcador` (cómo estaba la central: volver a él deshace aquella vuelta) y `pedida`
   (cuándo se le pidió aquella vuelta a la plataforma; sin hora, no consta que se pidiera).
-- Cuánto se guardan lo dice la regla de ciclo de vida del bucket. Desde
-  `apps/cloud-worker-licensing/`:
+- **Se guardan 30 días**, y con ellas los `.marcador` y los `.pedida`: lo dice la regla de ciclo de
+  vida del bucket, `caducar-copias` (prefijo `base-central/`, «Expire objects after 30 days»), no el
+  código. Se mira desde `apps/cloud-worker-licensing/`:
 
   ```bash
   pnpm exec wrangler r2 bucket lifecycle list tpv-copias-control
@@ -97,8 +98,10 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 
 **La central nunca atiende a medio restaurar.** Mientras se restaura, o con una restauración sin
 terminar, lo que la toca contesta 503 `hub_unavailable`, que los TPV tratan como la nube sin
-contestar. Una central a medio cargar contestaría `license_not_found` a licencias que sí existen, y
-cada Main lo tomaría por un rechazo de la suya.
+contestar. Una central a medio cargar contestaría como definitivo lo que no lo es: `license_not_found`
+a licencias que sí existen (cada Main lo toma por un rechazo sin firmar, que no la borra pero la
+bloquea al agotar la gracia sin conexión, y las Handy no trabajan), o que no valen claves y códigos
+que sí valen.
 
 ### El esquema vacío
 
@@ -107,8 +110,9 @@ pnpm central:aprovisionar -- --si
 ```
 
 Para una central que empieza de cero: un `wrangler dev` nuevo, otro entorno. **Nunca para una
-central perdida**: una central vacía no tiene ninguna licencia, y todo TPV que pregunte por la suya
-recibe `license_not_found`. Para eso está la copia.
+central perdida**: una central vacía no tiene ninguna licencia, y todo equipo que pregunte por la
+suya recibe `license_not_found`: las Handy dejan de trabajar, y los TPV, al agotar la gracia sin
+conexión. Para eso está la copia.
 
 ### Si no cabe en 30 s (CENTRAL-RESTAURAR)
 
@@ -243,6 +247,14 @@ pnpm exec wrangler r2 object put tpv-copias-control/base-central/<nombre>.sql.gz
 # desde la raíz
 pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 ```
+
+### El traspaso desde Turso (2026-11-25)
+
+La base central estaba en Turso (`tpv-control`), y entra en su objeto por este mismo camino: su
+volcado, convertido a este formato, se sube como `base-central/traspaso-turso-2026-11-25.sql.gz` y se
+aprovisiona desde ahí. Al lado va el volcado en bruto, `base-central/traspaso-turso-2026-11-25.volcado-turso.gz`.
+Los dos salen en `pnpm central:copias`, sin filas ni migraciones (se subieron a mano); el segundo no
+acaba en `.sql.gz` y no se restaura. Caducan a los 30 días, como todo lo de `base-central/`.
 
 ## Después
 

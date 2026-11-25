@@ -530,8 +530,11 @@ pierde ninguna venta, pero sin ella la nube no sabe quién es quién.
   contestar. La Main sigue vendiendo y, con el socket ya abierto, replicando, pero no puede volver a
   abrirlo, y su licencia sigue con la gracia sin conexión. Las Handy no trabajan. Activar, emparejar
   y renovar el token esperan.
-- **Nunca atiende vacía ni a medias**: si contestara `license_not_found` a licencias que existen,
-  cada Main lo tomaría por un rechazo de la suya ([licencias.md](licencias.md#el-gate)).
+- **Nunca atiende vacía ni a medias**: contestaría como definitivo lo que no lo es. A licencias que
+  existen, `license_not_found`: cada Main lo toma por un rechazo sin firmar, que no la borra pero la
+  deja con la gracia sin conexión y, al agotarse, bloqueada ([licencias.md](licencias.md#el-gate)),
+  y las Handy no pueden trabajar. Y el alta, el emparejamiento o la reserva web fallarían como si la
+  clave o el código no valieran.
 - **Se recupera desde la administración**: con su copia de R2, en un objeto vacío, o devolviéndola a
   un instante de los últimos 30 días ([restaurar-la-central.md](../guias/restaurar-la-central.md)).
   Ninguna de las dos toca la base de un negocio ni la de una Main.

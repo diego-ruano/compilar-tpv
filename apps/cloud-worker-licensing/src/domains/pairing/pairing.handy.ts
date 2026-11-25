@@ -354,6 +354,8 @@ export async function entregarToken(
 		{ rol: "handy", ttlSegundos: ttlSeconds },
 	);
 
+	// El reto, el código y el alta son tres escrituras sueltas, no un lote (EMPAREJAR-TOKEN, en
+	// docs/pendientes.md).
 	const challengeUpdate = await db.execute({
 		sql: `
 			UPDATE device_challenges

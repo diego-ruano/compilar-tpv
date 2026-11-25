@@ -211,8 +211,11 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   local y en los tests las dos van vacías: workerd no implementa jurisdicciones.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por valor o por fila (8 MiB
-  y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún tiene unos 2 MB, y uno de 3 MB
-  se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún se queda en unos 2,2 MB, y uno
+  de 3 MB se rechaza) y 10 GB por objeto. Los de producción son los de la tabla «SQL storage limits»
+  de la [página de límites](https://developers.cloudflare.com/durable-objects/platform/limits/)
+  (consultada el 2026-11-25). Un mensaje del socket de la Main tiene además su propio tope, 4 MiB
+  (`MAX_MENSAJE`, [MAX-MENSAJE](../pendientes.md#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base)). Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
   de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
   más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo
@@ -263,7 +266,9 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   veces (`test/syncGzipTransmision.test.ts`). Se mira lo que pidió el cliente
   (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
 - **Retirar un negocio** (`/v1/admin/pruebas/retirar`, sólo los de pruebas:
-  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar todo lo que guarda en la nube:
+  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar lo que guarda en la nube,
+  menos sus copias diarias, que se quedan en `tpv-copias-negocios`
+  ([COPIAS-RETENCION](../pendientes.md#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)):
   - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas y borra todo lo guardado. El
     cierre de esos sockets llega después y no vuelve a crear nada: una sesión que cerró el DO ya está
     fuera y su salida ya se contabilizó;
@@ -440,10 +445,11 @@ con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo de
 hub con la central (un error de SQL) va a Sentry, como siempre.
 
 - **Nunca una respuesta que diga algo de la licencia o del equipo.** Una central vacía o a medias
-  contestaría `license_not_found` a todos, y los clientes lo toman por un rechazo: la Main deja de
-  replicar y sigue con la gracia sin conexión con `rejection_unverified`
-  ([licencias.md](licencias.md#el-gate)), y la Handy se queda fuera en cada petición. Por eso la
-  central no atiende sin aprovisionar ni a medias.
+  contestaría como definitivo lo que no lo es: `license_not_found` a todos, y los clientes lo toman
+  por un rechazo. La Main no borra su licencia (RI-09), pero deja de replicar, sigue con la gracia sin
+  conexión con `rejection_unverified` y, al agotarla, se bloquea ([licencias.md](licencias.md#el-gate));
+  la Handy se queda fuera en cada petición; y el alta, el emparejamiento o la reserva web fallarían
+  como si la clave o el código no valieran. Por eso la central no atiende sin aprovisionar ni a medias.
 - Lo que la central lanza por otra cosa (un error de SQL, una sentencia prohibida, una operación que
   falla) sigue el camino de cualquier error: un 500 con su identificador (`central_error_sql`,
   `central_operacion_fallida`) y `code: internal`, y el texto de SQLite sólo en el log y en Sentry.
@@ -452,7 +458,9 @@ hub con la central (un error de SQL) va a Sentry, como siempre.
   ([jobs-e-interruptores.md](jobs-e-interruptores.md#interruptores-remotos-de-emergencia-prod-06)).
   El feed de actualizaciones no: sólo le da el canal normal al equipo cuyo piloto no ha podido mirar
   por otro fallo de la lectura (un error de SQL), que va a Sentry. El webhook de Stripe contesta su
-  503 y Stripe lo reintenta.
+  503 y Stripe lo reintenta; si la central sólo ha fallado en la operación y contesta al apuntar el
+  fallo, es un 500 y el motivo queda en `webhook_events.error_text`
+  ([licencias.md](licencias.md#comprar)).
 
 Lo cubre `test/centralNoDisponible.test.ts`.
 
@@ -995,9 +1003,12 @@ La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copi
 - **Bucket privado y propio**: `tpv-copias-control` (`COPIAS`), nunca `tpv-images`, que se sirve sin
   firma: lleva los correos de los clientes y las DEK de los negocios, cifradas con
   `LICENSE_STORE_KEY`. Sin esa clave la copia no las devuelve: se guarda fuera de Cloudflare.
-- **Cuánto se guardan lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el código, y
-  vale también para las de a mano y las de antes de volver, con sus `.marcador` y `.pedida`. Tiene que
-  quedar por debajo de los 90 días de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida
+- **Se guardan 30 días, y lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el
+  código: `caducar-copias`, sobre el prefijo `base-central/`, borra cada objeto a los 30 días de
+  subirlo (se mira, desde `apps/cloud-worker-licensing/`, con `pnpm exec wrangler r2 bucket lifecycle
+  list tpv-copias-control`). Vale también para las de a mano y las de antes de volver, con sus
+  `.marcador` y `.pedida`, que duran lo mismo que la ventana en que se puede deshacer una vuelta. Tiene
+  que quedar por debajo de los 90 días de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida
   seguirían vivos en las copias, y no por debajo de los 30 en que se puede deshacer una vuelta.
 - **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`). Se monta en memoria y al cerrarla ocupa el
   doble, dentro de los 128 MB del objeto. Pasado, falla en voz alta (`central_copia_fallida`) en vez
@@ -1207,8 +1218,11 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
   de los clientes de cada bar, un token de R2 que lea uno no lee el otro, y la retención es otra.
 - **Se guardan 30 por negocio y lo decide el código** (`COPIAS_QUE_SE_GUARDAN`, al subir cada una),
   no una regla por antigüedad: ésa borraría también las últimas de un objeto perdido, que ya no hace
-  copias nuevas, y es justo cuando hacen falta. La regla de ciclo de vida del bucket (90 días) es la
-  red de lo que nadie poda: las copias de un negocio retirado.
+  copias nuevas, y es justo cuando hacen falta. El bucket no tiene ninguna regla por antigüedad (sólo
+  la que aborta las subidas por partes sin terminar a los 7 días), así que lo que nadie poda se queda
+  hasta que se borre a mano: las copias de un objeto perdido y las de un negocio retirado, que la
+  retirada no toca
+  ([COPIAS-RETENCION](../pendientes.md#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)).
 - **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`), que se monta en memoria y al cerrarla ocupa
   el doble. Pasado, falla en voz alta; lo que toca entonces es archivar lo antiguo (DB-14).
 - **No propaga**: si falla, Sentry (`hub.copia_diaria`) y Axiom (`copia_diaria_fallida`), y se repite

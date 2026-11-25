@@ -111,4 +111,6 @@ Cómo funciona por dentro: [worker.md](../arquitectura/worker.md#la-base-central
   que la usa**: durante un despliegue conviven el código de antes y el de ahora, a los dos lados
   del RPC ([worker.md](../arquitectura/worker.md#su-esquema-migraciones-en-código)).
 - **La central nunca atiende a medias**: ni con una restauración sin terminar ni con una vuelta a
-  un instante preparada y sin aplicar.
+  un instante en curso, se esté preparando o esté preparada y sin aplicar. Contestaría como
+  definitivo lo que no lo es: que una licencia no existe (el TPV no la borra, pero se bloquea al
+  agotar la gracia sin conexión), que un código o una clave no valen.

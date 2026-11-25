@@ -274,7 +274,9 @@ cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `
 | `object-src`, `frame-src` | `'none'` | Sin plugins ni iframes |
 
 - **Un origen nuevo va en las dos**, `csp` y `devCsp`, o funcionará en desarrollo y fallará empaquetado.
-  El `<script>` inline de `index.html` (anti-FOUC) funciona porque Tauri calcula su sha256 al empaquetar.
+  El tema de antes del primer pintado (anti-FOUC) es un fichero, `public/tema-inicial.js`, que
+  `index.html` carga en el `<head>`: un `<script>` en línea no corre en la app instalada
+  (`script-src 'self'`; sólo `devCsp` lleva `'unsafe-inline'`).
 - **Prohibido inyectar `<style>` en tiempo de ejecución**: ni `<style>` renderizado por React, ni
   `document.createElement("style")`, ni librerías que se autoinyecten el CSS. Todo CSS pasa por el bundle.
   Una librería con estilos: si trae un `.css`, se importa; si se lo inyecta, se busca la opción para

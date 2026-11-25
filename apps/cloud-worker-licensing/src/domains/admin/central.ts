@@ -15,13 +15,15 @@
 //                                          con `reiniciar`, aplica una vuelta ya preparada
 //
 // Lo que cambia algo deja rastro en Axiom y en el log (`rastro`), no en `admin_audit`: es una tabla
-// de la propia central, y restaurarla o devolverla a un instante la reescriben. Restaurar y volver lo
-// dejan antes de llamar al objeto (`empieza`), y si la llamada no vuelve, también (`sin_respuesta`):
-// una restauración que pasa de 30 s reinicia el objeto, y una vuelta se aplica aunque la respuesta no
-// llegue. Aplicar una vuelta ya preparada lo deja antes de reiniciar (`reinicia`). El rastro sólo lleva
-// lo nuestro: códigos, claves y marcadores que han pasado su gramática (`esClaveDeCopiaDeLaCentral`,
-// `esMarcador`), recuentos. El `detalle` del objeto (lo que dicen SQLite, R2 o la plataforma) va en
-// la respuesta, a quien administra, y nunca al rastro.
+// de la propia central, y restaurarla o devolverla a un instante la reescriben. Aprovisionar (con el
+// esquema vacío o desde una copia) y volver lo dejan antes de llamar al objeto (`empieza`, en
+// `conRastro`), y si la llamada no vuelve, también (`sin_respuesta`): una restauración que pasa de
+// 30 s reinicia el objeto, y una vuelta se aplica aunque la respuesta no llegue. Al volver, con la
+// vuelta preparada, deja `preparada`, y aplicar una vuelta ya preparada lo deja antes de reiniciar
+// (`reinicia`). El rastro sólo lleva lo nuestro: códigos, claves y marcadores que han pasado su
+// gramática (`esClaveDeCopiaDeLaCentral`, `esMarcador`), recuentos. El `detalle` del objeto (lo que
+// dicen SQLite, R2 o la plataforma) va en la respuesta, a quien administra; al rastro va sólo su
+// código, si es el de una copia que no sirve (`motivoDe`).
 
 import { Hono, type Context } from "hono";
 import * as z from "zod";
@@ -75,7 +77,7 @@ const SALIDAS_DE_LA_VUELTA = "deshaciendo la vuelta, o volviendo a otro instante
  * volver tenía sus licencias, y el esquema vacío la pondría a atender sin ninguna.
  */
 const SIN_ESQUEMA_TRAS_VOLVER =
-	"La vuelta la ha dejado sin esquema. No le des el esquema vacío (pnpm central:aprovisionar sin --copia): atendería sin ninguna licencia, y los TPV que preguntaran por la suya la borrarían.";
+	"La vuelta la ha dejado sin esquema. No le des el esquema vacío (pnpm central:aprovisionar sin --copia): atendería sin ninguna licencia, y a cada equipo que preguntara por la suya le diría que no existe: las Handy dejarían de trabajar, y los TPV, al agotar la gracia sin conexión.";
 
 /** Lo que se le dice a quien administra cuando la central no ha hecho lo que se le pedía. */
 const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = {

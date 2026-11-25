@@ -260,8 +260,8 @@ export function reportarAdministracionDeLaCentral(
 	campos: {
 		accion: "copiar" | "aprovisionar" | "restaurar" | "volver";
 		/**
-		 * `ok`, o el código con el que no se ha hecho. Al restaurar y al volver, antes de llamar al
-		 * objeto, `empieza`, y si la llamada no vuelve, `sin_respuesta`. Al volver, antes de reiniciar,
+		 * `ok`, o el código con el que no se ha hecho. Al aprovisionar (vacía o desde una copia) y al
+		 * volver, antes de llamar al objeto, `empieza`, y si la llamada no vuelve, `sin_respuesta`. Al volver, antes de reiniciar,
 		 * `preparada`: si la llamada no termina, es lo que queda de con qué se deshace. Al aplicar una
 		 * vuelta ya preparada (`reiniciar`), antes de reiniciar, `reinicia`.
 		 */

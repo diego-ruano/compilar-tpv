@@ -117,7 +117,8 @@ export async function avisarDeCaducidades(
 		if (!peldano) continue;
 
 		// Cada licencia, por su cuenta (E7a-7): lo que falle con una (la central, al poner o al soltar
-		// su marca) va a Sentry, cuenta como fallida y no corta a las demás.
+		// su marca) va a Sentry, cuenta como fallida y no corta a las demás. Si falla al soltarla, o
+		// después de ponerla, ese peldaño no sale (AVISO-CADUCIDAD, en docs/pendientes.md).
 		try {
 			const gane = await marcarAvisoEnviado(db, {
 				licenseId: license.license_id,
