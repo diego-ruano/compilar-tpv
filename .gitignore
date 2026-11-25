@@ -21,7 +21,6 @@ dist-ssr/
 
 # ── Rust / Cargo ──
 **/target/
-.cargo-target/
 
 # ── Tauri (generado) ──
 apps/tpv-main/src-tauri/gen/schemas/
@@ -72,9 +71,6 @@ Thumbs.db
 # ── Cloudflare / Wrangler ──
 .wrangler/
 .dev.vars
-
-# ── Backups locales de migración (no versionar) ──
-_old_git_backup/
 
 # Capturas de los fallos del E2E (TEST-01)
 apps/tpv-main/e2e/fallos/
