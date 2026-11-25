@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const root = new URL("../../", import.meta.url);
 
-export function applicationVersion(env = process.env, tag) {
+export function applicationVersion(tag) {
   const conf = JSON.parse(readFileSync(new URL("apps/tpv-main/src-tauri/tauri.conf.json", root), "utf8"));
   const pkg = JSON.parse(readFileSync(new URL("apps/tpv-main/package.json", root), "utf8"));
   const cargo = readFileSync(new URL("apps/tpv-main/src-tauri/Cargo.toml", root), "utf8")
@@ -18,7 +18,7 @@ export function applicationVersion(env = process.env, tag) {
 }
 
 export function sentryBuildConfig(env = process.env, tag) {
-  const version = applicationVersion(env, tag);
+  const version = applicationVersion(tag);
   const variant = env.TPV_BUILD_VARIANT ?? (tag?.startsWith("win7-") ? "win7" : "windows-modern");
   if (!["windows-modern", "win7"].includes(variant)) throw new Error("Variante de escritorio inválida");
   const release = `${variant === "win7" ? "tpv-desktop-win7" : "tpv-desktop"}@${version}`;

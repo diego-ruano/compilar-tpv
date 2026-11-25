@@ -32,7 +32,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 
 export function workerVersion(tag, env = process.env) {
   if (tag?.startsWith("win7-")) throw new Error("Un tag de Windows 7 nunca despliega el worker");
-  const version = applicationVersion({}, tag);
+  const version = applicationVersion(tag);
   const pkg = JSON.parse(readFileSync(join(worker, "package.json"), "utf8"));
   if (pkg.version !== version) throw new Error("La versión de tpv-api debe coincidir con la de la aplicación moderna");
   const release = `tpv-api@${version}`;
