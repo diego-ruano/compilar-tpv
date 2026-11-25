@@ -122,8 +122,9 @@ const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
 
 // AUD-46: `last_seen` va por `waitUntil`, y un DO no hiberna mientras le quede una promesa de
 // `waitUntil` sin terminar: con el plazo, la suya termina aunque la base central no conteste. La
-// llamada vencida no se cancela (es un RPC, CENTRAL-PLAZO en docs/pendientes.md): si la central la
-// atiende después, el `last_seen` entra entonces, y si no, lo pone el siguiente.
+// llamada vencida no se cancela (es un RPC): si la central la atiende después, el `last_seen` entra
+// entonces, y si no, lo pone el siguiente. Se acepta así (CENTRAL-PLAZO, en
+// docs/arquitectura/worker.md#el-plazo-del-tenanthub-central-plazo).
 const PLAZO_LAST_SEEN_MS = 10_000;
 
 // ---- SYNC-12: purga del log de sync en la nube ------------------------------
@@ -283,7 +284,7 @@ export class MotorTenantHub {
 	 * (AUD-02): una central que no contesta no puede retener el turno del log ni la espera de la Main.
 	 * Vencido, sale como `CentralNoDisponible`, una lectura que no ha contestado. La llamada vencida no
 	 * se cancela (es un RPC): hasta que la central la atiende, este objeto no puede hibernar
-	 * (CENTRAL-PLAZO en docs/pendientes.md).
+	 * (CENTRAL-PLAZO: se acepta así, y lo cuenta docs/arquitectura/worker.md#el-plazo-del-tenanthub-central-plazo).
 	 */
 	private getCentralDb(plazoMs: number): Base {
 		return clienteCentral(() => centralDe(this.env), { plazoMs });
