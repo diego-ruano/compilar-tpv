@@ -19,6 +19,7 @@ import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
 import type { Sql } from "../lib/sql";
+import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
 import {
 	addMonths,
 	argumentosDeLaAuditoria,
@@ -1284,6 +1285,15 @@ export async function markWebhookProcessed(
 		`UPDATE webhook_events SET processed_at_ms=?, processed_ok=?, error_text=? WHERE event_uid=?;`,
 		[now, ok ? 1 : 0, ok ? null : errorText || "error", eventUid],
 	);
+}
+
+/**
+ * Las licencias de una sesión de checkout que ya se cumplió, en el orden de sus unidades; ninguna si
+ * no se ha cumplido. Es la consulta con la que `emitirCobro` lo decide (`COBROS_DE_LA_SESION`).
+ */
+export async function licenciasDeUnaSesionCumplida(db: Sql, sessionId: string): Promise<string[]> {
+	const r = await exec(db, COBROS_DE_LA_SESION, [sessionId]);
+	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
 }
 
 /* ============================================================

@@ -8,8 +8,9 @@
 //   3. Idempotencia por `event.id` en `webhook_events`: un evento que salió bien no se repite. Uno
 //      que falló SÍ se reprocesa — para eso se contestó 500 (REV-01).
 //   4. Idempotencia por sesión de checkout en `license_payments` (índice único por sesión y
-//      unidad): si esa sesión ya se cumplió, se sale. Es la barrera de verdad, y se comprueba
-//      dentro de la operación que emite el cobro.
+//      unidad): si esa sesión ya se cumplió, se sale. Se mira antes de preparar las claves, y la
+//      barrera de verdad, la que vale para dos entregas a la vez, se comprueba dentro de la
+//      operación que emite el cobro.
 //   5. Fail-closed en la duración: sin `metadata.term_months` no se emite NADA.
 //
 // RI-52 — una licencia por unidad: comprar 4 son 4 claves, todas en el mismo correo, y no 4 años
@@ -52,6 +53,7 @@ import { sha256Hex } from "../../server/crypto";
 import {
 	claveNueva,
 	getLicenseById,
+	licenciasDeUnaSesionCumplida,
 	markKeyEmailSent,
 	markWebhookProcessed,
 	negocioActivadoDe,
@@ -257,11 +259,19 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	if (!email) throw new Error(`missing_customer_email: ${sessionId}`);
 	const name = customerNameFromSession(session);
 
+	// Idempotencia (4), antes de preparar nada: una sesión que ya se cumplió sale aquí, con sus
+	// licencias, como saldría de `emitirCobro` y con su misma consulta. Preparar y cifrar unas claves
+	// que no se van a usar sólo podía fallar (con `LICENSE_STORE_KEY` inservible) y convertir una
+	// entrega repetida en un 500. La comprobación que vale para dos entregas a la vez sigue siendo la
+	// de `emitirCobro`, dentro de su transacción.
+	const yaEmitidas = await licenciasDeUnaSesionCumplida(db, sessionId);
+	if (yaEmitidas.length > 0) return { accion: "ya_cumplida", license_ids: yaEmitidas };
+
 	// Lo que el cobro escribe se prepara aquí: la clave de cada unidad (en claro, sólo para el correo),
 	// su huella, su forma corta y su cifrado, y los ids de su licencia y de su cobro. A la central no
-	// llega la clave en claro. Se prepara también para una sesión que ya se cumplió, y se tira: quien
-	// lo sabe es `emitirCobro`, dentro de su transacción. Con `LICENSE_STORE_KEY` inservible, cifrar
-	// falla aquí (y `/health` ya está en 503 por su canario).
+	// llega la clave en claro. Si otra entrega cumple la sesión entretanto, lo preparado se tira: lo
+	// dice `emitirCobro`. Con `LICENSE_STORE_KEY` inservible, cifrar falla aquí (y `/health` ya está en
+	// 503 por su canario).
 	const enClaro: string[] = [];
 	const preparadas = [];
 	for (const termMonths of unidades.termMonths) {
