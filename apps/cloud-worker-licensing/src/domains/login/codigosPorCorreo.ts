@@ -135,7 +135,8 @@ function porQueNoSeEnvia(previo: EmailCodeRow | null, ahora: number): RespuestaC
 
 /**
  * El código no llegó a nadie: se anula para que no quede uno vivo. Al anularlo deja de contar la
- * espera de un minuto (el envío fallido sí cuenta para el tope por hora).
+ * espera entre códigos (`REENVIO_MIN_MS`, cinco minutos); el envío fallido sí cuenta para el tope
+ * por hora (`MAX_ENVIOS_POR_VENTANA`).
  */
 export async function anularCodigo(db: Base, k: EmailCodeKey, ahora: number): Promise<void> {
 	await voidEmailCode(db, k, ahora);
