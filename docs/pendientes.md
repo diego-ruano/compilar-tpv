@@ -366,8 +366,8 @@ contestar `cambioDeEquipo: true` y avisar otra vez.
   Si la segunda falla, el código está gastado y el correo sigue siendo el de antes: hay que pedir
   otro.
 - Al pedirlo (`/solicitar`), si la reserva del envío entra en la central pero su respuesta no vuelve,
-  la petición falla sin mandar el correo, y la siguiente choca con la espera de un minuto que ha puesto
-  esa reserva: «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
+  la petición falla sin mandar el correo, y la siguiente choca con la espera entre códigos que ha puesto
+  esa reserva (`REENVIO_MIN_MS`, cinco minutos): «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
   salido ninguno.
 
 Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar antes de gastar el código
