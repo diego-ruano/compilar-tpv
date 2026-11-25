@@ -2,7 +2,7 @@
 //! Local-First: los args de entrada NO llevan op_id/outbox/remote_id. Los nombres de los
 //! tipos llevan el prefijo `Mesas`/`Mesa` cuando podrían colisionar en `bindings.ts` con
 //! DTOs de otros módulos (p. ej. `LineaComandaRow` de venta_rapida, `IdCategoriaArgs` de
-//! inventario). Los **nombres de campo** (serde) se conservan idénticos al backend antiguo.
+//! inventario). Los **nombres de campo** son los de serde, que es lo que lee la pantalla.
 
 use tpv_domain::dinero::Dinero;
 

@@ -1,5 +1,5 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **proveedores**.
-//! Campos snake_case idénticos a los structs antiguos (compat frontend).
+//! Campos en snake_case.
 
 use tpv_domain::dinero::Dinero;
 

@@ -2,7 +2,7 @@
 //!
 //! Vivían en `src-tauri/src/printing.rs` sin `#[derive(specta::Type)]`, así que el frontend los redeclaraba
 //! a mano, con el dinero como `number` (RI-53). El generador ESC/POS sigue allí; lo que cruza la
-//! frontera vive aquí, como el resto de DTOs, y llega a TypeScript por ts-rs.
+//! frontera vive aquí, como el resto de DTOs, y llega a TypeScript con Specta (`pnpm generate-types`).
 
 use tpv_domain::dinero::Dinero;
 

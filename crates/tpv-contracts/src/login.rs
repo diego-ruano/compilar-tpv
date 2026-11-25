@@ -1,6 +1,5 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **login / auth / fichaje**.
-//! Local-First: los args de entrada NO llevan op_id/outbox. Campos snake_case idénticos
-//! al backend antiguo (compat frontend).
+//! Local-First: los args de entrada NO llevan op_id/outbox. Campos en snake_case.
 
 use serde::{Deserialize, Serialize};
 /* =========================================================

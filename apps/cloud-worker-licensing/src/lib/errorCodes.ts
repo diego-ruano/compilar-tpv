@@ -2,10 +2,10 @@
 //
 // Catálogo de códigos de error del worker (ARCH-02 / ARCH-05).
 //
-// `ErrorCode` NO se define aquí: se importa de `@tpv/contracts`, que lo genera ts-rs
-// desde `crates/tpv-contracts/src/errors.rs`. Rust, el worker y el frontend comparten
-// exactamente el mismo conjunto cerrado, y añadir un código en Rust sin contemplarlo
-// aquí es un error de compilación, no una sorpresa en producción.
+// `ErrorCode` NO se define aquí: se importa de `@tpv/contracts`, que lo genera Specta
+// (`pnpm generate-types`) desde `crates/tpv-contracts/src/errors.rs`. Rust, el worker y el
+// frontend comparten exactamente el mismo conjunto cerrado, y añadir un código en Rust sin
+// contemplarlo aquí es un error de compilación, no una sorpresa en producción.
 //
 // Forma de la respuesta de error del worker:
 //

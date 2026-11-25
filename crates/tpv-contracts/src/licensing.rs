@@ -62,7 +62,7 @@ pub struct LicenseGateResult {
    Cabeceras firmadas / identidad
 ========================================================= */
 
-/// Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
+/// Cabeceras firmadas para el worker (campos en camelCase).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiSignedHeaders {
@@ -74,7 +74,8 @@ pub struct ApiSignedHeaders {
 }
 
 /// Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
-/// worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+/// worker. Campos en camelCase, como los manda el worker y los lee la pantalla (`pairCode`,
+/// `pairSecret`, `expiresAtMs`).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PairCreateResult {

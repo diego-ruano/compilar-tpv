@@ -1,7 +1,7 @@
 //! Casos de uso de cuentas (caja). Local-First.
 //!
-//! Nota de compatibilidad: importes/ids inválidos devuelven `Ok(false)` (no error),
-//! igual que el backend antiguo; los campos de texto vacíos sí son error de validación.
+//! Un importe o un id que no vale devuelve `Ok(false)`, no un error; un campo de texto vacío sí es un
+//! error de validación.
 
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{

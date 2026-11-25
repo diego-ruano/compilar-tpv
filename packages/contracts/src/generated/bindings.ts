@@ -75,7 +75,7 @@ export type AnularPagoInput = {
 	clase?: string | null,
 };
 
-/**  Cabeceras firmadas para tpv-server (campos camelCase, compat frontend). */
+/**  Cabeceras firmadas para el worker (campos en camelCase). */
 export type ApiSignedHeaders = {
 	authorization: string,
 	xDeviceTs: string,
@@ -1102,7 +1102,7 @@ export type EnsureImageArgs = {
 };
 
 /**
- *  Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+ *  Fila de entradas (cobros). `id` es el `ID_Pago`, como texto.
  *
  *  Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
  *  descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo
@@ -2285,7 +2285,8 @@ export type PaginaSalidas = {
 
 /**
  *  Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
- *  worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+ *  worker. Campos en camelCase, como los manda el worker y los lee la pantalla (`pairCode`,
+ *  `pairSecret`, `expiresAtMs`).
  */
 export type PairCreateResult = {
 	ok: boolean,

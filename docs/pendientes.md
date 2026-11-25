@@ -327,7 +327,7 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ### ARCH-01 · Doble implementación Main/worker
 
 Cada escritura existe en Rust (`tpv-infra-sqlite`, para la Main) y en TypeScript
-(`domains/*/*.commands.ts`, para la Handy), con dos sistemas de tipos (ts-rs y zod) y dos
+(`domains/*/*.commands.ts`, para la Handy), con dos sistemas de tipos (Specta y zod) y dos
 validaciones. Tienen que producir lo mismo para que la replicación converja. La red que hay: los dos
 arneses de contrato ([tests/contract/README.md](../tests/contract/README.md)) y
 `scripts/check-contract-coverage.mjs`, que lista en CI lo que se quede sin caso.
