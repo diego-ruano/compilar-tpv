@@ -21,7 +21,11 @@ import type { Valor } from "../lib/sql";
 import { ponerFk } from "./sqliteDelObjeto";
 import { LINEA_FIN, LINEA_MIGRACIONES, PRINCIPIO_DE_INSERT, SALTOS_CON_CHAR } from "./volcadoSql";
 
-/** Lo que se dice de una copia que no se puede devolver, y por qué. Sin datos de la copia. */
+/**
+ * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta,
+ * al log y a Axiom: sin nada que traiga la copia (ni sus nombres ni sus datos), sólo números de línea,
+ * posiciones, recuentos, códigos y lo que es de este worker (sus migraciones, sus tablas).
+ */
 export class CopiaInservible extends Error {
 	constructor(
 		readonly codigo: "copia_no_encontrada" | "copia_de_otra_version" | "copia_cortada" | "copia_no_valida",
@@ -30,6 +34,14 @@ export class CopiaInservible extends Error {
 		super(`${codigo}: ${detalle}`);
 		this.name = "CopiaInservible";
 	}
+}
+
+/** Por qué no se carga una línea de datos: un código, que es lo único que se dice de ella. */
+type MotivoDeFila = "tabla_ajena";
+
+/** Una línea de datos que no se carga: su número en la copia, el carácter donde falla y por qué. */
+function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila): CopiaInservible {
+	return new CopiaInservible("copia_no_valida", `la línea ${numero} no se puede cargar: ${motivo} (carácter ${caracter + 1})`);
 }
 
 /**
@@ -290,10 +302,14 @@ export async function cargarCopia(
 	}
 	if (!migraciones) throw new CopiaInservible("copia_no_valida", "sin la línea de las migraciones");
 	const aqui = como.migraciones;
-	if (migraciones.length > aqui.length || migraciones.some((m, i) => m !== aqui[i])) {
+	const distinta = migraciones.findIndex((m, i) => m !== aqui[i]);
+	if (distinta !== -1) {
+		// Cuál y cuántas, con los nombres de aquí: los de la copia pueden ser cualquier cosa.
 		throw new CopiaInservible(
 			"copia_de_otra_version",
-			`la copia tiene ${migraciones.at(-1) ?? "ninguna"} y este worker llega a ${aqui.at(-1)}`,
+			distinta < aqui.length
+				? `la migración ${distinta + 1} de la copia no es ${aqui[distinta]}, la de este worker`
+				: `la copia trae ${migraciones.length} migraciones y este worker sabe poner ${aqui.length}, hasta ${aqui.at(-1) ?? "ninguna"}`,
 		);
 	}
 
@@ -333,7 +349,7 @@ export async function cargarCopia(
 			}
 			const tabla = tablaDe(linea);
 			if (tabla === null) continue;
-			if (!tablas.has(tabla)) throw new CopiaInservible("copia_no_valida", `una tabla que no es de la base: ${tabla}`);
+			if (!tablas.has(tabla)) throw filaInservible(numero, PRINCIPIO_DE_INSERT.length - 1, "tabla_ajena");
 			lote.push({ texto: linea, numero, tabla });
 			caracteresDelLote += linea.length;
 			llenas.add(tabla);

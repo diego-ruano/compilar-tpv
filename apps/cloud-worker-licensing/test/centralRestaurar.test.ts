@@ -7,7 +7,7 @@
 //
 //   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con una tabla que no es
 //     de la base, con una clave foránea rota) deja el objeto como estaba: sin aprovisionar, sin marca,
-//     y el error dice por qué;
+//     y el error dice por qué, sin nada de lo que trae la copia (va al log y a Axiom);
 //   · en una central aprovisionada no toca nada;
 //   · con la marca de una restauración a medias no atiende nadie, tampoco al arrancar, y la siguiente
 //     restauración la vacía entera (también lo que la de antes dio por migrado) y termina;
@@ -119,11 +119,22 @@ async function comoAntes(central: CentralDePrueba) {
 
 describe("una copia que no vale deja el objeto como estaba, y dice por qué", () => {
 	const lineasDe = (texto: string) => texto.split("\n");
-	const casos: [string, (texto: string) => string, RegExp][] = [
+	/** Las migraciones de este worker, que el motivo sí puede nombrar; en una expresión regular, tal cual. */
+	const aqui = migraciones.MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
+	const tal = (texto: string) => texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	/** Pone `linea` como una fila más, justo antes de la línea del fin, que la cuenta. */
+	const conUnaFilaMas = (t: string, linea: string) =>
+		t.replace(/^-- Fin de la copia: (\d+)/m, (_m, n) => `${linea}\n-- Fin de la copia: ${Number(n) + 1}`);
+	/**
+	 * Qué se ha estropeado, cómo, qué dice el motivo y lo que el motivo no puede decir, porque es de la
+	 * copia: va en `detalle`, que llega al log y a Axiom.
+	 */
+	const casos: [string, (texto: string) => string, RegExp, string[]][] = [
 		[
 			"cortada: sin la línea del final",
 			(t) => lineasDe(t).filter((l) => !l.startsWith("-- Fin de la copia")).join("\n"),
 			/^copia_cortada: le falta la línea del final/,
+			[],
 		],
 		[
 			"cortada: con menos filas de las que dice",
@@ -133,48 +144,59 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 				return l.join("\n");
 			},
 			/^copia_cortada: dice \d+ filas y trae \d+/,
+			[],
 		],
 		[
-			"de otra versión",
-			(t) => t.replace(/^-- Migraciones: (.*)$/m, "-- Migraciones: $1,9999_del_futuro.sql"),
-			/^copia_de_otra_version: /,
+			"de otra versión: con una migración de más",
+			(t) => t.replace(/^-- Migraciones: (.*)$/m, "-- Migraciones: $1,9999_ana.gil@correo.es"),
+			new RegExp(
+				`^copia_de_otra_version: la copia trae ${aqui.length + 1} migraciones y este worker sabe poner ${aqui.length}, hasta ${tal(aqui.at(-1)!)}$`,
+			),
+			["9999", "ana.gil"],
+		],
+		[
+			"de otra versión: con una migración que no es la de este worker",
+			(t) => t.replace(/^-- Migraciones: .*$/m, "-- Migraciones: Ana Gil ana.gil@correo.es"),
+			new RegExp(`^copia_de_otra_version: la migración 1 de la copia no es ${tal(aqui[0])}, la de este worker$`),
+			["Ana", "ana.gil"],
 		],
 		[
 			"sin la línea de las migraciones",
 			(t) => lineasDe(t).filter((l) => !l.startsWith("-- Migraciones: ")).join("\n"),
 			/^copia_no_valida: sin la línea de las migraciones/,
+			[],
 		],
 		[
 			"con una tabla que no es de la base",
-			(t) => t.replace(/^-- Fin de la copia: (\d+)/m, (_m, n) => `INSERT INTO "inventada" ("a") VALUES (1);\n-- Fin de la copia: ${Number(n) + 1}`),
-			/^copia_no_valida: una tabla que no es de la base: inventada/,
+			(t) => conUnaFilaMas(t, `INSERT INTO "ana.gil@correo.es" ("a") VALUES (1);`),
+			/^copia_no_valida: la línea \d+ no se puede cargar: tabla_ajena \(carácter 13\)$/,
+			["ana.gil"],
 		],
 		[
 			"con filas de _migrations",
-			(t) =>
-				t.replace(
-					/^-- Fin de la copia: (\d+)/m,
-					(_m, n) => `INSERT INTO "_migrations" ("name", "hash", "applied_at") VALUES ('x', 'y', 1);\n-- Fin de la copia: ${Number(n) + 1}`,
-				),
-			/^copia_no_valida: una tabla que no es de la base: _migrations/,
+			(t) => conUnaFilaMas(t, `INSERT INTO "_migrations" ("name", "hash", "applied_at") VALUES ('x', 'y', 1);`),
+			/^copia_no_valida: la línea \d+ no se puede cargar: tabla_ajena \(carácter 13\)$/,
+			["_migrations"],
 		],
 		[
 			"con una clave foránea rota",
 			(t) =>
-				t.replace(
-					/^-- Fin de la copia: (\d+)/m,
-					(_m, n) =>
-						`INSERT INTO "devices" ("device_id", "tenant_id", "role", "first_seen_at_ms", "last_seen_at_ms") VALUES ('huerfano', 't-no-existe', 'tpv', 1, 1);\n-- Fin de la copia: ${Number(n) + 1}`,
+				conUnaFilaMas(
+					t,
+					`INSERT INTO "devices" ("device_id", "tenant_id", "role", "first_seen_at_ms", "last_seen_at_ms") VALUES ('huerfano', 't-no-existe', 'tpv', 1, 1);`,
 				),
 			/^copia_no_valida: deja una clave foránea rota en devices/,
+			["huerfano", "t-no-existe"],
 		],
 	];
 
-	it.each(casos)("%s", async (_que, estropear, motivo) => {
+	it.each(casos)("%s", async (_que, estropear, motivo, deLaCopia) => {
 		const texto = estropear(await textoDeLaCopia(await sembrada()));
 		const central = centralSinAprovisionar();
 		const r = await central.stub.aprovisionar({ claveDeCopia: await subir(texto) });
 		expect(r).toEqual({ ok: false, error: "central_copia_inservible", detalle: expect.stringMatching(motivo) });
+		const detalle = (r as { detalle: string }).detalle;
+		for (const dato of deLaCopia) expect(detalle).not.toContain(dato);
 		await comoAntes(central);
 	});
 
