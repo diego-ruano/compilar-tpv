@@ -535,6 +535,10 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"vuelta_sin_aplicar",
 	"instante_fuera_de_plazo",
 	"log_sin_reservar",
+	// VUELTA-REPETIR · Aplicar aparte una vuelta preparada (`reiniciar`).
+	"vuelta_a_la_vez",
+	"sin_vuelta_preparada",
+	"vuelta_ya_aplicada",
 	// DO-PERDIDA · Darle base a un objeto vacío (`/v1/admin/negocios/restaurar-copia` y `base-vacia`).
 	"negocio_sin_nacer",
 	"copia_no_encontrada",

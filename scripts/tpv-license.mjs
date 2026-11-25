@@ -41,6 +41,9 @@
 //   pnpm negocio:copiar   -- --tenant <tenantId>   (la copia de hoy a R2, ahora)
 //   pnpm negocio:instante -- --tenant <tenantId> --instante 2026-11-20T10:30:00+01:00 --modo nube|main --motivo "…"
 //                            (o --marcador <m> en vez de --instante, para deshacer una vuelta)
+//   pnpm negocio:instante -- --tenant <tenantId> --reiniciar <deshacer> --motivo "…"
+//                            (aplica la vuelta que quedó preparada y sin aplicar; si ya se ha
+//                             aplicado, no vuelve otra vez)
 //   pnpm negocio:restaurar-copia -- --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"
 //                            (DO-PERDIDA: un objeto vacío, con la base de su copia de R2; sin --dia, la última)
 //   pnpm negocio:base-vacia      -- --tenant <tenantId> --modo nube|main --motivo "…"
@@ -443,7 +446,14 @@ async function negocioEstado(args) {
 	console.log(`\n  Negocio        ${r.tenantId}`);
 	console.log(`  Ha nacido      ${r.nacido ? "sí (alguna licencia suya se activó)" : "no"}`);
 	console.log(`  Base           ${r.aprovisionado ? "sí" : "NO: el objeto está vacío"}${r.negocio && r.negocio !== r.tenantId ? ` (sello de ${r.negocio})` : ""}`);
-	console.log(`  Vuelta         ${r.vueltaEnCurso ? "PREPARADA Y SIN APLICAR: la base está cerrada" : "ninguna en curso"}`);
+	if (r.vuelta) {
+		// VUELTA-REPETIR: la orden que la aplica, nunca la de la vuelta otra vez.
+		console.log(`  Vuelta         PREPARADA Y SIN APLICAR (al marcador ${r.vuelta.destino}, modo ${r.vuelta.modo}): la base está cerrada`);
+		console.log(`                 Para aplicarla: ${negocioAplicar(r.tenantId, r.vuelta.deshacer)}`);
+		console.log(`                 Para deshacerla una vez aplicada: ${negocioAlMarcador(r.tenantId, r.vuelta.deshacer, r.vuelta.modo)}`);
+	} else {
+		console.log(`  Vuelta         ${r.vueltaEnCurso ? "NINGUNA, pero la base está cerrada: se le está dando base" : "ninguna en curso"}`);
+	}
 	console.log(`  Seq            ${r.seq}`);
 	console.log(`  Sesiones       ${r.sesiones}`);
 	console.log(`  Próxima copia  ${cuando(r.proximaCopiaMs)}`);
@@ -492,7 +502,64 @@ function marcadorDe(args) {
 	return args.marcador === undefined ? undefined : String(args.marcador);
 }
 
+/**
+ * VUELTA-REPETIR · La orden que aplica la vuelta preparada de `tenantId` que se deshace con `deshacer`:
+ * reinicia el objeto sólo si sigue preparada, y si ya se ha aplicado, no vuelve otra vez. Repetir la
+ * orden de la vuelta, en cambio, volvería otra vez si el objeto se ha reiniciado entretanto.
+ */
+const negocioAplicar = (tenantId, deshacer) => `pnpm negocio:instante -- --tenant ${tenantId} --reiniciar ${deshacer} --motivo "…"`;
+
+/** La orden que devuelve el negocio al marcador `deshacer`: la que deshace una vuelta. */
+const negocioAlMarcador = (tenantId, deshacer, modo) =>
+	`pnpm negocio:instante -- --tenant ${tenantId} --marcador ${deshacer} --modo ${modo} --motivo "…"`;
+
+/**
+ * Lo que se enseña de una vuelta que no ha salido entera: si sigue preparada y sin aplicar, la orden
+ * que la aplica; y con qué se deshace.
+ */
+const paraSalirDeLaVueltaDelNegocio = (tenantId, modo) => (data) => {
+	if (!data?.deshacer) return "";
+	const sinAplicar = data.error === "vuelta_sin_aplicar" || data.error === "log_sin_reservar";
+	return [
+		...(sinAplicar ? [`    Para aplicarla: ${negocioAplicar(tenantId, data.deshacer)}  (si ya se ha aplicado, no vuelve otra vez)`] : []),
+		`    Para ${sinAplicar ? "deshacerla una vez aplicada" : "deshacerla"}: ${negocioAlMarcador(tenantId, data.deshacer, data.modo ?? modo)}`,
+	].join("\n");
+};
+
+/** Lo que dice una vuelta del negocio que ha salido: adónde, con qué se deshace, el log y qué sigue. */
+function negocioHaVuelto(r, adonde) {
+	console.log(`\n  ✔ ${r.tenantId} ha vuelto ${adonde}.`);
+	console.log(`    Marcador para deshacerlo: ${r.deshacer}`);
+	console.log(`    Log abierto en el Seq ${r.inicio ?? "(sin base tras volver)"}${r.purgadoHasta ? `, purgado hasta ${r.purgadoHasta}` : ""}.\n`);
+	for (const paso of r.queHacer) console.log(`    · ${paso}`);
+	console.log("");
+}
+
+/**
+ * VUELTA-REPETIR · Aplica la vuelta del negocio que quedó preparada y sin aplicar
+ * (`--reiniciar <deshacer>`): reinicia el objeto sólo si sigue preparada; si se ha reiniciado por su
+ * cuenta, sólo abre el log que falta, y si ya se ha aplicado entera, no hace nada. Adónde se vuelve y
+ * quién manda los eligió la vuelta.
+ */
+async function negocioAplicarLaPreparada(args) {
+	const tenantId = negocioDe(args);
+	if (args.reiniciar === true) fail("--reiniciar <deshacer> (el de la vuelta preparada: lo da pnpm negocio:estado)");
+	if (args.instante !== undefined || args.marcador !== undefined || args.modo !== undefined) {
+		fail("--reiniciar va solo: aplica una vuelta ya preparada, sin --instante, --marcador ni --modo (los eligió la vuelta).");
+	}
+	const motivo = motivoDe(args);
+	const deshacer = String(args.reiniciar);
+	const r = await api(
+		"POST",
+		"/v1/admin/negocios/instante",
+		{ tenantId, reiniciar: deshacer, motivo },
+		{ comprobar: `pnpm negocio:estado -- --tenant ${tenantId}`, recuperar: paraSalirDeLaVueltaDelNegocio(tenantId, null) },
+	);
+	negocioHaVuelto(r, r.destino ? `al marcador ${r.destino}: la vuelta preparada se ha aplicado` : "con la vuelta preparada, que ya se había aplicado sola: el log se ha abierto ahora");
+}
+
 async function negocioInstante(args) {
+	if (args.reiniciar !== undefined) return negocioAplicarLaPreparada(args);
 	const tenantId = negocioDe(args);
 	const modo = modoDe(args);
 	const motivo = motivoDe(args);
@@ -507,18 +574,12 @@ async function negocioInstante(args) {
 		}
 		cuerpo.instanteMs = ms;
 	}
+	// Una vuelta que no ha salido entera dice igualmente con qué se deshace y, si sigue preparada, cómo se aplica.
 	const r = await api("POST", "/v1/admin/negocios/instante", cuerpo, {
-		// Una vuelta que no ha salido entera dice igualmente con qué se deshace.
-		recuperar: (data) =>
-			data?.deshacer
-				? `    Para deshacerla: pnpm negocio:instante -- --tenant ${tenantId} --marcador ${data.deshacer} --modo ${modo} --motivo "…"`
-				: "",
+		comprobar: `pnpm negocio:estado -- --tenant ${tenantId}`,
+		recuperar: paraSalirDeLaVueltaDelNegocio(tenantId, modo),
 	});
-	console.log(`\n  ✔ ${tenantId} ha vuelto${r.instanteMs ? ` a ${new Date(r.instanteMs).toISOString()}` : ` al marcador ${r.destino}`}.`);
-	console.log(`    Marcador para deshacerlo: ${r.deshacer}`);
-	console.log(`    Log abierto en el Seq ${r.inicio ?? "(sin base tras volver)"}${r.purgadoHasta ? `, purgado hasta ${r.purgadoHasta}` : ""}.\n`);
-	for (const paso of r.queHacer) console.log(`    · ${paso}`);
-	console.log("");
+	negocioHaVuelto(r, r.instanteMs ? `a ${new Date(r.instanteMs).toISOString()}` : `al marcador ${r.destino}`);
 }
 
 /** DO-PERDIDA · Lo que sigue tras darle base a un objeto vacío. */
@@ -1010,6 +1071,7 @@ if (!comandos[cmd]) {
     estado    --tenant <tenantId>
     copiar    --tenant <tenantId>          (la copia de hoy a R2, ahora)
     instante  --tenant <tenantId> (--instante <fecha ISO> | --marcador <m>) --modo nube|main --motivo "…"
+    instante  --tenant <tenantId> --reiniciar <deshacer> --motivo "…"   (aplica la vuelta preparada y sin aplicar)
     restaurar-copia --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"   (a un objeto vacío)
     base-vacia      --tenant <tenantId> --modo nube|main --motivo "…"                      (a un objeto vacío)
     subida          --tenant <tenantId> --reabrir --motivo "…"   (reabre la subida completa de la Main)

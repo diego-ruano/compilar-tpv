@@ -10,6 +10,7 @@ import type {
 	ResultadoAplicacion,
 	ResultadoDeAdministracion,
 	VueltaAplicada,
+	VueltaEnCurso,
 	VueltaPreparada,
 } from "./tenantHub.rpc";
 import type { CopiaHecha } from "./tenantHub.copia";
@@ -86,18 +87,25 @@ export class TenantHub extends DurableObject<Env> {
 
 	/**
 	 * DO-03 · Devolver la base a un instante, en tres llamadas (`domains/admin/basesDeNegocios.ts`):
-	 * preparar, reiniciar (el objeto vuelve al arrancar) y, ya vuelto, abrir el log.
+	 * preparar, reiniciar (el objeto vuelve al arrancar, si la vuelta preparada es la de ese
+	 * `deshacer`) y, ya vuelto, abrir el log.
 	 */
 	prepararVuelta(params: {
 		tenantId: string;
 		instanteMs?: number;
 		marcador?: string;
+		modo: ModoDeVuelta;
 	}): Promise<ResultadoDeAdministracion<VueltaPreparada>> {
 		return this.motor.prepararVuelta(params);
 	}
 
-	reiniciar(): void {
-		this.motor.reiniciar();
+	/** VUELTA-REPETIR · Si la base está cerrada, y la vuelta preparada, si es por una. Sólo lee. */
+	cierreDeLaBase(tenantId: string): Promise<ResultadoDeAdministracion<{ vueltaEnCurso: boolean; vuelta: VueltaEnCurso | null }>> {
+		return this.motor.cierreDeLaBase(tenantId);
+	}
+
+	reiniciarParaAplicar(tenantId: string, deshacer: string): Promise<ResultadoDeAdministracion<object>> {
+		return this.motor.reiniciarParaAplicar(tenantId, deshacer);
 	}
 
 	trasVolver(params: {

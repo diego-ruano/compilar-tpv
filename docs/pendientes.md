@@ -23,7 +23,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
-| [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
@@ -278,20 +277,6 @@ por encima.
 
 En local no se puede comprobar (no hay vuelta a un instante). Toca en el simulacro de vuelta en
 producción: volver, deshacer y ver si el negocio atiende.
-
-### VUELTA-REPETIR · Repetir la vuelta de un negocio puede volver dos veces
-
-`POST /v1/admin/negocios/instante` (`basesDeNegocios.ts`, `pnpm negocio:instante`) prepara la vuelta
-(`MotorTenantHub.prepararVuelta`), abre el log en la central y reinicia el objeto. Si se queda a medias,
-contesta `log_sin_reservar` (la central no ha contestado) o `vuelta_sin_aplicar` (el objeto no ha
-vuelto todavía), los dos con «Repite la misma orden». Repetirla vuelve a preparar la vuelta sin mirar
-si la de antes ya se ha aplicado: si el objeto se ha reiniciado por su cuenta entre el «sin aplicar» y
-la repetición, ya ha vuelto, y la repetición prepara otra vuelta al mismo destino, que se lleva lo
-escrito entre medias.
-
-La base central lo resuelve así (`domains/admin/central.ts::aplicarLaPreparada`,
-`baseCentral.instante.ts`): la respuesta da el `deshacer`, y `--reiniciar <deshacer>` sólo reinicia si
-esa vuelta sigue preparada; si ya se ha aplicado, no hace nada. El arreglo es el mismo para el negocio.
 
 ### CENTRAL-RESTAURAR · La central se restaura en una sola llamada
 

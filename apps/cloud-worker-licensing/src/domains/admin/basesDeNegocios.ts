@@ -7,7 +7,8 @@
 //
 //   POST /v1/admin/negocios/estado    → si nació, si tiene base, su próxima copia y sus copias en R2
 //   POST /v1/admin/negocios/copiar    → la copia de hoy, ahora
-//   POST /v1/admin/negocios/instante  → devuelve su TenantHub a un instante (o a un marcador)
+//   POST /v1/admin/negocios/instante  → devuelve su TenantHub a un instante (o a un marcador), o
+//                                       aplica una vuelta preparada (`reiniciar`, VUELTA-REPETIR)
 //   POST /v1/admin/negocios/restaurar-copia → DO-PERDIDA: a un objeto vacío, la base de una copia de R2
 //   POST /v1/admin/negocios/base-vacia      → DO-PERDIDA: a un objeto vacío, una base nueva y vacía
 //   POST /v1/admin/negocios/subida/reabrir  → DO-SUBIDA: reabre la subida completa de la Main si se
@@ -28,7 +29,7 @@
 // libre). Una copia que el objeto no restaura no cambia nada, y deja rastro sólo en Axiom: el código
 // y, si la copia no vale, por qué (`detalle`).
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import * as z from "zod";
 
 import type { Env } from "../../env";
@@ -43,7 +44,7 @@ import { claveDeCopia, listarCopias, seqDeLasCopias } from "../../durableObjects
 import { zDia } from "../../lib/fechas";
 import { esInstanteDeLaVentana } from "../../durableObjects/instantes";
 import { SALTO_DE_SEQ, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
-import type { VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
+import type { ResultadoDeAdministracion, VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
 
 export const basesDeNegociosRoutes = new Hono<{ Bindings: Env }>();
 
@@ -117,17 +118,53 @@ async function seqConocido(env: Env, tenantId: string): Promise<number> {
  *
  * Con un objeto vacío el `inicio` es exacto: tras `llenar` no queda nada numerado. Tras volver a un
  * instante, lo vuelto es de antes de lo que se leyó al prepararlo (`seqAntes`).
+ *
+ * La de una vuelta a un instante lleva además su `deshacer` y quién manda (`modo`): es lo que queda de
+ * ella fuera del objeto, que la vuelta deja sin su marca, y con lo que se aplica aparte si el objeto
+ * se ha reiniciado por su cuenta (`reservaDeLaVuelta`, VUELTA-REPETIR).
  */
 async function reservarLog(
 	env: Env,
-	{ tenantId, operacion, seqAntes }: { tenantId: string; operacion: "instante" | "base_vacia" | "copia"; seqAntes: number },
+	{
+		tenantId,
+		operacion,
+		seqAntes,
+		vuelta,
+	}: {
+		tenantId: string;
+		operacion: "instante" | "base_vacia" | "copia";
+		seqAntes: number;
+		vuelta?: { deshacer: string; modo: ModoDeVuelta };
+	},
 ): Promise<void> {
 	await auditAdmin(getDb(env), "negocio_log_reservado", null, {
 		tenantId,
 		operacion,
 		seqAntes,
 		inicio: seqAntes + SALTO_DE_SEQ,
+		...vuelta,
 	});
+}
+
+/**
+ * VUELTA-REPETIR · La reserva del log de la vuelta de `tenantId` que se deshace con `deshacer`, la
+ * última si hay varias, o `null`. Lanza si la base central no contesta.
+ */
+async function reservaDeLaVuelta(
+	env: Env,
+	tenantId: string,
+	deshacer: string,
+): Promise<{ seqAntes: number; modo: ModoDeVuelta } | null> {
+	const r = await getDb(env).execute({
+		sql: `SELECT json_extract(detail, '$.seqAntes') AS seqAntes, json_extract(detail, '$.modo') AS modo FROM admin_audit
+		      WHERE action = 'negocio_log_reservado' AND json_extract(detail, '$.operacion') = 'instante'
+		        AND json_extract(detail, '$.tenantId') = ?1 AND json_extract(detail, '$.deshacer') = ?2
+		      ORDER BY at_ms DESC, audit_id DESC LIMIT 1;`,
+		args: [tenantId, deshacer],
+	});
+	const fila = r.rows[0] as { seqAntes?: unknown; modo?: unknown } | undefined;
+	if (!fila || (fila.modo !== "nube" && fila.modo !== "main")) return null;
+	return { seqAntes: Number(fila.seqAntes) || 0, modo: fila.modo };
 }
 
 basesDeNegociosRoutes.post("/estado", cuerpo(negocioSchema), async (c) => {
@@ -157,11 +194,30 @@ const instanteSchema = z
 		instanteMs: z.number().int().positive().optional(),
 		/** O un marcador de una vuelta anterior: el `deshacer` que devolvió, para deshacerla. */
 		marcador: z.string().min(1).max(200).optional(),
-		modo: zModo,
+		/**
+		 * VUELTA-REPETIR · O, en vez de volver, el `deshacer` de una vuelta preparada y sin aplicar: la
+		 * aplica, sólo si sigue preparada. Va sola: adónde se vuelve y quién manda los eligió la vuelta.
+		 */
+		reiniciar: z.string().min(1).max(200).optional(),
+		modo: zModo.optional(),
 		motivo: zMotivo,
 	})
-	.refine((b) => (b.instanteMs === undefined) !== (b.marcador === undefined), {
-		message: "Di a qué se vuelve: un instante o un marcador, uno de los dos.",
+	.superRefine((b, ctx) => {
+		if (b.reiniciar !== undefined) {
+			if (b.instanteMs !== undefined || b.marcador !== undefined || b.modo !== undefined) {
+				ctx.addIssue({
+					code: "custom",
+					message: "Aplicar una vuelta preparada va solo: sin instante, marcador ni modo, que ya los eligió la vuelta.",
+				});
+			}
+			return;
+		}
+		if ((b.instanteMs === undefined) === (b.marcador === undefined)) {
+			ctx.addIssue({ code: "custom", message: "Di a qué se vuelve: un instante o un marcador, uno de los dos." });
+		}
+		if (b.modo === undefined) {
+			ctx.addIssue({ code: "custom", path: ["modo"], message: "Elige quién manda después: «nube» o «main»." });
+		}
 	});
 
 /**
@@ -186,22 +242,54 @@ function queHacerDespues(modo: ModoDeVuelta, deshacer: string, tenantId: string)
 	];
 }
 
+/** VUELTA-REPETIR · La orden que aplica la vuelta preparada de `tenantId` que se deshace con `deshacer`. */
+const ordenQueLaAplica = (tenantId: string, deshacer: string) =>
+	`pnpm negocio:instante -- --tenant ${tenantId} --reiniciar ${deshacer} --motivo "…"`;
+
 /**
- * Devuelve el TenantHub de un negocio a un instante de los últimos 30 días, o a un marcador.
+ * VUELTA-REPETIR · Lo que se dice de una vuelta preparada que no se ha aplicado, para aplicarla: con su
+ * `deshacer`, aparte, y nunca repitiendo la orden de la vuelta, que si el objeto se ha reiniciado
+ * entretanto volvería otra vez y se llevaría lo escrito entre medias.
+ */
+const paraAplicarla = (tenantId: string, deshacer: string) =>
+	`Se aplica con ${ordenQueLaAplica(tenantId, deshacer)}: sólo reinicia el objeto si esta vuelta sigue preparada, y si ya se ha aplicado, no vuelve otra vez. No repitas la orden de la vuelta: si el objeto se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez.`;
+
+const QUE_PASA = {
+	log_sin_reservar:
+		"La vuelta está preparada, pero la base central no ha contestado y sin ella no se abre el log: la base sigue cerrada.",
+	vuelta_sin_aplicar: "La vuelta está preparada pero el objeto no ha vuelto todavía, y su base sigue cerrada.",
+	vuelta_a_la_vez:
+		"La vuelta preparada de este negocio es otra, o se le está dando base: no se ha reiniciado nada. Mira cómo está con pnpm negocio:estado.",
+	sin_vuelta_preparada:
+		"Este negocio no tiene ninguna vuelta preparada con ese deshacer, ni consta que se preparase: no se ha reiniciado nada. Mira cómo está con pnpm negocio:estado.",
+	vuelta_ya_aplicada: "Esa vuelta ya se ha aplicado, y su log ya está abierto: no se ha hecho nada.",
+} as const;
+
+/**
+ * Devuelve el TenantHub de un negocio a un instante de los últimos 30 días, o a un marcador; o, con
+ * `reiniciar`, aplica una vuelta que quedó preparada (`aplicarLaPreparada`).
  *
  * Son tres llamadas al objeto, cada una con un stub nuevo (el reinicio deja inservible el anterior):
  *
  * 1. `prepararVuelta`: deja la vuelta preparada, lee lo que la nube había numerado, cierra la base
  *    y echa a las sesiones. Contesta el marcador con el que se deshace.
- * 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: el objeto se ha
- *    reiniciado y al arrancar vuelve.
+ * 2. `reiniciarParaAplicar(deshacer)`: `ctx.abort()`, sólo si la vuelta preparada es ésta. La llamada
+ *    falla, y es lo esperado: el objeto se ha reiniciado y al arrancar vuelve.
  * 3. `trasVolver`: ya en el objeto vuelto, abre el log por encima de lo numerado y, con `nube`,
  *    obliga a las Main a traerse la nube. Si el objeto todavía no ha vuelto, se reinicia otra vez y
  *    se repite una vez.
+ *
+ * VUELTA-REPETIR · Lo que no sale entero (`log_sin_reservar`, `vuelta_sin_aplicar`) da el `deshacer`
+ * y la orden que la aplica, no «repite la misma orden»: la vuelta ya está preparada, y si el objeto se
+ * reinicia por su cuenta (un despliegue) se aplica sola, sin que nadie lo vea; repetir la orden
+ * prepararía otra al mismo destino y se llevaría lo escrito entre medias.
  */
 basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	const env = c.env;
-	const { tenantId, instanteMs, marcador, modo, motivo } = c.req.valid("json");
+	const { tenantId, instanteMs, marcador, reiniciar, modo: elegido, motivo } = c.req.valid("json");
+	if (reiniciar !== undefined) return aplicarLaPreparada(c, { tenantId, deshacer: reiniciar, motivo });
+	// Sin `reiniciar`, el esquema lo exige.
+	const modo = elegido as ModoDeVuelta;
 	if (instanteMs !== undefined && !esInstanteDeLaVentana(instanteMs, Date.now())) {
 		return c.json(
 			{
@@ -218,7 +306,7 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	// nada: sin saberlo, no se vuelve.
 	const conocido = await seqConocido(env, tenantId);
 	const hub = () => hubDe(env, tenantId);
-	const prep = await hub().prepararVuelta({ tenantId, instanteMs, marcador });
+	const prep = await hub().prepararVuelta({ tenantId, instanteMs, marcador, modo });
 	if (!prep.ok) {
 		const message =
 			prep.error === "vuelta_no_disponible"
@@ -228,26 +316,13 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	}
 
 	const seqAntes = Math.max(prep.seqAntes, conocido);
-	// «Repite la misma orden» vuelve a preparar la vuelta sin mirar si la de antes ya se aplicó: si el
-	// objeto se ha reiniciado entretanto, volvería otra vez (VUELTA-REPETIR, en docs/pendientes.md).
+	const { deshacer } = prep;
 	try {
-		await reservarLog(env, { tenantId, operacion: "instante", seqAntes });
+		await reservarLog(env, { tenantId, operacion: "instante", seqAntes, vuelta: { deshacer, modo } });
 	} catch {
-		return c.json(
-			{
-				ok: false,
-				error: "log_sin_reservar",
-				message:
-					"La vuelta está preparada, pero la base central no ha contestado y sin ella no se abre el log: la base sigue cerrada. Repite la misma orden.",
-				deshacer: prep.deshacer,
-			},
-			503,
-		);
+		return sinAplicar(c, "log_sin_reservar", 503, { tenantId, deshacer, modo });
 	}
-	let tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
-	if (!tras.ok && tras.error === "vuelta_sin_aplicar") {
-		tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo });
-	}
+	const tras = await reiniciarYAbrir(hub, { tenantId, seqAntes, modo, deshacer });
 
 	const resultado = {
 		tenantId,
@@ -260,31 +335,126 @@ basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	await auditAdmin(getDb(env), "negocio_volver_a_instante", null, { ...resultado, motivo });
 	await rastro(env, "nube_devuelta", { tenant_id: tenantId, ...resultado });
 
-	if (!tras.ok) {
-		return c.json(
-			{
-				ok: false,
-				error: tras.error,
-				message:
-					"La vuelta está preparada pero el objeto no ha vuelto todavía, y su base sigue cerrada. Repite la misma orden: se aplica en el siguiente reinicio.",
-				deshacer: prep.deshacer,
-			},
-			tras.status as 503,
-		);
-	}
-	return c.json({ ok: true, ...resultado, queHacer: queHacerDespues(modo, prep.deshacer, tenantId) });
+	if (!tras.ok) return noAplicada(c, tras, { tenantId, deshacer, modo });
+	return c.json({ ok: true, ...resultado, queHacer: queHacerDespues(modo, deshacer, tenantId) });
 });
 
+/**
+ * VUELTA-REPETIR · Aplica la vuelta preparada de `tenantId` que se deshace con `deshacer`, sin volver
+ * a pedirle nada a la plataforma (como la central, `domains/admin/central.ts::aplicarLaPreparada`):
+ *
+ * - **Sigue preparada** (la marca del objeto es la suya): reserva el log si no se reservó (la base
+ *   central no contestó), reinicia el objeto (`reiniciarParaAplicar`, que vuelve a mirar que sea la
+ *   suya) y abre el log, como la orden de la vuelta.
+ * - **Ya no está preparada, pero consta su reserva**: el objeto se ha reiniciado por su cuenta y ya ha
+ *   vuelto. No se reinicia: sólo se abre el log, con lo que apuntó la reserva. Si ya estaba abierto, se
+ *   ha aplicado entera (`vuelta_ya_aplicada`), y no se hace nada.
+ * - **Otra vuelta preparada**, o dándole base al objeto: `vuelta_a_la_vez`. **Ninguna, ni su reserva**:
+ *   `sin_vuelta_preparada`. Ninguna de las dos reinicia ni abre nada.
+ *
+ * Quién manda y desde dónde se abre el log son los que eligió la vuelta: los lleva su marca, y su
+ * reserva en la base central.
+ */
+async function aplicarLaPreparada(
+	c: Context<{ Bindings: Env }>,
+	{ tenantId, deshacer, motivo }: { tenantId: string; deshacer: string; motivo: string },
+) {
+	const env = c.env;
+	const hub = () => hubDe(env, tenantId);
+	const estado = await hub().cierreDeLaBase(tenantId);
+	if (!estado.ok) return c.json({ ok: false, error: estado.error }, estado.status as 500);
+	const { vuelta } = estado;
+	if (estado.vueltaEnCurso && vuelta?.deshacer !== deshacer) {
+		return c.json({ ok: false, error: "vuelta_a_la_vez", message: QUE_PASA.vuelta_a_la_vez, vuelta }, 409);
+	}
+	const reserva = await reservaDeLaVuelta(env, tenantId, deshacer);
+	if (!vuelta && !reserva) {
+		return c.json({ ok: false, error: "sin_vuelta_preparada", message: QUE_PASA.sin_vuelta_preparada }, 409);
+	}
+
+	let seqAntes: number;
+	let modo: ModoDeVuelta;
+	if (reserva) {
+		({ seqAntes, modo } = reserva);
+	} else {
+		// Preparada y sin reservar: la base central no contestó al reservarla. Se reserva como entonces.
+		modo = vuelta!.modo;
+		seqAntes = Math.max(vuelta!.seqAntes, await seqConocido(env, tenantId));
+		try {
+			await reservarLog(env, { tenantId, operacion: "instante", seqAntes, vuelta: { deshacer, modo } });
+		} catch {
+			return sinAplicar(c, "log_sin_reservar", 503, { tenantId, deshacer, modo });
+		}
+	}
+
+	const tras = vuelta
+		? await reiniciarYAbrir(hub, { tenantId, seqAntes, modo, deshacer })
+		: await hub().trasVolver({ tenantId, seqAntes, modo });
+	if (!tras.ok && tras.error !== "vuelta_sin_aplicar") {
+		const message = QUE_PASA[tras.error as keyof typeof QUE_PASA];
+		return c.json({ ok: false, error: tras.error, ...(message ? { message } : {}) }, tras.status as 409);
+	}
+
+	const resultado = {
+		tenantId,
+		modo,
+		destino: vuelta?.destino ?? null,
+		deshacer,
+		seqAntes,
+		aplicada: true,
+		...(tras.ok ? soloLoAplicado(tras) : { error: tras.error }),
+	};
+	await auditAdmin(getDb(env), "negocio_volver_a_instante", null, { ...resultado, motivo });
+	await rastro(env, "nube_devuelta", { tenant_id: tenantId, ...resultado });
+
+	if (!tras.ok) return noAplicada(c, tras, { tenantId, deshacer, modo });
+	return c.json({ ok: true, ...resultado, queHacer: queHacerDespues(modo, deshacer, tenantId) });
+}
+
+/** La vuelta preparada que no se ha aplicado: por qué, su `deshacer` y la orden que la aplica. */
+function sinAplicar(
+	c: Context<{ Bindings: Env }>,
+	error: "log_sin_reservar" | "vuelta_sin_aplicar",
+	status: 503,
+	{ tenantId, deshacer, modo }: { tenantId: string; deshacer: string; modo: ModoDeVuelta },
+) {
+	return c.json({ ok: false, error, message: `${QUE_PASA[error]} ${paraAplicarla(tenantId, deshacer)}`, deshacer, modo }, status);
+}
+
+/** Lo que contesta una vuelta que no ha salido al reiniciar o al abrir el log. */
+function noAplicada(
+	c: Context<{ Bindings: Env }>,
+	tras: { error: string; status: number },
+	vuelta: { tenantId: string; deshacer: string; modo: ModoDeVuelta },
+) {
+	if (tras.error === "vuelta_sin_aplicar") return sinAplicar(c, "vuelta_sin_aplicar", 503, vuelta);
+	const message = QUE_PASA[tras.error as keyof typeof QUE_PASA];
+	return c.json(
+		{ ok: false, error: tras.error, ...(message ? { message } : {}), deshacer: vuelta.deshacer, modo: vuelta.modo },
+		tras.status as 409,
+	);
+}
+
+/**
+ * Reinicia el objeto para aplicar la vuelta que se deshace con `deshacer` (`reiniciarParaAplicar`) y,
+ * ya vuelto, abre el log. Si al ir a reiniciarlo ya no está preparada, el objeto se ha reiniciado por
+ * su cuenta: se abre el log igual. Si no ha vuelto todavía, una vez más.
+ */
 async function reiniciarYAbrir(
 	hub: () => ReturnType<typeof hubDe>,
-	params: { tenantId: string; seqAntes: number; modo: ModoDeVuelta },
-) {
-	try {
-		await hub().reiniciar();
-	} catch {
-		// `ctx.abort()` corta la llamada que lo pide: es lo que tiene que pasar.
+	params: { tenantId: string; seqAntes: number; modo: ModoDeVuelta; deshacer: string },
+): Promise<ResultadoDeAdministracion<VueltaAplicada>> {
+	const { deshacer, ...abrir } = params;
+	for (let vez = 0; ; vez++) {
+		try {
+			const r = await hub().reiniciarParaAplicar(params.tenantId, deshacer);
+			if (!r.ok && r.error !== "sin_vuelta_preparada") return r;
+		} catch {
+			// `ctx.abort()` corta la llamada que lo pide: es lo que tiene que pasar.
+		}
+		const tras = await hub().trasVolver(abrir);
+		if (tras.ok || tras.error !== "vuelta_sin_aplicar" || vez > 0) return tras;
 	}
-	return hub().trasVolver(params);
 }
 
 function soloLoPreparado(p: VueltaPreparada) {

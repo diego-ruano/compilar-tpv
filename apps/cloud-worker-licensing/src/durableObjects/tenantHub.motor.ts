@@ -35,6 +35,7 @@ import type {
 	ResultadoAplicacion,
 	ResultadoDeAdministracion,
 	VueltaAplicada,
+	VueltaEnCurso,
 	VueltaPreparada,
 } from "./tenantHub.rpc";
 import {
@@ -47,7 +48,14 @@ import {
 import { CopiaInservible, FilasRechazadas, leyendoElGzip, lineasDe } from "./cargaDeCopias";
 import { cargarCopiaDelNegocio } from "./tenantHub.restaurar";
 import { esSinVueltaAUnInstante, instantesDe, type Instantes } from "./instantes";
-import { abrirLogTrasVolver, CLAVE_VUELTA_EN_CURSO, seqMasAlto, type ModoDeVuelta } from "./tenantHub.instante";
+import {
+	abrirLogTrasVolver,
+	CLAVE_VUELTA_EN_CURSO,
+	logYaAbierto,
+	seqMasAlto,
+	vueltaPreparada,
+	type ModoDeVuelta,
+} from "./tenantHub.instante";
 import { nuevoId } from "../lib/ids";
 import {
 	caducarSiToca,
@@ -442,6 +450,7 @@ export class MotorTenantHub {
 			negocio: negocioApuntado(storage),
 			proximaCopiaMs: await storage.getAlarm(),
 			vueltaEnCurso: Boolean(await storage.get(CLAVE_VUELTA_EN_CURSO)),
+			vuelta: await vueltaPreparada(storage),
 			seq: seqMasAlto(storage.sql),
 			sesiones: this.authedCount(),
 			// DO-SUBIDA: la subida completa que se le pidió a la Main, si hay.
@@ -482,11 +491,14 @@ export class MotorTenantHub {
 	 *   entre entretanto se perdería al volver. La vuelta se la lleva, porque es de después.
 	 * - Las sesiones se cierran por `cerrar`, como todo cierre que inicia el DO: la Main y las Handy
 	 *   reconectan solas, y para entonces la nube ya ha vuelto.
+	 * - VUELTA-REPETIR: la marca lleva lo que hace falta para aplicarla aparte (`VueltaEnCurso`: su
+	 *   `deshacer`, `seqAntes` y quién manda), con `reiniciarParaAplicar`, sin volver a pedirla.
 	 */
 	async prepararVuelta(params: {
 		tenantId: string;
 		instanteMs?: number;
 		marcador?: string;
+		modo: ModoDeVuelta;
 	}): Promise<ResultadoDeAdministracion<VueltaPreparada>> {
 		const ajeno = this.negocioAjeno(params.tenantId, "prepararVuelta");
 		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
@@ -497,7 +509,8 @@ export class MotorTenantHub {
 			const aprovisionadoAntes = baseAprovisionada(storage.sql);
 			const actual = await this.instantes.marcadorActual();
 			const deshacer = await this.instantes.restaurarAlReiniciar(destino);
-			await storage.put(CLAVE_VUELTA_EN_CURSO, { destino, desdeMs: Date.now() });
+			const marca: VueltaEnCurso = { destino, deshacer, seqAntes, modo: params.modo, desdeMs: Date.now() };
+			await storage.put(CLAVE_VUELTA_EN_CURSO, marca);
 			this.vueltaEnCurso = true;
 			this.baseLocal = null;
 			for (const ws of this.state.getWebSockets()) this.cerrar(ws, this.att(ws), 4003, "nube_devuelta");
@@ -508,9 +521,33 @@ export class MotorTenantHub {
 		}
 	}
 
-	/** DO-03 · Reinicia el objeto, que al arrancar vuelve al instante preparado. Lanza en quien llama. */
-	reiniciar(): void {
+	/**
+	 * VUELTA-REPETIR · Si la base está cerrada (`vueltaEnCurso`: una vuelta preparada, o dándole base) y,
+	 * si es por una vuelta a un instante, cuál (`vuelta`). Sólo lee.
+	 */
+	async cierreDeLaBase(
+		tenantId: string,
+	): Promise<ResultadoDeAdministracion<{ vueltaEnCurso: boolean; vuelta: VueltaEnCurso | null }>> {
+		const ajeno = this.negocioAjeno(tenantId, "cierreDeLaBase");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		const storage = this.state.storage;
+		return { ok: true, vueltaEnCurso: Boolean(await storage.get(CLAVE_VUELTA_EN_CURSO)), vuelta: await vueltaPreparada(storage) };
+	}
+
+	/**
+	 * DO-03 · Reinicia el objeto, que al arrancar vuelve al instante preparado, sólo si la vuelta
+	 * preparada es la que se deshace con `deshacer` (VUELTA-REPETIR): con otra en curso (o dándole base
+	 * a un objeto vacío), `vuelta_a_la_vez`; sin ninguna (ya se ha aplicado, o no se preparó),
+	 * `sin_vuelta_preparada`. Si lo reinicia, no vuelve: lanza en quien llama.
+	 */
+	async reiniciarParaAplicar(tenantId: string, deshacer: string): Promise<ResultadoDeAdministracion<object>> {
+		const ajeno = this.negocioAjeno(tenantId, "reiniciarParaAplicar");
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
+		const storage = this.state.storage;
+		if (!(await storage.get(CLAVE_VUELTA_EN_CURSO))) return { ok: false, error: "sin_vuelta_preparada", status: 409 };
+		if ((await vueltaPreparada(storage))?.deshacer !== deshacer) return { ok: false, error: "vuelta_a_la_vez", status: 409 };
 		this.instantes.reiniciar("nube_devuelta");
+		return { ok: true };
 	}
 
 	/**
@@ -518,7 +555,8 @@ export class MotorTenantHub {
 	 * marca de vuelta en curso es de después del instante, así que volver se la lleva), pone el esquema
 	 * al día, abre el log por encima de todo lo numerado y, con `nube`, obliga a las Main a traerse la
 	 * nube (`abrirLogTrasVolver`). Sin base tras volver (un instante de antes de que naciera), no toca
-	 * nada.
+	 * nada. Si el log ya se abrió tras esta vuelta (`logYaAbierto`), `vuelta_ya_aplicada`, sin abrir
+	 * otro (VUELTA-REPETIR).
 	 */
 	async trasVolver(params: {
 		tenantId: string;
@@ -533,6 +571,7 @@ export class MotorTenantHub {
 		const ajeno = this.negocioAjeno(params.tenantId, "trasVolver");
 		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
 		if (!baseAprovisionada(storage.sql)) return { ok: true, aprovisionado: false, inicio: null, purgadoHasta: null };
+		if (logYaAbierto(storage.sql, params.seqAntes)) return { ok: false, error: "vuelta_ya_aplicada", status: 409 };
 		try {
 			await this.getTenantDb(params.tenantId);
 		} catch (e) {

@@ -1256,11 +1256,28 @@ detrás de `Instantes` (`durableObjects/instantes.ts`), que comparte con la base
 
 - **Tres llamadas desde la ruta**, cada una con un stub nuevo: `prepararVuelta` (lee lo que la nube
   había numerado, deja la vuelta para el siguiente arranque, cierra la base con una marca en el
-  almacenamiento, echa a las sesiones y devuelve el marcador con el que se deshace), `reiniciar`
-  (`ctx.abort()`: la llamada falla siempre, y es lo esperado) y `trasVolver`.
+  almacenamiento, echa a las sesiones y devuelve el marcador con el que se deshace),
+  `reiniciarParaAplicar(deshacer)` (`ctx.abort()`, sólo si la vuelta preparada es la de ese
+  `deshacer`: la llamada falla, y es lo esperado) y `trasVolver`.
 - **Mientras tanto la base no atiende** (`tenant_db_restaurando`, 503 `external`, pasajero para el
   outbox de la Main): lo que entrara se perdería al volver. Volver se lleva la marca, que es de
   después; si sigue ahí, el objeto no ha vuelto (`vuelta_sin_aplicar`) y la ruta lo reinicia otra vez.
+- **Una vuelta preparada se aplica aparte, con su `deshacer`** (VUELTA-REPETIR), como la de la
+  central: `{ tenantId, reiniciar: <deshacer>, motivo }` en la misma ruta (`pnpm negocio:instante --
+  --reiniciar`), sin instante, marcador ni modo. Lo que no sale entero (`log_sin_reservar`,
+  `vuelta_sin_aplicar`) da el `deshacer` y esa orden, nunca «repite la misma orden»: si el objeto se
+  reinicia por su cuenta (un despliegue), la vuelta se aplica sola, y repetir la orden prepararía otra
+  al mismo destino y se llevaría lo escrito entre medias. Lo que hace falta para aplicarla va en la
+  marca (`VueltaEnCurso`: destino, `deshacer`, `seqAntes` y quién manda) y en la reserva del log en
+  `admin_audit` (`negocio_log_reservado`, con su `deshacer` y su `modo`), que la vuelta no se lleva.
+  Con la marca suya, reserva el log si la base central no contestó, reinicia y lo abre. Sin marca y
+  con su reserva, el objeto ya ha vuelto: sólo abre el log, y si ya lo estaba (un cambio en
+  `seqAntes + SALTO_DE_SEQ` o por encima, `logYaAbierto`), contesta `vuelta_ya_aplicada`. Con otra
+  vuelta preparada, o dándole base al objeto, `vuelta_a_la_vez`; sin marca ni reserva,
+  `sin_vuelta_preparada`. Los tres son 409 y no reinician ni abren nada. `pnpm negocio:estado` enseña
+  la vuelta preparada y la orden que la aplica. Lo que no cubre: si la base central no contesta al
+  reservar y además el objeto se reinicia solo antes de aplicarla, no queda ni marca ni reserva, y el
+  log no se abre por encima (`sin_vuelta_preparada`).
 - **El log se abre por encima de todo lo numerado** (`abrirLogTrasVolver`). La nube vuelta numeraría
   otra vez desde el `Seq` del instante, y la Main, que pide desde su checkpoint, se saltaría para
   siempre lo nuevo con un número que ya ha visto. Se escribe un cambio vacío (`nube_devuelta`, sin
