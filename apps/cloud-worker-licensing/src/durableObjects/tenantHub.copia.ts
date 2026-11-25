@@ -46,12 +46,14 @@ export const PREFIJO_COPIAS_NEGOCIOS = "negocios/";
 export const COPIAS_QUE_SE_GUARDAN = 30;
 
 /**
- * El techo de la copia comprimida, que se monta en memoria antes de subirla (un objeto tiene
- * 128 MB). Un volcado SQL de una base de un bar se comprime entre 8 y 12 veces: son varios cientos de
- * MB sin comprimir, años de un bar normal. Pasado el techo falla en voz alta (Sentry y Axiom) en vez
- * de reventar el objeto; el día que se acerque, lo que toca es archivar lo antiguo (DB-14).
+ * El techo de la copia comprimida, que se monta en memoria antes de subirla. Al cerrarla, el fichero
+ * entero se monta junto a sus trozos (`GzipPorTrozos`), así que llega a ocupar dos veces esto: 64 MB
+ * de los 128 MB del objeto, que además tiene que seguir atendiendo al negocio. Un volcado SQL de una
+ * base de un bar se comprime entre 8 y 12 veces: son varios cientos de MB sin comprimir, años de un
+ * bar normal. Pasado el techo falla en voz alta (Sentry y Axiom) en vez de reventar el objeto; el día
+ * que se acerque, lo que toca es archivar lo antiguo (DB-14).
  */
-export const TOPE_COMPRIMIDO = 64 * 1024 * 1024;
+export const TOPE_COMPRIMIDO = 32 * 1024 * 1024;
 
 /** La primera línea de los datos de cada tabla. Es lo único que se ejecuta al restaurar. */
 export const PRINCIPIO_DE_INSERT = 'INSERT INTO "';

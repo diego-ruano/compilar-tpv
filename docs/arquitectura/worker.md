@@ -718,8 +718,8 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
   no una regla por antigüedad: ésa borraría también las últimas de un objeto perdido, que ya no hace
   copias nuevas, y es justo cuando hacen falta. La regla de ciclo de vida del bucket (90 días) es la
   red de lo que nadie poda: las copias de un negocio retirado.
-- **Un techo**: 64 MiB comprimida (`TOPE_COMPRIMIDO`), que se monta en memoria. Pasado, falla en voz
-  alta; lo que toca entonces es archivar lo antiguo (DB-14).
+- **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`), que se monta en memoria y al cerrarla ocupa
+  el doble. Pasado, falla en voz alta; lo que toca entonces es archivar lo antiguo (DB-14).
 - **No propaga**: si falla, Sentry (`hub.copia_diaria`) y Axiom (`copia_diaria_fallida`), y se repite
   en una hora. Lo que sale bien deja `copia_diaria` en Axiom con la clave, las filas y los bytes, y
   nada de los datos. Es la falta de ese evento lo que hay que vigilar.
