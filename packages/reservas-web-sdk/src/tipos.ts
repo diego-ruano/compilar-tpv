@@ -99,8 +99,9 @@ export type Reserva = {
 	mesa: string;
 	mesa_nombre: string;
 	/**
-	 * Si ha salido el correo de confirmación, con el enlace para cancelar. `null` cuando la respuesta es
-	 * la de un intento repetido (la reserva ya estaba hecha): su correo salió con el primero.
+	 * Si ha salido el correo de confirmación, con el enlace para cancelar. `null` cuando aún no se sabe:
+	 * la respuesta es la de un intento repetido (la reserva ya estaba hecha, y su correo salió con el
+	 * primero), o no ha podido salir ahora y se repite en unos minutos. `false`, si no va a salir.
 	 */
 	correo_enviado: boolean | null;
 };

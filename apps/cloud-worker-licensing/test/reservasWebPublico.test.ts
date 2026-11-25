@@ -15,7 +15,15 @@ import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enLaAgenda, lectorSobre } from "./helpers/agenda";
-import { centralDePrueba, filasDe, fotoDeLaCentral, type CentralDePrueba } from "./helpers/central";
+import {
+	centralDePrueba,
+	centralInterceptada,
+	desvio,
+	filasDe,
+	fotoDeLaCentral,
+	type CentralDePrueba,
+} from "./helpers/central";
+import { enviarCorreoReservaWeb } from "../src/domains/reservas_web/correos";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { MAX_ALTAS_DIA_CONEXION, MAX_ALTAS_DIA_RED, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
@@ -378,13 +386,26 @@ describe("las rutas públicas de la reserva web", () => {
 		});
 	});
 
-	it("POST /reservas: si el correo no sale, la reserva sigue y la respuesta lo dice", async () => {
+	it("POST /reservas: si el correo no sale, la reserva sigue, y la alarma de la agenda lo repite", async () => {
 		await conNegocio("publico-reservar-sin-correo", async (sql) => {
 			correoCaido = true;
 			const { status, json } = await pedir("/reservas", ALTA_WEB);
 			expect(status).toBe(200);
-			expect(json).toMatchObject({ ok: true, correo_enviado: false });
+			// No ha salido, pero puede llegar: no se sabe aún (RESERVA-CORREOS).
+			expect(json).toMatchObject({ ok: true, correo_enviado: null });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
+			expect(sql.exec(`SELECT tipo FROM correos_pendientes;`).toArray()).toEqual([{ tipo: "confirmacion" }]);
+		});
+	});
+
+	it("POST /reservas: si el correo no sale y la agenda no lo puede apuntar, la respuesta dice que no ha salido", async () => {
+		await conNegocio("publico-reservar-sin-correo-ni-agenda", async (_sql, motor) => {
+			correoCaido = true;
+			motor.apuntarCorreoPendiente = async () => {
+				throw new Error("la agenda no contesta");
+			};
+			const { json } = await pedir("/reservas", ALTA_WEB);
+			expect(json).toMatchObject({ ok: true, correo_enviado: false });
 		});
 	});
 
@@ -626,6 +647,135 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
 			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
 			expect(enviados[0].text).toContain(codigoDeReserva(idReserva));
+		});
+	});
+});
+
+describe("los correos que no salen por la central los repite la alarma de la agenda (RESERVA-CORREOS)", () => {
+	/**
+	 * La central de la prueba, vista por un desvío: con `caer()` no contesta a nada, con `levantar()`
+	 * vuelve. La alarma de la agenda manda con el mismo `env` que las rutas.
+	 */
+	function centralQueSeCae(motor: any, central: CentralDePrueba) {
+		const { atender, desviar } = desvio();
+		enCurso!.central = centralInterceptada(central, atender);
+		motor.enviarCorreo = (c: any) => enviarCorreoReservaWeb(envDeLaPrueba() as any, c);
+		return {
+			caer: () => desviar(() => Promise.reject(new Error("la base central no contesta"))),
+			levantar: () => desviar(null),
+		};
+	}
+
+	const pendientes = (sql: SqlStorage) => {
+		try {
+			return Number((sql.exec(`SELECT COUNT(*) AS n FROM correos_pendientes;`).toArray()[0] as any).n);
+		} catch {
+			return 0;
+		}
+	};
+
+	it("la confirmación que no sale se apunta, y la alarma la manda con un enlace que cancela esa reserva", async () => {
+		await conNegocio("publico-correo-confirmacion-repetida", async (sql, motor, central) => {
+			const { caer, levantar } = centralQueSeCae(motor, central);
+			caer();
+			const { json } = await pedir("/reservas", ALTA_WEB);
+			// No ha salido, pero saldrá: la respuesta no dice que no le vaya a llegar.
+			expect(json).toMatchObject({ ok: true, correo_enviado: null });
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(1);
+
+			// Con la central todavía sin contestar, la alarma no lo manda ni lo olvida.
+			await motor.alarm();
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(1);
+
+			levantar();
+			await motor.alarm();
+			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva confirmada en Bar Pepe"]]);
+			expect(enviados[0].text).toContain(json.codigo);
+			const token = tokenDelCorreo(enviados[0]);
+			expect((await pedir("/reserva", { token })).json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", estado: "confirmada" });
+			// Salido, se olvida: otra alarma no lo repite.
+			expect(pendientes(sql)).toBe(0);
+			await motor.alarm();
+			expect(enviados).toHaveLength(1);
+			// Y con su enlace se cancela, con su «has cancelado»: la confirmación salió.
+			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+			expect(enviados.map((m) => m.subject)).toEqual(["Reserva confirmada en Bar Pepe", "Reserva cancelada en Bar Pepe"]);
+		});
+	});
+
+	it("lo que se guarda para repetirla no lleva el token del enlace: sólo su hash vive en la agenda", async () => {
+		await conNegocio("publico-correo-sin-token-guardado", async (sql, motor, central) => {
+			const { caer } = centralQueSeCae(motor, central);
+			caer();
+			await pedir("/reservas", ALTA_WEB);
+			expect(pendientes(sql)).toBe(1);
+			const guardado = JSON.stringify(sql.exec(`SELECT * FROM correos_pendientes;`).toArray());
+			expect(guardado).not.toContain("#t=");
+			for (const { token_hash } of sql.exec(`SELECT token_hash FROM enlaces;`).toArray() as any[]) {
+				expect(guardado).not.toContain(token_hash);
+			}
+		});
+	});
+
+	it("el «has cancelado» que no sale se apunta, y la alarma lo manda una sola vez", async () => {
+		await conNegocio("publico-correo-cancelacion-repetida", async (sql, motor, central) => {
+			const { caer, levantar } = centralQueSeCae(motor, central);
+			await pedir("/reservas", ALTA_WEB);
+			const token = tokenDelCorreo(enviados[0]);
+			enviados.length = 0;
+
+			caer();
+			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(1);
+			levantar();
+			await motor.alarm();
+			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
+			await motor.alarm();
+			expect(enviados).toHaveLength(1);
+			expect(await filasDe(central, `SELECT id, ok FROM email_sends ORDER BY id;`)).toEqual([
+				{ id: expect.stringMatching(/^rw:cancelacion:/), ok: 1 },
+				{ id: expect.stringMatching(/^rw:confirmacion:/), ok: 1 },
+			]);
+		});
+	});
+
+	it("si el primero sí salió, la alarma no lo manda otra vez ni deja vivo el enlace que no ha llegado a nadie", async () => {
+		await conNegocio("publico-correo-ya-salido", async (sql, motor, central) => {
+			const { caer, levantar } = centralQueSeCae(motor, central);
+			caer();
+			const { json } = await pedir("/reservas", ALTA_WEB);
+			expect(json.correo_enviado).toBeNull();
+			expect(pendientes(sql)).toBe(1);
+			const idCorreo = String((sql.exec(`SELECT id_correo FROM correos_pendientes;`).toArray()[0] as any).id_correo);
+			// Otro camino lo dio por salido mientras tanto.
+			levantar();
+			await filasDe(
+				central,
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+				 VALUES (?, 't1', 'web', 'ana@correo.es', NULL, 1, NULL, ?, 'reserva_web');`,
+				idCorreo,
+				Date.now(),
+			);
+			const enlacesAntes = sql.exec(`SELECT COUNT(*) AS n FROM enlaces;`).toArray()[0];
+			await motor.alarm();
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(0);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM enlaces;`).toArray()[0]).toEqual(enlacesAntes);
+		});
+	});
+
+	it("con la central sin contestar, la alarma queda a pocos minutos, no a una hora", async () => {
+		await conNegocio("publico-correo-alarma-pronto", async (_sql, motor, central) => {
+			const { caer } = centralQueSeCae(motor, central);
+			caer();
+			const antes = Date.now();
+			await pedir("/reservas", ALTA_WEB);
+			const alarma = await (motor as any).ctx.storage.getAlarm();
+			expect(alarma).not.toBeNull();
+			expect(alarma - antes).toBeLessThanOrEqual(15 * 60_000);
 		});
 	});
 });

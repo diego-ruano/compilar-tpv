@@ -16,6 +16,7 @@ import type { ResultadoDeLaMain } from "./agendaWeb.almacen";
 import { Fila } from "./agendaWeb.fila";
 import {
 	MotorAgendaWeb,
+	type CorreoParaRepetir,
 	type ResultadoCancelar,
 	type ResultadoConsulta,
 	type ResultadoDisponibles,
@@ -54,6 +55,12 @@ export class AgendaWeb extends DurableObject<Env> {
 
 	cancelar(p: { tenantId: string; token: string }): Promise<ResultadoCancelar> {
 		return this.fila.atender(() => this.motor.cancelar(p));
+	}
+
+	// La confirmación o el «has cancelado» que la ruta no ha podido mandar: lo repite la alarma
+	// (RESERVA-CORREOS).
+	apuntarCorreoPendiente(p: { tenantId: string; correo: CorreoParaRepetir }): Promise<{ ok: true }> {
+		return this.fila.atender(() => this.motor.apuntarCorreoPendiente(p));
 	}
 
 	// La entrega a la Main (§4.5): sólo desde sus rutas, detrás de `soloLaMainVigente`.

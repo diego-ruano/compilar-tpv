@@ -41,8 +41,21 @@ import {
 	type ResultadoDe,
 } from "../domains/reservas_web/lecturasDeLaWeb";
 import { MESA_AUTOMATICA, type AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
-import { enviarCorreoReservaWeb, type Correo, type ResultadoCorreo } from "../domains/reservas_web/correos";
 import {
+	enlaceDeCancelar,
+	enviarCorreoReservaWeb,
+	type Correo,
+	type NegocioDelCorreo,
+	type ResultadoCorreo,
+} from "../domains/reservas_web/correos";
+import {
+	apuntarCorreoPendiente,
+	apuntarIntentoDeCorreo,
+	correosPendientes,
+	hayCorreosPendientes,
+	olvidarCorreoPendiente,
+	quitarEnlace,
+	type CorreoPendiente,
 	altasDeLaConexionDesde,
 	altasDesde,
 	apuntarAltaDeLaConexion,
@@ -122,6 +135,13 @@ const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
  */
 const MAX_AVISOS_FALLIDAS = 20;
 const MAX_FALLIDAS_MIRADAS = 100;
+/**
+ * RESERVA-CORREOS · Cada cuánto vuelve la alarma mientras haya un correo al cliente por repetir, y
+ * cuántos repite de una vez (cada confirmación lee su reserva en la base), entre cuántos.
+ */
+const REINTENTO_CORREOS_MS = 10 * 60_000;
+const MAX_CORREOS_REPETIDOS = 10;
+const MAX_CORREOS_MIRADOS = 50;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
@@ -226,6 +246,26 @@ export type AvisoDeCancelacion = {
 
 /** `aviso`, si se acaba de cancelar y se sabe a quién decírselo; `null` si ya lo estaba. */
 export type ResultadoCancelar = { ok: true; aviso: AvisoDeCancelacion | null } | RechazoAgenda;
+
+/**
+ * RESERVA-CORREOS · Un correo al cliente que la ruta no ha podido mandar, para que lo repita la
+ * alarma: la confirmación, con de dónde sale su enlace de cancelar (el token no: la alarma pone uno
+ * nuevo), o el «has cancelado», con el correo que tiene que haber salido antes.
+ */
+export type CorreoParaRepetir = {
+	tipo: "confirmacion" | "cancelacion";
+	id_reserva: string;
+	para: string;
+	dia: string;
+	hora: string;
+	personas: number;
+	/** El nombre de la mesa en la Main. */
+	mesa: string | null;
+	/** Confirmación: el origen del widget y la clave del negocio, para el enlace de cancelar. */
+	enlace?: { origen: string; clave: string };
+	/** Cancelación: `Correo.trasElCorreo`. */
+	tras_el_correo?: string | null;
+};
 
 /** Una referencia corta para hablar con el restaurante: el final aleatorio del `ID_Reserva`. */
 export function codigoDeReserva(idReserva: string): string {
@@ -700,6 +740,121 @@ export class MotorAgendaWeb {
 		return enviados;
 	}
 
+	/**
+	 * RESERVA-CORREOS · La ruta no ha podido mandar la confirmación o el «has cancelado» (la base
+	 * central sin contestar, o el binding): se apunta para la alarma, que vuelve en pocos minutos
+	 * mientras quede alguno.
+	 */
+	async apuntarCorreoPendiente(p: { tenantId: string; correo: CorreoParaRepetir }): Promise<{ ok: true }> {
+		recordarNegocio(this.sql, p.tenantId);
+		const c = p.correo;
+		apuntarCorreoPendiente(this.sql, {
+			id_correo: `rw:${c.tipo}:${c.id_reserva}`,
+			tipo: c.tipo,
+			id_reserva: c.id_reserva,
+			para: c.para,
+			dia_ymd: c.dia,
+			hora: c.hora,
+			comensales: c.personas,
+			mesa: c.mesa,
+			origen: c.tipo === "confirmacion" ? (c.enlace?.origen ?? null) : null,
+			clave: c.tipo === "confirmacion" ? (c.enlace?.clave ?? null) : null,
+			tras_el_correo: c.tipo === "cancelacion" ? (c.tras_el_correo ?? null) : null,
+			creado_ms: Date.now(),
+		});
+		await this.alarmaAntesDe(Date.now() + REINTENTO_CORREOS_MS);
+		return { ok: true };
+	}
+
+	/**
+	 * RESERVA-CORREOS · Los correos al cliente que la ruta no pudo mandar. Cada uno sale con su id de
+	 * siempre (`rw:<tipo>:<id_reserva>`): si el primero sí salió, la central lo sabe (`ya_enviado`) y
+	 * no sale otro. Lo que no sale porque la central sigue sin contestar (o otro lo está mandando) se
+	 * queda para la siguiente, detrás; lo que no sale por el tope o porque no salió el correo de antes,
+	 * se olvida: repetirlo sería saltarse lo que el tope frena. Pasada la hora de la reserva, también.
+	 * Devuelve cuántos han salido.
+	 */
+	async repetirCorreos(tenantId: string): Promise<number> {
+		const pendientes = correosPendientes(this.sql, MAX_CORREOS_MIRADOS);
+		if (!pendientes.length) return 0;
+		const { ahora, negocio } = await this.leer(tenantId, { que: "fallidas", idsMesas: [] });
+		let enviados = 0;
+		for (const c of pendientes) {
+			if (enviados >= MAX_CORREOS_REPETIDOS) break;
+			try {
+				const r =
+					c.tipo === "confirmacion"
+						? await this.repetirConfirmacion(tenantId, c, negocio)
+						: await this.repetirCancelacion(tenantId, c, ahora, negocio);
+				if (r === "enviado") enviados++;
+				if (r === "fallido" || r === "en_curso") apuntarIntentoDeCorreo(this.sql, c.id_correo, Date.now());
+				else olvidarCorreoPendiente(this.sql, c.id_correo);
+			} catch (e: any) {
+				console.warn("[agenda-web] no se ha podido repetir un correo:", c.tipo, String(e?.message || e));
+				apuntarIntentoDeCorreo(this.sql, c.id_correo, Date.now());
+			}
+		}
+		return enviados;
+	}
+
+	/**
+	 * La confirmación, si la reserva sigue en pie: como está ahora (en la base, o en el alta que
+	 * espera aquí) y con un enlace de cancelar nuevo. El del alta no se guardó en claro en ningún
+	 * sitio; éste tampoco: sólo su hash, como todos. Si el correo no llega a salir, el enlace se quita.
+	 * `descartado` cuando ya no hay nada que confirmar.
+	 */
+	private async repetirConfirmacion(
+		tenantId: string,
+		c: CorreoPendiente,
+		negocio: NegocioDelCorreo,
+	): Promise<ResultadoCorreo | "descartado"> {
+		const { leidaMs, ahora, enLaBase, numero } = await this.leerReserva(tenantId, c.id_reserva);
+		const alta = peticion(this.sql, "alta", c.id_reserva);
+		const datos = enLaBase ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
+		if (!datos || !c.origen || !c.clave) return "descartado";
+		// Cancelada (por el cliente, por el restaurante o porque la Main no pudo registrarla) o pasada.
+		if (this.estadoPublico(c.id_reserva, enLaBase, ahora, datos, leidaMs) !== "confirmada") return "descartado";
+
+		const token = nuevoToken();
+		const tokenHash = await sha256HexStr(token);
+		apuntarEnlace(this.sql, c.id_reserva, tokenHash, caducidadDelEnlace(datos.dia, datos.hora), false);
+		const r = await this.enviarCorreo({
+			tenantId,
+			id: c.id_correo,
+			tipo: "confirmacion",
+			para: enLaBase?.email ?? c.para,
+			negocio,
+			reserva: { dia: datos.dia, hora: datos.hora, personas: datos.personas, mesa: numero ?? c.mesa, codigo: codigoDeReserva(c.id_reserva) },
+			enlace: enlaceDeCancelar(c.origen, c.clave, token),
+			dispositivo: "agenda",
+		});
+		// Sin salir, el enlace se quita: con la central sin contestar, cada vuelta dejaría uno. Un binding
+		// que falla después de entregarlo (raro) deja ese correo con un enlace que ya no vale, pero queda
+		// apuntado como fallido en `email_sends` y el siguiente sale con uno que sí.
+		if (r !== "enviado") quitarEnlace(this.sql, tokenHash);
+		return r;
+	}
+
+	/** El «has cancelado», tal como era al cancelar, hasta la hora de la reserva. */
+	private async repetirCancelacion(
+		tenantId: string,
+		c: CorreoPendiente,
+		ahora: string,
+		negocio: NegocioDelCorreo,
+	): Promise<ResultadoCorreo | "descartado"> {
+		if (intervalo(c.dia_ymd, c.hora, 0).inicio <= ahora) return "descartado";
+		return this.enviarCorreo({
+			tenantId,
+			id: c.id_correo,
+			tipo: "cancelacion",
+			para: c.para,
+			negocio,
+			reserva: { dia: c.dia_ymd, hora: c.hora, personas: c.comensales, mesa: c.mesa, codigo: codigoDeReserva(c.id_reserva) },
+			dispositivo: "agenda",
+			trasElCorreo: c.tras_el_correo ?? undefined,
+		});
+	}
+
 	/** Lo que ve quien abre el enlace. Síncrono. */
 	private estadoPublico(
 		idReserva: string,
@@ -752,6 +907,12 @@ export class MotorAgendaWeb {
 		}
 	}
 
+	/** Que la alarma suene, como tarde, en `cuandoMs`: la adelanta si estaba más lejos. */
+	private async alarmaAntesDe(cuandoMs: number): Promise<void> {
+		const actual = await this.ctx.storage.getAlarm();
+		if (actual === null || actual > cuandoMs) await this.ctx.storage.setAlarm(cuandoMs);
+	}
+
 	async alarm(): Promise<void> {
 		let baseMirada = true;
 		try {
@@ -782,9 +943,17 @@ export class MotorAgendaWeb {
 			} catch (e: any) {
 				console.warn("[agenda-web] la alarma no ha podido avisar de las fallidas:", String(e?.message || e));
 			}
+			// Y la confirmación y el «has cancelado» que no salieron de la ruta (RESERVA-CORREOS).
+			try {
+				await this.repetirCorreos(tenantId);
+			} catch (e: any) {
+				console.warn("[agenda-web] la alarma no ha podido repetir los correos:", String(e?.message || e));
+			}
 		}
 		const quedaAlgo = purgar(this.sql, ahoraMs);
-		if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
+		// Un correo por repetir no espera una hora: su enlace de cancelar sirve hasta la hora de la reserva.
+		if (hayCorreosPendientes(this.sql)) await this.ctx.storage.setAlarm(Date.now() + REINTENTO_CORREOS_MS);
+		else if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
 	}
 
 	/**

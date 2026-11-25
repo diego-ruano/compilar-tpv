@@ -29,7 +29,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
 | [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
-| [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
@@ -415,18 +414,6 @@ El correo de un pedido sale aunque la central no conteste (`email.routes.ts::res
 mientras dure, sus pedidos salen sin contar en el cupo. Lo fija `test/correoTopeDiario.test.ts` («con
 la central saturada, también…»). Lo decide el responsable: contestar 503 con la central saturada
 (el pedido se repite después), o dejarlo así.
-
-### RESERVA-CORREOS · Los correos de una reserva web que se pierden con la central saturada
-
-El correo de confirmación de una reserva web (con el enlace de cancelar) y el de «has cancelado»
-salen de la petición del visitante (`publico.routes.ts`, `POST /reservas` y `POST /cancelar`), y
-antes reservan su sitio en `email_sends`, en la base central (`correos.ts::reservar`). Si la central
-no atiende (saturada, o sin contestar), el correo no sale (`fallido`: sin la base no se sabe si ya
-salió) y nadie lo repite: la reserva queda hecha, o cancelada, sin que el cliente reciba el correo ni,
-en el alta, el enlace para cancelarla, que sólo viaja en él. El alta lo dice en su respuesta
-(`correo_enviado: false`). Arreglo posible: apuntar el correo pendiente en la `AgendaWeb`, para que lo
-reintente su alarma como ya hace con el de «no se pudo registrar», y guardar para ello el enlace, o
-el token cifrado.
 
 ### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
 

@@ -101,7 +101,7 @@ function sinDatosPersonales(respuesta: unknown) {
 describe("la agenda de reservas web", () => {
 	it("sólo expone por RPC lo que llaman las rutas, y la alarma (RI-45)", () => {
 		expect(Object.getOwnPropertyNames(AgendaWeb.prototype).sort()).toEqual(
-			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "enlaceParaUnCambio", "borrarTodo", "alarm"].sort(),
+			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "apuntarCorreoPendiente", "pendientes", "recogidas", "enlaceParaUnCambio", "borrarTodo", "alarm"].sort(),
 		);
 	});
 
@@ -1101,7 +1101,7 @@ describe("la entrega a la Main", () => {
 			prepararAlmacen(sql);
 			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
 			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo", "aviso_ms"]));
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "7" });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
 			const r = await motor.recogidas({
@@ -1276,7 +1276,7 @@ describe("el tope de altas por conexión (RW-ALTAS)", () => {
 			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-vieja', 'r-vieja', ?);`, Date.now() + 86_400_000);
 			sql.exec(`UPDATE estado SET valor = '4' WHERE clave = 'version';`);
 			prepararAlmacen(sql);
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "7" });
 			// El enlace que ya había cuenta como de la confirmación.
 			expect(sql.exec(`SELECT por_un_cambio FROM enlaces WHERE token_hash = 'h-vieja';`).toArray()).toEqual([{ por_un_cambio: 0 }]);
 			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A, red: CONEXION_B })).ok).toBe(true);
@@ -1301,7 +1301,7 @@ describe("el tope de altas por conexión (RW-ALTAS)", () => {
 			expect(reservaDelEnlace(sql, "h-vieja", Date.now())).toEqual({ id_reserva: "r-vieja", por_un_cambio: false });
 			apuntarEnlace(sql, "r-vieja", "h-cambio", Date.now() + 86_400_000);
 			expect(reservaDelEnlace(sql, "h-cambio", Date.now())).toEqual({ id_reserva: "r-vieja", por_un_cambio: true });
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "6" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "7" });
 			expect((await motor.reservar({ tenantId: T, alta: alta(), conexion: CONEXION_A, red: CONEXION_B })).ok).toBe(true);
 			// Prepararla otra vez no cambia nada.
 			prepararAlmacen(sql);
@@ -1349,6 +1349,139 @@ describe("el tope de altas por conexión (RW-ALTAS)", () => {
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM altas_por_conexion WHERE conexion_hash = ?;`, RED).toArray()[0]).toEqual({
 				n: MAX_ALTAS_DIA_RED,
 			});
+		});
+	});
+});
+
+describe("los correos al cliente que repite la alarma (RESERVA-CORREOS)", () => {
+	const ORIGEN = "https://tpv-api.test";
+	const CLAVE = "rw_AAAAAAAAAAAAAAAAAAAAAA";
+
+	/** La confirmación de `r` que la ruta no pudo mandar. */
+	const confirmacion = (r: any, extra: Record<string, unknown> = {}) => ({
+		tipo: "confirmacion",
+		id_reserva: r.id_reserva,
+		para: "ana@correo.es",
+		dia: r.dia,
+		hora: r.hora,
+		personas: r.personas,
+		mesa: r.mesa,
+		enlace: { origen: ORIGEN, clave: CLAVE },
+		...extra,
+	});
+
+	const pendientes = (sql: SqlStorage) =>
+		sql.exec(`SELECT id_correo, intento_ms FROM correos_pendientes ORDER BY creado_ms;`).toArray() as any[];
+
+	it("una confirmación de una reserva que ya se ha cancelado no se manda: se olvida", async () => {
+		await conAgenda("correos-cancelada", async (motor, sql) => {
+			motor.avisarALaMain = () => {};
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+			await motor.cancelar({ tenantId: T, token: r.token });
+			expect(await motor.repetirCorreos(T)).toBe(0);
+			expect(motor.correos).toEqual([]);
+			expect(pendientes(sql)).toEqual([]);
+		});
+	});
+
+	it("la confirmación sale como está la reserva ahora en la base, a su cliente, con un enlace nuevo que la cancela", async () => {
+		await conAgenda("correos-movida", async (motor, sql) => {
+			motor.avisarALaMain = () => {};
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+			// Mientras, la Main la registró y el restaurante la movió a otra mesa y otra hora.
+			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c1', 'Ana', 'ana@otro.es');`);
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Mesa, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES (?, 'm4', 'c1', ?, '22:00', 'CENA', 3, 'PROXIMA', 'WEB');`,
+				r.id_reserva,
+				DIA,
+			);
+			expect(await motor.repetirCorreos(T)).toBe(1);
+			expect(motor.correos).toHaveLength(1);
+			const c = motor.correos[0];
+			expect(c).toMatchObject({
+				id: `rw:confirmacion:${r.id_reserva}`,
+				tipo: "confirmacion",
+				para: "ana@otro.es",
+				reserva: { dia: DIA, hora: "22:00", personas: 3, mesa: "4", codigo: codigoDeReserva(r.id_reserva) },
+				dispositivo: "agenda",
+			});
+			expect(c.enlace.startsWith(`${ORIGEN}/reservas-web/v1/w/${CLAVE}/cancelar#t=`)).toBe(true);
+			const token = c.enlace.slice(c.enlace.indexOf("#t=") + 3);
+			// El enlace nuevo es de la confirmación, no de un cambio, y vale hasta un día después de la hora nueva.
+			expect(await motor.consultarEnlace({ tenantId: T, token })).toMatchObject({ ok: true, hora: "22:00", estado: "confirmada" });
+			const enlace = sql.exec(`SELECT por_un_cambio, caduca_ms FROM enlaces WHERE id_reserva = ? ORDER BY caduca_ms DESC;`, r.id_reserva).toArray()[0];
+			expect(enlace).toEqual({ por_un_cambio: 0, caduca_ms: caducidadDelEnlace(DIA, "22:00") });
+			expect(pendientes(sql)).toEqual([]);
+		});
+	});
+
+	it("pasada la hora de la reserva, ni la confirmación ni el «has cancelado»: se olvidan", async () => {
+		let ahora = AHORA;
+		await conAgenda(
+			"correos-pasados",
+			async (motor, sql) => {
+				motor.avisarALaMain = () => {};
+				const r = await motor.reservar({ tenantId: T, alta: alta() });
+				await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+				await motor.apuntarCorreoPendiente({
+					tenantId: T,
+					correo: { ...confirmacion(r), tipo: "cancelacion", enlace: undefined, id_reserva: "otra", tras_el_correo: null },
+				});
+				ahora = `${DIA} 22:00:00`;
+				expect(await motor.repetirCorreos(T)).toBe(0);
+				expect(motor.correos).toEqual([]);
+				expect(pendientes(sql)).toEqual([]);
+			},
+			{ ahora: () => ahora },
+		);
+	});
+
+	it("lo que no sale porque la central no contesta se queda, detrás; lo que no sale por el tope, se olvida", async () => {
+		await conAgenda("correos-detras", async (motor, sql) => {
+			motor.avisarALaMain = () => {};
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "b@correo.es" }) });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(a) });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(b, { para: "b@correo.es" }) });
+			// La primera, la central sin contestar; la segunda, en el tope de su buzón.
+			motor.enviarCorreo = async (c: any) => (c.para === "ana@correo.es" ? "fallido" : "tope");
+			expect(await motor.repetirCorreos(T)).toBe(0);
+			const quedan = pendientes(sql);
+			expect(quedan.map((p) => p.id_correo)).toEqual([`rw:confirmacion:${a.id_reserva}`]);
+			expect(quedan[0].intento_ms).toBeTypeOf("number");
+			// Ningún enlace de los que no han llegado a nadie se queda vivo: sólo los dos de las altas.
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM enlaces;`).toArray()[0]).toEqual({ n: 2 });
+			// Y la alarma vuelve en minutos mientras quede uno.
+			await motor.alarm();
+			const alarma = await motor.ctx.storage.getAlarm();
+			expect(alarma - Date.now()).toBeLessThanOrEqual(10 * 60_000);
+		});
+	});
+
+	it("apuntar el mismo correo dos veces deja uno, y la alarma se adelanta pero no se atrasa", async () => {
+		await conAgenda("correos-una-vez", async (motor, sql, state) => {
+			motor.avisarALaMain = () => {};
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			await state.storage.setAlarm(Date.now() + 60_000);
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+			expect(pendientes(sql)).toHaveLength(1);
+			expect((await state.storage.getAlarm())! - Date.now()).toBeLessThanOrEqual(60_000);
+		});
+	});
+
+	it("a la semana sin salir, la purga lo olvida", async () => {
+		await conAgenda("correos-purga", async (motor, sql) => {
+			motor.avisarALaMain = () => {};
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.apuntarCorreoPendiente({ tenantId: T, correo: confirmacion(r) });
+			sql.exec(`UPDATE correos_pendientes SET creado_ms = ?;`, Date.now() - 8 * 86_400_000);
+			motor.enviarCorreo = async () => "fallido";
+			await motor.alarm();
+			expect(pendientes(sql)).toEqual([]);
 		});
 	});
 });

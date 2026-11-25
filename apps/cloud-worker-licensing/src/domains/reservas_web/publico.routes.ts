@@ -33,15 +33,16 @@ import type {
 
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
-import { codigoDeReserva, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
+import { codigoDeReserva, type CorreoParaRepetir, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
 import { reportarReservaWeb } from "../../observability/axiom";
+import { capturarError } from "../../observability/errors";
 import { enSegundoPlano } from "../../lib/enSegundoPlano";
 import { msDelId } from "../../lib/ids";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { RETENCION_ENVIOS_MS } from "../../server/purga";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { diasAbiertos, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
-import { enlaceDeCancelar, enviarCorreoReservaWeb, type NegocioDelCorreo } from "./correos";
+import { enlaceDeCancelar, enviarCorreoReservaWeb, type NegocioDelCorreo, type ResultadoCorreo } from "./correos";
 import { leerParaLaWeb } from "./lecturasDeLaWeb";
 import { origenDelWidget } from "./claves";
 import { corsPublico } from "./cors";
@@ -157,6 +158,23 @@ function confirmacionQueSigueApuntada(idReserva: string): string | undefined {
 	return `rw:confirmacion:${idReserva}`;
 }
 
+/**
+ * RESERVA-CORREOS · Un correo al cliente que no ha salido porque la base central no contesta (no se
+ * sabe si ya salió) o el binding ha fallado, o que otro está mandando: se apunta en la agenda, cuya
+ * alarma lo repite en unos minutos con el mismo id (si el primero sí salió, no sale otro). Lo que no
+ * sale por el tope, o porque no salió el correo de antes, no se repite. Devuelve si queda apuntado.
+ */
+async function repetirSiNoHaSalido(c: any, tenantId: string, resultado: ResultadoCorreo, correo: CorreoParaRepetir): Promise<boolean> {
+	if (resultado !== "fallido" && resultado !== "en_curso") return false;
+	try {
+		await agendaDe(c.env, tenantId).apuntarCorreoPendiente({ tenantId, correo });
+		return true;
+	} catch (e: any) {
+		capturarError(e, "reservas_web.correo.repetir");
+		return false;
+	}
+}
+
 /** Una `Idempotency-Key` del widget: un UUID, o algo de su estilo. */
 const CLAVE_DE_INTENTO = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -192,10 +210,13 @@ reservasWebPublicoRoutes.post(
 
 		// La confirmación, con el enlace de cancelar: el token NO va en la respuesta, sólo aquí. Una
 		// repetición ya no lo tiene (de él sólo queda el hash): su correo fue el del alta de verdad, y
-		// `correo_enviado: null` dice que no se sabe si llegó. Un correo que falla no deshace la reserva: el
-		// widget lo dice y enseña el código.
+		// `correo_enviado: null` dice que no se sabe si llegó. Un correo que falla no deshace la reserva:
+		// si lo repite la alarma de la agenda, tampoco se sabe aún si llegará (`null`); si no, el widget
+		// dice que no ha salido y enseña el código.
 		let correoEnviado: boolean | null = null;
 		if (r.token) {
+			const origen = origenDelWidget(c.env, c.req.url);
+			const clave = c.req.param("clave");
 			const enviado = await enviarCorreoReservaWeb(c.env, {
 				tenantId,
 				id: `rw:confirmacion:${r.id_reserva}`,
@@ -203,11 +224,21 @@ reservasWebPublicoRoutes.post(
 				para: alta.email,
 				negocio: await negocioParaElCorreo(c, tenantId),
 				reserva: { dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, codigo: r.codigo },
-				enlace: enlaceDeCancelar(origenDelWidget(c.env, c.req.url), c.req.param("clave"), r.token),
+				enlace: enlaceDeCancelar(origen, clave, r.token),
 				dispositivo: "web",
 			});
+			const seRepite = await repetirSiNoHaSalido(c, tenantId, enviado, {
+				tipo: "confirmacion",
+				id_reserva: r.id_reserva,
+				para: alta.email,
+				dia: r.dia,
+				hora: r.hora,
+				personas: r.personas,
+				mesa: r.mesa,
+				enlace: { origen, clave },
+			});
 			// En curso por otro lado no se sabe aún: lo mismo que una repetición.
-			correoEnviado = enviado === "en_curso" ? null : enviado === "enviado" || enviado === "ya_enviado";
+			correoEnviado = enviado === "en_curso" || seRepite ? null : enviado === "enviado" || enviado === "ya_enviado";
 		}
 		return c.json({
 			ok: true,
@@ -248,9 +279,11 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 	// si salió (o está saliendo) su confirmación (RW-ALTAS): una reserva que nunca se le confirmó a
 	// nadie no gasta cupo al cancelarse. Con el enlace de un correo de cambio del restaurante no se
 	// mira: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara.
+	// Si no sale porque la central no contesta, lo repite la alarma de la agenda (RESERVA-CORREOS).
 	if (r.aviso) {
 		const a = r.aviso;
-		await enviarCorreoReservaWeb(c.env, {
+		const trasElCorreo = a.con_enlace_de_un_cambio ? undefined : confirmacionQueSigueApuntada(a.id_reserva);
+		const enviado = await enviarCorreoReservaWeb(c.env, {
 			tenantId,
 			id: `rw:cancelacion:${a.id_reserva}`,
 			tipo: "cancelacion",
@@ -258,7 +291,17 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 			negocio: await negocioParaElCorreo(c, tenantId),
 			reserva: { dia: a.dia, hora: a.hora, personas: a.personas, mesa: a.mesa, codigo: codigoDeReserva(a.id_reserva) },
 			dispositivo: "web",
-			trasElCorreo: a.con_enlace_de_un_cambio ? undefined : confirmacionQueSigueApuntada(a.id_reserva),
+			trasElCorreo,
+		});
+		await repetirSiNoHaSalido(c, tenantId, enviado, {
+			tipo: "cancelacion",
+			id_reserva: a.id_reserva,
+			para: a.email,
+			dia: a.dia,
+			hora: a.hora,
+			personas: a.personas,
+			mesa: a.mesa,
+			tras_el_correo: trasElCorreo ?? null,
 		});
 	}
 	return c.json({ ok: true });

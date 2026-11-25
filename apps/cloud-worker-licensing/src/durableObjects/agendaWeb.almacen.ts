@@ -27,8 +27,10 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *   6. `enlaces.por_un_cambio`: el enlace llegó en el correo de un cambio del restaurante. Va en su
  *      propia versión porque hubo una 5 sólo con `altas_por_conexion`: una agenda que se quedó en
  *      ella no tiene la columna (RW-ALTAS).
+ *   7. `correos_pendientes`: los correos al cliente que la ruta no pudo mandar, para la alarma
+ *      (RESERVA-CORREOS; la crea `ESQUEMA`).
  */
-const VERSION_AGENDA = 6;
+const VERSION_AGENDA = 7;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
@@ -123,6 +125,27 @@ const ESQUEMA = [
 		creada_ms     INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_altas_por_conexion ON altas_por_conexion(conexion_hash, creada_ms);`,
+	// RESERVA-CORREOS · La confirmación (con el enlace de cancelar) o el «has cancelado» que la ruta no
+	// pudo mandar (la base central sin contestar, o el binding): la alarma los repite. `id_correo` es
+	// su id en `email_sends`, el que impide que salga dos veces. Lleva lo que sale en el correo y a
+	// quién, que es un dato personal: se borra al salir, cuando ya no sirve (la hora de la reserva) o a
+	// la semana. Del enlace, sólo de dónde sale (`origen`, `clave`: los dos públicos), nunca el token:
+	// la alarma pone uno nuevo, del que la agenda guarda el hash como de todos.
+	`CREATE TABLE IF NOT EXISTS correos_pendientes (
+		id_correo      TEXT NOT NULL PRIMARY KEY,
+		tipo           TEXT NOT NULL CHECK (tipo IN ('confirmacion', 'cancelacion')),
+		id_reserva     TEXT NOT NULL,
+		para           TEXT NOT NULL,
+		dia_ymd        TEXT NOT NULL,
+		hora           TEXT NOT NULL,
+		comensales     INTEGER NOT NULL,
+		mesa           TEXT,
+		origen         TEXT,
+		clave          TEXT,
+		tras_el_correo TEXT,
+		creado_ms      INTEGER NOT NULL,
+		intento_ms     INTEGER
+	);`,
 ];
 
 /** Crea lo que falte y pone al día lo que ya había. Idempotente: se llama al construir el objeto. */
@@ -424,14 +447,23 @@ export function prolongarEnlaces(sql: SqlStorage, idReserva: string, caducaMs: n
 	sql.exec(`UPDATE enlaces SET caduca_ms = MAX(caduca_ms, ?) WHERE id_reserva = ?;`, caducaMs, idReserva);
 }
 
-/** Un enlace de cancelar más para una reserva: el del correo de un cambio del restaurante. */
-export function apuntarEnlace(sql: SqlStorage, idReserva: string, tokenHash: string, caducaMs: number): void {
+/**
+ * Un enlace de cancelar más para una reserva: el del correo de un cambio del restaurante o, con
+ * `porUnCambio = false`, el de una confirmación que repite la alarma (RESERVA-CORREOS).
+ */
+export function apuntarEnlace(sql: SqlStorage, idReserva: string, tokenHash: string, caducaMs: number, porUnCambio = true): void {
 	sql.exec(
-		`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms, por_un_cambio) VALUES (?, ?, ?, 1);`,
+		`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms, por_un_cambio) VALUES (?, ?, ?, ?);`,
 		tokenHash,
 		idReserva,
 		caducaMs,
+		porUnCambio ? 1 : 0,
 	);
+}
+
+/** Un enlace que no ha llegado a nadie: su correo no salió, o ya había salido otro. */
+export function quitarEnlace(sql: SqlStorage, tokenHash: string): void {
+	sql.exec(`DELETE FROM enlaces WHERE token_hash = ?;`, tokenHash);
 }
 
 /** Un enlace de cancelar vivo: su reserva y si llegó en el correo de un cambio del restaurante. */
@@ -507,13 +539,85 @@ export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
 	sql.exec(`DELETE FROM enlaces WHERE caduca_ms <= ?;`, ahoraMs);
 	sql.exec(`DELETE FROM intentos WHERE creado_ms <= ?;`, ahoraMs - RETENCION_INTENTOS_MS);
 	sql.exec(`DELETE FROM altas_por_conexion WHERE creada_ms < ?;`, ahoraMs - VENTANA_TOPES_MS);
+	sql.exec(`DELETE FROM correos_pendientes WHERE creado_ms < ?;`, ahoraMs - RETENCION_CERRADAS_MS);
 	const quedan = sql
 		.exec(
 			`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) + (SELECT COUNT(*) FROM intentos)
-			      + (SELECT COUNT(*) FROM altas_por_conexion) AS n;`,
+			      + (SELECT COUNT(*) FROM altas_por_conexion) + (SELECT COUNT(*) FROM correos_pendientes) AS n;`,
 		)
 		.toArray()[0] as any;
 	return Number(quedan?.n ?? 0) > 0;
+}
+
+// ── Los correos que repite la alarma (RESERVA-CORREOS) ──────────────────────────────────────────
+
+export type CorreoPendiente = {
+	/** Su id en `email_sends`: `rw:<tipo>:<id_reserva>`. */
+	id_correo: string;
+	tipo: "confirmacion" | "cancelacion";
+	id_reserva: string;
+	para: string;
+	dia_ymd: string;
+	hora: string;
+	comensales: number;
+	/** El nombre de la mesa en la Main, como se mandó. */
+	mesa: string | null;
+	/** De dónde sale el enlace de cancelar de una confirmación: el origen del widget y la clave del negocio. */
+	origen: string | null;
+	clave: string | null;
+	/** El de un «has cancelado»: el correo que tiene que haber salido antes (`Correo.trasElCorreo`). */
+	tras_el_correo: string | null;
+	creado_ms: number;
+	intento_ms?: number | null;
+};
+
+/** Apunta un correo para la alarma. El mismo dos veces deja uno. */
+export function apuntarCorreoPendiente(sql: SqlStorage, c: CorreoPendiente): void {
+	sql.exec(
+		`INSERT INTO correos_pendientes (id_correo, tipo, id_reserva, para, dia_ymd, hora, comensales, mesa,
+		                                 origen, clave, tras_el_correo, creado_ms)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id_correo) DO NOTHING;`,
+		c.id_correo,
+		c.tipo,
+		c.id_reserva,
+		c.para,
+		c.dia_ymd,
+		c.hora,
+		c.comensales,
+		c.mesa,
+		c.origen,
+		c.clave,
+		c.tras_el_correo,
+		c.creado_ms,
+	);
+}
+
+/**
+ * Los correos por repetir, como `fallidasPorAvisar`: primero los que no se han intentado, de los
+ * más viejos a los más nuevos; los que se intentaron sin salir, detrás, del que lleva más sin
+ * intentarse al último. Como mucho `max`.
+ */
+export function correosPendientes(sql: SqlStorage, max: number): CorreoPendiente[] {
+	return (
+		sql
+			.exec(`SELECT * FROM correos_pendientes ORDER BY COALESCE(intento_ms, 0), creado_ms, id_correo LIMIT ?;`, max)
+			.toArray() as any[]
+	).map((f) => ({ ...f, comensales: Number(f.comensales), creado_ms: Number(f.creado_ms) }) as CorreoPendiente);
+}
+
+/** Un correo que no ha salido esta vez: va detrás de los que aún no se han intentado. */
+export function apuntarIntentoDeCorreo(sql: SqlStorage, idCorreo: string, ahoraMs: number): void {
+	sql.exec(`UPDATE correos_pendientes SET intento_ms = ? WHERE id_correo = ?;`, ahoraMs, idCorreo);
+}
+
+/** Ya salió, o ya no sirve de nada: se olvida, y con él la dirección. */
+export function olvidarCorreoPendiente(sql: SqlStorage, idCorreo: string): void {
+	sql.exec(`DELETE FROM correos_pendientes WHERE id_correo = ?;`, idCorreo);
+}
+
+export function hayCorreosPendientes(sql: SqlStorage): boolean {
+	return sql.exec(`SELECT 1 AS hay FROM correos_pendientes LIMIT 1;`).toArray().length > 0;
 }
 
 // ── La entrega a la Main (§5.4) ─────────────────────────────────────────────────────────────────
