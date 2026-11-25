@@ -132,13 +132,3 @@ export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null):
 			return { tipo, base, iva: restar(totalTramo, base) };
 		});
 }
-
-/** Suma de las bases del desglose. */
-export function baseTotal(tramos: TramoIva[]): Dinero {
-	return sumar(...tramos.map((t) => t.base));
-}
-
-/** Suma de las cuotas. */
-export function cuotaTotal(tramos: TramoIva[]): Dinero {
-	return sumar(...tramos.map((t) => t.iva));
-}

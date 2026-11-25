@@ -11,22 +11,25 @@
 
 import { describe, expect, it } from "vitest";
 
-import { deEuros } from "../src/shared/lib/dinero";
+import { deEuros, sumar } from "../src/shared/lib/dinero";
 import {
 	agruparLineas,
-	baseTotal,
-	cuotaTotal,
 	desgloseIva,
 	eur,
 	recortar,
 	totalDe,
 	type LineaEntrada,
+	type TramoIva,
 } from "../src/shared/ticket/ticketMath";
 
 /** Los supuestos se escriben en EUROS, que es como se lee un ticket; se comparan en céntimos. */
 function unidad(nombre: string, precio: number, iva_percent?: number | null): LineaEntrada {
 	return { nombre, precio: deEuros(precio), iva_percent };
 }
+
+/** Las bases y las cuotas de todos los tramos del desglose, sumadas. */
+const bases = (t: TramoIva[]) => sumar(...t.map((x) => x.base));
+const cuotas = (t: TramoIva[]) => sumar(...t.map((x) => x.iva));
 
 describe("agrupación", () => {
 	it("junta unidades idénticas", () => {
@@ -80,7 +83,7 @@ describe("desglose de IVA", () => {
 			10,
 		);
 		expect(t.map((x) => x.tipo)).toEqual([10, 21]);
-		expect(baseTotal(t) + cuotaTotal(t)).toBe(2310);
+		expect(bases(t) + cuotas(t)).toBe(2310);
 	});
 
 	it("un tipo del cero por ciento no divide entre cero", () => {
@@ -92,7 +95,7 @@ describe("desglose de IVA", () => {
 		expect(desgloseIva([], 10)).toEqual([]);
 	});
 
-	it("la base y la cuota totales suman las de cada tramo", () => {
+	it("con dos tipos, las bases suman 20 € y las cuotas 3,10 €", () => {
 		const t = desgloseIva(
 			agruparLineas([
 				{ nombre: "Cafe", precio: deEuros(11) },
@@ -100,8 +103,8 @@ describe("desglose de IVA", () => {
 			]),
 			10,
 		);
-		expect(baseTotal(t)).toBe(2000);
-		expect(cuotaTotal(t)).toBe(310);
+		expect(bases(t)).toBe(2000);
+		expect(cuotas(t)).toBe(310);
 	});
 
 	it("base más IVA da el total en todos los tipos y en todos los importes", () => {
@@ -135,7 +138,7 @@ describe("desglose de IVA", () => {
 					agruparLineas([unidad("A", x), unidad("B", y, 21)]),
 					10,
 				);
-				const suma = baseTotal(tramos) + cuotaTotal(tramos);
+				const suma = bases(tramos) + cuotas(tramos);
 				const total = deEuros(x) + deEuros(y);
 				if (suma !== total) {
 					fallos.push(`${x} al 10% + ${y} al 21%: ${suma} != ${total}`);
