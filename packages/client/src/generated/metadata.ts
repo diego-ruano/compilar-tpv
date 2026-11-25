@@ -14,7 +14,6 @@ export const nombresComandos = {
     "images_retry_upload": "imagesRetryUpload",
     "images_delete": "imagesDelete",
     "images_ensure_local": "imagesEnsureLocal",
-    "images_backfill": "imagesBackfill",
     "updater_check": "updaterCheck",
     "updater_status": "updaterStatus",
     "updater_install": "updaterInstall",
@@ -258,7 +257,6 @@ type Argumentos = {
     "images_retry_upload": { args: Parameters<Comandos["imagesRetryUpload"]>[0] };
     "images_delete": { args: Parameters<Comandos["imagesDelete"]>[0] };
     "images_ensure_local": { args: Parameters<Comandos["imagesEnsureLocal"]>[0] };
-    "images_backfill": {  };
     "updater_check": {  };
     "updater_status": {  };
     "updater_install": {  };

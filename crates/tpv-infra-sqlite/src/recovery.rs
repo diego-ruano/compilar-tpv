@@ -82,14 +82,13 @@ const APARTADO_EN_CURSO: &str = "apartado-en-curso";
 const NEGOCIO_ANTERIOR_PREFIX: &str = "negocio-anterior-";
 /// AUD-06 · Lo que un negocio tiene en la raíz de AppData, fuera de la base y de `backups/`: las
 /// copias previas a una migración y los temporales de una restauración (por prefijo), la cola de
-/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes, la
-/// carpeta con el PDF de sus facturas, la de un traslado y la de una base anterior a la nube. Lo que
-/// es del equipo (la licencia, el modo, los interruptores, la telemetría) no.
-const DEL_NEGOCIO_EN_APPDATA: [&str; 7] = [
+/// imágenes por subir y su temporal, la carpeta de imágenes, la carpeta
+/// con el PDF de sus facturas, la de un traslado y la de una base anterior a la nube. Lo que es del
+/// equipo (la licencia, el modo, los interruptores, la telemetría) no.
+const DEL_NEGOCIO_EN_APPDATA: [&str; 6] = [
     "image_uploads.json",
     "image_uploads.json.tmp",
     "images",
-    "image_backfill_done",
     "facturas",
     MARCA_TRASLADO,
     MARCA_ANTERIOR_A_LA_NUBE,
@@ -3328,7 +3327,7 @@ mod tests {
         }
         let del_negocio = [
             "data.db.bak.9", "data.db.bak.10", "data.restore.11.tmp", "image_uploads.json",
-            "image_uploads.json.tmp", "image_backfill_done", "traslado-pendiente", "anterior-a-la-nube",
+            "image_uploads.json.tmp", "traslado-pendiente", "anterior-a-la-nube",
         ];
         for nombre in del_negocio {
             std::fs::write(dir.join(nombre), "de A").unwrap();

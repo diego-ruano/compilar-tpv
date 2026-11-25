@@ -18,8 +18,8 @@ pub fn leer_para_subida(ruta: &Path) -> std::io::Result<Option<Vec<u8>>> {
 
 /// AUD-28 — una imagen tal como se nombra en lo que sale del equipo (avisos y errores, que llegan
 /// a Axiom y a Sentry). La carpeta y el nombre, si el nombre es el UUID que le pone la app; si no
-/// (una imagen heredada, guardada con el nombre que alguien le dio), sólo la carpeta y la extensión:
-/// ese nombre puede ser el de una persona. Nunca la ruta de AppData.
+/// (una ruta llegada de fuera con otro nombre), sólo la carpeta y la extensión: ese nombre puede ser
+/// el de una persona. Nunca la ruta de AppData.
 pub fn para_registro(rel: &str) -> String {
     if ruta_segura(rel) {
         return rel.to_string();
@@ -35,23 +35,11 @@ pub fn para_registro(rel: &str) -> String {
 /// OBS-06 · Una imagen guardada por la app: `images/{carpeta}/{uuid}.{ext}`. Es lo único que se
 /// sube, se baja, se borra o se lee del disco. Su ruta viaja en la URL (`/v1/images/…`, también la
 /// que carga la Handy), y Cloudflare guarda la URL de cada petición:
-/// el nombre que alguien le diera al fichero puede ser el de una persona. Las heredadas las renombra
-/// antes `images_backfill` (`nombre_opaco`). El worker pide lo mismo (`RUTA_DE_IMAGEN`, en
+/// el nombre que alguien le diera al fichero puede ser el de una persona. El worker pide lo mismo (`RUTA_DE_IMAGEN`, en
 /// `domains/images/rutaDeImagen.ts`).
 pub fn ruta_segura(rel: &str) -> bool {
     con_forma_de_imagen(rel)
         && rel.rsplit('/').next().and_then(|nombre| nombre.rsplit_once('.')).is_some_and(|(base, _)| es_uuid(base))
-}
-
-/// OBS-06 · El nombre opaco que le toca a una imagen heredada: la misma carpeta, un UUID nuevo y su
-/// extensión en minúsculas. `None` si ya lo tiene, o si la ruta no tiene forma de imagen.
-pub fn nombre_opaco(rel: &str) -> Option<String> {
-    if ruta_segura(rel) || !con_forma_de_imagen(rel) {
-        return None;
-    }
-    let (carpeta, nombre) = rel.rsplit_once('/')?;
-    let (_, ext) = nombre.rsplit_once('.')?;
-    Some(format!("{carpeta}/{}.{}", uuid::Uuid::new_v4(), ext.to_ascii_lowercase()))
 }
 
 /// El nombre que le pone la app a una imagen (`Uuid::new_v4`, con guiones): 8-4-4-4-12 cifras
@@ -195,19 +183,6 @@ mod tests {
         assert!(ruta_segura(&format!("images/productos/{}.jpg", uuid::Uuid::new_v4())));
     }
 
-    #[test]
-    fn una_heredada_recibe_un_uuid_con_su_extension_y_la_carpeta_de_antes() {
-        let opaco = nombre_opaco("images/proveedores/Juan-Perez.JPG").unwrap();
-        assert!(ruta_segura(&opaco), "{opaco}");
-        assert!(opaco.starts_with("images/proveedores/") && opaco.ends_with(".jpg"), "{opaco}");
-        assert!(!opaco.contains("Juan"));
-        assert_ne!(nombre_opaco("images/proveedores/Juan-Perez.JPG").unwrap(), opaco);
-        // Una que ya es opaca, o una ruta que no es de imagen, no se toca.
-        assert_eq!(nombre_opaco(&opaco), None);
-        for rel in ["images/../data.db", "images/logo/CON.jpg", "images/logo/a.svg", "otra/cosa.jpg"] {
-            assert_eq!(nombre_opaco(rel), None, "{rel}");
-        }
-    }
     #[test]
     fn conserva_formato_y_transparencia_sin_bytes_anadidos() {
         for formato in [ImageFormat::Jpeg, ImageFormat::Png] {

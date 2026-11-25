@@ -104,13 +104,11 @@ export default function AppBoot({ router }: { router: any }) {
 		void useContactSettings.getState().init();
 	}, [modo]);
 
-	// Imágenes → R2: una sola vez, encolar las imágenes locales pre-existentes (Mains anteriores
-	// a R2) y drenar la cola. El backfill se auto-protege con un marcador; el drenado es no-op si
-	// no hay nada o si está offline (se reintentará por el WebSocket cuando haya conexión).
+	// Imágenes → R2: al arrancar, drenar la cola. No hace nada si está vacía o si no hay red (se
+	// reintenta por el WebSocket cuando haya conexión).
 	useEffect(() => {
 		if (modo !== "tpv") return;
-		void commands.imagesBackfill()
-			.then(() => commands.imagesDrainPending())
+		void commands.imagesDrainPending()
 			.catch(() => {
 				// Ya lo registró `invocar`; se reintenta por el WebSocket.
 			});
