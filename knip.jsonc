@@ -57,10 +57,6 @@
     "packages/contracts": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
-    },
-    "packages/database": {
-      "entry": [],
-      "project": []
     }
   }
 }

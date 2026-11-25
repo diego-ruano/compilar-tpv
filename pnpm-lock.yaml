@@ -293,8 +293,6 @@ importers:
 
   packages/contracts: {}
 
-  packages/database: {}
-
   packages/estilos: {}
 
   packages/plano:
