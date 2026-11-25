@@ -14,7 +14,7 @@ import m0004 from "../../../../packages/database/migrations/0004_producto_sin_ca
 import m0005 from "../../../../packages/database/migrations/0005_subida_completa.sql";
 import m0006 from "../../../../packages/database/migrations/0006_facturas_pdf.sql";
 
-/** Quita comentarios de bloque y de línea (el parser de sqld/SqlStorage no siempre los tolera). */
+/** Quita comentarios de bloque y de línea (el `exec` de SqlStorage no siempre los tolera). */
 function sinComentarios(sql: string): string {
 	return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 }

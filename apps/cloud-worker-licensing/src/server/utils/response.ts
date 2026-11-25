@@ -43,8 +43,8 @@ export function json(data: any, status = 200, req?: Request) {
 // `error` de siempre. Se ramifica por `code`; `error` queda como diagnóstico.
 //
 // FABLE-B: estas tres no aceptan detalles. Lo que cuenta por dentro un fallo (la traza, el texto de
-// Turso, que lleva la URL de la base) le servía a quien quisiera saber cómo está hecho el worker, no
-// al cliente, que ramifica por `code`. El detalle se registra donde se captura el error
+// la base, con sus tablas y columnas) le serviría a quien quisiera saber cómo está hecho el worker,
+// no al cliente, que ramifica por `code`. El detalle se registra donde se captura el error
 // (`capturarError` y `console.error`), y la firma impide volver a mandarlo.
 
 export function unauthorized(req: Request, error: string) {

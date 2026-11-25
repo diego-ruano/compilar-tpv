@@ -156,10 +156,10 @@ describe("evalValueStep", () => {
 	});
 });
 
-describe("normalización de valores que vuelven de libsql", () => {
+describe("normalización de valores para guardarlos en JSON", () => {
 	it("convierte bigint a number", () => {
-		// Los enteros de SQLite llegan como bigint y JSON.stringify no sabe serializarlos:
-		// sin esta conversión, guardar el cambio en Sync_Changes lanzaría.
+		// JSON.stringify no sabe serializar un bigint: sin esta conversión, guardar un valor que lo
+		// lleve lanzaría.
 		expect(toPlainValue(9007199254740991n)).toBe(9007199254740991);
 		expect(() => JSON.stringify(toPlainValue({ n: 1n }))).not.toThrow();
 	});

@@ -9,7 +9,7 @@
 // al nombre de un modulo TypeScript.
 //
 // Manejo de las sentencias replicables dentro del DO: resolver los `$ref` de una transacción,
-// normalizar valores que vienen de libsql y leer resultados.
+// normalizar valores para guardarlos en JSON y leer resultados.
 //
 // El mecanismo de `$ref` es lo que permite que un paso use el resultado de otro anterior (el
 // caso típico: un `nuevoId()` guardado con `saveAs` y referenciado por el INSERT
@@ -128,8 +128,8 @@ export function evalValueStep(sql: string, args: SqlScalar[]): SqlScalar {
 //     `ON CONFLICT(Op_Id) DO NOTHING` + `rowsAffected`, un batch que fallara DESPUÉS dejaría la fila
 //     del gate puesta: el siguiente reintento recibiría «ya aplicada» y la operación se perdería
 //     para siempre. Eso es peor que lo que arreglaría.
-//   · **El texto lo pone SQLite, no libsql.** La regla de §9 («los mensajes de libsql cambian de
-//     redacción entre versiones») apunta a la capa de transporte, no a esta constante del motor.
+//   · **El texto lo pone SQLite, en el mismo objeto.** No pasa por ninguna capa que lo redacte de
+//     otra manera: es una constante del motor («UNIQUE constraint failed: tabla.columna»).
 //   · **Un falso NEGATIVO no corrompe**: convierte un reintento idempotente en una operación
 //     apartada, que es ruidosa (cuarentena + Sentry). El falso POSITIVO sí sería grave --dar por
 //     aplicada una operación que no lo está-- y por eso lo único que hay que vigilar es que ninguna

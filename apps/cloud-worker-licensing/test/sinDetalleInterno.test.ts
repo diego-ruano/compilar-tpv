@@ -1,8 +1,8 @@
 // test/sinDetalleInterno.test.ts
 //
-// FABLE-B: una respuesta de error no cuenta cómo ha fallado el worker por dentro. Antes, un 500
-// llevaba la traza o el texto crudo de Turso (con la URL de la base), y lo leía cualquiera que
-// provocara el fallo. El detalle se queda en el log y en Sentry; al cliente le basta el `code`.
+// FABLE-B: una respuesta de error no cuenta cómo ha fallado el worker por dentro: la traza o el
+// texto crudo de la base los leería cualquiera que provocara el fallo. El detalle se queda en el
+// log y en Sentry; al cliente le basta el `code`.
 //
 // Las firmas de `serverError`, `unauthorized` y `forbidden` ya no aceptan detalles. Esto fija la
 // otra mitad: lo que sale por ellas, también después de pasar por `completarCuerpoDeError`.

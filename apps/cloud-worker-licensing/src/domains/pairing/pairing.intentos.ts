@@ -96,7 +96,7 @@ export async function anotarFallo(db: Base, ipDeLaPeticion: string, ahoraMs: num
 export const PETICIONES_POR_MINUTO = 20;
 
 /**
- * El filtro exterior: ¿puede esta IP seguir, o se le cierra la puerta antes de tocar Turso?
+ * El filtro exterior: ¿puede esta IP seguir, o se le cierra la puerta antes de tocar la base central?
  *
  * Lo de arriba es exacto y cuesta una lectura de la base central en CADA intento, también en los
  * diez mil de un barrido. Esto lo evita con el Rate Limiting binding de Cloudflare, que se resuelve

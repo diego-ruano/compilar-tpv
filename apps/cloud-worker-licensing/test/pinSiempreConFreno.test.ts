@@ -101,7 +101,7 @@ describe("REV-06 · verificar un PIN exige el freno de LOGIN-01", () => {
 	it("el setup inicial ya no se puede hacer ni subir desde la nube", () => {
 		// Las correcciones de REV-06 y de AUD-24 son ausencias, así que se fijan como tales: ni
 		// `/complete-initial-setup` (elegía el PIN desde la nube) ni `/sync-initial-setup` (lo
-		// subía directo a Turso para cualquier usuario). El PIN inicial sube por el outbox.
+		// subía directo a la base del negocio para cualquier usuario). El PIN inicial sube por el outbox.
 		// Se mira la tabla de RUTAS y no el texto del fichero: ahí arriba hay un comentario que
 		// explica por qué se fueron, y ese comentario tiene que poder seguir nombrándolas.
 		const rutas = handlers(fuente).map((h) => h.ruta);

@@ -42,11 +42,11 @@ describe("Sentry: diagnóstico con una lista positiva de datos", () => {
 	});
 	it("elimina cuerpo, credenciales, consultas, usuario y consola antes del transporte", () => {
 		const event = sentryOptions({} as Env).beforeSend({
-			message: "Turso no responde", user: { name: "Ana López" }, extra: { notas: "diabetes" },
+			message: "La base central no responde", user: { name: "Ana López" }, extra: { notas: "diabetes" },
 			request: { url: "https://secret:password@worker.example/ws?ticket=opaque-secret", data: { pin: "1234" }, headers: { Authorization: "Bearer secret" }, cookies: "session=secret", query_string: "ticket=opaque-secret" },
 			breadcrumbs: [{ category: "console", message: "Ana López" }],
 		});
-		expect(event).toEqual({ message: "Turso no responde", request: { url: "https://worker.example/ws" }, breadcrumbs: [] });
+		expect(event).toEqual({ message: "La base central no responde", request: { url: "https://worker.example/ws" }, breadcrumbs: [] });
 	});
 });
 

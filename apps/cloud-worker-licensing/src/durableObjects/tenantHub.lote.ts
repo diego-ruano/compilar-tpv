@@ -3,9 +3,9 @@
 // ARQ-04 · De un comando a un lote de sentencias.
 //
 // El escalón que hay entre `tenantHub.sentencias.ts` (las primitivas: resolver un `$ref`,
-// normalizar un valor de libsql, leer una fila de un resultado) y el motor de aplicación del
-// TenantHub: coge un `InternalApplyCommand` y lo aplana a las piezas del batch atómico que se
-// ejecuta contra la base del negocio.
+// normalizar un valor para guardarlo en JSON, leer una fila de un resultado) y el motor de
+// aplicación del TenantHub: coge un `InternalApplyCommand` y lo aplana a las piezas del batch
+// atómico que se ejecuta contra la base del negocio.
 //
 // Vive fuera de la clase porque no toca NADA del Durable Object: ni `state`, ni la conexión al
 // tenant, ni el censo de sockets. Es una función del comando a sus sentencias, y por eso se puede

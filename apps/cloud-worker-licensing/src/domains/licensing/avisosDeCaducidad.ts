@@ -83,8 +83,8 @@ export type ResumenDeAvisos = {
  * Un ciclo completo. Lo llama el `scheduled` del worker una vez al día; es idempotente, así que
  * adelantarlo o repetirlo no manda nada de más.
  *
- * La conexión llega de fuera, como en `cumplir`: así el ciclo se prueba entero contra el esquema
- * real del control-plane sin salir a Turso.
+ * La base llega de fuera, como en `cumplir`: así el ciclo se prueba entero contra una base central
+ * de pruebas, con el esquema de verdad.
  */
 export async function avisarDeCaducidades(
 	env: Env,
