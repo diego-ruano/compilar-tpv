@@ -28,9 +28,6 @@ impl EstadoReserva {
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE", ascii_case_insensitive)]
 pub enum EstadoTarea { Abierta, Eliminada }
 impl EstadoTarea {
-    pub fn desde_texto(s: &str) -> Result<Self, String> {
-        s.trim().parse().map_err(|_| format!("Estado no admitido: '{s}'"))
-    }
     pub fn como_texto(self) -> &'static str { self.into() }
 }
 
