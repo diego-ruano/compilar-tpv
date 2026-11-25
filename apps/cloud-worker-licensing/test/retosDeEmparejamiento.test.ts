@@ -136,7 +136,9 @@ describe("AUD-13 · los retos caducados no se acumulan", () => {
 			// Lo que dejaba el abuso de antes, metido a mano: retos caducados cuyo `deviceId` pasa, él
 			// solo y comprimido, del techo de la copia. Es texto hexadecimal de bytes al azar: cada
 			// carácter lleva 4 bits, y comprimido no baja de medio byte.
-			const L = 1_900_000; // cabe en una fila del SQLite del DO de los tests (unos 2,2 MB; en producción, 8 MB)
+			// Cabe en una fila del SQLite del DO con el tope más bajo, el de local (algo más de 2 MiB); en
+			// producción (8 MiB y 34 bytes) también.
+			const L = 1_900_000;
 			const N = Math.ceil((2 * TOPE_COMPRIMIDO) / L) + 1;
 			const latidos: string[] = [];
 			const errores: string[] = [];

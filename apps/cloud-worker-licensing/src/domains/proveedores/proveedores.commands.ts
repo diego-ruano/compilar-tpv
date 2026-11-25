@@ -21,12 +21,6 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
-function numOrNull(v: unknown): number | null {
-	if (v == null) return null;
-	const n = Number(v);
-	return Number.isFinite(n) ? n : null;
-}
-
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
 		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),

@@ -115,16 +115,34 @@ describe("el acuse dice de qué clase es el fallo", () => {
 				// Los límites del SQLite del DO.
 				["un patrón de LIKE de más de 50 bytes", "UPDATE Zonas SET Nombre_Zona = 'x' WHERE Nombre_Zona LIKE ?1;", ["%" + "a".repeat(60) + "%"]],
 				["más de 5 SELECT en un compuesto", `INSERT INTO Zonas (ID_Zona, Nombre_Zona) ${Array.from({ length: 6 }, (_, i) => `SELECT 'u${i}', 'U${i}'`).join(" UNION ALL ")};`, []],
-				// Pasa del tope de un valor en el SQLite del workerd de los tests (unos 2,2 MB; en producción
-				// son 8 MB) y cabe en un mensaje.
-				["un valor que no cabe en una fila", ALTA, ["z-grande", "a".repeat(3_000_000)]],
+				// Un valor de 9 MB, que no cabe en una fila del SQLite del DO ni con el tope de local (algo más
+				// de 2 MiB) ni con el de producción (8 MiB y 34 bytes): así no cambia de sentido con otro
+				// workerd. Lo junta la sentencia con un argumento de 1 MB, para que el mensaje que lo lleva
+				// quepa en `MAX_MENSAJE`.
+				["un valor que no cabe en una fila", `INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ${Array(9).fill("?2").join(" || ")});`, ["z-grande", "a".repeat(1_000_000)]],
 			];
 			for (const [caso, texto, args] of CASOS) {
 				const v = await aplicar(`op-${caso}`, texto, args);
 				expect(v, `${caso}: ${v.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
+				// El de 9 MB lo rechaza la fila, no otra cosa que también sería permanente.
+				if (caso === "un valor que no cabe en una fila") expect(v.error).toMatch(/too big/);
 			}
 			// Y ninguno se ha tomado por una base llena.
 			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
+		});
+	});
+
+	it("una operación de más de 2 MiB que cabe en `MAX_MENSAJE` se lee y la juzga la base", async () => {
+		// Un mensaje de unos 3 MB. Con el tope del mensaje en 2 MiB se cortaba con `payload_too_large` y
+		// no llegaba ningún acuse, aunque la base de producción (filas de hasta 8 MiB y 34 bytes) la
+		// habría aceptado. El workerd local la rechaza por la fila (`sondaSqliteDo`, `valor3MB`), así
+		// que lo que se comprueba es que llega su acuse y que es la base quien la juzga, no el `ok`.
+		await enElHub("ack-3mb", async (hub: any) => {
+			const { aplicar } = await preparar(hub);
+			const v = await aplicar("op-3MB", ALTA, ["z-3mb", "a".repeat(3_000_000)]);
+			if (v.ok) return;
+			expect(v, String(v.error)).toMatchObject({ ok: false, permanente: true, transitorio: false });
+			expect(v.error).toMatch(/too big/);
 		});
 	});
 

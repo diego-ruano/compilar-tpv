@@ -22,7 +22,7 @@ import { enElHub } from "./helpers/hub";
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-/** Qué contesta `isTpvDevice`: el guard del endpoint. */
+/** Si el que pide es la Main: lo que deja pasar el doble de `soloLaMain`, el veto del endpoint. */
 let esTpv = true;
 
 // El router monta `tenantAuth` él mismo; aquí se sustituye por el mínimo que necesita el handler.

@@ -4019,7 +4019,7 @@ mod tests_exenciones_del_gate {
             );
             assert!(
                 !registro.contains(comando),
-                "`{comando}` ha vuelto al registro de comandos, y no puede: {porque} (REV-26).
+                "`{comando}` ha vuelto al registro de comandos, y no puede: {porque} (REV-26). \
                  Si de verdad hace falta, lo que hay que construir es su gate, no el comando."
             );
         }

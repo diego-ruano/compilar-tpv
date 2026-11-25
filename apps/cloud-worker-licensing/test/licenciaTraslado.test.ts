@@ -25,13 +25,14 @@ import {
 	centralInterceptada,
 	desvio,
 	filasDe,
+	fotoDeLaCentral,
 	type Atender,
 	type CentralDePrueba,
 } from "./helpers/central";
 import { app } from "../src/app";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { otpHash } from "../src/domains/licensing/licensing.helpers";
-import { getLicenseById, issueLicense, putDeviceOtp } from "../src/server/licenseStore";
+import { getLicenseById, issueLicense, putDeviceOtp, reassignMainDevice } from "../src/server/licenseStore";
 
 /** A quién ha ido el aviso al titular de que su licencia ha cambiado de equipo, y lo que va a Sentry. */
 const { avisosAlTitular, capturados } = vi.hoisted(() => ({ avisosAlTitular: [] as string[], capturados: [] as string[] }));
@@ -157,15 +158,43 @@ async function codigoDeTraslado(central: CentralDePrueba, licenseId: string, dev
 	});
 }
 
-/** Cómo ha quedado el traslado: dónde está la licencia, sus trazas y a quién se ha avisado. */
+/**
+ * Cómo ha quedado el traslado: dónde está la licencia y desde cuándo (`updated_at_ms`), sus trazas con
+ * todas sus columnas y a quién se ha avisado.
+ */
 async function comoHaQuedado(central: CentralDePrueba, licenseId: string) {
+	const [licencia] = await filasDe(
+		central,
+		`SELECT main_device_id, updated_at_ms FROM licenses WHERE license_id = ?;`,
+		licenseId,
+	);
 	return {
-		main: (await getLicenseById(central.db, licenseId))?.main_device_id,
-		trazas: await filasDe(central, `SELECT license_id, from_device_id, to_device_id FROM license_device_swaps;`),
+		licencia,
+		trazas: await filasDe(central, `SELECT * FROM license_device_swaps ORDER BY at_ms, swap_id;`),
 		avisosAlTitular: [...avisosAlTitular],
 		avisosAlHub: [...avisosAlHub],
 	};
 }
+
+// El reloj va fijo en los traslados: la hora que escribe cada paso se sabe, y se comprueba que la
+// licencia y su traza llevan la misma (`updated_at_ms` y `at_ms`, el mismo `now`, como en 8e9eff7c).
+/** Cuándo se activa la licencia en el primer equipo. */
+const HORA_DE_LA_ACTIVACION = Math.floor(Date.now() / 1000) * 1000;
+/** Cuándo se pide el traslado: un minuto después, con el código (diez minutos) aún vivo. */
+const HORA_DEL_TRASLADO = HORA_DE_LA_ACTIVACION + 60 * 1000;
+/** Cuándo se repite, con otro código, el que no llegó. */
+const HORA_DEL_SEGUNDO_TRASLADO = HORA_DEL_TRASLADO + 60 * 1000;
+/** El `swap_id` de una traza: un UUID nuevo de cada traslado. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** La traza de un traslado de `equipo-a` a `equipo-b` hecho a la hora `atMs`, con todas sus columnas. */
+const trazaDelTraslado = (licenseId: string, atMs: number) => ({
+	swap_id: expect.stringMatching(UUID),
+	license_id: licenseId,
+	from_device_id: "equipo-a",
+	to_device_id: "equipo-b",
+	at_ms: atMs,
+});
 
 /** Deja pasar el viaje a la central. */
 const pasar: Atender = (_metodo, _argumentos, llamar) => llamar();
@@ -266,12 +295,44 @@ describe("activar dice si la licencia se ha trasladado a este equipo", () => {
 });
 
 describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(HORA_DE_LA_ACTIVACION);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("la licencia cambia de equipo y de hora, y su traza lleva esa misma hora: nada más de la central", async () => {
+		// Lo que escribe el traslado, que ahora va en un lote: lo mismo que los dos `exec` sueltos de
+		// 8e9eff7c, con el mismo `now` en los dos, y ninguna otra fila de la central.
+		await conLicencia(async ({ licenseId, central, activar }) => {
+			expect((await activar("equipo-a", PUB_A)).status).toBe(200);
+			const antes = await fotoDeLaCentral(central);
+
+			vi.setSystemTime(HORA_DEL_TRASLADO);
+			await reassignMainDevice(central.db, { licenseId, fromDeviceId: "equipo-a", toDeviceId: "equipo-b" });
+
+			expect(antes.license_device_swaps).toEqual([]);
+			expect(await fotoDeLaCentral(central)).toEqual({
+				...antes,
+				licenses: antes.licenses.map((l: any) =>
+					l.license_id === licenseId
+						? { ...l, main_device_id: "equipo-b", updated_at_ms: HORA_DEL_TRASLADO }
+						: l,
+				),
+				license_device_swaps: [trazaDelTraslado(licenseId, HORA_DEL_TRASLADO)],
+			});
+		});
+	});
+
 	it("si el viaje del traslado no llega a la central, la licencia sigue en el equipo de antes", async () => {
 		await conLicencia(async ({ licenseId, central, desviar, activar }) => {
 			const a = await activar("equipo-a", PUB_A);
 			expect(a.status).toBe(200);
 			await codigoDeTraslado(central, licenseId, "equipo-b", "111111");
 
+			vi.setSystemTime(HORA_DEL_TRASLADO);
 			desviar(fallaElViajeDe(/INSERT INTO license_device_swaps/));
 			const fallido = await activar("equipo-b", PUB_B, "111111");
 			desviar(null);
@@ -280,7 +341,7 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			expect([fallido.status, fallido.body.error]).toEqual([503, "hub_unavailable"]);
 			// Y no ha pasado nada a medias: ni la licencia en el equipo nuevo, ni su traza, ni los avisos.
 			expect(await comoHaQuedado(central, licenseId)).toEqual({
-				main: "equipo-a",
+				licencia: { main_device_id: "equipo-a", updated_at_ms: HORA_DE_LA_ACTIVACION },
 				trazas: [],
 				avisosAlTitular: [],
 				avisosAlHub: [],
@@ -289,11 +350,12 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			// El código se gastó antes del fallo. Con otro, el traslado se hace entero: lo es para el
 			// equipo, deja su traza y avisa al titular y al `TenantHub`.
 			await codigoDeTraslado(central, licenseId, "equipo-b", "222222");
+			vi.setSystemTime(HORA_DEL_SEGUNDO_TRASLADO);
 			const r = await activar("equipo-b", PUB_B, "222222");
 			expect([r.status, r.body.cambioDeEquipo]).toEqual([200, true]);
 			expect(await comoHaQuedado(central, licenseId)).toEqual({
-				main: "equipo-b",
-				trazas: [{ license_id: licenseId, from_device_id: "equipo-a", to_device_id: "equipo-b" }],
+				licencia: { main_device_id: "equipo-b", updated_at_ms: HORA_DEL_SEGUNDO_TRASLADO },
+				trazas: [trazaDelTraslado(licenseId, HORA_DEL_SEGUNDO_TRASLADO)],
 				avisosAlTitular: ["bar@ejemplo.test"],
 				avisosAlHub: [a.body.tenantId],
 			});
@@ -306,6 +368,7 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			expect(a.status).toBe(200);
 			await codigoDeTraslado(central, licenseId, "equipo-b", "111111");
 
+			vi.setSystemTime(HORA_DEL_TRASLADO);
 			desviar(seLePierdeLaRespuestaDe(/INSERT INTO license_device_swaps/));
 			const r = await activar("equipo-b", PUB_B, "111111");
 			desviar(null);
@@ -314,8 +377,8 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			// mismo equipo (`cambioDeEquipo: false`) y los avisos no salían nunca.
 			expect([r.status, r.body.cambioDeEquipo]).toEqual([200, true]);
 			expect(await comoHaQuedado(central, licenseId)).toEqual({
-				main: "equipo-b",
-				trazas: [{ license_id: licenseId, from_device_id: "equipo-a", to_device_id: "equipo-b" }],
+				licencia: { main_device_id: "equipo-b", updated_at_ms: HORA_DEL_TRASLADO },
+				trazas: [trazaDelTraslado(licenseId, HORA_DEL_TRASLADO)],
 				avisosAlTitular: ["bar@ejemplo.test"],
 				avisosAlHub: [a.body.tenantId],
 			});
@@ -333,6 +396,7 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			expect((await activar("equipo-a", PUB_A)).status).toBe(200);
 			await codigoDeTraslado(central, licenseId, "equipo-b", "111111");
 
+			vi.setSystemTime(HORA_DEL_TRASLADO);
 			desviar(
 				seLePierdeLaRespuestaDe(/INSERT INTO license_device_swaps/, fallaElViajeDe(/FROM license_device_swaps/)),
 			);
@@ -343,8 +407,8 @@ describe("el traslado mueve la licencia con su traza, o no la mueve", () => {
 			// Había entrado, pero la ruta no lo ha podido saber: la licencia está en el equipo nuevo con su
 			// traza, y no se ha avisado a nadie.
 			expect(await comoHaQuedado(central, licenseId)).toEqual({
-				main: "equipo-b",
-				trazas: [{ license_id: licenseId, from_device_id: "equipo-a", to_device_id: "equipo-b" }],
+				licencia: { main_device_id: "equipo-b", updated_at_ms: HORA_DEL_TRASLADO },
+				trazas: [trazaDelTraslado(licenseId, HORA_DEL_TRASLADO)],
 				avisosAlTitular: [],
 				avisosAlHub: [],
 			});

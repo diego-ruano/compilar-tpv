@@ -1,7 +1,6 @@
 // src/domains/proveedores/proveedores.schemas.ts
 
 import * as z from "zod";
-import { zDineroOpcional } from "../../lib/dinero";
 
 import { MSG_TEXTO_DEMASIADO_LARGO, cabeEnTextoLibre, recortar } from "../../lib/texto";
 import { esImagenGuardable, MSG_IMAGEN_NO_VALIDA } from "../images/rutaDeImagen";
@@ -12,7 +11,6 @@ import type {
 } from "@tpv/contracts";
 
 const idStr = z.string().overwrite(recortar).min(1);
-const optNum = z.number().finite().min(0).nullish();
 
 function cleanOptional(v: unknown): string | null {
 	const t = recortar((v ?? "").toString());

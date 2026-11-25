@@ -103,16 +103,6 @@ function sembrarComandas(sql: any, n: number): void {
 	}
 }
 
-function sembrarSeq(sql: any, n: number): void {
-	for (let i = 1; i <= n; i++) {
-		sql.exec(
-			"INSERT INTO Sync_Changes (Op_Id, Statements_Json, Created_At_Ms) VALUES (?, '[]', ?);",
-			`op-${i}`,
-			i,
-		);
-	}
-}
-
 describe("el lector del TenantHub", () => {
 	it("fuera del TenantHub de su negocio no lee: la ruta no lleva alHub", async () => {
 		// Como `tenantQuery`: no hay otro sitio del que leer la base del negocio.

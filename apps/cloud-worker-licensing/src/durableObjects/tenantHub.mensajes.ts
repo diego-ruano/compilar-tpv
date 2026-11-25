@@ -134,10 +134,13 @@ export interface ContextoDeMensajes {
  * Lo más que ocupa un mensaje que se llega a leer: por encima no se intenta ni trocear el JSON. Un
  * lote de la Main son como mucho 256 KB de sentencias, pero una operación va sola en su lote aunque
  * pase de ahí, y tendría que poder llegar a la base con cualquier valor que la base admita. El SQLite
- * de un objeto admite en producción hasta 8 MB por valor o por fila (8 MiB y 34 bytes,
- * `MAX_ROW_LENGTH` de workerd); el workerd de los tests, unos 2,2 MB (`test/veredictoDelAcuse.test.ts`).
- * Con 4 MiB, una operación cuyo mensaje pasa de ahí por un valor de los que la base admite (de unos 4
- * a 8 MB) se rechaza por grande, y la Main la aparta: qué tope poner está sin decidir (MAX-MENSAJE, en docs/pendientes.md).
+ * del DO de producción acepta filas de hasta 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd,
+ * cargaDeCopias.ts), y el workerd local de las pruebas un valor de algo más de 2 MiB
+ * (`test/sondaSqliteDo.test.ts`, `valor2MiBYUnByte`). Con el tope en 2 MiB, una operación que la base
+ * sí aceptaría se rechazaba por grande; que una de unos 3 MB se lee y la juzga la base lo prueba
+ * `test/veredictoDelAcuse.test.ts`. Con 4 MiB, una operación cuyo mensaje pasa de ahí por un valor de
+ * los que la base admite (de unos 4 a 8 MB) se rechaza por grande, y la Main la aparta: qué tope poner
+ * está sin decidir (MAX-MENSAJE, en docs/pendientes.md).
  */
 const MAX_MENSAJE = 4 * 1024 * 1024;
 

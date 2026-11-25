@@ -1221,7 +1221,7 @@ describe("AUD-02 · el turno del log", () => {
 
 	it("tampoco el de la sesión que reemplaza su propia reconexión: lo vuelve a mandar la nueva", async () => {
 		await enElHub("aud02-turno-reemplazada", async (hub: any) => {
-			const { sql, central, turno } = await prepararHub(hub, "main-nueva");
+			const { sql, turno } = await prepararHub(hub, "main-nueva");
 			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = conectar(hub, "main-nueva");
@@ -1494,7 +1494,7 @@ describe("AUD-02 · el saludo", () => {
 	it("un `tpv` que ya no es la Main de la licencia no pasa el saludo, aunque firme bien", async () => {
 		// El ticket del socket dura 30 s: se emitió antes del traslado y se usa después.
 		await enElHub("aud02-saludo-vieja", async (hub: any) => {
-			const { sql, central } = await prepararHub(hub, "main-nueva");
+			const { sql } = await prepararHub(hub, "main-nueva");
 			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const nueva = conectar(hub, "main-nueva");
 			const vieja = await abrir(hub, "main-vieja");
@@ -1557,7 +1557,7 @@ describe("AUD-02 · el saludo", () => {
 
 	it("la reconexión de la propia Main reemplaza su sesión anterior y no echa a nadie más", async () => {
 		await enElHub("aud02-saludo-misma", async (hub: any) => {
-			const { central, eventos } = await prepararHub(hub, "main-nueva");
+			const { eventos } = await prepararHub(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = await abrir(hub, "main-nueva");
 			expect(await saludar(hub, primera)).toMatchObject({ type: "hello_ok", role: "tpv" });

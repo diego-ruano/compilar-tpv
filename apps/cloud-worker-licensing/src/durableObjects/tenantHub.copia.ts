@@ -235,14 +235,6 @@ export async function podarCopias(
 }
 
 /**
- * Borra todas las copias de un negocio. Devuelve cuántas. Nadie la llama todavía: retirar un negocio
- * (`pruebas.ts`, `huerfanos.ts`) no toca sus copias (COPIAS-RETENCION, en `docs/pendientes.md`).
- */
-export async function borrarCopias(bucket: R2Bucket, tenantId: string): Promise<number> {
-	return podarCopias(bucket, tenantId, 0);
-}
-
-/**
  * Cuándo toca la siguiente copia: la madrugada siguiente, entre las 3:00 y las 5:00 UTC (de 4 a 6
  * de la mañana en la península en invierno, de 5 a 7 en verano), cuando un bar está cerrado y la
  * copia, que ocupa el hilo del negocio mientras lee, no estorba. Cada negocio a su minuto, sacado

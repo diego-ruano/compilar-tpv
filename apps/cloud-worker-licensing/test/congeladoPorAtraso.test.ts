@@ -267,7 +267,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 	it("una escritura de la Handy admitida con la Main lista no entra si deja de estarlo mientras espera su turno", async () => {
 		await enElHub("aud15-turno", async (hub: any) => {
-			const { sql, db, control } = await prepararHub(hub);
+			const { sql, control } = await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const main = socketReal(hub, "device-main", "tpv", false);
 			await saludaLaMain(hub, main, true);
