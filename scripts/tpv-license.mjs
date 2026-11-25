@@ -570,7 +570,10 @@ async function centralEstado() {
 	console.log(`\n  Aprovisionada  ${r.aprovisionada ? "sí" : "NO"}`);
 	if (r.enCurso.restauracion) {
 		const { clave, desdeMs } = r.enCurso.restauracion;
-		console.log(`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.`);
+		console.log(
+			`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.\n` +
+				`                 ${SI_SE_CORTO_POR_TIEMPO}`,
+		);
 	}
 	if (r.enCurso.vuelta) {
 		const { destino, desdeMs, fase, preparada } = r.enCurso.vuelta;
@@ -625,6 +628,12 @@ async function centralCopias() {
 		console.log("  pedida: cuándo se le pidió aquella vuelta a la plataforma. Sin hora, no consta, y no se sabe si se pidió: la constancia se apunta después y puede no haber llegado.");
 		console.log("  Las que acaban en .marcador no son copias: la central no se podía copiar, y va sólo su marcador.\n");
 	}
+	const tope = r.filasQueSeRestauranDeUnaVez;
+	if (Number.isInteger(tope) && r.copias.some((c) => Number.isInteger(c.filas) && c.filas > tope)) {
+		console.log(
+			`  ⚠ Las de más de ${tope} filas no se restauran de una vez: la restauración pasaría de 30 s, se cortaría y dejaría la central A MEDIAS.\n`,
+		);
+	}
 	if (r.hayMas) console.log("  (hay más copias de las que caben en la lista)\n");
 }
 
@@ -633,15 +642,47 @@ async function centralCopiar() {
 	console.log(`\n  ✔ Copia de la central: ${r.clave}, ${r.filas} filas en ${r.tablas} tablas, ${r.bytes} bytes comprimida.\n`);
 }
 
+/**
+ * Lo que se dice de una restauración a medias: si se cortó por tiempo, repetirla con la misma copia se
+ * volverá a cortar (copias-4).
+ */
+const SI_SE_CORTO_POR_TIEMPO =
+	"Si se cortó por tiempo, con una copia de más filas de las que se restauran de una vez (pnpm central:copias lo dice) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes.";
+
+/**
+ * El aviso de que la copia `clave` tiene más filas de las que se restauran de una vez (los metadatos
+ * que da la lista de las copias, con `filasQueSeRestauranDeUnaVez`): la restauración puede pasar de
+ * 30 s, cortarse y dejar la central a medias (copias-4). Es sólo un aviso, antes de empezar: si la
+ * lista no contesta, o no tiene esa copia o sus filas, no dice nada y no impide nada.
+ */
+async function avisoDeUnaCopiaGrande(clave) {
+	try {
+		const r = await fetch(`${API_BASE}/v1/admin/central/copias`, { headers: { authorization: `Bearer ${TOKEN}` } });
+		const data = await r.json();
+		const tope = data?.filasQueSeRestauranDeUnaVez;
+		const filas = Array.isArray(data?.copias) ? data.copias.find((c) => c?.clave === clave)?.filas : undefined;
+		if (!r.ok || !Number.isInteger(tope) || !Number.isInteger(filas) || filas <= tope) return "";
+		return (
+			`  ⚠ ${clave} tiene ${filas} filas, más de las ${tope} que se restauran de una vez: la restauración puede pasar de 30 s,\n` +
+			"    cortarse y dejar la central A MEDIAS, sin atender, y repetirla se volvería a cortar. Hace falta una copia con menos\n" +
+			"    filas o cargarla por partes."
+		);
+	} catch {
+		return "";
+	}
+}
+
 async function centralAprovisionar(args) {
 	if (args.copia === true) fail("--copia <clave> (sácala de `pnpm central:copias`)");
 	const copia = args.copia === undefined ? undefined : String(args.copia).trim();
+	const aviso = copia ? await avisoDeUnaCopiaGrande(copia) : "";
 	confirmado(
 		args,
 		copia
-			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).`
+			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).${aviso ? `\n${aviso}` : ""}`
 			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y los TPV que pregunten por la suya la borrarían. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
 	);
+	if (aviso) console.log(`\n${aviso}`);
 	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, {
 		...CENTRAL,
 		// Sin respuesta de la ruta (una restauración que pasa de 30 s reinicia el objeto a mitad), no se
@@ -650,7 +691,8 @@ async function centralAprovisionar(args) {
 			esDeLaRuta(data, status)
 				? ""
 				: "    No se sabe cómo ha quedado la central: mírala con pnpm central:estado. Si dice A MEDIAS, la restauración\n" +
-					"    no terminó, y no atiende hasta que otra la termine.",
+					"    no terminó, y no atiende hasta que otra la termine.\n" +
+					`    ${SI_SE_CORTO_POR_TIEMPO}`,
 	});
 	if (r.copia) {
 		console.log(`\n  ✔ Central restaurada desde ${r.copia.clave}: ${r.copia.filas} filas en ${r.copia.tablas} tablas.`);

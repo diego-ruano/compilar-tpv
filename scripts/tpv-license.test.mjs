@@ -290,23 +290,67 @@ test("con la vuelta preparada y sin aplicar, central:estado da la orden exacta q
 	});
 });
 
-/** Restaura desde una copia a un worker que contesta con `contestar`. */
-function restaurarCon(contestar) {
+/** La lista de las copias con una de más filas de las que se restauran de una vez (copias-4). */
+const LA_GRANDE = RESPUESTAS["copias-con-una-grande"];
+const CLAVE_GRANDE = LA_GRANDE.cuerpo.copias[0].clave;
+
+/**
+ * Restaura desde la copia `clave` a un worker que contesta con `contestar`: antes mira en la lista de
+ * las copias si es de las que no se restauran de una vez, y después la pide.
+ */
+function restaurarCon(contestar, clave = "base-central/2026-11-24.sql.gz") {
 	return conElWorker(contestar, async (base, peticiones) => {
-		const r = await cliContra(base, "central-aprovisionar", "--copia", "base-central/2026-11-24.sql.gz", "--si");
+		const r = await cliContra(base, "central-aprovisionar", "--copia", clave, "--si");
 		assert.deepEqual(
 			peticiones.map((p) => [p.metodo, p.ruta, p.cuerpo]),
-			[["POST", "/v1/admin/central/aprovisionar", JSON.stringify({ claveDeCopia: "base-central/2026-11-24.sql.gz" })]],
+			[
+				["GET", "/v1/admin/central/copias", ""],
+				["POST", "/v1/admin/central/aprovisionar", JSON.stringify({ claveDeCopia: clave })],
+			],
 		);
 		return r;
 	});
 }
+
+/** Contesta la lista de las copias con `lista` y lo demás con `resto`. */
+const conLaLista = (lista, resto) => (peticion, res) =>
+	(peticion.url === "/v1/admin/central/copias" ? enJson(lista) : enJson(resto))(peticion, res);
 
 test("una restauración que no contesta (el 500 del onError) dice que no se sabe cómo ha quedado, y cómo mirarlo", async () => {
 	const r = await restaurarCon(enJson(RESPUESTAS["restaurar-sin-respuesta"]));
 	assert.equal(r.codigo, 1);
 	assert.ok(r.salida.includes("✖ 500: internal_error"), r.salida);
 	assert.match(r.salida, /No se sabe cómo ha quedado la central: mírala con pnpm central:estado\. Si dice A MEDIAS/);
+	// Si se cortó por tiempo, repetirla con una copia demasiado grande se volverá a cortar (copias-4).
+	assert.match(r.salida, /Si se cortó por tiempo, con una copia de más filas de las que se restauran de una vez/);
+	assert.match(r.salida, /hace falta una copia con menos filas o cargarla por partes/);
+});
+
+test("restaurar una copia de más filas de las que se restauran de una vez avisa antes de empezar, y la pide igual (copias-4)", async () => {
+	const { filasQueSeRestauranDeUnaVez: tope } = LA_GRANDE.cuerpo;
+	const r = await restaurarCon(conLaLista(LA_GRANDE, RESPUESTAS["restaurar-sin-respuesta"]), CLAVE_GRANDE);
+	assert.equal(r.codigo, 1);
+	const aviso = r.salida.indexOf(`⚠ ${CLAVE_GRANDE} tiene ${tope + 1} filas, más de las ${tope} que se restauran de una vez`);
+	assert.ok(aviso >= 0, r.salida);
+	assert.ok(aviso < r.salida.indexOf("✖ 500: internal_error"), r.salida);
+});
+
+test("sin --si, una copia de más filas de las que se restauran de una vez lo avisa, y no pide nada", async () => {
+	await conElWorker(conLaLista(LA_GRANDE, RESPUESTAS["restaurar-sin-respuesta"]), async (base, peticiones) => {
+		const r = await cliContra(base, "central-aprovisionar", "--copia", CLAVE_GRANDE);
+		assert.equal(r.codigo, 1);
+		assert.ok(r.salida.includes(`⚠ ${CLAVE_GRANDE} tiene`), r.salida);
+		assert.ok(r.salida.includes("repite la orden con --si"), r.salida);
+		assert.deepEqual(peticiones.map((p) => [p.metodo, p.ruta]), [["GET", "/v1/admin/central/copias"]]);
+	});
+});
+
+test("central:copias avisa de las copias que no se restaurarían de una vez", async () => {
+	await conElWorker(enJson(LA_GRANDE), async (base) => {
+		const r = await cliContra(base, "central-copias");
+		assert.equal(r.codigo, 0, r.salida);
+		assert.ok(r.salida.includes(`⚠ Las de más de ${LA_GRANDE.cuerpo.filasQueSeRestauranDeUnaVez} filas no se restauran de una vez`), r.salida);
+	});
 });
 
 test("una restauración con una copia que no sirve dice por qué, y nada más", async () => {

@@ -30,6 +30,7 @@ import {
 	NOMBRES_DE_UNA_COPIA,
 } from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
+import { FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } from "../src/durableObjects/baseCentral.restaurar";
 import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import {
 	centralDePrueba,
@@ -354,6 +355,26 @@ describe("aprovisionar desde una copia", () => {
 			{ accion: "restaurar", resultado: "ok", clave, filas: 3, tablas: 2 },
 		]);
 		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Bar Uno|Bar Dos/);
+	});
+});
+
+describe("una restauración que se corta por tiempo (copias-4)", () => {
+	it("con una a medias, lo que se le pide dice que con una copia de más filas de las que se restauran de una vez se volverá a cortar", async () => {
+		const central = await centralDePrueba();
+		await runInDurableObject(central.stub, (_o, state) =>
+			state.storage.kv.put(CLAVE_RESTAURACION_EN_CURSO, { clave: "base-central/2026-11-24.sql.gz", desdeMs: 1 }),
+		);
+		const r = await pedir(entornoCon(central), "POST", "/copiar-ahora");
+		expect(r).toMatchObject({ status: 503, body: { error: "central_restauracion_a_medias" } });
+		expect(r.body.message).toContain("vuelve a restaurar desde una copia");
+		expect(r.body.message).toContain(
+			`con una copia de más de ${FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ} filas (las dice pnpm central:copias) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes.`,
+		);
+	});
+
+	it("la lista de las copias dice hasta cuántas filas se restauran de una vez, para avisar antes de restaurar una más grande", async () => {
+		const lista = await pedir(entornoCon(centralSinAprovisionar()), "GET", "/copias");
+		expect(lista).toMatchObject({ status: 200, body: { ok: true, filasQueSeRestauranDeUnaVez: FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } });
 	});
 });
 

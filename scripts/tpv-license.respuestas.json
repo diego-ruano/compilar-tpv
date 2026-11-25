@@ -67,7 +67,8 @@
           "pedida": "2026-11-25T01:00:00.000Z"
         }
       ],
-      "hayMas": false
+      "hayMas": false,
+      "filasQueSeRestauranDeUnaVez": 150000
     }
   },
   "vuelta-que-no-atiende": {
@@ -75,7 +76,7 @@
     "cuerpo": {
       "ok": false,
       "error": "central_restauracion_a_medias",
-      "message": "La central ha vuelto, pero no atiende. Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta, cuando se cerró la central (cerradaDesde, con la hora del worker).",
+      "message": "La central ha vuelto, pero no atiende. Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Si la anterior se cortó por tiempo (no hubo respuesta), con una copia de más de 150000 filas (las dice pnpm central:copias) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes. Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta, cuando se cerró la central (cerradaDesde, con la hora del worker).",
       "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
       "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
       "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
@@ -344,9 +345,30 @@
     "cuerpo": {
       "ok": false,
       "error": "central_restauracion_a_medias",
-      "message": "Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si).",
+      "message": "Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Si la anterior se cortó por tiempo (no hubo respuesta), con una copia de más de 150000 filas (las dice pnpm central:copias) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes.",
       "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
       "code": "external"
+    }
+  },
+  "copias-con-una-grande": {
+    "status": 200,
+    "cuerpo": {
+      "ok": true,
+      "copias": [
+        {
+          "clave": "base-central/2026-11-23.sql.gz",
+          "bytes": 32768,
+          "subida": "2026-11-25T01:00:00.000Z",
+          "generada": "2026-11-25T01:00:00.000Z",
+          "filas": 150001,
+          "tablas": 22,
+          "ultimaMigracion": "0001_inicial.sql",
+          "marcador": null,
+          "pedida": null
+        }
+      ],
+      "hayMas": false,
+      "filasQueSeRestauranDeUnaVez": 150000
     }
   },
   "restaurar-sin-copia": {

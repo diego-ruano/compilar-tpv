@@ -7,7 +7,8 @@
 //
 //   GET  /v1/admin/central/estado        → si está aprovisionada, sus migraciones, si tiene avería o
 //                                          algo a medias, sus filas por tabla y lo que ocupa
-//   GET  /v1/admin/central/copias        → sus copias en R2, de la más reciente a la más vieja
+//   GET  /v1/admin/central/copias        → sus copias en R2, de la más reciente a la más vieja, y
+//                                          hasta cuántas filas se restauran de una vez
 //   POST /v1/admin/central/copiar-ahora  → una copia ahora, con la hora en la clave: no pisa la del día
 //   POST /v1/admin/central/aprovisionar  → a un objeto sin aprovisionar, el esquema vacío o, con
 //                                          `claveDeCopia`, la base de esa copia
@@ -45,6 +46,7 @@ import type {
 	FalloDeLaCentral,
 	VueltaPreparada,
 } from "../../durableObjects/baseCentral.rpc";
+import { FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } from "../../durableObjects/baseCentral.restaurar";
 import type { CopiaInservible } from "../../durableObjects/cargaDeCopias";
 import { esMarcador } from "../../durableObjects/instantes";
 
@@ -91,8 +93,7 @@ const SIN_ESQUEMA_TRAS_VOLVER =
 const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = {
 	central_sin_aprovisionar: "La central no está aprovisionada: dale esquema o restáurala con pnpm central:aprovisionar.",
 	central_ya_aprovisionada: "La central ya está aprovisionada, y no se ha tocado: sólo se aprovisiona un objeto vacío.",
-	central_restauracion_a_medias:
-		"Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si).",
+	central_restauracion_a_medias: `Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Si la anterior se cortó por tiempo (no hubo respuesta), con una copia de más de ${FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ} filas (las dice pnpm central:copias) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes.`,
 	central_copia_inservible: "Esa copia no se puede restaurar: la central se queda sin aprovisionar, como estaba.",
 	central_vuelta_en_curso:
 		"Hay una vuelta a un instante en curso, y la central no atiende hasta que se aplique. Si está preparada, se aplica con pnpm central:volver -- --reiniciar <deshacer> --si (pnpm central:estado da la orden entera); si se está preparando, espera a que acabe.",
@@ -183,9 +184,13 @@ centralRoutes.get("/estado", async (c) => {
 	return c.json({ ok: true, ...(await centralDe(c.env).estado()) });
 });
 
+/**
+ * Las copias, y hasta cuántas filas se restauran de una vez (copias-4): con más, la restauración puede
+ * pasar de 30 s, cortarse y dejar la central a medias. El CLI avisa antes de restaurar una así.
+ */
 centralRoutes.get("/copias", async (c) => {
 	const { copias, hayMas } = await listarCopiasDeLaCentral(c.env.COPIAS, TECHO_COPIAS);
-	return c.json({ ok: true, copias, hayMas });
+	return c.json({ ok: true, copias, hayMas, filasQueSeRestauranDeUnaVez: FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ });
 });
 
 centralRoutes.post("/copiar-ahora", async (c) => {
