@@ -725,8 +725,9 @@ apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AU
 desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
 que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
 pedido sale igual y se apunta después si se puede; la central que no atiende al cupo o a la traza
-queda en Axiom (`central_no_disponible`, `email.quota` o `email.audit`) y en Sentry sólo si no es
-carga ni un fallo pasajero ([arriba](#cuando-no-puede-atender)). Las trazas se purgan a los 90 días
+queda en Axiom (`central_no_disponible`, con la ruta del pedido por su patrón,
+`/v1/email/enviar-pedido`) y, como `email.quota` o `email.audit`, en Sentry sólo si no es carga ni
+un fallo pasajero ([arriba](#cuando-no-puede-atender)). Las trazas se purgan a los 90 días
 (`RETENCION_ENVIOS_MS`).
 
 **Un pedido no sale dos veces.** La Main o la Handy manda con cada pedido su clave de envío (`id_envio`, la
