@@ -110,8 +110,8 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 - **El logo pasa al imprimir por las mismas cotas que al guardarlo** (AUD-30). `Logo_DataUrl` se
   replica y lo puede escribir cualquier dispositivo del negocio, así que no se da por bueno aunque
   la interfaz sólo guarde imágenes ya reconstruidas. `leer_imagen_local` sólo lee una imagen
-  guardada (`images/{carpeta}/{archivo}`, la forma que valida `imagenes::ruta_segura`) o un data URL
-  heredado, y no más de 5 MB; `rasterizar_logo` decodifica con `imagenes::decodificar`, la misma
+  guardada (`images/{carpeta}/{archivo}`, la forma que valida `imagenes::ruta_segura`; un data URL
+  no, pese al nombre de la columna), y no más de 5 MB; `rasterizar_logo` decodifica con `imagenes::decodificar`, la misma
   función de `save_image`. Lo que no se lee, no cumple las cotas o hace fallar al decodificador
   (también con un pánico) deja el ticket sin logo, con un aviso en el registro si es la imagen la
   que se rechaza.

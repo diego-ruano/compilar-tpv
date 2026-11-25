@@ -1700,27 +1700,18 @@ fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorD
     ) as u32)
 }
 
-/// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`) o descodifica un data
-/// URL heredado. `None` si no se puede: quien llama decide qué hacer sin ella.
+/// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`). `None` si no se puede:
+/// quien llama decide qué hacer sin ella.
 ///
 /// AUD-30: la ruta es `Logo_DataUrl`, que llega replicado (o, en la precuenta, de la pantalla), y
-/// puede ser cualquier texto. Ni el data URL ni el fichero se leen más allá de lo que pesa una
-/// imagen admitida (`imagenes::MAX_BYTES`): lo que pasa de ahí no se iba a imprimir.
+/// puede ser cualquier texto. El fichero no se lee más allá de lo que pesa una imagen admitida
+/// (`imagenes::MAX_BYTES`): lo que pasa de ahí no se iba a imprimir. Pese al nombre de la columna,
+/// un data URL no se decodifica (M-075): lo que se guarda en ella es siempre la ruta de una imagen
+/// (`validar_ruta_imagen`, AUD-31).
 fn leer_imagen_local(app_data: Option<&std::path::Path>, ruta: &str) -> Option<Vec<u8>> {
     let r = ruta.trim();
     if r.is_empty() {
         return None;
-    }
-
-    // Data URL heredado (`data:image/png;base64,…`): los logos antiguos se guardaron así.
-    if let Some(b64) = r.split_once(";base64,").map(|(_, b)| b) {
-        // Base64 añade un tercio: se mide antes de decodificar, como en `save_image`.
-        if b64.len() > imagenes::MAX_BYTES.div_ceil(3) * 4 {
-            tracing::warn!(target: "tpv::impresion", "el logo pesa más de 5 MB: el ticket sale sin él");
-            return None;
-        }
-        use base64::Engine;
-        return base64::engine::general_purpose::STANDARD.decode(b64).ok();
     }
 
     // Sólo una imagen guardada (`images/{sub}/{archivo}`). Cualquier otro nombre puede ser un
@@ -2941,7 +2932,7 @@ mod tests_ruta_del_logo {
     }
 
     // AUD-30: el valor llega replicado, así que sólo se lee una imagen guardada, y no más de lo
-    // que pesa una admitida, venga como fichero o como data URL.
+    // que pesa una admitida.
 
     /// El logo de las pruebas, con el nombre que le pone `save_image` (un UUID, OBS-06).
     const LOGO: &str = "images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.png";
@@ -2957,13 +2948,15 @@ mod tests_ruta_del_logo {
     }
 
     #[test]
-    fn un_logo_se_lee_del_disco_o_de_un_data_url() {
+    fn un_logo_se_lee_del_disco_y_no_de_un_data_url() {
         let dir = con_logo();
 
         assert_eq!(leer_imagen_local(Some(&dir), LOGO).as_deref(), Some(&b"logo"[..]));
-        // «logo» en base64.
-        assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw==").as_deref(), Some(&b"logo"[..]));
         assert_eq!(leer_imagen_local(Some(&dir), GRANDE), None);
+        // M-075: un logo es siempre una imagen guardada (`validar_ruta_imagen`, AUD-31); un data
+        // URL («logo» en base64) no se decodifica.
+        assert_eq!(leer_imagen_local(Some(&dir), "data:image/png;base64,bG9nbw=="), None);
+        assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw=="), None);
     }
 
     #[test]
@@ -2978,16 +2971,6 @@ mod tests_ruta_del_logo {
         for ruta in ["images/logo.png", "images/logo/logo.png", "NUL", "../../secreto.png", "C:/Windows/win.ini"] {
             assert_eq!(leer_imagen_local(Some(&dir), ruta), None, "{ruta}");
         }
-    }
-
-    #[test]
-    fn un_data_url_mas_largo_que_una_imagen_admitida_no_se_decodifica() {
-        // El mismo tope que `save_image` pone a lo que le manda la pantalla.
-        let tope = imagenes::MAX_BYTES.div_ceil(3) * 4;
-        let data_url = |largo: usize| format!("data:image/png;base64,{}", "A".repeat(largo));
-
-        assert!(leer_imagen_local(None, &data_url(tope)).is_some());
-        assert!(leer_imagen_local(None, &data_url(tope + 4)).is_none());
     }
 
     #[test]
