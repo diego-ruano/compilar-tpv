@@ -66,21 +66,21 @@ const QUE_PASA: Partial<Record<CodigoDeLaCentral, string>> = {
 };
 
 /**
- * La respuesta de lo que la central contesta que no ha hecho: su código, qué pasa (`message`, con lo
- * que haya pasado `antes`) y, si el objeto lo dice, por qué (`detalle`, el motivo técnico, que el CLI
- * enseña aparte). `extra` va tal cual.
+ * La respuesta de lo que la central contesta que no ha hecho: su código, qué pasa (`message`, entre
+ * lo que haya pasado `antes` y lo que se puede hacer `despues`) y, si el objeto lo dice, por qué
+ * (`detalle`, el motivo técnico, que el CLI enseña aparte). `extra` va tal cual.
  */
 function noHecho(
 	c: Context<{ Bindings: Env }>,
 	fallo: FalloDeLaCentral,
-	opciones: { antes?: string; extra?: Record<string, unknown> } = {},
+	opciones: { antes?: string; despues?: string; extra?: Record<string, unknown> } = {},
 ) {
 	const quePasa = QUE_PASA[fallo.error] ?? "La central no lo ha hecho.";
 	return c.json(
 		{
 			ok: false,
 			error: fallo.error,
-			message: opciones.antes ? `${opciones.antes} ${quePasa}` : quePasa,
+			message: [opciones.antes, quePasa, opciones.despues].filter(Boolean).join(" "),
 			...(fallo.detalle ? { detalle: fallo.detalle } : {}),
 			...opciones.extra,
 		},
@@ -168,18 +168,19 @@ const volverSchema = z
 	});
 
 /**
- * Devuelve la central a un instante, o a un marcador (`durableObjects/baseCentral.instante.ts`). Son
- * dos llamadas al objeto, cada una con su stub (el reinicio deja inservible el anterior):
+ * Devuelve la central a un instante, o a un marcador (`durableObjects/baseCentral.instante.ts`), esté
+ * como esté: deshacer una vuelta que la ha dejado sin atender, o volver a otro instante, es la salida.
+ * Son dos llamadas al objeto, cada una con su stub (el reinicio deja inservible el anterior):
  *
- * 1. `prepararVuelta`: cierra la central, deja la copia de antes en R2 y la vuelta preparada.
- *    Contesta el marcador con el que se deshace.
+ * 1. `prepararVuelta`: cierra la central, deja la copia de antes en R2 (si se puede copiar) y la
+ *    vuelta preparada. Contesta el marcador con el que se deshace.
  * 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, vuelve.
  *
  * Después se espera a que conteste: si sigue con la vuelta sin aplicar, se reinicia otra vez. Lo que
  * se devuelve, también si algo no sale, es con qué se deshace y dónde está la copia de antes; y queda
  * en el rastro en cuanto la vuelta está preparada, antes de reiniciar, por si esta llamada no llega a
- * terminar. Una central que ha vuelto pero no atiende (vuelve a un instante con algo a medias, o una
- * migración no entra) no se da por buena.
+ * terminar. Una central que ha vuelto pero no atiende (vuelve a un instante con algo a medias, sin
+ * esquema, o una migración no entra) no se da por buena.
  */
 centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 	const env = c.env;
@@ -191,7 +192,7 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 		return noHecho(c, prep);
 	}
 	const { deshacer, copiaDeAntes } = prep.valor;
-	rastro(c, { accion: "volver", resultado: "preparada", destino, deshacer, copiaDeAntes });
+	rastro(c, { accion: "volver", resultado: "preparada", destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
 
 	let estado: EstadoDeLaCentral | null = null;
 	try {
@@ -201,12 +202,11 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 		// No contesta: no se sabe si ha vuelto. Se dice, con lo necesario para deshacerlo.
 	}
 	const aplicada = estado !== null && !estado.enCurso.vuelta;
-	const resultado = !estado
-		? "central_vuelta_sin_comprobar"
-		: !aplicada
-			? "central_vuelta_sin_aplicar"
-			: (estado.averia?.error ?? "ok");
-	rastro(c, { accion: "volver", resultado, destino, deshacer, copiaDeAntes });
+	// Sin esquema no es una avería del objeto, pero tampoco atiende.
+	const noAtiende: FalloDeLaCentral | null =
+		estado?.averia ?? (estado && !estado.aprovisionada ? { ok: false, error: "central_sin_aprovisionar" } : null);
+	const resultado = !estado ? "central_vuelta_sin_comprobar" : !aplicada ? "central_vuelta_sin_aplicar" : (noAtiende?.error ?? "ok");
+	rastro(c, { accion: "volver", resultado, destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
 
 	if (!estado) {
 		return c.json(
@@ -233,9 +233,10 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 			503,
 		);
 	}
-	if (estado.averia) {
-		return noHecho(c, estado.averia, {
+	if (noAtiende) {
+		return noHecho(c, noAtiende, {
 			antes: "La central ha vuelto, pero no atiende.",
+			despues: "Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así.",
 			extra: { deshacer, copiaDeAntes, estado },
 		});
 	}

@@ -120,9 +120,10 @@ describe("con la central sin aprovisionar, todo contesta", () => {
 			status: 503,
 			body: { ok: false, error: "central_sin_aprovisionar", message: expect.stringContaining("pnpm central:aprovisionar") },
 		});
+		// Volver se puede también sin aprovisionar; en local no hay vuelta a un instante.
 		expect(await pedir(entorno, "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.destino }) })).toMatchObject({
-			status: 503,
-			body: { ok: false, error: "central_sin_aprovisionar" },
+			status: 501,
+			body: { ok: false, error: "central_vuelta_no_disponible" },
 		});
 		expect(await pedir(entorno, "POST", "/aprovisionar", { cuerpo: json({}) })).toMatchObject({
 			status: 200,
@@ -308,23 +309,23 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			body: {
 				ok: true,
 				destino: MARCADORES.destino,
-				deshacer: MARCADORES.deshacer,
+				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 				estado: { aprovisionada: true, averia: null, enCurso: { restauracion: null, vuelta: null } },
 			},
 		});
-		expect(llamadas).toEqual(["de:number", `restaurar:${MARCADORES.destino}`, "reiniciar"]);
+		expect(llamadas).toEqual(["de:number", "actual", `restaurar:${MARCADORES.destino}`, "reiniciar"]);
 		// Con qué se deshace queda en el rastro antes de reiniciar: si la llamada no terminara, estaría ahí.
 		const destino = new Date(instanteMs).toISOString();
-		const deLaVuelta = { accion: "volver", destino, deshacer: MARCADORES.deshacer, copiaDeAntes: r.body.copiaDeAntes };
+		const deLaVuelta = { accion: "volver", destino, deshacer: MARCADORES.actual, copiaDeAntes: r.body.copiaDeAntes };
 		expect(rastrosDe(log)).toEqual([
 			{ ...deLaVuelta, resultado: "preparada" },
 			{ ...deLaVuelta, resultado: "ok" },
 		]);
 
 		// Deshacer es volver al marcador que devolvió.
-		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.deshacer }) });
-		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: MARCADORES.deshacer } });
+		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.actual }) });
+		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: MARCADORES.actual } });
 	});
 
 	it("si la central no llega a reiniciarse, lo dice, con lo necesario para deshacerlo; y repetir la orden la reinicia", async () => {
@@ -339,7 +340,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				ok: false,
 				error: "central_vuelta_sin_aplicar",
 				message: expect.stringContaining("Repite la misma orden"),
-				deshacer: MARCADORES.deshacer,
+				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 			},
 		});
@@ -376,7 +377,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				error: "central_restauracion_a_medias",
 				message: expect.stringMatching(/^La central ha vuelto, pero no atiende\. Hay una restauración a medias/),
 				detalle: expect.stringContaining("base-central/la-de-entonces.sql.gz"),
-				deshacer: MARCADORES.deshacer,
+				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 				estado: { aprovisionada: false, averia: { error: "central_restauracion_a_medias" } },
 			},

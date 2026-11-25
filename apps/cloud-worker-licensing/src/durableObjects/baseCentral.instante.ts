@@ -6,18 +6,28 @@
 // objeto, cada una con su stub:
 //
 // 1. `prepararVuelta`: cierra la central, saca el marcador del instante (antes de copiar nada: si la
-//    plataforma no vuelve a instantes o el instante no vale, no hay copia inútil), deja en R2 una
-//    copia de cómo está (`base-central/antes-de-volver-<hora>.sql.gz`) y deja la vuelta preparada
-//    para el siguiente arranque. Devuelve el marcador con el que se deshace.
+//    plataforma no vuelve a instantes o el instante no vale, no hay copia inútil) y el de cómo está
+//    ahora, que es con el que se deshace; deja en R2 una copia de cómo está
+//    (`base-central/antes-de-volver-<hora>.sql.gz`) y deja la vuelta preparada para el siguiente
+//    arranque.
 // 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto
 //    vuelve.
 //
 // **La marca de vuelta en curso** (`CLAVE_VUELTA_EN_CURSO`) cierra la central desde antes de la copia
 // hasta el reinicio: lo que se escribiera entretanto no estaría en la copia de antes y se perdería al
 // volver. Volver a un instante anterior se la lleva, porque es de después. Deshacer una vuelta no: el
-// marcador de deshacer es el del objeto justo antes de reiniciarse, con la marca puesta. Por eso la
+// marcador de deshacer es el de la central ya cerrada, con la marca puesta. Por eso la
 // marca que haya al arrancar ya no dice nada (la vuelta se aplica en el arranque, sea cual sea su
 // causa) y se quita entonces (`BaseCentral`).
+//
+// **También con la central sin atender**: a medio restaurar, con una migración que no entra o sin
+// esquema, que es como puede dejarla una vuelta (a un instante de en medio de una restauración, de
+// antes de una migración o de antes de aprovisionarla). Deshacerla, o volver a otro instante, es la
+// salida, así que no se le exige estar sana. Lo que no se puede es copiarla como una central sana:
+// sin esquema no hay qué copiar, y una copia de una restauración a medias parecería buena y le
+// faltarían filas. Así que la copia de antes sólo se hace con la central sana, y lo que queda siempre
+// de cómo estaba es su marcador (`getCurrentBookmark`), que es con el que se deshace: con él se
+// vuelve a ese estado exacto, también al averiado, que es la prueba de lo que pasó.
 //
 // **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
 // plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
@@ -35,8 +45,8 @@
 //   otra: devuelve la que hay, con su marcador de deshacer y su copia, para reiniciar. A otro destino,
 //   prepara otra encima, como una nueva.
 
-import { copiarLaCentral, claveConHora, type CopiaHecha } from "./baseCentral.copia";
-import { CLAVE_VUELTA_EN_CURSO, falloPorLasMarcas, marcasDe } from "./baseCentral.guardas";
+import { copiarLaCentral, claveConHora } from "./baseCentral.copia";
+import { CLAVE_VUELTA_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type {
 	DestinoDeLaVuelta,
 	FalloDeLaCentral,
@@ -59,8 +69,8 @@ function laQueSigueEnPie(actual: MarcaDeVuelta | null): MarcaDeVuelta | null {
 const otraALaVez = (detalle: string): FalloDeLaCentral => ({ ok: false, error: "central_vuelta_a_la_vez", detalle });
 
 /**
- * La primera mitad de la vuelta (ver la cabecera). Sólo con la central aprovisionada, sin avería y
- * sin una restauración a medias; una vuelta ya preparada se puede volver a preparar, a otro destino.
+ * La primera mitad de la vuelta (ver la cabecera), esté como esté la central: sana, con la copia de
+ * antes; sin atender, sin ella. Una vuelta ya preparada se puede volver a preparar, a otro destino.
  */
 export async function prepararVueltaDeLaCentral(
 	storage: DurableObjectStorage,
@@ -71,9 +81,8 @@ export async function prepararVueltaDeLaCentral(
 ): Promise<RespuestaDeLaCentral<VueltaPreparada>> {
 	const averia = await averiado;
 	const marcas = marcasDe(storage);
-	if (marcas.restauracion) return falloPorLasMarcas(marcas)!;
-	if (averia) return averia;
-	if (!baseAprovisionada(storage.sql)) return { ok: false, error: "central_sin_aprovisionar" };
+	/** Si se puede copiar como una central sana: aprovisionada, sin avería y sin una restauración a medias. */
+	const sana = !marcas.restauracion && !averia && baseAprovisionada(storage.sql);
 
 	const ahora = Date.now();
 	if ("instanteMs" in destino && !esInstanteDeLaVentana(destino.instanteMs, ahora)) {
@@ -113,25 +122,39 @@ export async function prepararVueltaDeLaCentral(
 	}
 	if (!esMia()) return sinLaMarca();
 
-	let copia: CopiaHecha;
-	try {
-		copia = await copiarLaCentral(storage.sql, bucket, claveConHora("antes-de-volver", new Date(ahora)));
-	} catch (error) {
-		reabrir();
-		return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
-	}
-	if (!esMia()) return sinLaMarca();
-
-	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "programando" } satisfies MarcaDeVuelta);
+	// Con qué se deshace: el marcador de cómo está, con la central ya cerrada. Lo escrito antes de
+	// cerrarla se confirma primero, para que el marcador lo lleve.
 	let deshacer: string;
 	try {
-		deshacer = await instantes.restaurarAlReiniciar(marcador);
+		await storage.sync();
+		deshacer = await instantes.marcadorActual();
 	} catch (error) {
 		reabrir();
 		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
 		throw error;
 	}
-	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes: copia.clave };
+	if (!esMia()) return sinLaMarca();
+
+	let copiaDeAntes: string | null = null;
+	if (sana) {
+		try {
+			copiaDeAntes = (await copiarLaCentral(storage.sql, bucket, claveConHora("antes-de-volver", new Date(ahora)))).clave;
+		} catch (error) {
+			reabrir();
+			return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
+		}
+		if (!esMia()) return sinLaMarca();
+	}
+
+	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "programando" } satisfies MarcaDeVuelta);
+	try {
+		await instantes.restaurarAlReiniciar(marcador);
+	} catch (error) {
+		reabrir();
+		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
+		throw error;
+	}
+	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes };
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "preparada", preparada, anterior: null } satisfies MarcaDeVuelta);
 	return { ok: true, valor: preparada };
 }

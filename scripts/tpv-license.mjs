@@ -647,7 +647,7 @@ async function centralVolver(args) {
 	);
 	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, deshacer: centralAlMarcador });
 	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
-	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes}`);
+	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
 }
 

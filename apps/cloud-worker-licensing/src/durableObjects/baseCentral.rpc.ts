@@ -118,8 +118,11 @@ export type DestinoDeLaVuelta = { instanteMs: number } | { marcador: string };
 export type VueltaPreparada = {
 	/** El marcador al que vuelve. */
 	marcador: string;
-	/** El marcador con el que se deshace: volver a él. */
+	/** El marcador de cómo estaba la central al prepararla (`getCurrentBookmark`): volver a él la deshace. */
 	deshacer: string;
-	/** La copia de cómo estaba la central antes de volver, en R2. */
-	copiaDeAntes: string;
+	/**
+	 * La copia de cómo estaba la central antes de volver, en R2. `null` si no se podía copiar como una
+	 * central sana: sin esquema, con una restauración a medias o con una migración que no entra.
+	 */
+	copiaDeAntes: string | null;
 };

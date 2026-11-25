@@ -16,7 +16,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
 import { BaseCentral } from "../src/durableObjects/baseCentral";
-import { CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
+import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import {
 	centralDePrueba,
 	centralSinAprovisionar,
@@ -53,13 +53,13 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 			ok: true,
 			valor: {
 				marcador: MARCADORES.destino,
-				deshacer: MARCADORES.deshacer,
+				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.sql\.gz$/),
 			},
 		});
-		expect(llamadas).toEqual(["de:number", `restaurar:${MARCADORES.destino}`]);
+		expect(llamadas).toEqual(["de:number", "actual", `restaurar:${MARCADORES.destino}`]);
 		if (!r.ok) return;
-		const copia = await bucket().get(r.valor.copiaDeAntes);
+		const copia = await bucket().get(r.valor.copiaDeAntes!);
 		const texto = await new Response(copia!.body.pipeThrough(new DecompressionStream("gzip"))).text();
 		expect(texto).toContain("'Bar de antes'");
 		expect(copia!.customMetadata).toMatchObject({ filas: "1" });
@@ -78,7 +78,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		);
 		expect(await codigoDe(central.db.operar("revocarAMano", { licenseId: "x", ahoraMs: 0 }))).toBe("central_vuelta_en_curso");
 		expect(await central.stub.copiar("2031-03-01")).toMatchObject({ ok: false, error: "central_vuelta_en_curso" });
-		expect(await central.stub.aprovisionar()).toEqual({ ok: false, error: "central_ya_aprovisionada" });
+		expect(await central.stub.aprovisionar()).toMatchObject({ ok: false, error: "central_vuelta_en_curso" });
 		expect(await central.stub.estado()).toMatchObject({
 			aprovisionada: true,
 			filas: {},
@@ -117,15 +117,15 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect(await filasDe(central, "SELECT tenant_id FROM tenants ORDER BY tenant_id;")).toEqual([{ tenant_id: "t-1" }]);
 	});
 
-	it("a un marcador (el `deshacer` de otra vuelta) no le pregunta a la plataforma por ningún instante", async () => {
+	it("a un marcador (el `deshacer` de otra vuelta) no le pregunta a la plataforma por ningún instante; se deshace con el de ahora", async () => {
 		const central = await sembrada();
 		const llamadas: string[] = [];
 		await conDobleDeInstantes(central, llamadas);
 		expect(await central.stub.prepararVuelta({ marcador: "m-de-otra" })).toMatchObject({
 			ok: true,
-			valor: { marcador: "m-de-otra", deshacer: MARCADORES.deshacer },
+			valor: { marcador: "m-de-otra", deshacer: MARCADORES.actual },
 		});
-		expect(llamadas).toEqual(["restaurar:m-de-otra"]);
+		expect(llamadas).toEqual(["actual", "restaurar:m-de-otra"]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: "m-de-otra" });
 	});
 
@@ -156,6 +156,29 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect((await central.db.execute("SELECT 1 AS uno;")).rows[0].uno).toBe(1);
 	});
 
+	it("con la central a medio restaurar también prepara, sin copia de antes; y mientras tanto no se restaura (vaciaría la marca y atendería con la vuelta pedida)", async () => {
+		const central = centralSinAprovisionar();
+		const aMedias = { clave: "base-central/la-de-antes.sql.gz", desdeMs: 1 };
+		await runInDurableObject(central.stub, (_o, state) => state.storage.kv.put(CLAVE_RESTAURACION_EN_CURSO, aMedias));
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas, { alReiniciar: () => {} });
+
+		expect(await central.stub.prepararVuelta({ marcador: "m-de-salida" })).toEqual({
+			ok: true,
+			valor: { marcador: "m-de-salida", deshacer: MARCADORES.actual, copiaDeAntes: null },
+		});
+		expect(llamadas).toEqual(["actual", "restaurar:m-de-salida"]);
+		expect(await central.stub.aprovisionar({ claveDeCopia: "base-central/cualquiera.sql.gz" })).toMatchObject({
+			ok: false,
+			error: "central_vuelta_en_curso",
+		});
+		expect(await central.stub.aprovisionar()).toMatchObject({ ok: false, error: "central_vuelta_en_curso" });
+		expect((await central.stub.estado()).enCurso).toMatchObject({
+			restauracion: aMedias,
+			vuelta: { destino: "m-de-salida", fase: "preparada" },
+		});
+	});
+
 	it("si ya había otra preparada y ésta falla, la de antes sigue en pie: la central sigue cerrada, y dice adónde vuelve", async () => {
 		const central = await sembrada();
 		await conDobleDeInstantes(central, []);
@@ -174,6 +197,8 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 	const B = "000000b0-00000000-00000000-0000000000000000000000000000000b";
 	const pausa = () => new Promise((r) => setTimeout(r, 5));
 	const copiasDeAntes = async () => (await bucket().list({ prefix: "base-central/antes-de-volver-" })).objects.length;
+	/** Lo que se le ha pedido a la plataforma que deje preparado. */
+	const pedidas = (llamadas: string[]) => llamadas.filter((l) => l.startsWith("restaurar:"));
 
 	/** La primera subida (la de A) espera a que el test la suelte; después, sube o falla según `falla`. */
 	async function conLaSubidaDeARetenida(central: CentralDePrueba, falla: boolean) {
@@ -203,7 +228,7 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 
 		subidaDeA.suelta = true;
 		expect(await a).toMatchObject({ ok: false, error: "central_copia_fallida" });
-		expect(llamadas).toEqual([`restaurar:${B}`]);
+		expect(pedidas(llamadas)).toEqual([`restaurar:${B}`]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
 		const escribir = central.db.execute({
 			sql: "INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('t-tras', 1, 1);",
@@ -224,7 +249,7 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 
 		subidaDeA.suelta = true;
 		expect(await a).toMatchObject({ ok: false, error: "central_vuelta_a_la_vez" });
-		expect(llamadas).toEqual([`restaurar:${B}`]);
+		expect(pedidas(llamadas)).toEqual([`restaurar:${B}`]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
 	});
 
@@ -246,7 +271,7 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 
 		senal.suelta = true;
 		expect(await a).toMatchObject({ ok: true, valor: { marcador: A } });
-		expect(llamadas).toEqual([`restaurar:${A}`]);
+		expect(pedidas(llamadas)).toEqual([`restaurar:${A}`]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: A, fase: "preparada" });
 	});
 
@@ -259,11 +284,11 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 		const primera = await central.stub.prepararVuelta({ marcador: A });
 		expect(primera.ok).toBe(true);
 		expect(await central.stub.prepararVuelta({ marcador: A })).toEqual(primera);
-		expect(llamadas).toEqual([`restaurar:${A}`]);
+		expect(pedidas(llamadas)).toEqual([`restaurar:${A}`]);
 		expect(await copiasDeAntes()).toBe(copias + 1);
 
 		expect(await central.stub.prepararVuelta({ marcador: B })).toMatchObject({ ok: true, valor: { marcador: B } });
-		expect(llamadas).toEqual([`restaurar:${A}`, `restaurar:${B}`]);
+		expect(pedidas(llamadas)).toEqual([`restaurar:${A}`, `restaurar:${B}`]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: B, fase: "preparada" });
 	});
 });
@@ -279,9 +304,9 @@ describe("prepararVuelta, con la plataforma de verdad", () => {
 		expect((await central.db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(1);
 	});
 
-	it("sin aprovisionar no prepara nada", async () => {
+	it("sin aprovisionar se puede volver (es la salida de una vuelta que la deja así), pero en local tampoco hay vuelta: lo dice y no deja la marca", async () => {
 		const central = centralSinAprovisionar();
-		expect(await central.stub.prepararVuelta({ marcador: "m" })).toEqual({ ok: false, error: "central_sin_aprovisionar" });
+		expect(await central.stub.prepararVuelta({ marcador: "m" })).toEqual({ ok: false, error: "central_vuelta_no_disponible" });
 		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 	});
 
