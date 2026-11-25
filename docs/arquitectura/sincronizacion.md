@@ -48,7 +48,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
-| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` sobre el SQLite del DO, para las rutas que se ejecutan dentro (`alHub`) |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: una `Base` (`lib/sql.ts`) sobre el SQLite del DO, para las rutas que se ejecutan dentro (`alHub`) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar/resumen`, `/verificar/filas`, `/verificar/por-clave`, `/verificar/claves`, `/salud` |
 | El contraste con la nube | `domains/sync/verificar.ts` · `resumenCubos.ts` · `tpv-infra-sqlite/src/contraste.rs` · `tpv-domain/src/contraste.rs` | El resumen por cubos de cada lado y lo que se baja cuando no cuadra |
@@ -197,7 +197,8 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **No hay ajuste online/offline en la interfaz.** El motor nativo `src-tauri/src/replicacion.rs`
   intenta conectar automáticamente en modo `tpv`, con licencia aprovisionada y la base lista o en
   reconciliación, salvo que la palanca técnica esté en `off`. Publica `sync:estado`; la UI lo observa
-  con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en Configuración → Conectividad.
+  con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en la pantalla de Conectividad de
+  Configuración, que no está en el menú: la abre el aviso de cambios de las Handy atascados (SYNC-36).
   Entre sus estados están `conectando`, `conectado`, `reintentando`, `sin_identidad`, `rechazado` y
   `pausada`. Desmontar la UI no detiene la réplica nativa. `conectado` con cambios por subir
   (`sync_health.outbox_pending`) no se pinta como «Al día» sino como «Subiendo cambios (N)…»
@@ -441,7 +442,8 @@ de Axiom y, si no es carga ni un fallo pasajero, Sentry; si ha rechazado la cons
 - Una operación con **20 intentos** contados (`MAX_SUBIDA_ATTEMPTS`) o un rechazo permanente se
   **aparta** (`outbox_mark_failed`, SYNC-20): sale de la cola, se cuenta aparte de lo pendiente
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
-  Sentry el diagnóstico (op, comando y error, nunca las sentencias), al usuario la consecuencia. Ver
+  Sentry el diagnóstico (`op_id`, el comando y cuántas se han reparado, `replicacion.rs::fallo_subida`;
+  nunca las sentencias ni el error), al usuario la consecuencia. Ver
   la reparación abajo.
 - El camino normal es el aviso `despertar` del motor nativo, que da cada escritura al confirmarse
   (`configure_outbox_notifier`): el motor sube lo pendiente en el momento. Además, para los
