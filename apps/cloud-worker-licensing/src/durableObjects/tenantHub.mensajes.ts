@@ -329,10 +329,11 @@ const CODIGO = /^[a-z][a-z0-9_]{0,63}$/;
 
 /**
  * El `details` de un `hello_failed`: el código de por qué no ha entrado (`device_replaced`,
- * `license_revoked`, `challenge_expired`, `hub_unavailable`…), nunca texto interno. Un error que no
- * es un código (el texto de SQLite de un error de la central, el de un `TypeError`) sale como
- * `internal_error`, y su texto se queda en el log, filtrado (FABLE-B). Los clientes no leen `details`
- * (`saludo_socket.rs` sólo mira el tipo): es para quien mira el tráfico, como el generador de carga.
+ * `license_revoked`, `challenge_expired`, `hub_unavailable`…), nunca texto interno. Un `HubError` da
+ * su código, sin su detalle (un error de SQL de la central, `central_error_sql`). Lo que no es un
+ * código ni un `HubError` (un `TypeError`) sale como `internal_error`, y su texto se queda en el log,
+ * filtrado (FABLE-B). Los clientes no leen `details` (`saludo_socket.rs` sólo mira el tipo): es para
+ * quien mira el tráfico, como el generador de carga.
  */
 function motivoDelSaludoFallido(e: unknown): string {
 	if (e instanceof HubError) return e.code;
