@@ -215,7 +215,8 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  * de todo el servicio, y también la puede empujar ahí quien tenga un dispositivo dado de alta: mientras
  * dure, sus pedidos salen sin contar, y así se ha decidido dejarlo (CUPO-SATURADA). Sin la base no se sabe
  * tampoco si ese envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de la
- * central se queda lo segundo (los correos de las reservas web, al revés, no salen).
+ * central se queda lo segundo (los correos de las reservas web, al revés, no salen entonces: los
+ * repite la alarma de la AgendaWeb con su mismo id, RESERVA-CORREOS).
  */
 export async function reservarCupo(db: Sql, envio: Envio, sinLaCentral: SinLaCentral = () => false): Promise<ReservaDeCupo> {
 	const ahora = Date.now();
