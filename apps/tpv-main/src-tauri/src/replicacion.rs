@@ -205,6 +205,11 @@ pub(crate) fn arrancar(app: AppHandle) {
                             let h = app.clone();
                             tauri::async_runtime::spawn(async move { let _ = crate::commands::licensing::license_check_now(h).await; });
                         } else { espera = retardo; retardo = (retardo * 2).min(30); }
+                        // Al quinto ciclo de reconciliación fallido seguido se deja de reintentar solo
+                        // (`bloqueada`). Sin límite es lo correcto mientras la causa sea la red, pero si
+                        // la nube rechaza siempre la misma operación local el bucle sería infinito,
+                        // callado y con un mensaje que apunta a la conexión. Bloqueada, la pantalla
+                        // vuelve a ofrecer las alternativas (otra copia, la nube).
                         if recuperando && estuvo_conectada {
                             fallos += 1;
                             let mut foto = runtime.foto.lock().unwrap_or_else(|e| e.into_inner());

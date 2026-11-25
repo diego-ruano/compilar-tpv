@@ -11,10 +11,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 
-import {
-	MAX_FALLOS_RECUPERACION,
-	useEstadoSync,
-} from "../src/shared/stores/useEstadoSync";
+import { useEstadoSync } from "../src/shared/stores/useEstadoSync";
 
 /** El store es un singleton de módulo: cada test parte del mismo sitio. */
 function reiniciar() {
@@ -134,25 +131,10 @@ describe("useEstadoSync", () => {
 		expect(s().faseRecuperacion).toBe("completada");
 	});
 
-	it("deja de reintentar sola tras varios ciclos fallidos seguidos", () => {
-		s().iniciarReconciliacion();
-
-		for (let i = 1; i < MAX_FALLOS_RECUPERACION; i++) {
-			s().marcarFalloRecuperacion("sin conexión");
-			expect(s().faseRecuperacion).toBe("error");
-		}
-		s().marcarFalloRecuperacion("la nube rechazó una operación local");
-
-		// Bloqueada: la pantalla vuelve a ofrecer las alternativas en vez de girar en el vacío.
-		expect(s().faseRecuperacion).toBe("bloqueada");
-		expect(s().errorRecuperacion).toBe("la nube rechazó una operación local");
-		// Y sigue sin poder entrarse: el bloqueo del login no depende de esto.
-		expect(s().reconciliacionPendiente).toBe(true);
-	});
-
 	it("reintentar borra el bloqueo y pide conexión inmediata", () => {
 		s().iniciarReconciliacion();
-		for (let i = 0; i < MAX_FALLOS_RECUPERACION; i++) s().marcarFalloRecuperacion("x");
+		// Lo que publica Rust al quinto ciclo fallido (`replicacion.rs`).
+		useEstadoSync.setState({ faseRecuperacion: "bloqueada", fallosRecuperacion: 5, errorRecuperacion: "x" });
 		const antes = s().pulso;
 
 		s().reintentarRecuperacion();

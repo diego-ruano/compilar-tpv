@@ -31,16 +31,6 @@ export type FaseRecuperacion =
 	| "bloqueada";
 
 /**
- * Fallos seguidos del ciclo de reconciliación tras los que se deja de reintentar solo.
- *
- * Reintentar sin límite es lo correcto mientras la causa sea la red. Deja de serlo cuando no lo
- * es —la nube rechaza siempre la misma operación local, el tenant está roto— porque entonces el
- * bucle es infinito, silencioso y con un mensaje que apunta a la conexión. Al agotarlos, la
- * pantalla vuelve a ofrecer las alternativas (otra copia, la nube) en vez de girar en el vacío.
- */
-export const MAX_FALLOS_RECUPERACION = 5;
-
-/**
  * Estado real de la conexión con la nube.
  *
  * - `pausada`: no se intenta nada, y se ve como tal. Dos motivos posibles: la palanca en `off`, o
@@ -99,7 +89,10 @@ type EstadoSyncStore = {
 	reconciliacionPendiente: boolean;
 	faseRecuperacion: FaseRecuperacion;
 	errorRecuperacion: string | null;
-	/** Fallos seguidos del ciclo de reconciliación (ver `MAX_FALLOS_RECUPERACION`). */
+	/**
+	 * Fallos seguidos del ciclo de reconciliación. Los cuenta Rust (`replicacion.rs`): al quinto, la
+	 * fase pasa a `bloqueada` y se deja de reintentar solo.
+	 */
 	fallosRecuperacion: number;
 	estado: EstadoSync;
 	/** Texto diagnóstico del último cambio (motivo del rechazo, error de red…). Nunca se compara. */
@@ -125,9 +118,6 @@ type EstadoSyncStore = {
 	marcarDatosPerdidos: (perdidos: boolean) => void;
 	configurarRecuperacion: (state: RecoveryState) => void;
 	iniciarReconciliacion: () => void;
-	marcarFaseRecuperacion: (fase: FaseRecuperacion, error?: string | null) => void;
-	/** Un ciclo de reconciliación ha fallado: cuenta el intento y bloquea al agotarlos. */
-	marcarFalloRecuperacion: (error: string) => void;
 	/** Vuelve a intentar la reconciliación tras un bloqueo (lo pide el usuario). */
 	reintentarRecuperacion: () => void;
 	finalizarRecuperacion: () => void;
@@ -225,19 +215,6 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 			fallosRecuperacion: 0,
 			pulso: s.pulso + 1,
 		})),
-
-	marcarFaseRecuperacion: (fase, error = null) =>
-		set({ faseRecuperacion: fase, errorRecuperacion: error }),
-
-	marcarFalloRecuperacion: (error) =>
-		set((s) => {
-			const fallos = s.fallosRecuperacion + 1;
-			return {
-				fallosRecuperacion: fallos,
-				errorRecuperacion: error,
-				faseRecuperacion: fallos >= MAX_FALLOS_RECUPERACION ? "bloqueada" : "error",
-			};
-		}),
 
 	reintentarRecuperacion: () =>
 		set((s) => ({

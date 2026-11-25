@@ -143,5 +143,7 @@ APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al termina
 - Las reglas de `recovery.rs` (retención, copias importadas, exportar): tests de Rust sobre ficheros, sin
   React ni IPC.
 - La guardia del outbox al restaurar: la interfaz no puede producir ese caso.
-- La reconciliación bloqueada tras cinco ciclos: serían unos quince minutos; está en
-  `test/estadoSync.test.ts` y `test/recoverySync.test.ts`.
+- La reconciliación bloqueada tras cinco ciclos: serían unos quince minutos. La cuenta la lleva
+  `src-tauri/src/replicacion.rs` (`fallos >= 5`), sin test propio; lo que enseña la pantalla bloqueada
+  está en `test/react/recuperarDatos.test.tsx`, y que reintentar quita el bloqueo, en
+  `test/estadoSync.test.ts`.
