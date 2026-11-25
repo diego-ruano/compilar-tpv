@@ -216,19 +216,27 @@ describe("lo que se prepara para la carrera", () => {
 
 	it("la carrera es de verdad: leyendo y escribiendo en dos viajes, sí se pierden cambios", async () => {
 		// Leer la caducidad en un viaje y escribir la nueva en otro: las N llamadas a la vez se cruzan
-		// entre los dos, que es lo que las operaciones de arriba no pueden hacer.
+		// entre los dos, que es lo que las operaciones de arriba no pueden hacer. Que se crucen no se deja
+		// a la planificación (en serie, leer₁ → escribir₁ → leer₂…, no se perdería nada): ninguna escribe
+		// hasta que han leído todas, así que todas leen la misma caducidad y escriben la misma.
 		const central = await centralDePrueba();
 		await licenciaYClave(central, "equipo-del-bar");
+		let leidas = 0;
+		let soltar!: () => void;
+		const hanLeidoTodas = new Promise<void>((resolver) => (soltar = resolver));
 		await Promise.all(
 			Array.from({ length: N }, async () => {
 				const leida = await central.db.execute({ sql: "SELECT expires_at_ms FROM licenses WHERE license_id = 'viva';" });
+				if (++leidas === N) soltar();
+				await hanLeidoTodas;
 				await central.db.execute({
 					sql: "UPDATE licenses SET expires_at_ms = ?1 WHERE license_id = 'viva';",
 					args: [addMonths(Number(leida.rows[0].expires_at_ms), 1)],
 				});
 			}),
 		);
+		// De los N meses se queda uno: los demás se han perdido.
 		const final = (await getLicenseById(central.db, "viva"))!.expires_at_ms!;
-		expect(final).toBeLessThan(addMonths(CADUCIDAD, N));
+		expect(final).toBe(addMonths(CADUCIDAD, 1));
 	});
 });
