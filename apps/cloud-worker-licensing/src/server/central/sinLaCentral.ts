@@ -37,7 +37,7 @@ import { respuestaNoDisponible } from "../../lib/noDisponible";
 import { reportarCentralNoDisponible } from "../../observability/axiom";
 import { capturarError } from "../../observability/errors";
 import { scrub } from "../../observability/scrub";
-import { acotar } from "../../observability/tope";
+import { acotar, MAX_FILTRADO } from "../../observability/tope";
 import { CentralNoDisponible, ErrorDeLaCentral } from "./cliente";
 
 /**
@@ -112,7 +112,9 @@ export function registrarSinLaCentral(
 			motivo,
 			metodo: donde.metodo,
 			ruta: donde.ruta,
-			error: String(causa.message ?? error).slice(0, 300),
+			// AUD-32: filtrado antes de recortarlo. Recortado antes, un correo o un JWT partidos por el
+			// corte ya no se reconocen y su principio queda a la vista.
+			error: acotar(String(causa.message ?? error), scrub, { bytes: 300, filtrado: MAX_FILTRADO }),
 			...(donde.tenantId ? { tenant_id: donde.tenantId } : {}),
 		}),
 	);

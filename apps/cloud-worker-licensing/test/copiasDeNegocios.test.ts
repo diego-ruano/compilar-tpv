@@ -212,6 +212,38 @@ describe("DO-03 · la copia diaria", () => {
 		expect(alarma - Date.now()).toBeLessThanOrEqual(60 * 60 * 1000);
 	});
 
+	it("AUD-32: el error de la copia fallida se filtra antes de recortarlo: un correo o un JWT que cruzan el corte no asoman", async () => {
+		const enviados: any[] = [];
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			enviados.push(...JSON.parse(String(init.body)));
+			return new Response("{}", { status: 200 });
+		});
+		// 290 caracteres que el filtro no toca; detrás, lo que cruza el corte de 300 y filtrado cabe.
+		const relleno = "la plataforma dice algo largo ".repeat(10).slice(0, 290);
+		const correo = "pepe.garcia@ejemplo.test";
+		const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+		try {
+			for (const [t, dato] of [["copia-falla-correo", correo], ["copia-falla-jwt", jwt]]) {
+				await negocioConDatos(t);
+				await enElHub(t, (hub: any) => {
+					hub.env = {
+						...hub.env,
+						AXIOM_TOKEN: "token-de-pruebas",
+						AXIOM_DATASET_SYNC: "sync-de-pruebas",
+						COPIAS_NEGOCIOS: { put: async () => { throw new Error(`${relleno} ${dato}`); } },
+					};
+				});
+				expect(await runDurableObjectAlarm(stub(t))).toBe(true);
+			}
+			const fallidas = () => enviados.filter((e) => e.event === "copia_diaria_fallida");
+			await vi.waitFor(() => expect(fallidas()).toHaveLength(2));
+			expect(fallidas().map((e) => e.error)).toEqual([`${relleno} [email]`, `${relleno} [jwt]`]);
+			expect(JSON.stringify(enviados)).not.toMatch(/pepe|eyJ/);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("un objeto sin base no copia ni se vuelve a armar, y retirarlo quita la alarma", async () => {
 		const t = "copia-retirado";
 		await negocioConDatos(t);
