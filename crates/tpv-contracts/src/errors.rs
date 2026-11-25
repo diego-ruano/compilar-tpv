@@ -56,8 +56,6 @@ pub enum ErrorCode {
     LicenseExpired,
     /// No existe licencia activa para este tenant.
     LicenseNotFound,
-    /// PIN incorrecto en login/fichaje.
-    InvalidPin,
     /// El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
     /// permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
     TenantDbNotProvisioned,
@@ -130,7 +128,6 @@ impl ErrorCode {
             ErrorCode::DeviceRevoked => "Este dispositivo ha sido revocado",
             ErrorCode::LicenseExpired => "La licencia ha caducado",
             ErrorCode::LicenseNotFound => "No hay una licencia activa",
-            ErrorCode::InvalidPin => "PIN incorrecto",
             ErrorCode::TenantDbNotProvisioned => "No existe una base de datos en la nube",
             ErrorCode::BootstrapTooLarge => {
                 // DO-02: sólo llega si ni lo imprescindible para trabajar cabe en una descarga.
@@ -197,7 +194,6 @@ impl ErrorCode {
             // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
-            "invalid_pin" => ErrorCode::InvalidPin,
             "validation_error" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
             "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,

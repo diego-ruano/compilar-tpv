@@ -14,7 +14,6 @@
     { "wire": "device_replaced", "code": "device_revoked", "porque": "la licencia se activó en otro equipo (§6.4): este Main deja de serlo, así que para él equivale a estar revocado" },
     { "wire": "license_not_found", "code": "license_not_found", "porque": "el servidor no reconoce la licencia" },
     { "wire": "no_active_license_for_tenant", "code": "license_not_found", "porque": "el tenant no tiene licencia activa" },
-    { "wire": "invalid_pin", "code": "invalid_pin", "porque": "PIN incorrecto en login/fichaje" },
     { "wire": "validation_error", "code": "validation", "porque": "fallo de validación genérico del worker" },
     { "wire": "not_found", "code": "not_found", "porque": "entidad inexistente" },
     { "wire": "tenant_db_not_provisioned", "code": "tenant_db_not_provisioned", "porque": "el servidor confirma que el tenant no tiene base de datos y permite ofrecer una inicialización vacía" },
@@ -32,7 +31,7 @@
     { "wire": "  not_approved  ", "code": "not_approved", "porque": "espacios alrededor: hay que recortarlos antes de buscar" },
     { "wire": "MAIN_OFFLINE", "code": "main_offline", "porque": "la búsqueda no puede depender de mayúsculas" },
     { "wire": "Device_Revoked", "code": "device_revoked", "porque": "mayúsculas mezcladas" },
-    { "wire": "\tinvalid_pin\n", "code": "invalid_pin", "porque": "tabuladores y saltos de línea también son espacio en blanco" }
+    { "wire": "\tusuario_inactivo\n", "code": "usuario_inactivo", "porque": "tabuladores y saltos de línea también son espacio en blanco" }
   ],
 
   "desconocidos": [
@@ -61,7 +60,6 @@
     "device_revoked",
     "license_expired",
     "license_not_found",
-    "invalid_pin",
     "tenant_db_not_provisioned",
     "bootstrap_too_large",
     "tenant_migration_altered",

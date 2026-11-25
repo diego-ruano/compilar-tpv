@@ -1181,8 +1181,6 @@ export type ErrorCode =
 "license_expired" |
 /**  No existe licencia activa para este tenant. */
 "license_not_found" |
-/**  PIN incorrecto en login/fichaje. */
-"invalid_pin" |
 /**
  *  El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
  *  permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
