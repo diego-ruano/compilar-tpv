@@ -710,7 +710,7 @@ procedimiento, en [restaurar-la-central.md](../guias/restaurar-la-central.md).
 | Sus copias | `GET /v1/admin/central/copias` | `pnpm central:copias` |
 | Una copia ahora | `POST /v1/admin/central/copiar-ahora` | `pnpm central:copiar` |
 | Darle esquema, o restaurarla desde una copia (sólo sin aprovisionar) | `POST /v1/admin/central/aprovisionar` | `pnpm central:aprovisionar -- [--copia <clave>] --si` |
-| Volver a un instante, o a un marcador | `POST /v1/admin/central/volver` | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m>) --si` |
+| Volver a un instante o a un marcador, o aplicar una vuelta preparada | `POST /v1/admin/central/volver` | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m> \| --reiniciar <deshacer>) --si` |
 
 ### Rotar el token de administración
 

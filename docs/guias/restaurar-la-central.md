@@ -26,10 +26,10 @@ pnpm central:estado
 ```
 
 Dice si está aprovisionada, si tiene algo a medias (una restauración que no terminó, una vuelta
-preparada y sin aplicar), su avería si la tiene (una migración que ha cambiado o que no entra), sus
-migraciones, lo que ocupa y las filas de cada tabla. Sólo lee, y contesta también con la central sin
-aprovisionar. Si la central no atiende, el porqué está aquí; y en Axiom, cada petición que no ha
-atendido deja un `central_no_disponible` con su `motivo`.
+preparándose, o preparada y sin aplicar), su avería si la tiene (una migración que ha cambiado o que
+no entra), sus migraciones, lo que ocupa y las filas de cada tabla. Sólo lee, y contesta también con
+la central sin aprovisionar. Si la central no atiende, el porqué está aquí; y en Axiom, cada petición
+que no ha atendido deja un `central_no_disponible` con su `motivo`.
 
 ## Las copias
 
@@ -228,7 +228,10 @@ copia ([worker.md](../arquitectura/worker.md#la-copia-diaria)):
 - Al final, la línea del fin, con las filas que trae: `-- Fin de la copia: <N> filas en <T> tablas`.
   Sin ella, o con otro número, está cortada.
 
-Se comprime, se sube a `base-central/` y se aprovisiona desde ahí, en un objeto sin aprovisionar:
+Se comprime, se sube a `base-central/` y se aprovisiona desde ahí, en un objeto sin aprovisionar. El
+`<nombre>` es de hasta 100 caracteres de `A-Z`, `a-z`, `0-9`, punto, guion y guion bajo, sin dos puntos
+seguidos ni un punto al final (`traspaso-turso-2026-11-25`, por ejemplo): con otro, `central:copias`
+la enseña, pero no se restaura.
 
 ```bash
 gzip -k base.sql
