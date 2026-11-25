@@ -1,7 +1,7 @@
 # Métricas a vigilar con restaurantes en producción
 
-**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo). Donde dice Turso (§1 y
-§4) es la base central, que desde [0009](../decisiones/0009-la-base-central-en-su-durable-object.md)
+**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo). Donde dice Turso es
+la base central, que desde [0009](../decisiones/0009-la-base-central-en-su-durable-object.md)
 es el SQLite de su objeto `BaseCentral`: sus filas leídas y escritas y lo que ocupa salen ya en las
 métricas de Durable Objects, y su tiempo, en el tramo `central` del `Server-Timing`.
 

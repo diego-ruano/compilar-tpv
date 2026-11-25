@@ -315,8 +315,8 @@ persona guarda donde quiera y manda a soporte como pueda. Es texto legible a pro
 abrir y ver qué lleva antes de mandarlo.
 
 **Dónde está.** En Configuración → Actualizaciones y soporte (sólo el administrador entra en
-Configuración, con candado de ruta), junto a los dos avisos de Conectividad que dicen «contacta con
-soporte», y en el error de la pantalla de recuperación, antes del login. El comando,
+Configuración, con candado de ruta), junto a los dos avisos de la pantalla de Conectividad (fuera del
+menú) que dicen «contacta con soporte», y en el error de la pantalla de recuperación, antes del login. El comando,
 `diagnostico_generar_paquete`, **no pide sesión**: es para cuando algo va mal, también cuando no se
 puede entrar, y en una Handy sin red el gate no podría comprobar los permisos de nadie. No escribe
 nada, y lo que lee es lo mismo que enseñan sin gate `sync_health`, `jobs_status` e
