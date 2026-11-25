@@ -1,0 +1,167 @@
+{
+  "//": "Lo que contesta la aplicación entera a POST /v1/admin/central/volver en cada desenlace. Lo escribe apps/cloud-worker-licensing/test/centralVueltaEnElCli.test.ts (con -u) y lo sirve el worker de mentira de scripts/tpv-license.test.mjs. No se edita a mano.",
+  "vuelta-hecha": {
+    "status": 200,
+    "cuerpo": {
+      "ok": true,
+      "destino": "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
+      "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+      "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "estado": {
+        "aprovisionada": true,
+        "migraciones": [
+          {
+            "nombre": "0001_inicial.sql",
+            "hash": "‹el hash de la migración›",
+            "aplicadaMs": 1764036000000
+          }
+        ],
+        "averia": null,
+        "enCurso": {
+          "restauracion": null,
+          "vuelta": null
+        },
+        "filas": {
+          "Ws_Tickets": 0,
+          "admin_audit": 0,
+          "app_releases": 0,
+          "canario_cifrado": 0,
+          "device_challenges": 0,
+          "devices": 0,
+          "email_codes": 0,
+          "email_sends": 0,
+          "interruptores": 0,
+          "license_device_otp": 0,
+          "license_device_swaps": 0,
+          "license_notices": 0,
+          "license_otp_eventos": 0,
+          "license_payments": 0,
+          "licenses": 0,
+          "pair_claim_fallos": 0,
+          "pair_requests": 0,
+          "reserva_web_claves": 0,
+          "reserva_web_dominios": 0,
+          "tenant_recovery_emails": 0,
+          "tenants": 0,
+          "webhook_events": 0
+        },
+        "bytes": 32768
+      }
+    }
+  },
+  "vuelta-que-no-atiende": {
+    "status": 503,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_restauracion_a_medias",
+      "message": "La central ha vuelto, pero no atiende. Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si). Se sale también deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.",
+      "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
+      "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+      "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "estado": {
+        "aprovisionada": false,
+        "migraciones": [],
+        "averia": {
+          "ok": false,
+          "error": "central_restauracion_a_medias",
+          "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia."
+        },
+        "enCurso": {
+          "restauracion": {
+            "clave": "base-central/2026-11-24.sql.gz",
+            "desdeMs": 1764036000000
+          },
+          "vuelta": null
+        },
+        "filas": {},
+        "bytes": 32768
+      },
+      "code": "external"
+    }
+  },
+  "vuelta-sin-aplicar": {
+    "status": 503,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_vuelta_sin_aplicar",
+      "message": "La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Repite la misma orden. El marcador para deshacerla queda también en R2 (pnpm central:copias, columna marcador); si aun así se pierde, se deshace volviendo con --instante a justo antes de la vuelta.",
+      "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+      "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz",
+      "code": "internal"
+    }
+  },
+  "estado-con-la-vuelta-sin-aplicar": {
+    "status": 200,
+    "cuerpo": {
+      "ok": true,
+      "aprovisionada": true,
+      "migraciones": [],
+      "averia": {
+        "ok": false,
+        "error": "central_vuelta_en_curso",
+        "detalle": "La vuelta a 2026-11-25T01:00:00.000Z está preparada desde el 2026-11-25T01:00:00.000Z: se aplica al reiniciar el objeto."
+      },
+      "enCurso": {
+        "restauracion": null,
+        "vuelta": {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "destino": "2026-11-25T01:00:00.000Z",
+          "desdeMs": 1764036000000,
+          "fase": "preparada",
+          "anterior": null,
+          "preparada": {
+            "marcador": "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
+            "deshacer": "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+            "copiaDeAntes": "base-central/antes-de-volver-2026-11-25T02-00-00.000Z.sql.gz"
+          }
+        }
+      },
+      "filas": {},
+      "bytes": 32768
+    }
+  },
+  "vuelta-sin-respuesta": {
+    "status": 500,
+    "cuerpo": {
+      "ok": false,
+      "code": "internal",
+      "error": "internal_error"
+    }
+  },
+  "vuelta-sin-copia-de-antes": {
+    "status": 500,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_copia_fallida",
+      "message": "La copia no ha llegado a R2, y no se ha hecho nada. Al volver a un instante, sin la copia (o, con la central sin atender, sin su marcador) no se pide la vuelta.",
+      "detalle": "R2 no contesta",
+      "code": "internal"
+    }
+  },
+  "token-rechazado": {
+    "status": 401,
+    "cuerpo": {
+      "ok": false,
+      "error": "unauthorized",
+      "code": "external"
+    }
+  },
+  "sin-token-en-el-worker": {
+    "status": 503,
+    "cuerpo": {
+      "ok": false,
+      "error": "admin_disabled",
+      "code": "internal"
+    }
+  },
+  "copiar-a-medias": {
+    "status": 503,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_restauracion_a_medias",
+      "message": "Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si).",
+      "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
+      "code": "external"
+    }
+  }
+}

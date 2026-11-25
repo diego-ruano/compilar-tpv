@@ -114,8 +114,9 @@ function parseArgs(argv) {
 	return out;
 }
 
-function fail(msg) {
-	console.error(`\n  ✖ ${msg}\n`);
+/** Termina con `msg` y, detrás, `despues`: lo que hay que hacer para salir de ahí, si lo hay. */
+function fail(msg, despues = "") {
+	console.error(`\n  ✖ ${msg}\n${despues ? `${despues}\n` : ""}`);
 	process.exit(1);
 }
 
@@ -123,41 +124,52 @@ function fail(msg) {
  * Una llamada a la administración del worker. Si no sale, se acaba aquí con lo que ha pasado, y con
  * su motivo si la respuesta lo trae aparte (`detalle`).
  * `comprobar` es cómo mirar si un cambio llegó a entrar cuando la nube no ha podido contestar.
- * `deshacer`, la orden que deshace una vuelta a un instante a partir de su marcador: una vuelta que no
- * ha salido entera dice igualmente con qué se deshace.
+ * `recuperar(data, status)`, cómo salir de lo que ha podido quedar a medias (una vuelta a un
+ * instante): con la respuesta, o con `data` a `null` si no ha llegado ninguna que leer (la red, un
+ * cuerpo que no es JSON), devuelve lo que hay que enseñar. Sale en TODAS las ramas de error, antes de
+ * terminar: es lo que la respuesta devuelve expresamente para salir de ahí.
  */
-async function api(method, path, body, { comprobar = "pnpm license:list", deshacer } = {}) {
-	const r = await fetch(`${API_BASE}${path}`, {
-		method,
-		headers: {
-			authorization: `Bearer ${TOKEN}`,
-			...(body ? { "content-type": "application/json" } : {}),
-		},
-		...(body ? { body: JSON.stringify(body) } : {}),
-	});
+async function api(method, path, body, { comprobar = "pnpm license:list", recuperar = () => "" } = {}) {
+	let r;
+	let text;
+	try {
+		r = await fetch(`${API_BASE}${path}`, {
+			method,
+			headers: {
+				authorization: `Bearer ${TOKEN}`,
+				...(body ? { "content-type": "application/json" } : {}),
+			},
+			...(body ? { body: JSON.stringify(body) } : {}),
+		});
+		text = await r.text();
+	} catch (e) {
+		fail(`No se ha podido hablar con el worker (${API_BASE}): ${String(e?.cause?.message || e?.message || e)}`, recuperar(null, null));
+	}
 
-	const text = await r.text();
 	let data;
 	try {
 		data = JSON.parse(text);
 	} catch {
-		fail(`Respuesta no-JSON del worker (${r.status}): ${text.slice(0, 200)}`);
+		fail(`Respuesta no-JSON del worker (${r.status}): ${text.slice(0, 200)}`, recuperar(null, r.status));
 	}
 
 	if (!r.ok || data.ok === false) {
-		if (r.status === 401) fail("Token rechazado. ¿ADMIN_API_TOKEN es el correcto?");
-		if (data.error === "admin_disabled") fail("El worker no tiene ADMIN_API_TOKEN configurado (wrangler secret put).");
+		const paraSalir = recuperar(data, r.status);
+		if (r.status === 401) fail("Token rechazado. ¿ADMIN_API_TOKEN es el correcto?", paraSalir);
+		if (data.error === "admin_disabled") fail("El worker no tiene ADMIN_API_TOKEN configurado (wrangler secret put).", paraSalir);
+		const motivo = data.detalle ? `\n    Motivo: ${data.detalle}` : "";
 		// La nube no ha podido atender (la base central saturada, sin aprovisionar…): la respuesta no
-		// dice si el cambio llegó a entrar, y repetir un extend o un shorten lo aplicaría dos veces.
-		if (data.code === "external" && r.status === 503) {
+		// dice si el cambio llegó a entrar, y repetir un extend o un shorten lo aplicaría dos veces. La
+		// que trae con qué deshacer lo que ha pasado sí lo dice (una vuelta a un instante que ha vuelto
+		// sin atender): va por la de abajo, con su código y su mensaje.
+		if (data.code === "external" && r.status === 503 && data.deshacer === undefined) {
 			fail(
 				`La nube no ha podido atender ahora (${data.error}${data.message ? ` — ${data.message}` : ""}). ` +
-					`Si era un cambio, no se sabe si ha entrado: compruébalo con ${comprobar} antes de repetirlo.`,
+					`Si era un cambio, no se sabe si ha entrado: compruébalo con ${comprobar} antes de repetirlo.${motivo}`,
+				paraSalir,
 			);
 		}
-		const motivo = data.detalle ? `\n    Motivo: ${data.detalle}` : "";
-		const paraDeshacer = data.deshacer && deshacer ? `\n    Para deshacerla: ${deshacer(data.deshacer)}` : "";
-		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}${motivo}${paraDeshacer}`);
+		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}${motivo}`, paraSalir);
 	}
 
 	return data;
@@ -493,7 +505,11 @@ async function negocioInstante(args) {
 		cuerpo.instanteMs = ms;
 	}
 	const r = await api("POST", "/v1/admin/negocios/instante", cuerpo, {
-		deshacer: (m) => `pnpm negocio:instante -- --tenant ${tenantId} --marcador ${m} --modo ${modo} --motivo "…"`,
+		// Una vuelta que no ha salido entera dice igualmente con qué se deshace.
+		recuperar: (data) =>
+			data?.deshacer
+				? `    Para deshacerla: pnpm negocio:instante -- --tenant ${tenantId} --marcador ${data.deshacer} --modo ${modo} --motivo "…"`
+				: "",
 	});
 	console.log(`\n  ✔ ${tenantId} ha vuelto${r.instanteMs ? ` a ${new Date(r.instanteMs).toISOString()}` : ` al marcador ${r.destino}`}.`);
 	console.log(`    Marcador para deshacerlo: ${r.deshacer}`);
@@ -558,7 +574,7 @@ async function centralEstado() {
 		if (fase === "preparada") {
 			console.log(
 				`  VUELTA         preparada a ${destino} (${cuando(desdeMs)}) y sin aplicar: no atiende hasta reiniciarse.\n` +
-					"                 Se reinicia repitiendo la misma orden de pnpm central:volver (con su --instante o su --marcador).",
+					`                 Se reinicia repitiendo la misma orden: ${centralVolverA(destino)}`,
 			);
 			if (preparada) console.log(`                 Para deshacerla, una vez aplicada: ${centralAlMarcador(preparada.deshacer)}`);
 		} else {
@@ -630,10 +646,42 @@ async function centralAprovisionar(args) {
 /** La orden que devuelve la central a un marcador: la que deshace una vuelta. */
 const centralAlMarcador = (marcador) => `pnpm central:volver -- --marcador ${marcador} --si`;
 
+/** La orden que pide la vuelta a `destino` (un instante en ISO, o un marcador): la misma de entonces. */
+const centralVolverA = (destino) =>
+	/^\d{4}-\d{2}-\d{2}T/.test(destino) ? `pnpm central:volver -- --instante ${destino} --si` : centralAlMarcador(destino);
+
 /** Lo que se hace si se pierde el marcador para deshacer una vuelta pedida en `antesDeVolver` (ISO). */
 const siSePierdeElMarcador = (antesDeVolver) =>
 	"    Si se pierde este marcador, está también en pnpm central:copias (columna marcador); y si tampoco,\n" +
-	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si\n`;
+	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si`;
+
+/**
+ * Lo que se enseña de una vuelta pedida en `antesDeVolver` (ISO) que no ha salido entera, en cualquier
+ * rama de error de `api`:
+ *
+ * - Si la respuesta trae con qué se deshace, la vuelta está preparada, y puede que aplicada: la orden
+ *   que la deshace, la copia de antes y qué hacer si se pierde el marcador.
+ * - Si la ruta dice que no la ha pedido (un 4xx, o uno de sus códigos `central_…` sin `deshacer`), nada.
+ * - Si no hay respuesta de la ruta (la red, un cuerpo que no es JSON, un fallo del worker que no es
+ *   suyo), no se sabe si se ha pedido: cómo mirarlo, y cómo deshacerla si se pidió.
+ */
+const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
+	if (data?.deshacer) {
+		return [
+			`    Para deshacerla: ${centralAlMarcador(data.deshacer)}`,
+			`    Copia de cómo estaba antes: ${data.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`,
+			siSePierdeElMarcador(antesDeVolver),
+		].join("\n");
+	}
+	const error = String(data?.error ?? "");
+	if (data && (status < 500 || error.startsWith("central_") || error === "admin_disabled")) return "";
+	return [
+		"    No se sabe si la vuelta ha llegado a pedirse: mira cómo está con pnpm central:estado.",
+		"    Si se ha pedido, el marcador para deshacerla está en pnpm central:copias (columna marcador, la",
+		"    copia o el .marcador antes-de-volver de esta hora); y si no está, se deshace volviendo a justo",
+		`    antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si`,
+	].join("\n");
+};
 
 async function centralVolver(args) {
 	let cuerpo;
@@ -657,11 +705,11 @@ async function centralVolver(args) {
 	);
 	// Justo antes de la vuelta: si se pierde el marcador para deshacerla, se vuelve aquí.
 	const antesDeVolver = new Date().toISOString();
-	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, deshacer: centralAlMarcador });
+	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, recuperar: paraSalirDeLaVuelta(antesDeVolver) });
 	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
-	console.log(siSePierdeElMarcador(antesDeVolver));
+	console.log(`${siSePierdeElMarcador(antesDeVolver)}\n`);
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
