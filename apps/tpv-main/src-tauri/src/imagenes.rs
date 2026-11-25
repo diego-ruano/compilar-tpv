@@ -18,8 +18,8 @@ pub fn leer_para_subida(ruta: &Path) -> std::io::Result<Option<Vec<u8>>> {
 
 /// AUD-28 — una imagen tal como se nombra en lo que sale del equipo (avisos y errores, que llegan
 /// a Axiom y a Sentry). La carpeta y el nombre, si el nombre es el UUID que le pone la app; si no
-/// (una imagen heredada, guardada con el nombre que alguien le dio), sólo la carpeta y la extensión:
-/// ese nombre puede ser el de una persona. Nunca la ruta de AppData.
+/// (una ruta llegada de fuera con otro nombre), sólo la carpeta y la extensión: ese nombre puede ser
+/// el de una persona. Nunca la ruta de AppData.
 pub fn para_registro(rel: &str) -> String {
     if ruta_segura(rel) {
         return rel.to_string();
@@ -35,23 +35,11 @@ pub fn para_registro(rel: &str) -> String {
 /// OBS-06 · Una imagen guardada por la app: `images/{carpeta}/{uuid}.{ext}`. Es lo único que se
 /// sube, se baja, se borra o se lee del disco. Su ruta viaja en la URL (`/v1/images/…`, también la
 /// que carga la Handy), y Cloudflare guarda la URL de cada petición:
-/// el nombre que alguien le diera al fichero puede ser el de una persona. Las heredadas las renombra
-/// antes `images_backfill` (`nombre_opaco`). El worker pide lo mismo (`RUTA_DE_IMAGEN`, en
+/// el nombre que alguien le diera al fichero puede ser el de una persona. El worker pide lo mismo (`RUTA_DE_IMAGEN`, en
 /// `domains/images/rutaDeImagen.ts`).
 pub fn ruta_segura(rel: &str) -> bool {
     con_forma_de_imagen(rel)
         && rel.rsplit('/').next().and_then(|nombre| nombre.rsplit_once('.')).is_some_and(|(base, _)| es_uuid(base))
-}
-
-/// OBS-06 · El nombre opaco que le toca a una imagen heredada: la misma carpeta, un UUID nuevo y su
-/// extensión en minúsculas. `None` si ya lo tiene, o si la ruta no tiene forma de imagen.
-pub fn nombre_opaco(rel: &str) -> Option<String> {
-    if ruta_segura(rel) || !con_forma_de_imagen(rel) {
-        return None;
-    }
-    let (carpeta, nombre) = rel.rsplit_once('/')?;
-    let (_, ext) = nombre.rsplit_once('.')?;
-    Some(format!("{carpeta}/{}.{}", uuid::Uuid::new_v4(), ext.to_ascii_lowercase()))
 }
 
 /// El nombre que le pone la app a una imagen (`Uuid::new_v4`, con guiones): 8-4-4-4-12 cifras
@@ -76,7 +64,7 @@ fn con_forma_de_imagen(rel: &str) -> bool {
     if matches!(dispositivo.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (dispositivo.len() == 4 && (dispositivo.starts_with("COM") || dispositivo.starts_with("LPT"))
             && dispositivo.as_bytes()[3].is_ascii_digit()) { return false; }
-    matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png" | "webp")
+    matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png")
 }
 
 pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, String> {
@@ -109,10 +97,17 @@ pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, Strin
 /// ningún límite: con unos bytes pedía gigas, dentro de todas las cotas de arriba. Los de PNG y
 /// JPEG reservan según los bytes que hay o según las dimensiones ya comprobadas, y el perfil de
 /// color de un PNG, que va comprimido, no pasa de `max_alloc`.
+///
+/// Quien elige un WebP en la pantalla lo puede guardar: lo convierte antes la WebView, con su propio
+/// decodificador, a JPEG o PNG (`shared/lib/guardarImagen.ts`), así que lo guardado es siempre JPEG
+/// o PNG. El rechazo de otro formato nombra los tres porque es lo que la persona puede elegir; el
+/// de un WebP, no: sólo llega uno sin convertir (por réplica, o de R2 a `images_ensure_local`), y
+/// lo que se registra no puede decir que WebP se admite justo al rechazarlo.
 pub fn decodificar(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err("La imagen debe pesar como máximo 5 MB".into()); }
     let formato = image::guess_format(bytes).map_err(|_| "Imagen no válida")?;
-    if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten JPEG y PNG".into()); }
+    if formato == ImageFormat::WebP { return Err("Esta imagen WebP no se ha convertido: vuelve a elegirla.".into()); }
+    if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten imágenes JPEG, PNG y WebP.".into()); }
     let mut lector = ImageReader::with_format(Cursor::new(bytes), formato);
     let mut limites = Limits::default();
     limites.max_image_width = Some(MAX_LADO_ENTRADA);
@@ -166,8 +161,8 @@ mod tests {
     fn rechaza_rutas_absolutas_traversal_y_nombres_especiales() {
         for rel in ["images/../data.db", "images/logo/../a.jpg", "images/logo/C:/a.jpg", "images/logo/a.jpg:datos", "images/logo/CON.jpg", "images/logo/a.svg", "images/logo/a.jpg/otro"] { assert!(!ruta_segura(rel), "{rel}"); }
         let uuid = "0190f3a1-7b2c-4d4e-8f00-123456789abc";
-        for ext in ["jpg", "jpeg", "png", "webp", "JPG"] { assert!(ruta_segura(&format!("images/logo/{uuid}.{ext}"))); }
-        for rel in [format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg"), format!("images/LOGO/{uuid}.jpg"), format!("IMAGES/logo/{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
+        for ext in ["jpg", "jpeg", "png", "JPG"] { assert!(ruta_segura(&format!("images/logo/{uuid}.{ext}"))); }
+        for rel in [format!("images/logo/{uuid}.webp"), format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg"), format!("images/LOGO/{uuid}.jpg"), format!("IMAGES/logo/{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
     }
 
     // OBS-06: el nombre de una imagen viaja en la URL; sólo se admite el UUID que le pone la app. Los
@@ -192,19 +187,6 @@ mod tests {
     }
 
     #[test]
-    fn una_heredada_recibe_un_uuid_con_su_extension_y_la_carpeta_de_antes() {
-        let opaco = nombre_opaco("images/proveedores/Juan-Perez.JPG").unwrap();
-        assert!(ruta_segura(&opaco), "{opaco}");
-        assert!(opaco.starts_with("images/proveedores/") && opaco.ends_with(".jpg"), "{opaco}");
-        assert!(!opaco.contains("Juan"));
-        assert_ne!(nombre_opaco("images/proveedores/Juan-Perez.JPG").unwrap(), opaco);
-        // Una que ya es opaca, o una ruta que no es de imagen, no se toca.
-        assert_eq!(nombre_opaco(&opaco), None);
-        for rel in ["images/../data.db", "images/logo/CON.jpg", "images/logo/a.svg", "otra/cosa.jpg"] {
-            assert_eq!(nombre_opaco(rel), None, "{rel}");
-        }
-    }
-    #[test]
     fn conserva_formato_y_transparencia_sin_bytes_anadidos() {
         for formato in [ImageFormat::Jpeg, ImageFormat::Png] {
             let mut original = Cursor::new(Vec::new());
@@ -228,9 +210,15 @@ mod tests {
     }
     #[test]
     fn no_admite_webp_aunque_sea_valido() {
-        // AUD-30: un WebP sin pérdida de 1×1, correcto. Lo que no se admite es el formato.
+        // AUD-30: un WebP sin pérdida de 1×1, correcto. Lo que no se admite es el formato: el que
+        // se elige en la pantalla llega aquí ya convertido por la WebView (`guardarImagen.ts`).
         let webp = b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0";
         assert_eq!(image::guess_format(webp).unwrap(), ImageFormat::WebP);
-        assert_eq!(procesar(webp).unwrap_err(), "Solo se admiten JPEG y PNG");
+        // El rechazo de un WebP no dice que se admite WebP: lo registran `images_ensure_local` y el
+        // logo del ticket y del PDF cuando llega uno por réplica.
+        assert_eq!(procesar(webp).unwrap_err(), "Esta imagen WebP no se ha convertido: vuelve a elegirla.");
+        let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff!\xf9\x04\x01\0\0\0\0,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
+        assert_eq!(image::guess_format(gif).unwrap(), ImageFormat::Gif);
+        assert_eq!(procesar(gif).unwrap_err(), "Solo se admiten imágenes JPEG, PNG y WebP.");
     }
 }

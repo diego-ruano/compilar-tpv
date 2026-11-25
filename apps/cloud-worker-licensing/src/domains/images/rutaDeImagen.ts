@@ -4,8 +4,7 @@
 // cerrada y por nombre el UUID que le pone la app al guardarla (`save_image`). Es lo que viaja en el
 // camino de `/v1/images/…`, que es lo que carga la Handy (INFRA-03), y Cloudflare
 // guarda la URL de cada petición: un nombre que alguien le diera al fichero puede ser el de una
-// persona. Las imágenes heredadas, guardadas antes con su nombre, las renombra la Main antes de
-// subir nada (`images_backfill`). Evita también el path traversal y las claves arbitrarias en el
+// persona. Evita también el path traversal y las claves arbitrarias en el
 // bucket.
 //
 // Admite exactamente lo mismo que la Main (`imagenes::ruta_segura`) y la Handy (`imageUrl.ts`): el
@@ -18,7 +17,7 @@
 import { recortar } from "../../lib/texto";
 
 export const RUTA_DE_IMAGEN =
-	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG]|[wW][eE][bB][pP])$/;
+	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG])$/;
 
 /**
  * AUD-31 · Lo que dice quien guarda una imagen que no tiene esa forma: el mismo texto en la Main

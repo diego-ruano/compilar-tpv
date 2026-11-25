@@ -816,18 +816,13 @@ Noble sólo sirve de referencia independiente en tests. Placement sigue desactiv
 ## Imágenes
 
 Se guardan en R2 con prefijo por tenant, y su ruta es siempre `images/{carpeta}/{uuid}.{ext}`: una
-carpeta de la lista, en minúsculas, y por nombre el UUID que le pone la app al guardarla
+carpeta de la lista, en minúsculas, por nombre el UUID que le pone la app al guardarla y por
+extensión `jpg`, `jpeg` o `png`, lo único que guarda (M-081)
 (`RUTA_DE_IMAGEN`, `domains/images/rutaDeImagen.ts`; en la Main, `imagenes::ruta_segura`, y en la
 Handy, `imageUrl.ts`, que admiten lo mismo). Esa ruta va en el camino de
 `/v1/images/…`, y Cloudflare guarda la URL de cada petición: un
-nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Las imágenes heredadas,
-guardadas antes con su nombre, las renombra la Main en cada arranque antes de subir nada
-(`images_backfill`, `renombrar_imagenes_heredadas`): copia el fichero con un UUID, encola la copia,
-cambia las filas que la usan (productos, categorías, proveedores y alérgenos) en una transacción por
-`WriteGuard`, que sube a la nube, y borra el fichero de antes. Encolada antes de cambiar las filas,
-un corte a medias no deja ninguna fila apuntando a una imagen que no va a subir. Una que no usa
-ninguna fila se queda como está, sin subir. Lo que no tiene esa forma no se sube, se baja ni se borra, y la Handy no lo
-pide (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
+nombre que alguien le diera al fichero puede ser el de una persona (OBS-06). Lo que no tiene esa
+forma no se sube, se baja ni se borra, y la Handy no lo pide (`imageUrl.ts`). El que la ruta de una imagen sólo admita eso lo comprueba
 `test/sinDatosPersonalesEnLaQuery.node.test.ts`.
 
 **Quién lee el bucket.** La app lo lee por el worker:
@@ -886,8 +881,9 @@ pinta cada equipo, también en la pantalla de entrada, así que:
 - La pantalla (`imageUrl.ts`) pinta sólo eso o un icono de alérgeno de la app (`/alergenos/…`); lo
   demás, o una imagen que la Main no tiene en disco, da `""` y el `<img>` pinta su marcador. La CSP de
   la webview no admite `data:` en `img-src`.
-- El PUT exige JPEG o PNG (no WebP, que la Main no decodifica, AUD-30) cuya cabecera declare como
-  mucho 8192 px de lado y 24 Mpx, las cotas de RI-07 (`imagenes::decodificar`); lo demás es
+- El PUT exige JPEG o PNG (`tipoImagen` no reconoce un WebP, que la Main no decodifica, AUD-30: uno
+  elegido en la pantalla lo convierte antes la webview) cuya cabecera declare como mucho 8192 px de
+  lado y 24 Mpx, las cotas de RI-07 (`imagenes::decodificar`); lo demás es
   `image_too_large` (413) o `bad_image_path` (400). La app sube siempre lo que ya ha reconstruido
   `imagenes::procesar` (1024 px de lado como mucho).
 - Lo que la Main baja de R2 (`images_ensure_local`) pasa por `imagenes::procesar` antes de escribirse

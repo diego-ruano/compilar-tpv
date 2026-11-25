@@ -100,8 +100,8 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
     const razonYaImpresa =
         p.show_business_name && razon.toLowerCase() === p.business_name.trim().toLowerCase();
 
-    // El logo puede ser una ruta relativa (canal R2) o un data URL heredado; se resuelve a una URL
-    // usable para el <img>. Ver `imageUrl.resolveImageUrl` (maneja ambos casos y el modo Handy).
+    // El logo es una ruta relativa (`images/logo/…`); se resuelve a una URL usable para el <img>.
+    // Ver `imageUrl.resolveImageUrl` (también en el modo Handy).
     const [logoSrc, setLogoSrc] = useState<string>("");
     useEffect(() => {
         let alive = true;

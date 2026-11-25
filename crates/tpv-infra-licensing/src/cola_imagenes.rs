@@ -9,7 +9,8 @@ static ACCESO: Mutex<()> = Mutex::new(());
 pub struct ImagenPendiente {
     pub rel_path: String,
     pub content_type: String,
-    #[serde(default)]
+    /// La pone `encolar` (y la renueva `reintentar`): una confirmación sólo quita la entrada si es
+    /// la misma revisión que se subió. Obligatoria (M-084).
     revision: String,
     #[serde(default)]
     pub apartada: Option<String>,
@@ -33,16 +34,8 @@ impl ColaImagenes {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(format!("No se pudo leer la cola de imágenes: {e}")),
         };
-        // Las entradas de versiones anteriores no tenían revisión. Se migra una sola vez en disco.
-        let mut migrada = false;
-        for imagen in &mut cola {
-            if imagen.revision.is_empty() {
-                imagen.revision = uuid::Uuid::new_v4().to_string();
-                migrada = true;
-            }
-        }
         let (resultado, cambiada) = cambiar(&mut cola);
-        if migrada || cambiada {
+        if cambiada {
             let bytes = serde_json::to_vec(&cola).map_err(|e| e.to_string())?;
             let temporal = self.carpeta.join("image_uploads.json.tmp");
             let mut fichero = fs::File::create(&temporal).map_err(|e| e.to_string())?;
@@ -178,13 +171,16 @@ mod tests {
         assert_eq!(fs::read(ruta).unwrap(), COLA);
     }
 
+    /// M-084: toda entrada lleva su revisión desde que la escribe `encolar`; una sin ella no es una
+    /// cola de esta versión, y se trata como una cola que no se puede leer: no se toca.
     #[test]
-    fn migra_el_formato_anterior_y_persiste_su_revision() {
-        let dir = Directorio::new();
-        fs::write(dir.0.join("image_uploads.json"), br#"[{"rel_path":"a","content_type":"image/jpeg"}]"#).unwrap();
-        let snapshot = dir.cola().pendientes().unwrap();
-        assert!(dir.cola().terminar(&snapshot[0], None).unwrap());
-        assert_eq!(dir.cola().estado().unwrap().pendientes, 0);
+    fn una_entrada_sin_revision_no_es_una_cola_valida() {
+        const COLA: &[u8] = br#"[{"rel_path":"a","content_type":"image/jpeg"}]"#;
+        let dir = Directorio::new(); let ruta = dir.0.join("image_uploads.json");
+        fs::write(&ruta, COLA).unwrap();
+        let error = dir.cola().pendientes().unwrap_err();
+        assert!(error.starts_with("La cola de imágenes no se puede leer"), "{error}");
+        assert_eq!(fs::read(ruta).unwrap(), COLA);
     }
 
     #[test]

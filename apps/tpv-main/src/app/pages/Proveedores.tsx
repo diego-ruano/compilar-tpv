@@ -1,6 +1,6 @@
 import { commands, toAppError } from "@tpv/client";
 import { usePermisos } from "../../shared/lib/usePermisos";
-import { guardarImagen } from "../../shared/lib/guardarImagen";
+import { ACEPTA_IMAGENES, guardarImagen } from "../../shared/lib/guardarImagen";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -764,7 +764,7 @@ export default function Proveedores() {
                   <input
                     ref={fotoInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                    accept={ACEPTA_IMAGENES}
                     className="hidden"
                     onChange={conAviso(async (e) => {
                       const file = e.target.files?.[0];

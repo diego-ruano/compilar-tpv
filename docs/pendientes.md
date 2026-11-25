@@ -22,6 +22,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
+| [WIDGET-LOGO](#widget-logo--el-widget-de-reservas-no-enseña-el-logo) | 🔵 | El widget de reservas no enseña el logo del negocio | Sin hacer: pide una ruta pública nueva |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -323,6 +324,16 @@ objeto, y se vería como 503 `hub_overloaded` y más reintentos. Opciones, sin d
 respetar el `Retry-After` del 503, o sacar el ticket del socket de la central (firmado, o en el
 `TenantHub`). Es un cambio en Rust, y como CENTRAL-AUTH no aprieta hasta los 1.000 negocios o así.
 
+### WIDGET-LOGO · El widget de reservas no enseña el logo
+
+`GET /v1/publico/reservas/:clave/negocio` no manda el logo (M-072), y el widget pinta sólo el nombre.
+`Logo_DataUrl` es la ruta de una imagen del bucket, y la única ruta pública que sirve imágenes,
+`GET /v1/images/:tenant/…`, lleva el id del negocio en el camino: ponerla en la respuesta publicaría
+ese id, que no se revoca, cuando lo público de la reserva web es la clave, que sí. Haría falta una
+ruta por la clave (`GET /v1/publico/reservas/:clave/logo`, detrás de `puertaPublica`) que lea
+`Logo_DataUrl` en el `TenantHub` y sirva la imagen de R2 con las cabeceras del GET de imágenes, el
+campo `logo` de vuelta en `Negocio` del SDK (un booleano o esa URL) y el `<img>` en `App.tsx`. La
+CSP del widget (`img-src 'self'`) ya lo admite: la ruta es del mismo origen.
 
 ---
 

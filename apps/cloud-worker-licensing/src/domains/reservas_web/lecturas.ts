@@ -56,12 +56,15 @@ export async function ajustesWeb(db: Base): Promise<AjustesWeb> {
 	};
 }
 
-/** Lo que el widget enseña del negocio: el rótulo, cómo llegar y quién es el responsable. */
+/**
+ * Lo que el widget enseña del negocio: el rótulo, cómo llegar y quién es el responsable. El logo no
+ * (M-072): es una imagen del bucket, que se sirve con el id del negocio en el camino
+ * (`/v1/images/:tenant/…`), y lo público de la reserva web es la clave.
+ */
 export type NegocioPublico = {
 	nombre: string;
 	direccion: string;
 	telefono: string;
-	logo: string | null;
 	razon_social: string;
 	cif: string;
 };
@@ -71,7 +74,7 @@ export async function negocioPublico(db: Base): Promise<NegocioPublico> {
 		filas(
 			await db.execute(`
 				SELECT Business_Name AS nombre, Direccion AS direccion, Telefono AS telefono,
-				       Logo_DataUrl AS logo, Razon_Social AS razon_social, CIF AS cif
+				       Razon_Social AS razon_social, CIF AS cif
 				FROM Business_Settings WHERE ID = 1;
 			`),
 		)[0] ?? {};
@@ -80,8 +83,6 @@ export async function negocioPublico(db: Base): Promise<NegocioPublico> {
 		nombre: s(r.nombre),
 		direccion: s(r.direccion),
 		telefono: s(r.telefono),
-		// Sólo un `data:` de imagen: es lo que deja pasar la CSP del widget (`img-src 'self' data:`).
-		logo: typeof r.logo === "string" && r.logo.startsWith("data:image/") ? r.logo : null,
 		razon_social: s(r.razon_social),
 		cif: s(r.cif),
 	};

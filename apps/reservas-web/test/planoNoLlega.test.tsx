@@ -23,7 +23,7 @@ afterEach(() => {
 
 const INFO = {
 	ok: true,
-	negocio: { nombre: "Bar Pepe", direccion: "", telefono: "", logo: null, razon_social: "", cif: "" },
+	negocio: { nombre: "Bar Pepe", direccion: "", telefono: "", razon_social: "", cif: "" },
 	hoy: "2026-11-10",
 	primer_dia: "2026-11-11",
 	ultimo_dia: "2026-12-10",

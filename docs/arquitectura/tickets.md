@@ -110,17 +110,22 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 - **El logo pasa al imprimir por las mismas cotas que al guardarlo** (AUD-30). `Logo_DataUrl` se
   replica y lo puede escribir cualquier dispositivo del negocio, así que no se da por bueno aunque
   la interfaz sólo guarde imágenes ya reconstruidas. `leer_imagen_local` sólo lee una imagen
-  guardada (`images/{carpeta}/{archivo}`, la forma que valida `imagenes::ruta_segura`) o un data URL
-  heredado, y no más de 5 MB; `rasterizar_logo` decodifica con `imagenes::decodificar`, la misma
+  guardada (`images/{carpeta}/{archivo}`, la forma que valida `imagenes::ruta_segura`; un data URL
+  no, pese al nombre de la columna), y no más de 5 MB; `rasterizar_logo` decodifica con `imagenes::decodificar`, la misma
   función de `save_image`. Lo que no se lee, no cumple las cotas o hace fallar al decodificador
   (también con un pánico) deja el ticket sin logo, con un aviso en el registro si es la imagen la
   que se rechaza.
-- **Sólo se decodifican JPEG y PNG**, al guardar una imagen y al imprimir el logo: 8192 px de lado,
+- **Rust sólo decodifica JPEG y PNG**, al guardar una imagen y al imprimir el logo: 8192 px de lado,
   24 Mpx y 128 MiB de imagen decodificada, comprobados con la cabecera antes de reservar los
-  píxeles. WebP no se admite ni se compila (`image` va sin esa característica) y la interfaz no lo
-  ofrece: su decodificador reserva lo que declara el fichero antes de comprobarlo, y con unos bytes
-  pedía gigas. Un logo que ya estuviera guardado en WebP se sigue viendo en pantalla, que lo pinta
-  la webview, pero no sale en el papel.
+  píxeles. El decodificador de WebP no se compila (`image` va sin esa característica): reserva lo
+  que declara el fichero antes de comprobarlo, y con unos bytes pedía gigas. Un WebP se puede
+  elegir igualmente: lo convierte la webview, con su propio decodificador, a JPEG (o a PNG si tiene
+  transparencia) y con 1024 px de lado como mucho, antes de mandarlo a `save_image`
+  (`guardarImagen.ts`). Antes de dárselo, las mismas cotas se miran en su cabecera: uno que declara
+  más de 8192 px de lado o 24 Mpx no llega a decodificarse. Lo guardado es siempre JPEG o PNG, así que el ticket y el PDF de una
+  factura lo pueden leer. Un WebP que llega sin convertir (por réplica, o de R2 a
+  `images_ensure_local`) se rechaza con «Esta imagen WebP no se ha convertido: vuelve a elegirla.»;
+  otro formato, con «Solo se admiten imágenes JPEG, PNG y WebP.», que es lo que se puede elegir.
 - **128 MiB acotan la imagen decodificada, no la memoria del proceso.** Con ella conviven otros
   búferes en cada paso. Al decodificarla, los coeficientes de un JPEG progresivo (hasta 8 bytes por
   píxel) o el perfil de color de un PNG (hasta otros 128 MiB). Al girarla por su orientación, la

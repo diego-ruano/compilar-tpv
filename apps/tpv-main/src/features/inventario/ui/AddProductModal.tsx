@@ -1,6 +1,6 @@
 import { commands, toAppError } from "@tpv/client";
 import { usePermisos } from "../../../shared/lib/usePermisos";
-import { guardarImagen } from "../../../shared/lib/guardarImagen";
+import { ACEPTA_IMAGENES, guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
@@ -797,7 +797,7 @@ export function AddProductModal({
                             id="producto-imagen"
                             ref={fileInputRef}
                             type="file"
-                            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                            accept={ACEPTA_IMAGENES}
                             className="hidden"
                             onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
                             disabled={loading}
@@ -866,7 +866,7 @@ export function AddProductModal({
                                             <div>
                                                 <p className="font-bold text-fg">Sube una imagen</p>
                                                 <p className="text-sm text-fg-muted">
-                                                    Click o arrastra y suelta (PNG/JPG).
+                                                    Click o arrastra y suelta (JPG, PNG o WebP).
                                                 </p>
                                             </div>
                                         </div>

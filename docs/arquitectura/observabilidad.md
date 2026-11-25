@@ -292,8 +292,8 @@ la URL de la petición, ni una ruta de AppData**. Lo que falla al hablar con el 
   `interruptores.json`, `images/logo`), nunca por su ruta, que lleva el usuario de Windows; el
   `io::Error` no la cita. No hay un registro sólo local: todo lo que se escribe con `tracing` a
   partir de INFO sale a Axiom (`forward.rs`), así que la ruta no va ni a los avisos. **Una
-  imagen** se nombra con `imagenes::para_registro`: la carpeta y su UUID, o, si es una heredada con
-  el nombre que alguien le dio, sólo la carpeta y la extensión.
+  imagen** se nombra con `imagenes::para_registro`: la carpeta y su UUID, o, si llega una ruta con
+  otro nombre, sólo la carpeta y la extensión.
 - Si la DEK de los datos del personal no se puede guardar, el aviso lo dice sin el error del almacén
   de secretos ni el nombre de su entrada.
 - El aviso de un interruptor que se apaga desde la nube dice cuál y hasta cuándo, no el motivo: es
@@ -385,8 +385,7 @@ filtro de datos personales no llega ahí**.
 Por eso **ningún dato personal ni texto libre viaja en la URL** (AUD-27): va en el cuerpo de un POST,
 y en la query sólo quedan identificadores, fechas, filtros cerrados y paginación. La regla y los tests
 que la vigilan, en [worker.md](worker.md#cómo-se-escribe-una-ruta). La ruta de una imagen va en el
-camino, y su nombre es siempre el UUID que le pone la app: las heredadas, guardadas antes con el
-nombre que alguien les dio, se renombran antes de subir nada (OBS-06,
+camino, y su nombre es siempre el UUID que le pone la app (OBS-06,
 [worker.md](worker.md#imágenes)).
 
 Cloudflare puede además quitar la query de las URL que registra, con el ajuste

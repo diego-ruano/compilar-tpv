@@ -77,11 +77,10 @@ const COPIAS_DE_A: [&str; 7] = [
     ".backup-7000.tmp",
 ];
 /// Y en la raíz de AppData, fuera de la base.
-const FUERA_DE_LA_BASE_DE_A: [&str; 5] = [
+const FUERA_DE_LA_BASE_DE_A: [&str; 4] = [
     "data.db.bak.8000",
     "data.restore.9000.tmp",
     "image_uploads.json",
-    "image_backfill_done",
     "images",
 ];
 
@@ -592,10 +591,9 @@ async fn equipo_de_a(nombre: &str) -> Equipo {
     std::fs::write(e.dir.join("images").join("productos").join("de-a.jpg"), "foto de A").unwrap();
     std::fs::write(
         e.dir.join("image_uploads.json"),
-        r#"[{"rel_path":"images/productos/de-a.jpg","content_type":"image/jpeg"}]"#,
+        r#"[{"rel_path":"images/productos/de-a.jpg","content_type":"image/jpeg","revision":"r1"}]"#,
     )
     .unwrap();
-    std::fs::write(e.dir.join("image_backfill_done"), "1").unwrap();
     std::fs::write(e.dir.join("data.db.bak.8000"), "base de antes de una migración").unwrap();
     std::fs::write(e.dir.join("data.restore.9000.tmp"), "restauración a medias").unwrap();
     assert_eq!(estado(&e.db).await, RecoveryState::Ready);

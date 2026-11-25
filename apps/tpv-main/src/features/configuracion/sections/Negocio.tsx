@@ -1,4 +1,4 @@
-import { guardarImagen } from "../../../shared/lib/guardarImagen";
+import { ACEPTA_IMAGENES, guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
 //
 // Configuración → Negocio: los datos que salen en el ticket, quién factura (FISCAL-01), el correo de
@@ -119,8 +119,8 @@ export function Negocio({
     // vale no se guarda: dejaría el TPV sin poder cobrar por una errata.
     const nifMal = draft.cif.trim().length > 0 && !nifValido(draft.cif);
 
-    // `draft.logo_data_url` puede ser una ruta relativa (`images/logo/…`, nuevo canal R2) o un
-    // data URL heredado; `resolveImageUrl` maneja ambos y devuelve una URL para el <img>.
+    // `draft.logo_data_url` es una ruta relativa (`images/logo/…`); `resolveImageUrl` la convierte
+    // en una URL para el <img>.
     const [logoSrc, setLogoSrc] = useState<string>("");
     useEffect(() => {
         let alive = true;
@@ -318,7 +318,7 @@ export function Negocio({
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                            accept={ACEPTA_IMAGENES}
                             className="hidden"
                             onChange={conAviso((e) => onLogoFile(e.target.files?.[0]))}
                         />

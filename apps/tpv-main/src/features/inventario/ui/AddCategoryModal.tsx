@@ -1,6 +1,6 @@
 // El alta y la edición de una categoría. Con `categoria` edita la que se le pasa (mismo comando, que
 // actualiza si recibe su id) y ofrece además eliminarla; sin ella, crea una nueva.
-import { guardarImagen } from "../../../shared/lib/guardarImagen";
+import { ACEPTA_IMAGENES, guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ImageOff, Trash2 } from "lucide-react";
 import { commands, toAppError } from "@tpv/client";
@@ -280,7 +280,7 @@ export default function AddCategoryModal({
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                        accept={ACEPTA_IMAGENES}
                         className="hidden"
                         onChange={(e) => {
                             handleFile(e.target.files?.[0] ?? null);
@@ -364,7 +364,7 @@ export default function AddCategoryModal({
                                         </div>
                                         <div>
                                             <p className="font-bold text-fg">Sube una imagen</p>
-                                            <p className="text-sm text-fg-muted">Click o arrastra y suelta (PNG/JPG).</p>
+                                            <p className="text-sm text-fg-muted">Click o arrastra y suelta (JPG, PNG o WebP).</p>
                                         </div>
                                     </div>
 

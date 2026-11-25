@@ -62,12 +62,12 @@ async function baseDeLaHandy(): Promise<string> {
 /**
  * OBS-06: una imagen guardada por la app, `images/{carpeta}/{uuid}.{ext}`. Su ruta viaja en el camino
  * del GET de imágenes del worker, y Cloudflare la guarda: la Handy no pide una cuyo nombre no sea el
- * UUID que le pone la app (una heredada que la Main no ha podido renombrar, con el nombre que alguien le dio).
+ * UUID que le pone la app.
  * Lo mismo que piden la Main (`imagenes::ruta_segura`) y el worker (`RUTA_DE_IMAGEN`): el prefijo y la
  * carpeta en minúsculas, y el UUID y la extensión en cualquier caja.
  */
 const RUTA_DE_IMAGEN =
-  /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG]|[wW][eE][bB][pP])$/;
+  /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG])$/;
 
 /**
  * AUD-31: un icono de alérgeno de la propia app (`public/alergenos/`), la única imagen que no es una

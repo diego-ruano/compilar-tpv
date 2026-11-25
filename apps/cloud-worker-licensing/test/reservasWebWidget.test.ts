@@ -105,13 +105,15 @@ describe("el widget servido por el worker", () => {
 				"script-src 'self' https://challenges.cloudflare.com",
 				"frame-src https://challenges.cloudflare.com",
 				"style-src 'self'",
-				"img-src 'self' data:",
+				"img-src 'self';",
 				"connect-src 'self'",
 				"object-src 'none'",
 				"base-uri 'none'",
 			]) {
 				expect(csp).toContain(directiva);
 			}
+			// M-072: ni `data:`, que era para un logo que no llegaba nunca.
+			expect(csp).not.toContain("data:");
 			expect(csp).not.toContain("unsafe-inline");
 			expect(csp).not.toContain("unsafe-eval");
 		});

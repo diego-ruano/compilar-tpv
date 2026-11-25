@@ -24,6 +24,8 @@ const SIN_FORMA = [
     "/alergenos/../data.db",
     "data.db",
     "images/logo/a.png",
+    // M-081: lo guardado es siempre JPEG o PNG (un WebP lo convierte la webview, `guardarImagen.ts`).
+    "images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.webp",
 ];
 const LOGO = "images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.png";
 

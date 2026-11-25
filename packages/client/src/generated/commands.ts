@@ -43,17 +43,6 @@ export const commands = {
 	 */
 	imagesEnsureLocal: (args: EnsureImageArgs) => __TAURI_INVOKE<boolean>("images_ensure_local", { args }),
 	/**
-	 *  Backfill: encola una vez las imágenes que ya había en disco, para Mains que las tenían antes de
-	 *  existir R2. Un marcador evita volver a encolarlas en cada arranque. La subida real la hace
-	 *  `images_drain_pending`.
-	 *
-	 *  OBS-06: antes, en cada arranque de la Main, las heredadas pasan a un nombre opaco
-	 *  (`renombrar_imagenes_heredadas`). Lo que se encola, se sube, se baja o se borra es siempre una
-	 *  imagen con un UUID por nombre (`imagenes::ruta_segura`): una heredada que no se ha podido
-	 *  renombrar no sale del equipo.
-	 */
-	imagesBackfill: () => __TAURI_INVOKE<string>("images_backfill"),
-	/**
 	 *  Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
 	 *
 	 *  En móvil no hay updater: el APK nuevo se instala encima. Contesta `None` («nada que

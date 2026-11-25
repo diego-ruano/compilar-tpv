@@ -373,7 +373,6 @@ fn content_type_for(rel_path: &str) -> &'static str {
         .as_deref()
     {
         Some("png") => "image/png",
-        Some("webp") => "image/webp",
         _ => "image/jpeg",
     }
 }
@@ -1443,158 +1442,6 @@ async fn images_ensure_local(
     }
 }
 
-/// Las carpetas de las imágenes que usan las filas del negocio (`Ruta_Imagen`): las que repasa el
-/// backfill.
-const CARPETAS_DEL_BACKFILL: [&str; 4] = ["productos", "categorias", "proveedores", "alergenos"];
-
-/// OBS-06 · Las imágenes heredadas (guardadas antes de que la app les pusiera un UUID, con el nombre
-/// que alguien le dio al fichero) pasan a un nombre opaco antes de que ese nombre salga en ninguna
-/// petición: la ruta de una imagen viaja en la URL con la que se sube, se sirve y se borra.
-///
-/// Por cada una que usa alguna fila: se copia con su nombre nuevo, se encola la copia, se cambian
-/// las filas que la usan (`tpv_infra_sqlite::imagenes::renombrar_imagen`, por `WriteGuard`, así que
-/// sube a la nube), se borra el fichero de antes y se quita de la cola el viejo si estaba. En ese
-/// orden, si algo se corta a medias las filas apuntan a un fichero que existe y está en la cola: la
-/// copia se encola antes de cambiar las filas porque, cambiadas, ya no es heredada y el marcador del
-/// backfill no la volvería a encolar. Una copia que se queda sin filas (el cambio falla o se corta
-/// antes) sale de la cola si se puede, y si no, se sube sin que la use nadie. Una heredada que no usa
-/// nadie se queda como está: ni se renombra ni se sube. Devuelve cuántas ha renombrado.
-async fn renombrar_imagenes_heredadas(app_data_dir: &Path, db: &Db) -> Result<u32, String> {
-    let cola = ColaImagenes::new(app_data_dir);
-    let mut renombradas = 0u32;
-    for sub in CARPETAS_DEL_BACKFILL {
-        let Ok(entradas) = fs::read_dir(app_data_dir.join("images").join(sub)) else {
-            continue;
-        };
-        for entrada in entradas.flatten() {
-            let origen = entrada.path();
-            if !origen.is_file() {
-                continue;
-            }
-            let Some(nombre) = entrada.file_name().to_str().map(String::from) else {
-                continue;
-            };
-            let antes = format!("images/{sub}/{nombre}");
-            let Some(despues) = imagenes::nombre_opaco(&antes) else {
-                continue;
-            };
-            if !tpv_infra_sqlite::imagenes::imagen_en_uso(db, &antes).await.map_err(|e| e.to_string())? {
-                continue;
-            }
-            let destino = imagenes::destino(app_data_dir, &despues, false)?;
-            fs::copy(&origen, &destino).map_err(|e| format!("No se pudo copiar una imagen heredada: {e}"))?;
-            let deshacer_la_copia = || {
-                let _ = cola.descartar(&despues);
-                let _ = fs::remove_file(&destino);
-            };
-            if let Err(e) = enqueue_image(app_data_dir, &despues, content_type_for(&despues)) {
-                deshacer_la_copia();
-                return Err(e);
-            }
-            match tpv_infra_sqlite::imagenes::renombrar_imagen(db, &antes, &despues).await {
-                Ok(0) => {
-                    // Entretanto ha dejado de usarla nadie.
-                    deshacer_la_copia();
-                    continue;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    deshacer_la_copia();
-                    return Err(e.to_string());
-                }
-            }
-            renombradas += 1;
-            // Ya no la usa nadie. Si no se puede borrar, el repaso siguiente la deja como está; y si
-            // no sale de la cola, el drenaje la aparta sin subirla (`imagenes::ruta_segura`).
-            if let Err(e) = fs::remove_file(&origen) {
-                tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudo borrar una imagen heredada ya renombrada");
-            }
-            if let Err(e) = cola.descartar(&antes) {
-                tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudo quitar de la cola una imagen heredada ya renombrada");
-            }
-        }
-    }
-    Ok(renombradas)
-}
-
-/// Backfill: encola una vez las imágenes que ya había en disco, para Mains que las tenían antes de
-/// existir R2. Un marcador evita volver a encolarlas en cada arranque. La subida real la hace
-/// `images_drain_pending`.
-///
-/// OBS-06: antes, en cada arranque de la Main, las heredadas pasan a un nombre opaco
-/// (`renombrar_imagenes_heredadas`). Lo que se encola, se sube, se baja o se borra es siempre una
-/// imagen con un UUID por nombre (`imagenes::ruta_segura`): una heredada que no se ha podido
-/// renombrar no sale del equipo.
-#[tauri::command]
-#[specta::specta]
-async fn images_backfill(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<String, AppErrorDto> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
-
-    let marker = app_data_dir.join("image_backfill_done");
-
-    // Sólo la Main tiene imágenes locales pre-existentes; en Handy marcamos y salimos.
-    let is_main = matches!(*state.mode.lock().await, Some(DeviceMode::Tpv));
-    if !is_main {
-        if !marker.exists() {
-            let _ = fs::write(&marker, b"handy");
-        }
-        return Ok("no_aplica".into());
-    }
-
-    // AUD-06: las imágenes que hay son del negocio de la base. Sólo se tocan si es el de la
-    // licencia y se está usando; si no, se espera (sin dar el repaso por hecho).
-    if negocio_de_la_base_en_uso(&state, &app_data_dir).await.is_none() {
-        return Ok("base_de_otro_negocio".into());
-    }
-    let Some(db) = state.db.lock().await.as_ref().cloned() else {
-        return Ok("base_de_otro_negocio".into());
-    };
-
-    let renombradas = match renombrar_imagenes_heredadas(&app_data_dir, &db).await {
-        Ok(n) => n,
-        Err(e) => {
-            // El arranque siguiente lo vuelve a intentar; mientras tanto, la heredada no sale.
-            tracing::warn!(target: "tpv::imagenes", error = %e, "no se pudieron renombrar las imágenes heredadas");
-            0
-        }
-    };
-    if marker.exists() {
-        return Ok(format!("ya_hecho renombradas={renombradas}"));
-    }
-
-    let mut encoladas = 0u32;
-    for sub in CARPETAS_DEL_BACKFILL {
-        let dir = app_data_dir.join("images").join(sub);
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if !entry.path().is_file() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(String::from) else {
-                continue;
-            };
-            let rel_path = format!("images/{}/{}", sub, name);
-            if !is_safe_image_rel_path(&rel_path) {
-                continue;
-            }
-            if enqueue_image(&app_data_dir, &rel_path, content_type_for(&rel_path)).is_ok() {
-                encoladas += 1;
-            }
-        }
-    }
-
-    let _ = fs::write(&marker, b"done");
-    Ok(format!("encoladas={encoladas} renombradas={renombradas}"))
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Comandos: impresión (host/Windows) — ver `printing.rs`
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1853,27 +1700,18 @@ fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorD
     ) as u32)
 }
 
-/// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`) o descodifica un data
-/// URL heredado. `None` si no se puede: quien llama decide qué hacer sin ella.
+/// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`). `None` si no se puede:
+/// quien llama decide qué hacer sin ella.
 ///
 /// AUD-30: la ruta es `Logo_DataUrl`, que llega replicado (o, en la precuenta, de la pantalla), y
-/// puede ser cualquier texto. Ni el data URL ni el fichero se leen más allá de lo que pesa una
-/// imagen admitida (`imagenes::MAX_BYTES`): lo que pasa de ahí no se iba a imprimir.
+/// puede ser cualquier texto. El fichero no se lee más allá de lo que pesa una imagen admitida
+/// (`imagenes::MAX_BYTES`): lo que pasa de ahí no se iba a imprimir. Pese al nombre de la columna,
+/// un data URL no se decodifica (M-075): lo que se guarda en ella es siempre la ruta de una imagen
+/// (`validar_ruta_imagen`, AUD-31).
 fn leer_imagen_local(app_data: Option<&std::path::Path>, ruta: &str) -> Option<Vec<u8>> {
     let r = ruta.trim();
     if r.is_empty() {
         return None;
-    }
-
-    // Data URL heredado (`data:image/png;base64,…`): los logos antiguos se guardaron así.
-    if let Some(b64) = r.split_once(";base64,").map(|(_, b)| b) {
-        // Base64 añade un tercio: se mide antes de decodificar, como en `save_image`.
-        if b64.len() > imagenes::MAX_BYTES.div_ceil(3) * 4 {
-            tracing::warn!(target: "tpv::impresion", "el logo pesa más de 5 MB: el ticket sale sin él");
-            return None;
-        }
-        use base64::Engine;
-        return base64::engine::general_purpose::STANDARD.decode(b64).ok();
     }
 
     // Sólo una imagen guardada (`images/{sub}/{archivo}`). Cualquier otro nombre puede ser un
@@ -2213,7 +2051,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             images_retry_upload,
             images_delete,
             images_ensure_local,
-            images_backfill,
             // auto-actualización (updater)
             updater_check,
             updater_status,
@@ -3095,7 +2932,7 @@ mod tests_ruta_del_logo {
     }
 
     // AUD-30: el valor llega replicado, así que sólo se lee una imagen guardada, y no más de lo
-    // que pesa una admitida, venga como fichero o como data URL.
+    // que pesa una admitida.
 
     /// El logo de las pruebas, con el nombre que le pone `save_image` (un UUID, OBS-06).
     const LOGO: &str = "images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.png";
@@ -3111,13 +2948,15 @@ mod tests_ruta_del_logo {
     }
 
     #[test]
-    fn un_logo_se_lee_del_disco_o_de_un_data_url() {
+    fn un_logo_se_lee_del_disco_y_no_de_un_data_url() {
         let dir = con_logo();
 
         assert_eq!(leer_imagen_local(Some(&dir), LOGO).as_deref(), Some(&b"logo"[..]));
-        // «logo» en base64.
-        assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw==").as_deref(), Some(&b"logo"[..]));
         assert_eq!(leer_imagen_local(Some(&dir), GRANDE), None);
+        // M-075: un logo es siempre una imagen guardada (`validar_ruta_imagen`, AUD-31); un data
+        // URL («logo» en base64) no se decodifica.
+        assert_eq!(leer_imagen_local(Some(&dir), "data:image/png;base64,bG9nbw=="), None);
+        assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw=="), None);
     }
 
     #[test]
@@ -3132,16 +2971,6 @@ mod tests_ruta_del_logo {
         for ruta in ["images/logo.png", "images/logo/logo.png", "NUL", "../../secreto.png", "C:/Windows/win.ini"] {
             assert_eq!(leer_imagen_local(Some(&dir), ruta), None, "{ruta}");
         }
-    }
-
-    #[test]
-    fn un_data_url_mas_largo_que_una_imagen_admitida_no_se_decodifica() {
-        // El mismo tope que `save_image` pone a lo que le manda la pantalla.
-        let tope = imagenes::MAX_BYTES.div_ceil(3) * 4;
-        let data_url = |largo: usize| format!("data:image/png;base64,{}", "A".repeat(largo));
-
-        assert!(leer_imagen_local(None, &data_url(tope)).is_some());
-        assert!(leer_imagen_local(None, &data_url(tope + 4)).is_none());
     }
 
     #[test]
@@ -3625,99 +3454,6 @@ mod tests_solo_en_la_main {
 }
 
 #[cfg(test)]
-mod tests_imagenes_heredadas {
-    //! OBS-06: una imagen heredada que usa alguna fila pasa a un UUID antes de que su nombre salga
-    //! en ninguna petición: el fichero, las filas (por `WriteGuard`, al outbox) y la cola de subida.
-
-    use super::*;
-    use tpv_infra_sqlite::db::Reader;
-    use tpv_infra_sqlite::ejecutor::Value;
-
-    const HEREDADA: &str = "images/proveedores/Juan-Perez.jpg";
-    const SIN_USO: &str = "images/proveedores/sin-uso.png";
-    const YA_OPACA: &str = "images/proveedores/0190f3a1-7b2c-4d4e-8f00-123456789abc.jpg";
-
-    async fn texto(db: &Db, sql: &str) -> Vec<String> {
-        let r = db.read().await;
-        let mut filas = r.query(sql, Vec::<Value>::new()).await.unwrap();
-        let mut salida = Vec::new();
-        while let Some(fila) = filas.next().await.unwrap() {
-            salida.push(tpv_infra_sqlite::mapping::v_string(fila.get_value(0).unwrap()).unwrap_or_default());
-        }
-        salida
-    }
-
-    #[tokio::test]
-    async fn la_heredada_en_uso_pasa_a_un_uuid_con_sus_filas_y_su_entrada_en_la_cola() {
-        let dir = std::env::temp_dir().join(format!("tpv-heredadas-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(dir.join("images/proveedores")).unwrap();
-        for (rel, bytes) in [(HEREDADA, &b"jpg"[..]), (SIN_USO, b"png"), (YA_OPACA, b"otra")] {
-            std::fs::write(dir.join(rel), bytes).unwrap();
-        }
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
-        db.write()
-            .await
-            .raw()
-            .execute(
-                "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Nombre_Imagen, Ruta_Imagen) VALUES ('p', 'Juan', 'Juan-Perez.jpg', ?1);",
-                vec![Value::Text(HEREDADA.into())],
-            )
-            .await
-            .unwrap();
-        // Como la dejaba encolada el backfill de antes, con su nombre.
-        enqueue_image(&dir, HEREDADA, "image/jpeg").unwrap();
-
-        assert_eq!(renombrar_imagenes_heredadas(&dir, &db).await.unwrap(), 1);
-
-        let ruta = texto(&db, "SELECT Ruta_Imagen FROM Proveedores;").await.remove(0);
-        assert!(imagenes::ruta_segura(&ruta) && ruta.starts_with("images/proveedores/") && ruta.ends_with(".jpg"), "{ruta}");
-        assert_eq!(std::fs::read(dir.join(&ruta)).unwrap(), b"jpg");
-        assert!(!dir.join(HEREDADA).exists());
-        assert_eq!(texto(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, vec!["1".to_string()]);
-        let cola: Vec<String> = ColaImagenes::new(&dir).pendientes().unwrap().into_iter().map(|i| i.rel_path).collect();
-        assert_eq!(cola, vec![ruta.clone()]);
-        // La que no usa nadie se queda como estaba, sin subir; la que ya era opaca, también.
-        assert!(dir.join(SIN_USO).exists() && dir.join(YA_OPACA).exists());
-
-        // El repaso siguiente no encuentra nada que hacer.
-        assert_eq!(renombrar_imagenes_heredadas(&dir, &db).await.unwrap(), 0);
-        assert_eq!(texto(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, vec!["1".to_string()]);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Si no se pueden cambiar las filas, no queda nada a medias: ni la copia, ni su entrada en la cola.
-    #[tokio::test]
-    async fn si_no_se_pueden_cambiar_las_filas_no_queda_la_copia_ni_su_entrada_en_la_cola() {
-        let dir = std::env::temp_dir().join(format!("tpv-heredadas-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(dir.join("images/proveedores")).unwrap();
-        std::fs::write(dir.join(HEREDADA), b"jpg").unwrap();
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
-        db.write()
-            .await
-            .raw()
-            .execute(
-                "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Ruta_Imagen) VALUES ('p', 'Juan', ?1);",
-                vec![Value::Text(HEREDADA.into())],
-            )
-            .await
-            .unwrap();
-        // Como durante una recuperación: no entra ninguna escritura de negocio.
-        db.bloquear_escrituras_de_negocio(true);
-
-        assert!(renombrar_imagenes_heredadas(&dir, &db).await.is_err());
-
-        assert_eq!(texto(&db, "SELECT Ruta_Imagen FROM Proveedores;").await, vec![HEREDADA.to_string()]);
-        let ficheros: Vec<String> = std::fs::read_dir(dir.join("images/proveedores"))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(ficheros, vec!["Juan-Perez.jpg".to_string()]);
-        assert!(ColaImagenes::new(&dir).pendientes().unwrap().is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-#[cfg(test)]
 mod tests_imagen_bajada_de_r2 {
     //! AUD-31 · Lo que baja de R2 pasa por RI-07 antes de escribirse en disco.
     //!
@@ -4063,7 +3799,6 @@ mod tests_exenciones_del_gate {
             "$APPDATA/image_uploads.json.tmp",
             "$APPDATA/telemetry-spool/**",
             "$APPDATA/logs/**",
-            "$APPDATA/image_backfill_done",
             // El PDF de cada factura completa: lo que se entregó, que no se reescribe.
             "$APPDATA/facturas/**",
         ];
