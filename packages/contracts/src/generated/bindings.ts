@@ -75,13 +75,6 @@ export type AnularPagoInput = {
 	clase?: string | null,
 };
 
-/**  Cabeceras firmadas para el worker (campos en camelCase). */
-export type ApiSignedHeaders = {
-	authorization: string,
-	xDeviceTs: string,
-	xDeviceSig: string,
-};
-
 /**  Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri. */
 export type AppErrorDto = {
 	/**  Código estable. Es lo único por lo que se debe ramificar. */
@@ -554,16 +547,6 @@ export type ClaveReservaWebDto = {
 	codigo: string,
 };
 
-/**  Una página de `/v1/sync/verificar/claves`: claves primarias de una tabla, en orden de clave. */
-export type ClavesPagina = {
-	tabla: string,
-	columnas?: string[],
-	claves?: unknown[][],
-	/**  La última clave de la página si queda algo detrás; `None` si era la última. */
-	siguiente_cursor?: unknown[] | null,
-	hasta_seq?: number,
-};
-
 /**
  *  El cliente que ya tiene ese teléfono o ese email. Se busca primero por email, que identifica
  *  (índice único), y luego por teléfono. `coincide_por` es `"email"` o `"telefono"`: con el email
@@ -953,20 +936,6 @@ export type DenominacionDto = {
 export type DenominacionInput = {
 	valor: Dinero,
 	unidades: number,
-};
-
-/**  Lo que no cuadra en una tabla. */
-export type DescuadreTabla = {
-	tabla: string,
-	/**  Filas que la Main tiene y la nube no. Se suben por estado. */
-	faltan: number,
-	/**
-	 *  Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir: se borran arriba
-	 *  sólo si esta Main puede afirmar que está al día.
-	 */
-	sobran: number,
-	/**  Filas que están en los dos sitios con contenido distinto. Se reparan con el de la Main. */
-	distintas: number,
 };
 
 /**  RELOJ-01 · Cuánto se aparta el reloj de este equipo del de la nube, para el aviso del reloj. */
@@ -1372,29 +1341,6 @@ export type FalloDeComando = {
 	veces: number,
 };
 
-/**  Una página de `/v1/sync/verificar/filas`: las filas de los cubos que no cuadraban. */
-export type FilasDeCubos = {
-	tabla: string,
-	columnas?: string[],
-	filas?: unknown[][],
-	/**  `None` = no quedan más. Cualquier otra cosa es «sigue pidiendo desde aquí». */
-	siguiente_cursor?: number | null,
-	hasta_seq?: number,
-};
-
-/**
- *  Respuesta de `/v1/sync/verificar/por-clave`: las filas de unas claves, estén o no en la ventana.
- *  Una clave pedida cuya fila no viene no está en la nube, salvo con `cortada`: entonces lo que no
- *  ha venido se vuelve a pedir.
- */
-export type FilasPorClave = {
-	tabla: string,
-	columnas?: string[],
-	filas?: unknown[][],
-	cortada?: boolean,
-	hasta_seq?: number,
-};
-
 export type FinalizarTareaInput = {
 	id_tarea: string,
 	id_trabajador: string,
@@ -1466,18 +1412,6 @@ export type GuardarPermisosInput = {
 export type HandySetTokenArgs = {
 	token: string,
 	tenant_id: string,
-};
-
-/**
- *  Una página de `/v1/sync/historico`. `filas` es posicional respecto a `columnas`, igual que en
- *  el volcado; el cursor viaja aparte y **no** es una columna más.
- */
-export type HistoricoPagina = {
-	tabla: string,
-	columnas: string[],
-	filas: unknown[][],
-	/**  `None` = esta tabla está completa. Cualquier otra cosa es "sigue pidiendo desde aquí". */
-	siguiente_cursor: number | null,
 };
 
 /**  Marcar libre el día de un trabajador: sustituye lo que tuviera ese día. */
@@ -2223,37 +2157,6 @@ export type NotificacionRow = {
 export type NotificacionesListArgs = {
 	/**  Si es `true`, solo devuelve las no leídas por ese usuario. */
 	solo_no_leidas?: boolean | null,
-};
-
-/**  Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo. */
-export type OutboxEntry = {
-	seq: number,
-	op_id: string,
-	command_name: string,
-	statements: SqlStatement[],
-};
-
-/**
- *  Lo que el drenado necesita saber tras un `apply_ack` fallido (SYNC-20): si esta operación se
- *  aparta o se sigue reintentando, y con qué contexto contarlo.
- */
-export type OutboxFallo = {
-	/**  Rechazos acumulados por esta operación. */
-	intentos: number,
-	/**  `true` si acaba de apartarse: el drenado debe SEGUIR con la siguiente, no parar. */
-	apartada: boolean,
-	/**
-	 *  Para el informe de telemetría. El `Statements_Json` NO sale de aquí: lleva datos del
-	 *  negocio y PII, y lo que hace falta para diagnosticar es qué comando falló, no con qué datos.
-	 */
-	command_name: string,
-	/**
-	 *  SYNC-22: filas cuya reparación se ha encolado al apartar esta operación. Cero puede
-	 *  significar dos cosas distintas y las dos importan: que no había nada que reparar, o que las
-	 *  sentencias no se supieron leer (queda en el log). Nunca significa "ya está igualado": eso
-	 *  sólo lo prueba que la reparación llegue a subir.
-	 */
-	reparadas: number,
 };
 
 /**  Una página de entradas. `siguiente` es `None` cuando no hay más filas (o no se pidió paginar). */
@@ -3188,38 +3091,6 @@ export type ResultadoRecogidaWeb =
 /**  No se ha podido guardar: al cliente se le avisa por correo. */
 "fallida";
 
-/**  Lo que dejó una pasada del contraste. */
-export type ResultadoVerificacion = {
-	descuadres: DescuadreTabla[],
-	/**  Filas cuya reparación se ha encolado en esta pasada. */
-	reparadas: number,
-	/**
-	 *  La nube no pudo resumir la ventana: sólo se han comparado los conteos (y las claves de lo
-	 *  que no cuadraba).
-	 */
-	ventana_omitida: boolean,
-	/**  Filas de más en la nube cuyo borrado se ha encolado. */
-	borradas?: number,
-	/**
-	 *  Se encontraron diferencias que NO se han tocado: esta Main no podía afirmar que estuviera
-	 *  al día (un fallo de bajada, histórico por bajar, la base se movió antes de escribir), la
-	 *  reparación está apagada, o la pasada llegó a su tope antes de mirarlo todo.
-	 *
-	 *  Se informa: es la diferencia entre «no hay nada que arreglar» y «lo hay y no me atrevo».
-	 */
-	aplazado?: boolean,
-	/**
-	 *  Filas que se han bajado de la nube para compararlas una a una: las de los cubos que no
-	 *  cuadraban. Cero es lo normal.
-	 */
-	filas_examinadas?: number,
-	/**
-	 *  Tablas que no se han podido comparar por valores: sin clave primaria, con otras columnas
-	 *  que en la nube (otra versión del programa), o cuyas filas no llegaron como en el resumen.
-	 */
-	tablas_sin_comparar?: string[],
-};
-
 /**
  *  Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
  *  rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
@@ -3426,15 +3297,6 @@ export type SpoolEvent = {
 	environment: string,
 };
 
-/**
- *  Una sentencia de escritura ya resuelta. `args` son escalares JSON (string/number/bool/null)
- *  que se enlazan a los `?` del `sql`.
- */
-export type SqlStatement = {
-	sql: string,
-	args: unknown[],
-};
-
 export type StatsCategoriaRow = {
 	ID_Categoria: string,
 	Nombre: string,
@@ -3472,16 +3334,6 @@ export type SubidaNubeEstado = {
 
 export type SummaryArgs = {
 	limit?: number | null,
-};
-
-/**
- *  Una operación a aplicar de forma atómica e idempotente (por `op_id`). `seq` es el cursor
- *  monotono del log de la nube; la Main lo usa como checkpoint del catch-up.
- */
-export type SyncChange = {
-	op_id: string,
-	seq: number,
-	statements: SqlStatement[],
 };
 
 /**

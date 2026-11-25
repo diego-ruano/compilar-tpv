@@ -63,7 +63,7 @@ pub struct LicenseGateResult {
 ========================================================= */
 
 /// Cabeceras firmadas para el worker (campos en camelCase).
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiSignedHeaders {
     pub authorization: String,
