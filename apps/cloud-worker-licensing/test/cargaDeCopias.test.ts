@@ -16,7 +16,8 @@
 //   · una línea que se lee y acaba en CR (fines de línea de Windows) lo dice, y no que la copia sea
 //     de otra versión; en el esquema, que no se lee, no estorba;
 //   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido;
-//   · si la carga se para antes del final, deja de leer la copia y de pedirla;
+//   · si la carga se para antes del final, deja de leer la copia y de pedirla, también a través de
+//     `leyendoElGzip`, que es como la leen la central y cada negocio;
 //   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción,
 //     como la escribe hoy la copia, sale entera, y una más larga que el tope hace inservible la copia
 //     en cuanto se pasa, sin esperar a su final. También la de una copia de un negocio de antes, con
@@ -25,7 +26,7 @@
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
-import { CARACTERES_POR_LINEA, cargarCopia, lineasDe } from "../src/durableObjects/cargaDeCopias";
+import { CARACTERES_POR_LINEA, cargarCopia, leyendoElGzip, lineasDe } from "../src/durableObjects/cargaDeCopias";
 import { literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "../src/durableObjects/volcadoSql";
 import { centralSinAprovisionar } from "./helpers/central";
 
@@ -125,34 +126,49 @@ function gzipSinFin(principio: string, relleno: string) {
 	return { gzip, pedido };
 }
 
+/** Por qué se para la carga antes del final: lo que lleva la copia y lo que se dice. */
+const PARADAS: [string, string[], RegExp][] = [
+	["una línea que no es una fila", [linea("1", "abc", "NULL", "NULL", "NULL", "NULL")], /^copia_no_valida: la línea 2 no se puede cargar: valor_no_literal/],
+	[
+		"unas filas que SQLite no acepta",
+		// Tres de 1,5 MB con la misma clave: llenan un lote, y SQLite rechaza la segunda en cuanto se ejecuta.
+		[1, 2, 3].map(() => linea("1", "1", `'${"x".repeat(1_500_000)}'`, "NULL", "NULL", "NULL")),
+		/SQLite no acepta la línea 3 de la copia \(t\): SQLITE_CONSTRAINT$/,
+	],
+];
+
+/**
+ * Cómo llegan a la carga las líneas del gzip: tal cual, y como las leen de verdad la central y cada
+ * negocio, a través de `leyendoElGzip`, que tiene que pasar a `lineasDe` que la carga se ha parado.
+ */
+const LECTURAS: [string, (gzip: ReadableStream<Uint8Array>) => AsyncIterable<string>][] = [
+	["lineasDe", (gzip) => lineasDe(gzip)],
+	["leyendoElGzip", (gzip) => leyendoElGzip(lineasDe(gzip))],
+];
+
 describe("el cargador de las copias", () => {
-	it.each([
-		["una línea que no es una fila", [linea("1", "abc", "NULL", "NULL", "NULL", "NULL")], /^copia_no_valida: la línea 2 no se puede cargar: valor_no_literal/],
-		[
-			"unas filas que SQLite no acepta",
-			// Tres de 1,5 MB con la misma clave: llenan un lote, y SQLite rechaza la segunda en cuanto se ejecuta.
-			[1, 2, 3].map(() => linea("1", "1", `'${"x".repeat(1_500_000)}'`, "NULL", "NULL", "NULL")),
-			/SQLite no acepta la línea 3 de la copia \(t\): SQLITE_CONSTRAINT$/,
-		],
-	])("si se para por %s, deja de leer la copia y de pedirla", async (_que, datos, motivo) => {
-		const { gzip, pedido } = gzipSinFin(`-- Migraciones: m1\n${datos.join("\n")}\n`, "-- relleno\n");
-		const { stub } = centralSinAprovisionar();
-		const error = await runInDurableObject(stub, (_objeto, state) =>
-			cargarCopia(state.storage, lineasDe(gzip), {
-				migraciones: ["m1"],
-				esTablaDeLaCopia: (t) => t === "t",
-				prepararBase: async () => {
-					state.storage.sql.exec(TABLA);
-				},
-			}).then(
-				() => "sin error",
-				(e) => String((e as Error).message),
-			),
-		);
-		expect(error).toMatch(motivo);
-		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
-		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
-	});
+	it.each(PARADAS.flatMap(([que, datos, motivo]) => LECTURAS.map(([como, leer]) => [que, como, datos, motivo, leer] as const)))(
+		"si se para por %s, deja de leer la copia y de pedirla (%s)",
+		async (_que, _como, datos, motivo, leer) => {
+			const { gzip, pedido } = gzipSinFin(`-- Migraciones: m1\n${datos.join("\n")}\n`, "-- relleno\n");
+			const { stub } = centralSinAprovisionar();
+			const error = await runInDurableObject(stub, (_objeto, state) =>
+				cargarCopia(state.storage, leer(gzip), {
+					migraciones: ["m1"],
+					esTablaDeLaCopia: (t) => t === "t",
+					prepararBase: async () => {
+						state.storage.sql.exec(TABLA);
+					},
+				}).then(
+					() => "sin error",
+					(e) => String((e as Error).message),
+				),
+			);
+			expect(error).toMatch(motivo);
+			await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
+			expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
+		},
+	);
 
 	it("una línea que no cabe en una llamada sale igual que si se ejecutara tal cual", async () => {
 		const largo = "x".repeat(40_000);
