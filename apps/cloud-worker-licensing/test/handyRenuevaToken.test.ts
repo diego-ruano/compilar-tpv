@@ -12,26 +12,20 @@
 //   · una Handy revocada NO lo renueva, y se le dice por qué (para que deje de reintentar);
 //   · seguir siendo la Main de la licencia sigue siendo obligatorio para quien es una Main;
 //   · la licencia del token tiene que ser la de su negocio (AUD-03).
+//
+// Cada caso tiene su base central de verdad (`helpers/central.ts`), a la que la ruta llega por
+// `getDb(env)`.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import * as ed from "@noble/ed25519";
 import { decodeJwt } from "jose";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
 import { firmarSesion, handyTokenTtlSeconds, verificarSesion } from "../src/lib/sesion";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
-
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
@@ -50,37 +44,32 @@ async function clave(relleno: number) {
 
 /** Un bar con su licencia activada en la Main y una Handy vinculada. */
 async function escenario<T>(
-	nombre: string,
 	opciones: { pubDeLaHandy: string; handyRevocadaMs?: number },
-	prueba: (sql: any) => Promise<T>,
+	prueba: (central: CentralDePrueba) => Promise<T>,
 ): Promise<T> {
-	return enElHub(`handy-renueva-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["devices", "licenses", "tenants"]) sql.exec(`DELETE FROM ${tabla};`);
-		dbDePruebas = clienteSobre(sql);
-
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, term_months,
-			                       origin, issued_at_ms, activated_at_ms, expires_at_ms, customer_email,
-			                       created_at_ms, updated_at_ms)
-			 VALUES ('lic-1', ?, ?, ?, 'active', 12, 'manual', 1, 1, ?, 'bar@ejemplo.test', 1, 1);`,
-			LIC_HASH,
-			TENANT,
-			LA_MAIN,
-			Date.now() + 30 * 24 * 60 * 60 * 1000,
-		);
-		sql.exec(
-			`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg, revoked_at_ms)
-			 VALUES (?, ?, 'handy', ?, 'ed25519', ?);`,
-			LA_HANDY,
-			TENANT,
-			opciones.pubDeLaHandy,
-			opciones.handyRevocadaMs ?? null,
-		);
-		return prueba(sql);
-	});
+	const central = await centralDePrueba();
+	await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
+	await filasDe(
+		central,
+		`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, term_months,
+		                       origin, issued_at_ms, activated_at_ms, expires_at_ms, customer_email,
+		                       created_at_ms, updated_at_ms)
+		 VALUES ('lic-1', ?, ?, ?, 'active', 12, 'manual', 1, 1, ?, 'bar@ejemplo.test', 1, 1);`,
+		LIC_HASH,
+		TENANT,
+		LA_MAIN,
+		Date.now() + 30 * 24 * 60 * 60 * 1000,
+	);
+	await filasDe(
+		central,
+		`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg, revoked_at_ms)
+		 VALUES (?, ?, 'handy', ?, 'ed25519', ?);`,
+		LA_HANDY,
+		TENANT,
+		opciones.pubDeLaHandy,
+		opciones.handyRevocadaMs ?? null,
+	);
+	return prueba(central);
 }
 
 /**
@@ -88,7 +77,12 @@ async function escenario<T>(
  * puede estar caducado —es justo el caso— porque `/refresh` lee sus claims sin verificar y lo que
  * autentica de verdad es la firma de la clave privada del equipo.
  */
-async function renovar(deviceId: string, seed: Uint8Array, licHash = LIC_HASH): Promise<Response> {
+async function renovar(
+	central: CentralDePrueba,
+	deviceId: string,
+	seed: Uint8Array,
+	licHash = LIC_HASH,
+): Promise<Response> {
 	const token = await firmarSesion(ENV as any, { tenantId: TENANT, deviceId, licHash });
 	const ts = Date.now();
 	const mensaje = ["DEVICE_PROOF", ts, "POST", "/refresh", await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
@@ -100,15 +94,15 @@ async function renovar(deviceId: string, seed: Uint8Array, licHash = LIC_HASH): 
 			method: "POST",
 			headers: { authorization: `Bearer ${token}`, "X-Device-Ts": String(ts), "X-Device-Sig": firma },
 		},
-		ENV,
+		{ ...ENV, ...central.entorno },
 	);
 }
 
 describe("una Handy renueva su token", () => {
 	it("lo reemite con sus mismas claims: es el de siempre con otra fecha", async () => {
 		const { seed, pub } = await clave(3);
-		await escenario("viva", { pubDeLaHandy: pub }, async () => {
-			const res = await renovar(LA_HANDY, seed);
+		await escenario({ pubDeLaHandy: pub }, async (central) => {
+			const res = await renovar(central, LA_HANDY, seed);
 			expect(res.status).toBe(200);
 
 			const token = String(((await res.json()) as any).token || "");
@@ -124,8 +118,8 @@ describe("una Handy renueva su token", () => {
 
 	it("revocada no renueva, y se le dice cuál es el problema", async () => {
 		const { seed, pub } = await clave(3);
-		await escenario("revocada", { pubDeLaHandy: pub, handyRevocadaMs: Date.now() }, async () => {
-			const res = await renovar(LA_HANDY, seed);
+		await escenario({ pubDeLaHandy: pub, handyRevocadaMs: Date.now() }, async (central) => {
+			const res = await renovar(central, LA_HANDY, seed);
 			expect(res.status).toBe(401);
 			// `device_revoked` está en el catálogo compartido: el cliente ramifica por él y deja de
 			// reintentar en vez de enseñar «Conectando…» para siempre.
@@ -136,8 +130,8 @@ describe("una Handy renueva su token", () => {
 	it("sin la firma de su clave registrada no renueva nada", async () => {
 		const registrada = await clave(3);
 		const otra = await clave(4);
-		await escenario("otra-clave", { pubDeLaHandy: registrada.pub }, async () => {
-			const res = await renovar(LA_HANDY, otra.seed);
+		await escenario({ pubDeLaHandy: registrada.pub }, async (central) => {
+			const res = await renovar(central, LA_HANDY, otra.seed);
 			expect(res.status).toBe(401);
 			expect(((await res.json()) as any).error).toBe("bad_device_signature");
 		});
@@ -145,11 +139,11 @@ describe("una Handy renueva su token", () => {
 
 	it("a una Main desplazada se le sigue diciendo que lo está", async () => {
 		const { seed, pub } = await clave(5);
-		await escenario("main-desplazada", { pubDeLaHandy: pub }, async (sql) => {
+		await escenario({ pubDeLaHandy: pub }, async (central) => {
 			// El mismo equipo, pero dado de alta como `tpv` y sin ser el de la licencia.
-			sql.exec(`UPDATE devices SET role='tpv' WHERE device_id=?;`, LA_HANDY);
+			await filasDe(central, `UPDATE devices SET role='tpv' WHERE device_id=?;`, LA_HANDY);
 
-			const res = await renovar(LA_HANDY, seed);
+			const res = await renovar(central, LA_HANDY, seed);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("device_replaced");
 		});
@@ -162,9 +156,13 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 	// otra fila y salía con un token firmado que se saltaba REV-12 en todas las rutas.
 
 	/** Anula la licencia del bar y da de alta otra fila a la que apuntar. */
-	function otraFila(sql: any, fila: { id: string; hash: string; tenant: string | null; status: string }) {
-		sql.exec(`UPDATE licenses SET status='revoked', disabled=1 WHERE license_id='lic-1';`);
-		sql.exec(
+	async function otraFila(
+		central: CentralDePrueba,
+		fila: { id: string; hash: string; tenant: string | null; status: string },
+	) {
+		await filasDe(central, `UPDATE licenses SET status='revoked', disabled=1 WHERE license_id='lic-1';`);
+		await filasDe(
+			central,
 			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, term_months,
 			                       origin, issued_at_ms, expires_at_ms, customer_email, created_at_ms, updated_at_ms)
 			 VALUES (?, ?, ?, NULL, ?, 12, 'stripe', 1, ?, 'otro@ejemplo.test', 1, 1);`,
@@ -178,10 +176,10 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 
 	it("no renueva hacia una clave sin estrenar", async () => {
 		const { seed, pub } = await clave(3);
-		await escenario("aud03-sin-estrenar", { pubDeLaHandy: pub }, async (sql) => {
-			otraFila(sql, { id: "lic-nueva", hash: "hash-nueva", tenant: null, status: "issued" });
+		await escenario({ pubDeLaHandy: pub }, async (central) => {
+			await otraFila(central, { id: "lic-nueva", hash: "hash-nueva", tenant: null, status: "issued" });
 
-			const res = await renovar(LA_HANDY, seed, "hash-nueva");
+			const res = await renovar(central, LA_HANDY, seed, "hash-nueva");
 			expect(res.status).toBe(404);
 			const cuerpo = (await res.json()) as any;
 			expect(cuerpo.error).toBe("license_not_found");
@@ -191,10 +189,10 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 
 	it("ni hacia una clave ya canjeada", async () => {
 		const { seed, pub } = await clave(3);
-		await escenario("aud03-canjeada", { pubDeLaHandy: pub }, async (sql) => {
-			otraFila(sql, { id: "lic-canjeada", hash: "hash-canjeada", tenant: null, status: "redeemed" });
+		await escenario({ pubDeLaHandy: pub }, async (central) => {
+			await otraFila(central, { id: "lic-canjeada", hash: "hash-canjeada", tenant: null, status: "redeemed" });
 
-			const res = await renovar(LA_HANDY, seed, "hash-canjeada");
+			const res = await renovar(central, LA_HANDY, seed, "hash-canjeada");
 			expect(res.status).toBe(404);
 			expect(((await res.json()) as any).error).toBe("license_not_found");
 		});
@@ -202,11 +200,11 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 
 	it("ni hacia la licencia de otro negocio, y sin aserción que hable de ella", async () => {
 		const { seed, pub } = await clave(3);
-		await escenario("aud03-ajena", { pubDeLaHandy: pub }, async (sql) => {
-			sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
-			otraFila(sql, { id: "lic-ajena", hash: "hash-ajena", tenant: "tenant-otro", status: "active" });
+		await escenario({ pubDeLaHandy: pub }, async (central) => {
+			await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
+			await otraFila(central, { id: "lic-ajena", hash: "hash-ajena", tenant: "tenant-otro", status: "active" });
 
-			const res = await renovar(LA_HANDY, seed, "hash-ajena");
+			const res = await renovar(central, LA_HANDY, seed, "hash-ajena");
 			expect(res.status).toBe(404);
 			const cuerpo = (await res.json()) as any;
 			expect(cuerpo.error).toBe("license_not_found");

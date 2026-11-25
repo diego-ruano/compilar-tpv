@@ -1,33 +1,29 @@
 // test/reservasWebPuerta.test.ts
 //
 // Reservas desde la web (docs/estudios/reservas-web.md §4.1): la puerta de las rutas públicas, que
-// no llevan `tenantAuth`. Lo que se fija aquí es quién pasa y quién no, contra la estructura de
-// verdad de la base central:
+// no llevan `tenantAuth`. Lo que se fija aquí es quién pasa y quién no, contra una base central de
+// verdad (`helpers/central.ts`):
 //   · una clave inexistente, revocada o de un negocio sin licencia, suspendido o con el interruptor
 //     apagado da siempre el mismo `reserva_web_no_disponible`, sin decir por qué;
 //   · los limitadores cortan con 429;
 //   · el alta exige Turnstile y, sin el secreto configurado, queda cerrada.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-let dbDePruebas: any = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
-const { claveDelNegocio, olvidarClavesCacheadas } = await import("../src/domains/reservas_web/claves");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const { olvidarInterruptoresCacheados } = await import("../src/lib/interruptores");
-const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo, huellasDeLaConexion } = await import(
-	"../src/domains/reservas_web/puerta"
-);
+import { centralDePrueba, centralQueApunta, filasDe, type CentralDePrueba } from "./helpers/central";
+import { claveDelNegocio, olvidarClavesCacheadas } from "../src/domains/reservas_web/claves";
+import {
+	huellasDeLaConexion,
+	limitadorAltas,
+	puertaPublica,
+	topeDelCuerpo,
+	turnstileValido,
+	verificacionHumana,
+} from "../src/domains/reservas_web/puerta";
+import { olvidarInterruptoresCacheados } from "../src/lib/interruptores";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
+import { redAmpliaIpv6 } from "../src/lib/limitador";
 
 const app = new Hono<any>();
 app.get("/p/:clave/negocio", puertaPublica, (c) => c.json({ ok: true, tenant: c.get("tenantId") }));
@@ -44,27 +40,39 @@ beforeEach(() => {
 	olvidarInterruptoresCacheados();
 });
 
-/** Un negocio activo con su licencia en vigor y su clave; la prueba recibe la clave. */
-async function escenario(nombre: string, prueba: (clave: string, sql: any) => Promise<void>) {
-	await enElHub(`rw-puerta-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		dbDePruebas = clienteSobre(sql);
-		sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('t1', 'active');`);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled,
-			                       term_months, origin, issued_at_ms, expires_at_ms, customer_email,
-			                       created_at_ms, updated_at_ms)
-			 VALUES ('l1', 'h1', 't1', 'main-1', 'active', 0, 12, 'admin', 0, ?, 'a@b.es', 0, 0);`,
-			Date.now() + 90 * DIA,
-		);
-		const clave = await claveDelNegocio(dbDePruebas, "t1", Date.now());
-		await prueba(clave, sql);
-	});
-}
+type Escenario = {
+	clave: string;
+	central: CentralDePrueba;
+	/** Pide `ruta` a la `app`, con la base central del escenario y lo que añada `env`. */
+	pedir: (ruta: string, init?: RequestInit, env?: Record<string, unknown>) => Promise<Response>;
+	/** Lee el negocio de la clave `clave` por la puerta. */
+	leer: (clave: string, env?: Record<string, unknown>) => Promise<Response>;
+	/** Ejecuta SQL en la base central, por debajo de sus guardas. */
+	enCentral: (sql: string, ...args: unknown[]) => Promise<unknown>;
+};
 
-async function leer(clave: string, env: any = {}) {
-	return app.request(`/p/${clave}/negocio`, {}, env);
+/** Un negocio activo con su licencia en vigor y su clave, en una base central propia. */
+async function escenario(prueba: (e: Escenario) => Promise<void>) {
+	const central = await centralDePrueba();
+	await filasDe(central, `INSERT INTO tenants (tenant_id, status) VALUES ('t1', 'active');`);
+	await filasDe(
+		central,
+		`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled,
+		                       term_months, origin, issued_at_ms, expires_at_ms, customer_email,
+		                       created_at_ms, updated_at_ms)
+		 VALUES ('l1', 'h1', 't1', 'main-1', 'active', 0, 12, 'admin', 0, ?, 'a@b.es', 0, 0);`,
+		Date.now() + 90 * DIA,
+	);
+	const clave = await claveDelNegocio(central.db, "t1", Date.now());
+	const pedir = async (ruta: string, init: RequestInit = {}, env: Record<string, unknown> = {}) =>
+		app.request(ruta, init, { ...central.entorno, ...env });
+	await prueba({
+		clave,
+		central,
+		pedir,
+		leer: (clave, env) => pedir(`/p/${clave}/negocio`, {}, env),
+		enCentral: (sql, ...args) => filasDe(central, sql, ...args),
+	});
 }
 
 async function noDisponible(res: Response) {
@@ -74,7 +82,7 @@ async function noDisponible(res: Response) {
 
 describe("la puerta pública de la reserva web", () => {
 	it("deja pasar a un negocio activo, con licencia y con su clave, y fija su tenant", async () => {
-		await escenario("pasa", async (clave) => {
+		await escenario(async ({ clave, leer }) => {
 			const res = await leer(clave);
 			expect(res.status).toBe(200);
 			expect(await res.json()).toEqual({ ok: true, tenant: "t1" });
@@ -82,39 +90,39 @@ describe("la puerta pública de la reserva web", () => {
 	});
 
 	it("una clave inventada o revocada no lleva a ningún sitio", async () => {
-		await escenario("clave", async (clave, sql) => {
+		await escenario(async ({ clave, leer, enCentral }) => {
 			await noDisponible(await leer("rw_AAAAAAAAAAAAAAAAAAAAAA"));
 			await noDisponible(await leer("t1"));
-			sql.exec(`UPDATE reserva_web_claves SET revoked_at_ms = 1 WHERE clave = ?;`, clave);
+			await enCentral(`UPDATE reserva_web_claves SET revoked_at_ms = 1 WHERE clave = ?;`, clave);
 			olvidarClavesCacheadas();
 			await noDisponible(await leer(clave));
 		});
 	});
 
 	it("sin licencia en vigor no se reserva: caducada del todo, revocada o sin activar", async () => {
-		await escenario("licencia", async (clave, sql) => {
+		await escenario(async ({ clave, leer, enCentral }) => {
 			// Caducada, pero dentro de la gracia: el TPV sigue vendiendo, y la web también.
-			sql.exec(`UPDATE licenses SET expires_at_ms = ? WHERE license_id = 'l1';`, Date.now() - DIA);
+			await enCentral(`UPDATE licenses SET expires_at_ms = ? WHERE license_id = 'l1';`, Date.now() - DIA);
 			expect((await leer(clave)).status).toBe(200);
 
-			sql.exec(`UPDATE licenses SET expires_at_ms = ? WHERE license_id = 'l1';`, Date.now() - 400 * DIA);
+			await enCentral(`UPDATE licenses SET expires_at_ms = ? WHERE license_id = 'l1';`, Date.now() - 400 * DIA);
 			olvidarLicenciasCacheadas();
 			await noDisponible(await leer(clave));
 
-			sql.exec(`UPDATE licenses SET expires_at_ms = ?, status = 'revoked', disabled = 1;`, Date.now() + DIA);
+			await enCentral(`UPDATE licenses SET expires_at_ms = ?, status = 'revoked', disabled = 1;`, Date.now() + DIA);
 			olvidarLicenciasCacheadas();
 			await noDisponible(await leer(clave));
 
-			sql.exec(`UPDATE licenses SET status = 'active', disabled = 0, main_device_id = NULL;`);
+			await enCentral(`UPDATE licenses SET status = 'active', disabled = 0, main_device_id = NULL;`);
 			olvidarLicenciasCacheadas();
 			await noDisponible(await leer(clave));
 		});
 	});
 
 	it("un negocio suspendido o dado de baja no atiende reservas aunque la licencia siga en vigor", async () => {
-		await escenario("suspendido", async (clave, sql) => {
+		await escenario(async ({ clave, leer, enCentral }) => {
 			for (const estado of ["suspended", "deleted"]) {
-				sql.exec(`UPDATE tenants SET status = ? WHERE tenant_id = 't1';`, estado);
+				await enCentral(`UPDATE tenants SET status = ? WHERE tenant_id = 't1';`, estado);
 				olvidarLicenciasCacheadas();
 				await noDisponible(await leer(clave));
 			}
@@ -122,10 +130,10 @@ describe("la puerta pública de la reserva web", () => {
 	});
 
 	it("el interruptor `reservas_web` la cierra, para ese negocio o para todos", async () => {
-		await escenario("interruptor", async (clave, sql) => {
+		await escenario(async ({ clave, leer, enCentral }) => {
 			for (const tenant of ["t1", "*"]) {
-				sql.exec(`DELETE FROM interruptores;`);
-				sql.exec(
+				await enCentral(`DELETE FROM interruptores;`);
+				await enCentral(
 					`INSERT INTO interruptores (interruptor_id, interruptor, tenant_id, motivo, expires_at_ms)
 					 VALUES (?, 'reservas_web', ?, 'prueba', ?);`,
 					`i-${tenant}`,
@@ -136,26 +144,28 @@ describe("la puerta pública de la reserva web", () => {
 				await noDisponible(await leer(clave));
 			}
 			// Apagado otro negocio: éste sigue abierto.
-			sql.exec(`UPDATE interruptores SET tenant_id = 't2';`);
+			await enCentral(`UPDATE interruptores SET tenant_id = 't2';`);
 			olvidarInterruptoresCacheados();
 			expect((await leer(clave)).status).toBe(200);
 		});
 	});
 
 	it("el limitador corta con 429 antes de mirar la clave", async () => {
-		await escenario("limitador", async () => {
+		await escenario(async ({ central, leer }) => {
+			const espia = centralQueApunta(central);
 			const lleno = { limit: async () => ({ success: false }) };
 			// Una clave inventada da 429 y no 404: el barrido de claves se frena antes de la base.
-			const res = await leer("rw_AAAAAAAAAAAAAAAAAAAAAA", { LIMITADOR_RESERVA_WEB: lleno });
+			const res = await leer("rw_AAAAAAAAAAAAAAAAAAAAAA", { LIMITADOR_RESERVA_WEB: lleno, ...espia.entorno });
 			expect(res.status).toBe(429);
 			expect(((await res.json()) as any).error).toBe("reserva_web_demasiadas");
+			expect(espia.pedido).toEqual([]);
 		});
 	});
 
 	it("el alta tiene su propio limitador, además del de las lecturas", async () => {
-		await escenario("limitador-alta", async (clave) => {
+		await escenario(async ({ clave, pedir }) => {
 			const lleno = { limit: async () => ({ success: false }) };
-			const res = await app.request(
+			const res = await pedir(
 				`/p/${clave}/reservas`,
 				{ method: "POST", headers: { "X-Turnstile-Token": "x" } },
 				{ LIMITADOR_RESERVA_WEB_ALTA: lleno, TURNSTILE_SECRET_KEY: "s" },
@@ -165,9 +175,9 @@ describe("la puerta pública de la reserva web", () => {
 	});
 
 	it("un cuerpo de más de 8 KB no se lee", async () => {
-		await escenario("tope-cuerpo", async (clave) => {
+		await escenario(async ({ clave, pedir }) => {
 			const enviar = (n: number) =>
-				app.request(`/p/${clave}/cancelar`, { method: "POST", headers: { "content-type": "application/json" }, body: "x".repeat(n) }, {});
+				pedir(`/p/${clave}/cancelar`, { method: "POST", headers: { "content-type": "application/json" }, body: "x".repeat(n) });
 			expect((await enviar(8 * 1024)).status).toBe(200);
 			const grande = await enviar(8 * 1024 + 1);
 			expect(grande.status).toBe(413);
@@ -176,12 +186,12 @@ describe("la puerta pública de la reserva web", () => {
 	});
 
 	it("sin el secreto de Turnstile el alta queda cerrada, y sin token no se pasa", async () => {
-		await escenario("turnstile", async (clave) => {
-			const sinSecreto = await app.request(`/p/${clave}/reservas`, { method: "POST" }, {});
+		await escenario(async ({ clave, pedir }) => {
+			const sinSecreto = await pedir(`/p/${clave}/reservas`, { method: "POST" });
 			expect(sinSecreto.status).toBe(503);
 			expect(((await sinSecreto.json()) as any).error).toBe("reserva_web_no_disponible");
 
-			const sinToken = await app.request(`/p/${clave}/reservas`, { method: "POST" }, { TURNSTILE_SECRET_KEY: "s" });
+			const sinToken = await pedir(`/p/${clave}/reservas`, { method: "POST" }, { TURNSTILE_SECRET_KEY: "s" });
 			expect(sinToken.status).toBe(403);
 			expect(((await sinToken.json()) as any).error).toBe("verificacion_humana_fallida");
 		});
@@ -255,7 +265,6 @@ describe("la huella de la conexión de un alta (RW-ALTAS)", () => {
 		expect(await red("198.51.100.7")).toBeNull();
 		expect(await red("::ffff:198.51.100.7")).toBeNull();
 
-		const { redAmpliaIpv6 } = await import("../src/lib/limitador");
 		expect(redAmpliaIpv6("2001:0DB8:0001:0002::1")).toBe("2001:db8:1::/48");
 		expect(redAmpliaIpv6("[2001:db8::1%eth0]")).toBe("2001:db8:0::/48");
 		expect(redAmpliaIpv6("198.51.100.7")).toBeNull();

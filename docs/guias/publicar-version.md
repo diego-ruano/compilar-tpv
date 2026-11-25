@@ -262,8 +262,9 @@ contando hasta liberarlo ([recuperacion.md](../arquitectura/recuperacion.md#tras
 
 - **Esquema del tenant**: ver [esquema.md](../arquitectura/esquema.md#cambiar-el-esquema). Se
   **despliega el worker antes** de publicar la versión que escribe la columna nueva.
-- **Base central**: las tablas y columnas nuevas se crean **a mano en Turso antes** de desplegar el
-  worker que las usa, y se reflejan en `docs/sql/control-plane/esquema-actual.sql`.
+- **Base central**: las tablas y columnas nuevas van en una migración nueva de la central
+  (`apps/cloud-worker-licensing/src/server/central/migraciones/`), aditiva, y se **despliegan antes**
+  que el código que las usa: en un despliegue aparte y anterior.
 
 El job `deploy-worker` del tag hace ese despliegue antes de publicar el instalador; no se vuelve
 a compilar ni se publica con un `wrangler deploy` manual que omita las comprobaciones de Sentry.

@@ -63,7 +63,8 @@ No sale nada a internet ni gasta cuota.
 - la CLI de Turso en el WSL (usa `~/.turso/sqld`).
 
 **Qué monta:**
-- Un `sqld` en el WSL con la base central, cargada con `docs/sql/control-plane/esquema-actual.sql`.
+- Un `sqld` en el WSL con la base central, cargada con su primera migración
+  (`apps/cloud-worker-licensing/src/server/central/migraciones/0001_inicial.sql`).
 - Delante del `sqld`, un proxy que suma las filas leídas y escritas de cada paso. Son las que factura
   Turso, contadas por el mismo motor.
 - El worker empaquetado con `wrangler deploy --dry-run` y arrancado con `wrangler dev --local`, sin

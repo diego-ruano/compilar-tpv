@@ -18,8 +18,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -195,7 +195,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 				const hash = await hashPin(PIN_BUENO);
 				crearUsuario(sql, "user-1", hash);
 				crearUsuario(sql, "user-2", hash);
-				dbActual = conLatencia(clienteSobre(sql), 2);
+				dbActual = conLatencia(clienteLocal(hub.state.storage), 2);
 				try {
 					// A la vez, contra user-1.
 					const respuestas = await Promise.all(PINES_MALOS.map((pin) => intentar(ruta, "user-1", pin)));
@@ -232,7 +232,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-3", "h");
-			const db = conLatencia(clienteSobre(sql), 2) as any;
+			const db = conLatencia(clienteLocal(hub.state.storage), 2) as any;
 			try {
 				const reservas = await Promise.all(Array.from({ length: 10 }, () => q.reservarIntento(db, "user-3")));
 				const ahora = Date.now();
@@ -258,7 +258,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-4", "h");
-			const db = clienteSobre(sql) as any;
+			const db = clienteLocal(hub.state.storage);
 			try {
 				// Cuatro fallos previos, sin bloqueo todavía.
 				for (let i = 0; i < 4; i++) expect((await q.reservarIntento(db, "user-4")).concedido).toBe(true);
@@ -295,7 +295,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 				crearEsquemaTenant(sql);
 				crearUsuario(sql, "user-9", await hashPin(PIN_BUENO));
 				// Lo que se queda por el camino es el borrado del recuento, no la reserva.
-				const puerta = conPuerta(clienteSobre(sql), /DELETE FROM Intentos_Login/);
+				const puerta = conPuerta(clienteLocal(hub.state.storage), /DELETE FROM Intentos_Login/);
 				dbActual = puerta.db;
 				try {
 					// A y B aciertan a la vez: reservan, verifican, y sus borrados no llegan todavía.
@@ -330,7 +330,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-10", "h");
-			const db = clienteSobre(sql) as any;
+			const db = clienteLocal(hub.state.storage);
 			try {
 				const ahora = Date.now();
 				const reservar = async () => {
@@ -368,7 +368,7 @@ describe("AUD-05 · el freno de LOGIN-01 con intentos simultáneos", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-5", await hashPin(PIN_BUENO));
-			dbActual = clienteSobre(sql);
+			dbActual = clienteLocal(hub.state.storage);
 			try {
 				for (let i = 0; i < LIBRES + 1; i++) expect((await intentar("login", "user-5", "1000")).status).toBe(401);
 				const bloqueada = fila(sql, "user-5");
@@ -391,7 +391,7 @@ describe("AUD-05 · uno detrás de otro, lo de siempre", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-6", await hashPin(PIN_BUENO));
-			dbActual = clienteSobre(sql);
+			dbActual = clienteLocal(hub.state.storage);
 			try {
 				expect((await intentar("login", "user-6", "1000")).status).toBe(401);
 				// Un fallo contado y ningún bloqueo en vigor.
@@ -420,7 +420,7 @@ describe("AUD-05 · uno detrás de otro, lo de siempre", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-7", "h");
-			const db = clienteSobre(sql) as any;
+			const db = clienteLocal(hub.state.storage);
 			try {
 				// El reloj lo lleva el test: cada intento llega justo cuando vence el bloqueo anterior.
 				let ahora = Date.now();
@@ -457,7 +457,7 @@ describe("AUD-05 · uno detrás de otro, lo de siempre", () => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
 			crearUsuario(sql, "user-8", await hashPin(PIN_BUENO), 1);
-			dbActual = clienteSobre(sql);
+			dbActual = clienteLocal(hub.state.storage);
 			try {
 				const hasta = Date.now() + 15 * 60_000;
 				sql.exec(

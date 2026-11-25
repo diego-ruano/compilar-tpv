@@ -7,29 +7,17 @@
 // letra al teclear la clave le decía que no tenía licencia.
 //
 // Aquí se fija la regla de la clave contra la tabla que comparte con la Main y con la pantalla
-// (`crates/tpv-domain/src/clave_licencia_casos.json`), y lo que contesta la ruta a cada caso.
+// (`crates/tpv-domain/src/clave_licencia_casos.json`), y lo que contesta la ruta a cada caso, con una
+// base central de verdad (`helpers/central.ts`).
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import tabla from "../../../crates/tpv-domain/src/clave_licencia_casos.json";
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-/** La conexión del test en curso; la lee el `getDb` simulado. */
-let clienteActual: any = null;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => clienteActual,
-}));
-
-const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
-const { CLAVE_DESCONOCIDA, generateLicenseKey, normalizeLicenseKey } = await import(
-	"../src/domains/licensing/licenseKey"
-);
-const { MENSAJES, SIN_MENSAJE_PROPIO, wireToCode } = await import("../src/lib/errorCodes");
+import { centralDePrueba } from "./helpers/central";
+import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
+import { CLAVE_DESCONOCIDA, generateLicenseKey, normalizeLicenseKey } from "../src/domains/licensing/licenseKey";
+import { MENSAJES, SIN_MENSAJE_PROPIO, wireToCode } from "../src/lib/errorCodes";
 
 const ENV = {
 	LICENSE_STORE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
@@ -38,10 +26,6 @@ const ENV = {
 } as any;
 
 const CLAVE_EQUIPO = await clavePublica(61);
-
-beforeEach(() => {
-	clienteActual = null;
-});
 
 describe("LIC-INC-01 · la forma de la clave, la misma que en la Main y en la pantalla", () => {
 	it.each(tabla.casos as Array<[string, string | null, string]>)("%j → %j (%s)", (entrada, canonica) => {
@@ -62,20 +46,16 @@ describe("LIC-INC-01 · la forma de la clave, la misma que en la Main y en la pa
 });
 
 describe("LIC-INC-01 · lo que contesta /v1/license/activate", () => {
+	/** Pide la activación con `activationKey` contra una base central nueva, sin licencias. */
 	async function activar(activationKey: string) {
-		return enElHub(`lic-inc-01-${Math.random()}`, async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			prepararPlanoDeControl(sql);
-			for (const t of ["licenses", "tenants", "devices"]) sql.exec(`DELETE FROM ${t};`);
-			clienteActual = clienteSobre(sql, hub.state.storage);
-			const res = await licenseRoutes.request(
-				"/activate",
-				await activacionFirmada({ activationKey, deviceId: "equipo-lic-inc-01", devicePubKey: CLAVE_EQUIPO }),
-				ENV,
-				{ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} } as any,
-			);
-			return { status: res.status, body: (await res.json()) as any };
-		});
+		const central = await centralDePrueba();
+		const res = await licenseRoutes.request(
+			"/activate",
+			await activacionFirmada({ activationKey, deviceId: "equipo-lic-inc-01", devicePubKey: CLAVE_EQUIPO }),
+			{ ...ENV, ...central.entorno },
+			{ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} } as any,
+		);
+		return { status: res.status, body: (await res.json()) as any };
 	}
 
 	it("una clave mal escrita: 400 invalid_license_key_format, no «No hay una licencia activa»", async () => {

@@ -15,8 +15,8 @@
 //     caché, la segunda petición no llega; con un secreto, una petición inventada no llega; y la que
 //     dice no tocarla, no la toca.
 //
-// Los viajes se cuentan en el cliente de la central que da `getDb` y en el espacio `BaseCentral` del
-// entorno de la petición (lo que se pida con `centralDe(c.env)`). Lo que lean desde dentro un
+// Los viajes se cuentan en el espacio `BaseCentral` del entorno de la petición: cada viaje del Worker
+// pide su objeto con `centralDe(c.env)`, también los de `getDb`. Lo que lean desde dentro un
 // TenantHub o una AgendaWeb, con su propio entorno, no se ve: con el limitador cerrado tampoco llega
 // a ellos, pero una caché o un «no la toca» de una ruta así no se podría comprobar aquí.
 //
@@ -34,59 +34,44 @@ import { COMPOSED_HANDLER } from "hono/utils/constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import configuracionDelWorker from "../wrangler.json";
-import { centralDePrueba } from "./helpers/central";
-
-let central: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => central };
-});
-
-const { app } = await import("../src/app");
-const { tenantAuth } = await import("../src/middleware/tenant");
-const { requireAdmin } = await import("../src/middleware/requireAdmin");
-const { clienteCentral } = await import("../src/server/central/cliente");
-const { DEMASIADAS_PETICIONES } = await import("../src/lib/limitador");
-const { olvidarSalud } = await import("../src/server/salud");
-const { olvidarLoQueLeeElFeed } = await import("../src/domains/updates/updates.routes");
-const { negocioCacheado, negocioDeLaClave, olvidarClavesCacheadas } = await import(
-	"../src/domains/reservas_web/claves"
-);
-const { centralDe } = await import("../src/lib/objetosDelNegocio");
+import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
+import { app } from "../src/app";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import { tenantAuth } from "../src/middleware/tenant";
+import { requireAdmin } from "../src/middleware/requireAdmin";
+import { DEMASIADAS_PETICIONES } from "../src/lib/limitador";
+import { olvidarSalud } from "../src/server/salud";
+import { olvidarLoQueLeeElFeed } from "../src/domains/updates/updates.routes";
+import { negocioCacheado, negocioDeLaClave, olvidarClavesCacheadas } from "../src/domains/reservas_web/claves";
+import { centralDe } from "../src/lib/objetosDelNegocio";
+import { getDb } from "../src/server/db";
 
 const env = entorno as any;
 
 // ── La base central que cuenta los viajes ─────────────────────────────────────
 
+/** La base central del caso: aprovisionada y vacía (`beforeEach`). */
+let central: CentralDePrueba;
+/** Por donde le llegan las peticiones: la central tal cual, o vista a través de su stub (`centralInterceptada`). */
+let vista: CentralDePrueba;
 let viajes = 0;
 
-/** Una base central aprovisionada y vacía, cuyo cliente cuenta cada viaje al objeto. */
-async function centralQueCuenta(): Promise<void> {
-	const nombre = `central-anonimas-${crypto.randomUUID()}`;
-	await centralDePrueba(nombre);
-	const id = env.BaseCentral.idFromName(nombre);
-	central = clienteCentral(() => {
-		viajes++;
-		return env.BaseCentral.get(id);
-	});
-	viajes = 0;
-}
-
 /**
- * El espacio `BaseCentral` del entorno de cada petición, contando cada objeto que se le pide: lo que
- * llegue a la central desde el Worker sin pasar por `getDb` (`centralDe(c.env)`).
+ * El espacio `BaseCentral` del entorno de cada petición, el de `vista`, contando cada objeto que se
+ * le pide: cada viaje a la central desde el Worker pide el suyo (`centralDe(c.env)`).
  */
-const baseCentralQueCuenta = new Proxy(env.BaseCentral, {
-	get(espacio, nombre) {
-		const valor = Reflect.get(espacio, nombre);
-		if (typeof valor !== "function") return valor;
-		return (...args: unknown[]) => {
-			if (nombre === "get" || nombre === "getByName") viajes++;
-			return valor.apply(espacio, args);
-		};
-	},
-});
+function espacioQueCuenta(): unknown {
+	return new Proxy(vista.entorno.BaseCentral, {
+		get(espacio, nombre) {
+			const valor = Reflect.get(espacio, nombre);
+			if (typeof valor !== "function") return valor;
+			return (...args: unknown[]) => {
+				if (nombre === "get" || nombre === "getByName") viajes++;
+				return valor.apply(espacio, args);
+			};
+		},
+	});
+}
 
 // ── Las rutas de la app ───────────────────────────────────────────────────────
 
@@ -167,7 +152,7 @@ function peticionAnonima(ruta: string, cabeceras: Record<string, string> = {}): 
 const entornoDeLaPeticion = (extra: Record<string, unknown> = {}) => ({
 	...env,
 	...ABIERTOS,
-	BaseCentral: baseCentralQueCuenta,
+	BaseCentral: espacioQueCuenta(),
 	...extra,
 });
 
@@ -238,7 +223,9 @@ beforeEach(async () => {
 	olvidarSalud();
 	olvidarLoQueLeeElFeed();
 	olvidarClavesCacheadas();
-	await centralQueCuenta();
+	central = await centralDePrueba();
+	vista = central;
+	viajes = 0;
 });
 
 describe("toda ruta que no está autenticada está en la lista, con lo que la protege", () => {
@@ -256,9 +243,11 @@ describe("toda ruta que no está autenticada está en la lista, con lo que la pr
 		}
 	});
 
-	it("el contador ve también lo que se pide con `centralDe`, sin pasar por `getDb`", () => {
+	it("el contador ve cada objeto que se pide con `centralDe`, también los viajes de `getDb`", async () => {
 		centralDe(entornoDeLaPeticion());
 		expect(viajes).toBe(1);
+		await getDb(entornoDeLaPeticion()).execute("SELECT 1;");
+		expect(viajes).toBe(2);
 	});
 
 	it("las autenticadas no llegan a la central con un token inventado", async () => {
@@ -333,7 +322,7 @@ describe("lo que protege a cada una, comprobado", () => {
 
 describe("el feed de actualizaciones no vuelve a la central por petición", () => {
 	const publicar = (version: string, channel: "stable" | "beta") =>
-		(central as any).execute({
+		central.db.execute({
 			sql: `INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature, url, is_active)
 			      VALUES (?1, 'windows', 'x86_64', ?2, '', '2026-01-01', ?3, ?4, 1);`,
 			args: [version, channel, `sig-${version}`, `https://cdn.test/${version}.exe`],
@@ -384,39 +373,31 @@ describe("el feed de actualizaciones no vuelve a la central por petición", () =
 	});
 
 	it("si la central falla, no se guarda nada: la siguiente petición vuelve a preguntar", async () => {
-		const buena = central;
-		central = clienteCentral(() => {
-			viajes++;
-			return {
-				ejecutar: async () => ({ ok: false, error: "central_error_sql", detalle: "prueba" }),
-			} as any;
-		});
+		// La central contesta que la sentencia ha fallado.
+		vista = centralInterceptada(central, async () => ({ ok: false, error: "central_error_sql", detalle: "prueba" }));
 		const res = await app.request("https://tpv-api.test/v1/update/windows/x86_64/0.9.0", {}, entornoDeLaPeticion());
 		expect(res.status).toBe(500);
+		expect(viajes).toBe(1);
 
-		central = buena;
+		vista = central;
 		await publicar("1.0.0", "stable");
 		expect(await feed("windows/x86_64/0.9.0")).toBe("1.0.0");
 	});
 
 	it("lo que se estaba leyendo al publicar no vuelve a guardar lo de antes", async () => {
 		await publicar("1.0.0", "stable");
-		const real = central as any;
 		let retenida = false;
 		let soltar!: () => void;
 		const suelta = new Promise<void>((r) => (soltar = r));
 		// La lectura de las versiones ya se ha hecho; lo que tarda es que llegue su respuesta.
-		central = {
-			...real,
-			async execute(s: any) {
-				const r = await real.execute(s);
-				if (!retenida && /FROM app_releases/.test(typeof s === "string" ? s : s.sql)) {
-					retenida = true;
-					await suelta;
-				}
-				return r;
-			},
-		};
+		vista = centralInterceptada(central, async (metodo, [sentencia], llamar) => {
+			const r = await llamar();
+			if (!retenida && metodo === "ejecutar" && /FROM app_releases/.test((sentencia as SentenciaEnlazada).sql)) {
+				retenida = true;
+				await suelta;
+			}
+			return r;
+		});
 
 		const enCurso = feed("windows/x86_64/0.9.0");
 		await vi.waitFor(() => expect(retenida).toBe(true));
@@ -443,44 +424,50 @@ describe("las claves inventadas de la reserva web no vacían la caché de las bu
 	const BUENA = `rw_${"b".repeat(22)}`;
 	const inventada = (i: number) => `rw_${i.toString().padStart(22, "0")}`;
 
-	/** Una base central con una sola clave, que cuenta las consultas. */
-	function baseConUnaClave() {
+	// Cada clave que no está en la caché es un viaje de verdad a la central: las pruebas de miles de
+	// claves tardan unos segundos, y llevan su plazo.
+
+	/** La base central del caso con una sola clave, y las claves por las que se le pregunta, en orden. */
+	async function baseConUnaClave() {
+		await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('negocio-bueno');`);
+		await filasDe(
+			central,
+			`INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES (?, 'negocio-bueno', 1);`,
+			BUENA,
+		);
 		const consultas: string[] = [];
-		const db = {
-			execute: async (s: any) => {
-				const clave = s.args[0];
-				consultas.push(clave);
-				return { rows: clave === BUENA ? [{ tenant_id: "negocio-bueno" }] : [], columns: [], rowsAffected: 0, lastInsertRowid: null };
-			},
-		};
+		const { db } = centralInterceptada(central, (metodo, [sentencia], llamar) => {
+			if (metodo === "ejecutar") consultas.push(String((sentencia as SentenciaEnlazada).args[0]));
+			return llamar();
+		});
 		return { db, consultas };
 	}
 
 	it("miles de claves inventadas: la buena sigue en la caché y no vuelve a la base", async () => {
-		const { db, consultas } = baseConUnaClave();
-		expect(await negocioDeLaClave(db as any, BUENA)).toBe("negocio-bueno");
+		const { db, consultas } = await baseConUnaClave();
+		expect(await negocioDeLaClave(db, BUENA)).toBe("negocio-bueno");
 
-		for (let i = 0; i < 2500; i++) expect(await negocioDeLaClave(db as any, inventada(i))).toBeNull();
+		for (let i = 0; i < 2500; i++) expect(await negocioDeLaClave(db, inventada(i))).toBeNull();
 
 		consultas.length = 0;
 		expect(negocioCacheado(BUENA)).toBe("negocio-bueno");
-		expect(await negocioDeLaClave(db as any, BUENA)).toBe("negocio-bueno");
+		expect(await negocioDeLaClave(db, BUENA)).toBe("negocio-bueno");
 		expect(consultas).toEqual([]);
-	});
+	}, 60_000);
 
 	it("una clave que no vale se recuerda: la misma otra vez no vuelve a la base", async () => {
-		const { db, consultas } = baseConUnaClave();
-		expect(await negocioDeLaClave(db as any, inventada(1))).toBeNull();
-		expect(await negocioDeLaClave(db as any, inventada(1))).toBeNull();
+		const { db, consultas } = await baseConUnaClave();
+		expect(await negocioDeLaClave(db, inventada(1))).toBeNull();
+		expect(await negocioDeLaClave(db, inventada(1))).toBeNull();
 		expect(negocioCacheado(inventada(1))).toBeNull();
 		expect(consultas).toEqual([inventada(1)]);
 	});
 
 	it("la caché de las que no valen tiene tope: se olvidan las más antiguas", async () => {
-		const { db } = baseConUnaClave();
-		for (let i = 0; i < 1001; i++) await negocioDeLaClave(db as any, inventada(i));
+		const { db } = await baseConUnaClave();
+		for (let i = 0; i < 1001; i++) await negocioDeLaClave(db, inventada(i));
 		expect(negocioCacheado(inventada(0))).toBeUndefined();
 		expect(negocioCacheado(inventada(1))).toBeNull();
 		expect(negocioCacheado(inventada(1000))).toBeNull();
-	});
+	}, 60_000);
 });

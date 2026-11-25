@@ -11,23 +11,15 @@
 //     hoy (hoy es un upsert, RI-30, pero la fecha de una fila sigue sin decir qué versión es). El updater no la instalaría —no baja de versión— pero dejaría de ofrecer la buena, y un
 //     equipo recién instalado se queda clavado sin que nada lo diga.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+//
+// Cada caso siembra sus versiones en su propia base central de verdad (`helpers/central.ts`), y la
+// ruta llega a ella por `getDb(env)`.
+
+import { describe, it, expect, beforeEach } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-let clienteActual: any = null;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => clienteActual,
-}));
-
-const { updatesRoutes, compararVersiones, olvidarLoQueLeeElFeed } = await import(
-	"../src/domains/updates/updates.routes"
-);
+import { centralDePrueba, filasDe } from "./helpers/central";
+import { updatesRoutes, compararVersiones, olvidarLoQueLeeElFeed } from "../src/domains/updates/updates.routes";
 
 type Release = {
 	version: string;
@@ -39,40 +31,33 @@ type Release = {
 
 /** Siembra releases y pide el feed para `target/arch/current`. */
 async function feed(
-	nombre: string,
 	releases: Release[],
 	ruta: { target: string; arch: string; current: string },
 ): Promise<{ status: number; body: any }> {
-	return enElHub(`rev23-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec(`DELETE FROM app_releases;`);
+	const central = await centralDePrueba();
+	for (const r of releases) {
+		await filasDe(
+			central,
+			`INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature,
+			   url, is_active, created_at_ms)
+			 VALUES (?, ?, ?, 'stable', 'notas', '2026-01-01T00:00:00Z', ?, ?, ?, ?);`,
+			r.version,
+			r.target ?? "windows",
+			r.arch ?? "x86_64",
+			`sig-${r.version}`,
+			`https://cdn.test/${r.version}.exe`,
+			r.activa === false ? 0 : 1,
+			r.creada ?? 0,
+		);
+	}
 
-		for (const r of releases) {
-			sql.exec(
-				`INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature,
-				   url, is_active, created_at_ms)
-				 VALUES (?, ?, ?, 'stable', 'notas', '2026-01-01T00:00:00Z', ?, ?, ?, ?);`,
-				r.version,
-				r.target ?? "windows",
-				r.arch ?? "x86_64",
-				`sig-${r.version}`,
-				`https://cdn.test/${r.version}.exe`,
-				r.activa === false ? 0 : 1,
-				r.creada ?? 0,
-			);
-		}
-
-		clienteActual = clienteSobre(sql);
-		const app = new Hono();
-		app.route("/", updatesRoutes);
-		const res = await app.request(`/${ruta.target}/${ruta.arch}/${ruta.current}`, {}, {} as any);
-		return { status: res.status, body: res.status === 204 ? null : await res.json() };
-	});
+	const app = new Hono();
+	app.route("/", updatesRoutes);
+	const res = await app.request(`/${ruta.target}/${ruta.arch}/${ruta.current}`, {}, central.entorno);
+	return { status: res.status, body: res.status === 204 ? null : await res.json() };
 }
 
 beforeEach(() => {
-	clienteActual = null;
 	// Cada caso siembra sus versiones: lo que el feed se guardó en el caso anterior no vale.
 	olvidarLoQueLeeElFeed();
 });
@@ -83,7 +68,6 @@ describe("REV-23 · qué versión sirve el feed", () => {
 		// INSERT OR REPLACE).
 		// Con el orden por fecha, ésa pasaba a ser «la última» y la 1.10.0 dejaba de ofrecerse.
 		const { body } = await feed(
-			"por-version",
 			[
 				{ version: "1.10.0", creada: 100 },
 				{ version: "1.2.0", creada: 999 },
@@ -98,7 +82,6 @@ describe("REV-23 · qué versión sirve el feed", () => {
 	it("una versión desactivada no se sirve, y vuelve la anterior", async () => {
 		// El rollback instantáneo, que es el motivo de servir el feed nosotros.
 		const { body } = await feed(
-			"rollback",
 			[
 				{ version: "1.3.0", activa: false },
 				{ version: "1.2.0" },
@@ -111,7 +94,6 @@ describe("REV-23 · qué versión sirve el feed", () => {
 
 	it("cada arquitectura recibe la suya", async () => {
 		const { body } = await feed(
-			"arch",
 			[
 				{ version: "2.0.0", arch: "x86_64" },
 				{ version: "1.9.0", arch: "aarch64" },
@@ -125,7 +107,7 @@ describe("REV-23 · qué versión sirve el feed", () => {
 	});
 
 	it("sin release para esa arquitectura contesta 204, no la de otra", async () => {
-		const { status } = await feed("arch-vacia", [{ version: "2.0.0", arch: "x86_64" }], {
+		const { status } = await feed([{ version: "2.0.0", arch: "x86_64" }], {
 			target: "windows",
 			arch: "aarch64",
 			current: "1.0.0",
@@ -135,7 +117,7 @@ describe("REV-23 · qué versión sirve el feed", () => {
 	});
 
 	it("sin ninguna release contesta 204", async () => {
-		const { status } = await feed("vacio", [], {
+		const { status } = await feed([], {
 			target: "windows",
 			arch: "x86_64",
 			current: "1.0.0",

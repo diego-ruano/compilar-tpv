@@ -19,21 +19,14 @@
 // Y lo mismo por el camino desplegado: cada ruta con un veto de rol, pedida por una Handy con un
 // cuerpo que no vale a la `app` entera, se queda en el veto dentro del TenantHub (el último bloque).
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { conNegocioFirmado, HANDY, pedirComo } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../src/server/db")>()),
-	getDb: () => dbCentral,
-}));
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 /** Leer el fuente con `?raw` (Vite): dentro del pool de workers no hay `node:fs`. */
 const fuentes = import.meta.glob("../src/domains/**/*.routes.ts", {

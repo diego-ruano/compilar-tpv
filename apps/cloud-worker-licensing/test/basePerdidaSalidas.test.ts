@@ -10,28 +10,21 @@
 // Las dos sólo con un negocio que ha nacido y cuyo objeto está vacío, con el token de
 // administración, y dejando rastro en `admin_audit`. Y las dos abren el log de la réplica por encima
 // de lo que la Main pueda haber visto, como la vuelta a un instante (`tenantHub.instante.ts`). La
-// base central va sobre el SQLite de un DO; los TenantHub y el bucket son los de los tests.
+// base central es una de verdad para cada caso (`helpers/central.ts`); los TenantHub y el bucket son
+// los de los tests.
 
 import { env as entorno, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { PURGADO_HASTA } from "../src/domains/sync/cambiosJson";
 import { leerPaginaDeCambios } from "../src/domains/sync/sync.routes";
 import { claveDeCopia } from "../src/durableObjects/tenantHub.copia";
 import { SALTO_DE_SEQ } from "../src/durableObjects/tenantHub.instante";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
-
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
-const { adminRoutes } = await import("../src/domains/admin/admin.routes");
 
 const env = entorno as any;
 const TOKEN = "token-de-pruebas";
@@ -41,53 +34,66 @@ const ADMIN = "00000000-0000-7000-8000-000000000501";
 
 const stub = (tenantId: string) => env.TenantHub.get(env.TenantHub.idFromName(tenantId));
 
-async function pedir(ruta: string, cuerpo: unknown, token: string | null = TOKEN) {
+/** Una orden a la administración, con la base central `central` (sin ella, la del despliegue). */
+async function pedir(
+	ruta: string,
+	cuerpo: unknown,
+	token: string | null = TOKEN,
+	central: Partial<Pick<CentralDePrueba, "entorno">> = {},
+) {
 	const res = await adminRoutes.fetch(
 		new Request(`https://api${ruta}`, {
 			method: "POST",
 			headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" },
 			body: JSON.stringify(cuerpo),
 		}),
-		ENV,
+		{ ...ENV, ...central.entorno },
 	);
 	// Un fallo sin capturar sale del `onError` de Hono como texto: sin cuerpo que leer.
 	return { status: res.status, body: (await res.json().catch(() => null)) as any };
 }
 
 type Central = {
-	auditoria: () => string[];
-	nacer: (t: string) => void;
+	/** Una orden a la administración (`pedir`) con esta base central. */
+	pedir: (ruta: string, cuerpo: unknown) => ReturnType<typeof pedir>;
+	auditoria: () => Promise<string[]>;
+	nacer: (t: string) => Promise<void>;
 	/** Desde ahora, la base central falla al apuntar esa acción en `admin_audit`, y sólo ésa. */
 	fallarAlApuntar: (action: string) => void;
 	/** Y vuelve a contestar. */
 	contestar: () => void;
 };
 
-/** Corre `cuerpo` dentro del DO de la base central (su SQLite no se deja tocar desde fuera). */
-async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promise<R>): Promise<R> {
-	return enElHub(nombre, (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec("DELETE FROM admin_audit;");
-		dbDePruebas = clienteSobre(sql, hub.state.storage);
-		return cuerpo({
-			auditoria: () => sql.exec("SELECT action FROM admin_audit ORDER BY at_ms, rowid;").toArray().map((f: any) => f.action),
-			fallarAlApuntar: (action: string) =>
-				sql.exec(
-					`CREATE TRIGGER falla_al_apuntar BEFORE INSERT ON admin_audit WHEN NEW.action = '${action}'
-					 BEGIN SELECT RAISE(ABORT, 'la base central no contesta'); END;`,
-				),
-			contestar: () => sql.exec("DROP TRIGGER IF EXISTS falla_al_apuntar;"),
-			nacer: (t: string) =>
-				sql.exec(
-					`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled, term_months,
-					   origin, issued_at_ms, activated_at_ms, customer_email, created_at_ms, updated_at_ms)
-					 VALUES (?, ?, ?, 'la-main', 'active', 0, 12, 'stripe', 1, 1, 'bar@ejemplo.test', 1, 1);`,
-					`lic-${t}`,
-					`hash-${t}`,
-					t,
-				),
-		});
+/** Corre `cuerpo` con una base central nueva. Lo que se le hace fallar va en su stub. */
+async function conCentral<R>(cuerpo: (central: Central) => Promise<R>): Promise<R> {
+	const base = await centralDePrueba();
+	let fallarAlApuntar: string | null = null;
+	const vista = centralInterceptada(base, (metodo, [sentencia], llamar) => {
+		const { sql, args } = sentencia as SentenciaEnlazada;
+		return metodo === "ejecutar" &&
+			fallarAlApuntar !== null &&
+			/^\s*INSERT INTO admin_audit\b/.test(sql) &&
+			args.includes(fallarAlApuntar)
+			? Promise.reject(new Error("la base central no contesta"))
+			: llamar();
+	});
+	return cuerpo({
+		pedir: (ruta, c) => pedir(ruta, c, TOKEN, vista),
+		auditoria: async () =>
+			(await filasDe(base, "SELECT action FROM admin_audit ORDER BY at_ms, rowid;")).map((f) => String(f.action)),
+		fallarAlApuntar: (action) => void (fallarAlApuntar = action),
+		contestar: () => void (fallarAlApuntar = null),
+		nacer: async (t) => {
+			await filasDe(
+				base,
+				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled, term_months,
+				   origin, issued_at_ms, activated_at_ms, customer_email, created_at_ms, updated_at_ms)
+				 VALUES (?, ?, ?, 'la-main', 'active', 0, 12, 'stripe', 1, 1, 'bar@ejemplo.test', 1, 1);`,
+				`lic-${t}`,
+				`hash-${t}`,
+				t,
+			);
+		},
 	});
 }
 
@@ -142,14 +148,14 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 
 	it("base vacía: sólo para un negocio nacido y sin base, sin pasar por la activación, y abre el log", async () => {
 		const t = "perdida-vacia";
-		const r = await conCentral("perdida-central-vacia", async (central) => {
+		const r = await conCentral(async (central) => {
 			// Sin nacer: eso lo hace la activación de su licencia.
-			const sinNacer = await pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
-			central.nacer(t);
-			const creada = await pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
+			const sinNacer = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
+			await central.nacer(t);
+			const creada = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
 			// Con base ya no: no se pisa una base.
-			const otraVez = await pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
-			return { sinNacer, creada, otraVez, auditoria: central.auditoria() };
+			const otraVez = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
+			return { sinNacer, creada, otraVez, auditoria: await central.auditoria() };
 		});
 
 		expect(r.sinNacer).toMatchObject({ status: 409, body: { ok: false, error: "negocio_sin_nacer" } });
@@ -177,11 +183,11 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		const antes = await negocioConCopia(t);
 		await stub(t).borrarTodo(); // la base se pierde; la copia de R2, no
 
-		const r = await conCentral("perdida-central-copia", async (central) => {
-			central.nacer(t);
-			const restaurada = await pedir("/negocios/restaurar-copia", { tenantId: t, modo: "main", motivo: "borrado por error" });
-			const otraVez = await pedir("/negocios/restaurar-copia", { tenantId: t, modo: "main", motivo: "borrado por error" });
-			return { restaurada, otraVez, auditoria: central.auditoria() };
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
+			const restaurada = await central.pedir("/negocios/restaurar-copia", { tenantId: t, modo: "main", motivo: "borrado por error" });
+			const otraVez = await central.pedir("/negocios/restaurar-copia", { tenantId: t, modo: "main", motivo: "borrado por error" });
+			return { restaurada, otraVez, auditoria: await central.auditoria() };
 		});
 
 		expect(r.restaurada.status).toBe(200);
@@ -213,9 +219,9 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 
 	it("tras otra pérdida el log nuevo se abre por encima del perdido, que la Main ya ha bajado (DO-PERDIDA)", async () => {
 		const t = "perdida-dos-veces";
-		const r = await conCentral("perdida-central-dos-veces", async (central) => {
-			central.nacer(t);
-			const primera = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
+			const primera = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
 			// La base nueva numera lo que escriben las Handy, y la Main lo baja: su checkpoint ya pasa del salto.
 			const checkpoint = await enElHub(t, (hub: any) => {
 				const sql = hub.state.storage.sql;
@@ -231,7 +237,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			});
 			// Y se vuelve a perder, antes de que le dé tiempo a hacer una copia.
 			await stub(t).borrarTodo();
-			const segunda = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "otra vez" });
+			const segunda = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "otra vez" });
 			// Una Handy escribe en la base de ahora, y la Main pide desde su checkpoint.
 			const pagina = await enElHub(t, (hub: any) => {
 				hub.state.storage.sql.exec(
@@ -260,20 +266,20 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			const orden = { tenantId: t, modo: "main", motivo: "se perdió" };
 			if (ruta === "/negocios/restaurar-copia") await negocioConCopia(t); // su copia dice el 70
 			await stub(t).borrarTodo();
-			const r = await conCentral(`perdida-central-sin-rastro-${ruta.slice(10)}`, async (central) => {
-				central.nacer(t);
+			const r = await conCentral(async (central) => {
+				await central.nacer(t);
 				// El objeto abre el log, y la base central falla justo al apuntar la orden.
 				central.fallarAlApuntar(accion);
-				const fallida = await pedir(ruta, orden);
+				const fallida = await central.pedir(ruta, orden);
 				central.contestar();
 				const abierto = await enElHub(t, (hub: any) =>
 					Number(hub.state.storage.sql.exec("SELECT MAX(Seq) AS s FROM Sync_Changes WHERE Command_Name = 'nube_devuelta';").one().s),
 				);
 				// Repetirla no lo arregla: el objeto ya tiene base.
-				const repetida = await pedir(ruta, orden);
+				const repetida = await central.pedir(ruta, orden);
 				// La Main baja de ese log, y el objeto se vuelve a perder antes de la copia de la noche.
 				await stub(t).borrarTodo();
-				const siguiente = await pedir("/negocios/base-vacia", orden);
+				const siguiente = await central.pedir("/negocios/base-vacia", orden);
 				return { fallida, abierto, repetida, siguiente };
 			});
 
@@ -302,9 +308,9 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		await stub(t).borrarTodo();
 
 		// Sin rastro en la base central: lo sabe sólo la copia.
-		const r = await conCentral("perdida-central-copia-numerada", async (central) => {
-			central.nacer(t);
-			return pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
+			return central.pedir("/negocios/base-vacia", { tenantId: t, modo: "nube", motivo: "se perdió" });
 		});
 		expect(r.body).toMatchObject({ ok: true, inicio: numerado + SALTO_DE_SEQ, purgadoHasta: numerado + SALTO_DE_SEQ - 1 });
 		expect(r.body.seqConocido).toBe(numerado);
@@ -322,12 +328,12 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		const deOtraVersion = buena.replace(/^-- Migraciones: (.*)$/m, "-- Migraciones: $1,9999_del_futuro");
 		await bucket.put(claveDeCopia(t, "2026-01-02"), await gzip(deOtraVersion));
 
-		const r = await conCentral("perdida-central-copia-mala", async (central) => {
-			central.nacer(t);
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
 			return {
-				cortada: await pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-01", modo: "main", motivo: "abc" }),
-				otra: await pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-02", modo: "main", motivo: "abc" }),
-				noHay: await pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2025-01-01", modo: "main", motivo: "abc" }),
+				cortada: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-01", modo: "main", motivo: "abc" }),
+				otra: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2026-01-02", modo: "main", motivo: "abc" }),
+				noHay: await central.pedir("/negocios/restaurar-copia", { tenantId: t, dia: "2025-01-01", modo: "main", motivo: "abc" }),
 			};
 		});
 		expect(r.cortada).toMatchObject({ status: 422, body: { error: "copia_cortada" } });

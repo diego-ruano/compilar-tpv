@@ -13,12 +13,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { centralDePrueba } from "./helpers/central";
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import type { Sentencia } from "../src/lib/sql";
-import { CentralNoDisponible } from "../src/server/central/cliente";
+import { centralDePrueba, centralInterceptada, filasDe } from "./helpers/central";
 import { cifrar, descifrar, versionDe } from "../src/server/crypto";
 import { getOrCreateTenantFieldDek, recifrarConLaActual } from "../src/server/licenseStore";
 import { comprobarSalud, olvidarSalud, TEXTO_CANARIO } from "../src/server/salud";
@@ -76,61 +71,53 @@ describe("RI-73 · el formato con versión", () => {
 	});
 });
 
-/** La base central de pruebas, vacía de lo que tocan estos casos. */
-async function conBaseCentral<T>(nombre: string, prueba: (e: { sql: any; db: any }) => Promise<T>) {
-	return enElHub(`cifrado-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const t of ["licenses", "tenants", "canario_cifrado"]) sql.exec(`DELETE FROM ${t};`);
-		return prueba({ sql, db: clienteSobre(sql) });
-	});
-}
-
 describe("RI-73 · rotar LICENSE_STORE_KEY sin perder nada", () => {
 	it("leer la DEK de un negocio con la clave anterior la deja guardada con la actual", async () => {
-		await conBaseCentral("dek", async ({ sql, db }) => {
-			sql.exec(`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?);`, await comoAntes("la-dek"));
-			expect(await getOrCreateTenantFieldDek(db, ROTANDO, "t1")).toBe("la-dek");
-			const guardada = String(sql.exec(`SELECT field_dek FROM tenants;`).toArray()[0].field_dek);
-			expect(versionDe(guardada)).toBe("2");
-		});
+		const central = await centralDePrueba();
+		await filasDe(central, `INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?);`, await comoAntes("la-dek"));
+		expect(await getOrCreateTenantFieldDek(central.db, ROTANDO, "t1")).toBe("la-dek");
+		const [{ field_dek: guardada }] = await filasDe(central, `SELECT field_dek FROM tenants;`);
+		expect(versionDe(String(guardada))).toBe("2");
 	});
 
 	it("la ruta de recifrar pasa todo a la actual, y separa lo que no puede leer", async () => {
-		await conBaseCentral("recifrar", async ({ sql, db }) => {
-			sql.exec(`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?), ('t3', ?);`,
-				await comoAntes("dek-1"),
-				await cifrar(ROTANDO, "dek-2"), // ya está con la actual: no se toca
-				await cifrar(OTRA, "dek-ilegible"),
-			);
-			sql.exec(
-				`INSERT INTO licenses (license_id, license_key_hash, license_key_enc, status, term_months, origin,
-				                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
-				 VALUES ('l1', 'h1', ?, 'issued', 12, 'manual', 1, 'a@b.test', 1, 1);`,
-				await comoAntes("CLAVE-1"),
-			);
+		const central = await centralDePrueba();
+		await filasDe(
+			central,
+			`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?), ('t3', ?);`,
+			await comoAntes("dek-1"),
+			await cifrar(ROTANDO, "dek-2"), // ya está con la actual: no se toca
+			await cifrar(OTRA, "dek-ilegible"),
+		);
+		await filasDe(
+			central,
+			`INSERT INTO licenses (license_id, license_key_hash, license_key_enc, status, term_months, origin,
+			                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
+			 VALUES ('l1', 'h1', ?, 'issued', 12, 'manual', 1, 'a@b.test', 1, 1);`,
+			await comoAntes("CLAVE-1"),
+		);
 
-			const r = await recifrarConLaActual(db, ROTANDO, 100);
-			expect(r.recifrados).toEqual({ licencias: 1, deks: 1 });
-			expect(r.ilegibles).toEqual([{ tabla: "tenants", id: "t3" }]);
-			expect(r.quedanMas).toBe(false);
+		const r = await recifrarConLaActual(central.db, ROTANDO, 100);
+		expect(r.recifrados).toEqual({ licencias: 1, deks: 1 });
+		expect(r.ilegibles).toEqual([{ tabla: "tenants", id: "t3" }]);
+		expect(r.quedanMas).toBe(false);
 
-			const clave = String(sql.exec(`SELECT license_key_enc FROM licenses;`).toArray()[0].license_key_enc);
-			expect(await descifrar(ROTANDO, clave)).toEqual({ texto: "CLAVE-1", recifrado: null });
-		});
+		const [{ license_key_enc: clave }] = await filasDe(central, `SELECT license_key_enc FROM licenses;`);
+		expect(await descifrar(ROTANDO, String(clave))).toEqual({ texto: "CLAVE-1", recifrado: null });
 	});
 
 	it("con más de lo que cabe en una llamada, dice que quedan más", async () => {
-		await conBaseCentral("techo", async ({ sql, db }) => {
-			sql.exec(`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?);`,
-				await comoAntes("a"),
-				await comoAntes("b"),
-			);
-			const r = await recifrarConLaActual(db, ROTANDO, 1);
-			expect(r.recifrados.deks).toBe(1);
-			expect(r.quedanMas).toBe(true);
-			expect((await recifrarConLaActual(db, ROTANDO, 1)).quedanMas).toBe(false);
-		});
+		const central = await centralDePrueba();
+		await filasDe(
+			central,
+			`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?);`,
+			await comoAntes("a"),
+			await comoAntes("b"),
+		);
+		const r = await recifrarConLaActual(central.db, ROTANDO, 1);
+		expect(r.recifrados.deks).toBe(1);
+		expect(r.quedanMas).toBe(true);
+		expect((await recifrarConLaActual(central.db, ROTANDO, 1)).quedanMas).toBe(false);
 	});
 });
 
@@ -138,44 +125,43 @@ describe("RI-73 · el canario de /health", () => {
 	beforeEach(() => olvidarSalud());
 
 	it("la primera vez lo crea, y con la misma clave sigue en verde", async () => {
-		await conBaseCentral("canario-ok", async ({ db }) => {
-			expect(await comprobarSalud(db, 1_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
-			olvidarSalud();
-			expect(await comprobarSalud(db, 2_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
-		});
+		const { db } = await centralDePrueba();
+		expect(await comprobarSalud(db, 1_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
+		olvidarSalud();
+		expect(await comprobarSalud(db, 2_000, K1)).toEqual({ ok: true, db: "ok", cifrado: "ok" });
 	});
 
 	it("con otra clave contesta que NO: el 27/09 entero, visto en minutos", async () => {
-		await conBaseCentral("canario-falla", async ({ db }) => {
-			await comprobarSalud(db, 1_000, K1);
-			olvidarSalud();
-			expect(await comprobarSalud(db, 2_000, OTRA)).toEqual({ ok: false, db: "ok", cifrado: "falla" });
-		});
+		const { db } = await centralDePrueba();
+		await comprobarSalud(db, 1_000, K1);
+		olvidarSalud();
+		expect(await comprobarSalud(db, 2_000, OTRA)).toEqual({ ok: false, db: "ok", cifrado: "falla" });
 	});
 
 	it("en plena rotación sigue en verde, y el canario se pasa a la actual", async () => {
-		await conBaseCentral("canario-rotacion", async ({ sql, db }) => {
-			await comprobarSalud(db, 1_000, K1);
-			olvidarSalud();
-			expect((await comprobarSalud(db, 2_000, ROTANDO)).cifrado).toBe("ok");
-			const valor = String(sql.exec(`SELECT valor FROM canario_cifrado;`).toArray()[0].valor);
-			expect(await descifrar(ROTANDO, valor)).toEqual({ texto: TEXTO_CANARIO, recifrado: null });
-		});
+		const central = await centralDePrueba();
+		await comprobarSalud(central.db, 1_000, K1);
+		olvidarSalud();
+		expect((await comprobarSalud(central.db, 2_000, ROTANDO)).cifrado).toBe("ok");
+		const [{ valor }] = await filasDe(central, `SELECT valor FROM canario_cifrado;`);
+		expect(await descifrar(ROTANDO, String(valor))).toEqual({ texto: TEXTO_CANARIO, recifrado: null });
 	});
 
 	it.each([
 		["al leerlo", 2],
 		["al guardarlo la primera vez", 3],
 	])("si la central no contesta %s, es la base la que no responde, no la clave", async (_cuando, cortada) => {
-		const { db } = await centralDePrueba();
+		// El corte es el de la plataforma (un fallo pasajero de la llamada al objeto), en su stub.
 		let llamadas = 0;
-		const conCorte = {
-			execute: async (sentencia: Sentencia) => {
-				if (++llamadas === cortada) throw new CentralNoDisponible("pasajera");
-				return await db.execute(sentencia);
-			},
-		};
-		expect(await comprobarSalud(conCorte, 1_000, K1)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
+		const conCorte = centralInterceptada(await centralDePrueba(), (_metodo, _argumentos, llamar) =>
+			++llamadas === cortada ? Promise.reject(Object.assign(new Error("pasajera"), { retryable: true })) : llamar(),
+		);
+		expect(await comprobarSalud(conCorte.db, 1_000, K1)).toEqual({
+			ok: false,
+			db: "inalcanzable",
+			cifrado: "sin_comprobar",
+		});
 		expect(llamadas).toBe(cortada);
 	});
 });
+

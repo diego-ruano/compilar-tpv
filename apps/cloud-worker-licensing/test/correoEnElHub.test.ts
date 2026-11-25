@@ -14,29 +14,18 @@
 //     ahora mismo no se manda otra vez;
 //   · las demás rutas de reservas web, que no leen la base del negocio, se quedan en el Worker.
 //
-// La base central de pruebas vive en el SQLite del propio TenantHub del negocio: es la única forma
-// de que la lea una ruta que se ejecuta dentro de él (`helpers/negocioFirmado.ts`).
+// La base central es la de verdad, la del negocio (`helpers/negocioFirmado.ts`): la ruta que se
+// ejecuta dentro del TenantHub llega a ella como en producción.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { conNegocioFirmado, pedirFirmado, viajes, type Negocio } from "./helpers/negocioFirmado";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 /** Lo que se ha mandado, y el binding de correo que lo apunta. */
 const enviados: any[] = [];
@@ -58,10 +47,11 @@ const ID_RESERVA = "0199aa00-0000-7000-8000-00000000abcd";
 const HUELLA_ANA = "80ec301799f952e798d6387318dc4616444dc00c3963ed5c1845cf85c0e60758";
 
 /**
- * Un negocio con un proveedor, sus datos de contacto y una reserva web, y el binding de correo
- * puesto en el entorno de su TenantHub: dentro del DO la ruta usa el entorno del DO, no el del Worker.
+ * Un negocio con un proveedor, sus datos de contacto, una reserva web y la clave de su widget, y el
+ * binding de correo puesto en el entorno de su TenantHub: dentro del DO la ruta usa el entorno del DO,
+ * no el del Worker.
  */
-async function conNegocio(nombre: string, prueba: (n: Negocio, sql: any) => Promise<void>): Promise<void> {
+async function conNegocio(nombre: string, prueba: (n: Negocio) => Promise<void>): Promise<void> {
 	enviados.length = 0;
 	correoCaido = false;
 	await conNegocioFirmado(
@@ -86,10 +76,9 @@ async function conNegocio(nombre: string, prueba: (n: Negocio, sql: any) => Prom
 				 VALUES (?, 'c1', 'm7', '2026-10-24', '22:00', 'CENA', 4, 'PROXIMA', 'WEB');`,
 				ID_RESERVA,
 			);
-			sql.exec("INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', ?, 1);", n.tenantId);
-			await prueba(n, sql);
+			await n.enCentral("INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', ?, 1);", n.tenantId);
+			await prueba(n);
 		},
-		{ centralEnElNegocio: true },
 	);
 }
 
@@ -118,7 +107,7 @@ function aviso(extra: Record<string, unknown> = {}) {
 
 describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub", () => {
 	it("un viaje, sin consultas sueltas: lee el proveedor, reserva el cupo, envía y deja la traza", async () => {
-		await conNegocio("pedido", async (n, sql) => {
+		await conNegocio("pedido", async (n) => {
 			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo: PEDIDO });
 			expect(await res.json()).toEqual({ ok: true });
 			expect(res.status).toBe(200);
@@ -135,7 +124,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 			expect(enviados[0].text).toContain("Cerveza");
 
 			// La traza y el cupo, en la base central, con quién lo pidió.
-			const traza = sql.exec("SELECT tenant_id, device_id, to_email, proveedor, ok, tipo FROM email_sends;").toArray();
+			const traza = await n.enCentral("SELECT tenant_id, device_id, to_email, proveedor, ok, tipo FROM email_sends;");
 			expect(traza).toEqual([
 				{
 					tenant_id: n.tenantId,
@@ -150,7 +139,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 	});
 
 	it("un destinatario que no es un proveedor del negocio se rechaza dentro, con su código", async () => {
-		await conNegocio("pedido-ajeno", async (n, sql) => {
+		await conNegocio("pedido-ajeno", async (n) => {
 			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", {
 				cuerpo: { ...PEDIDO, email_destino: "cualquiera@otro.test" },
 			});
@@ -159,7 +148,7 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 			expect(viajes(res, "hub-ruta")).toBe(1);
 			expect(enviados).toEqual([]);
 			// Un rechazo no gasta cupo.
-			expect(sql.exec("SELECT COUNT(*) AS n FROM email_sends;").one().n).toBe(0);
+			expect(await n.enCentral("SELECT COUNT(*) AS n FROM email_sends;")).toEqual([{ n: 0 }]);
 		});
 	});
 });
@@ -167,10 +156,10 @@ describe("DO-04 · el pedido a un proveedor se manda desde dentro del TenantHub"
 describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 	const CLAVE = "0199aa00-0000-7000-8000-0000000e0001";
 	const conClave = (id_envio: string = CLAVE) => ({ cuerpo: { ...PEDIDO, id_envio } });
-	const filas = (sql: any) => sql.exec("SELECT id, ok, error_code FROM email_sends ORDER BY sent_at_ms;").toArray();
+	const filas = (n: Negocio) => n.enCentral("SELECT id, ok, error_code FROM email_sends ORDER BY sent_at_ms;");
 
 	it("un reintento con la misma clave contesta ok y no manda otro correo", async () => {
-		await conNegocio("pedido-una-vez", async (n, sql) => {
+		await conNegocio("pedido-una-vez", async (n) => {
 			const primero = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(await primero.json()).toEqual({ ok: true });
 			// La respuesta se perdió por el camino y la Main lo repite con la misma clave.
@@ -180,7 +169,7 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 
 			expect(enviados).toHaveLength(1);
 			// Una fila, con la clave y el negocio delante; cuenta una vez en el cupo.
-			expect(filas(sql)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
+			expect(await filas(n)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
 
 			// Otro envío (otra clave) sí sale.
 			const otro = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave("0199aa00-0000-7000-8000-0000000e0002"));
@@ -190,39 +179,35 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 	});
 
 	it("uno que falló se puede repetir con su misma clave, y entonces sale", async () => {
-		await conNegocio("pedido-fallido", async (n, sql) => {
+		await conNegocio("pedido-fallido", async (n) => {
 			correoCaido = true;
 			const fallido = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(fallido.status).toBe(500);
-			expect(filas(sql)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 0, error_code: "E_INTERNAL" }]);
+			expect(await filas(n)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 0, error_code: "E_INTERNAL" }]);
 
 			correoCaido = false;
 			const otraVez = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(await otraVez.json()).toEqual({ ok: true });
 			expect(enviados).toHaveLength(1);
-			expect(filas(sql)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
+			expect(await filas(n)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
 		});
 	});
 
 	it("si apuntar que salió falla, se insiste: no se queda en «enviando», que se podría retomar", async () => {
-		await conNegocio("pedido-apuntar-insiste", async (n, sql) => {
-			const real: any = dbCentral;
+		await conNegocio("pedido-apuntar-insiste", async (n) => {
 			let fallos = 2;
-			dbCentral = {
-				...real,
-				execute: async (s: any) => {
-					const texto = typeof s === "string" ? s : s.sql;
-					if (/INSERT INTO email_sends[\s\S]*VALUES/.test(texto) && fallos-- > 0) throw new Error("la base central no contesta");
-					return real.execute(s);
-				},
-			};
+			n.interceptarLaCentral((metodo, [s], llamar) =>
+				metodo === "ejecutar" && /INSERT INTO email_sends[\s\S]*VALUES/.test((s as SentenciaEnlazada).sql) && fallos-- > 0
+					? Promise.reject(new Error("la base central no contesta"))
+					: llamar(),
+			);
 			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(await res.json()).toEqual({ ok: true });
 			expect(fallos).toBe(-1);
-			expect(filas(sql)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
+			expect(await filas(n)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
 
 			// Pasados los minutos en que una reserva a medias se puede retomar, sigue sin salir otra vez.
-			sql.exec("UPDATE email_sends SET sent_at_ms = sent_at_ms - 600000;");
+			await n.enCentral("UPDATE email_sends SET sent_at_ms = sent_at_ms - 600000;");
 			const repetido = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
 			expect(await repetido.json()).toEqual({ ok: true });
 			expect(enviados).toHaveLength(1);
@@ -230,8 +215,8 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 	});
 
 	it("el mismo envío saliendo ahora por otra petición: ésta no lo manda (409)", async () => {
-		await conNegocio("pedido-en-curso", async (n, sql) => {
-			sql.exec(
+		await conNegocio("pedido-en-curso", async (n) => {
+			await n.enCentral(
 				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
 				 VALUES (?, ?, 'main-firmada', 'pedidos@bebidas.test', 'Bebidas del Sur', 0, 'enviando', ?, 'pedido');`,
 				`pedido:${n.tenantId}:${CLAVE}`,
@@ -246,7 +231,7 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 	});
 
 	it("sin clave, o con una que no tiene su forma, no hay pedido: ni sale ni gasta cupo", async () => {
-		await conNegocio("pedido-sin-clave", async (n, sql) => {
+		await conNegocio("pedido-sin-clave", async (n) => {
 			const { id_envio: _, ...sinClave } = PEDIDO;
 			for (const cuerpo of [sinClave, { ...PEDIDO, id_envio: "" }, { ...PEDIDO, id_envio: "corta" }, { ...PEDIDO, id_envio: "con espacios y más de dieciséis" }]) {
 				const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", { cuerpo });
@@ -254,14 +239,14 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 				expect(await res.json()).toMatchObject({ ok: false, error: "validation_error" });
 			}
 			expect(enviados).toEqual([]);
-			expect(filas(sql)).toEqual([]);
+			expect(await filas(n)).toEqual([]);
 		});
 	});
 
 	it("una clave del negocio no tapa la misma clave de otro", async () => {
 		// El id lleva el negocio delante: la clave la elige el dispositivo.
-		await conNegocio("pedido-clave-ajena", async (n, sql) => {
-			sql.exec(
+		await conNegocio("pedido-clave-ajena", async (n) => {
+			await n.enCentral(
 				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
 				 VALUES (?, 'otro-negocio', 'otro-equipo', 'x@otro.test', 'Otro', 1, NULL, ?, 'pedido');`,
 				`pedido:otro-negocio:${CLAVE}`,
@@ -276,7 +261,7 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 
 describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantHub", () => {
 	it("un viaje, sin consultas sueltas: lee la reserva, pide el enlace a la agenda y envía", async () => {
-		await conNegocio("aviso", async (n, sql) => {
+		await conNegocio("aviso", async (n) => {
 			const res = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
 			expect(await res.json()).toEqual({ ok: true, enviado: true });
 			expect(res.status).toBe(200);
@@ -302,7 +287,7 @@ describe("DO-04 · el aviso de una reserva web se manda desde dentro del TenantH
 			const otra = await pedirFirmado(deps, app, n, "/v1/reservas-web/avisos", { cuerpo: aviso() });
 			expect(await otra.json()).toEqual({ ok: true, enviado: true });
 			expect(enviados).toHaveLength(1);
-			expect(sql.exec("SELECT id, device_id, tipo, ok FROM email_sends;").toArray()).toEqual([
+			expect(await n.enCentral("SELECT id, device_id, tipo, ok FROM email_sends;")).toEqual([
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0001", device_id: "main-firmada", tipo: "reserva_web", ok: 1 },
 			]);
 		});

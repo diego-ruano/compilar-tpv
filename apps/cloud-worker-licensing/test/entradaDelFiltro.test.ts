@@ -13,11 +13,11 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import type { Env } from "../src/env";
 import { tenantAuth } from "../src/middleware/tenant";
 import { ingestToAxiom } from "../src/observability/axiom";
 import { MARCA_DE_RECORTE } from "../src/observability/tope";
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { montarMainEnElHub } from "./helpers/mainEnElHub";
@@ -112,7 +112,7 @@ describe("AUD-32 · la clave y el nombre de una operación que falla en el Tenan
 	function preparar(hub: any): { name: string; fields: Record<string, unknown> }[] {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
-		const db = clienteSobre(sql, hub.state.storage);
+		const db = clienteLocal(hub.state.storage);
 		hub.getTenantDb = async () => db;
 		const eventos: { name: string; fields: Record<string, unknown> }[] = [];
 		hub.emitSyncEvent = (name: string, fields: Record<string, unknown>) => void eventos.push({ name, fields });

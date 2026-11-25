@@ -8,29 +8,17 @@
 // - que `/v1/sync/initialize-empty`, que corre dentro del DO, no se llama a sí mismo por RPC.
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { enElHub } from "./helpers/hub";
 import { HANDY, MAIN, conNegocioFirmado, peticionFirmada, viajes } from "./helpers/negocioFirmado";
-
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const { hashPin, verifyPin } = await import("../src/domains/login/login.crypto");
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
+import { hashPin, verifyPin } from "../src/domains/login/login.crypto";
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 const stub = (tenantId: string) => env.TenantHub.get(env.TenantHub.idFromName(tenantId));
 
@@ -115,10 +103,13 @@ describe("POST /v1/sync/initialize-empty corre dentro del DO sin llamarse a sí 
 			"inicializar-vacia",
 			async (n) => {
 				// Sólo nace vacía la base de un negocio que no ha nacido (`test/basePerdida.test.ts`).
-				n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
+				await n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
 				await sinLlamarseASiMismo(n.tenantId);
 
-				const res = await app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, {
+					...env,
+					...n.entorno,
+				});
 				expect(res.status).toBe(200);
 				expect(await res.json()).toEqual({ ok: true });
 				expect(viajes(res, "hub-ruta")).toBe(1);
@@ -127,12 +118,14 @@ describe("POST /v1/sync/initialize-empty corre dentro del DO sin llamarse a sí 
 				).toEqual(["admin@local"]);
 
 				// Con la base ya creada no hace nada: no es una salida de emergencia para lo demás.
-				const otra = await app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, env);
+				const otra = await app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, {
+					...env,
+					...n.entorno,
+				});
 				expect(otra.status).toBe(409);
 				expect(await otra.json()).toMatchObject({ ok: false, error: "tenant_db_already_provisioned" });
 			},
-			// La ruta pregunta a la base central desde dentro del TenantHub: va en su mismo objeto.
-			{ sinBase: true, centralEnElNegocio: true },
+			{ sinBase: true },
 		);
 	});
 
@@ -141,7 +134,10 @@ describe("POST /v1/sync/initialize-empty corre dentro del DO sin llamarse a sí 
 			deps,
 			"inicializar-handy",
 			async (n) => {
-				const res = await app.request(await peticionFirmada(deps, n, HANDY, "POST", "/v1/sync/initialize-empty"), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, HANDY, "POST", "/v1/sync/initialize-empty"), undefined, {
+					...env,
+					...n.entorno,
+				});
 				expect(res.status).toBe(403);
 				expect(await enElHub(n.tenantId, (hub: any) => hub.estaAprovisionado())).toBe(false);
 			},

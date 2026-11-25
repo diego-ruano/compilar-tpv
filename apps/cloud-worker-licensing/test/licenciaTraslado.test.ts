@@ -7,24 +7,16 @@
 // otro equipo hizo mientras tanto. Por eso lo tiene que decir el servidor, que sabe a qué equipo
 // estaba ligada la licencia, y no el cliente por haber escrito un código.
 //
-// El aprovisionamiento de la base del negocio y los correos se sustituyen: no son lo que se prueba.
+// Cada caso tiene su base central de verdad (`helpers/central.ts`). El aprovisionamiento de la base
+// del negocio y los correos se sustituyen: no son lo que se prueba.
 
 import { describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, type CentralDePrueba } from "./helpers/central";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
 import { otpHash } from "../src/domains/licensing/licensing.helpers";
 import { getLicenseById, issueLicense, putDeviceOtp } from "../src/server/licenseStore";
-
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/domains/licensing/licensing.helpers")>();
@@ -50,93 +42,93 @@ const PUB_A = await clavePublica(1);
 const PUB_B = await clavePublica(2);
 const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
-async function conLicencia<T>(nombre: string, prueba: (clave: string, licenseId: string) => Promise<T>) {
-	return enElHub(`licencia-traslado-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "devices", "tenants", "license_device_otp", "license_device_swaps"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
-		dbDePruebas = clienteSobre(sql);
-		const { license, keyPlain } = await issueLicense(dbDePruebas as any, {
-			claves: STORE_KEY,
-			termMonths: 12,
-			origin: "manual",
-			customerEmail: "bar@ejemplo.test",
-		});
-		return prueba(keyPlain, license.license_id);
-	});
-}
+type Licencia = {
+	licenseId: string;
+	central: CentralDePrueba;
+	/** Pide la activación de la licencia en `deviceId`, con el código de traslado `codigo`. */
+	activar: (deviceId: string, devicePubKey: string, codigo?: string) => Promise<{ status: number; body: any }>;
+};
 
-async function activar(clave: string, deviceId: string, devicePubKey: string, deviceChangeCode?: string) {
-	const res = await licenseRoutes.request(
-		"/activate",
-		await activacionFirmada({
-			activationKey: clave,
-			deviceId,
-			devicePubKey,
-			deviceChangeCode,
-			tenantInfo: { displayName: "Bar de Pruebas" },
-		}),
-		ENV,
-		CONTEXTO as any,
-	);
-	return { status: res.status, body: (await res.json()) as any };
+/** Una licencia recién emitida, sin activar, en una base central propia. */
+async function conLicencia<T>(prueba: (l: Licencia) => Promise<T>) {
+	const central = await centralDePrueba();
+	const { license, keyPlain } = await issueLicense(central.db, {
+		claves: STORE_KEY,
+		termMonths: 12,
+		origin: "manual",
+		customerEmail: "bar@ejemplo.test",
+	});
+	const activar = async (deviceId: string, devicePubKey: string, deviceChangeCode?: string) => {
+		const res = await licenseRoutes.request(
+			"/activate",
+			await activacionFirmada({
+				activationKey: keyPlain,
+				deviceId,
+				devicePubKey,
+				deviceChangeCode,
+				tenantInfo: { displayName: "Bar de Pruebas" },
+			}),
+			{ ...ENV, ...central.entorno },
+			CONTEXTO as any,
+		);
+		return { status: res.status, body: (await res.json()) as any };
+	};
+	return prueba({ licenseId: license.license_id, central, activar });
 }
 
 describe("activar dice si la licencia se ha trasladado a este equipo", () => {
 	it("la primera activación no es un traslado", async () => {
-		await conLicencia("primera", async (clave) => {
-			const r = await activar(clave, "equipo-a", PUB_A);
+		await conLicencia(async ({ activar }) => {
+			const r = await activar("equipo-a", PUB_A);
 			expect(r.status).toBe(200);
 			expect(r.body.cambioDeEquipo).toBe(false);
 		});
 	});
 
 	it("volver a activar en el mismo equipo no es un traslado, aunque llegue un código", async () => {
-		await conLicencia("mismo", async (clave) => {
-			await activar(clave, "equipo-a", PUB_A);
-			const r = await activar(clave, "equipo-a", PUB_A, "123456");
+		await conLicencia(async ({ activar }) => {
+			await activar("equipo-a", PUB_A);
+			const r = await activar("equipo-a", PUB_A, "123456");
 			expect(r.status).toBe(200);
 			expect(r.body.cambioDeEquipo).toBe(false);
 		});
 	});
 
 	it("activar en otro equipo con su código sí lo es, y la licencia pasa a ese equipo", async () => {
-		await conLicencia("otro", async (clave, licenseId) => {
-			await activar(clave, "equipo-a", PUB_A);
+		await conLicencia(async ({ licenseId, central, activar }) => {
+			await activar("equipo-a", PUB_A);
 
-			const sinCodigo = await activar(clave, "equipo-b", PUB_B);
+			const sinCodigo = await activar("equipo-b", PUB_B);
 			expect(sinCodigo.body.error).toBe("device_change_required");
 
-			await putDeviceOtp(dbDePruebas as any, {
+			await putDeviceOtp(central.db, {
 				licenseId,
 				newDeviceId: "equipo-b",
 				codeHash: await otpHash("654321"),
 				expiresAtMs: Date.now() + 10 * 60 * 1000,
 			});
-			const r = await activar(clave, "equipo-b", PUB_B, "654321");
+			const r = await activar("equipo-b", PUB_B, "654321");
 			expect(r.status).toBe(200);
 			expect(r.body.cambioDeEquipo).toBe(true);
-			expect((await getLicenseById(dbDePruebas as any, licenseId))?.main_device_id).toBe("equipo-b");
+			expect((await getLicenseById(central.db, licenseId))?.main_device_id).toBe("equipo-b");
 		});
 	});
 
 	it("y también cuando la licencia vuelve al equipo en el que estuvo antes", async () => {
 		// El caso que motiva todo esto: la base de ese equipo es de antes de que se fuera.
-		await conLicencia("vuelve", async (clave, licenseId) => {
-			await activar(clave, "equipo-a", PUB_A);
+		await conLicencia(async ({ licenseId, central, activar }) => {
+			await activar("equipo-a", PUB_A);
 			for (const [equipo, pub, codigo] of [
 				["equipo-b", PUB_B, "111111"],
 				["equipo-a", PUB_A, "222222"],
 			] as const) {
-				await putDeviceOtp(dbDePruebas as any, {
+				await putDeviceOtp(central.db, {
 					licenseId,
 					newDeviceId: equipo,
 					codeHash: await otpHash(codigo),
 					expiresAtMs: Date.now() + 10 * 60 * 1000,
 				});
-				const r = await activar(clave, equipo, pub, codigo);
+				const r = await activar(equipo, pub, codigo);
 				expect(r.body.cambioDeEquipo, equipo).toBe(true);
 			}
 		});

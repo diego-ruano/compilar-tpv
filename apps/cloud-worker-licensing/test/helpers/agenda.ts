@@ -2,11 +2,11 @@
 //
 // Correr código dentro de la agenda de reservas web (`AgendaWeb`) de verdad, como `hub.ts` con el
 // TenantHub. La «base del negocio» de los tests vive en el mismo SQLite de la agenda (los nombres de
-// sus tablas no chocan) y se lee con `clienteSobre`: así el motor lee SQL de verdad sin Turso.
+// sus tablas no chocan) y se lee con el cliente de producción de la base del negocio (`clienteLocal`).
 
 import { env, runInDurableObject } from "cloudflare:test";
 
-import { clienteSobre } from "./clienteSql";
+import { clienteLocal } from "../../src/durableObjects/tenantHub.sqlite";
 import { conLaHoraDeQuienPregunta } from "../../src/lib/tenantClient";
 import { ejecutarLecturaWeb } from "../../src/domains/reservas_web/lecturasDeLaWeb";
 
@@ -46,12 +46,12 @@ export async function enElObjetoDeLaAgenda<R>(
  * la vez se crucen.
  */
 export function lectorSobre(state: DurableObjectState, ahora: () => string, espera = 0) {
-	const db = clienteSobre(state.storage.sql, state.storage);
+	const db = clienteLocal(state.storage);
 	return async (_tenantId: string, lectura: any): Promise<any> => {
 		if (espera) await new Promise((r) => setTimeout(r, espera));
 		const a = ahora();
 		// La hora del negocio la fija el test: `horaDelNegocio` leería el reloj de verdad.
-		return ejecutarLecturaWeb(conLaHoraDeQuienPregunta(db as any, a), a, lectura);
+		return ejecutarLecturaWeb(conLaHoraDeQuienPregunta(db, a), a, lectura);
 	};
 }
 

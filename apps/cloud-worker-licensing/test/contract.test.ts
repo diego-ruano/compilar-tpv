@@ -12,12 +12,11 @@
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
-import { GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
+import { clienteLocal, GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
@@ -1198,7 +1197,7 @@ describe("contrato Main↔worker · efecto == golden", () => {
 		it(`${nombre}: deja el mismo efecto que la Main`, async () => {
 			await enElHub(`contract-${nombre}`, async (hub: any) => {
 				const sql = hub.state.storage.sql;
-				const db = clienteSobre(sql);
+				const db = clienteLocal(hub.state.storage);
 
 				// 1) Esquema real + siembra del caso (idéntica al lado Rust).
 				crearEsquemaTenant(sql);
@@ -1256,7 +1255,7 @@ describe("edición de catálogo sin cambiar precios", () => {
             crearEsquemaTenant(sql);
             sql.exec("INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Categoría')");
             aplicar(hub, sql, upsertProducto({id_producto:'p',id_categoria:'cat',nombre:'Editado',precio_venta:100,iva_percent:10,ids_alergenos:[]}, false, 'actor', true));
-            const filas = await clienteSobre(sql).execute("SELECT ID_Producto FROM Productos WHERE ID_Producto='p'");
+            const filas = await clienteLocal(hub.state.storage).execute("SELECT ID_Producto FROM Productos WHERE ID_Producto='p'");
             expect(filas.rows).toEqual([]);
         });
     });
@@ -1268,7 +1267,7 @@ describe("edición de catálogo sin cambiar precios", () => {
 			sql.exec("INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Categoría')");
 			sql.exec("INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta,IVA_Percent) VALUES ('p','cat','Anterior',200,21)");
 			aplicar(hub, sql, upsertProducto({ id_producto:'p',id_categoria:'cat',nombre:'Editado',precio_venta:100,iva_percent:10,ids_alergenos:[] }, false, 'actor', true));
-			const filas = await clienteSobre(sql).execute("SELECT Nombre,Precio_Venta,IVA_Percent FROM Productos WHERE ID_Producto='p'");
+			const filas = await clienteLocal(hub.state.storage).execute("SELECT Nombre,Precio_Venta,IVA_Percent FROM Productos WHERE ID_Producto='p'");
 			expect(filas.rows).toEqual([{Nombre:'Editado',Precio_Venta:200,IVA_Percent:21}]);
 		});
 	});
@@ -1289,8 +1288,8 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 		"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado) VALUES ('barra_cobrada','BARRA','2026-10-30 23:00:00','2026-10-30 23:10:00','Pagada')",
 	];
 
-	async function lineasDe(sql: any, idComanda: string): Promise<number> {
-		const rs = await clienteSobre(sql).execute({
+	async function lineasDe(hub: any, idComanda: string): Promise<number> {
+		const rs = await clienteLocal(hub.state.storage).execute({
 			sql: "SELECT COUNT(*) AS n FROM Detalle_Comanda WHERE ID_Comanda = ?1",
 			args: [idComanda],
 		});
@@ -1333,8 +1332,8 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 			for (const s of SIEMBRA) sql.exec(s);
 			expect(rechazo(hub, sql, lineaMesa("mesa_cobrada"))).toBe("comanda_cobrada");
 			expect(rechazo(hub, sql, lineaMesa("mesa_abierta"))).toBeNull();
-			expect(await lineasDe(sql, "mesa_cobrada")).toBe(0);
-			expect(await lineasDe(sql, "mesa_abierta")).toBe(1);
+			expect(await lineasDe(hub, "mesa_cobrada")).toBe(0);
+			expect(await lineasDe(hub, "mesa_abierta")).toBe(1);
 		});
 	});
 
@@ -1344,9 +1343,9 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
 			expect(rechazo(hub, sql, lineaBarra("barra_cobrada"))).toBe("comanda_cobrada");
-			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
+			expect(await lineasDe(hub, "barra_cobrada")).toBe(0);
 			expect(rechazo(hub, sql, lineaBarra("aun_no_existe"))).toBeNull();
-			expect(await lineasDe(sql, "aun_no_existe")).toBe(1);
+			expect(await lineasDe(hub, "aun_no_existe")).toBe(1);
 		});
 	});
 
@@ -1357,8 +1356,8 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 			for (const s of SIEMBRA) sql.exec(s);
 			comoLaMain(hub, sql, lineaMesa("mesa_cobrada"));
 			comoLaMain(hub, sql, lineaBarra("barra_cobrada"));
-			expect(await lineasDe(sql, "mesa_cobrada")).toBe(0);
-			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
+			expect(await lineasDe(hub, "mesa_cobrada")).toBe(0);
+			expect(await lineasDe(hub, "barra_cobrada")).toBe(0);
 		});
 	});
 });
@@ -1501,9 +1500,8 @@ describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 			crearEsquemaTenant(sql);
 			for (const s of SIEMBRA) sql.exec(s);
 			// El motor real del TenantHub, sobre su SQLite.
-			const db = clienteSobre(sql, hub.state.storage);
+			const db = clienteLocal(hub.state.storage);
 			hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-			hub.touchLastSeen = async () => {};
 			hub.isMainConnected = () => true;
 			hub.isMainReady = () => true;
 			hub.maybePurgeSyncLog = async () => {};

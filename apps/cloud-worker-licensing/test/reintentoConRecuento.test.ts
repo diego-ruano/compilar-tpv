@@ -20,7 +20,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -37,10 +37,6 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("deviceId", "dev-handy");
 		await next();
 	},
-}));
-
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({ execute: async () => ({ rows: [{ role: "handy" }] }) }),
 }));
 
 // Como el de verdad (REV-03): con una `X-Client-Now` válida, las lecturas usan su «ahora».
@@ -167,7 +163,7 @@ async function conHub(
 		);
 		sql.exec(`INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES (?, ?);`, TRABAJADOR, USUARIO);
 		sql.exec(`INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-manana', 'Mañana');`);
-		dbActual = clienteSobre(sql, hub.state.storage);
+		dbActual = clienteLocal(hub.state.storage);
 		await fn(sql, { TenantHub: hubDePrueba(hub, sql, primera, ganchos) });
 	});
 }

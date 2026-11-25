@@ -12,26 +12,20 @@
 // Lo que se fija aquí son los dos lados, porque el arreglo sólo vale si la gracia sigue pasando:
 // bloquear durante `expiry_grace` dejaría a un TPV vendiendo sin poder replicar, que es la peor
 // combinación posible.
+//
+// `tenantAuth` corre en el Worker y lee la licencia y el dispositivo de una base central de verdad
+// (`helpers/central.ts`), nueva en cada caso, a la que llega por `getDb(env)`.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import * as ed from "@noble/ed25519";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
-
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 // Las lecturas de negocio no son lo que se prueba: lo que importa es si se llega a ellas.
 vi.mock("../src/lib/tenantClient", () => ({
@@ -69,50 +63,46 @@ beforeEach(() => {
 	olvidarLicenciasCacheadas();
 });
 
-async function escenario<R>(
-	nombre: string,
-	opciones: { caducaEnDias: Caducidad; anulada?: boolean; mainDeLaLicencia?: string; rol?: string },
-	prueba: (seed: Uint8Array, sql: any) => Promise<R>,
-): Promise<R> {
-	return enElHub(`lic-negocio-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["devices", "licenses", "tenants"]) sql.exec(`DELETE FROM ${tabla};`);
-		sql.exec(`CREATE TABLE IF NOT EXISTS Ws_Tickets (ticket TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
-		          device_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL);`);
-		dbDePruebas = clienteSobre(sql);
+/** El negocio del caso: la clave de su Main y su base central. */
+type Escenario = { seed: Uint8Array; central: CentralDePrueba };
 
-		const { seed, pub } = await clave(1);
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
-			                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
-			                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
-			 VALUES ('lic-1', ?, ?, ?, ?, 0, 12, 'manual', 1, 1, ?, 'bar@a.test', 1, 1);`,
-			LIC_HASH,
-			TENANT,
-			opciones.mainDeLaLicencia ?? MAIN,
-			opciones.anulada ? "revoked" : "active",
-			opciones.caducaEnDias === null ? null : Date.now() + opciones.caducaEnDias * DIA,
-		);
-		sql.exec(
-			`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
-			 VALUES (?, ?, ?, ?, 'ed25519');`,
-			MAIN,
-			TENANT,
-			opciones.rol ?? "tpv",
-			pub,
-		);
-		return prueba(seed, sql);
-	});
+async function escenario<R>(
+	opciones: { caducaEnDias: Caducidad; anulada?: boolean; mainDeLaLicencia?: string; rol?: string },
+	prueba: (e: Escenario) => Promise<R>,
+): Promise<R> {
+	const central = await centralDePrueba();
+	const { seed, pub } = await clave(1);
+	await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
+	await filasDe(
+		central,
+		`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
+		                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
+		                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
+		 VALUES ('lic-1', ?, ?, ?, ?, 0, 12, 'manual', 1, 1, ?, 'bar@a.test', 1, 1);`,
+		LIC_HASH,
+		TENANT,
+		opciones.mainDeLaLicencia ?? MAIN,
+		opciones.anulada ? "revoked" : "active",
+		opciones.caducaEnDias === null ? null : Date.now() + opciones.caducaEnDias * DIA,
+	);
+	await filasDe(
+		central,
+		`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
+		 VALUES (?, ?, ?, ?, 'ed25519');`,
+		MAIN,
+		TENANT,
+		opciones.rol ?? "tpv",
+		pub,
+	);
+	return prueba({ seed, central });
 }
 
-/** Una petición firmada como la del cliente Rust (`sign_device_proof`). */
+/** Una petición firmada como la del cliente Rust (`sign_device_proof`), con la base central del caso. */
 async function pedir(
 	app: { request: (...a: any[]) => Promise<Response> },
 	metodo: "GET" | "POST",
 	ruta: string,
-	seed: Uint8Array,
+	{ seed, central }: Escenario,
 	licHash = LIC_HASH,
 ): Promise<Response> {
 	const token = await firmarSesion(ENV as any, {
@@ -141,24 +131,24 @@ async function pedir(
 				"X-Device-Sig": firma,
 			},
 		},
-		ENV,
+		{ ...ENV, ...central.entorno },
 	);
 }
 
-const negocio = (seed: Uint8Array) => pedir(loginRoutes as any, "GET", "/users", seed);
+const negocio = (e: Escenario) => pedir(loginRoutes as any, "GET", "/users", e);
 
 describe("REV-12 · la licencia manda en TODAS las rutas de negocio", () => {
 	it("anulada: el token ya no abre nada", async () => {
-		await escenario("anulada", { caducaEnDias: 30, anulada: true }, async (seed) => {
-			const res = await negocio(seed);
+		await escenario({ caducaEnDias: 30, anulada: true }, async (e) => {
+			const res = await negocio(e);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("license_revoked");
 		});
 	});
 
 	it("caducada y pasada la gracia: tampoco", async () => {
-		await escenario("caducada", { caducaEnDias: -60 }, async (seed) => {
-			const res = await negocio(seed);
+		await escenario({ caducaEnDias: -60 }, async (e) => {
+			const res = await negocio(e);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("license_expired");
 		});
@@ -167,21 +157,21 @@ describe("REV-12 · la licencia manda en TODAS las rutas de negocio", () => {
 	it("pero en la GRACIA por caducidad SÍ pasa, y tiene que pasar", async () => {
 		// Durante la gracia el TPV sigue vendiendo. Bloquear aquí lo dejaría vendiendo sin poder
 		// replicar, que es la peor combinación: acumula un outbox que quizá no suba nunca.
-		await escenario("gracia", { caducaEnDias: -1 }, async (seed) => {
-			expect((await negocio(seed)).status).toBe(200);
+		await escenario({ caducaEnDias: -1 }, async (e) => {
+			expect((await negocio(e)).status).toBe(200);
 		});
 	});
 
 	it("y una licencia sana, también", async () => {
-		await escenario("sana", { caducaEnDias: 30 }, async (seed) => {
-			expect((await negocio(seed)).status).toBe(200);
+		await escenario({ caducaEnDias: 30 }, async (e) => {
+			expect((await negocio(e)).status).toBe(200);
 		});
 	});
 
 	it("una Main desplazada deja de escribir en el tenant que ya no es suyo", async () => {
 		// Dos Mains replicando a la vez sobre el mismo tenant es lo que esto impide.
-		await escenario("desplazada", { caducaEnDias: 30, mainDeLaLicencia: "otro-equipo" }, async (seed) => {
-			const res = await negocio(seed);
+		await escenario({ caducaEnDias: 30, mainDeLaLicencia: "otro-equipo" }, async (e) => {
+			const res = await negocio(e);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("device_replaced");
 		});
@@ -190,8 +180,8 @@ describe("REV-12 · la licencia manda en TODAS las rutas de negocio", () => {
 	it("a una Handy NO se le aplica el traslado de licencia", async () => {
 		// Una Handy nunca es —ni puede ser— el `main_device_id`, así que medirla con esa vara la
 		// daría por desplazada SIEMPRE y bloquearía todas las del local.
-		await escenario("handy", { caducaEnDias: 30, mainDeLaLicencia: "otro-equipo", rol: "handy" }, async (seed) => {
-			expect((await negocio(seed)).status).toBe(200);
+		await escenario({ caducaEnDias: 30, mainDeLaLicencia: "otro-equipo", rol: "handy" }, async (e) => {
+			expect((await negocio(e)).status).toBe(200);
 		});
 	});
 });
@@ -200,9 +190,10 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 	// Un token con el `licHash` de otra fila (de otro negocio, o sin negocio) no puede hacer pasar la
 	// licencia anulada de éste. `/refresh` ya no los firma; esto cubre cualquier otro camino.
 	it("con la licencia de otro negocio, viva, no abre nada", async () => {
-		await escenario("aud03-ajena", { caducaEnDias: 30, anulada: true }, async (seed, sql) => {
-			sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
-			sql.exec(
+		await escenario({ caducaEnDias: 30, anulada: true }, async (e) => {
+			await filasDe(e.central, `INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
+			await filasDe(
+				e.central,
 				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
 				                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
 				                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
@@ -212,12 +203,12 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 				Date.now() + 30 * DIA,
 			);
 
-			const res = await pedir(loginRoutes as any, "GET", "/users", seed, "hash-ajena");
+			const res = await pedir(loginRoutes as any, "GET", "/users", e, "hash-ajena");
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("license_not_found");
 
 			// Y `/status` ni la firma, ni renueva el token, ni enseña su correo.
-			const status = await pedir(licenseRoutes as any, "GET", "/status", seed, "hash-ajena");
+			const status = await pedir(licenseRoutes as any, "GET", "/status", e, "hash-ajena");
 			expect(status.status).toBe(404);
 			const cuerpo = (await status.json()) as any;
 			expect(cuerpo.error).toBe("license_not_found");
@@ -228,15 +219,16 @@ describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () =>
 	});
 
 	it("con una clave sin estrenar, tampoco", async () => {
-		await escenario("aud03-sin-estrenar", { caducaEnDias: 30, anulada: true }, async (seed, sql) => {
-			sql.exec(
+		await escenario({ caducaEnDias: 30, anulada: true }, async (e) => {
+			await filasDe(
+				e.central,
 				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
 				                       disabled, term_months, origin, issued_at_ms, customer_email,
 				                       created_at_ms, updated_at_ms)
 				 VALUES ('lic-nueva', 'hash-nueva', NULL, NULL, 'issued', 0, 12, 'stripe', 1, 'bar@a.test', 1, 1);`,
 			);
 
-			const res = await pedir(loginRoutes as any, "GET", "/users", seed, "hash-nueva");
+			const res = await pedir(loginRoutes as any, "GET", "/users", e, "hash-nueva");
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("license_not_found");
 		});
@@ -247,8 +239,8 @@ describe("REV-12 · el token que reparte /status", () => {
 	it("con la licencia anulada contesta, pero sin token nuevo", async () => {
 		// La respuesta no puede callarse: es por donde el cliente se ENTERA de que ha dejado de
 		// valer. Lo que se le niega es la credencial, no la noticia.
-		await escenario("status-anulada", { caducaEnDias: 30, anulada: true }, async (seed) => {
-			const res = await pedir(licenseRoutes as any, "GET", "/status", seed);
+		await escenario({ caducaEnDias: 30, anulada: true }, async (e) => {
+			const res = await pedir(licenseRoutes as any, "GET", "/status", e);
 			expect(res.status).toBe(200);
 			const cuerpo = (await res.json()) as any;
 			expect(cuerpo.assertion).toBeTruthy();
@@ -257,8 +249,8 @@ describe("REV-12 · el token que reparte /status", () => {
 	});
 
 	it("durante la gracia sí lo renueva", async () => {
-		await escenario("status-gracia", { caducaEnDias: -1 }, async (seed) => {
-			const cuerpo = (await (await pedir(licenseRoutes as any, "GET", "/status", seed)).json()) as any;
+		await escenario({ caducaEnDias: -1 }, async (e) => {
+			const cuerpo = (await (await pedir(licenseRoutes as any, "GET", "/status", e)).json()) as any;
 			expect(typeof cuerpo.token).toBe("string");
 		});
 	});
@@ -266,14 +258,14 @@ describe("REV-12 · el token que reparte /status", () => {
 
 describe("REV-12 · la Main a la que se le anula la licencia no recupera el socket", () => {
 	it("el ticket con el que reconecta mira la licencia sin la caché del minuto", async () => {
-		await escenario("reconecta", { caducaEnDias: 30 }, async (seed, sql) => {
+		await escenario({ caducaEnDias: 30 }, async (e) => {
 			// Conectada y replicando: el «sí» queda en la caché del isolate.
-			expect((await pedir(wsRoutes as any, "POST", "/ticket", seed)).status).toBe(200);
-			expect((await negocio(seed)).status).toBe(200);
+			expect((await pedir(wsRoutes as any, "POST", "/ticket", e)).status).toBe(200);
+			expect((await negocio(e)).status).toBe(200);
 
 			// `revoke` anula y le cierra el socket; la Main reconecta a los pocos segundos.
-			sql.exec(`UPDATE licenses SET status = 'revoked';`);
-			const res = await pedir(wsRoutes as any, "POST", "/ticket", seed);
+			await filasDe(e.central, `UPDATE licenses SET status = 'revoked';`);
+			const res = await pedir(wsRoutes as any, "POST", "/ticket", e);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("license_revoked");
 		});

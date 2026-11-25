@@ -27,7 +27,7 @@ import type { ProductosStatsResponse } from "@tpv/contracts";
 import caso from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
 import casoNombreId from "../../../tests/contract/lecturas/casos/stats/productos_nombre_que_es_un_id.json";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { recortar } from "../src/lib/texto";
@@ -209,7 +209,7 @@ async function conLaSiembra<R>(
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const sentencia of siembra) sql.exec(sentencia);
-		return prueba(clienteSobre(sql) as unknown as Base, sql);
+		return prueba(clienteLocal(hub.state.storage), sql);
 	});
 }
 

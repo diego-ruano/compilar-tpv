@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { laMainEs } from "./helpers/mainVigente";
+import { centralConLaMain } from "./helpers/mainVigente";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 const TENANT = "tenant-difusion";
@@ -38,15 +38,14 @@ function conectar(hub: any, deviceId: string, role: "tpv" | "handy"): Conexion {
 	return escuchar(par[0], par[1]);
 }
 
-/** Un hub con su base de verdad, la Main de la licencia apuntada y la base central sin red. */
-function preparar(hub: any): any {
+/** Un hub con su base de verdad y una base central de verdad, con la licencia y su Main apuntada. */
+async function preparar(hub: any): Promise<any> {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
 	const db = clienteLocal(hub.state.storage);
 	hub.getTenantDb = async () => db;
-	hub.touchLastSeen = async () => {};
 	hub.emitSyncEvent = () => {};
-	laMainEs(hub, MAIN);
+	await centralConLaMain(hub, TENANT, MAIN);
 	return sql;
 }
 
@@ -70,7 +69,7 @@ const altaDeZona = (id: string) => ({
 describe("un cambio lleva lo que se lee, y nada más", () => {
 	it("el de una escritura de la Main, a la Handy", async () => {
 		await enElHub("difusion-de-la-main", async (hub: any) => {
-			const sql = preparar(hub);
+			const sql = await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv");
 			const handy = conectar(hub, "handy-1", "handy");
 
@@ -105,7 +104,7 @@ describe("un cambio lleva lo que se lee, y nada más", () => {
 
 	it("el de una escritura de la Handy, a la Main y a las demás Handy", async () => {
 		await enElHub("difusion-de-la-handy", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv");
 			const handy = conectar(hub, "handy-1", "handy");
 			const otra = conectar(hub, "handy-2", "handy");
@@ -138,7 +137,7 @@ describe("un cambio lleva lo que se lee, y nada más", () => {
 	it("el que se repite al reintentar una operación ya aplicada", async () => {
 		// SYNC-03: si la difusión original se perdió, el reintento del emisor la provoca otra vez.
 		await enElHub("difusion-repetida", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv");
 			const params = {
 				tenantId: TENANT,
@@ -163,7 +162,7 @@ describe("un cambio lleva lo que se lee, y nada más", () => {
 describe("no hay mensajes de presencia", () => {
 	it("ni al abrir un socket, ni al autenticarse, ni al irse", async () => {
 		await enElHub("difusion-sin-presencia", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const handy = conectar(hub, "handy-1", "handy");
 
 			// Abrir: el upgrade de verdad. Al que entra, su reto; a los demás, nada.
@@ -205,7 +204,7 @@ describe("no hay mensajes de presencia", () => {
 describe("un dispositivo no manda mensajes a los demás", () => {
 	it("`event` y `tenantDb.ping` se contestan como cualquier tipo desconocido, y no llegan a nadie", async () => {
 		await enElHub("difusion-sin-eventos", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv");
 			const handy = conectar(hub, "handy-1", "handy");
 			const otra = conectar(hub, "handy-2", "handy");
@@ -228,7 +227,7 @@ describe("un dispositivo no manda mensajes a los demás", () => {
 	// rechazándolo); no llega a nadie más.
 	it("un paso de la subida completa sólo tiene su acuse", async () => {
 		await enElHub("difusion-subida", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv");
 			const handy = conectar(hub, "handy-1", "handy");
 

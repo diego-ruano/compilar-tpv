@@ -11,11 +11,11 @@
 // Qué negocios se retiran lo decide `retirarNegociosDePrueba` (`test/pruebasRetiradas.test.ts`).
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { enLaAgenda, stubDeLaAgenda } from "./helpers/agenda";
 import { enElHub } from "./helpers/hub";
-import { laMainEs } from "./helpers/mainVigente";
+import { centralConLaMain } from "./helpers/mainVigente";
 import { borrarImagenesDelNegocio } from "../src/domains/admin/pruebas";
 
 const env = entorno as any;
@@ -58,9 +58,11 @@ describe("TenantHub.borrarTodo", () => {
 		expect(await stub.aprovisionar(tenantId)).toEqual({ reused: false });
 
 		const { main, handy } = await enElHub(tenantId, async (hub: any) => {
-			hub.touchLastSeen = async () => {};
 			hub.state.storage.sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
-			laMainEs(hub, "la-main");
+			await centralConLaMain(hub, tenantId, "la-main", [
+				{ deviceId: "la-main", rol: "tpv" },
+				{ deviceId: "una-handy", rol: "handy" },
+			]);
 			expect(tablas(hub.state.storage.sql)).toContain("Zonas");
 			return { main: conectar(hub, tenantId, "la-main", "tpv"), handy: conectar(hub, tenantId, "una-handy", "handy") };
 		});
@@ -139,6 +141,13 @@ describe("AgendaWeb.borrarTodo", () => {
 
 describe("las imágenes de un negocio", () => {
 	const JPEG = new Uint8Array([255, 216, 255, 224]);
+
+	// El bucket es el mismo para todo el fichero: cada caso se lleva lo que ha dejado, para que el
+	// siguiente lo encuentre vacío, corran en el orden que corran.
+	afterEach(async () => {
+		const { objects } = await env.IMAGES.list();
+		if (objects.length > 0) await env.IMAGES.delete(objects.map((o: R2Object) => o.key));
+	});
 
 	it("se borra su carpeta del bucket, y sólo la suya", async () => {
 		const claves = [

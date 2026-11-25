@@ -11,17 +11,19 @@
 // `validacion_casos.json`, que también lee la Main.
 //
 // Lo único que se sustituye es lo que no se puede levantar aquí: la autenticación del dispositivo
-// (`tenantAuth`, que deja pasar a una Handy emparejada), la base del negocio (se sirve con el SQLite
-// del DO y el esquema de producción) y el stub del DO, que en vez de esperar a una Main conectada
-// ejecuta el lote igual que `applyInternalCommandIdempotent`.
+// (`tenantAuth`, que deja pasar a una Handy emparejada), cómo llega la ruta a la base del negocio (se
+// sirve con el SQLite del DO, el esquema de producción y su cliente) y el stub del DO, que en vez de
+// esperar a una Main conectada ejecuta el lote igual que `applyInternalCommandIdempotent`. La base
+// central es una de verdad, con la Handy dada de alta (`helpers/central.ts`).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import * as z from "zod";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, negocioEnLaCentral } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
@@ -44,10 +46,6 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("deviceId", "dev-handy");
 		await next();
 	},
-}));
-
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({ execute: async () => ({ rows: [{ role: "handy" }] }) }),
 }));
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
@@ -107,8 +105,20 @@ async function pedir(metodo: string, ruta: string, cuerpo: unknown, env: unknown
 	return { status: res.status, json: (await res.json()) as any };
 }
 
-/** Un hub con el esquema real, una categoría y un café a 1,50 € con un lote. */
+/**
+ * Un hub con el esquema real, una categoría y un café a 1,50 € con un lote, y en su base central la
+ * Handy que escribe.
+ */
 async function conHub(nombre: string, fn: (sql: any, env: unknown) => Promise<void>) {
+	const central = await centralDePrueba();
+	await negocioEnLaCentral(central, {
+		tenantId: "t-aud17",
+		main: "dev-main",
+		dispositivos: [
+			{ deviceId: "dev-main", rol: "tpv" },
+			{ deviceId: "dev-handy", rol: "handy" },
+		],
+	});
 	await enElHub(nombre, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
@@ -117,8 +127,8 @@ async function conHub(nombre: string, fn: (sql: any, env: unknown) => Promise<vo
 		sql.exec(
 			"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada, Coste_Unitario) VALUES ('lote-1', 'cafe', 'L-1', 5, '2026-11-01 10:00:00', 40);",
 		);
-		dbActual = clienteSobre(sql, hub.state.storage);
-		await fn(sql, { TenantHub: hubDePrueba(hub, sql) });
+		dbActual = clienteLocal(hub.state.storage);
+		await fn(sql, { TenantHub: hubDePrueba(hub, sql), ...central.entorno });
 	});
 }
 

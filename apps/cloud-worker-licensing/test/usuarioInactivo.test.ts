@@ -8,26 +8,14 @@
 //
 // Por el camino desplegado: `tenantAuth`, `alHub` y la ruta dentro del TenantHub.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { HANDY, conNegocioFirmado, enLaBaseDe, pedirComo } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
-let dbCentral: any = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 const CAMARERO = "0192f7a4-3b1c-7d2e-8f00-00000000ca01";
 const ROL_CAMARERO = "00000000-0000-7000-8000-000000000002";

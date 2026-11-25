@@ -9,14 +9,16 @@
 //   recovery»): lo que se prueba con la plataforma de verdad es que la ruta lo dice. El resto, con un
 //   doble de `Instantes` dentro del objeto: el orden de las llamadas, que la base queda cerrada
 //   mientras tanto, que se echa a las sesiones y cómo queda el log para que la Main no se salte nada.
-// - La administración: sin token no entra, y lo que cambia algo queda en `admin_audit`.
+// - La administración: sin token no entra, y lo que cambia algo queda en `admin_audit`, en una base
+//   central de verdad (`helpers/central.ts`); que no conteste se provoca en su stub.
 
 import { env as entorno, runDurableObjectAlarm } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, centralInterceptada, filasDe } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { adminRoutes } from "../src/domains/admin/admin.routes";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { leerPaginaDeCambios } from "../src/domains/sync/sync.routes";
 import { PURGADO_HASTA } from "../src/domains/sync/cambiosJson";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
@@ -29,15 +31,6 @@ import {
 } from "../src/durableObjects/tenantHub.copia";
 import { CLAVE_VUELTA_EN_CURSO, SALTO_DE_SEQ } from "../src/durableObjects/tenantHub.instante";
 import { literalEnUnaLinea } from "../src/durableObjects/volcadoSql";
-
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
-const { adminRoutes } = await import("../src/domains/admin/admin.routes");
 
 const env = entorno as any;
 const TOKEN = "token-de-pruebas";
@@ -60,54 +53,63 @@ async function pedir(ruta: string, cuerpo: unknown, token: string | null = TOKEN
 }
 
 type Central = {
-	auditoria: () => any[];
-	nacer: (t: string) => void;
-	apuntar: (action: string, detail: unknown) => void;
+	/** Pide `ruta` a la administración con el token, con esta base central. */
+	pedir: (ruta: string, cuerpo: unknown) => ReturnType<typeof pedir>;
+	auditoria: () => Promise<any[]>;
+	nacer: (t: string) => Promise<unknown>;
+	apuntar: (action: string, detail: unknown) => Promise<unknown>;
 	/** Desde ahora, la base central falla al apuntar esa acción en `admin_audit`, y sólo ésa. */
 	fallarAlApuntar: (action: string) => void;
 	/** Y vuelve a contestar. */
 	contestar: () => void;
 };
 
+/** La sentencia con la que la administración apunta en `admin_audit` (`auditAdmin`). */
+const APUNTA_EN_LA_AUDITORIA = /^\s*INSERT INTO admin_audit\b/;
+
 /**
- * Corre `cuerpo` con la base central sobre el SQLite de un DO aparte, con `admin_audit` vacía, y
- * dentro de ese DO: su SQLite no se deja tocar desde otro contexto.
+ * Corre `cuerpo` con una base central de verdad, nueva (`admin_audit` vacía). Que no conteste al
+ * apuntar una acción se provoca en su stub (`centralInterceptada`): la sentencia no llega a ella.
  */
-async function conCentral<R>(nombre: string, cuerpo: (central: Central) => Promise<R>): Promise<R> {
-	return enElHub(nombre, (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec("DELETE FROM admin_audit;");
-		dbDePruebas = clienteSobre(sql, hub.state.storage);
-		return cuerpo({
-			auditoria: () =>
-				sql
-					.exec("SELECT action, detail FROM admin_audit ORDER BY at_ms, rowid;")
-					.toArray()
-					.map((f: any) => ({ action: f.action, detail: JSON.parse(f.detail) })),
-			nacer: (t: string) =>
-				sql.exec(
-					`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled, term_months,
-					   origin, issued_at_ms, activated_at_ms, customer_email, created_at_ms, updated_at_ms)
-					 VALUES (?, ?, ?, 'la-main', 'active', 0, 12, 'stripe', 1, 1, 'bar@ejemplo.test', 1, 1);`,
-					`lic-${t}`,
-					`hash-${t}`,
-					t,
-				),
-			apuntar: (action: string, detail: unknown) =>
-				sql.exec(
-					"INSERT INTO admin_audit (audit_id, action, license_id, detail, at_ms) VALUES (?, ?, NULL, ?, 1);",
-					crypto.randomUUID(),
-					action,
-					JSON.stringify(detail),
-				),
-			fallarAlApuntar: (action: string) =>
-				sql.exec(
-					`CREATE TRIGGER falla_al_apuntar BEFORE INSERT ON admin_audit WHEN NEW.action = '${action}'
-					 BEGIN SELECT RAISE(ABORT, 'la base central no contesta'); END;`,
-				),
-			contestar: () => sql.exec("DROP TRIGGER IF EXISTS falla_al_apuntar;"),
-		});
+async function conCentral<R>(cuerpo: (central: Central) => Promise<R>): Promise<R> {
+	const base = await centralDePrueba();
+	let falla: string | null = null;
+	const central = centralInterceptada(base, (metodo, [s], llamar) => {
+		const sentencia = s as SentenciaEnlazada;
+		return metodo === "ejecutar" &&
+			falla !== null &&
+			APUNTA_EN_LA_AUDITORIA.test(sentencia.sql) &&
+			sentencia.args?.[1] === falla
+			? Promise.reject(new Error("la base central no contesta"))
+			: llamar();
+	});
+	return cuerpo({
+		pedir: (ruta, datos) => pedir(ruta, datos, TOKEN, { ...ENV, ...central.entorno }),
+		auditoria: async () =>
+			(await filasDe(base, "SELECT action, detail FROM admin_audit ORDER BY at_ms, rowid;")).map((f) => ({
+				action: f.action,
+				detail: JSON.parse(f.detail),
+			})),
+		nacer: (t) =>
+			filasDe(
+				base,
+				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, disabled, term_months,
+				   origin, issued_at_ms, activated_at_ms, customer_email, created_at_ms, updated_at_ms)
+				 VALUES (?, ?, ?, 'la-main', 'active', 0, 12, 'stripe', 1, 1, 'bar@ejemplo.test', 1, 1);`,
+				`lic-${t}`,
+				`hash-${t}`,
+				t,
+			),
+		apuntar: (action, detail) =>
+			filasDe(
+				base,
+				"INSERT INTO admin_audit (audit_id, action, license_id, detail, at_ms) VALUES (?, ?, NULL, ?, 1);",
+				crypto.randomUUID(),
+				action,
+				JSON.stringify(detail),
+			),
+		fallarAlApuntar: (action) => void (falla = action),
+		contestar: () => void (falla = null),
 	});
 }
 
@@ -260,33 +262,33 @@ describe("DO-03 · la administración de la base de un negocio", () => {
 	it("copiar ahora deja la copia y su rastro; el estado la enseña con la próxima", async () => {
 		const t = "copia-a-mano";
 		await negocioConDatos(t);
-		await conCentral("copias-central-copiar", async (central) => {
-		central.nacer(t);
+		await conCentral(async (central) => {
+			await central.nacer(t);
 
-		const r = await pedir("/negocios/copiar", { tenantId: t });
-		expect(r.status).toBe(200);
-		expect(r.body).toMatchObject({ ok: true, tenantId: t, clave: claveDeCopia(t, new Date().toISOString().slice(0, 10)) });
-		expect(r.body.filas).toBeGreaterThanOrEqual(2);
-		expect(central.auditoria()).toEqual([
-			{ action: "negocio_copiar", detail: expect.objectContaining({ tenantId: t, clave: r.body.clave }) },
-		]);
+			const r = await central.pedir("/negocios/copiar", { tenantId: t });
+			expect(r.status).toBe(200);
+			expect(r.body).toMatchObject({ ok: true, tenantId: t, clave: claveDeCopia(t, new Date().toISOString().slice(0, 10)) });
+			expect(r.body.filas).toBeGreaterThanOrEqual(2);
+			expect(await central.auditoria()).toEqual([
+				{ action: "negocio_copiar", detail: expect.objectContaining({ tenantId: t, clave: r.body.clave }) },
+			]);
 
-		const e = await pedir("/negocios/estado", { tenantId: t });
-		expect(e.body).toMatchObject({ ok: true, nacido: true, aprovisionado: true, negocio: t, vueltaEnCurso: false });
-		expect(e.body.copias.map((c: any) => c.clave)).toEqual([r.body.clave]);
-		expect(e.body.proximaCopiaMs).toBeGreaterThan(Date.now());
+			const e = await central.pedir("/negocios/estado", { tenantId: t });
+			expect(e.body).toMatchObject({ ok: true, nacido: true, aprovisionado: true, negocio: t, vueltaEnCurso: false });
+			expect(e.body.copias.map((c: any) => c.clave)).toEqual([r.body.clave]);
+			expect(e.body.proximaCopiaMs).toBeGreaterThan(Date.now());
 
-		// Sin base no hay nada que copiar.
-		const vacio = await pedir("/negocios/copiar", { tenantId: "copia-sin-base" });
-		expect(vacio).toMatchObject({ status: 404, body: { error: "tenant_db_not_provisioned" } });
+			// Sin base no hay nada que copiar.
+			const vacio = await central.pedir("/negocios/copiar", { tenantId: "copia-sin-base" });
+			expect(vacio).toMatchObject({ status: 404, body: { error: "tenant_db_not_provisioned" } });
 		});
 	});
 
 	it("en local no hay vuelta a un instante, y la ruta lo dice sin tocar nada", async () => {
 		const t = "instante-sin-pitr";
 		await negocioConDatos(t);
-		const r = await conCentral("copias-central-sin-pitr", () =>
-			pedir("/negocios/instante", { tenantId: t, instanteMs: Date.now() - 60_000, modo: "nube", motivo: "prueba" }),
+		const r = await conCentral((central) =>
+			central.pedir("/negocios/instante", { tenantId: t, instanteMs: Date.now() - 60_000, modo: "nube", motivo: "prueba" }),
 		);
 		expect(r).toMatchObject({ status: 501, body: { ok: false, error: "vuelta_no_disponible" } });
 		expect(await enElHub(t, (hub: any) => hub.state.storage.get(CLAVE_VUELTA_EN_CURSO))).toBeUndefined();
@@ -346,9 +348,14 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 				return 41;
 			});
 
-			const { r, auditoria } = await conCentral(`copias-central-instante-${modo}`, async (central) => ({
-				r: await pedir("/negocios/instante", { tenantId: t, instanteMs: Date.now() - 3_600_000, modo, motivo: "un borrado por error" }),
-				auditoria: central.auditoria(),
+			const { r, auditoria } = await conCentral(async (central) => ({
+				r: await central.pedir("/negocios/instante", {
+					tenantId: t,
+					instanteMs: Date.now() - 3_600_000,
+					modo,
+					motivo: "un borrado por error",
+				}),
+				auditoria: await central.auditoria(),
 			}));
 			expect(r.status).toBe(200);
 			expect(r.body).toMatchObject({
@@ -392,8 +399,8 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			]);
 
 			// Deshacer es volver al marcador: otra vez por encima de lo último numerado.
-			const deshecho = await conCentral(`copias-central-deshacer-${modo}`, () =>
-				pedir("/negocios/instante", { tenantId: t, marcador: "m-deshacer", modo, motivo: "deshacer" }),
+			const deshecho = await conCentral((central) =>
+				central.pedir("/negocios/instante", { tenantId: t, marcador: "m-deshacer", modo, motivo: "deshacer" }),
 			);
 			expect(deshecho.body).toMatchObject({ ok: true, destino: "m-deshacer", inicio: seqAntes + 2 * SALTO_DE_SEQ });
 		});
@@ -405,10 +412,10 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 		await enElHub(t, (hub: any) => dobleDeInstantes(hub, []));
 		// El negocio ya perdió una base, cuyo log se abrió en el 5·salto: la Main puede ir por ahí.
 		const anterior = 5 * SALTO_DE_SEQ;
-		const r = await conCentral("copias-central-instante-tras-perdida", async (central) => {
-			central.apuntar("negocio_base_vacia", { tenantId: t, modo: "main", inicio: anterior, purgadoHasta: null });
-			central.apuntar("negocio_base_vacia", { tenantId: "otro-negocio", modo: "main", inicio: 9 * SALTO_DE_SEQ });
-			return pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+		const r = await conCentral(async (central) => {
+			await central.apuntar("negocio_base_vacia", { tenantId: t, modo: "main", inicio: anterior, purgadoHasta: null });
+			await central.apuntar("negocio_base_vacia", { tenantId: "otro-negocio", modo: "main", inicio: 9 * SALTO_DE_SEQ });
+			return central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
 		});
 		expect(r.status).toBe(200);
 		expect(r.body).toMatchObject({ ok: true, seqAntes: 1, seqConocido: anterior, inicio: anterior + SALTO_DE_SEQ });
@@ -418,18 +425,18 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 		const t = "instante-sin-rastro";
 		await negocioConDatos(t);
 		await enElHub(t, (hub: any) => dobleDeInstantes(hub, []));
-		const r = await conCentral("copias-central-instante-sin-rastro", async (central) => {
-			central.nacer(t);
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
 			// El objeto vuelve y abre el log, y la base central falla justo al apuntar la vuelta.
 			central.fallarAlApuntar("negocio_volver_a_instante");
-			const vuelta = await pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+			const vuelta = await central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
 			central.contestar();
 			const abierto = await enElHub(t, (hub: any) =>
 				Number(hub.state.storage.sql.exec("SELECT MAX(Seq) AS s FROM Sync_Changes WHERE Command_Name = 'nube_devuelta';").one().s),
 			);
 			// La Main baja de ese log, y el objeto se pierde antes de la copia de la noche.
 			await stub(t).borrarTodo();
-			const vacia = await pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
+			const vacia = await central.pedir("/negocios/base-vacia", { tenantId: t, modo: "main", motivo: "se perdió" });
 			return { vuelta, abierto, vacia };
 		});
 		expect(r.vuelta.status).toBe(500);
@@ -444,9 +451,9 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 		await negocioConDatos(t);
 		const llamadas: string[] = [];
 		await enElHub(t, (hub: any) => dobleDeInstantes(hub, llamadas));
-		const r = await conCentral("copias-central-instante-sin-reserva", async (central) => {
+		const r = await conCentral(async (central) => {
 			central.fallarAlApuntar("negocio_log_reservado");
-			return pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
+			return central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
 		});
 		expect(r).toMatchObject({ status: 503, body: { ok: false, error: "log_sin_reservar", deshacer: "m-deshacer" } });
 		expect(r.body.message).toContain("Repite la misma orden");

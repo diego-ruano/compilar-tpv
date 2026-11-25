@@ -186,8 +186,8 @@ desarrollo, como en la última consolidación).
 
 ### 3.2 Base central
 
-A mano en Turso antes de desplegar la fase 2, y reflejado en
-[esquema-actual.sql](../sql/control-plane/esquema-actual.sql).
+Están en la primera migración de la base central,
+[0001_inicial.sql](../../apps/cloud-worker-licensing/src/server/central/migraciones/0001_inicial.sql).
 
 | Tabla | Columnas |
 |---|---|

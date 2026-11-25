@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import { centralDePrueba, filasDe } from "./helpers/central";
 import { verifyDeviceProofOrThrow } from "../src/server/middleware/auth";
 import { bytesToB64 } from "../src/server/utils/base64";
 
@@ -69,13 +70,18 @@ async function mensajeProof(
 	].join("\n");
 }
 
-/** BD central de mentira: el dispositivo existe, vivo, con esa pubkey. */
-function bdCon(pubB64: string) {
-	return {
-		execute: async () => ({
-			rows: [{ role: "tpv", revoked_at_ms: null, device_pubkey_b64: pubB64 }],
-		}),
-	} as any;
+/** Una base central nueva en la que el dispositivo `deviceId` del negocio existe, vivo, como `tpv` y con esa pubkey. */
+async function centralCon(deviceId: string, pubB64: string) {
+	const central = await centralDePrueba();
+	await filasDe(central, "INSERT INTO tenants (tenant_id) VALUES (?);", CLAIMS_BASE.tenantId);
+	await filasDe(
+		central,
+		"INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg) VALUES (?, ?, 'tpv', ?, 'ed25519');",
+		deviceId,
+		CLAIMS_BASE.tenantId,
+		pubB64,
+	);
+	return central.db;
 }
 
 /** Monta la petición firmada tal y como la manda el cliente y la pasa por el verificador. */
@@ -112,7 +118,7 @@ async function verificar(
 
 	await verifyDeviceProofOrThrow(
 		req,
-		bdCon(disp.pubB64),
+		await centralCon(deviceId, disp.pubB64),
 		{ ...CLAIMS_BASE, deviceId },
 		TOKEN,
 		bytes,
@@ -154,8 +160,9 @@ describe("el cuerpo firmado son los bytes que se envían", () => {
         const target = "/v1/stats?desde=2026-01-01&hasta=2026-01-31";
         const sig = await disp.firmar(await mensajeProof(ts, "GET", target, new Uint8Array()));
         const options = { headers: { "X-Device-Ts": String(ts), "X-Device-Sig": sig } };
-        await expect(verifyDeviceProofOrThrow(new Request(`https://api.test${target}`, options), bdCon(disp.pubB64), { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).resolves.toEqual({ rol: "tpv" });
-        await expect(verifyDeviceProofOrThrow(new Request("https://api.test/v1/stats?desde=2025-01-01&hasta=2026-01-31", options), bdCon(disp.pubB64), { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).rejects.toThrow("bad_device_signature");
+        const db = await centralCon("d-query", disp.pubB64);
+        await expect(verifyDeviceProofOrThrow(new Request(`https://api.test${target}`, options), db, { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).resolves.toEqual({ rol: "tpv" });
+        await expect(verifyDeviceProofOrThrow(new Request("https://api.test/v1/stats?desde=2025-01-01&hasta=2026-01-31", options), db, { ...CLAIMS_BASE, deviceId: "d-query" }, TOKEN, new Uint8Array())).rejects.toThrow("bad_device_signature");
     });
 
 	it("cambiar un byte del cuerpo invalida la firma", async () => {
@@ -177,7 +184,7 @@ describe("el cuerpo firmado son los bytes que se envían", () => {
 		await expect(
 			verifyDeviceProofOrThrow(
 				req,
-				bdCon(disp.pubB64),
+				await centralCon("d-manipulado", disp.pubB64),
 				{ ...CLAIMS_BASE, deviceId: "d-manipulado" },
 				TOKEN,
 				enviado,

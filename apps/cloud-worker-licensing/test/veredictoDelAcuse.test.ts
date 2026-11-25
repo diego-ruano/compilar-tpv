@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { laMainEs } from "./helpers/mainVigente";
+import { centralConLaMain } from "./helpers/mainVigente";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { HubError } from "../src/lib/errorHttp";
 
@@ -32,15 +32,14 @@ type Preparado = {
 	aplicarPasos: (opId: string, steps: unknown[]) => Promise<any>;
 };
 
-/** Un hub con su base, una Main conectada y lista, y la base central sin red. */
-function preparar(hub: any): Preparado {
+/** Un hub con su base, una Main conectada y lista, y una base central de verdad con su licencia. */
+async function preparar(hub: any): Promise<Preparado> {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
 	hub.getTenantDb = async () => clienteLocal(hub.state.storage);
-	hub.touchLastSeen = async () => {};
 	const eventos: Preparado["eventos"] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
-	laMainEs(hub, MAIN);
+	await centralConLaMain(hub, TENANT, MAIN);
 
 	// El lote atómico de cada operación (`loteEnBruto`, con las claves foráneas aplazadas si hace
 	// falta), con un fallo delante si se pide.
@@ -101,7 +100,7 @@ const ALTA = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);";
 describe("el acuse dice de qué clase es el fallo", () => {
 	it("lo que rechaza el SQLite del DO por la sentencia es permanente", async () => {
 		await enElHub("ack-permanente", async (hub: any) => {
-			const { aplicar, eventos } = preparar(hub);
+			const { aplicar, eventos } = await preparar(hub);
 			expect(await aplicar("op-ok", ALTA, ["z1", "Sala"])).toMatchObject({ ok: true });
 
 			const CASOS: [string, string, unknown[]][] = [
@@ -132,7 +131,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 		// El rechazo lo lanza el propio hub con el SQL del paso detrás de su identificador. Leído
 		// como texto, `readonly database` lo hacía pasajero y una base llena.
 		await enElHub("ack-no-se-monta", async (hub: any) => {
-			const { aplicarPasos, eventos } = preparar(hub);
+			const { aplicarPasos, eventos } = await preparar(hub);
 			const CASOS: [string, unknown[]][] = [
 				["un paso value que no se sabe evaluar", [{ kind: "value", sql: "SELECT 'readonly database'", saveAs: "v" }]],
 				["una referencia a un paso que no está", [{ kind: "execute", sql: ALTA, args: ["z1", { $ref: "database is locked" }] }]],
@@ -149,7 +148,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 
 	it("una hora que tendría que poner la nube es permanente por su código", async () => {
 		await enElHub("ack-codigo-permanente", async (hub: any) => {
-			const { aplicar } = preparar(hub);
+			const { aplicar } = await preparar(hub);
 			const v = await aplicar("op-hora", "UPDATE Zonas SET Updated_At = CURRENT_TIMESTAMP;");
 			expect(v).toMatchObject({ ok: false, permanente: true, transitorio: false });
 			expect(v.error).toContain("hora_no_determinista");
@@ -158,7 +157,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 
 	it("un negocio sin base no le gasta intentos a ninguna operación del lote", async () => {
 		await enElHub("ack-sin-base", async (hub: any) => {
-			const { aplicar } = preparar(hub);
+			const { aplicar } = await preparar(hub);
 			hub.getTenantDb = async () => {
 				throw new HubError("tenant_db_not_provisioned", 404);
 			};
@@ -175,7 +174,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 
 	it("una base llena no aparta ni gasta intentos, y avisa una sola vez", async () => {
 		await enElHub("ack-base-llena", async (hub: any) => {
-			const { sql, eventos, romper, aplicar } = preparar(hub);
+			const { sql, eventos, romper, aplicar } = await preparar(hub);
 			romper(new Error("database or disk is full: SQLITE_FULL"));
 
 			for (const opId of ["op-1", "op-2", "op-3"]) {
@@ -197,7 +196,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 
 	it("un fallo del runtime del objeto es pasajero aunque arrastre texto de SQL", async () => {
 		await enElHub("ack-runtime", async (hub: any) => {
-			const { romper, aplicar } = preparar(hub);
+			const { romper, aplicar } = await preparar(hub);
 			romper(new Error("Durable Object storage operation exceeded timeout which caused object to be reset."));
 			expect(await aplicar("op-reset", ALTA, ["z1", "Sala"])).toMatchObject({
 				ok: false,
@@ -209,7 +208,7 @@ describe("el acuse dice de qué clase es el fallo", () => {
 
 	it("lo que no se sabe clasificar cuenta como intento: ni permanente ni pasajero", async () => {
 		await enElHub("ack-desconocido", async (hub: any) => {
-			const { romper, aplicar } = preparar(hub);
+			const { romper, aplicar } = await preparar(hub);
 			romper(new Error("algo raro ha pasado"));
 			expect(await aplicar("op-rara", ALTA, ["z1", "Sala"])).toMatchObject({
 				ok: false,

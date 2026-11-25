@@ -14,7 +14,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -73,7 +73,7 @@ function conLaBase<R>(nombre: string, prueba: (sql: any, db: any) => Promise<R>)
 	return enElHub(nombre, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
-		const db = clienteSobre(sql, hub.state.storage);
+		const db = clienteLocal(hub.state.storage);
 		clienteActual = db;
 		try {
 			return await prueba(sql, db);

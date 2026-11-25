@@ -8,75 +8,48 @@
 // de la Handy significa que cualquiera con su token puede cobrar igualmente — y el token de una
 // Handy vive en un móvil que se queda en la barra.
 //
-// El veto se prueba suelto (el middleware con el rol que devuelve la base central) y por el camino
-// desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub, que decide con
-// el rol de la identidad.
+// El veto se prueba suelto (el middleware con el rol que tiene el dispositivo en la base central) y
+// por el camino desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub,
+// que decide con el rol de la identidad. Las dos, contra una base central de verdad
+// (`helpers/central.ts`).
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
+import { centralConUnDispositivo } from "./helpers/central";
 import { conNegocioFirmado, HANDY, MAIN, pedirComo } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
+import { rolDelDispositivo, soloLaMainCobra } from "../src/middleware/tenant";
 
-/** Rol que devuelve la BD central en cada test del veto suelto. */
-let rolEnLaBd: string | null = "handy";
-const consultas: Array<{ sql: string; args: unknown[] }> = [];
-/** La base central de verdad, en los tests por el camino desplegado. */
-let dbCentral: unknown = null;
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
-vi.mock("../src/server/db", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../src/server/db")>()),
-	getDb: () =>
-		dbCentral ?? {
-			execute: async (q: { sql: string; args: unknown[] }) => {
-				consultas.push(q);
-				return { rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] };
-			},
-		},
-}));
-
-const { soloLaMainCobra, rolDelDispositivo } = await import("../src/middleware/tenant");
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
-
-/** Contexto de Hono con lo justo que mira el guard. */
-function contexto() {
-	const respuestas: Array<{ body: any; status: number }> = [];
+/** Contexto de Hono con lo justo que mira el guard, con la central `entorno`. */
+function contexto(entorno: unknown) {
 	return {
-		ctx: {
-			env: {} as any,
-			get: (k: string) => (k === "tenantId" ? "t1" : "d1"),
-			json: (body: any, status = 200) => {
-				respuestas.push({ body, status });
-				return { body, status } as any;
-			},
-		},
-		respuestas,
+		env: entorno as any,
+		get: (k: string) => (k === "tenantId" ? "t1" : "d1"),
+		json: (body: any, status = 200) => ({ body, status }) as any,
 	};
 }
 
 /**
- * Ejecuta el veto —que es un middleware— y devuelve su respuesta de rechazo, o `null` si dejó
- * pasar. Es middleware y no una función dentro del handler porque tiene que decidir antes de que
- * se lea y valide el cuerpo (ver `middleware/tenant.ts`).
+ * Ejecuta el veto —que es un middleware— con el dispositivo de la central `entorno`, y devuelve su
+ * respuesta de rechazo, o `null` si dejó pasar. Es middleware y no una función dentro del handler
+ * porque tiene que decidir antes de que se lea y valide el cuerpo (ver `middleware/tenant.ts`).
  */
-async function ejecutarVeto(mw: any, ctx: any): Promise<any> {
+async function ejecutarVeto(entorno: unknown): Promise<any> {
 	let paso = false;
-	const r = await mw(ctx, async () => {
+	const r = await soloLaMainCobra(contexto(entorno) as any, async () => {
 		paso = true;
 	});
 	return paso ? null : r;
 }
 
-beforeEach(() => {
-	consultas.length = 0;
-	rolEnLaBd = "handy";
-});
-
 describe("cobrar desde una Handy", () => {
 	it("se rechaza con un código que la app sabe traducir", async () => {
-		const { ctx } = contexto();
-		const veto = (await ejecutarVeto(soloLaMainCobra, ctx)) as any;
+		const { entorno } = await centralConUnDispositivo("handy");
+		const veto = await ejecutarVeto(entorno);
 
 		expect(veto).not.toBeNull();
 		expect(veto.status).toBe(403);
@@ -84,45 +57,38 @@ describe("cobrar desde una Handy", () => {
 	});
 
 	it("un dispositivo revocado o desconocido tampoco cobra", async () => {
-		// Sin fila (revocado, borrado, de otro tenant) el rol sale vacío: no es `tpv`, no cobra.
-		rolEnLaBd = null;
-		const { ctx } = contexto();
-
-		expect(await ejecutarVeto(soloLaMainCobra, ctx)).not.toBeNull();
+		// Sin fila viva (revocado, borrado, de otro tenant) el rol sale vacío: no es `tpv`, no cobra.
+		expect(await ejecutarVeto((await centralConUnDispositivo(null)).entorno)).not.toBeNull();
+		expect(await ejecutarVeto((await centralConUnDispositivo("tpv", { revocado: true })).entorno)).not.toBeNull();
 	});
 
 	it("un rol inventado no cuela", async () => {
 		// Lo único que abre la puerta es exactamente "tpv".
 		for (const rol of ["main", "TPV_MAIN", "admin", "", "tpv2"]) {
-			rolEnLaBd = rol;
-			const { ctx } = contexto();
-			expect(await ejecutarVeto(soloLaMainCobra, ctx), rol).not.toBeNull();
+			const { entorno } = await centralConUnDispositivo("tpv", { contestar: rol });
+			expect(await ejecutarVeto(entorno), rol).not.toBeNull();
 		}
 	});
 });
 
 describe("cobrar desde la Main", () => {
 	it("pasa", async () => {
-		rolEnLaBd = "tpv";
-		const { ctx } = contexto();
-
-		expect(await ejecutarVeto(soloLaMainCobra, ctx)).toBeNull();
+		expect(await ejecutarVeto((await centralConUnDispositivo("tpv")).entorno)).toBeNull();
 	});
 
 	it("el rol se lee sin distinguir mayúsculas", async () => {
 		// La fila la escribe el aprovisionamiento; que una mayúscula deje a un cliente sin poder
 		// cobrar sería un incidente de los caros.
-		rolEnLaBd = "TPV";
-		const { ctx } = contexto();
-
-		expect(await ejecutarVeto(soloLaMainCobra, ctx)).toBeNull();
+		const { entorno } = await centralConUnDispositivo("tpv", { contestar: "TPV" });
+		expect(await ejecutarVeto(entorno)).toBeNull();
 	});
 });
 
 describe("de dónde sale el rol", () => {
 	it("de la fila del dispositivo, nunca de una cabecera del cliente", async () => {
 		// Si el rol viniera del JWT o de `x-role`, el propio dispositivo se estaría autorizando.
-		await rolDelDispositivo({} as any, "t1", "d1");
+		const { entorno, consultas } = await centralConUnDispositivo("handy");
+		expect(await rolDelDispositivo(entorno as any, "t1", "d1")).toBe("handy");
 
 		expect(consultas).toHaveLength(1);
 		expect(consultas[0].sql).toContain("FROM devices");
@@ -132,7 +98,8 @@ describe("de dónde sale el rol", () => {
 	it("y solo si el dispositivo sigue vivo", async () => {
 		// Un dispositivo revocado conserva su fila: sin este filtro, un móvil dado de baja
 		// seguiría cobrando.
-		await rolDelDispositivo({} as any, "t1", "d1");
+		const { entorno, consultas } = await centralConUnDispositivo("tpv", { revocado: true });
+		expect(await rolDelDispositivo(entorno as any, "t1", "d1")).toBe("");
 
 		expect(consultas[0].sql).toContain("revoked_at_ms IS NULL");
 	});
@@ -153,7 +120,9 @@ describe("por el camino desplegado", () => {
 				expect(main.status, ruta).toBe(400);
 				expect(main.viajes, ruta).toBe(1);
 			}
-			// El rol viajó con la identidad: el veto no se lo pidió a la base central (`rolDelDispositivo`).
+			// El rol viajó con la identidad: el veto no se lo pidió a la base central (`rolDelDispositivo`),
+			// aunque `tenantAuth` sí leyó el dispositivo.
+			expect(n.central.some((q) => /FROM devices/.test(q))).toBe(true);
 			expect(n.central.filter((q) => /SELECT role FROM devices WHERE .*revoked_at_ms IS NULL/.test(q))).toEqual([]);
 		});
 	});

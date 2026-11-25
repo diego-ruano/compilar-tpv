@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { laMainEs } from "./helpers/mainVigente";
+import { centralConLaMain } from "./helpers/mainVigente";
 
 const TENANT = "tenant-latido";
 const MAIN = "main-latido";
@@ -41,13 +41,12 @@ function conectar(hub: any, deviceId: string, role: "tpv" | "handy", autenticada
 	return c;
 }
 
-function preparar(hub: any): void {
+async function preparar(hub: any): Promise<void> {
 	crearEsquemaTenant(hub.state.storage.sql);
 	const db = clienteLocal(hub.state.storage);
 	hub.getTenantDb = async () => db;
-	hub.touchLastSeen = async () => {};
 	hub.emitSyncEvent = () => {};
-	laMainEs(hub, MAIN);
+	await centralConLaMain(hub, TENANT, MAIN);
 	// El objeto lleva despierto un rato: el margen de después de despertar ya no cuenta.
 	hub.despiertaDesdeMs = Date.now() - HACE_MUCHO;
 }
@@ -85,7 +84,7 @@ async function intentar(hub: any, opId: string): Promise<any> {
 describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 	it("sin latido desde hace más de 90 s, la escritura de la Handy no entra, la sesión se cierra y las Handy se enteran", async () => {
 		await enElHub("latido-cortado", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
 			const handy = conectar(hub, "handy-1", "handy", Date.now());
 
@@ -102,7 +101,7 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 
 	it("recién autenticada y sin latido todavía, cuenta como conectada", async () => {
 		await enElHub("latido-recien-saludada", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv", Date.now());
 			conectar(hub, "handy-1", "handy", Date.now());
 
@@ -113,7 +112,7 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 
 	it("autenticada hace mucho pero con latido reciente, cuenta como conectada", async () => {
 		await enElHub("latido-reciente", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
 			conectar(hub, "handy-1", "handy", Date.now());
 
@@ -130,7 +129,7 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 	it("un mensaje de la Main también es señal de vida, aunque no mande el latido", async () => {
 		// Una Main ocupada (un lote, un acuse) sigue viva aunque su latido se retrase.
 		await enElHub("latido-mensaje", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
 			conectar(hub, "handy-1", "handy", Date.now());
 
@@ -144,7 +143,7 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 		// La documentación de Cloudflare no garantiza que el sello del latido sobreviva a la
 		// hibernación: sin el margen, la primera escritura tras despertar vetaría a una Main ociosa sana.
 		await enElHub("latido-al-despertar", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			hub.despiertaDesdeMs = Date.now();
 			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
 			conectar(hub, "handy-1", "handy", Date.now());
@@ -157,7 +156,7 @@ describe("una Main que no da señales de vida no autoriza a las Handy", () => {
 
 	it("el saludo de una Handy no le dice que hay Main si la que hay no da señales de vida", async () => {
 		await enElHub("latido-saludo-handy", async (hub: any) => {
-			preparar(hub);
+			await preparar(hub);
 			const main = conectar(hub, MAIN, "tpv", Date.now() - HACE_MUCHO);
 
 			const par = new WebSocketPair();

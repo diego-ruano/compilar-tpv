@@ -13,22 +13,22 @@
 //   · en `tenantAuth`, sólo un token o una firma que no valen son un 401: cualquier fallo de la central,
 //     marcado o no, sube al `onError`.
 //
-// La central es la de verdad (`centralSinAprovisionar`) o un objeto que falla como dice Cloudflare
-// (`overloaded`, `retryable`), siempre detrás del `clienteCentral` de producción: el doble de
-// `getDb` sólo decide sobre qué objeto habla.
+// La central es la de verdad (`centralSinAprovisionar`), o una cuyo stub falla como dice Cloudflare
+// (`overloaded`, `retryable`) o contesta lo que haga falta (`centralInterceptada`). La ruta llega a
+// ella como en producción, por `getDb(env)` y el `clienteCentral` de producción.
 
 import { env as entorno } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
+import {
+	centralDePrueba,
+	centralInterceptada,
+	centralSinAprovisionar,
+	type CentralDePrueba,
+} from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 
 const { capturados } = vi.hoisted(() => ({ capturados: [] as { operacion: string; mensaje: string }[] }));
-let central: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => central };
-});
 
 vi.mock("../src/observability/errors", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/observability/errors")>();
@@ -44,7 +44,7 @@ vi.mock("../src/observability/errors", async (importOriginal) => {
 });
 
 const { app } = await import("../src/app");
-const { clienteCentral } = await import("../src/server/central/cliente");
+const { CentralNoDisponible } = await import("../src/server/central/cliente");
 const { MENSAJES } = await import("../src/lib/errorCodes");
 const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLoQueLeeElFeed } = await import("../src/domains/updates/updates.routes");
@@ -68,10 +68,12 @@ const saturadaYPasajera = () =>
 		retryable: true,
 	});
 
-/** Una central cuyo objeto contesta con `responder` a todo (lanzando, si es un fallo de la plataforma). */
-function centralQue(responder: () => Promise<unknown>, opciones: { plazoMs?: number } = {}) {
-	const objeto = { ejecutar: responder, lote: responder, operar: responder };
-	return clienteCentral(() => objeto as any, opciones);
+/**
+ * Una central cuyo stub contesta con `responder` a todo (lanzando, si es un fallo de la plataforma).
+ * El objeto de detrás no llega a atender nada.
+ */
+function centralQue(responder: () => Promise<unknown>): CentralDePrueba {
+	return centralInterceptada(centralSinAprovisionar(), () => responder());
 }
 
 const lanza = (fallo: () => Error) => () => Promise.reject(fallo());
@@ -79,11 +81,15 @@ const lanza = (fallo: () => Error) => () => Promise.reject(fallo());
 // ── Las peticiones ─────────────────────────────────────────────────────────────
 
 /** El feed de actualizaciones: anónimo, y lo primero que hace es leer la central. */
-const pedirElFeed = () =>
-	app.request("https://tpv-api.test/v1/update/windows/x86_64/1.0.0", {}, { ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined });
+const pedirElFeed = (central: CentralDePrueba) =>
+	app.request(
+		"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
+		{},
+		{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
+	);
 
 /** Una ruta con `tenantAuth`, con un token bueno: lo primero que lee es el dispositivo, en la central. */
-async function pedirAutenticada(): Promise<Response> {
+async function pedirAutenticada(central: CentralDePrueba): Promise<Response> {
 	const deviceId = `equipo-${crypto.randomUUID()}`;
 	const token = await firmarSesion(env, { tenantId: "negocio-sin-central", deviceId, licHash: "hash" });
 	return app.request(
@@ -98,13 +104,17 @@ async function pedirAutenticada(): Promise<Response> {
 			},
 			body: "{}",
 		},
-		{ ...env, ...AXIOM },
+		{ ...env, ...AXIOM, ...central.entorno },
 	);
 }
 
 /** El WebSocket: el canje del ticket es un lote en la central. */
-const pedirElSocket = () =>
-	app.request("https://tpv-api.test/ws?ticket=un-ticket", {}, { ...env, ...AXIOM, LIMITADOR_SESION: undefined });
+const pedirElSocket = (central: CentralDePrueba) =>
+	app.request(
+		"https://tpv-api.test/ws?ticket=un-ticket",
+		{},
+		{ ...env, ...AXIOM, LIMITADOR_SESION: undefined, ...central.entorno },
+	);
 
 beforeEach(() => {
 	capturados.length = 0;
@@ -117,7 +127,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	central = null;
 	vi.unstubAllGlobals();
 });
 
@@ -129,8 +138,7 @@ async function eventosDeLaCentral(cuantos: number) {
 describe("la central saturada", () => {
 	it("503 `hub_overloaded` con Retry-After, sin Sentry, y su evento en Axiom", async () => {
 		for (const fallo of [saturada, saturadaYPasajera]) {
-			central = centralQue(lanza(fallo));
-			const res = await pedirElFeed();
+			const res = await pedirElFeed(centralQue(lanza(fallo)));
 
 			expect(res.status).toBe(503);
 			expect(res.headers.get("Retry-After")).toBe("2");
@@ -153,15 +161,14 @@ describe("la central saturada", () => {
 
 	it("pedido por un TPV (`X-Tpv-Device`): lo mismo, en un solo viaje y sin Sentry", async () => {
 		let viajes = 0;
-		const objeto = { ejecutar: lanza(saturada), lote: lanza(saturada), operar: lanza(saturada) };
-		central = clienteCentral(() => {
+		const central = centralQue(() => {
 			viajes++;
-			return objeto as any;
+			return Promise.reject(saturada());
 		});
 		const res = await app.request(
 			"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
 			{ headers: { "X-Tpv-Device": "equipo-de-un-bar" } },
-			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined },
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
 		);
 
 		expect(res.status).toBe(503);
@@ -172,25 +179,20 @@ describe("la central saturada", () => {
 	});
 
 	it("con las versiones ya leídas, saturada al mirar si el equipo es piloto: `stable`, sin Sentry", async () => {
-		const nombre = `central-sin-piloto-${crypto.randomUUID()}`;
-		const { db } = await centralDePrueba(nombre);
-		await db.execute({
+		const real = await centralDePrueba();
+		await real.db.execute({
 			sql: `INSERT INTO app_releases (version, target, arch, channel, notes, pub_date, signature, url, is_active)
 			      VALUES ('1.1.0', 'windows', 'x86_64', 'stable', '', '2026-01-01', 'sig', 'https://cdn.test/1.1.0.exe', 1);`,
 		});
-		const id = env.BaseCentral.idFromName(nombre);
-		central = clienteCentral(() => {
-			const real = env.BaseCentral.get(id);
-			return {
-				ejecutar: (s: { sql: string }) => (/JOIN tenants/.test(s.sql) ? Promise.reject(saturada()) : real.ejecutar(s)),
-				lote: (s: unknown) => real.lote(s),
-				operar: (n: string, d: unknown) => real.operar(n, d),
-			} as any;
-		});
+		const central = centralInterceptada(real, (metodo, [sentencia], llamar) =>
+			metodo === "ejecutar" && /JOIN tenants/.test((sentencia as SentenciaEnlazada).sql)
+				? Promise.reject(saturada())
+				: llamar(),
+		);
 		const res = await app.request(
 			"https://tpv-api.test/v1/update/windows/x86_64/1.0.0",
 			{ headers: { "X-Tpv-Device": "equipo-de-un-bar" } },
-			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined },
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...central.entorno },
 		);
 
 		expect(res.status).toBe(200);
@@ -201,8 +203,7 @@ describe("la central saturada", () => {
 
 describe("un fallo pasajero o un plazo vencido", () => {
 	it("un fallo pasajero de la plataforma: 503 `hub_unavailable`, sin Retry-After ni Sentry", async () => {
-		central = centralQue(lanza(pasajera));
-		const res = await pedirElFeed();
+		const res = await pedirElFeed(centralQue(lanza(pasajera)));
 
 		expect(res.status).toBe(503);
 		expect(res.headers.get("Retry-After")).toBeNull();
@@ -217,8 +218,12 @@ describe("un fallo pasajero o un plazo vencido", () => {
 	});
 
 	it("un plazo vencido: lo mismo, pero va a Sentry: la central no ha contestado a tiempo", async () => {
-		central = centralQue(() => new Promise(() => {}), { plazoMs: 10 });
-		const res = await pedirElFeed();
+		// Sólo se fija cómo contesta una ruta a la que le llegara este error. Hoy no le llega a ninguna:
+		// `getDb` va sin plazo, y el único que lo pone es el TenantHub (`getCentralDb`), cuyos fallos no
+		// pasan por el `onError`. Así que el error lo lanza el stub ya formado, como lo deja el cliente al
+		// vencer (`conPlazo`); el temporizador de verdad se prueba en `centralCliente.test.ts` («con
+		// plazo») y en el TenantHub (`mainDesplazadaSocket.test.ts`).
+		const res = await pedirElFeed(centralQue(() => Promise.reject(new CentralNoDisponible("plazo"))));
 
 		expect(res.status).toBe(503);
 		expect(res.headers.get("Retry-After")).toBeNull();
@@ -230,8 +235,7 @@ describe("un fallo pasajero o un plazo vencido", () => {
 
 describe("la central sin aprovisionar o averiada", () => {
 	it("sin aprovisionar (el objeto de verdad): 503 `hub_unavailable` sin Retry-After, y Sentry lo ve", async () => {
-		central = centralSinAprovisionar().db;
-		const res = await pedirElFeed();
+		const res = await pedirElFeed(centralSinAprovisionar());
 
 		expect(res.status).toBe(503);
 		expect(res.headers.get("Retry-After")).toBeNull();
@@ -250,8 +254,7 @@ describe("la central sin aprovisionar o averiada", () => {
 
 	it("una migración alterada o fallida, o una operación que no conoce: igual, con su motivo", async () => {
 		for (const codigo of ["central_migracion_alterada", "central_migracion_fallida", "central_operacion_desconocida"]) {
-			central = centralQue(async () => ({ ok: false, error: codigo, detalle: "prueba" }));
-			const res = await pedirElFeed();
+			const res = await pedirElFeed(centralQue(async () => ({ ok: false, error: codigo, detalle: "prueba" })));
 			expect(res.status, codigo).toBe(503);
 			expect(res.headers.get("Retry-After"), codigo).toBeNull();
 			expect(((await res.json()) as any).error, codigo).toBe("hub_unavailable");
@@ -271,8 +274,7 @@ describe("la central sin aprovisionar o averiada", () => {
 
 describe("lo que no es «no puede atender» sigue su camino", () => {
 	it("un error de SQL es un 500, sin evento de la central", async () => {
-		central = centralQue(async () => ({ ok: false, error: "central_error_sql", detalle: "no such table: x" }));
-		const res = await pedirElFeed();
+		const res = await pedirElFeed(centralQue(async () => ({ ok: false, error: "central_error_sql", detalle: "no such table: x" })));
 
 		expect(res.status).toBe(500);
 		expect(JSON.stringify(await res.json())).not.toContain("no such table");
@@ -281,8 +283,9 @@ describe("lo que no es «no puede atender» sigue su camino", () => {
 	});
 
 	it("cualquier otro fallo del viaje, el 500 de siempre", async () => {
-		central = centralQue(lanza(() => new Error("Serialized RPC arguments or return values are limited to 32MiB")));
-		const res = await pedirElFeed();
+		const res = await pedirElFeed(
+			centralQue(lanza(() => new Error("Serialized RPC arguments or return values are limited to 32MiB"))),
+		);
 
 		expect(res.status).toBe(500);
 		expect(((await res.json()) as any).error).toBe("internal_error");
@@ -291,8 +294,7 @@ describe("lo que no es «no puede atender» sigue su camino", () => {
 
 describe("en los sitios que no pasan por el `onError`", () => {
 	it("`tenantAuth`: la central saturada no es un 401, ni un rechazo del dispositivo", async () => {
-		central = centralQue(lanza(saturada));
-		const res = await pedirAutenticada();
+		const res = await pedirAutenticada(centralQue(lanza(saturada)));
 
 		expect(res.status).toBe(503);
 		expect(res.headers.get("Retry-After")).toBe("2");
@@ -303,15 +305,15 @@ describe("en los sitios que no pasan por el `onError`", () => {
 	});
 
 	it("`tenantAuth` con la central sin aprovisionar: 503, no 401", async () => {
-		central = centralSinAprovisionar().db;
-		const res = await pedirAutenticada();
+		const res = await pedirAutenticada(centralSinAprovisionar());
 		expect(res.status).toBe(503);
 		expect(((await res.json()) as any).error).toBe("hub_unavailable");
 	});
 
 	it("`tenantAuth` con un fallo del viaje que la plataforma no marca: el 500 de siempre, no un 401", async () => {
-		central = centralQue(lanza(() => new Error("Durable Object exceeded its memory limit and was reset.")));
-		const res = await pedirAutenticada();
+		const res = await pedirAutenticada(
+			centralQue(lanza(() => new Error("Durable Object exceeded its memory limit and was reset."))),
+		);
 
 		expect(res.status).toBe(500);
 		expect(await res.json()).toMatchObject({ ok: false, error: "internal_error" });
@@ -319,8 +321,7 @@ describe("en los sitios que no pasan por el `onError`", () => {
 	});
 
 	it("el WebSocket: un fallo pasajero al canjear el ticket es un 503, no un 500", async () => {
-		central = centralQue(lanza(pasajera));
-		const res = await pedirElSocket();
+		const res = await pedirElSocket(centralQue(lanza(pasajera)));
 
 		expect(res.status).toBe(503);
 		expect(((await res.json()) as any).error).toBe("hub_unavailable");

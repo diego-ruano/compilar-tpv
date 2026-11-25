@@ -32,7 +32,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
 | Comandos | `apps/tpv-main/src-tauri/src/commands/licensing.rs` | `license_activate`, `license_sumar_clave`, `license_check_now`, `license_clear_state`… |
 | Pulso | `jobs/registro.rs::licencia` | Cada 6 h (`MainOperativa`), emite `license:changed` |
-| Estructura de la base central | `docs/sql/control-plane/esquema-actual.sql` | La foto de producción; la usan los tests |
+| Estructura de la base central | `…/src/server/central/migraciones/` | Sus migraciones, que aplica el objeto `BaseCentral`; el esquema que dan, en `…/central/esquema.snapshot.sql` |
 
 ---
 
@@ -789,7 +789,9 @@ con Checkout alojado deja los datos de tarjeta fuera de nuestros servidores.
 
 ## Al tocar esto
 
-- **La estructura de la base central se cambia a mano en Turso, antes de desplegar** el worker que la
-  use, y se refleja en `docs/sql/control-plane/esquema-actual.sql` ([worker.md](worker.md)).
+- **La estructura de la base central se cambia con una migración nueva** en
+  `src/server/central/migraciones/` (registrada en `migraciones.ts`), aditiva y en un despliegue
+  **anterior** al del código que la usa: durante un despliegue, un Worker nuevo puede hablar unos
+  minutos con el objeto de antes ([worker.md](worker.md)).
 - El correo de recuperación del PIN (LOGIN-07/08) vive en la misma base pero es otra cosa: ver
   [permisos.md](permisos.md#recuperar-el-pin).

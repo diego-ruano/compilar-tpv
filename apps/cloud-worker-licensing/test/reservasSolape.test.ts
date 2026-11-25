@@ -6,9 +6,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { conLaHoraDeQuienPregunta } from "../src/lib/tenantClient";
 import { ajustesDeReserva, choqueEnLaMesa } from "../src/domains/reservas/reservas.queries";
 
@@ -23,7 +23,7 @@ async function conMesa(nombre: string, seed: string[], prueba: (db: any) => Prom
 			 VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 80, 80);`,
 		);
 		for (const s of seed) sqlStorage.exec(s);
-		await prueba(conLaHoraDeQuienPregunta(clienteSobre(sqlStorage), "2026-05-10 20:30:00"));
+		await prueba(conLaHoraDeQuienPregunta(clienteLocal(hub.state.storage), "2026-05-10 20:30:00"));
 	});
 }
 

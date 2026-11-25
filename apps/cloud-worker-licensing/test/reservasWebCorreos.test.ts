@@ -8,29 +8,23 @@
 //     suyo, sin tocar el de los pedidos;
 //   · que el mismo correo no sale dos veces, y que uno que falló se puede volver a intentar;
 //   · que lo que va a una cabecera (el asunto, el remitente, la dirección) sale en una línea (AUD-40).
+//
+// Cada caso que envía, contra su propia base central de verdad (`helpers/central.ts`), a la que
+// llega como en producción, por el `env`.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-let baseCentral: any = null;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => baseCentral,
-}));
-
-const {
+import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import {
 	enUnaLinea,
 	enviarCorreoReservaWeb,
 	fechaLarga,
 	plantilla,
 	TOPE_DIARIO_DESTINATARIO,
 	TOPE_DIARIO_NEGOCIO,
-} = await import("../src/domains/reservas_web/correos");
-const { reservarCupo } = await import("../src/domains/email/email.routes");
+} from "../src/domains/reservas_web/correos";
+import { reservarCupo } from "../src/domains/email/email.routes";
 
 const NEGOCIO = { nombre: "Bar Pepe", direccion: "Calle Mayor 1", telefono: "950 000 000", correo: "hola@barpepe.es" };
 const RESERVA = { dia: "2026-10-23", hora: "21:00", personas: 4, mesa: "Mesa 5", codigo: "ABC123" };
@@ -63,21 +57,45 @@ function correoFalso(falla = false) {
 	};
 }
 
-async function conBase<T>(nombre: string, fn: (sql: any) => Promise<T>): Promise<T> {
-	return enElHub(`correos-rw-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec(`DELETE FROM email_sends;`);
-		baseCentral = clienteSobre(sql, hub.state.storage);
-		try {
-			return await fn(sql);
-		} finally {
-			baseCentral = null;
-		}
-	});
+/** Una base central nueva para el caso. */
+async function conBase<T>(fn: (central: CentralDePrueba) => Promise<T>): Promise<T> {
+	return fn(await centralDePrueba());
 }
 
-const ENV = (extra: Record<string, unknown>) => ({ EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test", ...extra }) as any;
+/** El `env` con el que se envía: el remitente, la central `central` y lo que diga `extra`. */
+const ENV = (central: Pick<CentralDePrueba, "entorno">, extra: Record<string, unknown>) =>
+	({ EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test", ...central.entorno, ...extra }) as any;
+
+/**
+ * Los `correos` enviados a la vez, en el peor cruce: ninguno termina de salir hasta que todos han
+ * decidido, o porque están enviando o porque ya han contestado sin enviar. Así todos han pasado por
+ * la central (el tope y la fila del correo) antes de que se apunte que salió el primero, vaya la
+ * máquina lo rápida que vaya.
+ */
+async function aLaVez(central: CentralDePrueba, correos: any[]) {
+	const enviados: any[] = [];
+	let decididos = 0;
+	let abrir!: () => void;
+	const barrera = new Promise<void>((r) => (abrir = r));
+	// El que envía decide al empezar a enviar y se queda en la barrera: hasta abrirla, cada uno cuenta una vez.
+	const decidir = () => void (++decididos === correos.length && abrir());
+	const EMAIL = {
+		send: async (m: any) => {
+			decidir();
+			await barrera;
+			enviados.push(m);
+		},
+	};
+	const resultados = await Promise.all(
+		correos.map((c) =>
+			enviarCorreoReservaWeb(ENV(central, { EMAIL }), c).then((r) => {
+				decidir();
+				return r;
+			}),
+		),
+	);
+	return { resultados, enviados };
+}
 
 describe("lo que dice cada correo", () => {
 	it("la confirmación lleva el resumen, el código y el enlace de cancelar", () => {
@@ -137,9 +155,9 @@ describe("lo que dice cada correo", () => {
 describe("enviar", () => {
 	it("sale con el nombre del negocio, el Reply-To del negocio y el destinatario en minúsculas, y queda apuntado", async () => {
 		const falso = correoFalso();
-		const r = await conBase("sale", async (sql) => {
-			const r = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
-			const fila = sql.exec(`SELECT * FROM email_sends;`).toArray()[0] as any;
+		const r = await conBase(async (central) => {
+			const r = await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo());
+			const fila = (await filasDe(central, `SELECT * FROM email_sends;`))[0];
 			return { r, fila };
 		});
 		expect(r.r).toBe("enviado");
@@ -155,60 +173,51 @@ describe("enviar", () => {
 
 	it("el mismo correo no sale dos veces", async () => {
 		const falso = correoFalso();
-		const r = await conBase("dos-veces", async () => [
-			await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo()),
-			await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo()),
+		const r = await conBase(async (central) => [
+			await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo()),
+			await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo()),
 		]);
 		expect(r).toEqual(["enviado", "ya_enviado"]);
 		expect(falso.enviados).toHaveLength(1);
 	});
 
 	it("dos envíos a la vez del mismo correo: sale uno", async () => {
-		const enviados: any[] = [];
-		const lento = {
-			EMAIL: {
-				send: async (m: any) => {
-					await new Promise((r) => setTimeout(r, 5));
-					enviados.push(m);
-				},
-			},
-		};
-		const r = await conBase("a-la-vez", async () =>
-			Promise.all([enviarCorreoReservaWeb(ENV(lento), correo()), enviarCorreoReservaWeb(ENV(lento), correo())]),
-		);
+		const { resultados, enviados } = await conBase((central) => aLaVez(central, [correo(), correo()]));
 		// El segundo lo ve saliendo: en curso, no «ya enviado» (aún no se sabe si saldrá).
-		expect(r.sort()).toEqual(["en_curso", "enviado"]);
+		expect(resultados.sort()).toEqual(["en_curso", "enviado"]);
 		expect(enviados).toHaveLength(1);
 	});
 
 	it("uno que salió no se vuelve a enviar, ni lo deja reenviable un fallo después", async () => {
-		const r = await conBase("ya-salio", async (sql) => {
-			sql.exec(
+		const r = await conBase(async (central) => {
+			await filasDe(
+				central,
 				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, sent_at_ms, tipo)
 				 VALUES ('rw:confirmacion:r1', 't1', 'web', 'ana@correo.es', 1, ?, 'reserva_web');`,
 				Date.now(),
 			);
-			const r = await enviarCorreoReservaWeb(ENV(correoFalso(true)), correo());
-			return { r, fila: sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray()[0] };
+			const r = await enviarCorreoReservaWeb(ENV(central, correoFalso(true)), correo());
+			return { r, fila: (await filasDe(central, `SELECT ok, error_code FROM email_sends;`))[0] };
 		});
 		expect(r).toEqual({ r: "ya_enviado", fila: { ok: 1, error_code: null } });
 	});
 
 	it("uno que se quedó a medias hace unos minutos se retoma; uno que está saliendo ahora está en curso", async () => {
 		const falso = correoFalso();
-		const r = await conBase("a-medias", async (sql) => {
+		const r = await conBase(async (central) => {
 			const apuntar = (id: string, hace: number) =>
-				sql.exec(
+				filasDe(
+					central,
 					`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
 					 VALUES (?, 't1', 'web', 'ana@correo.es', 0, 'enviando', ?, 'reserva_web');`,
 					id,
 					Date.now() - hace,
 				);
-			apuntar("rw:confirmacion:viejo", 10 * 60_000);
-			apuntar("rw:confirmacion:ahora", 1000);
+			await apuntar("rw:confirmacion:viejo", 10 * 60_000);
+			await apuntar("rw:confirmacion:ahora", 1000);
 			return [
-				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:viejo" })),
-				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:ahora" })),
+				await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:viejo" })),
+				await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:ahora" })),
 			];
 		});
 		// En curso no es «ya enviado»: quien lo manda lo repite, por si el otro no llega a terminarlo.
@@ -218,27 +227,29 @@ describe("enviar", () => {
 
 	it("si apuntar que salió falla una vez, se insiste: no se queda «enviando» y no se puede repetir", async () => {
 		const falso = correoFalso();
-		const r = await conBase("terminar-insiste", async (sql) => {
-			const real = baseCentral;
-			let fallos = 1;
-			baseCentral = {
-				execute: async (q: any) => {
-					if (String(q.sql).trimStart().startsWith("UPDATE email_sends") && fallos-- > 0) throw new Error("turso a ratos");
-					return real.execute(q);
-				},
-			};
-			const r = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
-			return { r, fila: sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray()[0] };
+		const r = await conBase(async (central) => {
+			// El primer intento de apuntarlo se corta; los siguientes pasan.
+			let intentos = 0;
+			const aRatos = centralInterceptada(central, (metodo, [sentencia], llamar) =>
+				metodo === "ejecutar" &&
+				(sentencia as SentenciaEnlazada).sql.trimStart().startsWith("UPDATE email_sends") &&
+				intentos++ === 0
+					? Promise.reject(new Error("la base central no contesta"))
+					: llamar(),
+			);
+			const r = await enviarCorreoReservaWeb(ENV(aRatos, { EMAIL: falso.EMAIL }), correo());
+			return { r, intentos, fila: (await filasDe(central, `SELECT ok, error_code FROM email_sends;`))[0] };
 		});
-		expect(r).toEqual({ r: "enviado", fila: { ok: 1, error_code: null } });
+		// Dos intentos: el que se cortó y el que entró.
+		expect(r).toEqual({ r: "enviado", intentos: 2, fila: { ok: 1, error_code: null } });
 		expect(falso.enviados).toHaveLength(1);
 	});
 
 	it("sin la base central no se sabe si salió: no se envía, y es un fallo que se puede repetir", async () => {
 		const falso = correoFalso();
-		const r = await conBase("sin-base", async () => {
-			baseCentral = { execute: async () => { throw new Error("turso caído"); } };
-			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
+		const r = await conBase(async (central) => {
+			const caida = centralInterceptada(central, () => Promise.reject(new Error("la base central no contesta")));
+			return enviarCorreoReservaWeb(ENV(caida, { EMAIL: falso.EMAIL }), correo());
 		});
 		expect(r).toBe("fallido");
 		expect(falso.enviados).toHaveLength(0);
@@ -246,11 +257,11 @@ describe("enviar", () => {
 
 	it("uno que falló queda apuntado sin gastar cupo, y se puede volver a intentar", async () => {
 		const bueno = correoFalso();
-		const r = await conBase("reintento", async (sql) => {
-			const primero = await enviarCorreoReservaWeb(ENV(correoFalso(true)), correo());
-			const fallo = sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray()[0];
-			const segundo = await enviarCorreoReservaWeb(ENV({ EMAIL: bueno.EMAIL }), correo());
-			const filas = sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray();
+		const r = await conBase(async (central) => {
+			const primero = await enviarCorreoReservaWeb(ENV(central, correoFalso(true)), correo());
+			const fallo = (await filasDe(central, `SELECT ok, error_code FROM email_sends;`))[0];
+			const segundo = await enviarCorreoReservaWeb(ENV(central, { EMAIL: bueno.EMAIL }), correo());
+			const filas = await filasDe(central, `SELECT ok, error_code FROM email_sends;`);
 			return { primero, fallo, segundo, filas };
 		});
 		expect(r.primero).toBe("fallido");
@@ -261,8 +272,8 @@ describe("enviar", () => {
 
 	it("sin remitente configurado no sale", async () => {
 		const falso = correoFalso();
-		const r = await conBase("sin-remitente", async () =>
-			enviarCorreoReservaWeb({ EMAIL: falso.EMAIL } as any, correo()),
+		const r = await conBase(async (central) =>
+			enviarCorreoReservaWeb({ ...central.entorno, EMAIL: falso.EMAIL } as any, correo()),
 		);
 		expect(r).toBe("fallido");
 		expect(falso.enviados).toHaveLength(0);
@@ -270,29 +281,32 @@ describe("enviar", () => {
 });
 
 describe("los topes", () => {
-	function apuntar(sql: any, n: number, extra: Record<string, unknown> = {}) {
+	/** `n` envíos (al menos uno) en la central, en una sola sentencia: cientos, uno a uno, serían cientos de viajes. */
+	async function apuntar(central: CentralDePrueba, n: number, extra: Record<string, unknown> = {}) {
 		const f = { tenant_id: "t1", to_email: "otro@correo.es", ok: 1, error_code: null, tipo: "reserva_web", sent_at_ms: Date.now(), ...extra } as any;
-		for (let i = 0; i < n; i++) {
-			sql.exec(
-				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo) VALUES (?, ?, 'web', ?, ?, ?, ?, ?);`,
-				crypto.randomUUID(),
-				f.tenant_id,
-				f.to_email,
-				f.ok,
-				f.error_code,
-				f.sent_at_ms,
-				f.tipo,
-			);
-		}
+		await filasDe(
+			central,
+			`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+			 INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
+			 SELECT ? || '-' || i, ?, 'web', ?, ?, ?, ?, ? FROM n;`,
+			n,
+			crypto.randomUUID(),
+			f.tenant_id,
+			f.to_email,
+			f.ok,
+			f.error_code,
+			f.sent_at_ms,
+			f.tipo,
+		);
 	}
 
 	it("el del negocio corta lo de ese negocio", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tope-negocio", async (sql) => {
-			apuntar(sql, TOPE_DIARIO_NEGOCIO);
+		const r = await conBase(async (central) => {
+			await apuntar(central, TOPE_DIARIO_NEGOCIO);
 			return [
-				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo()),
-				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ tenantId: "t2", id: "rw:confirmacion:r2" })),
+				await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo()),
+				await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ tenantId: "t2", id: "rw:confirmacion:r2" })),
 			];
 		});
 		expect(r).toEqual(["tope", "enviado"]);
@@ -300,34 +314,30 @@ describe("los topes", () => {
 
 	it("el del destinatario corta, aunque sean de negocios distintos", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tope-destinatario", async (sql) => {
-			apuntar(sql, TOPE_DIARIO_DESTINATARIO, { tenant_id: "otro-bar", to_email: "ana@correo.es" });
-			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
+		const r = await conBase(async (central) => {
+			await apuntar(central, TOPE_DIARIO_DESTINATARIO, { tenant_id: "otro-bar", to_email: "ana@correo.es" });
+			return enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo());
 		});
 		expect(r).toBe("tope");
 		expect(falso.enviados).toHaveLength(0);
 	});
 
 	it("muchos envíos a la vez no pasan del tope: cuenta también lo que está saliendo", async () => {
-		const enviados: any[] = [];
-		const lento = { EMAIL: { send: async (m: any) => { await new Promise((r) => setTimeout(r, 5)); enviados.push(m); } } };
-		const r = await conBase("tope-a-la-vez", async (sql) => {
-			apuntar(sql, TOPE_DIARIO_DESTINATARIO - 1, { to_email: "ana@correo.es" });
-			return Promise.all(
-				Array.from({ length: 12 }, (_, i) => enviarCorreoReservaWeb(ENV(lento), correo({ id: `rw:confirmacion:x${i}` }))),
-			);
+		const { resultados, enviados } = await conBase(async (central) => {
+			await apuntar(central, TOPE_DIARIO_DESTINATARIO - 1, { to_email: "ana@correo.es" });
+			return aLaVez(central, Array.from({ length: 12 }, (_, i) => correo({ id: `rw:confirmacion:x${i}` })));
 		});
-		expect(r.filter((x) => x === "enviado")).toHaveLength(1);
-		expect(r.filter((x) => x === "tope")).toHaveLength(11);
+		expect(resultados.filter((x) => x === "enviado")).toHaveLength(1);
+		expect(resultados.filter((x) => x === "tope")).toHaveLength(11);
 		expect(enviados).toHaveLength(1);
 	});
 
 	it("un reintento a otra dirección cuenta para la dirección a la que sale", async () => {
 		const bueno = correoFalso();
-		const r = await conBase("reintento-otra", async (sql) => {
-			await enviarCorreoReservaWeb(ENV(correoFalso(true)), correo({ para: "vieja@correo.es" }));
-			await enviarCorreoReservaWeb(ENV({ EMAIL: bueno.EMAIL }), correo({ para: "nueva@correo.es" }));
-			return sql.exec(`SELECT to_email, ok FROM email_sends;`).toArray();
+		const r = await conBase(async (central) => {
+			await enviarCorreoReservaWeb(ENV(central, correoFalso(true)), correo({ para: "vieja@correo.es" }));
+			await enviarCorreoReservaWeb(ENV(central, { EMAIL: bueno.EMAIL }), correo({ para: "nueva@correo.es" }));
+			return filasDe(central, `SELECT to_email, ok FROM email_sends;`);
 		});
 		expect(r).toEqual([{ to_email: "nueva@correo.es", ok: 1 }]);
 		expect(bueno.enviados.map((m) => m.to)).toEqual(["nueva@correo.es"]);
@@ -335,23 +345,23 @@ describe("los topes", () => {
 
 	it("no cuentan los que no salieron, los de ayer ni los pedidos", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tope-no-cuentan", async (sql) => {
-			apuntar(sql, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", ok: 0 });
-			apuntar(sql, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", sent_at_ms: Date.now() - 25 * 3_600_000 });
-			apuntar(sql, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", tipo: "pedido" });
-			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
+		const r = await conBase(async (central) => {
+			await apuntar(central, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", ok: 0 });
+			await apuntar(central, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", sent_at_ms: Date.now() - 25 * 3_600_000 });
+			await apuntar(central, TOPE_DIARIO_DESTINATARIO, { to_email: "ana@correo.es", tipo: "pedido" });
+			return enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo());
 		});
 		expect(r).toBe("enviado");
 	});
 
 	it("los correos de las reservas web no gastan el cupo de los pedidos", async () => {
 		const { TOPE_DIARIO } = await import("../src/domains/email/email.routes");
-		const r = await conBase("cupo-pedidos", async (sql) => {
-			apuntar(sql, TOPE_DIARIO);
+		const r = await conBase(async (central) => {
+			await apuntar(central, TOPE_DIARIO);
 			// AUD-41: tampoco los que están saliendo.
-			apuntar(sql, TOPE_DIARIO, { ok: 0, error_code: "enviando" });
+			await apuntar(central, TOPE_DIARIO, { ok: 0, error_code: "enviando" });
 			const envio = { id: crypto.randomUUID(), tenantId: "t1", deviceId: "dev", toEmail: "prov@correo.es", proveedor: "Prov" };
-			return reservarCupo(baseCentral, envio);
+			return reservarCupo(central.db, envio);
 		});
 		expect(r).toBe("reservado");
 	});
@@ -389,8 +399,8 @@ describe("las cabeceras, en una línea (AUD-40)", () => {
 
 	it("lo que sale al binding: asunto y remitente en una línea", async () => {
 		const falso = correoFalso();
-		const r = await conBase("cabeceras", () =>
-			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ negocio: { ...NEGOCIO, nombre: `${CON_SALTOS}\u0000"<x>"` } })),
+		const r = await conBase((central) =>
+			enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ negocio: { ...NEGOCIO, nombre: `${CON_SALTOS}\u0000"<x>"` } })),
 		);
 		expect(r).toBe("enviado");
 		const m = falso.enviados[0];
@@ -401,9 +411,9 @@ describe("las cabeceras, en una línea (AUD-40)", () => {
 
 	it("una dirección con un carácter de control no se envía ni gasta cupo", async () => {
 		const falso = correoFalso();
-		const r = await conBase("para-con-salto", async (sql) => ({
-			r: await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ para: "ana@correo.es\r\nbcc:otro@prueba.test" })),
-			filas: sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n,
+		const r = await conBase(async (central) => ({
+			r: await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ para: "ana@correo.es\r\nbcc:otro@prueba.test" })),
+			filas: (await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`))[0].n,
 		}));
 		expect(r).toEqual({ r: "fallido", filas: 0 });
 		expect(falso.enviados).toHaveLength(0);
@@ -427,12 +437,12 @@ describe("el destinatario, una sola dirección (AUD-39)", () => {
 
 	it("una lista o algo que no es una dirección no se envía ni gasta cupo", async () => {
 		const falso = correoFalso();
-		const r = await conBase("para-lista", async (sql) => {
+		const r = await conBase(async (central) => {
 			const resultados = [];
 			for (const [i, para] of NO_SON_UNA.entries()) {
-				resultados.push(await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: `rw:confirmacion:l${i}`, para })));
+				resultados.push(await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ id: `rw:confirmacion:l${i}`, para })));
 			}
-			return { resultados, filas: sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n };
+			return { resultados, filas: (await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`))[0].n };
 		});
 		expect(r).toEqual({ resultados: NO_SON_UNA.map(() => "fallido"), filas: 0 });
 		expect(falso.enviados).toHaveLength(0);
@@ -440,8 +450,8 @@ describe("el destinatario, una sola dirección (AUD-39)", () => {
 
 	it("una dirección con + y subdominio, en mayúsculas, sí sale", async () => {
 		const falso = correoFalso();
-		const r = await conBase("para-buena", () =>
-			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ para: " Ana+Reservas@Sub.Correo.ES " })),
+		const r = await conBase((central) =>
+			enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ para: " Ana+Reservas@Sub.Correo.ES " })),
 		);
 		expect(r).toBe("enviado");
 		expect(falso.enviados.map((m) => m.to)).toEqual(["ana+reservas@sub.correo.es"]);
@@ -450,8 +460,9 @@ describe("el destinatario, una sola dirección (AUD-39)", () => {
 
 describe("un correo que va detrás de otro (RW-ALTAS)", () => {
 	const cancelacion = () => correo({ id: "rw:cancelacion:r1", tipo: "cancelacion", enlace: undefined, trasElCorreo: "rw:confirmacion:r1" });
-	const apuntarConfirmacion = (sql: any, ok: number, codigo: string | null, tenant = "t1") =>
-		sql.exec(
+	const apuntarConfirmacion = (central: CentralDePrueba, ok: number, codigo: string | null, tenant = "t1") =>
+		filasDe(
+			central,
 			`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
 			 VALUES ('rw:confirmacion:r1', ?, 'web', 'ana@correo.es', ?, ?, ?, 'reserva_web');`,
 			tenant,
@@ -462,11 +473,11 @@ describe("un correo que va detrás de otro (RW-ALTAS)", () => {
 
 	it("si el anterior no salió, no sale ni gasta cupo", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tras-sin-previo", async (sql) => {
-			const sinNada = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
-			apuntarConfirmacion(sql, 0, "E_INTERNAL");
-			const conFallo = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
-			return { sinNada, conFallo, filas: sql.exec(`SELECT id FROM email_sends;`).toArray() };
+		const r = await conBase(async (central) => {
+			const sinNada = await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), cancelacion());
+			await apuntarConfirmacion(central, 0, "E_INTERNAL");
+			const conFallo = await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), cancelacion());
+			return { sinNada, conFallo, filas: await filasDe(central, `SELECT id FROM email_sends;`) };
 		});
 		expect(r.sinNada).toBe("sin_previo");
 		expect(r.conFallo).toBe("sin_previo");
@@ -476,9 +487,9 @@ describe("un correo que va detrás de otro (RW-ALTAS)", () => {
 
 	it("el de otro negocio con el mismo id no cuenta como anterior", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tras-otro-negocio", async (sql) => {
-			apuntarConfirmacion(sql, 1, null, "t2");
-			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+		const r = await conBase(async (central) => {
+			await apuntarConfirmacion(central, 1, null, "t2");
+			return enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), cancelacion());
 		});
 		expect(r).toBe("sin_previo");
 		expect(falso.enviados).toEqual([]);
@@ -487,9 +498,9 @@ describe("un correo que va detrás de otro (RW-ALTAS)", () => {
 	it("si el anterior salió, o está saliendo, sale", async () => {
 		for (const [nombre, ok, codigo] of [["salio", 1, null], ["saliendo", 0, "enviando"]] as const) {
 			const falso = correoFalso();
-			const r = await conBase(`tras-${nombre}`, async (sql) => {
-				apuntarConfirmacion(sql, ok, codigo);
-				return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), cancelacion());
+			const r = await conBase(async (central) => {
+				await apuntarConfirmacion(central, ok, codigo);
+				return enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), cancelacion());
 			});
 			expect(r, nombre).toBe("enviado");
 			expect(falso.enviados.map((m) => m.subject), nombre).toEqual(["Reserva cancelada en Bar Pepe"]);
@@ -498,8 +509,8 @@ describe("un correo que va detrás de otro (RW-ALTAS)", () => {
 
 	it("sin `trasElCorreo`, como hasta ahora", async () => {
 		const falso = correoFalso();
-		const r = await conBase("tras-nada", async () =>
-			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:cancelacion:r1", tipo: "cancelacion", enlace: undefined })),
+		const r = await conBase(async (central) =>
+			enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ id: "rw:cancelacion:r1", tipo: "cancelacion", enlace: undefined })),
 		);
 		expect(r).toBe("enviado");
 	});

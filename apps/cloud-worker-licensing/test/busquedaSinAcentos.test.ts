@@ -21,7 +21,7 @@ import { normalizada, normalizarBusqueda, PLIEGUES, SE_QUITAN, textoABuscar } fr
 import { entradas, resumen, salidas } from "../src/domains/cuentas/cuentas.queries";
 import { searchProductos as buscarEnMesas } from "../src/domains/mesas/mesas.queries";
 import { searchProductos as buscarEnLaBarra } from "../src/domains/venta_rapida/venta_rapida.queries";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -105,7 +105,7 @@ describe("las búsquedas del worker no distinguen acentos ni mayúsculas", () =>
 			sql.exec(
 				"INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-12', 'Compras', 'Limón y azúcar', 1500);",
 			);
-			return prueba(clienteSobre(sql) as unknown as Base);
+			return prueba(clienteLocal(hub.state.storage));
 		});
 	}
 

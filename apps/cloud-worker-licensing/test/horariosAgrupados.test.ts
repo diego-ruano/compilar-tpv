@@ -7,7 +7,7 @@ import { grupoAsignacion, filasSemana } from "../src/domains/trabajadores/trabaj
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
 import { enElHub } from "./helpers/hub";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import type { AsignacionGuardarInput } from "@tpv/contracts";
 
 const entrada = (tramos = [["09:00", "14:00"], ["17:00", "22:00"]]): AsignacionGuardarInput => ({
@@ -18,10 +18,12 @@ function preparar(hub: any) {
     const sql = hub.state.storage.sql;
     crearEsquemaTenant(sql);
     sql.exec("INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) SELECT 'u', ID_Rol, 'u@bar.test', 'h', 'Ana', 'Activo' FROM Roles WHERE Nombre_Rol = 'Administrador'; INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('t', 'u');");
-    const db = clienteSobre(sql, hub.state.storage);
+    const db = clienteLocal(hub.state.storage);
     const aplicar = async (comando: ReturnType<typeof guardarAsignacion>) => {
         const lote = buildApplyBatch(comando.command);
-        const resultados = await db.batch(lote.middle);
+        // Como el motor (`applyInternalCommandIdempotent`): las sentencias del lote (con sus guardas y
+        // sus argumentos sin convertir) no son las que declara la `Base`, aunque las ejecute.
+        const resultados = await db.batch(lote.middle as any);
         return { resultado: lote.resolveResult(resultados, 0), replica: lote.replicated };
     };
     const filas = () => sql.exec("SELECT * FROM Asignacion_Turnos ORDER BY Fecha, Hora_Inicio, ID_Asignacion;").toArray();
@@ -93,7 +95,7 @@ it("captura para la réplica los mismos identificadores del conjunto confirmado"
         const confirmadas = filas();
         await enElHub("horarios-replica-destino", async (destino: any) => {
             const { db, filas: recibidas } = preparar(destino);
-            await db.batch(replica);
+            await db.batch(replica as any);
             expect(recibidas()).toEqual(confirmadas);
         });
     });

@@ -2,16 +2,14 @@
 //
 // LOGIN-08: el correo de recuperación, a dónde llegan los códigos para recuperar el PIN.
 //
-// Contra el esquema real del control-plane sobre el SQLite del Durable Object, como
+// Contra una base central de verdad (`helpers/central.ts`), nueva en cada caso, como
 // `recuperarPin.test.ts`. Lo que se fija es lo que haría el cambio inservible o peligroso sin que
 // nada fallara a la vista: cambiarlo sin demostrar el buzón nuevo, que el dueño no se entere, que el
 // código de un propósito sirva para el otro, o que recuperar el PIN siga yendo al correo viejo.
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, type CentralDePrueba } from "./helpers/central";
 import {
 	confirmarCambioCorreo,
 	estadoCorreoRecuperacion,
@@ -37,7 +35,7 @@ const MINUTO = 60_000;
 type Correo = { to: string; subject: string; text: string };
 
 type Escenario = {
-	db: any;
+	db: CentralDePrueba["db"];
 	env: any;
 	ctx: (extra?: Partial<ContextoCorreo>) => ContextoCorreo;
 	correos: Correo[];
@@ -49,75 +47,69 @@ type Escenario = {
 };
 
 async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
-	await enElHub("correo-recuperacion", async (hub: any) => {
-		const db = clienteSobre(hub.state.storage.sql);
-		prepararPlanoDeControl(hub.state.storage.sql);
-		for (const tabla of ["licenses", "email_codes", "tenant_recovery_emails", "license_device_swaps"]) {
-			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
-		}
+	const { db } = await centralDePrueba();
 
-		const correos: Correo[] = [];
-		const env = {
-			LICENSE_JWT_SECRET: "secreto-de-pruebas",
-			EMAIL_FROM_ADDRESS: "tpv@altaria.test",
-			EMAIL: {
-				send: async (m: any) => {
-					correos.push({ to: m.to, subject: m.subject, text: m.text });
-				},
+	const correos: Correo[] = [];
+	const env = {
+		LICENSE_JWT_SECRET: "secreto-de-pruebas",
+		EMAIL_FROM_ADDRESS: "tpv@altaria.test",
+		EMAIL: {
+			send: async (m: any) => {
+				correos.push({ to: m.to, subject: m.subject, text: m.text });
 			},
-		};
+		},
+	};
 
-		const { license } = await issueLicense(db, {
-			claves: STORE_KEY,
-			termMonths: 12,
-			origin: "manual",
-			customerEmail: COMPRA,
-		});
-		await activateLicenseFirstTime(db, {
-			licenseId: license.license_id,
-			tenantId: TENANT,
-			deviceId: MAIN,
-			termMonths: 12,
-		});
+	const { license } = await issueLicense(db, {
+		claves: STORE_KEY,
+		termMonths: 12,
+		origin: "manual",
+		customerEmail: COMPRA,
+	});
+	await activateLicenseFirstTime(db, {
+		licenseId: license.license_id,
+		tenantId: TENANT,
+		deviceId: MAIN,
+		termMonths: 12,
+	});
 
-		const ctx = (extra: Partial<ContextoCorreo> = {}): ContextoCorreo => ({
-			tenantId: TENANT,
-			deviceId: MAIN,
-			licHash: license.license_key_hash,
-			ahora: T0,
-			...extra,
-		});
+	const ctx = (extra: Partial<ContextoCorreo> = {}): ContextoCorreo => ({
+		tenantId: TENANT,
+		deviceId: MAIN,
+		licHash: license.license_key_hash,
+		ahora: T0,
+		...extra,
+	});
 
-		const avisos: Promise<unknown>[] = [];
-		const diferir = (p: Promise<unknown>) => void avisos.push(p);
+	const avisos: Promise<unknown>[] = [];
+	const diferir = (p: Promise<unknown>) => void avisos.push(p);
 
-		const ultimoCodigo = () => {
-			const m = correos[correos.length - 1]?.text.match(/\b(\d{6})\b/);
-			if (!m) throw new Error("el último correo no lleva ningún código");
-			return m[1];
-		};
+	const ultimoCodigo = () => {
+		const m = correos[correos.length - 1]?.text.match(/\b(\d{6})\b/);
+		if (!m) throw new Error("el último correo no lleva ningún código");
+		return m[1];
+	};
 
-		await fn({
-			db,
-			env,
-			ctx,
-			correos,
-			avisos,
-			diferir,
-			ultimoCodigo,
-			cambiarA: async (correo, ahora) => {
-				const s = await solicitarCambioCorreo(db, env as any, { ...ctx({ ahora }), correo });
-				expect(s.status).toBe(200);
-				const c = await confirmarCambioCorreo(
-					db,
-					env as any,
-					{ ...ctx({ ahora: ahora + 1_000 }), codigo: ultimoCodigo() },
-					diferir,
-				);
-				expect(c.status).toBe(200);
-				await Promise.all(avisos);
-			},
-		});
+	await fn({
+		db,
+		env,
+		ctx,
+		correos,
+		avisos,
+		diferir,
+		ultimoCodigo,
+		cambiarA: async (correo, ahora) => {
+			const s = await solicitarCambioCorreo(db, env as any, { ...ctx({ ahora }), correo });
+			expect(s.status).toBe(200);
+			const c = await confirmarCambioCorreo(
+				db,
+				env as any,
+				{ ...ctx({ ahora: ahora + 1_000 }), codigo: ultimoCodigo() },
+				diferir,
+			);
+			expect(c.status).toBe(200);
+			await Promise.all(avisos);
+		},
 	});
 }
 

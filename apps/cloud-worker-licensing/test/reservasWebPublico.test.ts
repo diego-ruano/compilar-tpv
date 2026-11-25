@@ -15,8 +15,7 @@ import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enLaAgenda, lectorSobre } from "./helpers/agenda";
-import { clienteSobre } from "./helpers/clienteSql";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, fotoDeLaCentral, type CentralDePrueba } from "./helpers/central";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { MAX_ALTAS_DIA_CONEXION, MAX_ALTAS_DIA_RED, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
@@ -27,8 +26,11 @@ const AHORA = horaLocalEn("Europe/Madrid", Date.now());
 const HOY = AHORA.slice(0, 10);
 const DIA = sumarDias(HOY, 3);
 
-/** La agenda y el lector de la prueba en curso: los mocks de abajo los leen al llamarse. */
-let enCurso: { motor: any; leer: any } | null = null;
+/**
+ * La agenda, el lector y la base central de la prueba en curso: los mocks de abajo los leen al
+ * llamarse, y las peticiones llevan la central en su `env` (`envDeLaPrueba`).
+ */
+let enCurso: { motor: any; leer: any; central: CentralDePrueba } | null = null;
 
 vi.mock("../src/domains/reservas_web/puerta", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/domains/reservas_web/puerta")>();
@@ -58,14 +60,6 @@ vi.mock("../src/observability/axiom", async (importOriginal) => {
 	};
 });
 
-/** La base central de la prueba en curso (`email_sends`), en el mismo SQLite de la agenda. */
-let baseCentral: any = null;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => baseCentral,
-}));
-
 vi.mock("../src/durableObjects/agendaWeb", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/durableObjects/agendaWeb")>();
 	return { ...original, agendaDe: () => enCurso!.motor };
@@ -91,6 +85,11 @@ const ENV = {
 	},
 };
 
+/** El `env` de las peticiones de la prueba en curso: el de la suite, con su base central. */
+function envDeLaPrueba() {
+	return { ...ENV, ...enCurso!.central.entorno };
+}
+
 const BASE = "/v1/publico/reservas/rw_AAAAAAAAAAAAAAAAAAAAAA";
 
 const PERSONALES = ["Ana", "ana@correo.es", "600112233", "bebé"];
@@ -101,7 +100,7 @@ async function pedir(ruta: string, cuerpo?: unknown) {
 		cuerpo === undefined
 			? {}
 			: { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cuerpo) },
-		ENV,
+		envDeLaPrueba(),
 	);
 	const json = (await res.json()) as any;
 	const texto = JSON.stringify(json);
@@ -109,7 +108,11 @@ async function pedir(ruta: string, cuerpo?: unknown) {
 	return { status: res.status, json, res };
 }
 
-async function conNegocio(nombre: string, prueba: (sql: SqlStorage, motor: any) => Promise<void>) {
+async function conNegocio(
+	nombre: string,
+	prueba: (sql: SqlStorage, motor: any, central: CentralDePrueba) => Promise<void>,
+) {
+	const central = await centralDePrueba();
 	await enLaAgenda(nombre, async (motor, state) => {
 		const sql = state.storage.sql;
 		crearEsquemaTenant(sql);
@@ -139,16 +142,13 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage, motor: any) 
 		}
 		const leer = lectorSobre(state, () => AHORA);
 		motor.leer = leer;
-		enCurso = { motor, leer };
-		prepararPlanoDeControl(sql);
-		baseCentral = clienteSobre(sql, state.storage);
+		enCurso = { motor, leer, central };
 		enviados.length = 0;
 		correoCaido = false;
 		try {
-			await prueba(sql, motor);
+			await prueba(sql, motor, central);
 		} finally {
 			enCurso = null;
-			baseCentral = null;
 		}
 	});
 }
@@ -189,7 +189,7 @@ async function altaDesde(ip: string, cuerpo: unknown) {
 	const res = await app.request(
 		`${BASE}/reservas`,
 		{ method: "POST", headers: { "content-type": "application/json", "CF-Connecting-IP": ip }, body: JSON.stringify(cuerpo) },
-		ENV,
+		envDeLaPrueba(),
 	);
 	return { status: res.status, json: (await res.json()) as any };
 }
@@ -336,7 +336,7 @@ describe("las rutas públicas de la reserva web", () => {
 				app.request(
 					`${BASE}/reservas`,
 					{ method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": clave }, body: JSON.stringify(cuerpo) },
-					ENV,
+					envDeLaPrueba(),
 				);
 			const clave = "5b0e2f8c-6d1a-4c3e-9f7b-2a4d6e8f0a1c";
 			const primera = (await (await alta(clave)).json()) as any;
@@ -527,7 +527,7 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 	});
 
 	it("la IP no queda en claro en la agenda: sólo su huella, que cambia de un negocio a otro", async () => {
-		await conNegocio("publico-conexion-sin-ip", async (sql) => {
+		await conNegocio("publico-conexion-sin-ip", async (sql, _motor, central) => {
 			expect((await altaDesde("192.0.2.77", ALTA_WEB)).status).toBe(200);
 			const huellas = sql.exec(`SELECT conexion_hash AS h FROM altas_por_conexion;`).toArray() as any[];
 			expect(huellas).toHaveLength(1);
@@ -549,24 +549,31 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 				expect(texto, tabla).not.toContain("192.0.2");
 				expect(texto, tabla).not.toMatch(/2001:db8|aaaa:bbbb/i);
 			}
+			// Ni en la base central (los correos que han salido).
+			for (const [tabla, filas] of Object.entries(await fotoDeLaCentral(central))) {
+				const texto = JSON.stringify(filas);
+				expect(texto, tabla).not.toContain("192.0.2");
+				expect(texto, tabla).not.toMatch(/2001:db8|aaaa:bbbb/i);
+			}
 		});
 	});
 
 	it("cancelar una reserva cuya confirmación no salió no manda correo ni gasta cupo", async () => {
-		await conNegocio("publico-cancelar-sin-confirmacion", async (sql, motor) => {
+		await conNegocio("publico-cancelar-sin-confirmacion", async (_sql, motor, central) => {
 			// Apuntada sin pasar por la ruta: no ha salido ningún correo.
 			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
 			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
 			expect((await pedir("/reserva", { token: hecha.token })).json.estado).toBe("cancelada");
 			expect(enviados).toEqual([]);
-			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).toArray()[0]).toEqual({ n: 0 });
+			expect(await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`)).toEqual([{ n: 0 }]);
 		});
 	});
 
 	it("cancelar una reserva cuya confirmación falló en el binding tampoco manda el «has cancelado»", async () => {
-		await conNegocio("publico-cancelar-confirmacion-fallida", async (sql, motor) => {
+		await conNegocio("publico-cancelar-confirmacion-fallida", async (_sql, motor, central) => {
 			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
-			sql.exec(
+			await filasDe(
+				central,
 				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
 				 VALUES (?, 't1', 'web', 'ana@correo.es', NULL, 0, 'E_INTERNAL', ?, 'reserva_web');`,
 				`rw:confirmacion:${hecha.id_reserva}`,
@@ -574,12 +581,12 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			);
 			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
 			expect(enviados).toEqual([]);
-			expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).toArray()[0]).toEqual({ n: 1 });
+			expect(await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`)).toEqual([{ n: 1 }]);
 		});
 	});
 
 	it("cancelar con el enlace del correo de un cambio del restaurante sí avisa, aunque la confirmación no saliera", async () => {
-		await conNegocio("publico-cancelar-con-enlace-de-un-cambio", async (sql, motor) => {
+		await conNegocio("publico-cancelar-con-enlace-de-un-cambio", async (_sql, motor, central) => {
 			// Apuntada sin confirmación; después el restaurante la cambia, y el correo que se lo cuenta
 			// (lo pide la Main) lleva un enlace de cancelar nuevo.
 			const hecha = await motor.reservar({ tenantId: "t1", alta: ALTA });
@@ -587,7 +594,7 @@ describe("el tope de altas por conexión y el correo de cancelar (RW-ALTAS)", ()
 			expect(cambio.token).toBeTruthy();
 			expect((await pedir("/cancelar", { token: cambio.token })).json).toEqual({ ok: true });
 			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
-			expect(sql.exec(`SELECT id FROM email_sends;`).toArray()).toEqual([{ id: `rw:cancelacion:${hecha.id_reserva}` }]);
+			expect(await filasDe(central, `SELECT id FROM email_sends;`)).toEqual([{ id: `rw:cancelacion:${hecha.id_reserva}` }]);
 		});
 	});
 

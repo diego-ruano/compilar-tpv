@@ -1,13 +1,11 @@
 // test/reservasWebClaves.test.ts
 //
 // Reservas desde la web (docs/estudios/reservas-web.md): la clave pública de cada negocio, contra
-// la estructura de verdad de la base central (`docs/sql/control-plane/esquema-actual.sql`).
+// una base central de verdad (`helpers/central.ts`), con el esquema de sus migraciones.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import {
 	CLAVE_RE,
 	claveDelNegocio,
@@ -20,13 +18,11 @@ import {
 
 beforeEach(() => olvidarClavesCacheadas());
 
-async function conBaseCentral(nombre: string, prueba: (db: any, sql: any) => Promise<void>) {
-	await enElHub(nombre, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('t1'), ('t2');`);
-		await prueba(clienteSobre(sql), sql);
-	});
+/** Los negocios `t1` y `t2`, en una base central propia. */
+async function conBaseCentral(prueba: (central: CentralDePrueba) => Promise<void>) {
+	const central = await centralDePrueba();
+	await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('t1'), ('t2');`);
+	await prueba(central);
 }
 
 describe("la clave pública de la reserva web", () => {
@@ -37,24 +33,28 @@ describe("la clave pública de la reserva web", () => {
 	});
 
 	it("un negocio tiene una sola clave activa aunque la pidan dos a la vez", async () => {
-		await conBaseCentral("rw-claves-una", async (db, sql) => {
+		await conBaseCentral(async (central) => {
+			const { db } = central;
 			const [a, b] = await Promise.all([claveDelNegocio(db, "t1", 1), claveDelNegocio(db, "t1", 2)]);
 			expect(a).toBe(b);
 			expect(await claveDelNegocio(db, "t1", 3)).toBe(a);
-			const activas = sql
-				.exec(`SELECT COUNT(*) AS n FROM reserva_web_claves WHERE tenant_id = 't1' AND revoked_at_ms IS NULL;`)
-				.toArray()[0].n;
-			expect(activas).toBe(1);
+			expect(
+				await filasDe(
+					central,
+					`SELECT COUNT(*) AS n FROM reserva_web_claves WHERE tenant_id = 't1' AND revoked_at_ms IS NULL;`,
+				),
+			).toEqual([{ n: 1 }]);
 			expect(await claveDelNegocio(db, "t2", 4)).not.toBe(a);
 		});
 	});
 
 	it("una clave revocada ya no lleva a ningún negocio, y una inventada tampoco", async () => {
-		await conBaseCentral("rw-claves-revocada", async (db, sql) => {
+		await conBaseCentral(async (central) => {
+			const { db } = central;
 			const clave = await claveDelNegocio(db, "t1", 1);
 			expect(await negocioDeLaClave(db, clave)).toBe("t1");
 
-			sql.exec(`UPDATE reserva_web_claves SET revoked_at_ms = 5 WHERE clave = ?;`, clave);
+			await filasDe(central, `UPDATE reserva_web_claves SET revoked_at_ms = 5 WHERE clave = ?;`, clave);
 			olvidarClavesCacheadas();
 			expect(await negocioDeLaClave(db, clave)).toBeNull();
 			expect(await negocioDeLaClave(db, generarClave())).toBeNull();

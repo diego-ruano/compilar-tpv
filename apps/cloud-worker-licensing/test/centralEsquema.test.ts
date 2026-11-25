@@ -8,19 +8,16 @@
 //   (`migrations.rs::schema_snapshot_no_drift`). Un cambio de esquema a propósito la regenera con
 //   `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`, y el cambio de la foto
 //   se revisa con el de la migración.
-// - **La 0001 es la base de producción.** La primera migración crea EXACTAMENTE la base que hay en
-//   producción, fotografiada en `docs/sql/control-plane/esquema-actual.sql`: las mismas tablas, con
-//   sus columnas en el mismo orden y con el mismo tipo, NOT NULL, DEFAULT y clave primaria; los
-//   mismos índices, con sus columnas y su WHERE; las mismas claves foráneas y los mismos CHECK. Es
-//   lo que permite cargar en el objeto un volcado de la base de hoy sin traducir nada. Se compara la
-//   estructura que da SQLite (`pragma_table_xinfo`, `pragma_index_list`…), no el texto: los
-//   comentarios no cuentan, y un espacio de más tampoco.
+// - **Lo que no cambia sin querer.** Lo que la base central tiene que tener, leído de la estructura
+//   que da SQLite (`pragma_table_xinfo`, `pragma_index_list`…) y no del texto: las tablas que hay,
+//   sin vistas ni triggers; las columnas de `tenants`, con su DEFAULT y sus CHECK; el índice único y
+//   parcial de `license_payments` por sesión y unidad; y las claves foráneas que borran en cascada.
+//   La foto se regenera con `-u`; esto sólo cambia a mano.
 
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba } from "./helpers/central";
 
 const sinComentarios = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 /** Un trozo de SQL sin espacios que no cuentan: los de más y los de junto a un paréntesis o una coma. */
@@ -69,10 +66,6 @@ function estructura(sql: SqlStorage) {
 			tablas.map((t) => [
 				t.name,
 				{
-					forma: filas(
-						"SELECT type, ncol, wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = ?1;",
-						t.name,
-					),
 					columnas: filas(
 						`SELECT cid, name, type, "notnull", dflt_value, pk, hidden FROM pragma_table_xinfo(?1) ORDER BY cid;`,
 						t.name,
@@ -99,8 +92,6 @@ function estructura(sql: SqlStorage) {
 	};
 }
 
-type Estructura = ReturnType<typeof estructura>;
-
 /**
  * La foto del esquema: el SQL de cada tabla e índice tal como lo guarda SQLite, sin las tablas de
  * SQLite, las del Durable Object ni `_migrations`, y con los espacios normalizados.
@@ -126,20 +117,8 @@ describe("la foto del esquema de la central", () => {
 	});
 });
 
-describe("la 0001 de la central es la base de producción", () => {
-	it("crea exactamente la misma estructura que la foto", async () => {
-		const migrada: Estructura = await runInDurableObject((await centralDePrueba()).stub, (_c, state) =>
-			estructura(state.storage.sql),
-		);
-		const foto: Estructura = await runInDurableObject(centralSinAprovisionar().stub, (_c, state) => {
-			prepararPlanoDeControl(state.storage.sql);
-			return estructura(state.storage.sql);
-		});
-
-		expect(migrada).toEqual(foto);
-	});
-
-	it("y la comparación mira de verdad: columnas, índices parciales, claves foráneas y CHECK", async () => {
+describe("lo que la base central tiene que tener", () => {
+	it("sus tablas, las columnas y los CHECK de tenants, el índice parcial de los cobros y las cascadas", async () => {
 		const { tablas, vistasYTriggers } = await runInDurableObject((await centralDePrueba()).stub, (_c, state) =>
 			estructura(state.storage.sql),
 		);

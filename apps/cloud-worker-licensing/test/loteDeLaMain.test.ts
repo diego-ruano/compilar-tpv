@@ -464,7 +464,7 @@ describe("apply_lote · lo que rechaza el lote entero", () => {
 	it("AUD-02: si la sesión ya no es la de la Main, no entra nada y se dice que es pasajero", async () => {
 		await enUnHub("lote-no-es-la-main", async (m, hub) => {
 			// La licencia se ha trasladado: la tabla nombra a otro equipo.
-			laMainEs(hub, "otro-equipo");
+			await laMainEs(hub, m.central, TENANT, "otro-equipo");
 			const acuse = await m.mandarLote([zona(1)]);
 			expect(acuse).toMatchObject({ ok: false, error: "not_authenticated", transitorio: true });
 			expect(zonas(m.sql)).toEqual([]);
@@ -478,7 +478,7 @@ describe("apply_lote · lo que rechaza el lote entero", () => {
 			const ocupado = hub.enTurnoDelLog(() => new Promise<void>((r) => (soltar = r)));
 			const acuse = m.mandarLote([zona(1)]);
 			await new Promise((r) => setTimeout(r, 20));
-			laMainEs(hub, "otro-equipo");
+			await laMainEs(hub, m.central, TENANT, "otro-equipo");
 			soltar();
 			await ocupado;
 

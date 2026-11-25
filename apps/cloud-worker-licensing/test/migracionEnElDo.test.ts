@@ -24,12 +24,6 @@ const { deMas, capturados } = vi.hoisted(() => ({
 	/** Lo que se ha mandado a Sentry (`capturarError`), con su operación. */
 	capturados: [] as { operacion: string; mensaje: string }[],
 }));
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
 
 vi.mock("../src/server/tenantMigrations", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/server/tenantMigrations")>();
@@ -63,11 +57,7 @@ const { esFalloPasajero, esRechazoPermanente } = await import("../src/durableObj
 const { HubError } = await import("../src/lib/errorHttp");
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 /** Reconstruye `Zonas` como lo haría una migración que le quita una restricción. */
 const RECONSTRUIR_ZONAS = {
@@ -224,13 +214,13 @@ describe("si la migración falla, el negocio lo dice y nadie pierde nada", () =>
 
 	it("contesta 503 con su identificador, avisa una vez y no deja nada a medias", async () => {
 		await conNegocioFirmado(deps, "migracion-fallida", async (n) => {
-			const antes = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			const antes = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 			expect(antes.status).toBe(200);
 
 			const { eventos } = await despliegueRoto(n.tenantId);
 
 			for (let i = 0; i < 3; i++) {
-				const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 				expect(res.status).toBe(503);
 				expect(viajes(res, "hub-ruta")).toBe(1);
 				expect(await res.json()).toEqual({
@@ -258,7 +248,7 @@ describe("si la migración falla, el negocio lo dice y nadie pierde nada", () =>
 
 			// Con el despliegue arreglado, el negocio vuelve sin tocar nada más.
 			deMas.length = 0;
-			const despues = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			const despues = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 			expect(despues.status).toBe(200);
 		});
 	});
@@ -273,7 +263,7 @@ describe("si la migración falla, el negocio lo dice y nadie pierde nada", () =>
 			});
 
 			for (let i = 0; i < 2; i++) {
-				const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 				expect(res.status).toBe(500);
 				expect(await res.json()).toMatchObject({ ok: false, code: "tenant_migration_altered", error: "migration_altered" });
 			}

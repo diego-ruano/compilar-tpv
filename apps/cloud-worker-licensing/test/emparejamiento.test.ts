@@ -1,7 +1,7 @@
 // test/emparejamiento.test.ts
 //
-// Vincular una Handy de principio a fin, contra el SQL de verdad (el SQLite de un Durable Object
-// con la estructura de producción, `helpers/planoDeControl.ts`) y con firmas ed25519 reales.
+// Vincular una Handy de principio a fin, contra una base central de verdad para cada caso
+// (`helpers/central.ts`) y con firmas ed25519 reales.
 //
 // Lo que se fija, y el fallo de antes que evita cada cosa:
 //   · La espera por fallos crece por tramos (3 → 30 s, 6 → 5 min, 9 → 30 min). Antes había 30
@@ -17,30 +17,14 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import * as ed from "@noble/ed25519";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-/**
- * La base del test, para el único caso que entra por la RUTA (el filtro exterior). El resto llama
- * a las funciones de decisión, que reciben el cliente y no lo buscan.
- */
-let dbDePruebas: any = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
-const { entregarToken, reclamarCodigo, soltarCodigo } = await import("../src/domains/pairing/pairing.handy");
-const { aprobarSolicitud, crearCodigo, rechazarSolicitud, solicitudesPendientes } = await import(
-	"../src/domains/pairing/pairing.main"
-);
-const { cancelSchema, claimSchema, fetchTokenSchema } = await import("../src/domains/pairing/pairing.schemas");
-const { pairingRoutes } = await import("../src/domains/pairing/pairing.routes");
-
-/** El worker con el subrouter montado donde de verdad vive, para probar las rutas enteras. */
-const elWorker = new Hono().route("/v1/pair", pairingRoutes);
+import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
+import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import type { FilasEnBruto } from "../src/durableObjects/sqliteDelObjeto";
+import type { ClienteCentral } from "../src/server/central/cliente";
+import { entregarToken, reclamarCodigo, soltarCodigo } from "../src/domains/pairing/pairing.handy";
+import { aprobarSolicitud, crearCodigo, rechazarSolicitud, solicitudesPendientes } from "../src/domains/pairing/pairing.main";
+import { cancelSchema, claimSchema, fetchTokenSchema } from "../src/domains/pairing/pairing.schemas";
+import { pairingRoutes } from "../src/domains/pairing/pairing.routes";
 import {
 	OLVIDO_MS,
 	PETICIONES_POR_MINUTO,
@@ -53,6 +37,13 @@ import configuracionDelWorker from "../wrangler.json";
 import { mensajeFirmado, type AccionFirmada } from "../src/domains/pairing/pairing.firma";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
+
+/**
+ * El worker con el subrouter montado donde de verdad vive, para probar las rutas enteras. Llega a la
+ * central del caso por su `entorno`; el resto de los casos llama a las funciones de decisión, que
+ * reciben el cliente y no lo buscan.
+ */
+const elWorker = new Hono().route("/v1/pair", pairingRoutes);
 
 const T0 = 1_800_000_000_000;
 const MIN = 60_000;
@@ -82,45 +73,49 @@ function peticion(ruta: string, cuerpo: Record<string, unknown>, ip = "10.0.0.1"
 	});
 }
 
-/** Un control-plane vacío con dos códigos del mismo negocio, que caducan a los 10 minutos. */
-async function conPlanoDeControl<R>(nombre: string, prueba: (m: Mundo) => Promise<R>): Promise<R> {
-	return enElHub(`emparejamiento-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql);
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["pair_requests", "device_challenges", "pair_claim_fallos", "devices", "licenses", "tenants"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
-		// `fetch-token` necesita el negocio, su licencia activa y, al aprobar, el dispositivo.
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
-			                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
-			 VALUES ('lic-1', 'hash-licencia', ?, 'active', 12, 'manual', ?, 'bar@ejemplo.test', ?, ?);`,
+/** Una base central nueva con dos códigos del mismo negocio, que caducan a los 10 minutos. */
+async function conLaCentral<R>(prueba: (m: Mundo) => Promise<R>): Promise<R> {
+	const central = await centralDePrueba();
+	// `fetch-token` necesita el negocio, su licencia activa y, al aprobar, el dispositivo.
+	await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
+	await filasDe(
+		central,
+		`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
+		                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
+		 VALUES ('lic-1', 'hash-licencia', ?, 'active', 12, 'manual', ?, 'bar@ejemplo.test', ?, ?);`,
+		TENANT,
+		T0,
+		T0,
+		T0,
+	);
+	for (const codigo of [CODIGO, OTRO_CODIGO]) {
+		await filasDe(
+			central,
+			`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
+			 VALUES (?, 'sin-secreto', ?, 'main-1', 'pending', ?, ?);`,
+			codigo,
 			TENANT,
 			T0,
-			T0,
-			T0,
+			T0 + 10 * MIN,
 		);
-		for (const codigo of [CODIGO, OTRO_CODIGO]) {
-			sql.exec(
-				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
-				 VALUES (?, 'sin-secreto', ?, 'main-1', 'pending', ?, ?);`,
-				codigo,
-				TENANT,
-				T0,
-				T0 + 10 * MIN,
-			);
-		}
-		return prueba(new Mundo(sql, db));
-	});
+	}
+	return prueba(new Mundo(central));
 }
 
 class Mundo {
+	/**
+	 * `db` es por donde las funciones de decisión le hablan a la central: su cliente, o la misma
+	 * central vista a través de su stub (`centralInterceptada`).
+	 */
 	constructor(
-		readonly sql: any,
-		readonly db: any,
+		readonly central: CentralDePrueba,
+		readonly db: ClienteCentral = central.db,
 	) {}
+
+	/** Las filas de una sentencia ejecutada directamente en la central: para sembrar y comprobar. */
+	filas(texto: string, ...args: unknown[]) {
+		return filasDe(this.central, texto, ...args);
+	}
 
 	async reclamar(d: Dispositivo, codigo: string, ahora: number, ip = "10.0.0.1") {
 		const res = await reclamarCodigo(
@@ -162,16 +157,16 @@ class Mundo {
 	}
 
 	/** Lo que hace `pairApprove` después de autenticar a la Main: marcar el código, nada más. */
-	aprobar(codigo: string, _d: Dispositivo, ahora: number) {
-		this.sql.exec(`UPDATE pair_requests SET status='approved', approved_at_ms=? WHERE pair_code=?;`, ahora, codigo);
+	async aprobar(codigo: string, _d: Dispositivo, ahora: number) {
+		await this.filas(`UPDATE pair_requests SET status='approved', approved_at_ms=? WHERE pair_code=?;`, ahora, codigo);
 	}
 
-	dispositivoRegistrado(d: Dispositivo): any {
-		return this.sql.exec(`SELECT * FROM devices WHERE device_id=?;`, d.id).toArray()[0];
+	async dispositivoRegistrado(d: Dispositivo): Promise<any> {
+		return (await this.filas(`SELECT * FROM devices WHERE device_id=?;`, d.id))[0];
 	}
 
-	solicitud(codigo: string): any {
-		return this.sql.exec(`SELECT * FROM pair_requests WHERE pair_code=?;`, codigo).toArray()[0];
+	async solicitud(codigo: string): Promise<any> {
+		return (await this.filas(`SELECT * FROM pair_requests WHERE pair_code=?;`, codigo))[0];
 	}
 }
 
@@ -197,7 +192,7 @@ describe("la espera por fallos", () => {
 
 	it("el tercer fallo ya contesta con la espera, y mientras dura ni un código bueno entra", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("tramo-1", async (m) => {
+		await conLaCentral(async (m) => {
 			expect((await m.reclamar(a, "000001", T0)).status).toBe(404);
 			expect((await m.reclamar(a, "000002", T0)).status).toBe(404);
 
@@ -210,7 +205,7 @@ describe("la espera por fallos", () => {
 			const bueno = await m.reclamar(a, CODIGO, T0 + 29_000);
 			expect(bueno.status).toBe(429);
 			expect(bueno.body.reintentarEnSegundos).toBe(1);
-			expect(m.solicitud(CODIGO).claimed_by_device_id).toBeNull();
+			expect((await m.solicitud(CODIGO)).claimed_by_device_id).toBeNull();
 
 			expect((await m.reclamar(a, CODIGO, T0 + 30_000)).status).toBe(200);
 		});
@@ -218,7 +213,7 @@ describe("la espera por fallos", () => {
 
 	it("los tramos siguientes: 5 minutos al sexto fallo y media hora al noveno", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("tramos", async (m) => {
+		await conLaCentral(async (m) => {
 			let ahora = T0;
 			const fallar = async () => {
 				const r = await m.reclamar(a, "000009", ahora);
@@ -238,7 +233,7 @@ describe("la espera por fallos", () => {
 		// Antes la borraba, y reclamar un código propio (que cualquier negocio con licencia emite sin
 		// tope) bastaba para poner a cero la espera entre cada dos fallos: un barrido sin freno.
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("olvido-exito", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, "000001", T0);
 			await m.reclamar(a, "000002", T0);
 			expect((await m.reclamar(a, CODIGO, T0)).status).toBe(200);
@@ -250,21 +245,21 @@ describe("la espera por fallos", () => {
 
 	it("reclamar una y otra vez el propio código pendiente no reinicia la espera (AUD-11)", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("propio-pendiente", async (m) => {
+		await conLaCentral(async (m) => {
 			const estados: number[] = [];
 			for (const codigo of ["000001", CODIGO, "000002", CODIGO, "000003"]) {
 				estados.push((await m.reclamar(a, codigo, T0)).status);
 			}
 			expect(estados).toEqual([404, 200, 404, 200, 429]);
-			expect(m.sql.exec(`SELECT fallos FROM pair_claim_fallos;`).toArray()).toEqual([{ fallos: 3 }]);
+			expect(await m.filas(`SELECT fallos FROM pair_claim_fallos;`)).toEqual([{ fallos: 3 }]);
 		});
 	});
 
 	it("ni el propio código ya aprobado (AUD-11)", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("propio-aprobado", async (m) => {
+		await conLaCentral(async (m) => {
 			expect((await m.reclamar(a, CODIGO, T0)).status).toBe(200);
-			m.aprobar(CODIGO, a, T0);
+			await m.aprobar(CODIGO, a, T0);
 			const estados: Array<string | number> = [];
 			for (const codigo of ["000001", CODIGO, "000002", CODIGO, "000003"]) {
 				const r = await m.reclamar(a, codigo, T0);
@@ -276,7 +271,7 @@ describe("la espera por fallos", () => {
 
 	it("un día sin fallar también la borra", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("olvido-dia", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, "000001", T0);
 			await m.reclamar(a, "000002", T0);
 			const dia = T0 + OLVIDO_MS + 1;
@@ -288,7 +283,7 @@ describe("la espera por fallos", () => {
 
 	it("cada IPv4 lleva su cuenta", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("por-ip", async (m) => {
+		await conLaCentral(async (m) => {
 			for (const codigo of ["000001", "000002", "000003"]) await m.reclamar(a, codigo, T0, "10.0.0.1");
 			expect((await m.reclamar(a, CODIGO, T0, "10.0.0.1")).status).toBe(429);
 			expect((await m.reclamar(a, CODIGO, T0, "10.0.0.2")).status).toBe(200);
@@ -299,7 +294,7 @@ describe("la espera por fallos", () => {
 		// Una conexión IPv6 recibe un /64 y elige a su gusto los 64 bits de abajo: contar por
 		// dirección daba a cada uno 2^64 cuentas nuevas. Se escriben de formas distintas a propósito.
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("por-64", async (m) => {
+		await conLaCentral(async (m) => {
 			const estados: number[] = [];
 			for (const [codigo, ip] of [
 				["000001", "2001:db8:0:1::1"],
@@ -312,17 +307,17 @@ describe("la espera por fallos", () => {
 			expect((await m.reclamar(a, CODIGO, T0, "2001:db8:0:1::abcd")).status).toBe(429);
 			// Otro /64 lleva la suya.
 			expect((await m.reclamar(a, CODIGO, T0, "2001:db8:0:2::1")).status).toBe(200);
-			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM pair_claim_fallos;`).toArray()[0].n).toBe(1);
+			expect((await m.filas(`SELECT COUNT(*) AS n FROM pair_claim_fallos;`))[0].n).toBe(1);
 		});
 	});
 
 	it("por la ruta, el filtro exterior también cuenta el /64 (AUD-11)", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("ruta-64", async (m) => {
-			dbDePruebas = m.db;
+		await conLaCentral(async (m) => {
 			const claves: string[] = [];
 			const env = {
 				...ENV,
+				...m.central.entorno,
 				LIMITADOR_CLAIM: {
 					limit: ({ key }: { key: string }) => {
 						claves.push(key);
@@ -335,7 +330,7 @@ describe("la espera por fallos", () => {
 				expect((await elWorker.fetch(peticion("claim", cuerpo, ip), env)).status).toBe(404);
 			}
 			expect(claves).toEqual(["2001:db8:0:7::/64", "2001:db8:0:7::/64"]);
-			expect(m.sql.exec(`SELECT ip, fallos FROM pair_claim_fallos;`).toArray()).toEqual([
+			expect(await m.filas(`SELECT ip, fallos FROM pair_claim_fallos;`)).toEqual([
 				{ ip: "2001:db8:0:7::/64", fallos: 2 },
 			]);
 		});
@@ -369,12 +364,11 @@ describe("la espera por fallos", () => {
 		// Por la RUTA: desde ARQ-03 quien rechaza el formato es el validador del cuerpo, delante
 		// del handler, y lo que se fija aquí es que ese 400 no gasta ningún intento.
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("mal-formada", async (m) => {
-			dbDePruebas = m.db;
+		await conLaCentral(async (m) => {
 			for (let i = 0; i < 5; i++) {
 				const r = await elWorker.fetch(
 					peticion("claim", { pairCode: "12", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" }),
-					ENV,
+					{ ...ENV, ...m.central.entorno },
 				);
 				expect(r.status).toBe(400);
 				expect(((await r.json()) as any).error).toBe("invalid_pair_code");
@@ -387,7 +381,7 @@ describe("la espera por fallos", () => {
 describe("el reto y la recogida del token", () => {
 	it("el reto vive lo que el código, y la Handy recibe cuánto le queda en relativo", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("reto", async (m) => {
+		await conLaCentral(async (m) => {
 			const r = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
 			expect(r.body.nonceExpiresAtMs).toBe(T0 + 10 * MIN);
 			expect(r.body.caducaEnMs).toBe(8 * MIN);
@@ -397,15 +391,15 @@ describe("el reto y la recogida del token", () => {
 	it("una aprobación a los cinco minutos todavía entrega el token", async () => {
 		// Con el reto de dos minutos de antes, esto era `challenge_expired` y el código se perdía.
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("aprobacion-tardia", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).body.error).toBe("not_approved");
 
-			m.aprobar(CODIGO, a, T0 + 5 * MIN);
+			await m.aprobar(CODIGO, a, T0 + 5 * MIN);
 			const token = await m.recoger(a, CODIGO, body.nonceB64, T0 + 5 * MIN);
 			expect(token.status).toBe(200);
 			expect(token.body).toMatchObject({ ok: true, tenantId: TENANT, deviceId: a.id });
-			expect(m.solicitud(CODIGO).status).toBe("used");
+			expect((await m.solicitud(CODIGO)).status).toBe("used");
 		});
 	});
 
@@ -413,13 +407,13 @@ describe("el reto y la recogida del token", () => {
 		// Dado de alta al aprobar, una aprobación que nadie recogía dejaba un Handy fantasma en la
 		// lista de vinculados de la Main.
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("alta-al-recoger", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
-			expect(m.dispositivoRegistrado(a)).toBeUndefined();
+			await m.aprobar(CODIGO, a, T0 + MIN);
+			expect(await m.dispositivoRegistrado(a)).toBeUndefined();
 
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).status).toBe(200);
-			expect(m.dispositivoRegistrado(a)).toMatchObject({
+			expect(await m.dispositivoRegistrado(a)).toMatchObject({
 				tenant_id: TENANT,
 				role: "handy",
 				revoked_at_ms: null,
@@ -431,33 +425,33 @@ describe("el reto y la recogida del token", () => {
 	it("un Handy revocado que se vuelve a vincular queda activo y con la clave nueva", async () => {
 		const antes = await dispositivo("handy-a", 1);
 		const ahora = await dispositivo("handy-a", 4);
-		await conPlanoDeControl("revocado-vuelve", async (m) => {
-			m.sql.exec(`INSERT INTO devices (device_id, tenant_id, role, revoked_at_ms, device_pubkey_b64)
+		await conLaCentral(async (m) => {
+			await m.filas(`INSERT INTO devices (device_id, tenant_id, role, revoked_at_ms, device_pubkey_b64)
 				VALUES (?, ?, 'handy', ?, ?);`, antes.id, TENANT, T0 - MIN, antes.pub);
 
 			const { body } = await m.reclamar(ahora, CODIGO, T0);
-			m.aprobar(CODIGO, ahora, T0);
+			await m.aprobar(CODIGO, ahora, T0);
 			expect((await m.recoger(ahora, CODIGO, body.nonceB64, T0)).status).toBe(200);
-			expect(m.dispositivoRegistrado(ahora)).toMatchObject({ revoked_at_ms: null, device_pubkey_b64: ahora.pub });
+			expect(await m.dispositivoRegistrado(ahora)).toMatchObject({ revoked_at_ms: null, device_pubkey_b64: ahora.pub });
 		});
 	});
 
 	it("una aprobación que nadie recoge no deja ningún dispositivo", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("sin-recoger", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 			// El código caduca sin que la Handy vuelva.
 			expect((await m.reclamar(a, CODIGO, T0 + 11 * MIN)).body.error).toBe("pair_code_expired");
-			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM devices;`).toArray()[0].n).toBe(0);
+			expect((await m.filas(`SELECT COUNT(*) AS n FROM devices;`))[0].n).toBe(0);
 		});
 	});
 
 	it("el dispositivo aprobado puede volver a reclamar su código y recoger el token", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("reclamar-aprobado", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 
 			// La aplicación se cerró esperando: al volver no tiene el reto.
 			const otraVez = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
@@ -476,9 +470,9 @@ describe("el reto y la recogida del token", () => {
 		// en los mensajes de presencia del WebSocket, así que lo conocen las Handy del local.
 		const victima = await dispositivo("main-de-otro-bar", 7);
 		const atacante = await dispositivo("main-de-otro-bar", 9); // mismo id, SU clave
-		await conPlanoDeControl("robo-de-dispositivo", async (m) => {
-			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-de-la-victima');`);
-			m.sql.exec(
+		await conLaCentral(async (m) => {
+			await m.filas(`INSERT INTO tenants (tenant_id) VALUES ('tenant-de-la-victima');`);
+			await m.filas(
 				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
 				 VALUES (?, 'tenant-de-la-victima', 'tpv', ?, 'ed25519');`,
 				victima.id,
@@ -486,14 +480,14 @@ describe("el reto y la recogida del token", () => {
 			);
 
 			const { body } = await m.reclamar(atacante, CODIGO, T0);
-			m.aprobar(CODIGO, atacante, T0);
+			await m.aprobar(CODIGO, atacante, T0);
 			const r = await m.recoger(atacante, CODIGO, body.nonceB64, T0);
 
 			expect(r.status).toBe(409);
 			expect(r.body.error).toBe("device_key_mismatch");
 
 			// Y la fila de la víctima, intacta: ni de negocio, ni de rol, ni de clave.
-			expect(m.dispositivoRegistrado(victima)).toMatchObject({
+			expect(await m.dispositivoRegistrado(victima)).toMatchObject({
 				tenant_id: "tenant-de-la-victima",
 				role: "tpv",
 				device_pubkey_b64: victima.pub,
@@ -506,9 +500,9 @@ describe("el reto y la recogida del token", () => {
 		// equipo tiene UNA identidad para sus dos modos, así que vincularlo como Handy de otro
 		// negocio mueve su fila. Lo que se exige es que lo haga él, no cualquiera.
 		const equipo = await dispositivo("equipo-viajero", 7);
-		await conPlanoDeControl("mudanza-legitima", async (m) => {
-			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('su-negocio-de-antes');`);
-			m.sql.exec(
+		await conLaCentral(async (m) => {
+			await m.filas(`INSERT INTO tenants (tenant_id) VALUES ('su-negocio-de-antes');`);
+			await m.filas(
 				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
 				 VALUES (?, 'su-negocio-de-antes', 'tpv', ?, 'ed25519');`,
 				equipo.id,
@@ -516,10 +510,10 @@ describe("el reto y la recogida del token", () => {
 			);
 
 			const { body } = await m.reclamar(equipo, CODIGO, T0);
-			m.aprobar(CODIGO, equipo, T0);
+			await m.aprobar(CODIGO, equipo, T0);
 			expect((await m.recoger(equipo, CODIGO, body.nonceB64, T0)).status).toBe(200);
 
-			expect(m.dispositivoRegistrado(equipo)).toMatchObject({
+			expect(await m.dispositivoRegistrado(equipo)).toMatchObject({
 				tenant_id: TENANT,
 				role: "handy",
 				device_pubkey_b64: equipo.pub,
@@ -535,10 +529,10 @@ describe("el reto y la recogida del token", () => {
 		const uno = await dispositivo("equipo-disputado", 7);
 		const otro = await dispositivo("equipo-disputado", 9); // mismo id, otra clave
 		const CODIGO_2 = "555555";
-		await conPlanoDeControl("dos-recogidas", async (m) => {
+		await conLaCentral(async (m) => {
 			// Un segundo negocio, con su licencia y su código.
-			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-2');`);
-			m.sql.exec(
+			await m.filas(`INSERT INTO tenants (tenant_id) VALUES ('tenant-2');`);
+			await m.filas(
 				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
 				                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
 				 VALUES ('lic-2', 'hash-licencia-2', 'tenant-2', 'active', 12, 'manual', ?, 'otro@ejemplo.test', ?, ?);`,
@@ -546,7 +540,7 @@ describe("el reto y la recogida del token", () => {
 				T0,
 				T0,
 			);
-			m.sql.exec(
+			await m.filas(
 				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
 				 VALUES (?, 'sin-secreto', 'tenant-2', 'main-2', 'pending', ?, ?);`,
 				CODIGO_2,
@@ -556,25 +550,27 @@ describe("el reto y la recogida del token", () => {
 
 			const reclamoUno = await m.reclamar(uno, CODIGO, T0);
 			const reclamoOtro = await m.reclamar(otro, CODIGO_2, T0, "10.0.0.2");
-			m.aprobar(CODIGO, uno, T0);
-			m.aprobar(CODIGO_2, otro, T0);
+			await m.aprobar(CODIGO, uno, T0);
+			await m.aprobar(CODIGO_2, otro, T0);
 
 			// Ninguna sigue hasta que las dos han leído que ese `device_id` no tiene fila.
 			let llegadas = 0;
 			let soltar!: () => void;
 			const lasDos = new Promise<void>((resolve) => (soltar = resolve));
-			const aLaVez = new Mundo(m.sql, {
-				...m.db,
-				async execute(entrada: any) {
-					const leido = await m.db.execute(entrada);
-					const texto = String(typeof entrada === "string" ? entrada : entrada.sql);
-					if (/SELECT tenant_id, device_pubkey_b64 FROM devices/.test(texto)) {
+			const aLaVez = new Mundo(
+				m.central,
+				centralInterceptada(m.central, async (metodo, [sentencia], llamar) => {
+					const leido = await llamar();
+					if (
+						metodo === "ejecutar" &&
+						/SELECT tenant_id, device_pubkey_b64 FROM devices/.test((sentencia as SentenciaEnlazada).sql)
+					) {
 						if (++llegadas >= 2) soltar();
 						await lasDos;
 					}
 					return leido;
-				},
-			});
+				}).db,
+			);
 
 			const [a, b] = await Promise.all([
 				aLaVez.recoger(uno, CODIGO, reclamoUno.body.nonceB64, T0),
@@ -590,7 +586,7 @@ describe("el reto y la recogida del token", () => {
 			expect(perdedora.body.token).toBeUndefined();
 			// …y la fila es la de la que entró: su negocio y su clave, las del token que se lleva.
 			expect(ganadora.body.token).toBeTruthy();
-			expect(m.dispositivoRegistrado(uno)).toMatchObject({
+			expect(await m.dispositivoRegistrado(uno)).toMatchObject({
 				tenant_id: ganadora.body.tenantId,
 				role: "handy",
 				device_pubkey_b64: suClave,
@@ -602,9 +598,9 @@ describe("el reto y la recogida del token", () => {
 		const a = await dispositivo("handy-a", 1);
 		const b = await dispositivo("handy-b", 2);
 		const suplantador = { ...(await dispositivo("handy-a", 3)), id: "handy-a" };
-		await conPlanoDeControl("aprobado-otro", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 
 			expect((await m.reclamar(b, CODIGO, T0 + 2 * MIN, "10.0.0.2")).body.error).toBe("pair_code_already_approved");
 			expect((await m.reclamar(suplantador, CODIGO, T0 + 2 * MIN, "10.0.0.3")).body.error).toBe(
@@ -615,12 +611,98 @@ describe("el reto y la recogida del token", () => {
 
 	it("la firma de una cancelación no sirve para recoger el token", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("firma-accion", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 			const r = await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN, "PAIR_CANCEL");
 			expect(r.body.error).toBe("bad_device_signature");
-			expect(m.solicitud(CODIGO).status).toBe("approved");
+			expect((await m.solicitud(CODIGO)).status).toBe("approved");
+		});
+	});
+});
+
+// Reclamar el código y canjearlo por el token leen la solicitud, deciden y escriben en viajes
+// distintos a la central. Lo que impide que dos se lo lleven es la sentencia que escribe, que sólo
+// lo hace si la solicitud sigue como estaba (FABLE-D, y el `used_at_ms IS NULL` del canje). Aquí, N
+// peticiones a la vez contra la central de verdad, y en el peor cruce: una barrera en su stub retiene
+// la lectura de la solicitud de cada una hasta que la han hecho todas. Lo que leyeron es el caso de
+// control: todas vieron el código como si fuera suyo, así que leer y decidir no basta.
+describe("el mismo código, pedido a la vez", () => {
+	const N = 6;
+
+	/**
+	 * El mundo `m`, pero con la barrera: las `n` primeras lecturas de la solicitud se quedan esperando,
+	 * ya contestadas, hasta que han llegado las `n`. En `vistos`, lo que leyó cada una.
+	 */
+	function conBarrera(m: Mundo, n: number) {
+		const vistos: { status: unknown; reclamado: unknown }[] = [];
+		let soltar!: () => void;
+		const todas = new Promise<void>((resolve) => (soltar = resolve));
+		const aLaVez = new Mundo(
+			m.central,
+			centralInterceptada(m.central, async (metodo, [sentencia], llamar) => {
+				const leido = (await llamar()) as RespuestaDeLaCentral<FilasEnBruto>;
+				const sql = metodo === "ejecutar" ? (sentencia as SentenciaEnlazada).sql : "";
+				if (vistos.length < n && /SELECT \* FROM pair_requests WHERE pair_code=\?/.test(sql) && leido.ok) {
+					const { columns, rows } = leido.valor;
+					vistos.push({
+						status: rows[0]?.[columns.indexOf("status")],
+						reclamado: rows[0]?.[columns.indexOf("claimed_by_device_id")],
+					});
+					if (vistos.length === n) soltar();
+					await todas;
+				}
+				return leido;
+			}).db,
+		);
+		return { aLaVez, vistos };
+	}
+
+	it("N equipos reclaman el mismo código: se lo queda uno, y los demás cuentan como intento", async () => {
+		const equipos = await Promise.all(Array.from({ length: N }, (_, i) => dispositivo(`handy-${i}`, 30 + i)));
+		await conLaCentral(async (m) => {
+			const { aLaVez, vistos } = conBarrera(m, N);
+			// Cada uno desde su IP: la espera por fallos de una IP es otro freno, y no es el que se prueba.
+			const rs = await Promise.all(equipos.map((d, i) => aLaVez.reclamar(d, CODIGO, T0, `10.0.1.${i + 1}`)));
+
+			expect(vistos).toEqual(Array(N).fill({ status: "pending", reclamado: null }));
+			const i = rs.findIndex((r) => r.status === 200);
+			expect(rs[i].body.state).toBe("pending_approval");
+			expect(rs.filter((r) => r !== rs[i]).map((r) => [r.status, r.body.error])).toEqual(
+				Array(N - 1).fill([409, "pair_claim_race_or_invalid_state"]),
+			);
+			// Lo que verá el dueño en la Main es el que lo reclamó, con su clave.
+			expect(await m.solicitud(CODIGO)).toMatchObject({
+				status: "pending",
+				claimed_by_device_id: equipos[i].id,
+				claimed_device_pubkey_b64: equipos[i].pub,
+				attempts: N - 1,
+			});
+			// Y sólo él tiene un reto con el que recoger el token.
+			expect(await m.filas(`SELECT device_id FROM device_challenges;`)).toEqual([{ device_id: equipos[i].id }]);
+		});
+	});
+
+	it("la Handy aprobada canjea el código N veces a la vez: sale un token, y el código queda gastado", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conLaCentral(async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			await m.aprobar(CODIGO, a, T0 + MIN);
+			// Un reto para cada canje: la Handy vuelve a reclamar su código aprobado y recibe otro.
+			const retos = [body.nonceB64];
+			while (retos.length < N) retos.push((await m.reclamar(a, CODIGO, T0 + MIN)).body.nonceB64);
+
+			const { aLaVez, vistos } = conBarrera(m, N);
+			const rs = await Promise.all(retos.map((reto) => aLaVez.recoger(a, CODIGO, reto, T0 + MIN)));
+
+			expect(vistos).toEqual(Array(N).fill({ status: "approved", reclamado: a.id }));
+			const i = rs.findIndex((r) => r.status === 200);
+			expect(rs[i].body).toMatchObject({ ok: true, tenantId: TENANT, deviceId: a.id, token: expect.any(String) });
+			expect(rs.filter((r) => r !== rs[i]).map((r) => [r.status, r.body.error, r.body.token])).toEqual(
+				Array(N - 1).fill([409, "pair_code_used_or_invalid_state", undefined]),
+			);
+			expect(await m.solicitud(CODIGO)).toMatchObject({ status: "used" });
+			expect(await m.filas(`SELECT COUNT(*) AS n FROM devices WHERE device_id = ?;`, a.id)).toEqual([{ n: 1 }]);
 		});
 	});
 });
@@ -628,7 +710,7 @@ describe("el reto y la recogida del token", () => {
 describe("rechazar en la Main", () => {
 	it("la Handy se entera en su siguiente consulta, y el código ya no se puede reclamar", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("rechazo", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 
 			expect(await rechazarSolicitud(m.db, TENANT, CODIGO, T0 + MIN)).toEqual({
@@ -645,7 +727,7 @@ describe("rechazar en la Main", () => {
 
 	it("repetir el rechazo no falla; un código de otro negocio se contesta como inexistente", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("rechazo-bordes", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, CODIGO, T0);
 			await rechazarSolicitud(m.db, TENANT, CODIGO, T0);
 			expect((await rechazarSolicitud(m.db, TENANT, CODIGO, T0)).status).toBe(200);
@@ -658,11 +740,11 @@ describe("rechazar en la Main", () => {
 
 	it("no se rechaza lo aprobado ni lo caducado", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("rechazo-estados", async (m) => {
+		await conLaCentral(async (m) => {
 			await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0);
+			await m.aprobar(CODIGO, a, T0);
 			expect((await rechazarSolicitud(m.db, TENANT, CODIGO, T0)).cuerpo.error).toBe("invalid_pair_status");
-			expect(m.solicitud(CODIGO).status).toBe("approved");
+			expect((await m.solicitud(CODIGO)).status).toBe("approved");
 
 			expect((await rechazarSolicitud(m.db, TENANT, OTRO_CODIGO, T0 + 11 * MIN)).cuerpo.error).toBe(
 				"pair_code_expired",
@@ -675,13 +757,13 @@ describe("cancelar en la Handy", () => {
 	it("suelta el código: sale de la lista de la Main y se puede volver a usar", async () => {
 		const a = await dispositivo("handy-a", 1);
 		const b = await dispositivo("handy-b", 2);
-		await conPlanoDeControl("cancelar", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 
 			const r = await m.cancelar(a, CODIGO, body.nonceB64, T0 + MIN);
 			expect(r.body).toEqual({ ok: true, liberado: true });
 
-			const fila = m.solicitud(CODIGO);
+			const fila = await m.solicitud(CODIGO);
 			expect(fila.status).toBe("pending");
 			expect(fila.claimed_by_device_id).toBeNull();
 			expect(fila.claimed_device_pubkey_b64).toBeNull();
@@ -692,7 +774,7 @@ describe("cancelar en la Handy", () => {
 
 	it("la misma firma no sirve dos veces", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("cancelar-replay", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 			const primera = await m.cancelar(a, CODIGO, body.nonceB64, T0 + MIN);
 			expect(primera.body.liberado).toBe(true);
@@ -705,7 +787,7 @@ describe("cancelar en la Handy", () => {
 
 			// Y con el claim todavía en pie (aprobado), es el reto gastado lo que la para.
 			const otra = await m.reclamar(a, CODIGO, T0 + MIN);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 			const cancelacion = await m.cancelar(a, CODIGO, otra.body.nonceB64, T0 + MIN);
 			const otraVez = await soltarCodigo(m.db, ENV, cancelSchema.parse(cancelacion.cuerpo), T0 + MIN);
 			expect(otraVez.status).toBe(409);
@@ -716,25 +798,25 @@ describe("cancelar en la Handy", () => {
 	it("no la puede cancelar otro dispositivo, ni con una firma hecha para otra cosa", async () => {
 		const a = await dispositivo("handy-a", 1);
 		const b = await dispositivo("handy-b", 2);
-		await conPlanoDeControl("cancelar-ajeno", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 
 			expect((await m.cancelar(b, CODIGO, body.nonceB64, T0)).body.error).toBe("pair_code_not_found");
 			expect((await m.cancelar(a, CODIGO, body.nonceB64, T0, "PAIR_FETCH")).body.error).toBe(
 				"bad_device_signature",
 			);
-			expect(m.solicitud(CODIGO).claimed_by_device_id).toBe(a.id);
+			expect((await m.solicitud(CODIGO)).claimed_by_device_id).toBe(a.id);
 		});
 	});
 
 	it("lo ya aprobado no se deshace cancelando: la Handy lo recoge volviendo a reclamar", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("cancelar-aprobado", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
-			m.aprobar(CODIGO, a, T0 + MIN);
+			await m.aprobar(CODIGO, a, T0 + MIN);
 
 			expect((await m.cancelar(a, CODIGO, body.nonceB64, T0 + MIN)).body).toEqual({ ok: true, liberado: false });
-			expect(m.solicitud(CODIGO).status).toBe("approved");
+			expect((await m.solicitud(CODIGO)).status).toBe("approved");
 
 			const otraVez = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
 			expect((await m.recoger(a, CODIGO, otraVez.body.nonceB64, T0 + 2 * MIN)).status).toBe(200);
@@ -757,9 +839,9 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 		aprobado: "300006",
 	} as const;
 
-	function sembrar(m: Mundo, quien: Dispositivo) {
+	async function sembrar(m: Mundo, quien: Dispositivo) {
 		const codigo = (pairCode: string, status: string, expira: number, reclamado: boolean, usado: number | null = null) =>
-			m.sql.exec(
+			m.filas(
 				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms,
 				                            expires_at_ms, claimed_at_ms, claimed_by_device_id, claimed_device_pubkey_b64, used_at_ms)
 				 VALUES (?, 'sin-secreto', ?, 'main-1', ?, ?, ?, ?, ?, ?, ?);`,
@@ -773,12 +855,12 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 				reclamado ? quien.pub : null,
 				usado,
 			);
-		codigo(C.libre, "pending", T0 + 9 * MIN, false);
-		codigo(C.reclamado, "pending", T0 + 9 * MIN, true);
-		codigo(C.caducado, "pending", T0 - MIN, true);
-		codigo(C.usado, "used", T0 + 5 * MIN, true, T0 - 2 * MIN);
-		codigo(C.rechazado, "rejected", T0 + 9 * MIN, true);
-		codigo(C.aprobado, "approved", T0 + 9 * MIN, true);
+		await codigo(C.libre, "pending", T0 + 9 * MIN, false);
+		await codigo(C.reclamado, "pending", T0 + 9 * MIN, true);
+		await codigo(C.caducado, "pending", T0 - MIN, true);
+		await codigo(C.usado, "used", T0 + 5 * MIN, true, T0 - 2 * MIN);
+		await codigo(C.rechazado, "rejected", T0 + 9 * MIN, true);
+		await codigo(C.aprobado, "approved", T0 + 9 * MIN, true);
 	}
 
 	/** Lo que manda quien no ha reclamado nada: ni reto ni firma de verdad. */
@@ -792,9 +874,9 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 
 	it("fetch-token y cancel contestan lo mismo a un código vivo, muerto o inexistente", async () => {
 		const handy = await dispositivo("handy-del-bar", 1);
-		await conPlanoDeControl("oraculo", async (m) => {
-			sembrar(m, handy);
-			const antes = m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray();
+		await conLaCentral(async (m) => {
+			await sembrar(m, handy);
+			const antes = await m.filas(`SELECT * FROM pair_requests ORDER BY pair_code;`);
 
 			const visto = new Set<string>();
 			for (const codigo of ["000100", ...Object.values(C)]) {
@@ -805,7 +887,7 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 				visto.add(`${cc.status} ${cc.cuerpo.error}`);
 			}
 			expect([...visto]).toEqual(["404 pair_code_not_found"]);
-			expect(m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray()).toEqual(antes);
+			expect(await m.filas(`SELECT * FROM pair_requests ORDER BY pair_code;`)).toEqual(antes);
 		});
 	});
 
@@ -813,8 +895,8 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 		// Quien conoce el `deviceId` de la Handy (no es un secreto dentro del local) tampoco sabe en
 		// qué estado está su código: la firma se mira antes que el estado.
 		const handy = await dispositivo("handy-del-bar", 1);
-		await conPlanoDeControl("oraculo-con-id", async (m) => {
-			sembrar(m, handy);
+		await conLaCentral(async (m) => {
+			await sembrar(m, handy);
 			const visto = new Set<string>();
 			// Todos los que ha reclamado ella; el libre no es suyo y sale como inexistente (arriba).
 			for (const codigo of Object.values(C).filter((c) => c !== C.libre)) {
@@ -830,16 +912,16 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 
 	it("approve contesta a la Main de otro negocio como si el código no existiera, igual que reject", async () => {
 		const handy = await dispositivo("handy-del-bar", 1);
-		await conPlanoDeControl("oraculo-approve", async (m) => {
-			sembrar(m, handy);
-			const antes = m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray();
+		await conLaCentral(async (m) => {
+			await sembrar(m, handy);
+			const antes = await m.filas(`SELECT * FROM pair_requests ORDER BY pair_code;`);
 			for (const codigo of ["000100", ...Object.values(C)]) {
 				expect(await aprobarSolicitud(m.db, "otro-negocio", codigo, T0)).toEqual({
 					status: 404,
 					cuerpo: { ok: false, error: "pair_code_not_found" },
 				});
 			}
-			expect(m.sql.exec(`SELECT * FROM pair_requests ORDER BY pair_code;`).toArray()).toEqual(antes);
+			expect(await m.filas(`SELECT * FROM pair_requests ORDER BY pair_code;`)).toEqual(antes);
 			// La de su negocio sí la aprueba.
 			expect((await aprobarSolicitud(m.db, TENANT, C.reclamado, T0)).status).toBe(200);
 		});
@@ -847,7 +929,7 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 
 	it("la Handy que lo reclamó, con su firma, sigue enterándose de todo", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("oraculo-legitimo", async (m) => {
+		await conLaCentral(async (m) => {
 			const { body } = await m.reclamar(a, CODIGO, T0);
 			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).body.error).toBe("not_approved");
 			await rechazarSolicitud(m.db, TENANT, CODIGO, T0 + MIN);
@@ -867,8 +949,8 @@ describe("una solicitud de quien ya está vinculado", () => {
 	// clave conserva su vínculo de antes, y su WebSocket sigue conectando mientras espera. La lista
 	// de la Main no puede soltar su solicitud por eso: la Handy la sigue esperando. La que ya no
 	// espera nadie (la Handy se cerró esperando) la suelta la Handy al volver a abrirse.
-	function vinculado(m: Mundo, d: Dispositivo, ultimaVez: number) {
-		m.sql.exec(
+	async function vinculado(m: Mundo, d: Dispositivo, ultimaVez: number) {
+		await m.filas(
 			`INSERT INTO devices (device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms, device_pubkey_b64)
 			 VALUES (?, ?, 'handy', ?, ?, NULL, ?);`,
 			d.id,
@@ -885,22 +967,22 @@ describe("una solicitud de quien ya está vinculado", () => {
 
 	it("sigue en la lista aunque su WebSocket vuelva a conectar mientras espera", async () => {
 		const a = await dispositivo("handy-a", 1);
-		await conPlanoDeControl("vinculado-espera", async (m) => {
-			vinculado(m, a, T0 - 30 * MIN);
+		await conLaCentral(async (m) => {
+			await vinculado(m, a, T0 - 30 * MIN);
 			await m.reclamar(a, CODIGO, T0 + MIN);
 			expect(await pendientes(m, T0 + MIN)).toEqual([a.id]);
 
 			// Mientras espera, su socket reconecta con el token de antes (`ws/canje.ts`).
-			m.sql.exec(`UPDATE devices SET last_seen_at_ms=? WHERE device_id=?;`, T0 + 2 * MIN, a.id);
+			await m.filas(`UPDATE devices SET last_seen_at_ms=? WHERE device_id=?;`, T0 + 2 * MIN, a.id);
 			expect(await pendientes(m, T0 + 3 * MIN)).toEqual([a.id]);
-			expect(m.solicitud(CODIGO).claimed_by_device_id).toBe(a.id);
+			expect((await m.solicitud(CODIGO)).claimed_by_device_id).toBe(a.id);
 		});
 	});
 });
 
 describe("el filtro exterior del claim", () => {
 	// No es un control de seguridad (cuenta por centro de datos): es lo que evita que un barrido
-	// pague una lectura de Turso por intento. Su valor vive en `wrangler.json`, así que lo único
+	// pague una lectura de la base central por intento. Su valor vive en `wrangler.json`, así que lo único
 	// que se puede comprobar aquí es que sigue ahí y que dice lo mismo que el código.
 	it("sigue declarado en wrangler.json, con el número que dice el código", () => {
 		const limitadores = (configuracionDelWorker as any).ratelimits ?? [];
@@ -943,18 +1025,17 @@ describe("el filtro exterior del claim", () => {
 		// Con el limitador lleno la respuesta es 429 SIN mirar la tabla; con él abierto, el 404 de
 		// siempre. Es la prueba de que es una capa delante y no un reemplazo.
 		const a = await dispositivo("handy-a", 1);
-		const { cortado, pasado } = await conPlanoDeControl("filtro", async (m) => {
+		const { cortado, pasado } = await conLaCentral(async (m) => {
 			// Por la RUTA y no por la función: desde ARQ-03 el filtro es un middleware que va
 			// delante del validador del cuerpo, y lo que se prueba es justo ese orden.
-			dbDePruebas = m.db;
 			const peticionDe = (env: any) =>
 				elWorker.fetch(
 					peticion("claim", { pairCode: "000001", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" }, "7.7.7.7"),
 					env,
 				);
 
-			const lleno = { ...ENV, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: false }) } };
-			const abierto = { ...ENV, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: true }) } };
+			const lleno = { ...ENV, ...m.central.entorno, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: false }) } };
+			const abierto = { ...ENV, ...m.central.entorno, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: true }) } };
 
 			const r1 = await peticionDe(lleno);
 			const r2 = await peticionDe(abierto);
@@ -988,8 +1069,8 @@ describe("crear códigos (AUD-12)", () => {
 
 	it("un número que la purga ha liberado vuelve a salir", async () => {
 		const { purgarBaseCentral, RETENCION_CODIGOS_MS } = await import("../src/server/purga");
-		await conPlanoDeControl("numero-liberado", async (m) => {
-			m.sql.exec(
+		await conLaCentral(async (m) => {
+			await m.filas(
 				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
 				 VALUES ('000123', 'x', 'otro-negocio', 'main-otro', 'used', ?, ?);`,
 				T0 - RETENCION_CODIGOS_MS - 20 * MIN,
@@ -1009,8 +1090,8 @@ describe("crear códigos (AUD-12)", () => {
 	});
 
 	it("un negocio no tiene más de 20 vivos a la vez; caducados, vuelve a crear, y a otro no le afecta", async () => {
-		await conPlanoDeControl("tope", async (m) => {
-			// El plano de control trae ya dos códigos vivos del negocio.
+		await conLaCentral(async (m) => {
+			// La central del caso trae ya dos códigos vivos del negocio.
 			for (let i = 0; i < 18; i++) {
 				expect((await crearCodigo(m.db, ENV, TENANT, "main-1", T0 + i)).status).toBe(200);
 			}
@@ -1018,7 +1099,7 @@ describe("crear códigos (AUD-12)", () => {
 			expect(vigesimoprimero.status).toBe(429);
 			expect(vigesimoprimero.cuerpo).toMatchObject({ ok: false, error: "too_many_attempts" });
 			expect(vigesimoprimero.cuerpo.message).toMatch(/espera unos minutos/);
-			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM pair_requests WHERE tenant_id = ?;`, TENANT).toArray()[0].n).toBe(20);
+			expect((await m.filas(`SELECT COUNT(*) AS n FROM pair_requests WHERE tenant_id = ?;`, TENANT))[0].n).toBe(20);
 
 			expect((await crearCodigo(m.db, ENV, "otro-negocio", "main-otro", T0 + 30)).status).toBe(200);
 

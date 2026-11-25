@@ -6,12 +6,12 @@
 // El enlace es el de compra de siempre —lo que convierte esa compra en tiempo añadido es activar
 // la clave en un equipo que ya tiene licencia—, así que aquí lo que se fija es el reparto de los
 // avisos: a quién, cuántas veces y qué pasa cuando el correo no sale.
+//
+// Corre contra una base central de verdad (`helpers/central.ts`), nueva en cada caso.
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import { avisarDeCaducidades, enlaceDeCompra } from "../src/domains/licensing/avisosDeCaducidad";
 
 const DIA = 24 * 60 * 60 * 1000;
@@ -36,67 +36,63 @@ function entorno(extra: Record<string, unknown> = {}) {
 }
 
 type Escenario = {
-	db: any;
-	sql: any;
+	db: CentralDePrueba["db"];
+	/** Ejecuta SQL directamente en la base central, por debajo de sus guardas. */
+	sql: (texto: string, ...args: unknown[]) => Promise<unknown>;
 	/** Una licencia activa que caduca dentro de `dias`. Devuelve su id. */
-	licencia: (id: string, dias: number, extra?: Record<string, unknown>) => string;
-	avisos: () => Array<{ license_id: string; kind: string; expires_at_ms: number }>;
+	licencia: (id: string, dias: number, extra?: Record<string, unknown>) => Promise<string>;
+	avisos: () => Promise<Array<{ license_id: string; kind: string; expires_at_ms: number }>>;
 };
 
-async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): Promise<T> {
-	return enElHub(`rev13-avisos-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql, hub.state.storage);
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "license_notices"]) sql.exec(`DELETE FROM ${tabla};`);
-
-		const e: Escenario = {
-			db,
-			sql,
-			licencia(id, dias, extra = {}) {
-				const campos = {
-					status: "active",
-					disabled: 0,
-					expires_at_ms: AHORA + dias * DIA,
-					...extra,
-				} as any;
-				sql.exec(
-					`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months,
-					   origin, issued_at_ms, activated_at_ms, expires_at_ms, customer_email, customer_name,
-					   created_at_ms, updated_at_ms)
-					 VALUES (?, ?, ?, ?, 'standard', 12, 'stripe', ?, ?, ?, ?, 'Bar de pruebas', ?, ?);`,
-					id,
-					`hash-${id}`,
-					campos.status,
-					campos.disabled,
-					AHORA - 300 * DIA,
-					AHORA - 300 * DIA,
-					campos.expires_at_ms,
-					`${id}@ejemplo.test`,
-					AHORA - 300 * DIA,
-					AHORA - 300 * DIA,
-				);
-				return id;
-			},
-			avisos() {
-				return sql
-					.exec(`SELECT license_id, kind, expires_at_ms FROM license_notices ORDER BY kind;`)
-					.toArray() as any;
-			},
-		};
-
-		return fn(e);
-	});
+async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
+	const central = await centralDePrueba();
+	const e: Escenario = {
+		db: central.db,
+		sql: (texto, ...args) => filasDe(central, texto, ...args),
+		async licencia(id, dias, extra = {}) {
+			const campos = {
+				status: "active",
+				disabled: 0,
+				expires_at_ms: AHORA + dias * DIA,
+				...extra,
+			} as any;
+			await filasDe(
+				central,
+				`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months,
+				   origin, issued_at_ms, activated_at_ms, expires_at_ms, customer_email, customer_name,
+				   created_at_ms, updated_at_ms)
+				 VALUES (?, ?, ?, ?, 'standard', 12, 'stripe', ?, ?, ?, ?, 'Bar de pruebas', ?, ?);`,
+				id,
+				`hash-${id}`,
+				campos.status,
+				campos.disabled,
+				AHORA - 300 * DIA,
+				AHORA - 300 * DIA,
+				campos.expires_at_ms,
+				`${id}@ejemplo.test`,
+				AHORA - 300 * DIA,
+				AHORA - 300 * DIA,
+			);
+			return id;
+		},
+		async avisos() {
+			return (await filasDe(
+				central,
+				`SELECT license_id, kind, expires_at_ms FROM license_notices ORDER BY kind;`,
+			)) as any;
+		},
+	};
+	return fn(e);
 }
 
 describe("REV-13 · a quién se avisa", () => {
 	it("avisa a la que caduca dentro de 30 días y no a la que le quedan 60", async () => {
-		const r = await escenario("ventana", async (e) => {
-			e.licencia("lic-30", 25);
-			e.licencia("lic-60", 60);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-30", 25);
+			await e.licencia("lic-60", 60);
 			const { env, enviados } = entorno();
 			const resumen = await avisarDeCaducidades(env, e.db, AHORA);
-			return { resumen, enviados, avisos: e.avisos() };
+			return { resumen, enviados, avisos: await e.avisos() };
 		});
 
 		expect(r.resumen.enviados).toBe(1);
@@ -107,8 +103,8 @@ describe("REV-13 · a quién se avisa", () => {
 	});
 
 	it("una que ya caducó no recibe nada: el aviso llega antes, no después", async () => {
-		const r = await escenario("caducada", async (e) => {
-			e.licencia("lic-vieja", -3, { status: "expired" });
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-vieja", -3, { status: "expired" });
 			const { env, enviados } = entorno();
 			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados };
 		});
@@ -119,8 +115,8 @@ describe("REV-13 · a quién se avisa", () => {
 
 	it("una anulada no recibe nada", async () => {
 		// Avisar de que va a caducar una licencia que le has revocado es ruido, y confuso.
-		const r = await escenario("anulada", async (e) => {
-			e.licencia("lic-anulada", 10, { status: "revoked", disabled: 1 });
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-anulada", 10, { status: "revoked", disabled: 1 });
 			const { env, enviados } = entorno();
 			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados };
 		});
@@ -130,8 +126,8 @@ describe("REV-13 · a quién se avisa", () => {
 	});
 
 	it("una comprada y nunca estrenada no recibe nada: no tiene reloj corriendo", async () => {
-		const r = await escenario("sin-estrenar", async (e) => {
-			e.sql.exec(
+		const r = await escenario(async (e) => {
+			await e.sql(
 				`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months,
 				   origin, issued_at_ms, customer_email, created_at_ms, updated_at_ms)
 				 VALUES ('lic-nueva', 'h', 'issued', 0, 'standard', 12, 'stripe', ?, 'a@b.test', ?, ?);`,
@@ -150,8 +146,8 @@ describe("REV-13 · a quién se avisa", () => {
 
 describe("REV-13 · cuántas veces se avisa", () => {
 	it("el mismo ciclo repetido no manda un segundo correo", async () => {
-		const r = await escenario("idempotente", async (e) => {
-			e.licencia("lic-1", 25);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-1", 25);
 			const { env, enviados } = entorno();
 			const uno = await avisarDeCaducidades(env, e.db, AHORA);
 			const dos = await avisarDeCaducidades(env, e.db, AHORA + DIA);
@@ -165,10 +161,10 @@ describe("REV-13 · cuántas veces se avisa", () => {
 	});
 
 	it("a una que entra ya con 5 días le llega UN correo, no los dos peldaños de golpe", async () => {
-		const r = await escenario("un-peldano", async (e) => {
-			e.licencia("lic-urgente", 5);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-urgente", 5);
 			const { env, enviados } = entorno();
-			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados, avisos: e.avisos() };
+			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados, avisos: await e.avisos() };
 		});
 
 		expect(r.enviados).toHaveLength(1);
@@ -178,13 +174,13 @@ describe("REV-13 · cuántas veces se avisa", () => {
 	});
 
 	it("la de 30 y luego la de 7 son dos avisos distintos", async () => {
-		const r = await escenario("dos-peldanos", async (e) => {
-			e.licencia("lic-1", 25);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-1", 25);
 			const { env, enviados } = entorno();
 			const lejos = await avisarDeCaducidades(env, e.db, AHORA);
 			// Veinte días después le quedan 5: toca el peldaño urgente.
 			const cerca = await avisarDeCaducidades(env, e.db, AHORA + 20 * DIA);
-			return { lejos, cerca, enviados, avisos: e.avisos() };
+			return { lejos, cerca, enviados, avisos: await e.avisos() };
 		});
 
 		expect(r.lejos.enviados).toBe(1);
@@ -195,14 +191,14 @@ describe("REV-13 · cuántas veces se avisa", () => {
 	it("renovar vuelve a abrir el aviso del año que viene", async () => {
 		// Es lo que justifica que `expires_at_ms` esté en la clave: sin él, la fila del año pasado
 		// silenciaría para siempre a una licencia que se renueva todos los años.
-		const r = await escenario("tras-renovar", async (e) => {
-			e.licencia("lic-1", 25);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-1", 25);
 			const { env, enviados } = entorno();
 			await avisarDeCaducidades(env, e.db, AHORA);
 
-			e.sql.exec(`UPDATE licenses SET expires_at_ms=? WHERE license_id='lic-1';`, AHORA + 390 * DIA);
+			await e.sql(`UPDATE licenses SET expires_at_ms=? WHERE license_id='lic-1';`, AHORA + 390 * DIA);
 			const luego = await avisarDeCaducidades(env, e.db, AHORA + 365 * DIA);
-			return { luego, enviados, avisos: e.avisos() };
+			return { luego, enviados, avisos: await e.avisos() };
 		});
 
 		expect(r.luego.enviados).toBe(1);
@@ -211,8 +207,8 @@ describe("REV-13 · cuántas veces se avisa", () => {
 	});
 
 	it("si el correo no sale, la marca se suelta y mañana se reintenta", async () => {
-		const r = await escenario("reintento", async (e) => {
-			e.licencia("lic-1", 25);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-1", 25);
 			let rota = true;
 			const enviados: any[] = [];
 			const env = {
@@ -227,7 +223,7 @@ describe("REV-13 · cuántas veces se avisa", () => {
 			} as any;
 
 			const falla = await avisarDeCaducidades(env, e.db, AHORA);
-			const avisosTrasFallo = e.avisos();
+			const avisosTrasFallo = await e.avisos();
 			rota = false;
 			const bien = await avisarDeCaducidades(env, e.db, AHORA + DIA);
 			return { falla, avisosTrasFallo, bien, enviados };
@@ -258,10 +254,10 @@ describe("REV-13 · el enlace", () => {
 	it("sin CHECKOUT_URL no se manda ningún aviso", async () => {
 		// Un aviso que no lleva a ninguna parte no es un aviso: deja al cliente sabiendo que tiene
 		// un problema y sin qué hacer con él.
-		const r = await escenario("sin-enlace", async (e) => {
-			e.licencia("lic-1", 25);
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-1", 25);
 			const { env, enviados } = entorno({ CHECKOUT_URL: "" });
-			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados, avisos: e.avisos() };
+			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados, avisos: await e.avisos() };
 		});
 
 		expect(r.resumen.sinEnlace).toBe(true);

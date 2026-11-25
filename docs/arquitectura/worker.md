@@ -56,10 +56,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   puede, el negocio contesta 503 `tenant_db_migration_failed` y el DO avisa
   ([esquema.md](esquema.md#si-la-migración-falla-en-la-nube)).
 - **La base central** (control-plane: licencias, tenants, dispositivos, emparejamientos, interruptores,
-  correo, releases…) está en Turso y **no cambia de estructura desde el código**: el worker lee y
-  escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`. Su estructura se cambia **a mano en Turso,
-  antes de desplegar** el worker que la use, y se refleja en `docs/sql/control-plane/esquema-actual.sql`,
-  que es lo único que la documenta y lo que cargan los tests (`test/helpers/planoDeControl.ts`).
+  correo, releases…) vive en el SQLite de su Durable Object, `BaseCentral`, y su estructura son sus
+  migraciones (`src/server/central/migraciones/`, registradas en `migraciones.ts`), que aplica el
+  propio objeto: el worker lee y escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`, y el objeto
+  sólo le ejecuta sentencias de filas (`baseCentral.guardas.ts`). Una migración de la central es
+  aditiva y va en un despliegue **anterior** al del código que la usa. Los tests hablan con un objeto
+  de verdad, aprovisionado con esas migraciones (`test/helpers/central.ts`).
 
 ### La base del negocio, dentro de su `TenantHub`
 
@@ -914,11 +916,10 @@ no lo vigila nada.
 
 | Lo que se llama | Doble |
 |---|---|
-| La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
+| La base central, desde una ruta, un helper o el `TenantHub` | No lleva doble: cada caso pide su objeto `BaseCentral` de verdad, aprovisionado con sus migraciones (`centralDePrueba()`, `helpers/central.ts`). Una ruta llega a él por su `env` (`{ ...env, ...central.entorno }`); una función que recibe la base, por `central.db`; el `TenantHub`, con `enElHub(…, { central })` o `ponerLaCentral` (`helpers/hub.ts`). Lo que el test siembra o comprueba va por debajo de sus guardas (`filasDe`), y un fallo o un cruce que haya que provocar, en su stub (`centralInterceptada`, `centralQueApunta`, `desvio`, `conFalloEnLasOperaciones`) |
 | El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`): `helpers/negocioFirmado.ts` monta el negocio y firma las peticiones de la Main y de la Handy (`pedirComo`) |
-| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
-| La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
-| La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` |
+| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con el cliente de producción, `clienteLocal(state.storage)` (`tenantHub.sqlite.ts`), sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
+| La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con `clienteLocal` o un envoltorio suyo |
 | Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |
 
 ## Secretos

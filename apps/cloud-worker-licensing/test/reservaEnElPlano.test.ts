@@ -18,7 +18,7 @@ import {
 	type Instante,
 	type ReservaDeMesa,
 } from "../src/domains/mesas/reservaEnElPlano";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -119,7 +119,7 @@ describe("el plano de la Handy trae las reservas", () => {
 				INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado)
 				VALUES ('com-1', 'MESA', 'm3', '2026-10-21 15:05:00', 'Abierta');
 			`);
-			const db = clienteSobre(sql, hub.state.storage) as any;
+			const db = clienteLocal(hub.state.storage);
 			// Las 20:00 en Madrid, que son las 18:00 UTC.
 			const reloj = Date.UTC(2026, 9, 21, 18, 0, 0);
 
