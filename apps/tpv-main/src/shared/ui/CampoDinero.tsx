@@ -166,5 +166,3 @@ export function useImporte(inicial: Dinero | null = null) {
         campo: { valor, reinicio, onCambio },
     };
 }
-
-export default CampoDinero;
