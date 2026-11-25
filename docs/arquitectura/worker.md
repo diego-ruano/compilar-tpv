@@ -1188,14 +1188,19 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   descomprimida y por líneas, sin tenerla entera en memoria. Antes de tocar nada mira que la copia
   sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí; si no,
   `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
-  ejecuta sólo los `INSERT` de la copia en tablas del negocio, en lotes de unos 4 millones de
-  caracteres por transacción (varias líneas por llamada; una que no quepa en los 100 KB de una
-  llamada, o con más saltos escritos con `char(10)` de los que caben en una expresión, sola y con sus
-  textos como argumentos) y con las claves foráneas apagadas (la copia va
-  tabla a tabla, no padres primero). Al acabar mira que esté
+  carga las filas de la copia en tablas del negocio. De la copia no se ejecuta ningún texto: cada
+  línea de datos se lee entera con una gramática cerrada (`INSERT INTO "<tabla>" ("<columna>", …)
+  VALUES (<literal>, …);` y nada más, con columnas de esa tabla y los literales que escribe la copia;
+  si no, `copia_no_valida` con la línea, el carácter y un código), y se ejecuta la sentencia que
+  escribe el cargador con lo leído. Va en lotes de unos 4 millones de caracteres por transacción
+  (varias filas por llamada; una de más de 100 KB, sola y con sus textos como argumentos) y con las
+  claves foráneas apagadas (la copia va tabla a tabla, no padres primero). Al acabar mira que esté
   entera (su línea de fin, con las mismas filas; si no, `copia_cortada`) y `foreign_key_check`
-  (`copia_no_valida`). Los disparadores saltan al cargar: los de validación aceptan lo que ya
-  aceptaron, y los del resumen diario sólo apuntan días.
+  (`copia_no_valida`). Con una copia que no vale, el objeto se queda vacío y la ruta contesta 422 con
+  el código y lo que dice el cargador (`detalle`, sin nada de la copia), y lo deja en Axiom
+  (`copia_no_restaurada`, el evento de toda restauración que el objeto no hace). Los disparadores
+  saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
+  apuntan días.
 - **`crearBaseVacia`** es el alta (`aprovisionar`: esquema, sello y administrador inicial).
 - **Las dos cierran la base mientras tanto** con la misma marca que la vuelta a un instante
   (`tenant_db_restaurando`), porque esperan a la red con la base a medias y las claves foráneas

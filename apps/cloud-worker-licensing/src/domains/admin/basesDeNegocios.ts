@@ -25,7 +25,8 @@
 //
 // Todo va por POST con el negocio en el cuerpo, como el resto de la administración que lleva datos.
 // Lo que cambia algo deja rastro en `admin_audit` (con el motivo) y en Axiom (sin él: es texto
-// libre).
+// libre). Una copia que el objeto no restaura no cambia nada, y deja rastro sólo en Axiom: el código
+// y, si la copia no vale, por qué (`detalle`).
 
 import { Hono } from "hono";
 import * as z from "zod";
@@ -335,7 +336,9 @@ function queHacerTrasDarBase(modo: ModoDeVuelta): string[] {
 
 /**
  * La base de una copia diaria de R2, a un objeto vacío (`MotorTenantHub.restaurarDesdeCopia`). Sin
- * `dia`, la más reciente. Si la copia no vale, el objeto se queda vacío y se dice por qué.
+ * `dia`, la más reciente. Si la copia no vale, el objeto se queda vacío y se dice por qué: el código y
+ * lo que dice el cargador (`detalle`: la línea, el carácter y un código, sin nada de la copia), que el
+ * CLI enseña como motivo. Lo que el objeto no hace queda también en Axiom (`copia_no_restaurada`).
  */
 basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c) => {
 	const env = c.env;
@@ -349,7 +352,11 @@ basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c
 	const conocido = await seqConocido(env, tenantId);
 	await reservarLog(env, { tenantId, operacion: "copia", seqAntes: conocido });
 	const r = await hubDe(env, tenantId).restaurarDesdeCopia({ tenantId, clave, modo, seqConocido: conocido });
-	if (!r.ok) return c.json({ ok: false, error: r.error, clave }, r.status as 409);
+	if (!r.ok) {
+		const porQue = { error: r.error, ...(r.detalle ? { detalle: r.detalle } : {}) };
+		await rastro(env, "copia_no_restaurada", { tenantId, modo, clave, ...porQue });
+		return c.json({ ok: false, clave, ...porQue }, r.status as 409);
+	}
 
 	const resultado = {
 		tenantId,

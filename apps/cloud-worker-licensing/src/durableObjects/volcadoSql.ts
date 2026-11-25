@@ -20,7 +20,11 @@
 
 import { constants, crc32, deflateRawSync } from "node:zlib";
 
-/** La primera línea de los datos de cada tabla. Es lo único que se ejecuta al restaurar. */
+/**
+ * El principio de cada línea de datos. Al restaurar sólo se leen éstas, y su texto no se ejecuta:
+ * se leen con una gramática cerrada, y se ejecuta lo que escribe el cargador con lo leído
+ * (`cargaDeCopias.ts`).
+ */
 export const PRINCIPIO_DE_INSERT = 'INSERT INTO "';
 /** La línea que dice con qué migraciones se hizo la copia: sus nombres, separados por comas. */
 export const LINEA_MIGRACIONES = "-- Migraciones: ";
@@ -41,7 +45,7 @@ export function identificador(nombre: string): string {
  * large»): con 50 saltos ya no la ejecuta. Un texto con más, como el cuerpo de un evento de Stripe
  * con su sangría, va entero en hexadecimal.
  */
-export const SALTOS_CON_CHAR = 40;
+const SALTOS_CON_CHAR = 40;
 
 /**
  * Un valor de SQLite como literal SQL que cabe en una línea. Un salto de línea dentro de un texto se
@@ -53,6 +57,9 @@ export const SALTOS_CON_CHAR = 40;
  * (por debajo de 1e-20 o por encima de 1e200) puede cambiar en su último dígito al leerlo SQLite.
  * Ninguna columna de las dos bases guarda algo así: sus números son milisegundos, céntimos, recuentos
  * y cantidades.
+ *
+ * El cargador sólo lee estas formas (`Lectura.valor`, en `cargaDeCopias.ts`), y las que se han
+ * escrito antes: una forma nueva aquí es una forma nueva allí, o sus copias no se podrán restaurar.
  */
 export function literalEnUnaLinea(v: SqlStorageValue): string {
 	if (v === null) return "NULL";

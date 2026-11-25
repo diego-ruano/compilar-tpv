@@ -6,11 +6,22 @@
 // migraciones que sabe poner su worker, qué tablas puede traer la copia y cómo se prepara la base.
 //
 // La copia se lee de R2 según llega (descomprimida y partida en líneas, sin tenerla entera en
-// memoria), y de ella sólo se ejecutan las líneas `INSERT` en tablas que la copia puede traer: el
-// esquema lo ponen las migraciones del worker, no la copia. Antes de tocar nada se mira que la copia
-// sea de un esquema que el worker sabe poner (sus migraciones son un principio de las de aquí), y al
-// acabar, que esté entera (su línea de fin, con las mismas filas) y que no haya dejado ninguna clave
-// foránea rota.
+// memoria). El esquema lo ponen las migraciones del worker, no la copia: de ella sólo cuentan las
+// líneas de datos, las que empiezan por `INSERT INTO "`, y de ninguna se ejecuta su texto. Cada una
+// se lee entera con la misma gramática, sea del tamaño que sea (`LectorDeFilas`):
+//
+//     INSERT INTO "<tabla>" ("<columna>", …) VALUES (<literal>, …);
+//
+// y nada más: ni otra sentencia, ni un comentario, ni espacios de más, ni varias filas. La tabla es
+// una de las que puede traer la copia; cada columna, una de esa tabla en el esquema que han puesto
+// las migraciones, sin repetir; y va un literal por columna, de los que escribe la copia
+// (`Lectura`). Con lo leído, este código escribe la sentencia que se ejecuta (`conLiterales`,
+// `conArgumentos`). Una línea que no se lee así hace inservible la copia, y se dice en qué línea y en
+// qué carácter, y por qué con un código (`MotivoDeFila`), sin nada de lo que lleva.
+//
+// Antes de tocar nada se mira que la copia sea de un esquema que el worker sabe poner (sus
+// migraciones son un principio de las de aquí), y al acabar, que esté entera (su línea de fin, con
+// las mismas filas) y que no haya dejado ninguna clave foránea rota.
 //
 // Las filas entran con las claves foráneas apagadas, como en las migraciones: la copia va tabla a
 // tabla en el orden en que se crearon, no padres primero. Lo comprueba `foreign_key_check` al final.
@@ -19,9 +30,13 @@
 
 import type { Valor } from "../lib/sql";
 import { ponerFk } from "./sqliteDelObjeto";
-import { LINEA_FIN, LINEA_MIGRACIONES, PRINCIPIO_DE_INSERT, SALTOS_CON_CHAR } from "./volcadoSql";
+import { identificador, LINEA_FIN, LINEA_MIGRACIONES, literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "./volcadoSql";
 
-/** Lo que se dice de una copia que no se puede devolver, y por qué. Sin datos de la copia. */
+/**
+ * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta,
+ * al log y a Axiom: sin nada que traiga la copia (ni sus nombres ni sus datos), sólo números de línea,
+ * posiciones, recuentos, códigos y lo que es de este worker (sus migraciones, sus tablas).
+ */
 export class CopiaInservible extends Error {
 	constructor(
 		readonly codigo: "copia_no_encontrada" | "copia_de_otra_version" | "copia_cortada" | "copia_no_valida",
@@ -30,6 +45,32 @@ export class CopiaInservible extends Error {
 		super(`${codigo}: ${detalle}`);
 		this.name = "CopiaInservible";
 	}
+}
+
+/**
+ * Por qué no se carga una línea de datos: un código, que es lo único que se dice de ella.
+ *
+ * - `fila_mal_formada`: no tiene la forma de una fila, o le sobra o le falta algo entre sus partes
+ *   (un espacio, una coma, la comilla que cierra un nombre, otra fila detrás de la primera).
+ * - `tabla_ajena`: la tabla no es de las que puede traer la copia.
+ * - `columna_desconocida`, `columna_repetida`: una columna que no es de esa tabla, o que ya ha salido.
+ * - `valor_no_literal`: un valor que no es un literal de los de la copia: una función, una
+ *   subconsulta, una expresión, un texto que no se cierra…
+ * - `valores_no_casan`: no va un valor por columna.
+ * - `sobra_texto`: algo detrás del `;`: otra sentencia, un comentario, un espacio.
+ */
+type MotivoDeFila =
+	| "fila_mal_formada"
+	| "tabla_ajena"
+	| "columna_desconocida"
+	| "columna_repetida"
+	| "valor_no_literal"
+	| "valores_no_casan"
+	| "sobra_texto";
+
+/** Una línea de datos que no se carga: su número en la copia, el carácter donde falla y por qué. */
+function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila): CopiaInservible {
+	return new CopiaInservible("copia_no_valida", `la línea ${numero} no se puede cargar: ${motivo} (carácter ${caracter + 1})`);
 }
 
 /**
@@ -56,161 +97,334 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>): AsyncGenera
 	if (resto) yield resto;
 }
 
-/** La tabla de una línea de datos, `INSERT INTO "<tabla>" (`, o `null` si no lo es. */
-function tablaDe(linea: string): string | null {
-	if (!linea.startsWith(PRINCIPIO_DE_INSERT)) return null;
-	const m = /^INSERT INTO "((?:[^"]|"")+)" \(/.exec(linea);
-	return m ? m[1].replaceAll('""', '"') : null;
-}
-
 /**
- * Cuántos caracteres de líneas de datos van, como mucho, en cada llamada a `exec`. El SQLite de un
- * objeto no admite un texto de más de 100 KB por llamada (SQLITE_TOOBIG), y un carácter de un texto de
- * JavaScript son, como mucho, 3 bytes en UTF-8: por debajo de esto, cabe seguro. Las líneas van de
- * varias en varias porque cada llamada tiene su coste fijo (también la traza de Sentry, que envuelve
- * el SQL del objeto): una a una, restaurar tarda el doble. Una sola línea más larga que esto (una fila
- * puede llegar a 2 MB) va sola, con sus textos como argumentos (`conArgumentos`).
+ * Cuántos caracteres van, como mucho, en cada llamada a `exec`. El SQLite de un objeto no admite un
+ * texto de más de 100 KB por llamada (SQLITE_TOOBIG), y un carácter de un texto de JavaScript son, como
+ * mucho, 3 bytes en UTF-8: por debajo de esto, cabe seguro. Las filas van de varias en varias porque
+ * cada llamada tiene su coste fijo (también la traza de Sentry, que envuelve el SQL del objeto): una a
+ * una, restaurar tarda el doble. Una fila de una línea más larga que esto (puede llegar a 2 MB) va
+ * sola, con sus textos y sus bytes como argumentos (`conArgumentos`).
  */
 const CARACTERES_POR_LLAMADA = Math.floor(100_000 / 3);
 
+const COMILLA = 0x27; // '
+const ABRE = 0x28; // (
+const CIERRA = 0x29; // )
+const COMA = 0x2c; // ,
+
 /**
- * ¿Lleva la línea, entre todos sus textos, más saltos escritos con `char(…)` de los que
- * `literalEnUnaLinea` escribe así en un texto (`SALTOS_CON_CHAR`)? Entonces puede tener una expresión
- * más honda de lo que admite el SQLite de un objeto (100 niveles), y va sola, con sus textos como
- * argumentos, que no hacen honda ninguna. Así se carga también una copia que escribe así textos con
- * más saltos.
+ * La forma de un número: el signo menos si lo lleva, sin ceros de más a la izquierda, sus decimales y
+ * el exponente con su signo. Así lo escribe `String(n)` de JavaScript (`-3`, `12.5`, `1e+21`,
+ * `5e-324`), y así se escribe también un REAL entero con su `.0` (`5.0`), sin JavaScript de por medio.
+ *
+ * La forma no basta: `1e+999` o un entero de 400 cifras también la tienen, y SQLite los guarda como
+ * infinito, que ninguna copia escribe (`literalEnUnaLinea` no tiene literal para él) y con el que la
+ * base ya no se podría copiar. Un número tiene que ser además finito (`Lectura.valor`).
  */
-function demasiadosSaltosConChar(linea: string): boolean {
-	let n = 0;
-	for (let i = linea.indexOf("||char("); i !== -1; i = linea.indexOf("||char(", i + 7)) {
-		if (++n > SALTOS_CON_CHAR) return true;
-	}
-	return false;
+const NUMERO = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:e[+-]\d+)?/y;
+
+/**
+ * Un número de la copia, ya leído con `NUMERO`. Va a la sentencia tal como venía: así SQLite le da el
+ * tipo que le daría la línea (enlazado, un número entraría siempre como REAL).
+ */
+class Numero {
+	constructor(readonly texto: string) {}
 }
 
-const ENTRE_TROZOS = new Map([
-	["||char(10)||", "\n"],
-	["||char(13)||", "\r"],
-]);
+/** Un valor de una fila, ya leído: NULL, un número, un texto o unos bytes. */
+type ValorLeido = null | Numero | string | Uint8Array<ArrayBuffer>;
+
+/** Un texto en hexadecimal tiene que ser UTF-8, como lo escribe la copia; un BOM delante es del texto. */
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/** El valor de un dígito hexadecimal, por su código, o -1. */
+function digitoHex(c: number): number {
+	if (c >= 0x30 && c <= 0x39) return c - 0x30;
+	if (c >= 0x61 && c <= 0x66) return c - 0x57;
+	if (c >= 0x41 && c <= 0x46) return c - 0x37;
+	return -1;
+}
+
+/** El nombre en minúsculas, sólo en ASCII: SQLite no distingue así las mayúsculas en los nombres. */
+const minusculas = (nombre: string) => nombre.replace(/[A-Z]+/g, (letras) => letras.toLowerCase());
 
 /**
- * La sentencia de una línea de datos que no cabe en una llamada (`CARACTERES_POR_LLAMADA`), o con
- * demasiados saltos escritos con `char(…)` (`demasiadosSaltosConChar`), con sus textos y sus blobs como
- * argumentos, que no cuentan para ese tope ni hacen honda la expresión. Los números y los NULL se
- * quedan en el texto: así SQLite les da el mismo tipo que les daría la línea tal cual (un número
- * enlazado entra siempre como REAL). Lee justo lo que escribe `literalEnUnaLinea`, y nada más: lo que
- * no reconoce hace inservible la copia.
+ * Una línea de datos mientras se lee: por dónde va (`i`), y su número en la copia, para decir dónde
+ * falla. Los literales que lee son los que escribe `literalEnUnaLinea`, también los que escribía la
+ * copia de un negocio antes de `SALTOS_CON_CHAR`, y nada más (`valor`).
  */
-function conArgumentos(linea: string): [string, ...Valor[]] {
-	const malFormada = () => new CopiaInservible("copia_no_valida", "una línea de datos que no se sabe leer");
-	let i = PRINCIPIO_DE_INSERT.length - 1;
+class Lectura {
+	i = 0;
 
-	/** Un texto entre comillas que empieza en `i` (`'…'`, con la comilla doble dentro); deja `i` detrás. */
-	const entreComillas = (comilla: string): string => {
-		if (linea[i] !== comilla) throw malFormada();
+	constructor(
+		readonly linea: string,
+		readonly numero: number,
+	) {}
+
+	falla(motivo: MotivoDeFila, en: number = this.i): never {
+		throw filaInservible(this.numero, en, motivo);
+	}
+
+	/** Si la línea sigue con `texto`, lo salta. */
+	salta(texto: string): boolean {
+		if (!this.linea.startsWith(texto, this.i)) return false;
+		this.i += texto.length;
+		return true;
+	}
+
+	/**
+	 * Lo que va entre `comilla` (la simple de un texto, la doble de un nombre) desde `i`, con la comilla
+	 * doblada dentro, y deja `i` detrás; `null` si en `i` no empieza o no se cierra.
+	 */
+	entre(comilla: "'" | '"'): string | null {
+		const { linea } = this;
+		if (linea[this.i] !== comilla) return null;
 		let texto = "";
-		for (i++; ; ) {
-			const fin = linea.indexOf(comilla, i);
-			if (fin === -1) throw malFormada();
-			texto += linea.slice(i, fin);
-			i = fin + 1;
-			if (linea[i] !== comilla) return texto;
-			texto += comilla;
-			i++;
-		}
-	};
-	const sigue = (texto: string) => {
-		if (!linea.startsWith(texto, i)) throw malFormada();
-		i += texto.length;
-	};
-	/** Los bytes de un hexadecimal que empieza en `i` y acaba en su comilla; deja `i` detrás. */
-	const hex = (): Uint8Array<ArrayBuffer> => {
-		const fin = linea.indexOf("'", i);
-		if (fin === -1 || (fin - i) % 2 !== 0 || !/^[0-9a-f]*$/i.test(linea.slice(i, fin))) throw malFormada();
-		const bytes = new Uint8Array((fin - i) / 2);
-		for (let b = 0; b < bytes.length; b++) bytes[b] = parseInt(linea.slice(i + 2 * b, i + 2 * b + 2), 16);
-		i = fin + 1;
-		return bytes;
-	};
-
-	// La tabla y sus columnas, que se quedan como están.
-	entreComillas('"');
-	sigue(" (");
-	for (;;) {
-		entreComillas('"');
-		if (linea.startsWith(", ", i)) i += 2;
-		else break;
-	}
-	sigue(") VALUES (");
-
-	let sentencia = linea.slice(0, i);
-	const argumentos: Valor[] = [];
-	for (;;) {
-		if (linea[i] === "'") {
-			argumentos.push(entreComillas("'"));
-			sentencia += "?";
-		} else if (linea[i] === "(") {
-			// Un texto con saltos de línea: sus trozos, unidos por `char(10)` o `char(13)`.
-			i++;
-			let texto = entreComillas("'");
-			for (;;) {
-				const salto = ENTRE_TROZOS.get(linea.slice(i, i + 12));
-				if (salto === undefined) break;
-				i += 12;
-				texto += salto + entreComillas("'");
+		for (let desde = this.i + 1; ; ) {
+			const fin = linea.indexOf(comilla, desde);
+			if (fin === -1) return null;
+			if (linea[fin + 1] !== comilla) {
+				this.i = fin + 1;
+				return texto + linea.slice(desde, fin);
 			}
-			sigue(")");
-			argumentos.push(texto);
-			sentencia += "?";
-		} else if (linea.startsWith("X'", i)) {
-			i += 2;
-			argumentos.push(hex().buffer);
-			sentencia += "?";
-		} else if (linea.startsWith("CAST(X'", i)) {
-			// Un texto con un NUL dentro, en hexadecimal.
-			i += 7;
-			argumentos.push(new TextDecoder().decode(hex()));
-			sigue(" AS TEXT)");
-			sentencia += "?";
+			texto += linea.slice(desde, fin + 1);
+			desde = fin + 2;
+		}
+	}
+
+	/** Unos bytes en hexadecimal desde `i` hasta su comilla, y deja `i` detrás de ella; `null` si no lo son. */
+	bytes(): Uint8Array<ArrayBuffer> | null {
+		const { linea, i } = this;
+		const fin = linea.indexOf("'", i);
+		if (fin === -1 || (fin - i) % 2 !== 0) return null;
+		const bytes = new Uint8Array((fin - i) / 2);
+		for (let b = 0; b < bytes.length; b++) {
+			const alto = digitoHex(linea.charCodeAt(i + 2 * b));
+			const bajo = digitoHex(linea.charCodeAt(i + 2 * b + 1));
+			if (alto < 0 || bajo < 0) return null;
+			bytes[b] = alto * 16 + bajo;
+		}
+		this.i = fin + 1;
+		return bytes;
+	}
+
+	/**
+	 * Un literal desde `i`, y deja `i` detrás. Es uno de éstos:
+	 *
+	 * - `NULL`;
+	 * - un número finito, como lo escribe `String(n)` (`NUMERO`);
+	 * - un texto entre comillas simples, con la comilla doblada dentro: `'Ana O''Neil'`;
+	 * - un texto con saltos de línea, entre paréntesis: sus trozos entre comillas, unidos por
+	 *   `||char(10)||` o `||char(13)||`, uno por salto y alguno: `('a'||char(13)||''||char(10)||'b')`.
+	 *   Cuántos, da igual: la copia de un negocio anterior a `SALTOS_CON_CHAR` los escribe todos así;
+	 * - unos bytes en hexadecimal, `X'00ff'`, o un texto en UTF-8 en hexadecimal, `CAST(X'…' AS TEXT)`
+	 *   (uno con un NUL o con muchos saltos de línea).
+	 */
+	valor(): ValorLeido {
+		const desde = this.i;
+		const c = this.linea.charCodeAt(desde);
+		if (c === COMILLA) {
+			const texto = this.entre("'");
+			if (texto !== null) return texto;
+		} else if (c === ABRE) {
+			this.i++;
+			let texto = this.entre("'");
+			let saltos = 0;
+			while (texto !== null) {
+				const salto = this.salta("||char(10)||") ? "\n" : this.salta("||char(13)||") ? "\r" : null;
+				if (salto === null) break;
+				const trozo = this.entre("'");
+				texto = trozo === null ? null : texto + salto + trozo;
+				saltos++;
+			}
+			if (texto !== null && saltos > 0 && this.salta(")")) return texto;
+		} else if (this.salta("NULL")) {
+			return null;
+		} else if (this.salta("X'")) {
+			const bytes = this.bytes();
+			if (bytes) return bytes;
+		} else if (this.salta("CAST(X'")) {
+			const bytes = this.bytes();
+			if (bytes && this.salta(" AS TEXT)")) {
+				try {
+					return UTF8.decode(bytes);
+				} catch {
+					// No es UTF-8: no lo ha escrito la copia.
+				}
+			}
 		} else {
-			const m = /^(?:NULL|-?\d+(?:\.\d+)?(?:e[+-]\d+)?)/.exec(linea.slice(i, i + 32));
-			if (!m) throw malFormada();
-			sentencia += m[0];
-			i += m[0].length;
+			NUMERO.lastIndex = desde;
+			const numero = NUMERO.exec(this.linea);
+			// Finito para JavaScript es finito para SQLite: lo que JavaScript redondea al REAL más grande,
+			// SQLite también. Al revés no siempre: uno justo por encima, que ninguna copia escribe, SQLite
+			// lo deja en el más grande y JavaScript lo lee infinito, y aquí no entra.
+			if (numero && Number.isFinite(Number(numero[0]))) {
+				this.i += numero[0].length;
+				return new Numero(numero[0]);
+			}
 		}
-		if (linea.startsWith(", ", i)) {
-			sentencia += ", ";
-			i += 2;
-			continue;
-		}
-		if (linea.slice(i) !== ");") throw malFormada();
-		return [`${sentencia});`, ...argumentos];
+		return this.falla("valor_no_literal", desde);
 	}
 }
 
-/** Una línea de datos de la copia: su texto, su número de línea en la copia y su tabla. */
-type LineaDeDatos = { texto: string; numero: number; tabla: string };
+/** La cabecera de una fila, `INSERT INTO "<tabla>" (<columnas>) VALUES (`, ya comprobada. */
+type Cabecera = {
+	/** Como viene en la línea. Las filas de una tabla van seguidas, y todas empiezan igual. */
+	enLaLinea: string;
+	/** La tabla, con su nombre en el esquema. */
+	tabla: string;
+	columnas: number;
+	/** El principio de la sentencia, con la tabla y las columnas con su nombre en el esquema. */
+	sentencia: string;
+};
 
 /**
- * Lo que se dice de unas líneas que SQLite no acepta: en qué líneas de la copia están y de qué
- * tablas, y el código de SQLite. Nada de su contenido, que el texto de SQLite sí lleva (cita el trozo
- * que no entiende): ése va como causa, sólo a Sentry.
+ * Una fila de la copia, lista para ejecutar: la sentencia que ha escrito este código, sus argumentos
+ * si los lleva, y su número de línea y su tabla, para decir dónde está si SQLite no la acepta.
  */
-function rechazadas(error: unknown, lineas: readonly LineaDeDatos[]): Error {
+type FilaDeLaCopia = { numero: number; tabla: string; sentencia: string; argumentos: Valor[] | null };
+
+/** Lee las líneas de datos de una copia contra el esquema de la base. */
+class LectorDeFilas {
+	private ultima: Cabecera | null = null;
+	private readonly columnas = new Map<string, ReadonlyMap<string, string>>();
+
+	/** `tablas`: las que puede traer la copia, por su nombre en minúsculas (`minusculas`). */
+	constructor(
+		private readonly sql: SqlStorage,
+		private readonly tablas: ReadonlyMap<string, string>,
+	) {}
+
+	/** La fila de una línea de datos (`PRINCIPIO_DE_INSERT`). Lanza `CopiaInservible` si no se lee. */
+	leer(linea: string, numero: number): FilaDeLaCopia {
+		const l: Lectura = new Lectura(linea, numero);
+		let cabecera = this.ultima;
+		if (cabecera && linea.startsWith(cabecera.enLaLinea)) l.i = cabecera.enLaLinea.length;
+		else cabecera = this.ultima = this.cabecera(l);
+
+		const valores: ValorLeido[] = [];
+		for (;;) {
+			const desde = l.i;
+			valores.push(l.valor());
+			if (l.salta(", ")) continue;
+			const c = linea.charCodeAt(l.i);
+			if (c === CIERRA) break;
+			// Detrás de un literal va otro o el cierre: lo demás era una expresión, o le falta un espacio.
+			if (c === COMA) l.falla("fila_mal_formada");
+			l.falla("valor_no_literal", desde);
+		}
+		const cierre = l.i++;
+		if (!l.salta(";")) l.falla("fila_mal_formada");
+		if (l.i !== linea.length) l.falla("sobra_texto");
+		if (valores.length !== cabecera.columnas) l.falla("valores_no_casan", cierre);
+
+		// Con sus valores como literales si cabe en una llamada, que es lo normal: no es más larga que su
+		// línea, salvo con un NUL suelto en un texto, que va en hexadecimal.
+		if (linea.length <= CARACTERES_POR_LLAMADA) {
+			const sentencia = conLiterales(cabecera, valores);
+			if (sentencia.length <= CARACTERES_POR_LLAMADA) return { numero, tabla: cabecera.tabla, sentencia, argumentos: null };
+		}
+		return { numero, tabla: cabecera.tabla, ...conArgumentos(cabecera, valores) };
+	}
+
+	/** La cabecera de la línea, que no es la de la fila anterior. */
+	private cabecera(l: Lectura): Cabecera {
+		l.i = PRINCIPIO_DE_INSERT.length - 1;
+		const enLaTabla = l.i;
+		const nombre = l.entre('"');
+		if (nombre === null) l.falla("fila_mal_formada");
+		const tabla = this.tablas.get(minusculas(nombre));
+		if (tabla === undefined) l.falla("tabla_ajena", enLaTabla);
+		const deLaTabla = this.columnasDe(tabla);
+		if (!l.salta(" (")) l.falla("fila_mal_formada");
+		const columnas: string[] = [];
+		do {
+			const enLaColumna = l.i;
+			const nombreDeColumna = l.entre('"');
+			if (nombreDeColumna === null) l.falla("fila_mal_formada");
+			const columna = deLaTabla.get(minusculas(nombreDeColumna));
+			if (columna === undefined) l.falla("columna_desconocida", enLaColumna);
+			if (columnas.includes(columna)) l.falla("columna_repetida", enLaColumna);
+			columnas.push(columna);
+		} while (l.salta(", "));
+		if (!l.salta(") VALUES (")) l.falla("fila_mal_formada");
+		return {
+			enLaLinea: l.linea.slice(0, l.i),
+			tabla,
+			columnas: columnas.length,
+			sentencia: `INSERT INTO ${identificador(tabla)} (${columnas.map(identificador).join(", ")}) VALUES (`,
+		};
+	}
+
+	/** Las columnas de `tabla` en el esquema, por su nombre en minúsculas. */
+	private columnasDe(tabla: string): ReadonlyMap<string, string> {
+		let columnas = this.columnas.get(tabla);
+		if (!columnas) {
+			const nombres = this.sql.exec("SELECT name FROM pragma_table_info(?1);", tabla).toArray();
+			columnas = new Map(nombres.map((f): [string, string] => [minusculas(String(f.name)), String(f.name)]));
+			this.columnas.set(tabla, columnas);
+		}
+		return columnas;
+	}
+}
+
+/** Lo que hace que un texto no vaya tal cual entre comillas: una comilla, que se dobla, o un NUL. */
+const COMILLA_O_NUL = /['\0]/;
+
+/**
+ * Un valor como literal de una sentencia. Un texto va entre comillas con sus saltos de línea tal cual
+ * (esta sentencia no se lee por líneas, y así no hacen honda la expresión); uno con un NUL, que no
+ * cabe en un literal, y los bytes, como los escribe la copia (`literalEnUnaLinea`).
+ */
+function literal(v: ValorLeido): string {
+	if (v === null) return "NULL";
+	if (v instanceof Numero) return v.texto;
+	if (typeof v === "string") {
+		if (!COMILLA_O_NUL.test(v)) return `'${v}'`;
+		if (!v.includes("\0")) return `'${v.replaceAll("'", "''")}'`;
+	}
+	return literalEnUnaLinea(typeof v === "string" ? v : v.buffer);
+}
+
+/** La sentencia de una fila con sus valores como literales (`literal`). */
+function conLiterales(cabecera: Cabecera, valores: readonly ValorLeido[]): string {
+	return `${cabecera.sentencia}${valores.map(literal).join(", ")});`;
+}
+
+/**
+ * La sentencia de una fila que no cabe en una llamada (`CARACTERES_POR_LLAMADA`), con sus textos y sus
+ * bytes como argumentos, que no cuentan para ese tope. Los números y los NULL se quedan en el texto:
+ * así SQLite les da el mismo tipo que en `conLiterales`.
+ */
+function conArgumentos(cabecera: Cabecera, valores: readonly ValorLeido[]): { sentencia: string; argumentos: Valor[] } {
+	const argumentos: Valor[] = [];
+	const literales = valores.map((v) => {
+		if (v === null || v instanceof Numero) return literal(v);
+		argumentos.push(typeof v === "string" ? v : v.buffer);
+		return "?";
+	});
+	return { sentencia: `${cabecera.sentencia}${literales.join(", ")});`, argumentos };
+}
+
+/**
+ * Lo que se dice de unas filas que SQLite no acepta: en qué líneas de la copia están y de qué
+ * tablas, y el código de SQLite. Nada de su contenido, que el texto de SQLite puede llevar (cita el
+ * trozo que no entiende): ése va como causa, sólo a Sentry.
+ */
+function rechazadas(error: unknown, filas: readonly FilaDeLaCopia[]): Error {
 	const codigo = /\bSQLITE_[A-Z_]+\b/.exec(String((error as Error)?.message ?? error))?.[0] ?? "sin código de SQLite";
 	const donde =
-		lineas.length === 1 ? `la línea ${lineas[0].numero}` : `una de las líneas ${lineas[0].numero}–${lineas.at(-1)!.numero}`;
-	const tablas = [...new Set(lineas.map((l) => l.tabla))].join(", ");
+		filas.length === 1 ? `la línea ${filas[0].numero}` : `una de las líneas ${filas[0].numero}–${filas.at(-1)!.numero}`;
+	const tablas = [...new Set(filas.map((f) => f.tabla))].join(", ");
 	return new Error(`SQLite no acepta ${donde} de la copia (${tablas}): ${codigo}`, { cause: error });
 }
 
 /**
- * Ejecuta unas líneas de datos, en orden: de varias en varias, tal cual, mientras quepan en una
- * llamada, y la que no cabe sola o lleva demasiados saltos escritos con `char(…)`, sola y con sus
- * textos como argumentos.
+ * Ejecuta unas filas, en orden: las que llevan sus valores como literales, de varias en varias
+ * mientras quepan en una llamada (`CARACTERES_POR_LLAMADA`), y las que llevan argumentos, solas.
  */
-function ejecutarLineas(sql: SqlStorage, lineas: readonly LineaDeDatos[]): void {
-	let juntas: LineaDeDatos[] = [];
+function ejecutarFilas(sql: SqlStorage, filas: readonly FilaDeLaCopia[]): void {
+	let juntas: FilaDeLaCopia[] = [];
 	let caracteres = 0;
 	const soltar = () => {
 		const estas = juntas;
@@ -218,25 +432,25 @@ function ejecutarLineas(sql: SqlStorage, lineas: readonly LineaDeDatos[]): void 
 		caracteres = 0;
 		if (!estas.length) return;
 		try {
-			sql.exec(estas.map((l) => l.texto).join("\n"));
+			sql.exec(estas.map((f) => f.sentencia).join("\n"));
 		} catch (error) {
 			throw rechazadas(error, estas);
 		}
 	};
-	for (const linea of lineas) {
-		if (linea.texto.length > CARACTERES_POR_LLAMADA || demasiadosSaltosConChar(linea.texto)) {
+	for (const fila of filas) {
+		if (fila.argumentos) {
 			soltar();
-			const [sentencia, ...argumentos] = conArgumentos(linea.texto);
 			try {
-				sql.exec(sentencia, ...argumentos);
+				sql.exec(fila.sentencia, ...fila.argumentos);
 			} catch (error) {
-				throw rechazadas(error, [linea]);
+				throw rechazadas(error, [fila]);
 			}
 			continue;
 		}
-		if (caracteres + linea.texto.length + 1 > CARACTERES_POR_LLAMADA) soltar();
-		juntas.push(linea);
-		caracteres += linea.texto.length + 1;
+		// Cada una cabe sola en una llamada (`leer`).
+		if (caracteres + fila.sentencia.length + 1 > CARACTERES_POR_LLAMADA) soltar();
+		juntas.push(fila);
+		caracteres += fila.sentencia.length + 1;
 	}
 	soltar();
 }
@@ -259,7 +473,7 @@ export type CopiaCargada = { filas: number; tablas: number };
 /**
  * Carga una copia en la base del objeto. Las tablas que puede traer se vacían antes de cargar (las
  * migraciones pueden sembrar filas, y la copia trae las suyas). Lanza `CopiaInservible` si la copia no
- * vale, y si SQLite no acepta una de sus líneas, un error que dice dónde está y no qué lleva
+ * vale, y si SQLite no acepta una de sus filas, un error que dice dónde está y no qué lleva
  * (`rechazadas`); la base se queda como la deje.
  */
 export async function cargarCopia(
@@ -290,37 +504,43 @@ export async function cargarCopia(
 	}
 	if (!migraciones) throw new CopiaInservible("copia_no_valida", "sin la línea de las migraciones");
 	const aqui = como.migraciones;
-	if (migraciones.length > aqui.length || migraciones.some((m, i) => m !== aqui[i])) {
+	const distinta = migraciones.findIndex((m, i) => m !== aqui[i]);
+	if (distinta !== -1) {
+		// Cuál y cuántas, con los nombres de aquí: los de la copia pueden ser cualquier cosa.
 		throw new CopiaInservible(
 			"copia_de_otra_version",
-			`la copia tiene ${migraciones.at(-1) ?? "ninguna"} y este worker llega a ${aqui.at(-1)}`,
+			distinta < aqui.length
+				? `la migración ${distinta + 1} de la copia no es ${aqui[distinta]}, la de este worker`
+				: `la copia trae ${migraciones.length} migraciones y este worker sabe poner ${aqui.length}, hasta ${aqui.at(-1) ?? "ninguna"}`,
 		);
 	}
 
 	await como.prepararBase(migraciones);
-	const tablas = new Set(
+	const tablas = new Map(
 		(sql.exec("SELECT name FROM sqlite_master WHERE type = 'table';").toArray() as { name: string }[])
 			.map((f) => String(f.name))
-			.filter(como.esTablaDeLaCopia),
+			.filter(como.esTablaDeLaCopia)
+			.map((t): [string, string] => [minusculas(t), t]),
 	);
+	const lector = new LectorDeFilas(sql, tablas);
 
 	await ponerFk(storage, false);
 	try {
 		storage.transactionSync(() => {
-			for (const t of tablas) sql.exec(`DELETE FROM "${t.replaceAll('"', '""')}";`);
+			for (const t of tablas.values()) sql.exec(`DELETE FROM ${identificador(t)};`);
 		});
 
 		let filas = 0;
 		let fin: number | null = null;
 		const llenas = new Set<string>();
-		let lote: LineaDeDatos[] = [];
+		let lote: FilaDeLaCopia[] = [];
 		let caracteresDelLote = 0;
 		const vaciarLote = () => {
 			if (!lote.length) return;
-			const sentencias = lote;
+			const estas = lote;
 			lote = [];
 			caracteresDelLote = 0;
-			storage.transactionSync(() => ejecutarLineas(sql, sentencias));
+			storage.transactionSync(() => ejecutarFilas(sql, estas));
 		};
 
 		for (;;) {
@@ -331,12 +551,11 @@ export async function cargarCopia(
 				fin = m ? Number(m[1]) : -1;
 				continue;
 			}
-			const tabla = tablaDe(linea);
-			if (tabla === null) continue;
-			if (!tablas.has(tabla)) throw new CopiaInservible("copia_no_valida", `una tabla que no es de la base: ${tabla}`);
-			lote.push({ texto: linea, numero, tabla });
+			if (!linea.startsWith(PRINCIPIO_DE_INSERT)) continue;
+			const fila = lector.leer(linea, numero);
+			lote.push(fila);
 			caracteresDelLote += linea.length;
-			llenas.add(tabla);
+			llenas.add(fila.tabla);
 			filas++;
 			if (caracteresDelLote >= CARACTERES_POR_LOTE) vaciarLote();
 		}

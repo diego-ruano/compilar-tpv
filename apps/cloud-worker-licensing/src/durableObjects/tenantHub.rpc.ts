@@ -37,9 +37,13 @@ export type ResultadoAplicacion =
 
 /**
  * DO-03 · Lo que contestan las operaciones de administración de la base del negocio (copias, vuelta a
- * un instante). Como `ResultadoAplicacion`: lo que se rechaza es un dato, con el estado HTTP.
+ * un instante). Como `ResultadoAplicacion`: lo que se rechaza es un dato, con el estado HTTP y, si lo
+ * hay, el motivo técnico (`detalle`: el de una copia que no se puede restaurar, `CopiaInservible`), que
+ * no lleva nada de la base ni de la copia y va a la respuesta y a Axiom.
  */
-export type ResultadoDeAdministracion<T> = ({ ok: true } & T) | { ok: false; error: string; status: number };
+export type ResultadoDeAdministracion<T> =
+	| ({ ok: true } & T)
+	| { ok: false; error: string; status: number; detalle?: string };
 
 /** DO-03 · Cómo está la base de un negocio, para soporte (`/v1/admin/negocios/estado`). */
 export type EstadoDeLaBase = {

@@ -163,11 +163,11 @@ describe("aprovisionar desde una copia", () => {
 		const bucket = (env as any).COPIAS as R2Bucket;
 		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
 		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
-		// Una línea de más, con la comilla sin cerrar: SQLite cita el trozo que no entiende.
+		// Una fila de más, bien escrita, con un negocio que ya está: SQLite no la acepta.
 		const estropeado = texto.replace(
 			/^-- Fin de la copia: (\d+)/m,
 			(_m, n) =>
-				`INSERT INTO "tenants" ("tenant_id", "legal_name", "created_at_ms", "updated_at_ms") VALUES ('t-9', 'Ana Gil, ana.gil@correo.es, 1, 1);\n-- Fin de la copia: ${Number(n) + 1}`,
+				`INSERT INTO "tenants" ("tenant_id", "legal_name", "created_at_ms", "updated_at_ms") VALUES ('t-1', 'Ana Gil, ana.gil@correo.es', 1, 1);\n-- Fin de la copia: ${Number(n) + 1}`,
 		);
 		const flujo = new Blob([estropeado]).stream().pipeThrough(new CompressionStream("gzip"));
 		await bucket.put(clave, await new Response(flujo).arrayBuffer());
@@ -179,7 +179,7 @@ describe("aprovisionar desde una copia", () => {
 			status: 422,
 			body: {
 				error: "central_copia_inservible",
-				detalle: expect.stringMatching(/^no se ha podido cargar: SQLite no acepta una de las líneas \d+–\d+ de la copia \(tenants\): SQLITE_ERROR$/),
+				detalle: expect.stringMatching(/^no se ha podido cargar: SQLite no acepta una de las líneas \d+–\d+ de la copia \(tenants\): SQLITE_CONSTRAINT$/),
 			},
 		});
 		expect(JSON.stringify(r.body)).not.toMatch(/Ana|ana\.gil/);
