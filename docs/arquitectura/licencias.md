@@ -101,8 +101,13 @@ claro no llega a la central: el Worker la prepara antes, y a la operación le pa
 cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y
 `pnpm license:list` las enseña pendientes de `pnpm license:resend`; lo mismo si una entrega de Stripe
 encuentra la sesión ya cumplida por otra que no llegó a mandar el correo, y entonces lo avisa en
-Sentry (`stripe.correo_de_claves`), con las licencias
-([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)). La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+Sentry (`stripe.correo_de_claves`, «Cobro cumplido sin el correo de claves apuntado…»), con las
+licencias
+([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
+Sólo sale si la entrega encuentra la sesión cumplida al empezar y el cobro tiene más de cinco
+minutos (antes, puede ser otra entrega que está mandando el correo). Ante ese aviso: comprobar con el
+cliente o con `pnpm license:list` y reenviar con `pnpm license:resend -- --id <licencia>`. Puede ser
+falso: el correo salió y lo que falló fue apuntarlo. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
 Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
