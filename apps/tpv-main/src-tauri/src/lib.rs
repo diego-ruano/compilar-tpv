@@ -99,9 +99,11 @@ enum DeviceMode {
 
 /// SYNC-17: qué hace la Main respecto a la nube. **Ya no es una elección del usuario**: la
 /// conectividad es un estado derivado del WebSocket (se intenta siempre y el badge refleja lo que
-/// hay). Esto es solo la palanca de emergencia, sin UI, para el caso patológico —una red que tira
-/// el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano en
-/// `device_config.json` o desde `set_connection_mode`.
+/// hay). Esto es solo la palanca de emergencia, sin UI ni comando, para el caso patológico —una red
+/// que tira el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano, en
+/// el campo `connectivity` de `device_config.json`. Nadie avisa al motor de la réplica: la ve en
+/// su siguiente comprobación (con la sesión abierta, a los 10 s como mucho con actividad y hasta
+/// 30 s en reposo; en `Off`, al acabar su espera, de hasta un minuto).
 ///
 /// `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
 /// `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
@@ -169,11 +171,6 @@ struct SetDeviceModeArgs {
 struct DestinoArgs {
     #[serde(default)]
     destino: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-struct SetConnectionModeArgs {
-    mode: ConnectivityMode,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
@@ -1017,37 +1014,6 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
     Ok(load_config(&app_data_dir).connectivity)
-}
-
-/// Persiste la palanca de conectividad en `device_config.json`. **Sin UI**: es la salida de
-/// emergencia de SYNC-17 (ver [`ConnectivityMode`]), no un ajuste que se ofrezca al usuario.
-///
-/// La captura de escrituras para el outbox está SIEMPRE activa (el outbox es el log de cambios
-/// local), así que apagar y volver a encender no pierde nada: al volver a `Auto` se drena.
-///
-/// Aquí ya NO se valida la licencia. Antes se hacía porque activar "online" era una acción
-/// explícita del usuario; ahora la autoridad es el worker (`/v1/ws/ticket` exige JWT + device
-/// proof y rechaza una licencia no activa) y, antes que eso, el gate de AppBoot ya bloquea la app
-/// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
-/// red a un camino que no la necesita.
-#[tauri::command(async)]
-#[specta::specta]
-fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, AppErrorDto> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
-
-    let mut cfg = load_config(&app_data_dir);
-    cfg.connectivity = Some(args.mode);
-    save_config(&app_data_dir, &cfg)?;
-    // El motor de la réplica no relee la palanca en cada mensaje (`COMPROBAR_DISPONIBLE_CADA`):
-    // se le avisa para que la mire ya, y para que conecte sin esperar si se ha vuelto a encender.
-    if let Some(sync) = app.try_state::<replicacion::SyncNativo>() {
-        sync.reintentar();
-    }
-
-    Ok("OK".into())
 }
 
 #[tauri::command]
@@ -2238,7 +2204,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             get_device_mode,
             set_device_mode,
             get_connection_mode,
-            set_connection_mode,
             init_main,
             device_reset_mode,
             // genéricos
@@ -4050,6 +4015,12 @@ mod tests_exenciones_del_gate {
                 "config_upload_initial_setup",
                 "subía a la nube, sin sesión ni `Requiere_Setup`, el PIN que le dijeran para el \
                  usuario que le dijeran; el setup inicial sube por el outbox (AUD-24)",
+            ),
+            (
+                "set_connection_mode",
+                "apagaba la réplica de la Main sin sesión ni gate, y ninguna pantalla lo usaba; la \
+                 palanca de emergencia es el campo `connectivity` de `device_config.json`, que se \
+                 toca a mano (SYNC-17)",
             ),
             (
                 "device_hora_para_firmar",

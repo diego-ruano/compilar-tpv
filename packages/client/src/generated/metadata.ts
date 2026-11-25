@@ -6,7 +6,6 @@ export const nombresComandos = {
     "get_device_mode": "getDeviceMode",
     "set_device_mode": "setDeviceMode",
     "get_connection_mode": "getConnectionMode",
-    "set_connection_mode": "setConnectionMode",
     "init_main": "initMain",
     "device_reset_mode": "deviceResetMode",
     "save_image": "saveImage",
@@ -253,7 +252,6 @@ type Argumentos = {
     "get_device_mode": {  };
     "set_device_mode": { args: Parameters<Comandos["setDeviceMode"]>[0] };
     "get_connection_mode": {  };
-    "set_connection_mode": { args: Parameters<Comandos["setConnectionMode"]>[0] };
     "init_main": {  };
     "device_reset_mode": {  };
     "save_image": { args: Parameters<Comandos["saveImage"]>[0] };

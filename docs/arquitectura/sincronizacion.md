@@ -208,11 +208,14 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   (`COMPROBAR_DISPONIBLE_CADA`, `use_cases/replicacion.rs`), no con cada mensaje del socket: es leer
   `device_config.json`, mirar si hay un traslado y dos consultas. Se mira al volver de cada espera
   del socket, así que en reposo es cuando vence la espera (hasta 30 s), como antes. Cambiar el modo
-  (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor, y entonces se mira
-  en el momento.
-- **Palanca de emergencia sin interfaz**: `connectivity: "auto" | "off"` en `device_config.json`
-  (`get/set_connection_mode`), con `auto` por defecto. Los antiguos valores `online`/`offline` y
-  cualquier valor desconocido se leen como ausencia del campo, que también implica `auto`.
+  (`contexto_cambiado`) despierta al motor, y entonces se mira en el momento.
+- **Palanca de emergencia sin interfaz ni comando**: `connectivity: "auto" | "off"` en
+  `device_config.json`, con `auto` por defecto; se cambia editando el fichero, y la pantalla sólo la
+  lee (`get_connection_mode`). Nadie avisa al motor: con la sesión abierta, pasar a `off` se nota en
+  la comprobación siguiente (10 s como mucho con actividad, hasta 30 s en reposo), y volver a
+  `auto`, cuando acaba la espera del motor parado (hasta un minuto). Los antiguos valores
+  `online`/`offline` y cualquier valor desconocido se leen como ausencia del campo, que también
+  implica `auto`.
   La captura del outbox no depende de ella. Para todos los equipos a la vez están los interruptores
   remotos ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
 - **La autoridad es el worker.** El cliente no decide si puede conectarse: lo intenta y obedece. La

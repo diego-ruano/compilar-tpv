@@ -804,9 +804,11 @@ export type ConfirmarCodigoPinInput = {
 /**
  *  SYNC-17: qué hace la Main respecto a la nube. **Ya no es una elección del usuario**: la
  *  conectividad es un estado derivado del WebSocket (se intenta siempre y el badge refleja lo que
- *  hay). Esto es solo la palanca de emergencia, sin UI, para el caso patológico —una red que tira
- *  el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano en
- *  `device_config.json` o desde `set_connection_mode`.
+ *  hay). Esto es solo la palanca de emergencia, sin UI ni comando, para el caso patológico —una red
+ *  que tira el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano, en
+ *  el campo `connectivity` de `device_config.json`. Nadie avisa al motor de la réplica: la ve en
+ *  su siguiente comprobación (con la sesión abierta, a los 10 s como mucho con actividad y hasta
+ *  30 s en reposo; en `Off`, al acabar su espera, de hasta un minuto).
  *
  *  `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
  *  `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
@@ -3376,10 +3378,6 @@ export type SaveImageArgs = {
 export type SetAsignacionesTareaInput = {
 	id_tarea: string,
 	ids_trabajadores?: string[],
-};
-
-export type SetConnectionModeArgs = {
-	mode: ConnectivityMode,
 };
 
 export type SetDeviceModeArgs = {

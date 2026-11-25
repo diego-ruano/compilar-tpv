@@ -25,8 +25,9 @@ pub(crate) const CAMBIOS_POR_PAGINA: i64 = 1_000;
 /// hay un traslado y hace dos consultas). Se mira al volver de cada espera del socket, como antes:
 /// en reposo, cuando vence (hasta 30 s). Antes se miraba en cada vuelta del bucle, que es cada
 /// mensaje del socket: con las Handy trabajando, varias veces por segundo. Lo que cambia el modo
-/// (`contexto_cambiado`) o la palanca (`set_connection_mode`) despierta al motor (`despertar`), y
-/// entonces se mira en el momento.
+/// (`contexto_cambiado`) despierta al motor (`despertar`), y entonces se mira en el momento. La
+/// palanca de emergencia (`connectivity` en `device_config.json`) se toca a mano y no avisa: se ve
+/// en la comprobación siguiente.
 pub const COMPROBAR_DISPONIBLE_CADA: Duration = Duration::from_secs(10);
 
 /// AUD-18 · Cuánto se espera antes de volver a intentar un cambio de la nube que ha fallado al
@@ -725,7 +726,7 @@ pub async fn ejecutar_con_saludo(ctx: &dyn ContextoReplicacion, nube: &dyn Pairi
         }
         let msg = canal.recibir(espera).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
-        // Un cambio de modo o de la palanca despierta al motor (`contexto_cambiado`): se mira ya.
+        // Un cambio de modo despierta al motor (`contexto_cambiado`): se mira ya.
         if despertar { disponible_comprobado = None; }
         if let Some(m) = msg { atender(ctx, &mut sesion, m).await?; }
         if despertar || ultimo_sondeo.elapsed() >= Duration::from_secs(if vacio {30} else {3}) {
