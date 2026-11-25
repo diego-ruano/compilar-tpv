@@ -38,13 +38,11 @@ type MainPresenceStore = {
 	tenantId: string | null;
 	estadoConexion: ConexionHandy;
 	mainOnline: boolean | null;
-	setMainOnline: (v: boolean | null) => void;
 	/**
 	 * La nube ha rechazado a este Handy (`null` = no ha pasado). Rust clasifica el rechazo;
 	 * el puente publica ese estado y lo retira cuando vuelve a confirmarse la conexión.
 	 */
 	rechazo: MotivoRechazo | null;
-	setRechazo: (v: MotivoRechazo | null) => void;
 	/**
 	 * SYNC-18: la Main está conectada pero subiendo el atraso que acumuló sin conexión, así que la
 	 * nube todavía no refleja su estado. El Handy se bloquea igual que sin Main —escribir sobre un
@@ -52,7 +50,6 @@ type MainPresenceStore = {
 	 * cosa: esto se pasa solo en cuanto termine.
 	 */
 	volcando: boolean;
-	setVolcando: (v: boolean) => void;
 	// Señal del botón Reintentar: el puente pide una reconexión a Rust sin recrear observadores.
 	retryTick: number;
 	requestReconnect: () => void;
@@ -64,11 +61,8 @@ export const useMainPresence = create<MainPresenceStore>((set) => ({
 	tenantId: null,
 	estadoConexion: "pausada",
 	mainOnline: null,
-	setMainOnline: (v) => set({ mainOnline: v }),
 	rechazo: null,
-	setRechazo: (v) => set({ rechazo: v }),
 	volcando: false,
-	setVolcando: (v) => set({ volcando: v }),
 	retryTick: 0,
 	requestReconnect: () => set((s) => ({ retryTick: s.retryTick + 1 })),
 }));

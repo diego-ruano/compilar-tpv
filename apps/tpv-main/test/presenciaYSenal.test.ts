@@ -27,30 +27,6 @@ describe("useMainPresence · lo que sabe el Handy de la Main", () => {
 		expect(useMainPresence.getState().mainOnline).toBeNull();
 	});
 
-	it("distingue los tres estados: sin confirmar, sin Main y con Main", () => {
-		const p = () => useMainPresence.getState();
-
-		p().setMainOnline(true);
-		expect(p().mainOnline).toBe(true);
-
-		p().setMainOnline(false);
-		expect(p().mainOnline).toBe(false);
-
-		p().setMainOnline(null);
-		expect(p().mainOnline).toBeNull();
-	});
-
-	it("el volcado es una espera aparte de la presencia (SYNC-18)", () => {
-		// Hay Main, pero está subiendo su atraso: la nube está a medio construir. El Handy espera
-		// igual, y son dos cosas distintas porque lo que se le cuenta al camarero es distinto.
-		const p = () => useMainPresence.getState();
-		p().setMainOnline(true);
-		p().setVolcando(true);
-
-		expect(p().mainOnline).toBe(true);
-		expect(p().volcando).toBe(true);
-	});
-
 	it("pedir reconexión sube el contador que reabre el socket", () => {
 		const antes = useMainPresence.getState().retryTick;
 		useMainPresence.getState().requestReconnect();
