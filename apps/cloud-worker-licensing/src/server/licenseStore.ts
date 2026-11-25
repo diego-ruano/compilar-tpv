@@ -400,7 +400,9 @@ export async function activateLicenseFirstTime(
  *
  * Un viaje que no vuelve con su respuesta (`CentralNoDisponible`) puede haber entrado: la plataforma
  * da el mismo fallo cuando la respuesta se pierde por el camino. Lo dice la traza, cuyo `swap_id`
- * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado. Si no está
+ * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado, con el fallo del
+ * viaje para que la ruta lo deje registrado (`registrarSinLaCentral`); si la respuesta llegó, con
+ * `null`. Si no está
  * cuando se mira, o la central tampoco contesta a esa lectura, lanza el fallo del viaje; si aun así
  * había entrado, la licencia queda en el equipo nuevo con su traza y sin los avisos, y el reintento
  * de ese equipo ya no es un traslado (`cambioDeEquipo: false`).
@@ -408,7 +410,7 @@ export async function activateLicenseFirstTime(
 export async function reassignMainDevice(
 	db: Base,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
-): Promise<void> {
+): Promise<CentralNoDisponible | null> {
 	const now = Date.now();
 	const swapId = crypto.randomUUID();
 
@@ -426,8 +428,10 @@ export async function reassignMainDevice(
 				args: [swapId, args.licenseId, args.fromDeviceId, args.toDeviceId, now],
 			},
 		]);
+		return null;
 	} catch (error) {
 		if (!(error instanceof CentralNoDisponible) || !(await hayTrazaDelTraslado(db, swapId, error))) throw error;
+		return error;
 	}
 }
 
