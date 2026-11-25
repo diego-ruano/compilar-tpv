@@ -79,6 +79,10 @@ export class FilasRechazadas extends CopiaInservible {
 /**
  * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
  * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
+ *
+ * Desde aquí no se distingue un gzip roto de una lectura de R2 que se corta a mitad: los dos dicen
+ * «no se puede descomprimir», que puede ser pasajero (se repite antes de dar la copia por mala), y
+ * los dos son una copia que no vale, que no va a Sentry, sólo adonde va una `CopiaInservible`.
  */
 export async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
 	try {

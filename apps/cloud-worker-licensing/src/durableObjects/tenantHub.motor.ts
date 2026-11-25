@@ -577,7 +577,8 @@ export class MotorTenantHub {
 	 * que este worker no sabe poner, con una línea que no es una fila, con el gzip roto, con unas
 	 * filas que SQLite no acepta), el objeto se queda vacío y se dice por qué: el código y lo que dice
 	 * el cargador (`detalle`), sin nada de la copia. Lo que SQLite no acepta puede ser además un fallo
-	 * de este worker, y va también a Sentry, con el texto de SQLite como causa.
+	 * de este worker, y va también a Sentry, con el texto de SQLite como causa; lo demás, no. Un gzip
+	 * que no se deja leer puede ser también una lectura de R2 cortada a mitad (`leyendoElGzip`).
 	 */
 	async restaurarDesdeCopia(params: {
 		tenantId: string;
