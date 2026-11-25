@@ -66,6 +66,7 @@ scripts/                         generate-types, check-migration-registry, check
 | Emparejar una Handy o su token | [emparejamiento.md](docs/arquitectura/emparejamiento.md) |
 | Un gate de permisos, la sesión, el PIN, la CSP, el `fs` de la webview | [permisos.md](docs/arquitectura/permisos.md) |
 | Una ruta del worker, la base central, el cron | [worker.md](docs/arquitectura/worker.md) |
+| Las copias de la base central, restaurarla, volver a un instante, `pnpm central:*` | [restaurar-la-central.md](docs/guias/restaurar-la-central.md) |
 | Un job o un interruptor remoto | [jobs-e-interruptores.md](docs/arquitectura/jobs-e-interruptores.md) |
 | El frontend, React Query, el dinero en pantalla | [frontend.md](docs/arquitectura/frontend.md) |
 | Sentry, Axiom, `/health` | [observabilidad.md](docs/arquitectura/observabilidad.md) |
@@ -368,12 +369,20 @@ lo que hay que revisar es el cambio, no el test:
   síncronos, y la central no llama a otro objeto), `objetosDelNegocio.node` (también `BaseCentral`, sólo
   por `centralDe`), `centralAnonimas` (cada ruta anónima que la lee tiene su filtro o su caché, y se
   comprueba), `centralNoDisponible` (cuando no atiende, 503 `external`, nunca un 401 ni un 500),
-  `centralGuardas`, `centralEnlace` (los argumentos se guardan y se rechazan como siempre),
+  `centralGuardas` (sin aprovisionar no atiende ni crea nada, sólo ejecuta sentencias de filas de una
+  en una, y con una migración aplicada que ha cambiado o una nueva que no entra, no atiende),
+  `centralEnlace` (los argumentos se guardan y se rechazan como siempre),
   `centralCarreras` y `centralFalloInyectado` (cada operación entra entera o no entra, también pedida a
-  la vez), `copiaCentralSinNuestroCodigo.node` (su copia se abre con `node:sqlite`), su foto
-  (`centralEsquema`) y el **oráculo de equivalencia** (`oraculoCentral`), cuyas fotos de
+  la vez), `copiaCentralSinNuestroCodigo.node` (su copia se abre con `node:sqlite`), su foto y el hash
+  de las migraciones que ya tiene la de producción, escrito a mano (`centralEsquema`, `APLICADAS`:
+  la 0001 no cambia), y el **oráculo de equivalencia** (`oraculoCentral`), cuyas fotos de
   `test/oraculo/central/` fijan lo que hacían las operaciones antes de que la central estuviera en su
   objeto: si una cambia, lo que ha cambiado es la lógica de negocio.
+- El CLI de administración de la central: `centralVueltaEnElCli` escribe en
+  `scripts/tpv-license.respuestas.json` lo que contesta la `app` entera a cada desenlace de
+  `pnpm central:*`, y `node --test scripts/tpv-license.test.mjs` comprueba con esas respuestas que el
+  CLI enseña con qué salir en todas las ramas de error. Un cambio a propósito de la respuesta se
+  regenera con `-u` y se dice en el commit.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `cantidad_casos.json`,
