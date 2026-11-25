@@ -3,7 +3,7 @@ import React from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "../lib/cn";
 
-export interface SearchInputProps
+interface SearchInputProps
     extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> {
     value: string;
     onValueChange: (value: string) => void;

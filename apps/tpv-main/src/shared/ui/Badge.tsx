@@ -2,7 +2,7 @@
 import React from "react";
 import { cn } from "../lib/cn";
 
-export type BadgeTone =
+type BadgeTone =
     | "neutral"
     | "accent"
     | "success"
@@ -17,7 +17,7 @@ const TONES: Record<BadgeTone, string> = {
     warning: "bg-warning-soft text-warning",
 };
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
     tone?: BadgeTone;
 }
 

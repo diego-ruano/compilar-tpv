@@ -31,7 +31,7 @@ const SIZES: Record<ButtonSize, string> = {
     lg: "h-12 px-5 text-base rounded-xl gap-2",
 };
 
-export interface ButtonProps
+interface ButtonProps
     extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     variant?: ButtonVariant;
     size?: ButtonSize;

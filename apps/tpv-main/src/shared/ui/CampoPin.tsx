@@ -11,7 +11,7 @@ import { cn } from "../lib/cn";
 import IconButton from "./IconButton";
 import Input, { type InputProps } from "./Input";
 
-export type CampoPinProps = Omit<
+type CampoPinProps = Omit<
     InputProps,
     "type" | "value" | "onChange" | "inputMode" | "autoComplete" | "pattern" | "maxLength"
 > & {

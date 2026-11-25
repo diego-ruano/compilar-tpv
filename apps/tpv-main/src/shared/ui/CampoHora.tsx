@@ -39,7 +39,7 @@ export function completarHora(texto: string): string {
     return partes ? `0${partes[1]}:${partes[2]}` : texto;
 }
 
-export type CampoHoraProps = {
+type CampoHoraProps = {
     /** `HH:mm`, o lo que haya escrito a medias. Vacío = sin rellenar. */
     valor: string;
     onCambio: (valor: string) => void;

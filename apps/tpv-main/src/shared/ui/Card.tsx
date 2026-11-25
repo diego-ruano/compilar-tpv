@@ -2,7 +2,7 @@
 import React from "react";
 import { cn } from "../lib/cn";
 
-export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
     /** Padding interno por defecto (p-4). Desactívalo para controlarlo tú. */
     padded?: boolean;
     /** Añade hover/cursor para tarjetas clicables. */
