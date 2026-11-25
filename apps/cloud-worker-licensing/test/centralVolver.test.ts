@@ -339,6 +339,24 @@ describe("lo que la plataforma no acepta vuelve como valor: la vuelta no se ha p
 		expect(nuevas).toEqual(fallaAl === "restaurarAlReiniciar" ? [expect.stringMatching(/\.sql\.gz$/)] : []);
 	});
 
+	it.each([
+		["en mayúsculas", MARCADORES.actual.toUpperCase()],
+		["vacío", ""],
+		["con algo que no es de un marcador", "Ana Gil"],
+	])("si el marcador de ahora que da la plataforma no tiene la forma de uno (%s), no pide la vuelta: no se podría deshacer con él (V-OP-4)", async (_que, raro) => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas, { marcadorActual: () => raro });
+		const antes = new Set(await deAntesDeVolver());
+
+		const r = await central.stub.prepararVuelta({ instanteMs: Date.now() - HORA });
+		expect(r).toMatchObject({ ok: false, error: "central_vuelta_rechazada", detalle: expect.stringContaining("no tiene la forma") });
+		expect(llamadas).toEqual(["de:number", "actual"]);
+		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
+		expect((await central.db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(1);
+		expect((await deAntesDeVolver()).filter((clave) => !antes.has(clave))).toEqual([]);
+	});
+
 	it("con otra vuelta ya preparada, la que no acepta deja en pie la de antes: la central sigue cerrada", async () => {
 		const central = await sembrada();
 		await conDobleDeInstantes(central, []);

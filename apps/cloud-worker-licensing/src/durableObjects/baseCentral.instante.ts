@@ -48,11 +48,13 @@
 //
 // **Lo que la plataforma no acepta vuelve como valor** (`central_vuelta_rechazada`, con lo que ha
 // contestado en `detalle`): el marcador de un instante, el de ahora o la propia vuelta pueden fallar
-// (un marcador que no es de este objeto, uno caducado, un fallo suyo). Entonces la vuelta no se ha
-// pedido: la marca vuelve a como estaba, y la central con ella, y lo que se haya subido a R2 no es de
-// ninguna vuelta (no lleva `.pedida`). Que un error al pedirla quiere decir que la plataforma no la
-// tiene es lo que dice el error: su documentación no dice otra cosa. Lanzarlo haría que quien la
-// pidió no supiera si se ha pedido, y deshiciera lo que no ha pasado.
+// (un marcador que no es de este objeto, uno caducado, un fallo suyo), y el de ahora puede no tener la
+// forma de los suyos (`esMarcador`), con lo que la vuelta no se podría deshacer por él ni iría al
+// rastro (V-OP-4). Entonces la vuelta no se ha pedido: la marca vuelve a como estaba, y la central
+// con ella, y lo que se haya subido a R2 no es de ninguna vuelta (no lleva `.pedida`). Que un error
+// al pedirla quiere decir que la plataforma no la tiene es lo que dice el error: su documentación no
+// dice otra cosa. Lanzarlo haría que quien la pidió no supiera si se ha pedido, y deshiciera lo que
+// no ha pasado.
 //
 // **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
 // plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
@@ -89,7 +91,7 @@ import type {
 	RespuestaDeLaCentral,
 	VueltaPreparada,
 } from "./baseCentral.rpc";
-import { esInstanteDeLaVentana, esSinVueltaAUnInstante, type Instantes } from "./instantes";
+import { esInstanteDeLaVentana, esMarcador, esSinVueltaAUnInstante, type Instantes } from "./instantes";
 import { baseAprovisionada } from "./sqliteDelObjeto";
 
 /**
@@ -178,6 +180,16 @@ export async function prepararVueltaDeLaCentral(
 		return noLaAcepta(error);
 	}
 	if (!esMia()) return sinLaMarca();
+	// Una vuelta que no se puede deshacer por su marcador no se pide (V-OP-4): la orden de deshacer lo
+	// rechazaría (`esMarcador`), y tampoco iría al rastro.
+	if (!esMarcador(deshacer)) {
+		reabrir();
+		return noLaAcepta(
+			new Error(
+				"El marcador de cómo está la central que ha dado la plataforma no tiene la forma de los suyos: con él no se podría deshacer la vuelta, y no se pide.",
+			),
+		);
+	}
 
 	// Fuera de la base que se devuelve, y antes de pedir la vuelta: con qué se deshace (ver la cabecera).
 	let copiaDeAntes: string | null = null;
