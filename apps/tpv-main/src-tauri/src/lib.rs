@@ -2252,7 +2252,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::recovery::recovery_import_backup,
             commands::recovery::recovery_restore_backup,
 
-            // mesass
+            // mesas
             commands::mesas::save_layout,
             commands::mesas::load_layout,
             commands::mesas::set_reserva_estado,
@@ -2274,7 +2274,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mesas::cobrar_detalles,
             commands::mesas::kitchen_list_today_pending,
             commands::mesas::kitchen_set_line_state,
-            // inventario (migrado a arquitectura hexagonal — commands/inventario.rs)
+            // inventario (commands/inventario.rs)
             commands::inventario::inventario_list_categorias,
             commands::inventario::inventario_create_categoria,
             commands::inventario::inventario_list_proveedores_mini,
@@ -2327,7 +2327,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::trabajadores::horarios_delete_asignacion,
             commands::trabajadores::horarios_copy_semana_asignaciones,
             commands::trabajadores::horarios_set_predeterminado_desde_semana,
-            // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
+            // cuentas (commands/cuentas.rs)
             commands::cuentas::cuentas_get_entradas,
             commands::cuentas::cuentas_get_salidas,
             commands::cuentas::cuentas_get_resumen,
@@ -2344,7 +2344,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::cierre_caja::cierre_listar,
             commands::cierre_caja::cierre_detalle,
             commands::cierre_caja::cierre_reabrir,
-            // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
+            // clientes (commands/clientes.rs)
             commands::clientes::clientes_get_overview,
             commands::clientes::clientes_get_cliente_form,
             commands::clientes::clientes_create_cliente,
@@ -2354,7 +2354,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::clientes::clientes_guardar_datos_fiscales,
             commands::clientes::clientes_facturas,
             commands::clientes::clientes_factura_pdf,
-            // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
+            // reservas (commands/reservas.rs)
             commands::reservas::reservas_get_meta,
             commands::reservas::reservas_get_mes,
             commands::reservas::reservas_save,
@@ -2368,7 +2368,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reservas_web::reserva_web_clave,
             commands::reservas_web::reserva_web_mesas,
             commands::reservas_web::reserva_web_guardar_mesa,
-            // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
+            // proveedores (commands/proveedores.rs)
             commands::proveedores::proveedores_get_all,
             commands::proveedores::proveedores_save,
             commands::proveedores::proveedores_delete,
@@ -2423,7 +2423,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::stats::stats_trabajadores_resumen,
             commands::stats::stats_clientes_resumen,
             commands::stats::stats_proveedores_resumen,
-            // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
+            // licensing (commands/licensing.rs)
             commands::licensing::license_get_state,
             commands::licensing::license_activate,
             commands::licensing::license_sumar_clave,
@@ -2431,7 +2431,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::licensing::license_clear_state,
             commands::licensing::license_gate,
             commands::licensing::license_check_now,
-            // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
+            // pairing (commands/pairing.rs)
             commands::pairing::handy_set_token,
             commands::pairing::handy_get_tenant,
             commands::pairing::handy_url_imagenes,
@@ -2442,10 +2442,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reloj::reloj_desfase,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
-            // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
-
-            // sincronización Main → nube (outbox de escrituras locales)
-
+            // sincronización con la nube, permisos de la sesión y socket de la Handy
             commands::sync::sync_health,
             commands::permisos::permisos_sesion,
             commands::permisos::permisos_configuracion,
@@ -2468,14 +2465,14 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             // tamaño de la interfaz (zoom de la ventana)
             commands::ventana::ventana_zoom_estado,
             commands::ventana::ventana_zoom_cambiar,
-            // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
+            // configuración (commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
             commands::configuracion::config_get_ticket_settings,
             commands::configuracion::config_patch_ticket_settings,
             commands::configuracion::config_get_contact_settings,
             commands::configuracion::config_patch_contact_settings,
-            // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
+            // correo electrónico (lo envía el worker, DB-04)
             commands::email_config::email_enviar_pedido,
         ])
         .typ::<tpv_contracts::inventario::ProductoDetalleDto>()
