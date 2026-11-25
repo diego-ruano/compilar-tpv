@@ -110,9 +110,11 @@ export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
  * y se juntan una vez, cuando llega su salto: un texto que creciera trozo a trozo se copiaría entero
  * con cada uno (el gzip llega a trozos de 4 KB), y una línea de 16 MiB tardaría segundos en juntarse.
  * Una de más de `tope` caracteres hace inservible la copia en cuanto se pasa, sin esperar a su final
- * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests), y se deja de leer la copia: la
- * descompresión del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con
- * el resto.
+ * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests).
+ *
+ * Si se deja de leer antes del final, por eso o porque quien lee se para (una línea que no vale, unas
+ * filas que SQLite no acepta: `cargarCopia` cierra el iterador), se cancela la copia: la descompresión
+ * del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con el resto.
  */
 export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARACTERES_POR_LINEA): AsyncGenerator<string> {
 	const lector = cuerpo
@@ -124,31 +126,35 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARAC
 	let caracteres = 0;
 	/** Cuántas líneas se han dado: la que se está leyendo es la siguiente. */
 	let dadas = 0;
-	const demasiadoLarga = async () => {
-		await lector.cancel().catch(() => undefined);
-		return new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
-	};
-	for (;;) {
-		const { value, done } = await lector.read();
-		if (done) break;
-		const partes = value.split("\n");
-		const resto = partes.pop() ?? "";
-		for (const parte of partes) {
-			if (caracteres + parte.length > tope) throw await demasiadoLarga();
-			trozos.push(parte);
-			const linea = trozos.length === 1 ? parte : trozos.join("");
-			trozos = [];
-			caracteres = 0;
-			dadas++;
-			yield linea;
+	const demasiadoLarga = () =>
+		new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
+	let leida = false;
+	try {
+		for (;;) {
+			const { value, done } = await lector.read();
+			if (done) break;
+			const partes = value.split("\n");
+			const resto = partes.pop() ?? "";
+			for (const parte of partes) {
+				if (caracteres + parte.length > tope) throw demasiadoLarga();
+				trozos.push(parte);
+				const linea = trozos.length === 1 ? parte : trozos.join("");
+				trozos = [];
+				caracteres = 0;
+				dadas++;
+				yield linea;
+			}
+			if (caracteres + resto.length > tope) throw demasiadoLarga();
+			if (resto) {
+				trozos.push(resto);
+				caracteres += resto.length;
+			}
 		}
-		if (caracteres + resto.length > tope) throw await demasiadoLarga();
-		if (resto) {
-			trozos.push(resto);
-			caracteres += resto.length;
-		}
+		leida = true;
+		if (trozos.length) yield trozos.join("");
+	} finally {
+		if (!leida) await lector.cancel().catch(() => undefined);
 	}
-	if (trozos.length) yield trozos.join("");
 }
 
 /**
@@ -533,15 +539,24 @@ export type CopiaCargada = { filas: number; tablas: number };
  * Carga una copia en la base del objeto. Las tablas que puede traer se vacían antes de cargar (las
  * migraciones pueden sembrar filas, y la copia trae las suyas). Lanza `CopiaInservible` si la copia no
  * vale, y si SQLite no acepta una de sus filas, un error que dice dónde está y no qué lleva
- * (`rechazadas`); la base se queda como la deje.
+ * (`rechazadas`); la base se queda como la deje. Si se para antes de leer la última línea, cierra
+ * `lineas` (`return`), y `lineasDe` deja de pedir la copia.
  */
 export async function cargarCopia(
 	storage: DurableObjectStorage,
 	lineas: AsyncIterable<string>,
 	como: ComoCargar,
 ): Promise<CopiaCargada> {
-	const sql = storage.sql;
 	const iterador = lineas[Symbol.asyncIterator]();
+	try {
+		return await cargarDe(storage, iterador, como);
+	} finally {
+		await iterador.return?.();
+	}
+}
+
+async function cargarDe(storage: DurableObjectStorage, iterador: AsyncIterator<string>, como: ComoCargar): Promise<CopiaCargada> {
+	const sql = storage.sql;
 	/** El número de la última línea leída, desde 1: con él se dice dónde está una que no vale. */
 	let numero = 0;
 	const siguiente = async () => {

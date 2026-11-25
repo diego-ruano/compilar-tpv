@@ -82,7 +82,75 @@ async function cargar(datos: string[]) {
 	});
 }
 
+/**
+ * Un gzip hecho a mano que no se acaba: `principio`, y detrás `relleno` repetido sin fin, en bloques
+ * sin comprimir de 4 KB, ninguno el último. Cuenta los bytes de relleno que le piden y si lo cancelan.
+ * La descompresión del runtime pide lo que llega sin esperar a que se lea, así que, si no se cancela,
+ * se lo traga entero; para que el test no se coma la memoria, el origen se rompe a los 64 MiB.
+ */
+function gzipSinFin(principio: string, relleno: string) {
+	const pedido = { bytes: 0, cancelado: false };
+	const relleno4k = new TextEncoder().encode(relleno.repeat(Math.ceil(4096 / relleno.length)).slice(0, 4096));
+	const delPrincipio = new TextEncoder().encode(principio);
+	let cabecera = true;
+	let dados = 0;
+	const bloque = (datos: Uint8Array) => {
+		const b = new Uint8Array(5 + datos.length);
+		b.set([0, datos.length & 0xff, datos.length >> 8, ~datos.length & 0xff, (~datos.length >> 8) & 0xff]);
+		b.set(datos, 5);
+		return b;
+	};
+	const gzip = new ReadableStream<Uint8Array>({
+		pull(c) {
+			if (cabecera) {
+				cabecera = false;
+				return c.enqueue(new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]));
+			}
+			if (dados < delPrincipio.length) {
+				const trozo = delPrincipio.subarray(dados, dados + 32 * 1024);
+				dados += trozo.length;
+				return c.enqueue(bloque(trozo));
+			}
+			if (pedido.bytes >= 64 * 1024 * 1024) return c.error(new Error("el origen se rompe a los 64 MiB"));
+			pedido.bytes += relleno4k.length;
+			c.enqueue(bloque(relleno4k));
+		},
+		cancel() {
+			pedido.cancelado = true;
+		},
+	});
+	return { gzip, pedido };
+}
+
 describe("el cargador de las copias", () => {
+	it.each([
+		["una línea que no es una fila", [linea("1", "abc", "NULL", "NULL", "NULL", "NULL")], /^copia_no_valida: la línea 2 no se puede cargar: valor_no_literal/],
+		[
+			"unas filas que SQLite no acepta",
+			// Tres de 1,5 MB con la misma clave: llenan un lote, y SQLite rechaza la segunda en cuanto se ejecuta.
+			[1, 2, 3].map(() => linea("1", "1", `'${"x".repeat(1_500_000)}'`, "NULL", "NULL", "NULL")),
+			/SQLite no acepta la línea 3 de la copia \(t\): SQLITE_CONSTRAINT$/,
+		],
+	])("si se para por %s, deja de leer la copia y de pedirla", async (_que, datos, motivo) => {
+		const { gzip, pedido } = gzipSinFin(`-- Migraciones: m1\n${datos.join("\n")}\n`, "-- relleno\n");
+		const { stub } = centralSinAprovisionar();
+		const error = await runInDurableObject(stub, (_objeto, state) =>
+			cargarCopia(state.storage, lineasDe(gzip), {
+				migraciones: ["m1"],
+				esTablaDeLaCopia: (t) => t === "t",
+				prepararBase: async () => {
+					state.storage.sql.exec(TABLA);
+				},
+			}).then(
+				() => "sin error",
+				(e) => String((e as Error).message),
+			),
+		);
+		expect(error).toMatch(motivo);
+		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
+		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
+	});
+
 	it("una línea que no cabe en una llamada sale igual que si se ejecutara tal cual", async () => {
 		const largo = "x".repeat(40_000);
 		const r = await cargar([
@@ -325,26 +393,7 @@ describe("las líneas de una copia (lineasDe)", () => {
 		// La descompresión del runtime pide lo que llega sin esperar a que se lea, así que, si no se
 		// cancela, se lo traga entero; para que el test no se coma la memoria, el origen se rompe a los
 		// 64 MiB.
-		const pedido = { bytes: 0, cancelado: false };
-		const datos = new Uint8Array(4096).fill(0x78);
-		let cabecera = true;
-		const gzip = new ReadableStream<Uint8Array>({
-			pull(c) {
-				if (cabecera) {
-					cabecera = false;
-					return c.enqueue(new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]));
-				}
-				if (pedido.bytes >= 64 * 1024 * 1024) return c.error(new Error("el origen se rompe a los 64 MiB"));
-				const bloque = new Uint8Array(5 + datos.length);
-				bloque.set([0, datos.length & 0xff, datos.length >> 8, ~datos.length & 0xff, (~datos.length >> 8) & 0xff]);
-				bloque.set(datos, 5);
-				pedido.bytes += datos.length;
-				c.enqueue(bloque);
-			},
-			cancel() {
-				pedido.cancelado = true;
-			},
-		});
+		const { gzip, pedido } = gzipSinFin("", "x");
 		const tope = 256 * 1024;
 		expect(await leer(gzip, tope)).toEqual({
 			dadas: [],
