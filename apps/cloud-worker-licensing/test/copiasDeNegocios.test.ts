@@ -667,6 +667,46 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 		expect(await logsAbiertos(t)).toBe(0);
 	});
 
+	it("VUELTA-REPETIR · el objeto vuelve a mirar, al ir a reiniciarse, que la vuelta preparada sea la de ese deshacer", async () => {
+		// Lo que la ruta mira antes (`cierreDeLaBase`) puede quedarse viejo: otra vuelta preparada entre
+		// medias, o el objeto reiniciado por su cuenta. Quien decide si se reinicia es el objeto.
+		const t = "instante-reinicio-propio";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, llamadas));
+		expect(await stub(t).prepararVuelta({ tenantId: t, marcador: "m", modo: "nube" })).toMatchObject({ ok: true, deshacer: "m-deshacer" });
+
+		expect(await stub(t).reiniciarParaAplicar(t, "otro-deshacer")).toEqual({ ok: false, error: "vuelta_a_la_vez", status: 409 });
+		expect(llamadas).not.toContain("reiniciar");
+
+		await enElHub(t, (hub: any) => hub.state.storage.delete(CLAVE_VUELTA_EN_CURSO));
+		expect(await stub(t).reiniciarParaAplicar(t, "m-deshacer")).toEqual({ ok: false, error: "sin_vuelta_preparada", status: 409 });
+		expect(llamadas).not.toContain("reiniciar");
+	});
+
+	it("VUELTA-REPETIR · si el objeto se reinicia solo entre prepararla y aplicarla, la orden de la vuelta abre el log sin reiniciarlo", async () => {
+		const t = "instante-reiniciado-a-medias";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		await enElHub(t, (hub: any) => {
+			dobleDeInstantes(hub, llamadas);
+			// Justo antes de que la ruta lo reinicie, el objeto se reinicia por su cuenta (un despliegue):
+			// vuelve, y la marca se va con la vuelta.
+			const reiniciarParaAplicar = hub.reiniciarParaAplicar.bind(hub);
+			hub.reiniciarParaAplicar = async (tenantId: string, deshacer: string) => {
+				llamadas.push("se-reinicia-solo");
+				await hub.state.storage.delete(CLAVE_VUELTA_EN_CURSO);
+				hub.vueltaEnCurso = false;
+				return reiniciarParaAplicar(tenantId, deshacer);
+			};
+		});
+		const r = await conCentral((central) => central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "nube", motivo: "prueba" }));
+		expect(r).toMatchObject({ status: 200, body: { ok: true, modo: "nube", deshacer: "m-deshacer", inicio: 1 + SALTO_DE_SEQ } });
+		expect(llamadas).toContain("se-reinicia-solo");
+		expect(llamadas).not.toContain("reiniciar");
+		expect(await logsAbiertos(t)).toBe(1);
+	});
+
 	it("mientras la vuelta está preparada la base no atiende a nadie, y sin volver no se abre el log", async () => {
 		const t = "instante-cerrado";
 		await negocioConDatos(t);
