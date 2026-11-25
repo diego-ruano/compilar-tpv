@@ -14,6 +14,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [CENTRAL-RETENCION](#central-retencion--nada-purga-webhook_events-ni-admin_audit) | 🟡 | Nada purga `webhook_events` ni `admin_audit` de la base central | Sin decidir |
+| [COPIAS-RETENCION](#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca) | 🟡 | Las copias de un negocio retirado o cuyo objeto se ha perdido no se borran nunca | Lo decide el responsable |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [SUBIDA-TECHO](#subida-techo--el-techo-total-de-la-subida-completa) | 🔵 | El techo de 60 millones de filas de la subida completa, sin medir con bares reales | Medir en producción |
@@ -30,7 +31,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
-| [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Caducan solas |
+| [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Se van con las copias nuevas; las de un negocio que ya no copia, no |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -428,10 +429,13 @@ cada salto de línea de un texto como `'||char(10)||'`, 14 caracteres. Una fila 
 millones de saltos (o de 8 MB con más de unos 726.000) da una línea de más de 17 MiB
 (`CARACTERES_POR_LINEA`, `cargaDeCopias.ts`), y esa copia no se restaura (`copia_no_valida: la línea N
 es demasiado larga`); el worker de antes tampoco la restauraba. Lo fija `test/cargaDeCopias.test.ts`
-(«la de una copia de un negocio de antes de SALTOS_CON_CHAR…»). Esas copias se van solas: se guardan
-las 30 últimas de cada negocio (`COPIAS_QUE_SE_GUARDAN`), así que a los 30 días del despliegue no
-queda ninguna, salvo las que proteja una subida completa sin terminar (`copiasProtegidasDesde`). Leerlas
-sin juntar la línea entera sería otro lector.
+(«la de una copia de un negocio de antes de SALTOS_CON_CHAR…»). Esas copias se van a medida
+que cada negocio sube copias nuevas: al subir una se borran las que pasan de las 30 últimas
+(`COPIAS_QUE_SE_GUARDAN`, `tenantHub.copia.ts::subirCopia`), salvo las que proteja una subida
+completa sin terminar (`copiasProtegidasDesde`). Las de un negocio que ya no hace copias (retirado, o
+cuyo objeto se ha perdido, que es cuando se restaura una vieja) no se van nunca
+([COPIAS-RETENCION](#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)).
+Leerlas sin juntar la línea entera sería otro lector.
 
 ---
 
@@ -484,6 +488,25 @@ diaria:
 Falta decidir cuánto se guarda cada una y qué parte (quizá sólo caduca el cuerpo de los eventos), con
 el marco de [LEGAL-01](#legal-01--rgpd), y sin perder lo que usan la consulta de AUD-45 y
 `negocio_log_reservado`.
+
+### COPIAS-RETENCION · Las copias de un negocio que ya no copia no se borran nunca
+
+Las copias diarias de cada negocio (`tpv-copias-negocios`) sólo se podan al subir una nueva
+(`tenantHub.copia.ts::subirCopia` → `podarCopias`), y eso lo hace la alarma del propio objeto. Un
+negocio que ya no hace copias deja las suyas para siempre, con los datos personales de sus clientes y
+de su personal:
+
+- **Retirado** (`/v1/admin/pruebas/retirar`, `/v1/admin/negocios-huerfanos`): la retirada vacía su
+  `TenantHub` y con él su alarma, pero no toca el bucket de las copias. `borrarCopias` existe y nadie
+  la llama.
+- **Con el objeto perdido**: aquí quedarse es lo que se quiere, porque son las copias con las que se
+  restaura ([worker.md](arquitectura/worker.md#las-copias-de-la-base-de-cada-negocio-do-03)).
+
+El bucket no tiene ninguna regla de ciclo de vida por antigüedad (sólo la que aborta las subidas por
+partes sin terminar a los 7 días), y una sin más borraría también las del objeto perdido. Lo decide
+el responsable: que la retirada borre las copias (`borrarCopias`), una regla por antigüedad larga en
+Cloudflare (p. ej. 90 días, que no alcanza a las de un negocio vivo pero sí, pasado ese plazo, a las
+de un objeto perdido), o las dos, con el marco de [LEGAL-01](#legal-01--rgpd).
 
 ---
 

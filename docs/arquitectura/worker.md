@@ -266,7 +266,9 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   veces (`test/syncGzipTransmision.test.ts`). Se mira lo que pidió el cliente
   (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
 - **Retirar un negocio** (`/v1/admin/pruebas/retirar`, sólo los de pruebas:
-  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar todo lo que guarda en la nube:
+  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar lo que guarda en la nube,
+  menos sus copias diarias, que se quedan en `tpv-copias-negocios`
+  ([COPIAS-RETENCION](../pendientes.md#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)):
   - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas y borra todo lo guardado. El
     cierre de esos sockets llega después y no vuelve a crear nada: una sesión que cerró el DO ya está
     fuera y su salida ya se contabilizó;
@@ -1214,8 +1216,11 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
   de los clientes de cada bar, un token de R2 que lea uno no lee el otro, y la retención es otra.
 - **Se guardan 30 por negocio y lo decide el código** (`COPIAS_QUE_SE_GUARDAN`, al subir cada una),
   no una regla por antigüedad: ésa borraría también las últimas de un objeto perdido, que ya no hace
-  copias nuevas, y es justo cuando hacen falta. La regla de ciclo de vida del bucket (90 días) es la
-  red de lo que nadie poda: las copias de un negocio retirado.
+  copias nuevas, y es justo cuando hacen falta. El bucket no tiene ninguna regla por antigüedad (sólo
+  la que aborta las subidas por partes sin terminar a los 7 días), así que lo que nadie poda se queda
+  hasta que se borre a mano: las copias de un objeto perdido y las de un negocio retirado, que la
+  retirada no toca
+  ([COPIAS-RETENCION](../pendientes.md#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)).
 - **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`), que se monta en memoria y al cerrarla ocupa
   el doble. Pasado, falla en voz alta; lo que toca entonces es archivar lo antiguo (DB-14).
 - **No propaga**: si falla, Sentry (`hub.copia_diaria`) y Axiom (`copia_diaria_fallida`), y se repite

@@ -128,8 +128,8 @@ nube: su base en el `TenantHub`, su agenda de reservas web y sus imágenes. El n
 retirado si la licencia quedó anulada y la retirada no devolvió fallos para él. Aunque la
 activación no llegue a contestar, la licencia lleva su negocio reservado desde antes de crear la base
 (AUD-09), así que la retirada también la ve. Quedan, como con los E2E, las filas de
-`devices` de los dos equipos sintéticos, la del negocio en `tenants` (dada por borrada) y la licencia
-anulada.
+`devices` de los dos equipos sintéticos, la del negocio en `tenants` (dada por borrada), la licencia
+anulada y las copias diarias que su `TenantHub` llegara a hacer (una por madrugada que pasó vivo).
 
 `pnpm carga --retirar` lista los negocios de pruebas sin retirar; `pnpm carga --retirar --si` los
 retira todos y reintenta lo que una retirada anterior no pudo borrar.
