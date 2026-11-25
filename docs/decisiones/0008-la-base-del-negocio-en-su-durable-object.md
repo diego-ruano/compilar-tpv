@@ -1,6 +1,8 @@
 # 0008 · La base de cada negocio vive en su Durable Object
 
-**Estado:** vigente.
+**Estado:** vigente. La base central, que aquí sigue en Turso, es desde
+[0009](0009-la-base-central-en-su-durable-object.md) el SQLite de su propio Durable Object,
+`BaseCentral`, en este mismo worker.
 
 ## Contexto
 
