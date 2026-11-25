@@ -24,9 +24,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
-| [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
-| [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
-| [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
@@ -366,47 +363,6 @@ Arreglo posible: que gastar el código y mover la licencia sean una sola operaci
 reconocer el reintento: con el código de este equipo ya gastado y una traza reciente hacia él,
 contestar `cambioDeEquipo: true` y avisar otra vez.
 
-### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
-
-- `/v1/login/correo-recuperacion/confirmar` (`correoRecuperacion.ts::confirmarCambioCorreo`) gasta el
-  código (`comprobarCodigo`, que acaba en `consumeEmailCode`) y, después, hace tres viajes sueltos a
-  la central: lee el correo de antes para avisarle (`correoDeRecuperacion`), cambia el correo
-  (`setTenantRecoveryEmail`) y lo vuelve a leer para contestar (`estado`). Si falla la lectura de antes o el
-  cambio, el código está gastado y el correo sigue siendo el de antes: hay que pedir otro. Si falla la
-  relectura, el correo ya ha cambiado pero la respuesta es un 503 (`onError`), y el reintento contesta
-  «Este código no es válido» (`invalid_code`: un código gastado no vuelve a valer,
-  `codigosPorCorreo.ts::comprobarCodigo`).
-- Al pedirlo (`/solicitar`), si la reserva del envío entra en la central pero su respuesta no vuelve,
-  la petición falla sin mandar el correo, y la siguiente choca con la espera entre códigos que ha puesto
-  esa reserva (`REENVIO_MIN_MS`, cinco minutos): «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
-  salido ninguno.
-
-Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar antes de gastar el código
-(`recuperarPin.ts::verificarCodigoPin`). Arreglo posible: leer aquí también el correo de antes antes
-de gastar el código, gastarlo y cambiar el correo en un solo lote, que la respuesta salga de lo que
-ya se sabe (el correo nuevo) y no de una relectura, y que la espera sólo cuente desde un envío que ha
-salido.
-
-### CUPO-SATURADA · El cupo diario de correo no se aplica con la central saturada
-
-El correo de un pedido sale aunque la central no conteste (`email.routes.ts::reservarCupo`,
-`sin_base`): una caída nuestra no impide mandar un pedido. Pero una central saturada
-(`hub_overloaded`) también es `sin_base`, y la puede saturar quien tenga un dispositivo dado de alta:
-mientras dure, sus pedidos salen sin contar en el cupo. Lo fija `test/correoTopeDiario.test.ts` («con
-la central saturada, también…»). Lo decide el responsable: contestar 503 con la central saturada
-(el pedido se repite después), o dejarlo así.
-
-### RESERVA-CORREOS · Los correos de una reserva web que se pierden con la central saturada
-
-El correo de confirmación de una reserva web (con el enlace de cancelar) y el de «has cancelado»
-salen de la petición del visitante (`publico.routes.ts`, `POST /reservas` y `POST /cancelar`), y
-antes reservan su sitio en `email_sends`, en la base central (`correos.ts::reservar`). Si la central
-no atiende (saturada, o sin contestar), el correo no sale (`fallido`: sin la base no se sabe si ya
-salió) y nadie lo repite: la reserva queda hecha, o cancelada, sin que el cliente reciba el correo ni,
-en el alta, el enlace para cancelarla, que sólo viaja en él. El alta lo dice en su respuesta
-(`correo_enviado: false`). Arreglo posible: apuntar el correo pendiente en la `AgendaWeb`, para que lo
-reintente su alarma como ya hace con el de «no se pudo registrar», y guardar para ello el enlace, o
-el token cifrado.
 
 ### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
 

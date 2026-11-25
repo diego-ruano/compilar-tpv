@@ -415,7 +415,8 @@ describe("las cabeceras, en una línea (AUD-40)", () => {
 			r: await enviarCorreoReservaWeb(ENV(central, { EMAIL: falso.EMAIL }), correo({ para: "ana@correo.es\r\nbcc:otro@prueba.test" })),
 			filas: (await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`))[0].n,
 		}));
-		expect(r).toEqual({ r: "fallido", filas: 0 });
+		// Repetirlo no la arregla: `invalido`, que nadie apunta para repetir.
+		expect(r).toEqual({ r: "invalido", filas: 0 });
 		expect(falso.enviados).toHaveLength(0);
 	});
 });
@@ -444,7 +445,7 @@ describe("el destinatario, una sola dirección (AUD-39)", () => {
 			}
 			return { resultados, filas: (await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`))[0].n };
 		});
-		expect(r).toEqual({ resultados: NO_SON_UNA.map(() => "fallido"), filas: 0 });
+		expect(r).toEqual({ resultados: NO_SON_UNA.map(() => "invalido"), filas: 0 });
 		expect(falso.enviados).toHaveLength(0);
 	});
 

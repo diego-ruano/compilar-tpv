@@ -734,7 +734,11 @@ sentencia (`reservarCupo`), justo antes de enviar y después de comprobar el des
 apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AUD-41). Un pedido cuenta
 desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
 que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
-pedido sale igual y se apunta después si se puede; la central que no atiende al cupo o a la traza
+pedido sale igual, sin contar en el cupo, y se apunta después si se puede. Saturada
+(`hub_overloaded`) es lo mismo, aunque la puede empujar ahí quien tenga un dispositivo dado de alta:
+mientras dure, sus pedidos salen sin contar. Es a propósito (CUPO-SATURADA, lo fija
+`test/correoTopeDiario.test.ts`): una caída o una saturación de la central no puede impedir que un
+bar mande su pedido. La central que no atiende al cupo o a la traza
 queda en Axiom (`central_no_disponible`, con la ruta del pedido por su patrón,
 `/v1/email/enviar-pedido`) y, como `email.quota` o `email.audit`, en Sentry sólo si no es carga ni
 un fallo pasajero ([arriba](#cuando-no-puede-atender)). Las trazas se purgan a los 90 días
@@ -762,8 +766,13 @@ id en `email_sends`, y el id y el cupo se reservan en una sola sentencia antes d
 no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se puede repetir. Un correo
 puede exigir que otro haya salido (o esté saliendo) antes (`trasElCorreo`, en la misma sentencia):
 el «has cancelado» sólo sale tras la confirmación de esa reserva (o si se cancela con el enlace
-del correo de un cambio del restaurante), y si no, no gasta cupo (RW-ALTAS). Sin la base central no se envía (no se sabría si ya salió), y el de la confirmación y el de «has
-cancelado» no los repite nadie ([RESERVA-CORREOS](../pendientes.md#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada)). Qué correo y cuándo:
+del correo de un cambio del restaurante), y si no, no gasta cupo (RW-ALTAS). Sin la base central no se
+envía (no se sabría si ya salió). La confirmación y el «has cancelado» que no salen así (o porque
+falla el binding o falta el remitente, que se arreglan en la configuración) los apunta la ruta en la
+`AgendaWeb`, y su alarma los repite cada 10 minutos con el mismo id, hasta la hora de la reserva
+(RESERVA-CORREOS): la confirmación, si la reserva sigue en pie y con un enlace de cancelar nuevo, del
+que sólo se guarda el hash. Uno cuyo destinatario no es una dirección sale como `invalido` y no se
+apunta: repetirlo no lo arregla. Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al
@@ -771,7 +780,7 @@ asunto y al remitente tal como está en la base, y ahí lo deja una Handy o la M
 propio SQL: por eso no se valida al guardar sino donde se compone el correo. `enUnaLinea` pasa a
 un espacio los caracteres de control y los separadores de línea, y el nombre entra con un tope de
 100 caracteres (el asunto no puede pasar de 998). Una dirección de destino con un carácter de
-control no es una dirección: no se envía ni gasta cupo, y sale como `fallido`.
+control no es una dirección: no se envía ni gasta cupo, y sale como `invalido`.
 
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
 proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en

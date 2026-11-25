@@ -59,7 +59,8 @@ try {
     { verificacion: casilla },
   );
   // r.codigo: la referencia para el restaurante. r.mesa_nombre: la mesa que ha quedado.
-  // r.correo_enviado: si le ha llegado el correo con el enlace para cancelar.
+  // r.correo_enviado: si ha salido el correo con el enlace para cancelar (`true`), si no va a salir
+  // (`false`) o si aún no se sabe (`null`: puede llegar en unos minutos).
 } catch (e) {
   if (esError(e, "sin_mesa_libre")) {
     // Ofrecer otra hora (vuelve a pedir `disponibles()`).

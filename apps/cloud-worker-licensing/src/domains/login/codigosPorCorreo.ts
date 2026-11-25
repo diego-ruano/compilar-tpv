@@ -19,6 +19,10 @@
 //     La espera viaja en la respuesta (`reenvioSegundos`) para que la pantalla cuente atrás, pero
 //     quien la hace cumplir es esto. Y como el intento, el envío se RESERVA en una sola sentencia
 //     (AUD-42): leer, decidir y escribir después dejaba pasar a todas las peticiones simultáneas.
+//   · La espera cuenta desde un envío que ha SALIDO (CORREO-CONFIRMAR). Mientras sale, sólo frena lo
+//     que puede tardar un envío (`ENVIO_EN_VUELO_MS`), y quien lo manda dice después que ha salido
+//     (`codigoEnviado`): una reserva cuyo correo no sale, o cuya respuesta se pierde, no deja a nadie
+//     cinco minutos con «Acabamos de enviarte un código» sin que haya salido ninguno.
 
 import type { Base } from "../../lib/sql";
 import { recortar } from "../../lib/texto";
@@ -26,9 +30,11 @@ import { recortar } from "../../lib/texto";
 import type { Env } from "../../env";
 import { hmacSha256Hex } from "../../server/utils/hmac";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
+import { capturarError } from "../../observability/errors";
 import {
 	consumeEmailCode,
 	getEmailCode,
+	markEmailCodeSent,
 	reserveEmailCodeAttempt,
 	reserveEmailCodeSend,
 	voidEmailCode,
@@ -39,6 +45,11 @@ import { generateOtpCode, OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "../licensing/lice
 
 /** Entre dos envíos del mismo equipo y propósito. El código dura el doble, así que da tiempo. */
 export const REENVIO_MIN_MS = 5 * 60_000;
+/**
+ * Lo que frena un código reservado cuyo correo aún no ha dicho que ha salido: más de lo que tarda un
+ * envío, para que las peticiones a la vez no manden cada una el suyo (AUD-42).
+ */
+export const ENVIO_EN_VUELO_MS = 60_000;
 /** Tope de envíos por equipo y propósito dentro de esta ventana, se usen o no. */
 export const VENTANA_ENVIOS_MS = 60 * 60_000;
 export const MAX_ENVIOS_POR_VENTANA = 5;
@@ -76,12 +87,13 @@ function sinSecreto(env: Env): RespuestaCodigo | null {
 }
 
 export type CodigoEmitido =
-	| { ok: true; codigo: string; minutos: number; reenvioSegundos: number }
+	| { ok: true; codigo: string; minutos: number; reenvioSegundos: number; huella: string }
 	| { ok: false; respuesta: RespuestaCodigo };
 
 /**
- * Genera y guarda un código para `sujeto`. No lo envía: quien llama sabe a dónde y con qué texto,
- * y si el envío falla tiene que llamar a `anularCodigo` para que no quede uno vivo.
+ * Genera y guarda un código para `sujeto`. No lo envía: quien llama sabe a dónde y con qué texto.
+ * Si el envío sale, llama a `codigoEnviado` (desde ahí cuenta la espera); si falla, a `anularCodigo`
+ * para que no quede uno vivo.
  */
 export async function emitirCodigo(
 	db: Base,
@@ -96,13 +108,15 @@ export async function emitirCodigo(
 	// AUD-42: la espera y el tope se deciden en la misma sentencia que guarda el código. Si no toca,
 	// no se escribe nada y no se envía; la lectura de después sólo elige qué decirle.
 	const codigo = generateOtpCode();
+	const codeHash = await huella(env, k, sujeto, codigo);
 	const reservado = await reserveEmailCodeSend(db, {
 		...k,
 		subject: sujeto,
-		codeHash: await huella(env, k, sujeto, codigo),
+		codeHash,
 		expiresAtMs: ahora + OTP_TTL_MS,
 		nowMs: ahora,
 		esperaMs: REENVIO_MIN_MS,
+		enVueloMs: ENVIO_EN_VUELO_MS,
 		ventanaMs: VENTANA_ENVIOS_MS,
 		maxEnvios: MAX_ENVIOS_POR_VENTANA,
 	});
@@ -113,7 +127,26 @@ export async function emitirCodigo(
 		codigo,
 		minutos: Math.round(OTP_TTL_MS / 60_000),
 		reenvioSegundos: Math.round(REENVIO_MIN_MS / 1000),
+		huella: codeHash,
 	};
+}
+
+/**
+ * El correo del código ha salido: la espera hasta el siguiente cuenta desde ahora (CORREO-CONFIRMAR).
+ * No lanza: el código ya está en el buzón y vale igual; si no se puede apuntar, la espera se queda en
+ * la de un envío en vuelo (`ENVIO_EN_VUELO_MS`), y el tope por hora sigue contando.
+ */
+export async function codigoEnviado(
+	db: Base,
+	k: EmailCodeKey,
+	emitido: { huella: string },
+	ahora: number,
+): Promise<void> {
+	try {
+		await markEmailCodeSent(db, k, emitido.huella, ahora);
+	} catch (e) {
+		capturarError(e, "codigos_por_correo.enviado");
+	}
 }
 
 /** Por qué no toca enviar otro código, con la cuenta atrás si es la espera. */
@@ -146,6 +179,11 @@ export type CodigoComprobado =
 	| { ok: true; sujeto: string }
 	| { ok: false; respuesta: RespuestaCodigo };
 
+/** El código no existe, ya se usó, o lo ha usado otra petición a la vez. */
+export function codigoNoValido(): RespuestaCodigo {
+	return fallo(400, "invalid_code", "Este código no es válido. Pide uno nuevo.");
+}
+
 /**
  * Comprueba y, si vale, CONSUME el código. `sujetoEsperado` es para cuando quien llama ya sabe a
  * qué se refiere (el usuario del PIN); si no se da, se devuelve el guardado (la dirección nueva).
@@ -158,6 +196,27 @@ export async function comprobarCodigo(
 	ahora: number,
 	sujetoEsperado?: string,
 ): Promise<CodigoComprobado> {
+	const comprobado = await comprobarSinGastar(db, env, k, codigoEscrito, ahora, sujetoEsperado);
+	if (!comprobado.ok) return comprobado;
+
+	// Consumo atómico: de dos peticiones con el código bueno a la vez, sólo una gana.
+	if (!(await consumeEmailCode(db, k, ahora))) return { ok: false, respuesta: codigoNoValido() };
+
+	return { ok: true, sujeto: comprobado.sujeto };
+}
+
+/**
+ * Comprueba el código sin gastarlo: lo gasta quien llama, en el mismo lote que lo que el código
+ * autoriza (CORREO-CONFIRMAR), con `huella`, la del código comprobado. El intento sí queda contado.
+ */
+export async function comprobarSinGastar(
+	db: Base,
+	env: Env,
+	k: EmailCodeKey,
+	codigoEscrito: string,
+	ahora: number,
+	sujetoEsperado?: string,
+): Promise<{ ok: true; sujeto: string; huella: string } | { ok: false; respuesta: RespuestaCodigo }> {
 	const mal = sinSecreto(env);
 	if (mal) return { ok: false, respuesta: mal };
 
@@ -166,10 +225,7 @@ export async function comprobarCodigo(
 		return { ok: false, respuesta: fallo(400, "invalid_code", "El código son 6 cifras.") };
 	}
 
-	const invalido = {
-		ok: false as const,
-		respuesta: fallo(400, "invalid_code", "Este código no es válido. Pide uno nuevo."),
-	};
+	const invalido = { ok: false as const, respuesta: codigoNoValido() };
 
 	const fila = await getEmailCode(db, k);
 	if (!fila || fila.consumed_at_ms) return invalido;
@@ -200,8 +256,5 @@ export async function comprobarCodigo(
 		};
 	}
 
-	// Consumo atómico: de dos peticiones con el código bueno a la vez, sólo una gana.
-	if (!(await consumeEmailCode(db, k, ahora))) return invalido;
-
-	return { ok: true, sujeto: fila.subject };
+	return { ok: true, sujeto: fila.subject, huella: fila.code_hash };
 }

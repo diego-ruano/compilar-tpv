@@ -63,7 +63,7 @@ administración propio (mientras tanto, el CLI).
 | Dirección | La del worker, `tpv-api.altarialights.workers.dev`, para todo: el widget, `embed.js`, el SDK y los enlaces de los correos (`RESERVAS_WEB_ORIGEN`). ⚠️ Queda pegada en cada web: cambiarla después obliga a tocarlas todas. Un nombre propio de `altarialights.com` saldría por IP que se bloquean cuando hay fútbol (INFRA-04, junto a `CLOUD_API_BASE`) |
 | Formularios propios | La API pública con CORS para los dominios del negocio y el SDK (§7.4). Turnstile va en una página nuestra metida en un iframe (`…/verificar`): sólo funciona en los dominios dados de alta en su widget |
 | Mesa automática | Sin mesa (`mesa: "auto"`), la de menos plazas en la que quepan; si empatan, la primera por `ID_Mesa`. La elige la agenda en su bloque síncrono. Sin ninguna, `sin_mesa_libre` |
-| Nombres de la API | Los mismos en lo que entra y en lo que sale: `dia`, `hora`, `personas`, `mesa` (siempre el id; el nombre, `mesa_nombre`), `correo` (`correo_enviado`, si salió). Lo de dentro (la agenda y la Main) sigue con `dia_ymd`, `id_mesa` y `email` |
+| Nombres de la API | Los mismos en lo que entra y en lo que sale: `dia`, `hora`, `personas`, `mesa` (siempre el id; el nombre, `mesa_nombre`), `correo` (`correo_enviado`, si salió; `null` si aún no se sabe). Lo de dentro (la agenda y la Main) sigue con `dia_ymd`, `id_mesa` y `email` |
 | Idioma | Español |
 | Dónde se puede incrustar | Lista de dominios por negocio que gestiona el proveedor (CLI), no el bar |
 
@@ -213,6 +213,7 @@ pasa por las migraciones).
 | `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms`, `por_un_cambio` (1 si llegó en el correo de un cambio del restaurante, 0 si en la confirmación; §4.8) |
 | `intentos` | `clave` (la `Idempotency-Key` del widget), `respuesta_json` (lo que contestó el alta, sin datos personales), `creado_ms`. Un día |
 | `altas_por_conexion` | `conexion_hash` y `creada_ms`: una fila por alta apuntada y huella, para los topes por conexión y por red (§4.3): la de la conexión y, en IPv6, otra de su /48. La huella es un HMAC, no la IP (§8). Se borra a las 24 h, cuando deja de contar |
+| `correos_pendientes` | La confirmación o el «has cancelado» que la ruta no pudo mandar (§4.8): `id_correo` (su id en `email_sends`), `tipo`, `id_reserva`, `para`, `dia_ymd`, `hora`, `comensales`, `mesa`, `origen` y `clave` (de dónde sale el enlace de cancelar; el token no se guarda), `tras_el_correo`, `creado_ms` e `intento_ms` (el último intento: los que no salen van detrás). Se borra al salir, pasada la hora de la reserva o a los 7 días |
 | `estado` | Clave y valor: la versión del esquema de la agenda |
 
 Ciclo de una petición:
@@ -232,17 +233,22 @@ Ciclo de una petición:
   cliente, que lo olvida en cuanto sale (o pasada la hora de la reserva), y la fila se va a los 7 días.
 - Un alta sólo se anula en la agenda si nunca se entregó (`intentos = 0`); una que vuelve a estar
   `pendiente` porque se reofrece puede estar ya en la Main, y lleva una cancelación.
-- La alarma, cada hora mientras quede algo: da por visto lo que ya está en la base del negocio (por lotes, con un
+- La alarma, cada hora mientras quede algo (cada 10 minutos mientras quede un correo en
+  `correos_pendientes`): da por visto lo que ya está en la base del negocio (por lotes, con un
   cursor por tipo en `estado`), reofrece, vuelve a avisar a la Main si queda algo `pendiente`, apunta
-  en Axiom lo que lleva tres días sin recoger y purga (también las conexiones de más de 24 h).
-- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 6): una agenda vieja
+  en Axiom lo que lleva tres días sin recoger, repite los correos al cliente que no salieron (§4.8) y
+  purga (también las conexiones de más de 24 h).
+- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 7): una agenda vieja
   se pone al día al construirse el objeto (`agendaWeb.almacen.ts::migrar`).
 - `pendiente` → `anulada` si el cliente la cancela antes de que la Main la recoja: se borra
   `datos_json` y la mesa queda libre en el acto.
 - Los enlaces caducan un día después de la reserva (con margen por la zona: 36 h desde su hora).
 - Todo está en `durableObjects/agendaWeb.almacen.ts`, síncrono a propósito.
 
-Los datos personales sólo están en la agenda mientras la reserva espera.
+Los datos personales sólo están en la agenda mientras la reserva espera, con dos excepciones: de una
+fallida, su correo, para avisar al cliente, hasta que sale el aviso o se purga; y de un correo que
+la ruta no pudo mandar (`correos_pendientes`), la dirección y los datos de ese correo (día, hora,
+comensales y mesa), hasta que sale, pasa la hora de la reserva o llega la semana.
 
 ---
 
@@ -299,7 +305,7 @@ lo de arriba. Va en dos piezas:
 | `GET /dia?dia=` | La base del negocio | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
 | `GET /plano` | La base del negocio | Salones (id, nombre, `Room_Points`) y mesas (`id`, `nombre`, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
-| `POST /reservas` `{ dia, hora, personas, mesa, nombre, correo, telefono, nota }` | Agenda | `{ codigo, dia, hora, personas, mesa, mesa_nombre, correo_enviado }` (`mesa`: el id, el pedido o el asignado con `"auto"`; `correo_enviado`: si salió el de confirmación, `null` en una repetición). El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el SDK manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
+| `POST /reservas` `{ dia, hora, personas, mesa, nombre, correo, telefono, nota }` | Agenda | `{ codigo, dia, hora, personas, mesa, mesa_nombre, correo_enviado }` (`mesa`: el id, el pedido o el asignado con `"auto"`; `correo_enviado`: si salió el de confirmación, `null` en una repetición o si lo repetirá la agenda). El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el SDK manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
 | `POST /reserva` `{ token }` | La agenda y la base del negocio | El resumen para la página de cancelar: día, hora, personas, `mesa` y `mesa_nombre`, estado y si aún se puede cancelar |
 | `POST /cancelar` `{ token }` | Agenda | `{ ok }` |
 
@@ -346,7 +352,8 @@ varios destinatarios o una cabecera más (AUD-39). Admite `+`, subdominios y let
 - **Sin estado en campos de instancia que importe ni variables de módulo con estado**, por las mismas
   razones que el `TenantHub` ([sincronizacion.md](../arquitectura/sincronizacion.md#hibernación-del-durable-object-sync-16)).
 - **Una sola alarma**, que se reprograma mientras haya algo que hacer: volver a ofrecer las
-  `entregada` de más de una hora, purgar y caducar enlaces.
+  `entregada` de más de una hora, repetir los correos al cliente que no salieron, purgar y caducar
+  enlaces.
 
 **Qué mesas valen** para el día D, la hora H y N personas:
 
@@ -508,17 +515,29 @@ Desde el worker, con el binding `EMAIL`:
   veces, muchos a la vez no pasan de los topes, uno que falló se puede repetir y uno que está saliendo
   por otro lado es «en curso», que se repite. Sin la base central no se envía: no se sabría si ya
   salió.
+- **Lo que no sale lo repite la agenda** (RESERVA-CORREOS). La confirmación y el «has cancelado»
+  salen de la ruta del visitante; si no salen porque la base central no contesta, el binding falla,
+  falta el remitente u otro los está mandando, la ruta los apunta en la agenda (`apuntarCorreoPendiente`,
+  `correos_pendientes`) y su alarma los repite cada 10 minutos con el mismo id: si el primero sí
+  salió, la central lo sabe y no sale otro. La confirmación se repite si la reserva sigue en pie,
+  como esté entonces (en la base del negocio, o en el alta que espera), al correo de su cliente y con
+  un enlace de cancelar nuevo (el del alta no se guarda en claro; del nuevo, sólo su hash, y se quita si
+  el correo no sale). El «has cancelado», tal como era al cancelar. Los dos, hasta la hora de la
+  reserva y como mucho una semana. Cada vuelta intenta como mucho 10, salgan o no (con la central sin
+  contestar no sale ninguno); los intentados van detrás. Lo que no sale por el tope, o porque no
+  salió el correo de antes (`trasElCorreo`), no se repite.
 - **El destinatario se vuelve a mirar al enviar**: con un carácter de control (AUD-40) o si no es
   una sola dirección (AUD-39), no sale ni gasta cupo. La del cliente puede llegar de la Main por la
-  réplica, que no pasa por ninguna validación.
+  réplica, que no pasa por ninguna validación. Sale como `invalido`, que no se repite: ni lo apunta
+  la ruta, ni lo guarda la alarma, y el aviso de la Main lo da por hecho sin enviar, como sin correo.
 - **Un correo que falla no deshace la reserva**: se registra y la reserva sigue confirmada.
   `enviarCorreoReservaWeb` no lanza nunca.
 - Todo en `domains/reservas_web/correos.ts`.
 
 | Correo | Cuándo | Desde |
 |---|---|---|
-| Confirmación, con el enlace de cancelar | Al reservar | `POST /reservas`; la respuesta dice si salió (`correo`), y una repetición del alta no lo repite (`null`) |
-| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). Si se cancela con el enlace del correo de un cambio del restaurante (`enlaces.por_un_cambio`), sale sin mirarlo: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara. De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en la base del negocio o, si aún no está, al del alta |
+| Confirmación, con el enlace de cancelar | Al reservar | `POST /reservas`; la respuesta dice si salió (`correo_enviado`): `null` si aún no se sabe (una repetición del alta, que no lo repite, o uno que repetirá la alarma de la agenda) |
+| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). Si se cancela con el enlace del correo de un cambio del restaurante (`enlaces.por_un_cambio`), sale sin mirarlo: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara. De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en la base del negocio o, si aún no está, al del alta; si no sale, la alarma de la agenda |
 | Reserva modificada | El restaurante cambia día, hora, personas o mesa (§5.6) | `POST /v1/reservas-web/avisos` (§5.7) |
 | Reserva cancelada por el restaurante | El restaurante la cancela | `POST /v1/reservas-web/avisos` (§5.7) |
 | No se pudo registrar | La Main devuelve `fallida`: el restaurante se pondrá en contacto | La agenda, al contestar la Main; lo que no sale lo repite la alarma hasta la hora de la reserva, y después olvida el correo |

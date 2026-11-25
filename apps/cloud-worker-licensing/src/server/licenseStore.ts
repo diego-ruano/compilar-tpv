@@ -942,6 +942,11 @@ export async function getEmailCode(db: Sql, k: EmailCodeKey): Promise<EmailCodeR
  * hay. Leer, decidir y escribir después dejaba pasar a todas las peticiones que leyeran antes de la
  * primera escritura: diez a la vez mandaban diez códigos. Pedir otro sustituye al anterior y
  * reinicia los intentos. Devuelve `false` si no toca (y no escribe nada): quien llama no envía.
+ *
+ * CORREO-CONFIRMAR · `created_at_ms` es desde cuándo cuenta la espera. Al reservar, sólo frena lo que
+ * puede tardar el envío (`enVueloMs`): lo justo para que las peticiones a la vez no manden cada una
+ * el suyo, sin que una reserva cuyo correo no llega a salir (o cuya respuesta se pierde) haga esperar
+ * la espera entera. Cuando el correo sale, `markEmailCodeSent` la pone en la hora del envío.
  */
 export async function reserveEmailCodeSend(
 	db: Sql,
@@ -951,6 +956,7 @@ export async function reserveEmailCodeSend(
 		expiresAtMs: number;
 		nowMs: number;
 		esperaMs: number;
+		enVueloMs: number;
 		ventanaMs: number;
 		maxEnvios: number;
 	},
@@ -961,7 +967,7 @@ export async function reserveEmailCodeSend(
     INSERT INTO email_codes (
       tenant_id, device_id, purpose, subject, code_hash, attempts, expires_at_ms, consumed_at_ms,
       created_at_ms, sends_in_window, window_started_ms
-    ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, ?7, 1, ?7)
+    ) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, ?7 - ?8 + ?11, 1, ?7)
     ON CONFLICT(tenant_id, device_id, purpose) DO UPDATE SET
       subject = excluded.subject,
       code_hash = excluded.code_hash,
@@ -988,9 +994,23 @@ export async function reserveEmailCodeSend(
 			args.esperaMs,
 			args.ventanaMs,
 			args.maxEnvios,
+			args.enVueloMs,
 		],
 	);
 	return (r.rows?.length ?? 0) > 0;
+}
+
+/**
+ * CORREO-CONFIRMAR · El correo del código ha salido: la espera hasta el siguiente cuenta desde ahora.
+ * Sólo si sigue siendo ese código (`codeHash`) y sin usar.
+ */
+export async function markEmailCodeSent(db: Sql, k: EmailCodeKey, codeHash: string, nowMs: number): Promise<void> {
+	await exec(
+		db,
+		`UPDATE email_codes SET created_at_ms = ?
+		 WHERE tenant_id=? AND device_id=? AND purpose=? AND code_hash=? AND consumed_at_ms IS NULL;`,
+		[nowMs, k.tenantId, k.deviceId, k.purpose, codeHash],
+	);
 }
 
 /**
@@ -1078,6 +1098,46 @@ export async function setTenantRecoveryEmail(
     `,
 		[tenantId, email, nowMs],
 	);
+}
+
+/**
+ * CORREO-CONFIRMAR · Gasta el código del cambio de correo (`codeHash`, el que se ha comprobado) y
+ * deja el correo de recuperación en `email` (`null`: el de la compra) en un solo lote: entran los
+ * dos o ninguno. El cambio sólo se escribe si el código se acaba de gastar en este lote, así que de
+ * dos confirmaciones a la vez sólo una gana (la otra escribiría lo mismo: el correo va en el código).
+ * Devuelve si lo ha gastado ésta.
+ */
+export async function consumeEmailCodeAndSetRecoveryEmail(
+	db: Base,
+	k: EmailCodeKey,
+	args: { codeHash: string; email: string | null; nowMs: number },
+): Promise<boolean> {
+	const recienGastado = `EXISTS (SELECT 1 FROM email_codes
+	                               WHERE tenant_id = ?1 AND device_id = ?2 AND purpose = ?3
+	                                 AND code_hash = ?4 AND consumed_at_ms = ?5)`;
+	const [gastado] = await db.batch([
+		{
+			sql: `UPDATE email_codes SET consumed_at_ms = ?5
+			      WHERE tenant_id = ?1 AND device_id = ?2 AND purpose = ?3 AND code_hash = ?4
+			        AND consumed_at_ms IS NULL
+			      RETURNING tenant_id;`,
+			args: [k.tenantId, k.deviceId, k.purpose, args.codeHash, args.nowMs],
+		},
+		args.email === null
+			? {
+					sql: `DELETE FROM tenant_recovery_emails WHERE tenant_id = ?1 AND ${recienGastado};`,
+					args: [k.tenantId, k.deviceId, k.purpose, args.codeHash, args.nowMs],
+				}
+			: {
+					sql: `INSERT INTO tenant_recovery_emails (tenant_id, email, verified_at_ms)
+					      SELECT ?1, ?6, ?5 WHERE ${recienGastado}
+					      ON CONFLICT(tenant_id) DO UPDATE SET
+					        email = excluded.email,
+					        verified_at_ms = excluded.verified_at_ms;`,
+					args: [k.tenantId, k.deviceId, k.purpose, args.codeHash, args.nowMs, args.email],
+				},
+	]);
+	return (gastado.rows?.length ?? 0) > 0;
 }
 
 /* ============================================================
