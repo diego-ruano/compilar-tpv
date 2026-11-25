@@ -167,11 +167,6 @@ function useSaludSync(activa: boolean): { health: SyncHealth | null; err: string
 
 // SYNC-14: panel de salud de la sincronización (profundidad de outbox, checkpoint y ops en
 // cuarentena/fallando). Hace un fallo de convergencia VISIBLE en vez de invisible.
-export function SaludSync({ darkMode }: { darkMode: boolean }) {
-	const { health, err } = useSaludSync(true);
-	return <PanelSaludSync darkMode={darkMode} health={health} err={err} />;
-}
-
 function PanelSaludSync({ darkMode, health, err }: { darkMode: boolean; health: SyncHealth | null; err: string | null }) {
 	return (
 		<Panel

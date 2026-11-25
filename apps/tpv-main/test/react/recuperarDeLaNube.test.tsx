@@ -5,12 +5,14 @@
 // nube, sólo si es seguro (nada de este TPV por subir) y con confirmación; al traerlo se cierra la
 // sesión y sigue la pantalla de recuperación. Corre el panel de verdad; sólo se sustituye el IPC.
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 
 import type { SyncHealth } from "@tpv/contracts";
-import { SaludSync } from "../../src/features/configuracion/sections/Conectividad";
+import { Conectividad } from "../../src/features/configuracion/sections/Conectividad";
 import { useAuth } from "../../src/shared/stores/useAuth";
 import { useEstadoSync } from "../../src/shared/stores/useEstadoSync";
+import { useMode } from "../../src/shared/stores/useMode";
 import { ToastProvider } from "../../src/shared/toast";
 
 const backend = vi.hoisted(() => ({ salud: null as unknown, llamadas: [] as string[] }));
@@ -38,20 +40,26 @@ const SANA: SyncHealth = {
 
 const authInicial = useAuth.getState();
 const syncInicial = useEstadoSync.getState();
+const modoInicial = useMode.getState();
 afterEach(() => {
     cleanup();
     backend.llamadas = [];
     useAuth.setState(authInicial, true);
     useEstadoSync.setState(syncInicial, true);
+    useMode.setState(modoInicial, true);
 });
 
 function pintar(salud: SyncHealth) {
     backend.salud = salud;
     useAuth.setState({ role: "Administrador", idUsuario: "u1" });
+    useMode.setState({ mode: "tpv" });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-        <ToastProvider>
-            <SaludSync darkMode={false} />
-        </ToastProvider>,
+        <QueryClientProvider client={qc}>
+            <ToastProvider>
+                <Conectividad darkMode={false} />
+            </ToastProvider>
+        </QueryClientProvider>,
     );
 }
 
