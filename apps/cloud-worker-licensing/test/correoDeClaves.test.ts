@@ -169,6 +169,28 @@ describe("CLAVES-SIN-CORREO · el cron reenvía el correo de claves que no const
 		expect(correos.map((c) => c.to)).toEqual(["cs_buzon_caido@ejemplo.test"]);
 	});
 
+	it("si el correo sale y no se llega a apuntar, cuenta como reenviado y no avisa de que no ha salido", async () => {
+		const central = await centralDePrueba();
+		const licencia = await compraSinCorreo(central, "cs_sin_marca");
+		capturados.length = 0;
+		// La central no atiende la marca: un fallo pasajero de la plataforma.
+		const sinMarca = centralInterceptada(central, (metodo, [sentencia], llamar) => {
+			if (metodo === "ejecutar" && /SET key_email_sent_at_ms/.test((sentencia as { sql: string }).sql)) {
+				throw Object.assign(new Error("Network connection lost."), { retryable: true });
+			}
+			return llamar();
+		});
+
+		const { env, correos } = conCorreo();
+		const hoy = await reenviarClavesSinCorreo(env, sinMarca.db, Date.now());
+
+		expect(correos.map((c) => c.to)).toEqual(["cs_sin_marca@ejemplo.test"]);
+		expect(hoy).toMatchObject({ reenviados: 1, fallidos: 0, sinApuntar: 1 });
+		// El comprador tiene su clave: nada de «su reenvío no ha salido». Sin la marca, mañana se repite.
+		expect(capturados.filter((c) => c.operacion === "stripe.correo_de_claves")).toEqual([]);
+		expect(await apuntado(central, licencia)).toBeNull();
+	});
+
 	it("lo hace el cron diario del worker", async () => {
 		const central = await centralDePrueba();
 		await compraSinCorreo(central, "cs_del_cron");

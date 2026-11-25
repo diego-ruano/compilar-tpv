@@ -351,6 +351,32 @@ describe("REV-01 · la plataforma corta la llamada que emite el cobro", () => {
 		expect(r.avisos).toEqual([]);
 	});
 
+	it("si el reenvío sale y no se llega a apuntar, no avisa de que no ha salido, y la entrega no falla", async () => {
+		correos = [];
+		const r = await escenario(async (e) => {
+			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { overloaded: true } });
+			await cumplir(CON_CORREO, cortada.db, sesion("cs_sin_marca")).catch(() => {});
+			await e.filas("UPDATE license_payments SET at_ms = at_ms - 10 * 60 * 1000;");
+			capturados.length = 0;
+			correos = [];
+			// La central no atiende la marca: un fallo pasajero de la plataforma.
+			const sinMarca = interceptar(e.central.stub, (metodo, [sentencia], llamar) => {
+				if (metodo === "ejecutar" && /SET key_email_sent_at_ms/.test((sentencia as { sql: string }).sql)) {
+					throw Object.assign(new Error("Network connection lost."), { retryable: true });
+				}
+				return llamar();
+			});
+			const despues = await cumplir(CON_CORREO, clienteCentral(() => sinMarca), sesion("cs_sin_marca"));
+			const [licencia] = await e.filas("SELECT key_email_sent_at_ms FROM licenses;");
+			return { despues, licencia, enviados: correos.splice(0), avisos: capturados.splice(0) };
+		});
+
+		expect(r.despues.accion).toBe("ya_cumplida");
+		expect(r.enviados.map((c) => c.to)).toEqual(["bar@ejemplo.test"]);
+		expect(r.licencia.key_email_sent_at_ms).toBeNull();
+		expect(r.avisos.filter((a) => a.operacion === "stripe.correo_de_claves")).toEqual([]);
+	});
+
 	it("si el reenvío no sale, lo avisa en Sentry con las licencias, y la entrega no falla", async () => {
 		const r = await escenario(async (e) => {
 			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { overloaded: true } });

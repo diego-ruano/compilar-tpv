@@ -117,7 +117,11 @@ dos veces (dos entregas a la vez, o un correo que salió y no se llegó a apunta
 comprador sin sus claves. Si el reenvío no sale, Sentry (`stripe.correo_de_claves`, «Correo de claves
 sin entregar, y su reenvío no ha salido…»), con las licencias: comprobar con el cliente y, si hace
 falta, `pnpm license:resend -- --id <licencia>`, que enseña la clave aunque el correo vuelva a fallar.
-El cron lo vuelve a intentar al día siguiente.
+El cron lo vuelve a intentar al día siguiente. Si el correo sale y lo que falla es apuntarlo, no es
+eso: el comprador tiene sus claves. Queda como cualquier central que no atiende (el evento
+`central_no_disponible`, y Sentry sólo si no es carga ni un fallo pasajero), o, si es otra cosa, en
+Sentry con «El correo de claves ha salido, pero no se ha podido apuntar…»; el cron lo cuenta como
+reenviado y sin apuntar, y lo repite al día siguiente.
 
 La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).

@@ -74,7 +74,7 @@ async function programado(env: Env, ctx: ExecutionContext): Promise<void> {
 
 	try {
 		const r = await reenviarClavesSinCorreo(env, getDb(env), Date.now(), enSegundoPlano);
-		console.log(`[cron] correo de claves: ${r.reenviados} reenviados, ${r.fallidos} fallidos, de ${r.revisadas} revisadas`);
+		console.log(`[cron] correo de claves: ${r.reenviados} reenviados (${r.sinApuntar} sin apuntar), ${r.fallidos} fallidos, de ${r.revisadas} revisadas`);
 	} catch (err) {
 		// La lectura de las que no tienen su correo apuntado: como la de las que caducan.
 		const operacion = "cron.correo_de_claves";
