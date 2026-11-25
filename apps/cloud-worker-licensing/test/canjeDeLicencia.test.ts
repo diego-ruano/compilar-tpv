@@ -426,11 +426,14 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 			const nueva = await e.emitir(12);
 
 			const res = await e.activar(nueva.clave, EQUIPO, await clavePublica(2));
-			return { res, final: await e.leer(viejaId), clave: await e.leer(nueva.id) };
+			return { res, antes, final: await e.leer(viejaId), clave: await e.leer(nueva.id) };
 		});
 
 		expect(r.res.status).toBe(409);
 		expect(r.res.body.error).toBe("device_key_mismatch");
+		// Ni un día más en la licencia del equipo, ni ninguna otra cosa suya cambiada.
+		expect(r.final.expires_at_ms).toBe(r.antes.expires_at_ms);
+		expect(r.final).toEqual(r.antes);
 		expect(r.clave.status).toBe("issued");
 	});
 });
