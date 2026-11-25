@@ -11,10 +11,10 @@ replicando). Hay dos formas de volver atrás:
 | **Volver a un instante** (de Cloudflare) | Una central con datos malos (un borrado por error, un fallo del programa que escribió mal) y el objeto vivo | Cualquier instante de los últimos 30 días | `pnpm central:volver` |
 | **Restaurar una copia de R2** | El objeto perdido o vacío: sin aprovisionar | Las copias que guarde el bucket | `pnpm central:aprovisionar -- --copia` |
 
-Todo es del CLI de administración (`scripts/tpv-license.mjs`), desde la raíz del repo, con
-`ADMIN_API_TOKEN` en el entorno o en el `.env`; `TPV_API_BASE` lo apunta a otro worker (a
-`wrangler dev`, por ejemplo). **Lo que cambia la central pide `--si`**: sin él, la orden dice qué
-haría y no hace nada.
+Las órdenes `pnpm central:*` son del CLI de administración (`scripts/tpv-license.mjs`), desde la
+raíz del repo, con `ADMIN_API_TOKEN` en el entorno o en el `.env`; `TPV_API_BASE` lo apunta a otro
+worker (a `wrangler dev`, por ejemplo). **Lo que cambia la central pide `--si`**: sin él, la orden
+dice qué haría y no hace nada. Las de `wrangler`, para R2, van desde `apps/cloud-worker-licensing/`.
 
 Lo que hace cada cosa por dentro:
 [worker.md](../arquitectura/worker.md#las-copias-de-la-base-central-restaurarla-y-volver-a-un-instante).
