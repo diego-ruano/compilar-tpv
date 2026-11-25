@@ -190,8 +190,8 @@ describe("la central saturada", () => {
 		expect(capturados).toEqual([]);
 		const eventos = await eventosDeLaCentral(2);
 		expect(eventos.map((e) => [e.motivo, e.metodo, e.ruta])).toEqual([
-			["saturada", "GET", "/v1/update/windows/x86_64/1.0.0"],
-			["saturada", "GET", "/v1/update/windows/x86_64/1.0.0"],
+			["saturada", "GET", "/v1/update/:target/:arch/:current"],
+			["saturada", "GET", "/v1/update/:target/:arch/:current"],
 		]);
 		expect(eventos[0].error).toContain("overloaded");
 	});
@@ -429,7 +429,8 @@ describe("en los sitios que no pasan por el `onError`", () => {
 		expect(res.headers.get("Retry-After")).toBe("2");
 		expect(((await res.json()) as any).error).toBe("hub_overloaded");
 		const [evento] = await eventosDeLaCentral(1);
-		expect(evento.ruta).toBe("/v1/interruptores");
+		// La ruta del middleware que lee la central, por su patrón: `tenantAuth`, en `/v1/interruptores/*`.
+		expect(evento.ruta).toBe("/v1/interruptores/*");
 		expect(enviados.filter((e) => e.event === "device_auth_rechazado")).toEqual([]);
 	});
 
@@ -509,5 +510,22 @@ describe("lo que queda en el log", () => {
 			nivel: "error",
 			texto: expect.stringMatching(/^\[onError\] GET \/v1\/update\/:target\/:arch\/:current → ErrorDeLaCentral: central_error_sql: near "\[email\]": syntax error/),
 		});
+	});
+});
+
+describe("lo que llega a Axiom (AUD-27)", () => {
+	it("el evento lleva la ruta por su patrón, no por su camino: el nombre que escribe quien llama no sale", async () => {
+		// El camino lo escribe quien llama, y un nombre no lo reconoce el filtro de datos personales.
+		const res = await app.request(
+			"https://tpv-api.test/v1/update/windows/x86_64/Ana-Gil",
+			{},
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...centralQue(lanza(pasajera)).entorno },
+		);
+
+		expect(res.status).toBe(503);
+		expect(((await res.json()) as any).error).toBe("hub_unavailable");
+		const [evento] = await eventosDeLaCentral(1);
+		expect(evento).toMatchObject({ motivo: "pasajera", metodo: "GET", ruta: "/v1/update/:target/:arch/:current" });
+		expect(JSON.stringify(enviados)).not.toContain("Ana-Gil");
 	});
 });

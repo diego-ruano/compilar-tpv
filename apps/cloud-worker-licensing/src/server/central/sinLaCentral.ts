@@ -37,7 +37,7 @@ import { respuestaNoDisponible } from "../../lib/noDisponible";
 import { reportarCentralNoDisponible } from "../../observability/axiom";
 import { capturarError } from "../../observability/errors";
 import { scrub } from "../../observability/scrub";
-import { acotar, MAX_FILTRADO } from "../../observability/tope";
+import { acotar } from "../../observability/tope";
 import { CentralNoDisponible, ErrorDeLaCentral } from "./cliente";
 
 /**
@@ -73,7 +73,10 @@ export type DondeSinLaCentral = {
 	 * o lo que hacía el `TenantHub` (`sync.main_vigente`).
 	 */
 	operacion: string;
-	/** El método y la ruta del evento de Axiom. */
+	/**
+	 * El método y la ruta del evento de Axiom. La ruta, como `operacion`, es un valor que no elige
+	 * quien llama (AUD-27): el patrón de la ruta, o lo que hacía el `TenantHub` o el cron.
+	 */
 	metodo: string;
 	ruta: string;
 	tenantId?: string;
@@ -125,8 +128,9 @@ export function respuestaSinLaCentral(c: Context, error: unknown): Response | nu
 		enSegundoPlano: (promesa) => enSegundoPlano(c, promesa),
 		operacion: `${c.req.method} ${c.req.routePath}`,
 		metodo: c.req.method,
-		// Como en `sinElObjeto` (AUD-32): el principio de la ruta, filtrado antes de recortarlo.
-		ruta: acotar(new URL(c.req.url).pathname, scrub, { bytes: 256, filtrado: MAX_FILTRADO }),
+		// AUD-27: la ruta por su patrón, como `operacion`, y no por su camino, que lo escribe quien llama
+		// (un nombre en el lugar de la versión del feed, que el filtro no reconoce).
+		ruta: c.req.routePath,
 		tenantId: (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId"),
 	});
 	return respuestaNoDisponible(c, motivo === "saturada");
