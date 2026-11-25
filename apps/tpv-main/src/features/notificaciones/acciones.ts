@@ -35,6 +35,7 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   // SYNC-36: un cambio de la nube atascado en su cuarentena. Conectividad explica qué pasa y ofrece
   // traer el estado actual de la nube cuando es seguro. No está en el menú: sólo se llega por aquí.
   ver_conectividad: { to: "/Configuracion", state: { seccion: "CONECTIVIDAD" } },
+  // M-077: `ver_fiscal`, el de los avisos de envío a la AEAT, vuelve con con-verifactu.
 };
 
 /**

@@ -30,6 +30,7 @@ function hasta(ms: number): string {
 	});
 }
 
+// M-076: sin la prop `solo`, que sólo usaba la pantalla Fiscal; vuelve con ella (con-verifactu).
 export function AvisoInterruptores() {
 	const [apagados, setApagados] = React.useState<InterruptorApagado[]>([]);
 
