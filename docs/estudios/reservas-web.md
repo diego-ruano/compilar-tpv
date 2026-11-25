@@ -295,7 +295,7 @@ lo de arriba. Va en dos piezas:
 
 | Ruta | Lee | Devuelve |
 |---|---|---|
-| `GET /negocio` | La base del negocio | Nombre, dirección, teléfono y logo; responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
+| `GET /negocio` | La base del negocio | Nombre, dirección y teléfono (el logo no: [WIDGET-LOGO](../pendientes.md#widget-logo--el-widget-de-reservas-no-enseña-el-logo)); responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
 | `GET /dia?dia=` | La base del negocio | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
 | `GET /plano` | La base del negocio | Salones (id, nombre, `Room_Points`) y mesas (`id`, `nombre`, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
@@ -462,8 +462,8 @@ Workers Static Assets en el mismo worker, con lo compilado de `apps/reservas-web
 | `/reservas-web/assets/*` | JS y CSS con huella en el nombre | Inmutable |
 
 CSP del HTML: `default-src 'self'`; `script-src 'self' https://challenges.cloudflare.com`;
-`frame-src https://challenges.cloudflare.com`; `style-src 'self'`; `img-src 'self' data:` (el logo
-es un `data:`); `connect-src 'self'`; y **`frame-ancestors` con los orígenes de
+`frame-src https://challenges.cloudflare.com`; `style-src 'self'`; `img-src 'self'`;
+`connect-src 'self'`; y **`frame-ancestors` con los orígenes de
 `reserva_web_dominios` del negocio** (sin ninguno, `'none'`: el widget no se puede incrustar hasta
 dar de alta la web). Para desarrollar, se da de alta `http://localhost:<puerto>`.
 

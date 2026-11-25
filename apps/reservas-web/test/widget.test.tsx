@@ -40,7 +40,7 @@ const BASE = `/v1/publico/reservas/${CLAVE}`;
 
 const INFO = {
 	ok: true,
-	negocio: { nombre: "Bar Pepe", direccion: "Calle Mayor 1", telefono: "950 000 000", logo: null, razon_social: "Pepe SL", cif: "B00000000" },
+	negocio: { nombre: "Bar Pepe", direccion: "Calle Mayor 1", telefono: "950 000 000", razon_social: "Pepe SL", cif: "B00000000" },
 	hoy: "2026-11-10",
 	primer_dia: "2026-11-11",
 	ultimo_dia: "2026-12-10",

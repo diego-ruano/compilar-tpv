@@ -119,7 +119,7 @@ async function conNegocio(
 		sql.exec(
 			`UPDATE Business_Settings SET Reserva_Web_Activa = 1, Business_Name = 'Bar Pepe', Telefono = '950 000 000',
 			        Direccion = 'Calle Mayor 1', Razon_Social = 'Pepe SL', CIF = 'B00000000',
-			        Logo_DataUrl = 'data:image/png;base64,AAAA' WHERE ID = 1;`,
+			        Logo_DataUrl = 'images/logo/0190f3a1-7b2c-4d4e-8f00-123456789abc.png' WHERE ID = 1;`,
 		);
 		sql.exec(`INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('z1', 'Salon', '[[0,0],[10,0]]');`);
 		for (const [id, cap, reservable] of [["m2", 2, 1], ["m4", 4, 1], ["m8", 8, 0]] as const) {
@@ -208,7 +208,6 @@ describe("las rutas públicas de la reserva web", () => {
 					nombre: "Bar Pepe",
 					direccion: "Calle Mayor 1",
 					telefono: "950 000 000",
-					logo: "data:image/png;base64,AAAA",
 					razon_social: "Pepe SL",
 					cif: "B00000000",
 				},
@@ -235,10 +234,13 @@ describe("las rutas públicas de la reserva web", () => {
 		});
 	});
 
-	it("GET /negocio: un logo que no es una imagen en `data:` no sale", async () => {
-		await conNegocio("publico-logo", async (sql) => {
-			sql.exec(`UPDATE Business_Settings SET Logo_DataUrl = 'https://otra.web/logo.png';`);
-			expect((await pedir("/negocio")).json.negocio.logo).toBeNull();
+	// M-072: el logo es la ruta de una imagen del bucket, que sólo se sirve con el id del negocio en
+	// el camino (`/v1/images/:tenant/…`), y el widget sólo conoce su clave. No se manda.
+	it("GET /negocio: el logo no sale", async () => {
+		await conNegocio("publico-logo", async () => {
+			expect(Object.keys((await pedir("/negocio")).json.negocio).sort()).toEqual(
+				["cif", "direccion", "nombre", "razon_social", "telefono"],
+			);
 		});
 	});
 

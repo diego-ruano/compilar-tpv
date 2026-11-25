@@ -49,7 +49,6 @@ export default function App({ ruta }: { ruta: Ruta | null }) {
 	}, [cargar]);
 
 	const nombre = carga.estado === "lista" ? carga.info.negocio.nombre : carga.estado === "cerrada" ? carga.nombre : "";
-	const logo = carga.estado === "lista" ? carga.info.negocio.logo : null;
 
 	// Todo el ancho del iframe, que es el del hueco de la web (embed.js): el tamaño lo decide ella.
 	return (
@@ -57,7 +56,6 @@ export default function App({ ruta }: { ruta: Ruta | null }) {
 			<Tarjeta>
 				{nombre ? (
 					<header className="mb-4 flex items-center gap-3">
-						{logo ? <img src={logo} alt="" className="size-10 rounded-lg object-contain" /> : null}
 						<h1 className="text-lg font-bold">{nombre}</h1>
 					</header>
 				) : null}

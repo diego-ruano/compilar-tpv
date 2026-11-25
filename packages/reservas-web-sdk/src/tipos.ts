@@ -11,8 +11,6 @@ export type Negocio = {
 	nombre: string;
 	direccion: string;
 	telefono: string;
-	/** El logo como `data:image/…`, o `null`. */
-	logo: string | null;
 	/** Quién trata los datos de quien reserva: para el texto de privacidad. */
 	razon_social: string;
 	cif: string;

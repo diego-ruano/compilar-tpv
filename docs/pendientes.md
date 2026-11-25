@@ -22,6 +22,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
+| [WIDGET-LOGO](#widget-logo--el-widget-de-reservas-no-enseña-el-logo) | 🔵 | El widget de reservas no enseña el logo del negocio | Sin hacer: pide una ruta pública nueva |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
@@ -482,6 +483,17 @@ cuyo objeto se ha perdido, que es cuando se restaura una vieja) no se van nunca
 Leerlas sin juntar la línea entera sería otro lector.
 
 ---
+
+### WIDGET-LOGO · El widget de reservas no enseña el logo
+
+`GET /v1/publico/reservas/:clave/negocio` no manda el logo (M-072), y el widget pinta sólo el nombre.
+`Logo_DataUrl` es la ruta de una imagen del bucket, y la única ruta pública que sirve imágenes,
+`GET /v1/images/:tenant/…`, lleva el id del negocio en el camino: ponerla en la respuesta publicaría
+ese id, que no se revoca, cuando lo público de la reserva web es la clave, que sí. Haría falta una
+ruta por la clave (`GET /v1/publico/reservas/:clave/logo`, detrás de `puertaPublica`) que lea
+`Logo_DataUrl` en el `TenantHub` y sirva la imagen de R2 con las cabeceras del GET de imágenes, el
+campo `logo` de vuelta en `Negocio` del SDK (un booleano o esa URL) y el `<img>` en `App.tsx`. La
+CSP del widget (`img-src 'self'`) ya lo admite: la ruta es del mismo origen.
 
 ## Datos
 

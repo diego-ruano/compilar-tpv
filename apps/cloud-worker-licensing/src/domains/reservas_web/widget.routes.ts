@@ -34,8 +34,7 @@ const CSP_COMUN = [
 	"script-src 'self' https://challenges.cloudflare.com",
 	"frame-src https://challenges.cloudflare.com",
 	"style-src 'self'",
-	// El logo del negocio llega como `data:`.
-	"img-src 'self' data:",
+	"img-src 'self'",
 	"connect-src 'self'",
 	"base-uri 'none'",
 	"form-action 'none'",
