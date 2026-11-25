@@ -305,7 +305,9 @@ Object, `BaseCentral` (`durableObjects/baseCentral.ts`), en este mismo worker
   el RPC del objeto (`ejecutar` y `lote`), más `operar(nombre, datos)` para
   [sus operaciones](#las-operaciones), tipado por operación. El `TenantHub` usa el mismo cliente, con
   plazo ([abajo](#el-plazo-del-tenanthub-central-plazo)). Cada viaje suma al tramo `central` del
-  `Server-Timing` (`observability/tiempos.ts`).
+  `Server-Timing` (`observability/tiempos.ts`). El resto de su RPC es de la administración y del cron
+  (`estado`, `copiar`, `aprovisionar`, `prepararVuelta` y `reiniciar`), que lo piden a `centralDe`
+  directamente ([abajo](#las-copias-de-la-base-central-restaurarla-y-volver-a-un-instante)).
 - **`rowsAffected` son las filas que cambia la sentencia** (`changes()`), no las que escribe con sus
   índices: es lo que decide una carrera (un `UPDATE` condicionado, un `INSERT OR IGNORE`). Las filas
   se leen por nombre y por posición, y un entero de más de 2^53 vuelve redondeado, sin aviso
