@@ -742,6 +742,49 @@ describe("los correos que no salen por la central los repite la alarma de la age
 		});
 	});
 
+	it("el «has cancelado» a algo que no es una dirección no se apunta: repetirlo no la arregla", async () => {
+		await conNegocio("publico-correo-cancelacion-invalida", async (sql, motor, central) => {
+			centralQueSeCae(motor, central);
+			await pedir("/reservas", ALTA_WEB);
+			const token = tokenDelCorreo(enviados[0]);
+			enviados.length = 0;
+			// La Main la registró con el correo de su cliente tal como lo tiene, que llega por la réplica.
+			const idReserva = String((sql.exec(`SELECT id_reserva FROM peticiones WHERE tipo = 'alta';`).toArray()[0] as any).id_reserva);
+			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c1', 'Ana', 'ana@correo.es,otra@correo.es');`);
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Mesa, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES (?, 'm2', 'c1', ?, '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+				idReserva,
+				DIA,
+			);
+			expect((await pedir("/cancelar", { token })).json).toEqual({ ok: true });
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(0);
+		});
+	});
+
+	it("uno apuntado que no va a una dirección, la alarma lo olvida en vez de repetirlo cada 10 minutos", async () => {
+		await conNegocio("publico-correo-pendiente-invalido", async (sql, motor, central) => {
+			centralQueSeCae(motor, central);
+			await motor.apuntarCorreoPendiente({
+				tenantId: "t1",
+				correo: {
+					tipo: "cancelacion",
+					id_reserva: "0199aa00-0000-7000-8000-0000000b0001",
+					para: "a@b.es,c@d.es",
+					dia: DIA,
+					hora: "21:00",
+					personas: 2,
+					mesa: "2",
+					tras_el_correo: null,
+				},
+			});
+			await motor.alarm();
+			expect(enviados).toEqual([]);
+			expect(pendientes(sql)).toBe(0);
+		});
+	});
+
 	it("si el primero sí salió, la alarma no lo manda otra vez ni deja vivo el enlace que no ha llegado a nadie", async () => {
 		await conNegocio("publico-correo-ya-salido", async (sql, motor, central) => {
 			const { caer, levantar } = centralQueSeCae(motor, central);

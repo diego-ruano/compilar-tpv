@@ -162,7 +162,8 @@ function confirmacionQueSigueApuntada(idReserva: string): string | undefined {
  * RESERVA-CORREOS · Un correo al cliente que no ha salido porque la base central no contesta (no se
  * sabe si ya salió) o el binding ha fallado, o que otro está mandando: se apunta en la agenda, cuya
  * alarma lo repite en unos minutos con el mismo id (si el primero sí salió, no sale otro). Lo que no
- * sale por el tope, o porque no salió el correo de antes, no se repite. Devuelve si queda apuntado.
+ * sale por el tope, porque no salió el correo de antes o porque el destinatario no es una dirección
+ * (`invalido`), no se repite. Devuelve si queda apuntado.
  */
 async function repetirSiNoHaSalido(c: any, tenantId: string, resultado: ResultadoCorreo, correo: CorreoParaRepetir): Promise<boolean> {
 	if (resultado !== "fallido" && resultado !== "en_curso") return false;

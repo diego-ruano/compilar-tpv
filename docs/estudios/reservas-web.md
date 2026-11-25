@@ -513,8 +513,8 @@ Desde el worker, con el binding `EMAIL`:
   por otro lado es «en curso», que se repite. Sin la base central no se envía: no se sabría si ya
   salió.
 - **Lo que no sale lo repite la agenda** (RESERVA-CORREOS). La confirmación y el «has cancelado»
-  salen de la ruta del visitante; si no salen porque la base central no contesta, el binding falla o
-  otro los está mandando, la ruta los apunta en la agenda (`apuntarCorreoPendiente`,
+  salen de la ruta del visitante; si no salen porque la base central no contesta, el binding falla,
+  falta el remitente u otro los está mandando, la ruta los apunta en la agenda (`apuntarCorreoPendiente`,
   `correos_pendientes`) y su alarma los repite cada 10 minutos con el mismo id: si el primero sí
   salió, la central lo sabe y no sale otro. La confirmación se repite si la reserva sigue en pie,
   como esté entonces (en la base del negocio, o en el alta que espera), al correo de su cliente y con
@@ -524,7 +524,8 @@ Desde el worker, con el binding `EMAIL`:
   (`trasElCorreo`), no se repite.
 - **El destinatario se vuelve a mirar al enviar**: con un carácter de control (AUD-40) o si no es
   una sola dirección (AUD-39), no sale ni gasta cupo. La del cliente puede llegar de la Main por la
-  réplica, que no pasa por ninguna validación.
+  réplica, que no pasa por ninguna validación. Sale como `invalido`, que no se repite: ni lo apunta
+  la ruta, ni lo guarda la alarma, y el aviso de la Main lo da por hecho sin enviar, como sin correo.
 - **Un correo que falla no deshace la reserva**: se registra y la reserva sigue confirmada.
   `enviarCorreoReservaWeb` no lanza nunca.
 - Todo en `domains/reservas_web/correos.ts`.

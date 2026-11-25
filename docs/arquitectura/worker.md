@@ -758,9 +758,11 @@ puede exigir que otro haya salido (o esté saliendo) antes (`trasElCorreo`, en l
 el «has cancelado» sólo sale tras la confirmación de esa reserva (o si se cancela con el enlace
 del correo de un cambio del restaurante), y si no, no gasta cupo (RW-ALTAS). Sin la base central no se
 envía (no se sabría si ya salió). La confirmación y el «has cancelado» que no salen así (o porque
-falla el binding) los apunta la ruta en la `AgendaWeb`, y su alarma los repite cada 10 minutos con el
-mismo id, hasta la hora de la reserva (RESERVA-CORREOS): la confirmación, si la reserva sigue en pie y
-con un enlace de cancelar nuevo, del que sólo se guarda el hash. Qué correo y cuándo:
+falla el binding o falta el remitente, que se arreglan en la configuración) los apunta la ruta en la
+`AgendaWeb`, y su alarma los repite cada 10 minutos con el mismo id, hasta la hora de la reserva
+(RESERVA-CORREOS): la confirmación, si la reserva sigue en pie y con un enlace de cancelar nuevo, del
+que sólo se guarda el hash. Uno cuyo destinatario no es una dirección sale como `invalido` y no se
+apunta: repetirlo no lo arregla. Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al
@@ -768,7 +770,7 @@ asunto y al remitente tal como está en la base, y ahí lo deja una Handy o la M
 propio SQL: por eso no se valida al guardar sino donde se compone el correo. `enUnaLinea` pasa a
 un espacio los caracteres de control y los separadores de línea, y el nombre entra con un tope de
 100 caracteres (el asunto no puede pasar de 998). Una dirección de destino con un carácter de
-control no es una dirección: no se envía ni gasta cupo, y sale como `fallido`.
+control no es una dirección: no se envía ni gasta cupo, y sale como `invalido`.
 
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
 proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en

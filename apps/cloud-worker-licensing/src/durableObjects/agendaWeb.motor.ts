@@ -771,7 +771,8 @@ export class MotorAgendaWeb {
 	 * siempre (`rw:<tipo>:<id_reserva>`): si el primero sí salió, la central lo sabe (`ya_enviado`) y
 	 * no sale otro. Lo que no sale porque la central sigue sin contestar (o otro lo está mandando) se
 	 * queda para la siguiente, detrás; lo que no sale por el tope o porque no salió el correo de antes,
-	 * se olvida: repetirlo sería saltarse lo que el tope frena. Pasada la hora de la reserva, también.
+	 * se olvida: repetirlo sería saltarse lo que el tope frena. Uno cuyo destinatario no es una
+	 * dirección (`invalido`), también: repetirlo no lo arregla. Y pasada la hora de la reserva.
 	 * Devuelve cuántos han salido.
 	 */
 	async repetirCorreos(tenantId: string): Promise<number> {

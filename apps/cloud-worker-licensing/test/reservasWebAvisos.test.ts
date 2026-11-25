@@ -356,6 +356,19 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 		});
 	});
 
+	it("un correo del cliente que no es una dirección no sale, y repetirlo no lo arregla: hecho, sin enviar", async () => {
+		await conNegocio("correo-invalido", async (sql) => {
+			reserva(sql, "WEB");
+			const malo = "ana@correo.es,otra@correo.es";
+			sql.exec(`UPDATE Clientes SET Email = ? WHERE ID_Cliente = 'c1';`, malo);
+			expect(await mandar(aviso({ huella_correo: await sha256HexStr(malo) }))).toEqual({
+				status: 200,
+				json: { ok: true, enviado: false },
+			});
+			expect(enviados).toEqual([]);
+		});
+	});
+
 	it("si el correo no sale, se dice para que se repita, y al repetirlo sale", async () => {
 		await conNegocio("caido", async (sql) => {
 			reserva(sql, "WEB");

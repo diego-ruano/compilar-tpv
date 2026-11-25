@@ -62,10 +62,13 @@ export type Correo = {
 
 /**
  * `en_curso`: otro lo está enviando ahora mismo; no se sabe aún si saldrá, y quien pueda lo repite.
- * `fallido`: no ha salido (el binding, o la base central sin responder); también se puede repetir.
+ * `fallido`: no ha salido (el binding, la base central sin responder o el remitente sin configurar);
+ *   también se puede repetir: lo que falla se arregla, y entonces sale.
  * `sin_previo`: no sale porque no salió el que tenía que ir antes (`Correo.trasElCorreo`).
+ * `invalido`: el destinatario no es una dirección (AUD-39/40). Repetirlo no lo arregla, y nadie lo
+ *   apunta para repetirlo (RESERVA-CORREOS).
  */
-export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "fallido" | "sin_previo";
+export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "fallido" | "sin_previo" | "invalido";
 
 const correoValido = z.string().max(254).email();
 
@@ -114,14 +117,14 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	// topes.
 	if (SALTO_O_CONTROL.test(para)) {
 		console.warn("[reservas-web] correo sin enviar: la dirección lleva caracteres de control:", correo.tipo);
-		return "fallido";
+		return "invalido";
 	}
 	// AUD-39: y una sola dirección. Las rutas ya lo exigen, pero la del cliente puede venir de la Main
 	// por la réplica, que no pasa por ninguna validación. Una lista sería un solo envío para los topes
 	// y otro destinatario para el de cada dirección, que va por la cadena literal.
 	if (!isValidEmail(para)) {
 		console.warn("[reservas-web] correo sin enviar: la dirección no es una sola dirección de correo:", correo.tipo);
-		return "fallido";
+		return "invalido";
 	}
 	const db = getDb(env);
 	const remitente = recortar(String(env.EMAIL_RESERVAS_FROM_ADDRESS || ""));
