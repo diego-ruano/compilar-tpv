@@ -115,12 +115,10 @@ enum ConnectivityMode {
     Off,
 }
 
-/// Lectura tolerante del campo: los `device_config.json` anteriores a SYNC-17 guardan
-/// `"offline"`/`"online"` (el ajuste que se ha eliminado). Un valor desconocido tiene que caer a
-/// `None` —o sea, `Auto`— y NO reventar el parseo: `load_config` hace `unwrap_or_default()`, así
+/// Lectura tolerante del campo, que se edita a mano: un valor que no sea `"off"` ni `"auto"` cae a
+/// `None` —o sea, `Auto`— y NO revienta el parseo: `load_config` hace `unwrap_or_default()`, así
 /// que un error aquí se llevaría por delante también `mode` y `printers` (el dispositivo
-/// olvidaría que es la Main). Que `"offline"` pase a `Auto` es justo lo que queremos: el ajuste
-/// desaparece y todo el mundo conecta solo.
+/// olvidaría que es la Main).
 fn connectivity_tolerante<'de, D>(d: D) -> Result<Option<ConnectivityMode>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1086,8 +1084,8 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     // `init_main_db` devuelve el `Db` ya montado: escritor único serializado + pool de lectura
     // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
-    // SIEMPRE activa (también offline): el outbox es el log de cambios local; se drena a la nube
-    // cuando el modo es "online".
+    // SIEMPRE activa (también sin red): el outbox es el log de cambios local; se drena a la nube
+    // cuando hay conexión.
     let db = tpv_infra_sqlite::connection::init_main_db(
         &app_data_dir,
         negocio_de_la_licencia(&app_data_dir).as_deref(),
@@ -2763,7 +2761,7 @@ pub fn run() {
             // anterior: se arranca sin ella, como con una ilegible, y el siguiente arranque lo repite.
             let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) && !matches!(cambio_de_negocio, Some(Err(_))) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
-                // está SIEMPRE activa (también offline); se drena en "online".
+                // está SIEMPRE activa (también sin red); se drena cuando hay conexión.
                 let abierta = tauri::async_runtime::block_on(async {
                     // AUD-06: con el negocio de la licencia guardada. Si la base es de otro, se
                     // aparta aquí, antes de abrir nada; si no se puede, se arranca sin base.

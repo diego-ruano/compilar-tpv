@@ -19,8 +19,8 @@ import { conAviso } from "../../../shared/lib/conAviso";
 import { contenidoDelQr } from "../../../app/arranque/emparejamiento";
 
 export function VincularHandy({ darkMode }: { darkMode: boolean }) {
-	// SYNC-17: la sección ya no se tapa (antes exigía el modo "online", que ya no existe). Vincular
-	// es una petición REST al worker: lo que hace falta es que HAYA conexión ahora mismo. Sin ella
+	// SYNC-17: vincular es una petición REST al worker: lo que hace falta es que HAYA conexión ahora
+	// mismo, no un modo. Sin ella
 	// se dice claramente —el código se pide a la nube y sin ella no hay código válido que teclear—,
 	// en vez de soltar el error crudo de red.
 	const hayNube = useEstadoSync((s) => s.estado) === "conectado";

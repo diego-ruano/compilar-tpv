@@ -30,9 +30,8 @@ function desdeHace(ms: number): string {
 	return `desde hace ${Math.floor(h / 24)} d`;
 }
 
-// Estado real de la conexión. Sustituye al antiguo selector "offline/online": el usuario ya no
-// decide si quiere conexión (una pregunta que no puede responder bien y cuya respuesta se queda
-// vieja), solo ve la que hay.
+// Estado real de la conexión. El usuario no decide si quiere conexión (una pregunta que no puede
+// responder bien y cuya respuesta se queda vieja), solo ve la que hay.
 function EstadoConexion({ darkMode, porSubir }: { darkMode: boolean; porSubir: number | null }) {
 	const estado = useEstadoSync((s) => s.estado);
 	const detalle = useEstadoSync((s) => s.detalle);
