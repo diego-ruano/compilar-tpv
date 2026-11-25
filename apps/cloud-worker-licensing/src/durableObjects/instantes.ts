@@ -45,6 +45,19 @@ export function esInstanteDeLaVentana(instanteMs: number, ahoraMs: number): bool
 	return instanteMs < ahoraMs && instanteMs >= ahoraMs - VENTANA_DE_VUELTA_MS;
 }
 
+/** Lo más largo que se admite como marcador: los de Cloudflare tienen 59 letras. */
+const TOPE_DEL_MARCADOR = 100;
+
+/**
+ * ¿Puede ser `texto` un marcador de la plataforma? Cloudflare los da en cifras hexadecimales en
+ * minúsculas, en grupos separados por guiones: `0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b`
+ * (el ejemplo de su documentación, arriba; los de D1 tienen la misma forma). Lo que no la tenga no es
+ * un marcador, y no llega ni a la plataforma ni al rastro de la administración.
+ */
+export function esMarcador(texto: string): boolean {
+	return texto.length <= TOPE_DEL_MARCADOR && /^[0-9a-f]+(?:-[0-9a-f]+)*$/.test(texto);
+}
+
 /** ¿Es el fallo de una plataforma sin vuelta a un instante (local, los tests)? */
 export function esSinVueltaAUnInstante(e: unknown): boolean {
 	return /point-in-time recovery/i.test(String((e as Error)?.message ?? e));

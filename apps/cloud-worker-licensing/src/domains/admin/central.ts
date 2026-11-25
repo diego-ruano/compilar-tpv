@@ -14,7 +14,10 @@
 //   POST /v1/admin/central/volver        → a un instante de los últimos 30 días, o a un marcador
 //
 // Lo que cambia algo deja rastro en Axiom y en el log (`rastro`), no en `admin_audit`: es una tabla
-// de la propia central, y restaurarla o devolverla a un instante la reescriben.
+// de la propia central, y restaurarla o devolverla a un instante la reescriben. El rastro sólo lleva
+// lo nuestro: códigos, claves y marcadores que han pasado su gramática (`esClaveDeCopiaDeLaCentral`,
+// `esMarcador`), recuentos. El `detalle` del objeto (lo que dice SQLite o R2, o lo que trae una copia)
+// va en la respuesta, a quien administra, y nunca al rastro.
 
 import { Hono, type Context } from "hono";
 import * as z from "zod";
@@ -32,6 +35,8 @@ import {
 	listarCopiasDeLaCentral,
 } from "../../durableObjects/baseCentral.copia";
 import type { CodigoDeLaCentral, EstadoDeLaCentral, FalloDeLaCentral } from "../../durableObjects/baseCentral.rpc";
+import type { CopiaInservible } from "../../durableObjects/cargaDeCopias";
+import { esMarcador } from "../../durableObjects/instantes";
 
 export const centralRoutes = new Hono<{ Bindings: Env }>();
 
@@ -81,10 +86,27 @@ function noHecho(
 	);
 }
 
-/** El rastro de lo que cambia algo: en el log y en Axiom. Sin datos personales. */
+/** El rastro de lo que cambia algo: en el log y en Axiom. Sin datos personales ni texto que no sea nuestro. */
 function rastro(c: Context<{ Bindings: Env }>, campos: Parameters<typeof reportarAdministracionDeLaCentral>[1]): void {
 	console.log(`[central] ${JSON.stringify(campos)}`);
 	enSegundoPlano(c, reportarAdministracionDeLaCentral(c.env, campos));
+}
+
+/** Los códigos con los que el cargador dice que una copia no sirve (`CopiaInservible`). */
+const MOTIVOS_DE_UNA_COPIA: Record<CopiaInservible["codigo"], true> = {
+	copia_no_encontrada: true,
+	copia_de_otra_version: true,
+	copia_cortada: true,
+	copia_no_valida: true,
+};
+
+/**
+ * Lo único del `detalle` de una restauración que va al rastro: el código con el que empieza, si es
+ * uno de los de una copia que no sirve (`copia_cortada: …`). Lo de detrás no es nuestro.
+ */
+function motivoDe(detalle: string | undefined): string | undefined {
+	const codigo = detalle?.split(":", 1)[0] ?? "";
+	return Object.prototype.hasOwnProperty.call(MOTIVOS_DE_UNA_COPIA, codigo) ? codigo : undefined;
 }
 
 centralRoutes.get("/estado", async (c) => {
@@ -99,7 +121,7 @@ centralRoutes.get("/copias", async (c) => {
 centralRoutes.post("/copiar-ahora", async (c) => {
 	const r = await centralDe(c.env).copiar(COPIA_A_MANO);
 	if (!r.ok) {
-		rastro(c, { accion: "copiar", resultado: r.error, detalle: r.detalle });
+		rastro(c, { accion: "copiar", resultado: r.error });
 		return noHecho(c, r);
 	}
 	rastro(c, { accion: "copiar", resultado: "ok", clave: r.valor.clave, filas: r.valor.filas, tablas: r.valor.tablas });
@@ -107,11 +129,10 @@ centralRoutes.post("/copiar-ahora", async (c) => {
 });
 
 const aprovisionarSchema = z.object({
-	/** La copia desde la que se restaura (`base-central/….sql.gz`). Sin ella, el esquema vacío. */
+	/** La copia desde la que se restaura (`base-central/<nombre>.sql.gz`). Sin ella, el esquema vacío. */
 	claveDeCopia: z
 		.string()
 		.overwrite(recortar)
-		.max(300, "Esa no es la clave de una copia de la central.")
 		.refine(esClaveDeCopiaDeLaCentral, "La copia va como base-central/<nombre>.sql.gz: sácala de pnpm central:copias.")
 		.optional(),
 });
@@ -121,7 +142,7 @@ centralRoutes.post("/aprovisionar", cuerpo(aprovisionarSchema), async (c) => {
 	const accion = claveDeCopia === undefined ? "aprovisionar" : "restaurar";
 	const r = await centralDe(c.env).aprovisionar(claveDeCopia === undefined ? {} : { claveDeCopia });
 	if (!r.ok) {
-		rastro(c, { accion, resultado: r.error, clave: claveDeCopia, detalle: r.detalle });
+		rastro(c, { accion, resultado: r.error, clave: claveDeCopia, motivo: motivoDe(r.detalle) });
 		return noHecho(c, r);
 	}
 	rastro(c, { accion, resultado: "ok", clave: claveDeCopia, filas: r.valor.copia?.filas, tablas: r.valor.copia?.tablas });
@@ -132,8 +153,13 @@ const volverSchema = z
 	.object({
 		/** El instante, en milisegundos desde 1970. El CLI lo saca de una fecha ISO. */
 		instanteMs: z.number().int().positive().optional(),
-		/** O un marcador: el `deshacer` de una vuelta anterior, para deshacerla. */
-		marcador: z.string().overwrite(recortar).min(1, "Falta el marcador.").max(200, "Ese no es un marcador.").optional(),
+		/** O un marcador: el `deshacer` de una vuelta anterior, para deshacerla. Con la forma de los de Cloudflare. */
+		marcador: z
+			.string()
+			.overwrite(recortar)
+			.min(1, "Falta el marcador.")
+			.refine(esMarcador, "Ese no es un marcador: cópialo tal cual lo dio la vuelta (cifras y letras de la a a la f, en grupos separados por guiones).")
+			.optional(),
 	})
 	.refine((b) => (b.instanteMs === undefined) !== (b.marcador === undefined), {
 		message: "Di a qué se vuelve: un instante o un marcador, uno de los dos.",
@@ -159,7 +185,7 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 	const destino = marcador !== undefined ? marcador : new Date(instanteMs!).toISOString();
 	const prep = await centralDe(env).prepararVuelta(marcador !== undefined ? { marcador } : { instanteMs: instanteMs! });
 	if (!prep.ok) {
-		rastro(c, { accion: "volver", resultado: prep.error, destino, detalle: prep.detalle });
+		rastro(c, { accion: "volver", resultado: prep.error, destino });
 		return noHecho(c, prep);
 	}
 	const { deshacer, copiaDeAntes } = prep.valor;

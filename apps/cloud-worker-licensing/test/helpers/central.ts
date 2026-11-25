@@ -131,6 +131,17 @@ export async function codigoDe(promesa: Promise<unknown>): Promise<string> {
 const vuelto = (state: DurableObjectState) => state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
 
 /**
+ * Los marcadores que contesta el doble de la plataforma, con la forma de los de Cloudflare
+ * (`esMarcador`): el del instante al que se vuelve, el de ahora y el que devuelve la plataforma al
+ * dejar preparada la vuelta.
+ */
+export const MARCADORES = {
+	destino: "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
+	actual: "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
+	deshacer: "0000007c-ffffffff-0000153a-2e50a9dd59d5fd7ee740ffd15ef5db8d",
+} as const;
+
+/**
  * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
  * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
  * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar).
@@ -143,9 +154,9 @@ export async function conDobleDeInstantes(
 	const { alReiniciar = vuelto } = opciones;
 	await enElObjeto(central, (state, objeto) => {
 		(objeto as { instantes: unknown }).instantes = {
-			marcadorActual: async () => (llamadas.push("actual"), "m-actual"),
-			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), "m-destino"),
-			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), "m-deshacer"),
+			marcadorActual: async () => (llamadas.push("actual"), MARCADORES.actual),
+			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), MARCADORES.destino),
+			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), MARCADORES.deshacer),
 			reiniciar: () => {
 				llamadas.push("reiniciar");
 				alReiniciar(state);

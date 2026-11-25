@@ -23,6 +23,7 @@ import {
 	conDobleDeInstantes,
 	conR2Caido,
 	filasDe,
+	MARCADORES,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -49,12 +50,12 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect(r).toEqual({
 			ok: true,
 			valor: {
-				marcador: "m-destino",
-				deshacer: "m-deshacer",
+				marcador: MARCADORES.destino,
+				deshacer: MARCADORES.deshacer,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.sql\.gz$/),
 			},
 		});
-		expect(llamadas).toEqual(["de:number", "restaurar:m-destino"]);
+		expect(llamadas).toEqual(["de:number", `restaurar:${MARCADORES.destino}`]);
 		if (!r.ok) return;
 		const copia = await bucket().get(r.valor.copiaDeAntes);
 		const texto = await new Response(copia!.body.pipeThrough(new DecompressionStream("gzip"))).text();
@@ -120,7 +121,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		await conDobleDeInstantes(central, llamadas);
 		expect(await central.stub.prepararVuelta({ marcador: "m-de-otra" })).toMatchObject({
 			ok: true,
-			valor: { marcador: "m-de-otra", deshacer: "m-deshacer" },
+			valor: { marcador: "m-de-otra", deshacer: MARCADORES.deshacer },
 		});
 		expect(llamadas).toEqual(["restaurar:m-de-otra"]);
 		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: "m-de-otra" });
@@ -148,7 +149,7 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 			error: "central_copia_fallida",
 			detalle: "R2 no contesta",
 		});
-		expect(llamadas).not.toContain("restaurar:m-destino");
+		expect(llamadas).not.toContain(`restaurar:${MARCADORES.destino}`);
 		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 		expect((await central.db.execute("SELECT 1 AS uno;")).rows[0].uno).toBe(1);
 	});

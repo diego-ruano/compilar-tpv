@@ -11,19 +11,27 @@
 //   · volver a un instante: prepara, deja en el rastro con qué se deshace, reinicia, espera y lo
 //     devuelve; una central que vuelve pero no atiende no se da por buena;
 //   · lo que no se hace dice qué pasa (`message`) y, aparte, el motivo técnico (`detalle`);
-//   · lo que cambia algo deja rastro en el log, sin datos personales.
+//   · lo que cambia algo deja rastro en el log, sin datos personales ni texto que no sea nuestro: la
+//     clave y el marcador pasan una gramática cerrada antes de llegar al objeto, y el `detalle` no va
+//     al rastro.
 
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { adminRoutes } from "../src/domains/admin/admin.routes";
-import { copiarLaCentral } from "../src/durableObjects/baseCentral.copia";
+import {
+	claveConHora,
+	claveDelDia,
+	copiarLaCentral,
+	esClaveDeCopiaDeLaCentral,
+} from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import {
 	centralDePrueba,
 	centralSinAprovisionar,
 	conDobleDeInstantes,
 	filasDe,
+	MARCADORES,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -112,7 +120,7 @@ describe("con la central sin aprovisionar, todo contesta", () => {
 			status: 503,
 			body: { ok: false, error: "central_sin_aprovisionar", message: expect.stringContaining("pnpm central:aprovisionar") },
 		});
-		expect(await pedir(entorno, "POST", "/volver", { cuerpo: json({ marcador: "m" }) })).toMatchObject({
+		expect(await pedir(entorno, "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.destino }) })).toMatchObject({
 			status: 503,
 			body: { ok: false, error: "central_sin_aprovisionar" },
 		});
@@ -132,17 +140,37 @@ describe("aprovisionar desde una copia", () => {
 		["de otra carpeta", "negocios/t-1/2026-01-01.sql.gz"],
 		["con ..", "base-central/../negocios/x.sql.gz"],
 		["que no es un .sql.gz", "base-central/2026-01-01.txt"],
-		["demasiado larga", `base-central/${"x".repeat(300)}.sql.gz`],
-	])("valida la clave: %s", async (_que, claveDeCopia) => {
+		["demasiado larga", `base-central/${"x".repeat(101)}.sql.gz`],
+		["con un nombre y un correo", "base-central/Ana Gil ana@correo.es.sql.gz"],
+		["con acentos", "base-central/copia-de-María.sql.gz"],
+		["en una carpeta de dentro", "base-central/otra/2026-01-01.sql.gz"],
+		["sin nombre", "base-central/.sql.gz"],
+	])("valida la clave antes de llegar a la central: %s", async (_que, claveDeCopia) => {
 		const central = centralSinAprovisionar();
+		const log = vi.spyOn(console, "log");
 		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia }) });
 		expect(r).toMatchObject({ status: 400, body: { ok: false, error: "validation_error", message: expect.any(String) } });
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
+		expect(rastrosDe(log)).toEqual([]);
 	});
 
-	it("una copia que no vale lo dice, con su motivo aparte, y la central sigue sin aprovisionar", async () => {
+	it("la gramática admite todas las claves que escribe el worker, y la del traspaso desde Turso", () => {
+		const ahora = new Date("2026-11-25T10:30:00.000Z");
+		for (const clave of [
+			claveDelDia("2026-11-25"),
+			claveConHora("a-mano", ahora),
+			claveConHora("antes-de-volver", ahora),
+			"base-central/traspaso-turso-2026-11-25.sql.gz",
+			`base-central/${"x".repeat(100)}.sql.gz`,
+		]) {
+			expect(esClaveDeCopiaDeLaCentral(clave), clave).toBe(true);
+		}
+	});
+
+	it("una copia que no vale lo dice, con su motivo aparte, y la central sigue sin aprovisionar; al rastro sólo va el código del motivo", async () => {
 		const central = centralSinAprovisionar();
 		const clave = `base-central/no-existe-${crypto.randomUUID()}.sql.gz`;
+		const log = vi.spyOn(console, "log");
 		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
 		expect(r).toEqual({
 			status: 422,
@@ -154,6 +182,30 @@ describe("aprovisionar desde una copia", () => {
 			},
 		});
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_no_encontrada" },
+		]);
+	});
+
+	it("lo que trae la copia no llega al rastro: ni una migración inventada en su cabecera", async () => {
+		const origen = await centralDePrueba();
+		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const bucket = (env as any).COPIAS as R2Bucket;
+		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
+		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
+		const conDatos = texto.replace(/^(-- Migraciones: .*)$/m, "$1,Ana Gil ana@correo.es");
+		expect(conDatos).not.toBe(texto);
+		const flujo = new Blob([conDatos]).stream().pipeThrough(new CompressionStream("gzip"));
+		await bucket.put(clave, await new Response(flujo).arrayBuffer());
+		const log = vi.spyOn(console, "log");
+
+		const central = centralSinAprovisionar();
+		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
+		expect(r).toMatchObject({ status: 422, body: { error: "central_copia_inservible" } });
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_de_otra_version" },
+		]);
+		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Ana|correo/);
 	});
 
 	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro", async () => {
@@ -183,7 +235,8 @@ describe("aprovisionar desde una copia", () => {
 			},
 		});
 		expect(JSON.stringify(r.body)).not.toMatch(/Ana|ana\.gil/);
-		expect(rastrosDe(log)).toEqual([{ accion: "restaurar", resultado: "central_copia_inservible", clave, detalle: r.body.detalle }]);
+		// El texto de SQLite no es nuestro: al rastro va sólo el código.
+		expect(rastrosDe(log)).toEqual([{ accion: "restaurar", resultado: "central_copia_inservible", clave }]);
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 	});
 
@@ -238,6 +291,9 @@ describe("aprovisionar desde una copia", () => {
 	});
 });
 
+/** Un marcador al que volver, con la forma de los de Cloudflare. */
+const MARCADOR = "00000070-00000000-00001500-00112233445566778899aabbccddeeff";
+
 describe("volver a un instante, con el doble de la plataforma", () => {
 	it("prepara, reinicia, espera a que conteste y devuelve con qué se deshace y la copia de antes", async () => {
 		const central = await centralDePrueba();
@@ -251,24 +307,24 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			status: 200,
 			body: {
 				ok: true,
-				destino: "m-destino",
-				deshacer: "m-deshacer",
+				destino: MARCADORES.destino,
+				deshacer: MARCADORES.deshacer,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 				estado: { aprovisionada: true, averia: null, enCurso: { restauracion: null, vuelta: null } },
 			},
 		});
-		expect(llamadas).toEqual(["de:number", "restaurar:m-destino", "reiniciar"]);
+		expect(llamadas).toEqual(["de:number", `restaurar:${MARCADORES.destino}`, "reiniciar"]);
 		// Con qué se deshace queda en el rastro antes de reiniciar: si la llamada no terminara, estaría ahí.
 		const destino = new Date(instanteMs).toISOString();
-		const deLaVuelta = { accion: "volver", destino, deshacer: "m-deshacer", copiaDeAntes: r.body.copiaDeAntes };
+		const deLaVuelta = { accion: "volver", destino, deshacer: MARCADORES.deshacer, copiaDeAntes: r.body.copiaDeAntes };
 		expect(rastrosDe(log)).toEqual([
 			{ ...deLaVuelta, resultado: "preparada" },
 			{ ...deLaVuelta, resultado: "ok" },
 		]);
 
 		// Deshacer es volver al marcador que devolvió.
-		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m-deshacer" }) });
-		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: "m-deshacer" } });
+		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.deshacer }) });
+		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: MARCADORES.deshacer } });
 	});
 
 	it("si la central no llega a reiniciarse, lo dice, con lo necesario para deshacerlo; y repetir la orden la reinicia", async () => {
@@ -276,14 +332,14 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		const llamadas: string[] = [];
 		await conDobleDeInstantes(central, llamadas, { alReiniciar: () => {} });
 
-		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) });
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADOR }) });
 		expect(r).toMatchObject({
 			status: 503,
 			body: {
 				ok: false,
 				error: "central_vuelta_sin_aplicar",
 				message: expect.stringContaining("Repite la misma orden"),
-				deshacer: "m-deshacer",
+				deshacer: MARCADORES.deshacer,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 			},
 		});
@@ -295,9 +351,9 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			body: { error: "central_vuelta_en_curso", message: expect.stringContaining("repitiendo la misma orden de pnpm central:volver") },
 		});
 		await conDobleDeInstantes(central, llamadas);
-		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) })).toMatchObject({
+		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADOR }) })).toMatchObject({
 			status: 200,
-			body: { ok: true, destino: "m" },
+			body: { ok: true, destino: MARCADOR },
 		});
 	});
 
@@ -312,7 +368,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		});
 		const log = vi.spyOn(console, "log");
 
-		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) });
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADOR }) });
 		expect(r).toMatchObject({
 			status: 503,
 			body: {
@@ -320,7 +376,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				error: "central_restauracion_a_medias",
 				message: expect.stringMatching(/^La central ha vuelto, pero no atiende\. Hay una restauración a medias/),
 				detalle: expect.stringContaining("base-central/la-de-entonces.sql.gz"),
-				deshacer: "m-deshacer",
+				deshacer: MARCADORES.deshacer,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 				estado: { aprovisionada: false, averia: { error: "central_restauracion_a_medias" } },
 			},
@@ -331,7 +387,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 	it("un instante o un marcador, uno de los dos; y el instante, de los últimos 30 días", async () => {
 		const central = await centralDePrueba();
 		const entorno = entornoCon(central);
-		for (const cuerpo of [{}, { instanteMs: Date.now() - 1000, marcador: "m" }, { marcador: "" }, { instanteMs: "ayer" }]) {
+		for (const cuerpo of [{}, { instanteMs: Date.now() - 1000, marcador: MARCADOR }, { marcador: "" }, { instanteMs: "ayer" }]) {
 			expect(await pedir(entorno, "POST", "/volver", { cuerpo: json(cuerpo) }), json(cuerpo)).toMatchObject({
 				status: 400,
 				body: { ok: false, error: "validation_error" },
@@ -345,6 +401,28 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				message: "Sólo se puede volver a un instante pasado de los últimos 30 días.",
 			},
 		});
+	});
+
+	it.each([
+		["un nombre", "Ana Gil"],
+		["un correo", "ana@correo.es"],
+		["en mayúsculas", MARCADOR.toUpperCase()],
+		["con espacios dentro", MARCADOR.replaceAll("-", " ")],
+		["con letras que no son de un marcador", "m-deshacer"],
+		["un guion suelto", "-"],
+		["demasiado largo", `${MARCADOR}-${"0".repeat(100)}`],
+	])("el marcador tiene la forma de los de Cloudflare: %s no llega a la central ni al rastro", async (_que, marcador) => {
+		const central = await centralDePrueba();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		const log = vi.spyOn(console, "log");
+		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador }) })).toMatchObject({
+			status: 400,
+			body: { ok: false, error: "validation_error", message: expect.stringMatching(/^Ese no es un marcador/) },
+		});
+		expect(llamadas).toEqual([]);
+		expect(rastrosDe(log)).toEqual([]);
+		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 	});
 
 	it("en local, sin el doble, dice que no hay vuelta a un instante y la central sigue atendiendo", async () => {

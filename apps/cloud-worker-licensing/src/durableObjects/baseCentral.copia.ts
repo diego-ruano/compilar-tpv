@@ -75,14 +75,23 @@ export function claveConHora(que: "a-mano" | "antes-de-volver", ahora: Date): st
 	return `${PREFIJO_COPIAS}${que}-${ahora.toISOString().replaceAll(":", "-")}.sql.gz`;
 }
 
-/** ¿Puede ser `clave` la de una copia de la central? Dentro de su carpeta, de un `.sql.gz` y sin `..`. */
+/** Lo más largo que puede ser el nombre de una copia, entre la carpeta y `.sql.gz`. */
+const TOPE_DEL_NOMBRE = 100;
+
+/** Las letras del nombre de una copia: sin acentos, sin espacios, sin `/` ni `@`. */
+const LETRAS_DEL_NOMBRE = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * ¿Puede ser `clave` la de una copia de la central? Una gramática cerrada: la carpeta, un nombre de
+ * hasta `TOPE_DEL_NOMBRE` letras de `[A-Za-z0-9._-]` sin `..`, y `.sql.gz`. Caben todas las que
+ * escribe el worker (la del día, `a-mano-…` y `antes-de-volver-…`) y la del traspaso desde Turso
+ * (`traspaso-turso-AAAA-MM-DD`); un texto libre, no. La clave va al rastro de la administración
+ * (Axiom y el log), donde no puede llegar ni un nombre ni un correo.
+ */
 export function esClaveDeCopiaDeLaCentral(clave: string): boolean {
-	return (
-		clave.startsWith(PREFIJO_COPIAS) &&
-		clave.endsWith(".sql.gz") &&
-		clave.length > PREFIJO_COPIAS.length + ".sql.gz".length &&
-		!clave.includes("..")
-	);
+	if (!clave.startsWith(PREFIJO_COPIAS) || !clave.endsWith(".sql.gz")) return false;
+	const nombre = clave.slice(PREFIJO_COPIAS.length, -".sql.gz".length);
+	return nombre.length <= TOPE_DEL_NOMBRE && LETRAS_DEL_NOMBRE.test(nombre) && !clave.includes("..");
 }
 
 export type CopiaHecha = {
