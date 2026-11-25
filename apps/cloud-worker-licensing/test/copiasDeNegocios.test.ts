@@ -4,7 +4,9 @@
 //
 // - La copia la hace cada TenantHub con su alarma, de su propia base, a su carpeta del bucket
 //   `COPIAS_NEGOCIOS` (el de los tests es local): sólo las tablas del negocio, en un volcado SQL
-//   que se lee sin nuestro código, y con las 30 más nuevas guardadas.
+//   que se lee sin nuestro código, y con las 30 más nuevas guardadas. Cada fila es una línea de unas
+//   dos veces la fila como mucho, y la copia vuelve igual a un objeto vacío (`restaurarDesdeCopia`),
+//   también con textos de más de mil saltos de línea y con la fila más grande que admite la base.
 // - La vuelta a un instante no existe en local (workerd: «does not implement point-in-time
 //   recovery»): lo que se prueba con la plataforma de verdad es que la ruta lo dice. El resto, con un
 //   doble de `Instantes` dentro del objeto: el orden de las llamadas, que la base queda cerrada
@@ -247,6 +249,63 @@ describe("DO-03 · la copia diaria", () => {
 			}
 			expect(() => literalEnUnaLinea(Number.NaN)).toThrow(/copia_valor_no_finito/);
 		});
+	});
+
+	it("la línea de un valor ocupa, como mucho, unas dos veces lo que el valor en la base", () => {
+		const bytes = (v: string | ArrayBuffer) => (typeof v === "string" ? new TextEncoder().encode(v).length : v.byteLength);
+		const N = 64 * 1024;
+		// Lo peor de cada forma de escribirlo: comillas que se doblan, saltos con `char(10)` hasta el
+		// tope, saltos en hexadecimal (también de letras de tres bytes), un NUL y un blob.
+		const peores: (string | ArrayBuffer)[] = [
+			"'".repeat(N),
+			"\n".repeat(40) + "'".repeat(N),
+			"\n".repeat(N),
+			"\r\n".repeat(N / 2),
+			("€".repeat(9) + "\n").repeat(N / 10),
+			"\0" + "x".repeat(N),
+			new Uint8Array(N).fill(0xff).buffer,
+		];
+		for (const v of peores) {
+			// Lo que no es el valor: las comillas o el `CAST(X'…' AS TEXT)`, y un `||char(10)||` por salto.
+			expect(bytes(literalEnUnaLinea(v))).toBeLessThanOrEqual(2 * bytes(v) + 40 * 13 + 20);
+		}
+	});
+
+	it("ida y vuelta: textos con más de mil saltos de línea, también la fila más grande que admite la base, vuelven iguales", async () => {
+		const t = "copia-ida-y-vuelta";
+		await stub(t).aprovisionar(t);
+		// Más saltos de los que caben escritos con `char(10)`: van en hexadecimal. Uno corto, que se carga
+		// con otras líneas; uno de más de 100 KB, que va con sus textos como argumentos; y 2 MB de saltos,
+		// casi lo más que admite una fila del SQLite de un objeto.
+		const notas = {
+			c1: `${"línea\n".repeat(1200)}fin`,
+			c2: `${"nota con 'comillas'\r\n".repeat(6000)}fin`,
+			c3: "\n".repeat(2_000_000),
+		};
+		await enElHub(t, (hub: any) => {
+			for (const [id, nota] of Object.entries(notas)) {
+				hub.state.storage.sql.exec("INSERT INTO Clientes (ID_Cliente, Nombre, Notas) VALUES (?, ?, ?);", id, `Cliente ${id}`, nota);
+			}
+		});
+		expect(await runDurableObjectAlarm(stub(t))).toBe(true);
+		const clave = claveDeCopia(t, new Date().toISOString().slice(0, 10));
+
+		// En la copia, una línea por fila, y la de 2 MB ocupa unas dos veces la fila.
+		const lineas = (await texto(clave)).split("\n").filter((l) => l.startsWith('INSERT INTO "Clientes"'));
+		expect(lineas.map((l) => l.includes("CAST(X'"))).toEqual([true, true, true]);
+		expect(lineas[2].length).toBeLessThan(2 * 2_000_000 + 2_000);
+
+		await stub(t).borrarTodo();
+		expect(await stub(t).restaurarDesdeCopia({ tenantId: t, clave, modo: "main" })).toMatchObject({ ok: true });
+		const vuelta = await enElHub(t, (hub: any) =>
+			hub.state.storage.sql.exec("SELECT ID_Cliente, Notas FROM Clientes ORDER BY ID_Cliente;").toArray(),
+		);
+		// Se comparan aquí, y no en el `toEqual`, que pintaría los textos enteros al fallar.
+		expect(vuelta.map((f: any) => [f.ID_Cliente, f.Notas === notas[f.ID_Cliente as keyof typeof notas]])).toEqual([
+			["c1", true],
+			["c2", true],
+			["c3", true],
+		]);
 	});
 });
 
