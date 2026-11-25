@@ -424,7 +424,9 @@ La respuesta es la del objeto de un negocio que no puede atender (`lib/noDisponi
 
 La traducen el `onError` de la `app`, el `/ws` y la activación cuando crea la base del negocio. Un
 `catch` que seguiría sin la central la deja subir (`laCentralNoAtiende`): el feed de actualizaciones no
-la lee como «no es piloto», que con sólo una beta publicada sería el 204 de «estás al día». **En
+la lee como «no es piloto», que con sólo una beta publicada sería el 204 de «estás al día», y el aviso
+al cliente de un cambio de su reserva web no sale sin su enlace de cancelar como si el negocio no
+tuviera clave, que ya no se repetiría: contesta el 503 y la Main lo vuelve a mandar. **En
 `tenantAuth` sólo un token o una firma que no valen son un 401** (`RechazoDeAutenticacion`): cualquier
 fallo de la central sube al `onError`, porque un 401 le haría creer al equipo que su token no vale. El
 motivo exacto no viaja: queda en Axiom (`central_no_disponible`, con el `motivo`: `saturada`,

@@ -24,7 +24,9 @@ import { alHub } from "../../lib/enElHub";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
 import { recortar } from "../../lib/texto";
+import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
+import { laCentralNoAtiende } from "../../server/central/sinLaCentral";
 import { claveActivaDelNegocio, claveDelNegocio, codigoParaLaWeb, origenDelWidget } from "./claves";
 import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
 import { avisoReservaWebSchema, recogidasSchema } from "./reservasWeb.schemas";
@@ -135,7 +137,17 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 			return c.json({ ok: false, error: "agenda_no_disponible" }, 503);
 		}
 		if (agenda.canceladaPorElCliente) return c.json({ ok: false, error: "aviso_superado" }, 409);
-		const clave = await claveActivaDelNegocio(getDb(c.env), tenantId).catch(() => null);
+		// La clave del negocio, para el enlace. Si la central no puede atender, sube a su 503
+		// (`server/central/sinLaCentral.ts`) y se repite más tarde, como sin la agenda: seguir sería
+		// mandar el correo sin enlace como si el negocio no tuviera clave, y ese aviso ya no vuelve a
+		// salir. Cualquier otro fallo de la lectura va a Sentry, y el correo sale sin el enlace.
+		let clave: string | null = null;
+		try {
+			clave = await claveActivaDelNegocio(getDb(c.env), tenantId);
+		} catch (e) {
+			if (laCentralNoAtiende(e)) throw e;
+			capturarError(e, "reservas_web.aviso.clave");
+		}
 		if (clave && agenda.token) enlace = enlaceDeCancelar(origenDelWidget(c.env, c.req.url), clave, agenda.token);
 	}
 

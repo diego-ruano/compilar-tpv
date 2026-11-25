@@ -4,8 +4,9 @@
 // donde un error se convierte en respuesta: el `onError` de la `app`, el `/ws` (`app.ts`) y los
 // `catch` que, si no, contestarían un código propio (la base del negocio que nace al activar). Lo que
 // lanza la central en `tenantAuth` no es un rechazo de quien llama: sube al `onError`. Y un `catch` que
-// sigue sin la central si la lectura falla (el piloto del feed de actualizaciones) deja subir esto
-// (`laCentralNoAtiende`): seguir sería contestar como si la central hubiera dicho que no hay nada.
+// sigue sin la central si la lectura falla (el piloto del feed de actualizaciones, la clave del enlace
+// del aviso de una reserva web) deja subir esto (`laCentralNoAtiende`): seguir sería contestar como si
+// la central hubiera dicho que no hay nada.
 //
 // Es lo mismo que cuando no atiende el objeto de un negocio (`lib/enElHub.ts::sinElObjeto`): el 503
 // `external` de `lib/noDisponible.ts`.
