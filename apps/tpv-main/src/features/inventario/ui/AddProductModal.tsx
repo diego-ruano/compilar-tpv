@@ -866,7 +866,7 @@ export function AddProductModal({
                                             <div>
                                                 <p className="font-bold text-fg">Sube una imagen</p>
                                                 <p className="text-sm text-fg-muted">
-                                                    Click o arrastra y suelta (PNG/JPG).
+                                                    Click o arrastra y suelta (JPG, PNG o WebP).
                                                 </p>
                                             </div>
                                         </div>

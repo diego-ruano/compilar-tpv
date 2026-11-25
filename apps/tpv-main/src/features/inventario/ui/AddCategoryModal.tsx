@@ -364,7 +364,7 @@ export default function AddCategoryModal({
                                         </div>
                                         <div>
                                             <p className="font-bold text-fg">Sube una imagen</p>
-                                            <p className="text-sm text-fg-muted">Click o arrastra y suelta (PNG/JPG).</p>
+                                            <p className="text-sm text-fg-muted">Click o arrastra y suelta (JPG, PNG o WebP).</p>
                                         </div>
                                     </div>
 
