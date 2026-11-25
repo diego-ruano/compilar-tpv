@@ -2,12 +2,10 @@
 
 **Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 y 8 (la API abierta a las webs del negocio y el
 SDK, publicado en npm) hechas y en producción; faltan el piloto (fase 6) y el plugin de WordPress
-(fase 7). Lo que queda por comprobar de cada fase, en el §11. Este plan se escribió con las dos bases
-del worker en Turso: donde dice Turso, hoy es la base del negocio, que vive en el SQLite de su
-`TenantHub` ([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)), y donde habla de
-la base central, ésta vive en el de su objeto `BaseCentral`
-([0009](../decisiones/0009-la-base-central-en-su-durable-object.md)), con sus tablas en sus
-migraciones. Las reglas no cambian.
+(fase 7). Lo que queda por comprobar de cada fase, en el §11. La base del negocio es el SQLite de su
+`TenantHub` ([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)), y la base
+central, el de su objeto `BaseCentral` ([0009](../decisiones/0009-la-base-central-en-su-durable-object.md)),
+con sus tablas en sus migraciones.
 
 > Un widget de reservas que cualquier web incrusta con una línea, conectado al TPV, y que acepta
 > reservas aunque la Main esté apagada. La decisión de arquitectura y su porqué están en
@@ -83,15 +81,15 @@ web del restaurante
                                                          │
                                        rutas públicas /v1/publico/reservas/rw_…/*
                                           │                        │
-                         lee Turso (plano, ajustes)        AgendaWeb (DO por negocio)
+         lee la base del negocio (plano, ajustes)        AgendaWeb (DO por negocio)
                                                            · decide la mesa y la guarda en su SQLite
-                                                           · lee Turso, nunca escribe en él
+                                                           · lee la base del negocio, nunca escribe en ella
                                                                    │ avisarReservasWeb()
                                                                    ▼
                                                            TenantHub ──{"type":"reservas_web"}──► Main
                                                                                                    │
                                      POST /v1/reservas-web/pendientes y /recogidas ◄───────────────┘
-                                     la Main la registra con su caso de uso → outbox → TenantHub → Turso
+                                     la Main la registra con su caso de uso → outbox → TenantHub → su base
 ```
 
 | Pieza | Dónde | Qué hace |
@@ -112,13 +110,13 @@ web del restaurante
 
 ### Reglas que no se rompen
 
-1. **La agenda nunca escribe en Turso.** La base del negocio se sigue escribiendo sólo por el
+1. **La agenda nunca escribe en la base del negocio.** La base del negocio se sigue escribiendo sólo por el
    `TenantHub`, como hoy.
 2. **La reserva la registra la Main**, con su caso de uso y su outbox.
 3. **La Main nunca rechaza una reserva web confirmada.** Si choca con algo, la guarda y avisa; si no
    puede registrarla, lo dice para que se avise al cliente.
 4. **El `TenantHub` no atiende tráfico público**: sólo recibe el aviso de la agenda.
-5. **Una reserva pendiente ocupa su mesa hasta que aparece en Turso**, no hasta que la Main acusa
+5. **Una reserva pendiente ocupa su mesa hasta que aparece en la base del negocio**, no hasta que la Main acusa
    recibo: entre una cosa y otra sólo existe en el outbox de la Main (la misma lección que el volcado
    del atraso, SYNC-18).
 6. **Las respuestas públicas no llevan datos personales** de ninguna reserva.
@@ -127,8 +125,8 @@ web del restaurante
 ### Los recorridos
 
 **Consultar.** El widget pide el negocio, el plano y las horas válidas de un día directamente a
-Turso (no pasan por la agenda: no dependen de lo pendiente). Para saber qué mesas están libres
-pregunta a la agenda, que suma lo que hay en Turso y lo pendiente.
+la base del negocio (no pasan por la agenda: no dependen de lo pendiente). Para saber qué mesas están libres
+pregunta a la agenda, que suma lo que hay en la base del negocio y lo pendiente.
 
 **Reservar.** El widget manda la mesa elegida con los datos y el token de Turnstile. La agenda vuelve
 a comprobar que la mesa sigue libre, la guarda como pendiente con un `ID_Reserva` (UUIDv7) que
@@ -137,7 +135,7 @@ agenda avisa al `TenantHub`. El cliente tiene su reserva confirmada aunque la Ma
 
 **Entregar.** Con la Main conectada, el aviso llega en el momento. La Main pide las pendientes por
 REST, registra cada una en su base (reserva y cliente), devuelve el resultado de cada una y las sube
-por su outbox. La agenda las da por vistas cuando aparecen en Turso. Si la Main estaba apagada, las
+por su outbox. La agenda las da por vistas cuando aparecen en la base del negocio. Si la Main estaba apagada, las
 recoge al conectar.
 
 **Cancelar.** El enlace del correo abre la página de cancelar, que pide confirmación. Si la reserva
@@ -185,7 +183,7 @@ desarrollo, como en la última consolidación).
 - `ReservaDto` gana `origen`, en las dos lecturas del calendario (Main y `reservas.queries.ts::mes`).
 - Pasos de siempre ([esquema.md](../arquitectura/esquema.md#cambiar-el-esquema)): `tenantMigrations.ts`,
   `test/helpers/esquemaTenant.ts`, la foto (`BLESS_SCHEMA_SNAPSHOT=1 …`), el reset de las bases de
-  desarrollo (Turso y `data.db`) y desplegar el worker antes que la Main.
+  desarrollo (la del `TenantHub` y `data.db`) y desplegar el worker antes que la Main.
 
 ### 3.2 Base central
 
@@ -220,21 +218,21 @@ pasa por las migraciones).
 Ciclo de una petición:
 
 - `pendiente` → `entregada` cuando la Main la recoge.
-- `entregada` → `vista` cuando el `ID_Reserva` aparece en Turso (en las lecturas del día, en
+- `entregada` → `vista` cuando el `ID_Reserva` aparece en la base del negocio (en las lecturas del día, en
   `pendientes` y en la alarma). Al pasar a `vista` se borra `datos_json` y, a los 7 días, la fila.
-- `entregada` sin aparecer en Turso en una hora → vuelve a `pendiente`. La Main la registra otra vez
+- `entregada` sin aparecer en la base del negocio en una hora → vuelve a `pendiente`. La Main la registra otra vez
   sin duplicarla (el `INSERT` es idempotente por `ID_Reserva`); cubre una Main que perdió su base o
-  un outbox atascado. Sólo si la alarma ha podido mirar Turso: sin él no sabría qué ha llegado.
-- Una cancelación sigue el mismo ciclo, pero está hecha (`vista`) cuando Turso tiene la reserva
+  un outbox atascado. Sólo si la alarma ha podido mirar la base del negocio: sin ella no sabría qué ha llegado.
+- Una cancelación sigue el mismo ciclo, pero está hecha (`vista`) cuando la base del negocio tiene la reserva
   fuera de `PROXIMA` (cancelada, sentada, terminada o no presentada), no cuando la Main dice que la
   ha cancelado: hasta que su outbox sube, eso
-  sólo existe en su base. Se entrega con su alta delante mientras el alta no se haya visto en Turso
+  sólo existe en su base. Se entrega con su alta delante mientras el alta no se haya visto en la base del negocio
   (la Main pudo no recibirla).
 - `fallida` (la Main no pudo registrarla) → de `datos_json` queda sólo el correo, para el correo al
   cliente, que lo olvida en cuanto sale (o pasada la hora de la reserva), y la fila se va a los 7 días.
 - Un alta sólo se anula en la agenda si nunca se entregó (`intentos = 0`); una que vuelve a estar
   `pendiente` porque se reofrece puede estar ya en la Main, y lleva una cancelación.
-- La alarma, cada hora mientras quede algo: da por visto lo que ya está en Turso (por lotes, con un
+- La alarma, cada hora mientras quede algo: da por visto lo que ya está en la base del negocio (por lotes, con un
   cursor por tipo en `estado`), reofrece, vuelve a avisar a la Main si queda algo `pendiente`, apunta
   en Axiom lo que lleva tres días sin recoger y purga (también las conexiones de más de 24 h).
 - El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 6): una agenda vieja
@@ -275,7 +273,7 @@ Del 2 al 4 el rechazo es siempre el mismo `reserva_web_no_disponible` (404): al 
 
 Después, `cuerpo(schema)` / `consulta(schema)` como en todas las rutas. Los nombres de estos
 middlewares se añaden a `VETOS` en `test/vetoAntesDelCuerpo.test.ts`. El interruptor general del
-negocio (`Reserva_Web_Activa`) se lee de Turso: `/negocio` contesta `reserva_web_cerrada` y el alta
+negocio (`Reserva_Web_Activa`) se lee de la base del negocio: `/negocio` contesta `reserva_web_cerrada` y el alta
 también.
 
 **CORS para las webs del negocio** (`cors.ts`). El widget no lo necesita: se sirve desde el mismo
@@ -297,12 +295,12 @@ lo de arriba. Va en dos piezas:
 
 | Ruta | Lee | Devuelve |
 |---|---|---|
-| `GET /negocio` | Turso | Nombre, dirección, teléfono y logo; responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
-| `GET /dia?dia=` | Turso | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
-| `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (`id`, `nombre`, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
+| `GET /negocio` | La base del negocio | Nombre, dirección, teléfono y logo; responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
+| `GET /dia?dia=` | La base del negocio | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
+| `GET /plano` | La base del negocio | Salones (id, nombre, `Room_Points`) y mesas (`id`, `nombre`, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
 | `POST /reservas` `{ dia, hora, personas, mesa, nombre, correo, telefono, nota }` | Agenda | `{ codigo, dia, hora, personas, mesa, mesa_nombre, correo_enviado }` (`mesa`: el id, el pedido o el asignado con `"auto"`; `correo_enviado`: si salió el de confirmación, `null` en una repetición). El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el SDK manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
-| `POST /reserva` `{ token }` | Agenda y Turso | El resumen para la página de cancelar: día, hora, personas, `mesa` y `mesa_nombre`, estado y si aún se puede cancelar |
+| `POST /reserva` `{ token }` | La agenda y la base del negocio | El resumen para la página de cancelar: día, hora, personas, `mesa` y `mesa_nombre`, estado y si aún se puede cancelar |
 | `POST /cancelar` `{ token }` | Agenda | `{ ok }` |
 
 `/reserva` va por POST para que el token no aparezca en ninguna URL ni en ningún log.
@@ -359,19 +357,19 @@ varios destinatarios o una cabecera más (AUD-39). Admite `+`, subdominios y let
 3. Alguna de sus franjas vale para D (§3.1) y `Hora_Desde − margen ≤ H` y
    `H + duración ≤ Hora_Hasta + margen`, con fechas y horas reales (una reserva puede pasar de la
    medianoche).
-4. No choca con ninguna reserva de Turso: **el mismo SQL** que `SQL_CHOQUE_RESERVA` y
+4. No choca con ninguna reserva de la base del negocio: **el mismo SQL** que `SQL_CHOQUE_RESERVA` y
    `SQL_CHOQUE_COMANDA` de la Main, que ya existe en el worker (`reservas.queries.ts::choqueEnLaMesa`).
    Se leen las reservas de D y de D − 1, por las que cruzan la medianoche.
 5. No choca con ninguna petición de alta de la agenda en `pendiente` o `entregada` que aún no esté en
-   Turso.
+   la base del negocio.
 
 **Reservar**:
 
 1. Validar la entrada (§4.2) y el día y la hora (1 y 3).
-2. Leer de Turso lo del día y comprobar la mesa elegida (2 a 4).
+2. Leer de la base del negocio lo del día y comprobar la mesa elegida (2 a 4).
 3. Topes exactos, que son el control exacto que va detrás del limitador por IP, como pide
    `lib/limitador.ts`:
-   - 10 reservas activas por correo (las de Turso desde hoy con ese correo, más las pendientes con
+   - 10 reservas activas por correo (las de la base del negocio desde hoy con ese correo, más las pendientes con
      su `email_hash`);
    - 10 altas por conexión y negocio en 24 h (`MAX_ALTAS_DIA_CONEXION`, `tope_reservas_conexion`,
      429), **contando las que su autor anuló**: es lo que corta reservar y cancelar en bucle desde
@@ -392,16 +390,16 @@ varios destinatarios o una cabecera más (AUD-39). Admite `+`, subdominios y let
      tuviera: ni llegan al TPV ni ocupan mesa (AUD-38). Con el tope por conexión, llenarlo pide al
      menos 20 conexiones distintas (en IPv6, de al menos 7 redes /48), cada una con su Turnstile.
 
-   Los topes por conexión y por red se miran también antes de leer Turso: una conexión que ya está
+   Los topes por conexión y por red se miran también antes de leer la base del negocio: una conexión que ya está
    en el suyo no le cuesta a nadie una lectura de la base.
 4. **En un bloque síncrono sobre el SQLite de la agenda, sin ningún `await` en medio:** volver a
    comprobar el punto 5 y los topes, e insertar la petición, el enlace y la conexión. Dos altas a la vez para la misma mesa:
-   gana una y la otra recibe `mesa_no_disponible`. Lo que se lee de Turso puede tener un segundo de
+   gana una y la otra recibe `mesa_no_disponible`. Lo que se lee de la base del negocio puede tener un segundo de
    retraso respecto a la Main; eso es el riesgo aceptado del §2.
 
-   Las altas de la agenda que cuentan son las que la lectura de Turso de esa petición no trae, y
+   Las altas de la agenda que cuentan son las que la lectura de la base del negocio de esa petición no trae, y
    también las que otra petición dio por `vista` desde un minuto antes de empezar a leer
-   (`Lectura` en `agendaWeb.almacen.ts`): sin eso, una petición que leyó Turso antes de que llegara
+   (`Lectura` en `agendaWeb.almacen.ts`): sin eso, una petición que leyó la base del negocio antes de que llegara
    un alta, y que se resuelve después de que otra la viera, no la encontraría en ningún sitio y se
    llevaría su mesa. Lo mismo para el tope por correo.
 5. `creada_local` es el instante del alta en la zona del negocio: es el `Created_At` que escribirá
@@ -430,12 +428,12 @@ clave, su Main sabe recibirlas. No hace falta comprobar versiones.
 
 `/avisos` lleva `id_aviso`, `id_reserva`, `tipo` (`modificada` o `cancelada`) y los datos nuevos
 (día, hora, personas, mesa). El destinatario **no** viene en el cuerpo: es el correo del cliente de
-esa reserva en Turso, y sólo si es `Origen = 'WEB'` (acotado a quién, como los pedidos con
+esa reserva en la base del negocio, y sólo si es `Origen = 'WEB'` (acotado a quién, como los pedidos con
 FABLE-C). Es idempotente por `id_aviso` (`email_sends.id`). Lleva también el cliente de la
 reserva y la huella de su correo (`id_cliente`, `huella_correo`) tal como los tiene quien la
 cambió. Qué contesta:
 
-- **404** (se repite): la reserva aún no está en Turso, o Turso no la tiene como dice el aviso (otro
+- **404** (se repite): la reserva aún no está en la base del negocio, o la base del negocio no la tiene como dice el aviso (otro
   cliente, otro correo, o, en un cambio, otro día, hora, personas o mesa): el cambio aún no ha subido,
   o hubo otro después.
 - **409** (se descarta): no es una reserva web (`reserva_no_web`), o un cambio de una reserva que ya
@@ -520,7 +518,7 @@ Desde el worker, con el binding `EMAIL`:
 | Correo | Cuándo | Desde |
 |---|---|---|
 | Confirmación, con el enlace de cancelar | Al reservar | `POST /reservas`; la respuesta dice si salió (`correo`), y una repetición del alta no lo repite (`null`) |
-| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). Si se cancela con el enlace del correo de un cambio del restaurante (`enlaces.por_un_cambio`), sale sin mirarlo: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara. De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en Turso o, si aún no está, al del alta |
+| Cancelación confirmada | Al cancelar desde el enlace, si salió (o está saliendo) la confirmación de esa reserva: si no, no sale ni gasta cupo (`trasElCorreo`, RW-ALTAS). Si se cancela con el enlace del correo de un cambio del restaurante (`enlaces.por_un_cambio`), sale sin mirarlo: ese correo lo pidió la Main, y es por donde le llegó el enlace aunque la confirmación fallara. De una reserva apuntada hace más de 89 días ya no queda traza de su confirmación (la purga de `email_sends` es a los 90), y sale sin mirarlo: la edad sale del `ID_Reserva`, un UUIDv7 | `POST /cancelar`, al correo del cliente de la reserva en la base del negocio o, si aún no está, al del alta |
 | Reserva modificada | El restaurante cambia día, hora, personas o mesa (§5.6) | `POST /v1/reservas-web/avisos` (§5.7) |
 | Reserva cancelada por el restaurante | El restaurante la cancela | `POST /v1/reservas-web/avisos` (§5.7) |
 | No se pudo registrar | La Main devuelve `fallida`: el restaurante se pondrá en contacto | La agenda, al contestar la Main; lo que no sale lo repite la alarma hasta la hora de la reserva, y después olvida el correo |
@@ -584,7 +582,7 @@ armado, pulsar una mesa abre su configuración (y la mesa no se arrastra). Sólo
 
 Al arrancar, si `Business_Settings.Zona_Horaria` no coincide con la zona IANA del sistema (crate
 `iana-time-zone`, que ya está en el árbol por `chrono`), la Main la escribe por `WriteGuard` y se
-replica. La agenda la lee de Turso.
+replica. La agenda la lee de la base del negocio.
 
 ### 5.4 Recoger las reservas web
 
@@ -651,7 +649,7 @@ Notificaciones (a los administradores, como la de «Nueva reserva»):
 - **Cancelar y borrar** son dos botones. Cancelar deja la reserva en la lista, atenuada, y sólo se
   cancela la que aún no ha llegado (`PROXIMA`); borrar la quita. **Una reserva web no se borra
   nunca**, ni por venir ni ya cerrada: queda constancia, la agenda libera la mesa al verla cancelada
-  en Turso y el correo del cliente se sigue pudiendo leer de ella. Lo deciden el repositorio de la
+  en la base del negocio y el correo del cliente se sigue pudiendo leer de ella. Lo deciden el repositorio de la
   Main (`eliminar`, `cancelar`) y las rutas del worker (`DELETE /v1/reservas/:id`,
   `POST /v1/reservas/:id/cancelar`), y se replica sólo la sentencia elegida, sin condición.
 
@@ -835,9 +833,9 @@ mismo origen).
 | Incrustarlo en otra web | `frame-ancestors` con los dominios del negocio |
 | Usar la API desde otra web | CORS sólo para los dominios del negocio (§4.1); la casilla de Turnstile del SDK, sólo para ellos y sólo incrustada en ellos (§7.4) |
 | Datos personales | Las respuestas públicas no los llevan (con un test que lo vigile) |
-| Spam con nuestro dominio | Destinatario acotado (el del alta, o el cliente de una reserva web en Turso), topes y nada de texto del visitante en los correos |
+| Spam con nuestro dominio | Destinatario acotado (el del alta, o el cliente de una reserva web en la base del negocio), topes y nada de texto del visitante en los correos |
 | Enlace de cancelar | 128 bits aleatorios, sólo su hash guardado, en el fragmento, y botón para confirmar |
-| Detalles internos en los errores | Resuelto antes de empezar (FABLE-B): un 500 no lleva traza ni texto de Turso ([worker.md](../arquitectura/worker.md#errores)) |
+| Detalles internos en los errores | Resuelto antes de empezar (FABLE-B): un 500 no lleva traza ni texto de SQLite ([worker.md](../arquitectura/worker.md#errores)) |
 | Telemetría | Lo que sale a Sentry y Axiom pasa por el filtro de datos personales; los eventos llevan ids, nunca correos ni teléfonos |
 | Legal | [LEGAL-01](../pendientes.md#legal-01--rgpd): texto informativo del formulario y contrato de encargado, antes del piloto |
 
@@ -884,7 +882,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | Fase | Entrega | Hecho cuando |
 |---|---|---|
 | ✅ **0 · Previos** | FABLE-B. Turnstile dado de alta (§12) | Hecho el 2026-10-17 |
-| ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. En producción, el widget ofrece la mesa y la franja que tiene la Main, y eso lo lee de Turso. Falta probar un día cerrado: no hay ninguno |
+| ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. En producción, el widget ofrece la mesa y la franja que tiene la Main, y eso lo lee de la base del negocio. Falta probar un día cerrado: no hay ninguno |
 | ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Desplegado: del 19 al 21 de octubre entraron tres reservas desde el widget, con Turnstile. Las rutas públicas contestan a una clave que no existe sin detalles internos |
 | ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Comprobado en producción con la Main encendida: las tres altas y dos cancelaciones llegaron, con sus avisos, sin ninguna fallida. Falta con la Main apagada (la recoge al conectar) |
 | ✅ **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Código y tests hechos el 2026-10-19; el tamaño desde el CSS del `div` y el plano grande (§7.2 y §7.3), el 2026-10-21. Funciona incrustado en una web; las cabeceras (CSP, caché, `nosniff`) son las del plan. Falta ver en un navegador, con lo del 2026-10-21 desplegado, que el marco crece al llegar al plano y encoge al volver o al confirmar, con y sin alto en el `div`, y en un móvil |
@@ -911,9 +909,8 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 
 ✅ **npm:** la organización `altarialights`, con el SDK publicado (fase 8).
 
-**Turso:** crear a mano las tablas del §3.2 en la base central antes de desplegar la fase 2, la columna
-`tipo` y el índice de `email_sends` antes de desplegar la fase 5, y resetear las bases de desarrollo
-en la fase 1.
+**Base central:** las tablas del §3.2, la columna `tipo` y el índice de `email_sends` están en su
+primera migración (`server/central/migraciones/0001_inicial.sql`).
 
 ---
 
@@ -934,7 +931,7 @@ en la fase 1.
   confirmación sigue cancelando esa reserva. Atarlo al cliente obligaría a invalidarlo y mandar uno
   nuevo en cada cambio de cliente; quien reservó puede cancelar lo que reservó.
 - **Cancelar desde el enlace en el segundo en que el alta se da por vista** cancela, pero puede no
-  mandar el correo de «has cancelado»: la lectura de Turso no trae al cliente y la agenda ya olvidó
+  mandar el correo de «has cancelado»: la lectura de la base del negocio no trae al cliente y la agenda ya olvidó
   el correo del alta. La página de cancelar ya se lo dice.
 - **La dirección `workers.dev`** queda pegada en cada web. Es lo aceptado frente a un nombre propio de
   `altarialights.com`, que caería con los bloqueos de LaLiga (INFRA-04).

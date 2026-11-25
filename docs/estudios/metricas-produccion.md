@@ -1,9 +1,6 @@
 # Métricas a vigilar con restaurantes en producción
 
-**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo). Donde dice Turso es
-la base central, que desde [0009](../decisiones/0009-la-base-central-en-su-durable-object.md)
-es el SQLite de su objeto `BaseCentral`: sus filas leídas y escritas y lo que ocupa salen ya en las
-métricas de Durable Objects, y su tiempo, en el tramo `central` del `Server-Timing`.
+**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo).
 
 > Qué medir cuando haya un restaurante real usando el TPV, por qué importa cada cosa y qué hacer si
 > se cruza un umbral. **Complementa** a [observabilidad.md](../arquitectura/observabilidad.md), que explica el montaje
@@ -41,7 +38,6 @@ docena de números que hoy no tenemos.
 | **Cloudflare** → Workers Analytics / GraphQL API | Peticiones, CPU, errores, subpeticiones | ✅ Disponible, sin usar |
 | **Cloudflare** → Durable Objects Analytics | Peticiones, duración GB-s, filas SQLite | ✅ Disponible, sin usar |
 | **Cloudflare** → R2 metrics | Almacenamiento, operaciones Clase A/B | ✅ Disponible, sin usar |
-| **Turso** → panel de uso | La base central: filas leídas/escritas, almacenamiento | ✅ Disponible, sin usar |
 | **SQL contra la `data.db` de la Main** | Filas por tabla, crecimiento diario | ⚠️ A mano (§2) |
 | **Tamaño de `data.db` y de las copias** | Crecimiento en disco del equipo | ⚠️ No instrumentado |
 
@@ -170,16 +166,21 @@ R2 **no cobra egreso**, que es justo lo que hace viable servir imágenes desde a
 
 ---
 
-## 4. Turso: la base central
+## 4. La base central
 
-Turso guarda sólo la base central (`tpv-control`): licencias, negocios, equipos, emparejamientos y
-correos. La de cada negocio vive en su `TenantHub` (§3.2). La central crece con los clientes, no con
+La base central (licencias, negocios, equipos, emparejamientos y correos) es el SQLite de su objeto
+`BaseCentral` ([0009](../decisiones/0009-la-base-central-en-su-durable-object.md)), uno para todo el
+servicio. La de cada negocio vive en su `TenantHub` (§3.2). La central crece con los clientes, no con
 lo que venden. Vigilar:
 
-- **Filas leídas y escritas al mes** contra las del plan contratado: las escriben las activaciones,
-  los emparejamientos, el `last_seen` de los equipos y los correos; cada petición autenticada la lee.
-- **Latencia p95 de consulta desde el worker**: la región es `aws-eu-central-1` (Frankfurt); si la
-  Handy va lenta, aquí se ve si es la base central o el camino.
+- **Filas leídas y escritas al mes**, en las métricas de Durable Objects (§3.2): las escriben las
+  activaciones, los emparejamientos, el `last_seen` de los equipos y los correos; cada petición
+  autenticada la lee. Lo que ocupa y las filas de cada tabla, con `pnpm central:estado`.
+- **Cuánto tarda**: el tramo `central` del `Server-Timing` de cada respuesta
+  (`server/central/cliente.ts`); si la Handy va lenta, ahí se ve si es la base central o el camino.
+- **Si da abasto**: atiende de una en una lo de todos los negocios
+  ([worker.md](../arquitectura/worker.md#un-solo-hilo)). Lo que no atiende deja en Axiom un
+  `central_no_disponible` con su `motivo`; una racha de `saturada` es la señal.
 
 ---
 
@@ -245,7 +246,7 @@ del DO y las reconexiones.
 
 **Mes 1**
 - Filas/día estabilizadas → cuántos días de histórico caben de golpe (**afina la ventana de SYNC-19**).
-- Coste real en Cloudflare y Turso desglosado → extrapolación a 10 y 50 clientes.
+- Coste real en Cloudflare desglosado → extrapolación a 10 y 50 clientes.
 - Multiplicador de filas escritas por operación (§3.2).
 - ¿Hiberna el DO? (§3.2).
 - Crecimiento de `data.db` en MB/mes (**decide DB-14**).
