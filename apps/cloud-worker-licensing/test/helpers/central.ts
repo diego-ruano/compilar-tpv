@@ -133,11 +133,6 @@ export async function codigoDe(promesa: Promise<unknown>): Promise<string> {
 const vuelto = (state: DurableObjectState) => state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
 
 /**
- * Los marcadores que contesta el doble de la plataforma, con la forma de los de Cloudflare
- * (`esMarcador`): el del instante al que se vuelve, el de ahora y el que devuelve la plataforma al
- * dejar preparada la vuelta.
- */
-/**
  * La clave de una copia de la central que no está en el bucket: una de a mano, de una hora al azar de
  * hace unos años, para que cada prueba tenga la suya (la gramática no admite texto libre).
  */
@@ -145,6 +140,11 @@ export function claveDeCopiaNueva(): string {
 	return claveConHora("a-mano", new Date(Date.UTC(2020, 0, 1) + Math.floor(Math.random() * 100_000_000_000)));
 }
 
+/**
+ * Los marcadores que contesta el doble de la plataforma, con la forma de los de Cloudflare
+ * (`esMarcador`): el del instante al que se vuelve, el de ahora y el que devuelve la plataforma al
+ * dejar preparada la vuelta.
+ */
 export const MARCADORES = {
 	destino: "0000007b-0000b26e-00001538-0c3e87bb37b3db5cc52eedb93cd3b96b",
 	actual: "0000007c-00000000-00001539-1d4f98cc48c4ec6dd63ffec04de4ca7c",
