@@ -3,6 +3,7 @@ import { HubError } from "../lib/errorHttp";
 import { forbidden, json, serverError } from "../server/utils/response";
 import type { Base, Resultado } from "../lib/sql";
 import { clienteCentral } from "../server/central/cliente";
+import { registrarSinLaCentral } from "../server/central/sinLaCentral";
 import { centralDe } from "../lib/objetosDelNegocio";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
@@ -286,6 +287,26 @@ export class MotorTenantHub {
 	 */
 	private getCentralDb(plazoMs: number): Base {
 		return clienteCentral(() => centralDe(this.env), { plazoMs });
+	}
+
+	/**
+	 * Un fallo de lo que el hub le pide a la base central por su cuenta (`operacion`: quién es la Main,
+	 * el `last_seen`). Si es que no ha podido atender, queda como en el Worker
+	 * (`registrarSinLaCentral`): el evento `central_no_disponible` en Axiom, con `metodo: "hub"` y la
+	 * operación como ruta, y Sentry sólo si no es carga ni un fallo pasajero de la plataforma: con la
+	 * central saturada, cada hub con actividad no puede mandar un evento por minuto. Cualquier otro
+	 * fallo (un error de SQL) va a Sentry, como siempre.
+	 */
+	private registrarFalloDeLaCentral(error: unknown, operacion: string, tenantId: string): void {
+		const deLaCentral = registrarSinLaCentral(error, {
+			env: this.env,
+			enSegundoPlano: (promesa) => this.state.waitUntil(promesa),
+			operacion,
+			metodo: "hub",
+			ruta: operacion,
+			tenantId,
+		});
+		if (!deLaCentral) capturarError(error, operacion);
 	}
 
 	/**
@@ -867,15 +888,16 @@ export class MotorTenantHub {
 		if (now - last < LAST_SEEN_THROTTLE_MS) return;
 		this.lastSeenPushedAtMs.set(deviceId, now);
 		// Va por `waitUntil`, sin nadie que espere su resultado: el fallo se recoge aquí (que la
-		// central no conteste a tiempo, no esté aprovisionada o rechace la sentencia). El `last_seen`
-		// lo pone entonces la siguiente actividad pasada la ventana.
+		// central no conteste a tiempo, no esté aprovisionada o rechace la sentencia) y queda
+		// registrado (`registrarFalloDeLaCentral`). El `last_seen` lo pone entonces la siguiente
+		// actividad pasada la ventana.
 		try {
 			await this.getCentralDb(PLAZO_LAST_SEEN_MS).execute({
 				sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
 				args: [now, tenantId, deviceId],
 			});
 		} catch (e) {
-			capturarError(e, "sync.last_seen");
+			this.registrarFalloDeLaCentral(e, "sync.last_seen", tenantId);
 		}
 	}
 
@@ -1072,7 +1094,7 @@ export class MotorTenantHub {
 		if (!tenantId) return null;
 		if (!tocaComprobar(this.state.storage)) return null;
 		return this.leerMain(tenantId).catch((e) => {
-			capturarError(e, "sync.main_vigente");
+			this.registrarFalloDeLaCentral(e, "sync.main_vigente", tenantId);
 		});
 	}
 
@@ -1122,7 +1144,7 @@ export class MotorTenantHub {
 		try {
 			await this.leerMain(tenantId);
 		} catch (e) {
-			capturarError(e, "sync.main_vigente");
+			this.registrarFalloDeLaCentral(e, "sync.main_vigente", tenantId);
 			olvidarComprobacion(this.state.storage);
 		}
 	}
@@ -1163,7 +1185,7 @@ export class MotorTenantHub {
 		try {
 			await this.leerMain(identidad.tenantId);
 		} catch (e) {
-			capturarError(e, "sync.main_vigente");
+			this.registrarFalloDeLaCentral(e, "sync.main_vigente", identidad.tenantId);
 			return "sin_comprobar";
 		}
 		const vigente = this.mainVigente();
@@ -2247,6 +2269,8 @@ export class MotorTenantHub {
 			mainVigente: () => this.mainVigente().deviceId,
 			leerMain: (tenantId) => this.leerMain(tenantId),
 			comprobarMain: () => this.comprobarMain(),
+			registrarFalloDeLaCentral: (error, operacion, tenantId) =>
+				this.registrarFalloDeLaCentral(error, operacion, tenantId),
 			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
 			enTurnoDeEntrada: (trabajo) => this.enTurnoDeEntrada(trabajo),
 			isMainConnected: (except) => this.isMainConnected(except),

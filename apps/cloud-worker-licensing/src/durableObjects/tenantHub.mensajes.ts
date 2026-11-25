@@ -87,6 +87,11 @@ export interface ContextoDeMensajes {
 	leerMain(tenantId: string): Promise<void>;
 	/** AUD-02: la comprobación por actividad. `null` si no toca; si toca, no lanza. */
 	comprobarMain(): Promise<void> | null;
+	/**
+	 * Un fallo de lo que el hub le pide a la base central: lo que no es que no pueda atender, a
+	 * Sentry; lo que sí, como en el Worker (`registrarSinLaCentral`).
+	 */
+	registrarFalloDeLaCentral(error: unknown, operacion: string, tenantId: string): void;
 	/** Todo cierre que inicia el DO: la sesión queda fuera, se cierra y se contabiliza su salida. */
 	cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void;
 	/** AUD-02: en fila con lo demás que la Main manda y entra en el acto (`apply_lote`). */
@@ -214,10 +219,17 @@ export async function atenderHelloSigned(
 				// AUD-02: el rol `tpv` dice que el equipo se activó como Main, no que lo siga
 				// siendo. Quién lo es ahora está en la tabla del DO. El saludo de un `tpv` la pone
 				// al día antes de mirarla, y si la base central no contesta no entra: como con la
-				// lectura del dispositivo, sin ella no se sabe quién es. El de una Handy es
-				// actividad, y pregunta sólo si toca.
-				if (roleFinal === "tpv") await ctx.leerMain(tenantId);
-				else await ctx.comprobarMain();
+				// lectura del dispositivo, sin ella no se sabe quién es. Ese fallo queda registrado
+				// como el de cualquier otra lectura de la Main; el de la firma no, que es un saludo
+				// que no vale. El de una Handy es actividad, y pregunta sólo si toca.
+				if (roleFinal === "tpv") {
+					try {
+						await ctx.leerMain(tenantId);
+					} catch (e) {
+						ctx.registrarFalloDeLaCentral(e, "sync.main_vigente", tenantId);
+						throw e;
+					}
+				} else await ctx.comprobarMain();
 
 				// ⚠️ De aquí al final no hay ninguna espera: la sesión se lee como está AHORA, se
 				// decide con la tabla y se autentica en el mismo paso.
