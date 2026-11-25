@@ -76,15 +76,6 @@ impl Dinero {
         Dinero((euros * 100.0).round() as i64)
     }
 
-    /// Los euros que representa, en coma flotante.
-    ///
-    /// Sólo para lo que sigue siendo `f64` por naturaleza (aplicar un tipo de IVA, repartir por un
-    /// peso). **Nunca para guardar ni para mostrar**: guardar va en céntimos y mostrar va por el
-    /// formateador.
-    pub fn a_euros(self) -> f64 {
-        self.0 as f64 / 100.0
-    }
-
     /// El valor absoluto.
     pub fn abs(self) -> Self {
         Dinero(self.0.abs())
