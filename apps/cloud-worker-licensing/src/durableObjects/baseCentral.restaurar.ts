@@ -14,7 +14,7 @@
 //   entra hasta que acaba, tampoco las guardas que reafirman las claves foráneas, que aquí van
 //   apagadas mientras entran las filas.
 // - **Una marca mientras tanto.** Antes de tocar nada se pone la marca de restauración en curso
-//   (`CLAVE_RESTAURACION_EN_CURSO`), y se quita en la misma transacción que da la central por buena.
+//   (`CLAVE_RESTAURACION_EN_CURSO`), y se quita al acabar, con todas las migraciones aplicadas.
 //   Si el objeto se reinicia a mitad, al arrancar la marca sigue ahí y no atiende
 //   (`central_restauracion_a_medias`), ni se pone al día con sus migraciones; la siguiente
 //   restauración empieza vaciándolo.
@@ -112,19 +112,10 @@ export async function restaurarLaCentral(
 			},
 		});
 
-		// Ya entera y sin claves rotas: las migraciones que le faltan, sobre sus datos.
+		// Ya entera y sin claves rotas: las migraciones que le faltan, sobre sus datos. Si una no entra,
+		// `migrarBase` lanza; si vuelve, están todas, y la central ya puede atender.
 		await migrarBase(storage, MIGRACIONES_DE_LA_CENTRAL);
-		const sql = storage.sql;
-		storage.transactionSync(() => {
-			const aplicadas = sql
-				.exec("SELECT name FROM _migrations ORDER BY rowid;")
-				.toArray()
-				.map((f) => String(f.name));
-			if (aplicadas.join(",") !== nombresDeLasMigraciones().join(",")) {
-				throw new Error(`La base restaurada se ha quedado en ${aplicadas.at(-1) ?? "ninguna"} y este worker llega a ${nombresDeLasMigraciones().at(-1)}.`);
-			}
-			storage.kv.delete(CLAVE_RESTAURACION_EN_CURSO);
-		});
+		storage.kv.delete(CLAVE_RESTAURACION_EN_CURSO);
 		return { ok: true, valor: { clave, ...cargada } };
 	} catch (error) {
 		await storage.deleteAll();
