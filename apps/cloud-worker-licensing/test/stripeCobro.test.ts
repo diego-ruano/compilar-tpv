@@ -24,6 +24,7 @@ import {
 import { cumplir, revertir } from "../src/domains/stripe/stripe.routes";
 import { MAX_LICENCIAS_POR_COMPRA } from "../src/domains/stripe/stripe.helpers";
 import { CentralNoDisponible, clienteCentral, type ClienteCentral } from "../src/server/central/cliente";
+import { descifrar } from "../src/server/crypto";
 import {
 	activateLicenseFirstTime,
 	getLicenseById,
@@ -309,30 +310,56 @@ describe("REV-01 · la plataforma corta la llamada que emite el cobro", () => {
 		expect(correos).toHaveLength(0);
 	});
 
-	it("la entrega que la encuentra cumplida sin el correo de claves apuntado lo avisa en Sentry, si el cobro no es de ahora", async () => {
+	// CLAVES-SIN-CORREO (G7): la entrega que encuentra la sesión cumplida sin el correo de claves
+	// apuntado lo reenvía ella, si el cobro no es de ahora. Lo peor es que lleguen dos correos.
+	it("la entrega que la encuentra cumplida sin el correo de claves apuntado lo reenvía, si el cobro no es de ahora", async () => {
 		correos = [];
 		const r = await escenario(async (e) => {
 			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { overloaded: true } });
-			await cumplir(CON_CORREO, cortada.db, sesion("cs_sin_correo")).catch(() => {});
+			await cumplir(CON_CORREO, cortada.db, sesionVarias("cs_sin_correo", [[12, 2]])).catch(() => {});
 			capturados.length = 0;
-			// Recién cobrada, puede ser otra entrega que está mandando el correo ahora mismo: no se avisa.
-			const enseguida = await cumplir(CON_CORREO, e.db, sesion("cs_sin_correo"));
-			const avisosEnseguida = capturados.splice(0);
-			// La entrega de Stripe de más tarde: nadie va a mandar ya ese correo.
+			// Recién cobrada, puede ser otra entrega que está mandando el correo ahora mismo: no se reenvía.
+			const enseguida = await cumplir(CON_CORREO, e.db, sesionVarias("cs_sin_correo", [[12, 2]]));
+			const correosEnseguida = correos.splice(0);
+			// La entrega de Stripe de más tarde: nadie va a mandar ya ese correo, así que lo manda ella.
 			await e.filas("UPDATE license_payments SET at_ms = at_ms - 10 * 60 * 1000;");
-			const despues = await cumplir(CON_CORREO, e.db, sesion("cs_sin_correo"));
-			const [licencia] = (await e.filas("SELECT license_id FROM licenses;")).map((f) => f.license_id);
-			return { enseguida, avisosEnseguida, despues, avisos: capturados.splice(0), licencia };
+			const despues = await cumplir(CON_CORREO, e.db, sesionVarias("cs_sin_correo", [[12, 2]]));
+			const reenviados = correos.splice(0);
+			// Y queda apuntado: otra entrega más no lo repite.
+			await cumplir(CON_CORREO, e.db, sesionVarias("cs_sin_correo", [[12, 2]]));
+			const licencias = await e.filas("SELECT license_key_enc, key_email_sent_at_ms FROM licenses ORDER BY rowid;");
+			const claves = await Promise.all(licencias.map(async (l) => (await descifrar(CON_CORREO, l.license_key_enc)).texto));
+			return { enseguida, correosEnseguida, despues, reenviados, otra: correos.splice(0), licencias, claves, avisos: capturados.splice(0) };
 		});
 
 		expect([r.enseguida.accion, r.despues.accion]).toEqual(["ya_cumplida", "ya_cumplida"]);
-		expect(r.avisosEnseguida).toEqual([]);
-		expect(r.avisos).toEqual([
-			{ operacion: "stripe.correo_de_claves", mensaje: expect.stringContaining(`pnpm license:resend`) },
-		]);
-		expect(r.avisos[0].mensaje).toContain(r.licencia);
-		// Sólo se avisa: el correo no se manda desde aquí.
-		expect(correos).toHaveLength(0);
+		expect(r.correosEnseguida).toEqual([]);
+		// El correo de `pnpm license:resend`: uno por licencia, al correo de la compra, con su clave.
+		expect(r.reenviados.map((c) => c.to)).toEqual(["bar@ejemplo.test", "bar@ejemplo.test"]);
+		expect(r.claves.map((clave, i) => r.reenviados[i].text.includes(clave))).toEqual([true, true]);
+		expect(r.licencias.every((l) => typeof l.key_email_sent_at_ms === "number")).toBe(true);
+		expect(r.otra).toEqual([]);
+		// Ha salido: no hay nada que avisar.
+		expect(r.avisos).toEqual([]);
+	});
+
+	it("si el reenvío no sale, lo avisa en Sentry con las licencias, y la entrega no falla", async () => {
+		const r = await escenario(async (e) => {
+			const cortada = conCorteEnLaPrimera(e.central, { confirma: true, marca: { overloaded: true } });
+			await cumplir(ENV, cortada.db, sesion("cs_sin_buzon")).catch(() => {});
+			await e.filas("UPDATE license_payments SET at_ms = at_ms - 10 * 60 * 1000;");
+			capturados.length = 0;
+			// Sin `EMAIL_FROM_ADDRESS`, el correo no sale.
+			const despues = await cumplir(ENV, e.db, sesion("cs_sin_buzon"));
+			const [licencia] = await e.filas("SELECT license_id, key_email_sent_at_ms FROM licenses;");
+			return { despues, licencia, avisos: capturados.splice(0) };
+		});
+
+		expect(r.despues.accion).toBe("ya_cumplida");
+		expect(r.licencia.key_email_sent_at_ms).toBeNull();
+		const aviso = r.avisos.find((a) => a.operacion === "stripe.correo_de_claves");
+		expect(aviso?.mensaje).toContain("pnpm license:resend");
+		expect(aviso?.mensaje).toContain(r.licencia.license_id);
 	});
 
 	it("con el correo de claves apuntado, una entrega repetida más tarde no avisa de nada", async () => {

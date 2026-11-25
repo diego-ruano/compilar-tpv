@@ -54,12 +54,12 @@ import {
 	claveNueva,
 	getLicenseById,
 	licenciasDeUnaSesionCumplida,
-	licenciasSinCorreoDeClaves,
 	markKeyEmailSent,
 	markWebhookProcessed,
 	negocioActivadoDe,
 	upsertWebhookEvent,
 } from "../../server/licenseStore";
+import { reenviarSiFaltaElCorreoDeClaves } from "../licensing/correoDeClaves";
 import { sendLicenseKeysEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import {
@@ -268,7 +268,8 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// de `emitirCobro`, dentro de su transacción.
 	const yaEmitidas = await licenciasDeUnaSesionCumplida(db, sessionId);
 	if (yaEmitidas.length > 0) {
-		await avisarSiFaltaElCorreoDeClaves(db, sessionId);
+		// CLAVES-SIN-CORREO: si a alguna le falta el correo con su clave, lo reenvía ésta.
+		await reenviarSiFaltaElCorreoDeClaves(env, db, sessionId);
 		return { accion: "ya_cumplida", license_ids: yaEmitidas };
 	}
 
@@ -307,10 +308,10 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// han preparado aquí: entonces la primera llamada llegó a confirmarse antes de cortarse
 	// (`emitirEnLaCentral`), y la emisión es ésta.
 	//
-	// Aquí no se mira si falta el correo de claves (`avisarSiFaltaElCorreoDeClaves`): la lectura de
+	// Aquí no se mira si falta el correo de claves (`reenviarSiFaltaElCorreoDeClaves`): la lectura de
 	// arriba, con la misma consulta, no encontró la sesión cumplida, así que el cobro de la otra entrega
 	// acaba de entrar y esa entrega sigue en curso, mandando su correo. Ese cobro nunca tiene más de
-	// `CORREO_DE_CLAVES_MAX_MS`, así que el aviso no podría salir.
+	// `CORREO_DE_CLAVES_MAX_MS`, así que no habría nada que reenviar (`correoDeClaves.ts`).
 	const ids = preparadas.map((u) => u.licenseId);
 	const deEstaEntrega = hecho.licenseIds.length === ids.length && hecho.licenseIds.every((id, i) => id === ids[i]);
 	if (!deEstaEntrega) return { accion: "ya_cumplida", license_ids: hecho.licenseIds };
@@ -322,48 +323,13 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	});
 
 	// Si el correo falla NO reventamos el webhook (la venta es lo importante y las claves siguen
-	// recuperables cifradas): dejamos `key_email_sent_at_ms` a NULL para que las licencias salgan
-	// en `pnpm license:list` como pendientes y se reenvíen con `pnpm license:resend`.
+	// recuperables cifradas): dejamos `key_email_sent_at_ms` a NULL, y el correo se reenvía solo
+	// (CLAVES-SIN-CORREO, `correoDeClaves.ts`): lo hace la entrega siguiente de Stripe, o el cron.
 	if (emailSent) {
 		for (const id of ids) await markKeyEmailSent(db, id);
 	}
 
 	return { accion: "emitida", license_ids: ids };
-}
-
-/**
- * Lo que tarda como mucho una entrega viva entre que su cobro entra y apunta que el correo con las
- * claves ha salido: el cobro (con su repetición), el correo y las marcas, que son segundos.
- */
-const CORREO_DE_CLAVES_MAX_MS = 5 * 60_000;
-
-/**
- * Una entrega que encuentra la sesión ya cumplida al empezar no manda el correo con las claves: las de otra
- * entrega no las tiene en claro. Si la primera entrega se cortó después de que su cobro entrara (su
- * respuesta se perdió, o falló al mandar o al apuntar el correo, y Stripe la repitió), el correo no
- * consta como entregado y nadie lo va a repetir: Stripe recibe ahora su 200. Eso se avisa en Sentry,
- * con las licencias, para que un operador lo mire y lo reenvíe (`pnpm license:resend`). No se reenvía
- * aquí: dos entregas a la vez mandarían dos correos.
- *
- * Sólo cuenta un cobro de hace más de `CORREO_DE_CLAVES_MAX_MS`: uno más reciente puede ser el de otra
- * entrega que está mandando el correo ahora mismo. Leerlo no puede hacer fallar la entrega: si la
- * central no contesta, el aviso no sale.
- */
-async function avisarSiFaltaElCorreoDeClaves(db: ClienteCentral, sessionId: string): Promise<void> {
-	let sinCorreo: string[];
-	try {
-		sinCorreo = await licenciasSinCorreoDeClaves(db, sessionId, Date.now() - CORREO_DE_CLAVES_MAX_MS);
-	} catch {
-		return;
-	}
-	if (sinCorreo.length === 0) return;
-	capturarError(
-		new Error(
-			`Cobro cumplido sin el correo de claves apuntado: si el cliente no lo tiene, ` +
-				`pnpm license:resend -- --id <licencia> (licencias ${sinCorreo.join(", ")})`,
-		),
-		"stripe.correo_de_claves",
-	);
 }
 
 /**

@@ -11,6 +11,7 @@ import { sentryOptions } from "./observability/sentry";
 import { capturarError } from "./observability/errors";
 import { getDb } from "./server/db";
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
+import { reenviarClavesSinCorreo } from "./domains/licensing/correoDeClaves";
 import { purgarBaseCentral } from "./server/purga";
 import { centralDe } from "./lib/objetosDelNegocio";
 import { ErrorDeLaCentral } from "./server/central/cliente";
@@ -41,7 +42,8 @@ export const BaseCentral = Sentry.instrumentDurableObjectWithSentry(sentryOption
 
 /**
  * Lo que este worker hace por su cuenta, una vez al día: avisar de las licencias que caducan
- * (REV-13), recoger la basura de la base central (`server/purga.ts`) y pedirle que se copie a R2
+ * (REV-13), reenviar el correo de claves de una compra que no consta como entregado
+ * (CLAVES-SIN-CORREO, `domains/licensing/correoDeClaves.ts`), recoger la basura de la base central (`server/purga.ts`) y pedirle que se copie a R2
  * (`durableObjects/baseCentral.copia.ts`, PROD-02).
  *
  * Va aquí y no en una ruta porque nadie lo va a llamar: el cliente no sabe que su licencia se
@@ -67,6 +69,18 @@ async function programado(env: Env, ctx: ExecutionContext): Promise<void> {
 		if (!registrarSinLaCentral(err, { env, enSegundoPlano, operacion, metodo: "cron", ruta: operacion })) {
 			capturarError(err, operacion);
 			console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
+		}
+	}
+
+	try {
+		const r = await reenviarClavesSinCorreo(env, getDb(env), Date.now(), enSegundoPlano);
+		console.log(`[cron] correo de claves: ${r.reenviados} reenviados, ${r.fallidos} fallidos, de ${r.revisadas} revisadas`);
+	} catch (err) {
+		// La lectura de las que no tienen su correo apuntado: como la de las que caducan.
+		const operacion = "cron.correo_de_claves";
+		if (!registrarSinLaCentral(err, { env, enSegundoPlano, operacion, metodo: "cron", ruta: operacion })) {
+			capturarError(err, operacion);
+			console.error("[cron] correo de claves falló:", (err as any)?.message || err);
 		}
 	}
 

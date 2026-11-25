@@ -98,16 +98,28 @@ varios locales; quien quiera todo el tiempo en un equipo canjea las claves una t
 su `unidad` (1…N), todas en una sola operación de la central (`emitirCobro`,
 [worker.md](worker.md#las-operaciones)), y cuando ha entrado van **juntas en un correo**. La clave en
 claro no llega a la central: el Worker la prepara antes, y a la operación le pasa su huella y su
-cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y
-`pnpm license:list` las enseña pendientes de `pnpm license:resend`; lo mismo si una entrega de Stripe
-encuentra la sesión ya cumplida por otra que no llegó a mandar el correo, y entonces lo avisa en
-Sentry (`stripe.correo_de_claves`, «Cobro cumplido sin el correo de claves apuntado…»), con las
-licencias
-([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
-Sólo sale si la entrega encuentra la sesión cumplida al empezar y el cobro tiene más de cinco
-minutos (antes, puede ser otra entrega que está mandando el correo). Ante ese aviso: comprobar con el
-cliente o con `pnpm license:list` y reenviar con `pnpm license:resend -- --id <licencia>`. Puede ser
-falso: el correo salió y lo que falló fue apuntarlo. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL`, y
+`pnpm license:list` las enseña pendientes.
+
+**El correo de claves que no consta se reenvía solo** (CLAVES-SIN-CORREO,
+`domains/licensing/correoDeClaves.ts`): el mismo de `pnpm license:resend`, uno por licencia, que la
+apunta si sale. Sólo una licencia de Stripe que sigue sin estrenar (`issued`, sin anular) y se cobró
+hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`: antes, puede ser la entrega que lo está
+mandando). Lo reenvían:
+
+- la entrega de Stripe que encuentra la sesión ya cumplida al empezar (la que la emitió no llegó a
+  mandarlo o a apuntarlo), con las licencias de esa sesión;
+- el cron diario, con cualquiera, como mucho 25 al día (`REENVIOS_DE_CLAVES_AL_DIA`), las más
+  recientes primero; las que no caben, al día siguiente.
+
+Una licencia manual no: se emite sin `--send-key` a propósito, y la suya no consta nunca. Puede llegar
+dos veces (dos entregas a la vez, o un correo que salió y no se llegó a apuntar): mejor eso que un
+comprador sin sus claves. Si el reenvío no sale, Sentry (`stripe.correo_de_claves`, «Correo de claves
+sin entregar, y su reenvío no ha salido…»), con las licencias: comprobar con el cliente y, si hace
+falta, `pnpm license:resend -- --id <licencia>`, que enseña la clave aunque el correo vuelva a fallar.
+El cron lo vuelve a intentar al día siguiente.
+
+La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
 Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.

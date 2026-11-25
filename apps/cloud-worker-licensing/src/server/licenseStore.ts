@@ -1361,19 +1361,48 @@ export async function licenciasDeUnaSesionCumplida(db: Sql, sessionId: string): 
 }
 
 /**
- * Las licencias de la sesión de checkout `sessionId` cobradas antes de `cobradasAntesDeMs` cuyo
- * correo con las claves no consta como entregado (`key_email_sent_at_ms` a NULL), en el orden de sus
- * unidades. Sólo se lee: lo que se haga con ellas lo decide un operador (`pnpm license:resend`).
+ * CLAVES-SIN-CORREO · Una licencia `l` a la que le falta el correo con su clave: no consta como
+ * entregado (`key_email_sent_at_ms` a NULL) y sigue sin estrenar (una activada, canjeada o anulada ya
+ * no necesita su clave).
+ */
+const LE_FALTA_EL_CORREO_DE_CLAVES = `l.key_email_sent_at_ms IS NULL AND l.status = 'issued' AND l.disabled = 0`;
+
+/**
+ * Las licencias de la sesión de checkout `sessionId` cobradas antes de `cobradasAntesDeMs` a las que
+ * les falta el correo con su clave, en el orden de sus unidades. Lo reenvía la entrega del webhook
+ * (`correoDeClaves.ts::reenviarSiFaltaElCorreoDeClaves`).
  */
 export async function licenciasSinCorreoDeClaves(db: Sql, sessionId: string, cobradasAntesDeMs: number): Promise<string[]> {
 	const r = await exec(
 		db,
 		`SELECT p.license_id FROM license_payments p JOIN licenses l ON l.license_id = p.license_id
-		 WHERE p.stripe_checkout_session_id = ? AND p.at_ms < ? AND l.key_email_sent_at_ms IS NULL
+		 WHERE p.stripe_checkout_session_id = ? AND p.at_ms < ? AND ${LE_FALTA_EL_CORREO_DE_CLAVES}
 		 ORDER BY p.unidad;`,
 		[sessionId, cobradasAntesDeMs],
 	);
 	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
+}
+
+/**
+ * CLAVES-SIN-CORREO · Las licencias de Stripe cobradas antes de `cobradasAntesDeMs` a las que les falta
+ * el correo con su clave, como mucho `tope`, las más recientes primero. Las manuales no: se emiten sin
+ * correo a propósito (`--send-key`). Lo reenvía el cron (`correoDeClaves.ts::reenviarClavesSinCorreo`).
+ */
+export async function licenciasDeStripeSinCorreoDeClaves(
+	db: Sql,
+	cobradasAntesDeMs: number,
+	tope: number,
+): Promise<LicenseRow[]> {
+	const r = await exec(
+		db,
+		`SELECT l.* FROM licenses l
+		 WHERE l.origin = 'stripe' AND ${LE_FALTA_EL_CORREO_DE_CLAVES}
+		   AND EXISTS (SELECT 1 FROM license_payments p WHERE p.license_id = l.license_id AND p.at_ms < ?)
+		 ORDER BY l.issued_at_ms DESC, l.rowid DESC
+		 LIMIT ?;`,
+		[cobradasAntesDeMs, tope],
+	);
+	return (r.rows ?? []) as unknown as LicenseRow[];
 }
 
 /* ============================================================

@@ -404,8 +404,9 @@ cuando el Worker la hacía con una transacción abierta por la red:
   que `licenseStore.ts` importa, para que no puedan divergir.
 - **`emitirCobro` se repite una vez** si la plataforma corta la llamada por un fallo pasajero, porque
   no se sabe si entró. Si entró, contesta `ya_cumplida` con las licencias que preparó este Worker, y
-  la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, y no se manda
-  nada ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
+  la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, que no tiene
+  sus claves en claro; si a la sesión le falta el correo, lo reenvía la entrega siguiente o el cron
+  ([licencias.md](licencias.md#comprar)).
   Una central saturada no se repite: Stripe reintenta más tarde.
 - Lo demás son sentencias sueltas condicionadas y lotes todo o nada, con sus ventanas de siempre: la
   primera activación, los códigos por correo, el emparejamiento, los cupos de correo, el ticket del
@@ -449,7 +450,8 @@ Sentry, con el error del viaje como causa, y en el log, que ahí hay algo que mi
 atiende al `TenantHub`, que le habla por su cuenta (quién es la Main, el `last_seen`): el mismo evento,
 con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo demás que le falle al
 hub con la central (un error de SQL) va a Sentry, como siempre. La misma regla siguen el cron de los
-avisos de caducidad (`metodo` `cron`, también en la lectura con la que empieza), el cupo y la traza
+avisos de caducidad y el del correo de claves (`metodo` `cron`, también en la lectura con la que
+empiezan), el cupo y la traza
 de un pedido a un proveedor (`email.quota`, `email.audit`) y el traslado de licencia que entró y
 cuya respuesta se perdió.
 
@@ -962,16 +964,18 @@ además `test/mainDesplazadaRest.test.ts`.
 `scheduled` en `src/index.ts`. Cada tarea va en su `try` y ninguna propaga:
 
 1. **Avisos de caducidad** de licencias ([licencias.md](licencias.md#avisos-de-caducidad)).
-2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo,
+2. **El correo de claves que no consta** de una compra de Stripe, reenviado
+   (`domains/licensing/correoDeClaves.ts`, [licencias.md](licencias.md#comprar)).
+3. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo,
    eventos del código de cambio de equipo, códigos de emparejamiento caducados hace más de un día,
    que liberan su número (AUD-12), y retos de emparejamiento caducados (AUD-13). Va antes de la
    copia, para no guardar lo que se tira.
-3. **Copia de la base central a R2**: se la pide a su objeto (`centralDe(env).copiar(<día>)`,
+4. **Copia de la base central a R2**: se la pide a su objeto (`centralDe(env).copiar(<día>)`,
    [abajo](#la-copia-diaria)) y, sólo si se subió, late `BETTERSTACK_HEARTBEAT_COPIAS_URL`. Si no, a
    Sentry (`cron.backup`). Si la copia pasa de 150.000 filas (`FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ`),
    avisa también a Sentry: la copia vale, pero ya no se restauraría de una vez
    ([CENTRAL-RESTAURAR](../pendientes.md#central-restaurar--la-central-se-restaura-en-una-sola-llamada)).
-4. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea
+5. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea
    haya fallado: responde a «¿se ejecuta el cron?». Un latido nunca propaga (`observability/latido.ts`).
 
 ## Las copias de la base central, restaurarla y volver a un instante

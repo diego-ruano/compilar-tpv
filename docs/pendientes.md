@@ -22,7 +22,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
-| [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
@@ -326,24 +325,6 @@ lecturas), justo cuando la central arranca. Con muchos negocios eso pasa de lo q
 objeto, y se vería como 503 `hub_overloaded` y más reintentos. Opciones, sin decidir: más dispersión en el primer reintento,
 respetar el `Retry-After` del 503, o sacar el ticket del socket de la central (firmado, o en el
 `TenantHub`). Es un cambio en Rust, y como CENTRAL-AUTH no aprieta hasta los 1.000 negocios o así.
-
-### CLAVES-SIN-CORREO · Las claves de un cobro que no llegaron a salir
-
-El correo con las claves de una compra sale después de la operación de la central
-(`emitirCobro`), y sólo si la emisión es de esa entrega del webhook
-([worker.md](arquitectura/worker.md#las-operaciones)). Si la primera llamada entra pero su respuesta se
-pierde, el reintento también falla y Stripe vuelve a entregar el evento, la entrega nueva encuentra la
-sesión ya cumplida con otras licencias y no manda nada: el comprador no recibe sus claves. Lo mismo si
-el worker se corta entre la operación y el correo. Las licencias se quedan con `key_email_sent_at_ms`
-a `NULL`, que es lo que `pnpm license:list` enseña como pendiente y `pnpm license:resend` reenvía
-([licencias.md](arquitectura/licencias.md#comprar)).
-
-Lo que ya está en el código (E7b definitivo-2): la entrega que encuentra la sesión cumplida con
-licencias sin `key_email_sent_at_ms`, cobradas hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`:
-una más reciente puede ser de otra entrega que está mandando el correo), lo avisa en Sentry
-(`stripe.correo_de_claves`, `stripe.routes.ts::avisarSiFaltaElCorreoDeClaves`), con las licencias y
-la orden que las reenvía. No las reenvía: dos entregas a la vez mandarían dos correos. Lo decide el
-responsable (G7): que se reenvíen solas, o dejarlo a mano tras el aviso, como ahora.
 
 ### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
 
