@@ -30,7 +30,8 @@ function hasta(ms: number): string {
 	});
 }
 
-export function AvisoInterruptores({ solo }: { solo?: Interruptor[] }) {
+// M-076: sin la prop `solo`, que sólo usaba la pantalla Fiscal; vuelve con ella (con-verifactu).
+export function AvisoInterruptores() {
 	const [apagados, setApagados] = React.useState<InterruptorApagado[]>([]);
 
 	React.useEffect(() => {
@@ -53,14 +54,13 @@ export function AvisoInterruptores({ solo }: { solo?: Interruptor[] }) {
 		};
 	}, []);
 
-	const visibles = solo ? apagados.filter((a) => solo.includes(a.interruptor)) : apagados;
-	if (!visibles.length) return null;
+	if (!apagados.length) return null;
 
 	return (
 		<div className="rounded-2xl border border-warning/40 bg-warning/10 p-4">
 			<div className="text-sm font-semibold text-warning">Pausado por soporte</div>
 			<ul className="mt-2 flex flex-col gap-2">
-				{visibles.map((a) => (
+				{apagados.map((a) => (
 					<li key={a.interruptor} className="text-sm text-fg">
 						<strong>{ETIQUETA[a.interruptor] ?? a.interruptor}</strong> está en pausa
 						{a.motivo ? <>: {a.motivo}</> : null}. Se reanuda solo, como tarde el{" "}

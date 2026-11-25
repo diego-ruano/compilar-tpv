@@ -153,8 +153,8 @@ describe("lo que la base central tiene que tener", () => {
 });
 
 /**
- * Las migraciones que la central de producción tiene aplicadas, o que va a tener en cuanto le lleguen
- * los datos de Turso (la 0001, la del traspaso), con el hash que guarda de cada una en `_migrations`:
+ * Las migraciones que la central de producción tiene aplicadas (la 0001 llegó con el traspaso desde
+ * Turso), con el hash que guarda de cada una en `_migrations`:
  * el SHA-256 del texto entero, con sus comentarios y sus espacios y con finales LF. Una que se añade
  * a la central de producción se añade aquí en el mismo despliegue.
  */

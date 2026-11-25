@@ -32,10 +32,6 @@ que le falta. El hash es el SHA-256 del fichero entero con los finales de línea
 `migration_altered`. Los dos aplican cada migración en su transacción con las FK apagadas alrededor de
 la tanda y comprueban `foreign_key_check` antes de confirmar.
 
-Por eso los comentarios de `0001_inicial.sql` que hablan de Turso se quedan como están: son de cuando
-la base del negocio en la nube estaba allí, y hoy esa base es el SQLite de su `TenantHub`
-([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)).
-
 ### Por qué con las FK apagadas
 
 Una migración que le quita una restricción a una tabla tiene que reconstruirla: crear la nueva,
@@ -175,8 +171,7 @@ El rol Encargado y sus concesiones iniciales nacen de `0001`, igual en Main y Wo
 `_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Sync_Por_Contrastar` (las filas
 que hay que traer de la nube porque su orden las dejó de otra forma aquí,
 [sincronizacion.md](sincronizacion.md#el-orden-de-la-nube-manda-sync-29)), `_Jobs_State`,
-`_Verifactu_Envios`, `_Verifactu_Flujo`, `_Verifactu_Anomalias` (sin uso en esta rama: son de la
-remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Backfill_Historico`,
+`_Recovery_State`, `_Backfill_Historico`,
 `_Verificacion_Nube` (cuándo se contrastó con la nube por última vez,
 [jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02)) y
 `_Negocio` (de qué negocio es la base) describen **este equipo**, se escriben por `raw()` y no se replican. Que se creen

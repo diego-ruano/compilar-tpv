@@ -267,8 +267,9 @@ export type BusinessSettings = {
 	 */
 	limite_simplif: Dinero,
 	/**
-	 *  `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. No tiene
-	 *  pantalla en esta rama: es de la remisión a la AEAT (ver `docs/arquitectura/verifactu.md`).
+	 *  `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. En esta
+	 *  rama no se cambia (ni pantalla ni ajuste, M-082): es de la remisión a la AEAT (ver
+	 *  `docs/arquitectura/verifactu.md`).
 	 */
 	verifactu_entorno: string,
 	/**  Minutos que dura una reserva que no elige su duración. */
@@ -312,7 +313,6 @@ export type BusinessSettingsPatch_Deserialize = {
 	razon_social?: string,
 	descripcion_op?: string,
 	limite_simplif?: Dinero,
-	verifactu_entorno?: string,
 	reserva_duracion_min?: number,
 	reserva_solape?: string,
 	reserva_no_vino_min?: number,
@@ -330,7 +330,6 @@ export type BusinessSettingsPatch_Serialize = {
 	razon_social?: string,
 	descripcion_op?: string,
 	limite_simplif?: Dinero,
-	verifactu_entorno?: string,
 	reserva_duracion_min?: number,
 	reserva_solape?: string,
 	reserva_no_vino_min?: number,

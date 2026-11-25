@@ -21,7 +21,7 @@ const negocio = z.object({
     mensaje_footer: z.string().optional(), iva_percent: zIva.optional(),
     umbral_descuadre: zDineroNoNegativo.optional(), razon_social: z.string().optional(),
     descripcion_op: z.string().optional(), limite_simplif: zDinero.optional(),
-    verifactu_entorno: z.string().optional(), reserva_duracion_min: z.number().int().optional(),
+    reserva_duracion_min: z.number().int().optional(),
     reserva_solape: z.string().optional(),
     // Mismo texto y rango que `no_vino_valido` en la Main (`tpv-domain/src/reservas.rs`).
     reserva_no_vino_min: z.number().int(MSG_NO_VINO).min(0, MSG_NO_VINO).max(24 * 60, MSG_NO_VINO).optional(),

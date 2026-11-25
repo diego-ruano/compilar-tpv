@@ -7,9 +7,11 @@ rodea) vive en las ramas `con-verifactu` y `con-verifactu-windows-7`, tal como e
 
 El registro se sigue guardando **completo**: huella, URL del QR y bloque `SistemaInformatico`, igual
 que con Veri\*factu. No se ve en ninguna pantalla ni en el papel, pero es lo que permite volver a
-poner el envío sin tocar lo ya emitido. Las tablas de la cola de envío (`_Verifactu_Envios`,
-`_Verifactu_Anomalias`, `_Verifactu_Flujo`) y las columnas `Verifactu_Entorno` y `Modo_Prueba` siguen
-en el esquema, sin uso.
+poner el envío sin tocar lo ya emitido. Lo que sólo usaba la remisión no está en el esquema de
+esta rama y vuelve con ella: las tablas de la cola de envío (`_Verifactu_Envios`,
+`_Verifactu_Anomalias`, `_Verifactu_Flujo`), las marcas de la subsanación de un rechazo
+(`Rechazo_Previo`, `Sin_Registro_Previo`, `Subsana_ID_Registro`). Tampoco está `Modo_Prueba`, la
+columna del modo prueba.
 
 El principio que ordena todo: **el registro es el hecho fiscal**; el papel es una copia suya. De ahí
 salen las tres reglas que no se negocian:
@@ -107,7 +109,8 @@ eslabón anterior es la fila de `MAX(Orden)`.
 - **`Sistema_Json`** congela el bloque `SistemaInformatico` tal como iba: el registro de ayer sigue
   diciendo con qué versión se generó.
 - **`QR_Url`** guarda la URL de cotejo, aunque el papel no la imprima. Su base la decide
-  `Business_Settings.Verifactu_Entorno`, que no tiene pantalla en esta rama.
+  `Business_Settings.Verifactu_Entorno`, que en esta rama no se cambia (ni pantalla ni ajuste en
+  `config_patch_business_settings`): es siempre la de producción.
 
 ### `FechaOperacion`
 

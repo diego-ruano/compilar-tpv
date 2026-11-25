@@ -329,19 +329,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
                 }));
             }
         }
-        if patch_has(patch, "verifactu_entorno") {
-            if let Some(v) = patch_string(patch, "verifactu_entorno") {
-                // El CHECK del esquema sólo admite dos valores, y un UPDATE que lo viole es un
-                // error de BD sin mensaje. Se normaliza aquí, donde sí se puede explicar.
-                let v = if v.trim().eq_ignore_ascii_case("pruebas") {
-                    "pruebas"
-                } else {
-                    "produccion"
-                };
-                sets.push("Verifactu_Entorno = ?");
-                args.push(Value::Text(v.to_string()));
-            }
-        }
 
         // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────
         if patch_has(patch, "reserva_duracion_min") {

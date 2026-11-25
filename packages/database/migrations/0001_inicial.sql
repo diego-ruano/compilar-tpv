@@ -1,7 +1,7 @@
 /* =========================================================
-   TPV SCHEMA — MIGRACION INICIAL (0001) · UNICA Y COMPARTIDA (app local + nube Turso)
+   TPV SCHEMA — MIGRACION INICIAL (0001) · COMPARTIDA (app local + nube)
    - La FUENTE UNICA DE VERDAD del esquema son los ficheros .sql de
-     packages/database/migrations/, aplicados EN ORDEN. Hoy este es el UNICO:
+     packages/database/migrations/, aplicados EN ORDEN. Este es el primero:
      antes del lanzamiento se CONSOLIDARON aqui todas las incrementales
      (contact settings, email unico de cliente, movimientos de stock, intentos
      de login, comanda unica por mesa, stock suelto, notificaciones, traza del
@@ -15,7 +15,8 @@
        * App de escritorio (Rust): crates/tpv-infra-sqlite/src/migrations.rs los
          embebe con include_dir! y aplica lo pendiente en cada arranque.
        * Worker tpv-api: apps/cloud-worker-licensing/src/server/tenantMigrations.ts
-         los registra y aplica igual sobre cada BD por-tenant (Turso).
+         los registra, y el TenantHub (Durable Object) de cada negocio los aplica
+         igual sobre su SQLite, que es la base del negocio en la nube.
      Cada BD lleva una tabla _migrations (name, hash, applied_at): una BD nueva se
      construye desde 0001 y una existente solo aplica lo que le falte.
    - REGLA DE ORO (vigente desde el lanzamiento): nunca edites una migracion ya
@@ -36,7 +37,7 @@
      codigo tapaba con (x*100).round()/100 repetido en 35 sitios y tres lenguajes
      -con tres modos de redondeo distintos: Rust aleja del cero, JavaScript lleva
      la mitad hacia +infinito y ROUND() de SQLite hace lo suyo-. Con enteros, SUM
-     es exacto y ASOCIATIVO: la Main y Turso obtienen el mismo numero sin importar
+     es exacto y ASOCIATIVO: la Main y la nube obtienen el mismo numero sin importar
      el orden de las filas ni el motor, que es lo que permite dejar los agregados
      derivados dentro del SQL (Total_Comanda tiene dos escritores, la Main por el
      outbox y la Handy por el Durable Object, y solo converge si se re-deriva).
@@ -74,15 +75,16 @@
    - Ninguna columna lleva DEFAULT de hora: la pone siempre quien inserta.
      Un DEFAULT con la hora actual lo evaluaria cada base por su cuenta, y
      en la nube eso es otro instante y en UTC. La fila de la Main y su copia
-     en Turso tienen que decir la misma hora. Lo vigila un test de db.rs.
+     en la nube tienen que decir la misma hora. Lo vigila un test de db.rs.
 ========================================================= */
 
 -- NOTA: aqui NO va `PRAGMA foreign_keys = ON`. Seria un no-op: (1) es un ajuste
 -- POR CONEXION que no persiste en el fichero, y (2) el runner aplica cada migracion
 -- dentro de una transaccion, donde el PRAGMA se ignora. Las FK se activan en cada conexion:
 --   * App local (Rust): `tune()` en crates/tpv-infra-sqlite/src/db.rs, al abrirla.
---   * Nube (worker):    Turso las trae activadas en cada conexion y el worker no las toca
---                       (RI-06, ver `probeTenantDb()` en src/durableObjects/tenantHub.motor.ts).
+--   * Nube (worker):    el SQLite del TenantHub las trae activadas (RI-06). El runner las apaga
+--                       alrededor de la tanda de migraciones y las vuelve a encender
+--                       (`migrarBase` y `ponerFk` en src/durableObjects/sqliteDelObjeto.ts).
 
 /* =========================================================
    1. Seguridad y Usuarios
@@ -155,12 +157,12 @@ CREATE TABLE IF NOT EXISTS Usuarios (
 );
 
 -- Anti brute-force del PIN (LOGIN-01): estado de intentos fallidos y bloqueo temporal por usuario.
--- Tabla del ESQUEMA COMPARTIDO (existe igual en la BD local de la Main y en la de tenant en Turso),
--- pero su contenido es DEVICE-LOCAL: no se sincroniza.
+-- Tabla del ESQUEMA COMPARTIDO (existe igual en la BD local de la Main y en la del negocio en la
+-- nube, el SQLite de su TenantHub), pero su contenido es DEVICE-LOCAL: no se sincroniza.
 --   - MAIN:  escribe/lee su propio estado con la conexion `raw` (sin outbox), para throttlear los
 --            logins locales. No se replica a la nube.
---   - WORKER: escribe/lee este estado en la BD de tenant (directo, sin hub), para throttlear los
---            logins de Handy.
+--   - WORKER: escribe/lee este estado en la base del negocio con sentencias sueltas, fuera de un
+--            comando (no pasan por Sync_Changes), para throttlear los logins de Handy.
 -- Cada lado throttlea de forma independiente; las filas de uno no viajan al otro.
 --
 -- Bloqueado_Hasta_Ms / Ultimo_Intento_Ms: epoch en milisegundos (reloj del dispositivo/worker). Se
@@ -1101,8 +1103,8 @@ ON Pago_Detalles(ID_Detalle);
 -- cree que `Estado = 'ACTIVO'` es selectivo (casi todos los cobros lo son) y resuelve
 -- `EXISTS (... WHERE ID_Detalle = X)` recorriendo TODOS los cobros activos y probando cada uno:
 -- segundos por mesa con un ano de datos. Con el `+` entra por idx_pago_detalles_detalle. No depende
--- de estadisticas, que es lo que importa: las lecturas de la Handy corren en Turso, donde no hay
--- ANALYZE.
+-- de estadisticas, que es lo que importa: las lecturas de la Handy corren en el SQLite del TenantHub,
+-- donde nadie lanza ANALYZE (en la Main tampoco).
 --
 -- Y por lo mismo esta vista se consulta con `NOT EXISTS`, nunca como operando derecho de un
 -- `LEFT JOIN ... IS NULL`: ahi SQLite no puede aplanarla (es un JOIN) y la materializa entera, o sea
@@ -1245,7 +1247,8 @@ ON Movimientos_Caja(Fecha_Hora);
 -- RI-04: un movimiento por (Tipo, apunte). Es la idempotencia que caja_movimientos::registrar ya
 -- garantiza con su WHERE NOT EXISTS, y es tambien lo que hace barata esa comprobacion: sin estos
 -- indices era un SCAN de la tabla en cada cobro, gasto y anulacion, y como la sentencia se replica
--- tal cual, en Turso cada cobro leia (y facturaba) el historial entero. Parciales porque cada fila
+-- tal cual, en la nube cada cobro leia el historial entero (y las filas leidas del SQLite del
+-- Durable Object se facturan). Parciales porque cada fila
 -- apunta a un pago O a un gasto. SQLite parte el OR de aquella sentencia y usa uno por rama.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_movcaja_pago
 ON Movimientos_Caja(Tipo, ID_Pago) WHERE ID_Pago IS NOT NULL;
@@ -1349,17 +1352,10 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- hosteleria esta en la lista del art. 4.2 y sube a 3.000. La AEAT lo valida en el servicio web
   -- (error 1150). Va aqui y no incrustado porque es un numero que la norma puede mover.
   Limite_Simplif INTEGER NOT NULL DEFAULT 300000 CHECK (typeof(Limite_Simplif) IN ('integer','null')),
-  -- 'produccion' | 'pruebas'. Cambia A LA VEZ el endpoint del servicio web y la URL del QR que se
-  -- imprime en el papel. Un ticket emitido en pruebas lleva un QR que apunta a prewww2.aeat.es: la
-  -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,
-  -- porque produccion y pruebas se distinguen en tres caracteres (www1 / prewww1).
+  -- 'produccion' | 'pruebas'. Decide la base de la URL de cotejo (QR_Url) que guarda cada registro
+  -- de facturacion. En esta rama no se cambia (ni pantalla ni ajuste, M-082): vale 'produccion'.
+  -- Con Veri*factu (rama con-verifactu) decide tambien el endpoint del servicio web de la AEAT.
   Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
-  -- MODO-PRUEBA (temporal): con 1, los cobros numeran en la serie PRUEBA y NO emiten registro de
-  -- facturacion: sin QR, sin envio a la AEAT y sin necesitar NIF ni certificado. Sirve para probar
-  -- el programa mientras Veri*factu no es obligatorio, y se quita entero antes de que lo sea (la
-  -- fecha, en docs/pendientes.md, VF-MODO-PRUEBA): un interruptor que deja de declarar ventas no
-  -- puede existir en un TPV que se venda.
-  Modo_Prueba INTEGER NOT NULL DEFAULT 0,
   -- RI-61: lo que dura una reserva que no elige su duracion (minutos), y que pasa cuando dos
   -- reservas de la misma mesa se pisan: 'avisar' (se guarda si quien reserva lo confirma) o
   -- 'prohibir'. Una comanda abierta en la mesa cuenta como ocupada desde que se abrio.
@@ -1514,7 +1510,8 @@ ON Notificacion_Lecturas(ID_Usuario);
 ========================================================= */
 -- Stock por producto + caducidad proxima + lote FEFO siguiente. Reescrita (DB-12) para NO usar
 -- subconsultas correlacionadas por producto (que re-escaneaban Lotes_Producto una vez por producto
--- y disparaban lecturas -> coste de Turso). Ahora son 2 pasadas unicas sobre Lotes_Producto:
+-- y disparaban lecturas: tiempo y, en la nube, filas leidas que se facturan). Ahora son 2 pasadas
+-- unicas sobre Lotes_Producto:
 --   * agg:      SUM(stock) por producto + MIN(caducidad) de los lotes con stock (= caducidad proxima).
 --   * lote_fefo: ROW_NUMBER() en UNA pasada para elegir el lote FEFO siguiente (rn = 1).
 -- Columnas de salida IDENTICAS a la version anterior (Stock_Actual, Caducidad_Proxima, Lote_Proximo).
@@ -1568,8 +1565,7 @@ LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
    no se negocian:
      1. El registro se crea EN LA MISMA TRANSACCION que el cobro (art. 9 RRSIF: "de forma
         simultanea o inmediatamente anterior a la expedicion").
-     2. NO SE MODIFICA. Una correccion es OTRA fila (subsanacion), nunca un UPDATE (la unica
-        escritura posterior, en Sistema_Json, se explica en Registros_Facturacion).
+     2. NO SE MODIFICA. Una correccion es OTRA fila (subsanacion), nunca un UPDATE.
      3. Nada de lo que rodea al envio puede impedir cobrar.
 
    Se replica a la nube por el outbox como el resto del esquema: es lo que permite que una Main que
@@ -1594,10 +1590,7 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
   Ultimo INTEGER NOT NULL DEFAULT 0
 );
 
--- El corazon. Append-only: se inserta y no se borra ni se corrige. La unica escritura posterior
--- rellena en Sistema_Json la identidad del productor o el numero de instalacion que faltaban, y solo
--- en registros que la AEAT no ha aceptado (asegurar_sistema_reparado en tpv-infra-sqlite/src/
--- verifactu.rs): ese bloque no entra en la huella ni en los datos de la factura.
+-- El corazon. Append-only: se inserta y no se borra ni se corrige; ninguna escritura la toca despues.
 --
 -- Tres decisiones que parecen detalles y no lo son:
 --
@@ -1666,9 +1659,6 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   Tipo_Huella           TEXT NOT NULL DEFAULT '01',
   Fecha_Hora_Huso       TEXT NOT NULL,
   Subsanacion           TEXT,
-  Rechazo_Previo        TEXT,
-  Sin_Registro_Previo   TEXT,
-  Subsana_ID_Registro   TEXT,
   Sistema_Json          TEXT NOT NULL,
   QR_Url                TEXT NOT NULL,
   Incidencia            TEXT NOT NULL DEFAULT 'N',
@@ -1680,8 +1670,6 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   CHECK (Tipo_Rectificativa IS NULL OR Tipo_Rectificativa IN ('S','I')),
   CHECK (Primer_Registro IS NULL OR Primer_Registro = 'S'),
   CHECK (Subsanacion IS NULL OR Subsanacion IN ('S','N')),
-  CHECK (Rechazo_Previo IS NULL OR Rechazo_Previo IN ('N','S','X')),
-  CHECK (Sin_Registro_Previo IS NULL OR Sin_Registro_Previo IN ('N','S')),
   CHECK (Macrodato IS NULL OR Macrodato IN ('N','S')),
   CHECK (Incidencia IN ('N','S')),
   CHECK (Tipo_Huella = '01')
@@ -1697,7 +1685,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_regfact_idfactura
 ON Registros_Facturacion(NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Tipo)
 WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
 
--- La ruta caliente del envio ("dame los pendientes por Orden ascendente") la sirve el UNIQUE (Orden)
+-- El ultimo eslabon de la cadena (ORDER BY Orden DESC LIMIT 1, en cada cobro) lo sirve el UNIQUE (Orden)
 -- de la tabla, que ya es un indice por Orden. Tenia ademas uno propio identico (RI-17): una escritura
 -- mas en la transaccion de cada cobro para nada.
 
@@ -1870,7 +1858,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
    16. Andamiaje LOCAL del dispositivo (prefijo `_`)
 
    Estado que describe lo que le pasa a ESTE equipo: que le falta por subir, que se
-   trajo, cuando corrio cada job, como va el envio a la AEAT. Nada de esto es un dato
+   trajo, cuando corrio cada job. Nada de esto es un dato
    de negocio y nada de esto viaja: sus escrituras van por `WriteGuard::raw()`, que no
    captura en `_Sync_Outbox`.
 
@@ -1880,7 +1868,8 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
    por `_migrations`, no entraba en el snapshot anti-drift y solo se podia leer
    ejecutandolo mentalmente. Un cambio en aquel no dejaba rastro en ningun sitio.
 
-   Que estas tablas se creen tambien en el tenant de Turso es DELIBERADO y no molesta:
+   Que estas tablas se creen tambien en la base del negocio en la nube (el SQLite de su
+   TenantHub) es DELIBERADO y no molesta:
    se quedan vacias, como ya dice la cabecera de este fichero. El volcado de recuperacion
    no las mira (`esTablaDeNegocio` descarta todo lo que empieza por `_`, ver
    domains/sync/bootstrap.ventana.ts), asi que no viajan ni de vuelta.
@@ -2027,61 +2016,6 @@ CREATE TABLE IF NOT EXISTS _Verificacion_Nube (
     Fallos INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO _Verificacion_Nube (Id, Fallos) VALUES (1, 0);
-
--- FISCAL-01 (Veri*factu): estado del envio a la AEAT.
---
--- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad
--- no esta en nuestra nube sino en la AEAT, a la que se le puede preguntar
--- (ConsultaFactuSistemaFacturacion). Replicarlo daria una respuesta que parece buena y no
--- lo es.
---
--- Estado:
---   PENDIENTE              -> generado, aun no aceptado por la AEAT.
---   ACEPTADO               -> EstadoRegistro 'Correcto' (o duplicado: ya lo teniamos alli).
---   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
---   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
-CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
-    ID_Registro       TEXT NOT NULL PRIMARY KEY,
-    Estado            TEXT NOT NULL,
-    Intentos          INTEGER NOT NULL DEFAULT 0,
-    Ultimo_Intento_Ms INTEGER,
-    Codigo_Error      TEXT,
-    Descripcion_Error TEXT,
-    CSV               TEXT,
-    Creado_En_Ms      INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_verifactu_envios_estado
-ON _Verifactu_Envios(Estado);
-
--- Anomalias de la cadena detectadas por la comprobacion previa del art. 7.i) de la Orden
--- HAC/1177/2024. Es estado LOCAL de diagnostico: describe lo que le ha pasado a ESTE
--- equipo.
---
--- No es el "registro de eventos" del RRSIF: ese solo es obligatorio para los SIF que pueden
--- actuar en modalidad NO VERI*FACTU, y este es SOLO VERI*FACTU (lo confirma la NOTA 1 del
--- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
--- una anomalia no se quede solo en un log que nadie abre.
-CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
-    ID_Anomalia     TEXT NOT NULL PRIMARY KEY,
-    Clase           TEXT NOT NULL,
-    Mensaje         TEXT NOT NULL,
-    ID_Registro     TEXT,
-    Detectada_En_Ms INTEGER NOT NULL,
-    Reconocida      INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_verifactu_anomalias_pend
-ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
-
--- Control de flujo obligatorio (art. 16.2 Orden HAC/1177/2024): el siguiente envio no puede
--- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
--- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
--- en cada respuesta (`TiempoEsperaEnvio`).
-CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
-    ID               INTEGER PRIMARY KEY CHECK (ID = 1),
-    Espera_Segundos  INTEGER NOT NULL DEFAULT 60,
-    Ultimo_Envio_Ms  INTEGER
-);
-INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
 
 -- Reservas desde la web (docs/estudios/reservas-web.md): los correos al cliente que esta Main ha
 -- pedido al cambiar o cancelar una reserva web y todavia no ha entregado al worker. Los saca el

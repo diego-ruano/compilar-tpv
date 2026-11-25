@@ -27,8 +27,9 @@ pub struct BusinessSettings {
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
     /// emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
     pub limite_simplif: Dinero,
-    /// `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. No tiene
-    /// pantalla en esta rama: es de la remisión a la AEAT (ver `docs/arquitectura/verifactu.md`).
+    /// `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. En esta
+    /// rama no se cambia (ni pantalla ni ajuste, M-082): es de la remisión a la AEAT (ver
+    /// `docs/arquitectura/verifactu.md`).
     pub verifactu_entorno: String,
 
     // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────────
@@ -150,9 +151,6 @@ pub struct BusinessSettingsPatch {
     pub limite_simplif: CampoPatch<Dinero>,
     #[serde(default, skip_serializing_if = "CampoPatch::ausente")]
     #[specta(optional)]
-    pub verifactu_entorno: CampoPatch<String>,
-    #[serde(default, skip_serializing_if = "CampoPatch::ausente")]
-    #[specta(optional)]
     pub reserva_duracion_min: CampoPatch<i64>,
     #[serde(default, skip_serializing_if = "CampoPatch::ausente")]
     #[specta(optional)]
@@ -252,5 +250,12 @@ mod tests_patch {
         for valor in [serde_json::json!({"businessName": "X"}), serde_json::json!({"business_name": null}), serde_json::json!({"iva_percent": "10"}), serde_json::json!({"umbral_descuadre": 1.5})] {
             assert!(serde_json::from_value::<BusinessSettingsPatch>(valor).is_err());
         }
+    }
+    /// M-082: el entorno de Veri\*factu no tiene pantalla ni remisión en esta rama, así que nadie lo
+    /// cambia: el registro guarda siempre la URL de cotejo de producción.
+    #[test]
+    fn el_entorno_de_verifactu_no_se_cambia_desde_los_ajustes() {
+        let valor = serde_json::json!({"verifactu_entorno": "pruebas"});
+        assert!(serde_json::from_value::<BusinessSettingsPatch>(valor).is_err());
     }
 }

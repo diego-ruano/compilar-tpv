@@ -239,10 +239,6 @@ impl Entorno {
             Entorno::Pruebas => QR_BASE_PRUEBAS,
         }
     }
-
-    pub fn es_pruebas(self) -> bool {
-        matches!(self, Entorno::Pruebas)
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
