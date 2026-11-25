@@ -1,10 +1,13 @@
 # Reservas desde la web
 
-**Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 hechas y en producción; faltan el piloto (fase 6)
-y el plugin de WordPress (fase 7). La fase 8 (dirección propia, API abierta a las webs del negocio y
-SDK) está hecha en código, sin desplegar. Lo que queda por comprobar de cada fase, en el §11. Donde
-el plan dice Turso, hoy es la base del negocio en el SQLite de su `TenantHub`
-([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)); las reglas no cambian.
+**Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 y 8 (la API abierta a las webs del negocio y el
+SDK, publicado en npm) hechas y en producción; faltan el piloto (fase 6) y el plugin de WordPress
+(fase 7). Lo que queda por comprobar de cada fase, en el §11. Este plan se escribió con las dos bases
+del worker en Turso: donde dice Turso, hoy es la base del negocio, que vive en el SQLite de su
+`TenantHub` ([0008](../decisiones/0008-la-base-del-negocio-en-su-durable-object.md)), y donde habla de
+la base central, ésta vive en el de su objeto `BaseCentral`
+([0009](../decisiones/0009-la-base-central-en-su-durable-object.md)), con sus tablas en sus
+migraciones. Las reglas no cambian.
 
 > Un widget de reservas que cualquier web incrusta con una línea, conectado al TPV, y que acepta
 > reservas aunque la Main esté apagada. La decisión de arquitectura y su porqué están en
@@ -885,7 +888,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. En producción llegan los correos y se cancela desde el enlace. Falta ver llegar los otros tres (cambio y cancelación por el restaurante, y el de «no se pudo registrar») |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |
-| **8 · API abierta y SDK** | Los nombres unificados de la API, la mesa automática, el CORS para las webs del negocio, la casilla de Turnstile en iframe y el SDK (§7.4); la dirección de la línea y los correos, fija (`RESERVAS_WEB_ORIGEN`) | Código y tests hechos el 2026-10-24. La dirección propia se probó y se volvió a `workers.dev` el 2026-10-25 (INFRA-04). Falta: desplegar el worker, probar un formulario propio desde una web dada de alta y publicar el SDK en npm |
+| ✅ **8 · API abierta y SDK** | Los nombres unificados de la API, la mesa automática, el CORS para las webs del negocio, la casilla de Turnstile en iframe y el SDK (§7.4); la dirección de la línea y los correos, fija (`RESERVAS_WEB_ORIGEN`) | Código y tests hechos el 2026-10-24. La dirección propia se probó y se volvió a `workers.dev` el 2026-10-25 (INFRA-04). Desplegado, y el SDK publicado en npm. Falta probar un formulario propio desde una web dada de alta |
 
 ---
 
@@ -903,7 +906,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 4. La clase nueva del DO y los dos limitadores van en `wrangler.json` y se crean al desplegar: no hay
    que tocar nada en el panel.
 
-**npm:** la organización `altarialights`, para publicar el SDK (fase 8).
+✅ **npm:** la organización `altarialights`, con el SDK publicado (fase 8).
 
 **Turso:** crear a mano las tablas del §3.2 en la base central antes de desplegar la fase 2, la columna
 `tipo` y el índice de `email_sends` antes de desplegar la fase 5, y resetear las bases de desarrollo

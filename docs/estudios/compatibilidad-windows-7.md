@@ -1,6 +1,13 @@
 # Compatibilidad de la aplicación de escritorio con Windows 7
 
-**Estado:** estudio; no hay nada de Windows 7 en el código ni en CI.
+**Estado:** estudio de antes de la variante, superado. La variante existe y vive en la rama
+`compilacion-windows-7`, que recibe `main` por merge: allí este mismo fichero es su documento (cómo
+se compila, qué se cambió y por qué, y qué falta comprobar en un Windows 7 real), y su decisión no es
+la de este estudio: no congela Rust en 1.77.2, sino que compila con el target
+`x86_64-win7-windows-msvc`. En `main` sólo está lo que comparte con ella: el target `windows7` del feed
+de actualizaciones (`domains/updates/updates.routes.ts`) y la release de Sentry de la variante
+(`tpv-desktop-win7`, `scripts/release/sentry-config.mjs`). Lo de abajo es el estudio tal como se
+escribió.
 
 Este documento estudia únicamente la posibilidad de distribuir una versión estable de la
 aplicación de escritorio para Windows 7. No plantea que Windows 7 vuelva a ser una plataforma de

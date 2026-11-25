@@ -1,6 +1,9 @@
 # Métricas a vigilar con restaurantes en producción
 
-**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo)
+**Estado:** plan para el piloto; vivo (se rellena con lo que se vaya midiendo). Donde dice Turso (§1 y
+§4) es la base central, que desde [0009](../decisiones/0009-la-base-central-en-su-durable-object.md)
+es el SQLite de su objeto `BaseCentral`: sus filas leídas y escritas y lo que ocupa salen ya en las
+métricas de Durable Objects, y su tiempo, en el tramo `central` del `Server-Timing`.
 
 > Qué medir cuando haya un restaurante real usando el TPV, por qué importa cada cosa y qué hacer si
 > se cruza un umbral. **Complementa** a [observabilidad.md](../arquitectura/observabilidad.md), que explica el montaje
@@ -30,7 +33,7 @@ docena de números que hoy no tenemos.
 
 | Fuente | Qué da | Estado |
 |---|---|---|
-| **Panel Configuración → Conectividad** | `sync_health` (outbox, `last_seq`, cuarentena, fallando) y `jobs_status` | ✅ Ya existe |
+| **Paquete de diagnóstico** (Configuración → Actualizaciones y soporte → «Guardar diagnóstico…»; la pantalla de Conectividad, que enseña lo mismo, ya no está en el menú) | `sync_health` (outbox, `last_seq`, cuarentena, fallando) y `jobs_status` | ✅ Ya existe |
 | **Axiom** — `AXIOM_DATASET_SYNC` | `apply_error`, `main_online/offline`, `device_auth_rechazado`, `tenant_salud_sync` | ✅ Ya existe |
 | **Better Stack** | Sonda de `/health` y latidos del cron y de la copia de la base central | ✅ Ya existe |
 | **Axiom** — `tpv-device-logs` | Logs del escritorio con scrubbing | ✅ Ya existe |
