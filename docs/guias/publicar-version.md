@@ -125,8 +125,9 @@ pnpm release:promocionar -- --version 1.0.3 --target windows7   # lo mismo, para
 
 Conviene elegir pilotos variados (con Handy, con varias impresoras, con mucho volumen) y que sepan que lo
 son. El TPV de staging, cuando exista (INFRA-01), será un piloto más. Marcar o quitar un piloto también se
-puede hacer con un `UPDATE tenants SET piloto = 1 WHERE tenant_id = '…'` en Turso: se nota en la
-siguiente comprobación de ese equipo.
+puede hacer con un `UPDATE tenants SET piloto = 1 WHERE tenant_id = '…'` en la base central, desde Data
+Studio ([worker.md](../arquitectura/worker.md#sql-a-mano)): el feed lo ve en un minuto como mucho (es lo
+que guarda lo que lee), y el equipo, en su siguiente comprobación.
 
 ### Secretos y variables de GitHub (Settings → Secrets and variables → Actions)
 
@@ -137,7 +138,8 @@ siguiente comprobación de ese equipo.
 El token de Cloudflare necesita Workers Editor en la cuenta que contiene `tpv-api`. El DSN del
 worker sigue siendo el secreto `SENTRY_DSN` de Cloudflare; el token de Sentry entra en los builds y
 en la comprobación de mapas, nunca en el paso que ejecuta Wrangler con el de Cloudflare.
-Las migraciones de la base central siguen siendo manuales y deben estar aplicadas antes de tagear.
+Una migración nueva de la base central va en un despliegue anterior al de la versión que la usa
+([abajo](#cambios-de-esquema-y-de-la-base-central)).
 
 Crear el token en Sentry → Settings de la organización → Developer Settings → Internal Integrations:
 **Release → Admin**, **Organization → Read**, **Project → Read**. No fijar `SENTRY_RELEASE` en GitHub:

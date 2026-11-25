@@ -1,7 +1,9 @@
 # Licencias
 
-Las licencias son nuestras: viven en la base central (control-plane, una Turso que no se recrea), las
-emiten **Stripe** (pago único) o el **administrador** a mano, y el TPV las valida contra el worker
+Las licencias son nuestras: viven en la base central (control-plane), que es el SQLite de su objeto
+`BaseCentral` ([worker.md](worker.md#la-base-central)), con su copia diaria y su vuelta a un
+instante ([restaurar-la-central.md](../guias/restaurar-la-central.md)). Las emiten **Stripe** (pago
+único) o el **administrador** a mano, y el TPV las valida contra el worker
 `tpv-api`. El estado que decide si el TPV puede trabajar viaja **firmado con ed25519** y el cliente
 lo verifica contra una clave pública fijada en el binario: un servidor falso, un MITM con CA propia o
 un DNS envenenado no pueden fabricar una licencia válida.
@@ -26,13 +28,15 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Avisos de caducidad | `…/licensing/avisosDeCaducidad.ts` | Del cron diario (`scheduled` en `src/index.ts`) |
 | Compra | `…/domains/stripe/{stripe.routes,stripe.helpers}.ts` | Webhook: emitir, revertir, restaurar |
 | Administración | `…/domains/admin/admin.routes.ts` + `scripts/tpv-license.mjs` | Emitir, listar, reenviar, revocar, desrevocar, extender, acortar |
-| Almacén | `…/src/server/licenseStore.ts` | Todas las lecturas y escrituras de la base central |
+| Almacén | `…/src/server/licenseStore.ts` | Las lecturas y las escrituras de una sentencia en la base central |
+| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el cobro y su reversión (`emitirCobro`, `revertirCobro`) y lo que la administración hace con una licencia ([worker.md](worker.md#las-operaciones)) |
 | Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
 | Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
 | Comandos | `apps/tpv-main/src-tauri/src/commands/licensing.rs` | `license_activate`, `license_sumar_clave`, `license_check_now`, `license_clear_state`… |
 | Pulso | `jobs/registro.rs::licencia` | Cada 6 h (`MainOperativa`), emite `license:changed` |
 | Estructura de la base central | `…/src/server/central/migraciones/` | Sus migraciones, que aplica el objeto `BaseCentral`; el esquema que dan, en `…/central/esquema.snapshot.sql` |
+| La base central en sí | `…/src/domains/admin/central.ts` + `pnpm central:*` | Cómo está, sus copias, restaurarla y volver a un instante ([restaurar-la-central.md](../guias/restaurar-la-central.md)) |
 
 ---
 
@@ -67,8 +71,9 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
    falló sí, y por eso se contestó 500.
 4. Idempotencia por sesión de checkout (índice único en `license_payments` por sesión y unidad),
-   comprobada dentro de la transacción. Antes de preparar las claves se mira con la misma consulta:
-   una sesión ya cumplida sale sin cifrar nada, también con `LICENSE_STORE_KEY` inservible.
+   comprobada dentro de la operación de la central que emite el cobro (`emitirCobro`). Antes de
+   preparar las claves se mira con la misma consulta: una sesión ya cumplida sale sin cifrar nada,
+   también con `LICENSE_STORE_KEY` inservible.
 5. Fail-closed: si una línea no trae `metadata.term_months` en su Price, la cantidad no es un entero
    positivo, la lista de líneas viene paginada o la compra pasa de `MAX_LICENCIAS_POR_COMPRA` (100),
    no se emite nada.
@@ -78,9 +83,13 @@ checkout `unpaid` espera al segundo). **Toda compra emite claves nuevas, una por
 del plan anual son 4 licencias de un año, no una de cuatro, porque quien compra varias puede querer
 varios locales; quien quiera todo el tiempo en un equipo canjea las claves una tras otra y se suman
 (ver [Activar](#activar)). Cada una se registra como cobro `kind='issue'` en `license_payments` con
-su `unidad` (1…N), todas en la misma transacción, y después del `COMMIT` van **juntas en un correo**.
-Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y `pnpm license:list` las
-enseña pendientes de `pnpm license:resend`. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+su `unidad` (1…N), todas en una sola operación de la central (`emitirCobro`,
+[worker.md](worker.md#las-operaciones)), y cuando ha entrado van **juntas en un correo**. La clave en
+claro no llega a la central: el Worker la prepara antes, y a la operación le pasa su huella y su
+cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y
+`pnpm license:list` las enseña pendientes de `pnpm license:resend`; lo mismo si una entrega de Stripe
+encuentra la sesión ya cumplida por otra que no llegó a mandar el correo
+([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)). La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
 Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
@@ -89,7 +98,7 @@ Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
 
 Eventos `charge.refunded`, `charge.dispute.created`, `charge.dispute.funds_withdrawn` y
 `charge.dispute.closed` (hay que suscribirlos en el endpoint del Dashboard de Stripe). Todo en una
-transacción:
+operación de la central (`revertirCobro`):
 
 Un cargo puede tener varios cobros, uno por licencia de la compra, y cada uno se trata por su
 cuenta:
@@ -152,8 +161,10 @@ días que llevaba activada.
 
 Hasta AUD-45 el webhook trataba una consulta como una disputa formal: revocaba el alta (o restaba los
 meses de la renovación), marcaba el cobro `dispute` y, al cerrarse `warning_closed`, no deshacía
-nada. Lo que quedó así se encuentra en la base central (en Turso, sólo lectura) con la auditoría de la
-reversión y el evento que la hizo, que guarda el estado con el que llegó la disputa:
+nada. Lo que quedó así se encuentra en la base central con la auditoría de la reversión y el evento
+que la hizo, que guarda el estado con el que llegó la disputa. Se mira en una copia abierta en local
+(`pnpm central:copiar`, [restaurar-la-central.md](../guias/restaurar-la-central.md#abrir-una-copia-en-local)),
+que sólo lee:
 
 ```sql
 SELECT a.license_id,
@@ -184,7 +195,8 @@ repara. Si sigue siendo consulta o está `warning_closed`:
   reembolso total posterior del cargo vuelve a revocarla, y si la consulta escala después,
   `funds_withdrawn` la revierte como a cualquier disputa formal.
 - **`meses_restados`** (una renovación): desrevocar no la toca. Primero se le quita la marca al
-  cobro, en Turso
+  cobro en la base central, desde Data Studio y con una copia hecha antes
+  ([worker.md](worker.md#sql-a-mano))
   (`UPDATE license_payments SET reversed_at_ms = NULL, reversed_reason = NULL, reversed_event_uid = NULL
   WHERE license_id = ? AND kind = 'renewal' AND reversed_reason = 'dispute' AND reversed_event_uid = ?`,
   con el `event_uid` de la fila), y después se le devuelven los meses,
@@ -270,7 +282,8 @@ registrado** (el `tenant_id` de su fila de `devices`), la clave nueva **no crea 
 - La clave presentada ya se ha comparado con la registrada, y aquí el equipo tiene que tener fila:
   sin ella no hay con qué comprobar que es él (`device_key_missing`).
 - Calcula antes todo lo que puede fallar sin escribir (la DEK y el token).
-- En una transacción: comprueba que la licencia elegida sigue siendo la viva de ese equipo
+- En una operación de la central (`canjearClave`, `server/central/operaciones/canje.ts`), entera o
+  nada: comprueba que la licencia elegida sigue siendo la viva de ese equipo
   (`sigueSiendoLaLicenciaDelEquipo`; si se ha anulado o trasladado entretanto, `clave_no_canjeable`
   sin gastar la clave), `canjearLicencia` (`WHERE status='issued'`, y si no gana la carrera contesta
   `license_already_used`), `extendLicense` (suma sobre lo que quedaba, o sobre hoy si ya venció) y
@@ -613,8 +626,8 @@ lectura siguiente, sin esperar a otra respuesta de la nube. Qué dice y a partir
 
 ## Anular desde la administración
 
-`POST /v1/admin/licenses/:id/revoke` revoca y, en la misma transacción, hace suya la revocación
-(`atribuirRevocacionAMano`): si una disputa abierta ya había revocado el alta, su cobro pasa de
+`POST /v1/admin/licenses/:id/revoke` revoca y, en la misma operación de la central (`revocarAMano`),
+hace suya la revocación (`atribuirRevocacionAMano`): si una disputa abierta ya había revocado el alta, su cobro pasa de
 `dispute` a `dispute_ya_revocada`, y ganarla ya no la reactiva (AUD-08). Después, como best-effort y
 si no estaba ya revocada, avisa por RPC al `TenantHub` del tenant (`lib/hub.ts::avisarCambioDeLicencia`
 → `releerMain`), que vuelve a leer quién es la Main (con la licencia anulada, nadie) y le cierra el
@@ -681,7 +694,23 @@ haya borrado a mano en la base central la licencia de uno de verdad: por eso se 
 de borrar. Cada llamada retira doce como mucho y dice si quedan más.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
-y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.
+y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`. Si la
+nube no puede atender (un 503 `external`), el CLI no repite nada: dice que no se sabe si el cambio ha
+entrado y que se compruebe antes de repetirlo, porque un `extend` o un `shorten` repetido se aplicaría
+dos veces.
+
+La base central en sí se administra con el mismo token y el mismo CLI (`pnpm central:*`): cómo está,
+sus copias, restaurarla y volver a un instante. Lo que la cambia pide `--si`, y queda en Axiom
+(`central_administrada`), no en `admin_audit`, que es una tabla de la propia central: el
+procedimiento, en [restaurar-la-central.md](../guias/restaurar-la-central.md).
+
+| Operación | Ruta | CLI |
+|---|---|---|
+| Cómo está | `GET /v1/admin/central/estado` | `pnpm central:estado` |
+| Sus copias | `GET /v1/admin/central/copias` | `pnpm central:copias` |
+| Una copia ahora | `POST /v1/admin/central/copiar-ahora` | `pnpm central:copiar` |
+| Darle esquema, o restaurarla desde una copia (sólo sin aprovisionar) | `POST /v1/admin/central/aprovisionar` | `pnpm central:aprovisionar -- [--copia <clave>] --si` |
+| Volver a un instante, o a un marcador | `POST /v1/admin/central/volver` | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m>) --si` |
 
 ### Rotar el token de administración
 
@@ -792,7 +821,10 @@ con Checkout alojado deja los datos de tarjeta fuera de nuestros servidores.
 
 - **La estructura de la base central se cambia con una migración nueva** en
   `src/server/central/migraciones/` (registrada en `migraciones.ts`), aditiva y en un despliegue
-  **anterior** al del código que la usa: durante un despliegue, un Worker nuevo puede hablar unos
-  minutos con el objeto de antes ([worker.md](worker.md)).
+  **anterior** al del código que la usa: durante un despliegue conviven el código de antes y el de
+  ahora a los dos lados del RPC ([worker.md](worker.md#su-esquema-migraciones-en-código)).
+- **Lo que escribe licencias o cobros en más de una sentencia es una operación de la central**
+  (`server/central/operaciones/`), síncrona y entera o nada; el correo, Stripe y el aviso al
+  `TenantHub` van antes o después, en la ruta ([worker.md](worker.md#las-operaciones)).
 - El correo de recuperación del PIN (LOGIN-07/08) vive en la misma base pero es otra cosa: ver
   [permisos.md](permisos.md#recuperar-el-pin).

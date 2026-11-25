@@ -13,12 +13,15 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
+| [CENTRAL-RETENCION](#central-retencion--nada-purga-webhook_events-ni-admin_audit) | 🟡 | Nada purga `webhook_events` ni `admin_audit` de la base central | Sin decidir |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [SUBIDA-TECHO](#subida-techo--el-techo-total-de-la-subida-completa) | 🔵 | El techo de 60 millones de filas de la subida completa, sin medir con bares reales | Medir en producción |
-| [CENTRAL-PLAZO](#central-plazo--una-llamada-vencida-a-la-base-central-no-deja-hibernar-al-tenanthub) | 🔵 | Una llamada vencida a la base central no se cancela, y el TenantHub no hiberna mientras tanto | Sin decidir |
 | [VUELTA-DESHACER](#vuelta-deshacer--deshacer-la-vuelta-de-un-negocio-lo-dejaría-cerrado) | 🟡 | Deshacer la vuelta a un instante de un negocio lo dejaría cerrado | Sin comprobar: en local no existe |
 | [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
+| [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
+| [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
+| [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano | Lo decide el responsable |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -207,12 +210,15 @@ por constante. No hay dónde probar un cambio del worker, del esquema de la nube
 de que lo vea un cliente. Aplazado a cuando el SaaS esté asentado: es duplicar la infraestructura.
 Por orden de dependencia:
 
-1. Un `env.staging` en `wrangler.json` con su `name` y sus `vars` (`ENVIRONMENT: "staging"`, `TURSO_*`,
-   `EMAIL_*`). Su `TenantHub` sería otro namespace.
+1. Un `env.staging` en `wrangler.json` con su `name` y sus `vars` (`ENVIRONMENT: "staging"`,
+   `EMAIL_*`). Sus Durable Objects (`TenantHub`, `AgendaWeb` y `BaseCentral`) serían otros espacios
+   de nombres.
 2. Todos los secretos repetidos con `--env staging`.
-3. **Otra base de control en Turso**: compartirla sería escribir sobre datos de clientes. Las bases
-   de los negocios van con su `TenantHub`, que ya es otro.
-4. Otro bucket de R2. La URL de las imágenes de la Handy sale de `CLOUD_API_BASE` (`handy_url_imagenes`, punto 6), y el `img-src` de la CSP la repite.
+3. **Su propia base central**: en otro worker, `BaseCentral` es otro objeto, que nace sin aprovisionar
+   y se aprovisiona con `pnpm central:aprovisionar -- --si` apuntando `TPV_API_BASE` a staging.
+   Compartir la de producción sería escribir sobre datos de clientes. Las bases de los negocios van
+   con su `TenantHub`, que ya es otro.
+4. Otros buckets de R2: el de las imágenes y los de las copias. La URL de las imágenes de la Handy sale de `CLOUD_API_BASE` (`handy_url_imagenes`, punto 6), y el `img-src` de la CSP la repite.
 5. Stripe en modo test, con su webhook y sus Prices.
 6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`) y
    `LICENSE_SIGNING_PUBLIC_KEYS_B64` están fijados en el código; hay que hacerlos configurables al
@@ -249,21 +255,6 @@ años, así que uno con mucho movimiento, años de histórico y una base vacía 
 es también subir lo que puede escribir un cliente que abuse. Falta medir cuánto escribe un bar real
 al año (las filas de su base y las escritas por la subida) y ajustarlo con ese dato.
 
-### CENTRAL-PLAZO · Una llamada vencida a la base central no deja hibernar al TenantHub
-
-El `TenantHub` lee de la base central quién es la Main (`mainEnCentral`, con 5 s de plazo) y apunta
-el `last_seen` (`touchLastSeen`, con 10 s) por `clienteCentral(…, { plazoMs })`. Vencido el plazo, el
-TenantHub sigue (el turno del log, la respuesta a la Main), pero la llamada no se cancela: es un RPC
-al objeto `BaseCentral`, y Cloudflare no da forma de cortarlo. Mientras no termina es E/S pendiente,
-y un objeto con E/S pendiente no hiberna
-([ciclo de vida](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/));
-el `last_seen` vencido, además, entra cuando la central lo atiende.
-
-Sólo pasa si la central tarda más que el plazo, y la central no espera a nada de fuera mientras
-atiende: su SQL es síncrono. La alternativa es que esas dos llamadas vayan por `fetch` al objeto con
-`AbortSignal.timeout(plazo)`, a cambio de una segunda puerta a la central además del RPC; antes habría
-que comprobar que cortar así la petición libera de verdad al TenantHub.
-
 ### VUELTA-DESHACER · Deshacer la vuelta de un negocio lo dejaría cerrado
 
 Al volver a un instante (DO-03, `tenantHub.instante.ts`), el `TenantHub` deja su marca de vuelta en
@@ -285,7 +276,46 @@ Restaurar la central desde una copia (`baseCentral.restaurar.ts`) va entero dent
 entonces sin atender, y cada intento volvería a cortarse. Medido en local, 150.000 filas de las más
 caras tardan como mucho la mitad, y el cron avisa a Sentry cuando la copia del día pasa de ahí
 (`FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ`). Antes de llegar hay que partir la carga en varias llamadas,
-cada una en su `blockConcurrencyWhile`, con la marca puesta entre ellas.
+cada una en su `blockConcurrencyWhile`, con la marca puesta entre ellas. Qué hacer mientras tanto:
+[restaurar-la-central.md](guias/restaurar-la-central.md#si-no-cabe-en-30-s-central-restaurar).
+
+### CENTRAL-AUTH · `tenantAuth` lee la central en tres viajes
+
+`tenantAuth` (`middleware/tenant.ts`) lee de la base central el dispositivo con su clave pública
+(`server/middleware/auth.ts`) y el veto de la licencia (`lib/licenciaEnUso.ts`: la licencia y el rol
+del equipo). Cada cosa tiene su caché de un minuto por isolate, pero con las dos frías son tres viajes
+seguidos al objeto `BaseCentral` en la misma petición, y la central atiende de una en una lo de todos
+los negocios ([worker.md](arquitectura/worker.md#un-solo-hilo)). Las lecturas no dependen unas de
+otras, así que podrían ir en un solo viaje. Hoy no aprieta: el estudio que llevó a
+[0009](decisiones/0009-la-base-central-en-su-durable-object.md) lo situaba hacia los 1.000
+negocios. Antes de decidir, medirlo con el generador de carga
+([pruebas-de-carga.md](guias/pruebas-de-carga.md)).
+
+### SOCKET-DISPERSION · El reintento del socket, casi sin dispersión
+
+Cuando se corta el socket, la Main (`src-tauri/src/replicacion.rs`) y la Handy
+(`src-tauri/src/socket_handy.rs`) vuelven a intentarlo a los 3 s, doblando la espera hasta 30 s, con
+menos de un segundo al azar. Un despliegue reinicia los objetos y corta los sockets de todos a la vez,
+y una caída de la nube también: al volver, todos los equipos de todos los negocios reconectan casi al
+mismo tiempo, y cada reconexión pide su ticket y lo canjea en la base central (dos lotes y varias
+lecturas), justo cuando la central arranca. Con muchos negocios eso pasa de lo que atiende un solo
+objeto, y se vería como 503 `hub_overloaded` y más reintentos. Opciones, sin decidir: más dispersión en el primer reintento,
+respetar el `Retry-After` del 503, o sacar el ticket del socket de la central (firmado, o en el
+`TenantHub`). Es un cambio en Rust, y como CENTRAL-AUTH no aprieta hasta los 1.000 negocios o así.
+
+### CLAVES-SIN-CORREO · Las claves de un cobro que no llegaron a salir
+
+El correo con las claves de una compra sale después de la operación de la central
+(`emitirCobro`), y sólo si la emisión es de esa entrega del webhook
+([worker.md](arquitectura/worker.md#las-operaciones)). Si la primera llamada entra pero su respuesta se
+pierde, el reintento también falla y Stripe vuelve a entregar el evento, la entrega nueva encuentra la
+sesión ya cumplida con otras licencias y no manda nada: el comprador no recibe sus claves. Lo mismo si
+el worker se corta entre la operación y el correo. Las licencias se quedan con `key_email_sent_at_ms`
+a `NULL`, que es lo que `pnpm license:list` enseña como pendiente y `pnpm license:resend` reenvía
+([licencias.md](arquitectura/licencias.md#comprar)).
+
+Lo decide el responsable (G7): que la entrega que encuentra la sesión cumplida con licencias sin
+`key_email_sent_at_ms` reenvíe las claves, que avise a Sentry, o dejarlo a mano como hasta ahora.
 
 ---
 
@@ -294,9 +324,9 @@ cada una en su `blockConcurrencyWhile`, con la marca puesta entre ellas.
 ### DB-14 · Retención y archivado
 
 Nada purga `Comandas`, `Detalle_Comanda`, `Pagos`, `Movimientos_Stock` ni `Notificaciones` (las
-notificaciones se borran de una en una). `purga_sync` limpia el andamiaje de replicación y
-`server/purga.ts` sólo `pair_claim_fallos` y `email_sends`. Las siete copias diarias son completas y
-engordan con todo.
+notificaciones se borran de una en una). `purga_sync` limpia el andamiaje de replicación. Las siete
+copias diarias son completas y engordan con todo. Lo de la base central, en
+[CENTRAL-RETENCION](#central-retencion--nada-purga-webhook_events-ni-admin_audit).
 
 Reglas fijadas:
 
@@ -319,6 +349,25 @@ Decidido, a falta de medir cuánto genera un bar al año:
 
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
+
+### CENTRAL-RETENCION · Nada purga `webhook_events` ni `admin_audit`
+
+La purga diaria de la base central (`server/purga.ts`) borra lo que crece desde fuera y ya no sirve
+(los fallos, códigos y retos de emparejamiento, los eventos de los códigos de cambio de equipo) y las
+trazas de correo a los 90 días. Dos tablas crecen sin que nada las borre, y van enteras en cada copia
+diaria:
+
+- `webhook_events`: cada evento de Stripe con su cuerpo entero (`payload_json`), que lleva el nombre,
+  el correo, el teléfono y la dirección de quien compra. Hace falta para no aplicar dos veces un
+  evento y para investigar un cobro: la consulta de AUD-45 la cruza con la auditoría
+  ([licencias.md](arquitectura/licencias.md#reparar-lo-que-revocó-una-consulta-del-banco)).
+- `admin_audit`: la auditoría de la administración y de los cobros, con hasta dónde se abrió el log de
+  cada negocio devuelto (`negocio_log_reservado`), que la siguiente devolución de ese negocio usa para
+  no repetir números ([worker.md](arquitectura/worker.md#las-copias-de-la-base-de-cada-negocio-do-03)).
+
+Falta decidir cuánto se guarda cada una y qué parte (quizá sólo caduca el cuerpo de los eventos), con
+el marco de [LEGAL-01](#legal-01--rgpd), y sin perder lo que usan la consulta de AUD-45 y
+`negocio_log_reservado`.
 
 ---
 

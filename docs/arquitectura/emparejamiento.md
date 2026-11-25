@@ -77,7 +77,9 @@ revés.
   diaria borra los retos caducados, que caducan con su código. Sin las dos cosas, una Main y un script
   dejaban la copia diaria de la base central por encima de su techo.
 - **A quien no lo reclamó, un código no existe** (AUD-10). `fetch-token` y `cancel` son anónimas y no
-  tienen freno (la Handy pregunta cada 1,5 s), así que no pueden servir para saber qué códigos viven:
+  tienen el freno de `claim` (la Handy pregunta cada 1,5 s): sólo el filtro holgado de las puertas de
+  la sesión (`LIMITADOR_SESION`), que recorta volumen antes de que lleguen a la base central
+  ([worker.md](worker.md#un-solo-hilo)). Así que no pueden servir para saber qué códigos viven:
   si no hay código o el `deviceId` no es el del reclamante, contestan `pair_code_not_found`, y la firma
   se comprueba **antes** que el estado (pendiente, rechazado, gastado, caducado). `approve` contesta lo
   mismo a la Main de otro negocio, como `reject`.

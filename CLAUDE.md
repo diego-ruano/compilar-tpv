@@ -2,7 +2,7 @@
 
 TPV de escritorio para hostelería: **Tauri 2 + React 19 + TypeScript** con backend **Rust** sobre
 **SQLite local (rusqlite)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio,
-que guarda la base del negocio en su SQLite, y Turso sólo para la base central. La Main (Windows)
+que guarda la base del negocio en su SQLite, y otro, `BaseCentral`, con la base central. La Main (Windows)
 vende contra su base local y replica cuando hay red; la Handy (Android) trabaja contra la nube. Qué es
 cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
 
@@ -28,7 +28,7 @@ apps/tpv-main/                   app de escritorio y Android (@tpv/main)
   src-tauri/src/printing.rs      generador ESC/POS
   src-tauri/src/interruptores.rs estado de los interruptores remotos
   e2e/                           recorridos E2E sobre la app compilada
-apps/cloud-worker-licensing/     worker tpv-api (Hono + TenantHub + licencias + sync + pairing…)
+apps/cloud-worker-licensing/     worker tpv-api (Hono + TenantHub + BaseCentral + licencias + sync + pairing…)
 crates/
   tpv-domain                     entidades y reglas puras
   tpv-application                puertos (ports/) y casos de uso (use_cases/)
@@ -207,8 +207,12 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
 - `tpv-infra-sqlite/build.rs` vigila la carpeta de migraciones: Cargo reembebe los SQL automáticamente.
 - ⚠️ El hash de la migración incluye sus comentarios: tocar un comentario de `0001_inicial.sql` es cambiar la
   migración.
-- **La base central del worker no se migra desde el código**: se cambia a mano en Turso antes de desplegar y
-  se refleja en `docs/sql/control-plane/esquema-actual.sql`.
+- **La base central del worker se cambia con una migración nueva** en
+  `apps/cloud-worker-licensing/src/server/central/migraciones/`, registrada en orden en `migraciones.ts`.
+  **Aditiva** (durante un despliegue, el código de antes sigue hablando con el objeto ya migrado) y en
+  un despliegue **anterior** al del código que la usa. Su foto se regenera con
+  `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`
+  ([esquema.md](docs/arquitectura/esquema.md#la-base-central)).
 
 ### Worker ([worker.md](docs/arquitectura/worker.md))
 
@@ -224,7 +228,16 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
   rutas de la Main que se quedan en el Worker vetan con `soloLaMainVigente`, no con `soloLaMain`.
   Un test que monta un router suelto declara el doble de `alHub` (`test/helpers/rutaSuelta.ts`).
 - El objeto de un negocio se pide sólo por `lib/objetosDelNegocio.ts` (`hubDe`, `agendaDe`), nunca a
-  `env.TenantHub` o `env.AgendaWeb` directamente.
+  `env.TenantHub` o `env.AgendaWeb` directamente; el de la base central, por `centralDe`, nunca a
+  `env.BaseCentral`.
+- **Lo que lee, decide y escribe en la base central es una operación** de su objeto
+  (`server/central/operaciones/`): síncrona de principio a fin (ni `async`, ni `await`, ni promesas,
+  tampoco en lo que importa), devuelve un dato y su nombre no cambia nunca de significado. Lo que
+  espera (cifrar, Stripe, el correo, avisar a un `TenantHub`) va antes o después, en la ruta.
+- **La central contesta lo que no ha hecho como valor, con su código** (`central_*`), y cuando no
+  puede atender, el 503 `external` de siempre (`hub_unavailable`, `hub_overloaded`): **nunca una
+  respuesta sobre la licencia o el equipo**, como `license_not_found`. Es un solo hilo para todos: toda
+  ruta anónima que la lee lleva delante un filtro por IP (`filtroPorIp`) o una caché.
 - **Lo que decide si una escritura entra va en un paso `guard` de su comando** (SYNC-30), que el
   `TenantHub` evalúa dentro del lote atómico y no replica; no en una lectura de la ruta antes de
   `apply`, que se queda vieja mientras el DO atiende a otros y contesta mal al reintento de una
@@ -349,6 +362,16 @@ lo que hay que revisar es el cambio, no el test:
   `mainDesplazadaRest` (`soloLaMain` sólo en routers con `alHub`), `objetosDelNegocio.node` y
   `sinDatosPersonalesEnLaQuery.node` (AUD-27); en la Handy, `tests_sin_datos_en_la_url`
   (`tpv-infra-http`).
+- De la base central del worker: `centralOperaciones.node` (las operaciones y lo que importan son
+  síncronos, y la central no llama a otro objeto), `objetosDelNegocio.node` (también `BaseCentral`, sólo
+  por `centralDe`), `centralAnonimas` (cada ruta anónima que la lee tiene su filtro o su caché, y se
+  comprueba), `centralNoDisponible` (cuando no atiende, 503 `external`, nunca un 401 ni un 500),
+  `centralGuardas`, `centralEnlace` (los argumentos se guardan y se rechazan como siempre),
+  `centralCarreras` y `centralFalloInyectado` (cada operación entra entera o no entra, también pedida a
+  la vez), `copiaCentralSinNuestroCodigo.node` (su copia se abre con `node:sqlite`), su foto
+  (`centralEsquema`) y el **oráculo de equivalencia** (`oraculoCentral`), cuyas fotos de
+  `test/oraculo/central/` fijan lo que hacían las operaciones antes de que la central estuviera en su
+  objeto: si una cambia, lo que ha cambiado es la lógica de negocio.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `cantidad_casos.json`,

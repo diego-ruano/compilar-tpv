@@ -36,7 +36,7 @@ Tres reglas:
 - [emparejamiento.md](arquitectura/emparejamiento.md): vincular una Handy y su token.
 - [permisos.md](arquitectura/permisos.md): sesión, gates, PIN y superficie de seguridad.
 - [worker.md](arquitectura/worker.md): el worker `tpv-api`, la base de cada negocio (el SQLite de su
-  `TenantHub`), la base central (Turso) y el cron.
+  `TenantHub`), la base central (el de su objeto `BaseCentral`), sus copias y el cron.
 - [jobs-e-interruptores.md](arquitectura/jobs-e-interruptores.md): tareas de fondo e interruptores remotos.
 - [frontend.md](arquitectura/frontend.md): estructura, datos, dinero en pantalla y CSP.
 - [observabilidad.md](arquitectura/observabilidad.md): Sentry, Axiom y vigilancia externa.
@@ -52,6 +52,9 @@ Tres reglas:
 - [pruebas-de-carga.md](guias/pruebas-de-carga.md): el generador de carga, en local y contra la nube.
 - [restaurar-un-negocio.md](guias/restaurar-un-negocio.md): la base de un negocio en la nube: sus copias y
   devolverla a un instante.
+- [restaurar-la-central.md](guias/restaurar-la-central.md): la base central: cómo está, sus copias,
+  restaurarla desde una y devolverla a un instante.
+- [medir-worker.md](guias/medir-worker.md): cómo medir el worker antes de decidir Placement.
 
 ## Estudios
 

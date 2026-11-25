@@ -602,8 +602,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
     se vería.
   - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
     al final de la actual.
-- «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
-  detenida en uno de ellos. «En cuarentena», los que se saltaron.
+- «Reintentándose» (en la pantalla de Conectividad, fuera del menú) son los fallos sin cuarentena: la
+  bajada está detenida en uno de ellos. «En cuarentena», los que se saltaron.
 - **Lo apartado de la subida se guarda 30 días** desde su último intento, y después lo retira
   `purga_sync` (`RETENCION_CUARENTENAS_MS`, `use_cases/sync.rs`). Para entonces se registró en la
   telemetría al apartarse, se encoló la reparación por estado y el contraste con la nube ha pasado
@@ -1205,10 +1205,13 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 2. **El censo es `state.getWebSockets()`**, con la etiqueta `deviceId`. Puede devolver sockets ya
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
    está cerrando.
-3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`, y no tiene `alarm`. El único
-   temporizador es el plazo de la
-   lectura de la base central que pone al día quién es la Main (`fetchConPlazo`), y vive lo que su
-   petición: se quita al leer la respuesta entera, al fallar o al cancelarse.
+3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`, y su única alarma es la de la
+   copia diaria ([worker.md](worker.md#las-copias-de-la-base-de-cada-negocio-do-03)). Los únicos
+   temporizadores son los plazos de lo que le pregunta a la base central (quién es la Main, 5 s, y el
+   `last_seen`, 10 s; `clienteCentral` con `plazoMs`), y viven lo que su llamada: se quitan al
+   contestar o al vencer. La llamada vencida no se cancela, y hasta que la central la atiende el
+   objeto no hiberna: se acepta
+   ([CENTRAL-PLAZO](worker.md#el-plazo-del-tenanthub-central-plazo)).
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
    negocio (`baseLocal`, que al volver comprueba otra vez las migraciones), `lastSeenPushedAtMs`,
    `lastPurgeAtMs` y lo que ya se ha avisado de una avería de la base (`avisados`: al despertar se

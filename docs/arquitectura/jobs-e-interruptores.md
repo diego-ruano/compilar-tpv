@@ -10,7 +10,7 @@ Todo lo que la Main hace «cada X tiempo» por su cuenta vive en un único runne
 | Motor | `jobs/mod.rs` | Vencimiento, jitter, backoff, gating, panics, registro |
 | **Catálogo** | `jobs/registro.rs` | **El único fichero que se toca para añadir un job** |
 | Estado | `_Jobs_State` (`0001_inicial.sql` §16, escrito en `infra-sqlite/src/jobs.rs`) | `Last_Ok_Ms` por job |
-| Diagnóstico | `commands/jobs.rs::jobs_status` | Panel en Configuración → Conectividad |
+| Diagnóstico | `commands/jobs.rs::jobs_status` | El panel de la pantalla de Conectividad, que no está en el menú: la abre el aviso de cambios de las Handy atascados ([sincronizacion.md](sincronizacion.md#la-salida-de-una-cuarentena-de-bajada-sync-36)). Va también en el paquete de diagnóstico (`tareas_de_fondo`, [observabilidad.md](observabilidad.md#el-paquete-de-diagnóstico-ops-02)) |
 
 ### Añadir un job
 
@@ -125,7 +125,7 @@ pnpm interruptor:lista    -- [--historial]
 | Lo que pregunta el TPV | `domains/interruptores/interruptores.routes.ts` (`POST /v1/interruptores`) | Por `tenantAuth`; el tenant sale del token |
 | Decisión en el TPV | `tpv-application/src/use_cases/interruptores.rs` | Qué vale y cuánto (aquí están los tests) |
 | Estado en el TPV | `src-tauri/src/interruptores.rs` + job `interruptores` | En memoria y en `AppData/interruptores.json` |
-| Pantalla | `features/configuracion/sections/AvisoInterruptores.tsx` | «Pausado por soporte» en Conectividad |
+| Pantalla | `features/configuracion/sections/AvisoInterruptores.tsx` | «Pausado por soporte» en la pantalla de Conectividad (fuera del menú). Lo apagado va también en el paquete de diagnóstico (`interruptores`) |
 
 | Interruptor | Dónde se mira | Qué deja de pasar |
 |---|---|---|

@@ -59,8 +59,9 @@ antigua crearía dos historiales que no hay forma de juntar.
   por modo (no tener base es normal en una Handy).
 - **Reconciliación pendiente**: se restauró y todavía no se ha comprobado contra la nube.
 
-Fuera de estos estados, un administrador puede traer el estado actual de la nube desde Configuración
-→ Conectividad cuando un cambio de la nube lleva una semana atascado en su cuarentena (SYNC-36) o una
+Fuera de estos estados, un administrador puede traer el estado actual de la nube desde la pantalla de
+Conectividad, que no está en el menú y abre el aviso de cambios de las Handy atascados, cuando un
+cambio de la nube lleva una semana atascado en su cuarentena (SYNC-36) o una
 fila lleva una semana apuntada para traerla de la nube sin entrar (SYNC-38,
 [sincronizacion.md](sincronizacion.md#la-salida-de-una-cuarentena-de-bajada-sync-36)), y sólo con
 nada por subir: la guardia del outbox lo niega si no. Al terminar se cierra la sesión y sigue la
@@ -517,6 +518,28 @@ worker deja el log de la réplica de forma que lo que ya hace la Main la lleve a
   (`verificar_nube`) confirma que cuadra. Lo mismo tras darle a un objeto vacío su copia de R2 o una
   base vacía con `--modo main`.
 - **Las Handy** no guardan base: se las echa al volver, reconectan solas y leen la nube que haya.
+
+## Cuando la base central no atiende o vuelve atrás
+
+La base central (licencias, negocios, dispositivos…) es una para todos los negocios, en su objeto
+`BaseCentral` ([worker.md](worker.md#la-base-central)). No es la base de ningún negocio: perderla no
+pierde ninguna venta, pero sin ella la nube no sabe quién es quién.
+
+- **Mientras no atiende** (saturada, reiniciándose, sin aprovisionar o restaurándose), lo que la toca
+  contesta 503 `hub_unavailable` o `hub_overloaded`, que los equipos tratan como la nube sin
+  contestar. La Main sigue vendiendo y, con el socket ya abierto, replicando, pero no puede volver a
+  abrirlo, y su licencia sigue con la gracia sin conexión. Las Handy no trabajan. Activar, emparejar
+  y renovar el token esperan.
+- **Nunca atiende vacía ni a medias**: si contestara `license_not_found` a licencias que existen,
+  cada Main lo tomaría por un rechazo de la suya ([licencias.md](licencias.md#el-gate)).
+- **Se recupera desde la administración**: con su copia de R2, en un objeto vacío, o devolviéndola a
+  un instante de los últimos 30 días ([restaurar-la-central.md](../guias/restaurar-la-central.md)).
+  Ninguna de las dos toca la base de un negocio ni la de una Main.
+- **Lo que se escribió en la central después de la copia o del instante se pierde**: una licencia
+  emitida o activada, una Handy emparejada… Un TPV cuya licencia ya no está recibe
+  `license_not_found` sin firmar: no la borra, sigue con la gracia sin conexión y su motivo, y al
+  acabarse se bloquea. Hay que rehacerle lo perdido antes
+  ([la guía](../guias/restaurar-la-central.md#lo-que-se-pierde-al-volver-atrás)).
 
 ## Lo que vuelve y lo que no
 

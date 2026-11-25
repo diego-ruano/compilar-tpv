@@ -317,8 +317,8 @@ persona guarda donde quiera y manda a soporte como pueda. Es texto legible a pro
 abrir y ver qué lleva antes de mandarlo.
 
 **Dónde está.** En Configuración → Actualizaciones y soporte (sólo el administrador entra en
-Configuración, con candado de ruta), junto a los dos avisos de Conectividad que dicen «contacta con
-soporte», y en el error de la pantalla de recuperación, antes del login. El comando,
+Configuración, con candado de ruta), junto a los dos avisos de la pantalla de Conectividad (fuera del
+menú) que dicen «contacta con soporte», y en el error de la pantalla de recuperación, antes del login. El comando,
 `diagnostico_generar_paquete`, **no pide sesión**: es para cuando algo va mal, también cuando no se
 puede entrar, y en una Handy sin red el gate no podría comprobar los permisos de nadie. No escribe
 nada, y lo que lee es lo mismo que enseñan sin gate `sync_health`, `jobs_status` e
@@ -542,7 +542,8 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
 | `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta. Lo emite el Worker (`service: tpv-api`) |
-| `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, `rechazo` —un rechazo del viaje que la plataforma no marca—, o el código del objeto: `central_sin_aprovisionar`, `central_migracion_alterada`, `central_migracion_fallida`, `central_operacion_desconocida`, `central_restauracion_a_medias`, `central_vuelta_en_curso`), el método, la ruta, el error de la plataforma o del objeto y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry, con el error del viaje como causa |
+| `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, `rechazo` —un rechazo del viaje que la plataforma no marca—, o el código del objeto: `central_sin_aprovisionar`, `central_operacion_desconocida`, `central_migracion_alterada`, `central_migracion_fallida`, `central_restauracion_a_medias`, `central_vuelta_en_curso`), el método, la ruta, el error de la plataforma o del objeto y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry, con el error del viaje como causa |
+| `central_administrada` | La administración ha copiado, aprovisionado o restaurado la base central, o la ha devuelto a un instante (`domains/admin/central.ts`): `accion`, `resultado` (`ok`, el código con el que no se ha hecho o, al volver, `preparada` antes de reiniciar) y, según la acción, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer y la copia de antes. Sin datos personales. Es el rastro de lo que cambia la central: no va a `admin_audit`, que es una tabla suya ([worker.md](worker.md#las-rutas-de-administración-de-la-central)) |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |
 
@@ -550,17 +551,26 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 
 - **Sentry**: issue nuevo o pico en cada proyecto, caída del *crash-free rate*, Spike Protection y
   filtros de entrada (un DSN público se puede sondear).
-- ⚠️ **`outbox_op_apartada` en Sentry** (lo emite el TPV): un equipo tiene un dato que la nube no va a
-  tener. Trae `op_id`, `command_name`, `intentos`, `permanente` y `error_nube`, sin sentencias ni args. Su
-  pareja en el worker es el `apply_error` de esa misma `op_id`.
+- ⚠️ **«operación apartada de la subida» en Sentry** (lo emite la Main: un `error!` con target
+  `tpv::sync`, `replicacion.rs::fallo_subida`): un equipo tiene un dato que la nube no va a tener. Trae
+  `op_id`, `comando` y `reparadas` (las filas cuya reparación se encoló al apartarla), sin sentencias
+  ni args. Su pareja en el worker es el `apply_error` de esa misma `op_id`.
 - **Main caída**: `main_offline` sin `main_online` posterior en N minutos por `tenant_id`.
 - **Errores de apply**: volumen de `apply_error` por `tenant_id`.
 - **Un negocio cuyo objeto no da abasto o no arranca**: una racha de `hub_no_disponible` del mismo
   `tenant_id`. Uno suelto con `pasajero` es normal: cada despliegue reinicia los objetos.
 - **La base central no da abasto o no arranca**: una racha de `central_no_disponible`, sea del negocio
   que sea (es una para todos). Cualquiera con un `motivo` que empieza por `central_` necesita a alguien:
-  está sin aprovisionar o averiada. Uno con `rechazo`, también: la plataforma no ha dicho por qué, o
-  es un fallo del programa dentro del objeto, que está en Sentry con su causa.
+  está sin aprovisionar, averiada o con algo a medias, y `pnpm central:estado` dice qué
+  ([restaurar-la-central.md](../guias/restaurar-la-central.md)). En Sentry, lo mismo desde dentro del
+  objeto: `central.migracion` (una migración que no entra), `central.pragmas` (alguien cambió a mano las
+  claves foráneas o los CHECK) y `central.restaurar` (una copia que no se ha podido cargar). Uno con
+  `rechazo` también necesita a alguien: la plataforma no ha dicho por qué, o es un fallo del programa
+  dentro del objeto, que está en Sentry con su causa.
+- **La copia de la central**: su latido (`BETTERSTACK_HEARTBEAT_COPIAS_URL`) deja de sonar si no se
+  sube; `cron.backup` en Sentry dice por qué, y también avisa cuando la copia pasa de las filas que se
+  restauran de una vez (CENTRAL-RESTAURAR). Y un `central_administrada` con un `resultado` que no es
+  `ok` (ni `preparada`, que va antes de reiniciar) es una administración de la central que no ha salido.
 - **Una base que necesita a alguien**: cualquier `base_llena` o `migracion_fallida`. También llegan a
   Sentry (`tenant_db.full`, `tenant_db.migration`).
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
@@ -577,8 +587,8 @@ Sentry y Axiom dependen de que el código se ejecute y consiga emitir: si el wor
 cuenta se suspende o el DNS se rompe, un panel vacío se ve igual que «no pasa nada». Por eso hay una
 sonda externa contra el **mismo hostname que usan los clientes**, y `/health` toca la base central
 ([worker.md](worker.md#salud-y-vigilancia-externa)): un `{ ok: true }` que no comprueba nada estaría verde
-durante una avería de Turso. Ninguna petición HTTP ve que el cron lleve meses sin dispararse; eso lo dice
-su latido.
+con la central sin aprovisionar, averiada o sin contestar, que deja a todas las Handy sin trabajar.
+Ninguna petición HTTP ve que el cron lleve meses sin dispararse; eso lo dice su latido.
 
 ## Pendiente
 

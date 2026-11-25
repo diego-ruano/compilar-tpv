@@ -24,15 +24,17 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 | `/v1/email/*` | `domains/email/` | El correo de un pedido a un proveedor (la Main y la Handy) |
 | `/v1/pair/*`, `/v1/device/*` | `domains/pairing/` | Emparejamiento ([emparejamiento.md](emparejamiento.md)) |
 | `/v1/license/*`, `/v1/stripe/*`, `/v1/admin/*` | `domains/{licensing,stripe,admin}/` | Licencias ([licencias.md](licencias.md)) |
+| `/v1/admin/central/*` | `domains/admin/central.ts` | La administración de la base central ([abajo](#las-rutas-de-administración-de-la-central)) |
 | `/v1/interruptores` | `domains/interruptores/` | La Main ([jobs-e-interruptores.md](jobs-e-interruptores.md)) |
 | `/v1/update/*` | `domains/updates/` | El updater de escritorio y la publicación ([publicar-version.md](../guias/publicar-version.md)) |
 | `/v1/telemetry/*` | `domains/telemetry/` | Reenvío de eventos ([observabilidad.md](observabilidad.md)) |
 
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
 (escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): los
-DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (las imágenes y el PDF de las facturas; se lee
-por el worker, [Imágenes](#imágenes) y [Facturas en PDF](#facturas-en-pdf)),
-`tpv-copias-control` (privado) y `tpv-copias-negocios` (privado), `send_email` (`EMAIL`), los
+DO `TenantHub`, `AgendaWeb` y `BaseCentral` (SQLite), R2 `tpv-images` (las imágenes y el PDF de las
+facturas; se lee por el worker, [Imágenes](#imágenes) y [Facturas en PDF](#facturas-en-pdf)),
+`tpv-copias-control` (privado, las copias de la base central) y `tpv-copias-negocios` (privado, las de
+cada negocio), `send_email` (`EMAIL`), los
 limitadores por IP `LIMITADOR_CLAIM`, `LIMITADOR_LICENCIA`, `LIMITADOR_RESERVA_WEB`,
 `LIMITADOR_RESERVA_WEB_ALTA`, `LIMITADOR_IMAGENES`, `LIMITADOR_ACTUALIZACIONES` (el feed) y
 `LIMITADOR_SESION` (`/ws`, `/v1/license/refresh` y la espera de la Handy al emparejarse)
@@ -42,12 +44,14 @@ caché; lo vigila `test/centralAnonimas.test.ts`.
 
 RI-46: los bindings de R2 son exclusivamente `IMAGES`, `COPIAS` y `COPIAS_NEGOCIOS`; lo de los TPV
 (imágenes y facturas) va en `IMAGES`, separado por carpetas. En desarrollo local, R2 y
-`EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
+`EMAIL` se simulan; no llevan `remote: true`. La base central es un objeto más: en `wrangler dev`
+nace sin aprovisionar, y lo que la toca contesta 503 hasta que se le da esquema
+(`pnpm central:aprovisionar -- --si`, con `TPV_API_BASE` apuntando a `wrangler dev`).
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
 el mismo `wrangler.json` con el entorno pisado ([los tests no salen a la red](#los-tests-no-salen-a-la-red))
 y los tipos se regeneran con `pnpm cf-typegen`.
 
-## Dos bases, y sólo una se migra desde el código
+## Dos bases, cada una en su objeto
 
 - **La base de cada negocio** vive en el SQLite de su `TenantHub` y se construye con las migraciones
   de `packages/database/migrations/`, registradas a mano en `src/server/tenantMigrations.ts`
@@ -61,7 +65,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   propio objeto: el worker lee y escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`, y el objeto
   sólo le ejecuta sentencias de filas (`baseCentral.guardas.ts`). Una migración de la central es
   aditiva y va en un despliegue **anterior** al del código que la usa. Los tests hablan con un objeto
-  de verdad, aprovisionado con esas migraciones (`test/helpers/central.ts`).
+  de verdad, aprovisionado con esas migraciones (`test/helpers/central.ts`). Cómo funciona:
+  [La base central](#la-base-central).
+
+Las dos comparten el motor del SQLite de un objeto (`durableObjects/sqliteDelObjeto.ts`: ejecutar una
+sentencia, las claves foráneas y el runner de migraciones), el formato y el cargador de sus copias
+(`volcadoSql.ts`, `cargaDeCopias.ts`) y la vuelta a un instante (`instantes.ts`).
 
 ### La base del negocio, dentro de su `TenantHub`
 
@@ -147,16 +156,7 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Sentry (`hub.ejecutar_ruta`). Lo cubre `test/alHubSinElObjeto.test.ts`.
 
   Cuando la que no puede atender es la base central, la respuesta es la misma
-  (`server/central/sinLaCentral.ts`): saturada, `hub_overloaded` con `Retry-After`; un fallo pasajero,
-  un plazo vencido, cualquier otro rechazo del viaje (la plataforma no dice por qué, o el objeto ha
-  lanzado), la central sin aprovisionar o averiada, `hub_unavailable`. La traducen el
-  `onError`, el `/ws` y la activación al crear la base del negocio. Un `catch` que seguiría sin la
-  central la deja subir (`laCentralNoAtiende`): el feed de actualizaciones no la lee como «no es
-  piloto», que con sólo una beta publicada sería el 204 de «estás al día». `tenantAuth` sólo contesta
-  401 a un token o una firma que no valen (`RechazoDeAutenticacion`); cualquier fallo de la central
-  sube al `onError`. Queda en Axiom
-  (`central_no_disponible`, con el motivo) y, si no es carga ni un fallo pasajero, en Sentry, con el
-  error del viaje como causa. Lo cubre `test/centralNoDisponible.test.ts`.
+  ([abajo](#cuando-no-puede-atender)).
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
   Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
@@ -281,6 +281,267 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Un negocio que ninguna licencia apunta (`/v1/admin/negocios-huerfanos`, AUD-09:
   [licencias.md](licencias.md#anular-desde-la-administración)) sólo se vacía su `TenantHub`: no ha
   tenido nunca una Main con token, así que no tiene agenda ni imágenes.
+
+## La base central
+
+Una para todo el servicio: los negocios (`tenants`), los dispositivos, las licencias y sus cobros, la
+auditoría de la administración, los eventos de Stripe, los emparejamientos y sus retos, los códigos y
+las trazas de correo, los tickets del socket, las claves y los dominios de la reserva web, los
+interruptores, las versiones de la app y el canario de `LICENSE_STORE_KEY`. Es el SQLite de un Durable
+Object, `BaseCentral` (`durableObjects/baseCentral.ts`), en este mismo worker
+([0009](../decisiones/0009-la-base-central-en-su-durable-object.md)).
+
+### El objeto y cómo se le habla
+
+- **Uno solo, pedido siempre igual**: `centralDe(env)` (`lib/objetosDelNegocio.ts`), con el nombre
+  `central`, sin jurisdicción y con la pista `weur`. Son constantes y suyos, no salen de
+  `JURISDICCION_DO` ni de `UBICACION_DO`: cambiar cómo nacen los objetos de los negocios no puede
+  dejar a la central hablando con otro objeto, vacío. Nadie más nombra `env.BaseCentral`
+  (`test/objetosDelNegocio.node.test.ts`). Cada viaje pide su stub, porque uno que ha lanzado puede
+  haberse quedado roto, y pedirlo no sale del isolate. Sentry lo instrumenta como a los otros dos
+  (`index.ts`).
+- **Se le habla con `getDb(env)`** (`server/db.ts`), que da `clienteCentral`
+  (`server/central/cliente.ts`): una `Base` de `lib/sql.ts` (`execute`, y `batch`, todo o nada) sobre
+  el RPC del objeto (`ejecutar` y `lote`), más `operar(nombre, datos)` para
+  [sus operaciones](#las-operaciones), tipado por operación. El `TenantHub` usa el mismo cliente, con
+  plazo ([abajo](#el-plazo-del-tenanthub-central-plazo)). Cada viaje suma al tramo `central` del
+  `Server-Timing` (`observability/tiempos.ts`). El resto de su RPC es de la administración y del cron
+  (`estado`, `copiar`, `aprovisionar`, `prepararVuelta` y `reiniciar`), que lo piden a `centralDe`
+  directamente ([abajo](#las-copias-de-la-base-central-restaurarla-y-volver-a-un-instante)).
+- **`rowsAffected` son las filas que cambia la sentencia** (`changes()`), no las que escribe con sus
+  índices: es lo que decide una carrera (un `UPDATE` condicionado, un `INSERT OR IGNORE`). Las filas
+  se leen por nombre y por posición, y un entero de más de 2^53 vuelve redondeado, sin aviso
+  (`test/centralCliente.test.ts`).
+- **Los argumentos se convierten antes de salir y otra vez al entrar en el objeto**
+  (`server/central/enlace.ts`), con lo que la central siempre ha guardado: un booleano como 1 o 0, una
+  fecha como sus milisegundos, un `bigint` como número si cabe sin perder precisión, un `Uint8Array`
+  como sus bytes. Un `undefined`, un `NaN` o un infinito lanzan sin llegar a viajar. Por su cuenta, el
+  SQLite de un objeto guardaría un booleano como el texto `'true'` y una fecha como su texto en
+  inglés, sin avisar (`test/centralEnlace.test.ts`). Sólo admite argumentos posicionales. Un número
+  viaja siempre como REAL: en un texto (una columna `TEXT`, `CAST(? AS TEXT)`, `json_object`) un
+  booleano sale «1.0».
+- **Lo que el objeto no ha hecho viaja como resultado**, `{ ok: false, error: "central_…", detalle }`
+  (`baseCentral.rpc.ts`), también un error de SQL. El cliente lo lanza en el Worker como
+  `ErrorDeLaCentral`, con el estado HTTP de su código ([los códigos](#los-códigos-de-la-central)):
+  quien lo recibe decide por el código, y el objeto no cuenta como un fallo suyo una restricción que
+  quien escribe espera. Un viaje que no vuelve con su respuesta sale como `CentralNoDisponible`, con
+  el error del viaje como causa: lo que la plataforma marca como saturado o pasajero, un plazo vencido
+  y cualquier otro rechazo (la plataforma no dice por qué, o el objeto ha lanzado). **Un error nunca
+  se convierte en filas vacías**: «la central no contesta» no puede leerse como «esa licencia no
+  existe».
+
+### Lo que cuida el objeto
+
+Un objeto mal pedido o tocado a mano no falla en voz alta. Por eso (`baseCentral.ts`,
+`baseCentral.guardas.ts`):
+
+- **Sin aprovisionar no atiende, y no crea nada.** Sin `_migrations`, todo lo que no es de
+  administración contesta `central_sin_aprovisionar`. El esquema sólo lo pone `aprovisionar`: vacío,
+  o desde una copia ([abajo](#restaurar-desde-una-copia)). Si lo creara solo, un nombre equivocado
+  daría una central vacía que contestaría que no existe ninguna licencia.
+- **Con algo a medias no atiende**: una restauración que no terminó (`central_restauracion_a_medias`)
+  o una vuelta a un instante preparada y sin aplicar (`central_vuelta_en_curso`). Lo dicen sus marcas
+  en el almacenamiento del objeto, y es lo primero que mira.
+- **Al arrancar se pone al día** con sus migraciones, dentro de `blockConcurrencyWhile` y sin atender
+  nada mientras tanto. Si una aplicada ha cambiado (`central_migracion_alterada`) o una nueva no entra
+  (`central_migracion_fallida`), no atiende, lo dice en cada llamada y avisa a Sentry
+  (`central.migracion`).
+- **Al empezar cada llamada mira las claves foráneas y los CHECK**: un `PRAGMA` lanzado a mano se
+  quedaría puesto para todo lo que venga detrás en el objeto. Si los encuentra cambiados, los vuelve a
+  poner y avisa a Sentry (`central.pragmas`). Encenderlas puede tener que esperar a que lo escrito se
+  confirme, y nada de lo que decide la llamada se lee antes de esa espera.
+- **Sólo ejecuta sentencias de filas, una por llamada**: `SELECT`, `INSERT`, `UPDATE`, `DELETE` y
+  `WITH`. Ni varias en un texto, ni `PRAGMA`, ni de esquema, ni de transacción, ni `ATTACH`, ni
+  `REPLACE`, `OR REPLACE` u `OR ROLLBACK`, ni nada sobre `_migrations`: `central_sentencia_prohibida`,
+  que es un fallo del programa.
+- **Nunca llama a otro objeto** (un `TenantHub`, una `AgendaWeb`): lo que hay que avisar después de
+  escribir lo avisa quien llama, que puede esperar (`test/centralOperaciones.node.test.ts`).
+
+Lo cubre `test/centralGuardas.test.ts`.
+
+### Las operaciones
+
+Lo que lee, decide y escribe en más de una sentencia, y tiene que entrar entero o no entrar, es una
+operación (`server/central/operaciones/`, registradas en `registro.ts`). Corre entera dentro del
+objeto, en un `transactionSync` (`baseCentral.operar.ts`), con el mismo SQL y en el mismo orden que
+cuando el Worker la hacía con una transacción abierta por la red:
+
+| Operación | La pide | Lo que hace el Worker antes y después |
+|---|---|---|
+| `canjearClave` | `/v1/license/activate`, al sumar una clave (`licensing.routes.ts`) | Antes, la DEK y el token; después, la frase de una clave ya usada y el recibo por correo |
+| `emitirCobro` | El webhook de Stripe (`stripe.routes.ts`) | Antes, si la sesión ya se cumplió, con la consulta de la operación (`COBROS_DE_LA_SESION`: si lo está, sale sin preparar nada), y las claves (su huella, su forma corta y cifradas: la clave en claro no viaja), los ids y la hora; después, el correo con las claves y su marca |
+| `revertirCobro` | El webhook: reembolsos y disputas | Después, marcar el evento y avisar al `TenantHub` de las altas anuladas |
+| `revocarAMano`, `desrevocar` | `/v1/admin/licenses/:id/revoke` y `/unrevoke` | Antes, que la licencia exista; después, la auditoría y el aviso al `TenantHub` |
+| `extenderAMano`, `acortarAMano` | `/v1/admin/licenses/:id/extend` y `/shorten` | Después, la auditoría. Leer la caducidad y escribir la nueva van juntos: dos a la vez no pierden ninguno de los dos cambios |
+
+- **Es síncrona de principio a fin**: ni `async`, ni `await`, ni promesas, ni temporizadores, ni
+  `fetch` o `crypto.subtle`, tampoco en lo que importa. Una espera dentro abriría el objeto a otras
+  llamadas a mitad de la transacción, y lo escrito después quedaría fuera de ella. Si devuelve algo
+  con `then`, se rechaza y se deshace. Lo vigila `test/centralOperaciones.node.test.ts`, que lee el
+  fuente.
+- **Devuelve un dato**: `null`, booleanos, números, textos, `ArrayBuffer`, y arrays y objetos
+  literales de datos. Otra cosa (una instancia, una función, una fecha) se rechaza antes de confirmar
+  y no queda nada escrito: el RPC la serializaría con la transacción ya confirmada, y quien la pidió
+  recibiría un error de algo que sí entró. Un resultado de negocio (la clave ya usada, la sesión ya
+  cumplida) es un valor; lanzar es fallar, y lo deshace todo (`central_operacion_fallida`, 500).
+- **Un nombre no cambia nunca de significado**: una operación que cambia lleva un nombre nuevo.
+  Durante un despliegue, un Worker nuevo puede hablar con el objeto de antes, que contesta
+  `central_operacion_desconocida` a lo que no conoce (503: el cliente o Stripe repiten).
+- **Una sola implementación**: lo que escribe licencias y cobros en más de una sentencia vive sólo
+  aquí. En el Worker quedan las lecturas y las escrituras de una sentencia (`server/licenseStore.ts`:
+  la auditoría, la marca del correo…). Las que corren también dentro de una operación (leer una
+  licencia, darla de alta, apuntar en la auditoría) salen de constantes de `operaciones/licencias.ts`,
+  que `licenseStore.ts` importa, para que no puedan divergir.
+- **`emitirCobro` se repite una vez** si la plataforma corta la llamada por un fallo pasajero, porque
+  no se sabe si entró. Si entró, contesta `ya_cumplida` con las licencias que preparó este Worker, y
+  la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, y no se manda
+  nada ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
+  Una central saturada no se repite: Stripe reintenta más tarde.
+- Lo demás son sentencias sueltas condicionadas y lotes todo o nada, con sus ventanas de siempre: la
+  primera activación, los códigos por correo, el emparejamiento, los cupos de correo, el ticket del
+  socket.
+
+Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma operación pedida a la
+vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`
+(un fallo tras cada sentencia de cada operación, y la central entera tiene que quedar como estaba) y el
+oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones conducidos
+sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada
+efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar
+en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
+`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`.
+
+### Cuando no puede atender
+
+La respuesta es la del objeto de un negocio que no puede atender (`lib/noDisponible.ts`): un 503
+`external`, que la Main y la Handy tratan como la nube sin contestar y repiten
+(`server/central/sinLaCentral.ts`):
+
+- saturada (`overloaded`): `hub_overloaded`, con `Retry-After`;
+- un fallo pasajero de la plataforma (`retryable`), un plazo vencido o cualquier otro rechazo del
+  viaje (la plataforma no dice por qué, o el objeto ha lanzado): `hub_unavailable`;
+- sin aprovisionar, una operación que no conoce, una migración alterada o fallida, o algo a medias
+  (`ErrorDeLaCentral` con 503): `hub_unavailable`, sin `Retry-After`.
+
+La traducen el `onError` de la `app`, el `/ws` y la activación cuando crea la base del negocio. Un
+`catch` que seguiría sin la central la deja subir (`laCentralNoAtiende`): el feed de actualizaciones no
+la lee como «no es piloto», que con sólo una beta publicada sería el 204 de «estás al día». **En
+`tenantAuth` sólo un token o una firma que no valen son un 401** (`RechazoDeAutenticacion`): cualquier
+fallo de la central sube al `onError`, porque un 401 le haría creer al equipo que su token no vale. El
+motivo exacto no viaja: queda en Axiom (`central_no_disponible`, con el `motivo`: `saturada`,
+`pasajera`, `plazo`, `rechazo` o el código del objeto) y, si no es carga ni un fallo pasajero, en
+Sentry, con el error del viaje como causa, y en el log, que ahí hay algo que mirar
+([observabilidad.md](observabilidad.md#eventos-de-tpv-sync)).
+
+- **Nunca una respuesta que diga algo de la licencia o del equipo.** Una central vacía o a medias
+  contestaría `license_not_found` a todos, y los clientes lo toman por un rechazo: la Main deja de
+  replicar y sigue con la gracia sin conexión con `rejection_unverified`
+  ([licencias.md](licencias.md#el-gate)), y la Handy se queda fuera en cada petición. Por eso la
+  central no atiende sin aprovisionar ni a medias.
+- Lo que la central lanza por otra cosa (un error de SQL, una sentencia prohibida, una operación que
+  falla) sigue el camino de cualquier error: un 500 con su identificador (`central_error_sql`,
+  `central_operacion_fallida`) y `code: internal`, y el texto de SQLite sólo en el log y en Sentry.
+- Unas pocas cosas siguen sin la central, a propósito: el correo de un pedido sale aunque no se pueda
+  apuntar ([Correo](#correo)) y los interruptores se dan por encendidos
+  ([jobs-e-interruptores.md](jobs-e-interruptores.md#interruptores-remotos-de-emergencia-prod-06)).
+  El feed de actualizaciones no: sólo le da el canal normal al equipo cuyo piloto no ha podido mirar
+  por otro fallo de la lectura (un error de SQL), que va a Sentry. El webhook de Stripe contesta su
+  503 y Stripe lo reintenta.
+
+Lo cubre `test/centralNoDisponible.test.ts`.
+
+### Un solo hilo
+
+La central atiende de una en una lo de todos los negocios, y mientras se copia no atiende a nadie
+([la copia](#la-copia-diaria)). Lo que se le lee en cada petición va en cachés de un minuto por
+isolate: el dispositivo con su clave pública y el veto de la licencia (`tenantAuth`), los
+interruptores, y las claves de la reserva web, con las que no valen en una caché aparte y acotada
+(llenarla de claves inventadas no vacía la buena). `/health` recuerda su veredicto 30 s. El `TenantHub` le pregunta quién
+es la Main como mucho una vez por minuto y negocio, y apunta el `last_seen` de un equipo como mucho
+cada 5 minutos.
+
+**Toda ruta anónima que lee la central lleva delante un filtro por IP o una caché.** El filtro es
+`filtroPorIp` (`lib/limitador.ts`): contesta 429 `too_many_attempts`, con `Retry-After: 60`, antes de
+leer el cuerpo y de tocar la central, y cuenta por red (AUD-11).
+
+| Ruta | Lo que la protege |
+|---|---|
+| `GET /ws`, `POST /v1/license/refresh`, `POST /v1/pair/fetch-token` y `/cancel` | `LIMITADOR_SESION`, holgado: los equipos de un bar salen por la misma IP, y una Handy que espera la aprobación pregunta cada segundo y medio |
+| `POST /v1/pair/claim` | `LIMITADOR_CLAIM`, y detrás el freno por IP de la base ([emparejamiento.md](emparejamiento.md)) |
+| `POST /v1/license/activate` y `/device-change/request` | `LIMITADOR_LICENCIA` |
+| `GET /v1/update/:target/:arch/:current` | `LIMITADOR_ACTUALIZACIONES` y la caché del feed: las versiones activas y los equipos piloto, leídos de una vez y guardados un minuto, que el isolate que publica, retira, promociona o marca un piloto vacía |
+| Las públicas de la reserva web | `LIMITADOR_RESERVA_WEB` y la caché de las claves |
+| `GET /health` | La caché de su veredicto |
+| `GET /v1/license/status`, el webhook de Stripe, publicar y retirar versiones | Su secreto (el token, la firma de Stripe, el token de publicación), comprobado antes de leer nada |
+
+Lo vigila `test/centralAnonimas.test.ts`, que recorre todas las rutas de la `app`: una anónima nueva
+lo hace fallar hasta que alguien decide qué la protege y lo apunta, y lo apuntado se comprueba (con el
+limitador cerrado no llega a la central; con caché, la segunda petición tampoco). Lo que haría falta
+al crecer, sin decidir, está en [pendientes.md](../pendientes.md): `tenantAuth` en un solo viaje
+(CENTRAL-AUTH) y más dispersión en el reintento del socket (SOCKET-DISPERSION).
+
+### El plazo del `TenantHub` (CENTRAL-PLAZO)
+
+- El `TenantHub` le habla a la central con plazo (`getCentralDb`): 5 s para leer quién es la Main
+  (`mainEnCentral`, AUD-02) y 10 s para apuntar el `last_seen` de un equipo (`touchLastSeen`). Vencido,
+  sale como `CentralNoDisponible` (`plazo`) y el hub sigue: el turno del log y la espera de la Main no
+  se quedan colgados, y la tabla de la Main se queda como estaba. El `last_seen` que no se apunta se
+  recoge en el hub y va a Sentry (`sync.last_seen`); lo pone la siguiente actividad pasada la ventana.
+- **La llamada vencida no se cancela.** Es un RPC, y Cloudflare no da forma de cortarlo: sigue viva
+  sin nadie que la espere, y si escribía (el `last_seen`), escribe cuando la central la atiende.
+  Mientras no termina es E/S pendiente, y el `TenantHub` no hiberna
+  ([ciclo de vida](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/)).
+  El temporizador del plazo sí se quita al terminar (`conPlazo`), y el fallo de la llamada que ya
+  nadie espera se recoge: no queda ningún rechazo sin recoger.
+- **Se acepta así.** Sólo pasa si la central tarda más que el plazo, y la central no espera a nada de
+  fuera mientras atiende: su SQL es síncrono. La otra forma, hablarle por `fetch` con
+  `AbortSignal.timeout`, sería una segunda puerta a la central además del RPC, y antes habría que
+  comprobar que cortar así libera de verdad al `TenantHub`.
+
+Lo cubren `test/centralCliente.test.ts` (con la central ocupada, el plazo suelta a quien espera y la
+llamada escribe después) y `test/elHubPuedeHibernar.test.ts`.
+
+### Su esquema: migraciones en código
+
+- Las migraciones de la central están en `src/server/central/migraciones/` y se registran, en orden,
+  en `server/central/migraciones.ts` (`MIGRACIONES_DE_LA_CENTRAL`): el bundler no recoge una carpeta
+  entera. `scripts/check-migration-registry.mjs` comprueba en CI que la carpeta y el registro
+  coinciden y que ninguna abre o cierra transacciones. La primera, `0001_inicial.sql`, es el esquema
+  entero.
+- Las aplica el objeto con el mismo runner que la base de cada negocio
+  (`sqliteDelObjeto.ts::migrarBase`, [esquema.md](esquema.md#cómo-se-aplica)): cada una en su
+  transacción, con las claves foráneas apagadas alrededor de la tanda y `foreign_key_check` antes de
+  confirmar, y en `_migrations` su nombre y el hash de su texto entero, comentarios incluidos. Una
+  aplicada que cambia deja el objeto sin atender (`central_migracion_alterada`).
+- **Un cambio es una migración nueva, aditiva, en un despliegue anterior al del código que la usa.**
+  Durante un despliegue conviven el código de antes y el de ahora, a los dos lados del RPC: Cloudflare
+  reparte el código nuevo poco a poco, y pide que lo que se dicen el Worker y sus objetos sea
+  compatible en los dos sentidos
+  ([known issues](https://developers.cloudflare.com/durable-objects/platform/known-issues/)). Un
+  Worker nuevo puede hablar un rato con el objeto de antes, que todavía no tiene la migración: por eso
+  va en un despliegue anterior. Y un isolate con el código de antes puede hablar con el objeto ya
+  migrado: por eso es aditiva, y nada de lo que el código de antes lee o escribe desaparece ni cambia
+  de sentido.
+- **La foto del esquema** es `src/server/central/esquema.snapshot.sql`, lo que dan las migraciones,
+  comparada por `test/centralEsquema.test.ts`, que además fija a mano lo que no puede cambiar sin
+  querer (las tablas, las columnas de `tenants`, el índice único de `license_payments` por sesión y
+  unidad, las claves foráneas en cascada). Un cambio a propósito la regenera con
+  `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`, y se revisa junto al de la
+  migración.
+- No es el esquema del negocio y no sigue sus reglas: no se replica, sus nombres van en inglés y
+  algunas columnas toman su hora de un `DEFAULT`.
+
+### SQL a mano
+
+No hay ninguna ruta que acepte SQL. Para mirar, lo seguro es una copia abierta en local
+([restaurar-la-central.md](../guias/restaurar-la-central.md#abrir-una-copia-en-local)). Para cambiar
+una fila a mano está Data Studio, en el panel de Cloudflare (Durable Objects, el espacio de
+`BaseCentral` de `tpv-api`, con el nombre `central`): ejecuta en el objeto de verdad, se factura como
+cualquier petición y deja rastro en los registros de auditoría de la cuenta
+([Data Studio](https://developers.cloudflare.com/durable-objects/observability/data-studio/)). **Ahí
+no pasan las guardas del objeto: sólo sentencias de filas, nunca un `PRAGMA` ni una de esquema**
+(`CREATE`, `ALTER`, `DROP`), que son de las migraciones. Un `PRAGMA` de las claves foráneas o de los
+CHECK lo corrige la siguiente llamada, que avisa a Sentry (`central.pragmas`), pero lo escrito
+entretanto ya habrá entrado. Antes de tocar nada, una copia (`pnpm central:copiar`).
 
 ## Cómo se escribe una ruta
 
@@ -419,7 +680,7 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `test/mensajesEnEspanol.test.ts`.
 - **Un error no cuenta su detalle interno** (FABLE-B): `serverError`, `unauthorized` y `forbidden`
   no aceptan detalles, y un 500 inesperado sale como `internal_error` sin más. La traza y el texto
-  de Turso quedan en el log (`wrangler tail`) y en Sentry, donde se captura el error. Los `details`
+  de SQLite quedan en el log (`wrangler tail`) y en Sentry, donde se captura el error. Los `details`
   de un `HubError` sí viajan: los escribe quien lo lanza y son parte del contrato
   (`test/sinDetalleInterno.test.ts`).
 
@@ -652,9 +913,10 @@ además `test/mainDesplazadaRest.test.ts`.
 
 ## Salud y vigilancia externa
 
-- **`/health` toca la base central** (`server/salud.ts`) y contesta 200 o 503. El cuerpo no cuenta por
-  qué falla (el error de libsql lleva la URL de la base). Caché de 30 s por isolate: la ruta es pública.
-  No toca ninguna base de tenant. Lo vigila `test/salud.test.ts`.
+- **`/health` toca la base central** (`server/salud.ts`) y contesta 200 o 503. Una central sin
+  aprovisionar, averiada o que no contesta es una base que no responde (`db: "inalcanzable"`). El
+  cuerpo no cuenta por qué: el motivo se queda en el log y en Sentry (`health.database`). Caché de
+  30 s por isolate: la ruta es pública. No toca ninguna base de tenant. Lo vigila `test/salud.test.ts`.
 - **También descifra el canario de `LICENSE_STORE_KEY`** (`canario_cifrado`, RI-73): con una clave
   equivocada contesta 503 (`cifrado: "falla"`). La fila la crea el propio `/health` la primera vez. Sin la
   tabla, `cifrado: "sin_comprobar"` y la sonda sigue en verde.
@@ -670,29 +932,182 @@ además `test/mainDesplazadaRest.test.ts`.
    eventos del código de cambio de equipo, códigos de emparejamiento caducados hace más de un día,
    que liberan su número (AUD-12), y retos de emparejamiento caducados (AUD-13). Va antes de la
    copia, para no guardar lo que se tira.
-3. **Copia de la base central a R2** (`server/copiaBaseCentral.ts`) y, sólo si se subió, su latido
-   (`BETTERSTACK_HEARTBEAT_COPIAS_URL`).
+3. **Copia de la base central a R2**: se la pide a su objeto (`centralDe(env).copiar(<día>)`,
+   [abajo](#la-copia-diaria)) y, sólo si se subió, late `BETTERSTACK_HEARTBEAT_COPIAS_URL`. Si no, a
+   Sentry (`cron.backup`). Si la copia pasa de 150.000 filas (`FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ`),
+   avisa también a Sentry: la copia vale, pero ya no se restauraría de una vez
+   ([CENTRAL-RESTAURAR](../pendientes.md#central-restaurar--la-central-se-restaura-en-una-sola-llamada)).
 4. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea
    haya fallado: responde a «¿se ejecuta el cron?». Un latido nunca propaga (`observability/latido.ts`).
 
-### La copia de la base central
+## Las copias de la base central, restaurarla y volver a un instante
 
-Es la base que no se puede perder: si el worker contesta `license_not_found`, el TPV borra su licencia
-local, así que perder `licenses` o `devices` desactivaría a todos. La copia cubre lo que el PITR de
-Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
+Es la base que no se puede perder: por ella pasan todos los negocios, y una central vacía o a medias
+contestaría `license_not_found` a todos ([arriba](#cuando-no-puede-atender)). Cloudflare puede devolver
+su objeto a cualquier instante de los últimos 30 días; eso no cubre que el objeto se pierda (un
+borrado, otro nombre, el propio proveedor) ni lo que se descubre pasado ese plazo, y para eso está la
+copia en R2, fuera del objeto. Las dos vueltas atrás son de administración (`domains/admin/central.ts`,
+`pnpm central:*`; el procedimiento, en [restaurar-la-central.md](../guias/restaurar-la-central.md)).
 
-- **Sólo lee**, en una transacción de lectura, y sale en formato `sqlite3 .dump` comprimido.
-- Va al bucket **privado** `tpv-copias-control`, nunca a `tpv-images`: lleva correos de clientes y DEK
-  cifradas.
-- La retención la pone el ciclo de vida del bucket (35 días), por debajo de los 90 de
-  `RETENCION_ENVIOS_MS`.
-- Sin `LICENSE_STORE_KEY` las DEK de la copia no se pueden descifrar: ese secreto
-  tiene que estar guardado fuera de Cloudflare.
-- ⚠️ **Restaurar cambia de base**: `turso db create <nueva> --from-db tpv-control --timestamp <RFC3339>`
-  (PITR) o `--from-dump copia.sql`, un token nuevo (`TURSO_AUTH_TOKEN`), su URL en `TURSO_DATABASE_URL`
-  de `wrangler.json` y desplegar, **deprisa**: mientras el worker apunte a una base sin esas filas, cada
-  TPV que compruebe su licencia la borra. Las licencias activadas después del punto restaurado hay que
-  rehacerlas a mano.
+### La copia diaria
+
+La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copia.ts`, PROD-02):
+
+- **Tres clases, en `base-central/`**: la del día, que pide el cron (`base-central/<AAAA-MM-DD>.sql.gz`,
+  con el día en UTC; repetirla el mismo día la reescribe); una a mano, que pide la administración
+  (`base-central/a-mano-<hora>.sql.gz`, que no pisa la del día); y la de cómo estaba antes de volver a
+  un instante (`base-central/antes-de-volver-<hora>.sql.gz`). La hora va en ISO, con guiones en vez de
+  dos puntos, para que la clave sirva de nombre de fichero también en Windows.
+- **Es una foto**: lee `sqlite_master` y todas las tablas y comprime de una pasada, sin esperas
+  (`GzipPorTrozos`, `volcadoSql.ts`, con `node:zlib`), así que ninguna escritura se intercala: la
+  copia no puede tener una licencia sin su negocio ni un dispositivo sin el suyo. Sólo la subida, que
+  ya es de lo leído, espera a R2. Lo que se paga es que, mientras lee y comprime, la central no atiende
+  a nadie.
+- **El formato es el de la copia de cada negocio** (`volcadoSql.ts`): un volcado SQL comprimido con
+  gzip que abre `gunzip -c <copia>.sql.gz | sqlite3 central.db` sin nada nuestro
+  (`test/copiaCentralSinNuestroCodigo.node.test.ts` la abre con `node:sqlite`). En la cabecera, con qué
+  migraciones se hizo (`-- Migraciones: …`), cómo abrirla y cómo devolverla; después, cada tabla con
+  su `CREATE` y sus filas, una sentencia `INSERT INTO "<tabla>" (<columnas>) VALUES (…);` por línea y
+  en el orden en que entraron; los índices al final, y la línea del fin con las filas y las tablas
+  (`-- Fin de la copia: …`). Un salto de línea dentro de un texto va como `char(10)`, y un texto con
+  más de 40, o con un NUL, en hexadecimal.
+- **Va todo lo que es de la base**, también una tabla que se cree mañana, sin tocar la copia. Fuera
+  quedan las tablas de SQLite, las del propio objeto (`_cf_*`) y `_migrations`, cuyo papel lo hace la
+  línea de las migraciones.
+- **En R2 lleva** sus metadatos (cuándo se leyó, filas, tablas y la última migración) y su SHA-256,
+  que R2 comprueba al recibirla.
+- **Bucket privado y propio**: `tpv-copias-control` (`COPIAS`), nunca `tpv-images`, que se sirve sin
+  firma: lleva los correos de los clientes y las DEK de los negocios, cifradas con
+  `LICENSE_STORE_KEY`. Sin esa clave la copia no las devuelve: se guarda fuera de Cloudflare.
+- **Cuánto se guardan lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el código, y
+  vale también para las de a mano y las de antes de volver. Tiene que quedar por debajo de los 90 días
+  de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida seguirían vivos en las copias.
+- **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`). Se monta en memoria y al cerrarla ocupa el
+  doble, dentro de los 128 MB del objeto. Pasado, falla en voz alta (`central_copia_fallida`) en vez
+  de reventar el objeto, y el latido de la copia deja de sonar.
+
+Lo cubre `test/copiaBaseCentral.test.ts`, que siembra una central con las operaciones de verdad, la
+copia, la devuelve a otro objeto y las compara tabla a tabla, con el tipo de cada valor.
+
+### Restaurar desde una copia
+
+`aprovisionar({ claveDeCopia })` (`durableObjects/baseCentral.restaurar.ts`), con el cargador que
+comparte con la base de cada negocio (`cargaDeCopias.ts`). **Sólo en un objeto sin aprovisionar**, o
+con una restauración a medias; en uno aprovisionado no toca nada (`central_ya_aprovisionada`). Una
+central con datos malos no se restaura: [vuelve a un instante](#volver-a-un-instante).
+
+- **Nada se intercala**: corre dentro de `blockConcurrencyWhile`, así que ninguna otra llamada entra
+  hasta que acaba, tampoco las guardas que reafirman las claves foráneas, que aquí van apagadas
+  mientras entran las filas.
+- **En este orden**: vacía el objeto (`deleteAll`) y pone la marca de restauración; mira que la copia
+  sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí); pone
+  ese esquema con las migraciones de la copia; ejecuta sólo sus `INSERT`, en tablas de la base (una
+  de otra tabla la hace inservible) y en lotes de unos 4 millones de caracteres por transacción; mira
+  que esté entera (su línea del fin, con las mismas filas) y que no deje ninguna clave foránea rota;
+  aplica sobre sus datos las migraciones que le falten, y quita la marca en la misma transacción que
+  da la central por buena.
+- **Si falla, como estaba**: vacía el objeto entero, marca incluida, y contesta
+  `central_copia_inservible` con el motivo (`copia_no_encontrada`, `copia_no_valida`, `copia_cortada`,
+  `copia_de_otra_version`, o que no se ha podido cargar, que va además a Sentry: `central.restaurar`).
+  El motivo dice en qué líneas y de qué tabla, nunca lo que llevan.
+- **Si el objeto se reinicia a mitad**, al arrancar la marca sigue ahí: no atiende
+  (`central_restauracion_a_medias`) ni se pone al día con sus migraciones, y la siguiente restauración
+  empieza vaciándolo.
+- **El límite son los 30 s de `blockConcurrencyWhile`**: pasados, el objeto se reinicia y la marca lo
+  deja sin atender. Medido en local con filas como las de la central, 150.000 tardan entre 11 y 16 s;
+  lo que manda son las filas, no los bytes, así que la copia admite más de lo que se restaura de una
+  vez. Por eso avisa el cron
+  ([CENTRAL-RESTAURAR](../pendientes.md#central-restaurar--la-central-se-restaura-en-una-sola-llamada)).
+- **El mismo camino carga una base que no sale de una copia**: convertida a este formato, subida a
+  `base-central/` y aprovisionada desde ahí
+  ([la guía](../guias/restaurar-la-central.md#una-base-que-no-sale-de-una-copia)).
+
+Lo cubren `test/centralRestaurar.test.ts` y `test/cargaDeCopias.test.ts`.
+
+### Volver a un instante
+
+Con la API de Cloudflare (`getBookmarkForTime`, `onNextSessionRestoreBookmark` y `ctx.abort()`), detrás
+de `Instantes` (`durableObjects/instantes.ts`), lo que comparte con la vuelta de cada negocio. Vuelve
+el objeto entero y en el sitio. Lo pide `/v1/admin/central/volver`, en dos llamadas al objeto, cada
+una con su stub:
+
+1. **`prepararVuelta`** (`baseCentral.instante.ts`), sólo con la central aprovisionada, sin avería y
+   sin una restauración a medias. Pone la marca de vuelta en curso, y desde ahí la central no atiende
+   (`central_vuelta_en_curso`): lo que se escribiera no estaría en la copia de antes y se perdería al
+   volver. Saca el marcador del instante antes de copiar nada (si la plataforma no vuelve o el instante
+   no vale, no hay copia inútil), deja en R2 la copia de cómo está (`antes-de-volver-<hora>`) y la
+   vuelta preparada para el siguiente arranque, y devuelve el marcador con el que se deshace. Si algo
+   falla antes de dejarla preparada, quita su marca, o vuelve a poner la de una vuelta anterior que
+   siguiera preparada, y la central vuelve a atender.
+2. **`reiniciar`**: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto
+   vuelve.
+
+- **Al arrancar, la marca de una vuelta se quita**: la vuelta se aplica en el arranque, sea cual sea
+  su causa, y lo que queda de la marca es de antes. Así, deshacer una vuelta (volver a su marcador,
+  que es el estado de justo antes de reiniciar, con la marca puesta) no deja la central cerrada.
+- **La ruta espera a que conteste** (diez veces, cada medio segundo) y, si sigue con la vuelta sin
+  aplicar, la reinicia otra vez. Una central que ha vuelto pero no atiende (una migración que no
+  entra) no se da por buena.
+- Sólo a un instante pasado de los últimos 30 días (`central_instante_fuera_de_plazo`). No existe en
+  local ni en los tests (`central_vuelta_no_disponible`): se prueba con un doble de `Instantes`
+  (`test/centralVolver.test.ts`, `test/centralAdmin.test.ts`).
+
+### Las rutas de administración de la central
+
+Van detrás de `requireAdmin` (`ADMIN_API_TOKEN`), que no lee la central: todas contestan también con
+ella sin aprovisionar.
+
+| Ruta | Qué hace | CLI |
+|---|---|---|
+| `GET /v1/admin/central/estado` | Si está aprovisionada, sus migraciones, su avería, lo que tiene a medias (`enCurso`), las filas de cada tabla y lo que ocupa. Sólo lee | `pnpm central:estado` |
+| `GET /v1/admin/central/copias` | Sus copias en R2, de la más reciente a la más vieja, con sus metadatos (100 como mucho, y `hayMas`) | `pnpm central:copias` |
+| `POST /v1/admin/central/copiar-ahora` | Una copia ahora, con la hora en la clave | `pnpm central:copiar` |
+| `POST /v1/admin/central/aprovisionar`, `{ claveDeCopia? }` | A un objeto sin aprovisionar: el esquema vacío o, con la clave, esa copia. La clave se valida antes de llegar al objeto: dentro de `base-central/`, un `.sql.gz` y sin `..` | `pnpm central:aprovisionar -- [--copia <clave>] --si` |
+| `POST /v1/admin/central/volver`, `{ instanteMs }` o `{ marcador }` | A un instante o a un marcador | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m>) --si` |
+
+- **Lo que no se hace contesta `{ ok: false, error, message, detalle? }`** con el estado HTTP de su
+  código ([abajo](#los-códigos-de-la-central)): `error` es el código; `message`, qué pasa y qué hacer
+  (`QUE_PASA`, en `central.ts`); y `detalle`, si el objeto lo da, el motivo técnico, que el CLI enseña
+  aparte («Motivo: …»). Al volver lleva además `deshacer` y `copiaDeAntes` aunque no haya salido
+  entera, y el CLI escribe la orden que la deshace.
+- **El rastro**: lo que cambia algo (copiar, aprovisionar o restaurar, volver) deja una línea en el
+  log (`[central] {…}`) y el evento `central_administrada` en Axiom, con la acción, el resultado y,
+  según el caso, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer y la
+  copia de antes: nunca datos personales. No va a `admin_audit`, que es una tabla de la propia
+  central: restaurarla o devolverla a un instante la reescriben. Al volver se deja dos veces: con
+  `resultado: "preparada"` en cuanto la vuelta está preparada, antes de reiniciar (si la llamada no
+  termina, es lo que queda de con qué se deshace), y con el resultado al final.
+
+### Los códigos de la central
+
+Los contesta el objeto (`CodigoDeLaCentral`, `baseCentral.rpc.ts`), salvo los dos últimos, que son de
+la ruta que vuelve a un instante. Su estado HTTP lo fija `server/central/cliente.ts`.
+
+| Código | HTTP | Cuándo |
+|---|---|---|
+| `central_sin_aprovisionar` | 503 | El objeto no tiene esquema: nadie lo ha aprovisionado, o se le ha pedido con otro nombre |
+| `central_operacion_desconocida` | 503 | Una operación que este objeto no conoce: un despliegue a medias |
+| `central_migracion_alterada` | 503 | Una migración ya aplicada ha cambiado |
+| `central_migracion_fallida` | 503 | Una migración no ha podido aplicarse |
+| `central_restauracion_a_medias` | 503 | Una restauración que no terminó: hasta que otra la vacíe y termine |
+| `central_vuelta_en_curso` | 503 | Una vuelta a un instante preparada y sin aplicar: hasta que el objeto se reinicie |
+| `central_error_sql` | 500 | Una sentencia ha fallado (una restricción, una columna que no existe): no ha escrito nada |
+| `central_operacion_fallida` | 500 | Una operación ha lanzado: no ha escrito nada |
+| `central_sentencia_prohibida` | 500 | Una sentencia que la central no ejecuta: un fallo del programa |
+| `central_copia_fallida` | 500 | La copia no ha llegado a R2 (R2, el techo, un día mal escrito): no ha subido nada |
+| `central_ya_aprovisionada` | 409 | `aprovisionar` en un objeto con esquema: no ha tocado nada |
+| `central_copia_inservible` | 422 | La copia no se puede restaurar: el objeto se queda sin aprovisionar, como estaba |
+| `central_instante_fuera_de_plazo` | 400 | Un instante del futuro o de hace más de 30 días |
+| `central_vuelta_no_disponible` | 501 | La plataforma no devuelve objetos a un instante (en local) |
+| `central_vuelta_sin_aplicar` | 503 | La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada: se repite la orden |
+| `central_vuelta_sin_comprobar` | 503 | La central se ha reiniciado pero todavía no contesta: se mira cómo está |
+
+- **Los seis primeros son «no puede atender»**: a una ruta que no es de administración le llegan como
+  el 503 `hub_unavailable` ([arriba](#cuando-no-puede-atender)), y su código queda como el `motivo` de
+  `central_no_disponible` en Axiom. Una ruta de administración los contesta con su código y su frase.
+- **Los de 500** siguen el camino de cualquier error: la respuesta lleva el código y `code: internal`,
+  y el detalle (el texto de SQLite, el motivo) sólo va al log y a Sentry.
+- Todos están en `SIN_MENSAJE_PROPIO` (`lib/errorCodes.ts`): nadie se los enseña a quien usa el TPV.
 
 ## Las copias de la base de cada negocio (DO-03)
 
@@ -735,7 +1150,8 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
 
 **La vuelta a un instante** (`durableObjects/tenantHub.instante.ts`), con la API de Cloudflare
 (`getBookmarkForTime`, `onNextSessionRestoreBookmark` y `ctx.abort()`,
-[sqlite-storage-api](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#pitr-point-in-time-recovery-api)):
+[sqlite-storage-api](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#pitr-point-in-time-recovery-api)),
+detrás de `Instantes` (`durableObjects/instantes.ts`), que comparte con la base central:
 
 - **Tres llamadas desde la ruta**, cada una con un stub nuevo: `prepararVuelta` (lee lo que la nube
   había numerado, deja la vuelta para el siguiente arranque, cierra la base con una marca en el
@@ -870,9 +1286,9 @@ Los tests corren dentro de workerd (`@cloudflare/vitest-pool-workers`) y toman d
 bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.ts`):
 
 - **El entorno es de pruebas** (`test/helpers/entornoDePruebas.ts`). Las `vars` que nombran un
-  servicio o una cuenta —la base central, los remitentes, Turnstile, el origen de las reservas web,
-  Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos que la suite necesita
-  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; la pista de región de los DO, vacía;
+  servicio o una cuenta —los remitentes, Turnstile, el origen de las reservas web, Axiom— valen
+  direcciones `.invalid` y nombres ficticios. El secreto que la suite necesita (`LICENSE_JWT_SECRET`)
+  es determinista; la pista de región de los DO, vacía;
   los demás van vacíos, que el worker trata como sin configurar, y el test que
   necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
   carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
@@ -886,8 +1302,8 @@ bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.t
   https://host`: el método y el origen, nunca la ruta ni la consulta, que es donde viajan los
   secretos (la URL de un latido lo es entera). Al terminar, el test falla con la lista de lo que
   intentó, aunque el código se haya tragado el error (un envío a Axiom o un latido no propagan su
-  fallo). La guarda se pone antes de cargar el worker: el cliente de libsql se guarda el
-  `WebSocket` al cargarse.
+  fallo). La guarda se pone antes de cargar el worker, para que nada de lo que se cargue se quede
+  con el `fetch` o el `WebSocket` de verdad.
 - **Detrás, el worker de pruebas no tiene por dónde salir**: `outboundService` manda todo lo que
   sale de él, también lo que no pase por el `fetch` global, a un worker auxiliar que lo corta, lo
   apunta y contesta 599 con el mismo texto; la guarda recoge lo apuntado al terminar cada test, así
@@ -919,18 +1335,21 @@ no lo vigila nada.
 
 | Lo que se llama | Doble |
 |---|---|
-| La base central, desde una ruta, un helper o el `TenantHub` | No lleva doble: cada caso pide su objeto `BaseCentral` de verdad, aprovisionado con sus migraciones (`centralDePrueba()`, `helpers/central.ts`). Una ruta llega a él por su `env` (`{ ...env, ...central.entorno }`); una función que recibe la base, por `central.db`; el `TenantHub`, con `enElHub(…, { central })` o `ponerLaCentral` (`helpers/hub.ts`). Lo que el test siembra o comprueba va por debajo de sus guardas (`filasDe`), y un fallo o un cruce que haya que provocar, en su stub (`centralInterceptada`, `centralQueApunta`, `desvio`, `conFalloEnLasOperaciones`) |
+| La base central, desde una ruta, un helper o el `TenantHub` | No lleva doble: cada caso pide su objeto `BaseCentral` de verdad, aprovisionado con sus migraciones, con `centralDePrueba()` (`helpers/central.ts`), que le da un nombre que no ha usado nadie: una base nueva y vacía, que no ve lo que siembra otro caso, corran en el orden que corran (`centralSinAprovisionar()`, la misma sin esquema). Una ruta llega a ella como en producción, por `getDb(env)`, con `{ ...env, ...central.entorno }`; una función que recibe la base, por `central.db`; el `TenantHub`, con `enElHub(…, { central })` o `ponerLaCentral` (`helpers/hub.ts`). Lo que el test siembra o comprueba va directo al SQLite del objeto, por debajo de sus guardas (`filasDe`, `fotoDeLaCentral`, `negocioEnLaCentral`). Un fallo o un cruce que haya que provocar va en su stub, nunca en un doble de la base (`centralInterceptada`, `centralQueApunta`, `desvio`, `conFalloEnLasOperaciones`, `operarConFallo`); un R2 que falla, dentro del objeto (`conCopiasDentro`, `conR2Caido`); la vuelta a un instante, que en local no existe, con `conDobleDeInstantes` |
 | El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`): `helpers/negocioFirmado.ts` monta el negocio y firma las peticiones de la Main y de la Handy (`pedirComo`) |
 | La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con el cliente de producción, `clienteLocal(state.storage)` (`tenantHub.sqlite.ts`), sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con `clienteLocal` o un envoltorio suyo |
 | Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |
 
+Cada fichero de tests corre en su propio workerd, con sus objetos en memoria: dos ficheros no comparten
+nada. Los casos de un mismo fichero sí comparten los objetos que pidan con el mismo nombre, también la
+central de `centralDe(env)`; por eso cada caso pide la suya.
+
 ## Secretos
 
 Van con `pnpm exec wrangler secret put <NOMBRE>` desde `apps/cloud-worker-licensing/`, nunca en
 `wrangler.json`. Los de licencias están en [licencias.md](licencias.md#secretos-del-worker); además:
-`TURSO_AUTH_TOKEN` (base central), `PAIR_PEPPER`,
-`RELEASE_ADMIN_TOKEN` (publicar releases), `SENTRY_DSN`, `AXIOM_TOKEN`,
+`PAIR_PEPPER`, `RELEASE_ADMIN_TOKEN` (publicar releases), `SENTRY_DSN`, `AXIOM_TOKEN`,
 `BETTERSTACK_HEARTBEAT_URL`, `BETTERSTACK_HEARTBEAT_COPIAS_URL` y, opcional, `HANDY_TOKEN_TTL_SECONDS`.
 Una ruta que depende de un secreto ausente responde 503 o 500 (fail-closed).
 
@@ -942,6 +1361,13 @@ bytes. Los tags `win7-v<versión>` publican únicamente el escritorio de Windows
 
 El worker lleva el esquema del negocio compilado dentro: **con un cambio de esquema, se despliega antes
 de que los TPV escriban la columna nueva**, o la primera escritura se rechaza. Desplegar reinicia los DO,
-y cada uno migra su base la primera vez que la toca. Y cualquier tabla o
-columna nueva de la base central se crea a mano en Turso antes. Más en
+y cada uno migra su base la primera vez que la toca; la central, al arrancar. Una migración nueva de
+la base central va en un despliegue **anterior** al del código que la usa
+([su esquema](#su-esquema-migraciones-en-código)). Más en
 [publicar-version.md](../guias/publicar-version.md).
+
+Desde el despliegue que creó la clase `BaseCentral` (la migración `v3` de `wrangler.json`),
+`wrangler rollback` no puede volver a una versión anterior a él: un cambio en el ciclo de vida de una
+clase de Durable Object lo bloquea
+([rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/)).
+Lo que falle se arregla hacia delante.
