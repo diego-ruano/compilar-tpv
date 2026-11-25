@@ -36,7 +36,9 @@ y la Main aprueba.
 3. La Main ve la solicitud (`/pending`) y la aprueba o la rechaza.
 4. La Handy pregunta por el token (`/fetch-token`) firmando el reto con su clave y la acción
    `PAIR_FETCH`. **El dispositivo se da de alta en `devices` al recoger el token**, no al aprobar, y es
-   entonces cuando la Main recibe el aviso.
+   entonces cuando la Main recibe el aviso. Pregunta cada 1,5 s mientras le contesten `not_approved`,
+   hasta que caduca el código; cualquier otro fallo termina la espera, también un 503 o un 429
+   pasajeros ([EMPAREJAR-ESPERA](../pendientes.md#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429)).
 5. Cancelar en la Handy (`/v1/pair/cancel`, acción `PAIR_CANCEL`) suelta el código en la nube, para que
    la solicitud no siga en la lista de la Main. Lo ya aprobado no se deshace cancelando: eso es revocar.
 6. Si la Handy se cierra o se reinicia esperando, nadie pulsa «Cancelar»: mientras espera, apunta la

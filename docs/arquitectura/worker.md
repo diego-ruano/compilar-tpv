@@ -751,7 +751,8 @@ id en `email_sends`, y el id y el cupo se reservan en una sola sentencia antes d
 no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se puede repetir. Un correo
 puede exigir que otro haya salido (o esté saliendo) antes (`trasElCorreo`, en la misma sentencia):
 el «has cancelado» sólo sale tras la confirmación de esa reserva (o si se cancela con el enlace
-del correo de un cambio del restaurante), y si no, no gasta cupo (RW-ALTAS). Sin la base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
+del correo de un cambio del restaurante), y si no, no gasta cupo (RW-ALTAS). Sin la base central no se envía (no se sabría si ya salió), y el de la confirmación y el de «has
+cancelado» no los repite nadie ([RESERVA-CORREOS](../pendientes.md#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada)). Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al

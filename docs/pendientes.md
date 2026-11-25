@@ -27,7 +27,9 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
+| [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
+| [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
@@ -393,6 +395,18 @@ falla el alta, el reto y el código ya están gastados y hay que emparejar otra 
 respuesta, queda un dispositivo dado de alta que no tiene su token. Arreglo posible: las tres en un
 lote todo o nada, con la condición de cada una dentro de su sentencia, como ya van.
 
+### EMPAREJAR-ESPERA · La Handy deja de esperar la aprobación al primer 503 o 429
+
+Mientras espera a que la Main la apruebe, la Handy pregunta por su token cada 1,5 s
+(`emparejamiento.ts::emparejarHandy`, `/v1/pair/fetch-token`), y sólo sigue esperando con
+`not_approved`. Cualquier otro fallo termina la espera, también lo que no es definitivo: un 503 de la
+central o del worker que no atienden, o un 429 del filtro por IP (`LIMITADOR_SESION`). La pantalla
+enseña el error y vuelve a la vinculación (`useEmparejamientoHandy.ts::iniciar`), y quien empareja
+tiene que volver a vincular a mano (el mismo código vale mientras no caduque). Arreglo posible: seguir
+esperando ante lo que no es terminal, hasta el límite de siempre, y que `pair_rejected` y
+`pair_code_expired`, que hoy llegan como `External`, tengan su código propio, para terminar sólo con
+ellos.
+
 ### CUPO-SATURADA · El cupo diario de correo no se aplica con la central saturada
 
 El correo de un pedido sale aunque la central no conteste (`email.routes.ts::reservarCupo`,
@@ -401,6 +415,18 @@ El correo de un pedido sale aunque la central no conteste (`email.routes.ts::res
 mientras dure, sus pedidos salen sin contar en el cupo. Lo fija `test/correoTopeDiario.test.ts` («con
 la central saturada, también…»). Lo decide el responsable: contestar 503 con la central saturada
 (el pedido se repite después), o dejarlo así.
+
+### RESERVA-CORREOS · Los correos de una reserva web que se pierden con la central saturada
+
+El correo de confirmación de una reserva web (con el enlace de cancelar) y el de «has cancelado»
+salen de la petición del visitante (`publico.routes.ts`, `POST /reservas` y `POST /cancelar`), y
+antes reservan su sitio en `email_sends`, en la base central (`correos.ts::reservar`). Si la central
+no atiende (saturada, o sin contestar), el correo no sale (`fallido`: sin la base no se sabe si ya
+salió) y nadie lo repite: la reserva queda hecha, o cancelada, sin que el cliente reciba el correo ni,
+en el alta, el enlace para cancelarla, que sólo viaja en él. El alta lo dice en su respuesta
+(`correo_enviado: false`). Arreglo posible: apuntar el correo pendiente en la `AgendaWeb`, para que lo
+reintente su alarma como ya hace con el de «no se pudo registrar», y guardar para ello el enlace, o
+el token cifrado.
 
 ### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
 
@@ -419,10 +445,12 @@ marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
 ### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
 
 `MAX_MENSAJE` (`tenantHub.mensajes.ts`) es de 4 MiB: un mensaje mayor de la Main se rechaza
-(`payload_too_large`) antes de leerlo. Una operación va sola en su lote aunque sea grande, y el SQLite
-de un objeto admite en producción valores y filas de hasta 8 MB
-([worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)): una operación cuyo
-mensaje pasa de 4 MiB por un valor que la base admite se rechaza, y la Main la aparta. Lo decide el
+(`payload_too_large`) antes de leerlo, sin llegar a la base. Una operación va sola en su lote aunque
+sea grande, y el SQLite de un objeto admite en producción filas de hasta 8 MiB y 34 bytes
+(`MAX_ROW_LENGTH` de workerd; [worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)):
+una operación cuyo mensaje pasa de 4 MiB por un valor que la base admite se rechaza, y la Main la
+aparta. En el workerd local de las pruebas el tope de un valor es algo más de 2 MiB
+(`test/sondaSqliteDo.test.ts`), así que eso sólo se ve en producción. Lo decide el
 responsable: subir el tope (antes, mirar en la página de límites de Cloudflare el de un mensaje de
 WebSocket que recibe un Durable Object), o dejarlo.
 
