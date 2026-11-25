@@ -619,9 +619,6 @@ impl InventarioRepository for SqliteInventarioRepository {
         .await
     }
 
-    async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
-        self.guardar_producto(actor, p, true, true).await
-    }
     async fn upsert_producto_autorizado(&self, actor: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
         self.guardar_producto(actor, p, precios, recibir).await
     }
@@ -1717,7 +1714,7 @@ mod tests_alta_del_suelto {
     /// Guarda la ficha de `hielo` con su stock suelto y devuelve lo que replica esa escritura.
     async fn guardar_hielo(db: &Arc<Db>, stock: f64, op_id: &str, seq: i64) -> SyncChange {
         SqliteInventarioRepository::new(db.clone())
-            .upsert_producto(
+            .upsert_producto_autorizado(
                 "autor",
                 ProductoUpsert {
                     id: Some("hielo".into()),
@@ -1735,6 +1732,8 @@ mod tests_alta_del_suelto {
                     ids_alergenos: vec![],
                     ids_ingredientes: None,
                 },
+                true,
+                true,
             )
             .await
             .unwrap();

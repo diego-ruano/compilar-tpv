@@ -261,13 +261,13 @@ mod tests {
         repo.guardar_ingrediente(ingr("i2", "pan", "Integral")).await.unwrap();
 
         // Uno que no existe (borrado con la ficha abierta) no rompe el guardado.
-        repo.upsert_producto("u", producto(Some(vec!["i2", "i1", "fantasma"]))).await.unwrap();
+        repo.upsert_producto_autorizado("u", producto(Some(vec!["i2", "i1", "fantasma"])), true, true).await.unwrap();
         assert_eq!(repo.ingredientes_de_producto("burger").await.unwrap(), vec!["i1", "i2"]);
 
-        repo.upsert_producto("u", producto(None)).await.unwrap();
+        repo.upsert_producto_autorizado("u", producto(None), true, true).await.unwrap();
         assert_eq!(repo.ingredientes_de_producto("burger").await.unwrap(), vec!["i1", "i2"]);
 
-        repo.upsert_producto("u", producto(Some(vec![]))).await.unwrap();
+        repo.upsert_producto_autorizado("u", producto(Some(vec![])), true, true).await.unwrap();
         assert!(repo.ingredientes_de_producto("burger").await.unwrap().is_empty());
     }
 
@@ -279,7 +279,7 @@ mod tests {
         repo.guardar_categoria_ingrediente(cat("salsas", "Salsas")).await.unwrap();
         repo.guardar_ingrediente(ingr("i1", "pan", "Brioche")).await.unwrap();
         repo.guardar_ingrediente(ingr("i2", "salsas", "Ketchup")).await.unwrap();
-        repo.upsert_producto("u", producto(Some(vec!["i1", "i2"]))).await.unwrap();
+        repo.upsert_producto_autorizado("u", producto(Some(vec!["i1", "i2"])), true, true).await.unwrap();
 
         repo.borrar_categoria_ingrediente("pan").await.unwrap();
         assert_eq!(repo.ingredientes_de_producto("burger").await.unwrap(), vec!["i2"]);

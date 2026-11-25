@@ -584,7 +584,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "inventario.upsert_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());
-            repo.upsert_producto(&s(&e["id_usuario"]), ProductoUpsert {
+            repo.upsert_producto_autorizado(&s(&e["id_usuario"]), ProductoUpsert {
                 id: opt_str(&e["id_producto"]),
                 id_categoria: s(&e["id_categoria"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
@@ -599,7 +599,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 iva_percent: e["iva_percent"].as_f64(),
                 ids_alergenos: strings(&e["ids_alergenos"]),
                 ids_ingredientes: e.get("ids_ingredientes").filter(|v| !v.is_null()).map(strings),
-            })
+            }, true, true)
             .await
             .expect("upsert producto");
         }

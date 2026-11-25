@@ -186,9 +186,6 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
-        self.guardar_producto(actor,p,true,true).await
-    }
     async fn upsert_producto_autorizado(&self, actor: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
         self.guardar_producto(actor,p,precios,recibir).await
     }
