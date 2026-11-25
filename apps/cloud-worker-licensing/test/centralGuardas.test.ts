@@ -13,7 +13,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Migracion } from "../src/durableObjects/sqliteDelObjeto";
-import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
+import { centralDePrueba, centralSinAprovisionar, codigoDe, tablasPropias } from "./helpers/central";
 
 const { deMas, capturados } = vi.hoisted(() => ({
 	/** Las migraciones de la central que «trae el despliegue», detrás de las de verdad. */
@@ -44,7 +44,6 @@ vi.mock("../src/observability/errors", async (importOriginal) => {
 });
 
 const { BaseCentral } = await import("../src/durableObjects/baseCentral");
-const { ErrorDeLaCentral } = await import("../src/server/central/cliente");
 const { centralDe } = await import("../src/lib/objetosDelNegocio");
 
 afterEach(() => {
@@ -52,31 +51,11 @@ afterEach(() => {
 	capturados.length = 0;
 });
 
-/** Las tablas que ha creado alguien, sin las de SQLite ni las del propio Durable Object. */
-const tablasPropias = (sql: SqlStorage): string[] =>
-	sql
-		.exec(
-			`SELECT name FROM sqlite_master WHERE type = 'table'
-			   AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name;`,
-		)
-		.toArray()
-		.map((r: any) => String(r.name));
-
 const pragma = (sql: SqlStorage, nombre: string): number =>
 	Number((sql.exec(`PRAGMA ${nombre};`).toArray()[0] as any)?.[nombre]);
 
 /** La misma base, arrancada otra vez: lo que haría el objeto tras un despliegue o al despertar. */
 const otraVez = (state: DurableObjectState) => new BaseCentral(state, env as any);
-
-/** El código con el que la central ha dicho que no a `promesa`. */
-async function codigoDe(promesa: Promise<unknown>): Promise<string> {
-	const error = await promesa.then(
-		() => null,
-		(e) => e,
-	);
-	expect(error).toBeInstanceOf(ErrorDeLaCentral);
-	return (error as InstanceType<typeof ErrorDeLaCentral>).code;
-}
 
 describe("sin aprovisionar", () => {
 	it("no atiende nada, y no crea nada", async () => {
@@ -90,7 +69,14 @@ describe("sin aprovisionar", () => {
 		expect(await stub.copiar("2026-01-01")).toEqual({ ok: false, error: "central_sin_aprovisionar" });
 		expect(await codigoDe(db.execute("CREATE TABLE tenants (tenant_id TEXT);"))).toBe("central_sentencia_prohibida");
 
-		expect(await stub.estado()).toEqual({ aprovisionada: false, migraciones: [], averia: null });
+		expect(await stub.estado()).toEqual({
+			aprovisionada: false,
+			migraciones: [],
+			averia: null,
+			enCurso: { restauracion: null, vuelta: null },
+			filas: {},
+			bytes: expect.any(Number),
+		});
 		expect(await runInDurableObject(stub, (_c, state) => tablasPropias(state.storage.sql))).toEqual([]);
 	});
 
@@ -341,7 +327,7 @@ describe("el objeto de producción", () => {
 describe("el prototipo RPC", () => {
 	it("sólo tiene sus métodos: lo demás vive en funciones de módulo", () => {
 		expect(Object.getOwnPropertyNames(BaseCentral.prototype).sort()).toEqual(
-			["constructor", "ejecutar", "lote", "operar", "copiar", "estado", "aprovisionar"].sort(),
+			["constructor", "ejecutar", "lote", "operar", "copiar", "estado", "aprovisionar", "prepararVuelta", "reiniciar"].sort(),
 		);
 	});
 });

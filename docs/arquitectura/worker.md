@@ -709,8 +709,10 @@ La base de un negocio tiene dos vueltas atrás, y las dos se piden desde la admi
 - **Sólo las tablas del negocio** (`esTablaDeNegocio`): ni las que empiezan por `_`, ni el log de la
   réplica, ni los intentos de PIN, ni vistas ni disparadores.
 - **Un volcado SQL comprimido**, legible sin nuestro código (`gunzip -c | sqlite3`), con una
-  sentencia de datos por línea (un salto de línea dentro de un texto va como `char(10)`), las
-  migraciones de la base en la cabecera y una línea de fin con las filas.
+  sentencia de datos por línea (un salto de línea dentro de un texto va como `char(10)`, y un texto
+  con más de 40, en hexadecimal: el SQLite de un objeto no admite una expresión de más de 100
+  niveles, y cada salto son dos), las migraciones de la base en la cabecera y una línea de fin con
+  las filas. Es el formato de la copia de la base central (`volcadoSql.ts`).
 - **Bucket propio y privado**: `tpv-copias-negocios` (`COPIAS_NEGOCIOS`),
   `negocios/<negocio>/<AAAA-MM-DD>.sql.gz`. No es el de la base central: lleva los datos personales
   de los clientes de cada bar, un token de R2 que lea uno no lee el otro, y la retención es otra.
@@ -760,12 +762,16 @@ lo que la activación y `/v1/sync/initialize-empty` no hacen con un negocio que 
 sabiendas por soporte. Las dos rutas miran en la base central que el negocio nació
 (`negocio_sin_nacer`, 409), y el objeto, que está vacío (`tenant_db_already_provisioned`, 409).
 
-- **`restaurarDesdeCopia`** (`durableObjects/tenantHub.restaurar.ts`) lee la copia de R2 según llega,
+- **`restaurarDesdeCopia`** (`durableObjects/tenantHub.restaurar.ts`, con el cargador que comparte con
+  la base central, `cargaDeCopias.ts`) lee la copia de R2 según llega,
   descomprimida y por líneas, sin tenerla entera en memoria. Antes de tocar nada mira que la copia
   sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí; si no,
   `copia_de_otra_version`); pone el esquema con las migraciones de aquí, vacía lo que siembran y
-  ejecuta sólo los `INSERT` de la copia en tablas del negocio, de 500 en 500 por transacción y con
-  las claves foráneas apagadas (la copia va tabla a tabla, no padres primero). Al acabar mira que esté
+  ejecuta sólo los `INSERT` de la copia en tablas del negocio, en lotes de unos 4 millones de
+  caracteres por transacción (varias líneas por llamada; una que no quepa en los 100 KB de una
+  llamada, o con más saltos escritos con `char(10)` de los que caben en una expresión, sola y con sus
+  textos como argumentos) y con las claves foráneas apagadas (la copia va
+  tabla a tabla, no padres primero). Al acabar mira que esté
   entera (su línea de fin, con las mismas filas; si no, `copia_cortada`) y `foreign_key_check`
   (`copia_no_valida`). Los disparadores saltan al cargar: los de validación aceptan lo que ya
   aceptaron, y los del resumen diario sólo apuntan días.

@@ -232,7 +232,10 @@ describe("DO-03 · la copia diaria", () => {
 	it("cada valor cabe en una línea y SQLite lo lee igual", async () => {
 		await enElHub("copia-literales", (hub: any) => {
 			const sql = hub.state.storage.sql;
-			const valores = ["a'b\nc\r\nd", "con\0nulo", 12.5, -3, null, new Uint8Array([0, 255, 16]).buffer, ""];
+			// Con muchos saltos de línea, cada uno es un nivel más en la expresión escrita con `char(10)`, y
+			// el SQLite de un objeto no admite más de 100 (con 50 saltos ya no la ejecuta).
+			const conSaltos = [40, 41, 49, 50, 120, 200, 201].map((n) => "línea\n".repeat(n - 1) + "y\r\nfin");
+			const valores = ["a'b\nc\r\nd", "con\0nulo", 12.5, -3, null, new Uint8Array([0, 255, 16]).buffer, "", ...conSaltos];
 			for (const v of valores) {
 				const lit = literalEnUnaLinea(v);
 				expect(lit).not.toMatch(/[\r\n]/);

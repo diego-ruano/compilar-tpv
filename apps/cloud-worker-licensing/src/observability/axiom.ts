@@ -248,6 +248,45 @@ export function reportarCentralNoDisponible(
 	}
 }
 
+/**
+ * Lo que la administración hace con la base central (`domains/admin/central.ts`): copiarla, darle
+ * esquema o restaurarla, y devolverla a un instante. No va en `admin_audit`, que es una tabla de la
+ * propia central: restaurarla o devolverla a un instante la reescriben. Sin datos personales: la
+ * acción, la clave de la copia, las filas, los marcadores y el resultado.
+ */
+export function reportarAdministracionDeLaCentral(
+	env: Env,
+	campos: {
+		accion: "copiar" | "aprovisionar" | "restaurar" | "volver";
+		/**
+		 * `ok`, o el código con el que no se ha hecho. Al volver, antes de reiniciar, `preparada`: si la
+		 * llamada no termina, es lo que queda de con qué se deshace.
+		 */
+		resultado: string;
+		clave?: string;
+		filas?: number;
+		tablas?: number;
+		/** Al volver: el instante (ISO) o el marcador al que se vuelve, y con qué se deshace. */
+		destino?: string;
+		deshacer?: string;
+		copiaDeAntes?: string;
+		/** Por qué no se ha hecho, si lo dice el objeto. */
+		detalle?: string;
+	},
+): Promise<unknown> {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
+
+	try {
+		return ingestToAxiom(env, dataset, [
+			{ _time: new Date().toISOString(), service: "tpv-api", event: "central_administrada", ...campos },
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+		return Promise.resolve();
+	}
+}
+
 /** Los eventos de la reserva desde la web (docs/estudios/reservas-web.md §9). */
 type EventoReservaWeb =
 	| "reserva_web_alta"

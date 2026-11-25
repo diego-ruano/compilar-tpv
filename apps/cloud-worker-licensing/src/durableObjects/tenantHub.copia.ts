@@ -21,10 +21,10 @@
 //     `Applied_Operations`, `Sync_Main_Checkpoints`), ni el freno del PIN. Del log sólo va hasta
 //     dónde numeró (`seq`, en los metadatos del objeto de R2): sobrevive a perder el objeto, y es con
 //     lo que se abre por encima el log de una base devuelta (DO-PERDIDA, `seqDeLasCopias`).
-//   · **Legible sin nuestro código**: es un volcado SQL comprimido con gzip, como el de la base
-//     central (`baseCentral.copia.ts`). `gunzip -c copia.sql.gz | sqlite3 copia.db` la abre.
-//     Cada sentencia de datos va en una línea (un salto de línea dentro de un texto se escribe como
-//     `char(10)`), y es lo que permite restaurarla leyéndola por líneas (`cargarCopia`).
+//   · **Legible sin nuestro código**: es un volcado SQL comprimido con gzip, con el formato de la
+//     copia de la base central (`volcadoSql.ts`). `gunzip -c copia.sql.gz | sqlite3 copia.db` la abre.
+//     Cada sentencia de datos va en una línea (`literalEnUnaLinea`), y es lo que permite restaurarla
+//     leyéndola por líneas (`cargaDeCopias.ts`).
 //   · **Datos personales**: clientes, personal, reservas. El bucket es privado y no es el de las
 //     imágenes, y nada de la copia sale en un log: las trazas llevan la clave, las filas y los bytes.
 //   · **Cuántas se guardan lo decide este código** (`COPIAS_QUE_SE_GUARDAN`), no una regla de ciclo
@@ -33,7 +33,7 @@
 
 import { esTablaDeNegocio } from "../domains/sync/bootstrap.ventana";
 import { seqMasAlto } from "./tenantHub.instante";
-import { GzipPorTrozos, identificador, literalEnUnaLinea } from "./volcadoSql";
+import { empezarVolcado, GzipPorTrozos, terminarVolcado, volcarFilas } from "./volcadoSql";
 
 /** Dónde caen las copias de los negocios dentro de su bucket: `negocios/<negocio>/<día>.sql.gz`. */
 export const PREFIJO_COPIAS_NEGOCIOS = "negocios/";
@@ -54,13 +54,6 @@ export const COPIAS_QUE_SE_GUARDAN = 30;
  * que se acerque, lo que toca es archivar lo antiguo (DB-14).
  */
 export const TOPE_COMPRIMIDO = 32 * 1024 * 1024;
-
-/** La primera línea de los datos de cada tabla. Es lo único que se ejecuta al restaurar. */
-export const PRINCIPIO_DE_INSERT = 'INSERT INTO "';
-/** La línea que dice con qué migraciones se hizo la copia. */
-export const LINEA_MIGRACIONES = "-- Migraciones: ";
-/** La línea del final: sin ella, la copia está cortada. */
-export const LINEA_FIN = "-- Fin de la copia: ";
 
 /** El prefijo de las copias de un negocio. Acaba en `/`: no es el principio del de otro. */
 export function prefijoDeCopias(tenantId: string): string {
@@ -111,42 +104,30 @@ export function volcarNegocio(
 	const tablas = esquema.filter((o) => o.type === "table" && esTablaDeNegocio(o.name));
 	const indices = esquema.filter((o) => o.type === "index" && esTablaDeNegocio(o.tbl_name));
 
-	gz.linea(`-- Copia de la base del negocio ${opciones.tenantId} (tpv-api, DO-03).`);
-	gz.linea(`-- Generada: ${opciones.ahora.toISOString()}`);
-	gz.linea(`${LINEA_MIGRACIONES}${migraciones.join(",")}`);
-	gz.linea("-- Sólo las tablas del negocio: sin las que empiezan por _, sin el log de sincronización ni");
-	gz.linea("-- los intentos de PIN. Sin vistas ni disparadores, que son del esquema (las migraciones).");
-	gz.linea("-- Abrirla: gunzip -c <copia>.sql.gz | sqlite3 copia.db");
-	gz.linea("-- Devolverla a su TenantHub: docs/guias/restaurar-un-negocio.md");
-	gz.linea("PRAGMA foreign_keys=OFF;");
-	gz.linea("BEGIN TRANSACTION;");
+	empezarVolcado(gz, {
+		titulo: `Copia de la base del negocio ${opciones.tenantId} (tpv-api, DO-03).`,
+		ahora: opciones.ahora,
+		migraciones,
+		notas: [
+			"Sólo las tablas del negocio: sin las que empiezan por _, sin el log de sincronización ni",
+			"los intentos de PIN. Sin vistas ni disparadores, que son del esquema (las migraciones).",
+			"Abrirla: gunzip -c <copia>.sql.gz | sqlite3 copia.db",
+			"Devolverla a su TenantHub: docs/guias/restaurar-un-negocio.md",
+		],
+	});
 	for (const t of tablas) gz.linea(`${t.sql};`);
 
 	let filas = 0;
-	for (const t of tablas) filas += volcarFilas(sql, t.name, gz);
+	// Sin orden: hay tablas `WITHOUT ROWID`.
+	for (const t of tablas) filas += volcarFilas(sql, t.name, gz, { porRowid: false });
 
 	// Los índices después de los datos, como `sqlite3 .dump`: crearlos sobre la tabla llena es más
 	// rápido que mantenerlos fila a fila.
 	for (const i of indices) gz.linea(`${i.sql};`);
-	gz.linea(`${LINEA_FIN}${filas} filas en ${tablas.length} tablas`);
-	gz.linea("COMMIT;");
+	terminarVolcado(gz, { filas, tablas: tablas.length });
 
 	const { gzip, bytesSinComprimir } = gz.cerrar();
 	return { gzip, tablas: tablas.length, filas, bytesSinComprimir, migraciones, seq };
-}
-
-/** Las filas de una tabla, una sentencia por línea. El cursor se recorre entero (worker.md). */
-function volcarFilas(sql: SqlStorage, tabla: string, gz: GzipPorTrozos): number {
-	const nombre = identificador(tabla);
-	const cursor = sql.exec(`SELECT * FROM ${nombre};`);
-	const lista = cursor.columnNames.map(identificador).join(", ");
-	const principio = `INSERT INTO ${nombre} (${lista}) VALUES (`;
-	let n = 0;
-	for (const fila of cursor.raw()) {
-		gz.linea(`${principio}${fila.map(literalEnUnaLinea).join(", ")});`);
-		n++;
-	}
-	return n;
 }
 
 export type CopiaHecha = {

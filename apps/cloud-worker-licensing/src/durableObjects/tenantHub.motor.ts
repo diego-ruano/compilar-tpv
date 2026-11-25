@@ -41,16 +41,10 @@ import {
 	prefijoDeCopias,
 	type CopiaHecha,
 } from "./tenantHub.copia";
-import { cargarCopia, CopiaInservible, lineasDe } from "./tenantHub.restaurar";
-import {
-	abrirLogTrasVolver,
-	CLAVE_VUELTA_EN_CURSO,
-	esSinVueltaAUnInstante,
-	instantesDe,
-	seqMasAlto,
-	type Instantes,
-	type ModoDeVuelta,
-} from "./tenantHub.instante";
+import { CopiaInservible, lineasDe } from "./cargaDeCopias";
+import { cargarCopiaDelNegocio } from "./tenantHub.restaurar";
+import { esSinVueltaAUnInstante, instantesDe, type Instantes } from "./instantes";
+import { abrirLogTrasVolver, CLAVE_VUELTA_EN_CURSO, seqMasAlto, type ModoDeVuelta } from "./tenantHub.instante";
 import { nuevoId } from "../lib/ids";
 import {
 	caducarSiToca,
@@ -576,7 +570,7 @@ export class MotorTenantHub {
 				const objeto = await this.env.COPIAS_NEGOCIOS.get(clave);
 				if (!objeto) throw new HubError("copia_no_encontrada", 404);
 				const storage = this.state.storage;
-				const cargada = await cargarCopia(storage, lineasDe(objeto.body), async () => {
+				const cargada = await cargarCopiaDelNegocio(storage, lineasDe(objeto.body), async () => {
 					await this.migrarEnExclusiva();
 					apuntarNegocio(storage, tenantId);
 				});

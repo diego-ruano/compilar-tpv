@@ -40,7 +40,8 @@ import { auditAdmin } from "../../server/licenseStore";
 import { getDb } from "../../server/db";
 import { claveDeCopia, listarCopias, seqDeLasCopias } from "../../durableObjects/tenantHub.copia";
 import { zDia } from "../../lib/fechas";
-import { SALTO_DE_SEQ, VENTANA_DE_VUELTA_MS, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
+import { esInstanteDeLaVentana } from "../../durableObjects/instantes";
+import { SALTO_DE_SEQ, type ModoDeVuelta } from "../../durableObjects/tenantHub.instante";
 import type { VueltaAplicada, VueltaPreparada } from "../../durableObjects/tenantHub.rpc";
 
 export const basesDeNegociosRoutes = new Hono<{ Bindings: Env }>();
@@ -200,8 +201,7 @@ function queHacerDespues(modo: ModoDeVuelta, deshacer: string, tenantId: string)
 basesDeNegociosRoutes.post("/instante", cuerpo(instanteSchema), async (c) => {
 	const env = c.env;
 	const { tenantId, instanteMs, marcador, modo, motivo } = c.req.valid("json");
-	const ahora = Date.now();
-	if (instanteMs !== undefined && (instanteMs >= ahora || instanteMs < ahora - VENTANA_DE_VUELTA_MS)) {
+	if (instanteMs !== undefined && !esInstanteDeLaVentana(instanteMs, Date.now())) {
 		return c.json(
 			{
 				ok: false,

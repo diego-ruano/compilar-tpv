@@ -9,9 +9,12 @@
 //
 // - **Sin aprovisionar no atiende.** Un nombre o una jurisdicción equivocados dan otro objeto, vacío
 //   y sin error; si creara su esquema solo, contestaría «no existe» a todas las licencias. Así que
-//   el esquema sólo lo crea `aprovisionar` (administración), y hasta entonces todo lo demás contesta
-//   `central_sin_aprovisionar` sin crear nada. Lo marca `_migrations`, que nace con la primera
-//   migración.
+//   el esquema sólo lo crea `aprovisionar` (administración), vacío o desde una copia, y hasta
+//   entonces todo lo demás contesta `central_sin_aprovisionar` sin crear nada. Lo marca
+//   `_migrations`, que nace con la primera migración.
+// - **Con algo a medias no atiende**: una restauración desde una copia que no terminó, o una vuelta a
+//   un instante preparada y sin aplicar. Lo dicen sus marcas, y es lo primero que se mira
+//   (`baseCentral.guardas.ts`).
 // - **Al arrancar se pone al día** con sus migraciones (`server/central/migraciones.ts`), sin atender
 //   nada mientras tanto. Si una ya aplicada ha cambiado, o una nueva no entra, no atiende y lo dice
 //   en cada llamada (`central_migracion_alterada`, `central_migracion_fallida`).
@@ -21,8 +24,10 @@
 // - **Nunca llama a otro objeto** (un `TenantHub`, una `AgendaWeb`): lo que hay que avisar después de
 //   escribir lo avisa quien llama (`test/centralOperaciones.node.test.ts`).
 //
-// Además de las sentencias y las operaciones, se copia a sí misma a R2 una vez al día
-// (`baseCentral.copia.ts`).
+// Además de las sentencias y las operaciones: se copia a sí misma a R2 (`baseCentral.copia.ts`), se
+// restaura desde una copia (`baseCentral.restaurar.ts`) y vuelve a un instante
+// (`baseCentral.instante.ts`). Lo pide la administración (`domains/admin/central.ts`), y la copia del
+// día, el cron.
 //
 // Lo que no ha hecho viaja como resultado (`baseCentral.rpc.ts`), también un error de SQL: lo lanza
 // quien llama, en su lado (`server/central/cliente.ts`). Así el objeto no cuenta como fallo suyo una
@@ -37,24 +42,48 @@ import { enlazar } from "../server/central/enlace";
 import { MIGRACIONES_DE_LA_CENTRAL } from "../server/central/migraciones";
 import { OPERACIONES } from "../server/central/operaciones/registro";
 import type {
+	CentralAprovisionada,
+	CopiaRestaurada,
+	DestinoDeLaVuelta,
 	EstadoDeLaCentral,
 	FalloDeLaCentral,
 	RespuestaDeLaCentral,
 	SentenciaEnlazada,
+	VueltaPreparada,
 } from "./baseCentral.rpc";
-import { copiarLaCentral, type CopiaHecha } from "./baseCentral.copia";
-import { motivoDeRechazo, reafirmarPragmas } from "./baseCentral.guardas";
+import {
+	claveConHora,
+	claveDelDia,
+	COPIA_A_MANO,
+	copiarLaCentral,
+	esTablaDeLaCopia,
+	type CopiaHecha,
+} from "./baseCentral.copia";
+import {
+	CLAVE_VUELTA_EN_CURSO,
+	falloPorLasMarcas,
+	marcasDe,
+	motivoDeRechazo,
+	reafirmarPragmas,
+} from "./baseCentral.guardas";
+import { prepararVueltaDeLaCentral } from "./baseCentral.instante";
 import { ejecutarOperacion } from "./baseCentral.operar";
+import { restaurarLaCentral } from "./baseCentral.restaurar";
+import { instantesDe, type Instantes } from "./instantes";
 import { baseAprovisionada, ejecutarEnBruto, migrarBase, type FilasEnBruto } from "./sqliteDelObjeto";
+import { identificador } from "./volcadoSql";
 
 export class BaseCentral extends DurableObject<Env> {
 	// Por qué no atiende, si no atiende: una migración que no ha podido aplicar al arrancar o al
 	// aprovisionarlo. Es de esta instancia (los campos de instancia no son visibles por RPC): cada
 	// arranque lo vuelve a calcular.
 	private averia: Promise<FalloDeLaCentral | null>;
+	// La vuelta a un instante, detrás de algo que un test puede sustituir (en local no existe).
+	private instantes: Instantes;
 
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
+		this.instantes = instantesDe(ctx);
 		this.averia = ctx.blockConcurrencyWhile(() => ponerAlDia(ctx.storage));
 	}
 
@@ -91,15 +120,17 @@ export class BaseCentral extends DurableObject<Env> {
 	}
 
 	/**
-	 * La copia del día `dia` (AAAA-MM-DD) a R2 (`baseCentral.copia.ts`), la que pide el cron. Si no
+	 * Una copia a R2 (`baseCentral.copia.ts`): la del día `cual` (AAAA-MM-DD), la que pide el cron, o
+	 * con `COPIA_A_MANO`, una con la hora en el nombre, que no pisa la del día (administración). Si no
 	 * llega a subirla (R2, el techo, un día mal escrito), contesta `central_copia_fallida`: lo cuenta
-	 * el cron, que es quien la ha pedido.
+	 * quien la ha pedido.
 	 */
-	async copiar(dia: string): Promise<RespuestaDeLaCentral<CopiaHecha>> {
+	async copiar(cual: string): Promise<RespuestaDeLaCentral<CopiaHecha>> {
 		const fallo = await antesDeTocarLaBase(this.ctx.storage, this.averia);
 		if (fallo) return fallo;
 		try {
-			return { ok: true, valor: await copiarLaCentral(this.ctx.storage.sql, this.env.COPIAS, dia) };
+			const clave = cual === COPIA_A_MANO ? claveConHora("a-mano", new Date()) : claveDelDia(cual);
+			return { ok: true, valor: await copiarLaCentral(this.ctx.storage.sql, this.env.COPIAS, clave) };
 		} catch (error) {
 			return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
 		}
@@ -107,27 +138,47 @@ export class BaseCentral extends DurableObject<Env> {
 
 	/** Cómo está el objeto (administración). Sólo lee. */
 	async estado(): Promise<EstadoDeLaCentral> {
-		return estadoDe(this.ctx.storage.sql, await this.averia);
+		return estadoDe(this.ctx.storage, await this.averia);
 	}
 
 	/**
-	 * Crea el esquema de un objeto que no lo tiene: le aplica todas sus migraciones (administración).
-	 * En uno que ya lo tiene no toca nada y contesta `central_ya_aprovisionada`.
+	 * Crea el esquema de un objeto que no lo tiene (administración): vacío, con todas sus migraciones,
+	 * o con `claveDeCopia`, restaurado desde esa copia de R2 (`baseCentral.restaurar.ts`). En uno que
+	 * ya lo tiene no toca nada y contesta `central_ya_aprovisionada`. Con una restauración a medias,
+	 * sólo otra restauración lo vacía y termina: vacío no se aprovisiona.
 	 *
-	 * Cada migración entra en su propia transacción: si una falla detrás de otras que ya han entrado,
-	 * la base queda aprovisionada a medias, y el objeto no atiende hasta que vuelva a arrancar y se
-	 * ponga al día, igual que si hubiera arrancado así.
+	 * Sin copia, cada migración entra en su propia transacción: si una falla detrás de otras que ya han
+	 * entrado, la base queda aprovisionada a medias, y el objeto no atiende hasta que vuelva a arrancar
+	 * y se ponga al día, igual que si hubiera arrancado así.
 	 */
-	async aprovisionar(): Promise<RespuestaDeLaCentral<EstadoDeLaCentral>> {
+	async aprovisionar(opciones: { claveDeCopia?: string } = {}): Promise<RespuestaDeLaCentral<CentralAprovisionada>> {
 		const storage = this.ctx.storage;
-		const fallo = await this.ctx.blockConcurrencyWhile(async (): Promise<FalloDeLaCentral | null> => {
+		const { claveDeCopia } = opciones;
+		const hecho = await this.ctx.blockConcurrencyWhile(async (): Promise<RespuestaDeLaCentral<CopiaRestaurada | null>> => {
+			if (claveDeCopia !== undefined) return restaurarLaCentral(storage, this.env.COPIAS, claveDeCopia);
+			const marcas = marcasDe(storage);
+			if (marcas.restauracion) return falloPorLasMarcas(marcas)!;
 			if (baseAprovisionada(storage.sql)) return { ok: false, error: "central_ya_aprovisionada" };
 			const fallo = await migrar(storage);
 			if (fallo && baseAprovisionada(storage.sql)) this.averia = Promise.resolve(fallo);
-			return fallo;
+			return fallo ?? { ok: true, valor: null };
 		});
-		if (fallo) return fallo;
-		return { ok: true, valor: estadoDe(storage.sql, null) };
+		if (!hecho.ok) return hecho;
+		return { ok: true, valor: { ...estadoDe(storage, await this.averia), copia: hecho.valor } };
+	}
+
+	/**
+	 * La primera mitad de la vuelta a un instante, o a un marcador (`baseCentral.instante.ts`): deja una
+	 * copia de cómo está, la vuelta preparada para el siguiente arranque y la central cerrada hasta
+	 * entonces. Contesta el marcador con el que se deshace.
+	 */
+	async prepararVuelta(destino: DestinoDeLaVuelta): Promise<RespuestaDeLaCentral<VueltaPreparada>> {
+		return prepararVueltaDeLaCentral(this.ctx.storage, this.env.COPIAS, this.instantes, this.averia, destino);
+	}
+
+	/** Reinicia el objeto, que al arrancar vuelve al instante preparado. Lanza en quien lo llama. */
+	reiniciar(): void {
+		this.instantes.reiniciar("central_devuelta");
 	}
 }
 
@@ -162,15 +213,27 @@ async function migrar(storage: DurableObjectStorage): Promise<FalloDeLaCentral |
 	}
 }
 
-/** Al arrancar: una base aprovisionada se pone al día. Una sin aprovisionar se queda como está. */
+/**
+ * Al arrancar: una base aprovisionada se pone al día. Una sin aprovisionar se queda como está.
+ *
+ * - Una restauración a medias no se pone al día: sus filas no están enteras, y no atiende hasta que
+ *   otra restauración la vacíe y termine (`antesDeTocarLaBase`).
+ * - La marca de una vuelta a un instante se quita: la vuelta preparada se aplica al arrancar, sea
+ *   cual sea la causa del reinicio, y lo que quede de su marca es de antes (al deshacer una vuelta, el
+ *   marcador de deshacer la lleva puesta). Ver `baseCentral.instante.ts`.
+ */
 function ponerAlDia(storage: DurableObjectStorage): Promise<FalloDeLaCentral | null> {
+	const marcas = marcasDe(storage);
+	if (marcas.vuelta) storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
+	if (marcas.restauracion) return Promise.resolve(null);
 	return baseAprovisionada(storage.sql) ? migrar(storage) : Promise.resolve(null);
 }
 
 /**
- * Lo que se mira al empezar cada llamada que toca la base: que no esté averiado, que la conexión
- * esté como debe y que el objeto esté aprovisionado. Lo de la conexión va antes porque puede tener
- * que esperar (`reafirmarPragmas`), y nada de lo que decide se lee antes de esa espera: de aquí a
+ * Lo que se mira al empezar cada llamada que toca la base, una vez el objeto ha arrancado
+ * (`averiado`): que no tenga nada a medias, que no esté averiado, que la conexión esté como debe y
+ * que el objeto esté aprovisionado. Lo de la conexión va antes que lo último porque puede tener que
+ * esperar (`reafirmarPragmas`), y nada de lo que decide se lee antes de esa espera: de aquí a
  * ejecutar no hay ninguna más.
  */
 async function antesDeTocarLaBase(
@@ -178,19 +241,40 @@ async function antesDeTocarLaBase(
 	averiado: Promise<FalloDeLaCentral | null>,
 ): Promise<FalloDeLaCentral | null> {
 	const averia = await averiado;
+	const aMedias = falloPorLasMarcas(marcasDe(storage));
+	if (aMedias) return aMedias;
 	if (averia) return averia;
 	await reafirmarPragmas(storage);
 	if (!baseAprovisionada(storage.sql)) return { ok: false, error: "central_sin_aprovisionar" };
 	return null;
 }
 
-function estadoDe(sql: SqlStorage, averia: FalloDeLaCentral | null): EstadoDeLaCentral {
+/**
+ * Cómo está el objeto. Con algo a medias no se mira nada más: ni sus migraciones ni sus filas, que
+ * pueden estar a medio cargar.
+ */
+function estadoDe(storage: DurableObjectStorage, averia: FalloDeLaCentral | null): EstadoDeLaCentral {
+	const sql = storage.sql;
+	const enCurso = marcasDe(storage);
+	const bytes = sql.databaseSize;
+	const aMedias = falloPorLasMarcas(enCurso);
+	if (aMedias) {
+		// Una vuelta sólo se prepara con la central aprovisionada; una restauración la aprovisiona al terminar.
+		return { aprovisionada: enCurso.restauracion === null, migraciones: [], averia: aMedias, enCurso, filas: {}, bytes };
+	}
 	const aprovisionada = baseAprovisionada(sql);
-	const migraciones = aprovisionada
-		? sql
-				.exec("SELECT name, hash, applied_at FROM _migrations ORDER BY name;")
-				.toArray()
-				.map((r: any) => ({ nombre: String(r.name), hash: String(r.hash), aplicadaMs: Number(r.applied_at) }))
-		: [];
-	return { aprovisionada, migraciones, averia };
+	if (!aprovisionada) return { aprovisionada, migraciones: [], averia, enCurso, filas: {}, bytes };
+	const migraciones = sql
+		.exec("SELECT name, hash, applied_at FROM _migrations ORDER BY name;")
+		.toArray()
+		.map((r: any) => ({ nombre: String(r.name), hash: String(r.hash), aplicadaMs: Number(r.applied_at) }));
+	const tablas = sql
+		.exec("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;")
+		.toArray()
+		.map((r) => String(r.name))
+		.filter(esTablaDeLaCopia);
+	const filas = Object.fromEntries(
+		tablas.map((t) => [t, Number(sql.exec(`SELECT COUNT(*) AS n FROM ${identificador(t)};`).one().n)]),
+	);
+	return { aprovisionada, migraciones, averia, enCurso, filas, bytes };
 }

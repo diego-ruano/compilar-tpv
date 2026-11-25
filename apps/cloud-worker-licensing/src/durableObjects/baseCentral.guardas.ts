@@ -2,6 +2,11 @@
 //
 // Lo que la `BaseCentral` comprueba antes de tocar su base.
 //
+// - **Si tiene algo a medias.** Una restauración desde una copia que no ha terminado
+//   (`baseCentral.restaurar.ts`) o una vuelta a un instante preparada y sin aplicar
+//   (`baseCentral.instante.ts`) dejan su marca en el almacenamiento del objeto. Mientras esté, no
+//   atiende, y es lo primero que se mira: las filas de una restauración a medias no las ve nadie, y lo
+//   que se escribiera antes de volver a un instante se perdería al volver.
 // - **Qué sentencias ejecuta.** Sólo lecturas y escrituras de filas, una por llamada. Su esquema sólo
 //   lo cambian sus migraciones (`server/central/migraciones.ts`), y lo que cambia el comportamiento
 //   de la conexión (un PRAGMA), abre o cierra transacciones por su cuenta, adjunta otra base o
@@ -12,7 +17,41 @@
 //   empezar cada llamada se mira, se corrige y se avisa.
 
 import { capturarError } from "../observability/errors";
+import type { FalloDeLaCentral, MarcaDeRestauracion, MarcaDeVuelta, MarcasDeLaCentral } from "./baseCentral.rpc";
 import { fkActivas, ponerFk, verboDe } from "./sqliteDelObjeto";
+
+/** Dónde deja su marca una restauración desde una copia mientras no termina. */
+export const CLAVE_RESTAURACION_EN_CURSO = "restauracion-en-curso";
+/** Dónde deja su marca una vuelta a un instante preparada, hasta que el objeto se reinicia. */
+export const CLAVE_VUELTA_EN_CURSO = "vuelta-en-curso";
+
+/** Lo que el objeto tiene a medias, según las marcas de su almacenamiento. */
+export function marcasDe(storage: DurableObjectStorage): MarcasDeLaCentral {
+	return {
+		restauracion: storage.kv.get<MarcaDeRestauracion>(CLAVE_RESTAURACION_EN_CURSO) ?? null,
+		vuelta: storage.kv.get<MarcaDeVuelta>(CLAVE_VUELTA_EN_CURSO) ?? null,
+	};
+}
+
+/** Por qué no atiende el objeto por lo que tiene a medias, o `null` si no tiene nada. */
+export function falloPorLasMarcas(marcas: MarcasDeLaCentral): FalloDeLaCentral | null {
+	const { restauracion, vuelta } = marcas;
+	if (restauracion) {
+		return {
+			ok: false,
+			error: "central_restauracion_a_medias",
+			detalle: `La restauración desde ${restauracion.clave}, empezada el ${new Date(restauracion.desdeMs).toISOString()}, no terminó: vuelve a restaurar desde una copia.`,
+		};
+	}
+	if (vuelta) {
+		return {
+			ok: false,
+			error: "central_vuelta_en_curso",
+			detalle: `La vuelta a ${vuelta.destino} está preparada desde el ${new Date(vuelta.desdeMs).toISOString()}: se aplica al reiniciar el objeto.`,
+		};
+	}
+	return null;
+}
 
 /** Los verbos de lo único que ejecuta la central: leer y escribir filas. */
 const VERBOS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "WITH"]);

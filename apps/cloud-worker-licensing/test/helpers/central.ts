@@ -10,13 +10,15 @@
 // (`filasDe`, `fotoDeLaCentral`), sin pasar por sus guardas.
 
 import { env, runInDurableObject } from "cloudflare:test";
+import { expect } from "vitest";
 
 import type { BaseCentral } from "../../src/durableObjects/baseCentral";
+import { CLAVE_VUELTA_EN_CURSO } from "../../src/durableObjects/baseCentral.guardas";
 import type { RespuestaDeLaCentral } from "../../src/durableObjects/baseCentral.rpc";
 import { ejecutarOperacion } from "../../src/durableObjects/baseCentral.operar";
 import type { Env } from "../../src/env";
 import type { SqlSync } from "../../src/lib/sql";
-import { clienteCentral, type ClienteCentral } from "../../src/server/central/cliente";
+import { clienteCentral, ErrorDeLaCentral, type ClienteCentral } from "../../src/server/central/cliente";
 import { OPERACIONES, type Operacion, type Operaciones } from "../../src/server/central/operaciones/registro";
 
 export type CentralDePrueba = {
@@ -67,20 +69,92 @@ export function filasDe(
 	return runInDurableObject(central.stub, (_objeto, state) => state.storage.sql.exec(texto, ...args).toArray());
 }
 
-/** La central entera: cada tabla (también `_migrations`), con sus filas en el orden en que se insertaron. */
-export function fotoDeLaCentral(central: Pick<CentralDePrueba, "stub">): Promise<Record<string, unknown[]>> {
+/** Las tablas que ha creado alguien en `sql`, por su nombre: sin las de SQLite ni las del propio Durable Object. */
+export function tablasPropias(sql: SqlStorage): string[] {
+	return sql
+		.exec(
+			`SELECT name FROM sqlite_master
+			  WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'
+			  ORDER BY name;`,
+		)
+		.toArray()
+		.map((f) => String(f.name));
+}
+
+/**
+ * La central entera: cada tabla, con sus filas en el orden en que se insertaron. Con `sinMigraciones`,
+ * sin `_migrations`, que lleva cuándo se aplicó cada una: para comparar dos centrales.
+ */
+export function fotoDeLaCentral(
+	central: Pick<CentralDePrueba, "stub">,
+	opciones: { sinMigraciones?: boolean } = {},
+): Promise<Record<string, unknown[]>> {
 	return runInDurableObject(central.stub, (_objeto, state) => {
 		const sql = state.storage.sql;
-		const tablas = sql
-			.exec(
-				`SELECT name FROM sqlite_master
-				  WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'
-				  ORDER BY name;`,
-			)
-			.toArray()
-			.map((f) => String(f.name));
+		const tablas = tablasPropias(sql).filter((t) => !(opciones.sinMigraciones && t === "_migrations"));
 		return Object.fromEntries(tablas.map((t) => [t, sql.exec(`SELECT * FROM "${t}" ORDER BY rowid;`).toArray()]));
 	});
+}
+
+/** El código con el que la central ha dicho que no a `promesa`. */
+export async function codigoDe(promesa: Promise<unknown>): Promise<string> {
+	const error = await promesa.then(
+		() => null,
+		(e) => e,
+	);
+	expect(error).toBeInstanceOf(ErrorDeLaCentral);
+	return (error as ErrorDeLaCentral).code;
+}
+
+/** «Reiniciar» como se ve desde fuera: el objeto arranca vuelto, sin la marca de la vuelta. */
+const vuelto = (state: DurableObjectState) => state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
+
+/**
+ * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
+ * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
+ * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar).
+ */
+export async function conDobleDeInstantes(
+	central: Pick<CentralDePrueba, "stub">,
+	llamadas: string[],
+	opciones: { alReiniciar?: (state: DurableObjectState) => void } = {},
+): Promise<void> {
+	const { alReiniciar = vuelto } = opciones;
+	await runInDurableObject(central.stub, (objeto, state) => {
+		(objeto as unknown as { instantes: unknown }).instantes = {
+			marcadorActual: async () => (llamadas.push("actual"), "m-actual"),
+			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), "m-destino"),
+			restaurarAlReiniciar: async (m: string) => (llamadas.push(`restaurar:${m}`), "m-deshacer"),
+			reiniciar: () => {
+				llamadas.push("reiniciar");
+				alReiniciar(state);
+			},
+		};
+	});
+}
+
+/**
+ * Cambia, dentro del objeto, el bucket de sus copias por lo que devuelva `sustituto` a partir del de
+ * verdad: para que falle o tarde lo que haga falta. `state` es el del objeto, para mirar dentro
+ * mientras tanto.
+ */
+export async function conCopiasDentro(
+	central: Pick<CentralDePrueba, "stub">,
+	sustituto: (real: R2Bucket, state: DurableObjectState) => unknown,
+): Promise<void> {
+	await runInDurableObject(central.stub, (objeto, state) => {
+		const conEntorno = objeto as unknown as { env: Record<string, unknown> };
+		conEntorno.env = { ...conEntorno.env, COPIAS: sustituto(conEntorno.env.COPIAS as R2Bucket, state) };
+	});
+}
+
+/** Que las copias de la central fallen al subir, dentro del objeto, con «R2 no contesta». */
+export function conR2Caido(central: Pick<CentralDePrueba, "stub">): Promise<void> {
+	return conCopiasDentro(central, () => ({
+		put: async () => {
+			throw new Error("R2 no contesta");
+		},
+	}));
 }
 
 /**

@@ -15,6 +15,7 @@ import { purgarBaseCentral } from "./server/purga";
 import { centralDe } from "./lib/objetosDelNegocio";
 import { ErrorDeLaCentral } from "./server/central/cliente";
 import { latir, latirA } from "./observability/latido";
+import { FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } from "./durableObjects/baseCentral.restaurar";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
 // para capturar las excepciones de su ciclo de vida (apply idempotente, WebSocket, broadcast).
@@ -84,6 +85,14 @@ async function programado(env: Env): Promise<void> {
 			`[cron] copia de la base central: ${r.clave}, ${r.tablas} tablas, ${r.filas} filas, ` +
 				`${r.bytes} bytes`,
 		);
+		// La copia vale, pero el día que hiciera falta no se restauraría de una vez: se avisa con tiempo.
+		if (r.filas > FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ) {
+			const aviso =
+				`La copia de la base central tiene ${r.filas} filas, más de las ${FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ} que se ` +
+				"restauran con holgura de una vez: hay que partir la restauración (baseCentral.restaurar.ts).";
+			console.warn(`[cron] ${aviso}`);
+			capturarError(new Error(aviso), "cron.backup");
+		}
 		await latirA(env.BETTERSTACK_HEARTBEAT_COPIAS_URL, "el latido de la copia");
 	} catch (err) {
 		capturarError(err, "cron.backup");

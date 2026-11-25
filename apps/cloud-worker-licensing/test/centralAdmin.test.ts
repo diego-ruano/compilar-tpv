@@ -1,0 +1,356 @@
+// test/centralAdmin.test.ts
+//
+// La base central desde la administración (`domains/admin/central.ts`, `/v1/admin/central/*`), con
+// objetos `BaseCentral` de verdad; el único doble es el de la vuelta a un instante (`Instantes`), que
+// en local no existe.
+//
+//   · sin el token de administración no entra nada, y se dice antes de leer el cuerpo;
+//   · el token no lee la central: todo contesta también con ella sin aprovisionar;
+//   · la clave de una copia se valida antes de llegar al objeto;
+//   · el recorrido entero: copiar ahora, aprovisionar otra central desde esa copia y ver su estado;
+//   · volver a un instante: prepara, deja en el rastro con qué se deshace, reinicia, espera y lo
+//     devuelve; una central que vuelve pero no atiende no se da por buena;
+//   · lo que no se hace dice qué pasa (`message`) y, aparte, el motivo técnico (`detalle`);
+//   · lo que cambia algo deja rastro en el log, sin datos personales.
+
+import { env, runInDurableObject } from "cloudflare:test";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { adminRoutes } from "../src/domains/admin/admin.routes";
+import { copiarLaCentral } from "../src/durableObjects/baseCentral.copia";
+import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
+import {
+	centralDePrueba,
+	centralSinAprovisionar,
+	conDobleDeInstantes,
+	filasDe,
+	type CentralDePrueba,
+} from "./helpers/central";
+
+const TOKEN = "token-de-pruebas";
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+/** El entorno de las rutas, con la central `central` (y el token, salvo que se diga otra cosa). */
+const entornoCon = (central: Pick<CentralDePrueba, "entorno">) => ({ ...(env as any), ADMIN_API_TOKEN: TOKEN, ...central.entorno });
+
+async function pedir(
+	entorno: Record<string, unknown>,
+	metodo: "GET" | "POST",
+	ruta: string,
+	opciones: { cuerpo?: string; token?: string | null } = {},
+) {
+	const { cuerpo, token = TOKEN } = opciones;
+	const res = await adminRoutes.fetch(
+		new Request(`https://api/central${ruta}`, {
+			method: metodo,
+			headers: {
+				...(token ? { authorization: `Bearer ${token}` } : {}),
+				...(cuerpo !== undefined ? { "content-type": "application/json" } : {}),
+			},
+			...(cuerpo !== undefined ? { body: cuerpo } : {}),
+		}),
+		entorno,
+	);
+	return { status: res.status, body: (await res.json().catch(() => null)) as any };
+}
+
+const json = (valor: unknown) => JSON.stringify(valor);
+
+/** Los rastros `[central]` que han salido por el log (`log` es el espía de `console.log`). */
+const rastrosDe = (log: { mock: { calls: unknown[][] } }) =>
+	log.mock.calls
+		.map((c) => String(c[0]))
+		.filter((l) => l.startsWith("[central] "))
+		.map((l) => JSON.parse(l.slice("[central] ".length)));
+
+const RUTAS: [string, "GET" | "POST", string?][] = [
+	["/estado", "GET"],
+	["/copias", "GET"],
+	["/copiar-ahora", "POST"],
+	["/aprovisionar", "POST", "{esto no es json"],
+	["/volver", "POST", "{esto no es json"],
+];
+
+describe("el token de administración", () => {
+	it.each(RUTAS)("sin él, %s da 401 antes de leer el cuerpo", async (ruta, metodo, cuerpo) => {
+		const entorno = entornoCon(centralSinAprovisionar());
+		for (const token of [null, "otro-token"]) {
+			const r = await pedir(entorno, metodo, ruta, { cuerpo, token });
+			expect(r, `${ruta} con ${token}`).toMatchObject({ status: 401, body: { ok: false, error: "unauthorized" } });
+		}
+	});
+
+	it("no lee la central: sin ella, el 401 sale igual y la lista de copias, también", async () => {
+		const intocable = {
+			idFromName: () => {
+				throw new Error("la central no se toca");
+			},
+			get: () => {
+				throw new Error("la central no se toca");
+			},
+		};
+		const entorno = { ...(env as any), ADMIN_API_TOKEN: TOKEN, BaseCentral: intocable };
+		expect((await pedir(entorno, "GET", "/estado", { token: null })).status).toBe(401);
+		expect(await pedir(entorno, "GET", "/copias")).toMatchObject({ status: 200, body: { ok: true, copias: expect.any(Array) } });
+	});
+});
+
+describe("con la central sin aprovisionar, todo contesta", () => {
+	it("estado, copias, copiar, volver y aprovisionar", async () => {
+		const central = centralSinAprovisionar();
+		const entorno = entornoCon(central);
+
+		expect(await pedir(entorno, "GET", "/estado")).toMatchObject({
+			status: 200,
+			body: { ok: true, aprovisionada: false, migraciones: [], averia: null, enCurso: { restauracion: null, vuelta: null }, filas: {} },
+		});
+		expect((await pedir(entorno, "GET", "/copias")).status).toBe(200);
+		expect(await pedir(entorno, "POST", "/copiar-ahora")).toMatchObject({
+			status: 503,
+			body: { ok: false, error: "central_sin_aprovisionar", message: expect.stringContaining("pnpm central:aprovisionar") },
+		});
+		expect(await pedir(entorno, "POST", "/volver", { cuerpo: json({ marcador: "m" }) })).toMatchObject({
+			status: 503,
+			body: { ok: false, error: "central_sin_aprovisionar" },
+		});
+		expect(await pedir(entorno, "POST", "/aprovisionar", { cuerpo: json({}) })).toMatchObject({
+			status: 200,
+			body: { ok: true, aprovisionada: true, copia: null, migraciones: [{ nombre: "0001_inicial.sql" }] },
+		});
+		expect(await pedir(entorno, "POST", "/aprovisionar", { cuerpo: json({}) })).toMatchObject({
+			status: 409,
+			body: { ok: false, error: "central_ya_aprovisionada" },
+		});
+	});
+});
+
+describe("aprovisionar desde una copia", () => {
+	it.each([
+		["de otra carpeta", "negocios/t-1/2026-01-01.sql.gz"],
+		["con ..", "base-central/../negocios/x.sql.gz"],
+		["que no es un .sql.gz", "base-central/2026-01-01.txt"],
+		["demasiado larga", `base-central/${"x".repeat(300)}.sql.gz`],
+	])("valida la clave: %s", async (_que, claveDeCopia) => {
+		const central = centralSinAprovisionar();
+		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia }) });
+		expect(r).toMatchObject({ status: 400, body: { ok: false, error: "validation_error", message: expect.any(String) } });
+		expect((await central.stub.estado()).aprovisionada).toBe(false);
+	});
+
+	it("una copia que no vale lo dice, con su motivo aparte, y la central sigue sin aprovisionar", async () => {
+		const central = centralSinAprovisionar();
+		const clave = `base-central/no-existe-${crypto.randomUUID()}.sql.gz`;
+		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
+		expect(r).toEqual({
+			status: 422,
+			body: {
+				ok: false,
+				error: "central_copia_inservible",
+				message: "Esa copia no se puede restaurar: la central se queda sin aprovisionar, como estaba.",
+				detalle: `copia_no_encontrada: no hay ninguna copia ${clave}`,
+			},
+		});
+		expect((await central.stub.estado()).aprovisionada).toBe(false);
+	});
+
+	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro", async () => {
+		const origen = await centralDePrueba();
+		await filasDe(origen, `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('t-1', 1, 2);`);
+		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const bucket = (env as any).COPIAS as R2Bucket;
+		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
+		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
+		// Una línea de más, con la comilla sin cerrar: SQLite cita el trozo que no entiende.
+		const estropeado = texto.replace(
+			/^-- Fin de la copia: (\d+)/m,
+			(_m, n) =>
+				`INSERT INTO "tenants" ("tenant_id", "legal_name", "created_at_ms", "updated_at_ms") VALUES ('t-9', 'Ana Gil, ana.gil@correo.es, 1, 1);\n-- Fin de la copia: ${Number(n) + 1}`,
+		);
+		const flujo = new Blob([estropeado]).stream().pipeThrough(new CompressionStream("gzip"));
+		await bucket.put(clave, await new Response(flujo).arrayBuffer());
+		const log = vi.spyOn(console, "log");
+
+		const central = centralSinAprovisionar();
+		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
+		expect(r).toMatchObject({
+			status: 422,
+			body: {
+				error: "central_copia_inservible",
+				detalle: expect.stringMatching(/^no se ha podido cargar: SQLite no acepta una de las líneas \d+–\d+ de la copia \(tenants\): SQLITE_ERROR$/),
+			},
+		});
+		expect(JSON.stringify(r.body)).not.toMatch(/Ana|ana\.gil/);
+		expect(rastrosDe(log)).toEqual([{ accion: "restaurar", resultado: "central_copia_inservible", clave, detalle: r.body.detalle }]);
+		expect((await central.stub.estado()).aprovisionada).toBe(false);
+	});
+
+	it("el recorrido entero: copiar ahora, aprovisionar otra central con esa copia, y su estado", async () => {
+		const origen = await centralDePrueba();
+		await filasDe(
+			origen,
+			`INSERT INTO tenants (tenant_id, legal_name, created_at_ms, updated_at_ms) VALUES ('t-1', 'Bar Uno', 1, 2), ('t-2', 'Bar Dos', 3, 4);`,
+		);
+		await filasDe(origen, `INSERT INTO devices (device_id, tenant_id, role) VALUES ('d-1', 't-1', 'tpv');`);
+		const log = vi.spyOn(console, "log");
+
+		const copia = await pedir(entornoCon(origen), "POST", "/copiar-ahora");
+		expect(copia).toMatchObject({
+			status: 200,
+			body: { ok: true, clave: expect.stringMatching(/^base-central\/a-mano-/), filas: 3, tablas: expect.any(Number) },
+		});
+		const clave = copia.body.clave as string;
+
+		const lista = await pedir(entornoCon(origen), "GET", "/copias");
+		expect(lista.status).toBe(200);
+		expect(lista.body.copias.find((c: any) => c.clave === clave)).toMatchObject({
+			clave,
+			bytes: expect.any(Number),
+			subida: expect.any(String),
+			generada: expect.any(String),
+			filas: 3,
+			ultimaMigracion: "0001_inicial.sql",
+		});
+		// Las más recientes primero.
+		const subidas = lista.body.copias.map((c: any) => Date.parse(c.subida));
+		expect(subidas).toEqual([...subidas].sort((a, b) => b - a));
+
+		const destino = centralSinAprovisionar();
+		const restaurada = await pedir(entornoCon(destino), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
+		expect(restaurada).toMatchObject({ status: 200, body: { ok: true, aprovisionada: true, copia: { clave, filas: 3 } } });
+
+		const [deOrigen, deDestino] = await Promise.all([
+			pedir(entornoCon(origen), "GET", "/estado"),
+			pedir(entornoCon(destino), "GET", "/estado"),
+		]);
+		expect(deDestino.body.filas).toEqual(deOrigen.body.filas);
+		expect(deDestino.body.filas).toMatchObject({ tenants: 2, devices: 1 });
+		expect(deDestino.body.bytes).toBeGreaterThan(0);
+
+		// El rastro: la acción, la clave, las filas y el resultado. Sin nada de los negocios.
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "copiar", resultado: "ok", clave, filas: 3, tablas: expect.any(Number) },
+			{ accion: "restaurar", resultado: "ok", clave, filas: 3, tablas: 2 },
+		]);
+		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Bar Uno|Bar Dos/);
+	});
+});
+
+describe("volver a un instante, con el doble de la plataforma", () => {
+	it("prepara, reinicia, espera a que conteste y devuelve con qué se deshace y la copia de antes", async () => {
+		const central = await centralDePrueba();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		const log = vi.spyOn(console, "log");
+
+		const instanteMs = Date.now() - 3_600_000;
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ instanteMs }) });
+		expect(r).toMatchObject({
+			status: 200,
+			body: {
+				ok: true,
+				destino: "m-destino",
+				deshacer: "m-deshacer",
+				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
+				estado: { aprovisionada: true, averia: null, enCurso: { restauracion: null, vuelta: null } },
+			},
+		});
+		expect(llamadas).toEqual(["de:number", "restaurar:m-destino", "reiniciar"]);
+		// Con qué se deshace queda en el rastro antes de reiniciar: si la llamada no terminara, estaría ahí.
+		const destino = new Date(instanteMs).toISOString();
+		const deLaVuelta = { accion: "volver", destino, deshacer: "m-deshacer", copiaDeAntes: r.body.copiaDeAntes };
+		expect(rastrosDe(log)).toEqual([
+			{ ...deLaVuelta, resultado: "preparada" },
+			{ ...deLaVuelta, resultado: "ok" },
+		]);
+
+		// Deshacer es volver al marcador que devolvió.
+		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m-deshacer" }) });
+		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: "m-deshacer" } });
+	});
+
+	it("si la central no llega a reiniciarse, lo dice, con lo necesario para deshacerlo; y repetir la orden la reinicia", async () => {
+		const central = await centralDePrueba();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas, { alReiniciar: () => {} });
+
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) });
+		expect(r).toMatchObject({
+			status: 503,
+			body: {
+				ok: false,
+				error: "central_vuelta_sin_aplicar",
+				message: expect.stringContaining("Repite la misma orden"),
+				deshacer: "m-deshacer",
+				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
+			},
+		});
+		expect(llamadas.filter((l) => l === "reiniciar")).toHaveLength(2);
+
+		// Mientras tanto, lo que se le pide dice cómo salir de ahí.
+		expect(await pedir(entornoCon(central), "POST", "/copiar-ahora")).toMatchObject({
+			status: 503,
+			body: { error: "central_vuelta_en_curso", message: expect.stringContaining("repitiendo la misma orden de pnpm central:volver") },
+		});
+		await conDobleDeInstantes(central, llamadas);
+		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) })).toMatchObject({
+			status: 200,
+			body: { ok: true, destino: "m" },
+		});
+	});
+
+	it("si la central vuelve pero no atiende, no lo da por bueno: dice por qué, con lo necesario para deshacerlo", async () => {
+		const central = await centralDePrueba();
+		// Vuelve a un instante de en medio de una restauración desde una copia: con su marca.
+		await conDobleDeInstantes(central, [], {
+			alReiniciar: (state) => {
+				state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
+				state.storage.kv.put(CLAVE_RESTAURACION_EN_CURSO, { clave: "base-central/la-de-entonces.sql.gz", desdeMs: 1 });
+			},
+		});
+		const log = vi.spyOn(console, "log");
+
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: "m" }) });
+		expect(r).toMatchObject({
+			status: 503,
+			body: {
+				ok: false,
+				error: "central_restauracion_a_medias",
+				message: expect.stringMatching(/^La central ha vuelto, pero no atiende\. Hay una restauración a medias/),
+				detalle: expect.stringContaining("base-central/la-de-entonces.sql.gz"),
+				deshacer: "m-deshacer",
+				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
+				estado: { aprovisionada: false, averia: { error: "central_restauracion_a_medias" } },
+			},
+		});
+		expect(rastrosDe(log).map((r) => r.resultado)).toEqual(["preparada", "central_restauracion_a_medias"]);
+	});
+
+	it("un instante o un marcador, uno de los dos; y el instante, de los últimos 30 días", async () => {
+		const central = await centralDePrueba();
+		const entorno = entornoCon(central);
+		for (const cuerpo of [{}, { instanteMs: Date.now() - 1000, marcador: "m" }, { marcador: "" }, { instanteMs: "ayer" }]) {
+			expect(await pedir(entorno, "POST", "/volver", { cuerpo: json(cuerpo) }), json(cuerpo)).toMatchObject({
+				status: 400,
+				body: { ok: false, error: "validation_error" },
+			});
+		}
+		expect(await pedir(entorno, "POST", "/volver", { cuerpo: json({ instanteMs: Date.now() + 60_000 }) })).toEqual({
+			status: 400,
+			body: {
+				ok: false,
+				error: "central_instante_fuera_de_plazo",
+				message: "Sólo se puede volver a un instante pasado de los últimos 30 días.",
+			},
+		});
+	});
+
+	it("en local, sin el doble, dice que no hay vuelta a un instante y la central sigue atendiendo", async () => {
+		const central = await centralDePrueba();
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ instanteMs: Date.now() - 60_000 }) });
+		expect(r).toMatchObject({ status: 501, body: { ok: false, error: "central_vuelta_no_disponible" } });
+		expect((await central.db.execute("SELECT 1 AS uno;")).rows[0].uno).toBe(1);
+	});
+});

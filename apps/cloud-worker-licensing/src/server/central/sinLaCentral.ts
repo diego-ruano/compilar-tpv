@@ -11,7 +11,8 @@
 //   · `CentralNoDisponible` (`cliente.ts`): saturada, `hub_overloaded` con `Retry-After`; un fallo
 //     pasajero de la plataforma o un plazo vencido, `hub_unavailable`.
 //   · `ErrorDeLaCentral` con 503: sin aprovisionar, una operación que el objeto no conoce (un
-//     despliegue a medias) o una migración alterada o fallida. `hub_unavailable`, sin `Retry-After`.
+//     despliegue a medias), una migración alterada o fallida, o algo a medias (una restauración desde
+//     una copia, una vuelta a un instante). `hub_unavailable`, sin `Retry-After`.
 //
 // Cada vez queda un evento en Axiom (`central_no_disponible`) con el motivo exacto. Lo que no es carga
 // ni un fallo pasajero de la plataforma (`esPasajeroDeLaCentral`: un plazo vencido, la central sin

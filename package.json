@@ -42,7 +42,12 @@
     "negocio:instante": "node scripts/tpv-license.mjs negocio-instante",
     "negocio:restaurar-copia": "node scripts/tpv-license.mjs negocio-restaurar-copia",
     "negocio:base-vacia": "node scripts/tpv-license.mjs negocio-base-vacia",
-    "negocio:subida": "node scripts/tpv-license.mjs negocio-subida"
+    "negocio:subida": "node scripts/tpv-license.mjs negocio-subida",
+    "central:estado": "node scripts/tpv-license.mjs central-estado",
+    "central:copias": "node scripts/tpv-license.mjs central-copias",
+    "central:copiar": "node scripts/tpv-license.mjs central-copiar",
+    "central:aprovisionar": "node scripts/tpv-license.mjs central-aprovisionar",
+    "central:volver": "node scripts/tpv-license.mjs central-volver"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

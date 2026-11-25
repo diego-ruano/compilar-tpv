@@ -80,11 +80,13 @@ const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// (`MotorTenantHub.getTenantDb`). Es cosa de minutos, y lo ha pedido soporte.
 	"tenant_db_restaurando",
 	// La base central no puede atender (`server/central/cliente.ts`): sin aprovisionar, en medio de
-	// un despliegue o sin poder ponerse al día.
+	// un despliegue, sin poder ponerse al día, o restaurándose o volviendo a un instante.
 	"central_sin_aprovisionar",
 	"central_operacion_desconocida",
 	"central_migracion_alterada",
 	"central_migracion_fallida",
+	"central_restauracion_a_medias",
+	"central_vuelta_en_curso",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -556,6 +558,15 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"central_migracion_alterada",
 	"central_migracion_fallida",
 	"central_copia_fallida",
+	"central_restauracion_a_medias",
+	"central_vuelta_en_curso",
+	// La administración de la central (`/v1/admin/central/*`): sólo las ve quien la administra, y la
+	// ruta las acompaña de su frase.
+	"central_copia_inservible",
+	"central_instante_fuera_de_plazo",
+	"central_vuelta_no_disponible",
+	"central_vuelta_sin_aplicar",
+	"central_vuelta_sin_comprobar",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",

@@ -17,6 +17,8 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [SUBIDA-TECHO](#subida-techo--el-techo-total-de-la-subida-completa) | 🔵 | El techo de 60 millones de filas de la subida completa, sin medir con bares reales | Medir en producción |
 | [CENTRAL-PLAZO](#central-plazo--una-llamada-vencida-a-la-base-central-no-deja-hibernar-al-tenanthub) | 🔵 | Una llamada vencida a la base central no se cancela, y el TenantHub no hiberna mientras tanto | Sin decidir |
+| [VUELTA-DESHACER](#vuelta-deshacer--deshacer-la-vuelta-de-un-negocio-lo-dejaría-cerrado) | 🟡 | Deshacer la vuelta a un instante de un negocio lo dejaría cerrado | Sin comprobar: en local no existe |
+| [CENTRAL-RESTAURAR](#central-restaurar--la-central-se-restaura-en-una-sola-llamada) | 🔵 | La central se restaura en una sola llamada, de 30 s como mucho | Avisa el cron; sin hacer |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -258,6 +260,29 @@ Sólo pasa si la central tarda más que el plazo, y la central no espera a nada 
 atiende: su SQL es síncrono. La alternativa es que esas dos llamadas vayan por `fetch` al objeto con
 `AbortSignal.timeout(plazo)`, a cambio de una segunda puerta a la central además del RPC; antes habría
 que comprobar que cortar así la petición libera de verdad al TenantHub.
+
+### VUELTA-DESHACER · Deshacer la vuelta de un negocio lo dejaría cerrado
+
+Al volver a un instante (DO-03, `tenantHub.instante.ts`), el `TenantHub` deja su marca de vuelta en
+curso hasta reiniciarse. Según la documentación de Cloudflare, el marcador de deshacer que devuelve
+`onNextSessionRestoreBookmark` es el estado del objeto «justo antes de la recuperación», así que lleva
+la marca dentro (`durableObjects/instantes.ts`). Al deshacer, el objeto arrancaría con la marca:
+`trasVolver` contestaría `vuelta_sin_aplicar`, y `getTenantDb`, `tenant_db_restaurando`, para siempre.
+La base central lo resuelve quitando al arrancar la marca que quede (`baseCentral.ts`, `ponerAlDia`);
+en el negocio no vale tal cual, porque `trasVolver` usa la marca para saber que tiene que abrir el log
+por encima.
+
+En local no se puede comprobar (no hay vuelta a un instante). Toca en el simulacro de vuelta en
+producción: volver, deshacer y ver si el negocio atiende.
+
+### CENTRAL-RESTAURAR · La central se restaura en una sola llamada
+
+Restaurar la central desde una copia (`baseCentral.restaurar.ts`) va entero dentro de un
+`blockConcurrencyWhile`, que reinicia el objeto pasados 30 s; la marca de restauración lo deja
+entonces sin atender, y cada intento volvería a cortarse. Medido en local, 150.000 filas de las más
+caras tardan como mucho la mitad, y el cron avisa a Sentry cuando la copia del día pasa de ahí
+(`FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ`). Antes de llegar hay que partir la carga en varias llamadas,
+cada una en su `blockConcurrencyWhile`, con la marca puesta entre ellas.
 
 ---
 

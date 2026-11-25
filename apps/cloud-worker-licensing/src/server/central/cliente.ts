@@ -47,15 +47,25 @@ const ESTADO: Record<CodigoDeLaCentral, number> = {
 	central_operacion_desconocida: 503,
 	central_migracion_alterada: 503,
 	central_migracion_fallida: 503,
-	central_ya_aprovisionada: 409,
+	central_restauracion_a_medias: 503,
+	central_vuelta_en_curso: 503,
 	// Lo de siempre con una base: un error de SQL sale como un 500.
 	central_error_sql: 500,
 	central_operacion_fallida: 500,
 	// Un fallo del programa: una sentencia que la central no ejecuta.
 	central_sentencia_prohibida: 500,
-	// La copia diaria, que sólo pide el cron.
+	// Lo que sólo pide la administración (y la copia diaria, el cron).
+	central_ya_aprovisionada: 409,
 	central_copia_fallida: 500,
+	central_copia_inservible: 422,
+	central_instante_fuera_de_plazo: 400,
+	central_vuelta_no_disponible: 501,
 };
+
+/** El estado HTTP con el que sale lo que el objeto de la central contesta que no ha hecho. */
+export function estadoHttpDe(codigo: CodigoDeLaCentral): number {
+	return ESTADO[codigo];
+}
 
 /**
  * Lo que el objeto de la central contesta que no ha hecho, con su código (`baseCentral.rpc.ts`). El
@@ -69,7 +79,7 @@ export class ErrorDeLaCentral extends HubError {
 		code: CodigoDeLaCentral,
 		readonly detalle?: string,
 	) {
-		super(code, ESTADO[code]);
+		super(code, estadoHttpDe(code));
 		this.name = "ErrorDeLaCentral";
 		if (detalle !== undefined) this.message = `${code}: ${detalle}`;
 	}

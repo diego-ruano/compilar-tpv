@@ -105,8 +105,8 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		/soloLaMain(?:Vigente)?\(\s*"([^"]+)"/g,
 		// La agenda de reservas web (`agendaWeb.motor.ts`): sus rechazos cruzan el RPC como resultado.
 		/rechazo\(\s*"([^"]+)"/g,
-		// DO-PERDIDA: una copia que no se puede restaurar (`tenantHub.restaurar.ts`); la ruta lo devuelve
-		// como `error`.
+		// DO-PERDIDA: una copia que no se puede restaurar (`cargaDeCopias.ts`); la ruta de los negocios
+		// lo devuelve como `error`.
 		/CopiaInservible\(\s*"([^"]+)"/g,
 		// Una subclase de `HubError` que fija su identificador y su estado en el constructor.
 		/super\(\s*"([^"]+)",\s*\d{3}\b/g,

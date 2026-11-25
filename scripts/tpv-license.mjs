@@ -48,6 +48,16 @@
 //   pnpm negocio:subida          -- --tenant <tenantId> --reabrir --motivo "…"
 //                            (DO-SUBIDA: reabre la subida completa de la Main agotada, caducada o huérfana)
 //
+// Y la base central (su objeto `BaseCentral`). Lo que la cambia pide `--si`: sin él, dice qué haría.
+//
+//   pnpm central:estado        (si está aprovisionada, sus migraciones, si tiene algo a medias, sus filas)
+//   pnpm central:copias        (sus copias en R2, de la más reciente a la más vieja)
+//   pnpm central:copiar        (una copia ahora, con la hora en la clave: no pisa la del día)
+//   pnpm central:aprovisionar -- [--copia <clave>] --si
+//                            (a un objeto sin aprovisionar: el esquema vacío o, con --copia, esa copia)
+//   pnpm central:volver -- (--instante 2026-11-20T10:30:00+01:00 | --marcador <m>) --si
+//                            (a un instante de los últimos 30 días; dice con qué marcador se deshace)
+//
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
 //   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
@@ -109,7 +119,14 @@ function fail(msg) {
 	process.exit(1);
 }
 
-async function api(method, path, body) {
+/**
+ * Una llamada a la administración del worker. Si no sale, se acaba aquí con lo que ha pasado, y con
+ * su motivo si la respuesta lo trae aparte (`detalle`).
+ * `comprobar` es cómo mirar si un cambio llegó a entrar cuando la nube no ha podido contestar.
+ * `deshacer`, la orden que deshace una vuelta a un instante a partir de su marcador: una vuelta que no
+ * ha salido entera dice igualmente con qué se deshace.
+ */
+async function api(method, path, body, { comprobar = "pnpm license:list", deshacer } = {}) {
 	const r = await fetch(`${API_BASE}${path}`, {
 		method,
 		headers: {
@@ -134,11 +151,13 @@ async function api(method, path, body) {
 		// dice si el cambio llegó a entrar, y repetir un extend o un shorten lo aplicaría dos veces.
 		if (data.code === "external" && r.status === 503) {
 			fail(
-				`La nube no ha podido atender ahora (${data.error}). Si era un cambio, no se sabe si ha entrado: ` +
-					"compruébalo con license:list antes de repetirlo.",
+				`La nube no ha podido atender ahora (${data.error}${data.message ? ` — ${data.message}` : ""}). ` +
+					`Si era un cambio, no se sabe si ha entrado: compruébalo con ${comprobar} antes de repetirlo.`,
 			);
 		}
-		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}`);
+		const motivo = data.detalle ? `\n    Motivo: ${data.detalle}` : "";
+		const paraDeshacer = data.deshacer && deshacer ? `\n    Para deshacerla: ${deshacer(data.deshacer)}` : "";
+		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}${motivo}${paraDeshacer}`);
 	}
 
 	return data;
@@ -452,13 +471,20 @@ function modoDe(args) {
 	return modo;
 }
 
+/** El `--marcador` de una vuelta a un instante (el «deshacer» de otra), si lo hay. Sin valor no vale. */
+function marcadorDe(args) {
+	if (args.marcador === true) fail("--marcador <marcador> (el «deshacer» de otra vuelta)");
+	return args.marcador === undefined ? undefined : String(args.marcador);
+}
+
 async function negocioInstante(args) {
 	const tenantId = negocioDe(args);
 	const modo = modoDe(args);
 	const motivo = motivoDe(args);
 	const cuerpo = { tenantId, modo, motivo };
-	if (args.marcador) {
-		cuerpo.marcador = String(args.marcador);
+	const marcador = marcadorDe(args);
+	if (marcador) {
+		cuerpo.marcador = marcador;
 	} else {
 		const ms = Date.parse(String(args.instante || ""));
 		if (!Number.isFinite(ms)) {
@@ -466,7 +492,9 @@ async function negocioInstante(args) {
 		}
 		cuerpo.instanteMs = ms;
 	}
-	const r = await api("POST", "/v1/admin/negocios/instante", cuerpo);
+	const r = await api("POST", "/v1/admin/negocios/instante", cuerpo, {
+		deshacer: (m) => `pnpm negocio:instante -- --tenant ${tenantId} --marcador ${m} --modo ${modo} --motivo "…"`,
+	});
 	console.log(`\n  ✔ ${tenantId} ha vuelto${r.instanteMs ? ` a ${new Date(r.instanteMs).toISOString()}` : ` al marcador ${r.destino}`}.`);
 	console.log(`    Marcador para deshacerlo: ${r.deshacer}`);
 	console.log(`    Log abierto en el Seq ${r.inicio ?? "(sin base tras volver)"}${r.purgadoHasta ? `, purgado hasta ${r.purgadoHasta}` : ""}.\n`);
@@ -506,6 +534,113 @@ async function negocioSubida(args) {
 	if (!args.reabrir) fail("--reabrir requerido (lo único que se hace con la subida desde aquí; su estado sale en negocio:estado)");
 	const r = await api("POST", "/v1/admin/negocios/subida/reabrir", { tenantId, motivo: motivoDe(args) });
 	console.log(`\n  ✔ Subida completa de ${tenantId} reabierta (estaba ${r.antes}). La primera Main vigente que salude se la queda.\n`);
+}
+
+/* ── La base central (su objeto BaseCentral) ─────────────────────────────── */
+
+const CENTRAL = { comprobar: "pnpm central:estado" };
+
+/** Lo que cambia la central sólo se hace con `--si`: sin él, se dice qué haría y no se hace nada. */
+function confirmado(args, queHaria) {
+	if (args.si === true) return;
+	fail(`${queHaria}\n    Si es lo que quieres, repite la orden con --si.`);
+}
+
+async function centralEstado() {
+	const r = await api("GET", "/v1/admin/central/estado", undefined, CENTRAL);
+	console.log(`\n  Aprovisionada  ${r.aprovisionada ? "sí" : "NO"}`);
+	if (r.enCurso.restauracion) {
+		const { clave, desdeMs } = r.enCurso.restauracion;
+		console.log(`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.`);
+	}
+	if (r.enCurso.vuelta) {
+		const { destino, desdeMs } = r.enCurso.vuelta;
+		console.log(
+			`  VUELTA         preparada a ${destino} (${cuando(desdeMs)}) y sin aplicar: no atiende hasta reiniciarse.\n` +
+				"                 Se reinicia repitiendo la misma orden de pnpm central:volver (con su --instante o su --marcador).",
+		);
+	}
+	console.log(`  Avería         ${r.averia ? `${r.averia.error}${r.averia.detalle ? ` — ${r.averia.detalle}` : ""}` : "ninguna"}`);
+	console.log(`  Migraciones    ${r.migraciones.map((m) => m.nombre).join(", ") || "(ninguna)"}`);
+	console.log(`  Tamaño         ${r.bytes} bytes`);
+	const filas = Object.entries(r.filas);
+	if (!filas.length) {
+		console.log("");
+		return;
+	}
+	console.log("  Filas:");
+	console.table(filas.map(([tabla, n]) => ({ tabla, filas: n })));
+}
+
+async function centralCopias() {
+	const r = await api("GET", "/v1/admin/central/copias", undefined, CENTRAL);
+	if (!r.copias.length) {
+		console.log("\n  (ninguna copia de la central en R2)\n");
+		return;
+	}
+	console.table(
+		r.copias.map((c) => ({
+			clave: c.clave,
+			subida: c.subida,
+			bytes: c.bytes,
+			filas: c.filas ?? "?",
+			tablas: c.tablas ?? "?",
+			migracion: c.ultimaMigracion ?? "?",
+		})),
+	);
+	if (r.hayMas) console.log("  (hay más copias de las que caben en la lista)\n");
+}
+
+async function centralCopiar() {
+	const r = await api("POST", "/v1/admin/central/copiar-ahora", undefined, CENTRAL);
+	console.log(`\n  ✔ Copia de la central: ${r.clave}, ${r.filas} filas en ${r.tablas} tablas, ${r.bytes} bytes comprimida.\n`);
+}
+
+async function centralAprovisionar(args) {
+	if (args.copia === true) fail("--copia <clave> (sácala de `pnpm central:copias`)");
+	const copia = args.copia === undefined ? undefined : String(args.copia).trim();
+	confirmado(
+		args,
+		copia
+			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).`
+			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y los TPV que pregunten por la suya la borrarían. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
+	);
+	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, CENTRAL);
+	if (r.copia) {
+		console.log(`\n  ✔ Central restaurada desde ${r.copia.clave}: ${r.copia.filas} filas en ${r.copia.tablas} tablas.`);
+	} else {
+		console.log("\n  ✔ Central aprovisionada, vacía.");
+	}
+	console.log(`    Migraciones: ${r.migraciones.map((m) => m.nombre).join(", ")}\n`);
+}
+
+/** La orden que devuelve la central a un marcador: la que deshace una vuelta. */
+const centralAlMarcador = (marcador) => `pnpm central:volver -- --marcador ${marcador} --si`;
+
+async function centralVolver(args) {
+	let cuerpo;
+	/** Adónde vuelve, para decirlo: «al marcador …» o «a <instante>». */
+	let adonde;
+	const marcador = marcadorDe(args);
+	if (marcador) {
+		cuerpo = { marcador };
+		adonde = `al marcador ${marcador}`;
+	} else {
+		const ms = Date.parse(String(args.instante || ""));
+		if (!Number.isFinite(ms)) {
+			fail("--instante <fecha ISO, p. ej. 2026-11-20T10:30:00+01:00> o --marcador <marcador> requerido");
+		}
+		cuerpo = { instanteMs: ms };
+		adonde = `a ${new Date(ms).toISOString()}`;
+	}
+	confirmado(
+		args,
+		`Esto devuelve la central ENTERA ${adonde}: lo escrito después se pierde (antes se deja una copia de cómo está en R2), y mientras vuelve no atiende.`,
+	);
+	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, deshacer: centralAlMarcador });
+	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
+	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes}`);
+	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
@@ -629,6 +764,11 @@ const comandos = {
 	"negocio-restaurar-copia": negocioRestaurarCopia,
 	"negocio-base-vacia": negocioBaseVacia,
 	"negocio-subida": negocioSubida,
+	"central-estado": centralEstado,
+	"central-copias": centralCopias,
+	"central-copiar": centralCopiar,
+	"central-aprovisionar": centralAprovisionar,
+	"central-volver": centralVolver,
 };
 
 if (!comandos[cmd]) {
@@ -672,6 +812,13 @@ if (!comandos[cmd]) {
     restaurar-copia --tenant <tenantId> [--dia AAAA-MM-DD] --modo nube|main --motivo "…"   (a un objeto vacío)
     base-vacia      --tenant <tenantId> --modo nube|main --motivo "…"                      (a un objeto vacío)
     subida          --tenant <tenantId> --reabrir --motivo "…"   (reabre la subida completa de la Main)
+
+  La base central (pnpm central:<comando>; lo que la cambia pide --si):
+    estado
+    copias
+    copiar                                         (una copia ahora; no pisa la del día)
+    aprovisionar [--copia <clave>] --si            (a un objeto sin aprovisionar: vacía o desde una copia)
+    volver (--instante <fecha ISO> | --marcador <m>) --si
 `);
 	process.exit(1);
 }
