@@ -44,8 +44,6 @@ type Props = {
   retryDelayMs?: number;
   /** Espera del último reintento, con el `fallback` pintado (0: no lo hay). */
   ultimoReintentoMs?: number;
-  draggable?: boolean;
-  loading?: "lazy" | "eager"; // usa "eager" (default) si el img empieza hidden
 };
 
 export default function ImageWithFallback({
@@ -56,8 +54,6 @@ export default function ImageWithFallback({
   retries = 5,
   retryDelayMs = 3000,
   ultimoReintentoMs = ULTIMO_REINTENTO_MS,
-  draggable = false,
-  loading = "eager",
 }: Props) {
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -130,8 +126,9 @@ export default function ImageWithFallback({
       // Oculta mientras carga para no mostrar el icono de imagen rota durante un reintento;
       // al cargar aparece directamente la imagen buena, sin placeholder intermedio.
       style={loaded ? undefined : { visibility: "hidden" }}
-      draggable={draggable}
-      loading={loading}
+      draggable={false}
+      // "eager": la imagen empieza oculta, y con "lazy" no llegaría a cargarse.
+      loading="eager"
       onLoad={() => setLoaded(true)}
       onError={markError}
     />

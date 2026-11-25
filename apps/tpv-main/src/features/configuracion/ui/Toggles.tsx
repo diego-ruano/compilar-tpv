@@ -47,12 +47,10 @@ export function Checkbox({
 	checked,
 	onChange,
 	label,
-	description,
 }: {
 	checked: boolean;
 	onChange: (v: boolean) => void;
 	label: string;
-	description?: string;
 }) {
 	return (
 		<button
@@ -74,10 +72,7 @@ export function Checkbox({
 					{checked ? "✓" : ""}
 				</div>
 
-				<div className="min-w-0">
-					<div className="text-sm font-semibold text-fg">{label}</div>
-					{description ? <div className="text-xs text-fg-muted mt-0.5">{description}</div> : null}
-				</div>
+				<div className="min-w-0 text-sm font-semibold text-fg">{label}</div>
 			</div>
 		</button>
 	);

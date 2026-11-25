@@ -126,13 +126,11 @@ function PrimaryButton({
 
 function MiniIconButton({
     title,
-    disabled = false,
     children,
     onClick,
     variant = "neutral",
 }: {
     title?: string;
-    disabled?: boolean;
     children: React.ReactNode;
     onClick?: () => void;
     variant?: "neutral" | "danger";
@@ -141,7 +139,6 @@ function MiniIconButton({
         <button
             type="button"
             title={title}
-            disabled={disabled}
             onClick={onClick}
             className={[
                 "h-9 w-9 rounded-xl border shadow-sm transition active:scale-[0.98]",

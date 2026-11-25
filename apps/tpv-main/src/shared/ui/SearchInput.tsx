@@ -7,9 +7,6 @@ interface SearchInputProps
     extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> {
     value: string;
     onValueChange: (value: string) => void;
-    /** Muestra botón de limpiar cuando hay texto (default: true). */
-    clearable?: boolean;
-    onClear?: () => void;
 }
 
 const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
@@ -17,20 +14,13 @@ const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
         {
             value,
             onValueChange,
-            clearable = true,
-            onClear,
             placeholder = "Buscar...",
             className,
             ...rest
         },
         ref,
     ) => {
-        const showClear = clearable && value.length > 0;
-
-        const handleClear = () => {
-            onValueChange("");
-            onClear?.();
-        };
+        const showClear = value.length > 0;
 
         return (
             <div className={cn("relative", className)}>
@@ -56,7 +46,7 @@ const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
                 {showClear && (
                     <button
                         type="button"
-                        onClick={handleClear}
+                        onClick={() => onValueChange("")}
                         aria-label="Limpiar búsqueda"
                         title="Limpiar"
                         className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-fg-subtle transition hover:bg-surface-3 hover:text-fg cursor-pointer"

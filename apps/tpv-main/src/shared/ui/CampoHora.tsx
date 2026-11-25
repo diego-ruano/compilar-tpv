@@ -43,8 +43,6 @@ type CampoHoraProps = {
     /** `HH:mm`, o lo que haya escrito a medias. Vacío = sin rellenar. */
     valor: string;
     onCambio: (valor: string) => void;
-    id?: string;
-    disabled?: boolean;
     className?: string;
     "aria-label"?: string;
 };

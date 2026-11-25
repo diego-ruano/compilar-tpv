@@ -65,13 +65,11 @@ export default function TicketPreviewModal({
 	open,
 	onClose,
 	items,
-	titulo = "Previsualización del ticket",
 	onPrint,
 }: {
 	open: boolean;
 	onClose: () => void;
 	items: TicketItemLike[];
-	titulo?: string;
 	onPrint?: () => void;
 }) {
 	const { iva_percent } = useBusinessSettings();
@@ -83,7 +81,7 @@ export default function TicketPreviewModal({
 	const empty = items.length === 0;
 
 	return (
-		<Modal open={open} onClose={onClose} title={titulo}>
+		<Modal open={open} onClose={onClose} title="Previsualización del ticket">
 			<div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-4">
 				<div className="flex justify-center">
 					<TicketPaper payload={payload} />

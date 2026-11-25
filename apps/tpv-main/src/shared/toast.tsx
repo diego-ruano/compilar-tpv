@@ -94,15 +94,11 @@ function ToastCard({
     );
 }
 
-export function ToastProvider({
-    children,
-    maxToasts = 3,
-    durationMs = 2600,
-}: {
-    children: React.ReactNode;
-    maxToasts?: number;
-    durationMs?: number;
-}) {
+/** Cuántos avisos se ven a la vez y cuánto dura cada uno. */
+const MAX_TOASTS = 3;
+const DURACION_MS = 2600;
+
+export function ToastProvider({ children }: { children: React.ReactNode }) {
     const [toasts, setToasts] = useState<ToastItem[]>([]);
     const timers = useRef<Record<number, number>>({});
 
@@ -118,13 +114,13 @@ export function ToastProvider({
             const id = Date.now() + Math.floor(Math.random() * 1000);
             const toast: ToastItem = { id, ...t };
 
-            setToasts((prev) => [toast, ...prev].slice(0, maxToasts));
+            setToasts((prev) => [toast, ...prev].slice(0, MAX_TOASTS));
 
             timers.current[id] = window.setTimeout(() => {
                 remove(id);
-            }, durationMs);
+            }, DURACION_MS);
         },
-        [durationMs, maxToasts, remove],
+        [remove],
     );
 
     const api = useMemo<ToastContextValue>(
