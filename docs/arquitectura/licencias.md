@@ -69,7 +69,10 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 1. Firma HMAC-SHA256 de Stripe sobre el cuerpo **crudo**, comparación de tiempo constante.
 2. El timestamp de la firma no se desvía más de 5 minutos.
 3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
-   falló sí, y por eso se contestó 500.
+   falló sí, y por eso se contestó 500. Por qué falló queda en `webhook_events.error_text`: el
+   mensaje del error, que, si es la central la que no ha atendido, es su identificador
+   (`hub_unavailable` o `hub_overloaded`), no el texto de la plataforma; ése va como causa del error
+   (`e.cause`) a Sentry.
 4. Idempotencia por sesión de checkout (índice único en `license_payments` por sesión y unidad),
    comprobada dentro de la operación de la central que emite el cobro (`emitirCobro`). Antes de
    preparar las claves se mira con la misma consulta: una sesión ya cumplida sale sin cifrar nada,
