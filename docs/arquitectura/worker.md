@@ -996,9 +996,12 @@ La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copi
 - **Bucket privado y propio**: `tpv-copias-control` (`COPIAS`), nunca `tpv-images`, que se sirve sin
   firma: lleva los correos de los clientes y las DEK de los negocios, cifradas con
   `LICENSE_STORE_KEY`. Sin esa clave la copia no las devuelve: se guarda fuera de Cloudflare.
-- **Cuánto se guardan lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el código, y
-  vale también para las de a mano y las de antes de volver, con sus `.marcador` y `.pedida`. Tiene que
-  quedar por debajo de los 90 días de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida
+- **Se guardan 30 días, y lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el
+  código: `caducar-copias`, sobre el prefijo `base-central/`, borra cada objeto a los 30 días de
+  subirlo (se mira, desde `apps/cloud-worker-licensing/`, con `pnpm exec wrangler r2 bucket lifecycle
+  list tpv-copias-control`). Vale también para las de a mano y las de antes de volver, con sus
+  `.marcador` y `.pedida`, que duran lo mismo que la ventana en que se puede deshacer una vuelta. Tiene
+  que quedar por debajo de los 90 días de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida
   seguirían vivos en las copias, y no por debajo de los 30 en que se puede deshacer una vuelta.
 - **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`). Se monta en memoria y al cerrarla ocupa el
   doble, dentro de los 128 MB del objeto. Pasado, falla en voz alta (`central_copia_fallida`) en vez

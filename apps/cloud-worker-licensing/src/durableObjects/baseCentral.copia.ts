@@ -50,9 +50,11 @@
 //   · El bucket es PRIVADO y propio. Nunca `tpv-images`, que se sirve sin firma: esto lleva los
 //     correos de los clientes, y las DEK de los negocios (cifradas con `LICENSE_STORE_KEY`,
 //     que por eso tiene que estar guardada fuera de Cloudflare: sin ella la copia no los devuelve).
-//   · Cuánto se guardan las copias lo decide la regla de ciclo de vida del bucket, no este código.
-//     Tiene que ser menor que los 90 días de `RETENCION_ENVIOS_MS` (`server/purga.ts`), o los correos
-//     que la purga promete olvidar seguirían vivos dentro de las copias.
+//   · Cuánto se guardan las copias lo decide la regla de ciclo de vida del bucket, no este código:
+//     `caducar-copias`, 30 días para todo `base-central/` (también los `.marcador` y los `.pedida`;
+//     `wrangler r2 bucket lifecycle list tpv-copias-control`). Tiene que ser menor que los 90 días de
+//     `RETENCION_ENVIOS_MS` (`server/purga.ts`), o los correos que la purga promete olvidar seguirían
+//     vivos dentro de las copias, y no menos que los 30 en que se puede deshacer una vuelta.
 
 import { esFechaYmd } from "../lib/fechas";
 import { empezarVolcado, GzipPorTrozos, terminarVolcado, volcarFilas } from "./volcadoSql";

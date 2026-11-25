@@ -46,8 +46,9 @@ pnpm central:copiar    # una ahora, con la hora en la clave: no pisa la del día
   se hizo: se puede restaurar si este worker sabe poner esas migraciones. De las de antes de volver
   dice además el `marcador` (cómo estaba la central: volver a él deshace aquella vuelta) y `pedida`
   (cuándo se le pidió aquella vuelta a la plataforma; sin hora, no consta que se pidiera).
-- Cuánto se guardan lo dice la regla de ciclo de vida del bucket. Desde
-  `apps/cloud-worker-licensing/`:
+- **Se guardan 30 días**, y con ellas los `.marcador` y los `.pedida`: lo dice la regla de ciclo de
+  vida del bucket, `caducar-copias` (prefijo `base-central/`, «Expire objects after 30 days»), no el
+  código. Se mira desde `apps/cloud-worker-licensing/`:
 
   ```bash
   pnpm exec wrangler r2 bucket lifecycle list tpv-copias-control

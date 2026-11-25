@@ -162,7 +162,7 @@ Tres cosas concretas que comprobar:
 
 | Métrica | Por qué |
 |---|---|
-| Almacenamiento (`tpv-images`, `tpv-releases`, `tpv-copias-control`) | Las imágenes crecen con el catálogo; las copias de la base central se borran a los 35 días |
+| Almacenamiento (`tpv-images`, `tpv-releases`, `tpv-copias-control`) | Las imágenes crecen con el catálogo; las copias de la base central se borran a los 30 días (regla `caducar-copias`: `pnpm exec wrangler r2 bucket lifecycle list tpv-copias-control`) |
 | Operaciones Clase A (escrituras) | Subidas de imágenes |
 | Operaciones Clase B (lecturas) | Cada imagen que carga una Handy y no tiene en la caché de su webview (INFRA-03: va por el GET del worker, y en `workers.dev` no se cuenta con la Cache API; [worker.md](../arquitectura/worker.md#imágenes)) |
 

@@ -139,7 +139,8 @@ export interface Env {
 
 	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`durableObjects/baseCentral.copia.ts`).
 	// No puede ser el de imágenes: aquél se sirve sin firma por `/v1/images`, y esto lleva correos de clientes y
-	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare.
+	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare
+	// (`caducar-copias`: 30 días).
 	COPIAS: R2Bucket;
 
 	// DO-03 · Bucket PRIVADO de las copias diarias de la base de cada negocio
