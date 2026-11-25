@@ -318,7 +318,8 @@ cuatro reglas:
 | `@typescript-eslint/no-misused-promises` | Una promesa entregada a quien no la espera (`onClick={guardar}`) | error |
 
 Antes de añadir una quinta: «¿habría cazado un bug que hemos tenido?». Lo apagado lleva su motivo en
-`eslint.config.mjs`. Los `packages/*` quedan fuera del análisis con tipos porque no tienen `tsconfig.json`.
+`eslint.config.mjs`. Los `packages/*` quedan fuera del análisis con tipos porque no tienen `tsconfig.json`;
+`reservas-web-sdk`, que sí lo tiene, va con tipos.
 
 `pnpm check:dead-code` (RI-22) informa sobre ficheros, exportaciones y dependencias TS con Knip,
 y sobre dependencias Rust con cargo-machete. Necesita Node >=22.12, `pnpm install` y
