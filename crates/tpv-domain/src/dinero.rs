@@ -344,10 +344,10 @@ mod tests {
 
     #[test]
     fn el_redondeo_es_el_mismo_que_el_de_la_pantalla() {
-        // Tabla repetida a proposito en `apps/tpv-main/test/efectivo.test.ts`: la pantalla del
-        // cierre ensena el arqueo antes de confirmar y tiene que redondear igual que lo que se
-        // guarda. `f64::round` aleja la mitad del cero y el `Math.round` de JavaScript no
-        // (-12,5 -> -12), asi que si esto cambia, alli hay que cambiar `aCentimos`.
+        // La pantalla del cierre ensena el arqueo antes de confirmar y tiene que redondear igual
+        // que lo que se guarda. `f64::round` aleja la mitad del cero y el `Math.round` de
+        // JavaScript no (-12,5 -> -12): la pantalla redondea con `deEuros` (shared/lib/dinero.ts),
+        // y las dos se prueban contra la tabla compartida `dinero_casos.json`.
         //
         // Vivia en `cierre_caja.rs` cuando la regla era de la caja. Ahora es del dinero entero:
         // esta es la unica puerta por la que un f64 se convierte en un importe.

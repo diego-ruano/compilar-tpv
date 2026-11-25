@@ -534,7 +534,7 @@ export const commands = {
 	vrGetDetallesVerTicket: (args: VrIdComandaArgs) => __TAURI_INVOKE<VerTicketsDetalleRow[]>("vr_get_detalles_ver_ticket", { args }),
 	/**
 	 *  ¿Están los datos fiscales del negocio? Lo leen el aviso de datos fiscales y Configuración →
-	 *  Fiscal.
+	 *  Negocio.
 	 *
 	 *  Sin exigir rol: el aviso sale a quien esté delante, porque sin esos datos el siguiente cobro
 	 *  va a fallar.

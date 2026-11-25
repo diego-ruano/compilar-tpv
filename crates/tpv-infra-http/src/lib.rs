@@ -12,11 +12,9 @@
 //! el cliente.
 //!
 //! ## Cobertura
-//! Implementados contra los dominios del worker (`/v1/<modulo>/*`): clientes, configuracion,
-//! cuentas, reservas, tareas, trabajadores, proveedores, pedidos_proveedor, stats, venta_rapida,
-//! inventario, mesas y login. Excepción conocida:
-//! - los métodos de **barra** de `MesasRepository` (el worker los sirve bajo `venta_rapida`):
-//!   se implementan como error explícito `endpoint_no_disponible_en_handy`.
+//! Un módulo por puerto, contra las rutas del worker (`/v1/…`): cierre_caja, clientes, configuracion,
+//! cuentas, inventario, login, mesas, notificaciones, pedidos_proveedor, permisos, proveedores,
+//! reservas, stats, tareas, trabajadores y venta_rapida.
 
 pub mod cierre_caja;
 pub mod clientes;

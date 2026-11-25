@@ -1514,8 +1514,9 @@ fn discard_sidecars(path: &Path) {
 /// - **Lo que va por debajo y está en cuarentena se conserva**: el checkpoint ya pasó por encima,
 ///   así que el catch-up no lo traerá nunca y esta copia no tiene ese cambio. Borrarlo lo
 ///   escondería y le abriría a `verificar_nube` la puerta de borrar o pisar arriba lo que ese
-///   cambio hizo. Con él, `recovery_complete` (que exige cuarentena = 0) no desbloquea con esta
-///   copia: la salida es otra copia o la nube, que es lo que dice la pantalla al quedar bloqueada.
+///   cambio hizo. Con él, el desbloqueo (`commands::recovery::completar`, que exige cuarentena = 0)
+///   no llega con esta copia: la salida es otra copia o la nube, que es lo que dice la pantalla al
+///   quedar bloqueada.
 /// - Lo que va por debajo **sin** cuarentena (una copia anterior a AUD-18, cuando el checkpoint
 ///   podía saltarse un fallo) pasa a estarlo, porque es lo que es: un cambio que el checkpoint dejó
 ///   atrás y que no volverá.

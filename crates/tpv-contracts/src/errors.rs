@@ -34,7 +34,9 @@ pub enum ErrorCode {
     NotFound,
     /// El estado actual no admite la operación (comanda cerrada, stock insuficiente…).
     Conflict,
-    /// Fallo de persistencia (SQLite/libsql).
+    /// Fallo de la base SQLite local de la Main. Sólo lo emite Rust: las bases de la nube (la de
+    /// cada negocio, en el SQLite de su Durable Object, y la central, en el objeto `BaseCentral`)
+    /// son cosa del worker, que no manda este código.
     Repository,
     /// Fallo de un servicio externo (red, worker, licencias).
     External,

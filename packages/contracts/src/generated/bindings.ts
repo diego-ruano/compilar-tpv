@@ -1157,7 +1157,11 @@ export type ErrorCode =
 "not_found" |
 /**  El estado actual no admite la operación (comanda cerrada, stock insuficiente…). */
 "conflict" |
-/**  Fallo de persistencia (SQLite/libsql). */
+/**
+ *  Fallo de la base SQLite local de la Main. Sólo lo emite Rust: las bases de la nube (la de
+ *  cada negocio, en el SQLite de su Durable Object, y la central, en el objeto `BaseCentral`)
+ *  son cosa del worker, que no manda este código.
+ */
 "repository" |
 /**  Fallo de un servicio externo (red, worker, licencias). */
 "external" |
@@ -1252,7 +1256,7 @@ export type EstadoCorreoRecuperacion = {
 	es_el_de_la_compra: boolean,
 };
 
-/**  ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal. */
+/**  ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Negocio. */
 export type EstadoFiscal = {
 	/**
 	 *  ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir la factura, y

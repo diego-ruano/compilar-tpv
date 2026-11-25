@@ -2930,8 +2930,8 @@ mod tests_backfill {
     //! - si la fase 2 pisara una fila que ya está, machacaría con una versión vieja del histórico
     //!   lo que el catch-up acaba de traer al día;
     //! - si sus escrituras pasaran por la captura del outbox, el equipo devolvería a la nube —fila
-    //!   a fila, y facturado como escrituras en Turso— el histórico entero que acaba de bajarse de
-    //!   ella, para no cambiar absolutamente nada.
+    //!   a fila, y pagando cada una como escritura en el SQLite del Durable Object del negocio— el
+    //!   histórico entero que acaba de bajarse de ella, para no cambiar absolutamente nada.
     //!
     //! Ninguno de los dos da un error. El primero da un dato incorrecto que nadie mira y el segundo
     //! da una factura.
