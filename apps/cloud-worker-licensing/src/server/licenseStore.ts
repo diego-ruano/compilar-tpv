@@ -528,16 +528,17 @@ export type LicensePaymentRow = {
 };
 
 /**
- * Marca que el correo con la clave se entregó. Se llama SOLO si el envío devolvió `true`; si falla,
- * la columna queda NULL y ese cliente aparece como "pagó y no tiene su clave" (reenviable con
- * `pnpm license:resend`).
+ * Marca que el correo con las claves de `licenseIds` se entregó, en una sentencia (la lista, como un
+ * único parámetro JSON). Se llama SOLO si el envío devolvió `true`; si falla, la columna queda NULL y
+ * ese cliente aparece como "pagó y no tiene su clave" (CLAVES-SIN-CORREO: se reenvía solo).
  */
-export async function markKeyEmailSent(db: Sql, licenseId: string): Promise<void> {
+export async function markKeyEmailSent(db: Sql, licenseIds: string[]): Promise<void> {
+	if (licenseIds.length === 0) return;
 	const now = Date.now();
 	await exec(
 		db,
-		`UPDATE licenses SET key_email_sent_at_ms=?, updated_at_ms=? WHERE license_id=?;`,
-		[now, now, licenseId],
+		`UPDATE licenses SET key_email_sent_at_ms=?, updated_at_ms=? WHERE license_id IN (SELECT value FROM json_each(?));`,
+		[now, now, JSON.stringify(licenseIds)],
 	);
 }
 
@@ -1352,15 +1353,15 @@ const LE_FALTA_EL_CORREO_DE_CLAVES = `l.key_email_sent_at_ms IS NULL AND l.statu
  * les falta el correo con su clave, en el orden de sus unidades. Lo reenvía la entrega del webhook
  * (`correoDeClaves.ts::reenviarSiFaltaElCorreoDeClaves`).
  */
-export async function licenciasSinCorreoDeClaves(db: Sql, sessionId: string, cobradasAntesDeMs: number): Promise<string[]> {
+export async function licenciasSinCorreoDeClaves(db: Sql, sessionId: string, cobradasAntesDeMs: number): Promise<LicenseRow[]> {
 	const r = await exec(
 		db,
-		`SELECT p.license_id FROM license_payments p JOIN licenses l ON l.license_id = p.license_id
+		`SELECT l.* FROM license_payments p JOIN licenses l ON l.license_id = p.license_id
 		 WHERE p.stripe_checkout_session_id = ? AND p.at_ms < ? AND ${LE_FALTA_EL_CORREO_DE_CLAVES}
 		 ORDER BY p.unidad;`,
 		[sessionId, cobradasAntesDeMs],
 	);
-	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
+	return (r.rows ?? []) as unknown as LicenseRow[];
 }
 
 /**

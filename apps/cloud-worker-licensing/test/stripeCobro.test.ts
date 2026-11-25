@@ -323,20 +323,28 @@ describe("REV-01 · la plataforma corta la llamada que emite el cobro", () => {
 			const correosEnseguida = correos.splice(0);
 			// La entrega de Stripe de más tarde: nadie va a mandar ya ese correo, así que lo manda ella.
 			await e.filas("UPDATE license_payments SET at_ms = at_ms - 10 * 60 * 1000;");
-			const despues = await cumplir(CON_CORREO, e.db, sesionVarias("cs_sin_correo", [[12, 2]]));
+			let viajes = 0;
+			const contada = interceptar(e.central.stub, (_metodo, _argumentos, llamar) => {
+				viajes++;
+				return llamar();
+			});
+			const despues = await cumplir(CON_CORREO, clienteCentral(() => contada), sesionVarias("cs_sin_correo", [[12, 2]]));
 			const reenviados = correos.splice(0);
 			// Y queda apuntado: otra entrega más no lo repite.
 			await cumplir(CON_CORREO, e.db, sesionVarias("cs_sin_correo", [[12, 2]]));
 			const licencias = await e.filas("SELECT license_key_enc, key_email_sent_at_ms FROM licenses ORDER BY rowid;");
 			const claves = await Promise.all(licencias.map(async (l) => (await descifrar(CON_CORREO, l.license_key_enc)).texto));
-			return { enseguida, correosEnseguida, despues, reenviados, otra: correos.splice(0), licencias, claves, avisos: capturados.splice(0) };
+			return { enseguida, correosEnseguida, despues, reenviados, viajes, otra: correos.splice(0), licencias, claves, avisos: capturados.splice(0) };
 		});
 
 		expect([r.enseguida.accion, r.despues.accion]).toEqual(["ya_cumplida", "ya_cumplida"]);
 		expect(r.correosEnseguida).toEqual([]);
-		// El correo de `pnpm license:resend`: uno por licencia, al correo de la compra, con su clave.
-		expect(r.reenviados.map((c) => c.to)).toEqual(["bar@ejemplo.test", "bar@ejemplo.test"]);
-		expect(r.claves.map((clave, i) => r.reenviados[i].text.includes(clave))).toEqual([true, true]);
+		// El correo de la compra: uno solo con todas las claves que faltan, al correo de la compra.
+		expect(r.reenviados.map((c) => c.to)).toEqual(["bar@ejemplo.test"]);
+		expect(r.claves.map((clave) => r.reenviados[0].text.includes(clave))).toEqual([true, true]);
+		// Y los viajes a la central no crecen con las licencias de la compra: ver que está cumplida, leer
+		// las que faltan y apuntarlas.
+		expect(r.viajes).toBe(3);
 		expect(r.licencias.every((l) => typeof l.key_email_sent_at_ms === "number")).toBe(true);
 		expect(r.otra).toEqual([]);
 		// Ha salido: no hay nada que avisar.

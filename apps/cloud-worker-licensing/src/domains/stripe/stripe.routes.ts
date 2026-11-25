@@ -325,9 +325,7 @@ export async function cumplir(env: Env, db: ClienteCentral, session: any): Promi
 	// Si el correo falla NO reventamos el webhook (la venta es lo importante y las claves siguen
 	// recuperables cifradas): dejamos `key_email_sent_at_ms` a NULL, y el correo se reenvía solo
 	// (CLAVES-SIN-CORREO, `correoDeClaves.ts`): lo hace la entrega siguiente de Stripe, o el cron.
-	if (emailSent) {
-		for (const id of ids) await markKeyEmailSent(db, id);
-	}
+	if (emailSent) await markKeyEmailSent(db, ids);
 
 	return { accion: "emitida", license_ids: ids };
 }

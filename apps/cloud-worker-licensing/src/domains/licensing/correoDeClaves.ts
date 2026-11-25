@@ -22,14 +22,13 @@ import { capturarError } from "../../observability/errors";
 import { registrarSinLaCentral } from "../../server/central/sinLaCentral";
 import { descifrar } from "../../server/crypto";
 import {
-	getLicenseById,
 	guardarClaveRecifrada,
 	licenciasDeStripeSinCorreoDeClaves,
 	licenciasSinCorreoDeClaves,
 	markKeyEmailSent,
 	type LicenseRow,
 } from "../../server/licenseStore";
-import { sendLicenseKeyEmail } from "./licenseEmails";
+import { sendLicenseKeyEmail, sendLicenseKeysEmail } from "./licenseEmails";
 
 /**
  * Lo que tarda como mucho una entrega viva entre que su cobro entra y apunta que el correo con las
@@ -55,18 +54,26 @@ export async function reenviarCorreoDeClave(
 	db: Sql,
 	lic: LicenseRow,
 ): Promise<{ key: string; emailSent: boolean }> {
-	if (!lic.license_key_enc) throw new Error(`La licencia ${lic.license_id} no tiene su clave guardada.`);
-	const { texto: key, recifrado } = await descifrar(env, lic.license_key_enc);
-	if (recifrado) await guardarClaveRecifrada(db, lic.license_id, lic.license_key_enc, recifrado);
-
+	const key = await claveEnClaro(env, db, lic);
 	const emailSent = await sendLicenseKeyEmail(env, {
 		to: lic.customer_email,
 		name: lic.customer_name,
 		key,
 		termMonths: lic.term_months,
 	});
-	if (emailSent) await markKeyEmailSent(db, lic.license_id);
+	if (emailSent) await markKeyEmailSent(db, [lic.license_id]);
 	return { key, emailSent };
+}
+
+/**
+ * La clave de `lic` en claro. Si estaba cifrada con la clave anterior de `LICENSE_STORE_KEY`, la
+ * guarda ya con la actual (RI-73). Lanza si no la tiene guardada o no se deja descifrar.
+ */
+async function claveEnClaro(env: Env, db: Sql, lic: LicenseRow): Promise<string> {
+	if (!lic.license_key_enc) throw new Error(`La licencia ${lic.license_id} no tiene su clave guardada.`);
+	const { texto, recifrado } = await descifrar(env, lic.license_key_enc);
+	if (recifrado) await guardarClaveRecifrada(db, lic.license_id, lic.license_key_enc, recifrado);
+	return texto;
 }
 
 /** El aviso de Sentry de unas licencias cuyo correo de claves no se ha podido reenviar. */
@@ -83,27 +90,31 @@ function avisarDeQueNoHanSalido(licencias: string[]): void {
 /**
  * CLAVES-SIN-CORREO · La entrega del webhook que encuentra la sesión `sessionId` ya cumplida reenvía
  * el correo de las licencias que no lo tienen apuntado y se cobraron hace más de
- * `CORREO_DE_CLAVES_MAX_MS`. No puede hacer fallar la entrega: si la central no contesta a la lectura,
- * no hace nada (ya lo hará el cron); si un reenvío no sale, lo avisa en Sentry.
+ * `CORREO_DE_CLAVES_MAX_MS`: el de la compra, uno solo con todas las claves que faltan
+ * (`sendLicenseKeysEmail`), en tres viajes a la central, sean cuantas sean (hasta
+ * `MAX_LICENCIAS_POR_COMPRA`), para no retener la respuesta a Stripe. No puede hacer fallar la
+ * entrega: si la central no contesta a la lectura, no hace nada (ya lo hará el cron); si el reenvío no
+ * sale, lo avisa en Sentry.
  */
 export async function reenviarSiFaltaElCorreoDeClaves(env: Env, db: Sql, sessionId: string): Promise<void> {
-	let sinCorreo: string[];
+	let sinCorreo: LicenseRow[];
 	try {
 		sinCorreo = await licenciasSinCorreoDeClaves(db, sessionId, Date.now() - CORREO_DE_CLAVES_MAX_MS);
 	} catch {
 		return;
 	}
+	if (sinCorreo.length === 0) return;
 
-	const noHanSalido: string[] = [];
-	for (const id of sinCorreo) {
-		try {
-			const lic = await getLicenseById(db, id);
-			if (lic && !(await reenviarCorreoDeClave(env, db, lic)).emailSent) noHanSalido.push(id);
-		} catch {
-			noHanSalido.push(id);
-		}
+	const ids = sinCorreo.map((l) => l.license_id);
+	try {
+		const claves = [];
+		for (const lic of sinCorreo) claves.push({ key: await claveEnClaro(env, db, lic), termMonths: lic.term_months });
+		const [{ customer_email: to, customer_name: name }] = sinCorreo;
+		if (await sendLicenseKeysEmail(env, { to, name, claves })) await markKeyEmailSent(db, ids);
+		else avisarDeQueNoHanSalido(ids);
+	} catch {
+		avisarDeQueNoHanSalido(ids);
 	}
-	if (noHanSalido.length > 0) avisarDeQueNoHanSalido(noHanSalido);
 }
 
 export type ResumenDeReenvios = { revisadas: number; reenviados: number; fallidos: number };

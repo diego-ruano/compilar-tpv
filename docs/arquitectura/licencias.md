@@ -102,15 +102,15 @@ cifrado. Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL
 `pnpm license:list` las enseña pendientes.
 
 **El correo de claves que no consta se reenvía solo** (CLAVES-SIN-CORREO,
-`domains/licensing/correoDeClaves.ts`): el mismo de `pnpm license:resend`, uno por licencia, que la
-apunta si sale. Sólo una licencia de Stripe que sigue sin estrenar (`issued`, sin anular) y se cobró
-hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`: antes, puede ser la entrega que lo está
-mandando). Lo reenvían:
+`domains/licensing/correoDeClaves.ts`), y se apunta si sale. Sólo una licencia de Stripe que sigue
+sin estrenar (`issued`, sin anular) y se cobró hace más de cinco minutos (`CORREO_DE_CLAVES_MAX_MS`:
+antes, puede ser la entrega que lo está mandando). Lo reenvían:
 
 - la entrega de Stripe que encuentra la sesión ya cumplida al empezar (la que la emitió no llegó a
-  mandarlo o a apuntarlo), con las licencias de esa sesión;
-- el cron diario, con cualquiera, como mucho 25 al día (`REENVIOS_DE_CLAVES_AL_DIA`), las más
-  recientes primero; las que no caben, al día siguiente.
+  mandarlo o a apuntarlo): el correo de la compra, uno solo con las claves de esa sesión que faltan,
+  en tres viajes a la central sean cuantas sean, para no retener la respuesta a Stripe;
+- el cron diario, con cualquiera, el de `pnpm license:resend`, uno por licencia, como mucho 25 al día
+  (`REENVIOS_DE_CLAVES_AL_DIA`), las más recientes primero; las que no caben, al día siguiente.
 
 Una licencia manual no: se emite sin `--send-key` a propósito, y la suya no consta nunca. Puede llegar
 dos veces (dos entregas a la vez, o un correo que salió y no se llegó a apuntar): mejor eso que un
