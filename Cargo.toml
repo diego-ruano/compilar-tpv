@@ -46,7 +46,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
 # ── Fechas ──
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
 
 # ── DB ──
 # SQLite local de la Main. `bundled` compila el SQLite que trae la crate: el mismo en Windows,
@@ -109,6 +109,6 @@ sentry = { version = "0.42", default-features = false, features = ["backtrace", 
 # Puente tracing→Sentry: convierte los `error!` en eventos Sentry con breadcrumbs.
 sentry-tracing = "0.42"
 
-specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "chrono", "serde_json", "uuid"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "serde_json"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript"] }
