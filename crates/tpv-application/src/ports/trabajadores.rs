@@ -5,9 +5,7 @@ use async_trait::async_trait;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
 };
-use tpv_domain::trabajadores::{
-    AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
-};
+use tpv_domain::trabajadores::{AsignacionNueva, TrabajadorCambios, TrabajadorNuevo};
 
 use crate::error::AppResult;
 
@@ -36,14 +34,8 @@ pub trait TrabajadoresRepository: Send + Sync {
     async fn get_asignaciones_semana(&self, fecha_lunes: String) -> AppResult<Vec<AsignacionRow>>;
 
     /* Escrituras (Local-First, sin outbox) */
-    async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool>;
     /// RI-85: sustituye el grupo completo; las asignaciones antiguas son grupos de un tramo.
     async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool>;
-    async fn update_asignacion(
-        &self,
-        id_asignacion: &str,
-        cambios: AsignacionCambios,
-    ) -> AppResult<bool>;
     async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool>;
     /// Marca libre el día `fecha` del trabajador: quita lo que tuviera ese día y deja su día libre
     /// (`ID_TURNO_LIBRE`, sin horas), que tapa la plantilla. Se quita con `delete_asignacion`.

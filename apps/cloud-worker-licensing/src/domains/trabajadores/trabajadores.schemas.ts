@@ -6,9 +6,7 @@ import { esFechaYmd, normalizarDia, zDia } from "../../lib/fechas";
 import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
-	AsignacionCreateInput as ContractAsignacionCreateInput,
 	AsignacionGuardarInput,
-	AsignacionUpdateInput as ContractAsignacionUpdateInput,
 	CopySemanaInput as ContractCopySemanaInput,
 	HorarioLibreInput,
 	TrabajadorCreateInput as ContractTrabajadorCreateInput,
@@ -51,14 +49,6 @@ function normalizeEstado(v: unknown): string {
 // —`Date.UTC` y el `date()` de SQLite lo convierten en 3 de marzo—, y lanzaba dentro del
 // `transform`: una fecha mal formada contestaba 500 en vez de un fallo de validación.
 const zDiaDeHorario = zDia;
-
-function normalizeOptionalTime(raw: unknown): string | null {
-	const s = cleanOrNull(raw);
-	if (!s) return null;
-	const hhmm = s.length >= 5 ? s.slice(0, 5) : "";
-	if (!/^\d{2}:\d{2}$/.test(hhmm)) return s;
-	return hhmm;
-}
 
 /** Lo que se dice de las fechas del contrato que no valen: el mismo texto que la Main (TRA-INC-01). */
 const MSG_INICIO_CONTRATO = "La fecha de inicio del contrato no es válida.";
@@ -160,39 +150,6 @@ export const trabajadorUpdateSchema = z
 		puesto: cleanOrNull(v.puesto),
 	}));
 
-export const asignacionCreateSchema = z
-	.object({
-		id_trabajador: idField("Falta el trabajador."),
-		fecha: zDiaDeHorario("El día del turno no es válido."),
-		id_turno: idField("Elige un turno."),
-		area: requiredString("Elige el área."),
-		hora_inicio: z.any().optional().nullable(),
-		hora_fin: z.any().optional().nullable(),
-		notas: z.any().optional().nullable(),
-	})
-	.transform((v) => ({
-		...v,
-		hora_inicio: normalizeOptionalTime(v.hora_inicio),
-		hora_fin: normalizeOptionalTime(v.hora_fin),
-		notas: cleanOrNull(v.notas),
-	}));
-
-export const asignacionUpdateSchema = z
-	.object({
-		id_asignacion: idField("Falta la asignación."),
-		id_turno: idField("Elige un turno."),
-		area: requiredString("Elige el área."),
-		hora_inicio: z.any().optional().nullable(),
-		hora_fin: z.any().optional().nullable(),
-		notas: z.any().optional().nullable(),
-	})
-	.transform((v) => ({
-		...v,
-		hora_inicio: normalizeOptionalTime(v.hora_inicio),
-		hora_fin: normalizeOptionalTime(v.hora_fin),
-		notas: cleanOrNull(v.notas),
-	}));
-
 /** Marcar libre el día de un trabajador. Los mismos textos que la Main. */
 export const horarioLibreSchema = z
 	.object({
@@ -260,8 +217,6 @@ type NullableTrabajadorUpdateFields =
 	| "pin"
 	| "sin_pin";
 
-type NullableAsignacionFields = "hora_inicio" | "hora_fin" | "notas";
-
 export type TrabajadorCreateInput = Omit<
 	ContractTrabajadorCreateInput,
 	NullableTrabajadorCreateFields | PiiSoloMain
@@ -276,20 +231,6 @@ export type TrabajadorUpdateInput = Omit<
 	[K in NullableTrabajadorUpdateFields]?: ContractTrabajadorUpdateInput[K] | null;
 };
 
-export type AsignacionCreateInput = Omit<
-	ContractAsignacionCreateInput,
-	NullableAsignacionFields
-> & {
-	[K in NullableAsignacionFields]?: ContractAsignacionCreateInput[K] | null;
-};
-
-export type AsignacionUpdateInput = Omit<
-	ContractAsignacionUpdateInput,
-	NullableAsignacionFields
-> & {
-	[K in NullableAsignacionFields]?: ContractAsignacionUpdateInput[K] | null;
-};
-
 export type CopySemanaInput = Required<ContractCopySemanaInput>;
 
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
@@ -298,7 +239,5 @@ export type CopySemanaInput = Required<ContractCopySemanaInput>;
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GTrabajadorCreate = Assert<SameKeys<z.infer<typeof trabajadorCreateSchema>, TrabajadorCreateInput>>;
 type _GTrabajadorUpdate = Assert<SameKeys<z.infer<typeof trabajadorUpdateSchema>, TrabajadorUpdateInput>>;
-type _GAsignacionCreate = Assert<SameKeys<z.infer<typeof asignacionCreateSchema>, AsignacionCreateInput>>;
-type _GAsignacionUpdate = Assert<SameKeys<z.infer<typeof asignacionUpdateSchema>, AsignacionUpdateInput>>;
 type _GCopySemana = Assert<SameKeys<z.infer<typeof copySemanaSchema>, CopySemanaInput>>;
 type _GHorarioLibre = Assert<SameKeys<z.infer<typeof horarioLibreSchema>, HorarioLibreInput>>;

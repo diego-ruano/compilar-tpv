@@ -1261,7 +1261,7 @@ demás. Por eso **lo que decide si la escritura entra va en un paso de guarda de
   a decidir, porque no quedó aplicada: con la base igual, contesta lo mismo. El de una que sí entró
   choca antes con el gate y contesta lo guardado sin mirar la guarda. Por eso la ruta no mira antes lo
   que decide una guarda: el reintento de una línea que entró antes de un cobro contestaba
-  `comanda_cobrada`, y el de un turno asignado se encontraba a sí mismo (`asignacion_duplicada`).
+  `comanda_cobrada`.
 - La ruta sí lee antes lo que necesita para construir el comando o para contestar sin escribir (una
   reserva que ya no existe o ya está cancelada, el estado desde el que se marca la llegada) o para
   decir más que la guarda (con qué choca un solape: la guarda contesta el mismo código con el texto
@@ -1273,10 +1273,9 @@ reserva con los solapes prohibidos o sin confirmar (`reserva_solapada_prohibida`
 `reserva_solapada`), con la duración y el modo del negocio leídos al aplicar, que su cliente siga
 existiendo (`cliente_no_encontrado`) y que el email de un cliente nuevo no sea de otro
 (`email_duplicado`), en el orden en que lo mira la ruta; el último administrador
-(`ultimo_administrador`) y que la ficha que se edita exista (`trabajador_no_encontrado`); el turno
-repetido de un trabajador (`asignacion_duplicada`) y editar una asignación que tiene dos tramos o
-que ya no está (`horario_editar_conjunto`, `asignacion_no_encontrada`); una línea de un producto
-archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivado`,
+(`ultimo_administrador`) y que la ficha que se edita exista (`trabajador_no_encontrado`); que a quien
+se le guarda un horario o un día libre siga en la plantilla (`trabajador_no_encontrado`); una línea
+de un producto archivado o en una comanda cobrada, en la mesa y en la barra (`producto_archivado`,
 `comanda_cobrada`, `mesas/guardasDeLinea.ts`); quitar un producto que está en una comanda abierta
 (`producto_en_comanda_abierta`), y ajustar las existencias de un lote o el stock suelto con lo que
 se vio (`stock_cambiado`: la ruta sólo contesta sin escribir lo que ya está como se pide, y el
@@ -1299,8 +1298,8 @@ Una ruta cuya escritura decide una guarda no mira el resultado de `apply`. Las q
 por el recuento que tocó una sentencia condicional (la papelera de notificaciones, el turno partido,
 el guardado de un horario, enviar o cancelar un pedido a un proveedor) lo hacen con `decidirPorEstado` (`lib/rutas.ts`): en el reintento de una
 operación ya aplicada el resultado guardado puede llegar sin el recuento (SYNC-10 lo afina después
-de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha, editar una asignación
-y quitar un producto decidían así o por una lectura que devolvía el lote, y en ese reintento
+de aplicarla, si puede), y entonces se mira cómo ha quedado. Editar una ficha y quitar un producto
+decidían así o por una lectura que devolvía el lote, y en ese reintento
 contestaban `ok` sin saber si lo editado seguía existiendo, o el 409 de un producto que ya se había
 quitado (SYNC-35): ahora lo decide su guarda. El ajuste de existencias miraba lo visto en la ruta, y
 el reintento de uno que ya había entrado veía lo nuevo y contestaba `stock_cambiado`.

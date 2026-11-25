@@ -83,16 +83,6 @@ export type AppErrorDto = {
 	message: string,
 };
 
-export type AsignacionCreateInput = {
-	id_trabajador: string,
-	fecha: string,
-	id_turno: string,
-	area: string,
-	hora_inicio?: string | null,
-	hora_fin?: string | null,
-	notas?: string | null,
-};
-
 export type AsignacionDeleteInput = {
 	id_asignacion: string,
 };
@@ -121,15 +111,6 @@ export type AsignacionRow = {
 	Nombre_Turno: string,
 	/**  Es el día libre del trabajador (el turno LIBRE, sin horas): tapa la plantilla. */
 	Libre?: boolean,
-};
-
-export type AsignacionUpdateInput = {
-	id_asignacion: string,
-	id_turno: string,
-	area: string,
-	hora_inicio?: string | null,
-	hora_fin?: string | null,
-	notas?: string | null,
 };
 
 export type AutorizacionUsuario = {

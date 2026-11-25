@@ -107,8 +107,8 @@ export async function apply(
  *
  * Si lo que decide es una condición previa (que exista lo que se edita, que no esté en uso lo que se
  * quita), mejor una guarda en el comando (SYNC-30): decide dentro del lote, el reintento de lo que
- * entró contesta lo guardado y la ruta no mira el resultado. Así van editar una ficha, editar una
- * asignación de un tramo y quitar un producto (SYNC-35).
+ * entró contesta lo guardado y la ruta no mira el resultado. Así van editar una ficha y quitar un
+ * producto (SYNC-35).
  */
 export async function decidirPorEstado(
 	resultado: unknown,

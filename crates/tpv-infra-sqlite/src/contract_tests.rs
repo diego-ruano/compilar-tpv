@@ -57,7 +57,6 @@ use tpv_domain::notificaciones::NuevaNotificacion;
 use tpv_domain::proveedores::ProveedorValidado;
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
-use tpv_domain::trabajadores::{AsignacionCambios, AsignacionNueva};
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
@@ -425,9 +424,7 @@ casos_de_contrato! {
     horarios__marcar_libre,
     trabajadores__eliminar_con_historia,
     trabajadores__eliminar_sin_historia,
-    horarios__create_asignacion,
     horarios__guardar_asignacion,
-    horarios__update_asignacion,
     horarios__delete_asignacion,
 }
 
@@ -1060,35 +1057,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("guardar los dos tramos");
-        }
-        "horarios.create_asignacion" => {
-            let repo = SqliteTrabajadoresRepository::new(db.clone());
-            repo.create_asignacion(AsignacionNueva {
-                id_trabajador: s(&e["id_trabajador"]),
-                fecha: s(&e["fecha"]),
-                id_turno: s(&e["id_turno"]),
-                area: s(&e["area"]),
-                hora_inicio: opt_str(&e["hora_inicio"]),
-                hora_fin: opt_str(&e["hora_fin"]),
-                notas: opt_str(&e["notas"]),
-            })
-            .await
-            .expect("create asignacion");
-        }
-        "horarios.update_asignacion" => {
-            let repo = SqliteTrabajadoresRepository::new(db.clone());
-            repo.update_asignacion(
-                &s(&e["id_asignacion"]),
-                AsignacionCambios {
-                    id_turno: s(&e["id_turno"]),
-                    area: s(&e["area"]),
-                    hora_inicio: opt_str(&e["hora_inicio"]),
-                    hora_fin: opt_str(&e["hora_fin"]),
-                    notas: opt_str(&e["notas"]),
-                },
-            )
-            .await
-            .expect("update asignacion");
         }
         "horarios.delete_asignacion" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());

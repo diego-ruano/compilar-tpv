@@ -7,8 +7,6 @@ import { ID_TURNO_LIBRE, type FilaSemanaOrigen, type GrupoAsignacion } from "./t
 import type { PredeterminadoItem } from "./trabajadores.queries";
 import type { AsignacionGuardarInput } from "@tpv/contracts";
 import type {
-	AsignacionCreateInput,
-	AsignacionUpdateInput,
 	CopySemanaInput,
 	TrabajadorCreateInput,
 	TrabajadorUpdateInput,
@@ -273,68 +271,6 @@ function guardaDeLaPlantilla(idTrabajador: string) {
 	};
 }
 
-/**
- * TRAB-04: el mismo turno no se asigna dos veces al mismo trabajador el mismo día, aunque cambie el
- * área. Espejo de la comprobación de la Main. Lo decide la guarda, dentro del lote que la escribe
- * (SYNC-30): mirado antes, otro dispositivo podía asignarlo entre la lectura y el lote, y el
- * reintento de una que sí entró la encontraba a ella misma.
- */
-export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
-	const idAsignacion = nuevoId();
-	return {
-		commandName: "horarios_create_asignacion",
-		command: {
-			type: "tenantDb.transaction",
-			payload: {
-				steps: [
-					guardaDeLaPlantilla(input.id_trabajador),
-					{
-						kind: "guard",
-						sql: "SELECT NOT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3);",
-						args: [input.id_trabajador, input.fecha, input.id_turno],
-						error: "asignacion_duplicada",
-						status: 409,
-					},
-					{
-						kind: "execute",
-						sql: `
-							INSERT INTO Asignacion_Turnos (
-								ID_Asignacion,
-								ID_Trabajador,
-								Fecha,
-								ID_Turno,
-								Area,
-								Hora_Inicio,
-								Hora_Fin,
-								Notas
-							)
-							VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
-						`,
-						args: [
-							idAsignacion,
-							input.id_trabajador,
-							input.fecha,
-							input.id_turno,
-							input.area,
-							input.hora_inicio,
-							input.hora_fin,
-							input.notas,
-						],
-					},
-					{
-						kind: "value",
-						saveAs: "id_asignacion",
-						sql: "SELECT ?1;",
-						args: [idAsignacion],
-					},
-				],
-				resultKey: "id_asignacion",
-			},
-		},
-		cloudPayload: input,
-	};
-}
-
 /** RI-85: resuelve el grupo y lo sustituye dentro de la misma transacción. */
 /**
  * Lo que quita el día libre de un trabajador (?1) un día (?2): al guardarle un turno ese día. Mismo
@@ -405,66 +341,6 @@ export function marcarLibre(input: { id_trabajador: string; fecha: string }): Bu
 			},
 		},
 		cloudPayload: input,
-	};
-}
-
-/**
- * Edita una asignación de un solo tramo. Lo deciden dos guardas dentro del lote, en el orden de la
- * Main (`update_asignacion`): una de dos tramos se edita como un conjunto (`horario_editar_conjunto`)
- * y una que ya no está, `asignacion_no_encontrada`. SYNC-35: lo decidía la ruta por las filas que
- * tocaba el UPDATE, y en el reintento de una edición cuyo recuento no se guardó llegaba `null` y
- * contestaba `ok` aunque la asignación se hubiera borrado. El UPDATE replicado conserva su condición,
- * que vuelve a evaluar la Main.
- */
-export function updateAsignacion(
-	idAsignacion: string,
-	input: AsignacionUpdateInput,
-): BuiltCommand {
-	return {
-		commandName: "horarios_update_asignacion",
-		command: {
-			type: "tenantDb.transaction",
-			payload: {
-				steps: [
-					{
-						kind: "guard",
-						sql: "SELECT (SELECT COUNT(*) FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1)) <= 1;",
-						args: [idAsignacion],
-						error: "horario_editar_conjunto",
-						status: 409,
-					},
-					{
-						kind: "guard",
-						sql: "SELECT EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);",
-						args: [idAsignacion],
-						error: "asignacion_no_encontrada",
-						status: 404,
-					},
-					{
-						kind: "execute",
-						sql: `
-							UPDATE Asignacion_Turnos
-							SET
-								ID_Turno = ?2,
-								Area = ?3,
-								Hora_Inicio = ?4,
-								Hora_Fin = ?5,
-								Notas = ?6
-							WHERE ID_Asignacion = ?1 AND (SELECT COUNT(*) FROM Asignacion_Turnos a WHERE COALESCE(a.ID_Grupo, a.ID_Asignacion) = COALESCE(Asignacion_Turnos.ID_Grupo, Asignacion_Turnos.ID_Asignacion)) = 1;
-						`,
-						args: [
-							idAsignacion,
-							input.id_turno,
-							input.area,
-							input.hora_inicio,
-							input.hora_fin,
-							input.notas,
-						],
-					},
-				],
-			},
-		},
-		cloudPayload: { ...input, id_asignacion: idAsignacion },
 	};
 }
 

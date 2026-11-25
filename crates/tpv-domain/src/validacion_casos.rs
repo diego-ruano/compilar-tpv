@@ -338,7 +338,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "lote_edicion" => lote_edicion(entrada),
         "negocio" => negocio(entrada),
         "producto" => producto(entrada),
-        "horario_alta" => dias_de_horario(entrada, &[("fecha", MSG_DIA_DEL_TURNO)]),
+        "horario_libre" => dias_de_horario(entrada, &[("fecha", MSG_DIA_DEL_TURNO)]),
         "horario_copia" => dias_de_horario(
             entrada,
             &[("from_monday", MSG_SEMANA_ORIGEN), ("to_monday", MSG_SEMANA_DESTINO)],
