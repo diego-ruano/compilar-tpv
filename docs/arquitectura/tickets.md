@@ -121,7 +121,8 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   que declara el fichero antes de comprobarlo, y con unos bytes pedía gigas. Un WebP se puede
   elegir igualmente: lo convierte la webview, con su propio decodificador, a JPEG (o a PNG si tiene
   transparencia) y con 1024 px de lado como mucho, antes de mandarlo a `save_image`
-  (`guardarImagen.ts`). Lo guardado es siempre JPEG o PNG, así que el ticket y el PDF de una
+  (`guardarImagen.ts`). Antes de dárselo, las mismas cotas se miran en su cabecera: uno que declara
+  más de 8192 px de lado o 24 Mpx no llega a decodificarse. Lo guardado es siempre JPEG o PNG, así que el ticket y el PDF de una
   factura lo pueden leer.
 - **128 MiB acotan la imagen decodificada, no la memoria del proceso.** Con ella conviven otros
   búferes en cada paso. Al decodificarla, los coeficientes de un JPEG progresivo (hasta 8 bytes por

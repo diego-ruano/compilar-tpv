@@ -66,6 +66,64 @@ describe("guardarImagen", () => {
 		expect(h.saveImage).not.toHaveBeenCalled();
 	});
 
+	// Las cotas de RI-07 (`imagenes::decodificar`) valen también para un WebP, y se miran en su
+	// cabecera antes de que la WebView reserve los píxeles: unos pocos bytes pueden declarar un
+	// lienzo de 16384 × 16384, un giga decodificado.
+	describe("un WebP que declara demasiados píxeles no llega a decodificarse", () => {
+		const riff = (chunk: string, datos: number[]) => {
+			const cuerpo = [...[...chunk].map((c) => c.charCodeAt(0)), datos.length, 0, 0, 0, ...datos];
+			const total = 4 + cuerpo.length;
+			return new Uint8Array([82, 73, 70, 70, total & 0xff, total >> 8, 0, 0, 87, 69, 66, 80, ...cuerpo]);
+		};
+		/** VP8L: firma 0x2f y 14 bits de ancho − 1 y 14 de alto − 1. */
+		const vp8l = (ancho: number, alto: number) => {
+			const v = (ancho - 1) | ((alto - 1) << 14);
+			return riff("VP8L", [0x2f, v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >>> 24) & 0xff, 0, 0, 0]);
+		};
+		/** VP8X: banderas, tres reservados y 24 bits de ancho − 1 y de alto − 1. */
+		const vp8x = (ancho: number, alto: number) => {
+			const a = ancho - 1;
+			const b = alto - 1;
+			return riff("VP8X", [0x10, 0, 0, 0, a & 0xff, (a >> 8) & 0xff, a >> 16, b & 0xff, (b >> 8) & 0xff, b >> 16]);
+		};
+		/** VP8 con pérdida: etiqueta de 3 bytes, el código 9d 01 2a y 14 bits de ancho y de alto. */
+		const vp8 = (ancho: number, alto: number) =>
+			riff("VP8 ", [0x50, 0x01, 0x00, 0x9d, 0x01, 0x2a, ancho & 0xff, ancho >> 8, alto & 0xff, alto >> 8]);
+
+		it.each([
+			["VP8L de 16384 × 16384", vp8l(16384, 16384)],
+			["VP8L de 8193 × 1", vp8l(8193, 1)],
+			["VP8X de 9000 × 100", vp8x(9000, 100)],
+			["VP8X de 6000 × 5000 (30 Mpx)", vp8x(6000, 5000)],
+			["VP8 de 1 × 8200", vp8(1, 8200)],
+		])("%s", async (_nombre, bytes) => {
+			const convertir = vi.fn(async () => new Blob([PNG], { type: "image/png" }));
+			await expect(guardarImagen(new File([bytes], "foto.webp"), "productos", convertir)).rejects.toThrow(
+				"La imagen tiene demasiados píxeles: como mucho 8192 de lado y 24 millones en total.",
+			);
+			expect(convertir).not.toHaveBeenCalled();
+			expect(h.saveImage).not.toHaveBeenCalled();
+		});
+
+		it("dentro de las cotas, sí", async () => {
+			for (const bytes of [vp8l(8192, 2929), vp8x(4000, 6000), vp8(1024, 768), WEBP]) {
+				const convertir = vi.fn(async () => new Blob([PNG], { type: "image/png" }));
+				await guardarImagen(new File([bytes], "foto.webp"), "productos", convertir);
+				expect(convertir).toHaveBeenCalledOnce();
+			}
+		});
+
+		it("una cabecera que no se entiende no se le pasa a la WebView", async () => {
+			const convertir = vi.fn(async () => new Blob([PNG], { type: "image/png" }));
+			for (const bytes of [riff("VP8Z", [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), riff("VP8L", [0x00, 0, 0, 0, 0]), WEBP.slice(0, 16)]) {
+				await expect(guardarImagen(new File([bytes], "foto.webp"), "productos", convertir)).rejects.toThrow(
+					"No se pudo leer la imagen WebP: prueba con otra o guárdala como JPEG o PNG.",
+				);
+			}
+			expect(convertir).not.toHaveBeenCalled();
+		});
+	});
+
 	it("los selectores de fichero ofrecen también WebP", () => {
 		expect(ACEPTA_IMAGENES.split(",")).toEqual(expect.arrayContaining(["image/webp", ".webp", "image/jpeg", "image/png"]));
 	});

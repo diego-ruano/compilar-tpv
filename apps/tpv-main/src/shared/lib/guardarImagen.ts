@@ -19,6 +19,49 @@ function esWebp(bytes: Uint8Array): boolean {
     return bytes.length >= 12 && dice(0, "RIFF") && dice(8, "WEBP");
 }
 
+/** Las cotas de RI-07 en `imagenes::decodificar`: 8192 px de lado y 24 Mpx. */
+const MAX_LADO_ENTRADA = 8192;
+const MAX_PIXELES = 24_000_000;
+const NO_SE_LEE_EL_WEBP = "No se pudo leer la imagen WebP: prueba con otra o guárdala como JPEG o PNG.";
+
+/**
+ * Ancho y alto que declara la cabecera de un WebP, o `null` si no se entiende. El primer trozo dice
+ * cuál de las tres es: `VP8X` (la extendida: el lienzo, 24 bits de ancho − 1 y de alto − 1), `VP8L`
+ * (sin pérdida: firma 0x2f y 14 bits de cada uno, menos 1) o `VP8 ` (con pérdida: código 9d 01 2a
+ * y 14 bits de cada uno). Así lo describe la RFC 9649.
+ */
+function dimensionesWebp(b: Uint8Array): { ancho: number; alto: number } | null {
+    if (b.length < 16) return null;
+    const trozo = String.fromCharCode(b[12], b[13], b[14], b[15]);
+    if (trozo === "VP8X") {
+        if (b.length < 30) return null;
+        return { ancho: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), alto: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) };
+    }
+    if (trozo === "VP8L") {
+        if (b.length < 25 || b[20] !== 0x2f) return null;
+        const v = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+        return { ancho: 1 + (v & 0x3fff), alto: 1 + ((v >>> 14) & 0x3fff) };
+    }
+    if (trozo === "VP8 ") {
+        if (b.length < 30 || b[23] !== 0x9d || b[24] !== 0x01 || b[25] !== 0x2a) return null;
+        return { ancho: (b[26] | (b[27] << 8)) & 0x3fff, alto: (b[28] | (b[29] << 8)) & 0x3fff };
+    }
+    return null;
+}
+
+/**
+ * Las cotas de RI-07, sobre la cabecera y antes de que la WebView reserve los píxeles: unos pocos
+ * bytes pueden declarar un lienzo de 16384 × 16384, un giga decodificado. Lo mismo que hace Rust con
+ * un JPEG o un PNG (`imagenes::decodificar`).
+ */
+function comprobarCotasWebp(bytes: Uint8Array): void {
+    const d = dimensionesWebp(bytes);
+    if (!d || d.ancho === 0 || d.alto === 0) throw new Error(NO_SE_LEE_EL_WEBP);
+    if (d.ancho > MAX_LADO_ENTRADA || d.alto > MAX_LADO_ENTRADA || d.ancho * d.alto > MAX_PIXELES) {
+        throw new Error("La imagen tiene demasiados píxeles: como mucho 8192 de lado y 24 millones en total.");
+    }
+}
+
 /**
  * Convierte un WebP con el decodificador de la WebView: WebView2 (también la 109 de Windows 7), la
  * de Android y WKWebView (WebP desde iOS 14; `createImageBitmap` con un `Blob`, desde Safari 15, y
@@ -71,11 +114,12 @@ export async function guardarImagen(
     validarImagen(file);
     let bytes = new Uint8Array(await file.arrayBuffer());
     if (esWebp(bytes)) {
+        comprobarCotasWebp(bytes);
         let convertida: Blob;
         try {
             convertida = await convertir(file);
         } catch {
-            throw new Error("No se pudo leer la imagen WebP: prueba con otra o guárdala como JPEG o PNG.");
+            throw new Error(NO_SE_LEE_EL_WEBP);
         }
         bytes = new Uint8Array(await convertida.arrayBuffer());
     }
