@@ -512,6 +512,29 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		expect(nuevas).toEqual([expect.objectContaining({ clave: expect.stringMatching(/\.sql\.gz$/), marcador: expect.any(String), pedida: null })]);
 	});
 
+	it.each(["marcadorDe", "marcadorActual", "restaurarAlReiniciar"] as const)(
+		"si la plataforma falla en %s, la ruta contesta central_vuelta_rechazada y lo apunta con su código, sin `sin_respuesta`",
+		async (fallaAl) => {
+			const central = await centralDePrueba();
+			const llamadas: string[] = [];
+			await conDobleDeInstantes(central, llamadas, { fallaAl });
+			const log = vi.spyOn(console, "log");
+			const instanteMs = Date.now() - 3_600_000;
+			const destino = new Date(instanteMs).toISOString();
+
+			expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ instanteMs }) })).toMatchObject({
+				status: 422,
+				body: { ok: false, error: "central_vuelta_rechazada", detalle: expect.any(String) },
+			});
+			expect(rastrosDe(log)).toEqual([
+				{ accion: "volver", resultado: "empieza", destino },
+				{ accion: "volver", resultado: "central_vuelta_rechazada", destino },
+			]);
+			expect(llamadas).not.toContain("reiniciar");
+			expect((await central.db.execute("SELECT 1 AS uno;")).rows[0].uno).toBe(1);
+		},
+	);
+
 	it("si la central vuelve pero no atiende, no lo da por bueno: dice por qué, con lo necesario para deshacerlo", async () => {
 		const central = await centralDePrueba();
 		// Vuelve a un instante de en medio de una restauración desde una copia: con su marca.
