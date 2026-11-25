@@ -73,7 +73,7 @@ function AvisoDatosFiscalesModal({ onClose }: { onClose: () => void }) {
                                 onClose();
                                 void navigate("/Configuracion", { state: { seccion: "NEGOCIO" } });
                             }}
-                            className="h-10 rounded-xl border border-primary bg-primary px-5 text-sm font-bold text-white shadow-sm hover:opacity-90 active:scale-[0.97]"
+                            className="h-10 rounded-xl border border-accent bg-accent px-5 text-sm font-bold text-accent-fg shadow-sm hover:border-accent-hover hover:bg-accent-hover hover:opacity-90 active:scale-[0.97]"
                         >
                             Rellenarlo ahora
                         </button>

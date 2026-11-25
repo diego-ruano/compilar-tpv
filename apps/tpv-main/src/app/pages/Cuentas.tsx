@@ -1646,7 +1646,7 @@ export default function Cuentas() {
                                             className={[
                                                 "w-full rounded-2xl border px-4 py-3 text-left transition",
                                                 activa
-                                                    ? "border-primary bg-primary/10"
+                                                    ? "border-accent bg-accent/10"
                                                     : "border-border bg-surface hover:bg-surface-2",
                                                 confirmando ? "opacity-60 cursor-not-allowed" : "",
                                             ].join(" ")}
@@ -1677,7 +1677,7 @@ export default function Cuentas() {
                                     onChange={(ev) => setMotivoAnulacion(ev.target.value)}
                                     placeholder="Cobro duplicado, error de importe…"
                                     disabled={confirmando}
-                                    className="mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-primary"
+                                    className="mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                                 />
                             </label>
                         ) : null}

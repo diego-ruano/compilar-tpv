@@ -91,7 +91,7 @@ export default function DatosFiscalesModal(props: Props) {
 }
 
 const CAMPO =
-    "mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-primary";
+    "mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent";
 const BOTON_SECUNDARIO =
     "cursor-pointer rounded-xl border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-2";
 
@@ -370,7 +370,7 @@ function Formulario({
                             "mt-1 h-10 w-full rounded-xl border bg-surface px-3 text-sm text-fg outline-none",
                             tocadoNif && nif.trim() && !nifOk
                                 ? "border-danger focus:border-danger"
-                                : "border-border focus:border-primary",
+                                : "border-border focus:border-accent",
                         ].join(" ")}
                     />
                     {tocadoNif && nif.trim() && !nifOk ? (
@@ -385,7 +385,7 @@ function Formulario({
                         type="button"
                         disabled={guardando}
                         onClick={() => rellenar(coincidente)}
-                        className="mt-2 w-full cursor-pointer rounded-xl border border-primary/40 bg-surface-2 px-3 py-2 text-left text-sm text-fg hover:bg-surface"
+                        className="mt-2 w-full cursor-pointer rounded-xl border border-accent/40 bg-surface-2 px-3 py-2 text-left text-sm text-fg hover:bg-surface"
                     >
                         Es <strong>{coincidente.nombre}</strong>: rellenar con sus datos
                     </button>
@@ -463,8 +463,8 @@ function Formulario({
                         disabled={!puede}
                         onClick={confirmar}
                         className={[
-                            "h-10 rounded-xl border border-primary bg-primary px-5 text-sm font-bold text-white shadow-sm",
-                            "hover:opacity-90 active:scale-[0.97]",
+                            "h-10 rounded-xl border border-accent bg-accent px-5 text-sm font-bold text-accent-fg shadow-sm",
+                            "enabled:hover:border-accent-hover enabled:hover:bg-accent-hover hover:opacity-90 active:scale-[0.97]",
                             !puede ? "cursor-not-allowed opacity-60" : "",
                         ].join(" ")}
                     >
