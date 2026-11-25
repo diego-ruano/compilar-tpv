@@ -492,7 +492,6 @@ pub(crate) fn configure_outbox_notifier(app: &AppHandle, db: &Arc<Db>) {
     let h = app.clone();
     db.set_outbox_notifier(move || {
         if let Some(sync) = h.try_state::<replicacion::SyncNativo>() { sync.despertar.notify_one(); }
-        let _ = h.emit("outbox:pending", ());
     });
 }
 

@@ -437,9 +437,10 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
   Sentry el diagnóstico (op, comando y error, nunca las sentencias), al usuario la consecuencia. Ver
   la reparación abajo.
-- El camino normal es el evento `outbox:pending`, que Rust emite al confirmar cada escritura. Además
-  hay un sondeo de seguridad, para los reintentos: cada 3 s mientras queda algo pendiente, y cada 30 s
-  con el outbox vacío (RI-33).
+- El camino normal es el aviso `despertar` del motor nativo, que da cada escritura al confirmarse
+  (`configure_outbox_notifier`): el motor sube lo pendiente en el momento. Además, para los
+  reintentos, el motor mira el outbox cada 3 s mientras queda algo pendiente y cada 30 s con el
+  outbox vacío (RI-33).
 
 ### El lote en el `TenantHub` (`aplicarLote`)
 
