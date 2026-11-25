@@ -166,7 +166,7 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
 ### Escrituras y replicación ([sincronizacion.md](docs/arquitectura/sincronizacion.md))
 
 - **Toda escritura de negocio de la Main pasa por `WriteGuard::execute`**, que la captura en el outbox. Lo
-  que es estado local del equipo (`_Jobs_State`, `_Sync_*`, `_Verifactu_*`, `_Recovery_State`,
+  que es estado local del equipo (`_Jobs_State`, `_Sync_*`, `_Recovery_State`,
   `_Backfill_Historico`, el backfill) va por `raw()`. `is_write_sql` no reconoce un `WITH … INSERT`.
 - **Una tabla que empieza por `_` es del equipo (o de cada lado), no del negocio**: no se replica, y todo
   lo que recorre tablas (volcados, histórico, contraste, restauración) se la salta, en la Main
