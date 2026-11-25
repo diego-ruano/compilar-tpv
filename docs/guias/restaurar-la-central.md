@@ -245,13 +245,19 @@ copia ([worker.md](../arquitectura/worker.md#la-copia-diaria)):
   columnas: hay que convertirlo.
 - Al final, la línea del fin, con las filas que trae: `-- Fin de la copia: <N> filas en <T> tablas`.
   Sin ella, o con otro número, está cortada.
+- Los fines de línea, LF. Una línea que se lee (la de las migraciones o una de datos) y acaba en CR
+  hace inservible la copia (`copia_no_valida: la línea N acaba en CR: … conviértela a LF`). Un CR
+  dentro del esquema, en las líneas que no se leen, no estorba.
 
 Se comprime, se sube a `base-central/` y se aprovisiona desde ahí, en un objeto sin aprovisionar. El
 `<nombre>` de una base subida a mano es `subida-<AAAA-MM-DD>`, o `subida-<AAAA-MM-DD>-<N>` si hay más
 de una el mismo día (N de 1 a 999); la del traspaso desde Turso, `traspaso-turso-<AAAA-MM-DD>`. Las
 claves son una gramática cerrada (`NOMBRES_DE_UNA_COPIA`, `baseCentral.copia.ts`), sin texto libre,
-porque van al rastro de la administración: con otro nombre, `central:copias` la enseña, pero no se
-restaura.
+porque van al rastro de la administración. Además de esas dos, sólo las que escribe el worker: la del
+día (`<AAAA-MM-DD>`), `a-mano-<hora>` y `antes-de-volver-<hora>` (la hora como
+`AAAA-MM-DDTHH-MM-SS.mmmZ`), siempre con un día o una hora que existan. Con otro nombre,
+`central:copias` la enseña, pero `central:aprovisionar` la rechaza sin llegar a la central (400
+`validation_error`, con las formas que valen en el mensaje).
 
 ```bash
 gzip -k base.sql
