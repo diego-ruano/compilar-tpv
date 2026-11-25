@@ -2,9 +2,9 @@
 //
 // LOGIN-07: recuperar el PIN de un administrador con un código que llega al correo de la licencia.
 //
-// Se prueba la lógica (`recuperarPin.ts`) contra el esquema real del control-plane sobre el SQLite
-// del Durable Object, igual que `adminLicenciaReversible.test.ts`. La ruta sólo le pone delante la
-// autenticación de siempre (`tenantAuth`) y la comprobación de que quien pide es una Main.
+// Se prueba la lógica (`recuperarPin.ts`) contra una base central de verdad, nueva en cada caso
+// (`helpers/central.ts`). La ruta sólo le pone delante la autenticación de siempre (`tenantAuth`) y
+// la comprobación de que quien pide es una Main.
 //
 // Lo que se fija es lo que haría que esto dejara de ser seguro sin que nada fallara a la vista:
 // que un código valga dos veces, en otro equipo o para otro usuario; que los intentos no se agoten;
@@ -12,9 +12,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba } from "./helpers/central";
+import type { ClienteCentral } from "../src/server/central/cliente";
 import {
 	solicitarCodigoPin,
 	verificarCodigoPin,
@@ -44,7 +43,7 @@ const CLAVE_PIN = { tenantId: TENANT, deviceId: MAIN, purpose: "recuperar_pin" a
 type Correo = { to: string; subject: string; text: string };
 
 type Escenario = {
-	db: any;
+	db: ClienteCentral;
 	env: any;
 	ctx: (extra?: Partial<ContextoRecuperacion>) => ContextoRecuperacion;
 	correos: Correo[];
@@ -58,66 +57,61 @@ type Escenario = {
 	romperCorreo: (roto: boolean) => void;
 };
 
+/** Una licencia activada en la Main, en una base central propia. */
 async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
-	await enElHub("recuperar-pin", async (hub: any) => {
-		const db = clienteSobre(hub.state.storage.sql);
-		prepararPlanoDeControl(hub.state.storage.sql);
-		for (const tabla of ["licenses", "email_codes", "tenant_recovery_emails", "license_device_swaps"]) {
-			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
-		}
+	const { db } = await centralDePrueba();
 
-		const correos: Correo[] = [];
-		let correoRoto = false;
-		const env = {
-			LICENSE_JWT_SECRET: "secreto-de-pruebas",
-			EMAIL_FROM_ADDRESS: "tpv@altaria.test",
-			EMAIL: {
-				send: async (m: any) => {
-					if (correoRoto) throw new Error("el servicio de correo no contesta");
-					correos.push({ to: m.to, subject: m.subject, text: m.text });
-				},
+	const correos: Correo[] = [];
+	let correoRoto = false;
+	const env = {
+		LICENSE_JWT_SECRET: "secreto-de-pruebas",
+		EMAIL_FROM_ADDRESS: "tpv@altaria.test",
+		EMAIL: {
+			send: async (m: any) => {
+				if (correoRoto) throw new Error("el servicio de correo no contesta");
+				correos.push({ to: m.to, subject: m.subject, text: m.text });
 			},
-		};
+		},
+	};
 
-		const { license } = await issueLicense(db, {
-			claves: STORE_KEY,
-			termMonths: 12,
-			origin: "manual",
-			customerEmail: CORREO,
-		});
-		await activateLicenseFirstTime(db, {
-			licenseId: license.license_id,
-			tenantId: TENANT,
-			deviceId: MAIN,
-			termMonths: 12,
-		});
+	const { license } = await issueLicense(db, {
+		claves: STORE_KEY,
+		termMonths: 12,
+		origin: "manual",
+		customerEmail: CORREO,
+	});
+	await activateLicenseFirstTime(db, {
+		licenseId: license.license_id,
+		tenantId: TENANT,
+		deviceId: MAIN,
+		termMonths: 12,
+	});
 
-		const ctx = (extra: Partial<ContextoRecuperacion> = {}): ContextoRecuperacion => ({
-			tenantId: TENANT,
-			deviceId: MAIN,
-			licHash: license.license_key_hash,
-			idUsuario: ADMIN,
-			ahora: T0,
-			...extra,
-		});
+	const ctx = (extra: Partial<ContextoRecuperacion> = {}): ContextoRecuperacion => ({
+		tenantId: TENANT,
+		deviceId: MAIN,
+		licHash: license.license_key_hash,
+		idUsuario: ADMIN,
+		ahora: T0,
+		...extra,
+	});
 
-		const avisos: Promise<unknown>[] = [];
+	const avisos: Promise<unknown>[] = [];
 
-		await fn({
-			db,
-			env,
-			ctx,
-			correos,
-			ultimoCodigo: () => {
-				const m = correos[correos.length - 1]?.text.match(/\b(\d{6})\b/);
-				if (!m) throw new Error("el último correo no lleva ningún código");
-				return m[1];
-			},
-			verificar: (codigo, extra = {}) =>
-				verificarCodigoPin(db, env as any, { ...ctx(extra), codigo }, (p) => avisos.push(p)),
-			avisos,
-			romperCorreo: (roto) => (correoRoto = roto),
-		});
+	await fn({
+		db,
+		env,
+		ctx,
+		correos,
+		ultimoCodigo: () => {
+			const m = correos[correos.length - 1]?.text.match(/\b(\d{6})\b/);
+			if (!m) throw new Error("el último correo no lleva ningún código");
+			return m[1];
+		},
+		verificar: (codigo, extra = {}) =>
+			verificarCodigoPin(db, env as any, { ...ctx(extra), codigo }, (p) => avisos.push(p)),
+		avisos,
+		romperCorreo: (roto) => (correoRoto = roto),
 	});
 }
 

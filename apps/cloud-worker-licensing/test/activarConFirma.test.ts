@@ -20,8 +20,9 @@
 // nada hecho, el canje va atado al negocio que el equipo dice tener, y qué pasa al repetir una
 // activación ya aceptada mientras su firma sigue en hora (FABLE-E).
 //
-// La base central es la de verdad (`helpers/central.ts`): `getDb` devuelve su cliente, o uno que lo
-// envuelve para cambiar algo a mitad de una activación.
+// La base central es la de verdad (`helpers/central.ts`), nueva en cada caso. Las rutas llegan a ella
+// por `getDb(env)`, directamente o a través de un stub que cambia algo a mitad de una activación
+// (`centralInterceptada`).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -29,22 +30,27 @@ import * as ed from "@noble/ed25519";
 
 import vectorJson from "../../../crates/tpv-infra-licensing/src/firma_activacion_casos.json?raw";
 import { activacionFirmada, firmarActivacion, mensajeDeActivacion, parDeClaves, parDeSemilla } from "./helpers/activar";
-import { centralDePrueba, filasDe } from "./helpers/central";
+import {
+	centralDePrueba,
+	centralInterceptada,
+	centralQueApunta,
+	filasDe,
+	type CentralDePrueba,
+} from "./helpers/central";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 
-/** El cliente de la central del test en curso; lo devuelve `getDb`. */
-let clienteActual: any = null;
+/**
+ * La central a la que llegan las rutas en el caso en curso: la de su escenario, o esa misma a través
+ * de un stub que cambia algo a mitad de una activación.
+ */
+let deLaRuta: CentralDePrueba | null = null;
 /** Bases de tenant que se han llegado a aprovisionar (en producción, la de su TenantHub). */
 let basesCreadas: string[] = [];
 /** Correos que habría mandado el worker. */
 let correos: Array<{ to: string; subject: string; text: string }> = [];
 /** Lo que la ruta deja en `waitUntil` (los correos). */
 let pendientes: Promise<unknown>[] = [];
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => clienteActual,
-}));
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (original) => ({
 	...(await (original as any)()),
@@ -93,6 +99,15 @@ const CTX = {
 	props: {},
 } as any;
 
+/** La central a la que llegan las rutas en el caso en curso (`deLaRuta`). */
+function centralDeLaRuta(): CentralDePrueba {
+	if (!deLaRuta) throw new Error("la prueba no ha montado su escenario");
+	return deLaRuta;
+}
+
+/** El `env` de una ruta en el caso en curso: con la central a la que tiene que llegar. */
+const envDeLaRuta = () => ({ ...ENV, ...centralDeLaRuta().entorno });
+
 const DIA = 24 * 60 * 60 * 1000;
 const MINUTO = 60 * 1000;
 const IP = "203.0.113.7";
@@ -116,9 +131,10 @@ type Negocio = {
 };
 
 type Ctx = {
+	central: CentralDePrueba;
 	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
 	sql: (texto: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
-	db: any;
+	db: CentralDePrueba["db"];
 };
 
 /** Un negocio con su licencia viva, su Main dada de alta y su DEK guardada (cifrada). */
@@ -211,7 +227,7 @@ async function contar({ sql }: Ctx, tabla: string, donde = "1=1"): Promise<numbe
 
 /** Manda a `/activate` una petición ya montada (`activacionFirmada`) y espera a sus correos. */
 async function enviar(peticion: RequestInit, rutas: { request: typeof licenseRoutes.request } = licenseRoutes, ruta = "/activate") {
-	const res = await rutas.request(ruta, peticion, ENV, CTX);
+	const res = await rutas.request(ruta, peticion, envDeLaRuta(), CTX);
 	const body = (await res.json().catch(() => null)) as any;
 	await Promise.all(pendientes.splice(0));
 	return { status: res.status, body };
@@ -232,7 +248,7 @@ async function pedirCodigo(clave: string, deviceId: string) {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ activationKey: clave, deviceId }),
 		},
-		ENV,
+		envDeLaRuta(),
 		CTX,
 	);
 	await Promise.all(pendientes.splice(0));
@@ -261,7 +277,7 @@ async function conPrueba(metodo: "GET" | "POST", ruta: "/status" | "/refresh", t
 				"X-Device-Sig": await firmar(mensaje, seed),
 			},
 		},
-		ENV,
+		envDeLaRuta(),
 		CTX,
 	);
 	return { status: res.status, body: (await res.json().catch(() => null)) as any };
@@ -276,7 +292,7 @@ async function pasaTenantAuth(tenantId: string, deviceId: string, licHash: strin
 	const req = new Request(`https://tpv.test${ruta}`, {
 		headers: { "X-Device-Ts": String(ts), "X-Device-Sig": await firmar(mensaje, seed) },
 	});
-	await verifyDeviceProofOrThrow(req, clienteActual, { tenantId, deviceId }, token, new Uint8Array());
+	await verifyDeviceProofOrThrow(req, centralDeLaRuta().db, { tenantId, deviceId }, token, new Uint8Array());
 }
 
 /**
@@ -302,14 +318,14 @@ async function vincularComoHandy({ db }: Ctx, n: Negocio, deviceId: string, clav
 	return entregarToken(db, ENV, { pairCode, deviceId, nonceB64, sigB64, ts }, Date.now());
 }
 
-async function escenario<T>(nombre: string, fn: (c: Ctx) => Promise<T>): Promise<T> {
-	const central = await centralDePrueba(`aud01-${nombre}-${crypto.randomUUID()}`);
-	clienteActual = central.db;
-	return fn({ sql: (texto, ...args) => filasDe(central, texto, ...args), db: central.db });
+async function escenario<T>(fn: (c: Ctx) => Promise<T>): Promise<T> {
+	const central = await centralDePrueba();
+	deLaRuta = central;
+	return fn({ central, sql: (texto, ...args) => filasDe(central, texto, ...args), db: central.db });
 }
 
 beforeEach(() => {
-	clienteActual = null;
+	deLaRuta = null;
 	basesCreadas = [];
 	correos = [];
 	pendientes = [];
@@ -321,7 +337,7 @@ afterEach(() => {
 
 describe("AUD-01 · la Handy de otro negocio", () => {
 	it("con su device_id y su clave pública, pero sin su firma, no se la lleva nadie", async () => {
-		await escenario("handy", async (c) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			const HANDY = "handy-de-un-camarero";
 			const handy = await parDeClaves(0x13);
@@ -375,7 +391,7 @@ describe("AUD-01 · la Handy de otro negocio", () => {
 	});
 
 	it("mudarse sigue siendo cosa del propio equipo: firmando con su clave, activa", async () => {
-		await escenario("handy-propia", async (c) => {
+		await escenario(async (c) => {
 			const { victima } = await dosNegocios(c);
 			const TABLET = "tablet-que-pasa-a-ser-main";
 			const tablet = await parDeClaves(0x14);
@@ -401,7 +417,7 @@ describe("AUD-01 · la Handy de otro negocio", () => {
 
 describe("AUD-01 · canje sobre la Main de otro negocio", () => {
 	it("una clave sin estrenar no devuelve la DEK ni suma nada sin la firma de esa Main", async () => {
-		await escenario("canje", async (c) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 
 			// La Main víctima reclamó un código del negocio atacante (sin llegar a aprobarse): su Main
@@ -453,7 +469,7 @@ describe("AUD-01 · canje sobre la Main de otro negocio", () => {
 	});
 
 	it("la Main de verdad, que firma con su clave, sigue canjeando y recibe su DEK", async () => {
-		await escenario("canje-propio", async (c) => {
+		await escenario(async (c) => {
 			const { victima } = await dosNegocios(c);
 			const antes = await getLicenseById(c.db, victima.licenseId);
 
@@ -484,7 +500,7 @@ describe("AUD-01 · canje sobre la Main de otro negocio", () => {
 
 describe("AUD-01 · la Main de otro negocio", () => {
 	it("con su licencia y el código que le llega a él, el atacante no la mueve ni gasta intentos", async () => {
-		await escenario("main", async (c) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			const datos = { activationKey: atacante.clave, deviceId: victima.mainId, devicePubKey: victima.main.pub };
 			const enSuSitio = { tenant_id: victima.tenantId, role: "tpv", revoked_at_ms: null, device_pubkey_b64: victima.main.pub };
@@ -525,7 +541,7 @@ describe("AUD-01 · la Main de otro negocio", () => {
 	});
 
 	it("y la renovación de la víctima va a su licencia y le devuelve su negocio", async () => {
-		await escenario("renovacion", async (c) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 
 			// El intento de traslado de antes, completo, y rechazado.
@@ -576,7 +592,7 @@ describe("AUD-01 · la Main de otro negocio", () => {
 	});
 
 	it("el traslado de verdad, firmado por el equipo que recibe la licencia, sigue entrando", async () => {
-		await escenario("traslado", async (c) => {
+		await escenario(async (c) => {
 			const { atacante: dueno } = await dosNegocios(c);
 			const NUEVO = "pc-nuevo-de-la-barra";
 			const nuevo = await parDeClaves(0x15);
@@ -604,12 +620,12 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	// ninguna registrada con la que compararla, darla por buena sería dejar que el primero que firme
 	// se quede con ese equipo. Las dos formas en que una columna puede estar «sin clave»:
 	const SIN_CLAVE = [
-		{ como: "NULL", valor: null, id: "null" },
-		{ como: "cadena vacía", valor: "", id: "vacia" },
+		{ como: "NULL", valor: null },
+		{ como: "cadena vacía", valor: "" },
 	] as const;
 
-	it.each(SIN_CLAVE)("canje sobre una Main con la clave en $como: 409 sin DEK y sin gastar nada", async ({ valor, id }) => {
-		await escenario(`sin-clave-canje-${id}`, async (c) => {
+	it.each(SIN_CLAVE)("canje sobre una Main con la clave en $como: 409 sin DEK y sin gastar nada", async ({ valor }) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			await c.sql(`UPDATE devices SET device_pubkey_b64 = ? WHERE device_id = ?;`, valor, victima.mainId);
 			const antes = await getLicenseById(c.db, victima.licenseId);
@@ -645,7 +661,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	});
 
 	it("canje sobre una Main que no tiene fila: tampoco", async () => {
-		await escenario("sin-fila-canje", async (c) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			await c.sql(`DELETE FROM devices WHERE device_id = ?;`, victima.mainId);
 			const antes = await getLicenseById(c.db, victima.licenseId);
@@ -671,7 +687,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	});
 
 	it("y a quien le pasa se le dice qué hacer: contactar con soporte", async () => {
-		await escenario("sin-clave-frase", async (c) => {
+		await escenario(async (c) => {
 			const { victima } = await dosNegocios(c);
 			await c.sql(`UPDATE devices SET device_pubkey_b64 = NULL WHERE device_id = ?;`, victima.mainId);
 			const k = await emitir(c, victima.email, "lic-renovacion");
@@ -699,8 +715,8 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 		});
 	});
 
-	it.each(SIN_CLAVE)("la Handy de otro negocio con la clave en $como no se mueve, ni activando ni vinculándola", async ({ valor, id }) => {
-		await escenario(`sin-clave-handy-${id}`, async (c) => {
+	it.each(SIN_CLAVE)("la Handy de otro negocio con la clave en $como no se mueve, ni activando ni vinculándola", async ({ valor }) => {
+		await escenario(async (c) => {
 			const { victima, atacante } = await dosNegocios(c);
 			const HANDY = "handy-sin-clave";
 			await c.sql(
@@ -735,7 +751,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 	});
 
 	it("el alta escribe la fila con su clave en una sola sentencia: un corte después no la deja sin clave", async () => {
-		await escenario("alta-de-una-vez", async (c) => {
+		await escenario(async (c) => {
 			const equipo = await parDeClaves(0x43);
 			const k = await emitir(c, "bar@ejemplo.test", "lic-nueva");
 			const datos = { activationKey: k.clave, deviceId: "equipo-nuevo", devicePubKey: equipo.pub };
@@ -743,23 +759,19 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 			// Lo que se le manda a la base central mientras dura la activación. La activación se corta
 			// justo después de dar de alta el equipo: en la primera, eso es ya con la licencia suya
 			// (AUD-09), al guardar los datos del negocio.
-			const sentencias: string[] = [];
 			let cortar = true;
-			clienteActual = {
-				...c.db,
-				execute: async (q: any) => {
-					const texto = String(typeof q === "string" ? q : q.sql);
-					sentencias.push(texto);
-					if (cortar && /UPDATE tenants\s+SET display_name/.test(texto)) throw new Error("corte_simulado");
-					return c.db.execute(q);
-				},
-			};
+			const vista = centralQueApunta(c.central, (metodo, [entrada], llamar) =>
+				cortar && metodo === "ejecutar" && /UPDATE tenants\s+SET display_name/.test((entrada as SentenciaEnlazada).sql)
+					? Promise.reject(new Error("corte_simulado"))
+					: llamar(),
+			);
+			deLaRuta = vista;
 
 			const cortada = await activar(datos);
 			expect(cortada.status).toBe(500);
 			cortar = false;
 
-			const escrituras = sentencias.filter((s) => /\b(INSERT INTO|UPDATE)\s+devices\b/i.test(s));
+			const escrituras = vista.pedido.filter((s) => /\b(INSERT INTO|UPDATE)\s+devices\b/i.test(s));
 			expect(escrituras).toHaveLength(1);
 			expect(escrituras[0]).toContain("device_pubkey_b64");
 			expect(await fila(c, "equipo-nuevo")).toMatchObject({ role: "tpv", device_pubkey_b64: equipo.pub });
@@ -784,7 +796,7 @@ describe("AUD-01 · un equipo registrado sin clave no se da por bueno con la que
 
 describe("AUD-01 · un rechazo por la clave no deja nada hecho", () => {
 	it("traslado hacia una Handy del propio negocio con otra clave: ni rol, ni revocación, ni código", async () => {
-		await escenario("handy-propia-otra-clave", async (c) => {
+		await escenario(async (c) => {
 			const { atacante: dueno } = await dosNegocios(c);
 			const HANDY = "handy-del-negocio";
 			const handy = await parDeClaves(0x51);
@@ -840,7 +852,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	}
 
 	it("diciendo cuál es su negocio, la renovación va a su licencia y no a la que más tarde caduca", async () => {
-		await escenario("dos-licencias", async (c) => {
+		await escenario(async (c) => {
 			const { victima, otro } = await conDosLicenciasSobreElEquipo(c);
 			const antes = await getLicenseById(c.db, victima.licenseId);
 			const otraAntes = await getLicenseById(c.db, otro.licenseId);
@@ -876,7 +888,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	});
 
 	it("si en su negocio no tiene licencia viva, no se suma a la de otro", async () => {
-		await escenario("dos-licencias-sin-la-suya", async (c) => {
+		await escenario(async (c) => {
 			const { victima, otro } = await conDosLicenciasSobreElEquipo(c);
 			// La suya está anulada: la única viva que apunta al equipo es la del otro negocio.
 			await c.sql(`UPDATE licenses SET status = 'revoked' WHERE license_id = ?;`, victima.licenseId);
@@ -909,7 +921,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	it("sin decir su negocio, suma a la del negocio en el que la nube tiene registrado al equipo", async () => {
 		// Es lo que manda quien no tiene licencia guardada (la pantalla de activación). El negocio sale
 		// de su fila de `devices`, no de cuál de las licencias que le apuntan caduca más tarde.
-		await escenario("dos-licencias-sin-decirlo", async (c) => {
+		await escenario(async (c) => {
 			const { victima, otro } = await conDosLicenciasSobreElEquipo(c);
 			const otraAntes = await getLicenseById(c.db, otro.licenseId);
 			const k = await emitir(c, victima.email, "lic-nueva");
@@ -928,7 +940,7 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	it("si dice otro negocio que el registrado para el equipo, no canjea sobre él ni recibe su DEK", async () => {
 		// Las dos licencias apuntan al equipo, y la petición va bien firmada por él. Lo que decide de
 		// qué negocio es el equipo es su fila de `devices`, no lo que la petición diga.
-		await escenario("dos-licencias-otro-negocio", async (c) => {
+		await escenario(async (c) => {
 			const { victima, otro } = await conDosLicenciasSobreElEquipo(c);
 			const antes = await getLicenseById(c.db, victima.licenseId);
 			const otraAntes = await getLicenseById(c.db, otro.licenseId);
@@ -956,14 +968,14 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 	});
 
 	it.each([
-		{ como: "anula", id: "anulada", sentencia: `UPDATE licenses SET status = 'revoked' WHERE license_id = ?;` },
-		{ como: "traslada a otro equipo", id: "trasladada", sentencia: `UPDATE licenses SET main_device_id = 'otro-equipo' WHERE license_id = ?;` },
-	])("si la licencia se $como justo después de elegirla, la clave no estrena otro negocio ni se gasta", async ({ id, sentencia }) => {
+		{ como: "anula", sentencia: `UPDATE licenses SET status = 'revoked' WHERE license_id = ?;` },
+		{ como: "traslada a otro equipo", sentencia: `UPDATE licenses SET main_device_id = 'otro-equipo' WHERE license_id = ?;` },
+	])("si la licencia se $como justo después de elegirla, la clave no estrena otro negocio ni se gasta", async ({ sentencia }) => {
 		// La ruta leía la licencia viva dos veces, una para el veto de `soloSumar` y otra para el
 		// canje. Si cambiaba entre las dos, la segunda no la encontraba y la clave seguía hasta el
 		// alta de un negocio nuevo, también con `soloSumar`.
 		for (const soloSumar of [true, false]) {
-			await escenario(`canje-${id}-${soloSumar ? "sumar" : "activar"}`, async (c) => {
+			await escenario(async (c) => {
 				const { victima } = await dosNegocios(c);
 				const antes = await getLicenseById(c.db, victima.licenseId);
 				const k = await emitir(c, victima.email, "lic-renovacion");
@@ -971,18 +983,18 @@ describe("AUD-01 · el canje va atado al negocio que el equipo ya tiene", () => 
 
 				// La licencia cambia en cuanto la ruta termina de leerla por primera vez.
 				let cambiada = false;
-				clienteActual = {
-					...c.db,
-					execute: async (q: any) => {
-						const leido = await c.db.execute(q);
-						const texto = String(typeof q === "string" ? q : q.sql);
-						if (!cambiada && /FROM licenses\s+WHERE main_device_id = \?/.test(texto)) {
-							cambiada = true;
-							await c.sql(sentencia, victima.licenseId);
-						}
-						return leido;
-					},
-				};
+				deLaRuta = centralInterceptada(c.central, async (metodo, [entrada], llamar) => {
+					const leido = await llamar();
+					if (
+						!cambiada &&
+						metodo === "ejecutar" &&
+						/FROM licenses\s+WHERE main_device_id = \?/.test((entrada as SentenciaEnlazada).sql)
+					) {
+						cambiada = true;
+						await c.sql(sentencia, victima.licenseId);
+					}
+					return leido;
+				});
 
 				const r = await activar({
 					activationKey: k.clave,
@@ -1018,7 +1030,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 	// tal cual, durante los ±2 minutos de su hora. Esto fija lo que hace esa repetición.
 
 	it("la primera activación se vuelve a ejecutar: readmite el equipo, repone el nombre y entrega la DEK", async () => {
-		await escenario("repetir-estreno", async (c) => {
+		await escenario(async (c) => {
 			const equipo = await parDeClaves(0x61);
 			const k = await emitir(c, "bar@ejemplo.test", "lic-nueva");
 			const peticion = await activacionFirmada({
@@ -1060,7 +1072,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 	});
 
 	it("el canje no suma dos veces: la repetición se queda en que la clave ya está usada", async () => {
-		await escenario("repetir-canje", async (c) => {
+		await escenario(async (c) => {
 			const { victima } = await dosNegocios(c);
 			const renovacion = await emitir(c, victima.email, "lic-renovacion");
 			const peticion = await activacionFirmada({
@@ -1086,13 +1098,13 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 	});
 
 	it.each([
-		{ como: "anulado", id: "anulada", sentencia: `UPDATE licenses SET status = 'revoked' WHERE license_id = ?;` },
-		{ como: "trasladado a otro equipo", id: "trasladada", sentencia: `UPDATE licenses SET main_device_id = 'otro-equipo' WHERE license_id = ?;` },
-	])("repetir un canje cuando la licencia que recibió el tiempo se ha $como no estrena otro negocio (AUD-07)", async ({ id, sentencia }) => {
+		{ como: "anulado", sentencia: `UPDATE licenses SET status = 'revoked' WHERE license_id = ?;` },
+		{ como: "trasladado a otro equipo", sentencia: `UPDATE licenses SET main_device_id = 'otro-equipo' WHERE license_id = ?;` },
+	])("repetir un canje cuando la licencia que recibió el tiempo se ha $como no estrena otro negocio (AUD-07)", async ({ sentencia }) => {
 		// Sin `soloSumar`, como lo manda la pantalla de activación. El equipo ya no tiene licencia viva
 		// a la que sumar y la clave canjeada sigue con `main_device_id` a NULL: la repetición seguía
 		// hasta el alta y abría un negocio nuevo con el plazo entero de una clave ya gastada.
-		await escenario(`repetir-canje-${id}`, async (c) => {
+		await escenario(async (c) => {
 			const { victima } = await dosNegocios(c);
 			const renovacion = await emitir(c, victima.email, "lic-renovacion");
 			const peticion = await activacionFirmada({
@@ -1132,7 +1144,7 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 	});
 
 	it("el traslado no se repite con su código: ya consumido, la repetición entra como el mismo equipo", async () => {
-		await escenario("repetir-traslado", async (c) => {
+		await escenario(async (c) => {
 			const { atacante: dueno } = await dosNegocios(c);
 			const NUEVO = "pc-nuevo";
 			const nuevo = await parDeClaves(0x62);
@@ -1180,7 +1192,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	}
 
 	it("la hora: fuera de ±2 minutos no entra ni la firma del equipo de verdad", async () => {
-		await escenario("hora", async (c) => {
+		await escenario(async (c) => {
 			const { k, datos } = await estreno(c, 0x21);
 
 			for (const desfase of [-3 * MINUTO, 3 * MINUTO]) {
@@ -1196,7 +1208,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	});
 
 	it("el cuerpo entero: cambiar cualquier dato después de firmar la invalida", async () => {
-		await escenario("cuerpo", async (c) => {
+		await escenario(async (c) => {
 			const { k, datos } = await estreno(c, 0x22);
 			const otra = await emitir(c, "bar@ejemplo.test", "lic-otra");
 
@@ -1218,7 +1230,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	});
 
 	it("los bytes tal como llegan: no hace falta que el cuerpo sea el JSON compacto", async () => {
-		await escenario("bytes", async (c) => {
+		await escenario(async (c) => {
 			const { datos } = await estreno(c, 0x23);
 			const cuerpo = JSON.stringify({ ...datos, tenantInfo: { displayName: "Bar Ñandú — «El Rincón»" } }, null, "\t");
 
@@ -1228,7 +1240,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	});
 
 	it("la ruta: la firma de otra petición del mismo equipo no vale para activar", async () => {
-		await escenario("ruta", async (c) => {
+		await escenario(async (c) => {
 			const { equipo, k, datos } = await estreno(c, 0x24);
 			const body = JSON.stringify(datos);
 			const bytes = new TextEncoder().encode(body);
@@ -1264,7 +1276,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	});
 
 	it("sin firma no se lee ni el cuerpo; con firma, un cuerpo que no vale sigue siendo un 400", async () => {
-		await escenario("orden", async (c) => {
+		await escenario(async (c) => {
 			const { equipo, datos } = await estreno(c, 0x25);
 
 			const basura = await enviar({
@@ -1282,7 +1294,7 @@ describe("AUD-01 · qué cubre la firma", () => {
 	});
 
 	it("le dice a quien activa qué hacer, también montada en su ruta de verdad", async () => {
-		await escenario("mensajes", async (c) => {
+		await escenario(async (c) => {
 			const { equipo, datos } = await estreno(c, 0x26);
 			const app = new Hono().use("*", completarErrores).route("/v1/license", licenseRoutes);
 			const pedir = (peticion: RequestInit) => enviar(peticion, app as any, "/v1/license/activate");

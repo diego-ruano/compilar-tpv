@@ -14,33 +14,21 @@
 // De punta a punta: el nombre lo fija una Handy por la ruta real y el TenantHub real; la
 // confirmación la dispara un visitante por la ruta pública, sobre la agenda de verdad (la puerta
 // —clave, Turnstile, limitador— se deja pasar como en `reservasWebPublico.test.ts`).
+//
+// La base central (`email_sends`) es una de verdad, nueva en cada caso (`helpers/central.ts`): el
+// Worker llega a ella por su `entorno` y el TenantHub, porque se le pone.
 
 import { env as entorno } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { enLaAgenda, lectorSobre } from "./helpers/agenda";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, centralQueApunta, filasDe, type CentralDePrueba } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { enElHub, ponerLaCentral } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
-
-/** La base central de la prueba en curso (`email_sends`). Sin ella, nadie debería preguntarle nada. */
-let baseCentral: any = null;
-let preguntasSinBase = 0;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () =>
-		baseCentral ?? {
-			execute: async () => {
-				preguntasSinBase++;
-				throw new Error("no hay base central en este paso");
-			},
-		},
-}));
 
 // Lo que deja la autenticación real (token + prueba del equipo + licencia) para una Handy.
 vi.mock("../src/middleware/tenant", async (original) => ({
@@ -97,17 +85,19 @@ function sinSaltos(m: any) {
 
 describe("AUD-40 · el nombre del negocio que deja una Handy", () => {
 	it("se guarda como llega, pero el correo sale con el asunto y el remitente en una línea", async () => {
+		// Lo que le llega a la base central, desde el Worker y desde el TenantHub.
+		const central = centralQueApunta(await centralDePrueba());
 		// La Handy cambia el nombre por la ruta real; el TenantHub, con una Main conectada.
 		await enElHub("aud40-tenant", (motor: any) => {
-			const sql = motor.state.storage.sql;
-			crearEsquemaTenant(sql);
-			const db = clienteSobre(sql, motor.state.storage);
+			crearEsquemaTenant(motor.state.storage.sql);
+			const db = clienteLocal(motor.state.storage);
 			motor.withTenantDbRetry = async (_t: string, run: any) => run(db);
 			motor.getTenantDb = async () => db;
-			motor.touchLastSeen = async () => {};
 			motor.maybePurgeSyncLog = async () => {};
 			motor.isMainConnected = () => true;
 			motor.isMainReady = () => true;
+			// La ruta llega por RPC, fuera de este callback: la central se le queda puesta.
+			ponerLaCentral(motor, central);
 		});
 		const app = new Hono();
 		app.route("/v1/configuracion", configuracionRoutes);
@@ -122,7 +112,7 @@ describe("AUD-40 · el nombre del negocio que deja una Handy", () => {
 				},
 				body: JSON.stringify({ patch: { business_name: NOMBRE_CON_SALTOS } }),
 			},
-			entorno,
+			{ ...entorno, ...central.entorno },
 		);
 		expect(respuesta.status).toBe(200);
 
@@ -131,38 +121,31 @@ describe("AUD-40 · el nombre del negocio que deja una Handy", () => {
 		const negocio = await enElHub("aud40-tenant", async (motor: any) => {
 			const sql = motor.state.storage.sql;
 			expect(sql.exec(`SELECT Business_Name AS n FROM Business_Settings WHERE ID = 1;`).one().n).toBe(NOMBRE_CON_SALTOS);
-			return negocioDelCorreo(clienteSobre(sql, motor.state.storage) as any);
+			return negocioDelCorreo(clienteLocal(motor.state.storage));
 		});
 		expect(negocio.nombre).toBe("Bar Pepe\r\nBcc: x@prueba.test\r\nX-Prueba: 1");
-		expect(preguntasSinBase).toBe(0);
+		// Hasta aquí nadie ha preguntado nada a la base central.
+		expect(central.pedido).toEqual([]);
 
 		// El envío.
 		const enviados: any[] = [];
-		const r = await enElHub("aud40-central", async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			prepararPlanoDeControl(sql);
-			baseCentral = clienteSobre(sql, hub.state.storage);
-			try {
-				return await enviarCorreoReservaWeb(
-					{
-						EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test",
-						EMAIL: { send: async (m: any) => void enviados.push(m) },
-					} as any,
-					{
-						tenantId: "aud40-tenant",
-						id: "rw:confirmacion:aud40",
-						tipo: "confirmacion",
-						para: "ana@correo.test",
-						negocio,
-						reserva: { dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "7", codigo: "ABC123" },
-						enlace: "https://tpv-api.test/reservas-web/v1/w/rw_X/cancelar#t=TOKEN",
-						dispositivo: "web",
-					},
-				);
-			} finally {
-				baseCentral = null;
-			}
-		});
+		const r = await enviarCorreoReservaWeb(
+			{
+				EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test",
+				EMAIL: { send: async (m: any) => void enviados.push(m) },
+				...central.entorno,
+			} as any,
+			{
+				tenantId: "aud40-tenant",
+				id: "rw:confirmacion:aud40",
+				tipo: "confirmacion",
+				para: "ana@correo.test",
+				negocio,
+				reserva: { dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "7", codigo: "ABC123" },
+				enlace: "https://tpv-api.test/reservas-web/v1/w/rw_X/cancelar#t=TOKEN",
+				dispositivo: "web",
+			},
+		);
 		expect(r).toBe("enviado");
 		expect(enviados).toHaveLength(1);
 		sinSaltos(enviados[0]);
@@ -186,7 +169,8 @@ const ENV_WEB = {
 	EMAIL: { send: async (m: any) => void enviadosWeb.push(m) },
 };
 
-async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<void>) {
+async function conNegocio(nombre: string, prueba: (sql: SqlStorage, central: CentralDePrueba) => Promise<void>) {
+	const central = await centralDePrueba();
 	await enLaAgenda(nombre, async (motor, state) => {
 		const sql = state.storage.sql;
 		crearEsquemaTenant(sql);
@@ -208,19 +192,16 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<v
 		const leer = lectorSobre(state, () => AHORA);
 		motor.leer = leer;
 		enCurso = { motor, leer };
-		prepararPlanoDeControl(sql);
-		baseCentral = clienteSobre(sql, state.storage);
 		enviadosWeb.length = 0;
 		try {
-			await prueba(sql);
+			await prueba(sql, central);
 		} finally {
 			enCurso = null;
-			baseCentral = null;
 		}
 	});
 }
 
-function alta(correo: string, hora = "21:00") {
+function alta(central: CentralDePrueba, correo: string, hora = "21:00") {
 	return publico.request(
 		`${BASE}/reservas`,
 		{
@@ -228,14 +209,14 @@ function alta(correo: string, hora = "21:00") {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ dia: DIA, hora, personas: 2, mesa: "m2", nombre: "Ana Pérez", correo, telefono: "600 112 233" }),
 		},
-		ENV_WEB,
+		{ ...ENV_WEB, ...central.entorno },
 	);
 }
 
 describe("AUD-40 · la confirmación que dispara un visitante", () => {
 	it("sale con el nombre del negocio en una línea", async () => {
-		await conNegocio("aud40-publico", async () => {
-			const res = await alta("ana@correo.test");
+		await conNegocio("aud40-publico", async (_sql, central) => {
+			const res = await alta(central, "ana@correo.test");
 			expect(res.status).toBe(200);
 			expect(((await res.json()) as any).correo_enviado).toBe(true);
 			expect(enviadosWeb).toHaveLength(1);
@@ -252,13 +233,13 @@ describe("AUD-40 · la confirmación que dispara un visitante", () => {
 		["un nombre y la dirección entre ángulos", "Ana<ana@correo.test>"],
 	] as const).entries()) {
 		it(`con ${caso} en su correo, ni se reserva ni sale nada (AUD-39)`, async () => {
-			await conNegocio(`aud39-publico-${i}`, async (sql) => {
-				const res = await alta(correo);
+			await conNegocio(`aud39-publico-${i}`, async (sql, central) => {
+				const res = await alta(central, correo);
 				expect(res.status).toBe(400);
 				expect(JSON.stringify(await res.json())).toContain("El correo no es válido");
 				expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).one().n).toBe(0);
 				expect(enviadosWeb).toEqual([]);
-				expect(sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n).toBe(0);
+				expect(await filasDe(central, `SELECT COUNT(*) AS n FROM email_sends;`)).toEqual([{ n: 0 }]);
 			});
 		});
 	}

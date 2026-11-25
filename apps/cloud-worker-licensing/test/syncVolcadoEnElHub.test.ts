@@ -9,29 +9,17 @@
 // fijan sus tests, con el router suelto y la ruta dentro del TenantHub (`helpers/volcadoEnElHub.ts`).
 //
 // El veto de rol (`soloLaMain`) es el de verdad. Dentro del TenantHub decide con el rol que llega
-// con la identidad: la base central de pruebas es el SQLite de otro Durable Object, que desde el del
-// negocio no se puede tocar, así que un volcado que volviera a ella a por el rol fallaría aquí.
+// con la identidad: lo que se pide a la base central del negocio, desde el Worker o desde el TenantHub,
+// queda apuntado (`n.central`), y nadie le pide el rol.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { conNegocioFirmado, enLaBaseDe, pedirFirmado, viajes, type Negocio } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 /** La consulta con la que `soloLaMain` le pide el rol a la base central en un router que corre en el Worker. */
 const PIDE_EL_ROL = /SELECT role FROM devices WHERE tenant_id=\? AND device_id=\? AND revoked_at_ms IS NULL/;
@@ -63,6 +51,7 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 			const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", { cabeceras: AHORA });
 			expect(res.status).toBe(200);
 			// El rol ha viajado con la identidad: nadie se lo ha pedido a la base central.
+			expect(n.central.some((q) => /FROM devices/.test(q))).toBe(true);
 			expect(n.central.filter((q) => PIDE_EL_ROL.test(q))).toEqual([]);
 			expect(res.headers.get("content-type")).toContain("application/json");
 			expect(viajes(res, "hub-ruta")).toBe(1);
@@ -111,13 +100,12 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 			deps,
 			"volcado-hub-sin-base",
 			async (n) => {
-				n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
+				await n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
 				const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", { cabeceras: AHORA });
 				expect(res.status).toBe(404);
 				expect(await res.json()).toMatchObject({ ok: false, code: "tenant_db_not_provisioned" });
 			},
-			// La ruta pregunta a la base central desde dentro del TenantHub: va en su mismo objeto.
-			{ sinBase: true, centralEnElNegocio: true },
+			{ sinBase: true },
 		);
 	});
 });

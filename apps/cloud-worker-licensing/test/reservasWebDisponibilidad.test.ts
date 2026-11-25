@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { conLaHoraDeQuienPregunta } from "../src/lib/tenantClient";
@@ -220,7 +220,7 @@ describe("los intervalos de la base del negocio dan lo mismo que el SQL de choqu
 			for (const s of SEMILLA) sql.exec(s);
 			// A las 10:00 de quien pregunta, la comanda abierta desde las 09:10 ocupa la mesa todo el día
 			// (RES-04): hoy choca a cualquier hora, y mañana sólo lo que se cruza con una reserva.
-			const db = conLaHoraDeQuienPregunta(clienteSobre(sql), "2026-05-10 10:00:00");
+			const db = conLaHoraDeQuienPregunta(clienteLocal(hub.state.storage),"2026-05-10 10:00:00");
 
 			const chocanEl = async (dia: string) => {
 				const { ocupaciones } = await ocupacionAlrededorDe(db, dia, 120);

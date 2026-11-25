@@ -8,62 +8,47 @@
 // interfaz significa que cualquiera con el token de una Handy anula igualmente, y ese token vive
 // en un móvil que se queda en la barra.
 //
-// El veto se prueba suelto (el middleware con el rol que devuelve la base central) y por el camino
-// desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub, que decide con
-// el rol de la identidad.
+// El veto se prueba suelto (el middleware con el rol que tiene el dispositivo en la base central) y
+// por el camino desplegado: la `app` entera, `tenantAuth`, `alHub` y la ruta dentro del TenantHub,
+// que decide con el rol de la identidad. Las dos, contra una base central de verdad
+// (`helpers/central.ts`).
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
+import { centralConUnDispositivo } from "./helpers/central";
 import { conNegocioFirmado, HANDY, MAIN, pedirComo } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
+import { soloLaMainEscribeCaja } from "../src/middleware/tenant";
 
-/** Rol que devuelve la BD central en cada test del veto suelto. */
-let rolEnLaBd: string | null = "handy";
-/** La base central de verdad, en los tests por el camino desplegado. */
-let dbCentral: unknown = null;
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
-vi.mock("../src/server/db", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../src/server/db")>()),
-	getDb: () =>
-		dbCentral ?? {
-			execute: async () => ({ rows: rolEnLaBd === null ? [] : [{ role: rolEnLaBd }] }),
-		},
-}));
-
-const { soloLaMainEscribeCaja } = await import("../src/middleware/tenant");
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
-
-/** Contexto de Hono con lo justo que mira el guard. */
-function contexto() {
+/** Contexto de Hono con lo justo que mira el guard, con la central `entorno`. */
+function contexto(entorno: unknown) {
 	return {
-		env: {} as any,
+		env: entorno as any,
 		get: (k: string) => (k === "tenantId" ? "t1" : "d1"),
 		json: (body: any, status = 200) => ({ body, status }) as any,
 	};
 }
 
 /**
- * Ejecuta el veto —que es un middleware— y devuelve su respuesta de rechazo, o `null` si dejó
- * pasar. Es middleware y no una función dentro del handler porque tiene que decidir antes de que
- * se lea y valide el cuerpo (ver `middleware/tenant.ts`).
+ * Ejecuta el veto —que es un middleware— con el dispositivo de la central `entorno`, y devuelve su
+ * respuesta de rechazo, o `null` si dejó pasar. Es middleware y no una función dentro del handler
+ * porque tiene que decidir antes de que se lea y valide el cuerpo (ver `middleware/tenant.ts`).
  */
-async function ejecutarVeto(mw: any, ctx: any): Promise<any> {
+async function ejecutarVeto(entorno: unknown): Promise<any> {
 	let paso = false;
-	const r = await mw(ctx, async () => {
+	const r = await soloLaMainEscribeCaja(contexto(entorno) as any, async () => {
 		paso = true;
 	});
 	return paso ? null : r;
 }
 
-beforeEach(() => {
-	rolEnLaBd = "handy";
-});
-
 describe("anular un cobro desde una Handy", () => {
 	it("se rechaza con un código que la app sabe traducir", async () => {
-		const veto = (await ejecutarVeto(soloLaMainEscribeCaja, contexto())) as any;
+		const veto = await ejecutarVeto((await centralConUnDispositivo("handy")).entorno);
 
 		expect(veto).not.toBeNull();
 		expect(veto.status).toBe(403);
@@ -71,24 +56,23 @@ describe("anular un cobro desde una Handy", () => {
 	});
 
 	it("un dispositivo revocado o desconocido tampoco anula", async () => {
-		rolEnLaBd = null;
-		expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto())).not.toBeNull();
+		expect(await ejecutarVeto((await centralConUnDispositivo(null)).entorno)).not.toBeNull();
+		expect(await ejecutarVeto((await centralConUnDispositivo("tpv", { revocado: true })).entorno)).not.toBeNull();
 	});
 
 	it("un rol inventado no cuela", async () => {
 		for (const rol of ["main", "TPV_MAIN", "admin", "", "tpv2"]) {
-			rolEnLaBd = rol;
-			expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto()), rol).not.toBeNull();
+			const { entorno } = await centralConUnDispositivo("tpv", { contestar: rol });
+			expect(await ejecutarVeto(entorno), rol).not.toBeNull();
 		}
 	});
 });
 
 describe("anular desde la Main", () => {
 	it("pasa", async () => {
-		for (const rol of ["tpv", " TPV "]) {
-			rolEnLaBd = rol;
-			expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto()), rol).toBeNull();
-		}
+		expect(await ejecutarVeto((await centralConUnDispositivo("tpv")).entorno)).toBeNull();
+		const { entorno } = await centralConUnDispositivo("tpv", { contestar: " TPV " });
+		expect(await ejecutarVeto(entorno), " TPV ").toBeNull();
 	});
 });
 

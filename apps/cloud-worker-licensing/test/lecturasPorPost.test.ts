@@ -14,22 +14,26 @@
 //   · un cuerpo que no es una búsqueda se rechaza antes de autenticar, que es cuando se lee.
 //
 // Lo único que se sustituye es lo que no se puede levantar aquí: la autenticación del dispositivo
-// (`tenantAuth`, que deja pasar a una Handy emparejada) y la base del negocio (se sirve con el
-// SQLite del DO y el esquema de producción). La regla, leída del fuente, está en
-// `sinDatosPersonalesEnLaQuery.node.test.ts`.
+// (`tenantAuth`, que deja pasar a una Handy emparejada) y cómo llega la ruta a la base del negocio
+// (`tenantQuery`, que la sirve con el SQLite del DO, el esquema de producción y su cliente). La base
+// central es una de verdad, con la Handy dada de alta (`helpers/central.ts`). La regla, leída del
+// fuente, está en `sinDatosPersonalesEnLaQuery.node.test.ts`.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, negocioEnLaCentral, type CentralDePrueba } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
 /** La base del negocio de la prueba: el SQLite del DO con el esquema real. */
 let dbActual: any = null;
+/** Lo que lleva el `env` de la prueba para que `getDb` llegue a su base central. */
+let entornoCentral: CentralDePrueba["entorno"] | null = null;
 /** Las rutas que han llegado a autenticarse. */
 const autenticadas: string[] = [];
 /** La `X-Client-Now` con la que cada lectura ha llegado a `tenantQuery`, que es quien la fija. */
@@ -48,12 +52,6 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("deviceId", "dev-handy");
 		await next();
 	},
-}));
-
-// El rol que dice la base central: una Handy. Si alguna de estas lecturas llevara un veto «sólo la
-// Main», contestaría 403.
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({ execute: async () => ({ rows: [{ role: "handy" }] }) }),
 }));
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
@@ -106,7 +104,7 @@ async function pedir(metodo: "GET" | "POST", ruta: string, cuerpo?: unknown) {
 			},
 			body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
 		},
-		env as any,
+		{ ...env, ...entornoCentral } as any,
 	);
 	const texto = await res.text();
 	let json: any;
@@ -139,13 +137,27 @@ const SEMILLA = [
 
 const MAYO = { del: "2026-05-01", al: "2026-05-31" };
 
-/** Un negocio con un cliente, dos cobros (uno suyo, con dos líneas), dos gastos y dos productos. */
+/**
+ * Un negocio con un cliente, dos cobros (uno suyo, con dos líneas), dos gastos y dos productos, y
+ * en su base central la Handy que pregunta. Si alguna de estas lecturas llevara un veto «sólo la
+ * Main», contestaría 403.
+ */
 async function conNegocio(nombre: string, fn: () => Promise<void>) {
+	const central = await centralDePrueba();
+	await negocioEnLaCentral(central, {
+		tenantId: "t-aud27",
+		main: "dev-main",
+		dispositivos: [
+			{ deviceId: "dev-main", rol: "tpv" },
+			{ deviceId: "dev-handy", rol: "handy" },
+		],
+	});
+	entornoCentral = central.entorno;
 	await enElHub(nombre, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const sentencia of SEMILLA) sql.exec(sentencia);
-		dbActual = clienteSobre(sql, hub.state.storage);
+		dbActual = clienteLocal(hub.state.storage);
 		await fn();
 	});
 }
@@ -166,6 +178,7 @@ const LECTURAS: { ruta: string; cuerpo: Record<string, unknown>; tope: number }[
 
 beforeEach(() => {
 	dbActual = null;
+	entornoCentral = null;
 	autenticadas.length = 0;
 	horas.length = 0;
 	vecesEnElHub = 0;
@@ -361,7 +374,7 @@ describe("AUD-27 · por POST, pero lecturas", () => {
 			const res = await app.request(
 				"/v1/reservas/buscar-cliente",
 				{ method: "POST", headers: { "X-Client-Now": AHORA }, body: JSON.stringify({ telefono: "600000000" }) },
-				env as any,
+				{ ...env, ...entornoCentral } as any,
 			);
 			expect(res.status).toBe(400);
 			expect(((await res.json()) as any).error).toBe("validation_error");

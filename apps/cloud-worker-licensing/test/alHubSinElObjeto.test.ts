@@ -20,12 +20,6 @@ import { enElHub } from "./helpers/hub";
 import { MAIN, conNegocioFirmado, peticionFirmada } from "./helpers/negocioFirmado";
 
 const { capturados } = vi.hoisted(() => ({ capturados: [] as { operacion: string; mensaje: string }[] }));
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
 
 vi.mock("../src/observability/errors", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/observability/errors")>();
@@ -49,11 +43,7 @@ const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 // ── Los fallos, como los marca Cloudflare ─────────────────────────────────────
 
@@ -291,7 +281,10 @@ describe("por el RPC de verdad", () => {
 				};
 			});
 
-			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, {
+				...env,
+				...n.entorno,
+			});
 			expect(res.status).toBe(503);
 			expect(await res.json()).toEqual({
 				ok: false,

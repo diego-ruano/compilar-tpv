@@ -11,14 +11,12 @@
 // Lo que aquí se fija: el claim es del PRIMERO, un segundo dispositivo no puede pisarlo, y el
 // reclamante legítimo puede reintentar sin perder el suyo.
 //
-// El SQL es el de verdad: se ejecuta contra el SQLite del Durable Object en vez de contra un
-// doble que emule el WHERE, que es justo la parte que interesa comprobar.
+// El SQL es el de verdad: se ejecuta contra una base central de verdad (`helpers/central.ts`) en
+// vez de contra un doble que emule el WHERE, que es justo la parte que interesa comprobar.
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe } from "./helpers/central";
 import { reclamarCodigo } from "../src/domains/pairing/pairing.handy";
 import { claimSchema } from "../src/domains/pairing/pairing.schemas";
 import { bytesToB64 } from "../src/server/utils/base64";
@@ -45,76 +43,66 @@ type Resultado = {
 
 /**
  * Ejecuta una tanda de claims contra un código recién creado y devuelve, por cada uno, la
- * respuesta y cómo quedó la fila. Cada tanda usa su propio DO (storage limpio).
+ * respuesta y cómo quedó la fila. Cada tanda usa su propia base central.
  */
-async function reclamar(
-	nombreHub: string,
-	claims: { deviceId: string; devicePubKey: string; pairSecret?: string }[],
-): Promise<Resultado[]> {
-	return enElHub(nombreHub, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		const db = clienteSobre(sql);
-		// El esquema de producción, no una copia que pueda divergir.
-		prepararPlanoDeControl(sql);
-		sql.exec("DELETE FROM pair_requests;");
+async function reclamar(claims: { deviceId: string; devicePubKey: string; pairSecret?: string }[]): Promise<Resultado[]> {
+	const central = await centralDePrueba();
+	const ahora = Date.now();
+	await filasDe(
+		central,
+		`INSERT INTO pair_requests
+			(pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
+		 VALUES (?, ?, ?, ?, 'pending', ?, ?);`,
+		CODIGO,
+		"hash-que-no-se-usa-en-la-ruta-de-solo-codigo",
+		"tenant-1",
+		"main-1",
+		ahora,
+		ahora + 10 * 60 * 1000,
+	);
 
-		const ahora = Date.now();
-		sql.exec(
-			`INSERT INTO pair_requests
-				(pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
-			 VALUES (?, ?, ?, ?, 'pending', ?, ?);`,
-			CODIGO,
-			"hash-que-no-se-usa-en-la-ruta-de-solo-codigo",
-			"tenant-1",
-			"main-1",
-			ahora,
-			ahora + 10 * 60 * 1000,
+	const salida: Resultado[] = [];
+
+	for (const [i, c] of claims.entries()) {
+		const res = await reclamarCodigo(
+			central.db,
+			{ PAIR_PEPPER: "pepper-de-pruebas" },
+			entrada({
+				pairCode: CODIGO,
+				pairSecret: c.pairSecret ?? "",
+				deviceId: c.deviceId,
+				devicePubKey: c.devicePubKey,
+				deviceName: "",
+			}),
+			// Una IP por claim: el throttle por IP es otra barrera y no es la que se prueba aquí.
+			`10.0.0.${i + 1}`,
+			Date.now(),
 		);
 
-		const salida: Resultado[] = [];
+		const [fila] = await filasDe(
+			central,
+			"SELECT claimed_by_device_id, attempts FROM pair_requests WHERE pair_code = ?;",
+			CODIGO,
+		);
 
-		for (const [i, c] of claims.entries()) {
-			const res = await reclamarCodigo(
-				db,
-				{ PAIR_PEPPER: "pepper-de-pruebas" },
-				entrada({
-					pairCode: CODIGO,
-					pairSecret: c.pairSecret ?? "",
-					deviceId: c.deviceId,
-					devicePubKey: c.devicePubKey,
-					deviceName: "",
-				}),
-				// Una IP por claim: el throttle por IP es otra barrera y no es la que se prueba aquí.
-				`10.0.0.${i + 1}`,
-				Date.now(),
-			);
+		salida.push({
+			status: res.status,
+			body: res.cuerpo,
+			fila: fila
+				? {
+						claimed_by_device_id: fila.claimed_by_device_id ?? null,
+						attempts: Number(fila.attempts ?? 0),
+					}
+				: null,
+		});
+	}
 
-			const fila =
-				(sql
-					.exec("SELECT claimed_by_device_id, attempts FROM pair_requests WHERE pair_code = ?;", CODIGO)
-					.toArray()[0] as any) ?? null;
-
-			salida.push({
-				status: res.status,
-				body: res.cuerpo,
-				fila: fila
-					? {
-							claimed_by_device_id: fila.claimed_by_device_id ?? null,
-							attempts: Number(fila.attempts ?? 0),
-						}
-					: null,
-			});
-		}
-
-		return salida;
-	});
+	return salida;
 }
 
 describe("pair/claim · adjudicación del código (FABLE-D)", () => {
 	it("el primer dispositivo se queda el código", async () => {
-		const [a] = await reclamar("pair-claim-primero", [
-			{ deviceId: DEVICE_A, devicePubKey: PUB_A },
-		]);
+		const [a] = await reclamar([{ deviceId: DEVICE_A, devicePubKey: PUB_A }]);
 
 		expect(a.status).toBe(200);
 		expect(a.body.state).toBe("pending_approval");
@@ -122,7 +110,7 @@ describe("pair/claim · adjudicación del código (FABLE-D)", () => {
 	});
 
 	it("un segundo dispositivo NO puede pisar el claim del primero", async () => {
-		const [, b] = await reclamar("pair-claim-carrera", [
+		const [, b] = await reclamar([
 			{ deviceId: DEVICE_A, devicePubKey: PUB_A },
 			{ deviceId: DEVICE_B, devicePubKey: PUB_B },
 		]);
@@ -134,7 +122,7 @@ describe("pair/claim · adjudicación del código (FABLE-D)", () => {
 	});
 
 	it("el claim rechazado cuenta como intento (quema el código si se martillea)", async () => {
-		const [a, b] = await reclamar("pair-claim-intentos", [
+		const [a, b] = await reclamar([
 			{ deviceId: DEVICE_A, devicePubKey: PUB_A },
 			{ deviceId: DEVICE_B, devicePubKey: PUB_B },
 		]);
@@ -144,7 +132,7 @@ describe("pair/claim · adjudicación del código (FABLE-D)", () => {
 	});
 
 	it("el reclamante legítimo puede reintentar sin perder su claim", async () => {
-		const [, segundo] = await reclamar("pair-claim-reintento", [
+		const [, segundo] = await reclamar([
 			{ deviceId: DEVICE_A, devicePubKey: PUB_A },
 			{ deviceId: DEVICE_A, devicePubKey: PUB_A },
 		]);

@@ -9,7 +9,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enElHub } from "./helpers/hub";
+import { centralDePrueba } from "./helpers/central";
+import { enElHub, ponerLaCentral } from "./helpers/hub";
 
 const informe: Record<string, unknown> = {};
 
@@ -574,10 +575,11 @@ describe("transacciones y turnos", () => {
 	it("lo que se manda por un socket no sale si lo escrito en ese turno no llega a ser duradero", async () => {
 		const ns = (env as any).TenantHub as DurableObjectNamespace;
 		const abrir = async (nombre: string) => {
+			// Abrir el socket apunta la visita en la base central: una de verdad, que el hub se queda.
+			const central = await centralDePrueba();
 			await enElHub(nombre, (hub) => {
 				crearEsquemaTenant(hub.state.storage.sql);
-				// Abrir el socket apunta la visita en la base central, que aquí no existe.
-				hub.touchLastSeen = async () => {};
+				ponerLaCentral(hub, central);
 			});
 			const stub = ns.get(ns.idFromName(nombre));
 			const res = await stub.fetch("https://tpv-api.test/ws", {

@@ -23,7 +23,7 @@
 import type { Base } from "../src/lib/sql";
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { entradas, resumen, salidas } from "../src/domains/cuentas/cuentas.queries";
@@ -57,7 +57,7 @@ async function conProductos<R>(nombre: string, prueba: (db: Base) => Promise<R>)
 				producto,
 			);
 		}
-		return prueba(clienteSobre(sql) as unknown as Base);
+		return prueba(clienteLocal(hub.state.storage));
 	});
 }
 
@@ -140,7 +140,7 @@ describe("buscar en los listados de caja con lo que teclea el usuario", () => {
 					importe,
 				);
 			}
-			return prueba(clienteSobre(sql) as unknown as Base);
+			return prueba(clienteLocal(hub.state.storage));
 		});
 	}
 

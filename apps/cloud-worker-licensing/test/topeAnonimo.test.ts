@@ -8,7 +8,8 @@
 // Por la entrada real del worker (`src/index.ts`), con el cuerpo servido como un ReadableStream que
 // cuenta lo que se le ha pedido: así se ve cuánto lee de verdad el worker, no sólo qué contesta. La
 // firma de Stripe es la real (envuelta para anotar cuántos caracteres le llegan). La base central no
-// se toca: una consulta queda anotada y lanza.
+// se toca: es una de verdad para cada caso (`helpers/central.ts`), y lo que le llegue queda anotado
+// en su stub y lanza.
 //
 // Y que el tope no rompe lo legítimo: la activación más grande que acepta el schema, firmada como la
 // manda la Main (AUD-01); un cuerpo justo del tamaño del tope en cada ruta; y el evento más grande
@@ -18,21 +19,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
+import { centralDePrueba, centralQueApunta } from "./helpers/central";
 
-const { tamanos, consultas } = vi.hoisted(() => ({ tamanos: [] as number[], consultas: [] as string[] }));
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return {
-		...original,
-		getDb: () => ({
-			execute: (q: any) => {
-				consultas.push(String(q?.sql ?? q));
-				throw new Error("no debe tocar la base");
-			},
-		}),
-	};
-});
+const { tamanos } = vi.hoisted(() => ({ tamanos: [] as number[] }));
 
 vi.mock("../src/domains/stripe/stripe.helpers", async (importOriginal) => {
 	const real = await importOriginal<typeof import("../src/domains/stripe/stripe.helpers")>();
@@ -111,14 +100,20 @@ async function pedir(ruta: string, cuerpo: Uint8Array, cabeceras: Record<string,
 	const req = new Request(`https://tpv-api.test${ruta}`, { method: "POST", headers, body: stream, duplex: "half" } as any);
 	expect(req.headers.has("content-length")).toBe(conLongitud);
 	const ctx = createExecutionContext();
-	const res = await worker.fetch!(req as any, ENV, ctx);
+	const res = await worker.fetch!(req as any, { ...ENV, ...central.entorno }, ctx);
 	await waitOnExecutionContext(ctx);
 	return { status: res.status, cuerpo: (await res.json()) as any, leidos: contador.leidos };
 }
 
-beforeEach(() => {
+/** La base central del caso, que anota lo que le pidan y no lo atiende. */
+let central: ReturnType<typeof centralQueApunta>;
+/** Lo que se le ha pedido a la base central en el caso en curso. */
+let consultas: string[];
+
+beforeEach(async () => {
 	tamanos.length = 0;
-	consultas.length = 0;
+	central = centralQueApunta(await centralDePrueba(), () => Promise.reject(new Error("no debe tocar la base")));
+	consultas = central.pedido;
 });
 
 const JSON_CT = { "Content-Type": "application/json" };
@@ -180,10 +175,11 @@ describe("AUD-34 · una ruta anónima no lee un cuerpo que pasa de su tope", () 
 			headers: { authorization: `Bearer ${JWT_SIN_FIRMA}` },
 		});
 		const ctx = createExecutionContext();
-		const res = await worker.fetch!(req as any, ENV, ctx);
+		const res = await worker.fetch!(req as any, { ...ENV, ...central.entorno }, ctx);
 		await waitOnExecutionContext(ctx);
 		expect(res.status).toBe(401);
 		expect(((await res.json()) as any).error).toBe("missing_device_proof");
+		expect(consultas).toEqual([]);
 	});
 });
 

@@ -16,22 +16,19 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { centralDePrueba, conFalloEnLasOperaciones, filasDe, type CentralDePrueba } from "./helpers/central";
+import {
+	centralDePrueba,
+	centralInterceptada,
+	conFalloEnLasOperaciones,
+	filasDe,
+	type CentralDePrueba,
+} from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 
-/**
- * El cliente de la central del test en curso; lo devuelve `getDb`. Es el de verdad, o uno que lo
- * envuelve para cortar una sentencia a mitad de un estreno.
- */
-let clienteActual: any = null;
 /** Bases de tenant que se han llegado a aprovisionar: el canje no puede crear ninguna. */
 let basesCreadas: string[] = [];
 /** Lo que pasa mientras se aprovisiona una base, para intercalar otra petición (AUD-07). */
 let alAprovisionar: (() => Promise<void>) | null = null;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => clienteActual,
-}));
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (original) => ({
 	...(await (original as any)()),
@@ -68,9 +65,14 @@ const CLAVE_EQUIPO = await clavePublica(1);
 
 type Escenario = {
 	central: CentralDePrueba;
+	/**
+	 * La central a la que llega `/activate` (por `getDb(env)`): la de verdad, o la misma a través de un
+	 * stub que corta una sentencia a mitad de un estreno.
+	 */
+	deLaRuta: CentralDePrueba;
 	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
 	sql: (texto: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
-	db: any;
+	db: CentralDePrueba["db"];
 	/** Emite una clave sin estrenar y devuelve el texto de la clave y su id. */
 	emitir: (meses?: number) => Promise<{ clave: string; id: string }>;
 	/** Deja una licencia ya activada en este equipo, con la caducidad indicada. */
@@ -84,17 +86,17 @@ type Escenario = {
 	leer: (id: string) => Promise<any>;
 };
 
-async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): Promise<T> {
+async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 	{
-		const central = await centralDePrueba(`rev13-canje-${nombre}-${crypto.randomUUID()}`);
+		const central = await centralDePrueba();
 		const db = central.db;
 		const sql = (texto: string, ...args: unknown[]) => filasDe(central, texto, ...args);
-		clienteActual = db;
 		basesCreadas = [];
 
 		let n = 0;
 		const e: Escenario = {
 			central,
+			deLaRuta: central,
 			sql,
 			db,
 			async emitir(meses = 12) {
@@ -137,7 +139,7 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 				const res = await licenseRoutes.request(
 					"/activate",
 					await activacionFirmada({ activationKey: clave, deviceId, devicePubKey: pubKey, ...extra }),
-					ENV,
+					{ ...ENV, ...e.deLaRuta.entorno },
 					// El recibo del canje sale por `waitUntil`, así que hace falta un contexto.
 					{ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} } as any,
 				);
@@ -161,14 +163,13 @@ const revocar = (e: Escenario, licenseId: string) => e.db.operar("revocarAMano",
 const desrevocar = (e: Escenario, licenseId: string) => e.db.operar("desrevocar", { licenseId, ahoraMs: Date.now() });
 
 beforeEach(() => {
-	clienteActual = null;
 	basesCreadas = [];
 	alAprovisionar = null;
 });
 
 describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 	it("suma los meses a la que hay y no crea otro negocio", async () => {
-		const r = await escenario("suma", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
@@ -203,7 +204,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 
 	it("una licencia ya CADUCADA se renueva y vuelve a estar activa", async () => {
 		// El caso más normal de todos: se te pasó la fecha, compras un código y sigues.
-        const r = await escenario("caducada", async (e) => {
+        const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: -10, status: "expired" });
 			const nueva = await e.emitir(12);
 			const res = await e.activar(nueva.clave);
@@ -219,7 +220,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 	it("el mismo código no suma dos veces", async () => {
 		// La lección de REV-15: un `UPDATE` condicionado cuyo resultado nadie mira no condiciona
 		// nada, y aquí serían meses regalados en cada reintento.
-		const r = await escenario("dos-veces", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const nueva = await e.emitir(12);
 
@@ -241,7 +242,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 		// El canje deja la clave `redeemed` con `main_device_id` a NULL, y `/activate` sólo miraba esto
 		// último: la misma clave, tecleada en la pantalla de activación de otro ordenador, estrenaba un
 		// negocio nuevo con su plazo entero mientras el primero se quedaba los meses sumados.
-		const r = await escenario("canjeada-en-otro-equipo", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const nueva = await e.emitir(12);
 
@@ -288,7 +289,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 
 	it("el alta no estrena una clave canjeada aunque llegue hasta ella (AUD-07)", async () => {
 		// La segunda barrera, la del `UPDATE`: no basta con que la ruta mire el estado al leer.
-		const r = await escenario("alta-de-canjeada", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const nueva = await e.emitir(12);
 			await e.activar(nueva.clave);
@@ -317,7 +318,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 	it("anular y desanular una clave canjeada no la deja otra vez sin estrenar (AUD-07)", async () => {
 		// Nunca se activó, así que deshacer su anulación la devolvía a `issued`: se podía estrenar con
 		// ella un negocio, o sumarla otra vez.
-		const r = await escenario("desanulada", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const nueva = await e.emitir(12);
 			await e.activar(nueva.clave);
@@ -350,7 +351,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 		// Lo que el rechazo de la ruta no ve: el equipo nuevo leyó la clave cuando aún era `issued`, y
 		// el canje la gasta antes de su `UPDATE`. Ganaban los dos: 12 meses al primer local y un
 		// negocio nuevo con otros 12.
-		const r = await escenario("carrera-con-el-alta", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
@@ -393,7 +394,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 	it("el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar", async () => {
 		// LIC-07: `localizarCobro` llega al cobro por el `payment_intent`. Si el cobro siguiera
 		// apuntando a la clave gastada —que no tiene meses— devolver el dinero no quitaría nada.
-		const r = await escenario("cobro", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const nueva = await e.emitir(12);
 			await e.sql(
@@ -419,7 +420,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 		// (REV-07). Quien lo conoce puede firmar con una clave suya, pero no es la registrada de ese
 		// equipo; y presentar la registrada exige firmar con su privada (AUD-01,
 		// `activarConFirma.test.ts`).
-		const r = await escenario("clave-ajena", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
@@ -436,7 +437,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 
 describe("REV-13 · el equipo NO tiene licencia: se estrena", () => {
 	it("un equipo nuevo estrena su propio negocio", async () => {
-		const r = await escenario("estrena", async (e) => {
+		const r = await escenario(async (e) => {
 			const nueva = await e.emitir(12);
 			const res = await e.activar(nueva.clave, "equipo-recien-comprado", CLAVE_EQUIPO);
 			return { res, lic: await e.leer(nueva.id) };
@@ -452,7 +453,7 @@ describe("REV-13 · el equipo NO tiene licencia: se estrena", () => {
 
 	it("el segundo local del mismo dueño es un negocio aparte", async () => {
 		// El caso que el bug se comía: el dueño abre otro bar, compra y activa en el equipo NUEVO.
-		const r = await escenario("segundo-local", async (e) => {
+		const r = await escenario(async (e) => {
 			const primeraId = await e.licenciaDelEquipo();
 			const antes = await e.leer(primeraId);
 			const nueva = await e.emitir(12);
@@ -482,25 +483,21 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 		return fila ? String(fila.tenant_id) : null;
 	};
 
-	/** El mismo cliente, pero la primera sentencia suelta que case con `patron` revienta. */
-	function conCorte(db: any, patron: RegExp) {
+	/** La misma central, pero la primera sentencia suelta que case con `patron` revienta en su stub. */
+	function conCorte(central: CentralDePrueba, patron: RegExp): CentralDePrueba {
 		let pendiente = true;
-		return {
-			...db,
-			async execute(entrada: any) {
-				const texto = typeof entrada === "string" ? entrada : entrada.sql;
-				if (pendiente && patron.test(String(texto))) {
-					pendiente = false;
-					throw new Error("corte_simulado");
-				}
-				return db.execute(entrada);
-			},
-		} as any;
+		return centralInterceptada(central, (metodo, [entrada], llamar) => {
+			if (metodo === "ejecutar" && pendiente && patron.test((entrada as SentenciaEnlazada).sql)) {
+				pendiente = false;
+				return Promise.reject(new Error("corte_simulado"));
+			}
+			return llamar();
+		});
 	}
 
 	for (const previo of ["anulada", "trasladada"] as const) {
 		it(`con la licencia del negocio anterior ${previo}, el estreno avisa de que la base no vale`, async () => {
-			const r = await escenario(`aud06-${previo}`, async (e) => {
+			const r = await escenario(async (e) => {
 				const viejaId = await e.licenciaDelEquipo();
 				if (previo === "anulada") {
 					await revocar(e, viejaId);
@@ -541,7 +538,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 	}
 
 	it("un equipo nuevo no tiene nada que apartar", async () => {
-		const r = await escenario("aud06-equipo-nuevo", async (e) => {
+		const r = await escenario(async (e) => {
 			// Otro negocio con su licencia, en su equipo: no es el que activa.
 			await e.licenciaDelEquipo();
 			const nueva = await e.emitir(12);
@@ -554,7 +551,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 
 	it("el mismo negocio, reactivado en su equipo, conserva su base", async () => {
 		// Una anulación por error que se deshace: la misma clave vuelve a activar el mismo equipo.
-		const r = await escenario("aud06-mismo-negocio", async (e) => {
+		const r = await escenario(async (e) => {
 			const mia = await e.emitir(12);
 			const estreno = await e.activar(mia.clave);
 			await revocar(e, mia.id);
@@ -572,7 +569,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 	it("el equipo que pasó por otro negocio y vuelve a su licencia también la conserva", async () => {
 		// Una Main que se usó como Handy de otro negocio: su fila se mudó allí, pero su base sigue
 		// siendo la de su licencia. No es una primera activación, así que no hay nada que apartar.
-		const r = await escenario("aud06-vuelve-a-su-licencia", async (e) => {
+		const r = await escenario(async (e) => {
 			const mia = await e.emitir(12);
 			const estreno = await e.activar(mia.clave);
 
@@ -602,14 +599,14 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 		// negocio queda reservado en la clave y el equipo sin dar de alta (eso espera a ganar la
 		// licencia), así que el reintento vuelve al mismo negocio sin nada que apartar. Si contara
 		// como otro, el equipo nuevo que reintenta acabaría en la pantalla de recuperación.
-		const r = await escenario("aud06-reintento", async (e) => {
+		const r = await escenario(async (e) => {
 			const nueva = await e.emitir(12);
 
-			clienteActual = conCorte(e.db, /UPDATE licenses\s+SET status='active'/);
+			e.deLaRuta = conCorte(e.central, /UPDATE licenses\s+SET status='active'/);
 			const fallo = await e.activar(nueva.clave);
 			const trasElFallo = { negocio: await negocioDelEquipo(e), clave: await e.leer(nueva.id) };
 
-			clienteActual = e.db;
+			e.deLaRuta = e.central;
 			const bien = await e.activar(nueva.clave);
 			return { fallo, trasElFallo, bien, negocio: await negocioDelEquipo(e) };
 		});
@@ -632,7 +629,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 			// licencia para darse de alta: su fila en el negocio que la clave tiene reservado y sin
 			// activar. Ese negocio no ha nacido (`activated_at_ms`), así que su base no es de nadie.
 			// Y una clave canjeada después lo arrastraba con su `tenant_id` (ahora el canje lo suelta).
-			const r = await escenario(`aud09-reservada-${como === "sin estrenar" ? "issued" : "redeemed"}`, async (e) => {
+			const r = await escenario(async (e) => {
 				const reservada = await e.emitir(12);
 				await e.sql(`INSERT INTO tenants (tenant_id, status) VALUES ('negocio-reservado', 'active');`);
 				await e.sql(
@@ -660,7 +657,7 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 		// Lo que deja cada tanda del E2E (`admin/pruebas.ts`): el negocio dado por borrado y su
 		// licencia anulada. El equipo conserva la identidad y estrena la tanda siguiente con la
 		// carpeta de datos recién borrada.
-		const r = await escenario("aud06-retirado", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			await revocar(e, viejaId);
 			await e.sql(`UPDATE tenants SET status='deleted' WHERE tenant_id='tenant-del-bar';`);
@@ -678,7 +675,7 @@ describe("REV-13 · una licencia ya activada no canjea", () => {
 	it("teclear en su propio equipo la clave que ya usó no suma tiempo", async () => {
 		// Decisión de producto: sumar tiempo es cosa de un código SIN estrenar. Reactivar la que ya
 		// tienes es sólo volver a entrar, no comprar otro año.
-		const r = await escenario("ya-activada", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			// La misma clave con la que se activó.
@@ -694,7 +691,7 @@ describe("REV-13 · una licencia ya activada no canjea", () => {
 	});
 
 	it("la clave de otro negocio, ya activada, tampoco suma: eso es un cambio de equipo", async () => {
-		const r = await escenario("de-otro", async (e) => {
+		const r = await escenario(async (e) => {
 			const miaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(miaId);
 
@@ -729,7 +726,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 		// el equipo se llevaba un 500 y el reintento, `license_already_used`: sin token con
 		// ninguna de las dos claves.
 		const OTRA_CLAVE = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
-		const r = await escenario("dek-ilegible", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
@@ -765,16 +762,16 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 	it("un corte a mitad de las escrituras no deja la clave gastada sin sumar", async () => {
 		// Gastar, sumar y mudar el cobro eran tres sentencias sueltas: si caía la tercera, las dos
 		// primeras se quedaban, y el reintento ya no podía canjear.
-		const r = await escenario("corte", async (e) => {
+		const r = await escenario(async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
 
-			clienteActual = conFalloEnLasOperaciones(e.central, /UPDATE license_payments/).db;
+			e.deLaRuta = conFalloEnLasOperaciones(e.central, /UPDATE license_payments/);
 			const fallo = await e.activar(nueva.clave);
 			const tras = { vieja: await e.leer(viejaId), clave: await e.leer(nueva.id) };
 
-			clienteActual = e.db;
+			e.deLaRuta = e.central;
 			const bien = await e.activar(nueva.clave);
 			return { antes, fallo, tras, bien, final: await e.leer(viejaId) };
 		});
@@ -793,7 +790,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 
 describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 	it("una clave sin estrenar suma tiempo, igual que sin la marca", async () => {
-		const r = await escenario("solo-sumar-ok", async (e) => {
+		const r = await escenario(async (e) => {
 			const actual = await e.licenciaDelEquipo({ diasRestantes: 30 });
 			const antes = (await e.leer(actual)).expires_at_ms;
 			const { clave } = await e.emitir(12);
@@ -806,7 +803,7 @@ describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 	});
 
 	it("la clave de otro equipo, ya activada, se rechaza sin pedir el código de cambio de equipo", async () => {
-		const r = await escenario("solo-sumar-otro", async (e) => {
+		const r = await escenario(async (e) => {
 			await e.licenciaDelEquipo();
 			const { clave, id } = await e.emitir(12);
 			await e.sql(
@@ -826,7 +823,7 @@ describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 	});
 
 	it("en un equipo sin licencia viva no estrena un negocio nuevo", async () => {
-		const r = await escenario("solo-sumar-sin-licencia", async (e) => {
+		const r = await escenario(async (e) => {
 			const { clave, id } = await e.emitir(12);
 			const res = await e.activar(clave, EQUIPO, CLAVE_EQUIPO, { soloSumar: true });
 			return { res, clave: await e.leer(id), bases: basesCreadas.length };
@@ -838,7 +835,7 @@ describe("RI-52 · canje desde Configuración (soloSumar)", () => {
 	});
 
 	it("la clave que ya tiene este equipo no se vuelve a activar", async () => {
-		const r = await escenario("solo-sumar-misma", async (e) => {
+		const r = await escenario(async (e) => {
 			const actual = await e.licenciaDelEquipo();
 			const clave = generateLicenseKey();
 			await e.sql(

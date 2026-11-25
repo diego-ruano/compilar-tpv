@@ -14,7 +14,7 @@ import {
 } from "../src/domains/trabajadores/trabajadores.schemas";
 import { getLoginRecord, listLoginUsers } from "../src/domains/login/login.queries";
 import { loginUserSchema, punchSchema } from "../src/domains/login/login.schemas";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -63,7 +63,7 @@ describe("Sin_PIN · entrar sin PIN", () => {
 			sql.exec(
 				"INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Sin_PIN) VALUES ('user-1', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Camarero'), 'ada@test.local', 'h', 'Ada', 1);",
 			);
-			const db = clienteSobre(sql) as any;
+			const db = clienteLocal(hub.state.storage);
 			expect(Number((await getLoginRecord(db, "user-1")).sin_pin)).toBe(1);
 			const lista = await listLoginUsers(db);
 			expect(lista.find((u) => u.id_usuario === "user-1")?.sin_pin).toBe(true);

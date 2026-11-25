@@ -35,7 +35,7 @@ import { planAbrirORetomar } from "../src/domains/mesas/abrirORetomar";
 import { comandaConLineas } from "../src/domains/mesas/mesas.queries";
 import { mesasRoutes } from "../src/domains/mesas/mesas.routes";
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -56,7 +56,7 @@ async function conMesa<R>(nombre: string, extra: string[], prueba: (db: Base, sq
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const s of [...SEMILLA, ...extra]) sql.exec(s);
-		return prueba(clienteSobre(sql) as unknown as Base, sql, hub);
+		return prueba(clienteLocal(hub.state.storage), sql, hub);
 	});
 }
 

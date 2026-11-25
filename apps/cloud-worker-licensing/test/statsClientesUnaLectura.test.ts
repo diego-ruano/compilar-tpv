@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import caso from "../../../tests/contract/lecturas/casos/stats/clientes.json";
 import golden from "../../../tests/contract/lecturas/golden/stats/clientes.json";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { clientes } from "../src/domains/stats/stats.queries";
@@ -30,7 +30,7 @@ describe("la estadística de clientes", () => {
 			crearEsquemaTenant(sql);
 			for (const sentencia of caso.seed) sql.exec(sentencia);
 
-			const db = clienteSobre(sql) as unknown as Base;
+			const db = clienteLocal(hub.state.storage);
 			const sentencias: string[] = [];
 			const espia = {
 				execute: (entrada: any) => {

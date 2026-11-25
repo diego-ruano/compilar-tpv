@@ -3,11 +3,13 @@
 // Una Main y una Handy conectadas a un TenantHub de verdad, para probar lo que la Main sube por el
 // socket (`apply_lote`) contra el motor real: la base del negocio aprovisionada como en
 // producción (sus migraciones, sus claves foráneas), la sesión de la Main en su attachment y la
-// tabla de quién es la Main puesta al día. La base central no existe: lo que la toca se sustituye.
+// tabla de quién es la Main puesta al día. La base central es una de verdad, nueva, con el negocio y
+// sus dos equipos dados de alta (`centralConLaMain`): lo que el hub le pregunta lo contesta ella.
 //
 // Todo corre dentro de la invocación del DO que lo monta (`enElHub`): los sockets viven lo que ella.
 
-import { laMainEs } from "./mainVigente";
+import type { CentralDePrueba } from "./central";
+import { centralConLaMain } from "./mainVigente";
 
 export type OpDelOutbox = {
 	opId: string;
@@ -43,6 +45,8 @@ type Extremo = {
 
 export type MainEnElHub = {
 	sql: any;
+	/** La base central del hub, con el negocio, su Main y la Handy. */
+	central: CentralDePrueba;
 	main: Extremo;
 	handy: Extremo;
 	/** Los eventos de salud que habrían ido a Axiom. */
@@ -91,6 +95,9 @@ function abrir(hub: any, tenant: string, deviceId: string, role: "tpv" | "handy"
 	return { servidor: par[1], recibidos, esperar };
 }
 
+/** La Handy que se conecta con la Main. */
+const HANDY = "handy-lote";
+
 let lotes = 0;
 
 /**
@@ -104,11 +111,12 @@ export async function montarMainEnElHub(
 ): Promise<MainEnElHub> {
 	const idMain = opciones.main ?? "main-lote";
 	await hub.aprovisionar(tenant);
-	// `last_seen` va contra la base central, que aquí no existe y tampoco es lo que se prueba.
-	hub.touchLastSeen = async () => {};
 	const eventos: MainEnElHub["eventos"] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
-	laMainEs(hub, idMain);
+	const central = await centralConLaMain(hub, tenant, idMain, [
+		{ deviceId: idMain, rol: "tpv" },
+		{ deviceId: HANDY, rol: "handy" },
+	]);
 
 	// Lo difundido se apunta al salir del hub, no al llegar a la Handy: cada socket entrega a su
 	// ritmo, y lo que importa es el orden en que el hub lo manda.
@@ -121,7 +129,7 @@ export async function montarMainEnElHub(
 
 	const sql = hub.state.storage.sql;
 	const main = abrir(hub, tenant, idMain, "tpv", opciones.recovering ?? true);
-	const handy = abrir(hub, tenant, "handy-lote", "handy", false);
+	const handy = abrir(hub, tenant, HANDY, "handy", false);
 
 	const mandarLote = async (ops: OpDelOutbox[], extra: Record<string, unknown> = {}) => {
 		const loteId = `lote-${++lotes}`;
@@ -132,6 +140,7 @@ export async function montarMainEnElHub(
 
 	return {
 		sql,
+		central,
 		main,
 		handy,
 		eventos,

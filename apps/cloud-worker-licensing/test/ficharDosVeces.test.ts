@@ -9,41 +9,32 @@
 //
 // Dos alturas: la consulta contra el SQLite de un Durable Object con el esquema del negocio, y la
 // ruta de punta a punta por `src/index.ts` con la autenticación real de una Handy (token de sesión,
-// prueba ed25519, licencia y PIN), ejecutada dentro del TenantHub del negocio como en producción.
+// prueba ed25519, licencia y PIN) contra una base central de verdad, ejecutada dentro del TenantHub
+// del negocio como en producción.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import * as ed from "@noble/ed25519";
 import { createExecutionContext, env as entorno, waitOnExecutionContext } from "cloudflare:test";
 
 import fuenteDeLaMain from "../../../crates/tpv-infra-sqlite/src/login.rs?raw";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, negocioEnLaCentral } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
-import { GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
+import { clienteLocal, GuardaIncumplida, loteEnBruto } from "../src/durableObjects/tenantHub.sqlite";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
+import worker from "../src/index";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
+import { hashPin } from "../src/domains/login/login.crypto";
+import { getOpenPunch, parteSiguiente } from "../src/domains/login/login.queries";
+import { punchEntrada, punchSalida } from "../src/domains/login/login.commands";
+import { serverNowFixed } from "../src/durableObjects/tenantHub.tiempo";
 
 const env = entorno as any;
-
-/** La base central de cada caso de la ruta (el SQLite de un DO aparte). */
-let central: any = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => central };
-});
-
-const { default: worker } = await import("../src/index");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const { hashPin } = await import("../src/domains/login/login.crypto");
-const { getOpenPunch, parteSiguiente } = await import("../src/domains/login/login.queries");
-const { punchEntrada, punchSalida } = await import("../src/domains/login/login.commands");
-const { serverNowFixed } = await import("../src/durableObjects/tenantHub.tiempo");
 
 beforeEach(() => {
 	olvidarLicenciasCacheadas();
@@ -92,7 +83,7 @@ describe("AUD-47 · TRA-INC-04 · las guardas del fichaje rechazan con un 409 y 
 				 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', 'x', 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
 			);
 			sembrar(sql);
-			const parte = await parteSiguiente(clienteSobre(sql) as any, "u-1", HOY);
+			const parte = await parteSiguiente(clienteLocal(hub.state.storage), "u-1", HOY);
 			try {
 				aplicarLote(hub, punchEntrada({ id_usuario: "u-1", fecha: HOY, parte }));
 				return { parte };
@@ -183,7 +174,7 @@ describe("AUD-47 · TRA-INC-04 · las guardas del fichaje rechazan con un 409 y 
 				 VALUES ('f-1', 'u-1', date('now','localtime'), 1, datetime('now','localtime','-2 hours'), 'ABIERTO');`,
 			);
 			// Lo que lee la ruta.
-			const abierto = await getOpenPunch(clienteSobre(sql) as any, "u-1");
+			const abierto = await getOpenPunch(clienteLocal(hub.state.storage), "u-1");
 			expect(abierto?.id_fichaje).toBe("f-1");
 			const built = punchSalida({ id_usuario: "u-1", id_fichaje: abierto!.id_fichaje, fecha: abierto!.fecha });
 
@@ -231,7 +222,6 @@ describe("AUD-47 · TRA-INC-04 · las guardas del fichaje rechazan con un 409 y 
 const TENANT = "tenant-aud47";
 const HANDY = "handy-aud47";
 const LIC_HASH = "hash-licencia-aud47";
-const DIA_MS = 24 * 60 * 60 * 1000;
 const PIN = "4321";
 
 type Caso = {
@@ -241,87 +231,74 @@ type Caso = {
 	fichar: (tipo: "entrada" | "salida", clave?: string) => Promise<Response>;
 };
 
-/** Un negocio con un camarero, su licencia viva, una Handy emparejada y la Main conectada. */
+/**
+ * Un negocio con un camarero, su licencia viva, una Handy emparejada y la Main conectada, con su base
+ * central propia. La prueba corre dentro de su TenantHub, con la central puesta: la misma que lee el
+ * Worker.
+ */
 async function escenario<R>(nombre: string, prueba: (c: Caso) => Promise<R>): Promise<R> {
 	const tenantId = `${TENANT}-${nombre}`;
 
 	await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
 	const hash = await hashPin(PIN);
-	await enElHub(tenantId, (hub: any) => {
-		hub.state.storage.sql.exec(
-			`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
-			 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', ?, 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
-			hash,
-		);
-		hub.isMainConnected = () => true;
-		hub.isMainReady = () => true;
-		hub.broadcastChange = () => {};
+
+	ensureEd25519Sha512();
+	const seed = new Uint8Array(32).fill(47);
+	const central = await centralDePrueba();
+	await negocioEnLaCentral(central, {
+		tenantId,
+		main: "main-aud47",
+		licenseId: "lic-aud47",
+		licenseKeyHash: LIC_HASH,
+		dispositivos: [{ deviceId: HANDY, rol: "handy", pubkeyB64: bytesToB64(await ed.getPublicKeyAsync(seed)) }],
 	});
-	const filas = () =>
-		enElHub(tenantId, (hub: any) =>
-			hub.state.storage.sql
-				.exec(`SELECT Parte, Hora_Salida IS NOT NULL AS cerrado, Estado FROM Fichajes WHERE ID_Usuario = 'u-1' ORDER BY Parte;`)
-				.toArray(),
-		);
 
-	return enElHub(`aud47-central-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		central = clienteSobre(sql);
+	return enElHub(
+		tenantId,
+		async (hub: any) => {
+			hub.state.storage.sql.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 SELECT 'u-1', ID_Rol, 'u1@ejemplo.test', ?, 'Prueba' FROM Roles WHERE Nombre_Rol = 'Camarero';`,
+				hash,
+			);
+			hub.isMainConnected = () => true;
+			hub.isMainReady = () => true;
+			hub.broadcastChange = () => {};
+			const filas = async () =>
+				hub.state.storage.sql
+					.exec(`SELECT Parte, Hora_Salida IS NOT NULL AS cerrado, Estado FROM Fichajes WHERE ID_Usuario = 'u-1' ORDER BY Parte;`)
+					.toArray();
 
-		ensureEd25519Sha512();
-		const seed = new Uint8Array(32).fill(47);
-		const pub = bytesToB64(await ed.getPublicKeyAsync(seed));
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, tenantId);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
-			                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
-			                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
-			 VALUES ('lic-aud47', ?, ?, 'main-aud47', 'active', 0, 12, 'manual', 1, 1, ?, 'bar@ejemplo.test', 1, 1);`,
-			LIC_HASH,
-			tenantId,
-			Date.now() + 30 * DIA_MS,
-		);
-		sql.exec(
-			`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
-			 VALUES (?, ?, 'handy', ?, 'ed25519');`,
-			HANDY,
-			tenantId,
-			pub,
-		);
+			/** Una petición firmada como la del cliente Rust, con la hora real del equipo. */
+			const fichar = async (tipo: "entrada" | "salida", clave: string = crypto.randomUUID()) => {
+				const token = await firmarSesion(env, { tenantId, deviceId: HANDY, licHash: LIC_HASH }, { rol: "handy" });
+				const ruta = "/v1/login/punch";
+				const cuerpo = new TextEncoder().encode(JSON.stringify({ id_usuario: "u-1", pin: PIN, tipo }));
+				const ts = Date.now();
+				const mensaje = ["DEVICE_PROOF", ts, "POST", ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
+				const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
+				const req = new Request(`https://tpv-api.test${ruta}`, {
+					method: "POST",
+					headers: {
+						authorization: `Bearer ${token}`,
+						"X-Device-Ts": String(ts),
+						"X-Device-Sig": firma,
+						"X-Idempotency-Key": clave,
+						"X-Client-Now": serverNowFixed(),
+						"content-type": "application/json",
+					},
+					body: cuerpo,
+				});
+				const ctx = createExecutionContext();
+				const res = await worker.fetch!(req as any, { ...env, ...central.entorno }, ctx);
+				await waitOnExecutionContext(ctx);
+				return res;
+			};
 
-		/** Una petición firmada como la del cliente Rust, con la hora real del equipo. */
-		const fichar = async (tipo: "entrada" | "salida", clave: string = crypto.randomUUID()) => {
-			const token = await firmarSesion(env, { tenantId, deviceId: HANDY, licHash: LIC_HASH }, { rol: "handy" });
-			const ruta = "/v1/login/punch";
-			const cuerpo = new TextEncoder().encode(JSON.stringify({ id_usuario: "u-1", pin: PIN, tipo }));
-			const ts = Date.now();
-			const mensaje = ["DEVICE_PROOF", ts, "POST", ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
-			const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
-			const req = new Request(`https://tpv-api.test${ruta}`, {
-				method: "POST",
-				headers: {
-					authorization: `Bearer ${token}`,
-					"X-Device-Ts": String(ts),
-					"X-Device-Sig": firma,
-					"X-Idempotency-Key": clave,
-					"X-Client-Now": serverNowFixed(),
-					"content-type": "application/json",
-				},
-				body: cuerpo,
-			});
-			const ctx = createExecutionContext();
-			const res = await worker.fetch!(req as any, env, ctx);
-			await waitOnExecutionContext(ctx);
-			return res;
-		};
-
-		try {
-			return await prueba({ filas, fichar });
-		} finally {
-			central = null;
-		}
-	});
+			return prueba({ filas, fichar });
+		},
+		{ central },
+	);
 }
 
 describe("AUD-47 · POST /v1/login/punch con una entrada que no toca", () => {

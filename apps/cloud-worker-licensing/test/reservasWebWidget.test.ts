@@ -12,23 +12,16 @@
 //   · la casilla de Turnstile del SDK sólo se da a una web del negocio, que es la única que la puede
 //     incrustar, y lleva la clave pública que pone el worker;
 //   · el SDK servido se puede importar como módulo desde cualquier web.
+//
+// El negocio de cada caso vive en su propia base central de verdad (`helpers/central.ts`), y la ruta
+// llega a ella por `getDb(env)` con su `entorno`.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-let dbDePruebas: any = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
-const { reservasWebWidgetRoutes } = await import("../src/domains/reservas_web/widget.routes");
-const { claveDelNegocio, olvidarClavesCacheadas, ponerDominio } = await import("../src/domains/reservas_web/claves");
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
+import { reservasWebWidgetRoutes } from "../src/domains/reservas_web/widget.routes";
+import { claveDelNegocio, olvidarClavesCacheadas, ponerDominio } from "../src/domains/reservas_web/claves";
 
 const app = new Hono();
 app.route("/reservas-web", reservasWebWidgetRoutes);
@@ -59,28 +52,25 @@ async function pedir(ruta: string, env: Record<string, unknown> = {}) {
 
 const ancestros = (res: Response) => /frame-ancestors ([^;]+)/.exec(res.headers.get("Content-Security-Policy") ?? "")?.[1];
 
-async function conNegocio(nombre: string, prueba: (clave: string) => Promise<void>) {
-	await enElHub(`rw-widget-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		dbDePruebas = clienteSobre(sql);
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('t1');`);
-		await prueba(await claveDelNegocio(dbDePruebas, "t1", 1));
-	});
+/** El negocio `t1`, con su clave, en una base central nueva. */
+async function conNegocio(prueba: (clave: string, central: CentralDePrueba) => Promise<void>) {
+	const central = await centralDePrueba();
+	await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('t1');`);
+	await prueba(await claveDelNegocio(central.db, "t1", 1), central);
 }
 
 beforeEach(() => olvidarClavesCacheadas());
 
 describe("el widget servido por el worker", () => {
 	it("se puede incrustar sólo en las webs dadas de alta para su negocio", async () => {
-		await conNegocio("dominios", async (clave) => {
-			const sinWebs = await pedir(`/v1/w/${clave}`);
+		await conNegocio(async (clave, central) => {
+			const sinWebs = await pedir(`/v1/w/${clave}`, central.entorno);
 			expect(sinWebs.status).toBe(200);
 			expect(ancestros(sinWebs)).toBe("'none'");
 
-			await ponerDominio(dbDePruebas, "t1", "https://www.barpepe.es", 1);
-			await ponerDominio(dbDePruebas, "t1", "http://localhost:5173", 2);
-			const conWebs = await pedir(`/v1/w/${clave}`);
+			await ponerDominio(central.db, "t1", "https://www.barpepe.es", 1);
+			await ponerDominio(central.db, "t1", "http://localhost:5173", 2);
+			const conWebs = await pedir(`/v1/w/${clave}`, central.entorno);
 			expect(ancestros(conWebs)).toBe("http://localhost:5173 https://www.barpepe.es");
 			expect(conWebs.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
 			expect(conWebs.headers.get("Cache-Control")).toBe("no-store");
@@ -89,18 +79,18 @@ describe("el widget servido por el worker", () => {
 	});
 
 	it("la página de cancelar no se incrusta nunca, ni con webs dadas de alta", async () => {
-		await conNegocio("cancelar", async (clave) => {
-			await ponerDominio(dbDePruebas, "t1", "https://www.barpepe.es", 1);
-			const res = await pedir(`/v1/w/${clave}/cancelar`);
+		await conNegocio(async (clave, central) => {
+			await ponerDominio(central.db, "t1", "https://www.barpepe.es", 1);
+			const res = await pedir(`/v1/w/${clave}/cancelar`, central.entorno);
 			expect(res.status).toBe(200);
 			expect(ancestros(res)).toBe("'none'");
 		});
 	});
 
 	it("una clave que no existe da el widget (que dirá que no está disponible), sin poder incrustarse", async () => {
-		await conNegocio("sin-clave", async () => {
+		await conNegocio(async (_clave, central) => {
 			for (const clave of ["rw_AAAAAAAAAAAAAAAAAAAAAA", "cualquiera"]) {
-				const res = await pedir(`/v1/w/${clave}`);
+				const res = await pedir(`/v1/w/${clave}`, central.entorno);
 				expect(res.status, clave).toBe(200);
 				expect(ancestros(res), clave).toBe("'none'");
 			}
@@ -108,8 +98,8 @@ describe("el widget servido por el worker", () => {
 	});
 
 	it("la CSP no deja cargar nada de fuera salvo Turnstile ni hablar con otro origen", async () => {
-		await conNegocio("csp", async (clave) => {
-			const csp = (await pedir(`/v1/w/${clave}`)).headers.get("Content-Security-Policy") ?? "";
+		await conNegocio(async (clave, central) => {
+			const csp = (await pedir(`/v1/w/${clave}`, central.entorno)).headers.get("Content-Security-Policy") ?? "";
 			for (const directiva of [
 				"default-src 'self'",
 				"script-src 'self' https://challenges.cloudflare.com",
@@ -146,8 +136,11 @@ describe("el widget servido por el worker", () => {
 	});
 
 	it("sin el widget compilado, dice que no está disponible", async () => {
-		await conNegocio("sin-compilar", async (clave) => {
-			const res = await app.request(`https://tpv-api.test/reservas-web/v1/w/${clave}`, {}, { ASSETS: almacen(false) } as any);
+		await conNegocio(async (clave, central) => {
+			const res = await app.request(`https://tpv-api.test/reservas-web/v1/w/${clave}`, {}, {
+				ASSETS: almacen(false),
+				...central.entorno,
+			} as any);
 			expect(res.status).toBe(503);
 		});
 	});
@@ -158,9 +151,9 @@ describe("el widget servido por el worker", () => {
 	});
 
 	it("la casilla de Turnstile del SDK: sólo para una web del negocio, que es la única que puede incrustarla", async () => {
-		await conNegocio("verificar", async (clave) => {
-			await ponerDominio(dbDePruebas, "t1", "https://www.barpepe.es", 1);
-			const env = { TURNSTILE_SITE_KEY: "0xPRUEBA" };
+		await conNegocio(async (clave, central) => {
+			await ponerDominio(central.db, "t1", "https://www.barpepe.es", 1);
+			const env = { TURNSTILE_SITE_KEY: "0xPRUEBA", ...central.entorno };
 			const res = await pedir(`/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`, env);
 			expect(res.status).toBe(200);
 			expect(ancestros(res)).toBe("https://www.barpepe.es");
@@ -177,7 +170,9 @@ describe("el widget servido por el worker", () => {
 				expect((await pedir(ruta, env)).status, quien).toBe(403);
 			}
 			// Sin la clave de Turnstile no hay casilla que enseñar.
-			expect((await pedir(`/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`)).status).toBe(503);
+			expect(
+				(await pedir(`/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`, central.entorno)).status,
+			).toBe(503);
 		});
 	});
 

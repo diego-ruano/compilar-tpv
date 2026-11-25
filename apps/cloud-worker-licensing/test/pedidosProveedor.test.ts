@@ -13,7 +13,6 @@ import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
 import { MENSAJES } from "../src/lib/errorCodes";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { TECHO_LINEAS_PAGINA } from "../src/domains/pedidos_proveedor/pedidos_proveedor.queries";
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -62,9 +61,8 @@ async function conNegocio(nombre: string, sembrar: string[], prueba: (n: Negocio
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const s of sembrar) sql.exec(s);
-		nube = clienteSobre(sql, hub.state.storage);
-
 		const real = clienteLocal(hub.state.storage);
+		nube = real;
 		let antesDelLote: string[] = [];
 		const db = {
 			...real,
@@ -75,7 +73,6 @@ async function conNegocio(nombre: string, sembrar: string[], prueba: (n: Negocio
 			},
 		};
 		hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-		hub.touchLastSeen = async () => {};
 		hub.isMainConnected = () => true;
 		hub.isMainReady = () => true;
 		hub.maybePurgeSyncLog = async () => {};

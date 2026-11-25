@@ -1,26 +1,28 @@
 // test/helpers/negocioFirmado.ts
 //
-// Un negocio entero para probar por el camino de verdad: su base en su TenantHub, y en la base
-// central (el SQLite de otro Durable Object de pruebas) su licencia, su Main y una Handy, cada una
-// con su clave. Las peticiones salen firmadas como las del cliente Rust (`sign_device_proof`).
+// Un negocio entero para probar por el camino de verdad: su base en su TenantHub, y en una base
+// central propia (`helpers/central.ts`) su licencia, su Main y una Handy, cada una con su clave. Las
+// peticiones salen firmadas como las del cliente Rust (`sign_device_proof`).
 //
-// El test pone el doble de la base central (`vi.mock("../src/server/db")` es de cada fichero) y
-// pasa aquí cómo cambiarlo, además de la firma de sesión, que tiene que cargarse después del doble.
+// La central es un objeto `BaseCentral` de verdad, nuevo para cada negocio, y le llega lo mismo que en
+// producción por los dos caminos:
+//   · el del Worker (`tenantAuth`, las rutas que se quedan en él), por `n.entorno`. `pedirFirmado` y
+//     `pedirComo` lo ponen solos; quien le pida a la `app` directamente, `{ ...env, ...n.entorno }`;
+//   · el del TenantHub del negocio (`getCentralDb`, y `getDb` en las rutas que se ejecutan dentro),
+//     porque `prueba` corre dentro de él con la central puesta (`enElHub(…, { central })`).
+// Lo que le llega por cualquiera de los dos queda apuntado en `n.central`, y `n.interceptarLaCentral`
+// provoca en su stub lo que haga falta (que no conteste, que tarde).
 //
-// La base central de pruebas es el SQLite de un Durable Object, y sólo se puede tocar desde él. Por
-// defecto es uno aparte: vale para lo que lee la base central en el Worker (`tenantAuth`), y una
-// ruta que se ejecuta dentro del TenantHub del negocio no la alcanza (el rol, que es lo único que
-// necesitaba de ella, le llega con la identidad). Con `centralEnElNegocio`, las tablas de la central
-// van en el SQLite del propio TenantHub del negocio: así también la lee una ruta que corre dentro de
-// él y la necesita de verdad (el cupo y la traza de un correo, la clave del widget).
+// El test pasa la firma de sesión y cómo olvidar la caché de licencias, cargadas después de sus
+// `vi.mock`.
 
 import { env as entorno } from "cloudflare:test";
 import * as ed from "@noble/ed25519";
 
-import { clienteSobre } from "./clienteSql";
+import { centralDePrueba, centralQueApunta, desvio, filasDe, negocioEnLaCentral, type Atender } from "./central";
 import { ensureEd25519Sha512 } from "./ed25519";
 import { enElHub } from "./hub";
-import { prepararPlanoDeControl } from "./planoDeControl";
+import type { Env } from "../../src/env";
 import { bytesToB64 } from "../../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../../src/server/utils/crypto";
 
@@ -37,79 +39,61 @@ const SEMILLAS: Record<string, Uint8Array> = {
 
 export type Negocio = {
 	tenantId: string;
-	/** Lo que se le ha pedido a la base central, en orden. */
+	/** Lo que se le ha pedido a la base central del negocio, desde el Worker y desde su TenantHub, en orden (`centralQueApunta`). */
 	central: string[];
-	/** Ejecuta SQL en la base central, sin que cuente como consulta del worker. */
-	enCentral: (sql: string, ...args: unknown[]) => void;
+	/** Lo que lleva el `env` de una ruta para que su `getDb` llegue a la central del negocio. */
+	entorno: Pick<Env, "BaseCentral">;
+	/** Ejecuta SQL en la base central y devuelve sus filas, por debajo de sus guardas y sin que cuente en `central`. */
+	enCentral: (sql: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
+	/** Desde ahora, lo que se pida a la central pasa por `atender` (después de apuntarlo); con `null`, va directo. */
+	interceptarLaCentral: (atender: Atender | null) => void;
 };
 
 export type Dependencias = {
-	/** Cambia la base central que devuelve el doble de `getDb` del test. */
-	ponerCentral: (db: unknown) => void;
 	firmarSesion: (env: any, claims: { tenantId: string; deviceId: string; licHash: string }) => Promise<string>;
 	olvidarLicenciasCacheadas: () => void;
 };
 
 /**
  * Monta el negocio `nombre` (con licencia en vigor y, salvo `sinBase`, aprovisionado) y corre
- * `prueba` con él.
- *
- * `prueba` corre dentro del Durable Object que guarda la base central de pruebas y recibe su motor:
- * uno aparte o, con `centralEnElNegocio`, el TenantHub del propio negocio.
+ * `prueba` con él, dentro de su TenantHub (cuyo motor recibe).
  */
 export async function conNegocioFirmado<R>(
 	deps: Dependencias,
 	nombre: string,
 	prueba: (n: Negocio, hub: any) => Promise<R>,
-	opciones: { sinBase?: boolean; centralEnElNegocio?: boolean } = {},
+	opciones: { sinBase?: boolean } = {},
 ): Promise<R> {
 	deps.olvidarLicenciasCacheadas();
 	const tenantId = `negocio-firmado-${nombre}`;
 	if (!opciones.sinBase) await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
 
 	ensureEd25519Sha512();
-	const dondeLaCentral = opciones.centralEnElNegocio ? tenantId : `negocio-firmado-central-${nombre}`;
-	return enElHub(dondeLaCentral, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, tenantId);
-		sql.exec(
-			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
-			                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
-			                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
-			 VALUES (?, ?, ?, ?, 'active', 0, 12, 'manual', 1, 1, ?, 'bar@a.test', 1, 1);`,
-			`lic-${nombre}`,
-			LIC_HASH,
-			tenantId,
-			MAIN,
-			Date.now() + 30 * 24 * 60 * 60 * 1000,
-		);
-		for (const [deviceId, rol] of [[MAIN, "tpv"], [HANDY, "handy"]] as const) {
-			sql.exec(
-				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
-				 VALUES (?, ?, ?, ?, 'ed25519');`,
+	const base = await centralDePrueba();
+	await negocioEnLaCentral(base, {
+		tenantId,
+		main: MAIN,
+		licenseId: `lic-${nombre}`,
+		licenseKeyHash: LIC_HASH,
+		dispositivos: await Promise.all(
+			([[MAIN, "tpv"], [HANDY, "handy"]] as const).map(async ([deviceId, rol]) => ({
 				deviceId,
-				tenantId,
 				rol,
-				bytesToB64(await ed.getPublicKeyAsync(SEMILLAS[deviceId])),
-			);
-		}
-
-		const central: string[] = [];
-		const real = clienteSobre(sql, hub.state.storage);
-		deps.ponerCentral({
-			...real,
-			execute: async (entrada: any) => {
-				central.push(String(typeof entrada === "string" ? entrada : entrada.sql).replace(/\s+/g, " ").trim());
-				return real.execute(entrada);
-			},
-		});
-		try {
-			return await prueba({ tenantId, central, enCentral: (texto, ...args) => void sql.exec(texto, ...args) }, hub);
-		} finally {
-			deps.ponerCentral(null);
-		}
+				pubkeyB64: bytesToB64(await ed.getPublicKeyAsync(SEMILLAS[deviceId])),
+			})),
+		),
 	});
+
+	const { atender, desviar } = desvio();
+	const central = centralQueApunta(base, atender);
+	const n: Negocio = {
+		tenantId,
+		central: central.pedido,
+		entorno: central.entorno,
+		enCentral: (texto, ...args) => filasDe(base, texto, ...args),
+		interceptarLaCentral: desviar,
+	};
+	return enElHub(tenantId, (hub: any) => prueba(n, hub), { central });
 }
 
 /** Ejecuta `sembrar` sobre la base del negocio, dentro de su TenantHub. */
@@ -160,7 +144,10 @@ export async function peticionFirmada(
 	});
 }
 
-/** Un POST firmado por la Main y pedido a la `app` entera. `entorno` pisa variables del de la suite. */
+/**
+ * Un POST firmado por la Main y pedido a la `app` entera, con la central del negocio. `entorno` pisa
+ * variables del de la suite.
+ */
 export async function pedirFirmado(
 	deps: Pick<Dependencias, "firmarSesion">,
 	app: { request: (peticion: Request, init: undefined, env: any) => Response | Promise<Response> },
@@ -173,13 +160,14 @@ export async function pedirFirmado(
 		cuerpo: opciones.cuerpo ?? {},
 		cabeceras: opciones.cabeceras,
 	});
-	return app.request(peticion, undefined, { ...env, ...opciones.entorno });
+	return app.request(peticion, undefined, { ...env, ...n.entorno, ...opciones.entorno });
 }
 
 /**
- * Una petición firmada por `deviceId` (`MAIN` o `HANDY`) a la `app` entera: su estado, su cuerpo y
- * cuántos viajes ha hecho al TenantHub (`hub-ruta`). Es el camino desplegado: `tenantAuth` en el
- * Worker, `alHub`, `ejecutarRuta` y la ruta dentro del DO con el rol de la identidad.
+ * Una petición firmada por `deviceId` (`MAIN` o `HANDY`) a la `app` entera, con la central del
+ * negocio: su estado, su cuerpo y cuántos viajes ha hecho al TenantHub (`hub-ruta`). Es el camino
+ * desplegado: `tenantAuth` en el Worker, `alHub`, `ejecutarRuta` y la ruta dentro del DO con el rol
+ * de la identidad.
  */
 export async function pedirComo(
 	deps: Pick<Dependencias, "firmarSesion">,
@@ -190,7 +178,10 @@ export async function pedirComo(
 	ruta: string,
 	cuerpo?: unknown,
 ): Promise<{ status: number; json: any; viajes: number }> {
-	const res = await app.request(await peticionFirmada(deps, n, deviceId, metodo, ruta, { cuerpo }), undefined, env);
+	const res = await app.request(await peticionFirmada(deps, n, deviceId, metodo, ruta, { cuerpo }), undefined, {
+		...env,
+		...n.entorno,
+	});
 	const texto = await res.text();
 	let json: any = null;
 	try {

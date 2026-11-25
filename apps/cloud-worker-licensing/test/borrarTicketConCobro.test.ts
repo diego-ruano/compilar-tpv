@@ -8,14 +8,16 @@
 // hubiera visto antes, no que el ticket se ha borrado.
 //
 // Se pasa por lo real: la ruta de Hono, `applyViaHub` y el motor del TenantHub. Sólo se sustituyen
-// `tenantAuth` (la identidad de la Handy), la presencia de la Main y la base del negocio, que es el
-// SQLite del propio DO con el esquema real. Cada caso usa su propia instancia del DO.
+// `tenantAuth` (la identidad de la Handy) y la presencia de la Main. La base del negocio es el
+// SQLite del propio DO con el esquema real y su cliente de producción, y la base central del hub,
+// una de verdad. Cada caso usa su propia instancia del DO.
 
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -77,11 +79,12 @@ type Guion = {
  * que el DO le devolvió a la ruta (`devuelto`) y cómo queda la base.
  */
 async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda = "ticket") {
+	const central = await centralDePrueba();
 	return enElHub(nombre, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const s of sembrar) sql.exec(s);
-		const base = clienteSobre(sql, hub.state.storage);
+		const base = clienteLocal(hub.state.storage);
 		let primero = true;
 		const db = {
 			...base,
@@ -94,7 +97,6 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 		};
 		nube = base;
 		hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-		hub.touchLastSeen = async () => {};
 		hub.isMainConnected = () => true;
 		hub.isMainReady = () => true;
 		hub.maybePurgeSyncLog = async () => {};
@@ -141,7 +143,7 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 				"SELECT COUNT(*) FROM v_lineas_cobradas v JOIN Detalle_Comanda dc ON dc.ID_Detalle = v.ID_Detalle WHERE dc.ID_Comanda='ticket' AND v.ID_Pago='pago-otra'",
 			),
 		};
-	});
+	}, { central });
 }
 
 const TIENE_COBROS = { ok: false, error: "comanda_has_paid_lines" };

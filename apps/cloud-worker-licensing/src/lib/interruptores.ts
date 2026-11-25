@@ -6,7 +6,7 @@
 // estado pisa filas buenas, la descarga del histórico satura la base—, la
 // única forma de pararla era publicar una versión y esperar a que cada TPV se actualizara. Esto
 // deja apagarla desde aquí, en minutos, con una fila en la tabla `interruptores` de la base
-// central (su estructura está en `docs/sql/control-plane/esquema-actual.sql`).
+// central (su estructura está en `src/server/central/migraciones/`).
 //
 // Reglas al tocar esto:
 //

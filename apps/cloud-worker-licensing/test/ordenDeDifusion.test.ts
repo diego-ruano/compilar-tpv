@@ -9,13 +9,13 @@
 // (`enTurnoDelLog`), que hace que cada escritura confirme y difunda antes de que empiece la
 // siguiente, también la de un lote de la Main.
 //
-// La base del tenant es el SQLite del propio DO (`clienteSobre`) con una puerta delante: la primera
+// La base del tenant es el SQLite del propio DO (`clienteLocal`) con una puerta delante: la primera
 // escritura confirma en el acto, pero su respuesta no vuelve hasta que el test la abre. Es la forma
 // determinista de que una segunda escritura llegue mientras la primera aún no ha terminado.
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -94,11 +94,10 @@ function conPuerta(base: any) {
 	};
 }
 
-/** Hub sin base central delante; devuelve lo que difunde, en orden. */
+/** El hub con la Main conectada y lista, sobre `db`; devuelve lo que difunde, en orden. */
 function prepararHub(hub: any, db: any): any[] {
 	crearEsquemaTenant(hub.state.storage.sql);
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-	hub.touchLastSeen = async () => {};
 	hub.isMainConnected = () => true;
 	hub.isMainReady = () => true;
 	hub.maybePurgeSyncLog = async () => {};
@@ -116,7 +115,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 	it("la escritura que confirma antes se difunde antes, aunque su respuesta tarde", async () => {
 		await enElHub("aud18-orden", async (hub: any) => {
 			const sql = hub.state.storage.sql;
-			const puerta = conPuerta(clienteSobre(sql, hub.state.storage));
+			const puerta = conPuerta(clienteLocal(hub.state.storage));
 			const difundidos = prepararHub(hub, puerta.db);
 
 			const a = hub.applyInternalCommandIdempotent(escritura("op-a", "z-a"));
@@ -139,7 +138,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 	it("un lote de la Main no se difunde por delante de una escritura que confirmó antes", async () => {
 		await enElHub("aud18-orden-lote", async (hub: any) => {
 			const sql = hub.state.storage.sql;
-			const puerta = conPuerta(clienteSobre(sql, hub.state.storage));
+			const puerta = conPuerta(clienteLocal(hub.state.storage));
 			const difundidos = prepararHub(hub, puerta.db);
 
 			const handy = hub.applyInternalCommandIdempotent(escritura("op-handy", "z-handy"));
@@ -161,7 +160,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 		// a saludar con `recovering` (AUD-15). Dentro del turno se vuelve a mirar: no entra.
 		await enElHub("aud18-orden-congelado", async (hub: any) => {
 			const sql = hub.state.storage.sql;
-			const puerta = conPuerta(clienteSobre(sql, hub.state.storage));
+			const puerta = conPuerta(clienteLocal(hub.state.storage));
 			const difundidos = prepararHub(hub, puerta.db);
 
 			const a = hub.applyInternalCommandIdempotent(escritura("op-a", "z-a"));
@@ -182,7 +181,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 	it("una escritura que la base rechaza suelta el turno", async () => {
 		await enElHub("aud18-turno-libre", async (hub: any) => {
 			const sql = hub.state.storage.sql;
-			const base = clienteSobre(sql, hub.state.storage);
+			const base = clienteLocal(hub.state.storage);
 			const estado = { rechaza: true };
 			const db = {
 				...base,

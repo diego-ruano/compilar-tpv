@@ -20,7 +20,7 @@ const RAIZ = fileURLToPath(new URL("../../", import.meta.url));
 const WORKER = join(RAIZ, "apps/cloud-worker-licensing");
 const WRANGLER = join(WORKER, "node_modules/wrangler/bin/wrangler.js");
 const WIDGET = join(RAIZ, "apps/reservas-web/dist");
-const ESQUEMA_CENTRAL = join(RAIZ, "docs/sql/control-plane/esquema-actual.sql");
+const ESQUEMA_CENTRAL = join(WORKER, "src/server/central/migraciones/0001_inicial.sql");
 const SQLD = "$HOME/.turso/sqld";
 
 /** Lo que no debe llegar a wrangler: con esto podría hablar con la cuenta de Cloudflare de verdad. */

@@ -20,15 +20,10 @@
 import { env as entorno } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { centralDePrueba, centralInterceptada, filasDe } from "./helpers/central";
 import { HANDY, MAIN, conNegocioFirmado, pedirFirmado, peticionFirmada, type Negocio } from "./helpers/negocioFirmado";
 
-let dbCentral: unknown = null;
 const { avisos } = vi.hoisted(() => ({ avisos: [] as string[] }));
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
 
 // Lo que se manda a Sentry, apuntado por operación: aquí interesa el aviso de la base perdida.
 vi.mock("../src/observability/errors", async (importOriginal) => {
@@ -49,28 +44,24 @@ const { MENSAJES } = await import("../src/lib/errorCodes");
 const { olvidarAvisosDeBasePerdida } = await import("../src/lib/basePerdida");
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 const USUARIO = "00000000-0000-7000-8000-000000000001";
 const PERDIDA = { ok: false, code: "external", error: "tenant_db_perdida", message: MENSAJES.tenant_db_perdida };
 
-/**
- * Un negocio con licencia y sin base. La base central va en el SQLite de su propio TenantHub, para
- * que también la lea la ruta que se ejecuta dentro de él.
- */
+/** Un negocio con licencia activada y sin base. */
 const sinBase = <R>(nombre: string, prueba: (n: Negocio, hub: any) => Promise<R>) =>
-	conNegocioFirmado(deps, nombre, prueba, { sinBase: true, centralEnElNegocio: true });
+	conNegocioFirmado(deps, nombre, prueba, { sinBase: true });
 
 /** Como lo deja el alta mientras la licencia no se ha activado: el negocio no ha nacido. */
 const sinNacer = (n: Negocio) =>
 	n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
 
 const inicializarVacia = async (n: Negocio) =>
-	app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, env);
+	app.request(await peticionFirmada(deps, n, MAIN, "POST", "/v1/sync/initialize-empty"), undefined, {
+		...env,
+		...n.entorno,
+	});
 
 const avisosDeBasePerdida = () => avisos.filter((operacion) => operacion === "tenant_db.perdida").length;
 
@@ -80,21 +71,33 @@ beforeEach(() => {
 });
 
 describe("la base sólo se crea para un negocio que no ha nacido", () => {
-	const central = (nacido: boolean) =>
-		({ execute: async () => ({ rows: nacido ? [{ 1: 1 }] : [] }) }) as any;
+	/** Una central con la licencia del negocio `tenantId`: activada (el negocio ha nacido) o no. */
+	async function central(tenantId: string, nacido: boolean) {
+		const c = await centralDePrueba();
+		await filasDe(
+			c,
+			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
+			                       issued_at_ms, activated_at_ms, customer_email, created_at_ms, updated_at_ms)
+			 VALUES ('lic-1', 'hash-1', ?, ?, 12, 'manual', 1, ?, 'bar@a.test', 1, 1);`,
+			tenantId,
+			nacido ? "active" : "issued",
+			nacido ? 1 : null,
+		);
+		return c;
+	}
 	const stub = (tenantId: string) => env.TenantHub.get(env.TenantHub.idFromName(tenantId));
 
 	it("un negocio que no ha nacido estrena su base; con ella ya creada, no hay nada que hacer", async () => {
 		const tenantId = "base-perdida-nace";
-		expect(await provisionTenantDatabase(central(false), env, tenantId)).toEqual({ reused: false });
+		expect(await provisionTenantDatabase((await central(tenantId, false)).db, env, tenantId)).toEqual({ reused: false });
 		expect(await stub(tenantId).estaAprovisionado()).toBe(true);
 		// Ya nacido y con su base: lo de siempre.
-		expect(await provisionTenantDatabase(central(true), env, tenantId)).toEqual({ reused: true });
+		expect(await provisionTenantDatabase((await central(tenantId, true)).db, env, tenantId)).toEqual({ reused: true });
 	});
 
 	it("uno que ya nació y no la tiene no recibe una vacía", async () => {
 		const tenantId = "base-perdida-nacido";
-		await expect(provisionTenantDatabase(central(true), env, tenantId)).rejects.toMatchObject({
+		await expect(provisionTenantDatabase((await central(tenantId, true)).db, env, tenantId)).rejects.toMatchObject({
 			code: "tenant_db_perdida",
 			status: 503,
 		});
@@ -103,8 +106,10 @@ describe("la base sólo se crea para un negocio que no ha nacido", () => {
 
 	it("si la base central no contesta, tampoco", async () => {
 		const tenantId = "base-perdida-sin-central";
-		const caida = { execute: async () => Promise.reject(new Error("la base central no contesta")) } as any;
-		await expect(provisionTenantDatabase(caida, env, tenantId)).rejects.toThrow("la base central no contesta");
+		const caida = centralInterceptada(await central(tenantId, false), () =>
+			Promise.reject(new Error("la base central no contesta")),
+		);
+		await expect(provisionTenantDatabase(caida.db, env, tenantId)).rejects.toThrow("la base central no contesta");
 		expect(await stub(tenantId).estaAprovisionado()).toBe(false);
 	});
 });
@@ -132,7 +137,7 @@ describe("un negocio que ya nació y se encuentra sin base", () => {
 			const res = await app.request(
 				await peticionFirmada(deps, n, HANDY, "GET", `/v1/trabajadores/permisos/${USUARIO}`),
 				undefined,
-				env,
+				{ ...env, ...n.entorno },
 			);
 			expect(res.status).toBe(503);
 			expect(await res.json()).toEqual(PERDIDA);
@@ -151,7 +156,7 @@ describe("un negocio que ya nació y se encuentra sin base", () => {
 describe("un negocio que no ha nacido", () => {
 	it("sigue recibiendo tenant_db_not_provisioned y puede crear su base", async () => {
 		await sinBase("base-perdida-sin-nacer", async (n, hub) => {
-			sinNacer(n);
+			await sinNacer(n);
 
 			const bajada = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap");
 			expect(bajada.status).toBe(404);
@@ -171,8 +176,9 @@ describe("si la base central no contesta a la pregunta", () => {
 			// La primera pasa por la base central y deja en caché el dispositivo y la licencia.
 			expect((await pedirFirmado(deps, app, n, "/v1/sync/bootstrap")).status).toBe(503);
 
-			const caida = async () => Promise.reject(new Error("la base central no contesta"));
-			deps.ponerCentral({ execute: caida, batch: caida });
+			// Desde aquí, la central no contesta, ni al Worker ni al TenantHub.
+			n.interceptarLaCentral(() => Promise.reject(new Error("la base central no contesta")));
+			const pedidasAntes = n.central.length;
 
 			const descarga = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap");
 			expect(descarga.status).toBe(500);
@@ -181,6 +187,8 @@ describe("si la base central no contesta a la pregunta", () => {
 			const vacia = await inicializarVacia(n);
 			expect(vacia.status).toBe(500);
 			expect(hub.estaAprovisionado()).toBe(false);
+			// Las dos han llegado a preguntárselo, y la central no ha contestado.
+			expect(n.central.slice(pedidasAntes).filter((q) => /activated_at_ms IS NOT NULL/.test(q))).toHaveLength(2);
 		});
 	});
 });

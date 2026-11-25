@@ -12,7 +12,8 @@
 // Ahora el negocio se reserva en la licencia en una sola sentencia antes de crear nada
 // (`reservarNegocioDeLaClave`), y el equipo y los datos del negocio esperan a ganarla. Aquí, por la
 // ruta entera, con la base central de verdad (`helpers/central.ts`) y las bases de los negocios en sus
-// TenantHub de verdad:
+// TenantHub de verdad. Las carreras y los cortes se provocan en el stub de la central
+// (`centralInterceptada`):
 //
 //   · cinco activaciones simultáneas de la misma clave: una gana, cuatro reciben 409, y sólo hay un
 //     negocio y un objeto aprovisionado, sin filas de equipo de las perdedoras;
@@ -26,23 +27,15 @@ import { env as entorno } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { centralDePrueba, filasDe } from "./helpers/central";
+import { centralDePrueba, centralInterceptada, desvio, filasDe, type Atender } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import type { ClienteCentral } from "../src/server/central/cliente";
 
-/**
- * El cliente de la central del test en curso; lo devuelve `getDb`. Es el de verdad, o uno que lo
- * envuelve para cruzar las activaciones o cortar una a mitad.
- */
-let clienteActual: any = null;
 /** Los negocios cuya base ha pedido crear la activación, en orden. La base es la de verdad. */
 let basesPedidas: string[] = [];
 /** La próxima activación se corta justo DESPUÉS de crear la base. */
 let cortarTrasAprovisionar = false;
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => clienteActual,
-}));
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (original) => {
 	const real = (await (original as any)()) as typeof import("../src/domains/licensing/licensing.helpers");
@@ -64,7 +57,6 @@ vi.mock("../src/domains/licensing/licensing.helpers", async (original) => {
 const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
 const { generateLicenseKey, licenseKeyHash } = await import("../src/domains/licensing/licenseKey");
 const { eraLaMainDeOtroNegocio, reservarNegocioDeLaClave } = await import("../src/server/licenseStore");
-const { CentralNoDisponible } = await import("../src/server/central/cliente");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
@@ -82,104 +74,102 @@ const DIA = 24 * 60 * 60 * 1000;
 const stub = (tenantId: string) => (entorno as any).TenantHub.get((entorno as any).TenantHub.idFromName(tenantId));
 
 type Ctx = {
-	db: any;
+	/** El cliente de la central, sin nada en medio. */
+	db: ClienteCentral;
 	/** Una clave sin estrenar: su texto y su id. */
 	emitir: () => Promise<{ clave: string; id: string }>;
+	/** Pide la activación por la ruta, que llega a la central por su stub (`interceptar`). */
 	activar: (
 		clave: string,
 		deviceId: string,
 		pub: string,
 		extra?: Record<string, unknown>,
 	) => Promise<{ status: number; body: any }>;
+	/** Desde ahora, lo que la ruta pida a la central pasa por `atender`; con `null`, va directo. */
+	interceptar: (atender: Atender | null) => void;
 	licencia: (id: string) => Promise<any>;
 	/** Una sentencia directa en el SQLite de la central, por fuera de sus guardas (`filasDe`). */
 	filas: (sql: string, ...args: unknown[]) => Promise<any[]>;
 };
 
-/** Una base central de verdad, propia del test (`nombre`). */
+/** Una base central de verdad, propia del test. */
 async function escenario<T>(nombre: string, prueba: (c: Ctx) => Promise<T>): Promise<T> {
-	{
-		const central = await centralDePrueba(`aud09-central-${nombre}-${crypto.randomUUID()}`);
-		const filas = (q: string, ...args: unknown[]) => filasDe(central, q, ...args);
-		const db = central.db;
-		clienteActual = db;
-		let n = 0;
-		const c: Ctx = {
-			db,
-			async emitir() {
-				const clave = generateLicenseKey();
-				const id = `lic-${nombre}-${++n}`;
-				await filas(
-					`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months, origin,
-					   issued_at_ms, customer_email, created_at_ms, updated_at_ms)
-					 VALUES (?, ?, 'issued', 0, 'standard', 12, 'stripe', ?, 'bar@ejemplo.test', ?, ?);`,
-					id,
-					await licenseKeyHash(clave),
-					Date.now(),
-					Date.now(),
-					Date.now(),
-				);
-				return { clave, id };
-			},
-			async activar(clave, deviceId, pub, extra = {}) {
-				const res = await licenseRoutes.request(
-					"/activate",
-					await activacionFirmada({ activationKey: clave, deviceId, devicePubKey: pub, ...extra }),
-					ENV,
-					CTX,
-				);
-				// Un fallo sin capturar sale como el texto de Hono, no como JSON.
-				return { status: res.status, body: await res.json().catch(() => null) };
-			},
-			licencia: async (id) =>
-				(await filas(`SELECT status, tenant_id, main_device_id, activated_at_ms FROM licenses WHERE license_id = ?;`, id))[0],
-			filas,
-		};
-		return prueba(c);
-	}
+	const central = await centralDePrueba();
+	const filas = (q: string, ...args: unknown[]) => filasDe(central, q, ...args);
+	const { atender, desviar } = desvio();
+	const vista = centralInterceptada(central, atender);
+	let n = 0;
+	const c: Ctx = {
+		db: central.db,
+		async emitir() {
+			const clave = generateLicenseKey();
+			const id = `lic-${nombre}-${++n}`;
+			await filas(
+				`INSERT INTO licenses (license_id, license_key_hash, status, disabled, plan, term_months, origin,
+				   issued_at_ms, customer_email, created_at_ms, updated_at_ms)
+				 VALUES (?, ?, 'issued', 0, 'standard', 12, 'stripe', ?, 'bar@ejemplo.test', ?, ?);`,
+				id,
+				await licenseKeyHash(clave),
+				Date.now(),
+				Date.now(),
+				Date.now(),
+			);
+			return { clave, id };
+		},
+		async activar(clave, deviceId, pub, extra = {}) {
+			const res = await licenseRoutes.request(
+				"/activate",
+				await activacionFirmada({ activationKey: clave, deviceId, devicePubKey: pub, ...extra }),
+				{ ...ENV, ...vista.entorno },
+				CTX,
+			);
+			// Un fallo sin capturar sale como el texto de Hono, no como JSON.
+			return { status: res.status, body: await res.json().catch(() => null) };
+		},
+		interceptar: desviar,
+		licencia: async (id) =>
+			(await filas(`SELECT status, tenant_id, main_device_id, activated_at_ms FROM licenses WHERE license_id = ?;`, id))[0],
+		filas,
+	};
+	return prueba(c);
 }
 
+/** El texto de la sentencia de una llamada `ejecutar` al stub de la central; de otra llamada, `null`. */
+const sentenciaDe = (metodo: string, [s]: unknown[]): string | null =>
+	metodo === "ejecutar" ? (s as SentenciaEnlazada).sql : null;
+
 /**
- * El cliente de la base central, pero las `n` primeras lecturas de la licencia por su clave no
- * vuelven hasta que han llegado todas: las `n` activaciones la leen sin estrenar antes de que
- * ninguna escriba nada. Es la carrera de verdad, montada desde la ruta.
+ * Las `n` primeras lecturas de la licencia por su clave no vuelven hasta que han llegado todas: las
+ * `n` activaciones la leen sin estrenar antes de que ninguna escriba nada. Es la carrera de verdad,
+ * montada desde la ruta.
  */
-function conBarrera(db: any, n: number) {
+function conBarrera(n: number): Atender {
 	let llegadas = 0;
 	let soltar!: () => void;
 	const todas = new Promise<void>((r) => (soltar = r));
-	return {
-		...db,
-		async execute(q: any) {
-			const r = await db.execute(q);
-			const texto = String(typeof q === "string" ? q : q.sql);
-			if (llegadas < n && /FROM licenses WHERE license_key_hash/.test(texto)) {
-				if (++llegadas === n) soltar();
-				await todas;
-			}
-			return r;
-		},
-	} as any;
+	return async (metodo, argumentos, llamar) => {
+		const r = await llamar();
+		if (llegadas < n && /FROM licenses WHERE license_key_hash/.test(sentenciaDe(metodo, argumentos) ?? "")) {
+			if (++llegadas === n) soltar();
+			await todas;
+		}
+		return r;
+	};
 }
 
-/** El mismo cliente, pero la primera sentencia que case con `patron` revienta. */
-function conCorte(db: any, patron: RegExp) {
+/** La primera sentencia que case con `patron` no llega a la central: revienta en el viaje. */
+function conCorte(patron: RegExp): Atender {
 	let pendiente = true;
-	return {
-		...db,
-		async execute(q: any) {
-			const texto = String(typeof q === "string" ? q : q.sql);
-			if (pendiente && patron.test(texto)) {
-				pendiente = false;
-				throw new Error("corte_simulado");
-			}
-			return db.execute(q);
-		},
-	} as any;
+	return (metodo, argumentos, llamar) => {
+		if (pendiente && patron.test(sentenciaDe(metodo, argumentos) ?? "")) {
+			pendiente = false;
+			return Promise.reject(new Error("corte_simulado"));
+		}
+		return llamar();
+	};
 }
 
 beforeEach(() => {
-	clienteActual = null;
 	basesPedidas = [];
 	cortarTrasAprovisionar = false;
 });
@@ -191,12 +181,12 @@ describe("AUD-09 · cinco activaciones simultáneas de la misma clave", () => {
 			const equipos = await Promise.all(
 				[0, 1, 2, 3, 4].map(async (i) => ({ id: `equipo-${i}`, pub: await clavePublica(0x60 + i) })),
 			);
-			clienteActual = conBarrera(c.db, equipos.length);
+			c.interceptar(conBarrera(equipos.length));
 
 			const respuestas = await Promise.all(
 				equipos.map((e, i) => c.activar(k.clave, e.id, e.pub, { tenantInfo: { displayName: `Bar ${i}` } })),
 			);
-			clienteActual = c.db;
+			c.interceptar(null);
 
 			const ganadoras = respuestas.filter((r) => r.status === 200);
 			const perdedoras = respuestas.filter((r) => r.status !== 200);
@@ -244,10 +234,10 @@ describe("AUD-09 · cinco activaciones simultáneas de la misma clave", () => {
 		await escenario("doble-envio", async (c) => {
 			const k = await c.emitir();
 			const pub = await clavePublica(0x70);
-			clienteActual = conBarrera(c.db, 3);
+			c.interceptar(conBarrera(3));
 
 			const respuestas = await Promise.all([0, 1, 2].map(() => c.activar(k.clave, "equipo-unico", pub)));
-			clienteActual = c.db;
+			c.interceptar(null);
 
 			expect(respuestas.map((r) => r.status).sort()).toEqual([200, 409, 409]);
 			const tenantId = respuestas.find((r) => r.status === 200)!.body.tenantId;
@@ -271,7 +261,7 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 		{
 			como: "al apuntar la licencia",
 			id: "al-apuntar",
-			preparar: (c: Ctx) => void (clienteActual = conCorte(c.db, /UPDATE licenses\s+SET status='active'/)),
+			preparar: (c: Ctx) => c.interceptar(conCorte(/UPDATE licenses\s+SET status='active'/)),
 			fallo: [500, undefined],
 		},
 	] as const;
@@ -286,7 +276,7 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 
 					caso.preparar(c);
 					const cortada = await c.activar(k.clave, primero.id, primero.pub);
-					clienteActual = c.db;
+					c.interceptar(null);
 					expect([cortada.status, cortada.body?.error]).toEqual(caso.fallo);
 
 					// La clave sigue sin estrenar, con su negocio reservado y su base ya creada. Ni el
@@ -319,21 +309,18 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 			const k = await c.emitir();
 			const equipo = { id: "equipo-sin-central", pub: await clavePublica(0x74) };
 
-			// La pregunta de `negocioNacido`, la que hace crear la base: la central saturada.
+			// La pregunta de `negocioNacido`, la que hace crear la base: la central saturada, como la
+			// marca la plataforma (`overloaded`).
 			let pendiente = true;
-			clienteActual = {
-				...c.db,
-				async execute(q: any) {
-					const texto = String(typeof q === "string" ? q : q.sql);
-					if (pendiente && /WHERE tenant_id = \? AND activated_at_ms IS NOT NULL/.test(texto)) {
-						pendiente = false;
-						throw new CentralNoDisponible("saturada");
-					}
-					return c.db.execute(q);
-				},
-			};
+			c.interceptar((metodo, argumentos, llamar) => {
+				if (pendiente && /WHERE tenant_id = \? AND activated_at_ms IS NOT NULL/.test(sentenciaDe(metodo, argumentos) ?? "")) {
+					pendiente = false;
+					return Promise.reject(Object.assign(new Error("la base central está saturada"), { overloaded: true }));
+				}
+				return llamar();
+			});
 			const sinCentral = await c.activar(k.clave, equipo.id, equipo.pub);
-			clienteActual = c.db;
+			c.interceptar(null);
 			expect(pendiente).toBe(false);
 			expect([sinCentral.status, sinCentral.body]).toEqual([503, { ok: false, code: "external", error: "hub_overloaded" }]);
 

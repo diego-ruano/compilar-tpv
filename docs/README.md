@@ -66,5 +66,6 @@ Tres reglas:
 
 ## Datos
 
-- [sql/control-plane/esquema-actual.sql](sql/control-plane/esquema-actual.sql): la estructura de la base
-  central tal como está en Turso. Se actualiza a mano al cambiarla, y la cargan los tests del worker.
+- [La estructura de la base central](../apps/cloud-worker-licensing/src/server/central/migraciones/): sus
+  migraciones, que aplica su objeto `BaseCentral`; el esquema que dan está fotografiado en
+  `apps/cloud-worker-licensing/src/server/central/esquema.snapshot.sql`.

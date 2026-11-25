@@ -13,7 +13,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -78,7 +78,7 @@ function checkpointDeLaMain(sql: any, seq: number) {
 function conLaBaseDelDo(hub: any) {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
-	const db = clienteSobre(sql, hub.state.storage);
+	const db = clienteLocal(hub.state.storage);
 	hub.getTenantDb = async () => db;
 	clienteActual = db;
 	const purgar = async () => {

@@ -6,14 +6,15 @@
 // Es una ruta que borra bases en producción, así que lo que más importa aquí es lo que NO toca: un
 // negocio con una licencia que no sea de pruebas, aunque tenga también una de pruebas, ni uno al
 // que se le haya canjeado una clave de verdad, también si el canje llega mientras se retira. Corre
-// contra la base central de verdad (`helpers/central.ts`), como `adminLicenciaReversible.test.ts`; lo
-// que `getDb` le da a la ruta es su cliente, con un gancho para intercalar algo a mitad de la
-// retirada. Los objetos de los negocios y el bucket son de mentira: sólo apuntan qué se borró. Lo que
-// borra cada uno de verdad está en `retirarUnNegocio.test.ts`.
+// contra la base central de verdad (`helpers/central.ts`), como `adminLicenciaReversible.test.ts`; la
+// ruta llega a ella por `getDb(env)`, a través de un stub que intercala algo a mitad de la retirada
+// (`centralInterceptada`). Los objetos de los negocios y el bucket son de mentira: sólo apuntan qué se
+// borró. Lo que borra cada uno de verdad está en `retirarUnNegocio.test.ts`.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { centralDePrueba, filasDe } from "./helpers/central";
+import { centralDePrueba, centralInterceptada, filasDe } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { CORREO_DE_PRUEBAS, NEGOCIOS_POR_LLAMADA } from "../src/domains/admin/pruebas";
 import { activateLicenseFirstTime, getLicenseById, issueLicense } from "../src/server/licenseStore";
@@ -22,14 +23,6 @@ import type { LicenseOrigin } from "../src/shared";
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const TOKEN = "token-de-pruebas";
 
-/** Lo que `getDb` le da a la ruta: el cliente de la central del escenario, con sus ganchos. */
-let dbDePruebas: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
-
 type Escenario = {
 	post: (ruta: string, cuerpo?: unknown) => Promise<Response>;
 	/** Emite una licencia y, si se da `tenantId`, la activa en ese negocio, que tendrá su base. */
@@ -37,6 +30,7 @@ type Escenario = {
 	estadoDelNegocio: (tenantId: string) => Promise<string | null>;
 	tieneBase: (tenantId: string) => boolean;
 	estadoDeLicencia: (licenseId: string) => Promise<string>;
+	origenDeLicencia: (licenseId: string) => Promise<string>;
 	/** Las bases que se borraron, en orden. */
 	borradas: string[];
 	/** Los negocios cuyo TenantHub no contesta. */
@@ -71,24 +65,23 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		const sql = (texto: string, ...args: unknown[]) => filasDe(central, texto, ...args);
 		let alListar: (() => Promise<void>) | null = null;
 		let alAnular: (() => Promise<void>) | null = null;
-		dbDePruebas = {
-			...db,
-			async execute(entrada: any) {
-				const r = await db.execute(entrada);
-				const texto = String(entrada?.sql ?? entrada);
-				if (alListar && /SELECT DISTINCT l\.tenant_id/.test(texto)) {
-					const fn = alListar;
-					alListar = null;
-					await fn();
-				}
-				if (alAnular && /UPDATE licenses SET status = 'revoked'/.test(texto)) {
-					const fn = alAnular;
-					alAnular = null;
-					await fn();
-				}
-				return r;
-			},
-		};
+		// La central que ve la ruta: cada sentencia suelta, ya ejecutada, puede soltar un gancho.
+		const deLaRuta = centralInterceptada(central, async (metodo, [entrada], llamar) => {
+			const r = await llamar();
+			if (metodo !== "ejecutar") return r;
+			const texto = (entrada as SentenciaEnlazada).sql;
+			if (alListar && /SELECT DISTINCT l\.tenant_id/.test(texto)) {
+				const fn = alListar;
+				alListar = null;
+				await fn();
+			}
+			if (alAnular && /UPDATE licenses SET status = 'revoked'/.test(texto)) {
+				const fn = alAnular;
+				alAnular = null;
+				await fn();
+			}
+			return r;
+		});
 
 		const conBase = new Set<string>();
 		const borradas: string[] = [];
@@ -134,6 +127,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			TenantHub,
 			AgendaWeb,
 			IMAGES,
+			...deLaRuta.entorno,
 		} as unknown as Parameters<typeof adminRoutes.fetch>[1];
 
 		return fn({
@@ -206,6 +200,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				(await sql(`SELECT status FROM tenants WHERE tenant_id = ?;`, tenantId))[0]?.status ?? null,
 			tieneBase: (tenantId) => conBase.has(tenantId),
 			estadoDeLicencia: async (licenseId) => (await getLicenseById(db, licenseId))!.status,
+			origenDeLicencia: async (licenseId) => (await getLicenseById(db, licenseId))!.origin,
 		});
 	}
 }
@@ -470,11 +465,11 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 		await escenario(async (e) => {
 			const res = await e.post("/licenses", { termMonths: 12, email: CORREO_DE_PRUEBAS, pruebas: true });
 			const { licenseId } = (await res.json()) as { licenseId: string };
-			expect((await getLicenseById(dbDePruebas as any, licenseId))!.origin).toBe("pruebas");
+			expect(await e.origenDeLicencia(licenseId)).toBe("pruebas");
 
 			const normal = await e.post("/licenses", { termMonths: 12, email: "bar@ejemplo.test" });
 			const { licenseId: otra } = (await normal.json()) as { licenseId: string };
-			expect((await getLicenseById(dbDePruebas as any, otra))!.origin).toBe("manual");
+			expect(await e.origenDeLicencia(otra)).toBe("manual");
 		});
 	});
 });

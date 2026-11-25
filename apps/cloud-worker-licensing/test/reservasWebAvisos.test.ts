@@ -11,15 +11,19 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { clienteSobre } from "./helpers/clienteSql";
 import { enLaAgenda } from "./helpers/agenda";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
-/** La base del negocio y la central de la prueba en curso, en el mismo SQLite. */
+/**
+ * La base del negocio de la prueba en curso (en el SQLite de la agenda), y lo que lleva el `env` de la
+ * ruta para que su `getDb` llegue a la base central de la prueba, que es de verdad y sólo suya.
+ */
 let base: any = null;
+let entornoDeLaCentral: CentralDePrueba["entorno"] | null = null;
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -33,11 +37,6 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 vi.mock("../src/lib/tenantClient", async (original) => ({
 	...(await (original as any)()),
 	tenantQuery: (_c: any, fn: any) => fn(base),
-}));
-
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => base,
 }));
 
 /** La agenda: apunta los enlaces que se le piden, dice si el cliente la canceló, o no responde. */
@@ -98,30 +97,32 @@ async function mandar(cuerpo: unknown) {
 	const res = await app.request(
 		"/v1/reservas-web/avisos",
 		{ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(cuerpo) },
-		ENV as any,
+		{ ...ENV, ...entornoDeLaCentral } as any,
 	);
 	return { status: res.status, json: (await res.json()) as any };
 }
 
-async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<void>) {
+async function conNegocio(nombre: string, prueba: (sql: SqlStorage, central: CentralDePrueba) => Promise<void>) {
+	const central = await centralDePrueba();
+	await filasDe(central, `INSERT INTO tenants (tenant_id, display_name) VALUES ('t1', 'Bar Pepe');`);
+	await filasDe(central, `INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', 't1', 1);`);
 	await enLaAgenda(`avisos-${nombre}`, async (_motor, state) => {
 		const sql = state.storage.sql;
 		crearEsquemaTenant(sql);
-		prepararPlanoDeControl(sql);
 		sql.exec(`UPDATE Business_Settings SET Business_Name = 'Bar Pepe', Telefono = '950 000 000' WHERE ID = 1;`);
 		sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono) VALUES ('c1', 'Ana', 'ana@correo.es', '600112233');`);
-		base = clienteSobre(sql, state.storage);
+		base = clienteLocal(state.storage);
+		entornoDeLaCentral = central.entorno;
 		enviados.length = 0;
 		correoCaido = false;
 		agenda.prolongadas.length = 0;
 		agenda.canceladaPorElCliente = false;
 		agenda.caida = false;
-		sql.exec(`INSERT INTO tenants (tenant_id, display_name) VALUES ('t1', 'Bar Pepe');`);
-		sql.exec(`INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', 't1', 1);`);
 		try {
-			await prueba(sql);
+			await prueba(sql, central);
 		} finally {
 			base = null;
+			entornoDeLaCentral = null;
 		}
 	});
 }
@@ -147,7 +148,7 @@ function reserva(sql: SqlStorage, origen: "WEB" | "TPV", cliente: string | null 
 
 describe("el aviso al cliente de un cambio del restaurante", () => {
 	it("va al cliente de la reserva web, con los datos de después del cambio; repetido, no manda otro", async () => {
-		await conNegocio("modificada", async (sql) => {
+		await conNegocio("modificada", async (sql, central) => {
 			reserva(sql, "WEB");
 			expect(await mandar(aviso())).toEqual({ status: 200, json: { ok: true, enviado: true } });
 			expect(enviados).toHaveLength(1);
@@ -164,7 +165,7 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 			// Uno distinto, sí.
 			await mandar(aviso({ id_aviso: "0199aa00-0000-7000-8000-0000000a0002", tipo: "cancelada" }));
 			expect(enviados.map((m) => m.subject)).toEqual(["Tu reserva en Bar Pepe ha cambiado", "Tu reserva en Bar Pepe se ha cancelado"]);
-			const traza = sql.exec(`SELECT id, device_id, tipo FROM email_sends ORDER BY id;`).toArray();
+			const traza = await filasDe(central, `SELECT id, device_id, tipo FROM email_sends ORDER BY id;`);
 			expect(traza).toEqual([
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0001", device_id: "dev-main", tipo: "reserva_web" },
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0002", device_id: "dev-main", tipo: "reserva_web" },
@@ -291,9 +292,10 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 	});
 
 	it("si ese aviso está saliendo por otro lado, se dice para que se repita: no se da por hecho", async () => {
-		await conNegocio("en-curso", async (sql) => {
+		await conNegocio("en-curso", async (sql, central) => {
 			reserva(sql, "WEB");
-			sql.exec(
+			await filasDe(
+				central,
 				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
 				 VALUES ('rw:aviso:0199aa00-0000-7000-8000-0000000a0001', 't1', 'dev-main', 'ana@correo.es', 0, 'enviando', ?, 'reserva_web');`,
 				Date.now(),

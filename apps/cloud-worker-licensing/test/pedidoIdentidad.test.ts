@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { enElHub } from "./helpers/hub";
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { leerIdentidadPedido, type IdentidadPedido } from "../src/domains/email/pedidoIdentidad";
 import { buildHtml, buildText } from "../src/domains/email/email.routes";
@@ -10,7 +10,7 @@ describe("RI-60 · identidad comercial del pedido", () => {
 		await enElHub("ri60-identidad", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
-			const db = clienteSobre(sql, hub.state.storage);
+			const db = clienteLocal(hub.state.storage);
 			sql.exec("INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Email) VALUES ('p', 'Proveedor real', 'p@proveedor.es')");
 			await expect(leerIdentidadPedido(db, "otro@proveedor.es")).rejects.toMatchObject({ code: "email_destino_no_autorizado" });
 			await expect(leerIdentidadPedido(db, "p@proveedor.es")).rejects.toMatchObject({ code: "email_contacto_incompleto" });

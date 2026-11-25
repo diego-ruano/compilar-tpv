@@ -20,9 +20,10 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
+import { centralDePrueba, negocioEnLaCentral } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
 import { montarMainEnElHub } from "./helpers/mainEnElHub";
-import { laMainEs } from "./helpers/mainVigente";
+import { laLicenciaDiceQueLaMainEs, laMainEs, laTablaDiceQueLaMainEs } from "./helpers/mainVigente";
 import { Canonico, hex64, SumaDeTramo } from "../src/domains/sync/resumenCubos";
 import { apuntarGasto, gastadoEnLaHora } from "../src/durableObjects/tenantHub.presupuesto";
 import { claveDeCopia, podarCopias } from "../src/durableObjects/tenantHub.copia";
@@ -63,7 +64,10 @@ async function conSubida(hub: any, tenant: string, origen: "copia" | "base_vacia
 const cliente = (id: string, nombre: string, total = 0) => [id, nombre, total];
 const COLS_CLIENTE = ["ID_Cliente", "Nombre", "Total_Gastado"];
 
-/** Un `tpv` que saluda de verdad (con la firma y la base central sustituidas). Devuelve su `hello_ok`. */
+/**
+ * Un `tpv` que saluda de verdad (con la firma sustituida): la base central que tiene puesta el hub
+ * tiene que decir que es la Main. Devuelve su `hello_ok`.
+ */
 async function saludaLaMain(hub: any, tenant: string, deviceId = MAIN): Promise<{ servidor: WebSocket; hello: any }> {
 	const par = new WebSocketPair();
 	hub.state.acceptWebSocket(par[1], [deviceId]);
@@ -74,8 +78,6 @@ async function saludaLaMain(hub: any, tenant: string, deviceId = MAIN): Promise<
 		recibidos.push(JSON.parse(String(ev.data)));
 	});
 	hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
-	hub.mainEnCentral = async () => deviceId;
-	hub.touchLastSeen = async () => {};
 	await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s", recovering: true }));
 	await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
 	return { servidor: par[1], hello: recibidos.find((x) => x.type === "hello_ok") };
@@ -100,8 +102,10 @@ describe("DO-SUBIDA · la petición", () => {
 	});
 
 	it("la Main que saluda mientras se llena la base vacía no se queda sin la petición: se la echa al acabar", async () => {
-		await enElHub("subida-base-vacia-saludo", async (hub: any) => {
-			const t = "subida-base-vacia-saludo";
+		const t = "subida-base-vacia-saludo";
+		const central = await centralDePrueba();
+		await negocioEnLaCentral(central, { tenantId: t, main: MAIN, dispositivos: [{ deviceId: MAIN, rol: "tpv" }] });
+		await enElHub(t, async (hub: any) => {
 			// La Main reconecta mientras se llena la base (el PIN del administrador, la copia de R2).
 			const crear = hub.crearBase.bind(hub);
 			let entretanto: { servidor: WebSocket; hello: any } | null = null;
@@ -117,7 +121,7 @@ describe("DO-SUBIDA · la petición", () => {
 			expect(entretanto!.servidor.readyState).not.toBe(1);
 			const otra = await saludaLaMain(hub, t);
 			expect(otra.hello.subida).toEqual({ id: leerSubida(hub.state.storage.sql)!.id, estado: "esperando", origen: "base_vacia" });
-		});
+		}, { central });
 	});
 
 	it("la vuelta a un instante en modo main echa a quien ya estaba, y el hello_ok de su Main lleva la petición", async () => {
@@ -139,7 +143,7 @@ describe("DO-SUBIDA · la petición", () => {
 				recibidos.push(JSON.parse(String(ev.data)));
 			});
 			hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
-			laMainEs(hub, MAIN);
+			await laMainEs(hub, m.central, t, MAIN);
 			await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s", recovering: true }));
 			await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
 			const hello = recibidos.find((x) => x.type === "hello_ok");
@@ -167,7 +171,7 @@ describe("DO-SUBIDA · la petición", () => {
 			const m = await montarMainEnElHub(hub, t, { main: MAIN, recovering: false });
 			// La tabla de la Main vigente ha vuelto al instante con todo lo demás: nombra al equipo de
 			// antes de un traslado de licencia.
-			laMainEs(hub, "main-de-antes");
+			laTablaDiceQueLaMainEs(hub, "main-de-antes");
 			const r = await hub.trasVolver({ tenantId: t, seqAntes: 0, modo: "main" });
 			expect(r.ok).toBe(true);
 			expect(leerSubida(m.sql)).toMatchObject({ estado: "esperando", origen: "instante", mainDeviceId: null });
@@ -182,7 +186,6 @@ describe("DO-SUBIDA · la petición", () => {
 				recibidos.push(JSON.parse(String(ev.data)));
 			});
 			hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
-			hub.mainEnCentral = async () => MAIN;
 			await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s", recovering: true }));
 			await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
 			expect(recibidos.find((x) => x.type === "hello_ok").subida).toMatchObject({ estado: "esperando", origen: "instante" });
@@ -203,7 +206,7 @@ describe("DO-SUBIDA · la petición", () => {
 				recibidos.push(JSON.parse(String(ev.data)));
 			});
 			hub.verifyHelloSigned = async () => ({ roleFinal: "tpv", pubkeyB64: "x" });
-			hub.mainEnCentral = async () => "otra-main";
+			await laLicenciaDiceQueLaMainEs(m.central, t, "otra-main");
 			await hub.webSocketMessage(par[1], JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s" }));
 			await vi.waitFor(() => expect(recibidos.some((x) => x.type === "hello_ok")).toBe(true), { timeout: 10_000 });
 			expect(recibidos.find((x) => x.type === "hello_ok").subida).toBeUndefined();

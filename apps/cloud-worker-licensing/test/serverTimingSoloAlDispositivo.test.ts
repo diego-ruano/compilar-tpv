@@ -11,30 +11,16 @@
 //   · que una firmada que `tenantAuth` rechaza no lo lleva, tampoco por la licencia.
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
+import { centralDePrueba } from "./helpers/central";
 import { MAIN, conNegocioFirmado, peticionFirmada, viajes } from "./helpers/negocioFirmado";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
+import { app } from "../src/app";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 describe("lo que no es de un dispositivo no lleva el desglose", () => {
 	it.each([
@@ -47,32 +33,25 @@ describe("lo que no es de un dispositivo no lleva el desglose", () => {
 		["el emparejamiento", "POST", "/v1/pair/claim"],
 		["una ruta de negocio sin firmar", "GET", "/v1/login/users"],
 	])("%s", async (_que, metodo, ruta) => {
-		await enElHub(`server-timing-anonimo-${ruta}-${metodo}`, async (hub: any) => {
-			prepararPlanoDeControl(hub.state.storage.sql);
-			dbCentral = clienteSobre(hub.state.storage.sql, hub.state.storage);
-			try {
-				const res = await app.request(
-					ruta,
-					{
-						method: metodo,
-						...(metodo === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}),
-					},
-					env,
-				);
-				// Conteste lo que conteste (200, 204, 401, 404…), sin desglose.
-				expect(res.status, ruta).toBeGreaterThan(0);
-				expect(res.headers.get("Server-Timing"), `${metodo} ${ruta} (${res.status})`).toBeNull();
-			} finally {
-				dbCentral = null;
-			}
-		});
+		const central = await centralDePrueba();
+		const res = await app.request(
+			ruta,
+			{
+				method: metodo,
+				...(metodo === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}),
+			},
+			{ ...env, ...central.entorno },
+		);
+		// Conteste lo que conteste (200, 204, 401, 404…), sin desglose.
+		expect(res.status, ruta).toBeGreaterThan(0);
+		expect(res.headers.get("Server-Timing"), `${metodo} ${ruta} (${res.status})`).toBeNull();
 	});
 });
 
 describe("a un dispositivo del negocio, sí", () => {
 	it("una petición firmada lleva su viaje al TenantHub", async () => {
 		await conNegocioFirmado(deps, "server-timing", async (n) => {
-			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 			expect(res.status).toBe(200);
 			expect(res.headers.get("Server-Timing")).toMatch(/total;dur=/);
 			expect(viajes(res, "hub-ruta")).toBe(1);
@@ -81,8 +60,8 @@ describe("a un dispositivo del negocio, sí", () => {
 
 	it("una firmada con la licencia anulada, tampoco: `tenantAuth` la rechaza después de saber quién es", async () => {
 		await conNegocioFirmado(deps, "server-timing-licencia-anulada", async (n) => {
-			n.enCentral("UPDATE licenses SET status = 'revoked';");
-			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			await n.enCentral("UPDATE licenses SET status = 'revoked';");
+			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 			expect(res.status).toBe(403);
 			expect(res.headers.get("Server-Timing")).toBeNull();
 		});
@@ -93,7 +72,7 @@ describe("a un dispositivo del negocio, sí", () => {
 			const peticion = await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users");
 			const mal = new Request(peticion, { headers: new Headers(peticion.headers) });
 			mal.headers.set("X-Device-Sig", "A".repeat(88));
-			const res = await app.request(mal, undefined, env);
+			const res = await app.request(mal, undefined, { ...env, ...n.entorno });
 			expect(res.status).toBe(401);
 			expect(res.headers.get("Server-Timing")).toBeNull();
 		});

@@ -1032,8 +1032,7 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * AUD-02 · Lo que dice ahora la base central: la Main de la licencia viva, o `null`. Método, y
-	 * no una lambda del contexto, para que un test lo sustituya, como `verifyHelloSigned`.
+	 * AUD-02 · Lo que dice ahora la base central: la Main de la licencia viva, o `null`.
 	 *
 	 * Con plazo, porque puede ir delante de una escritura o dentro del turno del log y no puede
 	 * retenerlos. Lanza si no hay respuesta.

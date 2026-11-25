@@ -27,7 +27,6 @@ import casoNombreId from "../../../tests/contract/lecturas/casos/stats/productos
 import casoProductosSemana from "../../../tests/contract/lecturas/casos/stats/productos_semana.json";
 import casoVendidos from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
 
-import { clienteSobre } from "./helpers/clienteSql";
 import { mesasDeAntes, productosDeAntes } from "./helpers/estadisticasDeAntes";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
@@ -134,7 +133,7 @@ function conLaSiembra<R>(nombre: string, siembra: string[], prueba: (db: Base, s
 		const storage = hub.state.storage;
 		crearEsquemaTenant(storage.sql);
 		for (const sentencia of siembra) storage.sql.exec(sentencia);
-		return prueba(clienteSobre(storage.sql, storage) as unknown as Base, storage.sql);
+		return prueba(clienteLocal(storage), storage.sql);
 	});
 }
 

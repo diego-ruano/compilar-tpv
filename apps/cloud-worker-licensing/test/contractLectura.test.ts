@@ -15,7 +15,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -739,7 +739,7 @@ describe("contrato de lectura Main↔worker · resultado == golden", () => {
 		it(`${nombre}: devuelve lo mismo que la Main`, async () => {
 			await enElHub(`contract-lectura-${nombre}`, async (hub: any) => {
 				const sql = hub.state.storage.sql;
-				const db = clienteSobre(sql);
+				const db = clienteLocal(hub.state.storage);
 
 				// 1) Esquema real + siembra del caso (idéntica al lado Rust).
 				crearEsquemaTenant(sql);

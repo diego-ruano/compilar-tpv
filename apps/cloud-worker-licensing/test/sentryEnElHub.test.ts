@@ -16,12 +16,6 @@ import { enElHub } from "./helpers/hub";
 import { MAIN, conNegocioFirmado, peticionFirmada, viajes, type Negocio } from "./helpers/negocioFirmado";
 
 const { enviados } = vi.hoisted(() => ({ enviados: [] as any[] }));
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbCentral };
-});
 
 vi.mock("@sentry/cloudflare", async (importOriginal) => {
 	const sdk = await importOriginal<typeof import("@sentry/cloudflare")>();
@@ -53,11 +47,7 @@ const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 
 const env = entorno as any;
-const deps = {
-	ponerCentral: (db: unknown) => void (dbCentral = db),
-	firmarSesion,
-	olvidarLicenciasCacheadas,
-};
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 /** Los eventos de error que el SDK ha entregado al transporte. */
 function eventos(): any[] {
@@ -66,10 +56,13 @@ function eventos(): any[] {
 	);
 }
 
-/** Por el `fetch` del worker, como en producción: Sentry delante y el entorno instrumentado. */
-async function porElWorker(peticion: Request): Promise<Response> {
+/**
+ * Por el `fetch` del worker, como en producción: Sentry delante y el entorno instrumentado, con la
+ * base central del negocio `n`.
+ */
+async function porElWorker(n: Negocio, peticion: Request): Promise<Response> {
 	const ctx = createExecutionContext();
-	const res = await worker.fetch!(peticion as any, env, ctx);
+	const res = await worker.fetch!(peticion as any, { ...env, ...n.entorno }, ctx);
 	await waitOnExecutionContext(ctx);
 	return res;
 }
@@ -98,7 +91,7 @@ describe("un fallo dentro de una ruta que corre en el TenantHub llega a Sentry",
 		await conNegocioFirmado(deps, "sentry-worker", async (n) => {
 			await romperLaBase(n, "la base no abre (prueba del worker)");
 
-			const res = await porElWorker(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"));
+			const res = await porElWorker(n, await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"));
 			expect(res.status).toBe(500);
 			expect(viajes(res, "hub-ruta")).toBe(1);
 			expect(await res.json()).toMatchObject({ ok: false, error: "internal_error" });
@@ -122,7 +115,7 @@ describe("un fallo dentro de una ruta que corre en el TenantHub llega a Sentry",
 
 			// `app.request` no pasa por `withSentry`: el entorno no va instrumentado y el RPC sale
 			// sin `__sentry_rpc_meta__`, así que el SDK no envuelve el método del DO.
-			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, env);
+			const res = await app.request(await peticionFirmada(deps, n, MAIN, "GET", "/v1/login/users"), undefined, { ...env, ...n.entorno });
 			expect(res.status).toBe(500);
 			expect(viajes(res, "hub-ruta")).toBe(1);
 
@@ -139,9 +132,10 @@ describe("las etiquetas de una petición acaban con ella", () => {
 		await conNegocioFirmado(deps, "sentry-a", async (a) => {
 			// Un negocio deja en su ámbito la versión del cliente y los importes de su cuerpo.
 			const conEtiquetas = { cabeceras: { "X-TPV-Version": "9.9.9", "X-TPV-Variant": "android" } };
-			const lectura = await porElWorker(await peticionFirmada(deps, a, MAIN, "GET", "/v1/login/users", conEtiquetas));
+			const lectura = await porElWorker(a, await peticionFirmada(deps, a, MAIN, "GET", "/v1/login/users", conEtiquetas));
 			expect(lectura.status).toBe(200);
 			const escritura = await porElWorker(
+				a,
 				await peticionFirmada(deps, a, MAIN, "POST", "/v1/inventario/categorias", {
 					...conEtiquetas,
 					cuerpo: { id_categoria: null, nombre: "Bebidas", vendible: true, pasa_cocina: false },
@@ -156,7 +150,7 @@ describe("las etiquetas de una petición acaban con ella", () => {
 		// Después, en el mismo isolate, falla una petición de otro negocio que no trae nada de eso.
 		await conNegocioFirmado(deps, "sentry-b", async (b) => {
 			await romperLaBase(b, "la base de otro negocio no abre");
-			const res = await porElWorker(await peticionFirmada(deps, b, MAIN, "GET", "/v1/inventario/categorias"));
+			const res = await porElWorker(b, await peticionFirmada(deps, b, MAIN, "GET", "/v1/inventario/categorias"));
 			expect(res.status).toBe(500);
 
 			const [evento, ...resto] = await esperarEventos(1);
@@ -179,7 +173,7 @@ describe("las etiquetas de una petición acaban con ella", () => {
 					cuerpo: { id_categoria: null, nombre: "Bebidas", vendible: true, pasa_cocina: false },
 				}),
 				undefined,
-				env,
+				{ ...env, ...n.entorno },
 			);
 			expect(res.status).toBe(400);
 			expect(viajes(res, "hub-ruta")).toBe(1);

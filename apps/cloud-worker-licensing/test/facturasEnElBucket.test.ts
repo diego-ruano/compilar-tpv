@@ -15,22 +15,15 @@
 //     la carpeta de las facturas, se le pida como se le pida (mayúsculas, `..`, `%2F`, `%2e%2e`, `\`).
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { HANDY, MAIN, conNegocioFirmado, peticionFirmada, type Negocio } from "./helpers/negocioFirmado";
+import { app } from "../src/app";
 import { MAX_BYTES_FACTURA } from "../src/domains/facturas/facturas.routes";
+import { firmarSesion } from "../src/lib/sesion";
+import { olvidarLicenciasCacheadas } from "../src/lib/licenciaEnUso";
 
-let dbCentral: unknown = null;
-
-vi.mock("../src/server/db", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../src/server/db")>()),
-	getDb: () => dbCentral,
-}));
-
-const { app } = await import("../src/app");
-const { firmarSesion } = await import("../src/lib/sesion");
-const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
-const deps = { ponerCentral: (db: unknown) => void (dbCentral = db), firmarSesion, olvidarLicenciasCacheadas };
+const deps = { firmarSesion, olvidarLicenciasCacheadas };
 
 const env = entorno as any;
 
@@ -50,11 +43,11 @@ async function subir(n: Negocio, id: string, bytes: Uint8Array, deviceId = MAIN,
 		bytes,
 		cabeceras: { "content-type": "application/pdf" },
 	});
-	return app.request(peticion, undefined, { ...env, ...entornoExtra });
+	return app.request(peticion, undefined, { ...env, ...n.entorno, ...entornoExtra });
 }
 
 async function bajar(n: Negocio, cuerpo: unknown, deviceId = MAIN) {
-	return app.request(await peticionFirmada(deps, n, deviceId, "POST", "/v1/facturas/descargar", { cuerpo }), undefined, env);
+	return app.request(await peticionFirmada(deps, n, deviceId, "POST", "/v1/facturas/descargar", { cuerpo }), undefined, { ...env, ...n.entorno });
 }
 
 describe("la Main sube y baja el PDF de una factura", () => {
@@ -148,7 +141,7 @@ describe("una factura subida no cambia", () => {
 			expect((await subir(n, id, pdf("para siempre"))).status).toBe(200);
 
 			for (const metodo of ["DELETE", "POST", "PATCH"]) {
-				const res = await app.request(await peticionFirmada(deps, n, MAIN, metodo, `/v1/facturas/${id}`), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, MAIN, metodo, `/v1/facturas/${id}`), undefined, { ...env, ...n.entorno });
 				expect(res.status, metodo).toBe(404);
 				await res.arrayBuffer();
 			}
@@ -222,7 +215,7 @@ describe("lo que no entra", () => {
 					body: grande,
 				}),
 				undefined,
-				env,
+				{ ...env, ...n.entorno },
 			);
 			expect(res.status).toBe(413);
 			expect(await res.json()).toMatchObject({ ok: false, error: "factura_demasiado_grande" });
@@ -260,7 +253,7 @@ describe("sólo la Main vigente", () => {
 			// Entra, y el Worker se queda con su «sí» un minuto.
 			expect((await subir(n, id, pdf("antes del traslado"))).status).toBe(200);
 
-			n.enCentral(`UPDATE licenses SET main_device_id = 'la-main-nueva', updated_at_ms = ? WHERE tenant_id = ?;`, Date.now(), n.tenantId);
+			await n.enCentral(`UPDATE licenses SET main_device_id = 'la-main-nueva', updated_at_ms = ? WHERE tenant_id = ?;`, Date.now(), n.tenantId);
 			const otro = crypto.randomUUID();
 			const sube = await subir(n, otro, pdf("después del traslado"));
 			expect(sube.status).toBe(403);
@@ -313,7 +306,7 @@ describe("las rutas de las imágenes no llegan a las facturas", () => {
 			await env.IMAGES.put(`${n.tenantId}/facturas/images/productos/${id}.jpg`, pdf("privada"));
 
 			for (const camino of porElGetPublico(n.tenantId, id)) {
-				const res = await app.request(new Request(`https://tpv-api.test${camino}`), undefined, env);
+				const res = await app.request(new Request(`https://tpv-api.test${camino}`), undefined, { ...env, ...n.entorno });
 				const cuerpo = await res.text();
 				expect(res.status, camino).toBe(400);
 				expect(cuerpo, camino).not.toContain("%PDF");
@@ -343,7 +336,7 @@ describe("las rutas de las imágenes no llegan a las facturas", () => {
 					const res = await app.request(
 						await peticionFirmada(deps, n, MAIN, "PUT", `/v1/images/${rel}`, { bytes, cabeceras: { "content-type": "image/png" } }),
 						undefined,
-						env,
+						{ ...env, ...n.entorno },
 					);
 					expect(res.status, rel).toBe(400);
 					await res.arrayBuffer();
@@ -372,7 +365,7 @@ describe("las rutas de las imágenes no llegan a las facturas", () => {
 				`facturas/`,
 				``,
 			]) {
-				const res = await app.request(await peticionFirmada(deps, n, MAIN, "DELETE", `/v1/images/${rel}`), undefined, env);
+				const res = await app.request(await peticionFirmada(deps, n, MAIN, "DELETE", `/v1/images/${rel}`), undefined, { ...env, ...n.entorno });
 				expect([400, 404], rel).toContain(res.status);
 				await res.arrayBuffer();
 			}
@@ -399,7 +392,7 @@ describe("las rutas de las imágenes no llegan a las facturas", () => {
 				const res = await app.request(
 					await peticionFirmada(deps, n, MAIN, "POST", "/v1/images/download", { cuerpo: { rel_path } }),
 					undefined,
-					env,
+					{ ...env, ...n.entorno },
 				);
 				const cuerpo = await res.text();
 				expect(res.status, rel_path).toBe(400);

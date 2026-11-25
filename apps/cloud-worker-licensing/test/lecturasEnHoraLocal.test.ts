@@ -17,9 +17,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { conLaHoraDeQuienPregunta } from "../src/lib/tenantClient";
 import { punchStatus } from "../src/domains/login/login.queries";
 
@@ -104,7 +104,7 @@ describe("el fichaje de madrugada", () => {
 		await enElHub("lecturas-hora-local", async (hub: any) => {
 			const sqlStorage = hub.state.storage.sql;
 			crearEsquemaTenant(sqlStorage);
-			const db = clienteSobre(sqlStorage);
+			const db = clienteLocal(hub.state.storage);
 
 			// El rol lo siembra el propio esquema; aqui solo hace falta alguien que fiche.
 			sqlStorage.exec(
@@ -138,7 +138,7 @@ describe("el fichaje de madrugada", () => {
 		await enElHub("lecturas-hora-local-noche", async (hub: any) => {
 			const sqlStorage = hub.state.storage.sql;
 			crearEsquemaTenant(sqlStorage);
-			const db = clienteSobre(sqlStorage);
+			const db = clienteLocal(hub.state.storage);
 
 			sqlStorage.exec(
 				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)

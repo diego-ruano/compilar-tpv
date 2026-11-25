@@ -8,8 +8,9 @@
 // cada una tiene su tope delante (`TOPE_FIRMA_B64`, 128; `TOPE_CLAVE_B64`, 64): más larga sale con su
 // error sin llegar a quitar comillas (`quitarComillas`, `sanitizeB64`) ni a consultar la base.
 //
-// Por la entrada real del worker (`src/index.ts`). La base central apunta cada consulta y no encuentra
-// nada: así se ve si una petición llegó a ella. Cada familia, con tres entradas:
+// Por la entrada real del worker (`src/index.ts`). La base central es una de verdad, nueva en cada caso
+// y vacía, que apunta lo que se le pide (`centralQueApunta`) y no encuentra nada: así se ve si una
+// petición llegó a ella. Cada familia, con tres entradas:
 //   · una firma o una clave buenas con comillas alrededor hasta justo el tope: pasan y llegan a la base;
 //   · las mismas con una comilla más: se rechazan. Sin el tope pasaban, porque las comillas se quitan;
 //   · la forma del ataque, una racha de comillas en medio: se rechaza igual;
@@ -20,24 +21,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
+import { centralDePrueba, centralQueApunta } from "./helpers/central";
 
-const { consultas, llamadas } = vi.hoisted(() => ({
-	consultas: [] as string[],
+const { llamadas } = vi.hoisted(() => ({
 	llamadas: { quitarComillas: 0, sanitizeB64: 0 },
 }));
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return {
-		...original,
-		getDb: () => ({
-			execute: async (q: any) => {
-				consultas.push(String(q?.sql ?? q));
-				return { rows: [], rowsAffected: 0 };
-			},
-		}),
-	};
-});
 
 vi.mock("../src/lib/texto", async (importOriginal) => {
 	const real = await importOriginal<typeof import("../src/lib/texto")>();
@@ -87,16 +75,23 @@ const b64url = (s: string) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").re
 /** Una firma Ed25519 con su forma (64 bytes, 88 caracteres); no hace falta que valga. */
 const FIRMA = b64(new Uint8Array(64).fill(9));
 
+/** La base central del caso, vacía, y lo que se le ha pedido. */
+let central: ReturnType<typeof centralQueApunta>;
+
 async function pedir(ruta: string, init: RequestInit) {
 	const ctx = createExecutionContext();
-	const res = await worker.fetch!(new Request(`https://tpv-api.test${ruta}`, init) as any, ENV, ctx);
+	const res = await worker.fetch!(
+		new Request(`https://tpv-api.test${ruta}`, init) as any,
+		{ ...ENV, ...central.entorno },
+		ctx,
+	);
 	await waitOnExecutionContext(ctx);
 	const cuerpo = (await res.json()) as any;
 	return { status: res.status, error: cuerpo.error as string };
 }
 
-beforeEach(() => {
-	consultas.length = 0;
+beforeEach(async () => {
+	central = centralQueApunta(await centralDePrueba());
 	llamadas.quitarComillas = 0;
 	llamadas.sanitizeB64 = 0;
 });
@@ -104,7 +99,7 @@ beforeEach(() => {
 /** Rechazada sin quitar comillas ni consultar la base. */
 function sinProcesar(r: { status: number; error: string }, esperado: { status: number; error: string }) {
 	expect(r).toEqual(esperado);
-	expect(consultas).toEqual([]);
+	expect(central.pedido).toEqual([]);
 	expect(llamadas.quitarComillas).toBe(0);
 	expect(llamadas.sanitizeB64).toBe(0);
 }
@@ -137,7 +132,7 @@ describe("AUD-33 · POST /v1/pair/claim: la clave pública lleva su tope delante
 		const r = await reclamar(conComillas(await clavePublica(33), TOPE_CLAVE_B64));
 		expect(r).toEqual({ status: 404, error: "pair_code_not_found" });
 		expect(llamadas.sanitizeB64).toBe(1);
-		expect(consultas.length).toBeGreaterThan(0);
+		expect(central.pedido.length).toBeGreaterThan(0);
 	});
 
 	it("con una comilla más: 400 invalid_devicePubKey sin llegar a sanitizeB64 ni a la base", async () => {
@@ -170,7 +165,7 @@ describe("AUD-33 · POST /v1/pair/fetch-token y /cancel: la firma lleva su tope"
 		it(`${ruta}: una firma con comillas hasta el tope llega a la base`, async () => {
 			const r = await pedirCon(conComillas(FIRMA, TOPE_FIRMA_B64));
 			expect(r).toEqual({ status: 404, error: "pair_code_not_found" });
-			expect(consultas.length).toBeGreaterThan(0);
+			expect(central.pedido.length).toBeGreaterThan(0);
 		});
 
 		it(`${ruta}: con una comilla más, o con una racha de 4.000, 400 missing_proof sin tocar la base`, async () => {
@@ -205,7 +200,7 @@ describe("AUD-33 · POST /v1/license/refresh (anónima): X-Device-Sig lleva su t
 		const r = await refrescar(conComillas(FIRMA, TOPE_FIRMA_B64));
 		expect(r).toEqual({ status: 401, error: "device_pubkey_not_registered" });
 		expect(llamadas.quitarComillas).toBeGreaterThan(0);
-		expect(consultas.length).toBeGreaterThan(0);
+		expect(central.pedido.length).toBeGreaterThan(0);
 	});
 
 	it("con una comilla más, o con la cabecera del ataque: 401 bad_device_signature sin tocarla ni la base", async () => {
@@ -229,7 +224,7 @@ describe("AUD-33 · POST /v1/license/activate (anónima): X-Device-Sig lleva su 
 	it("la firma de verdad con comillas hasta el tope se comprueba y la activación llega a la base", async () => {
 		const r = await activar((real) => conComillas(real, TOPE_FIRMA_B64));
 		expect(r).toEqual({ status: 404, error: "license_not_found" });
-		expect(consultas.length).toBeGreaterThan(0);
+		expect(central.pedido.length).toBeGreaterThan(0);
 	});
 
 	it("con una comilla más, o con la cabecera del ataque: 401 bad_device_signature sin tocarla ni la base", async () => {
@@ -252,7 +247,7 @@ describe("AUD-33 · tenantAuth: X-Device-Sig lleva su tope antes de buscar el di
 	it("una firma con comillas hasta el tope llega a buscar el dispositivo", async () => {
 		const r = await leer(conComillas(FIRMA, TOPE_FIRMA_B64));
 		expect(r).toEqual({ status: 401, error: "device_not_registered" });
-		expect(consultas.length).toBeGreaterThan(0);
+		expect(central.pedido.length).toBeGreaterThan(0);
 	});
 
 	it("con una comilla más, o con la cabecera del ataque: 401 bad_device_signature sin tocarla ni la base", async () => {

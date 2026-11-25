@@ -6,18 +6,35 @@
 // mientras deja pasar la subida de la Main (`apply_lote`) y `recovery_ready` las suelta.
 //
 // Sin sustituir `isMainConnected` ni `isMainReady`: la Main y la Handy son sockets reales aceptados
-// con `state.acceptWebSocket`, así que decide el censo de producción. Se sustituye sólo lo que
-// saldría del DO: la firma del saludo, `last_seen` y la base del tenant (el SQLite del propio DO).
+// con `state.acceptWebSocket`, así que decide el censo de producción. Se sustituye sólo la firma del
+// saludo. La base del tenant es el SQLite del propio DO, con su cliente de producción, y la base
+// central, una de verdad con la licencia del negocio.
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { deleteComandaIfSafe } from "../src/domains/venta_rapida/venta_rapida.commands";
-import { clienteSobre } from "./helpers/clienteSql";
+import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
+import { centralInterceptada } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enElHub } from "./helpers/hub";
-import { laMainEs } from "./helpers/mainVigente";
+import { enElHub, ponerLaCentral } from "./helpers/hub";
+import { centralConLaMain } from "./helpers/mainVigente";
 
 const TENANT = "tenant-1";
+
+/** Lo único que esta prueba deja pedir a la base central: quién es la Main y el `last_seen`. */
+const LO_QUE_SE_PIDE_A_LA_CENTRAL = /SELECT main_device_id\s+FROM\s+licenses|UPDATE devices SET last_seen_at_ms/;
+
+/**
+ * Lo demás que le ha llegado a la base central en el caso en curso. Se apunta en vez de lanzar: el
+ * `last_seen` va por `waitUntil`, y lo que se lanzara por ahí no lo recogería nadie y el caso pasaría
+ * igual. Lo comprueba el `afterEach`.
+ */
+const inesperadas: string[] = [];
+
+afterEach(() => {
+	expect(inesperadas.splice(0), "la prueba no espera esto en la base central").toEqual([]);
+});
 
 const SEMILLA = [
 	"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -50,12 +67,12 @@ function opDelAtraso(n: number) {
 	};
 }
 
-function prepararHub(hub: any) {
+async function prepararHub(hub: any) {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
 	for (const s of SEMILLA) sql.exec(s);
 
-	const base = clienteSobre(sql, hub.state.storage);
+	const base = clienteLocal(hub.state.storage);
 	// Cuenta los lotes que llegan a la base y, si se le pide, rechaza los que lleven un texto. El
 	// rechazo es de la base (no deja la confirmación en duda) pero no es de los definitivos: cuenta
 	// como un intento de la operación.
@@ -71,13 +88,20 @@ function prepararHub(hub: any) {
 		},
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-	hub.touchLastSeen = async () => {};
-	// Ningún camino de esta prueba debe tocar la base central.
-	hub.getCentralDb = () => {
-		throw new Error("la prueba no tiene base central");
-	};
-	// AUD-02: la Main de estas pruebas es la de la licencia, y su saludo lo pregunta a un doble.
-	laMainEs(hub, "device-main");
+	// AUD-02: la Main de estas pruebas es la de la licencia, y su saludo se lo pregunta a la base
+	// central. Ningún otro camino de esta prueba debe tocarla: lo demás que le llegue se contesta con
+	// un rechazo y hace fallar el caso (`inesperadas`).
+	const central = await centralConLaMain(hub, TENANT, "device-main");
+	ponerLaCentral(
+		hub,
+		centralInterceptada(central, async (metodo, [s], llamar) => {
+			const texto = metodo === "ejecutar" ? (s as SentenciaEnlazada).sql : "";
+			if (LO_QUE_SE_PIDE_A_LA_CENTRAL.test(texto)) return llamar();
+			inesperadas.push(`${metodo} ${texto}`.trim());
+			const rechazo: RespuestaDeLaCentral<never> = { ok: false, error: "central_error_sql", detalle: "la prueba no lo espera" };
+			return rechazo;
+		}),
+	);
 	return { sql, db, control };
 }
 
@@ -191,7 +215,7 @@ const ticketsDeBarra = (sql: any) =>
 describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () => {
 	it("el saludo con atraso congela a la Handy, la subida de la Main pasa y recovery_ready la suelta", async () => {
 		await enElHub("aud15-congelado", async (hub: any) => {
-			const { sql } = prepararHub(hub);
+			const { sql } = await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const main = socketReal(hub, "device-main", "tpv", false);
 
@@ -243,7 +267,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 	it("una escritura de la Handy admitida con la Main lista no entra si deja de estarlo mientras espera su turno", async () => {
 		await enElHub("aud15-turno", async (hub: any) => {
-			const { sql, db, control } = prepararHub(hub);
+			const { sql, db, control } = await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const main = socketReal(hub, "device-main", "tpv", false);
 			await saludaLaMain(hub, main, true);
@@ -275,7 +299,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 	it("una Main reemplazada deja de autorizar a las Handy mientras se cierra", async () => {
 		await enElHub("aud15-reemplazo-lista", async (hub: any) => {
-			prepararHub(hub);
+			await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const vieja = mainSinCerrar(hub, false);
 			expect(hub.isMainReady()).toBe(true);
@@ -305,7 +329,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 	it("una Main cuyo socket ya ha cerrado el DO no cuenta, aunque siga en getWebSockets", async () => {
 		await enElHub("aud15-cerrando", async (hub: any) => {
-			prepararHub(hub);
+			await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const main = mainSinCerrar(hub, false);
 			expect(hub.isMainReady()).toBe(true);
@@ -325,7 +349,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 	it("una Main reemplazada que estaba congelando no retiene a las Handy cuando la nueva las suelta", async () => {
 		await enElHub("aud15-reemplazo-congelando", async (hub: any) => {
-			prepararHub(hub);
+			await prepararHub(hub);
 			const handy = socketReal(hub, "device-handy", "handy", true);
 			const vieja = mainSinCerrar(hub, true);
 

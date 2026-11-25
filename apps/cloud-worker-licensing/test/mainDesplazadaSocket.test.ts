@@ -28,20 +28,27 @@
 //   · la tabla sobrevive a un reinicio del DO.
 //
 // DO real con sockets reales (`WebSocketPair` + `acceptWebSocket`), sin sustituir `isMainConnected`
-// ni `isMainReady`. Nada sale a la red: la base del negocio es el SQLite del propio DO y la base
-// central, un doble que sólo contesta las dos consultas que hace el DO (`licenses` y `devices`).
+// ni `isMainReady`. La base del negocio es el SQLite del propio DO, con su cliente de producción, y
+// la base central, una de verdad con el negocio dado de alta (`helpers/central.ts`). Lo único que el
+// DO le pide es quién es la Main de la licencia y el `last_seen`; que no conteste, que no haga la
+// consulta o que tarde se provoca en su stub.
 
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { aplicarLectura, empezarLectura, mainVigente, olvidarComprobacion, tocaComprobar } from "../src/durableObjects/tenantHub.main";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { bytesToB64 } from "../src/server/utils/base64";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, centralQueApunta, filasDe, negocioEnLaCentral, type CentralDePrueba } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enElHub } from "./helpers/hub";
+import { enElHub, ponerLaCentral } from "./helpers/hub";
+import { laLicenciaDiceQueLaMainEs, laTablaDiceQueLaMainEs } from "./helpers/mainVigente";
 
 const TENANT = "tenant-1";
 const ADMIN = "00000000-0000-7000-8000-000000000001";
 const UN_MINUTO_LARGO_MS = 61_000;
+/** Lo que la Main espera el acuse de un lote (`ESPERA_DEL_LOTE`, `use_cases/replicacion.rs`). */
+const LA_MAIN_ESPERA_SU_ACUSE_MS = 30_000;
 
 // Los casos esperan mensajes y cierres de sockets de verdad. Con la máquina cargada, los 5 s por
 // defecto de un test y las esperas cortas se quedan en nada: aquí van con margen. Una espera acaba
@@ -56,33 +63,53 @@ function retencion() {
 	return { espera, soltar };
 }
 
-// ── La base central, de mentira ───────────────────────────────────────────────
+// ── La base central ───────────────────────────────────────────────────────────
 
-/** Una respuesta de la base central que se ha quedado esperando. */
-type Retenida = { que: "licenses"; deviceId: string | null; soltar: () => void };
+/** La pregunta del DO a la base central: quién es la Main de la licencia (`mainDeLaLicencia`). */
+const PIDE_LA_MAIN = /FROM licenses/;
+/**
+ * Lo único que el DO le pide a la base central: quién es la Main y el `last_seen` (`touchLastSeen`).
+ * Del dispositivo no se pregunta nada: el rol y la clave los pasa el Worker al abrir el socket
+ * (`abrir`), y una lectura de `devices` haría fallar el caso (`inesperadas`).
+ */
+const LO_QUE_SE_PIDE_A_LA_CENTRAL = /FROM licenses|UPDATE devices SET last_seen_at_ms/;
+
+/**
+ * Lo que le ha llegado a la base central en el caso en curso sin ser `LO_QUE_SE_PIDE_A_LA_CENTRAL`.
+ * Se apunta y se contesta con un rechazo, sin lanzar: el `last_seen` va por `waitUntil`, y lo que
+ * se lanzara por ahí no lo recogería nadie y el caso pasaría igual. Lo comprueba el `afterEach`.
+ */
+const inesperadas: string[] = [];
+
+afterEach(() => {
+	expect(inesperadas.splice(0), "AUD-02: la prueba no espera esto en la base central").toEqual([]);
+});
+
+/** Lo que contesta la base central cuando no ha hecho la consulta. */
+const rechazo = (detalle: string): RespuestaDeLaCentral<never> => ({ ok: false, error: "central_error_sql", detalle });
+
+/** Una respuesta de la base central que se ha quedado esperando en su stub. */
+type Retenida = { que: "licenses"; soltar: () => void };
 
 type Central = {
-	/** El `main_device_id` de la licencia viva del negocio; `null`, anulada. */
-	main: string | null;
+	/** La base central de verdad del DO, con el negocio dado de alta. */
+	base: CentralDePrueba;
 	/** La base central no contesta. */
 	caida: boolean;
-	/** La base central contesta, pero rechaza la consulta: las credenciales no valen. */
+	/** La base central contesta, pero no ha hecho la consulta. */
 	rechaza: boolean;
 	/** Lecturas de `licenses`: lo que cuesta saber quién es la Main. */
-	lecturas: number;
-	/** Con qué plazo se pidió el cliente de cada lectura de `licenses`. */
-	plazos: (number | undefined)[];
+	readonly lecturas: number;
 	/** Retiene cada lectura de `licenses`, con la respuesta de cuando se hizo. */
 	retenerLicencias: boolean;
 	/** Lo retenido, en el orden en que llegó. */
 	retenidas: Retenida[];
 };
 
-function retener(central: Central, que: Retenida["que"], deviceId: string | null): Promise<void> {
+function retener(central: Central): Promise<void> {
 	return new Promise<void>((resolver) => {
 		const r: Retenida = {
-			que,
-			deviceId,
+			que: "licenses",
 			soltar: () => {
 				const i = central.retenidas.indexOf(r);
 				if (i >= 0) central.retenidas.splice(i, 1);
@@ -95,41 +122,49 @@ function retener(central: Central, que: Retenida["que"], deviceId: string | null
 
 const soltarTodas = (central: Central) => [...central.retenidas].forEach((r) => r.soltar());
 
-function centralDeMentira(hub: any, main: string | null): Central {
+/**
+ * Una base central nueva para el DO, con el negocio y su licencia, de la que `main` es la Main
+ * (`null`: anulada), puesta detrás del hub. La tabla del DO no se toca. Lo que el DO le pide pasa
+ * por su stub, que lo apunta y hace lo que diga `Central`.
+ */
+async function centralDelHub(hub: any, main: string | null): Promise<Central> {
+	const base = await centralDePrueba();
+	await negocioEnLaCentral(base, { tenantId: TENANT, main: main ?? "main-de-la-anulada" });
+	if (main === null) {
+		await filasDe(base, "UPDATE licenses SET status = 'revoked', disabled = 1 WHERE tenant_id = ?;", TENANT);
+	}
+	const vista = centralQueApunta(base, async (metodo, [s], llamar) => {
+		const texto = metodo === "ejecutar" ? (s as SentenciaEnlazada).sql : "";
+		if (!LO_QUE_SE_PIDE_A_LA_CENTRAL.test(texto)) {
+			inesperadas.push(`${metodo} ${texto}`.trim());
+			return rechazo("la prueba no lo espera");
+		}
+		if (!PIDE_LA_MAIN.test(texto)) return llamar();
+		if (central.caida) throw new Error("la base central no contesta");
+		if (central.rechaza) return rechazo("consulta rechazada");
+		// Lo que hay AHORA, aunque la respuesta tarde en llegar.
+		const respuesta = await llamar();
+		if (central.retenerLicencias) await retener(central);
+		return respuesta;
+	});
 	const central: Central = {
-		main,
+		base,
 		caida: false,
 		rechaza: false,
-		lecturas: 0,
-		plazos: [],
+		get lecturas() {
+			return vista.pedido.filter((q) => PIDE_LA_MAIN.test(q)).length;
+		},
 		retenerLicencias: false,
 		retenidas: [],
 	};
-	const cliente = (plazoMs?: number) => ({
-		async execute({ sql, args }: { sql: string; args: unknown[] }) {
-			if (/FROM\s+licenses/i.test(sql)) {
-				central.lecturas++;
-				central.plazos.push(plazoMs);
-				if (central.caida) throw new Error("fetch failed: la base central no contesta");
-				if (central.rechaza) throw new Error("SERVER_ERROR: Server returned HTTP status 401");
-				// Lo que hay AHORA, aunque la respuesta tarde en llegar.
-				const valor = args[0] === TENANT ? central.main : null;
-				if (central.retenerLicencias) await retener(central, "licenses", null);
-				return { rows: valor ? [{ main_device_id: valor }] : [] };
-			}
-			// Del dispositivo no se pregunta nada: el rol y la clave los pasa el Worker al abrir el
-			// socket (`abrir`), y una lectura de `devices` cae aquí abajo.
-			throw new Error(`AUD-02: la prueba no espera esta sentencia en la base central: ${sql}`);
-		},
-	});
-	hub.getCentralDb = (plazoMs?: number) => cliente(plazoMs);
+	ponerLaCentral(hub, vista);
 	return central;
 }
 
-function prepararHub(hub: any, main: string | null) {
+async function prepararHub(hub: any, main: string | null) {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
-	const base = clienteSobre(sql, hub.state.storage);
+	const base = clienteLocal(hub.state.storage);
 	// El lote que lleve este texto se queda esperando: es como se retiene el turno del log.
 	const turno = { texto: null as string | null, pausa: retencion(), retenidos: 0 };
 	const db = {
@@ -143,20 +178,13 @@ function prepararHub(hub: any, main: string | null) {
 		},
 	};
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-	hub.touchLastSeen = async () => {};
 	const eventos: { name: string; [campo: string]: unknown }[] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => eventos.push({ name, ...campos });
-	const central = centralDeMentira(hub, main);
+	const central = await centralDelHub(hub, main);
 	return { sql, db, central, eventos, turno };
 }
 
 // ── La tabla del DO ───────────────────────────────────────────────────────────
-
-/** Apunta en la tabla del DO quién es la Main, como una lectura que acaba de volver. */
-function apuntar(hub: any, deviceId: string | null) {
-	const storage = hub.state.storage;
-	aplicarLectura(storage, empezarLectura(storage), deviceId);
-}
 
 /** Hace como si la última lectura de la base central fuera de hace más de un minuto. */
 function pasaUnMinuto(hub: any) {
@@ -167,9 +195,9 @@ function pasaUnMinuto(hub: any) {
  * El traslado cuyo aviso de cierre no llegó al DO: la tabla dice `vieja`, la última lectura es de
  * hace más de un minuto y la base central ya dice `nueva`.
  */
-function trasladoSinAviso(hub: any, vieja: string, nueva: string | null) {
-	const preparado = prepararHub(hub, nueva);
-	apuntar(hub, vieja);
+async function trasladoSinAviso(hub: any, vieja: string, nueva: string | null) {
+	const preparado = await prepararHub(hub, nueva);
+	laTablaDiceQueLaMainEs(hub, vieja);
 	pasaUnMinuto(hub);
 	return preparado;
 }
@@ -263,9 +291,10 @@ async function esperar(c: Conexion, pred: (m: any) => boolean, ms = ESPERA_MS): 
 	return undefined;
 }
 
+/** Espera a que se cumpla `cond`. Sin `setTimeout`: vale también con el reloj de mentira puesto. */
 async function esperarA(cond: () => boolean, ms = ESPERA_MS): Promise<boolean> {
 	const limite = Date.now() + ms;
-	while (!cond() && Date.now() < limite) await new Promise((r) => setTimeout(r, 10));
+	while (!cond() && Date.now() < limite) await scheduler.wait(10);
 	return cond();
 }
 
@@ -482,8 +511,8 @@ describe("AUD-02 · la tabla manda", () => {
 		// No se llega a esto por ningún camino (`fijarMain` echa en el mismo paso en que apunta, y el
 		// saludo decide con la tabla), pero es lo que se mira en cada sitio: aquí se fabrica a mano.
 		await enElHub("aud02-tabla-manda", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-1");
-			apuntar(hub, "main-1");
+			const { sql, central } = await prepararHub(hub, "main-1");
+			laTablaDiceQueLaMainEs(hub, "main-1");
 			const main = conectar(hub, "main-1");
 			const otra = conectar(hub, "main-2", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
@@ -515,7 +544,7 @@ describe("AUD-02 · la tabla manda", () => {
 	it("nunca leída, cuenta cualquier sesión `tpv`, y la primera actividad la lee y echa a la que no es", async () => {
 		// Una sesión que saludó antes de que hubiera tabla: el saludo de ahora siempre la lee.
 		await enElHub("aud02-tabla-sin-leer", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-nueva");
+			const { sql, central } = await prepararHub(hub, "main-nueva");
 			const vieja = conectar(hub, "main-vieja", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -542,7 +571,7 @@ describe("AUD-02 · la tabla manda", () => {
 describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main anterior", () => {
 	it("su `apply_lote` no escribe, ni lee, ni llega a la Main nueva, y se la echa con 4001", async () => {
 		await enElHub("aud02-lote", async (hub: any) => {
-			const { sql, central, eventos } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { sql, central, eventos } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			sql.exec(
 				"INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-1', ?, 'admin@ejemplo.test', 'pbkdf2$ficticio', 'Admin');",
 				ADMIN,
@@ -588,7 +617,7 @@ describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main
 
 	it("una vez fuera no recibe lo del negocio ni los avisos de la Main, y no cuenta como Main", async () => {
 		await enElHub("aud02-fuera", async (hub: any) => {
-			const { sql } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { sql } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			const nueva = conectar(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
@@ -624,7 +653,7 @@ describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main
 	it("la Main de una licencia anulada también: 4001 y el negocio se queda sin Main", async () => {
 		// El reembolso o la disputa de un alta, o la anulación a mano, cuando el aviso de cierre no llegó.
 		await enElHub("aud02-anulada", async (hub: any) => {
-			const { sql } = trasladoSinAviso(hub, "main-unica", null);
+			const { sql } = await trasladoSinAviso(hub, "main-unica", null);
 			const main = conectar(hub, "main-unica");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -645,7 +674,7 @@ describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main
 
 	it("veinte lotes suyos a la vez hacen una sola lectura, y no entra ninguno", async () => {
 		await enElHub("aud02-veinte-vieja", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			try {
 				central.retenerLicencias = true;
@@ -681,7 +710,7 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 
 	it("una escritura de la Handy pregunta antes, no la cuenta como Main ni le entrega el cambio", async () => {
 		await enElHub("aud02-pasiva-handy", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -704,7 +733,7 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 
 	it("a una Handy que saluda no se le dice que hay Main", async () => {
 		await enElHub("aud02-pasiva-saludo", async (hub: any) => {
-			const { central } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { central } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			const handy = sinSaludar(hub, "handy-1", "handy");
 			try {
@@ -719,7 +748,7 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 
 	it("el aviso de emparejamiento pregunta antes, y sólo le llega a la Main de la licencia", async () => {
 		await enElHub("aud02-pasiva-aviso", async (hub: any) => {
-			const { central } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
+			const { central } = await trasladoSinAviso(hub, "main-vieja", "main-nueva");
 			const vieja = conectar(hub, "main-vieja");
 			const nueva = conectar(hub, "main-nueva");
 			try {
@@ -737,8 +766,8 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 	it("un socket que no ha saludado no recibe los cambios, aunque sea de la Main", async () => {
 		// Abrió el socket con un ticket de cuando era la Main y se quedó sin saludar.
 		await enElHub("aud02-sin-saludar", async (hub: any) => {
-			prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-nueva");
+			await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const callado = sinSaludar(hub, "main-vieja", "tpv");
 			const propio = sinSaludar(hub, "handy-2", "handy");
 			const nueva = conectar(hub, "main-nueva");
@@ -760,8 +789,8 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 	it("dentro de su minuto sigue dentro, y la primera actividad después la echa", async () => {
 		// La ventana que queda si el aviso de cierre falla: lo que le quede al minuto de la última lectura.
 		await enElHub("aud02-pasiva-ventana", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-vieja");
+			const { sql, central } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-vieja");
 			const vieja = conectar(hub, "main-vieja");
 			try {
 				expect(await escribeLaHandy(hub, "op-1", "z-1")).toMatchObject({ ok: true });
@@ -785,7 +814,7 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 	it("todo lo que sube se atiende, con una lectura de la base central por minuto", async () => {
 		await enElHub("aud02-legitima", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			const main = conectar(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -807,10 +836,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(5);
 				expect(cambios(main).map((m) => m.opId)).toEqual(["op-handy"]);
 				expect(central.lecturas).toBe(1);
-				// Lo que se sabe está en el SQL del DO (sobrevive a la hibernación), y la lectura va con plazo.
+				// Lo que se sabe está en el SQL del DO (sobrevive a la hibernación).
 				expect(mainDeLaTabla(hub)).toBe("main-nueva");
-				expect(central.plazos).toHaveLength(1);
-				expect(central.plazos[0]).toBeGreaterThan(0);
 
 				// Pasado el minuto se vuelve a preguntar, una vez.
 				pasaUnMinuto(hub);
@@ -821,7 +848,29 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				expect(central.lecturas).toBe(2);
 				expect(main.cierre).toBeNull();
 				expect(att(main).authed).toBe(true);
+
+				// Y esa lectura va con plazo: con la base central colgada, el lote no la espera más de lo
+				// que la Main espera su acuse, y entra con lo que dice la tabla. El plazo corre en un reloj
+				// de mentira: el caso no lo espera de verdad, y si se pierde, falla aquí en vez de colgarse.
+				pasaUnMinuto(hub);
+				central.retenerLicencias = true;
+				vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+				try {
+					await hub.webSocketMessage(main.servidor, applyLote("op-6", [altaDeZona("z-6")]));
+					expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
+					expect(elLog(sql)).not.toContain("op-6");
+					await vi.advanceTimersByTimeAsync(LA_MAIN_ESPERA_SU_ACUSE_MS - 1);
+				} finally {
+					vi.useRealTimers();
+				}
+				expect(await acuseDe(main, "op-6")).toMatchObject({ ok: true, resultados: [{ ok: true }] });
+				// La base central no ha llegado a contestar: la lectura sigue retenida, y la tabla, igual.
+				expect(central.retenidas).toHaveLength(1);
+				expect(central.lecturas).toBe(3);
+				expect(mainDeLaTabla(hub)).toBe("main-nueva");
+				expect(main.cierre).toBeNull();
 			} finally {
+				soltarTodas(central);
 				await cerrar(hub, main, handy);
 			}
 		});
@@ -833,8 +882,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 		// no, el segundo se le adelantaba: la fila no lo soltaba, pero no esperaba a que el primero
 		// tuviera sitio.
 		await enElHub("aud02-abrir-la-base", async (hub: any) => {
-			const { sql } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-nueva");
+			const { sql } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const main = conectar(hub, "main-nueva");
 			const directo = hub.withTenantDbRetry;
 			const abrir = retencion();
@@ -869,7 +918,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 
 	it("veinte mensajes de varias clases a la vez: una sola lectura, y se atienden todos", async () => {
 		await enElHub("aud02-veinte-mezcla", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			const main = conectar(hub, "main-nueva", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -906,7 +955,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 		// El primero se queda esperando la comprobación; el segundo ya no tendría que preguntar, y antes
 		// entraba por delante. Las operaciones dependen unas de otras: el orden se ve en el resultado.
 		await enElHub("aud02-veinte-lotes", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			const main = conectar(hub, "main-nueva");
 			try {
 				central.retenerLicencias = true;
@@ -935,7 +984,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 
 	it("un mensaje mal formado, uno vacío, un `ping`, `recovery_ready` o el de una Handy no gastan la lectura", async () => {
 		await enElHub("aud02-sin-coste", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			const main = conectar(hub, "main-nueva", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -985,7 +1034,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 
 	it("con la base central caída o rechazando la consulta no se rechaza nada, y las Handy se sueltan", async () => {
 		await enElHub("aud02-central-caida", async (hub: any) => {
-			const { sql, central } = trasladoSinAviso(hub, "main-nueva", "main-nueva");
+			const { sql, central } = await trasladoSinAviso(hub, "main-nueva", "main-nueva");
 			central.caida = true;
 			// La Main saludó poniéndose al día: las Handy esperan a que las suelte.
 			const main = conectar(hub, "main-nueva", "tpv", true);
@@ -1024,7 +1073,7 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 
 				// La base central vuelve, y entretanto la licencia se había trasladado.
 				central.rechaza = false;
-				central.main = "otro-equipo";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "otro-equipo");
 				pasaUnMinuto(hub);
 				await hub.webSocketMessage(main.servidor, applyLote("op-3", [altaDeZona("z-3")]));
 				expect(await esperarCierre(main)).toEqual({ code: 4001, reason: "device_replaced" });
@@ -1042,7 +1091,7 @@ describe("AUD-02 · una expulsión entre la última espera y lo que se iba a hac
 	// sesión como está después de esperar, no como estaba antes.
 
 	async function conLaLecturaRetenida(hub: any, mensaje: string) {
-		const preparado = trasladoSinAviso(hub, "main-1", "main-1");
+		const preparado = await trasladoSinAviso(hub, "main-1", "main-1");
 		const main = conectar(hub, "main-1");
 		const handy = conectar(hub, "handy-1", "handy");
 		preparado.central.retenerLicencias = true;
@@ -1078,7 +1127,7 @@ describe("AUD-02 · una expulsión entre la última espera y lo que se iba a hac
 
 	it("`recovery_ready` no espera nada, y una vez echada no suelta a nadie", async () => {
 		await enElHub("aud02-espera-ready", async (hub: any) => {
-			const { central } = trasladoSinAviso(hub, "main-1", "main-1");
+			const { central } = await trasladoSinAviso(hub, "main-1", "main-1");
 			const main = conectar(hub, "main-1", "tpv", true);
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -1101,8 +1150,8 @@ describe("AUD-02 · el turno del log", () => {
 		// El mensaje pasó su comprobación y espera detrás de otra escritura. Llega el aviso de las
 		// rutas y se echa su socket.
 		await enElHub("aud02-turno-retenido", async (hub: any) => {
-			const { sql, central, turno } = prepararHub(hub, "main-1");
-			apuntar(hub, "main-1");
+			const { sql, central, turno } = await prepararHub(hub, "main-1");
+			laTablaDiceQueLaMainEs(hub, "main-1");
 			const main = conectar(hub, "main-1");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -1139,8 +1188,8 @@ describe("AUD-02 · el turno del log", () => {
 		// Mientras espera se traslada la licencia, el aviso no llega y pasa el minuto. Cuando le toca,
 		// se pregunta antes de enviarlo.
 		await enElHub("aud02-turno-traslado", async (hub: any) => {
-			const { sql, central, turno } = prepararHub(hub, "main-vieja");
-			apuntar(hub, "main-vieja");
+			const { sql, central, turno } = await prepararHub(hub, "main-vieja");
+			laTablaDiceQueLaMainEs(hub, "main-vieja");
 			const vieja = conectar(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -1151,7 +1200,7 @@ describe("AUD-02 · el turno del log", () => {
 				await unMomento();
 				expect(central.lecturas).toBe(0);
 
-				central.main = "main-nueva";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "main-nueva");
 				pasaUnMinuto(hub);
 				turno.pausa.soltar();
 				expect(await deLaHandy).toMatchObject({ ok: true });
@@ -1172,8 +1221,8 @@ describe("AUD-02 · el turno del log", () => {
 
 	it("tampoco el de la sesión que reemplaza su propia reconexión: lo vuelve a mandar la nueva", async () => {
 		await enElHub("aud02-turno-reemplazada", async (hub: any) => {
-			const { sql, central, turno } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-nueva");
+			const { sql, central, turno } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = conectar(hub, "main-nueva");
 			let segunda: Conexion | null = null;
@@ -1209,8 +1258,8 @@ describe("AUD-02 · el turno del log", () => {
 describe("AUD-02 · los avisos de las rutas", () => {
 	it("la baja de un dispositivo echa su sesión con 4001 y no le atiende nada más, aunque la tabla la diera por Main", async () => {
 		await enElHub("aud02-revocar", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-1");
-			apuntar(hub, "main-1");
+			const { sql, central } = await prepararHub(hub, "main-1");
+			laTablaDiceQueLaMainEs(hub, "main-1");
 			const main = conectar(hub, "main-1");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -1237,8 +1286,8 @@ describe("AUD-02 · los avisos de las rutas", () => {
 
 	it("un cambio de licencia relee en el acto, sin esperar al minuto, y echa a la que ya no es la Main", async () => {
 		await enElHub("aud02-releer", async (hub: any) => {
-			const { central, eventos } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-vieja");
+			const { central, eventos } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-vieja");
 			const vieja = conectar(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
@@ -1259,7 +1308,7 @@ describe("AUD-02 · los avisos de las rutas", () => {
 		// B→A, y el aviso de ese traslado se retrasa; A→B, y B saluda y queda como la Main. Llega
 		// entonces el primer aviso: antes echaba a B sin más.
 		await enElHub("aud02-aviso-tarde", async (hub: any) => {
-			const { central, eventos } = prepararHub(hub, "equipo-b");
+			const { central, eventos } = await prepararHub(hub, "equipo-b");
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			try {
@@ -1284,8 +1333,8 @@ describe("AUD-02 · los avisos de las rutas", () => {
 
 	it("si la lectura del aviso no contesta, no echa a nadie y la siguiente actividad vuelve a preguntar", async () => {
 		await enElHub("aud02-releer-caida", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-vieja");
+			const { sql, central } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-vieja");
 			const vieja = conectar(hub, "main-vieja");
 			try {
 				central.caida = true;
@@ -1309,7 +1358,7 @@ describe("AUD-02 · los avisos de las rutas", () => {
 
 	it("sin ninguna sesión `tpv` autenticada, el aviso lee igualmente", async () => {
 		await enElHub("aud02-releer-vacio", async (hub: any) => {
-			const { central } = prepararHub(hub, "main-1");
+			const { central } = await prepararHub(hub, "main-1");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
 				await hub.releerMain(TENANT);
@@ -1326,7 +1375,7 @@ describe("AUD-02 · los avisos de las rutas", () => {
 		// aviso: B todavía no está autenticada, pero el aviso lee igual, y su lectura, que empezó
 		// después, es la que vale.
 		await enElHub("aud02-releer-saludo", async (hub: any) => {
-			const { central } = prepararHub(hub, "equipo-b");
+			const { central } = await prepararHub(hub, "equipo-b");
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			try {
@@ -1335,7 +1384,7 @@ describe("AUD-02 · los avisos de las rutas", () => {
 				expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
 
 				central.retenerLicencias = false;
-				central.main = "equipo-a";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "equipo-a");
 				await hub.releerMain(TENANT);
 				expect(mainDeLaTabla(hub)).toBe("equipo-a");
 
@@ -1381,7 +1430,7 @@ describe("AUD-02 · el saludo", () => {
 		"si mientras el saludo espera a la base central %s, no se autentica ni se anuncia",
 		async (_como, cerrarlo) => {
 			await enElHub(`aud02-saludo-cerrado-${_como.replace(/\W+/g, "-")}`, async (hub: any) => {
-				const { central } = prepararHub(hub, "main-1");
+				const { central } = await prepararHub(hub, "main-1");
 				const handy = conectar(hub, "handy-1", "handy");
 				const main = await abrir(hub, "main-1");
 				try {
@@ -1417,8 +1466,8 @@ describe("AUD-02 · el saludo", () => {
 
 	it("un cierre que llega al DO deja la sesión fuera, y lo que tuviera esperando no sigue", async () => {
 		await enElHub("aud02-cierre-fuera", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-1");
-			apuntar(hub, "main-1");
+			const { sql, central } = await prepararHub(hub, "main-1");
+			laTablaDiceQueLaMainEs(hub, "main-1");
 			pasaUnMinuto(hub);
 			const main = conectar(hub, "main-1");
 			try {
@@ -1445,8 +1494,8 @@ describe("AUD-02 · el saludo", () => {
 	it("un `tpv` que ya no es la Main de la licencia no pasa el saludo, aunque firme bien", async () => {
 		// El ticket del socket dura 30 s: se emitió antes del traslado y se usa después.
 		await enElHub("aud02-saludo-vieja", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-nueva");
+			const { sql, central } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-nueva");
 			const nueva = conectar(hub, "main-nueva");
 			const vieja = await abrir(hub, "main-vieja");
 			try {
@@ -1470,8 +1519,8 @@ describe("AUD-02 · el saludo", () => {
 		// El aviso de cierre del traslado es best-effort. Si no llegó, la sesión anterior sigue dentro
 		// sin escribir: recibiendo, y contando como Main lista.
 		await enElHub("aud02-saludo-nueva", async (hub: any) => {
-			const { sql, central } = prepararHub(hub, "main-nueva");
-			apuntar(hub, "main-vieja");
+			const { sql, central } = await prepararHub(hub, "main-nueva");
+			laTablaDiceQueLaMainEs(hub, "main-vieja");
 			const vieja = conectar(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			expect(hub.isMainReady()).toBe(true);
@@ -1508,7 +1557,7 @@ describe("AUD-02 · el saludo", () => {
 
 	it("la reconexión de la propia Main reemplaza su sesión anterior y no echa a nadie más", async () => {
 		await enElHub("aud02-saludo-misma", async (hub: any) => {
-			const { central, eventos } = prepararHub(hub, "main-nueva");
+			const { central, eventos } = await prepararHub(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			const primera = await abrir(hub, "main-nueva");
 			expect(await saludar(hub, primera)).toMatchObject({ type: "hello_ok", role: "tpv" });
@@ -1539,7 +1588,7 @@ describe("AUD-02 · el saludo", () => {
 		// («es A») tarda más todavía. Se traslada otra vez a B, cuyo saludo sigue y lee «es B». Llega
 		// la respuesta vieja de A: no se apunta, y A no entra.
 		await enElHub("aud02-saludo-bab", async (hub: any) => {
-			const { central } = prepararHub(hub, "equipo-b");
+			const { central } = await prepararHub(hub, "equipo-b");
 			const handy = conectar(hub, "handy-1", "handy");
 			const b = await abrir(hub, "equipo-b");
 			let a: Conexion | null = null;
@@ -1559,7 +1608,7 @@ describe("AUD-02 · el saludo", () => {
 				await mandarSaludo(hub, b);
 				expect(await esperarA(() => bEsperando)).toBe(true);
 
-				central.main = "equipo-a";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "equipo-a");
 				a = await abrir(hub, "equipo-a");
 				central.retenerLicencias = true;
 				await mandarSaludo(hub, a);
@@ -1567,7 +1616,7 @@ describe("AUD-02 · el saludo", () => {
 				const respuestaDeA = central.retenidas.find((r) => r.que === "licenses")!;
 
 				central.retenerLicencias = false;
-				central.main = "equipo-b";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "equipo-b");
 				soltarB();
 				expect(await respuestaAlSaludo(b)).toMatchObject({ type: "hello_ok", role: "tpv" });
 
@@ -1593,7 +1642,7 @@ describe("AUD-02 · el saludo", () => {
 		// La lectura de la licencia se hizo antes del traslado y su respuesta llega después: después
 		// del cierre del equipo anterior y del saludo de la Main nueva.
 		await enElHub("aud02-saludo-retenido", async (hub: any) => {
-			const { central } = prepararHub(hub, "main-vieja");
+			const { central } = await prepararHub(hub, "main-vieja");
 			const handy = conectar(hub, "handy-1", "handy");
 			const vieja = await abrir(hub, "main-vieja");
 			let nueva: Conexion | null = null;
@@ -1603,7 +1652,7 @@ describe("AUD-02 · el saludo", () => {
 				expect(await esperarA(() => central.retenidas.length === 1)).toBe(true);
 
 				// El traslado, con su aviso de cierre, y la Main nueva entra.
-				central.main = "main-nueva";
+				await laLicenciaDiceQueLaMainEs(central.base, TENANT, "main-nueva");
 				central.retenerLicencias = false;
 				hub.revocarDispositivo("main-vieja");
 				nueva = await abrir(hub, "main-nueva");
@@ -1637,7 +1686,7 @@ describe("AUD-02 · el saludo", () => {
 
 	it("ni el saludo que la propia Main dejó a medias al reconectar", async () => {
 		await enElHub("aud02-saludo-retenido-misma", async (hub: any) => {
-			const { central } = prepararHub(hub, "main-nueva");
+			const { central } = await prepararHub(hub, "main-nueva");
 			const primera = await abrir(hub, "main-nueva");
 			let segunda: Conexion | null = null;
 			try {
@@ -1670,7 +1719,7 @@ describe("AUD-02 · el saludo", () => {
 		// del nuevo falla —aquí, porque la base central no contesta y sin ella un `tpv` no entra—, su
 		// cierre es el que anuncia que no hay Main. La prueba no llama a `webSocketClose`.
 		await enElHub("aud02-saludo-falla", async (hub: any) => {
-			const { central } = prepararHub(hub, "main-1");
+			const { central } = await prepararHub(hub, "main-1");
 			// El runtime no garantiza `webSocketClose` cuando cierra el propio DO: aquí no llega nunca.
 			hub.webSocketClose = async () => {};
 			const handy = conectar(hub, "handy-1", "handy");

@@ -22,7 +22,7 @@ import { cuerpoDeErrorConStatus } from "../src/lib/errorHttp";
 import { MENSAJES } from "../src/lib/errorCodes";
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
@@ -92,16 +92,21 @@ type Negocio = {
 	) => Promise<{ status: number; json: any }>;
 };
 
-/** Un TenantHub con la base de verdad, la Main presente y `sembrar` dentro. */
+/**
+ * Un TenantHub con la base de verdad, la Main presente y `sembrar` dentro. Su base central es una
+ * de verdad.
+ */
 async function conNegocio(nombre: string, sembrar: string[], prueba: (n: Negocio) => Promise<void>) {
+	const central = await centralDePrueba();
 	await enElHub(`sync30-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
 		for (const s of sembrar) sql.exec(s);
-		nube = clienteSobre(sql, hub.state.storage);
 
-		// El lote va por el cliente de verdad (`loteEnBruto`), con lo que tenga que entrar antes.
+		// La ruta lee y el lote escribe por el cliente de verdad (`loteEnBruto`); el lote, con lo que
+		// tenga que entrar antes.
 		const real = clienteLocal(hub.state.storage);
+		nube = real;
 		let antesDelLote: string[] = [];
 		const db = {
 			...real,
@@ -112,7 +117,6 @@ async function conNegocio(nombre: string, sembrar: string[], prueba: (n: Negocio
 			},
 		};
 		hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
-		hub.touchLastSeen = async () => {};
 		hub.isMainConnected = () => true;
 		hub.isMainReady = () => true;
 		hub.maybePurgeSyncLog = async () => {};
@@ -151,7 +155,7 @@ async function conNegocio(nombre: string, sembrar: string[], prueba: (n: Negocio
 				return { status: res.status, json: await res.json() };
 			},
 		});
-	});
+	}, { central });
 }
 
 /* =========================================================

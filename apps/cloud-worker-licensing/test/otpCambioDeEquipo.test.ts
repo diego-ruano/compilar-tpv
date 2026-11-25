@@ -8,14 +8,13 @@
 // cada uno. Lo que se fija aquí es que los topes de verdad van por LICENCIA, y que un dueño que
 // cambia de PC de verdad no los roza.
 //
-// El aprovisionamiento de la base del negocio y los correos se sustituyen: no son lo que se prueba.
+// Cada caso tiene su base central de verdad (`helpers/central.ts`). El aprovisionamiento de la base
+// del negocio y los correos se sustituyen: no son lo que se prueba.
 
 import { describe, expect, it, vi } from "vitest";
 
 import { activacionFirmada, clavePublica } from "./helpers/activar";
-import { clienteSobre } from "./helpers/clienteSql";
-import { enElHub } from "./helpers/hub";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, filasDe, type CentralDePrueba } from "./helpers/central";
 import configuracionDelWorker from "../wrangler.json";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
 import {
@@ -27,13 +26,7 @@ import {
 import { issueLicense, putDeviceOtp } from "../src/server/licenseStore";
 import { purgarBaseCentral } from "../src/server/purga";
 
-let dbDePruebas: unknown = null;
 const correosEnviados: string[] = [];
-
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => dbDePruebas };
-});
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/domains/licensing/licensing.helpers")>();
@@ -63,31 +56,32 @@ const PUB_A = await clavePublica(1);
 const PUB_B = await clavePublica(2);
 const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
-/** Una licencia ya activada en `equipo-a`, que es lo que hace que otro equipo necesite el código. */
+/**
+ * Una licencia ya activada en `equipo-a`, que es lo que hace que otro equipo necesite el código, en
+ * una central propia.
+ */
 async function conLicenciaActivada<T>(
-	nombre: string,
-	prueba: (e: { clave: string; licenseId: string; sql: any }) => Promise<T>,
-) {
-	return enElHub(`otp-${nombre}`, async (hub: any) => {
-		const sql = hub.state.storage.sql;
-		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "devices", "tenants", "license_device_otp", "license_otp_eventos"]) {
-			sql.exec(`DELETE FROM ${tabla};`);
-		}
-		correosEnviados.length = 0;
-		dbDePruebas = clienteSobre(sql);
-		const { license, keyPlain } = await issueLicense(dbDePruebas as any, {
-			claves: STORE_KEY,
-			termMonths: 12,
-			origin: "manual",
-			customerEmail: "bar@ejemplo.test",
-		});
-		expect((await activar(keyPlain, "equipo-a", PUB_A)).status).toBe(200);
-		return prueba({ clave: keyPlain, licenseId: license.license_id, sql });
+	prueba: (e: { clave: string; licenseId: string; central: CentralDePrueba }) => Promise<T>,
+): Promise<T> {
+	const central = await centralDePrueba();
+	correosEnviados.length = 0;
+	const { license, keyPlain } = await issueLicense(central.db, {
+		claves: STORE_KEY,
+		termMonths: 12,
+		origin: "manual",
+		customerEmail: "bar@ejemplo.test",
 	});
+	expect((await activar(central, keyPlain, "equipo-a", PUB_A)).status).toBe(200);
+	return prueba({ clave: keyPlain, licenseId: license.license_id, central });
 }
 
-async function activar(clave: string, deviceId: string, devicePubKey: string, deviceChangeCode?: string) {
+async function activar(
+	central: CentralDePrueba,
+	clave: string,
+	deviceId: string,
+	devicePubKey: string,
+	deviceChangeCode?: string,
+) {
 	const res = await licenseRoutes.request(
 		"/activate",
 		await activacionFirmada({
@@ -97,13 +91,13 @@ async function activar(clave: string, deviceId: string, devicePubKey: string, de
 			deviceChangeCode,
 			tenantInfo: { displayName: "Bar de Pruebas" },
 		}),
-		ENV,
+		{ ...ENV, ...central.entorno },
 		CONTEXTO as any,
 	);
 	return { status: res.status, body: (await res.json()) as any };
 }
 
-async function pedirCodigo(clave: string, deviceId: string, env: Record<string, unknown> = ENV) {
+async function pedirCodigo(central: CentralDePrueba, clave: string, deviceId: string) {
 	const res = await licenseRoutes.request(
 		"/device-change/request",
 		{
@@ -111,15 +105,15 @@ async function pedirCodigo(clave: string, deviceId: string, env: Record<string, 
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ activationKey: clave, deviceId }),
 		},
-		env,
+		{ ...ENV, ...central.entorno },
 		CONTEXTO as any,
 	);
 	return { status: res.status, body: (await res.json()) as any };
 }
 
 /** Deja preparado un código conocido para la pareja (licencia, `deviceId`). */
-async function codigoConocido(licenseId: string, deviceId: string, codigo: string) {
-	await putDeviceOtp(dbDePruebas as any, {
+async function codigoConocido(central: CentralDePrueba, licenseId: string, deviceId: string, codigo: string) {
+	await putDeviceOtp(central.db, {
 		licenseId,
 		newDeviceId: deviceId,
 		codeHash: await otpHash(codigo),
@@ -129,9 +123,9 @@ async function codigoConocido(licenseId: string, deviceId: string, codigo: strin
 
 describe("RI-68 · cuántos códigos se mandan", () => {
 	it("como mucho OTP_CODIGOS_AL_DIA por licencia, aunque cada uno lo pida un equipo distinto", async () => {
-		await conLicenciaActivada("envios", async ({ clave }) => {
+		await conLicenciaActivada(async ({ clave, central }) => {
 			for (let i = 0; i < OTP_CODIGOS_AL_DIA + 3; i++) {
-				const r = await pedirCodigo(clave, `inventado-${i}`);
+				const r = await pedirCodigo(central, clave, `inventado-${i}`);
 				// La respuesta no cambia: no le dice a nadie si la clave existe ni si hay cupo.
 				expect(r).toEqual({ status: 200, body: { ok: true } });
 			}
@@ -140,15 +134,16 @@ describe("RI-68 · cuántos códigos se mandan", () => {
 	});
 
 	it("y los envíos de hace más de un día ya no cuentan", async () => {
-		await conLicenciaActivada("ventana", async ({ clave, licenseId, sql }) => {
+		await conLicenciaActivada(async ({ clave, licenseId, central }) => {
 			for (let i = 0; i < OTP_CODIGOS_AL_DIA; i++) {
-				sql.exec(
+				await filasDe(
+					central,
 					`INSERT INTO license_otp_eventos (license_id, tipo, at_ms) VALUES (?, 'envio', ?);`,
 					licenseId,
 					Date.now() - OTP_VENTANA_MS - 1000,
 				);
 			}
-			await pedirCodigo(clave, "equipo-b");
+			await pedirCodigo(central, clave, "equipo-b");
 			expect(correosEnviados).toHaveLength(1);
 		});
 	});
@@ -156,15 +151,15 @@ describe("RI-68 · cuántos códigos se mandan", () => {
 
 describe("RI-68 · cuántos códigos incorrectos se aceptan", () => {
 	it("pasado OTP_FALLOS_AL_DIA por licencia, ni el código bueno entra, aunque cada fallo fuera de otro equipo", async () => {
-		await conLicenciaActivada("fallos", async ({ clave, licenseId }) => {
+		await conLicenciaActivada(async ({ clave, licenseId, central }) => {
 			for (let i = 0; i < OTP_FALLOS_AL_DIA; i++) {
-				await codigoConocido(licenseId, `inventado-${i}`, "111111");
-				const r = await activar(clave, `inventado-${i}`, PUB_B, "999999");
+				await codigoConocido(central, licenseId, `inventado-${i}`, "111111");
+				const r = await activar(central, clave, `inventado-${i}`, PUB_B, "999999");
 				expect(r.body.error).toBe("invalid_code");
 			}
 
-			await codigoConocido(licenseId, "equipo-b", "222222");
-			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			await codigoConocido(central, licenseId, "equipo-b", "222222");
+			const r = await activar(central, clave, "equipo-b", PUB_B, "222222");
 			expect(r.status).toBe(429);
 			expect(r.body.error).toBe("too_many_attempts");
 			expect(r.body.message).toContain("mañana");
@@ -172,41 +167,42 @@ describe("RI-68 · cuántos códigos incorrectos se aceptan", () => {
 	});
 
 	it("pedir otro código no devuelve los intentos de la licencia", async () => {
-		await conLicenciaActivada("reinicio", async ({ clave, licenseId }) => {
+		await conLicenciaActivada(async ({ clave, licenseId, central }) => {
 			for (let i = 0; i < OTP_FALLOS_AL_DIA; i++) {
 				// El mismo equipo, pidiendo un código nuevo cada vez: eso reinicia los 5 del código,
 				// pero no los de la licencia.
-				await codigoConocido(licenseId, "equipo-b", "111111");
-				await activar(clave, "equipo-b", PUB_B, "999999");
+				await codigoConocido(central, licenseId, "equipo-b", "111111");
+				await activar(central, clave, "equipo-b", PUB_B, "999999");
 			}
-			await codigoConocido(licenseId, "equipo-b", "222222");
-			expect((await activar(clave, "equipo-b", PUB_B, "222222")).status).toBe(429);
+			await codigoConocido(central, licenseId, "equipo-b", "222222");
+			expect((await activar(central, clave, "equipo-b", PUB_B, "222222")).status).toBe(429);
 		});
 	});
 
 	it("un dueño que se equivoca una vez y luego acierta mueve su licencia", async () => {
-		await conLicenciaActivada("dueno", async ({ clave, licenseId }) => {
-			await codigoConocido(licenseId, "equipo-b", "222222");
-			expect((await activar(clave, "equipo-b", PUB_B, "999999")).body.error).toBe("invalid_code");
-			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+		await conLicenciaActivada(async ({ clave, licenseId, central }) => {
+			await codigoConocido(central, licenseId, "equipo-b", "222222");
+			expect((await activar(central, clave, "equipo-b", PUB_B, "999999")).body.error).toBe("invalid_code");
+			const r = await activar(central, clave, "equipo-b", PUB_B, "222222");
 			expect(r.status).toBe(200);
 			expect(r.body.cambioDeEquipo).toBe(true);
 		});
 	});
 
 	it("la purga diaria se lleva los eventos que ya no cuentan, y no los que sí", async () => {
-		await conLicenciaActivada("purga", async ({ licenseId, sql }) => {
+		await conLicenciaActivada(async ({ licenseId, central }) => {
 			const ahora = Date.now();
-			sql.exec(
+			await filasDe(
+				central,
 				`INSERT INTO license_otp_eventos (license_id, tipo, at_ms) VALUES (?, 'fallo', ?), (?, 'envio', ?);`,
 				licenseId,
 				ahora - OTP_VENTANA_MS - 1,
 				licenseId,
 				ahora - OTP_VENTANA_MS + 1000,
 			);
-			const purgado = await purgarBaseCentral(dbDePruebas as any, ahora);
+			const purgado = await purgarBaseCentral(central.db, ahora);
 			expect(purgado.eventosDeCodigo).toBe(1);
-			expect(sql.exec(`SELECT tipo FROM license_otp_eventos;`).toArray()).toEqual([{ tipo: "envio" }]);
+			expect(await filasDe(central, `SELECT tipo FROM license_otp_eventos;`)).toEqual([{ tipo: "envio" }]);
 		});
 	});
 });

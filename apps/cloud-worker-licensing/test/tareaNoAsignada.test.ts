@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { MENSAJES } from "../src/lib/errorCodes";
@@ -29,7 +29,7 @@ describe("finalizar una tarea exige tenerla asignada", () => {
 			sql.exec("INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('ana', 'u1'), ('luis', 'u2');");
 			sql.exec("INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea', 'Limpiar', '2026-10-30 10:00:00');");
 			sql.exec("INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At) VALUES ('tarea', 'ana', '2026-10-30 10:00:00');");
-			const db = clienteSobre(sql) as any;
+			const db = clienteLocal(hub.state.storage);
 
 			expect(await estaAsignada(db, "tarea", "ana")).toBe(true);
 			expect(await estaAsignada(db, "tarea", "luis")).toBe(false);

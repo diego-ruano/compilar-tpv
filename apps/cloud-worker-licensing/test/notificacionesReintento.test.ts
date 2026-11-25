@@ -15,15 +15,17 @@
 // Se recorre la ruta de verdad (`/v1/notificaciones/:id/{descartar,restaurar,eliminar}`, con su
 // validador, el `apply` y el `applyViaHub` reales y el lote de `buildApplyBatch`) sobre el esquema
 // real del negocio. Lo que se sustituye: la autenticación del dispositivo (una Handy ya verificada),
-// la base del negocio (el SQLite del DO) y el DO, que aplica el lote y guarda por clave lo que guarda
-// el gate del de verdad antes de refinarlo. Sin tiempos ni red.
+// cómo llega la ruta a la base del negocio (el SQLite del DO, con su cliente de producción) y el DO,
+// que aplica el lote y guarda por clave lo que guarda el gate del de verdad antes de refinarlo. La
+// base central es una de verdad, con la Handy dada de alta (`helpers/central.ts`). Sin tiempos ni red.
 
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { centralDePrueba, negocioEnLaCentral } from "./helpers/central";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
@@ -38,10 +40,6 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 		c.set("deviceId", "dev-handy");
 		await next();
 	},
-}));
-
-vi.mock("../src/server/db", () => ({
-	getDb: () => ({ execute: async () => ({ rows: [{ role: "handy" }] }) }),
 }));
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
@@ -118,13 +116,25 @@ async function pedir(ruta: string, cuerpo: unknown, env: unknown, op: string) {
 	return { status: res.status, json };
 }
 
-/** Un negocio con un administrador, un camarero y un aviso para los administradores. */
+/**
+ * Un negocio con un administrador, un camarero y un aviso para los administradores, y en su base
+ * central la Handy que lo toca.
+ */
 async function conHub(
 	nombre: string,
 	estado: "activa" | "descartada",
 	primera: Primera,
 	fn: (sql: any, env: unknown) => Promise<void>,
 ) {
+	const central = await centralDePrueba();
+	await negocioEnLaCentral(central, {
+		tenantId: "t-aud26",
+		main: "dev-main",
+		dispositivos: [
+			{ deviceId: "dev-main", rol: "tpv" },
+			{ deviceId: "dev-handy", rol: "handy" },
+		],
+	});
 	await enElHub(nombre, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
@@ -146,8 +156,8 @@ async function conHub(
 			         (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'), ?, '2026-11-11 10:00:00');`,
 			estado,
 		);
-		dbActual = clienteSobre(sql, hub.state.storage);
-		await fn(sql, { TenantHub: hubDePrueba(hub, sql, primera) });
+		dbActual = clienteLocal(hub.state.storage);
+		await fn(sql, { TenantHub: hubDePrueba(hub, sql, primera), ...central.entorno });
 	});
 }
 

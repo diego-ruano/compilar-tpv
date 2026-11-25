@@ -5,25 +5,27 @@
 // contaban a la vez leían el mismo recuento y pasaban, aunque juntas superasen el tope. Ahora el
 // sitio se reserva con la fila, en una sola sentencia, antes de enviar (`reservarCupo`).
 //
-// La ruta de verdad, con SQL de verdad: la base central y la del negocio en el SQLite de un Durable
-// Object, la autenticación simulada y el envío de correo doblado. Ningún caso mide tiempo: el cruce
-// de las peticiones a la vez lo fuerza una barrera, no una espera.
+// La ruta de verdad, con SQL de verdad: la base central es una de verdad (`helpers/central.ts`) y la
+// del negocio, el SQLite de un Durable Object con su cliente de producción; la autenticación,
+// simulada, y el envío de correo, doblado. Una central que no contesta se provoca en su stub. Ningún
+// caso mide tiempo: el cruce de las peticiones a la vez lo fuerza una barrera, no una espera.
 
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { clienteSobre } from "./helpers/clienteSql";
 import { enLaAgenda } from "./helpers/agenda";
-import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { centralDePrueba, centralInterceptada, desvio, filasDe, type Atender, type CentralDePrueba } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 
 // El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
 vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
 
 /** La base del negocio de la prueba en curso (`tenantQuery`). */
 let base: any = null;
-/** La base central de la prueba en curso (`getDb`): el mismo SQLite, con su propio cliente. */
-let central: any = null;
+/** Lo que lleva el `env` de la ruta para que `getDb` llegue a la base central de la prueba en curso. */
+let central: CentralDePrueba["entorno"] | null = null;
 
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
@@ -39,11 +41,6 @@ vi.mock("../src/lib/tenantClient", async (original) => ({
 	tenantQuery: (_c: any, fn: any) => fn(base),
 }));
 
-vi.mock("../src/server/db", async (original) => ({
-	...(await (original as any)()),
-	getDb: () => central,
-}));
-
 const { emailRoutes, TOPE_DIARIO, VENTANA_MS } = await import("../src/domains/email/email.routes");
 
 const app = new Hono();
@@ -51,27 +48,39 @@ app.route("/v1/email", emailRoutes);
 // Como `index.ts`: un error con su status (el 403 de un destinatario que no es proveedor) sale con él.
 app.onError((err: any, c) => c.json({ error: err?.code ?? "internal_error" }, err?.status ?? 500));
 
-const INSERT_ENVIO = `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, sent_at_ms)
-                      VALUES (?, 't1', 'dev', 'prov@prueba.test', 'Prov', 1, ?);`;
+/** `?1` pedidos (al menos uno) ya entregados, en una sola sentencia: uno a uno serían otros tantos viajes. */
+const ENVIOS_ENTREGADOS = `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+                           INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, sent_at_ms)
+                           SELECT ?2 || '-' || i, 't1', 'dev', 'prov@prueba.test', 'Prov', 1, ?3 FROM n;`;
 
-type Ctx = { sql: any; directo: any };
+type Ctx = {
+	/** Las filas de una sentencia en la base central, por debajo de sus guardas. */
+	filas: (sql: string, ...args: unknown[]) => Promise<Record<string, any>[]>;
+	/** Desde ahora, lo que la ruta pida a la base central pasa por `atender`; con `null`, va directo. */
+	interceptar: (atender: Atender | null) => void;
+};
 
-/** Un negocio con su proveedor y su contacto, y `previos` pedidos ya entregados hoy. */
+/**
+ * Un negocio con su proveedor y su contacto, y `previos` pedidos ya entregados hoy en su base
+ * central, que es nueva.
+ */
 async function conNegocio<T>(nombre: string, previos: number, prueba: (ctx: Ctx) => Promise<T>): Promise<T> {
+	const real = await centralDePrueba();
+	const filas = (sql: string, ...args: unknown[]) => filasDe(real, sql, ...args);
+	if (previos > 0) await filas(ENVIOS_ENTREGADOS, previos, crypto.randomUUID(), Date.now());
+	const { atender, desviar } = desvio();
+	const vista = centralInterceptada(real, atender);
 	return enLaAgenda(`aud41-${nombre}`, async (_motor, state) => {
 		const sql = state.storage.sql;
 		crearEsquemaTenant(sql);
-		prepararPlanoDeControl(sql);
 		sql.exec(`UPDATE Contact_Settings SET Contact_Email = 'bar@prueba.test' WHERE ID = 1;`);
 		sql.exec(
 			`INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Email) VALUES ('p1', 'Prov', 'prov@prueba.test');`,
 		);
-		for (let i = 0; i < previos; i++) sql.exec(INSERT_ENVIO, crypto.randomUUID(), Date.now());
-		const directo = clienteSobre(sql, state.storage);
-		base = directo;
-		central = directo;
+		base = clienteLocal(state.storage);
+		central = vista.entorno;
 		try {
-			return await prueba({ sql, directo });
+			return await prueba({ filas, interceptar: desviar });
 		} finally {
 			base = null;
 			central = null;
@@ -79,10 +88,13 @@ async function conNegocio<T>(nombre: string, previos: number, prueba: (ctx: Ctx)
 	});
 }
 
-/** El entorno de la ruta con el envío de correo doblado. */
+/** El entorno de la ruta con el envío de correo doblado y la base central de la prueba en curso. */
 function entorno(send: (m: any) => Promise<void>) {
-	return { EMAIL_FROM_ADDRESS: "pedidos@prueba.test", EMAIL: { send } };
+	return { EMAIL_FROM_ADDRESS: "pedidos@prueba.test", EMAIL: { send }, ...central };
 }
+
+/** Una base central que no contesta. */
+const caida = () => Promise.reject(new Error("la base central no contesta"));
 
 /** Un envío de correo que apunta lo que sale. */
 function correoQueSale() {
@@ -142,14 +154,16 @@ async function aLaVez(n: number, alAbrir?: () => void) {
 
 async function resumen(respuestas: Response[], enviados: any[], ctx: Ctx) {
 	const cuerpos: any[] = await Promise.all(respuestas.map((r) => r.json()));
-	const filas = (donde: string) =>
-		Number(ctx.sql.exec(`SELECT COUNT(*) AS n FROM email_sends WHERE tenant_id = 't1' AND tipo = 'pedido' AND ${donde};`).one().n);
+	const filas = async (donde: string) =>
+		Number(
+			(await ctx.filas(`SELECT COUNT(*) AS n FROM email_sends WHERE tenant_id = 't1' AND tipo = 'pedido' AND ${donde};`))[0].n,
+		);
 	return {
 		respuestas200: respuestas.filter((r) => r.status === 200).length,
 		respuestas429: cuerpos.filter((c, i) => respuestas[i].status === 429 && c.error === "email_limite_diario").length,
 		enviados: enviados.length,
-		filasOk: filas("ok = 1"),
-		filasEnviando: filas("error_code = 'enviando'"),
+		filasOk: await filas("ok = 1"),
+		filasEnviando: await filas("error_code = 'enviando'"),
 	};
 }
 
@@ -199,7 +213,7 @@ describe("AUD-41 · el tope diario de pedidos con peticiones a la vez", () => {
 		try {
 			const r = await conNegocio("desde-que-salio", 0, async (ctx) => {
 				const primera = await aLaVez(TOPE_DIARIO, () => (reloj = T0 + 30_000));
-				const horas = ctx.sql.exec(`SELECT DISTINCT sent_at_ms AS t FROM email_sends;`).toArray().map((f: any) => f.t);
+				const horas = (await ctx.filas(`SELECT DISTINCT sent_at_ms AS t FROM email_sends;`)).map((f) => f.t);
 				reloj = T0 + VENTANA_MS + 1000;
 				const segunda = await aLaVez(TOPE_DIARIO);
 				// A las 12:00:31 del día siguiente, las primeras ya tienen sus 24 h.
@@ -227,7 +241,7 @@ describe("AUD-41 · la reserva del cupo en la ruta", () => {
 				throw Object.assign(new Error("caído"), { code: "E_RATE_LIMIT_EXCEEDED" });
 			});
 			const primera = await pedir(falla);
-			const fallo = ctx.sql.exec(`SELECT ok, error_code FROM email_sends WHERE ok = 0;`).toArray();
+			const fallo = await ctx.filas(`SELECT ok, error_code FROM email_sends WHERE ok = 0;`);
 			const { enviados, env } = correoQueSale();
 			const segunda = await pedir(env);
 			return { primera: [primera.status, ((await primera.json()) as any).error], fallo, segunda: segunda.status, enviados: enviados.length };
@@ -244,7 +258,7 @@ describe("AUD-41 · la reserva del cupo en la ruta", () => {
 		const r = await conNegocio("rechazado", TOPE_DIARIO - 1, async (ctx) => {
 			const { enviados, env } = correoQueSale();
 			const rechazado = await pedir(env, "otro@prueba.test");
-			const filas = ctx.sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n;
+			const [{ n: filas }] = await ctx.filas(`SELECT COUNT(*) AS n FROM email_sends;`);
 			const bueno = await pedir(env);
 			return { rechazado: [rechazado.status, ((await rechazado.json()) as any).error], filas, bueno: bueno.status, enviados: enviados.length };
 		});
@@ -255,7 +269,7 @@ describe("AUD-41 · la reserva del cupo en la ruta", () => {
 		const r = await conNegocio("cerrado", 0, async (ctx) => {
 			const { env } = correoQueSale();
 			const res = await pedir(env);
-			return { status: res.status, filas: ctx.sql.exec(`SELECT * FROM email_sends;`).toArray() };
+			return { status: res.status, filas: await ctx.filas(`SELECT * FROM email_sends;`) };
 		});
 		expect(r.status).toBe(200);
 		expect(r.filas).toHaveLength(1);
@@ -272,25 +286,29 @@ describe("AUD-41 · la reserva del cupo en la ruta", () => {
 
 	it("si la base central no deja reservar, se envía igual y se apunta después si se puede", async () => {
 		const r = await conNegocio("sin-reserva", TOPE_DIARIO - 1, async (ctx) => {
-			central = {
-				execute: async (q: any) => {
-					if (/^\s*INSERT INTO email_sends[\s\S]*SELECT\s+\?1/.test(String(q.sql))) throw new Error("turso caído");
-					return ctx.directo.execute(q);
-				},
-			};
+			let reservasCaidas = 0;
+			ctx.interceptar((metodo, [s], llamar) => {
+				if (metodo !== "ejecutar" || !/^\s*INSERT INTO email_sends[\s\S]*SELECT\s+\?1/.test((s as SentenciaEnlazada).sql)) {
+					return llamar();
+				}
+				reservasCaidas++;
+				return caida();
+			});
 			const { enviados, env } = correoQueSale();
 			const res = await pedir(env);
-			return { status: res.status, enviados: enviados.length, filasOk: ctx.sql.exec(`SELECT COUNT(*) AS n FROM email_sends WHERE ok = 1;`).one().n };
+			const [{ n: filasOk }] = await ctx.filas(`SELECT COUNT(*) AS n FROM email_sends WHERE ok = 1;`);
+			return { status: res.status, enviados: enviados.length, filasOk, reservasCaidas };
 		});
-		expect(r).toEqual({ status: 200, enviados: 1, filasOk: TOPE_DIARIO });
+		expect(r).toEqual({ status: 200, enviados: 1, filasOk: TOPE_DIARIO, reservasCaidas: 1 });
 	});
 
 	it("sin la base central, el pedido sale aunque no quede apuntado", async () => {
 		const r = await conNegocio("sin-base", 0, async (ctx) => {
-			central = { execute: async () => { throw new Error("turso caído"); } };
+			ctx.interceptar(caida);
 			const { enviados, env } = correoQueSale();
 			const res = await pedir(env);
-			return { status: res.status, enviados: enviados.length, filas: ctx.sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n };
+			const [{ n: filas }] = await ctx.filas(`SELECT COUNT(*) AS n FROM email_sends;`);
+			return { status: res.status, enviados: enviados.length, filas };
 		});
 		expect(r).toEqual({ status: 200, enviados: 1, filas: 0 });
 	});

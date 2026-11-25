@@ -16,20 +16,19 @@
 //   · retirado el negocio, el objeto se olvida de quién era y puede volver a darse de alta;
 //   · los eventos de salud llevan el negocio apuntado aunque la instancia no haya recibido ninguna
 //     llamada que se lo diga (la que despierta un mensaje de un socket).
+//
+// El objeto que pregunta a la base central (quién es la Main al releerla; si el negocio ha nacido,
+// una ruta que se encuentra sin base: `lib/basePerdida.ts`) tiene puesta una de verdad y sin
+// licencias (`helpers/central.ts`): ningún negocio ha nacido ni tiene Main. Se le pone con
+// `ponerLaCentral` y se le queda puesta, porque se le llama por RPC, desde fuera de `enElHub`.
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { enElHub } from "./helpers/hub";
+import { centralDePrueba, centralQueApunta } from "./helpers/central";
+import { enElHub, ponerLaCentral } from "./helpers/hub";
 import { negocioApuntado } from "../src/durableObjects/tenantHub.negocio";
 import type { ApplyParams, IdentidadDelWorker } from "../src/durableObjects/tenantHub.rpc";
-
-// Una ruta que se encuentra sin base pregunta a la base central si el negocio ha nacido
-// (`lib/basePerdida.ts`). Aquí ninguno lo ha hecho: no hay licencias.
-vi.mock("../src/server/db", async (importOriginal) => {
-	const original = await importOriginal<typeof import("../src/server/db")>();
-	return { ...original, getDb: () => ({ execute: async () => ({ rows: [] }) }) };
-});
 
 const env = entorno as any;
 const stub = (nombre: string) => env.TenantHub.get(env.TenantHub.idFromName(nombre));
@@ -106,9 +105,10 @@ describe("una llamada con el negocio de otro no llega a la base", () => {
 		const negocio = "negocio-hub-rpc";
 		await stub(negocio).aprovisionar(negocio);
 		const eventos: any[] = [];
+		const central = centralQueApunta(await centralDePrueba());
 		await enElHub(negocio, (hub: any) => {
 			hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
-			hub.mainEnCentral = async () => null;
+			ponerLaCentral(hub, central);
 		});
 
 		const ajeno = { ok: false, code: "negocio_ajeno", status: 500 };
@@ -117,12 +117,14 @@ describe("una llamada con el negocio de otro no llega a la base", () => {
 		expect(await stub(negocio).aplicar(escritura("otro-negocio"))).toEqual({ ok: false, error: "negocio_ajeno", status: 500 });
 		expect(await rechazo(() => stub(negocio).releerMain("otro-negocio"))).toMatch(/negocio_ajeno/);
 
-		// Nada de eso ha escrito: ni la zona, ni la tabla de quién es la Main.
+		// Nada de eso ha escrito: ni la zona, ni la tabla de quién es la Main. Ni ha preguntado a la
+		// base central.
 		await enElHub(negocio, (hub: any) => {
 			const sql = hub.state.storage.sql;
 			expect(Number(sql.exec("SELECT COUNT(*) AS n FROM Zonas;").one().n)).toBe(0);
 			expect(tablas(sql)).not.toContain("_Main_Vigente");
 		});
+		expect(central.pedido).toEqual([]);
 		expect(eventos.filter((e) => e.name === "negocio_ajeno").map((e) => [e.operacion, e.recibido])).toEqual([
 			["leerParaLaWeb", "otro-negocio"],
 			["leerParaLaWeb", ""],
@@ -130,9 +132,11 @@ describe("una llamada con el negocio de otro no llega a la base", () => {
 			["releerMain", "otro-negocio"],
 		]);
 
-		// Con el suyo, todo sigue como siempre.
+		// Con el suyo, todo sigue como siempre: releer la Main pregunta a la base central, que no
+		// tiene ninguna.
 		expect(await stub(negocio).leerParaLaWeb(negocio, { que: "negocioDelCorreo" })).toMatchObject({ ok: true });
 		await expect(stub(negocio).releerMain(negocio)).resolves.toBeUndefined();
+		expect(central.pedido.filter((q) => q.includes("SELECT main_device_id FROM licenses"))).toHaveLength(1);
 		// Sin Main conectada no entra, pero ha pasado la comprobación del negocio.
 		expect(await stub(negocio).aplicar(escritura(negocio))).toEqual({ ok: false, error: "main_offline", status: 400 });
 	});
@@ -155,7 +159,6 @@ describe("una llamada con el negocio de otro no llega a la base", () => {
 		const negocio = "negocio-hub-ws";
 		await stub(negocio).aprovisionar(negocio);
 		await enElHub(negocio, async (hub: any) => {
-			hub.touchLastSeen = async () => {};
 			const abrir = (tenantId: string): Promise<Response> =>
 				hub.fetch(
 					new Request("https://hub/ws", {
@@ -199,6 +202,8 @@ describe("un objeto que ya tenía base sin negocio apuntado", () => {
 describe("un objeto sin base", () => {
 	it("no apunta nada ni crea tablas por preguntarle", async () => {
 		const negocio = "negocio-hub-sin-base";
+		const central = centralQueApunta(await centralDePrueba());
+		await enElHub(negocio, (hub: any) => void ponerLaCentral(hub, central));
 		expect(await stub(negocio).leerParaLaWeb(negocio, { que: "negocioDelCorreo" })).toMatchObject({
 			ok: false,
 			code: "tenant_db_not_provisioned",
@@ -212,6 +217,12 @@ describe("un objeto sin base", () => {
 			rol: "tpv",
 		});
 		expect(deLaMain.status).toBe(404);
+		// Cada una ha preguntado a la base central si el negocio ha nacido (no), y nada más: tampoco
+		// quién es la Main.
+		expect(central.pedido.map((q) => /FROM licenses WHERE tenant_id = \? AND activated_at_ms IS NOT NULL/.test(q))).toEqual([
+			true,
+			true,
+		]);
 
 		await enElHub(negocio, (hub: any) => {
 			expect(negocioApuntado(hub.state.storage)).toBeNull();

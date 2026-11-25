@@ -17,7 +17,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { dentroDelHub, type HubLocal } from "../src/lib/hubLocal";
@@ -109,7 +109,7 @@ async function conBase<R>(nombre: string, prueba: (sql: any) => Promise<R>): Pro
 		sembrar(sql);
 		hubDelTest = {
 			identidad: { tenantId: "t1", deviceId: "d1", token: "", licHash: "", rol: "tpv" },
-			base: async () => clienteSobre(sql),
+			base: async () => clienteLocal(hub.state.storage),
 			sql: async () => sql,
 			aplicar: async () => {
 				throw new Error("estas rutas no aplican nada");
