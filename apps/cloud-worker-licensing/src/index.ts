@@ -50,9 +50,9 @@ export const BaseCentral = Sentry.instrumentDurableObjectWithSentry(sentryOption
  * Cada tarea va en su propio `try` y ninguna propaga: son independientes, y la purga —que es
  * mantenimiento— no puede llevarse por delante un aviso que alguien está esperando para renovar.
  */
-async function programado(env: Env): Promise<void> {
+async function programado(env: Env, ctx: ExecutionContext): Promise<void> {
 	try {
-		const r = await avisarDeCaducidades(env, getDb(env));
+		const r = await avisarDeCaducidades(env, getDb(env), Date.now(), (promesa) => ctx.waitUntil(promesa));
 		console.log(
 			`[cron] avisos de caducidad: ${r.enviados} enviados, ${r.yaAvisadas} ya avisadas, ` +
 				`${r.fallidos} fallidos, de ${r.revisadas} revisadas`,
@@ -111,5 +111,5 @@ async function programado(env: Env): Promise<void> {
 // `nodejs_compat`, ver wrangler.json). Si no hay `SENTRY_DSN`, es un no-op transparente.
 export default Sentry.withSentry(sentryOptions, {
 	fetch: (request, env, ctx) => app.fetch(request, env, ctx),
-	scheduled: (_evento, env, ctx) => ctx.waitUntil(programado(env)),
+	scheduled: (_evento, env, ctx) => ctx.waitUntil(programado(env, ctx)),
 } satisfies ExportedHandler<Env>);

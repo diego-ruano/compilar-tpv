@@ -10,7 +10,7 @@
 // Corre contra una base central de verdad (`helpers/central.ts`), nueva en cada caso, vista a través
 // de su stub (`centralInterceptada`), por donde se le hace fallar un viaje.
 
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 import { centralDePrueba, centralInterceptada, desvio, filasDe, type Atender, type CentralDePrueba } from "./helpers/central";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
@@ -31,9 +31,29 @@ vi.mock("../src/observability/errors", async (importOriginal) => {
 	};
 });
 
+/** Con Axiom configurado: lo que se le manda, en `eventos`. */
+const AXIOM = { AXIOM_TOKEN: "token-de-pruebas", AXIOM_DATASET_SYNC: "sync-de-pruebas" };
+let eventos: any[] = [];
+
 beforeEach(() => {
 	capturados.length = 0;
+	eventos = [];
+	vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+		eventos.push(...JSON.parse(String(init.body)));
+		return new Response("{}", { status: 200 });
+	});
 });
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+/** Los eventos `central_no_disponible` que han salido, cuando son `cuantos`: el motivo, el método y la ruta. */
+async function sinLaCentral(cuantos: number) {
+	const de = () => eventos.filter((e) => e.event === "central_no_disponible");
+	await vi.waitFor(() => expect(de()).toHaveLength(cuantos));
+	return de().map((e) => [e.motivo, e.metodo, e.ruta]);
+}
 
 const DIA = 24 * 60 * 60 * 1000;
 const AHORA = 1_800_000_000_000;
@@ -291,11 +311,15 @@ describe("REV-13 · el enlace", () => {
 	});
 });
 
+/** Como marca la plataforma un fallo pasajero, o la central saturada. */
+const PASAJERA = { retryable: true };
+const SATURADA = { overloaded: true };
+
 /**
- * Un `Atender` que rechaza, como la plataforma ante un fallo pasajero, el primer viaje con una
- * sentencia que case con `patron` sobre la licencia `licencia`, sin que llegue a la central.
+ * Un `Atender` que rechaza, como la plataforma (por defecto, ante un fallo pasajero), el primer viaje
+ * con una sentencia que case con `patron` sobre la licencia `licencia`, sin que llegue a la central.
  */
-function fallaUnaVez(patron: RegExp, licencia: string): Atender {
+function fallaUnaVez(patron: RegExp, licencia: string, marca: object = PASAJERA): Atender {
 	let pendiente = true;
 	return (metodo, argumentos, llamar) => {
 		const sentencia = argumentos[0] as SentenciaEnlazada;
@@ -303,9 +327,7 @@ function fallaUnaVez(patron: RegExp, licencia: string): Atender {
 			return llamar();
 		}
 		pendiente = false;
-		return Promise.reject(
-			Object.assign(new Error("Durable Object reset because its code was updated."), { retryable: true }),
-		);
+		return Promise.reject(Object.assign(new Error("Durable Object reset because its code was updated."), marca));
 	};
 }
 
@@ -315,7 +337,7 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 			// La que caduca antes es la primera que se revisa.
 			await e.licencia("lic-a", 20);
 			await e.licencia("lic-b", 25);
-			const { env, enviados } = entorno();
+			const { env, enviados } = entorno(AXIOM);
 
 			e.desviar(fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a"));
 			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
@@ -327,9 +349,10 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 
 		expect(r.hoy).toMatchObject({ revisadas: 2, enviados: 1, yaAvisadas: 0, fallidos: 1 });
 		expect(r.deHoy).toEqual(["lic-b@ejemplo.test"]);
-		// Lo que ha fallado va a Sentry, con la operación del cron.
-		expect(capturados.map((c) => c.operacion)).toEqual(["cron.license_expiry"]);
-		expect(capturados[0].error).toBeInstanceOf(CentralNoDisponible);
+		// La central que no atiende por un fallo pasajero queda en Axiom, con la operación del cron, y no
+		// va a Sentry: como en el resto del Worker.
+		expect(await sinLaCentral(1)).toEqual([["pasajera", "cron", "cron.license_expiry"]]);
+		expect(capturados).toEqual([]);
 		// No llegó a marcarse, así que el ciclo siguiente la avisa.
 		expect(r.manana).toMatchObject({ enviados: 1, yaAvisadas: 1, fallidos: 0 });
 		expect(r.enviados.map((c) => c.to)).toEqual(["lic-b@ejemplo.test", "lic-a@ejemplo.test"]);
@@ -341,6 +364,7 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 			await e.licencia("lic-b", 25);
 			const enviados: string[] = [];
 			const { env } = entorno({
+				...AXIOM,
 				EMAIL: {
 					send: async (msg: Correo) => {
 						if (msg.to === "lic-a@ejemplo.test") throw new Error("buzón caído");
@@ -357,8 +381,60 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 
 		expect(r.resumen).toMatchObject({ revisadas: 2, enviados: 1, yaAvisadas: 0, fallidos: 1 });
 		expect(r.enviados).toEqual(["lic-b@ejemplo.test"]);
-		// El correo que no salió y la central que no soltó la marca.
-		expect(capturados.map((c) => c.operacion)).toEqual(["license_email.send", "cron.license_expiry"]);
-		expect(capturados[1].error).toBeInstanceOf(CentralNoDisponible);
+		// El correo que no salió va a Sentry; la central que no soltó la marca, a Axiom.
+		expect(capturados.map((c) => c.operacion)).toEqual(["license_email.send"]);
+		expect(await sinLaCentral(1)).toEqual([["pasajera", "cron", "cron.license_expiry"]]);
+	});
+
+	it("un fallo de la central que no es carga ni pasajero sí va a Sentry, con la operación del cron", async () => {
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			await e.licencia("lic-b", 25);
+			const { env } = entorno(AXIOM);
+			e.desviar(fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a", {}));
+			return avisarDeCaducidades(env, e.db, AHORA);
+		});
+
+		expect(r).toMatchObject({ revisadas: 2, enviados: 1, fallidos: 1 });
+		expect(capturados.map((c) => c.operacion)).toEqual(["cron.license_expiry"]);
+		expect(capturados[0].error).toBeInstanceOf(CentralNoDisponible);
+		expect(await sinLaCentral(1)).toEqual([["rechazo", "cron", "cron.license_expiry"]]);
+	});
+});
+
+describe("REV-13 · con la central saturada, el ciclo se corta", () => {
+	it("las que faltan cuentan como fallidas, sin más viajes ni Sentry, y mañana se avisa de todas", async () => {
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			await e.licencia("lic-b", 25);
+			await e.licencia("lic-c", 28);
+			const { env, enviados } = entorno(AXIOM);
+
+			// Saturada al marcar la primera; lo que se pida después, contado.
+			let saturada = false;
+			let viajesDespues = 0;
+			const marcarLaPrimera = fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a", SATURADA);
+			e.desviar((metodo, argumentos, llamar) => {
+				if (saturada) viajesDespues++;
+				const respuesta = marcarLaPrimera(metodo, argumentos, llamar);
+				if (respuesta instanceof Promise) respuesta.catch(() => (saturada = true));
+				return respuesta;
+			});
+			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
+			e.desviar(null);
+			const deHoy = enviados.map((c) => c.to);
+			const manana = await avisarDeCaducidades(env, e.db, AHORA + DIA);
+			return { hoy, deHoy, viajesDespues, manana, enviados: enviados.map((c) => c.to), avisos: await e.avisos() };
+		});
+
+		expect(r.hoy).toMatchObject({ revisadas: 3, enviados: 0, yaAvisadas: 0, fallidos: 3 });
+		expect(r.deHoy).toEqual([]);
+		expect(r.viajesDespues).toBe(0);
+		expect(capturados).toEqual([]);
+		expect(await sinLaCentral(1)).toEqual([["saturada", "cron", "cron.license_expiry"]]);
+		// Ninguna se marcó: al día siguiente salen las tres.
+		expect(r.manana).toMatchObject({ revisadas: 3, enviados: 3, fallidos: 0 });
+		expect(r.enviados).toEqual(["lic-a@ejemplo.test", "lic-b@ejemplo.test", "lic-c@ejemplo.test"]);
+		expect(r.avisos).toHaveLength(3);
 	});
 });
