@@ -2,9 +2,10 @@
 //
 // Lo que enseña el CLI de administración (`tpv-license.mjs`) cuando una vuelta de la base central a
 // un instante no sale entera: con qué se deshace, la copia de antes y, si eso se pierde, a qué
-// instante se vuelve; en TODAS las ramas de error, antes de terminar. También cuando no hay una
-// respuesta que leer (la red, un cuerpo que no es JSON): entonces no se sabe si la vuelta se pidió, y
-// dice cómo mirarlo y cómo deshacerla.
+// instante se vuelve; si quedó sin aplicar, la orden que la aplica (`--reiniciar`), que no vuelve dos
+// veces; en TODAS las ramas de error, antes de terminar. También cuando no hay una respuesta que leer
+// (la red, un cuerpo que no es JSON): entonces no se sabe si la vuelta se pidió, y dice cómo saberlo
+// (`central:copias`, con su `pedida`) sin proponer otra vuelta.
 //
 // El worker es de mentira, pero lo que contesta es lo que contesta la aplicación entera, con
 // `completarErrores` y el `onError`: `tpv-license.respuestas.json`, que escribe y vigila
@@ -110,6 +111,21 @@ async function volverCon(contestar) {
 /** La orden que deshace con el marcador `m`. */
 const conElMarcador = (m) => `pnpm central:volver -- --marcador ${m} --si`;
 
+/** La orden que aplica la vuelta preparada que se deshace con `m`. */
+const aplicando = (m) => `pnpm central:volver -- --reiniciar ${m} --si`;
+
+/** Aplica la vuelta preparada que se deshace con `deshacer`, contra un worker que contesta con `contestar`. */
+async function aplicarCon(contestar, deshacer) {
+	return conElWorker(contestar, async (base, peticiones) => {
+		const r = await cliContra(base, "central-volver", "--reiniciar", deshacer, "--si");
+		assert.deepEqual(
+			peticiones.map((p) => [p.metodo, p.ruta, p.cuerpo]),
+			[["POST", "/v1/admin/central/volver", JSON.stringify({ reiniciar: deshacer })]],
+		);
+		return r;
+	});
+}
+
 /** Que dice a qué instante volver si se pierde el marcador, y que es el de justo antes de pedir la vuelta. */
 function diceElInstanteDeAntes(r) {
 	const instante = /pnpm central:volver -- --instante (\S+) --si/.exec(r.salida)?.[1];
@@ -133,13 +149,15 @@ test("la vuelta que ha vuelto sin atender (503 external por completarErrores) di
 	assert.doesNotMatch(r.salida, /no se sabe si ha entrado/i);
 });
 
-test("la vuelta preparada que no se ha aplicado (503 internal) dice con qué se deshace, la copia de antes y el instante de antes", async () => {
+test("la vuelta preparada que no se ha aplicado (503 internal) da la orden que la aplica, con qué se deshace, la copia de antes y el instante de antes", async () => {
 	const respuesta = RESPUESTAS["vuelta-sin-aplicar"];
 	const r = await volverCon(enJson(respuesta));
 	assert.equal(r.codigo, 1);
 	assert.ok(r.salida.includes(`✖ 503: central_vuelta_sin_aplicar — ${respuesta.cuerpo.message}`), r.salida);
-	assert.ok(r.salida.includes(`Para deshacerla: ${conElMarcador(respuesta.cuerpo.deshacer)}`), r.salida);
+	assert.ok(r.salida.includes(`Para aplicarla: ${aplicando(respuesta.cuerpo.deshacer)}`), r.salida);
+	assert.ok(r.salida.includes(`Para anularla, o deshacerla una vez aplicada: ${conElMarcador(respuesta.cuerpo.deshacer)}`), r.salida);
 	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
+	assert.doesNotMatch(r.salida, /Repite la misma orden/i);
 	diceElInstanteDeAntes(r);
 });
 
@@ -154,15 +172,54 @@ for (const [que, contestar] of [
 	],
 	["la conexión se corta sin respuesta", (peticion) => peticion.socket.destroy()],
 ]) {
-	test(`si ${que}, no se sabe si la vuelta se pidió: dice cómo mirarlo y a qué instante volver`, async () => {
+	test(`si ${que}, no se sabe si la vuelta se pidió: dice cómo saberlo en R2, y no propone otra vuelta`, async () => {
 		const r = await volverCon(contestar);
 		assert.equal(r.codigo, 1);
-		assert.match(r.salida, /No se sabe si la vuelta ha llegado a pedirse: mira cómo está con pnpm central:estado\./);
-		assert.match(r.salida, /pnpm central:copias \(columna marcador/);
-		diceElInstanteDeAntes(r);
-		assert.doesNotMatch(r.salida, /Para deshacerla:/);
+		assert.match(r.salida, /No se sabe si la vuelta ha llegado a pedirse\. Míralo con pnpm central:copias/);
+		assert.ok(r.salida.includes("· Si no la hay, no se ha pedido: no hay nada que deshacer."), r.salida);
+		assert.ok(r.salida.includes("· Si la hay con hora en «pedida», se ha pedido."), r.salida);
+		assert.ok(r.salida.includes("No repitas la vuelta sin mirarlo"), r.salida);
+		// Sin nada en R2 no se ha pedido: volver a justo antes sería una vuelta de más.
+		assert.doesNotMatch(r.salida, /--instante|Para deshacerla:/);
 	});
 }
+
+test("aplicar la vuelta preparada (--reiniciar) dice que ha vuelto y con qué se deshace", async () => {
+	const respuesta = RESPUESTAS["aplicar-la-preparada"];
+	const r = await aplicarCon(enJson(respuesta), respuesta.cuerpo.deshacer);
+	assert.equal(r.codigo, 0, r.salida);
+	assert.ok(r.salida.includes(`✔ La vuelta preparada se ha aplicado: la central ha vuelto al marcador ${respuesta.cuerpo.destino}.`), r.salida);
+	assert.ok(r.salida.includes(`Copia de cómo estaba antes: ${respuesta.cuerpo.copiaDeAntes}`), r.salida);
+	assert.ok(r.salida.includes(conElMarcador(respuesta.cuerpo.deshacer)), r.salida);
+});
+
+test("aplicarla otra vez, ya aplicada, dice que no hay ninguna preparada, y nada más", async () => {
+	const respuesta = RESPUESTAS["aplicar-ya-aplicada"];
+	const r = await aplicarCon(enJson(respuesta), RESPUESTAS["aplicar-la-preparada"].cuerpo.deshacer);
+	assert.equal(r.codigo, 1);
+	assert.ok(r.salida.includes(`✖ 409: central_sin_vuelta_preparada — ${respuesta.cuerpo.message}`), r.salida);
+	assert.doesNotMatch(r.salida, /No se sabe|Para aplicarla|--instante/);
+});
+
+test("si aplicarla no contesta, dice que basta con repetir esa misma orden", async () => {
+	const r = await aplicarCon((peticion) => peticion.socket.destroy(), RESPUESTAS["aplicar-la-preparada"].cuerpo.deshacer);
+	assert.equal(r.codigo, 1);
+	assert.match(r.salida, /No se sabe si la central se ha reiniciado: mira cómo está con pnpm central:estado\./);
+	assert.match(r.salida, /repite esta misma orden: si ya se ha aplicado, no hace nada\./);
+	assert.doesNotMatch(r.salida, /--instante/);
+});
+
+test("central:copias enseña el marcador de la copia de antes y cuándo se pidió la vuelta", async () => {
+	const respuesta = RESPUESTAS["copias-tras-la-vuelta"];
+	const [copia] = respuesta.cuerpo.copias;
+	await conElWorker(enJson(respuesta), async (base) => {
+		const r = await cliContra(base, "central-copias");
+		assert.equal(r.codigo, 0, r.salida);
+		assert.ok(r.salida.includes(copia.marcador), r.salida);
+		assert.ok(r.salida.includes(copia.pedida), r.salida);
+		assert.ok(r.salida.includes("pedida: cuándo se le pidió aquella vuelta a la plataforma."), r.salida);
+	});
+});
 
 for (const [nombre, aviso] of [
 	["vuelta-sin-copia-de-antes", "✖ 500: central_copia_fallida — La copia no ha llegado a R2, y no se ha hecho nada."],
@@ -187,15 +244,16 @@ test("la vuelta hecha dice con qué se deshace, la copia de antes y el instante 
 	diceElInstanteDeAntes(r);
 });
 
-test("con la vuelta preparada y sin aplicar, central:estado da la orden exacta que la reinicia y la que la deshace", async () => {
+test("con la vuelta preparada y sin aplicar, central:estado da la orden exacta que la aplica (no la de la vuelta) y la que la deshace", async () => {
 	const respuesta = RESPUESTAS["estado-con-la-vuelta-sin-aplicar"];
-	const { destino, preparada } = respuesta.cuerpo.enCurso.vuelta;
+	const { preparada } = respuesta.cuerpo.enCurso.vuelta;
 	await conElWorker(enJson(respuesta), async (base, peticiones) => {
 		const r = await cliContra(base, "central-estado");
 		assert.equal(r.codigo, 0, r.salida);
 		assert.deepEqual(peticiones.map((p) => [p.metodo, p.ruta]), [["GET", "/v1/admin/central/estado"]]);
-		assert.ok(r.salida.includes(`Se reinicia repitiendo la misma orden: pnpm central:volver -- --instante ${destino} --si`), r.salida);
-		assert.ok(r.salida.includes(`Para deshacerla, una vez aplicada: ${conElMarcador(preparada.deshacer)}`), r.salida);
+		assert.ok(r.salida.includes(`Se aplica con: ${aplicando(preparada.deshacer)}`), r.salida);
+		assert.ok(r.salida.includes(`Para anularla, o deshacerla una vez aplicada: ${conElMarcador(preparada.deshacer)}`), r.salida);
+		assert.doesNotMatch(r.salida, /misma orden: pnpm central:volver -- --instante/);
 	});
 });
 

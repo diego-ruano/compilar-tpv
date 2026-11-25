@@ -34,6 +34,7 @@ import {
 	centralInterceptada,
 	centralSinAprovisionar,
 	conDobleDeInstantes,
+	conPlataformaQueVuelve,
 	filasDe,
 	MARCADORES,
 	type CentralDePrueba,
@@ -363,19 +364,25 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			{ ...deLaVuelta, resultado: "preparada" },
 			{ ...deLaVuelta, resultado: "ok" },
 		]);
-		// Y la lista de las copias lo enseña, en la copia de antes: está en R2.
+		// Y la lista de las copias lo enseña, en la copia de antes: está en R2, con la hora a la que se
+		// pidió la vuelta (`….pedida`, que no es una fila).
 		const lista = await pedir(entornoCon(central), "GET", "/copias");
-		expect(lista.body.copias.find((c: any) => c.clave === r.body.copiaDeAntes)).toMatchObject({ marcador: MARCADORES.actual });
+		expect(lista.body.copias.find((c: any) => c.clave === r.body.copiaDeAntes)).toMatchObject({
+			marcador: MARCADORES.actual,
+			pedida: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+		});
+		expect(lista.body.copias.map((c: any) => c.clave)).not.toContain(r.body.copiaDeAntes.replace(/\.sql\.gz$/, ".pedida"));
 
 		// Deshacer es volver al marcador que devolvió.
 		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.actual }) });
 		expect(deshecha).toMatchObject({ status: 200, body: { ok: true, destino: MARCADORES.actual } });
 	});
 
-	it("si la central no llega a reiniciarse, lo dice, con lo necesario para deshacerlo; y repetir la orden la reinicia", async () => {
+	it("si la central no llega a reiniciarse, lo dice, con lo necesario para aplicarla y deshacerla; `reiniciar` con su deshacer la aplica, sin pedir otra, y repetirlo no hace nada", async () => {
 		const central = await centralDePrueba();
 		const llamadas: string[] = [];
 		await conDobleDeInstantes(central, llamadas, { alReiniciar: () => {} });
+		const log = vi.spyOn(console, "log");
 
 		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADOR }) });
 		expect(r).toMatchObject({
@@ -383,23 +390,89 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			body: {
 				ok: false,
 				error: "central_vuelta_sin_aplicar",
-				message: expect.stringContaining("Repite la misma orden"),
+				message: expect.stringContaining("Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si"),
 				deshacer: MARCADORES.actual,
 				copiaDeAntes: expect.stringMatching(/^base-central\/antes-de-volver-/),
 			},
 		});
+		expect(r.body.message).not.toMatch(/Repite la misma orden/);
 		expect(llamadas.filter((l) => l === "reiniciar")).toHaveLength(2);
 
 		// Mientras tanto, lo que se le pide dice cómo salir de ahí.
-		expect(await pedir(entornoCon(central), "POST", "/copiar-ahora")).toMatchObject({
+		const copiar = await pedir(entornoCon(central), "POST", "/copiar-ahora");
+		expect(copiar).toMatchObject({
 			status: 503,
-			body: { error: "central_vuelta_en_curso", message: expect.stringContaining("repitiendo la misma orden de pnpm central:volver") },
+			body: { error: "central_vuelta_en_curso", message: expect.stringContaining("pnpm central:volver -- --reiniciar <deshacer> --si") },
 		});
+		expect(copiar.body.message).not.toMatch(/la misma orden/);
+
 		await conDobleDeInstantes(central, llamadas);
-		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADOR }) })).toMatchObject({
+		const aplicada = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ reiniciar: MARCADORES.actual }) });
+		expect(aplicada).toMatchObject({
 			status: 200,
-			body: { ok: true, destino: MARCADOR },
+			body: {
+				ok: true,
+				destino: MARCADOR,
+				deshacer: MARCADORES.actual,
+				copiaDeAntes: r.body.copiaDeAntes,
+				estado: { aprovisionada: true, averia: null, enCurso: { restauracion: null, vuelta: null } },
+			},
 		});
+		// Sin otra preparación: sólo el reinicio.
+		expect(llamadas.filter((l) => l.startsWith("restaurar:"))).toEqual([`restaurar:${MARCADOR}`]);
+		expect(llamadas.filter((l) => l === "reiniciar")).toHaveLength(3);
+
+		// Repetirlo, ya aplicada, no reinicia nada.
+		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ reiniciar: MARCADORES.actual }) })).toMatchObject({
+			status: 409,
+			body: {
+				ok: false,
+				error: "central_sin_vuelta_preparada",
+				message: expect.stringContaining("o se ha aplicado"),
+				estado: { enCurso: { vuelta: null } },
+			},
+		});
+		expect(llamadas.filter((l) => l === "reiniciar")).toHaveLength(3);
+
+		const deLaVuelta = { accion: "volver", destino: MARCADOR, deshacer: MARCADORES.actual, copiaDeAntes: r.body.copiaDeAntes };
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "volver", resultado: "empieza", destino: MARCADOR },
+			{ ...deLaVuelta, resultado: "preparada" },
+			{ ...deLaVuelta, resultado: "central_vuelta_sin_aplicar" },
+			{ accion: "copiar", resultado: "central_vuelta_en_curso" },
+			{ ...deLaVuelta, resultado: "reinicia" },
+			{ ...deLaVuelta, resultado: "ok" },
+			{ accion: "volver", resultado: "central_sin_vuelta_preparada", deshacer: MARCADORES.actual },
+		]);
+	});
+
+	it("si la central se reinicia por su cuenta antes de aplicar la vuelta que quedó sin aplicar, la orden que da para aplicarla no vuelve otra vez: lo escrito después se queda", async () => {
+		const alta = (id: string) => `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('${id}', 1, 1);`;
+		const LOS_NEGOCIOS = "SELECT tenant_id FROM tenants ORDER BY tenant_id;";
+		const central = await centralDePrueba();
+		await filasDe(central, alta("t-1"));
+		const plataforma = await conPlataformaQueVuelve(central);
+		const objetivo = await plataforma.fotografiar();
+		await filasDe(central, alta("t-2"));
+		// El reinicio de la ruta no llega al objeto.
+		const sinReinicio = centralInterceptada(central, (metodo, _a, llamar) =>
+			metodo === "reiniciar" ? Promise.reject(new Error("no llega")) : llamar(),
+		);
+		const r = await pedir(entornoCon(sinReinicio), "POST", "/volver", { cuerpo: json({ marcador: objetivo }) });
+		expect(r).toMatchObject({ status: 503, body: { error: "central_vuelta_sin_aplicar", deshacer: expect.any(String) } });
+
+		// El objeto se reinicia por su cuenta (un despliegue): vuelve. Después, un TPV escribe.
+		await plataforma.reiniciar();
+		await central.db.execute({ sql: alta("t-3") });
+		expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-3" }]);
+
+		// La orden que da la respuesta para aplicarla.
+		const orden = /pnpm central:volver -- --reiniciar <deshacer> --si/.exec(r.body.message);
+		expect(orden).not.toBeNull();
+		const aplicar = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ reiniciar: r.body.deshacer }) });
+		expect(aplicar).toMatchObject({ status: 409, body: { ok: false, error: "central_sin_vuelta_preparada" } });
+		expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-3" }]);
+		expect(plataforma.llamadas.filter((l) => l.startsWith("restaurar:"))).toEqual([`restaurar:${objetivo}`]);
 	});
 
 	it("si la central vuelve pero no atiende, no lo da por bueno: dice por qué, con lo necesario para deshacerlo", async () => {
@@ -429,10 +502,18 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		expect(rastrosDe(log).map((r) => r.resultado)).toEqual(["empieza", "preparada", "central_restauracion_a_medias"]);
 	});
 
-	it("un instante o un marcador, uno de los dos; y el instante, de los últimos 30 días", async () => {
+	it("un instante, un marcador o la vuelta preparada que se aplica, una sola cosa; y el instante, de los últimos 30 días", async () => {
 		const central = await centralDePrueba();
 		const entorno = entornoCon(central);
-		for (const cuerpo of [{}, { instanteMs: Date.now() - 1000, marcador: MARCADOR }, { marcador: "" }, { instanteMs: "ayer" }]) {
+		for (const cuerpo of [
+			{},
+			{ instanteMs: Date.now() - 1000, marcador: MARCADOR },
+			{ marcador: MARCADOR, reiniciar: MARCADOR },
+			{ instanteMs: Date.now() - 1000, reiniciar: MARCADOR },
+			{ marcador: "" },
+			{ reiniciar: "" },
+			{ instanteMs: "ayer" },
+		]) {
 			expect(await pedir(entorno, "POST", "/volver", { cuerpo: json(cuerpo) }), json(cuerpo)).toMatchObject({
 				status: 400,
 				body: { ok: false, error: "validation_error" },
@@ -461,10 +542,12 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		const llamadas: string[] = [];
 		await conDobleDeInstantes(central, llamadas);
 		const log = vi.spyOn(console, "log");
-		expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador }) })).toMatchObject({
-			status: 400,
-			body: { ok: false, error: "validation_error", message: expect.stringMatching(/^Ese no es un marcador/) },
-		});
+		for (const cuerpo of [{ marcador }, { reiniciar: marcador }]) {
+			expect(await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json(cuerpo) }), json(cuerpo)).toMatchObject({
+				status: 400,
+				body: { ok: false, error: "validation_error", message: expect.stringMatching(/^Ese no es un marcador/) },
+			});
+		}
 		expect(llamadas).toEqual([]);
 		expect(rastrosDe(log)).toEqual([]);
 		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();

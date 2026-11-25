@@ -261,7 +261,8 @@ export function reportarAdministracionDeLaCentral(
 		/**
 		 * `ok`, o el código con el que no se ha hecho. Al restaurar y al volver, antes de llamar al
 		 * objeto, `empieza`, y si la llamada no vuelve, `sin_respuesta`. Al volver, antes de reiniciar,
-		 * `preparada`: si la llamada no termina, es lo que queda de con qué se deshace.
+		 * `preparada`: si la llamada no termina, es lo que queda de con qué se deshace. Al aplicar una
+		 * vuelta ya preparada (`reiniciar`), antes de reiniciar, `reinicia`.
 		 */
 		resultado: string;
 		clave?: string;

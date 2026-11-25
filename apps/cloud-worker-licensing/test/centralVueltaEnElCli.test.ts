@@ -7,7 +7,9 @@
 // `onError`); la que no se hace porque la copia de antes no llega a R2; y los dos rechazos del token.
 // Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer; el
 // estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
-// reinicia; y una restauración con una copia que no existe y otra cuya llamada no vuelve.
+// aplica; aplicarla con esa orden (`reiniciar`), y otra vez, ya aplicada; la lista de las copias con
+// las de una vuelta (su marcador y cuándo se pidió); y una restauración con una copia que no existe y
+// otra cuya llamada no vuelve.
 //
 // Queda escrito en `scripts/tpv-license.respuestas.json`, que es lo que sirve el worker de mentira de
 // `scripts/tpv-license.test.mjs`: así el CLI se prueba con la respuesta de verdad, y si la ruta o la
@@ -30,6 +32,7 @@ import {
 	centralSinAprovisionar,
 	conDobleDeInstantes,
 	conR2Caido,
+	MARCADORES,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -124,16 +127,34 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 
 	const { ADMIN_API_TOKEN: _, ...sinElTokenDelWorker } = entornoCon(hecha);
 
+	/** Aplica la vuelta que quedó sin aplicar en `central`, ahora que el reinicio sí llega. */
+	async function aplicarLaPreparada(central: CentralDePrueba): Promise<Respuesta> {
+		await conDobleDeInstantes(central, []);
+		return pedir("POST", "/volver", entornoCon(central), { reiniciar: MARCADORES.actual });
+	}
+
+	/** La lista de las copias, con sólo las filas de la vuelta que contestó `r`: en el bucket están las de todas. */
+	async function copiasDeLaVuelta(r: Respuesta): Promise<Respuesta> {
+		const deLaVuelta = String((r.cuerpo as { copiaDeAntes: string }).copiaDeAntes).replace(/\.sql\.gz$/, "");
+		const lista = await pedir("GET", "/copias", entornoCon(hecha));
+		const cuerpo = lista.cuerpo as { copias: { clave: string }[] };
+		return { ...lista, cuerpo: { ...cuerpo, copias: cuerpo.copias.filter((c) => c.clave.startsWith(deLaVuelta)) } };
+	}
+
+	const vueltaHecha = await volver(entornoCon(hecha));
 	const respuestas = {
 		"//":
 			"Lo que contesta la aplicación entera a la vuelta de la central a un instante (y a copiar, restaurar y " +
 			"pedir el estado) en cada desenlace que el CLI tiene que saber leer. Lo escribe " +
 			"apps/cloud-worker-licensing/test/centralVueltaEnElCli.test.ts (con -u) y lo sirve el worker de mentira " +
 			"de scripts/tpv-license.test.mjs. No se edita a mano.",
-		"vuelta-hecha": await volver(entornoCon(hecha)),
+		"vuelta-hecha": vueltaHecha,
+		"copias-tras-la-vuelta": await copiasDeLaVuelta(vueltaHecha),
 		"vuelta-que-no-atiende": await volver(entornoCon(sinAtender)),
 		"vuelta-sin-aplicar": await volver(entornoCon(sinAplicar)),
 		"estado-con-la-vuelta-sin-aplicar": await pedir("GET", "/estado", entornoCon(sinAplicar)),
+		"aplicar-la-preparada": await aplicarLaPreparada(sinAplicar),
+		"aplicar-ya-aplicada": await pedir("POST", "/volver", entornoCon(sinAplicar), { reiniciar: MARCADORES.actual }),
 		"vuelta-sin-respuesta": await volver(entornoCon(sinRespuesta)),
 		"vuelta-sin-copia-de-antes": await volver(entornoCon(sinCopia)),
 		"token-rechazado": await volver(entornoCon(hecha), "otro-token"),
@@ -146,6 +167,10 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 	// Lo que el CLI tiene que leer bien, dicho aquí también: si cambia, cambia a propósito.
 	expect(respuestas).toMatchObject({
 		"vuelta-hecha": { status: 200, cuerpo: { ok: true, deshacer: expect.any(String) } },
+		"copias-tras-la-vuelta": {
+			status: 200,
+			cuerpo: { ok: true, copias: [{ marcador: expect.any(String), pedida: expect.any(String) }] },
+		},
 		"vuelta-que-no-atiende": {
 			status: 503,
 			cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias", deshacer: expect.any(String) },
@@ -155,6 +180,8 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 			status: 200,
 			cuerpo: { ok: true, enCurso: { vuelta: { fase: "preparada", preparada: { deshacer: expect.any(String) } } } },
 		},
+		"aplicar-la-preparada": { status: 200, cuerpo: { ok: true, deshacer: expect.any(String), estado: { enCurso: { vuelta: null } } } },
+		"aplicar-ya-aplicada": { status: 409, cuerpo: { ok: false, error: "central_sin_vuelta_preparada" } },
 		"vuelta-sin-respuesta": { status: 500, cuerpo: { ok: false, error: "internal_error" } },
 		"vuelta-sin-copia-de-antes": { status: 500, cuerpo: { ok: false, error: "central_copia_fallida" } },
 		"token-rechazado": { status: 401 },

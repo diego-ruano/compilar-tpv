@@ -16,7 +16,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
 import { BaseCentral } from "../src/durableObjects/baseCentral";
-import { esClaveDeCopiaDeLaCentral } from "../src/durableObjects/baseCentral.copia";
+import { esClaveDeCopiaDeLaCentral, listarCopiasDeLaCentral } from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import {
 	centralDePrueba,
@@ -81,6 +81,72 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect(r).toMatchObject({ ok: true, valor: { deshacer: MARCADORES.actual, copiaDeAntes: expect.stringMatching(/\.sql\.gz$/) } });
 		if (!r.ok) return;
 		expect(alPedirla.get(r.valor.copiaDeAntes!)).toBe(MARCADORES.actual);
+	});
+
+	it("en cuanto la plataforma tiene la vuelta, deja constancia en R2 al lado de su copia de antes (….pedida), y no antes; la lista la pone en la fila de la copia", async () => {
+		const central = await sembrada();
+		/** Lo que hay en R2 de antes de volver cuando se le pide la vuelta a la plataforma. */
+		const alPedirla: string[] = [];
+		await conDobleDeInstantes(central, [], {
+			alRestaurar: async () => {
+				const { objects } = await bucket().list({ prefix: "base-central/antes-de-volver-" });
+				alPedirla.push(...objects.map((o) => o.key));
+			},
+		});
+
+		const r = await central.stub.prepararVuelta({ instanteMs: Date.now() - HORA });
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		const copia = r.valor.copiaDeAntes!;
+		const pedida = copia.replace(/\.sql\.gz$/, ".pedida");
+		expect(alPedirla).toContain(copia);
+		expect(alPedirla).not.toContain(pedida);
+		const constancia = await bucket().head(pedida);
+		expect(constancia?.customMetadata).toMatchObject({ marcador: MARCADORES.actual, pedida: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) });
+		expect(esClaveDeCopiaDeLaCentral(pedida)).toBe(false);
+
+		const { copias } = await listarCopiasDeLaCentral(bucket(), 1000);
+		expect(copias.find((c) => c.clave === copia)).toMatchObject({
+			marcador: MARCADORES.actual,
+			pedida: constancia!.customMetadata!.pedida,
+		});
+		expect(copias.map((c) => c.clave)).not.toContain(pedida);
+	});
+
+	it("si R2 no recibe la constancia de que se ha pedido, la vuelta sigue preparada: la plataforma ya la tiene", async () => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		await conCopiasDentro(central, (real) => ({
+			put: async (clave: string, valor: Uint8Array | string, opciones: R2PutOptions) => {
+				if (clave.endsWith(".pedida")) throw new Error("R2 no contesta");
+				return real.put(clave, valor, opciones);
+			},
+		}));
+
+		expect(await central.stub.prepararVuelta({ marcador: "m-sin-constancia" })).toMatchObject({
+			ok: true,
+			valor: { marcador: "m-sin-constancia", deshacer: MARCADORES.actual, copiaDeAntes: expect.stringMatching(/\.sql\.gz$/) },
+		});
+		expect((await central.stub.estado()).enCurso.vuelta).toMatchObject({ destino: "m-sin-constancia", fase: "preparada" });
+		expect(await codigoDe(central.db.execute("SELECT 1;"))).toBe("central_vuelta_en_curso");
+	});
+
+	it("la lista pone la constancia de una vuelta pedida en la fila de su .marcador, y sola sólo si no está ni su copia ni su .marcador", async () => {
+		const deUnaVuelta = (que: string) => `base-central/antes-de-volver-prueba-${que}-${crypto.randomUUID()}`;
+		const conMarcador = deUnaVuelta("con-marcador");
+		const sola = deUnaVuelta("sola");
+		await bucket().put(`${conMarcador}.marcador`, "m\n", { customMetadata: { marcador: "0000000a-0000000a" } });
+		await bucket().put(`${conMarcador}.pedida`, "m\n", { customMetadata: { marcador: "0000000a-0000000a", pedida: "2031-01-01T00:00:01.000Z" } });
+		await bucket().put(`${sola}.pedida`, "m\n", { customMetadata: { marcador: "0000000b-0000000b", pedida: "2031-01-01T00:00:02.000Z" } });
+
+		const { copias } = await listarCopiasDeLaCentral(bucket(), 1000);
+		const filaDe = (base: string) =>
+			copias.filter((c) => c.clave.startsWith(base)).map((c) => ({ clave: c.clave, marcador: c.marcador, pedida: c.pedida }));
+		expect(filaDe(conMarcador)).toEqual([
+			{ clave: `${conMarcador}.marcador`, marcador: "0000000a-0000000a", pedida: "2031-01-01T00:00:01.000Z" },
+		]);
+		expect(filaDe(sola)).toEqual([{ clave: `${sola}.pedida`, marcador: "0000000b-0000000b", pedida: "2031-01-01T00:00:02.000Z" }]);
 	});
 
 	it("con la central sin atender, el marcador va solo en R2 (….marcador, que no es una copia), también antes de pedir la vuelta", async () => {
@@ -251,7 +317,8 @@ describe("dos preparaciones a la vez: sólo sigue una, y la marca es de quien la
 	const A = "000000a0-00000000-00000000-0000000000000000000000000000000a";
 	const B = "000000b0-00000000-00000000-0000000000000000000000000000000b";
 	const pausa = () => new Promise((r) => setTimeout(r, 5));
-	const copiasDeAntes = async () => (await bucket().list({ prefix: "base-central/antes-de-volver-" })).objects.length;
+	const copiasDeAntes = async () =>
+		(await bucket().list({ prefix: "base-central/antes-de-volver-" })).objects.filter((o) => o.key.endsWith(".sql.gz")).length;
 	/** Lo que se le ha pedido a la plataforma que deje preparado. */
 	const pedidas = (llamadas: string[]) => llamadas.filter((l) => l.startsWith("restaurar:"));
 

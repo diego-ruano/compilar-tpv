@@ -41,6 +41,11 @@
 // (`baseCentral.copia.ts`). `pnpm central:copias` lo enseña mientras dura la ventana de 30 días. Si
 // pese a todo se perdiera, se deshace volviendo con un instante de justo antes de la vuelta.
 //
+// **Y que se ha pedido, en cuanto la plataforma la tiene** (`….pedida`, al lado): sin respuesta, una
+// vuelta que se ha aplicado y una que no llegó a pedirse dejan la central igual, atendiendo y sin
+// marca, y repetir la orden en el primer caso volvería otra vez y se llevaría lo escrito desde
+// entonces. Si R2 no la recibe, la vuelta sigue: ya está pedida, y lo que falta es la constancia.
+//
 // **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
 // plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
 // preparaciones cruzadas no pueden dejar la central abierta con una vuelta pedida, ni pedir la suya
@@ -55,9 +60,19 @@
 //   ninguna, y entonces la central vuelve a atender.
 // - Repetir la misma orden con la vuelta ya preparada (el reinicio no llegó a pasar) no prepara
 //   otra: devuelve la que hay, con su marcador de deshacer y su copia, para reiniciar. A otro destino,
-//   prepara otra encima, como una nueva.
+//   prepara otra encima, como una nueva. Pero en cuanto el objeto se reinicia, por lo que sea, la
+//   vuelta se aplica y su marca se va, y la misma orden prepararía otra: lo que aplica una vuelta
+//   preparada sin volver a pedir nada es el reinicio con su `deshacer` (`reiniciarParaAplicar`), que
+//   si ya se ha aplicado no hace nada.
 
-import { copiarLaCentral, claveConHora, guardarElMarcadorDeAntes, TOPE_COMPRIMIDO } from "./baseCentral.copia";
+import { capturarError } from "../observability/errors";
+import {
+	copiarLaCentral,
+	claveConHora,
+	guardarElMarcadorDeAntes,
+	guardarQueSePidio,
+	TOPE_COMPRIMIDO,
+} from "./baseCentral.copia";
 import { CLAVE_VUELTA_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type {
 	DestinoDeLaVuelta,
@@ -169,6 +184,12 @@ export async function prepararVueltaDeLaCentral(
 		reabrir();
 		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
 		throw error;
+	}
+	// Que la plataforma ya la tiene, al lado de con qué se deshace (ver la cabecera).
+	try {
+		await guardarQueSePidio(bucket, new Date(ahora), deshacer);
+	} catch (error) {
+		capturarError(error, "central.vuelta_pedida");
 	}
 	const preparada: VueltaPreparada = { marcador, deshacer, copiaDeAntes };
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "preparada", preparada, anterior: null } satisfies MarcaDeVuelta);

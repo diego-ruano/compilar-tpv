@@ -11,13 +11,14 @@
 //   POST /v1/admin/central/copiar-ahora  → una copia ahora, con la hora en la clave: no pisa la del día
 //   POST /v1/admin/central/aprovisionar  → a un objeto sin aprovisionar, el esquema vacío o, con
 //                                          `claveDeCopia`, la base de esa copia
-//   POST /v1/admin/central/volver        → a un instante de los últimos 30 días, o a un marcador
+//   POST /v1/admin/central/volver        → a un instante de los últimos 30 días, o a un marcador; o,
+//                                          con `reiniciar`, aplica una vuelta ya preparada
 //
 // Lo que cambia algo deja rastro en Axiom y en el log (`rastro`), no en `admin_audit`: es una tabla
 // de la propia central, y restaurarla o devolverla a un instante la reescriben. Restaurar y volver lo
 // dejan antes de llamar al objeto (`empieza`), y si la llamada no vuelve, también (`sin_respuesta`):
 // una restauración que pasa de 30 s reinicia el objeto, y una vuelta se aplica aunque la respuesta no
-// llegue. El rastro sólo lleva
+// llegue. Aplicar una vuelta ya preparada lo deja antes de reiniciar (`reinicia`). El rastro sólo lleva
 // lo nuestro: códigos, claves y marcadores que han pasado su gramática (`esClaveDeCopiaDeLaCentral`,
 // `esMarcador`), recuentos. El `detalle` del objeto (lo que dice SQLite o R2, o lo que trae una copia)
 // va en la respuesta, a quien administra, y nunca al rastro.
@@ -37,7 +38,12 @@ import {
 	esClaveDeCopiaDeLaCentral,
 	listarCopiasDeLaCentral,
 } from "../../durableObjects/baseCentral.copia";
-import type { CodigoDeLaCentral, EstadoDeLaCentral, FalloDeLaCentral } from "../../durableObjects/baseCentral.rpc";
+import type {
+	CodigoDeLaCentral,
+	EstadoDeLaCentral,
+	FalloDeLaCentral,
+	VueltaPreparada,
+} from "../../durableObjects/baseCentral.rpc";
 import type { CopiaInservible } from "../../durableObjects/cargaDeCopias";
 import { esMarcador } from "../../durableObjects/instantes";
 
@@ -69,14 +75,16 @@ const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = 
 		"Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si).",
 	central_copia_inservible: "Esa copia no se puede restaurar: la central se queda sin aprovisionar, como estaba.",
 	central_vuelta_en_curso:
-		"Hay una vuelta a un instante preparada y sin aplicar: la central no atiende hasta reiniciarse. Se reinicia repitiendo la misma orden de pnpm central:volver.",
+		"Hay una vuelta a un instante en curso, y la central no atiende hasta que se aplique. Si está preparada, se aplica con pnpm central:volver -- --reiniciar <deshacer> --si (pnpm central:estado da la orden entera); si se está preparando, espera a que acabe.",
 	central_vuelta_a_la_vez:
 		"Otra vuelta a un instante se estaba preparando a la vez, y sólo sigue una: mira cuál con pnpm central:estado antes de repetir nada.",
+	central_sin_vuelta_preparada:
+		"Ya no hay ninguna vuelta preparada con ese marcador: o se ha aplicado (la central se ha reiniciado desde entonces), o no llegó a pedirse. No se ha reiniciado nada: mira cómo está con pnpm central:estado.",
 	central_instante_fuera_de_plazo: "Sólo se puede volver a un instante pasado de los últimos 30 días.",
 	central_vuelta_no_disponible: "Este despliegue no puede devolver un objeto a un instante (en local no existe).",
 	central_copia_fallida: "La copia no ha llegado a R2, y no se ha hecho nada. Al volver a un instante, sin la copia (o, con la central sin atender, sin su marcador) no se pide la vuelta.",
 	central_vuelta_sin_comprobar: `La vuelta está preparada y la central se ha reiniciado, pero no contesta todavía: mira cómo está con pnpm central:estado. ${SI_SE_PIERDE_EL_MARCADOR}`,
-	central_vuelta_sin_aplicar: `La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Repite la misma orden. ${SI_SE_PIERDE_EL_MARCADOR}`,
+	central_vuelta_sin_aplicar: `La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si, con el deshacer de esta respuesta: sólo reinicia la central si esta vuelta sigue preparada, y si ya se ha aplicado, no hace nada. No repitas la orden de la vuelta: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez. ${SI_SE_PIERDE_EL_MARCADOR}`,
 	central_migracion_alterada: "Una migración ya aplicada ha cambiado: la central no atiende.",
 	central_migracion_fallida: "Una migración no ha podido aplicarse: la central no atiende.",
 };
@@ -191,20 +199,27 @@ centralRoutes.post("/aprovisionar", cuerpo(aprovisionarSchema), async (c) => {
 	return c.json({ ok: true, ...r.valor });
 });
 
+/** Un marcador en el cuerpo de `/volver`, con la forma de los de Cloudflare (`esMarcador`). */
+const marcadorSchema = z
+	.string()
+	.overwrite(recortar)
+	.min(1, "Falta el marcador.")
+	.refine(esMarcador, "Ese no es un marcador: cópialo tal cual lo dio la vuelta (cifras y letras de la a a la f, en grupos separados por guiones).");
+
 const volverSchema = z
 	.object({
 		/** El instante, en milisegundos desde 1970. El CLI lo saca de una fecha ISO. */
 		instanteMs: z.number().int().positive().optional(),
-		/** O un marcador: el `deshacer` de una vuelta anterior, para deshacerla. Con la forma de los de Cloudflare. */
-		marcador: z
-			.string()
-			.overwrite(recortar)
-			.min(1, "Falta el marcador.")
-			.refine(esMarcador, "Ese no es un marcador: cópialo tal cual lo dio la vuelta (cifras y letras de la a a la f, en grupos separados por guiones).")
-			.optional(),
+		/** O un marcador: el `deshacer` de una vuelta anterior, para deshacerla. */
+		marcador: marcadorSchema.optional(),
+		/**
+		 * O, en vez de volver, el `deshacer` de una vuelta preparada y sin aplicar: reinicia la central
+		 * para aplicarla, sólo si sigue preparada. Si ya se ha aplicado, no hace nada.
+		 */
+		reiniciar: marcadorSchema.optional(),
 	})
-	.refine((b) => (b.instanteMs === undefined) !== (b.marcador === undefined), {
-		message: "Di a qué se vuelve: un instante o un marcador, uno de los dos.",
+	.refine((b) => [b.instanteMs, b.marcador, b.reiniciar].filter((v) => v !== undefined).length === 1, {
+		message: "Di a qué se vuelve (un instante o un marcador) o qué vuelta preparada se aplica (reiniciar): una sola cosa.",
 	});
 
 /**
@@ -217,21 +232,15 @@ const volverSchema = z
  * 2. `reiniciar(deshacer)`: `ctx.abort()`, sólo si la vuelta preparada es ésta. La llamada falla, y
  *    es lo esperado: al arrancar, vuelve.
  *
- * Después se espera a que conteste: si sigue con esta vuelta sin aplicar, se reinicia otra vez. Si la
- * que hay en curso es otra, no se toca: es de quien la está preparando, y reiniciar cortaría su
- * preparación o aplicaría su vuelta (`central_vuelta_a_la_vez`). Lo que se devuelve, también si algo
- * no sale, es con qué se deshace y dónde está la copia de antes; y queda en el rastro en cuanto la
- * vuelta está preparada, antes de reiniciar, por si esta llamada no llega a terminar. Antes de eso, el
- * objeto lo ha dejado en R2, por si no llega ni la respuesta de `prepararVuelta`. Una central que ha
- * vuelto pero no atiende (vuelve a un instante con algo a medias, sin esquema, o una migración no
- * entra) no se da por buena.
+ * Con `reiniciar` en el cuerpo, sólo la segunda: aplica una vuelta que quedó preparada y sin aplicar
+ * (`aplicarLaPreparada`).
  */
 centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
-	const env = c.env;
-	const { instanteMs, marcador } = c.req.valid("json");
+	const { instanteMs, marcador, reiniciar } = c.req.valid("json");
+	if (reiniciar !== undefined) return aplicarLaPreparada(c, reiniciar);
 	const destino = marcador !== undefined ? marcador : new Date(instanteMs!).toISOString();
 	const prep = await conRastro(c, { accion: "volver", destino }, async () =>
-		centralDe(env).prepararVuelta(marcador !== undefined ? { marcador } : { instanteMs: instanteMs! }),
+		centralDe(c.env).prepararVuelta(marcador !== undefined ? { marcador } : { instanteMs: instanteMs! }),
 	);
 	if (!prep.ok) {
 		rastro(c, { accion: "volver", resultado: prep.error, destino });
@@ -239,7 +248,52 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 	}
 	const { deshacer, copiaDeAntes } = prep.valor;
 	rastro(c, { accion: "volver", resultado: "preparada", destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
+	return aplicar(c, destino, prep.valor);
+});
 
+/**
+ * Aplica la vuelta preparada que se deshace con `deshacer`: la que no llegó a reiniciarse
+ * (`central_vuelta_sin_aplicar`). Sólo si sigue preparada: si ya se ha aplicado (el objeto se ha
+ * reiniciado desde entonces, por lo que sea) o no llegó a pedirse, no reinicia nada
+ * (`central_sin_vuelta_preparada`), y con otra en curso, tampoco (`central_vuelta_a_la_vez`). Así,
+ * repetirla no vuelve dos veces, que es lo que haría repetir la orden de la vuelta.
+ */
+async function aplicarLaPreparada(c: Context<{ Bindings: Env }>, deshacer: string) {
+	const antes = await centralDe(c.env).estado();
+	const vuelta = antes.enCurso.vuelta;
+	if (!vuelta?.preparada || !esLaPreparada(antes, deshacer)) {
+		const error = vuelta ? "central_vuelta_a_la_vez" : "central_sin_vuelta_preparada";
+		rastro(c, { accion: "volver", resultado: error, deshacer });
+		return noHecho(c, { ok: false, error }, {
+			...(vuelta
+				? {
+						quePasa:
+							"La vuelta en curso no es la de ese marcador, y la central no se ha reiniciado: mira cuál es con pnpm central:estado antes de repetir nada.",
+					}
+				: {}),
+			extra: { estado: antes },
+		});
+	}
+	const { copiaDeAntes } = vuelta.preparada;
+	rastro(c, { accion: "volver", resultado: "reinicia", destino: vuelta.destino, deshacer, copiaDeAntes: copiaDeAntes ?? undefined });
+	return aplicar(c, vuelta.destino, vuelta.preparada);
+}
+
+/**
+ * La segunda mitad de la vuelta preparada `preparada`, a `destino`: reiniciar, esperar a que la central
+ * conteste y decir cómo ha quedado.
+ *
+ * Si sigue con esta vuelta sin aplicar, se reinicia otra vez. Si la que hay en curso es otra, no se
+ * toca: es de quien la está preparando, y reiniciar cortaría su preparación o aplicaría su vuelta
+ * (`central_vuelta_a_la_vez`). Lo que se devuelve, también si algo no sale, es con qué se deshace y
+ * dónde está la copia de antes; y ya está en el rastro, antes de reiniciar, por si esta llamada no
+ * llega a terminar. Antes de eso, el objeto lo ha dejado en R2, por si no llega ni la respuesta de
+ * `prepararVuelta`. Una central que ha vuelto pero no atiende (vuelve a un instante con algo a
+ * medias, sin esquema, o una migración no entra) no se da por buena.
+ */
+async function aplicar(c: Context<{ Bindings: Env }>, destino: string, preparada: VueltaPreparada) {
+	const env = c.env;
+	const { deshacer, copiaDeAntes } = preparada;
 	let estado: EstadoDeLaCentral | null = null;
 	try {
 		estado = await reiniciarYEsperar(env, deshacer);
@@ -300,8 +354,8 @@ centralRoutes.post("/volver", cuerpo(volverSchema), async (c) => {
 			extra: { deshacer, copiaDeAntes, estado },
 		});
 	}
-	return c.json({ ok: true, destino: prep.valor.marcador, deshacer, copiaDeAntes, estado });
-});
+	return c.json({ ok: true, destino: preparada.marcador, deshacer, copiaDeAntes, estado });
+}
 
 /** ¿Es la vuelta en curso la preparada que se deshace con `deshacer`? */
 function esLaPreparada(estado: EstadoDeLaCentral, deshacer: string): boolean {
