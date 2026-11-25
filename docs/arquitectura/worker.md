@@ -211,8 +211,11 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   local y en los tests las dos van vacías: workerd no implementa jurisdicciones.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por valor o por fila (8 MiB
-  y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún tiene unos 2 MB, y uno de 3 MB
-  se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún se queda en unos 2,2 MB, y uno
+  de 3 MB se rechaza) y 10 GB por objeto. Los de producción son los de la tabla «SQL storage limits»
+  de la [página de límites](https://developers.cloudflare.com/durable-objects/platform/limits/)
+  (consultada el 2026-11-25). Un mensaje del socket de la Main tiene además su propio tope, 4 MiB
+  (`MAX_MENSAJE`, [MAX-MENSAJE](../pendientes.md#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base)). Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
   de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
   más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo

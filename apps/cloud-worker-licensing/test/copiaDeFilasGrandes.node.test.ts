@@ -16,7 +16,7 @@
 //     el cargador de verdad en el Node aparte con el montón acotado.
 //
 // Por eso es de Node: en workerd no se puede acotar ni medir la memoria de un test, y en local el
-// SQLite de un objeto no admite filas de más de unos 2 MB.
+// SQLite de un objeto no admite filas de más de unos 2,2 MB (en producción, 8 MB).
 
 import { spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
