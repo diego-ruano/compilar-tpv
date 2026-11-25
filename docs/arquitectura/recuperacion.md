@@ -480,10 +480,6 @@ lleva el negocio con el que empezó.
 
 Lo que no hace:
 
-- Los cobros antiguos del navegador (`localStorage`, de antes de que los cobros a medias vivieran en
-  la base) no dicen de qué negocio son: se importan sólo si su ticket está en la base, con todas sus
-  líneas; los demás se apartan en el propio `localStorage` como desconocidos
-  ([frontend.md](frontend.md)).
 - `negocio-anterior-<ms>/` no se vacía nunca.
 - En la Handy no hay base ni reinicio: no activa licencias de Main.
 - No reinicia por la fuerza: si el TPV no llega a reiniciarse (se cierra antes, o el reinicio falla),
