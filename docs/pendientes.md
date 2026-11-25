@@ -363,17 +363,23 @@ contestar `cambioDeEquipo: true` y avisar otra vez.
 ### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
 
 - `/v1/login/correo-recuperacion/confirmar` (`correoRecuperacion.ts::confirmarCambioCorreo`) gasta el
-  código (`comprobarCodigo`) y después cambia el correo (`setTenantRecoveryEmail`), en dos escrituras.
-  Si la segunda falla, el código está gastado y el correo sigue siendo el de antes: hay que pedir
-  otro.
+  código (`comprobarCodigo`, que acaba en `consumeEmailCode`) y, después, hace tres viajes sueltos a
+  la central: lee el correo de antes para avisarle (`correoDeRecuperacion`), cambia el correo
+  (`setTenantRecoveryEmail`) y lo vuelve a leer para contestar (`estado`). Si falla la lectura de antes o el
+  cambio, el código está gastado y el correo sigue siendo el de antes: hay que pedir otro. Si falla la
+  relectura, el correo ya ha cambiado pero la respuesta es un 503 (`onError`), y el reintento contesta
+  «Este código no es válido» (`invalid_code`: un código gastado no vuelve a valer,
+  `codigosPorCorreo.ts::comprobarCodigo`).
 - Al pedirlo (`/solicitar`), si la reserva del envío entra en la central pero su respuesta no vuelve,
   la petición falla sin mandar el correo, y la siguiente choca con la espera entre códigos que ha puesto
   esa reserva (`REENVIO_MIN_MS`, cinco minutos): «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
   salido ninguno.
 
 Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar antes de gastar el código
-(`recuperarPin.ts`). Arreglo posible: gastar el código y cambiar el correo en un solo lote, y que la
-espera sólo cuente desde un envío que ha salido.
+(`recuperarPin.ts::verificarCodigoPin`). Arreglo posible: leer aquí también el correo de antes antes
+de gastar el código, gastarlo y cambiar el correo en un solo lote, que la respuesta salga de lo que
+ya se sabe (el correo nuevo) y no de una relectura, y que la espera sólo cuente desde un envío que ha
+salido.
 
 ### EMPAREJAR-TOKEN · Recoger el token de una Handy son tres escrituras sueltas
 
