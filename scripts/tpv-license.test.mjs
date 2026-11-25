@@ -199,6 +199,34 @@ test("con la vuelta preparada y sin aplicar, central:estado da la orden exacta q
 	});
 });
 
+/** Restaura desde una copia a un worker que contesta con `contestar`. */
+function restaurarCon(contestar) {
+	return conElWorker(contestar, async (base, peticiones) => {
+		const r = await cliContra(base, "central-aprovisionar", "--copia", "base-central/2026-11-24.sql.gz", "--si");
+		assert.deepEqual(
+			peticiones.map((p) => [p.metodo, p.ruta, p.cuerpo]),
+			[["POST", "/v1/admin/central/aprovisionar", JSON.stringify({ claveDeCopia: "base-central/2026-11-24.sql.gz" })]],
+		);
+		return r;
+	});
+}
+
+test("una restauración que no contesta (el 500 del onError) dice que no se sabe cómo ha quedado, y cómo mirarlo", async () => {
+	const r = await restaurarCon(enJson(RESPUESTAS["restaurar-sin-respuesta"]));
+	assert.equal(r.codigo, 1);
+	assert.ok(r.salida.includes("✖ 500: internal_error"), r.salida);
+	assert.match(r.salida, /No se sabe cómo ha quedado la central: mírala con pnpm central:estado\. Si dice A MEDIAS/);
+});
+
+test("una restauración con una copia que no sirve dice por qué, y nada más", async () => {
+	const respuesta = RESPUESTAS["restaurar-sin-copia"];
+	const r = await restaurarCon(enJson(respuesta));
+	assert.equal(r.codigo, 1);
+	assert.ok(r.salida.includes(`✖ 422: central_copia_inservible — ${respuesta.cuerpo.message}`), r.salida);
+	assert.ok(r.salida.includes(`Motivo: ${respuesta.cuerpo.detalle}`), r.salida);
+	assert.doesNotMatch(r.salida, /No se sabe/);
+});
+
 test("otra orden con la central sin atender (503 external sin nada que deshacer) sigue diciendo que no se sabe si ha entrado", async () => {
 	const respuesta = RESPUESTAS["copiar-a-medias"];
 	await conElWorker(enJson(respuesta), async (base, peticiones) => {

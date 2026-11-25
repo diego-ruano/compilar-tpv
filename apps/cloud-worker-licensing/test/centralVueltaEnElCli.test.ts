@@ -5,9 +5,9 @@
 // que saber leer: la vuelta hecha; la que ha vuelto pero no atiende, que sale como 503 `external` por
 // `completarErrores`; la que no se ha aplicado; la llamada al objeto que no vuelve (el 500 del
 // `onError`); la que no se hace porque la copia de antes no llega a R2; y los dos rechazos del token.
-// Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer, y
-// el estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
-// reinicia.
+// Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer; el
+// estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
+// reinicia; y una restauración con una copia que no existe y otra cuya llamada no vuelve.
 //
 // Queda escrito en `scripts/tpv-license.respuestas.json`, que es lo que sirve el worker de mentira de
 // `scripts/tpv-license.test.mjs`: así el CLI se prueba con la respuesta de verdad, y si la ruta o la
@@ -27,6 +27,7 @@ import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durab
 import {
 	centralDePrueba,
 	centralInterceptada,
+	centralSinAprovisionar,
 	conDobleDeInstantes,
 	conR2Caido,
 	type CentralDePrueba,
@@ -113,11 +114,20 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		state.storage.kv.put(CLAVE_RESTAURACION_EN_CURSO, { clave: "base-central/2026-11-24.sql.gz", desdeMs: 1 }),
 	);
 
+	// Restaurar: una copia que no existe (lo dice la ruta), y la llamada que no vuelve (pasa de 30 s y
+	// el objeto se reinicia a mitad).
+	const sinRestaurar = centralSinAprovisionar();
+	const restaurandoSinRespuesta = centralInterceptada(centralSinAprovisionar(), (metodo, _a, llamar) =>
+		metodo === "aprovisionar" ? Promise.reject(new Error("el objeto se ha reiniciado")) : llamar(),
+	);
+	const conLaCopia = { claveDeCopia: "base-central/2026-11-24.sql.gz" };
+
 	const { ADMIN_API_TOKEN: _, ...sinElTokenDelWorker } = entornoCon(hecha);
 
 	const respuestas = {
 		"//":
-			"Lo que contesta la aplicación entera a POST /v1/admin/central/volver en cada desenlace. Lo escribe " +
+			"Lo que contesta la aplicación entera a la vuelta de la central a un instante (y a copiar, restaurar y " +
+			"pedir el estado) en cada desenlace que el CLI tiene que saber leer. Lo escribe " +
 			"apps/cloud-worker-licensing/test/centralVueltaEnElCli.test.ts (con -u) y lo sirve el worker de mentira " +
 			"de scripts/tpv-license.test.mjs. No se edita a mano.",
 		"vuelta-hecha": await volver(entornoCon(hecha)),
@@ -129,6 +139,8 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"token-rechazado": await volver(entornoCon(hecha), "otro-token"),
 		"sin-token-en-el-worker": await volver(sinElTokenDelWorker),
 		"copiar-a-medias": await pedir("POST", "/copiar-ahora", entornoCon(aMedias)),
+		"restaurar-sin-copia": await pedir("POST", "/aprovisionar", entornoCon(sinRestaurar), conLaCopia),
+		"restaurar-sin-respuesta": await pedir("POST", "/aprovisionar", entornoCon(restaurandoSinRespuesta), conLaCopia),
 	};
 
 	// Lo que el CLI tiene que leer bien, dicho aquí también: si cambia, cambia a propósito.
@@ -148,6 +160,8 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"token-rechazado": { status: 401 },
 		"sin-token-en-el-worker": { status: 503, cuerpo: { error: "admin_disabled" } },
 		"copiar-a-medias": { status: 503, cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias" } },
+		"restaurar-sin-copia": { status: 422, cuerpo: { ok: false, error: "central_copia_inservible" } },
+		"restaurar-sin-respuesta": { status: 500, cuerpo: { ok: false, error: "internal_error" } },
 	});
 	expect(respuestas["copiar-a-medias"].cuerpo).not.toHaveProperty("deshacer");
 	const fijas = Object.fromEntries(

@@ -634,7 +634,16 @@ async function centralAprovisionar(args) {
 			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).`
 			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y los TPV que pregunten por la suya la borrarían. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
 	);
-	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, CENTRAL);
+	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, {
+		...CENTRAL,
+		// Sin respuesta de la ruta (una restauración que pasa de 30 s reinicia el objeto a mitad), no se
+		// sabe cómo ha quedado.
+		recuperar: (data, status) =>
+			esDeLaRuta(data, status)
+				? ""
+				: "    No se sabe cómo ha quedado la central: mírala con pnpm central:estado. Si dice A MEDIAS, la restauración\n" +
+					"    no terminó, y no atiende hasta que otra la termine.",
+	});
 	if (r.copia) {
 		console.log(`\n  ✔ Central restaurada desde ${r.copia.clave}: ${r.copia.filas} filas en ${r.copia.tablas} tablas.`);
 	} else {
@@ -656,14 +665,25 @@ const siSePierdeElMarcador = (antesDeVolver) =>
 	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si`;
 
 /**
+ * ¿Es de la ruta de la central esta respuesta de error? Lo es un 4xx (no ha llegado a hacer nada) y
+ * lo que contesta con uno de sus códigos (`central_…`) o sin el token configurado. No lo es no tener
+ * respuesta (`data` a `null`: la red, un cuerpo que no es JSON) ni un fallo del worker que no es suyo
+ * (el 500 del `onError` cuando la llamada al objeto no vuelve): entonces no se sabe qué ha pasado.
+ */
+function esDeLaRuta(data, status) {
+	const error = String(data?.error ?? "");
+	return Boolean(data) && (status < 500 || error.startsWith("central_") || error === "admin_disabled");
+}
+
+/**
  * Lo que se enseña de una vuelta pedida en `antesDeVolver` (ISO) que no ha salido entera, en cualquier
  * rama de error de `api`:
  *
  * - Si la respuesta trae con qué se deshace, la vuelta está preparada, y puede que aplicada: la orden
  *   que la deshace, la copia de antes y qué hacer si se pierde el marcador.
- * - Si la ruta dice que no la ha pedido (un 4xx, o uno de sus códigos `central_…` sin `deshacer`), nada.
- * - Si no hay respuesta de la ruta (la red, un cuerpo que no es JSON, un fallo del worker que no es
- *   suyo), no se sabe si se ha pedido: cómo mirarlo, y cómo deshacerla si se pidió.
+ * - Si la ruta dice que no la ha pedido (`esDeLaRuta`, sin `deshacer`), nada.
+ * - Si no hay respuesta de la ruta, no se sabe si se ha pedido: cómo mirarlo, y cómo deshacerla si se
+ *   pidió.
  */
 const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 	if (data?.deshacer) {
@@ -673,8 +693,7 @@ const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 			siSePierdeElMarcador(antesDeVolver),
 		].join("\n");
 	}
-	const error = String(data?.error ?? "");
-	if (data && (status < 500 || error.startsWith("central_") || error === "admin_disabled")) return "";
+	if (esDeLaRuta(data, status)) return "";
 	return [
 		"    No se sabe si la vuelta ha llegado a pedirse: mira cómo está con pnpm central:estado.",
 		"    Si se ha pedido, el marcador para deshacerla está en pnpm central:copias (columna marcador, la",

@@ -1,5 +1,5 @@
 {
-  "//": "Lo que contesta la aplicación entera a POST /v1/admin/central/volver en cada desenlace. Lo escribe apps/cloud-worker-licensing/test/centralVueltaEnElCli.test.ts (con -u) y lo sirve el worker de mentira de scripts/tpv-license.test.mjs. No se edita a mano.",
+  "//": "Lo que contesta la aplicación entera a la vuelta de la central a un instante (y a copiar, restaurar y pedir el estado) en cada desenlace que el CLI tiene que saber leer. Lo escribe apps/cloud-worker-licensing/test/centralVueltaEnElCli.test.ts (con -u) y lo sirve el worker de mentira de scripts/tpv-license.test.mjs. No se edita a mano.",
   "vuelta-hecha": {
     "status": 200,
     "cuerpo": {
@@ -162,6 +162,24 @@
       "message": "Hay una restauración a medias y la central no atiende: vuelve a restaurar desde una copia (pnpm central:aprovisionar -- --copia <clave> --si).",
       "detalle": "La restauración desde base-central/2026-11-24.sql.gz, empezada el 2026-11-25T01:00:00.000Z, no terminó: vuelve a restaurar desde una copia.",
       "code": "external"
+    }
+  },
+  "restaurar-sin-copia": {
+    "status": 422,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_copia_inservible",
+      "message": "Esa copia no se puede restaurar: la central se queda sin aprovisionar, como estaba.",
+      "detalle": "copia_no_encontrada: no hay ninguna copia base-central/2026-11-24.sql.gz",
+      "code": "validation"
+    }
+  },
+  "restaurar-sin-respuesta": {
+    "status": 500,
+    "cuerpo": {
+      "ok": false,
+      "code": "internal",
+      "error": "internal_error"
     }
   }
 }
