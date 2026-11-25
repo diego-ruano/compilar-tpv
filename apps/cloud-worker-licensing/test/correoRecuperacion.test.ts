@@ -9,7 +9,8 @@
 
 import { describe, it, expect } from "vitest";
 
-import { centralDePrueba, type CentralDePrueba } from "./helpers/central";
+import { centralDePrueba, centralInterceptada, type CentralDePrueba } from "./helpers/central";
+import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import {
 	confirmarCambioCorreo,
 	estadoCorreoRecuperacion,
@@ -35,6 +36,8 @@ const MINUTO = 60_000;
 type Correo = { to: string; subject: string; text: string };
 
 type Escenario = {
+	/** La base central del caso, para pedirla con una barrera en su stub (`conBarrera`). */
+	central: CentralDePrueba;
 	db: CentralDePrueba["db"];
 	env: any;
 	ctx: (extra?: Partial<ContextoCorreo>) => ContextoCorreo;
@@ -47,7 +50,8 @@ type Escenario = {
 };
 
 async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
-	const { db } = await centralDePrueba();
+	const central = await centralDePrueba();
+	const { db } = central;
 
 	const correos: Correo[] = [];
 	const env = {
@@ -91,6 +95,7 @@ async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
 	};
 
 	await fn({
+		central,
 		db,
 		env,
 		ctx,
@@ -263,15 +268,39 @@ describe("correo de recuperación · lo que no se puede", () => {
 	});
 });
 
-// AUD-42: la espera de cinco minutos y el tope por hora se decidían sobre una lectura y se escribía
-// después, sin condición. Diez peticiones a la vez mandaban diez códigos a diez direcciones.
+/**
+ * La base central del caso con una barrera en su stub: la primera sentencia de cada petición sobre
+ * `email_codes` (la que decide si toca mandar otro código) se queda parada, ya ejecutada, hasta que
+ * han hecho la suya las `n`. Así las `n` han decidido antes de que siga ninguna, vaya la máquina lo
+ * rápida que vaya.
+ */
+function conBarrera(central: CentralDePrueba, n: number): CentralDePrueba["db"] {
+	let llegadas = 0;
+	let soltar!: () => void;
+	const barrera = new Promise<void>((r) => (soltar = r));
+	return centralInterceptada(central, async (metodo, [sentencia], llamar) => {
+		const r = await llamar();
+		if (metodo === "ejecutar" && llegadas < n && /\bemail_codes\b/.test((sentencia as SentenciaEnlazada).sql)) {
+			if (++llegadas === n) soltar();
+			await barrera;
+		}
+		return r;
+	}).db;
+}
+
+// AUD-42: la espera de cinco minutos y el tope por hora se deciden en la misma sentencia que guarda
+// el código (`reserveEmailCodeSend`). Las peticiones a la vez se cruzan en el peor orden con la
+// barrera de `conBarrera`: si se decidiera con una lectura y se escribiera después, todas leerían
+// antes de que escribiera ninguna, y cada una mandaría su código a su dirección.
 describe("correo de recuperación · peticiones a la vez", () => {
-	const aLaVez = (e: Escenario, n: number, ahora: number, prefijo: string) =>
-		Promise.all(
+	const aLaVez = (e: Escenario, n: number, ahora: number, prefijo: string) => {
+		const db = conBarrera(e.central, n);
+		return Promise.all(
 			Array.from({ length: n }, (_, i) =>
-				solicitarCambioCorreo(e.db, e.env as any, { ...e.ctx({ ahora }), correo: `${prefijo}${i}@victima.test` }),
+				solicitarCambioCorreo(db, e.env as any, { ...e.ctx({ ahora }), correo: `${prefijo}${i}@victima.test` }),
 			),
 		);
+	};
 
 	it("diez a la vez mandan un solo código, y el que vale es el de ese correo", async () => {
 		await escenario(async (e) => {
