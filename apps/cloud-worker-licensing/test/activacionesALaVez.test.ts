@@ -32,6 +32,20 @@ import { enElHub } from "./helpers/hub";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import type { ClienteCentral } from "../src/server/central/cliente";
 
+/** Lo que se manda a Sentry, con su operación. */
+const { aSentry } = vi.hoisted(() => ({ aSentry: [] as { operacion: string; error: unknown }[] }));
+
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			if (!original.esRechazoEsperado(error)) aSentry.push({ operacion, error });
+			original.capturarError(error, operacion);
+		},
+	};
+});
+
 /** Los negocios cuya base ha pedido crear la activación, en orden. La base es la de verdad. */
 let basesPedidas: string[] = [];
 /** La próxima activación se corta justo DESPUÉS de crear la base. */
@@ -172,6 +186,7 @@ function conCorte(patron: RegExp): Atender {
 beforeEach(() => {
 	basesPedidas = [];
 	cortarTrasAprovisionar = false;
+	aSentry.length = 0;
 });
 
 describe("AUD-09 · cinco activaciones simultáneas de la misma clave", () => {
@@ -331,6 +346,37 @@ describe("AUD-09 · el reintento tras un fallo vuelve al mismo negocio", () => {
 			const bien = await c.activar(k.clave, equipo.id, equipo.pub);
 			expect(bien.status).toBe(200);
 			expect(bien.body.tenantId).toBe(tras.tenant_id);
+		});
+	});
+
+	it("si el viaje a la central se rechaza sin marcas al preguntarlo: su 503 y a Sentry con la causa, no `tenant_db_provision_failed`", async () => {
+		await escenario("central-sin-marcas", async (c) => {
+			const k = await c.emitir();
+			const equipo = { id: "equipo-sin-marcas", pub: await clavePublica(0x75) };
+
+			// Un rechazo que la plataforma no marca: no dice por qué, o es un fallo del programa dentro
+			// del objeto. Va a Sentry con él como causa: no se queda en un 503.
+			const sinMarcas = new Error("Durable Object exceeded its memory limit and was reset.");
+			let pendiente = true;
+			c.interceptar((metodo, argumentos, llamar) => {
+				if (pendiente && /WHERE tenant_id = \? AND activated_at_ms IS NOT NULL/.test(sentenciaDe(metodo, argumentos) ?? "")) {
+					pendiente = false;
+					return Promise.reject(sinMarcas);
+				}
+				return llamar();
+			});
+			const sinCentral = await c.activar(k.clave, equipo.id, equipo.pub);
+			c.interceptar(null);
+			expect(pendiente).toBe(false);
+			expect([sinCentral.status, sinCentral.body]).toEqual([503, { ok: false, code: "external", error: "hub_unavailable" }]);
+			expect(aSentry.map(({ operacion, error }) => [operacion, (error as Error).message, (error as Error).cause])).toEqual([
+				["POST /activate", "hub_unavailable", sinMarcas],
+			]);
+
+			// Como con la central saturada: la clave sigue sin estrenar y la base sin crear.
+			const tras = await c.licencia(k.id);
+			expect(tras).toMatchObject({ status: "issued", main_device_id: null, activated_at_ms: null });
+			expect(await stub(tras.tenant_id).estaAprovisionado()).toBe(false);
 		});
 	});
 });

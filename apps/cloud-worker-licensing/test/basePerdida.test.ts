@@ -14,7 +14,8 @@
 //     con su frase) en la descarga de la recuperación, en `/v1/sync/initialize-empty` y en las
 //     lecturas de la Handy, y la base no se crea;
 //   · uno que no ha nacido sigue recibiendo `tenant_db_not_provisioned`, y puede crear su base;
-//   · si la base central no contesta a la pregunta, no se sabe: 500, y tampoco se crea nada;
+//   · si la base central no contesta a la pregunta, no se sabe: su 503 (`hub_unavailable`), y
+//     tampoco se crea nada;
 //   · se avisa una vez por negocio, no una por petición.
 
 import { env as entorno } from "cloudflare:test";
@@ -109,7 +110,10 @@ describe("la base sólo se crea para un negocio que no ha nacido", () => {
 		const caida = centralInterceptada(await central(tenantId, false), () =>
 			Promise.reject(new Error("la base central no contesta")),
 		);
-		await expect(provisionTenantDatabase(caida.db, env, tenantId)).rejects.toThrow("la base central no contesta");
+		await expect(provisionTenantDatabase(caida.db, env, tenantId)).rejects.toMatchObject({
+			code: "hub_unavailable",
+			cause: { message: "la base central no contesta" },
+		});
 		expect(await stub(tenantId).estaAprovisionado()).toBe(false);
 	});
 });
@@ -171,7 +175,7 @@ describe("un negocio que no ha nacido", () => {
 });
 
 describe("si la base central no contesta a la pregunta", () => {
-	it("no se sabe si el negocio nació: 500, y ni se ofrece ni se crea nada", async () => {
+	it("no se sabe si el negocio nació: su 503, y ni se ofrece ni se crea nada", async () => {
 		await sinBase("base-perdida-central-caida", async (n, hub) => {
 			// La primera pasa por la base central y deja en caché el dispositivo y la licencia.
 			expect((await pedirFirmado(deps, app, n, "/v1/sync/bootstrap")).status).toBe(503);
@@ -181,11 +185,12 @@ describe("si la base central no contesta a la pregunta", () => {
 			const pedidasAntes = n.central.length;
 
 			const descarga = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap");
-			expect(descarga.status).toBe(500);
-			expect(await descarga.json()).toMatchObject({ ok: false, code: "internal", error: "internal_error" });
+			expect(descarga.status).toBe(503);
+			expect(await descarga.json()).toMatchObject({ ok: false, code: "external", error: "hub_unavailable" });
 
 			const vacia = await inicializarVacia(n);
-			expect(vacia.status).toBe(500);
+			expect(vacia.status).toBe(503);
+			expect(await vacia.json()).toMatchObject({ ok: false, code: "external", error: "hub_unavailable" });
 			expect(hub.estaAprovisionado()).toBe(false);
 			// Las dos han llegado a preguntárselo, y la central no ha contestado.
 			expect(n.central.slice(pedidasAntes).filter((q) => /activated_at_ms IS NOT NULL/.test(q))).toHaveLength(2);

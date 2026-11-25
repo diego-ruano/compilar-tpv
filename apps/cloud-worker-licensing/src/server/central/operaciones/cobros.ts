@@ -63,6 +63,13 @@ type DatosDelCobro = {
 type CobroEmitido = { resultado: "emitida" | "ya_cumplida"; licenseIds: string[] };
 
 /**
+ * Las licencias a las que apuntan los cobros de una sesión de checkout, en el orden de sus unidades:
+ * si hay alguna, la sesión ya se cumplió. La lee `emitirCobro` dentro de su transacción, y la ruta del
+ * webhook antes de preparar las claves (`stripe.routes.ts::cumplir`).
+ */
+export const COBROS_DE_LA_SESION = `SELECT license_id FROM license_payments WHERE stripe_checkout_session_id = ? ORDER BY unidad;`;
+
+/**
  * Convierte una sesión pagada en licencias: una por unidad, con su cobro (RI-52). Si esa clave suma
  * tiempo a un negocio o estrena uno se decide al activarla (REV-13).
  */
@@ -70,10 +77,7 @@ export function emitirCobro(sql: SqlSync, d: DatosDelCobro): CobroEmitido {
 	// Idempotencia: esta sesión ya se cumplió. Si dos entregas se cruzaran igualmente, el índice único
 	// de `license_payments` (`ux_license_payments_session_unidad`) rechaza la unidad 1 de la segunda,
 	// y la operación entera se deshace.
-	const previos = sql.execute({
-		sql: `SELECT license_id FROM license_payments WHERE stripe_checkout_session_id = ? ORDER BY unidad;`,
-		args: [d.sessionId],
-	}).rows;
+	const previos = sql.execute({ sql: COBROS_DE_LA_SESION, args: [d.sessionId] }).rows;
 	if (previos.length > 0) return { resultado: "ya_cumplida", licenseIds: previos.map((p) => String(p.license_id)) };
 
 	// REV-13: aquí ya no se decide nada. Toda compra emite una clave, y lo que convierte esa clave en

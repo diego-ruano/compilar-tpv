@@ -2,15 +2,16 @@
 //
 // Cómo se guardan los argumentos de una sentencia de la base central (`server/central/enlace.ts`).
 //
-// La central siempre ha guardado lo que le dejaba pasar libsql. La tabla de abajo es lo que hace su
-// `valueToProto` (`@libsql/hrana-client`), comprobado contra su fuente caso a caso: lo que libsql
-// rechazaba se rechaza, y lo que convertía se convierte igual. Las dos únicas diferencias en lo que
-// rechaza son a propósito y están marcadas: un `bigint` que no cabe en un número y una fecha no
-// válida, que libsql guardaba (exacto el uno, como NaN la otra) y el SQLite de un Durable Object no
-// puede guardar bien. Y hay una en lo que guarda, que el SQLite de un DO no deja evitar: un
-// booleano o un `bigint` se enlazan como REAL, no como enteros.
+// La tabla de abajo es la regla, caso a caso: lanza lo que se guardaría distinto de lo que se pasó
+// (un número que no es finito, un `bigint` que no cabe en un número sin perder precisión, una fecha
+// no válida) y lo que no es un valor (`undefined`, un símbolo, una función); lo demás se convierte
+// siempre igual. De unos bytes se guardan los de su vista, también de un `Buffer` de Node. Y lo que
+// el SQLite de un Durable Object no deja evitar: un booleano o un `bigint` se enlazan como REAL, no
+// como enteros.
 //
 // Y por qué hace falta: el SQLite de un DO, por su cuenta, guarda otra cosa sin avisar.
+
+import { Buffer } from "node:buffer";
 
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
@@ -20,6 +21,16 @@ import { clienteCentral } from "../src/server/central/cliente";
 import { centralDePrueba, centralSinAprovisionar } from "./helpers/central";
 
 const BYTES = new Uint8Array([1, 2, 3, 4]);
+
+/**
+ * Un `Buffer` de tres bytes (5, 6, 7) en medio de un almacén de 16, con otros bytes a los lados:
+ * como los que reparte Node de su almacén común.
+ */
+function bufferEnMedio(): Buffer {
+	const almacen = new Uint8Array(16).fill(0xee);
+	almacen.set([5, 6, 7], 4);
+	return Buffer.from(almacen.buffer, 4, 3);
+}
 
 /** Lo que guarda la central de cada argumento; `"lanza"` si no lo guarda. */
 const CASOS: [string, unknown, unknown][] = [
@@ -35,11 +46,11 @@ const CASOS: [string, unknown, unknown][] = [
 	["bigint", 10n, 10],
 	["bigint en el borde", BigInt(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER],
 	["bigint negativo en el borde", BigInt(Number.MIN_SAFE_INTEGER), Number.MIN_SAFE_INTEGER],
-	// Diferencia con libsql: lo guardaba exacto, hasta 2^63 - 1.
+	// Pasado ±(2^53 − 1), como número ya es otro: se guardaría redondeado.
 	["bigint que no cabe en un número", BigInt(Number.MAX_SAFE_INTEGER) + 1n, "lanza"],
 	["bigint de más de 64 bits", 2n ** 63n, "lanza"],
 	["Date", new Date(1_700_000_000_000), 1_700_000_000_000],
-	// Diferencia con libsql: la mandaba como NaN.
+	// No tiene milisegundos que guardar (son NaN).
 	["Date no válida", new Date("no es una fecha"), "lanza"],
 	["undefined", undefined, "lanza"],
 	["símbolo", Symbol("s"), "lanza"],
@@ -50,7 +61,7 @@ const CASOS: [string, unknown, unknown][] = [
 	["otra vista que no es Uint8Array", new Int16Array([1, 2]), "1,2"],
 ];
 
-describe("el enlace estricto, como libsql", () => {
+describe("el enlace estricto", () => {
 	it.each(CASOS)("%s", (_nombre, entrada, esperado) => {
 		if (esperado === "lanza") {
 			expect(() => valorEstricto(entrada)).toThrow();
@@ -65,6 +76,16 @@ describe("el enlace estricto, como libsql", () => {
 		const deUnaVista = valorEstricto(new Uint8Array(BYTES.buffer, 1, 2));
 		expect(deUnaVista).toBeInstanceOf(ArrayBuffer);
 		expect([...new Uint8Array(deUnaVista as ArrayBuffer)]).toEqual([2, 3]);
+	});
+
+	it("un Buffer de Node, también con sólo los de su vista: su `slice` no copia", () => {
+		const vista = bufferEnMedio();
+		const enlazado = valorEstricto(vista);
+		expect(enlazado).toBeInstanceOf(ArrayBuffer);
+		expect([...new Uint8Array(enlazado as ArrayBuffer)]).toEqual([5, 6, 7]);
+		// Una copia: lo que se guarde no cambia si alguien escribe después en la vista.
+		vista[0] = 99;
+		expect([...new Uint8Array(enlazado as ArrayBuffer)]).toEqual([5, 6, 7]);
 	});
 
 	it("sólo argumentos posicionales, y el error dice cuál", () => {
@@ -118,14 +139,20 @@ describe("el cliente y el objeto enlazan así", () => {
 		});
 	});
 
-	it("un número viaja como REAL, como en libsql: una columna INTEGER lo guarda entero", async () => {
+	it("de un Buffer de Node llegan sólo los bytes de su vista, no el almacén entero", async () => {
+		const { db } = await centralDePrueba();
+		const fila = (await db.execute({ sql: "SELECT length(?1) AS n, hex(?1) AS h;", args: [bufferEnMedio() as any] })).rows[0];
+		expect(fila).toMatchObject({ n: 3, h: "050607" });
+	});
+
+	it("un número viaja como REAL: una columna INTEGER lo guarda entero", async () => {
 		const { db } = await centralDePrueba();
 		expect((await db.execute({ sql: "SELECT typeof(?1) AS t;", args: [1] })).rows[0].t).toBe("real");
 		await db.execute({ sql: "INSERT INTO tenants (tenant_id, piloto) VALUES ('t', ?1);", args: [1] });
 		expect((await db.execute("SELECT typeof(piloto) AS t FROM tenants;")).rows[0].t).toBe("integer");
 	});
 
-	it("un booleano o un bigint, también: libsql los mandaba como enteros, y en un texto se nota", async () => {
+	it("un booleano o un bigint, también: en un texto se nota, «1.0» y no «1»", async () => {
 		const { db } = await centralDePrueba();
 		const comoTexto = { sql: "SELECT typeof(?1) AS t, CAST(?1 AS TEXT) AS s, json_object('a', ?1) AS j;" };
 		expect((await db.execute({ ...comoTexto, args: [true as any] })).rows[0]).toMatchObject({

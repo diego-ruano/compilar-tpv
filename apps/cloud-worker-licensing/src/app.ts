@@ -26,7 +26,9 @@ import { HTTPException } from "hono/http-exception";
 import type { Env } from "./env";
 import { capturarError } from "./observability/errors";
 import { registrarPeticion } from "./observability/requestContext";
+import { scrub } from "./observability/scrub";
 import { cabeceraServerTiming, conMedida } from "./observability/tiempos";
+import { acotar } from "./observability/tope";
 import { getDb } from "./server/db";
 import { respuestaSinLaCentral } from "./server/central/sinLaCentral";
 import { comprobarSalud } from "./server/salud";
@@ -292,10 +294,15 @@ app.onError(async (err, c) => {
 	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
 	capturarError(err, `${c.req.method} ${c.req.routePath}`);
 	// Traza server-side: es el único sitio, junto con Sentry, donde queda el detalle de un 500. La
-	// respuesta no lo lleva (FABLE-B), así que sin esto no habría forma de diagnosticarlo en vivo.
+	// respuesta no lo lleva (FABLE-B), así que sin esto no habría forma de diagnosticarlo en vivo. La
+	// ruta va por su patrón y no por su camino, que lo escribe quien llama, y el mensaje y la traza,
+	// filtrados y acotados como lo que va a telemetría: pueden citar lo que llegó en la petición.
 	console.error(
-		`[onError] ${c.req.method} ${new URL(c.req.url).pathname} → ${(err as any)?.name || "Error"}: ` +
-		`${(err as any)?.message || err}\n${(err as any)?.stack || ""}`,
+		acotar(
+			`[onError] ${c.req.method} ${c.req.routePath} → ${(err as any)?.name || "Error"}: ` +
+				`${(err as any)?.message || err}\n${(err as any)?.stack || ""}`,
+			scrub,
+		),
 	);
 	// El validador del cuerpo (`lib/validacion.ts`) lanza esto cuando el JSON viene roto, con una
 	// frase en inglés dentro. Sin esta rama, esa frase viajaría en `error`, que es donde el cliente

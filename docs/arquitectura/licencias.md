@@ -67,7 +67,8 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
    falló sí, y por eso se contestó 500.
 4. Idempotencia por sesión de checkout (índice único en `license_payments` por sesión y unidad),
-   comprobada dentro de la transacción.
+   comprobada dentro de la transacción. Antes de preparar las claves se mira con la misma consulta:
+   una sesión ya cumplida sale sin cifrar nada, también con `LICENSE_STORE_KEY` inservible.
 5. Fail-closed: si una línea no trae `metadata.term_months` en su Price, la cantidad no es un entero
    positivo, la lista de líneas viene paginada o la compra pasa de `MAX_LICENCIAS_POR_COMPRA` (100),
    no se emite nada.

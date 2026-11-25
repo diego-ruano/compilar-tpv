@@ -220,10 +220,11 @@ export function reportarHubNoDisponible(
 
 /**
  * La base central no ha podido atender una petición (`server/central/sinLaCentral.ts`). `motivo`:
- * saturada, un fallo pasajero de la plataforma, sin contestar a tiempo (`plazo`), o el código con el
- * que el objeto dice que no puede (`central_sin_aprovisionar`, `central_migracion_alterada`…). Es una
- * para todo el servicio: lo que hay que mirar es la racha, sea del negocio que sea. `tenant_id` va
- * cuando la petición es de uno, para poder cruzarlo.
+ * saturada, un fallo pasajero de la plataforma, sin contestar a tiempo (`plazo`), un rechazo del viaje
+ * que la plataforma no marca (`rechazo`), o el código con el que el objeto dice que no puede
+ * (`central_sin_aprovisionar`, `central_migracion_alterada`…). Es una para todo el servicio: lo que hay
+ * que mirar es la racha, sea del negocio que sea. `tenant_id` va cuando la petición es de uno, para
+ * poder cruzarlo.
  */
 export function reportarCentralNoDisponible(
 	env: Env,
