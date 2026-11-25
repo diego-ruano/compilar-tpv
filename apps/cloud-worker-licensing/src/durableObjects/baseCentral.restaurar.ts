@@ -6,9 +6,12 @@
 // `base-central/`). Se carga con el cargador que comparte con la base de cada negocio
 // (`cargaDeCopias.ts`).
 //
-// Lo que no puede pasar nunca es que una central restaurada a medias atienda: contestaría «no existe»
-// a una licencia que sí existe, y el TPV borraría la suya (`tpv-infra-licensing::clasificar_error`).
-// Por eso:
+// Lo que no puede pasar nunca es que una central restaurada a medias atienda: contestaría como
+// definitivo lo que no lo es («no existe» a una licencia que sí existe, «no vale» a un código que sí
+// vale). El TPV no borra su licencia por eso (RI-09: un `license_not_found` sin firmar es
+// `RechazoSinFirmar`, `tpv-infra-licensing::clasificar_error`), pero lo cuenta como no haber podido
+// comprobar y, al agotar la gracia sin conexión, se bloquea; la Handy no puede trabajar, y el alta, el
+// emparejamiento o la reserva web fallarían como si fuera de verdad. Por eso:
 //
 // - **Nada se intercala.** Quien llama lo hace dentro de `blockConcurrencyWhile`: ninguna otra llamada
 //   entra hasta que acaba, tampoco las guardas que reafirman las claves foráneas, que aquí van

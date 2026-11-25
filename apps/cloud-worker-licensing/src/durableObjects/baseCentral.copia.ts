@@ -18,9 +18,14 @@
 // últimos 30 días. Eso no cubre que el objeto se pierda (un borrado por error, otro nombre, el propio
 // proveedor), ni lo que se descubre pasado ese plazo: para eso está esta copia, fuera del objeto.
 //
-// Y por qué importa tanto esta base en concreto: si el worker contesta `license_not_found`, el TPV
-// borra su licencia local (`tpv-infra-licensing::clasificar_error`). Perder `licenses` y `devices`
-// no es perder un histórico: es que todos los equipos se desactivan en la siguiente comprobación.
+// Y por qué importa tanto esta base en concreto: sin `licenses` y `devices`, el worker contesta
+// `license_not_found` a todos los equipos. El TPV no borra su licencia por eso (RI-09): un rechazo
+// sin firmar es `FalloConsulta::RechazoSinFirmar` (`tpv-infra-licensing::clasificar_error`), que
+// `tpv_domain::licensing::evaluar_fallo` trata como no haber podido comprobar (`rejection_unverified`):
+// sigue vendiendo mientras dure la gracia sin conexión y, agotada, se bloquea. La Handy, que trabaja
+// contra la nube, se queda sin poder hacer nada («No hay una licencia activa»), y el alta, el
+// emparejamiento y la reserva web fallan como si fuera de verdad. Perder esta base no es perder un
+// histórico: es parar todos los negocios.
 //
 // Reglas al tocarlo:
 //   · SÓLO LEE. La estructura de la base sólo la cambian sus migraciones, y la copia tampoco escribe

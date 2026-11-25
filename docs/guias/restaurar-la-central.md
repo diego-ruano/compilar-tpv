@@ -97,8 +97,10 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 
 **La central nunca atiende a medio restaurar.** Mientras se restaura, o con una restauración sin
 terminar, lo que la toca contesta 503 `hub_unavailable`, que los TPV tratan como la nube sin
-contestar. Una central a medio cargar contestaría `license_not_found` a licencias que sí existen, y
-cada Main lo tomaría por un rechazo de la suya.
+contestar. Una central a medio cargar contestaría como definitivo lo que no lo es: `license_not_found`
+a licencias que sí existen (cada Main lo toma por un rechazo sin firmar, que no la borra pero la
+bloquea al agotar la gracia sin conexión, y las Handy no trabajan), o que no valen claves y códigos
+que sí valen.
 
 ### El esquema vacío
 
@@ -107,8 +109,9 @@ pnpm central:aprovisionar -- --si
 ```
 
 Para una central que empieza de cero: un `wrangler dev` nuevo, otro entorno. **Nunca para una
-central perdida**: una central vacía no tiene ninguna licencia, y todo TPV que pregunte por la suya
-recibe `license_not_found`. Para eso está la copia.
+central perdida**: una central vacía no tiene ninguna licencia, y todo equipo que pregunte por la
+suya recibe `license_not_found`: las Handy dejan de trabajar, y los TPV, al agotar la gracia sin
+conexión. Para eso está la copia.
 
 ### Si no cabe en 30 s (CENTRAL-RESTAURAR)
 

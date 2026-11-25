@@ -440,10 +440,11 @@ con `metodo` `hub`, y Sentry con la misma regla (`registrarSinLaCentral`). Lo de
 hub con la central (un error de SQL) va a Sentry, como siempre.
 
 - **Nunca una respuesta que diga algo de la licencia o del equipo.** Una central vacía o a medias
-  contestaría `license_not_found` a todos, y los clientes lo toman por un rechazo: la Main deja de
-  replicar y sigue con la gracia sin conexión con `rejection_unverified`
-  ([licencias.md](licencias.md#el-gate)), y la Handy se queda fuera en cada petición. Por eso la
-  central no atiende sin aprovisionar ni a medias.
+  contestaría como definitivo lo que no lo es: `license_not_found` a todos, y los clientes lo toman
+  por un rechazo. La Main no borra su licencia (RI-09), pero deja de replicar, sigue con la gracia sin
+  conexión con `rejection_unverified` y, al agotarla, se bloquea ([licencias.md](licencias.md#el-gate));
+  la Handy se queda fuera en cada petición; y el alta, el emparejamiento o la reserva web fallarían
+  como si la clave o el código no valieran. Por eso la central no atiende sin aprovisionar ni a medias.
 - Lo que la central lanza por otra cosa (un error de SQL, una sentencia prohibida, una operación que
   falla) sigue el camino de cualquier error: un 500 con su identificador (`central_error_sql`,
   `central_operacion_fallida`) y `code: internal`, y el texto de SQLite sólo en el log y en Sentry.

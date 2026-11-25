@@ -75,7 +75,7 @@ const SALIDAS_DE_LA_VUELTA = "deshaciendo la vuelta, o volviendo a otro instante
  * volver tenía sus licencias, y el esquema vacío la pondría a atender sin ninguna.
  */
 const SIN_ESQUEMA_TRAS_VOLVER =
-	"La vuelta la ha dejado sin esquema. No le des el esquema vacío (pnpm central:aprovisionar sin --copia): atendería sin ninguna licencia, y los TPV que preguntaran por la suya la borrarían.";
+	"La vuelta la ha dejado sin esquema. No le des el esquema vacío (pnpm central:aprovisionar sin --copia): atendería sin ninguna licencia, y a cada equipo que preguntara por la suya le diría que no existe: las Handy dejarían de trabajar, y los TPV, al agotar la gracia sin conexión.";
 
 /** Lo que se le dice a quien administra cuando la central no ha hecho lo que se le pedía. */
 const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = {

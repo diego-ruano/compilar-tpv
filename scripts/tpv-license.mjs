@@ -640,7 +640,7 @@ async function centralAprovisionar(args) {
 		args,
 		copia
 			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).`
-			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y los TPV que pregunten por la suya la borrarían. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
+			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y a cada equipo que pregunte por la suya le dirá que no existe: las Handy dejan de trabajar, y los TPV, al agotar la gracia sin conexión. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
 	);
 	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, {
 		...CENTRAL,
