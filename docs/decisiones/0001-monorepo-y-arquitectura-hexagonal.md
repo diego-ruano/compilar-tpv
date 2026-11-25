@@ -1,6 +1,7 @@
 # 0001 · Monorepo híbrido y arquitectura hexagonal en Rust
 
-**Estado:** vigente.
+**Estado:** vigente. Turborepo ya no está: sólo ordenaba `generate-types`, que es un script de
+Node (`pnpm generate-types`), y nadie construía el monorepo entero con `build`.
 
 ## Contexto
 

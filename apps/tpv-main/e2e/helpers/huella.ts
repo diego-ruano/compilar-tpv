@@ -43,7 +43,7 @@ const RAICES = [
 ];
 
 /** Carpetas generadas: ni son fuente ni caben en una huella. */
-const IGNORADAS = new Set(["node_modules", "target", "dist", ".turbo"]);
+const IGNORADAS = new Set(["node_modules", "target", "dist"]);
 
 export type Huella = {
     /** sha256 del conjunto. Es lo que se compara. */

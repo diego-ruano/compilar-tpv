@@ -46,7 +46,6 @@ export default tseslint.config(
             "**/node_modules/**",
             "**/dist/**",
             "**/target/**",
-            "**/.turbo/**",
             "**/.wrangler/**",
             "apps/tpv-main/src-tauri/gen/**",
             // Generados: los contratos y el cliente salen de Specta; el Worker, de wrangler.
