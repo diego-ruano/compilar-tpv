@@ -292,11 +292,11 @@ negocios. Antes de decidir, medirlo con el generador de carga
 
 Cuando se corta el socket, la Main (`src-tauri/src/replicacion.rs`) y la Handy
 (`src-tauri/src/socket_handy.rs`) vuelven a intentarlo a los 3 s, doblando la espera hasta 30 s, con
-menos de un segundo al azar. Desplegar reinicia los objetos, y una caída los deja a todos sin red a la
-vez: después, todos los equipos de todos los negocios reconectan casi al mismo tiempo, y cada
-reconexión pide su ticket y lo canjea en la base central (dos lotes y varias lecturas), justo cuando
-la central arranca. Con muchos negocios eso pasa de lo que atiende un solo objeto, y se vería como 503
-`hub_overloaded` y más reintentos. Opciones, sin decidir: más dispersión en el primer reintento,
+menos de un segundo al azar. Un despliegue reinicia los objetos y corta los sockets de todos a la vez,
+y una caída de la nube también: al volver, todos los equipos de todos los negocios reconectan casi al
+mismo tiempo, y cada reconexión pide su ticket y lo canjea en la base central (dos lotes y varias
+lecturas), justo cuando la central arranca. Con muchos negocios eso pasa de lo que atiende un solo
+objeto, y se vería como 503 `hub_overloaded` y más reintentos. Opciones, sin decidir: más dispersión en el primer reintento,
 respetar el `Retry-After` del 503, o sacar el ticket del socket de la central (firmado, o en el
 `TenantHub`). Es un cambio en Rust, y como CENTRAL-AUTH no aprieta hasta los 1.000 negocios o así.
 
