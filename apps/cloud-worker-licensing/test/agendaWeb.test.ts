@@ -1461,6 +1461,31 @@ describe("los correos al cliente que repite la alarma (RESERVA-CORREOS)", () => 
 		});
 	});
 
+	it("con la central sin contestar, cada vuelta intenta como mucho 10, y la siguiente sigue por los de detrás", async () => {
+		await conAgenda("correos-tope-de-intentos", async (motor, sql) => {
+			motor.avisarALaMain = () => {};
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			for (let i = 0; i < 15; i++) {
+				await motor.apuntarCorreoPendiente({
+					tenantId: T,
+					correo: { ...confirmacion(r), tipo: "cancelacion", enlace: undefined, id_reserva: `otra-${String(i).padStart(2, "0")}`, tras_el_correo: null },
+				});
+			}
+			const intentados: string[] = [];
+			motor.enviarCorreo = async (c: any) => {
+				intentados.push(c.id);
+				return "fallido";
+			};
+			expect(await motor.repetirCorreos(T)).toBe(0);
+			expect(intentados).toHaveLength(10);
+			// Los que no se han intentado van delante en la siguiente.
+			intentados.length = 0;
+			await motor.repetirCorreos(T);
+			expect(intentados.slice(0, 5).sort()).toEqual([10, 11, 12, 13, 14].map((i) => `rw:cancelacion:otra-${i}`));
+			expect(pendientes(sql)).toHaveLength(15);
+		});
+	});
+
 	it("apuntar el mismo correo dos veces deja uno, y la alarma se adelanta pero no se atrasa", async () => {
 		await conAgenda("correos-una-vez", async (motor, sql, state) => {
 			motor.avisarALaMain = () => {};

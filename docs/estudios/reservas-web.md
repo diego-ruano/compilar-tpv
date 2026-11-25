@@ -520,8 +520,9 @@ Desde el worker, con el binding `EMAIL`:
   como esté entonces (en la base del negocio, o en el alta que espera), al correo de su cliente y con
   un enlace de cancelar nuevo (el del alta no se guarda en claro; del nuevo, sólo su hash, y se quita si
   el correo no sale). El «has cancelado», tal como era al cancelar. Los dos, hasta la hora de la
-  reserva y como mucho una semana. Lo que no sale por el tope, o porque no salió el correo de antes
-  (`trasElCorreo`), no se repite.
+  reserva y como mucho una semana. Cada vuelta intenta como mucho 10, salgan o no (con la central sin
+  contestar no sale ninguno); los intentados van detrás. Lo que no sale por el tope, o porque no
+  salió el correo de antes (`trasElCorreo`), no se repite.
 - **El destinatario se vuelve a mirar al enviar**: con un carácter de control (AUD-40) o si no es
   una sola dirección (AUD-39), no sale ni gasta cupo. La del cliente puede llegar de la Main por la
   réplica, que no pasa por ninguna validación. Sale como `invalido`, que no se repite: ni lo apunta

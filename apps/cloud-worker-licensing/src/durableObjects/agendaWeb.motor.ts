@@ -137,11 +137,12 @@ const MAX_AVISOS_FALLIDAS = 20;
 const MAX_FALLIDAS_MIRADAS = 100;
 /**
  * RESERVA-CORREOS · Cada cuánto vuelve la alarma mientras haya un correo al cliente por repetir, y
- * cuántos repite de una vez (cada confirmación lee su reserva en la base), entre cuántos.
+ * cuántos intenta de una vez, salgan o no: cada confirmación lee su reserva en la base, y cada uno
+ * pregunta a la central, que puede ser justo la que no contesta. Los intentados van detrás, así que
+ * la siguiente vuelta sigue por los demás.
  */
 const REINTENTO_CORREOS_MS = 10 * 60_000;
-const MAX_CORREOS_REPETIDOS = 10;
-const MAX_CORREOS_MIRADOS = 50;
+const MAX_CORREOS_POR_VUELTA = 10;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
@@ -776,12 +777,13 @@ export class MotorAgendaWeb {
 	 * Devuelve cuántos han salido.
 	 */
 	async repetirCorreos(tenantId: string): Promise<number> {
-		const pendientes = correosPendientes(this.sql, MAX_CORREOS_MIRADOS);
+		// El tope es de intentos, no de enviados: con la central sin contestar no sale ninguno, y contar
+		// sólo los que salen sería probarlos todos en cada vuelta.
+		const pendientes = correosPendientes(this.sql, MAX_CORREOS_POR_VUELTA);
 		if (!pendientes.length) return 0;
 		const { ahora, negocio } = await this.leer(tenantId, { que: "fallidas", idsMesas: [] });
 		let enviados = 0;
 		for (const c of pendientes) {
-			if (enviados >= MAX_CORREOS_REPETIDOS) break;
 			try {
 				const r =
 					c.tipo === "confirmacion"
