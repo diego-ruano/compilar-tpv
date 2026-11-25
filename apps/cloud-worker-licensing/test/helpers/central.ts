@@ -20,6 +20,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { expect } from "vitest";
 
 import type { BaseCentral } from "../../src/durableObjects/baseCentral";
+import { claveConHora } from "../../src/durableObjects/baseCentral.copia";
 import { CLAVE_VUELTA_EN_CURSO } from "../../src/durableObjects/baseCentral.guardas";
 import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../../src/durableObjects/baseCentral.rpc";
 import { ejecutarOperacion } from "../../src/durableObjects/baseCentral.operar";
@@ -130,6 +131,14 @@ export async function codigoDe(promesa: Promise<unknown>): Promise<string> {
 
 /** «Reiniciar» como se ve desde fuera: el objeto arranca vuelto, sin la marca de la vuelta. */
 const vuelto = (state: DurableObjectState) => state.storage.kv.delete(CLAVE_VUELTA_EN_CURSO);
+
+/**
+ * La clave de una copia de la central que no está en el bucket: una de a mano, de una hora al azar de
+ * hace unos años, para que cada prueba tenga la suya (la gramática no admite texto libre).
+ */
+export function claveDeCopiaNueva(): string {
+	return claveConHora("a-mano", new Date(Date.UTC(2020, 0, 1) + Math.floor(Math.random() * 100_000_000_000)));
+}
 
 /**
  * Los marcadores que contesta el doble de la plataforma, con la forma de los de Cloudflare

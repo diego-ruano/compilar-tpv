@@ -44,7 +44,7 @@
 import { capturarError } from "../observability/errors";
 import { MIGRACIONES_DE_LA_CENTRAL } from "../server/central/migraciones";
 import { CopiaInservible, cargarCopia, lineasDe } from "./cargaDeCopias";
-import { esClaveDeCopiaDeLaCentral, esTablaDeLaCopia } from "./baseCentral.copia";
+import { esClaveDeCopiaDeLaCentral, esTablaDeLaCopia, NOMBRES_DE_UNA_COPIA } from "./baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type { CopiaRestaurada, MarcaDeRestauracion, RespuestaDeLaCentral } from "./baseCentral.rpc";
 import { baseAprovisionada, migrarBase } from "./sqliteDelObjeto";
@@ -91,7 +91,7 @@ export async function restaurarLaCentral(
 		return {
 			ok: false,
 			error: "central_copia_inservible",
-			detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
+			detalle: `copia_no_valida: la clave no es la de una copia de la central: va como ${NOMBRES_DE_UNA_COPIA}`,
 		};
 	}
 	const marcas = marcasDe(storage);

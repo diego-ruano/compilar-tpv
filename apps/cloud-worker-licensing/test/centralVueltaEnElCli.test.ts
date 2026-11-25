@@ -3,14 +3,16 @@
 // Lo que contesta la aplicación entera (`app`: la ruta, `completarErrores` y el `onError`) a la vuelta
 // de la central a un instante (`POST /v1/admin/central/volver`) en cada desenlace que el CLI tiene
 // que saber leer: la vuelta hecha; la que ha vuelto pero no atiende, que sale como 503 `external` por
-// `completarErrores`; la que no se ha aplicado; la llamada al objeto que no vuelve (el 500 del
-// `onError`); la que no se hace porque la copia de antes no llega a R2; la que la plataforma no
-// acepta; y los dos rechazos del token.
+// `completarErrores`; la que no se ha aplicado; la que el objeto ya no tiene preparada al ir a
+// reiniciarla, porque otra se ha preparado encima y se ha aplicado (C1); la llamada al objeto que no
+// vuelve (el 500 del `onError`); la que no se hace porque la copia de antes no llega a R2; la que la
+// plataforma no acepta; y los dos rechazos del token.
 // Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer; el
 // estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
 // aplica; aplicarla con esa orden (`reiniciar`), y otra vez, ya aplicada; la lista de las copias con
-// las de una vuelta (su marcador y cuándo se pidió); y una restauración con una copia que no existe y
-// otra cuya llamada no vuelve.
+// las de una vuelta (su marcador y cuándo se pidió); la lista con una copia de más filas de las que se
+// restauran de una vez (copias-4), y una restauración con una copia que no existe y otra cuya llamada no
+// vuelve.
 //
 // Queda escrito en `scripts/tpv-license.respuestas.json`, que es lo que sirve el worker de mentira de
 // `scripts/tpv-license.test.mjs`: así el CLI se prueba con la respuesta de verdad, y si la ruta o la
@@ -27,6 +29,7 @@ import { expect, it, vi } from "vitest";
 
 import { app } from "../src/app";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
+import { FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ } from "../src/durableObjects/baseCentral.restaurar";
 import {
 	centralDePrueba,
 	centralInterceptada,
@@ -146,6 +149,44 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		return { ...lista, cuerpo: { ...cuerpo, copias: cuerpo.copias.filter((c) => c.clave.startsWith(deLaVuelta)) } };
 	}
 
+	// Una vuelta (A) con su reinicio retenido; otra (B) se prepara encima y se aplica; después llega el
+	// reinicio de A, que el objeto ya no tiene preparada.
+	const cruzada = await centralDePrueba();
+	await conDobleDeInstantes(cruzada, []);
+	const reinicioDeA = { retenido: false, suelto: false };
+	const deA = centralInterceptada(cruzada, async (metodo, _a, llamar) => {
+		if (metodo === "reiniciar" && !reinicioDeA.suelto) {
+			reinicioDeA.retenido = true;
+			while (!reinicioDeA.suelto) await new Promise((r) => setTimeout(r, 5));
+		}
+		return llamar();
+	});
+	const vueltaDeA = volver(entornoCon(deA));
+	await vi.waitFor(() => expect(reinicioDeA.retenido).toBe(true));
+	const vueltaDeB = await pedir("POST", "/volver", entornoCon(cruzada), { marcador: MARCADORES.deshacer });
+	expect(vueltaDeB).toMatchObject({ status: 200, cuerpo: { ok: true } });
+	reinicioDeA.suelto = true;
+	const vueltaCruzada = await vueltaDeA;
+
+	// Una copia con más filas de las que se restauran de una vez, según sus metadatos: la lista, con ella sola.
+	const grande = "base-central/2026-11-23.sql.gz";
+	await (env as any).COPIAS.put(grande, "no se restaura", {
+		customMetadata: {
+			generada: new Date().toISOString(),
+			filas: String(FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ + 1),
+			tablas: "22",
+			ultimaMigracion: "0001_inicial.sql",
+		},
+	});
+	const listaConLaGrande = await pedir("GET", "/copias", entornoCon(hecha));
+	const copiasConUnaGrande = {
+		...listaConLaGrande,
+		cuerpo: {
+			...(listaConLaGrande.cuerpo as object),
+			copias: (listaConLaGrande.cuerpo as { copias: { clave: string }[] }).copias.filter((c) => c.clave === grande),
+		},
+	};
+
 	const vueltaHecha = await volver(entornoCon(hecha));
 	const respuestas = {
 		"//":
@@ -157,6 +198,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"copias-tras-la-vuelta": await copiasDeLaVuelta(vueltaHecha),
 		"vuelta-que-no-atiende": await volver(entornoCon(sinAtender)),
 		"vuelta-sin-aplicar": await volver(entornoCon(sinAplicar)),
+		"vuelta-cruzada": vueltaCruzada,
 		"estado-con-la-vuelta-sin-aplicar": await pedir("GET", "/estado", entornoCon(sinAplicar)),
 		"aplicar-la-preparada": await aplicarLaPreparada(sinAplicar),
 		"aplicar-ya-aplicada": await pedir("POST", "/volver", entornoCon(sinAplicar), { reiniciar: MARCADORES.actual }),
@@ -166,6 +208,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"token-rechazado": await volver(entornoCon(hecha), "otro-token"),
 		"sin-token-en-el-worker": await volver(sinElTokenDelWorker),
 		"copiar-a-medias": await pedir("POST", "/copiar-ahora", entornoCon(aMedias)),
+		"copias-con-una-grande": copiasConUnaGrande,
 		"restaurar-sin-copia": await pedir("POST", "/aprovisionar", entornoCon(sinRestaurar), conLaCopia),
 		"restaurar-sin-respuesta": await pedir("POST", "/aprovisionar", entornoCon(restaurandoSinRespuesta), conLaCopia),
 	};
@@ -182,6 +225,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 			cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias", deshacer: expect.any(String) },
 		},
 		"vuelta-sin-aplicar": { status: 503, cuerpo: { ok: false, error: "central_vuelta_sin_aplicar", deshacer: expect.any(String) } },
+		"vuelta-cruzada": { status: 409, cuerpo: { ok: false, error: "central_sin_vuelta_preparada", deshacer: expect.any(String) } },
 		"estado-con-la-vuelta-sin-aplicar": {
 			status: 200,
 			cuerpo: { ok: true, enCurso: { vuelta: { fase: "preparada", preparada: { deshacer: expect.any(String) } } } },
@@ -194,6 +238,10 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"token-rechazado": { status: 401 },
 		"sin-token-en-el-worker": { status: 503, cuerpo: { error: "admin_disabled" } },
 		"copiar-a-medias": { status: 503, cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias" } },
+		"copias-con-una-grande": {
+			status: 200,
+			cuerpo: { ok: true, filasQueSeRestauranDeUnaVez: FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ, copias: [{ filas: FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ + 1 }] },
+		},
 		"restaurar-sin-copia": { status: 422, cuerpo: { ok: false, error: "central_copia_inservible" } },
 		"restaurar-sin-respuesta": { status: 500, cuerpo: { ok: false, error: "internal_error" } },
 	});

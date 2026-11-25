@@ -570,7 +570,10 @@ async function centralEstado() {
 	console.log(`\n  Aprovisionada  ${r.aprovisionada ? "sí" : "NO"}`);
 	if (r.enCurso.restauracion) {
 		const { clave, desdeMs } = r.enCurso.restauracion;
-		console.log(`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.`);
+		console.log(
+			`  A MEDIAS       la restauración desde ${clave} (${cuando(desdeMs)}) no terminó: no atiende. Vuelve a restaurar.\n` +
+				`                 ${SI_SE_CORTO_POR_TIEMPO}`,
+		);
 	}
 	if (r.enCurso.vuelta) {
 		const { destino, desdeMs, fase, preparada } = r.enCurso.vuelta;
@@ -622,8 +625,14 @@ async function centralCopias() {
 	);
 	if (r.copias.some((c) => c.marcador)) {
 		console.log("  marcador: cómo estaba la central al hacerla, antes de volver a un instante; volver a él deshace aquella vuelta.");
-		console.log("  pedida: cuándo se le pidió aquella vuelta a la plataforma. Sin hora, no consta que se pidiera.");
+		console.log("  pedida: cuándo se le pidió aquella vuelta a la plataforma. Sin hora, no consta, y no se sabe si se pidió: la constancia se apunta después y puede no haber llegado.");
 		console.log("  Las que acaban en .marcador no son copias: la central no se podía copiar, y va sólo su marcador.\n");
+	}
+	const tope = r.filasQueSeRestauranDeUnaVez;
+	if (Number.isInteger(tope) && r.copias.some((c) => Number.isInteger(c.filas) && c.filas > tope)) {
+		console.log(
+			`  ⚠ Las de más de ${tope} filas no se restauran de una vez: la restauración pasaría de 30 s, se cortaría y dejaría la central A MEDIAS.\n`,
+		);
 	}
 	if (r.hayMas) console.log("  (hay más copias de las que caben en la lista)\n");
 }
@@ -633,15 +642,47 @@ async function centralCopiar() {
 	console.log(`\n  ✔ Copia de la central: ${r.clave}, ${r.filas} filas en ${r.tablas} tablas, ${r.bytes} bytes comprimida.\n`);
 }
 
+/**
+ * Lo que se dice de una restauración a medias: si se cortó por tiempo, repetirla con la misma copia se
+ * volverá a cortar (copias-4).
+ */
+const SI_SE_CORTO_POR_TIEMPO =
+	"Si se cortó por tiempo, con una copia de más filas de las que se restauran de una vez (pnpm central:copias lo dice) se volverá a cortar: hace falta una copia con menos filas o cargarla por partes.";
+
+/**
+ * El aviso de que la copia `clave` tiene más filas de las que se restauran de una vez (los metadatos
+ * que da la lista de las copias, con `filasQueSeRestauranDeUnaVez`): la restauración puede pasar de
+ * 30 s, cortarse y dejar la central a medias (copias-4). Es sólo un aviso, antes de empezar: si la
+ * lista no contesta, o no tiene esa copia o sus filas, no dice nada y no impide nada.
+ */
+async function avisoDeUnaCopiaGrande(clave) {
+	try {
+		const r = await fetch(`${API_BASE}/v1/admin/central/copias`, { headers: { authorization: `Bearer ${TOKEN}` } });
+		const data = await r.json();
+		const tope = data?.filasQueSeRestauranDeUnaVez;
+		const filas = Array.isArray(data?.copias) ? data.copias.find((c) => c?.clave === clave)?.filas : undefined;
+		if (!r.ok || !Number.isInteger(tope) || !Number.isInteger(filas) || filas <= tope) return "";
+		return (
+			`  ⚠ ${clave} tiene ${filas} filas, más de las ${tope} que se restauran de una vez: la restauración puede pasar de 30 s,\n` +
+			"    cortarse y dejar la central A MEDIAS, sin atender, y repetirla se volvería a cortar. Hace falta una copia con menos\n" +
+			"    filas o cargarla por partes."
+		);
+	} catch {
+		return "";
+	}
+}
+
 async function centralAprovisionar(args) {
 	if (args.copia === true) fail("--copia <clave> (sácala de `pnpm central:copias`)");
 	const copia = args.copia === undefined ? undefined : String(args.copia).trim();
+	const aviso = copia ? await avisoDeUnaCopiaGrande(copia) : "";
 	confirmado(
 		args,
 		copia
-			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).`
+			? `Esto restaura la central desde ${copia}. Sólo se hace si el objeto está sin aprovisionar (o con una restauración a medias).${aviso ? `\n${aviso}` : ""}`
 			: "Esto le da a la central su esquema VACÍO: sin ninguna licencia, y a cada equipo que pregunte por la suya le dirá que no existe: las Handy dejan de trabajar, y los TPV, al agotar la gracia sin conexión. Sólo se hace si el objeto está sin aprovisionar. Si la central se ha perdido, restáurala desde una copia con --copia <clave>.",
 	);
+	if (aviso) console.log(`\n${aviso}`);
 	const r = await api("POST", "/v1/admin/central/aprovisionar", copia ? { claveDeCopia: copia } : {}, {
 		...CENTRAL,
 		// Sin respuesta de la ruta (una restauración que pasa de 30 s reinicia el objeto a mitad), no se
@@ -650,7 +691,8 @@ async function centralAprovisionar(args) {
 			esDeLaRuta(data, status)
 				? ""
 				: "    No se sabe cómo ha quedado la central: mírala con pnpm central:estado. Si dice A MEDIAS, la restauración\n" +
-					"    no terminó, y no atiende hasta que otra la termine.",
+					"    no terminó, y no atiende hasta que otra la termine.\n" +
+					`    ${SI_SE_CORTO_POR_TIEMPO}`,
 	});
 	if (r.copia) {
 		console.log(`\n  ✔ Central restaurada desde ${r.copia.clave}: ${r.copia.filas} filas en ${r.copia.tablas} tablas.`);
@@ -670,10 +712,14 @@ const centralAlMarcador = (marcador) => `pnpm central:volver -- --marcador ${mar
  */
 const centralAplicar = (deshacer) => `pnpm central:volver -- --reiniciar ${deshacer} --si`;
 
-/** Lo que se hace si se pierde el marcador para deshacer una vuelta pedida en `antesDeVolver` (ISO). */
-const siSePierdeElMarcador = (antesDeVolver) =>
+/**
+ * Lo que se hace si se pierde el marcador para deshacer una vuelta. `cerrada` (ISO) es cuándo se cerró
+ * la central para prepararla, con la hora del worker (`cerradaDesde` en la respuesta, V-OP-3); sólo si
+ * la respuesta no lo trae, la de este equipo justo antes de pedirla.
+ */
+const siSePierdeElMarcador = (cerrada) =>
 	"    Si se pierde este marcador, está también en pnpm central:copias (columna marcador); y si tampoco,\n" +
-	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si`;
+	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${cerrada} --si`;
 
 /**
  * ¿Es de la ruta de la central esta respuesta de error? Lo es un 4xx (no ha llegado a hacer nada) y
@@ -693,21 +739,30 @@ function esDeLaRuta(data, status) {
  *
  * - Si la respuesta trae con qué se deshace, la vuelta está preparada, y puede que aplicada: si sigue
  *   sin aplicar, la orden que la aplica; la que la deshace, la copia de antes y qué hacer si se pierde
- *   el marcador.
+ *   el marcador. Si el objeto ya no la tenía preparada al ir a reiniciarla (C1), no se sabe si se ha
+ *   aplicado ésta u otra preparada encima: la orden que la deshace vale si fue ésta.
  * - Si la ruta dice que no la ha pedido (`esDeLaRuta`, sin `deshacer`), nada.
  * - Si no hay respuesta de la ruta, no se sabe si se ha pedido. Lo dice R2: su marcador va antes de
  *   pedirla, y en cuanto la plataforma la tiene, la constancia (`pedida` en `central:copias`). Sin
- *   nada de esa hora, no se pidió, y no hay nada que deshacer. Al aplicar una ya preparada, basta con
+ *   nada de esa hora, no se pidió, y no hay nada que deshacer; con el marcador y sin la constancia, no
+ *   se sabe (C2), y se dice cómo comprobarlo y con qué deshacerla. Al aplicar una ya preparada, basta con
  *   repetir la orden, que no vuelve dos veces.
  */
 const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 	if (data?.deshacer) {
 		const sinAplicar = data.error === "central_vuelta_sin_aplicar";
+		const cerrada = data.cerradaDesde ?? antesDeVolver;
+		const quizaOtra = data.error === "central_sin_vuelta_preparada" || data.error === "central_vuelta_a_la_vez";
+		const para = sinAplicar
+			? "anularla, o deshacerla una vez aplicada"
+			: quizaOtra
+				? "deshacerla, si la que se ha aplicado es ésta"
+				: "deshacerla";
 		return [
 			...(sinAplicar ? [`    Para aplicarla: ${centralAplicar(data.deshacer)}  (si ya se ha aplicado, no hace nada)`] : []),
-			`    Para ${sinAplicar ? "anularla, o deshacerla una vez aplicada" : "deshacerla"}: ${centralAlMarcador(data.deshacer)}`,
+			`    Para ${para}: ${centralAlMarcador(data.deshacer)}`,
 			`    Copia de cómo estaba antes: ${data.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`,
-			...(antesDeVolver ? [siSePierdeElMarcador(antesDeVolver)] : []),
+			...(cerrada ? [siSePierdeElMarcador(cerrada)] : []),
 		].join("\n");
 	}
 	if (esDeLaRuta(data, status)) return "";
@@ -722,9 +777,16 @@ const paraSalirDeLaVuelta = (antesDeVolver) => (data, status) => {
 		`    va a R2, en una antes-de-volver de justo después de ${antesDeVolver} (con la hora de este equipo).`,
 		"    · Si no la hay, no se ha pedido: no hay nada que deshacer.",
 		"    · Si la hay con hora en «pedida», se ha pedido. Si pnpm central:estado no tiene ninguna vuelta en curso, se",
-		"      ha aplicado, y se deshace volviendo a su marcador; si la tiene preparada, da la orden que la aplica.",
-		"    · Si la hay sin hora en «pedida», no consta que se pidiera: casi siempre es que no llegó a pedirse, y no hay",
-		"      nada que deshacer.",
+		"      ha aplicado, y se deshace volviendo a su marcador; si la tiene preparada, da la orden que la aplica. Si",
+		"      se perdiera su marcador, se vuelve al instante de la hora de su clave (antes-de-volver-<hora>, con «:»",
+		"      en vez de «-» entre las horas, los minutos y los segundos): es cuándo cerró la central el worker.",
+		"    · Si la hay sin hora en «pedida», el resultado es DESCONOCIDO: puede que no llegara a pedirse, o que se pidiera",
+		"      y la constancia no llegara a R2 (se avisa a Sentry, central.vuelta_pedida) o el objeto se reiniciara justo",
+		"      entre pedirla y apuntarlo. Compruébalo: si pnpm central:estado tiene la vuelta preparada, da la orden que la",
+		"      aplica; si no tiene ninguna, mira si a la central le falta lo que se escribió entre el instante al que volvía y",
+		"      la hora de su clave (pnpm license:list, por ejemplo). Si no le falta, no se ha aplicado: no hay nada que",
+		"      deshacer. Si le falta, se ha aplicado, y se deshace con:",
+		"        pnpm central:volver -- --marcador <el marcador de esa fila> --si",
 		"    No repitas la vuelta sin mirarlo: si se ha aplicado, volvería otra vez y se llevaría lo escrito desde entonces.",
 		"    (Si la orden repetía una vuelta que ya estaba preparada, su antes-de-volver es la de entonces.)",
 	].join("\n");
@@ -748,6 +810,7 @@ async function centralAplicarLaPreparada(args) {
 	console.log(`\n  ✔ La vuelta preparada se ha aplicado: la central ha vuelto al marcador ${r.destino}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
+	if (r.cerradaDesde) console.log(`${siSePierdeElMarcador(r.cerradaDesde)}\n`);
 }
 
 async function centralVolver(args) {
@@ -771,13 +834,14 @@ async function centralVolver(args) {
 		args,
 		`Esto devuelve la central ENTERA ${adonde}: lo escrito después se pierde (antes se deja en R2 una copia de cómo está o, si no atiende, su marcador), y mientras vuelve no atiende.`,
 	);
-	// Justo antes de la vuelta: si se pierde el marcador para deshacerla, se vuelve aquí.
+	// Justo antes de la vuelta, con la hora de este equipo: dónde buscarla en R2 si no hay respuesta, y a
+	// qué instante volver si se pierde el marcador y la respuesta no dice cuándo se cerró la central.
 	const antesDeVolver = new Date().toISOString();
 	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, recuperar: paraSalirDeLaVuelta(antesDeVolver) });
 	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
-	console.log(`${siSePierdeElMarcador(antesDeVolver)}\n`);
+	console.log(`${siSePierdeElMarcador(r.cerradaDesde ?? antesDeVolver)}\n`);
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */

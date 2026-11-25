@@ -143,4 +143,10 @@ export type VueltaPreparada = {
 	 * central sana: sin esquema, con una restauración a medias o con una migración que no entra.
 	 */
 	copiaDeAntes: string | null;
+	/**
+	 * Desde cuándo está cerrada la central para esta vuelta, con la hora del worker (la de la clave
+	 * de su copia de antes): el instante de justo antes de la vuelta. Si se pierde el marcador de
+	 * deshacer, se deshace volviendo a él (V-OP-3).
+	 */
+	desdeMs: number;
 };
