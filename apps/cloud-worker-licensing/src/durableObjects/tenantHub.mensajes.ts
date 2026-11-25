@@ -136,14 +136,18 @@ export interface ContextoDeMensajes {
  * una operación va sola en su lote aunque pase de ahí, y tiene que poder llegar a la base con
  * cualquier valor que la base admita (MAX-MENSAJE):
  *
- * - **Lo más grande que la base acepta cabe.** El SQLite del DO admite filas de hasta 8 MiB y 34 bytes
- *   (`MAX_ROW_LENGTH` de workerd, cargaDeCopias.ts; «8 MB» en
- *   https://developers.cloudflare.com/durable-objects/platform/limits/), y una operación que entra
- *   deja además en `Sync_Changes` una fila con todas sus sentencias y sus valores en JSON
- *   (`loteDe`), con los mismos escapes que el mensaje. Así que el JSON de cualquier operación que la
- *   base acepta ocupa como mucho 8 MiB y 34 bytes, y su mensaje, eso y el sobre (`type`, `loteId`,
- *   `opId`…): 9 MiB deja un MiB de margen. Lo que pasa de ahí, la base tampoco lo aceptaría: un
- *   valor con muchos escapes, que en el JSON ocupa más que en su fila, no cabe en la del log.
+ * - **Cabe lo más grande que la base acepta, salvo con decenas de miles de sentencias.** El SQLite
+ *   del DO admite filas de hasta 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd, cargaDeCopias.ts;
+ *   «8 MB» en https://developers.cloudflare.com/durable-objects/platform/limits/), y una operación
+ *   que entra deja además en `Sync_Changes` una fila con todas sus sentencias y sus valores en JSON
+ *   (`loteDe`), con los mismos escapes que el mensaje. Esa fila y el mensaje no son iguales: el
+ *   mensaje lleva el sobre (`type`, `loteId`, `opId`…) y, por sentencia, el `"kind":"execute",` que
+ *   el log no guarda (17 bytes, `replicacion.rs::operacion`) y los blancos de los extremos del SQL
+ *   que el log recorta (`normalizeSql`). 9 MiB deja un MiB sobre la fila más grande: cabe toda
+ *   operación que la base acepte con hasta unas 60.000 sentencias. Más allá, una cuya fila del log
+ *   cabría recibe igual `payload_too_large`, y la Main la aparta (`no_cabe`). Lo que pasa del MiB por
+ *   un valor, la base tampoco lo aceptaría: un valor con muchos escapes, que en el JSON ocupa más que
+ *   en su fila, no cabe en la del log.
  * - **Por debajo del límite de la plataforma**: un mensaje de WebSocket que recibe un Durable Object,
  *   32 MiB (la misma página). Los valores van como parámetros: no cuentan en los 100 KB de una
  *   sentencia.

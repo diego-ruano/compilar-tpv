@@ -216,9 +216,11 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   de 3 MB se rechaza) y 10 GB por objeto. Los de producción son los de la tabla «SQL storage limits»
   de la [página de límites](https://developers.cloudflare.com/durable-objects/platform/limits/)
   (consultada el 2026-11-25). Un mensaje del socket de la Main tiene además su propio tope, 9 MiB
-  de UTF-8 (`MAX_MENSAJE`, MAX-MENSAJE): cabe cualquier operación que la base acepte, porque su fila
-  del log (`Sync_Changes`) lleva todas sus sentencias y valores en el mismo JSON y tampoco pasa de
-  8 MiB y 34 bytes; queda por debajo de los 32 MiB que admite la plataforma en un mensaje que recibe
+  de UTF-8 (`MAX_MENSAJE`, MAX-MENSAJE): cabe cualquier operación que la base acepte con hasta unas
+  60.000 sentencias, porque su fila del log (`Sync_Changes`) lleva todas sus sentencias y valores en
+  el mismo JSON y tampoco pasa de 8 MiB y 34 bytes, y el mensaje sólo le añade el sobre y, por
+  sentencia, los 17 bytes del `"kind":"execute",` que el log no guarda y los blancos de los extremos
+  del SQL, que recorta; queda por debajo de los 32 MiB que admite la plataforma en un mensaje que recibe
   un objeto (la misma página), y deja margen en los 128 MB del aislado: medido en workerd, aplicar
   una operación de N MiB hace crecer el proceso unas cinco veces N. Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»

@@ -458,8 +458,9 @@ de Axiom y, si no es carga ni un fallo pasajero, Sentry; si ha rechazado la cons
 ### El lote en el `TenantHub` (`aplicarLote`)
 
 - **Antes de aplicar nada**: el tamaño del mensaje se mira antes de leerlo (9 MiB de UTF-8,
-  MAX-MENSAJE: cabe cualquier operación que admita el SQLite del DO, cuya fila del log no pasa de
-  8 MiB y 34 bytes; lo que pasa contesta `payload_too_large`), sólo la Main manda
+  MAX-MENSAJE: cabe cualquier operación que admita el SQLite del DO con hasta unas 60.000
+  sentencias, cuya fila del log no pasa de 8 MiB y 34 bytes y a la que el mensaje sólo añade el
+  sobre y unos 17 bytes por sentencia; lo que pasa contesta `payload_too_large`), sólo la Main manda
   lotes (`forbidden_not_tpv`), y la forma de **todas** sus operaciones se comprueba antes de aplicar
   ninguna: una mal hecha rechaza el lote entero (`missing_apply_fields`). El lote entra en la fila
   de entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su
