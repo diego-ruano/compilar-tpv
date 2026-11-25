@@ -21,7 +21,7 @@ import { conTexto, escribir, gestosEn, pulsar } from "./ui.js";
  *
  * `b` es la pantalla donde se teclea: la Main por defecto, o la Handy.
  */
-export async function tecleaPin(pin: string, b: WebdriverIO.Browser = browser): Promise<void> {
+async function tecleaPin(pin: string, b: WebdriverIO.Browser = browser): Promise<void> {
     const { pulsarXPath } = gestosEn(b);
     const ojo = b.$('//button[@aria-label="Mostrar PIN"]');
     if (await ojo.isExisting()) await ojo.click();
