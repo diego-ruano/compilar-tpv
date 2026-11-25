@@ -10,7 +10,7 @@ import { commands } from "@tpv/client";
 
 import React, { useCallback, useEffect, useState } from "react";
 import { toAppError } from "@tpv/client";
-import type { LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
+import type { LicenseLocalState } from "@tpv/contracts";
 
 import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
