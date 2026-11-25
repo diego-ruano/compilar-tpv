@@ -215,7 +215,9 @@ describe("el cargador de las copias", () => {
 			linea("1", "1", "'bien'", "NULL", "NULL", "NULL"),
 			linea("1", "1", "'Ana Gil Sanz, ana.gil@correo.es'", "NULL", "NULL", "NULL"),
 		]);
-		expect(r).toMatchObject({ error: expect.stringMatching(/^SQLite no acepta una de las líneas 4–5 de la copia \(t\): SQLITE_CONSTRAINT$/) });
+		expect(r).toMatchObject({
+			error: expect.stringMatching(/^copia_no_valida: SQLite no acepta una de las líneas 4–5 de la copia \(t\): SQLITE_CONSTRAINT$/),
+		});
 	});
 });
 

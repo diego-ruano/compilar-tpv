@@ -53,9 +53,39 @@ export class CopiaInservible extends Error {
 	constructor(
 		readonly codigo: "copia_no_encontrada" | "copia_de_otra_version" | "copia_cortada" | "copia_no_valida",
 		detalle: string,
+		opciones?: ErrorOptions,
 	) {
-		super(`${codigo}: ${detalle}`);
+		super(`${codigo}: ${detalle}`, opciones);
 		this.name = "CopiaInservible";
+	}
+}
+
+/**
+ * Unas filas de la copia que SQLite no acepta (`rechazadas`): la copia no vale (`copia_no_valida`), y
+ * se dice dónde están y no qué llevan (`porQue`). Puede ser también un fallo de este worker (de quien
+ * escribió la copia, de una migración), y por eso quien carga lo manda además a Sentry, con el texto de
+ * SQLite, que puede citar lo que lleva la fila, sólo como causa.
+ */
+export class FilasRechazadas extends CopiaInservible {
+	constructor(
+		readonly porQue: string,
+		causa: unknown,
+	) {
+		super("copia_no_valida", porQue, { cause: causa });
+		this.name = "FilasRechazadas";
+	}
+}
+
+/**
+ * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
+ * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
+ */
+export async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
+	try {
+		yield* lineas;
+	} catch (error) {
+		if (error instanceof CopiaInservible) throw error;
+		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
 	}
 }
 
@@ -490,14 +520,14 @@ function conArgumentos(cabecera: Cabecera, valores: readonly ValorLeido[]): { se
 /**
  * Lo que se dice de unas filas que SQLite no acepta: en qué líneas de la copia están y de qué
  * tablas, y el código de SQLite. Nada de su contenido, que el texto de SQLite puede llevar (cita el
- * trozo que no entiende): ése va como causa, sólo a Sentry.
+ * trozo que no entiende): ése va como causa, sólo a Sentry (`FilasRechazadas`).
  */
-function rechazadas(error: unknown, filas: readonly FilaDeLaCopia[]): Error {
+function rechazadas(error: unknown, filas: readonly FilaDeLaCopia[]): FilasRechazadas {
 	const codigo = /\bSQLITE_[A-Z_]+\b/.exec(String((error as Error)?.message ?? error))?.[0] ?? "sin código de SQLite";
 	const donde =
 		filas.length === 1 ? `la línea ${filas[0].numero}` : `una de las líneas ${filas[0].numero}–${filas.at(-1)!.numero}`;
 	const tablas = [...new Set(filas.map((f) => f.tabla))].join(", ");
-	return new Error(`SQLite no acepta ${donde} de la copia (${tablas}): ${codigo}`, { cause: error });
+	return new FilasRechazadas(`SQLite no acepta ${donde} de la copia (${tablas}): ${codigo}`, error);
 }
 
 /**
@@ -554,8 +584,8 @@ export type CopiaCargada = { filas: number; tablas: number };
 /**
  * Carga una copia en la base del objeto. Las tablas que puede traer se vacían antes de cargar (las
  * migraciones pueden sembrar filas, y la copia trae las suyas). Lanza `CopiaInservible` si la copia no
- * vale, y si SQLite no acepta una de sus filas, un error que dice dónde está y no qué lleva
- * (`rechazadas`); la base se queda como la deje. Si se para antes de leer la última línea, cierra
+ * vale; si SQLite no acepta una de sus filas, la de `FilasRechazadas`, que dice dónde está y no qué
+ * lleva (`rechazadas`). La base se queda como la deje. Si se para antes de leer la última línea, cierra
  * `lineas` (`return`), y `lineasDe` deja de pedir la copia.
  */
 export async function cargarCopia(

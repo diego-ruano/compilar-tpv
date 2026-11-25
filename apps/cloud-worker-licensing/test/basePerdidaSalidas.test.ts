@@ -28,6 +28,27 @@ import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import { clienteLocal } from "../src/durableObjects/tenantHub.sqlite";
 import { MIGRATIONS } from "../src/server/tenantMigrations";
 
+const { capturados } = vi.hoisted(() => ({
+	/** Lo que se ha mandado a Sentry (`capturarError`): su operación, su mensaje y el de su causa. */
+	capturados: [] as { operacion: string; mensaje: string; causa?: string }[],
+}));
+
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			const causa = (error as any)?.cause;
+			capturados.push({
+				operacion,
+				mensaje: String((error as any)?.message ?? error),
+				...(causa === undefined ? {} : { causa: String(causa?.message ?? causa) }),
+			});
+			original.capturarError(error, operacion);
+		},
+	};
+});
+
 const env = entorno as any;
 const TOKEN = "token-de-pruebas";
 const ENV = { ...env, ADMIN_API_TOKEN: TOKEN };
@@ -405,6 +426,60 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			["copia_no_encontrada", undefined],
 		]);
 		expect(JSON.stringify(enviados)).not.toContain("al migrar");
+
+		expect(await stub(t).estaAprovisionado()).toBe(false);
+		expect(await enElHub(t, (hub: any) => hub.state.storage.getAlarm())).toBeNull();
+	});
+
+	it("una copia con el gzip roto, o con una fila que SQLite no acepta, tampoco: el objeto se queda vacío y se dice por qué, sin nada de la copia", async () => {
+		const t = "perdida-copia-rechazada";
+		await negocioConCopia(t);
+		await stub(t).borrarTodo();
+		const buena = await leer(claveDeCopia(t, hoy()));
+		const lineas = buena.split("\n");
+		const entera = await gzip(buena);
+		await bucket.put(claveDeCopia(t, "2026-02-01"), entera.slice(0, Math.floor(entera.length / 2)));
+		// La fila de un cliente otra vez, con otros datos: SQLite no la acepta (su clave ya está).
+		const enClientes = lineas.findIndex((l) => l.startsWith('INSERT INTO "Clientes" ('));
+		const repetida = lineas[enClientes].replace("'Ana'", "'Ana Gil Sanz, ana.gil@correo.es'");
+		expect(repetida).not.toBe(lineas[enClientes]);
+		const conRepetida = lineas
+			.toSpliced(enClientes + 1, 0, repetida)
+			.map((l) => l.replace(/^-- Fin de la copia: (\d+)/, (_m, n) => `-- Fin de la copia: ${Number(n) + 1}`))
+			.join("\n");
+		await bucket.put(claveDeCopia(t, "2026-02-02"), await gzip(conRepetida));
+
+		const enviados: Record<string, unknown>[] = [];
+		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+			enviados.push(...JSON.parse(String(init.body)));
+			return new Response("{}", { status: 200 });
+		});
+		capturados.length = 0;
+		const r = await conCentral(async (central) => {
+			await central.nacer(t);
+			const restaurar = (dia: string) =>
+				central.pedir("/negocios/restaurar-copia", { tenantId: t, dia, modo: "main", motivo: "se perdió al migrar" });
+			return { gzipRoto: await restaurar("2026-02-01"), rechazada: await restaurar("2026-02-02") };
+		}, AXIOM).finally(() => vi.unstubAllGlobals());
+
+		const porQue = {
+			gzipRoto: /^copia_no_valida: no se puede descomprimir: /,
+			rechazada: /^copia_no_valida: SQLite no acepta una de las líneas \d+–\d+ de la copia \(.*\bClientes\b.*\): SQLITE_CONSTRAINT$/,
+		};
+		for (const [copia, detalle] of Object.entries(porQue)) {
+			expect(r[copia as keyof typeof porQue], copia).toMatchObject({
+				status: 422,
+				body: { ok: false, error: "copia_no_valida", detalle: expect.stringMatching(detalle) },
+			});
+		}
+		expect(JSON.stringify(r)).not.toMatch(/Ana Gil|ana\.gil/);
+		// Queda en Axiom con su motivo, y lo que SQLite no acepta, también en Sentry, con su texto como causa.
+		expect(enviados.filter((e) => e.event === "copia_no_restaurada").map(({ error, detalle }) => [error, detalle])).toEqual([
+			["copia_no_valida", r.gzipRoto.body.detalle],
+			["copia_no_valida", r.rechazada.body.detalle],
+		]);
+		expect(JSON.stringify(enviados)).not.toMatch(/Ana Gil|ana\.gil|al migrar/);
+		expect(capturados).toEqual([{ operacion: "hub.restaurar_copia", mensaje: r.rechazada.body.detalle, causa: expect.stringMatching(/UNIQUE/) }]);
 
 		expect(await stub(t).estaAprovisionado()).toBe(false);
 		expect(await enElHub(t, (hub: any) => hub.state.storage.getAlarm())).toBeNull();

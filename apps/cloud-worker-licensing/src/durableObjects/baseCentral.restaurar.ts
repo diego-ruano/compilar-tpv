@@ -40,7 +40,7 @@
 
 import { capturarError } from "../observability/errors";
 import { MIGRACIONES_DE_LA_CENTRAL } from "../server/central/migraciones";
-import { CopiaInservible, cargarCopia, lineasDe } from "./cargaDeCopias";
+import { CopiaInservible, cargarCopia, FilasRechazadas, leyendoElGzip, lineasDe } from "./cargaDeCopias";
 import { esClaveDeCopiaDeLaCentral, esTablaDeLaCopia } from "./baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type { CopiaRestaurada, MarcaDeRestauracion, RespuestaDeLaCentral } from "./baseCentral.rpc";
@@ -55,19 +55,6 @@ export const FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ = 150_000;
 /** Los nombres de las migraciones de este worker, en orden. */
 function nombresDeLasMigraciones(): string[] {
 	return MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
-}
-
-/**
- * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
- * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
- */
-async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
-	try {
-		yield* lineas;
-	} catch (error) {
-		if (error instanceof CopiaInservible) throw error;
-		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
-	}
 }
 
 /**
@@ -119,9 +106,17 @@ export async function restaurarLaCentral(
 		return { ok: true, valor: { clave, ...cargada } };
 	} catch (error) {
 		await storage.deleteAll();
-		if (!(error instanceof CopiaInservible)) capturarError(error, "central.restaurar");
+		// Unas filas que SQLite no acepta (`FilasRechazadas`) no se cuentan como una copia que no vale:
+		// pueden ser un fallo de este worker, y van a Sentry, con el texto de SQLite como causa, como lo
+		// demás que no se ha podido cargar.
+		const noCargada = error instanceof FilasRechazadas || !(error instanceof CopiaInservible);
+		if (noCargada) capturarError(error, "central.restaurar");
 		const detalle =
-			error instanceof CopiaInservible ? error.message : `no se ha podido cargar: ${String((error as Error)?.message ?? error)}`;
+			error instanceof FilasRechazadas
+				? `no se ha podido cargar: ${error.porQue}`
+				: error instanceof CopiaInservible
+					? error.message
+					: `no se ha podido cargar: ${String((error as Error)?.message ?? error)}`;
 		return { ok: false, error: "central_copia_inservible", detalle };
 	}
 }

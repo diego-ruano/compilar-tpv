@@ -337,8 +337,9 @@ function queHacerTrasDarBase(modo: ModoDeVuelta): string[] {
 /**
  * La base de una copia diaria de R2, a un objeto vacío (`MotorTenantHub.restaurarDesdeCopia`). Sin
  * `dia`, la más reciente. Si la copia no vale, el objeto se queda vacío y se dice por qué: el código y
- * lo que dice el cargador (`detalle`: la línea, el carácter y un código, sin nada de la copia), que el
- * CLI enseña como motivo. Lo que el objeto no hace queda también en Axiom (`copia_no_restaurada`).
+ * lo que dice el cargador (`detalle`: la línea, el carácter y un código, que el gzip no se deja leer,
+ * o en qué líneas están unas filas que SQLite no acepta; nada de la copia), que el CLI enseña como
+ * motivo. Lo que el objeto no hace queda también en Axiom (`copia_no_restaurada`).
  */
 basesDeNegociosRoutes.post("/restaurar-copia", cuerpo(restaurarSchema), async (c) => {
 	const env = c.env;
