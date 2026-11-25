@@ -56,6 +56,10 @@ export function relojFueraDeMargen(ts: number, ahoraMs: number): boolean {
 /**
  * Comprueba el reto y la firma. `null` si todo cuadra; si no, el error con el que contestar. No
  * gasta el reto: eso lo hace quien llama, cuando la operación sale bien.
+ *
+ * Con `retoGastadoEn`, el reto no tiene que estar sin gastar sino gastado justo entonces: es la
+ * recogida del token que se repite porque se perdió la respuesta (EMPAREJAR-TOKEN), con el reto que
+ * gastó el código. Cualquier otro reto de un código gastado contesta `already_used`.
  */
 export async function comprobarFirmaDelReclamante(
 	db: Base,
@@ -68,6 +72,8 @@ export async function comprobarFirmaDelReclamante(
 		sigB64: string;
 		pubB64: string;
 		ahoraMs: number;
+		/** La hora a la que se gastó el código, si ya está gastado. */
+		retoGastadoEn?: number;
 	},
 ): Promise<ProblemaDeFirma | null> {
 	const chRes = await db.execute({
@@ -83,7 +89,7 @@ export async function comprobarFirmaDelReclamante(
 
 	const ch = chRes.rows?.[0] as any | undefined;
 	if (!ch) return { status: 404, error: "challenge_not_found" };
-	if (ch.used_at_ms) return { status: 409, error: "challenge_used" };
+	if (datos.retoGastadoEn === undefined && ch.used_at_ms) return { status: 409, error: "challenge_used" };
 	if (Number(ch.expires_at_ms || 0) < datos.ahoraMs) return { status: 410, error: "challenge_expired" };
 
 	let sigU8: Uint8Array;
@@ -104,5 +110,10 @@ export async function comprobarFirmaDelReclamante(
 	);
 
 	const ok = await ed25519Verify(sigU8, bytesExactos(mensaje), pubU8);
-	return ok ? null : { status: 401, error: "bad_device_signature" };
+	if (!ok) return { status: 401, error: "bad_device_signature" };
+	// Lo que se sabe del código gastado, sólo a quien firma como su reclamante (AUD-10).
+	if (datos.retoGastadoEn !== undefined && Number(ch.used_at_ms || 0) !== datos.retoGastadoEn) {
+		return { status: 409, error: "already_used" };
+	}
+	return null;
 }

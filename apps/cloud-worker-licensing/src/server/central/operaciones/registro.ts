@@ -23,6 +23,7 @@ import type { SqlSync } from "../../../lib/sql";
 import { acortarAMano, desrevocar, extenderAMano, revocarAMano } from "./administracion";
 import { canjearClave } from "./canje";
 import { emitirCobro, revertirCobro } from "./cobros";
+import { recogerTokenDeLaHandy } from "./emparejamiento";
 
 /**
  * Una operación de la central: recibe la base, sin esperas, y sus datos, y devuelve su resultado.
@@ -39,6 +40,7 @@ export const OPERACIONES = {
 	desrevocar,
 	extenderAMano,
 	acortarAMano,
+	recogerTokenDeLaHandy,
 } satisfies Readonly<Record<string, Operacion>>;
 
 /** Las operaciones, con la forma de sus datos y de su resultado. */

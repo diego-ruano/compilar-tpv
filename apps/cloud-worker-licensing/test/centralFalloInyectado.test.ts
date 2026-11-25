@@ -255,6 +255,39 @@ const CASOS = [
 			return { licenseId: lic, meses: 3, ahoraMs: Date.now() };
 		},
 	}),
+	caso({
+		// EMPAREJAR-TOKEN: el reto, el código y el alta, juntos o nada.
+		que: "la recogida del token de una Handy que se vuelve a vincular",
+		nombre: "recogerTokenDeLaHandy",
+		sentencias: 5,
+		async preparar(central) {
+			const ahoraMs = Date.now();
+			await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('t-1');`);
+			await filasDe(
+				central,
+				`INSERT INTO devices (device_id, tenant_id, role, revoked_at_ms, device_pubkey_b64, pubkey_alg)
+				 VALUES ('handy-1', 't-1', 'handy', ?, 'clave-vieja', 'ed25519');`,
+				ahoraMs - 60_000,
+			);
+			await filasDe(
+				central,
+				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms,
+				                            expires_at_ms, claimed_at_ms, claimed_by_device_id, claimed_device_pubkey_b64, approved_at_ms)
+				 VALUES ('482913', 'sin-secreto', 't-1', 'main-1', 'approved', ?, ?, ?, 'handy-1', 'clave-nueva', ?);`,
+				ahoraMs,
+				ahoraMs + 600_000,
+				ahoraMs,
+				ahoraMs,
+			);
+			await filasDe(
+				central,
+				`INSERT INTO device_challenges (device_id, nonce_b64, expires_at_ms, created_at_ms) VALUES ('handy-1', 'reto', ?, ?);`,
+				ahoraMs + 600_000,
+				ahoraMs,
+			);
+			return { pairCode: "482913", deviceId: "handy-1", nonceB64: "reto", tenantId: "t-1", pubB64: "clave-nueva", ahoraMs };
+		},
+	}),
 ];
 
 describe("un fallo tras cualquier sentencia de una operación no deja nada escrito", () => {

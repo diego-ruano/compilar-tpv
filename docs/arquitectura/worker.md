@@ -382,6 +382,7 @@ cuando el Worker la hacía con una transacción abierta por la red:
 | `revertirCobro` | El webhook: reembolsos y disputas | Después, marcar el evento y avisar al `TenantHub` de las altas anuladas |
 | `revocarAMano`, `desrevocar` | `/v1/admin/licenses/:id/revoke` y `/unrevoke` | Antes, que la licencia exista; después, la auditoría y el aviso al `TenantHub` |
 | `extenderAMano`, `acortarAMano` | `/v1/admin/licenses/:id/extend` y `/shorten` | Después, la auditoría. Leer la caducidad y escribir la nueva van juntos: dos a la vez no pierden ninguno de los dos cambios |
+| `recogerTokenDeLaHandy` | `/v1/pair/fetch-token` (`pairing.handy.ts`) | Antes, la firma del reto, el estado del código, la clave del equipo si está en otro negocio y el token firmado; después, el aviso a la Main. Gasta el reto, gasta el código y da de alta la Handy, o nada ([emparejamiento.md](emparejamiento.md#el-flujo)) |
 
 - **Es síncrona de principio a fin**: ni `async`, ni `await`, ni promesas, ni temporizadores, ni
   `fetch` o `crypto.subtle`, tampoco en lo que importa. Una espera dentro abriría el objeto a otras
@@ -407,8 +408,8 @@ cuando el Worker la hacía con una transacción abierta por la red:
   nada ([CLAVES-SIN-CORREO](../pendientes.md#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir)).
   Una central saturada no se repite: Stripe reintenta más tarde.
 - Lo demás son sentencias sueltas condicionadas y lotes todo o nada, con sus ventanas de siempre: la
-  primera activación, los códigos por correo, el emparejamiento, los cupos de correo, el ticket del
-  socket.
+  primera activación, los códigos por correo, reclamar y soltar un código de emparejamiento, los
+  cupos de correo, el ticket del socket.
 
 Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma operación pedida a la
 vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`

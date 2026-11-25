@@ -12,6 +12,7 @@
 // fichero no hay ni un `String(body.x ?? "")` ni un `if (!campo)`.
 
 import type { Base } from "../../lib/sql";
+import type { ClienteCentral } from "../../server/central/cliente";
 import type { z } from "zod";
 
 import { DEMASIADAS_PETICIONES } from "../../lib/limitador";
@@ -260,9 +261,17 @@ async function licenciaActivaDelTenant(db: Base, tenantId: string): Promise<stri
 	return v || null;
 }
 
-/** La Handy recoge su token: el código está aprobado y ella prueba que es quien lo reclamó. */
+/**
+ * La Handy recoge su token: el código está aprobado y ella prueba que es quien lo reclamó.
+ *
+ * EMPAREJAR-TOKEN: gastar el reto, gastar el código y dar de alta el dispositivo van en una operación
+ * de la central (`recogerTokenDeLaHandy`), todo o nada; antes eran tres sentencias sueltas y un fallo
+ * del alta dejaba el reto y el código gastados sin dispositivo. Y si lo que se pierde es la respuesta,
+ * la Handy vuelve a preguntar con el mismo reto, que es el que gastó el código: se le firma otro token
+ * del mismo alta (`entregarOtraVez`).
+ */
 export async function entregarToken(
-	db: Base,
+	db: ClienteCentral,
 	env: any,
 	datos: z.infer<typeof fetchTokenSchema>,
 	now: number,
@@ -292,6 +301,9 @@ export async function entregarToken(
 	if (!tenantId) return fallo(500, "missing_tenant_id");
 	if (!pubB64Raw) return fallo(500, "missing_pubkey");
 
+	// Con el código ya gastado, sólo vale el reto con el que se gastó (EMPAREJAR-TOKEN).
+	const gastadoEn = pr.used_at_ms ? Number(pr.used_at_ms) : undefined;
+
 	const problema = await comprobarFirmaDelReclamante(db, {
 		accion: "PAIR_FETCH",
 		pairCode,
@@ -301,10 +313,11 @@ export async function entregarToken(
 		sigB64,
 		pubB64: pubB64Raw,
 		ahoraMs: now,
+		retoGastadoEn: gastadoEn,
 	});
 	if (problema) return fallo(problema.status, problema.error);
 
-	if (pr.used_at_ms) return fallo(409, "already_used");
+	if (gastadoEn !== undefined) return entregarOtraVez(db, env, tenantId, deviceId, pubB64Raw);
 	if (Number(pr.expires_at_ms || 0) < now) return fallo(410, "pair_code_expired");
 
 	const status = String(pr.status || "");
@@ -315,7 +328,7 @@ export async function entregarToken(
 	if (status !== "approved") return fallo(409, "not_approved");
 
 	// REV-07: y la firma de arriba prueba que tiene la clave que ACABA DE MANDAR, no la que este
-	// `device_id` tuviera registrada. Sin este corte, el upsert de más abajo pisaba `tenant_id`
+	// `device_id` tuviera registrada. Sin este corte, el upsert del alta pisaba `tenant_id`
 	// **y `device_pubkey_b64`**, así que bastaba con vincular una Handy a un negocio propio
 	// usando el `device_id` de la Main de otro —que las Handy del local conocen, viaja en los
 	// avisos del WebSocket (`main_online`)— para dejar aquella Main firmando con una clave que
@@ -325,7 +338,8 @@ export async function entregarToken(
 	// Que un equipo pueda mudarse de negocio sigue siendo cierto y deliberado (§9): lo que se
 	// exige es que lo haga firmando con SU clave, que es lo que prueba que es él. Dentro del
 	// mismo negocio la clave sí puede cambiar: es como se recupera un Handy que perdió la suya,
-	// y lo aprueba el dueño desde su Main.
+	// y lo aprueba el dueño desde su Main. La regla va también dentro de la sentencia del alta
+	// (AUD-01, `recogerTokenDeLaHandy`): esta lectura no está en su transacción.
 	try {
 		await exigirClaveSiEsDeOtroNegocio(db, deviceId, pubB64Raw, tenantId);
 	} catch (e: any) {
@@ -336,6 +350,71 @@ export async function entregarToken(
 		throw e;
 	}
 
+	// El token se firma antes de escribir nada: si no se puede, no queda nada gastado.
+	const token = await tokenDeLaHandy(db, env, tenantId, deviceId);
+	if ("status" in token) return token;
+
+	// Ahora, y no al aprobar, es cuando el dispositivo existe de verdad: el código está gastado,
+	// la firma es la de la clave que la Main aprobó y el token sale en esta respuesta.
+	const recogida = await db.operar("recogerTokenDeLaHandy", {
+		pairCode,
+		deviceId,
+		nonceB64,
+		tenantId,
+		pubB64: pubB64Raw,
+		ahoraMs: now,
+	});
+	if (recogida.resultado === "reto_gastado") return fallo(409, "challenge_used_or_expired");
+	if (recogida.resultado === "codigo_gastado") return fallo(409, "pair_code_used_or_invalid_state");
+	if (recogida.resultado === "clave_de_otro") return fallo(409, "device_key_mismatch");
+
+	// La lista de vinculados de la Main cambia en este momento, no al aprobar.
+	await avisarSolicitudALaMain(env, tenantId);
+
+	return ok({ tenantId, token: token.token, deviceId, expiresInSeconds: token.ttlSeconds });
+}
+
+/**
+ * EMPAREJAR-TOKEN: la recogida que entró y cuya respuesta se perdió. La Handy no tiene el token y
+ * vuelve a preguntar con el reto que gastó el código (lo ha comprobado `comprobarFirmaDelReclamante`,
+ * con la firma de la clave que la Main aprobó): se le firma otro del mismo alta, sin escribir nada.
+ * El token no se guarda en ningún sitio para devolver «el mismo»: es una sesión firmada, y otra igual
+ * vale lo mismo. Es lo que da `/v1/license/refresh` a una Handy que firma con su clave, y con las
+ * mismas condiciones: que el dispositivo siga siendo esa Handy de ese negocio, con esa clave, y sin
+ * revocar. Vale lo que vive el reto, que caduca con el código.
+ */
+async function entregarOtraVez(
+	db: ClienteCentral,
+	env: any,
+	tenantId: string,
+	deviceId: string,
+	pubB64: string,
+): Promise<Resultado> {
+	const r = await db.execute({
+		sql: `SELECT tenant_id, role, revoked_at_ms, device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
+		args: [deviceId],
+	});
+	const fila = r.rows?.[0] as any | undefined;
+	const esElAlta =
+		fila &&
+		String(fila.tenant_id || "") === tenantId &&
+		String(fila.role || "") === "handy" &&
+		String(fila.device_pubkey_b64 || "") === pubB64;
+	if (!esElAlta) return fallo(409, "already_used");
+	if (fila.revoked_at_ms) return fallo(401, "device_revoked");
+
+	const token = await tokenDeLaHandy(db, env, tenantId, deviceId);
+	if ("status" in token) return token;
+	return ok({ tenantId, token: token.token, deviceId, expiresInSeconds: token.ttlSeconds });
+}
+
+/** El token de una Handy de `tenantId`, o el fallo con el que contestar si no se puede firmar. */
+async function tokenDeLaHandy(
+	db: Base,
+	env: any,
+	tenantId: string,
+	deviceId: string,
+): Promise<{ token: string; ttlSeconds: number } | Resultado> {
 	const licHash = await licenciaActivaDelTenant(db, tenantId);
 	if (!licHash) return fallo(500, "no_active_license_for_tenant");
 
@@ -348,90 +427,8 @@ export async function entregarToken(
 
 	// El mismo emisor que usa `/v1/license/refresh` para reemitirlo cuando caduque: si cada uno
 	// firmara el suyo, un token renovado podría no ser el mismo token con otra fecha.
-	const token = await firmarSesion(
-		env,
-		{ tenantId, deviceId, licHash },
-		{ rol: "handy", ttlSegundos: ttlSeconds },
-	);
-
-	// El reto, el código y el alta son tres escrituras sueltas, no un lote (EMPAREJAR-TOKEN, en
-	// docs/pendientes.md).
-	const challengeUpdate = await db.execute({
-		sql: `
-			UPDATE device_challenges
-			SET used_at_ms=?
-			WHERE device_id=?
-			  AND nonce_b64=?
-			  AND used_at_ms IS NULL
-			  AND expires_at_ms >= ?;
-		`,
-		args: [now, deviceId, nonceB64, now],
-	});
-
-	if (challengeUpdate.rowsAffected <= 0) return fallo(409, "challenge_used_or_expired");
-
-	const pairUpdate = await db.execute({
-		sql: `
-			UPDATE pair_requests
-			SET status='used',
-			    used_at_ms=?
-			WHERE pair_code=?
-			  AND claimed_by_device_id=?
-			  AND status='approved'
-			  AND used_at_ms IS NULL
-			  AND expires_at_ms >= ?;
-		`,
-		args: [now, pairCode, deviceId, now],
-	});
-
-	if (pairUpdate.rowsAffected <= 0) return fallo(409, "pair_code_used_or_invalid_state");
-
-	// Ahora, y no al aprobar, es cuando el dispositivo existe de verdad: el código está gastado,
-	// la firma es la de la clave que la Main aprobó y el token sale en esta respuesta. Si ya
-	// estaba (una Handy que se vuelve a vincular), se reactiva.
-	//
-	// `device_pubkey_b64` se sigue escribiendo, pero ya no puede CAMBIAR de dueño: arriba se ha
-	// exigido que sea la que este `device_id` tuviera registrada (REV-07). Escribirla aquí es lo
-	// que le pone clave a un dispositivo que aún no la tenía.
-	//
-	// AUD-01: y la regla de REV-07 va también DENTRO de la sentencia. La comprobación de arriba y
-	// esta escritura no son un lote: dos recogidas aprobadas para el mismo `device_id`, en negocios
-	// distintos y con claves distintas, veían las dos que no había fila; la primera la creaba y el
-	// upsert de la segunda, sin condición, le cambiaba el negocio y la clave. Una fila que ya
-	// existe sólo se toca si es de este negocio (la recuperación que aprueba el dueño) o si su clave
-	// registrada es ésta (la mudanza del propio equipo). Si no escribe, no se entrega el token.
-	const alta = await db.execute({
-		sql: `
-			INSERT INTO devices (
-				device_id,
-				tenant_id,
-				role,
-				first_seen_at_ms,
-				last_seen_at_ms,
-				revoked_at_ms,
-				device_pubkey_b64,
-				pubkey_alg
-			)
-			VALUES (?, ?, 'handy', ?, ?, NULL, ?, 'ed25519')
-			ON CONFLICT(device_id) DO UPDATE SET
-				tenant_id=excluded.tenant_id,
-				role='handy',
-				last_seen_at_ms=excluded.last_seen_at_ms,
-				revoked_at_ms=NULL,
-				device_pubkey_b64=excluded.device_pubkey_b64,
-				pubkey_alg='ed25519'
-			WHERE devices.tenant_id = excluded.tenant_id
-			   OR devices.device_pubkey_b64 = excluded.device_pubkey_b64;
-		`,
-		args: [deviceId, tenantId, now, now, pubB64Raw],
-	});
-
-	if (alta.rowsAffected <= 0) return fallo(409, "device_key_mismatch");
-
-	// La lista de vinculados de la Main cambia en este momento, no al aprobar.
-	await avisarSolicitudALaMain(env, tenantId);
-
-	return ok({ tenantId, token, deviceId, expiresInSeconds: ttlSeconds });
+	const token = await firmarSesion(env, { tenantId, deviceId, licHash }, { rol: "handy", ttlSegundos: ttlSeconds });
+	return { token, ttlSeconds };
 }
 
 /**

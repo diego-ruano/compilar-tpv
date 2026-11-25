@@ -17,10 +17,11 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import * as ed from "@noble/ed25519";
 
-import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
+import { centralDePrueba, centralInterceptada, filasDe, operarConFallo, type CentralDePrueba } from "./helpers/central";
 import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 import type { FilasEnBruto } from "../src/durableObjects/sqliteDelObjeto";
-import type { ClienteCentral } from "../src/server/central/cliente";
+import { ErrorDeLaCentral, type ClienteCentral } from "../src/server/central/cliente";
+import type { Operaciones } from "../src/server/central/operaciones/registro";
 import { entregarToken, reclamarCodigo, soltarCodigo } from "../src/domains/pairing/pairing.handy";
 import { aprobarSolicitud, crearCodigo, rechazarSolicitud, solicitudesPendientes } from "../src/domains/pairing/pairing.main";
 import { cancelSchema, claimSchema, fetchTokenSchema } from "../src/domains/pairing/pairing.schemas";
@@ -621,6 +622,133 @@ describe("el reto y la recogida del token", () => {
 	});
 });
 
+// EMPAREJAR-TOKEN: gastar el reto, gastar el código y dar de alta la Handy eran tres sentencias
+// sueltas. Un fallo del alta dejaba el reto y el código gastados sin dispositivo, y había que
+// emparejar otra vez; y la Handy cuya respuesta se perdía no podía volver a pedir su token, porque su
+// reto ya estaba gastado. Ahora van en una operación de la central, todo o nada, y la recogida que se
+// repite con el reto que gastó el código recibe otro token del mismo alta.
+describe("recoger el token, todo o nada (EMPAREJAR-TOKEN)", () => {
+	/**
+	 * Lo que escribe la recogida, y el texto con el que se reconoce cada escritura: por sentencia suelta
+	 * (antes) o dentro de la operación (ahora).
+	 */
+	const ESCRITURAS = [
+		["al gastar el reto", /UPDATE device_challenges/],
+		["al gastar el código", /UPDATE pair_requests\s+SET status='used'/],
+		["al dar de alta el dispositivo", /INSERT INTO devices/],
+	] as const;
+
+	/**
+	 * El mundo `m`, pero con la central fallando en la escritura que case con `patron` mientras
+	 * `fallar.si` lo diga: una sentencia suelta falla sin ejecutarse, como un error de SQL; una
+	 * operación revienta justo después de ejecutarla.
+	 */
+	function conFalloAlEscribir(m: Mundo, patron: RegExp) {
+		const fallar = { si: true };
+		const mundo = new Mundo(
+			m.central,
+			centralInterceptada(m.central, (metodo, argumentos, llamar) => {
+				if (!fallar.si) return llamar();
+				if (metodo === "ejecutar" && patron.test((argumentos[0] as SentenciaEnlazada).sql)) {
+					return { ok: false, error: "central_error_sql", detalle: "fallo_simulado" };
+				}
+				if (metodo === "operar") {
+					const [nombre, datos] = argumentos as [keyof Operaciones, never];
+					return operarConFallo(m.central, nombre, datos, (texto) => patron.test(texto));
+				}
+				return llamar();
+			}).db,
+		);
+		return { mundo, fallar };
+	}
+
+	for (const [cuando, patron] of ESCRITURAS) {
+		it(`un fallo ${cuando} no deja nada gastado, y la Handy repite la recogida con el mismo reto`, async () => {
+			const a = await dispositivo("handy-a", 1);
+			await conLaCentral(async (m) => {
+				const { body } = await m.reclamar(a, CODIGO, T0);
+				await m.aprobar(CODIGO, a, T0 + MIN);
+				const { mundo, fallar } = conFalloAlEscribir(m, patron);
+
+				await expect(mundo.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).rejects.toBeInstanceOf(ErrorDeLaCentral);
+
+				expect(
+					await m.filas(`SELECT used_at_ms FROM device_challenges WHERE device_id = ? AND nonce_b64 = ?;`, a.id, body.nonceB64),
+				).toEqual([{ used_at_ms: null }]);
+				expect(await m.solicitud(CODIGO)).toMatchObject({ status: "approved", used_at_ms: null });
+				expect(await m.dispositivoRegistrado(a)).toBeUndefined();
+
+				// La central vuelve a contestar: la siguiente consulta, con el mismo reto, se lleva el token.
+				fallar.si = false;
+				const otraVez = await mundo.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN);
+				expect(otraVez.status).toBe(200);
+				expect(otraVez.body).toMatchObject({ ok: true, tenantId: TENANT, deviceId: a.id, token: expect.any(String) });
+				expect(await m.solicitud(CODIGO)).toMatchObject({ status: "used" });
+				expect(await m.dispositivoRegistrado(a)).toMatchObject({ tenant_id: TENANT, role: "handy", revoked_at_ms: null });
+			});
+		});
+	}
+
+	it("si la respuesta se pierde, repetir la recogida con el mismo reto da otro token del mismo alta", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conLaCentral(async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			await m.aprobar(CODIGO, a, T0 + MIN);
+			const primera = await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN);
+			expect(primera.status).toBe(200);
+			const alta = await m.dispositivoRegistrado(a);
+
+			// La respuesta no llegó: la Handy vuelve a preguntar con su reto, firmando otra vez.
+			const repetida = await m.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN);
+			expect(repetida.status).toBe(200);
+			expect(repetida.body).toMatchObject({ ok: true, tenantId: TENANT, deviceId: a.id, token: expect.any(String) });
+
+			// Sin escribir nada: ni otro dispositivo, ni el alta tocada, ni el código.
+			expect(await m.filas(`SELECT COUNT(*) AS n FROM devices;`)).toEqual([{ n: 1 }]);
+			expect(await m.dispositivoRegistrado(a)).toEqual(alta);
+			expect(await m.solicitud(CODIGO)).toMatchObject({ status: "used", used_at_ms: T0 + MIN });
+		});
+	});
+
+	it("la recogida repetida sólo vale con el reto que gastó el código, firmado por quien lo reclamó, y mientras viva", async () => {
+		const a = await dispositivo("handy-a", 1);
+		const suplantador = { ...(await dispositivo("handy-a", 3)), id: "handy-a" };
+		await conLaCentral(async (m) => {
+			// Dos retos del mismo reclamo: la aplicación se reinició esperando y volvió a reclamar.
+			const otroReto = (await m.reclamar(a, CODIGO, T0)).body.nonceB64;
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			await m.aprobar(CODIGO, a, T0 + MIN);
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).status).toBe(200);
+
+			expect((await m.recoger(a, CODIGO, otroReto, T0 + 2 * MIN)).body.error).toBe("already_used");
+			expect((await m.recoger(suplantador, CODIGO, body.nonceB64, T0 + 2 * MIN)).body.error).toBe("bad_device_signature");
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN, "PAIR_CANCEL")).body.error).toBe(
+				"bad_device_signature",
+			);
+			// El reto caduca con el código: después, la Handy renueva su token como cualquier otra (`/v1/license/refresh`).
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + 11 * MIN)).body.error).toBe("challenge_expired");
+		});
+	});
+
+	it("la recogida repetida no da token a un dispositivo revocado, ni al que ya no es de ese negocio con esa clave", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conLaCentral(async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			await m.aprobar(CODIGO, a, T0 + MIN);
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).status).toBe(200);
+
+			await m.filas(`UPDATE devices SET revoked_at_ms = ? WHERE device_id = ?;`, T0 + MIN, a.id);
+			const revocado = await m.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN);
+			expect([revocado.status, revocado.body.error, revocado.body.token]).toEqual([401, "device_revoked", undefined]);
+
+			await m.filas(`INSERT INTO tenants (tenant_id) VALUES ('otro-negocio');`);
+			await m.filas(`UPDATE devices SET revoked_at_ms = NULL, tenant_id = 'otro-negocio' WHERE device_id = ?;`, a.id);
+			const mudado = await m.recoger(a, CODIGO, body.nonceB64, T0 + 2 * MIN);
+			expect([mudado.status, mudado.body.error, mudado.body.token]).toEqual([409, "already_used", undefined]);
+		});
+	});
+});
+
 // Reclamar el código y canjearlo por el token leen la solicitud, deciden y escriben en viajes
 // distintos a la central. Lo que impide que dos se lo lleven es la sentencia que escribe, que sólo
 // lo hace si la solicitud sigue como estaba (FABLE-D, y el `used_at_ms IS NULL` del canje). Aquí, N
@@ -938,8 +1066,9 @@ describe("sin ser quien lo reclamó, ningún código existe (AUD-10)", () => {
 			const otro = await m.reclamar(a, OTRO_CODIGO, T0);
 			expect((await aprobarSolicitud(m.db, TENANT, OTRO_CODIGO, T0 + MIN)).status).toBe(200);
 			expect((await m.recoger(a, OTRO_CODIGO, otro.body.nonceB64, T0 + MIN)).status).toBe(200);
-			// Recogido el token, el reto está gastado.
-			expect((await m.recoger(a, OTRO_CODIGO, otro.body.nonceB64, T0 + MIN)).body.error).toBe("challenge_used");
+			// Recogido el token, el reto está gastado: con él sólo se repite la recogida cuya respuesta se
+			// perdió (EMPAREJAR-TOKEN), y lo que se lleva es otro token del mismo alta.
+			expect((await m.recoger(a, OTRO_CODIGO, otro.body.nonceB64, T0 + MIN)).body).toMatchObject({ ok: true, deviceId: a.id });
 		});
 	});
 });

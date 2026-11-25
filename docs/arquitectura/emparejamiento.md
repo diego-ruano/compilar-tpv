@@ -36,19 +36,31 @@ y la Main aprueba.
 3. La Main ve la solicitud (`/pending`) y la aprueba o la rechaza.
 4. La Handy pregunta por el token (`/fetch-token`) firmando el reto con su clave y la acción
    `PAIR_FETCH`. **El dispositivo se da de alta en `devices` al recoger el token**, no al aprobar, y es
-   entonces cuando la Main recibe el aviso. Pregunta cada 1,5 s mientras le contesten `not_approved`,
-   hasta que caduca el código (`emparejamiento.ts::emparejarHandy`). **Sólo termina con lo que no va
-   a cambiar** (`TERMINALES`, EMPAREJAR-ESPERA): el rechazo de la Main (`pair_rejected`) y el código
-   caducado (`pair_code_expired`), que tienen su código en el catálogo; el código que no es de este
-   equipo (`not_found`), gastado o con el reto inservible (`conflict`), o la nube que no deja entrar al
-   equipo o a su negocio. Lo demás es pasajero —sin red, un 503 de la central o del worker, un 429 del
-   filtro por IP, un 5xx— y se sigue esperando: tras cada fallo seguido la pausa se dobla, hasta 15 s
+   entonces cuando la Main recibe el aviso. **Gastar el reto, gastar el código y dar de alta la Handy
+   van juntos o no van** (EMPAREJAR-TOKEN): son una operación de la base central
+   (`recogerTokenDeLaHandy`, [worker.md](worker.md#las-operaciones)), y el token se firma antes, así
+   que si algo falla no queda nada gastado y la siguiente consulta, con el mismo reto, lo recoge. Si lo
+   que se pierde es la respuesta, la Handy, que ante un fallo de red sigue preguntando, vuelve a
+   hacerlo con el reto que gastó el código y recibe **otro token del mismo alta**, sin escribir nada
+   (`entregarOtraVez`): el token no se guarda, es una sesión firmada, y es lo que daría
+   `/v1/license/refresh` a esa Handy firmando con su clave. Sólo con ese reto, con la firma de la clave
+   que la Main aprobó, mientras el reto viva (caduca con el código), y si el dispositivo sigue siendo
+   esa Handy de ese negocio, con esa clave y sin revocar (`device_revoked` si la han revocado;
+   `already_used` con otro reto o si ya no es ella).
+
+   Pregunta cada 1,5 s mientras le contesten `not_approved`, hasta que caduca el código
+   (`emparejamiento.ts::emparejarHandy`). **Sólo termina con lo que no va a cambiar** (`TERMINALES`,
+   EMPAREJAR-ESPERA): el rechazo de la Main (`pair_rejected`) y el código caducado
+   (`pair_code_expired`), que tienen su código en el catálogo; el código que no es de este equipo
+   (`not_found`), gastado o con el reto inservible (`conflict`), o la nube que no deja entrar al equipo
+   o a su negocio. Lo demás es pasajero —sin red, un 503 de la central o del worker, un 429 del filtro
+   por IP, un 5xx— y se sigue esperando: tras cada fallo seguido la pausa se dobla, hasta 15 s
    (`ESPERA_MAXIMA_TRAS_FALLOS_MS`), y vuelve a 1,5 s en cuanto la nube contesta. La pausa no la dice
    la respuesta: el `Retry-After` del 429 no cruza el IPC, que sólo lleva `code` y `message`. Mientras
    falla, la pantalla lo dice («… Se sigue esperando la aprobación.»), y si el código caduca así, dice
    que la nube no contestaba en vez de que la Main no aprobó. El código caducado esperando sale también
-   como `pair_code_expired`. Con éste o con el rechazo, la pantalla da el código por gastado y lo vacía;
-   con cualquier otro fallo lo deja, y «Vincular dispositivo» lo vuelve a intentar.
+   como `pair_code_expired`. Con éste o con el rechazo, la pantalla da el código por gastado y lo
+   vacía; con cualquier otro fallo lo deja, y «Vincular dispositivo» lo vuelve a intentar.
 5. Cancelar en la Handy (`/v1/pair/cancel`, acción `PAIR_CANCEL`) suelta el código en la nube, para que
    la solicitud no siga en la lista de la Main. Lo ya aprobado no se deshace cancelando: eso es revocar.
 6. Si la Handy se cierra o se reinicia esperando, nadie pulsa «Cancelar»: mientras espera, apunta la
@@ -113,11 +125,12 @@ revés.
   (`/v1/device/list`, `/v1/pair/pending`). Dentro del mismo negocio, que la clave cambie al volver a
   vincular es la vía de recuperación de una Handy revocada (o de una fila que se quedó sin clave), y
   lo aprueba el dueño. Activar una licencia no lo deja ni dentro del mismo negocio.
-- **Esa regla va también dentro de la sentencia del alta.** La comprobación y la escritura no son un
-  lote, así que el upsert de `fetch-token` sólo toca una fila que ya existe si es de este negocio o
-  si su clave registrada es la presentada. Si no escribe, contesta `device_key_mismatch` y no
-  entrega el token: de dos recogidas simultáneas del mismo `device_id` en negocios y con claves
-  distintos entra una sola. A la que llega tarde le queda el código gastado.
+- **Esa regla va también dentro de la sentencia del alta.** La comprobación se hace antes de la
+  operación que da el alta, fuera de su transacción, así que el upsert de `recogerTokenDeLaHandy`
+  sólo toca una fila que ya existe si es de este negocio o si su clave registrada es la presentada. Si
+  no escribe, contesta `device_key_mismatch` y no entrega el token: de dos recogidas simultáneas del
+  mismo `device_id` en negocios y con claves distintos entra una sola. A la que llega tarde no le
+  queda nada gastado: su reto y su código siguen como estaban.
 
 ## El token de la Handy
 
