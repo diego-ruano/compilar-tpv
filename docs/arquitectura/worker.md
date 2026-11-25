@@ -340,8 +340,9 @@ Un objeto mal pedido o tocado a mano no falla en voz alta. Por eso (`baseCentral
   o desde una copia ([abajo](#restaurar-desde-una-copia)). Si lo creara solo, un nombre equivocado
   daría una central vacía que contestaría que no existe ninguna licencia.
 - **Con algo a medias no atiende**: una restauración que no terminó (`central_restauracion_a_medias`)
-  o una vuelta a un instante preparada y sin aplicar (`central_vuelta_en_curso`). Lo dicen sus marcas
-  en el almacenamiento del objeto, y es lo primero que mira.
+  o una vuelta a un instante en curso, preparándose o preparada y sin aplicar
+  (`central_vuelta_en_curso`). Lo dicen sus marcas en el almacenamiento del objeto, y es lo primero
+  que mira.
 - **Al arrancar se pone al día** con sus migraciones, dentro de `blockConcurrencyWhile` y sin atender
   nada mientras tanto. Si una aplicada ha cambiado (`central_migracion_alterada`) o una nueva no entra
   (`central_migracion_fallida`), no atiende, lo dice en cada llamada y avisa a Sentry
@@ -533,6 +534,11 @@ llamada escribe después) y `test/elHubPuedeHibernar.test.ts`.
   unidad, las claves foráneas en cascada). Un cambio a propósito la regenera con
   `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`, y se revisa junto al de la
   migración.
+- **Lo que la central de producción ya tiene aplicado no cambia**: el mismo test lleva escrito a mano
+  el hash de cada una de esas migraciones (`APLICADAS`, hoy la 0001), el que el runner guarda en
+  `_migrations`, y lo compara con el que da. Cambiar una, aunque sea un comentario o un espacio que no
+  llegan a la foto, lo hace fallar, y `-u` no lo toca. Una migración nueva se añade ahí en el mismo
+  despliegue en que se aplica en producción.
 - No es el esquema del negocio y no sigue sus reglas: no se replica, sus nombres van en inglés y
   algunas columnas toman su hora de un `DEFAULT`.
 
@@ -963,7 +969,10 @@ La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copi
   con el día en UTC; repetirla el mismo día la reescribe); una a mano, que pide la administración
   (`base-central/a-mano-<hora>.sql.gz`, que no pisa la del día); y la de cómo estaba antes de volver a
   un instante (`base-central/antes-de-volver-<hora>.sql.gz`). La hora va en ISO, con guiones en vez de
-  dos puntos, para que la clave sirva de nombre de fichero también en Windows.
+  dos puntos, para que la clave sirva de nombre de fichero también en Windows. Junto a la de antes de
+  volver pueden ir dos ficheros que no son copias ni se restauran: `….marcador`, el marcador que
+  deshace la vuelta cuando la central no se podía copiar, y `….pedida`, la constancia de que la
+  plataforma ya tiene la vuelta ([abajo](#volver-a-un-instante)).
 - **Es una foto**: lee `sqlite_master` y todas las tablas y comprime de una pasada, sin esperas
   (`GzipPorTrozos`, `volcadoSql.ts`, con `node:zlib`), así que ninguna escritura se intercala: la
   copia no puede tener una licencia sin su negocio ni un dispositivo sin el suyo. Sólo la subida, que
@@ -980,14 +989,15 @@ La hace el propio objeto (`BaseCentral.copiar`, `durableObjects/baseCentral.copi
 - **Va todo lo que es de la base**, también una tabla que se cree mañana, sin tocar la copia. Fuera
   quedan las tablas de SQLite, las del propio objeto (`_cf_*`) y `_migrations`, cuyo papel lo hace la
   línea de las migraciones.
-- **En R2 lleva** sus metadatos (cuándo se leyó, filas, tablas y la última migración) y su SHA-256,
-  que R2 comprueba al recibirla.
+- **En R2 lleva** sus metadatos (cuándo se leyó, filas, tablas y la última migración; la de antes de
+  volver, también el `marcador` que deshace la vuelta) y su SHA-256, que R2 comprueba al recibirla.
 - **Bucket privado y propio**: `tpv-copias-control` (`COPIAS`), nunca `tpv-images`, que se sirve sin
   firma: lleva los correos de los clientes y las DEK de los negocios, cifradas con
   `LICENSE_STORE_KEY`. Sin esa clave la copia no las devuelve: se guarda fuera de Cloudflare.
 - **Cuánto se guardan lo decide la regla de ciclo de vida del bucket**, en Cloudflare, no el código, y
-  vale también para las de a mano y las de antes de volver. Tiene que quedar por debajo de los 90 días
-  de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida seguirían vivos en las copias.
+  vale también para las de a mano y las de antes de volver, con sus `.marcador` y `.pedida`. Tiene que
+  quedar por debajo de los 90 días de `RETENCION_ENVIOS_MS`, o los correos que la purga olvida
+  seguirían vivos en las copias, y no por debajo de los 30 en que se puede deshacer una vuelta.
 - **Un techo**: 32 MiB comprimida (`TOPE_COMPRIMIDO`). Se monta en memoria y al cerrarla ocupa el
   doble, dentro de los 128 MB del objeto. Pasado, falla en voz alta (`central_copia_fallida`) en vez
   de reventar el objeto, y el latido de la copia deja de sonar.
@@ -999,8 +1009,10 @@ copia, la devuelve a otro objeto y las compara tabla a tabla, con el tipo de cad
 
 `aprovisionar({ claveDeCopia })` (`durableObjects/baseCentral.restaurar.ts`), con el cargador que
 comparte con la base de cada negocio (`cargaDeCopias.ts`). **Sólo en un objeto sin aprovisionar**, o
-con una restauración a medias; en uno aprovisionado no toca nada (`central_ya_aprovisionada`). Una
-central con datos malos no se restaura: [vuelve a un instante](#volver-a-un-instante).
+con una restauración a medias; en uno aprovisionado no toca nada (`central_ya_aprovisionada`). Con una
+vuelta a un instante en curso no hace nada, tampoco con el esquema vacío (`central_vuelta_en_curso`):
+restaurar empieza vaciando el objeto, marca incluida, y la central atendería con una vuelta pedida a
+la plataforma. Una central con datos malos no se restaura: [vuelve a un instante](#volver-a-un-instante).
 
 - **Nada se intercala**: corre dentro de `blockConcurrencyWhile`, así que ninguna otra llamada entra
   hasta que acaba, tampoco las guardas que reafirman las claves foráneas, que aquí van apagadas
@@ -1037,31 +1049,60 @@ Lo cubren `test/centralRestaurar.test.ts` y `test/cargaDeCopias.test.ts`.
 
 ### Volver a un instante
 
-Con la API de Cloudflare (`getBookmarkForTime`, `onNextSessionRestoreBookmark` y `ctx.abort()`), detrás
-de `Instantes` (`durableObjects/instantes.ts`), lo que comparte con la vuelta de cada negocio. Vuelve
-el objeto entero y en el sitio. Lo pide `/v1/admin/central/volver`, en dos llamadas al objeto, cada
-una con su stub:
+Con la API de Cloudflare (`getBookmarkForTime`, `getCurrentBookmark`, `onNextSessionRestoreBookmark` y
+`ctx.abort()`), detrás de `Instantes` (`durableObjects/instantes.ts`), lo que comparte con la vuelta de
+cada negocio. Vuelve el objeto entero y en el sitio. Lo pide `/v1/admin/central/volver`, en dos
+llamadas al objeto, cada una con su stub:
 
-1. **`prepararVuelta`** (`baseCentral.instante.ts`), sólo con la central aprovisionada, sin avería y
-   sin una restauración a medias. Pone la marca de vuelta en curso, y desde ahí la central no atiende
-   (`central_vuelta_en_curso`): lo que se escribiera no estaría en la copia de antes y se perdería al
-   volver. Saca el marcador del instante antes de copiar nada (si la plataforma no vuelve o el instante
-   no vale, no hay copia inútil), deja en R2 la copia de cómo está (`antes-de-volver-<hora>`) y la
-   vuelta preparada para el siguiente arranque, y devuelve el marcador con el que se deshace. Si algo
-   falla antes de dejarla preparada, quita su marca, o vuelve a poner la de una vuelta anterior que
-   siguiera preparada, y la central vuelve a atender.
-2. **`reiniciar`**: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto
-   vuelve.
+1. **`prepararVuelta`** (`baseCentral.instante.ts`), esté como esté la central. Pone la marca de
+   vuelta en curso, y desde ahí la central no atiende (`central_vuelta_en_curso`): lo que se
+   escribiera no estaría en la copia de antes y se perdería al volver. Saca el marcador del instante
+   antes de copiar nada (si la plataforma no vuelve o el instante no vale, no hay copia inútil) y el de
+   cómo está, con la central ya cerrada, que es el que la deshace. Deja ese marcador en R2, fuera de lo
+   que vuelve (la vuelta se lleva el SQLite entero del objeto, también `storage.kv`): en los metadatos
+   de la copia de cómo está (`antes-de-volver-<hora>.sql.gz`) o, si no se puede copiar, solo
+   (`antes-de-volver-<hora>.marcador`). Si no llega a R2, no pide la vuelta (`central_copia_fallida`).
+   Después la pide para el siguiente arranque, deja en R2 que la ha pedido
+   (`antes-de-volver-<hora>.pedida`; si R2 falla ahí, la vuelta sigue y se avisa a Sentry,
+   `central.vuelta_pedida`) y devuelve el marcador con el que se deshace.
+2. **`reiniciar(deshacer)`**: `ctx.abort()`, sólo si la vuelta preparada es la que se deshace con
+   `deshacer`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto vuelve. Con otra
+   vuelta en curso contesta `central_vuelta_a_la_vez`, y sin ninguna, `central_sin_vuelta_preparada`,
+   sin reiniciar: el reinicio es de quien la ha preparado.
 
+- **También con la central sin atender** (a medio restaurar, con una migración que falla o alterada,
+  o sin esquema), que es como la puede dejar una vuelta: deshacerla, o volver a otro instante, es la
+  salida. Entonces no hay copia de antes (`copiaDeAntes: null`): la de una central así parecería buena
+  y le faltarían filas.
+- **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta`, con su `id` y su
+  fase: `preparando`, `programando` o `preparada`). Una preparación nueva se queda la marca de otra que
+  está `preparando`, y ésa, al ver que ya no es suya, lo deja sin pedir nada a la plataforma
+  (`central_vuelta_a_la_vez`); mientras a una se le está pidiendo la vuelta a la plataforma
+  (`programando`), no entra ninguna otra. Lo que no sale sólo devuelve la marca a como estaba si sigue
+  siendo suya: a la vuelta que ya estaba preparada, o a ninguna, y entonces la central vuelve a
+  atender.
+- **Lo que la plataforma no acepta vuelve como valor**: si el marcador del instante, el de ahora o la
+  propia vuelta fallan, la marca vuelve a como estaba y contesta `central_vuelta_rechazada`, con lo que
+  ha dicho la plataforma en `detalle`, y avisa a Sentry (`central.vuelta`). La vuelta no se ha pedido,
+  y lo subido a R2 no lleva `.pedida`. En local, `central_vuelta_no_disponible`.
 - **Al arrancar, la marca de una vuelta se quita**: la vuelta se aplica en el arranque, sea cual sea
   su causa, y lo que queda de la marca es de antes. Así, deshacer una vuelta (volver a su marcador,
   que es el estado de justo antes de reiniciar, con la marca puesta) no deja la central cerrada.
-- **La ruta espera a que conteste** (diez veces, cada medio segundo) y, si sigue con la vuelta sin
-  aplicar, la reinicia otra vez. Una central que ha vuelto pero no atiende (una migración que no
-  entra) no se da por buena.
-- Sólo a un instante pasado de los últimos 30 días (`central_instante_fuera_de_plazo`). No existe en
-  local ni en los tests (`central_vuelta_no_disponible`): se prueba con un doble de `Instantes`
-  (`test/centralVolver.test.ts`, `test/centralAdmin.test.ts`).
+- **La ruta espera a que conteste** (diez veces, cada medio segundo) y, si sigue con su vuelta sin
+  aplicar, la reinicia otra vez; si la vuelta en curso es otra, no la toca (`central_vuelta_a_la_vez`).
+  Una central que ha vuelto pero no atiende (a medio restaurar, sin esquema, una migración que no
+  entra) no se da por buena: contesta su código con el marcador que la deshace, la copia de antes y
+  cómo salir.
+- **Aplicar una vuelta preparada es una orden propia**: con `{ reiniciar: <deshacer> }`, la ruta sólo
+  hace la segunda llamada, y sólo si esa vuelta sigue preparada, así que repetirla no vuelve dos veces.
+  La misma orden de vuelta con la vuelta aún preparada devuelve la que hay, pero si la central se ha
+  reiniciado entretanto, ya ha vuelto, y prepararía otra.
+- Sólo a un instante pasado de los últimos 30 días (`central_instante_fuera_de_plazo`), y a un
+  marcador con la forma de los de Cloudflare (`esMarcador`: cifras hexadecimales en minúsculas en
+  grupos separados por guiones, hasta 100 caracteres). No existe en local ni en los tests
+  (`central_vuelta_no_disponible`): se prueba con dobles de `Instantes` (`conDobleDeInstantes` y
+  `conPlataformaQueVuelve`, en `test/centralVolver.test.ts`, `test/centralVolverAveriada.test.ts` y
+  `test/centralAdmin.test.ts`).
 
 ### Las rutas de administración de la central
 
@@ -1071,23 +1112,34 @@ ella sin aprovisionar.
 | Ruta | Qué hace | CLI |
 |---|---|---|
 | `GET /v1/admin/central/estado` | Si está aprovisionada, sus migraciones, su avería, lo que tiene a medias (`enCurso`), las filas de cada tabla y lo que ocupa. Sólo lee | `pnpm central:estado` |
-| `GET /v1/admin/central/copias` | Sus copias en R2, de la más reciente a la más vieja, con sus metadatos (100 como mucho, y `hayMas`) | `pnpm central:copias` |
+| `GET /v1/admin/central/copias` | Sus copias en R2, de la más reciente a la más vieja, con sus metadatos; de las de antes de volver, también su `marcador` y cuándo se pidió la vuelta (`pedida`), y los `.marcador` que van solos (100 como mucho, y `hayMas`) | `pnpm central:copias` |
 | `POST /v1/admin/central/copiar-ahora` | Una copia ahora, con la hora en la clave | `pnpm central:copiar` |
-| `POST /v1/admin/central/aprovisionar`, `{ claveDeCopia? }` | A un objeto sin aprovisionar: el esquema vacío o, con la clave, esa copia. La clave se valida antes de llegar al objeto: dentro de `base-central/`, un `.sql.gz` y sin `..` | `pnpm central:aprovisionar -- [--copia <clave>] --si` |
-| `POST /v1/admin/central/volver`, `{ instanteMs }` o `{ marcador }` | A un instante o a un marcador | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m>) --si` |
+| `POST /v1/admin/central/aprovisionar`, `{ claveDeCopia? }` | A un objeto sin aprovisionar: el esquema vacío o, con la clave, esa copia. La clave pasa una gramática cerrada antes de llegar al objeto (`esClaveDeCopiaDeLaCentral`): `base-central/`, un nombre de hasta 100 caracteres de `[A-Za-z0-9._-]` sin `..`, y `.sql.gz` | `pnpm central:aprovisionar -- [--copia <clave>] --si` |
+| `POST /v1/admin/central/volver`, `{ instanteMs }`, `{ marcador }` o `{ reiniciar }` | A un instante o a un marcador; o, con `reiniciar` (el `deshacer` de una vuelta preparada y sin aplicar), aplica esa vuelta | `pnpm central:volver -- (--instante <fecha ISO> \| --marcador <m> \| --reiniciar <deshacer>) --si` |
 
 - **Lo que no se hace contesta `{ ok: false, error, message, detalle? }`** con el estado HTTP de su
   código ([abajo](#los-códigos-de-la-central)): `error` es el código; `message`, qué pasa y qué hacer
   (`QUE_PASA`, en `central.ts`); y `detalle`, si el objeto lo da, el motivo técnico, que el CLI enseña
   aparte («Motivo: …»). Al volver lleva además `deshacer` y `copiaDeAntes` aunque no haya salido
-  entera, y el CLI escribe la orden que la deshace.
+  entera (y `estado`, si la central ha vuelto pero no atiende), y el CLI escribe en cada rama de error
+  lo que hace falta para salir: la orden que aplica la vuelta si quedó sin aplicar, la que la deshace,
+  la copia de antes y, sin respuesta de la ruta, cómo saber por R2 si se pidió.
+- **Lo que enseña el CLI lo prueba `scripts/tpv-license.test.mjs`** (en CI, en el job del worker):
+  ejecuta una copia del CLI, sin `.env`, contra un worker de mentira que sirve
+  `scripts/tpv-license.respuestas.json`, las respuestas de la aplicación entera. Las escribe y vigila
+  `test/centralVueltaEnElCli.test.ts`, como una foto: se regeneran con
+  `pnpm --filter tpv-api exec vitest run test/centralVueltaEnElCli.test.ts -u`.
 - **El rastro**: lo que cambia algo (copiar, aprovisionar o restaurar, volver) deja una línea en el
   log (`[central] {…}`) y el evento `central_administrada` en Axiom, con la acción, el resultado y,
-  según el caso, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer y la
-  copia de antes: nunca datos personales. No va a `admin_audit`, que es una tabla de la propia
-  central: restaurarla o devolverla a un instante la reescriben. Al volver se deja dos veces: con
-  `resultado: "preparada"` en cuanto la vuelta está preparada, antes de reiniciar (si la llamada no
-  termina, es lo que queda de con qué se deshace), y con el resultado al final.
+  según el caso, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer, la
+  copia de antes y, de una restauración que no sale, el `motivo` (el código del cargador,
+  `copia_cortada`…). Sólo lleva códigos, recuentos y claves y marcadores que han pasado su gramática:
+  nunca datos personales ni el `detalle` del objeto, que va en la respuesta. No va a `admin_audit`, que es una
+  tabla de la propia central: restaurarla o devolverla a un instante la reescriben. Restaurar,
+  aprovisionar y volver lo dejan antes de llamar al objeto (`empieza`) y, si la llamada no vuelve,
+  otra vez (`sin_respuesta`). Al volver, además, con `resultado: "preparada"` en cuanto la vuelta está
+  preparada, antes de reiniciar (si la llamada no termina, es lo que queda de con qué se deshace), y
+  con el resultado al final; al aplicar una vuelta ya preparada, con `reinicia` antes de reiniciar.
 
 ### Los códigos de la central
 
@@ -1101,16 +1153,19 @@ la ruta que vuelve a un instante. Su estado HTTP lo fija `server/central/cliente
 | `central_migracion_alterada` | 503 | Una migración ya aplicada ha cambiado |
 | `central_migracion_fallida` | 503 | Una migración no ha podido aplicarse |
 | `central_restauracion_a_medias` | 503 | Una restauración que no terminó: hasta que otra la vacíe y termine |
-| `central_vuelta_en_curso` | 503 | Una vuelta a un instante preparada y sin aplicar: hasta que el objeto se reinicie |
+| `central_vuelta_en_curso` | 503 | Una vuelta a un instante en curso: preparándose, o preparada y sin aplicar (hasta que el objeto se reinicie) |
 | `central_error_sql` | 500 | Una sentencia ha fallado (una restricción, una columna que no existe): no ha escrito nada |
 | `central_operacion_fallida` | 500 | Una operación ha lanzado: no ha escrito nada |
 | `central_sentencia_prohibida` | 500 | Una sentencia que la central no ejecuta: un fallo del programa |
-| `central_copia_fallida` | 500 | La copia no ha llegado a R2 (R2, el techo, un día mal escrito): no ha subido nada |
+| `central_copia_fallida` | 500 | La copia no ha llegado a R2 (R2, el techo, un día mal escrito): no ha subido nada. Al volver, sin la copia o su marcador no se pide la vuelta |
 | `central_ya_aprovisionada` | 409 | `aprovisionar` en un objeto con esquema: no ha tocado nada |
 | `central_copia_inservible` | 422 | La copia no se puede restaurar: el objeto se queda sin aprovisionar, como estaba |
 | `central_instante_fuera_de_plazo` | 400 | Un instante del futuro o de hace más de 30 días |
 | `central_vuelta_no_disponible` | 501 | La plataforma no devuelve objetos a un instante (en local) |
-| `central_vuelta_sin_aplicar` | 503 | La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada: se repite la orden |
+| `central_vuelta_rechazada` | 422 | La plataforma no ha aceptado la vuelta (el marcador del instante, el de ahora o la propia vuelta): no se ha pedido, y la central sigue como estaba |
+| `central_vuelta_a_la_vez` | 409 | Otra vuelta se prepara o se pide a la vez, o la que está en curso no es la de ese `deshacer`: ésta no ha pedido ni reiniciado nada |
+| `central_sin_vuelta_preparada` | 409 | Al aplicar una vuelta preparada (`reiniciar`), no hay ninguna en curso: se ha aplicado o no llegó a pedirse, y no se reinicia nada |
+| `central_vuelta_sin_aplicar` | 503 | La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada: se aplica con `reiniciar` y su `deshacer`, nunca repitiendo la orden de la vuelta |
 | `central_vuelta_sin_comprobar` | 503 | La central se ha reiniciado pero todavía no contesta: se mira cómo está |
 
 - **Los seis primeros son «no puede atender»**: a una ruta que no es de administración le llegan como
@@ -1351,7 +1406,7 @@ no lo vigila nada.
 
 | Lo que se llama | Doble |
 |---|---|
-| La base central, desde una ruta, un helper o el `TenantHub` | No lleva doble: cada caso pide su objeto `BaseCentral` de verdad, aprovisionado con sus migraciones, con `centralDePrueba()` (`helpers/central.ts`), que le da un nombre que no ha usado nadie: una base nueva y vacía, que no ve lo que siembra otro caso, corran en el orden que corran (`centralSinAprovisionar()`, la misma sin esquema). Una ruta llega a ella como en producción, por `getDb(env)`, con `{ ...env, ...central.entorno }`; una función que recibe la base, por `central.db`; el `TenantHub`, con `enElHub(…, { central })` o `ponerLaCentral` (`helpers/hub.ts`). Lo que el test siembra o comprueba va directo al SQLite del objeto, por debajo de sus guardas (`filasDe`, `fotoDeLaCentral`, `negocioEnLaCentral`). Un fallo o un cruce que haya que provocar va en su stub, nunca en un doble de la base (`centralInterceptada`, `centralQueApunta`, `desvio`, `conFalloEnLasOperaciones`, `operarConFallo`); un R2 que falla, dentro del objeto (`conCopiasDentro`, `conR2Caido`); la vuelta a un instante, que en local no existe, con `conDobleDeInstantes` |
+| La base central, desde una ruta, un helper o el `TenantHub` | No lleva doble: cada caso pide su objeto `BaseCentral` de verdad, aprovisionado con sus migraciones, con `centralDePrueba()` (`helpers/central.ts`), que le da un nombre que no ha usado nadie: una base nueva y vacía, que no ve lo que siembra otro caso, corran en el orden que corran (`centralSinAprovisionar()`, la misma sin esquema). Una ruta llega a ella como en producción, por `getDb(env)`, con `{ ...env, ...central.entorno }`; una función que recibe la base, por `central.db`; el `TenantHub`, con `enElHub(…, { central })` o `ponerLaCentral` (`helpers/hub.ts`). Lo que el test siembra o comprueba va directo al SQLite del objeto, por debajo de sus guardas (`filasDe`, `fotoDeLaCentral`, `negocioEnLaCentral`). Un fallo o un cruce que haya que provocar va en su stub, nunca en un doble de la base (`centralInterceptada`, `centralQueApunta`, `desvio`, `conFalloEnLasOperaciones`, `operarConFallo`); un R2 que falla, dentro del objeto (`conCopiasDentro`, `conR2Caido`); la vuelta a un instante, que en local no existe, con `conDobleDeInstantes` o `conPlataformaQueVuelve` |
 | El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`): `helpers/negocioFirmado.ts` monta el negocio y firma las peticiones de la Main y de la Handy (`pedirComo`) |
 | La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con el cliente de producción, `clienteLocal(state.storage)` (`tenantHub.sqlite.ts`), sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con `clienteLocal` o un envoltorio suyo |

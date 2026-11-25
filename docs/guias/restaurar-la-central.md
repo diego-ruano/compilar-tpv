@@ -8,7 +8,7 @@ replicando). Hay dos formas de volver atrás:
 
 | | Qué cubre | Cuánto atrás | Cómo |
 |---|---|---|---|
-| **Volver a un instante** (de Cloudflare) | Una central con datos malos (un borrado por error, un fallo del programa que escribió mal) y el objeto vivo | Cualquier instante de los últimos 30 días | `pnpm central:volver` |
+| **Volver a un instante** (de Cloudflare) | Una central con datos malos (un borrado por error, un fallo del programa que escribió mal), o que una vuelta ha dejado sin atender, y el objeto vivo | Cualquier instante de los últimos 30 días | `pnpm central:volver` |
 | **Restaurar una copia de R2** | El objeto perdido o vacío: sin aprovisionar | Las copias que guarde el bucket | `pnpm central:aprovisionar -- --copia` |
 
 Las órdenes `pnpm central:*` son del CLI de administración (`scripts/tpv-license.mjs`), desde la
@@ -40,9 +40,12 @@ pnpm central:copiar    # una ahora, con la hora en la clave: no pisa la del día
 
 - Están en el bucket privado `tpv-copias-control`, en `base-central/`: la del día, que hace el cron a
   las 7:00 UTC (`<AAAA-MM-DD>.sql.gz`), las de a mano (`a-mano-<hora>.sql.gz`) y la que deja cada
-  vuelta a un instante (`antes-de-volver-<hora>.sql.gz`).
+  vuelta a un instante (`antes-de-volver-<hora>.sql.gz`). Si la central no atendía y no se podía
+  copiar, la vuelta deja sólo su marcador (`antes-de-volver-<hora>.marcador`), que no es una copia.
 - `central:copias` dice de cada una sus bytes, sus filas, sus tablas y la última migración con la que
-  se hizo: se puede restaurar si este worker sabe poner esas migraciones.
+  se hizo: se puede restaurar si este worker sabe poner esas migraciones. De las de antes de volver
+  dice además el `marcador` (cómo estaba la central: volver a él deshace aquella vuelta) y `pedida`
+  (cuándo se le pidió aquella vuelta a la plataforma; sin hora, no consta que se pidiera).
 - Cuánto se guardan lo dice la regla de ciclo de vida del bucket. Desde
   `apps/cloud-worker-licensing/`:
 
@@ -87,6 +90,9 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 - **Si se corta a mitad** (el objeto se reinicia), se queda con la marca de la restauración a medias y
   no atiende (`central_restauracion_a_medias`). Repite la orden: la siguiente restauración lo vacía y
   empieza de nuevo.
+- **Con una vuelta a un instante en curso no se restaura** (`central_vuelta_en_curso`): restaurar
+  empieza vaciando el objeto, y la central atendería con una vuelta pedida a la plataforma. Primero se
+  aplica o se deja acabar ([abajo](#volver-a-un-instante)).
 - Lo que se escribió después de la copia se pierde ([abajo](#lo-que-se-pierde-al-volver-atrás)).
 
 **La central nunca atiende a medio restaurar.** Mientras se restaura, o con una restauración sin
@@ -123,10 +129,19 @@ pnpm central:volver -- --instante 2026-11-20T10:30:00+01:00 --si
 ```
 
 - **`--instante`**: una fecha ISO de los últimos 30 días. Cloudflare vuelve a un punto cercano a ese
-  instante, no al milisegundo: elige uno con margen antes del daño.
+  instante, no al milisegundo: elige uno con margen antes del daño. O **`--marcador <m>`**, el de una
+  vuelta anterior, para deshacerla, copiado tal cual (cifras y letras de la `a` a la `f`, en grupos
+  separados por guiones): lo que no tiene esa forma se rechaza sin llegar a la central.
 - **Lo que pasa**: la central se cierra (`central_vuelta_en_curso`), deja en R2 una copia de cómo está
-  (`antes-de-volver-<hora>`), deja la vuelta preparada, se reinicia y vuelve. La orden espera a que
-  conteste y dice cómo ha quedado. Mientras dura, lo que toca la central contesta 503.
+  (`antes-de-volver-<hora>.sql.gz`) con el marcador que la deshace, pide la vuelta a la plataforma,
+  apunta en R2 que la ha pedido (`antes-de-volver-<hora>.pedida`), se reinicia y vuelve. La orden
+  espera a que conteste y dice cómo ha quedado. Mientras dura, lo que toca la central contesta 503.
+- **También con la central sin atender** (a medio restaurar, con una migración que falla o alterada, o
+  sin esquema), que es como la puede dejar una vuelta: deshacerla, o volver a otro instante, es la
+  salida. Así no se copia (la copia de una central así parecería buena y le faltarían filas): queda
+  sólo su marcador (`antes-de-volver-<hora>.marcador`), y la copia de antes sale como «ninguna».
+- **Una sola a la vez**: si dos se preparan a la vez, sólo sigue una, y la otra contesta
+  `central_vuelta_a_la_vez` sin pedir nada a la plataforma.
 - **La respuesta trae la copia de antes y la orden que la deshace**:
 
   ```bash
@@ -134,17 +149,43 @@ pnpm central:volver -- --instante 2026-11-20T10:30:00+01:00 --si
   ```
 
   Deshacer es otra vuelta, con su propia copia de antes y su propio marcador. El CLI escribe esa
-  orden también cuando la vuelta no ha salido entera.
+  orden también cuando la vuelta no ha salido entera. El marcador queda en R2 antes de pedir la vuelta
+  (`pnpm central:copias`, columna `marcador`); si aun así se pierde, se deshace volviendo con
+  `--instante` a justo antes de la vuelta.
 
 Si no sale a la primera:
 
 - **`central_vuelta_sin_aplicar`**: la vuelta está preparada pero la central no se ha reiniciado, y
-  sigue cerrada. **Repite la misma orden**, con el mismo `--instante` o `--marcador`.
+  sigue cerrada. **Se aplica con su `deshacer`**, el de esa respuesta o el que da `pnpm central:estado`:
+
+  ```bash
+  pnpm central:volver -- --reiniciar <deshacer> --si
+  ```
+
+  Sólo reinicia la central si esa vuelta sigue preparada: si ya se ha aplicado, o no llegó a pedirse,
+  contesta `central_sin_vuelta_preparada` y no hace nada, así que se puede repetir. **No repitas la
+  orden de la vuelta**: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez
+  llevándose lo escrito desde entonces.
 - **`central_vuelta_sin_comprobar`**: se ha reiniciado y todavía no contesta. Mira cómo está con
   `pnpm central:estado`.
-- **«La central ha vuelto, pero no atiende»**, con su avería: lo que había en ese instante no se ha
-  podido poner al día con las migraciones de este worker. El motivo dice cuál; se deshace con el
-  marcador que trae.
+- **«La central ha vuelto, pero no atiende»** (503, con su código: `central_restauracion_a_medias`,
+  `central_migracion_fallida` o `_alterada`, o `central_sin_aprovisionar`): lo que había en ese
+  instante no atiende con este worker. Trae el marcador que la deshace y la copia de antes. Se sale
+  deshaciendo la vuelta o volviendo a otro instante; a medio restaurar o sin esquema, también
+  restaurando una copia. **Sin esquema, nunca el esquema vacío**: atendería sin ninguna licencia.
+- **`central_vuelta_rechazada`**: la plataforma no ha aceptado la vuelta (el motivo dice qué ha
+  contestado: un marcador que no es de este objeto, uno caducado…). No se ha pedido, la central sigue
+  como estaba, y lo que se haya subido a R2 para ella (sin hora en `pedida`) no es de ninguna vuelta:
+  no hay nada que deshacer.
+- **`central_vuelta_a_la_vez`**: otra vuelta se estaba preparando a la vez, o, al aplicarla, la que
+  está en curso es otra. No se ha reiniciado nada: mira cuál es con `pnpm central:estado` antes de
+  repetir nada.
+- **Sin respuesta** (la red, o la llamada al objeto que no vuelve): no se sabe si la vuelta ha llegado
+  a pedirse, y el CLI dice cómo saberlo con `pnpm central:copias`. Sin ninguna `antes-de-volver` de
+  justo después de la orden, no se pidió y no hay nada que deshacer. Con hora en `pedida`, se pidió:
+  si `pnpm central:estado` no tiene ninguna vuelta en curso, se ha aplicado, y se deshace volviendo a
+  su marcador; si la tiene preparada, da la orden que la aplica. Sin hora, no consta que se pidiera
+  (casi siempre, no se pidió). No repitas la vuelta sin mirarlo.
 - **`central_instante_fuera_de_plazo`**: el instante es del futuro o de hace más de 30 días.
 - **`central_vuelta_no_disponible`**: ese despliegue no vuelve a instantes. En local (`wrangler dev`)
   no existe.
@@ -215,11 +256,14 @@ ha podido atender ahora»: si la orden cambiaba algo, no se sabe si ha entrado, 
 |---|---|---|
 | `central_sin_aprovisionar` | La central no tiene esquema | Restaurarla desde una copia; el esquema vacío, sólo si empieza de cero |
 | `central_ya_aprovisionada` | Ya tiene esquema, y no se ha tocado: sólo se aprovisiona un objeto vacío | Con datos malos, volver a un instante |
-| `central_restauracion_a_medias` | Una restauración no terminó, y no atiende | Volver a restaurar desde una copia |
+| `central_restauracion_a_medias` | Una restauración no terminó, y no atiende | Volver a restaurar desde una copia (si la dejó así una vuelta, también se sale deshaciéndola) |
 | `central_copia_inservible` | Esa copia no se puede restaurar; la central sigue sin aprovisionar | Otra copia (el motivo dice qué le pasa a ésta) |
-| `central_copia_fallida` | La copia no ha llegado a R2 | El motivo dice por qué (R2, el techo de 32 MiB); repetir |
-| `central_vuelta_en_curso`, `central_vuelta_sin_aplicar` | Hay una vuelta preparada y sin aplicar: no atiende hasta reiniciarse | Repetir la misma orden de `central:volver` |
+| `central_copia_fallida` | La copia no ha llegado a R2 (al volver, sin ella o sin su marcador no se pide la vuelta) | El motivo dice por qué (R2, el techo de 32 MiB); repetir |
+| `central_vuelta_en_curso`, `central_vuelta_sin_aplicar` | Hay una vuelta en curso: preparándose, o preparada y sin aplicar. No atiende hasta que se aplique | Preparada: `pnpm central:volver -- --reiniciar <deshacer> --si` (la orden entera la da `pnpm central:estado`), nunca la orden de la vuelta otra vez. Preparándose: esperar |
 | `central_vuelta_sin_comprobar` | Se ha reiniciado y todavía no contesta | `pnpm central:estado` |
+| `central_vuelta_a_la_vez` | Otra vuelta se prepara a la vez, o la que está en curso no es la de ese marcador: ésta no ha pedido ni reiniciado nada | `pnpm central:estado` antes de repetir nada |
+| `central_sin_vuelta_preparada` | Con `--reiniciar`: ya no hay ninguna vuelta preparada con ese marcador (se ha aplicado o no llegó a pedirse), y no se ha reiniciado nada | `pnpm central:estado` |
+| `central_vuelta_rechazada` | La plataforma no ha aceptado la vuelta: no se ha pedido, y la central sigue como estaba | Nada que deshacer; el motivo dice qué ha contestado |
 | `central_instante_fuera_de_plazo` | El instante no es de los últimos 30 días | Otro instante |
 | `central_vuelta_no_disponible` | Ese despliegue no vuelve a instantes (en local no existe) | — |
 | `central_migracion_alterada` | Una migración ya aplicada ha cambiado, y no atiende | Desplegar la migración tal como se aplicó (su hash es el de su texto, comentarios incluidos) |

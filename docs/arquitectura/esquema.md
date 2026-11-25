@@ -116,7 +116,9 @@ Para cambiarla:
    `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`, y revisar su diferencia con
    la de la migración.
 5. **Desplegarla antes que el código que la usa**, en un despliegue aparte: un Worker nuevo puede
-   hablar un rato con el objeto de antes, que todavía no la tiene.
+   hablar un rato con el objeto de antes, que todavía no la tiene. En ese despliegue, su hash se añade
+   a `APLICADAS` en `test/centralEsquema.test.ts`, que vigila que no cambie ninguna de las que tiene la
+   central de producción, ni en un comentario ([worker.md](worker.md#su-esquema-migraciones-en-código)).
 
 ## Reglas del esquema
 

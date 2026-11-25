@@ -211,8 +211,9 @@ node scripts/carga/carga.mjs --nube   # el mismo contra el worker desplegado (do
   `apps/cloud-worker-licensing/src/server/central/migraciones/`, registrada en orden en `migraciones.ts`.
   **Aditiva** (durante un despliegue, el código de antes sigue hablando con el objeto ya migrado) y en
   un despliegue **anterior** al del código que la usa. Su foto se regenera con
-  `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`
-  ([esquema.md](docs/arquitectura/esquema.md#la-base-central)).
+  `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`; el hash de las que ya tiene
+  la central de producción va escrito en ese test (`APLICADAS`), que `-u` no toca, y una nueva se
+  añade ahí al desplegarla ([esquema.md](docs/arquitectura/esquema.md#la-base-central)).
 
 ### Worker ([worker.md](docs/arquitectura/worker.md))
 
