@@ -1630,10 +1630,6 @@ impl PairingService for PairingAdapter {
         Ok(FirmaDispositivo { ts, sig_b64: sign_payload_b64(&sk, &payload).map_err(ext)? })
     }
 
-    fn hora_para_firmar(&self) -> i64 {
-        reloj::ahora_ms()
-    }
-
     fn desfase_del_reloj_ms(&self) -> Option<i64> {
         reloj::desfase_medido_ms()
     }

@@ -846,9 +846,6 @@ mod tests_leer_respuesta {
         ) -> AppResult<tpv_contracts::licensing::FirmaDispositivo> {
             unimplemented!()
         }
-        fn hora_para_firmar(&self) -> i64 {
-            unimplemented!()
-        }
         fn desfase_del_reloj_ms(&self) -> Option<i64> {
             unimplemented!()
         }

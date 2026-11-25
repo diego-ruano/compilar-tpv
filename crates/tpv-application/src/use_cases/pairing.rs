@@ -46,10 +46,6 @@ pub fn firmar_emparejamiento(svc: &dyn PairingService, args: DeviceFirmarEmparej
     svc.firmar_emparejamiento(args)
 }
 
-pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
-    svc.hora_para_firmar()
-}
-
 /// RELOJ-01: el desfase medido del reloj, para el aviso de la pantalla.
 pub fn desfase_del_reloj(svc: &dyn PairingService) -> DesfaseReloj {
     DesfaseReloj { desfase_ms: svc.desfase_del_reloj_ms() }

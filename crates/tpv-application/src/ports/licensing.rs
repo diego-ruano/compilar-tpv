@@ -160,10 +160,6 @@ pub trait PairingService: Send + Sync {
     fn device_identity(&self) -> AppResult<DeviceIdentity>;
     fn firmar_hello(&self, mode: &str, nonce_b64: &str) -> AppResult<FirmaDispositivo>;
     fn firmar_emparejamiento(&self, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo>;
-    /// PROD-04: la hora (ms) con la que hay que firmar lo que se manda a la nube: la del equipo
-    /// corregida con la que trae cada respuesta del worker. Para lo que firma el frontend (el saludo
-    /// del WebSocket, el emparejamiento); lo que firma Rust ya la usa por su cuenta.
-    fn hora_para_firmar(&self) -> i64;
     /// RELOJ-01: lo último que se ha medido de cuánto se aparta el reloj del equipo del de la nube
     /// (ms que hay que sumarle; positivo, va atrasado), o `None` si todavía no ha respondido la nube.
     /// Sólo para avisar: no corrige ninguna hora.

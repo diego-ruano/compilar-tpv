@@ -2474,7 +2474,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
 
             commands::pairing::device_get_identity,
             commands::pairing::device_firmar_emparejamiento,
-            commands::pairing::device_hora_para_firmar,
             // RELOJ-01: el aviso del reloj desfasado (sin sesión: commands/reloj.rs)
             commands::reloj::reloj_desfase,
             commands::pairing::tpv_server_post_json,
@@ -4053,6 +4052,11 @@ mod tests_exenciones_del_gate {
                 "config_upload_initial_setup",
                 "subía a la nube, sin sesión ni `Requiere_Setup`, el PIN que le dijeran para el \
                  usuario que le dijeran; el setup inicial sube por el outbox (AUD-24)",
+            ),
+            (
+                "device_hora_para_firmar",
+                "daba a la pantalla, sin sesión, la hora de la nube para firmar con ella; la pantalla \
+                 no firma nada: el emparejamiento y el saludo los firma Rust con esa hora (PROD-04)",
             ),
         ] {
             assert!(

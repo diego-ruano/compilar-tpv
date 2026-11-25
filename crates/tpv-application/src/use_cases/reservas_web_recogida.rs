@@ -348,9 +348,6 @@ mod tests {
         fn firmar_emparejamiento(&self, _: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
             panic!("ajeno a esta prueba")
         }
-        fn hora_para_firmar(&self) -> i64 {
-            panic!("ajeno a esta prueba")
-        }
         fn desfase_del_reloj_ms(&self) -> Option<i64> {
             panic!("ajeno a esta prueba")
         }

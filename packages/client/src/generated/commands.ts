@@ -635,13 +635,6 @@ export const commands = {
 	deviceGetIdentity: () => __TAURI_INVOKE<DeviceIdentity>("device_get_identity"),
 	deviceFirmarEmparejamiento: (args: DeviceFirmarEmparejamientoArgs) => __TAURI_INVOKE<FirmaDispositivo>("device_firmar_emparejamiento", { args }),
 	/**
-	 *  PROD-04: la hora con la que el frontend firma el saludo del WebSocket y el emparejamiento. Es
-	 *  la de la nube, no la del equipo: con un reloj desfasado más de 2 min la nube rechaza la firma.
-	 *  Sin sesión, como los comandos de firma acotada: se usa en el emparejamiento de la Handy, antes de que nadie
-	 *  entre.
-	 */
-	deviceHoraParaFirmar: () => __TAURI_INVOKE<number>("device_hora_para_firmar"),
-	/**
 	 *  RELOJ-01: cuánto se aparta la hora de este equipo de la de la nube, según la última respuesta
 	 *  del worker. Lo enseña `AvisoReloj`; no corrige nada.
 	 */
