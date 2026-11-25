@@ -776,15 +776,24 @@ marca en `license_notices` antes de enviar y sólo envía quien gana la marca; s
 marca se suelta. La clave de `license_notices` incluye `expires_at_ms`, para que un aviso de un ciclo
 no silencie el del siguiente.
 
-Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner o al soltar su marca,
+La marca es **«enviando» hasta que el correo sale** (AVISO-CADUCIDAD; `enviando_hasta_ms`, de la
+migración `0002_avisos_enviando.sql` de la central): es de quien la puso durante una hora
+(`MARCA_ENVIANDO_MS`), lo bastante para que termine de mandar el correo, y cuando sale pasa a enviada
+(`enviando_hasta_ms` a `NULL`), que ya no la gana nadie. Pasada esa hora, una marca que sigue
+«enviando» la gana otro ciclo, porque no consta que su aviso haya salido: la central falló al
+soltarla, o la marca entró y su respuesta no volvió. Si el correo sale y la central no llega a
+apuntarlo, el aviso cuenta como enviado y su marca caduca igual: otro día se repite. Mejor dos avisos
+que ninguno.
+
+Cada licencia va por su cuenta (E7a-7): si la central falla con una, al poner, al soltar o al confirmar su marca,
 cuenta entre los `fallidos` del resumen del cron y el ciclo sigue con las demás. Si es que la central
 no ha podido atender, queda como en el resto del Worker (`registrarSinLaCentral`): su
 `central_no_disponible` en Axiom, con `metodo` `cron`, y Sentry (`cron.license_expiry`) sólo si no es
 carga ni un fallo pasajero; cualquier otro fallo va a Sentry. Lo mismo si no atiende la lectura de
 las que caducan, con la que empieza el ciclo (`index.ts::programado`): ese día no se avisa de ninguna.
 **Con la central saturada, el ciclo se corta**: las que faltan cuentan como fallidas, sin más viajes a una central que no atiende, y se
-avisan al día siguiente. Si la marca no llegó a ponerse, su aviso sale al día siguiente; si se quedó
-puesta, ese peldaño no sale ([AVISO-CADUCIDAD](../pendientes.md#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca)).
+avisan al día siguiente. Si la marca no llegó a ponerse, o se quedó «enviando», su aviso sale al día
+siguiente.
 
 ## Lo que guarda el equipo
 

@@ -19,6 +19,10 @@
 //   · **Se marca ANTES de enviar y sólo se envía si se ganó la marca.** Dos ejecuciones cruzadas no
 //     mandan dos correos. Si el envío falla se suelta la marca, para que el ciclo siguiente lo
 //     reintente: un aviso que no ha salido no puede quedar contado como enviado.
+//   · **La marca es «enviando» hasta que el aviso sale** (AVISO-CADUCIDAD). Si se queda puesta sin
+//     constar enviada (la central falló al soltarla, o entró y su respuesta no volvió), pasado
+//     `MARCA_ENVIANDO_MS` la retoma otro ciclo. Si el aviso sale y la central no llega a apuntarlo,
+//     también: mejor dos avisos que ninguno.
 //   · **Cada licencia va por su cuenta.** Si la central falla con una, al poner o al soltar su
 //     marca, esa cuenta como fallida y el ciclo sigue con las demás. Si es que no ha podido atender,
 //     queda como en el resto del Worker (`registrarSinLaCentral`): su evento en Axiom, y Sentry sólo si
@@ -31,14 +35,22 @@ import { capturarError } from "../../observability/errors";
 import { registrarSinLaCentral } from "../../server/central/sinLaCentral";
 import type { Sql } from "../../lib/sql";
 import {
+	confirmarAvisoEnviado,
 	licenciasPorCaducar,
-	marcarAvisoEnviado,
-	olvidarAvisoEnviado,
+	marcarAvisoEnviando,
+	olvidarAvisoEnviando,
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { sendLicenseExpiringEmail } from "./licenseEmails";
 
 const DIA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * AVISO-CADUCIDAD · Cuánto es de un ciclo la marca «enviando» que ha puesto: lo bastante para que
+ * termine de mandar el correo, y mucho menos que un día, para que el ciclo del día siguiente retome
+ * la que se ha quedado puesta sin que conste enviada.
+ */
+export const MARCA_ENVIANDO_MS = 60 * 60 * 1000;
 
 /**
  * Los peldaños, **de más urgente a menos**. El orden es lo que hace que `find` devuelva el que
@@ -129,16 +141,14 @@ export async function avisarDeCaducidades(
 		const peldano = peldanoDe(restanteMs);
 		if (!peldano) continue;
 
-		// Cada licencia, por su cuenta (E7a-7): lo que falle con una (la central, al poner o al soltar
-		// su marca) cuenta como fallida y no corta a las demás, salvo la central saturada. Si falla al
-		// soltarla, o después de ponerla, ese peldaño no sale (AVISO-CADUCIDAD, en docs/pendientes.md).
+		// Cada licencia, por su cuenta (E7a-7): lo que falle con una (la central, al poner, al soltar o
+		// al confirmar su marca) cuenta como fallida y no corta a las demás, salvo la central saturada.
+		// AVISO-CADUCIDAD: una marca que se queda «enviando» (no se soltó, o entró sin respuesta) la
+		// retoma el ciclo de otro día, pasado `MARCA_ENVIANDO_MS`.
+		const marca = { licenseId: license.license_id, kind: peldano.kind, expiresAtMs, nowMs: ahoraMs };
+		let salio = false;
 		try {
-			const gane = await marcarAvisoEnviado(db, {
-				licenseId: license.license_id,
-				kind: peldano.kind,
-				expiresAtMs,
-				nowMs: ahoraMs,
-			});
+			const gane = await marcarAvisoEnviando(db, { ...marca, hastaMs: ahoraMs + MARCA_ENVIANDO_MS });
 			if (!gane) {
 				resumen.yaAvisadas += 1;
 				continue;
@@ -146,12 +156,12 @@ export async function avisarDeCaducidades(
 
 			const enlace = enlaceDeCompra(env, license);
 			if (!enlace) {
-				await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
+				await olvidarAvisoEnviando(db, marca);
 				resumen.fallidos += 1;
 				continue;
 			}
 
-			const enviado = await sendLicenseExpiringEmail(env, {
+			salio = await sendLicenseExpiringEmail(env, {
 				to: license.customer_email,
 				name: license.customer_name,
 				expiresAtMs,
@@ -160,11 +170,14 @@ export async function avisarDeCaducidades(
 				enlace,
 			});
 
-			if (enviado) {
+			if (salio) {
+				// Ha salido, aunque la central no llegue a apuntarlo: entonces su marca caduca y otro día
+				// se repite. Mejor dos avisos que ninguno.
 				resumen.enviados += 1;
+				await confirmarAvisoEnviado(db, marca);
 			} else {
 				// El correo no salió: se suelta la marca para que el ciclo de mañana lo reintente.
-				await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
+				await olvidarAvisoEnviando(db, marca);
 				resumen.fallidos += 1;
 			}
 		} catch (err) {
@@ -179,7 +192,8 @@ export async function avisarDeCaducidades(
 				capturarError(err, OPERACION);
 				console.error(`[avisos] la licencia ${license.license_id} falló:`, (err as any)?.message || err);
 			}
-			resumen.fallidos += 1;
+			// Un aviso que salió ya está contado entre los enviados.
+			if (!salio) resumen.fallidos += 1;
 			// Saturada, seguir sería un viaje más por licencia a una central que no atiende (en
 			// 8e9eff7c, el primer fallo cortaba el ciclo). Las que faltan, fallidas: mañana se reintentan.
 			if (sinLaCentral === "saturada") {

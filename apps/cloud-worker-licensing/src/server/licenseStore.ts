@@ -198,39 +198,66 @@ export async function licenciasPorCaducar(
 }
 
 /**
- * Marca un aviso como enviado, y dice si ha sido ESTA llamada la que lo ha marcado.
+ * Marca un aviso como «enviando» hasta `hastaMs`, y dice si ha sido ESTA llamada la que lo ha marcado.
  *
  * Devolver el resultado es lo que hace que el aviso salga una vez: se marca **antes** de enviar y
  * sólo se envía si se ganó la fila. Dos ejecuciones del cron a la vez, o un reintento, encuentran
  * la fila puesta y no mandan nada. (REV-15 enseñó la otra mitad: un `INSERT` condicionado cuyo
  * resultado nadie mira no condiciona nada.)
  *
+ * AVISO-CADUCIDAD: una marca «enviando» cuyo plazo ha pasado se gana otra vez. No consta que su aviso
+ * haya salido: la central falló al soltarla, o la marca entró y su respuesta no volvió. Una que consta
+ * enviada (`enviando_hasta_ms` a `NULL`, `confirmarAvisoEnviado`) no se gana nunca.
+ *
  * La clave incluye `expires_at_ms` a propósito. Sin él, una licencia renovada nunca volvería a
  * avisar: la fila del año pasado seguiría ahí. Con él, mover la caducidad —renovar, o acortarla
  * desde administración— abre un aviso nuevo y deja el anterior como rastro de lo que se mandó.
  */
-export async function marcarAvisoEnviado(
+export async function marcarAvisoEnviando(
 	db: Sql,
-	args: { licenseId: string; kind: string; expiresAtMs: number; nowMs: number },
+	args: { licenseId: string; kind: string; expiresAtMs: number; nowMs: number; hastaMs: number },
 ): Promise<boolean> {
 	const r = await exec(
 		db,
-		`INSERT OR IGNORE INTO license_notices (license_id, kind, expires_at_ms, sent_at_ms)
-     VALUES (?, ?, ?, ?);`,
-		[args.licenseId, args.kind, args.expiresAtMs, args.nowMs],
+		`INSERT INTO license_notices (license_id, kind, expires_at_ms, sent_at_ms, enviando_hasta_ms)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(license_id, kind, expires_at_ms) DO UPDATE SET
+       sent_at_ms = excluded.sent_at_ms,
+       enviando_hasta_ms = excluded.enviando_hasta_ms
+     WHERE license_notices.enviando_hasta_ms IS NOT NULL
+       AND license_notices.enviando_hasta_ms <= excluded.sent_at_ms;`,
+		[args.licenseId, args.kind, args.expiresAtMs, args.nowMs, args.hastaMs],
 	);
 	return Number((r as any)?.rowsAffected ?? 0) > 0;
 }
 
-/** Deshace el marcado: para cuando el envío falla y queremos que el próximo ciclo lo reintente. */
-export async function olvidarAvisoEnviado(
-	db: Sql,
-	args: { licenseId: string; kind: string; expiresAtMs: number },
-): Promise<void> {
+/** Lo que identifica una marca: su aviso, y cuándo la puso quien la ganó (`nowMs`). */
+type MarcaDeAviso = { licenseId: string; kind: string; expiresAtMs: number; nowMs: number };
+
+/**
+ * El aviso ha salido: su marca deja de ser «enviando» y ya no la retoma nadie. Sólo la suya: si su
+ * plazo pasó y otro ciclo la ha retomado, la de ése la confirma ése.
+ */
+export async function confirmarAvisoEnviado(db: Sql, args: MarcaDeAviso): Promise<void> {
 	await exec(
 		db,
-		`DELETE FROM license_notices WHERE license_id = ? AND kind = ? AND expires_at_ms = ?;`,
-		[args.licenseId, args.kind, args.expiresAtMs],
+		`UPDATE license_notices SET enviando_hasta_ms = NULL
+      WHERE license_id = ? AND kind = ? AND expires_at_ms = ? AND sent_at_ms = ?;`,
+		[args.licenseId, args.kind, args.expiresAtMs, args.nowMs],
+	);
+}
+
+/**
+ * Suelta la marca: para cuando el envío falla y el próximo ciclo lo tiene que reintentar. Sólo la
+ * suya, y sólo mientras es «enviando». Si no llega a soltarse, la retoma otro ciclo pasado su plazo.
+ */
+export async function olvidarAvisoEnviando(db: Sql, args: MarcaDeAviso): Promise<void> {
+	await exec(
+		db,
+		`DELETE FROM license_notices
+      WHERE license_id = ? AND kind = ? AND expires_at_ms = ? AND sent_at_ms = ?
+        AND enviando_hasta_ms IS NOT NULL;`,
+		[args.licenseId, args.kind, args.expiresAtMs, args.nowMs],
 	);
 }
 

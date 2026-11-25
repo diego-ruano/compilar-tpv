@@ -29,7 +29,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
 | [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
-| [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
 | [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Se van con las copias nuevas; las de un negocio que ya no copia, no |
@@ -407,20 +406,6 @@ en el alta, el enlace para cancelarla, que sólo viaja en él. El alta lo dice e
 (`correo_enviado: false`). Arreglo posible: apuntar el correo pendiente en la `AgendaWeb`, para que lo
 reintente su alarma como ya hace con el de «no se pudo registrar», y guardar para ello el enlace, o
 el token cifrado.
-
-### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
-
-El cron de avisos de caducidad (`avisosDeCaducidad.ts`) pone una marca por licencia y peldaño
-(`marcarAvisoEnviado`) antes de mandar el correo, y la suelta si no sale (`olvidarAvisoEnviado`). Lo
-que ya está en el código (E7a-7): una licencia que falla no corta a las demás, salvo la central
-saturada, que corta el ciclo (las que faltan, fallidas, se avisan al día siguiente). Lo que queda: si la
-central falla al soltar la marca, o después de ponerla (la marca entra y su respuesta no vuelve), la
-marca se queda, y el ciclo de otro día no la gana (`INSERT OR IGNORE`) y cuenta esa licencia como ya
-avisada: ese peldaño no sale nunca. Eso se lee en el código
-(`avisosDeCaducidad.ts::avisarDeCaducidades`) y no lo prueba ningún test: el de «al soltar la marca de
-un aviso que no ha salido…» (`test/avisoDeCaducidad.test.ts`) sólo fija que ese fallo no corta a las
-demás, sin correr otro ciclo, y el de la marca que entra sin respuesta no existe. Arreglo posible: una
-marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
 
 ### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
 

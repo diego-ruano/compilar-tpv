@@ -43,6 +43,7 @@ import {
 	conPlataformaQueVuelve,
 	filasDe,
 	MARCADORES,
+	MIGRACIONES_DE_VERDAD,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -160,7 +161,7 @@ describe("con la central sin aprovisionar, todo contesta", () => {
 		});
 		expect(await pedir(entorno, "POST", "/aprovisionar", { cuerpo: json({}) })).toMatchObject({
 			status: 200,
-			body: { ok: true, aprovisionada: true, copia: null, migraciones: [{ nombre: "0001_inicial.sql" }] },
+			body: { ok: true, aprovisionada: true, copia: null, migraciones: MIGRACIONES_DE_VERDAD.map((nombre) => ({ nombre })) },
 		});
 		expect(await pedir(entorno, "POST", "/aprovisionar", { cuerpo: json({}) })).toMatchObject({
 			status: 409,
@@ -364,7 +365,7 @@ describe("aprovisionar desde una copia", () => {
 			subida: expect.any(String),
 			generada: expect.any(String),
 			filas: 3,
-			ultimaMigracion: "0001_inicial.sql",
+			ultimaMigracion: MIGRACIONES_DE_VERDAD.at(-1),
 		});
 		// Las más recientes primero.
 		const subidas = lista.body.copias.map((c: any) => Date.parse(c.subida));

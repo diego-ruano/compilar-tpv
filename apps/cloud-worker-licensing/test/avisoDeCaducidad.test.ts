@@ -342,7 +342,7 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 			await e.licencia("lic-b", 25);
 			const { env, enviados } = entorno(AXIOM);
 
-			e.desviar(fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a"));
+			e.desviar(fallaUnaVez(/INTO license_notices/, "lic-a"));
 			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
 			e.desviar(null);
 			const deHoy = enviados.map((c) => c.to);
@@ -394,7 +394,7 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 			await e.licencia("lic-a", 20);
 			await e.licencia("lic-b", 25);
 			const { env } = entorno(AXIOM);
-			e.desviar(fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a", {}));
+			e.desviar(fallaUnaVez(/INTO license_notices/, "lic-a", {}));
 			return avisarDeCaducidades(env, e.db, AHORA);
 		});
 
@@ -402,6 +402,121 @@ describe("REV-13 · si la central falla con una licencia, las demás siguen", ()
 		expect(capturados.map((c) => c.operacion)).toEqual(["cron.license_expiry"]);
 		expect(capturados[0].error).toBeInstanceOf(CentralNoDisponible);
 		expect(await sinLaCentral(1)).toEqual([["rechazo", "cron", "cron.license_expiry"]]);
+	});
+});
+
+/**
+ * Un `Atender` que deja llegar a la central el primer viaje con una sentencia que case con `patron`
+ * sobre la licencia `licencia`, y pierde su respuesta: entra, y quien la pidió recibe el fallo
+ * pasajero de la plataforma.
+ */
+function entraSinRespuesta(patron: RegExp, licencia: string): Atender {
+	let pendiente = true;
+	return async (metodo, argumentos, llamar) => {
+		const sentencia = argumentos[0] as SentenciaEnlazada;
+		if (!pendiente || metodo !== "ejecutar" || !patron.test(sentencia.sql) || sentencia.args[0] !== licencia) {
+			return llamar();
+		}
+		pendiente = false;
+		await llamar();
+		throw Object.assign(new Error("Network connection lost."), PASAJERA);
+	};
+}
+
+// AVISO-CADUCIDAD · La marca es «enviando» hasta que el correo sale: una que se ha quedado puesta sin
+// constar enviada la retoma el ciclo de otro día, y el peldaño sale.
+describe("AVISO-CADUCIDAD · una marca que se queda puesta sin que el aviso haya salido", () => {
+	it("si la central falla al soltarla, el ciclo del día siguiente manda el aviso", async () => {
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			let rota = true;
+			const enviados: string[] = [];
+			const { env } = entorno({
+				...AXIOM,
+				EMAIL: {
+					send: async (msg: Correo) => {
+						if (rota) throw new Error("buzón caído");
+						enviados.push(msg.to);
+					},
+				},
+			});
+
+			e.desviar(fallaUnaVez(/DELETE FROM license_notices/, "lic-a"));
+			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
+			e.desviar(null);
+			rota = false;
+			const manana = await avisarDeCaducidades(env, e.db, AHORA + DIA);
+			const pasado = await avisarDeCaducidades(env, e.db, AHORA + 2 * DIA);
+			return { hoy, manana, pasado, enviados };
+		});
+
+		expect(r.hoy).toMatchObject({ enviados: 0, fallidos: 1 });
+		expect(r.manana).toMatchObject({ enviados: 1, yaAvisadas: 0, fallidos: 0 });
+		// Y una vez salido, consta: no se repite.
+		expect(r.pasado).toMatchObject({ enviados: 0, yaAvisadas: 1 });
+		expect(r.enviados).toEqual(["lic-a@ejemplo.test"]);
+	});
+
+	it("si la marca entra y su respuesta no vuelve, el ciclo del día siguiente manda el aviso", async () => {
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			await e.licencia("lic-b", 25);
+			const { env, enviados } = entorno(AXIOM);
+
+			e.desviar(entraSinRespuesta(/INTO license_notices/, "lic-a"));
+			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
+			e.desviar(null);
+			const deHoy = enviados.map((c) => c.to);
+			const manana = await avisarDeCaducidades(env, e.db, AHORA + DIA);
+			return { hoy, deHoy, manana, enviados: enviados.map((c) => c.to) };
+		});
+
+		expect(r.hoy).toMatchObject({ revisadas: 2, enviados: 1, fallidos: 1 });
+		expect(r.deHoy).toEqual(["lic-b@ejemplo.test"]);
+		expect(r.manana).toMatchObject({ enviados: 1, yaAvisadas: 1, fallidos: 0 });
+		expect(r.enviados).toEqual(["lic-b@ejemplo.test", "lic-a@ejemplo.test"]);
+	});
+
+	it("una marca de hace un rato no se retoma: su aviso puede estar saliendo", async () => {
+		// Dos ciclos cruzados: mientras el primero manda el correo, el segundo encuentra su marca.
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			const enviados: string[] = [];
+			let cruzado: unknown;
+			const { env } = entorno({
+				EMAIL: {
+					send: async (msg: Correo) => {
+						cruzado ??= await avisarDeCaducidades(env, e.db, AHORA + 60_000);
+						enviados.push(msg.to);
+					},
+				},
+			});
+			const primero = await avisarDeCaducidades(env, e.db, AHORA);
+			return { primero, cruzado, enviados };
+		});
+
+		expect(r.primero).toMatchObject({ enviados: 1 });
+		expect(r.cruzado).toMatchObject({ enviados: 0, yaAvisadas: 1 });
+		expect(r.enviados).toEqual(["lic-a@ejemplo.test"]);
+	});
+
+	it("si el aviso sale y la central no apunta que ha salido, cuenta como enviado y otro día se repite", async () => {
+		// Mejor dos correos que ninguno: no consta que haya salido, así que la marca caduca como la de
+		// cualquier envío que no terminó.
+		const r = await escenario(async (e) => {
+			await e.licencia("lic-a", 20);
+			const { env, enviados } = entorno(AXIOM);
+			e.desviar(fallaUnaVez(/UPDATE license_notices/, "lic-a"));
+			const hoy = await avisarDeCaducidades(env, e.db, AHORA);
+			e.desviar(null);
+			const manana = await avisarDeCaducidades(env, e.db, AHORA + DIA);
+			return { hoy, manana, enviados: enviados.map((c) => c.to) };
+		});
+
+		expect(r.hoy).toMatchObject({ enviados: 1, fallidos: 0 });
+		expect(await sinLaCentral(1)).toEqual([["pasajera", "cron", "cron.license_expiry"]]);
+		expect(r.manana).toMatchObject({ enviados: 1 });
+		expect(r.enviados).toEqual(["lic-a@ejemplo.test", "lic-a@ejemplo.test"]);
 	});
 });
 
@@ -416,7 +531,7 @@ describe("REV-13 · con la central saturada, el ciclo se corta", () => {
 			// Saturada al marcar la primera; lo que se pida después, contado.
 			let saturada = false;
 			let viajesDespues = 0;
-			const marcarLaPrimera = fallaUnaVez(/INSERT OR IGNORE INTO license_notices/, "lic-a", SATURADA);
+			const marcarLaPrimera = fallaUnaVez(/INTO license_notices/, "lic-a", SATURADA);
 			e.desviar((metodo, argumentos, llamar) => {
 				if (saturada) viajesDespues++;
 				const respuesta = marcarLaPrimera(metodo, argumentos, llamar);

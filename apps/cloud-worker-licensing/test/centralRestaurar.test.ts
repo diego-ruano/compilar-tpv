@@ -35,6 +35,7 @@ import {
 	conCopiasDentro,
 	filasDe,
 	fotoDeLaCentral,
+	MIGRACIONES_DE_VERDAD,
 	tablasPropias,
 	type CentralDePrueba,
 } from "./helpers/central";
@@ -368,7 +369,7 @@ describe("una restauración a medias", () => {
 			};
 		});
 		expect(tras.ejecutar).toMatchObject({ ok: false, error: "central_restauracion_a_medias" });
-		expect(tras.migraciones).toEqual(["0001_inicial.sql"]);
+		expect(tras.migraciones).toEqual(MIGRACIONES_DE_VERDAD);
 	});
 
 	it("la siguiente restauración la vacía y termina bien", async () => {
@@ -391,7 +392,7 @@ describe("una restauración a medias", () => {
 		deMas.push({ name: "9001_transforma.sql", sql: "UPDATE tenants SET notes = upper(notes) || '!';" });
 		const central = await aMedias();
 		expect(await filasDe(central, "SELECT name FROM _migrations ORDER BY rowid;")).toEqual([
-			{ name: "0001_inicial.sql" },
+			...MIGRACIONES_DE_VERDAD.map((name) => ({ name })),
 			{ name: "9001_transforma.sql" },
 		]);
 
@@ -465,7 +466,7 @@ describe("mientras restaura", () => {
 		const r = await central.stub.aprovisionar({ claveDeCopia: clave });
 		expect(r).toMatchObject({ ok: true, valor: { aprovisionada: true } });
 		if (!r.ok) return;
-		expect(r.valor.migraciones.map((m) => m.nombre)).toEqual(["0001_inicial.sql", "9001_transforma.sql"]);
+		expect(r.valor.migraciones.map((m) => m.nombre)).toEqual([...MIGRACIONES_DE_VERDAD, "9001_transforma.sql"]);
 		expect(await filasDe(central, "SELECT tenant_id, notes FROM tenants ORDER BY tenant_id;")).toEqual([
 			{ tenant_id: "t-1", notes: "ABC!" },
 			{ tenant_id: "t-2", notes: null },
