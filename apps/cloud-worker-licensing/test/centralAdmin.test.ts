@@ -604,6 +604,9 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 
 			senal.sueltaReinicio = true;
 			const r = await a;
+			// Con «pedida» en la otra, está donde la dejó la otra; sin ella, no se sabe (C2): no se concluye que ésta.
+			expect(r.body.message).toContain("si la hay sin «pedida», no se sabe");
+			expect(r.body.message).not.toContain("si no, ésta");
 			expect(r).toMatchObject({
 				status: 409,
 				body: {
@@ -644,6 +647,49 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				body: { ok: false, error: "central_vuelta_a_la_vez", deshacer: expect.any(String), estado: { enCurso: { vuelta: null } } },
 			});
 			expect(await filasDe(central, LOS_NEGOCIOS)).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-2" }]);
+		});
+
+		it("la de A con el reinicio retenido; B se está pidiendo a la plataforma cuando llega el reinicio de A, y después no sale: el 409 de A no la da por perdida, y vuelve a quedar preparada, con la orden que la aplica en central:estado", async () => {
+			const central = await centralDePrueba();
+			const senal = { reiniciando: false, sueltaReinicio: false, bPidiendose: false, sueltaB: false };
+			let actuales = 0;
+			let pedidas = 0;
+			await conDobleDeInstantes(central, [], {
+				marcadorActual: () => (actuales++ === 0 ? MARCADORES.actual : MARCADORES.deshacer),
+				alRestaurar: async () => {
+					if (++pedidas !== 2) return;
+					senal.bPidiendose = true;
+					while (!senal.sueltaB) await pausa();
+					throw new Error("la plataforma no acepta la de B");
+				},
+			});
+			const deA = centralInterceptada(central, async (metodo, _a, llamar) => {
+				if (metodo === "reiniciar") {
+					senal.reiniciando = true;
+					while (!senal.sueltaReinicio) await pausa();
+				}
+				return llamar();
+			});
+
+			const a = pedir(entornoCon(deA), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.destino }) });
+			await vi.waitFor(() => expect(senal.reiniciando).toBe(true));
+			const b = central.stub.prepararVuelta({ instanteMs: Date.now() - 3_600_000 });
+			await vi.waitFor(() => expect(senal.bPidiendose).toBe(true));
+			senal.sueltaReinicio = true;
+			const r = await a;
+			expect(r).toMatchObject({ status: 409, body: { ok: false, error: "central_vuelta_a_la_vez", deshacer: MARCADORES.actual } });
+			// No afirma que ésta ya no sigue: si la otra no sale, vuelve a quedar preparada.
+			expect(r.body.message).not.toContain("ya no sigue");
+			expect(r.body.message).toContain("si la otra no sale, puede que ésta vuelva a quedar preparada");
+			expect(r.body.message).toContain("pnpm central:estado da la orden que la aplica");
+
+			senal.sueltaB = true;
+			expect(await b).toMatchObject({ ok: false, error: "central_vuelta_rechazada" });
+			const estado = await pedir(entornoCon(central), "GET", "/estado");
+			expect(estado.body.enCurso.vuelta).toMatchObject({ fase: "preparada", preparada: { deshacer: r.body.deshacer } });
+			// La orden que la aplica, con el deshacer del 409 de A.
+			const aplicada = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ reiniciar: r.body.deshacer }) });
+			expect(aplicada).toMatchObject({ status: 200, body: { ok: true, deshacer: r.body.deshacer } });
 		});
 	});
 

@@ -73,11 +73,16 @@ const SI_SE_PIERDE_EL_MARCADOR =
 /**
  * Lo que se dice cuando, al ir a reiniciar la central para aplicar una vuelta recién preparada, el
  * objeto contesta que ya no la tiene (C1): otra ha empezado encima, o ya no hay ninguna.
+ *
+ * Con otra en curso, ésta no se da por perdida: si la otra no sale, el objeto vuelve a poner la que
+ * seguía en pie (`laQueSigueEnPie` en `baseCentral.instante.ts`), y ésa puede ser ésta, preparada y
+ * con la central cerrada. Sin ninguna, lo que dice R2 de la otra es lo mismo que sin respuesta
+ * (C2): con «pedida», se pidió; con el marcador y sin «pedida», no se sabe.
  */
 const OTRA_AL_REINICIAR =
-	"Al ir a reiniciar la central para aplicar esta vuelta, la que había en curso era otra, que empezó después: no se ha reiniciado para ésta, que ya no sigue. Mira cómo está con pnpm central:estado antes de repetir nada: si la otra ya se ha aplicado, la central está donde la dejó ella.";
+	"Al ir a reiniciar la central para aplicar esta vuelta, la que había en curso era otra, que empezó después: no se ha reiniciado para ésta. Mira cómo está con pnpm central:estado antes de repetir nada: si la otra ya se ha aplicado, la central está donde la dejó ella; si la otra no sale, puede que ésta vuelva a quedar preparada, con la central cerrada, y entonces pnpm central:estado da la orden que la aplica.";
 const NINGUNA_AL_REINICIAR =
-	"Al ir a reiniciar la central para aplicar esta vuelta, ya no había ninguna preparada: o la central se ha reiniciado entretanto y ha vuelto a ésta, u otra vuelta se ha preparado encima y es la que se ha aplicado. No se sabe cuál: en pnpm central:copias, si después de la copia de antes de ésta hay otra antes-de-volver con hora en «pedida», se aplicó la otra; si no, ésta. Míralo antes de repetir nada.";
+	"Al ir a reiniciar la central para aplicar esta vuelta, ya no había ninguna preparada: o la central se ha reiniciado entretanto y ha vuelto a ésta, u otra vuelta se ha preparado encima y es la que se ha aplicado. No se sabe cuál: míralo en pnpm central:copias antes de repetir nada. Si después de la copia de antes de ésta no hay otra antes-de-volver, se ha aplicado ésta; si la hay con hora en «pedida», la otra se ha pedido y la central está donde la dejó ella; si la hay sin «pedida», no se sabe: puede que la otra no llegara a pedirse, o que se pidiera y la constancia no llegara a R2.";
 
 /** Por dónde se sale de una vuelta que deja la central sin atender. */
 const SALIDAS_DE_LA_VUELTA = "deshaciendo la vuelta, o volviendo a otro instante: pnpm central:volver lo hace con la central así.";
