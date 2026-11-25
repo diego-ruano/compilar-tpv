@@ -36,7 +36,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import configuracionDelWorker from "../wrangler.json";
 import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
 import { app } from "../src/app";
-import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import type { RespuestaDeLaCentral, SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
+import type { FilasEnBruto } from "../src/durableObjects/sqliteDelObjeto";
 import { tenantAuth } from "../src/middleware/tenant";
 import { requireAdmin } from "../src/middleware/requireAdmin";
 import { DEMASIADAS_PETICIONES } from "../src/lib/limitador";
@@ -423,11 +424,21 @@ describe("el feed de actualizaciones no vuelve a la central por petición", () =
 describe("las claves inventadas de la reserva web no vacían la caché de las buenas", () => {
 	const BUENA = `rw_${"b".repeat(22)}`;
 	const inventada = (i: number) => `rw_${i.toString().padStart(22, "0")}`;
+	/** El tope de la caché de las que no valen (`CACHE_NEGATIVA_MAX` de claves.ts). */
+	const CACHE_NEGATIVA_MAX = 1000;
 
-	// Cada clave que no está en la caché es un viaje de verdad a la central: las pruebas de miles de
-	// claves tardan unos segundos, y llevan su plazo.
+	/** Lo que contesta la central a una clave que no tiene: ninguna fila. */
+	const sinFilas: RespuestaDeLaCentral<FilasEnBruto> = {
+		ok: true,
+		valor: { columns: ["tenant_id"], rows: [], rowsAffected: 0, lastInsertRowid: null },
+	};
 
-	/** La base central del caso con una sola clave, y las claves por las que se le pregunta, en orden. */
+	/**
+	 * La base central del caso con una sola clave, y las claves por las que se le pregunta, en orden.
+	 * Lo que se prueba es la caché del isolate, no la central: sólo la buena viaja hasta ella, y a las
+	 * inventadas el doble les contesta lo que contestaría la central (ninguna fila) sin el viaje, que con
+	 * miles de claves se comía el plazo del caso.
+	 */
 	async function baseConUnaClave() {
 		await filasDe(central, `INSERT INTO tenants (tenant_id) VALUES ('negocio-bueno');`);
 		await filasDe(
@@ -437,23 +448,28 @@ describe("las claves inventadas de la reserva web no vacían la caché de las bu
 		);
 		const consultas: string[] = [];
 		const { db } = centralInterceptada(central, (metodo, [sentencia], llamar) => {
-			if (metodo === "ejecutar") consultas.push(String((sentencia as SentenciaEnlazada).args[0]));
-			return llamar();
+			if (metodo !== "ejecutar") return llamar();
+			const clave = String((sentencia as SentenciaEnlazada).args[0]);
+			consultas.push(clave);
+			return clave === BUENA ? llamar() : sinFilas;
 		});
 		return { db, consultas };
 	}
 
-	it("miles de claves inventadas: la buena sigue en la caché y no vuelve a la base", async () => {
+	it("más claves inventadas de las que caben: la buena sigue en la caché y no vuelve a la base", async () => {
 		const { db, consultas } = await baseConUnaClave();
 		expect(await negocioDeLaClave(db, BUENA)).toBe("negocio-bueno");
 
-		for (let i = 0; i < 2500; i++) expect(await negocioDeLaClave(db, inventada(i))).toBeNull();
+		// Una más de las que caben en la caché de las que no valen: si compartieran caché con las buenas,
+		// la llenarían y la vaciarían.
+		for (let i = 0; i < CACHE_NEGATIVA_MAX + 1; i++) expect(await negocioDeLaClave(db, inventada(i))).toBeNull();
+		expect(consultas).toHaveLength(CACHE_NEGATIVA_MAX + 2);
 
 		consultas.length = 0;
 		expect(negocioCacheado(BUENA)).toBe("negocio-bueno");
 		expect(await negocioDeLaClave(db, BUENA)).toBe("negocio-bueno");
 		expect(consultas).toEqual([]);
-	}, 60_000);
+	});
 
 	it("una clave que no vale se recuerda: la misma otra vez no vuelve a la base", async () => {
 		const { db, consultas } = await baseConUnaClave();
@@ -465,9 +481,9 @@ describe("las claves inventadas de la reserva web no vacían la caché de las bu
 
 	it("la caché de las que no valen tiene tope: se olvidan las más antiguas", async () => {
 		const { db } = await baseConUnaClave();
-		for (let i = 0; i < 1001; i++) await negocioDeLaClave(db, inventada(i));
+		for (let i = 0; i < CACHE_NEGATIVA_MAX + 1; i++) await negocioDeLaClave(db, inventada(i));
 		expect(negocioCacheado(inventada(0))).toBeUndefined();
 		expect(negocioCacheado(inventada(1))).toBeNull();
-		expect(negocioCacheado(inventada(1000))).toBeNull();
-	}, 60_000);
+		expect(negocioCacheado(inventada(CACHE_NEGATIVA_MAX))).toBeNull();
+	});
 });
