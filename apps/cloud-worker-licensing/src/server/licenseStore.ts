@@ -1332,6 +1332,22 @@ export async function licenciasDeUnaSesionCumplida(db: Sql, sessionId: string): 
 	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
 }
 
+/**
+ * Las licencias de la sesión de checkout `sessionId` cobradas antes de `cobradasAntesDeMs` cuyo
+ * correo con las claves no consta como entregado (`key_email_sent_at_ms` a NULL), en el orden de sus
+ * unidades. Sólo se lee: lo que se haga con ellas lo decide un operador (`pnpm license:resend`).
+ */
+export async function licenciasSinCorreoDeClaves(db: Sql, sessionId: string, cobradasAntesDeMs: number): Promise<string[]> {
+	const r = await exec(
+		db,
+		`SELECT p.license_id FROM license_payments p JOIN licenses l ON l.license_id = p.license_id
+		 WHERE p.stripe_checkout_session_id = ? AND p.at_ms < ? AND l.key_email_sent_at_ms IS NULL
+		 ORDER BY p.unidad;`,
+		[sessionId, cobradasAntesDeMs],
+	);
+	return (r.rows ?? []).map((f) => String((f as unknown as { license_id: unknown }).license_id));
+}
+
 /* ============================================================
    Auditoría de admin
 ============================================================ */
