@@ -49,7 +49,7 @@ const TROZOS_POR_UNION = 65_536;
  * de un texto de megas, no caben en los 128 MB del objeto. Aquí los trozos se unen en un texto plano
  * de `TROZOS_POR_UNION` en `TROZOS_POR_UNION`, y al final todos.
  */
-class TextoPorTrozos {
+export class TextoPorTrozos {
 	private unidos: string[] = [];
 	private trozos: string[] = [];
 
@@ -72,7 +72,7 @@ class TextoPorTrozos {
  * `texto` con cada `buscado` (que no puede ser vacío) cambiado por `puesto`: lo que hace `replaceAll`,
  * sin su cuerda (`TextoPorTrozos`).
  */
-function reemplazarTodos(texto: string, buscado: string, puesto: string): string {
+export function reemplazarTodos(texto: string, buscado: string, puesto: string): string {
 	let i = texto.indexOf(buscado);
 	if (i === -1) return texto;
 	const junto = new TextoPorTrozos();

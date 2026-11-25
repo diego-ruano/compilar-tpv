@@ -30,7 +30,15 @@
 
 import type { Valor } from "../lib/sql";
 import { ponerFk } from "./sqliteDelObjeto";
-import { identificador, LINEA_FIN, LINEA_MIGRACIONES, literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "./volcadoSql";
+import {
+	identificador,
+	LINEA_FIN,
+	LINEA_MIGRACIONES,
+	literalEnUnaLinea,
+	PRINCIPIO_DE_INSERT,
+	reemplazarTodos,
+	TextoPorTrozos,
+} from "./volcadoSql";
 
 /**
  * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta,
@@ -174,22 +182,19 @@ class Lectura {
 
 	/**
 	 * Lo que va entre `comilla` (la simple de un texto, la doble de un nombre) desde `i`, con la comilla
-	 * doblada dentro, y deja `i` detrás; `null` si en `i` no empieza o no se cierra.
+	 * doblada dentro, y deja `i` detrás; `null` si en `i` no empieza o no se cierra. Primero se busca
+	 * dónde se cierra, y luego se desdoblan las de dentro de una vez (`reemplazarTodos`): un texto de
+	 * megas puede traer millones.
 	 */
 	entre(comilla: "'" | '"'): string | null {
 		const { linea } = this;
 		if (linea[this.i] !== comilla) return null;
-		let texto = "";
-		for (let desde = this.i + 1; ; ) {
-			const fin = linea.indexOf(comilla, desde);
-			if (fin === -1) return null;
-			if (linea[fin + 1] !== comilla) {
-				this.i = fin + 1;
-				return texto + linea.slice(desde, fin);
-			}
-			texto += linea.slice(desde, fin + 1);
-			desde = fin + 2;
-		}
+		const desde = this.i + 1;
+		let fin = linea.indexOf(comilla, desde);
+		while (fin !== -1 && linea[fin + 1] === comilla) fin = linea.indexOf(comilla, fin + 2);
+		if (fin === -1) return null;
+		this.i = fin + 1;
+		return reemplazarTodos(linea.slice(desde, fin), comilla + comilla, comilla);
 	}
 
 	/** Unos bytes en hexadecimal desde `i` hasta su comilla, y deja `i` detrás de ella; `null` si no lo son. */
@@ -227,17 +232,21 @@ class Lectura {
 			const texto = this.entre("'");
 			if (texto !== null) return texto;
 		} else if (c === ABRE) {
+			// Los trozos y sus saltos se juntan sin cuerda: una copia de antes de `SALTOS_CON_CHAR` puede
+			// traer cientos de miles.
 			this.i++;
-			let texto = this.entre("'");
+			const texto = new TextoPorTrozos();
+			let trozo = this.entre("'");
 			let saltos = 0;
-			while (texto !== null) {
+			while (trozo !== null) {
+				texto.poner(trozo);
 				const salto = this.salta("||char(10)||") ? "\n" : this.salta("||char(13)||") ? "\r" : null;
 				if (salto === null) break;
-				const trozo = this.entre("'");
-				texto = trozo === null ? null : texto + salto + trozo;
+				texto.poner(salto);
+				trozo = this.entre("'");
 				saltos++;
 			}
-			if (texto !== null && saltos > 0 && this.salta(")")) return texto;
+			if (trozo !== null && saltos > 0 && this.salta(")")) return texto.texto();
 		} else if (this.salta("NULL")) {
 			return null;
 		} else if (this.salta("X'")) {
