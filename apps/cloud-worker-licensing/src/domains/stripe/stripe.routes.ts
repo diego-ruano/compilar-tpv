@@ -182,8 +182,9 @@ stripeRoutes.post("/webhook", async (c) => {
 		const detalle = String(e?.message || e);
 		await markWebhookProcessed(db, eventId, false, detalle);
 		console.error("[stripe] fulfillment fallido:", detalle);
-		// 500 → Stripe reintenta. Es lo que queremos si el fallo es nuestro (la base central no
-		// contesta, etc.).
+		// 500 → Stripe reintenta. Es lo que queremos si el fallo es nuestro (la base central no ha
+		// atendido la operación, etc.). Si tampoco atiende `markWebhookProcessed`, el error sube al
+		// `onError`, que contesta 503, sin nada en `error_text`: Stripe también reintenta.
 		return c.json({ ok: false, error: "fulfillment_failed" }, 500);
 	}
 });

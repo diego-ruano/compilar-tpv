@@ -458,7 +458,9 @@ hub con la central (un error de SQL) va a Sentry, como siempre.
   ([jobs-e-interruptores.md](jobs-e-interruptores.md#interruptores-remotos-de-emergencia-prod-06)).
   El feed de actualizaciones no: sólo le da el canal normal al equipo cuyo piloto no ha podido mirar
   por otro fallo de la lectura (un error de SQL), que va a Sentry. El webhook de Stripe contesta su
-  503 y Stripe lo reintenta.
+  503 y Stripe lo reintenta; si la central sólo ha fallado en la operación y contesta al apuntar el
+  fallo, es un 500 y el motivo queda en `webhook_events.error_text`
+  ([licencias.md](licencias.md#comprar)).
 
 Lo cubre `test/centralNoDisponible.test.ts`.
 
