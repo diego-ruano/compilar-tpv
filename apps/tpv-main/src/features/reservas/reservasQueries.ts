@@ -14,7 +14,7 @@ import { statsKeys } from "../estadisticas/statsQueries";
 import { mesasKeys } from "../mesas/mesasQueries";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
-export const reservasKeys = {
+const reservasKeys = {
   all: ["reservas"] as const,
   meta: () => ["reservas", "meta"] as const,
   mes: (desde: string, hasta: string) => ["reservas", "mes", desde, hasta] as const,

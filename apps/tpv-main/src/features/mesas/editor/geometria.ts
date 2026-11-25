@@ -42,7 +42,7 @@ export function clamp(n: number, min: number, max: number) {
     return Math.max(min, Math.min(n, max));
 }
 
-export function polygonBBox(points: number[]) {
+function polygonBBox(points: number[]) {
     const xy = pointsToXY(points);
     let minX = Infinity;
     let minY = Infinity;
@@ -59,7 +59,7 @@ export function polygonBBox(points: number[]) {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-export function isPointInPolygon(
+function isPointInPolygon(
     point: { x: number; y: number },
     polygon: Array<{ x: number; y: number }>,
 ) {
@@ -89,7 +89,7 @@ export function getTableBBox(table: Table) {
     return { rawW, rawH };
 }
 
-export function tableProbePointsAt(pos: { x: number; y: number }, table: Table) {
+function tableProbePointsAt(pos: { x: number; y: number }, table: Table) {
     if (table.shape === "circle") {
         const r0 = table.radius ?? 40;
         const r = Math.max(4, r0 - COLLISION_SKIN);
@@ -141,7 +141,7 @@ export function isTableInsidePolygon(
     return probes.every((p) => isPointInPolygon(p, poly));
 }
 
-export function clampToRect(
+function clampToRect(
     pos: { x: number; y: number },
     rect: { x: number; y: number; width: number; height: number },
     table: Table,
@@ -232,7 +232,7 @@ export function findInsidePosition(
     return start;
 }
 
-export function distPointToSegmentSquared(
+function distPointToSegmentSquared(
     p: { x: number; y: number },
     a: { x: number; y: number },
     b: { x: number; y: number },

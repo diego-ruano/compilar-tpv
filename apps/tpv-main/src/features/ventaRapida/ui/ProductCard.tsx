@@ -6,7 +6,7 @@ import { cn } from "../utils";
 import ImageWithFallback from "../../../shared/ui/ImageWithFallback";
 import { eur } from "../../../shared/lib/dinero";
 
-export type ProductCardProps = {
+type ProductCardProps = {
   p: ProductoDisplay;
   qty: number;
   onAdd: (p: ProductoDisplay) => void;

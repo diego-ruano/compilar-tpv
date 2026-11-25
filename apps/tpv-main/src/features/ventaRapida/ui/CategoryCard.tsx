@@ -4,7 +4,7 @@ import { ImageOff } from "lucide-react";
 import { CategoriaDisplay } from "../types";
 import ImageWithFallback from "../../../shared/ui/ImageWithFallback";
 
-export type CategoryCardProps = {
+type CategoryCardProps = {
   c: CategoriaDisplay;
   onSelect: (c: CategoriaDisplay) => void;
 };

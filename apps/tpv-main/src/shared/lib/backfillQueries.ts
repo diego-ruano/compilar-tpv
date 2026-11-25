@@ -13,7 +13,7 @@ import { commands } from "@tpv/client";
 
 import { useQuery } from "@tanstack/react-query";
 
-export const backfillKeys = {
+const backfillKeys = {
 	estado: ["sync", "backfill"] as const,
 };
 

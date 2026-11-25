@@ -48,7 +48,7 @@ export type LinkedDevice = {
 };
 
 /** Prefijo de claves de la feature; invalidar esto refresca las dos listas. */
-export const pairingKeys = {
+const pairingKeys = {
 	all: ["pairing"] as const,
 	pendientes: ["pairing", "pendientes"] as const,
 	vinculados: ["pairing", "vinculados"] as const,

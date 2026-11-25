@@ -28,7 +28,7 @@ import { claveDeConsulta, featureKeysPorTablas } from "../../shared/lib/syncStat
 import type { CategoriaDisplay, ProductoDisplay } from "./hooks/useInventario";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
-export const inventarioKeys = {
+const inventarioKeys = {
   all: ["inventario"] as const,
   categorias: () => ["inventario", "categorias"] as const,
   productosByCategoria: (idCategoria: string) =>

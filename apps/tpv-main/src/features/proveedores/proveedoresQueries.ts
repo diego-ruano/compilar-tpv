@@ -17,7 +17,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { proveedoresGetProductos, proveedoresSave, proveedoresDelete, proveedoresSetVinculos } from "./proveedoresApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
-export const proveedoresKeys = {
+const proveedoresKeys = {
   all: ["proveedores"] as const,
   list: () => ["proveedores", "list"] as const,
   categorias: () => ["proveedores", "categorias"] as const,

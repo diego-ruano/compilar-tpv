@@ -30,7 +30,7 @@ export async function ensureOpenComanda(
     });
 }
 
-export function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
+function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
     const mapped: TicketItem[] = rows.map((r) => {
         const pasa = r.Pasa_Cocina === 1;
         return {

@@ -244,7 +244,7 @@ export type EsperaGuardada = Pick<EsperaDeAprobacion, "pairCode" | "nonceB64">;
 const CLAVE_ESPERA = "tpv:emparejamiento:espera:v1";
 
 /** El almacenamiento de la aplicación, o `null` si no está (entonces la espera no se recuerda). */
-export function almacenDeLaApp(): Storage | null {
+function almacenDeLaApp(): Storage | null {
 	try {
 		return typeof window === "undefined" ? null : window.localStorage;
 	} catch {
