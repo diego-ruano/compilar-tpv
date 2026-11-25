@@ -74,6 +74,3 @@ Thumbs.db
 
 # Capturas de los fallos del E2E (TEST-01)
 apps/tpv-main/e2e/fallos/
-
-# Artefactos sueltos de ts-rs: lo bueno va a packages/contracts/src/generated/bindings.ts
-crates/*/bindings/
