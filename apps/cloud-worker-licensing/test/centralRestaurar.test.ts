@@ -5,8 +5,9 @@
 // comprueba la ida y vuelta de `copiaBaseCentral.test.ts`; aquí, que una central restaurada a medias
 // no atiende nunca:
 //
-//   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con una tabla que no es
-//     de la base, con una línea demasiado larga, con una clave foránea rota) deja el objeto como
+//   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con fines de línea de
+//     Windows, con una tabla que no es de la base, con una línea demasiado larga, con una clave
+//     foránea rota) deja el objeto como
 //     estaba: sin aprovisionar, sin marca, y el error dice por qué, sin nada de lo que trae la copia
 //     (va en el `detalle` de la respuesta, y al rastro de la administración, sólo su código:
 //     `motivoDe`, en `domains/admin/central.ts`);
@@ -170,6 +171,14 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 			"sin la línea de las migraciones",
 			(t) => lineasDe(t).filter((l) => !l.startsWith("-- Migraciones: ")).join("\n"),
 			/^copia_no_valida: sin la línea de las migraciones/,
+			[],
+		],
+		[
+			"con fines de línea de Windows (CRLF), que no es de otra versión",
+			(t) => t.replaceAll("\n", "\r\n"),
+			new RegExp(
+				`^copia_no_valida: la línea 3 acaba en CR: la copia tiene fines de línea de Windows \\(CRLF\\); conviértela a LF$`,
+			),
 			[],
 		],
 		[

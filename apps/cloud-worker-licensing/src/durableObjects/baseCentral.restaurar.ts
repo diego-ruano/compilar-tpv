@@ -17,7 +17,7 @@
 //   entra hasta que acaba, tampoco las guardas que reafirman las claves foráneas, que aquí van
 //   apagadas mientras entran las filas.
 // - **Una marca mientras tanto.** Antes de tocar nada se pone la marca de restauración en curso
-//   (`CLAVE_RESTAURACION_EN_CURSO`), y se quita en la misma transacción que da la central por buena.
+//   (`CLAVE_RESTAURACION_EN_CURSO`), y se quita al acabar, con todas las migraciones aplicadas.
 //   Si el objeto se reinicia a mitad, al arrancar la marca sigue ahí y no atiende
 //   (`central_restauracion_a_medias`), ni se pone al día con sus migraciones; la siguiente
 //   restauración empieza vaciándolo.
@@ -43,7 +43,7 @@
 
 import { capturarError } from "../observability/errors";
 import { MIGRACIONES_DE_LA_CENTRAL } from "../server/central/migraciones";
-import { CopiaInservible, cargarCopia, lineasDe } from "./cargaDeCopias";
+import { CopiaInservible, cargarCopia, FilasRechazadas, leyendoElGzip, lineasDe } from "./cargaDeCopias";
 import { esClaveDeCopiaDeLaCentral, esTablaDeLaCopia, NOMBRES_DE_UNA_COPIA } from "./baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type { CopiaRestaurada, MarcaDeRestauracion, RespuestaDeLaCentral } from "./baseCentral.rpc";
@@ -58,19 +58,6 @@ export const FILAS_QUE_SE_RESTAURAN_DE_UNA_VEZ = 150_000;
 /** Los nombres de las migraciones de este worker, en orden. */
 function nombresDeLasMigraciones(): string[] {
 	return MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
-}
-
-/**
- * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
- * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
- */
-async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
-	try {
-		yield* lineas;
-	} catch (error) {
-		if (error instanceof CopiaInservible) throw error;
-		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
-	}
 }
 
 /**
@@ -115,25 +102,24 @@ export async function restaurarLaCentral(
 			},
 		});
 
-		// Ya entera y sin claves rotas: las migraciones que le faltan, sobre sus datos.
+		// Ya entera y sin claves rotas: las migraciones que le faltan, sobre sus datos. Si una no entra,
+		// `migrarBase` lanza; si vuelve, están todas, y la central ya puede atender.
 		await migrarBase(storage, MIGRACIONES_DE_LA_CENTRAL);
-		const sql = storage.sql;
-		storage.transactionSync(() => {
-			const aplicadas = sql
-				.exec("SELECT name FROM _migrations ORDER BY rowid;")
-				.toArray()
-				.map((f) => String(f.name));
-			if (aplicadas.join(",") !== nombresDeLasMigraciones().join(",")) {
-				throw new Error(`La base restaurada se ha quedado en ${aplicadas.at(-1) ?? "ninguna"} y este worker llega a ${nombresDeLasMigraciones().at(-1)}.`);
-			}
-			storage.kv.delete(CLAVE_RESTAURACION_EN_CURSO);
-		});
+		storage.kv.delete(CLAVE_RESTAURACION_EN_CURSO);
 		return { ok: true, valor: { clave, ...cargada } };
 	} catch (error) {
 		await storage.deleteAll();
-		if (!(error instanceof CopiaInservible)) capturarError(error, "central.restaurar");
+		// Unas filas que SQLite no acepta (`FilasRechazadas`) no se cuentan como una copia que no vale:
+		// pueden ser un fallo de este worker, y van a Sentry, con el texto de SQLite como causa, como lo
+		// demás que no se ha podido cargar.
+		const noCargada = error instanceof FilasRechazadas || !(error instanceof CopiaInservible);
+		if (noCargada) capturarError(error, "central.restaurar");
 		const detalle =
-			error instanceof CopiaInservible ? error.message : `no se ha podido cargar: ${String((error as Error)?.message ?? error)}`;
+			error instanceof FilasRechazadas
+				? `no se ha podido cargar: ${error.porQue}`
+				: error instanceof CopiaInservible
+					? error.message
+					: `no se ha podido cargar: ${String((error as Error)?.message ?? error)}`;
 		return { ok: false, error: "central_copia_inservible", detalle };
 	}
 }

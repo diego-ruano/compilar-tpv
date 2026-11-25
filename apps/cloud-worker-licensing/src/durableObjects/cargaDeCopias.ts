@@ -53,9 +53,43 @@ export class CopiaInservible extends Error {
 	constructor(
 		readonly codigo: "copia_no_encontrada" | "copia_de_otra_version" | "copia_cortada" | "copia_no_valida",
 		detalle: string,
+		opciones?: ErrorOptions,
 	) {
-		super(`${codigo}: ${detalle}`);
+		super(`${codigo}: ${detalle}`, opciones);
 		this.name = "CopiaInservible";
+	}
+}
+
+/**
+ * Unas filas de la copia que SQLite no acepta (`rechazadas`): la copia no vale (`copia_no_valida`), y
+ * se dice dónde están y no qué llevan (`porQue`). Puede ser también un fallo de este worker (de quien
+ * escribió la copia, de una migración), y por eso quien carga lo manda además a Sentry, con el texto de
+ * SQLite, que puede citar lo que lleva la fila, sólo como causa.
+ */
+export class FilasRechazadas extends CopiaInservible {
+	constructor(
+		readonly porQue: string,
+		causa: unknown,
+	) {
+		super("copia_no_valida", porQue, { cause: causa });
+		this.name = "FilasRechazadas";
+	}
+}
+
+/**
+ * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
+ * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
+ *
+ * Desde aquí no se distingue un gzip roto de una lectura de R2 que se corta a mitad: los dos dicen
+ * «no se puede descomprimir», que puede ser pasajero (se repite antes de dar la copia por mala), y
+ * los dos son una copia que no vale, que no va a Sentry, sólo adonde va una `CopiaInservible`.
+ */
+export async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
+	try {
+		yield* lineas;
+	} catch (error) {
+		if (error instanceof CopiaInservible) throw error;
+		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
 	}
 }
 
@@ -86,6 +120,22 @@ function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila):
 }
 
 /**
+ * Que una línea que se lee (la de las migraciones, una de datos) no acabe en CR, el `\r` que queda de
+ * una copia con fines de línea de Windows (CRLF) partida por los `\n`. Sin esto se diría otra cosa:
+ * que la copia es de otra versión (el `\r` se pega al nombre de la última migración) o que a una fila
+ * le sobra texto. Las líneas que no se leen, como las del esquema, no se miran: un CREATE con sus
+ * saltos de Windows dentro, como lo deja un volcado de una base que los traía, no estorba.
+ */
+function sinCr(linea: string, numero: number): void {
+	if (linea.endsWith("\r")) {
+		throw new CopiaInservible(
+			"copia_no_valida",
+			`la línea ${numero} acaba en CR: la copia tiene fines de línea de Windows (CRLF); conviértela a LF`,
+		);
+	}
+}
+
+/**
  * Cuánto entra por transacción: las líneas que se juntan, en caracteres (unos 8 MB en memoria). Entre
  * lote y lote se espera a R2, y cada espera con algo escrito confirma lo escrito, que es lo que más
  * cuesta: con lotes de 500 filas, restaurar 150.000 tarda tres veces más.
@@ -111,10 +161,13 @@ export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
  * y se juntan una vez, cuando llega su salto: un texto que creciera trozo a trozo se copiaría entero
  * con cada uno (el gzip llega a trozos de 4 KB), y una línea de 16 MiB tardaría segundos en juntarse.
  * Una de más de `tope` caracteres hace inservible la copia en cuanto se pasa, sin esperar a su final
- * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests), y se deja de leer la copia: la
- * descompresión del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con
- * el resto. Que eso acumule memoria mientras la carga escribe está sin medir (RESTAURAR-CONTRAPRESION,
- * en docs/pendientes.md).
+ * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests).
+ *
+ * Si se deja de leer antes del final, por eso o porque quien lee se para (una línea que no vale, unas
+ * filas que SQLite no acepta: `cargarCopia` cierra el iterador), se cancela la copia: la descompresión
+ * del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con el resto.
+ * Que la descompresión acumule memoria mientras la carga escribe está sin medir
+ * (RESTAURAR-CONTRAPRESION, en docs/pendientes.md).
  */
 export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARACTERES_POR_LINEA): AsyncGenerator<string> {
 	const lector = cuerpo
@@ -126,31 +179,35 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARAC
 	let caracteres = 0;
 	/** Cuántas líneas se han dado: la que se está leyendo es la siguiente. */
 	let dadas = 0;
-	const demasiadoLarga = async () => {
-		await lector.cancel().catch(() => undefined);
-		return new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
-	};
-	for (;;) {
-		const { value, done } = await lector.read();
-		if (done) break;
-		const partes = value.split("\n");
-		const resto = partes.pop() ?? "";
-		for (const parte of partes) {
-			if (caracteres + parte.length > tope) throw await demasiadoLarga();
-			trozos.push(parte);
-			const linea = trozos.length === 1 ? parte : trozos.join("");
-			trozos = [];
-			caracteres = 0;
-			dadas++;
-			yield linea;
+	const demasiadoLarga = () =>
+		new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
+	let leida = false;
+	try {
+		for (;;) {
+			const { value, done } = await lector.read();
+			if (done) break;
+			const partes = value.split("\n");
+			const resto = partes.pop() ?? "";
+			for (const parte of partes) {
+				if (caracteres + parte.length > tope) throw demasiadoLarga();
+				trozos.push(parte);
+				const linea = trozos.length === 1 ? parte : trozos.join("");
+				trozos = [];
+				caracteres = 0;
+				dadas++;
+				yield linea;
+			}
+			if (caracteres + resto.length > tope) throw demasiadoLarga();
+			if (resto) {
+				trozos.push(resto);
+				caracteres += resto.length;
+			}
 		}
-		if (caracteres + resto.length > tope) throw await demasiadoLarga();
-		if (resto) {
-			trozos.push(resto);
-			caracteres += resto.length;
-		}
+		leida = true;
+		if (trozos.length) yield trozos.join("");
+	} finally {
+		if (!leida) await lector.cancel().catch(() => undefined);
 	}
-	if (trozos.length) yield trozos.join("");
 }
 
 /**
@@ -470,14 +527,14 @@ function conArgumentos(cabecera: Cabecera, valores: readonly ValorLeido[]): { se
 /**
  * Lo que se dice de unas filas que SQLite no acepta: en qué líneas de la copia están y de qué
  * tablas, y el código de SQLite. Nada de su contenido, que el texto de SQLite puede llevar (cita el
- * trozo que no entiende): ése va como causa, sólo a Sentry.
+ * trozo que no entiende): ése va como causa, sólo a Sentry (`FilasRechazadas`).
  */
-function rechazadas(error: unknown, filas: readonly FilaDeLaCopia[]): Error {
+function rechazadas(error: unknown, filas: readonly FilaDeLaCopia[]): FilasRechazadas {
 	const codigo = /\bSQLITE_[A-Z_]+\b/.exec(String((error as Error)?.message ?? error))?.[0] ?? "sin código de SQLite";
 	const donde =
 		filas.length === 1 ? `la línea ${filas[0].numero}` : `una de las líneas ${filas[0].numero}–${filas.at(-1)!.numero}`;
 	const tablas = [...new Set(filas.map((f) => f.tabla))].join(", ");
-	return new Error(`SQLite no acepta ${donde} de la copia (${tablas}): ${codigo}`, { cause: error });
+	return new FilasRechazadas(`SQLite no acepta ${donde} de la copia (${tablas}): ${codigo}`, error);
 }
 
 /**
@@ -534,16 +591,25 @@ export type CopiaCargada = { filas: number; tablas: number };
 /**
  * Carga una copia en la base del objeto. Las tablas que puede traer se vacían antes de cargar (las
  * migraciones pueden sembrar filas, y la copia trae las suyas). Lanza `CopiaInservible` si la copia no
- * vale, y si SQLite no acepta una de sus filas, un error que dice dónde está y no qué lleva
- * (`rechazadas`); la base se queda como la deje.
+ * vale; si SQLite no acepta una de sus filas, la de `FilasRechazadas`, que dice dónde está y no qué
+ * lleva (`rechazadas`). La base se queda como la deje. Si se para antes de leer la última línea, cierra
+ * `lineas` (`return`), y `lineasDe` deja de pedir la copia.
  */
 export async function cargarCopia(
 	storage: DurableObjectStorage,
 	lineas: AsyncIterable<string>,
 	como: ComoCargar,
 ): Promise<CopiaCargada> {
-	const sql = storage.sql;
 	const iterador = lineas[Symbol.asyncIterator]();
+	try {
+		return await cargarDe(storage, iterador, como);
+	} finally {
+		await iterador.return?.();
+	}
+}
+
+async function cargarDe(storage: DurableObjectStorage, iterador: AsyncIterator<string>, como: ComoCargar): Promise<CopiaCargada> {
+	const sql = storage.sql;
 	/** El número de la última línea leída, desde 1: con él se dice dónde está una que no vale. */
 	let numero = 0;
 	const siguiente = async () => {
@@ -558,6 +624,7 @@ export async function cargarCopia(
 		const { value, done } = await siguiente();
 		if (done) throw new CopiaInservible("copia_cortada", "sin datos");
 		if (value.startsWith(LINEA_MIGRACIONES)) {
+			sinCr(value, numero);
 			migraciones = value.slice(LINEA_MIGRACIONES.length).split(",").filter(Boolean);
 			break;
 		}
@@ -613,6 +680,7 @@ export async function cargarCopia(
 				continue;
 			}
 			if (!linea.startsWith(PRINCIPIO_DE_INSERT)) continue;
+			sinCr(linea, numero);
 			const fila = lector.leer(linea, numero);
 			lote.push(fila);
 			caracteresDelLote += linea.length;

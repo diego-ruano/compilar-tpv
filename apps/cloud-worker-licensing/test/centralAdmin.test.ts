@@ -16,7 +16,9 @@
 //   · lo que no se hace dice qué pasa (`message`) y, aparte, el motivo técnico (`detalle`);
 //   · lo que cambia algo deja rastro en el log, sin datos personales ni texto que no sea nuestro: la
 //     clave y el marcador pasan una gramática cerrada antes de llegar al objeto, y el `detalle` no va
-//     al rastro.
+//     al rastro;
+//   · a Sentry va lo que puede ser un fallo del worker (unas filas que SQLite no acepta), y no una
+//     copia que no vale.
 
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -44,9 +46,31 @@ import {
 	type CentralDePrueba,
 } from "./helpers/central";
 
+const { capturados } = vi.hoisted(() => ({
+	/** Lo que se ha mandado a Sentry (`capturarError`): su operación, su mensaje y el de su causa. */
+	capturados: [] as { operacion: string; mensaje: string; causa?: string }[],
+}));
+
+vi.mock("../src/observability/errors", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/errors")>();
+	return {
+		...original,
+		capturarError: (error: unknown, operacion: string) => {
+			const causa = (error as any)?.cause;
+			capturados.push({
+				operacion,
+				mensaje: String((error as any)?.message ?? error),
+				...(causa === undefined ? {} : { causa: String(causa?.message ?? causa) }),
+			});
+			original.capturarError(error, operacion);
+		},
+	};
+});
+
 const TOKEN = "token-de-pruebas";
 
 afterEach(() => {
+	capturados.length = 0;
 	vi.restoreAllMocks();
 });
 
@@ -268,10 +292,12 @@ describe("aprovisionar desde una copia", () => {
 			{ accion: "restaurar", resultado: "empieza", clave },
 			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_no_valida" },
 		]);
+		// Una copia que no vale no es un fallo del worker: no va a Sentry.
+		expect(capturados).toEqual([]);
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 	});
 
-	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro", async () => {
+	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro; va a Sentry", async () => {
 		const origen = await centralDePrueba();
 		await filasDe(origen, `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('t-1', 1, 2);`);
 		const clave = claveDeCopiaNueva();
@@ -302,6 +328,14 @@ describe("aprovisionar desde una copia", () => {
 		expect(rastrosDe(log)).toEqual([
 			{ accion: "restaurar", resultado: "empieza", clave },
 			{ accion: "restaurar", resultado: "central_copia_inservible", clave },
+		]);
+		// Puede ser un fallo de este worker: va a Sentry, una vez, con el texto de SQLite sólo como causa.
+		expect(capturados).toEqual([
+			{
+				operacion: "central.restaurar",
+				mensaje: expect.stringMatching(/SQLite no acepta una de las líneas \d+–\d+ de la copia \(tenants\): SQLITE_CONSTRAINT$/),
+				causa: expect.stringMatching(/UNIQUE/),
+			},
 		]);
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 	});

@@ -87,14 +87,19 @@ export class BaseCentral extends DurableObject<Env> {
 		this.averia = ctx.blockConcurrencyWhile(() => ponerAlDia(ctx.storage));
 	}
 
-	/** Una sentencia suelta. */
+	/**
+	 * Una sentencia suelta, en su transacción, como las de un lote: si falla, no queda nada de lo que
+	 * llevaba escrito. Suelta, SQLite lo conservaría con la cláusula de conflicto FAIL (`INSERT OR
+	 * FAIL`, o un `RAISE(FAIL)`), y `central_error_sql` dice que no ha escrito nada.
+	 */
 	async ejecutar(sentencia: SentenciaEnlazada): Promise<RespuestaDeLaCentral<FilasEnBruto>> {
 		const { sql, args } = enlazar(sentencia);
 		const motivo = motivoDeRechazo(sql);
 		if (motivo) return { ok: false, error: "central_sentencia_prohibida", detalle: motivo };
 		const fallo = await antesDeTocarLaBase(this.ctx.storage, this.averia);
 		if (fallo) return fallo;
-		return conErrorDeSql(() => ejecutarEnBruto(this.ctx.storage.sql, sql, args));
+		const storage = this.ctx.storage;
+		return conErrorDeSql(() => storage.transactionSync(() => ejecutarEnBruto(storage.sql, sql, args)));
 	}
 
 	/** Varias sentencias, todo o nada: si una falla, no queda nada de las anteriores. */

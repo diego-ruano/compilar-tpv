@@ -44,7 +44,7 @@ import {
 	prefijoDeCopias,
 	type CopiaHecha,
 } from "./tenantHub.copia";
-import { CopiaInservible, lineasDe } from "./cargaDeCopias";
+import { CopiaInservible, FilasRechazadas, leyendoElGzip, lineasDe } from "./cargaDeCopias";
 import { cargarCopiaDelNegocio } from "./tenantHub.restaurar";
 import { esSinVueltaAUnInstante, instantesDe, type Instantes } from "./instantes";
 import { abrirLogTrasVolver, CLAVE_VUELTA_EN_CURSO, seqMasAlto, type ModoDeVuelta } from "./tenantHub.instante";
@@ -581,8 +581,11 @@ export class MotorTenantHub {
 	 * DO-PERDIDA · Devuelve a un objeto vacío la base de una copia diaria de R2
 	 * (`/v1/admin/negocios/restaurar-copia`, `tenantHub.restaurar.ts`), y abre el log como
 	 * `crearBaseVacia`. La copia tiene que ser de este negocio. Si no vale (cortada, de un esquema
-	 * que este worker no sabe poner, con una línea que no es una fila), el objeto se queda vacío y se
-	 * dice por qué: el código y lo que dice el cargador (`detalle`), sin nada de la copia.
+	 * que este worker no sabe poner, con una línea que no es una fila, con el gzip roto, con unas
+	 * filas que SQLite no acepta), el objeto se queda vacío y se dice por qué: el código y lo que dice
+	 * el cargador (`detalle`), sin nada de la copia. Lo que SQLite no acepta puede ser además un fallo
+	 * de este worker, y va también a Sentry, con el texto de SQLite como causa; lo demás, no. Un gzip
+	 * que no se deja leer puede ser también una lectura de R2 cortada a mitad (`leyendoElGzip`).
 	 */
 	async restaurarDesdeCopia(params: {
 		tenantId: string;
@@ -599,15 +602,16 @@ export class MotorTenantHub {
 				const objeto = await this.env.COPIAS_NEGOCIOS.get(clave);
 				if (!objeto) throw new HubError("copia_no_encontrada", 404);
 				const storage = this.state.storage;
-				const cargada = await cargarCopiaDelNegocio(storage, lineasDe(objeto.body), async () => {
+				const cargada = await cargarCopiaDelNegocio(storage, leyendoElGzip(lineasDe(objeto.body)), async () => {
 					await this.migrarEnExclusiva();
 					apuntarNegocio(storage, tenantId);
 				});
 				return { clave, ...cargada };
 			});
 		} catch (e) {
-			if (e instanceof CopiaInservible) return { ok: false, error: e.codigo, status: 422, detalle: e.message };
-			throw e;
+			if (!(e instanceof CopiaInservible)) throw e;
+			if (e instanceof FilasRechazadas) capturarError(e, "hub.restaurar_copia");
+			return { ok: false, error: e.codigo, status: 422, detalle: e.message };
 		}
 	}
 
