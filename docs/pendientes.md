@@ -23,7 +23,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
-| [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
 | [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
@@ -31,9 +30,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
 | [RESERVA-CORREOS](#reserva-correos--los-correos-de-una-reserva-web-que-se-pierden-con-la-central-saturada) | 🔵 | Con la central saturada, la confirmación de una reserva web (con su enlace de cancelar) y el «has cancelado» no salen, y nadie los repite | Sin hacer |
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
-| [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
-| [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
-| [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Se van con las copias nuevas; las de un negocio que ya no copia, no |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -301,20 +297,6 @@ por encima.
 En local no se puede comprobar (no hay vuelta a un instante). Toca en el simulacro de vuelta en
 producción: volver, deshacer y ver si el negocio atiende.
 
-### VUELTA-REPETIR · Repetir la vuelta de un negocio puede volver dos veces
-
-`POST /v1/admin/negocios/instante` (`basesDeNegocios.ts`, `pnpm negocio:instante`) prepara la vuelta
-(`MotorTenantHub.prepararVuelta`), abre el log en la central y reinicia el objeto. Si se queda a medias,
-contesta `log_sin_reservar` (la central no ha contestado) o `vuelta_sin_aplicar` (el objeto no ha
-vuelto todavía), los dos con «Repite la misma orden». Repetirla vuelve a preparar la vuelta sin mirar
-si la de antes ya se ha aplicado: si el objeto se ha reiniciado por su cuenta entre el «sin aplicar» y
-la repetición, ya ha vuelto, y la repetición prepara otra vuelta al mismo destino, que se lleva lo
-escrito entre medias.
-
-La base central lo resuelve así (`domains/admin/central.ts::aplicarLaPreparada`,
-`baseCentral.instante.ts`): la respuesta da el `deshacer`, y `--reiniciar <deshacer>` sólo reinicia si
-esa vuelta sigue preparada; si ya se ha aplicado, no hace nada. El arreglo es el mismo para el negocio.
-
 ### CENTRAL-RESTAURAR · La central se restaura en una sola llamada
 
 Restaurar la central desde una copia (`baseCentral.restaurar.ts`) va entero dentro de un
@@ -461,45 +443,6 @@ avisada: ese peldaño no sale nunca. Eso se lee en el código
 un aviso que no ha salido…» (`test/avisoDeCaducidad.test.ts`) sólo fija que ese fallo no corta a las
 demás, sin correr otro ciclo, y el de la marca que entra sin respuesta no existe. Arreglo posible: una
 marca «enviando» con caducidad, que el ciclo de otro día pueda retomar.
-
-### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
-
-`MAX_MENSAJE` (`tenantHub.mensajes.ts`) es de 4 MiB: un mensaje mayor de la Main se rechaza
-(`payload_too_large`) antes de leerlo, sin llegar a la base. Una operación va sola en su lote aunque
-sea grande, y el SQLite de un objeto admite en producción filas de hasta 8 MiB y 34 bytes
-(`MAX_ROW_LENGTH` de workerd; [worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)):
-una operación cuyo mensaje pasa de 4 MiB por un valor que la base admite se rechaza, y la Main la
-aparta. En el workerd local de las pruebas el tope de un valor es algo más de 2 MiB
-(`test/sondaSqliteDo.test.ts`), así que eso sólo se ve en producción. Lo decide el
-responsable: subir el tope (antes, mirar en la página de límites de Cloudflare el de un mensaje de
-WebSocket que recibe un Durable Object), o dejarlo.
-
-### RESTAURAR-CONTRAPRESION · La descompresión de una copia no espera a la carga
-
-Restaurar una copia, de la central o de un negocio, lee el gzip de R2 con `DecompressionStream` y
-`TextDecoderStream` (`cargaDeCopias.ts::lineasDe`), y entre lote y lote la carga escribe en el SQLite
-del objeto. La descompresión de workerd no espera a que se lea lo que da: una sonda (un gzip sin fin
-hecho a mano; se leen 256 KiB y se para 300 ms) vio que, mientras tanto, pedía a la fuente 64 MiB. Si
-la carga va más despacio que R2, lo descomprimido se acumula en la memoria del objeto (128 MB). La
-sonda no se ha quedado en el repositorio. Lo que ya está en el código: si la carga se para antes del
-final (una copia que no vale, unas filas que SQLite no acepta), se cancelan la lectura y la
-descompresión (`cargarCopia` cierra el iterador, y `lineasDe` cancela la copia). Falta medir una restauración grande en producción; si se
-confirma, descomprimir a demanda (pidiendo a R2 sólo cuando se ha cargado lo anterior).
-
-### COPIAS-SALTOS · Copias de negocio de antes con muchos saltos en una fila
-
-Las copias diarias de negocio que hizo el worker antes de `SALTOS_CON_CHAR` (`volcadoSql.ts`) escriben
-cada salto de línea de un texto como `'||char(10)||'`, 14 caracteres. Una fila con más de 1,27
-millones de saltos (o de 8 MB con más de unos 726.000) da una línea de más de 17 MiB
-(`CARACTERES_POR_LINEA`, `cargaDeCopias.ts`), y esa copia no se restaura (`copia_no_valida: la línea N
-es demasiado larga`); el worker de antes tampoco la restauraba. Lo fija `test/cargaDeCopias.test.ts`
-(«la de una copia de un negocio de antes de SALTOS_CON_CHAR…»). Esas copias se van a medida
-que cada negocio sube copias nuevas: al subir una se borran las que pasan de las 30 últimas
-(`COPIAS_QUE_SE_GUARDAN`, `tenantHub.copia.ts::subirCopia`), salvo las que proteja una subida
-completa sin terminar (`copiasProtegidasDesde`). Las de un negocio que ya no hace copias (retirado, o
-cuyo objeto se ha perdido, que es cuando se restaura una vieja) no se van nunca
-([COPIAS-RETENCION](#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)).
-Leerlas sin juntar la línea entera sería otro lector.
 
 ---
 

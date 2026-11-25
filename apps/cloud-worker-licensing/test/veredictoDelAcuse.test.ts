@@ -132,17 +132,33 @@ describe("el acuse dice de qué clase es el fallo", () => {
 		});
 	});
 
-	it("una operación de más de 2 MiB que cabe en `MAX_MENSAJE` se lee y la juzga la base", async () => {
-		// Un mensaje de unos 3 MB. Con el tope del mensaje en 2 MiB se cortaba con `payload_too_large` y
-		// no llegaba ningún acuse, aunque la base de producción (filas de hasta 8 MiB y 34 bytes) la
-		// habría aceptado. El workerd local la rechaza por la fila (`sondaSqliteDo`, `valor3MB`), así
-		// que lo que se comprueba es que llega su acuse y que es la base quien la juzga, no el `ok`.
-		await enElHub("ack-3mb", async (hub: any) => {
-			const { aplicar } = await preparar(hub);
-			const v = await aplicar("op-3MB", ALTA, ["z-3mb", "a".repeat(3_000_000)]);
-			if (v.ok) return;
-			expect(v, String(v.error)).toMatchObject({ ok: false, permanente: true, transitorio: false });
-			expect(v.error).toMatch(/too big/);
+	it("una operación de más de 4 MiB que cabe en el mensaje (9 MiB) se lee y la juzga la base (MAX-MENSAJE)", async () => {
+		// Con el tope del mensaje en 4 MiB se cortaba con `payload_too_large` y no llegaba ningún acuse,
+		// aunque la base de producción (filas de hasta 8 MiB y 34 bytes) podía aceptarla.
+		await enElHub("ack-grande", async (hub: any) => {
+			const { aplicar, aplicarPasos } = await preparar(hub);
+			const MIB = 1024 * 1024;
+
+			// Un valor de 6 MB. La fila no cabe en el workerd local (algo más de 2 MiB, `sondaSqliteDo`,
+			// `valor3MB`) y sí en producción: lo que se comprueba es que llega su acuse y que, si no
+			// entra, es la base quien la rechaza.
+			const v = await aplicar("op-6MB", ALTA, ["z-6mb", "a".repeat(6_000_000)]);
+			if (!v.ok) {
+				expect(v, String(v.error)).toMatchObject({ ok: false, permanente: true, transitorio: false });
+				expect(v.error).toMatch(/too big/);
+			}
+
+			// Sin depender de la fila de local: seis filas de 1,4 MiB, que caben en local y en producción,
+			// en una operación de unos 8,4 MiB. Lo que no cabe es la fila de su log (`Sync_Changes`, con
+			// todas sus sentencias), en local ni en producción: la base la rechaza, siempre igual.
+			const pasos = Array.from({ length: 6 }, (_, i) => ({
+				kind: "execute",
+				sql: ALTA,
+				args: [`z-trozo-${i}`, `${i}-`.padEnd(1.4 * MIB, "b")],
+			}));
+			const trozos = await aplicarPasos("op-8,4MiB", pasos);
+			expect(trozos, String(trozos.error)).toMatchObject({ ok: false, permanente: true, transitorio: false });
+			expect(trozos.error).toMatch(/too big/);
 		});
 	});
 

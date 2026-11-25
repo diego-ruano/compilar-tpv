@@ -374,3 +374,79 @@ test("otra orden con la central sin atender (503 external sin nada que deshacer)
 		assert.doesNotMatch(r.salida, /deshacer|--instante/i);
 	});
 });
+
+// VUELTA-REPETIR · La vuelta de un negocio que no sale entera da la orden que la aplica aparte
+// (`--reiniciar`), no «repite la misma orden», que volvería otra vez si el objeto se ha reiniciado.
+
+const NEGOCIO = "negocio-de-prueba";
+
+test("la vuelta de un negocio preparada y sin aplicar da la orden que la aplica, y con qué se deshace una vez aplicada", async () => {
+	const cuerpo = {
+		ok: false,
+		error: "vuelta_sin_aplicar",
+		message: "La vuelta está preparada pero el objeto no ha vuelto todavía, y su base sigue cerrada.",
+		deshacer: "m-deshacer",
+		modo: "nube",
+	};
+	await conElWorker(enJson({ status: 503, cuerpo }), async (base, peticiones) => {
+		const r = await cliContra(base, "negocio-instante", "--tenant", NEGOCIO, "--instante", INSTANTE, "--modo", "nube", "--motivo", "prueba");
+		assert.equal(r.codigo, 1);
+		assert.deepEqual(
+			peticiones.map((p) => JSON.parse(p.cuerpo)),
+			[{ tenantId: NEGOCIO, modo: "nube", motivo: "prueba", instanteMs: Date.parse(INSTANTE) }],
+		);
+		assert.ok(r.salida.includes(`Para aplicarla: pnpm negocio:instante -- --tenant ${NEGOCIO} --reiniciar m-deshacer --motivo "…"`), r.salida);
+		assert.ok(
+			r.salida.includes(`Para deshacerla una vez aplicada: pnpm negocio:instante -- --tenant ${NEGOCIO} --marcador m-deshacer --modo nube`),
+			r.salida,
+		);
+		assert.doesNotMatch(r.salida, /Repite la misma orden/);
+	});
+});
+
+test("aplicar la vuelta preparada de un negocio (--reiniciar) va sola, y dice que ha vuelto y con qué se deshace", async () => {
+	const cuerpo = {
+		ok: true,
+		tenantId: NEGOCIO,
+		modo: "main",
+		destino: "m-destino",
+		deshacer: "m-deshacer",
+		inicio: 10_000_001,
+		purgadoHasta: null,
+		queHacer: ["La Main sigue con su base."],
+	};
+	await conElWorker(enJson({ status: 200, cuerpo }), async (base, peticiones) => {
+		const r = await cliContra(base, "negocio-instante", "--tenant", NEGOCIO, "--reiniciar", "m-deshacer", "--motivo", "aplicarla");
+		assert.equal(r.codigo, 0, r.salida);
+		assert.deepEqual(
+			peticiones.map((p) => [p.ruta, JSON.parse(p.cuerpo)]),
+			[["/v1/admin/negocios/instante", { tenantId: NEGOCIO, reiniciar: "m-deshacer", motivo: "aplicarla" }]],
+		);
+		assert.ok(r.salida.includes(`✔ ${NEGOCIO} ha vuelto al marcador m-destino: la vuelta preparada se ha aplicado.`), r.salida);
+		assert.ok(r.salida.includes("Marcador para deshacerlo: m-deshacer"), r.salida);
+	});
+	// Con --modo, --instante o --marcador no pide nada: los eligió la vuelta.
+	await conElWorker(enJson({ status: 200, cuerpo }), async (base, peticiones) => {
+		const r = await cliContra(base, "negocio-instante", "--tenant", NEGOCIO, "--reiniciar", "m-deshacer", "--modo", "nube", "--motivo", "x y z");
+		assert.equal(r.codigo, 1);
+		assert.match(r.salida, /--reiniciar va solo/);
+		assert.equal(peticiones.length, 0);
+	});
+});
+
+test("aplicar una vuelta de un negocio ya aplicada dice que no ha hecho nada, sin proponer otra", async () => {
+	const cuerpo = {
+		ok: false,
+		error: "vuelta_ya_aplicada",
+		message: "Esa vuelta ya se ha aplicado, y su log ya está abierto: no se ha hecho nada.",
+		deshacer: "m-deshacer",
+		modo: "main",
+	};
+	await conElWorker(enJson({ status: 409, cuerpo }), async (base) => {
+		const r = await cliContra(base, "negocio-instante", "--tenant", NEGOCIO, "--reiniciar", "m-deshacer", "--motivo", "otra vez");
+		assert.equal(r.codigo, 1);
+		assert.ok(r.salida.includes(`✖ 409: vuelta_ya_aplicada — ${cuerpo.message}`), r.salida);
+		assert.doesNotMatch(r.salida, /Para aplicarla|--instante/);
+		assert.ok(r.salida.includes(`Para deshacerla: pnpm negocio:instante -- --tenant ${NEGOCIO} --marcador m-deshacer --modo main`), r.salida);
+	});
+});

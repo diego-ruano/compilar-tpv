@@ -323,21 +323,27 @@ describe("apply_lote · el trabajo que cabe en un turno", () => {
 		});
 	});
 
-	it("un mensaje de más de 4 MiB no se llega a leer", async () => {
+	it("un mensaje de hasta 9 MiB se lee, y uno de más no se llega a leer (MAX-MENSAJE)", async () => {
 		await enUnHub("lote-mensaje-enorme", async (m, hub) => {
+			const TOPE = 9 * 1024 * 1024;
+			const mensaje = (loteId: string, relleno: string) => JSON.stringify({ type: "apply_lote", loteId, ops: [], relleno });
+			const sobre = (loteId: string) => mensaje(loteId, "").length;
+
+			// Justo en el tope, se lee: es el lote quien contesta.
+			const leido = m.main.esperar((x) => x.loteId === "en-el-tope" || x.type === "error");
+			await hub.webSocketMessage(m.main.servidor, mensaje("en-el-tope", "x".repeat(TOPE - sobre("en-el-tope"))));
+			expect(await leido).toMatchObject({ type: "apply_lote_ack", loteId: "en-el-tope", ok: true, resultados: [] });
+
+			// Un byte más, no.
 			const respuesta = m.main.esperar((x) => x.type === "error");
-			await hub.webSocketMessage(
-				m.main.servidor,
-				JSON.stringify({ type: "apply_lote", loteId: "enorme", ops: [], relleno: "x".repeat(4 * 1024 * 1024) }),
-			);
+			await hub.webSocketMessage(m.main.servidor, mensaje("enorme", "x".repeat(TOPE - sobre("enorme") + 1)));
 			expect(await respuesta).toEqual({ type: "error", error: "payload_too_large" });
 
 			// Lo mismo en bytes de UTF-8, aunque en caracteres sean bastantes menos.
 			const otra = m.main.esperar((x) => x.type === "error");
-			await hub.webSocketMessage(
-				m.main.servidor,
-				JSON.stringify({ type: "apply_lote", loteId: "enorme-utf8", ops: [], relleno: "界".repeat(1_500_000) }),
-			);
+			const relleno = "界".repeat(Math.ceil((TOPE - sobre("enorme-utf8") + 1) / 3));
+			expect(mensaje("enorme-utf8", relleno).length).toBeLessThan(TOPE);
+			await hub.webSocketMessage(m.main.servidor, mensaje("enorme-utf8", relleno));
 			expect(await otra).toEqual({ type: "error", error: "payload_too_large" });
 		});
 	});

@@ -1,3 +1,4 @@
+import type { ModoDeVuelta } from "./tenantHub.instante";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
 export type ValorJson = null | string | number | boolean | object;
@@ -52,14 +53,31 @@ export type EstadoDeLaBase = {
 	negocio: string | null;
 	/** Cuándo toca la siguiente copia diaria (la alarma del objeto), o `null` si no hay ninguna armada. */
 	proximaCopiaMs: number | null;
-	/** Si hay una vuelta a un instante preparada y sin aplicar. */
+	/** Si la base está cerrada: por una vuelta a un instante preparada y sin aplicar, o porque se le está dando base. */
 	vueltaEnCurso: boolean;
+	/** VUELTA-REPETIR · La vuelta a un instante preparada y sin aplicar, o `null`. */
+	vuelta: VueltaEnCurso | null;
 	/** El `Seq` más alto que sabe la base (`seqMasAlto`). */
 	seq: number;
 	/** Sesiones autenticadas ahora mismo. */
 	sesiones: number;
 	/** DO-SUBIDA: la subida completa que se le pidió a la Main (`tenantHub.subida.ts`), o `null`. */
 	subida: Record<string, unknown> | null;
+};
+
+/**
+ * VUELTA-REPETIR · La marca de una vuelta a un instante preparada y sin aplicar
+ * (`CLAVE_VUELTA_EN_CURSO`): lo que hace falta para aplicarla aparte, con su `deshacer`, sin volver a
+ * pedirle nada a la plataforma. La vuelta se la lleva, porque es de después.
+ */
+export type VueltaEnCurso = {
+	destino: string;
+	deshacer: string;
+	/** Lo que la nube había numerado al prepararla. */
+	seqAntes: number;
+	/** Quién manda después: lo elige la orden de la vuelta, no la que la aplica. */
+	modo: ModoDeVuelta;
+	desdeMs: number;
 };
 
 /** DO-03 · Lo que deja preparado la primera mitad de la vuelta a un instante (`prepararVuelta`). */

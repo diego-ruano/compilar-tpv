@@ -215,8 +215,14 @@ sentencia, las claves foráneas y el runner de migraciones), el formato y el car
   y 34 bytes, `MAX_ROW_LENGTH` de workerd; el workerd de los tests aún se queda en unos 2,2 MB, y uno
   de 3 MB se rechaza) y 10 GB por objeto. Los de producción son los de la tabla «SQL storage limits»
   de la [página de límites](https://developers.cloudflare.com/durable-objects/platform/limits/)
-  (consultada el 2026-11-25). Un mensaje del socket de la Main tiene además su propio tope, 4 MiB
-  (`MAX_MENSAJE`, [MAX-MENSAJE](../pendientes.md#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base)). Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  (consultada el 2026-11-25). Un mensaje del socket de la Main tiene además su propio tope, 9 MiB
+  de UTF-8 (`MAX_MENSAJE`, MAX-MENSAJE): cabe cualquier operación que la base acepte con hasta unas
+  60.000 sentencias, porque su fila del log (`Sync_Changes`) lleva todas sus sentencias y valores en
+  el mismo JSON y tampoco pasa de 8 MiB y 34 bytes, y el mensaje sólo le añade el sobre y, por
+  sentencia, los 17 bytes del `"kind":"execute",` que el log no guarda y los blancos de los extremos
+  del SQL, que recorta; queda por debajo de los 32 MiB que admite la plataforma en un mensaje que recibe
+  un objeto (la misma página), y deja margen en los 128 MB del aislado: medido en workerd, aplicar
+  una operación de N MiB hace crecer el proceso unas cinco veces N. Una lista de IDs de tamaño variable va como un único parámetro JSON:
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
   de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
   más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo
@@ -1256,11 +1262,28 @@ detrás de `Instantes` (`durableObjects/instantes.ts`), que comparte con la base
 
 - **Tres llamadas desde la ruta**, cada una con un stub nuevo: `prepararVuelta` (lee lo que la nube
   había numerado, deja la vuelta para el siguiente arranque, cierra la base con una marca en el
-  almacenamiento, echa a las sesiones y devuelve el marcador con el que se deshace), `reiniciar`
-  (`ctx.abort()`: la llamada falla siempre, y es lo esperado) y `trasVolver`.
+  almacenamiento, echa a las sesiones y devuelve el marcador con el que se deshace),
+  `reiniciarParaAplicar(deshacer)` (`ctx.abort()`, sólo si la vuelta preparada es la de ese
+  `deshacer`: la llamada falla, y es lo esperado) y `trasVolver`.
 - **Mientras tanto la base no atiende** (`tenant_db_restaurando`, 503 `external`, pasajero para el
   outbox de la Main): lo que entrara se perdería al volver. Volver se lleva la marca, que es de
   después; si sigue ahí, el objeto no ha vuelto (`vuelta_sin_aplicar`) y la ruta lo reinicia otra vez.
+- **Una vuelta preparada se aplica aparte, con su `deshacer`** (VUELTA-REPETIR), como la de la
+  central: `{ tenantId, reiniciar: <deshacer>, motivo }` en la misma ruta (`pnpm negocio:instante --
+  --reiniciar`), sin instante, marcador ni modo. Lo que no sale entero (`log_sin_reservar`,
+  `vuelta_sin_aplicar`) da el `deshacer` y esa orden, nunca «repite la misma orden»: si el objeto se
+  reinicia por su cuenta (un despliegue), la vuelta se aplica sola, y repetir la orden prepararía otra
+  al mismo destino y se llevaría lo escrito entre medias. Lo que hace falta para aplicarla va en la
+  marca (`VueltaEnCurso`: destino, `deshacer`, `seqAntes` y quién manda) y en la reserva del log en
+  `admin_audit` (`negocio_log_reservado`, con su `deshacer` y su `modo`), que la vuelta no se lleva.
+  Con la marca suya, reserva el log si la base central no contestó, reinicia y lo abre. Sin marca y
+  con su reserva, el objeto ya ha vuelto: sólo abre el log, y si ya lo estaba (un cambio en
+  `seqAntes + SALTO_DE_SEQ` o por encima, `logYaAbierto`), contesta `vuelta_ya_aplicada`. Con otra
+  vuelta preparada, o dándole base al objeto, `vuelta_a_la_vez`; sin marca ni reserva,
+  `sin_vuelta_preparada`. Los tres son 409 y no reinician ni abren nada. `pnpm negocio:estado` enseña
+  la vuelta preparada y la orden que la aplica. Lo que no cubre: si la base central no contesta al
+  reservar y además el objeto se reinicia solo antes de aplicarla, no queda ni marca ni reserva, y el
+  log no se abre por encima (`sin_vuelta_preparada`).
 - **El log se abre por encima de todo lo numerado** (`abrirLogTrasVolver`). La nube vuelta numeraría
   otra vez desde el `Seq` del instante, y la Main, que pide desde su checkpoint, se saltaría para
   siempre lo nuevo con un número que ya ha visto. Se escribe un cambio vacío (`nube_devuelta`, sin
@@ -1310,7 +1333,13 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   `copia_no_valida`, nunca un 500. De todo eso, sólo las filas que SQLite no acepta van además a
   Sentry (`hub.restaurar_copia`, con el texto de SQLite como causa), porque pueden ser un fallo de este
   worker; el gzip roto se queda en Axiom. Una línea que se lee y acaba en CR es de una copia con fines
-  de línea de Windows, y lo dice (`copia_no_valida`), en la central también. Si la carga se para antes
+  de línea de Windows, y lo dice (`copia_no_valida`), en la central también. La descompresión va a demanda
+  (`aDemanda`, RESTAURAR-CONTRAPRESION): sólo se le da un trozo de la copia, de 16 KiB, cuando se espera
+  lo que sale de ella y no ha salido nada. La del runtime acepta lo que se le dé sin mirar si se ha
+  leído, y detrás de la copia con `pipeThrough` seguía pidiendo a R2 mientras la carga escribía o ponía
+  las migraciones (medido en workerd: 64 MiB en 300 ms de espera, sin límite); ahora no va más de un
+  trozo por delante (16 MiB descomprimidos en lo peor, una copia toda de ceros; con una de verdad,
+  unos cientos de KB), y restaurar 300.000 filas tarda lo mismo que antes. Si la carga se para antes
   del final, se cancelan la lectura de R2 y la descompresión (`cargarCopia` cierra el iterador). Los disparadores
   saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
   apuntan días.

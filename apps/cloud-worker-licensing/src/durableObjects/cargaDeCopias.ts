@@ -152,9 +152,85 @@ const CARACTERES_POR_LOTE = 4 * 1024 * 1024;
  * La copia de un negocio hecha por un worker anterior a `SALTOS_CON_CHAR` escribe con `char(10)` todos
  * los saltos de línea de un texto, 14 caracteres cada uno: si una fila suya lleva más de 1,27 millones
  * (o es de 8 MB y lleva más de unos 726.000), su línea pasa del tope, y esa copia no se restaura
- * (COPIAS-SALTOS, en docs/pendientes.md).
+ * (COPIAS-SALTOS: decidido así; leerla sin juntar la línea entera sería otro lector).
  */
 export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
+
+/**
+ * Los trozos en que se le da la copia a la descompresión, como mucho: lo que llega de R2 de una vez
+ * puede ser más. Lo que va por delante de lo leído es uno (`aDemanda`), y uno de gzip no descomprime
+ * en más de unas 1.032 veces lo que ocupa: 16 MiB en lo peor (una copia toda de ceros), y con una
+ * copia de verdad, que comprime unas diez veces, unos cientos de KB. Partirlos no cuesta tiempo que se
+ * note: restaurar 300.000 filas (6,8 MiB de gzip) tarda en local unos 5,5 s, igual que sin partir.
+ */
+const BYTES_POR_TROZO = 16 * 1024;
+
+const nada = () => undefined;
+
+/**
+ * RESTAURAR-CONTRAPRESION · La copia, descomprimida a demanda: a la descompresión sólo se le da un
+ * trozo cuando se espera lo que sale de ella y no ha salido nada. La del runtime acepta lo que se le dé
+ * sin mirar si se ha leído lo que ya ha dado, y puesta con `pipeThrough` tras la copia de R2 seguía
+ * pidiéndole y descomprimiendo mientras la carga esperaba a otra cosa (poner las migraciones, que van
+ * en exclusiva, o escribir un lote), y lo descomprimido se quedaba en la memoria del objeto. Medido en
+ * workerd con una copia sin fin, leyendo 256 KiB y esperando 300 ms: pedía 64 MiB en la primera
+ * espera, hasta romper el origen de la prueba (`cargaDeCopias.test.ts`).
+ *
+ * Sin `pipeThrough` también por cancelar: la copia se cancela a mitad (`cancelar`) con su último trozo
+ * dado y la descompresión sin acabar, y el cierre que el runtime hace por su cuenta se queja de un
+ * gzip a medias sin que nadie recoja la queja. Aquí el cierre es nuestro.
+ *
+ * `leer` da lo siguiente descomprimido, o `null` al acabar la copia.
+ */
+function aDemanda(cuerpo: ReadableStream<Uint8Array>) {
+	const origen = cuerpo.getReader();
+	const gzip = new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
+	const escritor = gzip.writable.getWriter();
+	const salida = gzip.readable.getReader();
+	/** Lo que queda del último trozo de R2, si era más grande que `BYTES_POR_TROZO`. */
+	let resto: Uint8Array = new Uint8Array(0);
+	/** Toda la copia dada, y la descompresión cerrada. */
+	let dada = false;
+	/** El trozo que se le está dando a la descompresión: uno cada vez. */
+	let dando: Promise<void> | null = null;
+
+	async function darTrozo() {
+		if (!resto.length) {
+			const { value, done } = await origen.read();
+			if (done) {
+				dada = true;
+				// Lo que diga el cierre lo dice también `salida`, que es lo que se lee.
+				escritor.close().catch(nada);
+				return;
+			}
+			resto = value;
+		}
+		const trozo = resto.subarray(0, BYTES_POR_TROZO);
+		resto = resto.subarray(BYTES_POR_TROZO);
+		await escritor.write(trozo);
+	}
+
+	async function leer(): Promise<Uint8Array | null> {
+		const lectura = salida.read();
+		let lista = false;
+		const hecha = lectura.then(
+			() => void (lista = true),
+			() => void (lista = true),
+		);
+		while (!lista && !dada) {
+			dando ??= darTrozo().finally(() => (dando = null));
+			await Promise.race([dando, hecha]);
+		}
+		const { value, done } = await lectura;
+		return done ? null : value;
+	}
+
+	async function cancelar() {
+		await Promise.all([origen.cancel().catch(nada), escritor.abort().catch(nada), salida.cancel().catch(nada)]);
+	}
+
+	return { leer, cancelar };
+}
 
 /**
  * Las líneas de un gzip, de una en una, según llegan. De la que no ha acabado se guardan sus trozos,
@@ -163,17 +239,14 @@ export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
  * Una de más de `tope` caracteres hace inservible la copia en cuanto se pasa, sin esperar a su final
  * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests).
  *
- * Si se deja de leer antes del final, por eso o porque quien lee se para (una línea que no vale, unas
- * filas que SQLite no acepta: `cargarCopia` cierra el iterador), se cancela la copia: la descompresión
- * del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con el resto.
- * Que la descompresión acumule memoria mientras la carga escribe está sin medir
- * (RESTAURAR-CONTRAPRESION, en docs/pendientes.md).
+ * La copia se le da a la descompresión sólo mientras se está leyendo (`aDemanda`): si no, iría por
+ * delante sin límite mientras la carga espera a otra cosa. Si se deja de leer antes del final, por eso
+ * o porque quien lee se para (una línea que no vale, unas filas que SQLite no acepta: `cargarCopia`
+ * cierra el iterador), se cancela la copia.
  */
 export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARACTERES_POR_LINEA): AsyncGenerator<string> {
-	const lector = cuerpo
-		.pipeThrough(new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>)
-		.pipeThrough(new TextDecoderStream())
-		.getReader();
+	const copia = aDemanda(cuerpo);
+	const texto = new TextDecoder();
 	/** Los trozos de la línea que no ha acabado, y cuántos caracteres suman. */
 	let trozos: string[] = [];
 	let caracteres = 0;
@@ -184,8 +257,8 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARAC
 	let leida = false;
 	try {
 		for (;;) {
-			const { value, done } = await lector.read();
-			if (done) break;
+			const bytes = await copia.leer();
+			const value = bytes ? texto.decode(bytes, { stream: true }) : texto.decode();
 			const partes = value.split("\n");
 			const resto = partes.pop() ?? "";
 			for (const parte of partes) {
@@ -202,11 +275,12 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARAC
 				trozos.push(resto);
 				caracteres += resto.length;
 			}
+			if (!bytes) break;
 		}
 		leida = true;
 		if (trozos.length) yield trozos.join("");
 	} finally {
-		if (!leida) await lector.cancel().catch(() => undefined);
+		if (!leida) await copia.cancelar();
 	}
 }
 

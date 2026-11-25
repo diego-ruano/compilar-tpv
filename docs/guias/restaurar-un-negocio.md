@@ -51,10 +51,30 @@ la réplica se abre por encima de todo lo que la nube había numerado. La respue
 pnpm negocio:instante -- --tenant <tenantId> --marcador <deshacer> --modo <el mismo> --motivo "deshacer …"
 ```
 
-Si contesta `vuelta_sin_aplicar`, el objeto no se ha reiniciado todavía y su base sigue cerrada:
-repite la misma orden. Lo mismo con `log_sin_reservar`: la base central no ha contestado al apuntar
-desde dónde se abre el log, y sin eso no se abre. Si contesta `vuelta_no_disponible`, ese despliegue no tiene vuelta a un
-instante (en local, `wrangler dev`, no existe).
+### Una vuelta preparada y sin aplicar
+
+Si contesta `vuelta_sin_aplicar` (el objeto no se ha reiniciado todavía) o `log_sin_reservar` (la
+base central no ha contestado al apuntar desde dónde se abre el log, y sin eso no se abre), la vuelta
+está preparada y la base sigue cerrada. **No repitas la orden de la vuelta**: si el objeto se reinicia
+por su cuenta entretanto (un despliegue), la vuelta se aplica sola, y repetirla prepararía otra al
+mismo destino y se llevaría lo escrito entre medias. Se aplica con su `deshacer`, que dan la respuesta
+y `pnpm negocio:estado`:
+
+```bash
+pnpm negocio:instante -- --tenant <tenantId> --reiniciar <deshacer> --motivo "…"
+```
+
+Va sola, sin `--instante`, `--marcador` ni `--modo`: adónde vuelve y quién manda los eligió la vuelta.
+Sólo reinicia el objeto si esa vuelta sigue preparada; si ya se ha reiniciado solo, sólo abre el log
+que falta, y si ya se ha aplicado entera, contesta `vuelta_ya_aplicada` sin hacer nada. Así que se
+puede repetir. Con otra vuelta preparada contesta `vuelta_a_la_vez`, y sin ninguna que conste,
+`sin_vuelta_preparada`: ninguno de los dos toca nada; mira `pnpm negocio:estado`. Si la base
+central no contestó al reservar y además el objeto se ha reiniciado solo, no consta la vuelta
+(`sin_vuelta_preparada`) y el log no se ha abierto por encima: la base ya ha vuelto, y lo que falta es
+esa apertura.
+
+Si contesta `vuelta_no_disponible`, ese despliegue no tiene vuelta a un instante (en local,
+`wrangler dev`, no existe).
 
 ## Las copias diarias
 

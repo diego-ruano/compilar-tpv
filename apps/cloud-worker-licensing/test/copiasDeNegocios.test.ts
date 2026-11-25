@@ -399,6 +399,11 @@ describe("DO-03 · la administración de la base de un negocio", () => {
 		expect(ninguno.status).toBe(400);
 		const sinModo = await pedir("/negocios/instante", { tenantId: "x", marcador: "m", motivo: "prueba" });
 		expect(sinModo.status).toBe(400);
+		// Aplicar una vuelta preparada va sola: ni con otro destino, ni eligiendo quién manda, que ya lo eligió.
+		const conDestino = await pedir("/negocios/instante", { tenantId: "x", reiniciar: "d", marcador: "m", motivo: "prueba" });
+		expect(conDestino.status).toBe(400);
+		const conModo = await pedir("/negocios/instante", { tenantId: "x", reiniciar: "d", modo: "main", motivo: "prueba" });
+		expect(conModo.status).toBe(400);
 	});
 });
 
@@ -483,7 +488,7 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 				// Antes de abrir el log, desde dónde se abrirá (DO-PERDIDA).
 				{
 					action: "negocio_log_reservado",
-					detail: { tenantId: t, operacion: "instante", seqAntes, inicio: seqAntes + SALTO_DE_SEQ },
+					detail: { tenantId: t, operacion: "instante", seqAntes, inicio: seqAntes + SALTO_DE_SEQ, deshacer: "m-deshacer", modo },
 				},
 				{
 					action: "negocio_volver_a_instante",
@@ -549,10 +554,157 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			return central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "main", motivo: "prueba" });
 		});
 		expect(r).toMatchObject({ status: 503, body: { ok: false, error: "log_sin_reservar", deshacer: "m-deshacer" } });
-		expect(r.body.message).toContain("Repite la misma orden");
+		// Se aplica aparte, con su deshacer: repetir la orden de la vuelta podría volver otra vez.
+		expect(r.body.message).toContain(`pnpm negocio:instante -- --tenant ${t} --reiniciar m-deshacer`);
+		expect(r.body.message).not.toContain("Repite la misma orden");
 		// Ni se reinicia el objeto ni se abre el log: la vuelta sigue preparada y la base, cerrada.
 		expect(llamadas).not.toContain("reiniciar");
-		expect(await stub(t).estadoDeLaBase(t)).toMatchObject({ ok: true, vueltaEnCurso: true });
+		expect(await stub(t).estadoDeLaBase(t)).toMatchObject({
+			ok: true,
+			vueltaEnCurso: true,
+			vuelta: { destino: "m", deshacer: "m-deshacer", seqAntes: 1, modo: "main" },
+		});
+
+		// Con la base central de vuelta, aplicarla apunta desde dónde se abre el log, reinicia y lo abre,
+		// sin volver a pedirle nada a la plataforma.
+		const aplicada = await conCentral(async (central) => ({
+			r: await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "m-deshacer", motivo: "aplicarla" }),
+			auditoria: await central.auditoria(),
+		}));
+		expect(aplicada.r).toMatchObject({ status: 200, body: { ok: true, modo: "main", deshacer: "m-deshacer", inicio: 1 + SALTO_DE_SEQ } });
+		expect(aplicada.auditoria.map((a) => a.action)).toEqual(["negocio_log_reservado", "negocio_volver_a_instante"]);
+		expect(llamadas.filter((l) => l.startsWith("restaurar"))).toEqual(["restaurar:m"]);
+		expect(llamadas.filter((l) => l === "reiniciar")).toEqual(["reiniciar"]);
+	});
+
+	/** Cuántas veces se ha abierto el log tras volver en la base de `t`. */
+	const logsAbiertos = (t: string) =>
+		enElHub(t, (hub: any) =>
+			Number(hub.state.storage.sql.exec("SELECT COUNT(*) AS n FROM Sync_Changes WHERE Command_Name = 'nube_devuelta';").one().n),
+		);
+
+	/**
+	 * Prepara la vuelta de `t` a `m` por la ruta con un objeto que no llega a reiniciarse: la vuelta queda
+	 * preparada y sin aplicar. Después, el doble vuelve a reiniciar de verdad (y se lleva la marca).
+	 */
+	async function vueltaSinAplicar(t: string, central: Central, llamadas: string[]) {
+		await enElHub(t, (hub: any) => {
+			dobleDeInstantes(hub, llamadas);
+			hub.instantes.reiniciar = () => void llamadas.push("no-se-reinicia");
+		});
+		const r = await central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "nube", motivo: "prueba" });
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, llamadas));
+		return r;
+	}
+
+	it("VUELTA-REPETIR · una vuelta sin aplicar se aplica aparte, con su deshacer: reinicia sólo si sigue preparada, y aplicarla dos veces no vuelve dos veces", async () => {
+		const t = "instante-aplicar-aparte";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		const r = await conCentral(async (central) => {
+			const vuelta = await vueltaSinAplicar(t, central, llamadas);
+			const aplicada = await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "m-deshacer", motivo: "aplicarla" });
+			const otraVez = await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "m-deshacer", motivo: "otra vez" });
+			return { vuelta, aplicada, otraVez, auditoria: await central.auditoria() };
+		});
+		expect(r.vuelta).toMatchObject({ status: 503, body: { ok: false, error: "vuelta_sin_aplicar", deshacer: "m-deshacer" } });
+		expect(r.vuelta.body.message).toContain(`pnpm negocio:instante -- --tenant ${t} --reiniciar m-deshacer`);
+		expect(r.vuelta.body.message).not.toContain("Repite la misma orden");
+
+		// Quién manda lo eligió la vuelta, y desde dónde se abre el log, lo que se reservó al prepararla.
+		expect(r.aplicada).toMatchObject({
+			status: 200,
+			body: { ok: true, modo: "nube", destino: "m", deshacer: "m-deshacer", inicio: 1 + SALTO_DE_SEQ, purgadoHasta: SALTO_DE_SEQ },
+		});
+		expect(r.aplicada.body.queHacer.join(" ")).toContain("--marcador m-deshacer --modo nube");
+		expect(r.otraVez).toMatchObject({ status: 409, body: { ok: false, error: "vuelta_ya_aplicada" } });
+
+		// A la plataforma se le pidió una sola vuelta, y se reinició una vez para aplicarla; el log, una vez.
+		expect(llamadas.filter((l) => l.startsWith("restaurar"))).toEqual(["restaurar:m"]);
+		expect(llamadas.filter((l) => l === "reiniciar")).toEqual(["reiniciar"]);
+		expect(await logsAbiertos(t)).toBe(1);
+		// Una reserva: la de la vuelta, que aplicarla no repite.
+		expect(r.auditoria.filter((a) => a.action === "negocio_log_reservado")).toHaveLength(1);
+	});
+
+	it("VUELTA-REPETIR · si el objeto se ha reiniciado por su cuenta, ya ha vuelto: aplicarla no reinicia ni vuelve otra vez, sólo abre el log que falta", async () => {
+		const t = "instante-reiniciado-solo";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		const r = await conCentral(async (central) => {
+			await vueltaSinAplicar(t, central, llamadas);
+			// El objeto se reinicia solo (un despliegue): vuelve, y la marca se va con la vuelta.
+			await enElHub(t, async (hub: any) => {
+				await hub.state.storage.delete(CLAVE_VUELTA_EN_CURSO);
+				hub.vueltaEnCurso = false;
+			});
+			const aplicada = await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "m-deshacer", motivo: "aplicarla" });
+			const otraVez = await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "m-deshacer", motivo: "otra vez" });
+			return { aplicada, otraVez };
+		});
+		expect(r.aplicada).toMatchObject({ status: 200, body: { ok: true, modo: "nube", deshacer: "m-deshacer", inicio: 1 + SALTO_DE_SEQ } });
+		expect(r.otraVez).toMatchObject({ status: 409, body: { ok: false, error: "vuelta_ya_aplicada" } });
+		expect(llamadas.filter((l) => l.startsWith("restaurar"))).toEqual(["restaurar:m"]);
+		expect(llamadas).not.toContain("reiniciar");
+		expect(await logsAbiertos(t)).toBe(1);
+	});
+
+	it("VUELTA-REPETIR · con otra vuelta preparada, o sin ninguna que conste con ese deshacer, aplicar no reinicia ni abre nada", async () => {
+		const t = "instante-aplicar-otra";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		const r = await conCentral(async (central) => {
+			await vueltaSinAplicar(t, central, llamadas);
+			return {
+				otra: await central.pedir("/negocios/instante", { tenantId: t, reiniciar: "otro-deshacer", motivo: "aplicarla" }),
+				sinNinguna: await central.pedir("/negocios/instante", { tenantId: "instante-sin-vuelta", reiniciar: "m-deshacer", motivo: "aplicarla" }),
+			};
+		});
+		expect(r.otra).toMatchObject({ status: 409, body: { ok: false, error: "vuelta_a_la_vez", vuelta: { deshacer: "m-deshacer" } } });
+		expect(r.sinNinguna).toMatchObject({ status: 409, body: { ok: false, error: "sin_vuelta_preparada" } });
+		expect(llamadas).not.toContain("reiniciar");
+		expect(await stub(t).estadoDeLaBase(t)).toMatchObject({ ok: true, vueltaEnCurso: true, vuelta: { deshacer: "m-deshacer" } });
+		expect(await logsAbiertos(t)).toBe(0);
+	});
+
+	it("VUELTA-REPETIR · el objeto vuelve a mirar, al ir a reiniciarse, que la vuelta preparada sea la de ese deshacer", async () => {
+		// Lo que la ruta mira antes (`cierreDeLaBase`) puede quedarse viejo: otra vuelta preparada entre
+		// medias, o el objeto reiniciado por su cuenta. Quien decide si se reinicia es el objeto.
+		const t = "instante-reinicio-propio";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		await enElHub(t, (hub: any) => dobleDeInstantes(hub, llamadas));
+		expect(await stub(t).prepararVuelta({ tenantId: t, marcador: "m", modo: "nube" })).toMatchObject({ ok: true, deshacer: "m-deshacer" });
+
+		expect(await stub(t).reiniciarParaAplicar(t, "otro-deshacer")).toEqual({ ok: false, error: "vuelta_a_la_vez", status: 409 });
+		expect(llamadas).not.toContain("reiniciar");
+
+		await enElHub(t, (hub: any) => hub.state.storage.delete(CLAVE_VUELTA_EN_CURSO));
+		expect(await stub(t).reiniciarParaAplicar(t, "m-deshacer")).toEqual({ ok: false, error: "sin_vuelta_preparada", status: 409 });
+		expect(llamadas).not.toContain("reiniciar");
+	});
+
+	it("VUELTA-REPETIR · si el objeto se reinicia solo entre prepararla y aplicarla, la orden de la vuelta abre el log sin reiniciarlo", async () => {
+		const t = "instante-reiniciado-a-medias";
+		await negocioConDatos(t);
+		const llamadas: string[] = [];
+		await enElHub(t, (hub: any) => {
+			dobleDeInstantes(hub, llamadas);
+			// Justo antes de que la ruta lo reinicie, el objeto se reinicia por su cuenta (un despliegue):
+			// vuelve, y la marca se va con la vuelta.
+			const reiniciarParaAplicar = hub.reiniciarParaAplicar.bind(hub);
+			hub.reiniciarParaAplicar = async (tenantId: string, deshacer: string) => {
+				llamadas.push("se-reinicia-solo");
+				await hub.state.storage.delete(CLAVE_VUELTA_EN_CURSO);
+				hub.vueltaEnCurso = false;
+				return reiniciarParaAplicar(tenantId, deshacer);
+			};
+		});
+		const r = await conCentral((central) => central.pedir("/negocios/instante", { tenantId: t, marcador: "m", modo: "nube", motivo: "prueba" }));
+		expect(r).toMatchObject({ status: 200, body: { ok: true, modo: "nube", deshacer: "m-deshacer", inicio: 1 + SALTO_DE_SEQ } });
+		expect(llamadas).toContain("se-reinicia-solo");
+		expect(llamadas).not.toContain("reiniciar");
+		expect(await logsAbiertos(t)).toBe(1);
 	});
 
 	it("mientras la vuelta está preparada la base no atiende a nadie, y sin volver no se abre el log", async () => {
@@ -562,7 +714,7 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			dobleDeInstantes(hub, []);
 			hub.instantes.reiniciar = () => {}; // el objeto no llega a reiniciarse
 		});
-		const prep = await stub(t).prepararVuelta({ tenantId: t, instanteMs: Date.now() - 60_000 });
+		const prep = await stub(t).prepararVuelta({ tenantId: t, instanteMs: Date.now() - 60_000, modo: "main" });
 		expect(prep).toMatchObject({ ok: true, deshacer: "m-deshacer" });
 
 		expect(await stub(t).leerParaLaWeb(t, { que: "plano" })).toMatchObject({ ok: false, code: "tenant_db_restaurando" });
@@ -590,8 +742,8 @@ describe("DO-03 · volver a un instante (con un doble de la plataforma)", () => 
 			);
 			dobleDeInstantes(hub, []);
 		});
-		await stub(t).prepararVuelta({ tenantId: t, marcador: "m" });
-		await stub(t).reiniciar();
+		await stub(t).prepararVuelta({ tenantId: t, marcador: "m", modo: "nube" });
+		await stub(t).reiniciarParaAplicar(t, "m-deshacer");
 		const r = await stub(t).trasVolver({ tenantId: t, seqAntes: 7, modo: "nube" });
 		expect(r).toMatchObject({ ok: true, inicio: 7 + SALTO_DE_SEQ, purgadoHasta: 6 + SALTO_DE_SEQ });
 	});

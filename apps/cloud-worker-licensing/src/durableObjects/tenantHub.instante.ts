@@ -27,6 +27,7 @@
 
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 import { baseAprovisionada } from "./sqliteDelObjeto";
+import type { VueltaEnCurso } from "./tenantHub.rpc";
 import { olvidarSubida, pedirSubida, type OrigenDeSubida } from "./tenantHub.subida";
 
 export type ModoDeVuelta = "nube" | "main";
@@ -41,8 +42,27 @@ export type ModoDeVuelta = "nube" | "main";
  */
 export const SALTO_DE_SEQ = 10_000_000;
 
-/** La marca que pone «vuelta en curso» en el almacenamiento del objeto. La vuelta se la lleva. */
+/**
+ * La marca que pone «vuelta en curso» en el almacenamiento del objeto: la de una vuelta a un instante
+ * (`VueltaEnCurso`, con su `deshacer`) o la de darle base a un objeto vacío (`{ darBase }`). La
+ * vuelta se la lleva.
+ */
 export const CLAVE_VUELTA_EN_CURSO = "vuelta-en-curso";
+
+/** VUELTA-REPETIR · La vuelta a un instante preparada y sin aplicar, si la marca es de una. */
+export async function vueltaPreparada(storage: DurableObjectStorage): Promise<VueltaEnCurso | null> {
+	const marca = (await storage.get(CLAVE_VUELTA_EN_CURSO)) as Partial<VueltaEnCurso> | undefined;
+	return marca?.deshacer ? (marca as VueltaEnCurso) : null;
+}
+
+/**
+ * VUELTA-REPETIR · Si ya se ha abierto el log tras la vuelta que leyó `seqAntes` al prepararse: el
+ * cambio vacío que lo abre (`abrirLogTrasVolver`) queda en `seqAntes + SALTO_DE_SEQ` o por encima, y
+ * la base vuelta no llega ahí sin él, porque numera desde lo que tenía en el instante.
+ */
+export function logYaAbierto(sql: SqlStorage, seqAntes: number): boolean {
+	return seqMasAlto(sql) >= seqAntes + SALTO_DE_SEQ;
+}
 
 /**
  * El `Seq` más alto que sabe esta base: el final del log, el de su autoincremento (lo purgado
