@@ -25,8 +25,12 @@ import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
 import type { ResultadoDelTraslado } from "./central/operaciones/traslado";
 import {
 	addMonths,
+	ALTA_DEL_EQUIPO,
+	ALTA_DEL_NEGOCIO,
 	argumentosDeLaAuditoria,
 	argumentosDeLaLicenciaNueva,
+	argumentosDelAltaDelEquipo,
+	argumentosDelAltaDelNegocio,
 	INSERTAR_AUDITORIA,
 	INSERTAR_LICENCIA,
 	LICENCIA_POR_ID,
@@ -661,17 +665,7 @@ export async function upsertTenantInfo(
 }
 
 export async function ensureTenantExistsMinimal(db: Sql, tenantId: string) {
-	const now = Date.now();
-	await exec(
-		db,
-		`
-    INSERT INTO tenants (tenant_id, status, created_at_ms, updated_at_ms)
-    VALUES (?, 'active', ?, ?)
-    ON CONFLICT(tenant_id) DO UPDATE SET
-      updated_at_ms=excluded.updated_at_ms;
-    `,
-		[tenantId, now, now],
-	);
+	await exec(db, ALTA_DEL_NEGOCIO, argumentosDelAltaDelNegocio(tenantId, Date.now()));
 }
 
 /* ============================================================
@@ -1260,24 +1254,10 @@ export async function ensureDevice(
 	role: "tpv" | "handy",
 	devicePubKeyB64: string,
 ): Promise<void> {
-	const now = Date.now();
-
 	const r = await exec(
 		db,
-		`
-    INSERT INTO devices (
-      device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms,
-      device_pubkey_b64, pubkey_alg
-    )
-    VALUES (?, ?, ?, ?, ?, NULL, ?, 'ed25519')
-    ON CONFLICT(device_id) DO UPDATE SET
-      tenant_id=excluded.tenant_id,
-      role=excluded.role,
-      last_seen_at_ms=excluded.last_seen_at_ms,
-      revoked_at_ms=NULL
-    WHERE devices.device_pubkey_b64 = excluded.device_pubkey_b64;
-    `,
-		[deviceId, tenantId, role, now, now, devicePubKeyB64.trim()],
+		ALTA_DEL_EQUIPO,
+		argumentosDelAltaDelEquipo({ deviceId, tenantId, rol: role, devicePubKeyB64, ahoraMs: Date.now() }),
 	);
 
 	if (Number((r as any)?.rowsAffected ?? 0) <= 0) throw errorDeClave("device_key_mismatch");

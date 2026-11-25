@@ -400,8 +400,9 @@ cuando el Worker la hacía con una transacción abierta por la red:
 - **Una sola implementación**: lo que escribe licencias y cobros en más de una sentencia vive sólo
   aquí. En el Worker quedan las lecturas y las escrituras de una sentencia (`server/licenseStore.ts`:
   la auditoría, la marca del correo…). Las que corren también dentro de una operación (leer una
-  licencia, darla de alta, apuntar en la auditoría) salen de constantes de `operaciones/licencias.ts`,
-  que `licenseStore.ts` importa, para que no puedan divergir.
+  licencia, darla de alta, apuntar en la auditoría, dar de alta el negocio y el equipo con la
+  condición de su clave de AUD-01) salen de constantes de `operaciones/licencias.ts`, que
+  `licenseStore.ts` importa, para que no puedan divergir.
 - **`emitirCobro` se repite una vez** si la plataforma corta la llamada por un fallo pasajero, porque
   no se sabe si entró. Si entró, contesta `ya_cumplida` con las licencias que preparó este Worker, y
   la emisión es ésta: se manda el correo. Con otras licencias es otra entrega de Stripe, que no tiene

@@ -15,6 +15,7 @@
 // reintento del mismo traslado (`licenseStore.ts::trasladoQueSeRepite`).
 
 import type { SqlSync } from "../../../lib/sql";
+import { ALTA_DEL_EQUIPO, ALTA_DEL_NEGOCIO, argumentosDelAltaDelEquipo, argumentosDelAltaDelNegocio } from "./licencias";
 
 type DatosDelTraslado = {
 	licenciaId: string;
@@ -47,27 +48,18 @@ export function trasladarLicencia(sql: SqlSync, d: DatosDelTraslado): ResultadoD
 	if (!claveDelEquipoValida(sql, d.aDeviceId, d.devicePubKey)) return { resultado: "clave_distinta" };
 	if (!gastarCodigo(sql, d)) return { resultado: "codigo_invalido" };
 
-	sql.execute({
-		sql: `INSERT INTO tenants (tenant_id, status, created_at_ms, updated_at_ms)
-          VALUES (?, 'active', ?, ?)
-          ON CONFLICT(tenant_id) DO UPDATE SET updated_at_ms = excluded.updated_at_ms;`,
-		args: [d.tenantId, d.ahoraMs, d.ahoraMs],
-	});
-	// El alta del equipo, como `ensureDevice`: una fila que ya existe sólo se muda si su clave es
-	// ésta, que se ha mirado arriba. Si aun así no entra, se deshace todo.
+	sql.execute({ sql: ALTA_DEL_NEGOCIO, args: argumentosDelAltaDelNegocio(d.tenantId, d.ahoraMs) });
+	// El alta del equipo, la misma sentencia que `ensureDevice`: una fila que ya existe sólo se muda
+	// si su clave es ésta, que se ha mirado arriba. Si aun así no entra, se deshace todo.
 	const alta = sql.execute({
-		sql: `INSERT INTO devices (
-            device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms,
-            device_pubkey_b64, pubkey_alg
-          )
-          VALUES (?, ?, 'tpv', ?, ?, NULL, ?, 'ed25519')
-          ON CONFLICT(device_id) DO UPDATE SET
-            tenant_id = excluded.tenant_id,
-            role = excluded.role,
-            last_seen_at_ms = excluded.last_seen_at_ms,
-            revoked_at_ms = NULL
-          WHERE devices.device_pubkey_b64 = excluded.device_pubkey_b64;`,
-		args: [d.aDeviceId, d.tenantId, d.ahoraMs, d.ahoraMs, d.devicePubKey.trim()],
+		sql: ALTA_DEL_EQUIPO,
+		args: argumentosDelAltaDelEquipo({
+			deviceId: d.aDeviceId,
+			tenantId: d.tenantId,
+			rol: "tpv",
+			devicePubKeyB64: d.devicePubKey,
+			ahoraMs: d.ahoraMs,
+		}),
 	});
 	if (alta.rowsAffected <= 0) throw new Error("El alta del equipo nuevo no ha entrado con la clave que se ha comprobado.");
 
