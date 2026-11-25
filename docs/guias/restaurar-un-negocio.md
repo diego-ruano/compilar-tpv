@@ -99,10 +99,16 @@ pnpm negocio:restaurar-copia -- --tenant <tenantId> [--dia AAAA-MM-DD] --modo ma
 Mientras se carga, la base no atiende (`tenant_db_restaurando`, como en la vuelta a un instante). Si
 la copia no vale, el objeto se queda vacío y contesta por qué: `copia_cortada` (le falta el final),
 `copia_de_otra_version` (es de un esquema que este worker no sabe poner: un worker anterior a la
-copia) o `copia_no_valida` (una línea que no es una fila, una de más de 17 MiB o una clave foránea
-rota). El CLI enseña además el motivo, que queda también en Axiom (`copia_no_restaurada`): de una
-línea, su número, el carácter y un código (`columna_desconocida`, `tabla_ajena`,
-`valor_no_literal`…), o que es demasiado larga. Prueba con la de otro día. Si es una columna o una
+copia) o `copia_no_valida` (una línea que no es una fila, una de más de 17 MiB, una que acaba en CR,
+una clave foránea rota, un gzip que no se descomprime o unas filas que SQLite no acepta), siempre
+con 422, nunca con un 500. El CLI enseña además el motivo, que queda también en Axiom
+(`copia_no_restaurada`): de una línea, su número, el carácter y un código (`columna_desconocida`,
+`tabla_ajena`, `valor_no_literal`…), o que es demasiado larga; `la línea N acaba en CR: …
+conviértela a LF` (una copia con fines de línea de Windows); `no se puede descomprimir: …`, o
+`SQLite no acepta … de la copia (<tablas>): SQLITE_…`, que va también a Sentry
+(`hub.restaurar_copia`) porque puede ser un fallo del worker. **`no se puede descomprimir` puede ser
+una lectura de R2 cortada a mitad, no la copia**: repite la orden antes de darla por mala. Si no,
+prueba con la de otro día. Si es una columna o una
 tabla que el esquema de hoy no tiene (`columna_desconocida`, `tabla_ajena`) en una copia de antes de
 una migración que la quitó o le cambió el nombre, fallarán igual todas las de antes de esa
 migración: este worker no las sabe cargar. Y una copia hecha por un worker que aún no escribía en

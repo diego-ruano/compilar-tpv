@@ -433,7 +433,9 @@ Restaurar una copia, de la central o de un negocio, lee el gzip de R2 con `Decom
 del objeto. La descompresión de workerd no espera a que se lea lo que da: una sonda (un gzip sin fin
 hecho a mano; se leen 256 KiB y se para 300 ms) vio que, mientras tanto, pedía a la fuente 64 MiB. Si
 la carga va más despacio que R2, lo descomprimido se acumula en la memoria del objeto (128 MB). La
-sonda no se ha quedado en el repositorio. Falta medir una restauración grande en producción; si se
+sonda no se ha quedado en el repositorio. Lo que ya está en el código: si la carga se para antes del
+final (una copia que no vale, unas filas que SQLite no acepta), se cancelan la lectura y la
+descompresión (`cargarCopia` cierra el iterador, y `lineasDe` cancela la copia). Falta medir una restauración grande en producción; si se
 confirma, descomprimir a demanda (pidiendo a R2 sólo cuando se ha cargado lo anterior).
 
 ### COPIAS-SALTOS · Copias de negocio de antes con muchos saltos en una fila

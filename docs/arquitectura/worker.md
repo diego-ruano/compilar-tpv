@@ -1294,10 +1294,13 @@ sabiendas por soporte. Las dos rutas miran en la base central que el negocio nac
   (`copia_no_valida`). Con una copia que no vale, el objeto se queda vacío y la ruta contesta 422 con
   el código y lo que dice el cargador (`detalle`, sin nada de la copia), y lo deja en Axiom
   (`copia_no_restaurada`, el evento de toda restauración que el objeto no hace). También con el gzip
-  roto (puede ser una lectura de R2 cortada a mitad) o con unas filas que SQLite no acepta, que van
-  además a Sentry (`hub.restaurar_copia`), porque pueden ser un fallo de este worker. Una línea que se
-  lee y acaba en CR es de una copia con fines de línea de Windows, y lo dice (`copia_no_valida`), en
-  la central también. Los disparadores
+  roto (`no se puede descomprimir: …`, que puede ser una lectura de R2 cortada a mitad: se repite
+  antes de dar la copia por mala) o con unas filas que SQLite no acepta (`SQLite no acepta …`), con
+  `copia_no_valida`, nunca un 500. De todo eso, sólo las filas que SQLite no acepta van además a
+  Sentry (`hub.restaurar_copia`, con el texto de SQLite como causa), porque pueden ser un fallo de este
+  worker; el gzip roto se queda en Axiom. Una línea que se lee y acaba en CR es de una copia con fines
+  de línea de Windows, y lo dice (`copia_no_valida`), en la central también. Si la carga se para antes
+  del final, se cancelan la lectura de R2 y la descompresión (`cargarCopia` cierra el iterador). Los disparadores
   saltan al cargar: los de validación aceptan lo que ya aceptaron, y los del resumen diario sólo
   apuntan días.
 - **`crearBaseVacia`** es el alta (`aprovisionar`: esquema, sello y administrador inicial).

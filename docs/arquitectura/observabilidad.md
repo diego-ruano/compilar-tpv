@@ -546,6 +546,8 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
 | `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta por su patrón (la del `alHub` de su router, `/v1/clientes/*`; nunca el camino, que lo escribe quien llama) y el error, filtrado antes de recortarlo. Lo emite el Worker (`service: tpv-api`) |
 | `central_no_disponible` | La base central no ha atendido una petición (`server/central/sinLaCentral.ts`): `motivo` (`saturada`, `pasajera`, `plazo`, `rechazo` —un rechazo del viaje que la plataforma no marca—, o el código del objeto: `central_sin_aprovisionar`, `central_operacion_desconocida`, `central_migracion_alterada`, `central_migracion_fallida`, `central_restauracion_a_medias`, `central_vuelta_en_curso`), el método, la ruta por su patrón (`/v1/…/:id`, nunca el camino, que lo escribe quien llama), el error de la plataforma o del objeto, filtrado antes de recortarlo, y, si la petición es de un negocio, su `tenant_id`. El cliente recibe el 503 `hub_overloaded` o `hub_unavailable` de siempre; lo que no es `saturada` ni `pasajera` llega también a Sentry, con el error del viaje como causa. Lo deja también el `TenantHub` cuando la central no le atiende a él, con la misma regla para Sentry: con `metodo` `hub` y, en `ruta`, lo que hacía (`sync.main_vigente`, saber quién es la Main; `sync.last_seen`), y el cron de los avisos de caducidad, con `metodo` `cron` y `ruta` `cron.license_expiry`. Una ruta que sigue sin la central lo deja igual: el cupo y la traza de un pedido a un proveedor (`email.quota`, `email.audit`) y el traslado de licencia cuya respuesta se perdió y que sí entró |
 | `central_administrada` | La administración ha copiado, aprovisionado o restaurado la base central, o la ha devuelto a un instante (`domains/admin/central.ts`): `accion`, `resultado` (`ok` o el código con el que no se ha hecho; al aprovisionar, restaurar y volver, `empieza` antes de llamar al objeto y `sin_respuesta` si la llamada no vuelve; al volver, `preparada` antes de reiniciar, y al aplicar una vuelta ya preparada, `reinicia`) y, según la acción, la clave de la copia, sus filas y tablas, el destino, el marcador para deshacer, la copia de antes y, de una restauración que no sale, el `motivo` (el código del cargador, nunca el `detalle` del objeto). Sin datos personales. Es el rastro de lo que cambia la central: no va a `admin_audit`, que es una tabla suya ([worker.md](worker.md#las-rutas-de-administración-de-la-central)) |
+| `copia_diaria` / `copia_diaria_fallida` | La copia diaria de la base de un negocio a R2: la clave, las tablas, las filas y los bytes; o, si no sale, el error, filtrado antes de recortarlo a 300 bytes (AUD-32), que va también a Sentry (`hub.copia_diaria`) ([worker.md](worker.md#las-copias-de-la-base-de-cada-negocio-do-03)) |
+| `copia_no_restaurada` | La administración no ha podido devolverle su copia a un negocio (`/v1/admin/negocios/restaurar-copia`): el negocio, el modo, la clave, el código y lo que dice el cargador (`detalle`, sin nada de la copia). Lo emite el Worker (`service: tpv-api`) |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |
 
@@ -566,7 +568,9 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
   está sin aprovisionar, averiada o con algo a medias, y `pnpm central:estado` dice qué
   ([restaurar-la-central.md](../guias/restaurar-la-central.md)). En Sentry, lo mismo desde dentro del
   objeto: `central.migracion` (una migración que no entra), `central.pragmas` (alguien cambió a mano las
-  claves foráneas o los CHECK), `central.restaurar` (una copia que no se ha podido cargar),
+  claves foráneas o los CHECK), `central.restaurar` (una copia que no se ha podido cargar: unas filas
+  que SQLite no acepta, con su texto como causa, o un fallo que no es de la copia; una copia que no
+  vale, gzip roto incluido, va sólo al rastro, `central_administrada`),
   `central.vuelta` (la plataforma no ha aceptado una vuelta a un instante, y no se ha pedido) y
   `central.vuelta_pedida` (la vuelta se ha pedido, pero no ha quedado en R2 que se pidió:
   `pnpm central:copias` la enseña sin `pedida`). Uno con `rechazo` también necesita a alguien: la
@@ -583,6 +587,10 @@ Sólo **fallos** y **ciclo de vida**: una escritura correcta no se emite.
   se había aplicado no es un fallo: no ha reiniciado nada.
 - **Una base que necesita a alguien**: cualquier `base_llena` o `migracion_fallida`. También llegan a
   Sentry (`tenant_db.full`, `tenant_db.migration`).
+- **La copia de un negocio**: un `copia_diaria_fallida` (y `hub.copia_diaria` en Sentry); al
+  restaurarla, un `copia_no_restaurada`. De una restauración sólo llegan a Sentry unas filas que SQLite
+  no acepta (`hub.restaurar_copia`, con su texto como causa), que pueden ser un fallo del worker; una
+  copia que no vale, también con el gzip roto, se queda en Axiom.
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
   `motivo` (`device_revoked`, `bad_device_signature`, `device_ts_out_of_range`). No van a Sentry: un 401
   suelto es normal.
