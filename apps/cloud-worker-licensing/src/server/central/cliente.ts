@@ -13,9 +13,10 @@
 //   Pedirlo no sale del isolate.
 // - Un error nunca se convierte en filas vacías: «la central no contesta» no puede leerse como «esa
 //   licencia no existe». Lo que el objeto contesta que no ha hecho (también un error de SQL) sale
-//   como `ErrorDeLaCentral`, con su código; lo que la plataforma marca como saturado o pasajero, y
-//   un plazo vencido, como `CentralNoDisponible`, con los códigos del objeto de un negocio que no
-//   puede atender (`lib/enElHub.ts`); cualquier otro fallo del viaje, tal cual.
+//   como `ErrorDeLaCentral`, con su código. Un viaje que no vuelve con respuesta (lo que la
+//   plataforma marca como saturado o pasajero, un plazo vencido o cualquier otro rechazo) sale como
+//   `CentralNoDisponible`, con los códigos del objeto de un negocio que no puede atender
+//   (`lib/enElHub.ts`) y el error del viaje como causa.
 // - Con `plazoMs`, cada viaje tiene ese plazo. Un RPC no se puede cancelar: vencido el plazo, la
 //   llamada sigue viva y nadie la espera, y si escribía, escribe cuando la central la atienda. El
 //   plazo libera a quien espera, no al objeto que la hizo: mientras la llamada no termina es E/S
@@ -85,13 +86,18 @@ export class ErrorDeLaCentral extends HubError {
 	}
 }
 
-/** Por qué no ha podido atender la central: saturada, un fallo pasajero de la plataforma, o tarde. */
-type MotivoDeNoDisponible = "saturada" | "pasajera" | "plazo";
+/**
+ * Por qué no ha podido atender la central: saturada, un fallo pasajero de la plataforma, tarde, o un
+ * rechazo del viaje que la plataforma no marca (`comoNoDisponible`).
+ */
+type MotivoDeNoDisponible = "saturada" | "pasajera" | "plazo" | "rechazo";
 
 /**
- * La central no ha podido atender la llamada. No es un fallo del programa: se puede repetir. Sale
- * con los mismos códigos que el objeto de un negocio que no puede atender (`lib/enElHub.ts`):
- * saturada, `hub_overloaded`; lo demás, `hub_unavailable`.
+ * La central no ha podido atender la llamada: el viaje no ha vuelto con su respuesta, y se puede
+ * repetir. Sale con los mismos códigos que el objeto de un negocio que no puede atender
+ * (`lib/enElHub.ts`): saturada, `hub_overloaded`; lo demás, `hub_unavailable`. El error del viaje va
+ * como causa (`cause`), y Sentry lo enseña con él: un `rechazo` puede ser un fallo del programa
+ * dentro del objeto.
  */
 export class CentralNoDisponible extends HubError {
 	constructor(
@@ -105,15 +111,21 @@ export class CentralNoDisponible extends HubError {
 }
 
 /**
+ * Un viaje que no ha vuelto con su respuesta, como `CentralNoDisponible` y con su error como causa.
  * Lo que Cloudflare marca en el error de una llamada a un Durable Object
  * (https://developers.cloudflare.com/durable-objects/best-practices/error-handling/): `overloaded`,
- * el objeto tiene más de lo que puede atender; `retryable`, un fallo pasajero de la plataforma.
+ * el objeto tiene más de lo que puede atender; `retryable`, un fallo pasajero de la plataforma. Sin
+ * ninguna de las dos es un `rechazo`: la plataforma no dice por qué (un objeto que se ha quedado sin
+ * memoria, un mensaje que no cabe en el RPC), o el objeto ha lanzado, que es un fallo del programa.
+ * Lo que el objeto contesta que no ha hecho no pasa por aquí: vuelve como respuesta, con su código.
  */
-function noDisponibleSiLoEs(error: unknown): unknown {
+function comoNoDisponible(error: unknown): CentralNoDisponible {
+	// Un plazo vencido ya llega así (`conPlazo`).
+	if (error instanceof CentralNoDisponible) return error;
 	const fallo = (error ?? {}) as { overloaded?: unknown; retryable?: unknown };
 	if (fallo.overloaded === true) return new CentralNoDisponible("saturada", error);
 	if (fallo.retryable === true) return new CentralNoDisponible("pasajera", error);
-	return error;
+	return new CentralNoDisponible("rechazo", error);
 }
 
 /** `llamada`, o `CentralNoDisponible` si no ha contestado en `plazoMs`. */
@@ -138,7 +150,7 @@ function viaje<T>(pedir: () => Promise<RespuestaDeLaCentral<T>>, plazoMs: number
 		try {
 			respuesta = await conPlazo(pedir(), plazoMs);
 		} catch (error) {
-			throw noDisponibleSiLoEs(error);
+			throw comoNoDisponible(error);
 		}
 		if (!respuesta.ok) throw new ErrorDeLaCentral(respuesta.error, respuesta.detalle);
 		return respuesta.valor;

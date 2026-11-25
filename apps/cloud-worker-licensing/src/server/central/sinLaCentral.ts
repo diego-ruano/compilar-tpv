@@ -10,15 +10,17 @@
 // Es lo mismo que cuando no atiende el objeto de un negocio (`lib/enElHub.ts::sinElObjeto`): el 503
 // `external` de `lib/noDisponible.ts`.
 //
-//   · `CentralNoDisponible` (`cliente.ts`): saturada, `hub_overloaded` con `Retry-After`; un fallo
-//     pasajero de la plataforma o un plazo vencido, `hub_unavailable`.
+//   · `CentralNoDisponible` (`cliente.ts`), un viaje que no ha vuelto con su respuesta: saturada,
+//     `hub_overloaded` con `Retry-After`; un fallo pasajero de la plataforma, un plazo vencido o
+//     cualquier otro rechazo del viaje, `hub_unavailable`.
 //   · `ErrorDeLaCentral` con 503: sin aprovisionar, una operación que el objeto no conoce (un
 //     despliegue a medias), una migración alterada o fallida, o algo a medias (una restauración desde
 //     una copia, una vuelta a un instante). `hub_unavailable`, sin `Retry-After`.
 //
 // Cada vez queda un evento en Axiom (`central_no_disponible`) con el motivo exacto. Lo que no es carga
-// ni un fallo pasajero de la plataforma (`esPasajeroDeLaCentral`: un plazo vencido, la central sin
-// aprovisionar o averiada) va además a Sentry y al log: ahí hay algo que mirar.
+// ni un fallo pasajero de la plataforma (`esPasajeroDeLaCentral`: un plazo vencido, un rechazo del
+// viaje sin marcas, que puede ser un fallo del programa dentro del objeto, la central sin aprovisionar
+// o averiada) va además a Sentry, con su causa, y al log: ahí hay algo que mirar.
 //
 // Lo demás que lanza la central (un error de SQL, una sentencia prohibida) no es «no puede atender»:
 // sigue el camino de cualquier otro error.
@@ -61,16 +63,19 @@ export function respuestaSinLaCentral(c: Context, error: unknown): Response | nu
 	const motivo = motivoSinLaCentral(error);
 	if (!motivo) return null;
 
+	// Lo que dijo la plataforma, si fue ella (o lo que lanzó el objeto); si no, lo que dijo el objeto.
+	const causa = ((error as Error).cause ?? error) as { message?: unknown };
 	if (!esPasajeroDeLaCentral(error)) {
+		// A Sentry va con su causa: el SDK la enseña enlazada.
 		capturarError(error, `${c.req.method} ${c.req.routePath}`);
 		// FABLE-B: el detalle se queda aquí y en Sentry; la respuesta no lo lleva. En el log, la ruta va
 		// por su patrón y no por su camino, que lo escribe quien llama (un correo en el lugar de la
-		// versión del feed), y el mensaje, filtrado y acotado como lo que va a telemetría.
-		console.error(acotar(`[central] ${c.req.method} ${c.req.routePath} → ${(error as Error).message}`, scrub));
+		// versión del feed), y el mensaje, con el de su causa, filtrado y acotado como lo que va a
+		// telemetría.
+		const conCausa = causa === error ? "" : `: ${String(causa.message ?? causa)}`;
+		console.error(acotar(`[central] ${c.req.method} ${c.req.routePath} → ${(error as Error).message}${conCausa}`, scrub));
 	}
 
-	// Lo que dijo la plataforma, si fue ella; si no, lo que dijo el objeto.
-	const causa = ((error as Error).cause ?? error) as { message?: unknown };
 	const tenantId = (c as unknown as { get: (clave: "tenantId") => string | undefined }).get("tenantId");
 	enSegundoPlano(
 		c,

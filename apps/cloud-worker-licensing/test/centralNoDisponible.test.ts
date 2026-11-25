@@ -4,8 +4,10 @@
 // objeto de un negocio (`lib/enElHub.ts`): un 503 `external`, no un 500 de fallo del programa ni un
 // 401 de token malo (`server/central/sinLaCentral.ts`).
 //
-//   · saturada: `hub_overloaded` con `Retry-After`; un fallo pasajero de la plataforma o un plazo
-//     vencido: `hub_unavailable`. Lo marca `clienteCentral` (`CentralNoDisponible`);
+//   · saturada: `hub_overloaded` con `Retry-After`; un fallo pasajero de la plataforma, un plazo
+//     vencido o cualquier otro rechazo del viaje: `hub_unavailable`. Lo marca `clienteCentral`
+//     (`CentralNoDisponible`), con el error del viaje como causa, que un rechazo sin las marcas de la
+//     plataforma lleva a Sentry: puede ser un fallo del programa dentro del objeto;
 //   · sin aprovisionar, una operación que no conoce, una migración alterada o fallida
 //     (`ErrorDeLaCentral` con 503): `hub_unavailable`, sin `Retry-After`;
 //   · cada vez, un evento `central_no_disponible` en Axiom con el motivo; a Sentry, sólo lo que no es
@@ -19,7 +21,8 @@
 // (`overloaded`, `retryable`) o contesta lo que haga falta (`centralInterceptada`). La ruta llega a
 // ella como en producción, por `getDb(env)` y el `clienteCentral` de producción.
 
-import { env as entorno } from "cloudflare:test";
+import * as Sentry from "@sentry/cloudflare";
+import { createExecutionContext, env as entorno, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -30,15 +33,23 @@ import {
 } from "./helpers/central";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
 
-const { capturados } = vi.hoisted(() => ({ capturados: [] as { operacion: string; mensaje: string }[] }));
+const { capturados } = vi.hoisted(() => ({
+	capturados: [] as { operacion: string; mensaje: string; causa?: string }[],
+}));
 
+// Lo que se manda a Sentry: la operación, el mensaje y, si lo lleva, el de su causa.
 vi.mock("../src/observability/errors", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/observability/errors")>();
 	return {
 		...original,
 		capturarError: (error: unknown, operacion: string) => {
 			if (!original.esRechazoEsperado(error)) {
-				capturados.push({ operacion, mensaje: String((error as any)?.message ?? error) });
+				const causa = (error as any)?.cause;
+				capturados.push({
+					operacion,
+					mensaje: String((error as any)?.message ?? error),
+					...(causa === undefined ? {} : { causa: String(causa?.message ?? causa) }),
+				});
 			}
 			original.capturarError(error, operacion);
 		},
@@ -50,6 +61,7 @@ const { CentralNoDisponible } = await import("../src/server/central/cliente");
 const { MENSAJES } = await import("../src/lib/errorCodes");
 const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLoQueLeeElFeed } = await import("../src/domains/updates/updates.routes");
+const { sentryOptions } = await import("../src/observability/sentry");
 
 const env = entorno as any;
 
@@ -69,6 +81,9 @@ const saturadaYPasajera = () =>
 		overloaded: true,
 		retryable: true,
 	});
+/** Sin ninguna de las dos marcas: la plataforma no dice por qué, o es un fallo del programa en el objeto. */
+const SIN_MARCAS = "Durable Object exceeded its memory limit and was reset.";
+const sinMarcas = () => new Error(SIN_MARCAS);
 
 /**
  * Una central cuyo stub contesta con `responder` a todo (lanzando, si es un fallo de la plataforma).
@@ -107,6 +122,26 @@ async function pedirAutenticada(central: CentralDePrueba): Promise<Response> {
 			body: "{}",
 		},
 		{ ...env, ...AXIOM, ...central.entorno },
+	);
+}
+
+/**
+ * El estado de la licencia (`/v1/license/status`), con un token bueno: lo primero que lee en la
+ * central es la clave del equipo, para comprobar su firma. La de la licencia no se llega a usar.
+ */
+async function pedirElEstado(central: CentralDePrueba): Promise<Response> {
+	const deviceId = `equipo-${crypto.randomUUID()}`;
+	const token = await firmarSesion(env, { tenantId: "negocio-sin-central", deviceId, licHash: "hash" });
+	return app.request(
+		"https://tpv-api.test/v1/license/status",
+		{
+			headers: {
+				authorization: `Bearer ${token}`,
+				"X-Device-Ts": String(Date.now()),
+				"X-Device-Sig": `${"A".repeat(86)}==`,
+			},
+		},
+		{ ...env, ...AXIOM, LICENSE_SIGNING_PRIVATE_KEY: "sin-usar", ...central.entorno },
 	);
 }
 
@@ -319,13 +354,70 @@ describe("lo que no es «no puede atender» sigue su camino", () => {
 		expect(enviados.filter((e) => e.event === "central_no_disponible")).toEqual([]);
 	});
 
-	it("cualquier otro fallo del viaje, el 500 de siempre", async () => {
-		const res = await pedirElFeed(
-			centralQue(lanza(() => new Error("Serialized RPC arguments or return values are limited to 32MiB"))),
-		);
+});
 
-		expect(res.status).toBe(500);
-		expect(((await res.json()) as any).error).toBe("internal_error");
+describe("un rechazo del viaje sin las marcas de la plataforma", () => {
+	// La plataforma no dice por qué (un objeto que se ha quedado sin memoria, un mensaje que no cabe en
+	// el RPC), o es un fallo del programa dentro del objeto. La central no ha contestado: es su 503, y
+	// va a Sentry con el error del viaje como causa, que es donde se ve cuál de las dos cosas ha sido.
+	it("503 `hub_unavailable` sin Retry-After, y a Sentry con su causa", async () => {
+		const res = await pedirElFeed(centralQue(lanza(sinMarcas)));
+
+		expect(res.status).toBe(503);
+		expect(res.headers.get("Retry-After")).toBeNull();
+		expect(await res.json()).toEqual({
+			ok: false,
+			code: "external",
+			error: "hub_unavailable",
+			message: MENSAJES.hub_unavailable,
+		});
+		expect(capturados).toEqual([
+			{ operacion: "GET /v1/update/:target/:arch/:current", mensaje: "hub_unavailable", causa: SIN_MARCAS },
+		]);
+		expect(await eventosDeLaCentral(1)).toMatchObject([{ motivo: "rechazo", error: SIN_MARCAS }]);
+	});
+
+	it("`/v1/license/status` (lee la clave del equipo): el mismo 503, no un 500 de la ruta", async () => {
+		const res = await pedirElEstado(centralQue(lanza(sinMarcas)));
+
+		expect(res.status).toBe(503);
+		expect(((await res.json()) as any).error).toBe("hub_unavailable");
+		expect(capturados).toEqual([{ operacion: "GET /v1/license/status", mensaje: "hub_unavailable", causa: SIN_MARCAS }]);
+	});
+
+	it("con el SDK de Sentry de verdad: el evento lleva la causa enlazada, con su operación", async () => {
+		const sobres: any[] = [];
+		const conSentry = Sentry.withSentry<any>(
+			() => ({
+				...sentryOptions({ SENTRY_DSN: "https://public@sentry.invalid/1" } as any),
+				transport: () => ({
+					send: async (sobre: unknown) => {
+						sobres.push(structuredClone(sobre));
+						return { statusCode: 200 };
+					},
+					flush: async () => true,
+				}),
+			}),
+			{ fetch: (peticion: Request, entorno: any, ctx: ExecutionContext) => app.fetch(peticion, entorno, ctx) },
+		);
+		const ctx = createExecutionContext();
+		const res = await conSentry.fetch!(
+			new Request("https://tpv-api.test/v1/update/windows/x86_64/1.0.0") as any,
+			{ ...env, ...AXIOM, LIMITADOR_ACTUALIZACIONES: undefined, ...centralQue(lanza(sinMarcas)).entorno },
+			ctx,
+		);
+		await waitOnExecutionContext(ctx);
+
+		expect(res.status).toBe(503);
+		const eventos = sobres.flatMap((s) => s[1].filter((i: any) => i[0].type === "event").map((i: any) => i[1]));
+		expect(eventos).toHaveLength(1);
+		expect(eventos[0].tags).toMatchObject({ operation: "GET /v1/update/:target/:arch/:current" });
+		expect(eventos[0].exception.values.map((v: any) => [v.type, v.value])).toEqual(
+			expect.arrayContaining([
+				["Error", SIN_MARCAS],
+				["CentralNoDisponible", "hub_unavailable"],
+			]),
+		);
 	});
 });
 
@@ -347,14 +439,15 @@ describe("en los sitios que no pasan por el `onError`", () => {
 		expect(((await res.json()) as any).error).toBe("hub_unavailable");
 	});
 
-	it("`tenantAuth` con un fallo del viaje que la plataforma no marca: el 500 de siempre, no un 401", async () => {
-		const res = await pedirAutenticada(
-			centralQue(lanza(() => new Error("Durable Object exceeded its memory limit and was reset."))),
-		);
+	it("`tenantAuth` con un rechazo del viaje que la plataforma no marca: 503, no un 401, y a Sentry", async () => {
+		const res = await pedirAutenticada(centralQue(lanza(sinMarcas)));
 
-		expect(res.status).toBe(500);
-		expect(await res.json()).toMatchObject({ ok: false, error: "internal_error" });
-		expect(capturados.map((c) => c.mensaje)).toEqual(["Durable Object exceeded its memory limit and was reset."]);
+		expect(res.status).toBe(503);
+		expect(((await res.json()) as any).error).toBe("hub_unavailable");
+		// La operación es la del middleware que lee la central: `tenantAuth`, montado en `/v1/interruptores/*`.
+		expect(capturados).toEqual([{ operacion: "POST /v1/interruptores/*", mensaje: "hub_unavailable", causa: SIN_MARCAS }]);
+		expect((await eventosDeLaCentral(1))[0].motivo).toBe("rechazo");
+		expect(enviados.filter((e) => e.event === "device_auth_rechazado")).toEqual([]);
 	});
 
 	it("el WebSocket: un fallo pasajero al canjear el ticket es un 503, no un 500", async () => {

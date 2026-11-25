@@ -7,9 +7,9 @@
 // entra nada, y tiene que ser síncrona de verdad. Una que espera (`async`) dejaría lo de después de su
 // `await` fuera de la transacción: se rechaza, y lo que intente escribir después ya no entra.
 //
-// Del cliente: un plazo vencido, un objeto saturado o con un fallo pasajero, y lo que el objeto
-// contesta que no ha hecho salen cada uno con su error, nunca como filas vacías, y sin dejar ningún
-// rechazo sin recoger.
+// Del cliente: un plazo vencido, un objeto saturado o con un fallo pasajero, cualquier otro rechazo
+// del viaje y lo que el objeto contesta que no ha hecho salen cada uno con su error, nunca como filas
+// vacías, y sin dejar ningún rechazo sin recoger.
 
 import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -225,10 +225,12 @@ describe("el cliente, cuando la central no contesta como debe", () => {
 		expect(error).toMatchObject({ motivo, code, status: 503, cause: causa });
 	});
 
-	it("cualquier otro fallo del viaje sale tal cual", async () => {
+	it("cualquier otro rechazo del viaje, sin esas marcas, también: CentralNoDisponible (`rechazo`), con él como causa", async () => {
 		const causa = new Error("otra cosa");
 		const db = deUnStub({ ejecutar: async () => Promise.reject(causa) });
-		await expect(db.execute("SELECT 1;")).rejects.toBe(causa);
+		const error: any = await db.execute("SELECT 1;").catch((e) => e);
+		expect(error).toBeInstanceOf(CentralNoDisponible);
+		expect(error).toMatchObject({ motivo: "rechazo", code: "hub_unavailable", status: 503, cause: causa });
 	});
 
 	it("cada viaje pide su stub: el que ha fallado no se vuelve a usar", async () => {
@@ -237,7 +239,7 @@ describe("el cliente, cuando la central no contesta como debe", () => {
 		const stubs = [roto, bueno, bueno, bueno];
 		let pedidos = 0;
 		const db = clienteCentral(() => stubs[pedidos++] as any);
-		await expect(db.execute("SELECT 1;")).rejects.toThrow("stub roto");
+		await expect(db.execute("SELECT 1;")).rejects.toMatchObject({ motivo: "rechazo", cause: { message: "stub roto" } });
 		expect(await db.execute("SELECT 1;")).toMatchObject({ rows: [] });
 		expect(await db.batch([])).toEqual([]);
 		expect(await db.operar("extenderAMano", { licenseId: "x", meses: 1, ahoraMs: 0 })).toBe(7);
