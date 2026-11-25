@@ -13,13 +13,17 @@
 //     función, una subconsulta, varias filas, una columna que no es de la tabla, un número que SQLite
 //     guardaría como infinito…) hace inservible la copia: dice en qué línea y carácter y por qué, sin
 //     nada de lo que lleva, y no se ejecuta nada;
-//   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido.
+//   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido;
+//   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción,
+//     como la escribe hoy la copia, sale entera, y una más larga que el tope hace inservible la copia
+//     en cuanto se pasa, sin esperar a su final. También la de una copia de un negocio de antes, con
+//     cada salto escrito con `char(10)`, si una fila lleva más de 1,27 millones: no se restaura.
 
 import { runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { cargarCopia } from "../src/durableObjects/cargaDeCopias";
-import { literalEnUnaLinea } from "../src/durableObjects/volcadoSql";
+import { CARACTERES_POR_LINEA, cargarCopia, lineasDe } from "../src/durableObjects/cargaDeCopias";
+import { literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "../src/durableObjects/volcadoSql";
 import { centralSinAprovisionar } from "./helpers/central";
 
 /** La tabla de prueba: `a` y `c` sin tipo, que guardan cada valor con el tipo con el que llega. */
@@ -262,6 +266,8 @@ describe("una línea de datos que no es exactamente una fila hace inservible la 
 		["una columna repetida", `INSERT INTO "t" ("id", "a", "A") VALUES (2, 1, '${DE_LA_COPIA}');`, "columna_repetida", '"A"'],
 		["una tabla que la copia no puede traer", `INSERT INTO "sqlite_master" ("name") VALUES ('${DE_LA_COPIA}');`, "tabla_ajena", '"sqlite_master"'],
 		["menos valores que columnas", `INSERT INTO "t" ("id", "a", "b") VALUES (2, '${DE_LA_COPIA}');`, "valores_no_casan", ");"],
+		// En el primero que sobra, sin leer los demás: una línea puede traer millones.
+		["más valores que columnas", `INSERT INTO "t" ("id", "a") VALUES (2, '${DE_LA_COPIA}', 7, 8);`, "valores_no_casan", "7, 8);"],
 	];
 
 	it.each(casos)("%s", async (_que, mala, motivo, donde) => {
@@ -283,4 +289,111 @@ describe("una línea de datos que no es exactamente una fila hace inservible la 
 			enT: 0,
 		});
 	});
+});
+
+describe("las líneas de una copia (lineasDe)", () => {
+	/** `texto`, comprimido con gzip, como llega de R2. */
+	const gzipDe = (texto: string) => new Blob([texto]).stream().pipeThrough(new CompressionStream("gzip"));
+
+	/** Las líneas que da `lineasDe`, o el mensaje con el que se para y las que ha dado antes. */
+	async function leer(cuerpo: ReadableStream<Uint8Array>, tope?: number) {
+		const dadas: string[] = [];
+		try {
+			for await (const linea of lineasDe(cuerpo, tope)) dadas.push(linea);
+			return { dadas };
+		} catch (error) {
+			return { dadas, error: String((error as Error).message) };
+		}
+	}
+
+	it("una línea de hasta el tope sale entera, aunque llegue en muchos trozos; la de un carácter más hace inservible la copia, y dice cuál", async () => {
+		const tope = 10_000;
+		const justa = "x".repeat(tope);
+		expect(await leer(gzipDe(`uno\n${justa}\ndos\n`), tope)).toEqual({ dadas: ["uno", justa, "dos"] });
+		expect(await leer(gzipDe(`uno\n${justa}\ndos\n${"y".repeat(tope + 1)}\ntres\n`), tope)).toEqual({
+			dadas: ["uno", justa, "dos"],
+			error: `copia_no_valida: la línea 4 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+		// También la última, sin su salto.
+		expect(await leer(gzipDe(`uno\n${"y".repeat(tope + 1)}`), tope)).toMatchObject({
+			error: `copia_no_valida: la línea 2 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+	});
+
+	it("una línea que no acaba nunca no se junta: en cuanto pasa del tope se deja de leer, y de pedir la copia", async () => {
+		// Un gzip hecho a mano que no se acaba: bloques sin comprimir de 4 KB de «x», ninguno el último.
+		// La descompresión del runtime pide lo que llega sin esperar a que se lea, así que, si no se
+		// cancela, se lo traga entero; para que el test no se coma la memoria, el origen se rompe a los
+		// 64 MiB.
+		const pedido = { bytes: 0, cancelado: false };
+		const datos = new Uint8Array(4096).fill(0x78);
+		let cabecera = true;
+		const gzip = new ReadableStream<Uint8Array>({
+			pull(c) {
+				if (cabecera) {
+					cabecera = false;
+					return c.enqueue(new Uint8Array([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255]));
+				}
+				if (pedido.bytes >= 64 * 1024 * 1024) return c.error(new Error("el origen se rompe a los 64 MiB"));
+				const bloque = new Uint8Array(5 + datos.length);
+				bloque.set([0, datos.length & 0xff, datos.length >> 8, ~datos.length & 0xff, (~datos.length >> 8) & 0xff]);
+				bloque.set(datos, 5);
+				pedido.bytes += datos.length;
+				c.enqueue(bloque);
+			},
+			cancel() {
+				pedido.cancelado = true;
+			},
+		});
+		const tope = 256 * 1024;
+		expect(await leer(gzip, tope)).toEqual({
+			dadas: [],
+			error: `copia_no_valida: la línea 1 es demasiado larga: pasa de ${tope} caracteres`,
+		});
+		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
+		expect(pedido.bytes).toBeLessThan(16 * 1024 * 1024);
+	});
+
+	it("la línea de la fila más grande que admite un objeto en producción cabe en el tope, escrita de cualquier forma de las de hoy", async () => {
+		// 8 MiB y 34 bytes (`MAX_ROW_LENGTH` de workerd): lo más que ocupa una fila, con todas sus columnas.
+		const fila = 8 * 1024 * 1024 + 34;
+		const peores: [string, SqlStorageValue][] = [
+			["en hexadecimal", "\n".repeat(fila)],
+			["unos bytes", new Uint8Array(fila).buffer],
+			["comillas dobladas", "'".repeat(fila)],
+			["comillas dobladas y los saltos que van con char(10)", "\n".repeat(40) + "'".repeat(fila - 40)],
+		];
+		// Lo que pueden sumar los nombres y los demás valores de una fila de hasta 100 columnas (lo más
+		// que admite una tabla de un objeto): cada nombre con sus comillas, su coma y un número.
+		const resto = 100 * (64 + 4 + 24 + 2);
+		for (const [que, valor] of peores) {
+			const linea = `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${literalEnUnaLinea(valor)});`;
+			expect(linea.length + resto, que).toBeLessThan(CARACTERES_POR_LINEA);
+		}
+		// Y sale entera por `lineasDe`, con el tope de verdad.
+		const copia = ["-- Migraciones: m1", `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${literalEnUnaLinea(peores[0][1])});`, "-- Fin de la copia: 1 filas en 1 tablas"];
+		const { dadas, error } = await leer(gzipDe(`${copia.join("\n")}\n`));
+		expect(error).toBeUndefined();
+		// Se comparan así, y no con un `toEqual` de las líneas, que pintaría 16 MiB al fallar.
+		expect(dadas.map((l, i) => [l.length, l === copia[i]])).toEqual(copia.map((l) => [l.length, true]));
+	}, 60_000);
+
+	it("la de una copia de un negocio de antes de SALTOS_CON_CHAR, con cada salto escrito con char(10), pasa del tope si una fila lleva más de 1,27 millones: esa copia no se restaura", async () => {
+		// Así escribe todos los saltos de un texto, lleve los que lleve, la copia de un negocio de un worker
+		// anterior: 14 caracteres por salto. La línea de una fila de 8 MB puede pasar de 100 MiB, y ésa no
+		// se puede juntar.
+		const conSaltos = (texto: string) => `${PRINCIPIO_DE_INSERT}t" ("a") VALUES (${conChar(texto)});`;
+		const sinSaltos = conSaltos("").length;
+		expect(conSaltos(`${"\n".repeat(1000)}${"x".repeat(500)}`).length).toBe(sinSaltos + 14 * 1000 + 500);
+		// Los que caben: solos, y en un texto de 8 MiB, el valor más grande que admite un objeto.
+		expect(Math.floor((CARACTERES_POR_LINEA - sinSaltos) / 14)).toBe(1_273_268);
+		expect(Math.floor((CARACTERES_POR_LINEA - sinSaltos - 8 * 1024 * 1024) / 13)).toBe(725_934);
+		// Con uno más, la línea es demasiado larga en cuanto pasa del tope.
+		const copia = ["-- Migraciones: m1", conSaltos("\n".repeat(1_273_269)), "-- Fin de la copia: 1 filas en 1 tablas"];
+		expect(copia[1].length).toBeGreaterThan(CARACTERES_POR_LINEA);
+		expect(await leer(gzipDe(`${copia.join("\n")}\n`))).toEqual({
+			dadas: ["-- Migraciones: m1"],
+			error: `copia_no_valida: la línea 2 es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres`,
+		});
+	}, 60_000);
 });

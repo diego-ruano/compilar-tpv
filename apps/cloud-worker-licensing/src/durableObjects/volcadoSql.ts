@@ -39,6 +39,54 @@ export function identificador(nombre: string): string {
 	return `"${nombre.replaceAll('"', '""')}"`;
 }
 
+/** Cuántos trozos se unen de una vez en `TextoPorTrozos`. */
+const TROZOS_POR_UNION = 65_536;
+
+/**
+ * Un texto que se junta por trozos sin dejar una cuerda. Juntar con `+=` (o con `replaceAll`, que lo
+ * hace por dentro) no copia nada: cada paso deja un nodo que apunta a lo de antes y a lo nuevo, vivos
+ * todos hasta que se lee el texto, de 20 a 32 bytes cada uno. Con millones de pasos, como las comillas
+ * de un texto de megas, no caben en los 128 MB del objeto. Aquí los trozos se unen en un texto plano
+ * de `TROZOS_POR_UNION` en `TROZOS_POR_UNION`, y al final todos.
+ */
+export class TextoPorTrozos {
+	private unidos: string[] = [];
+	private trozos: string[] = [];
+
+	poner(trozo: string): void {
+		this.trozos.push(trozo);
+		if (this.trozos.length === TROZOS_POR_UNION) {
+			this.unidos.push(this.trozos.join(""));
+			this.trozos = [];
+		}
+	}
+
+	texto(): string {
+		if (this.trozos.length) this.unidos.push(this.trozos.join(""));
+		this.trozos = [];
+		return this.unidos.length === 1 ? this.unidos[0] : this.unidos.join("");
+	}
+}
+
+/**
+ * `texto` con cada `buscado` (que no puede ser vacío) cambiado por `puesto`: lo que hace `replaceAll`,
+ * sin su cuerda (`TextoPorTrozos`).
+ */
+export function reemplazarTodos(texto: string, buscado: string, puesto: string): string {
+	let i = texto.indexOf(buscado);
+	if (i === -1) return texto;
+	const junto = new TextoPorTrozos();
+	let desde = 0;
+	do {
+		junto.poner(texto.slice(desde, i));
+		junto.poner(puesto);
+		desde = i + buscado.length;
+		i = texto.indexOf(buscado, desde);
+	} while (i !== -1);
+	junto.poner(texto.slice(desde));
+	return junto.texto();
+}
+
 /**
  * Cuántos saltos de línea puede llevar un texto escrito con `char(10)`. Cada uno son dos `||` más en
  * la expresión, y el SQLite de un objeto no admite una de más de 100 niveles («Expression tree is too
@@ -47,10 +95,29 @@ export function identificador(nombre: string): string {
  */
 const SALTOS_CON_CHAR = 40;
 
+/** Un salto de línea, `\n` o `\r`. Con `g`, cada `test` sigue desde donde se quedó el anterior. */
+const SALTO = /[\r\n]/g;
+
+/**
+ * Cuántos saltos de línea lleva `v`, contados sólo hasta `hasta`: para elegir cómo se escribe no hace
+ * falta saber más. Contarlos todos de una vez (`match`) monta una lista con uno por salto, millones en
+ * un texto de megas.
+ */
+function saltosHasta(v: string, hasta: number): number {
+	SALTO.lastIndex = 0;
+	let n = 0;
+	while (n < hasta && SALTO.test(v)) n++;
+	return n;
+}
+
 /**
  * Un valor de SQLite como literal SQL que cabe en una línea. Un salto de línea dentro de un texto se
  * escribe como `char(10)` (y el retorno de carro, `char(13)`); un texto con muchos, en hexadecimal,
  * como uno con un NUL.
+ *
+ * De paso no ocupa más que la línea y lo justo para escribirla (`saltosHasta`, `reemplazarTodos`,
+ * `hex`): el valor más grande que admite el SQLite de un objeto en producción es de 8 MB, y el objeto
+ * tiene 128 MB.
  *
  * Un número sale como lo da el SQL del objeto, un número de JavaScript: un entero de más de 2^53 no
  * sale exacto, un REAL entero en una columna sin tipo vuelve como INTEGER, y uno de exponente extremo
@@ -70,11 +137,11 @@ export function literalEnUnaLinea(v: SqlStorageValue): string {
 		return String(v);
 	}
 	if (typeof v === "string") {
-		const saltos = v.match(/[\r\n]/g)?.length ?? 0;
+		const saltos = saltosHasta(v, SALTOS_CON_CHAR + 1);
 		// Un NUL no puede ir dentro de un literal de texto: SQLite cortaría la cadena ahí. Se escribe
 		// en hexadecimal y se vuelve a convertir en texto.
 		if (v.includes("\0") || saltos > SALTOS_CON_CHAR) return `CAST(X'${hex(new TextEncoder().encode(v))}' AS TEXT)`;
-		const escapado = `'${v.replaceAll("'", "''")}'`;
+		const escapado = `'${reemplazarTodos(v, "'", "''")}'`;
 		if (saltos === 0) return escapado;
 		return `(${escapado.replaceAll("\n", "'||char(10)||'").replaceAll("\r", "'||char(13)||'")})`;
 	}
@@ -83,12 +150,22 @@ export function literalEnUnaLinea(v: SqlStorageValue): string {
 	throw new Error(`copia_valor_desconocido: ${typeof v}`);
 }
 
-const BYTE_EN_HEX = Array.from({ length: 256 }, (_, b) => b.toString(16).padStart(2, "0"));
+/** Las cifras hexadecimales en minúsculas, como bytes de ASCII: la del valor `n` es la `n`. */
+const CIFRAS_HEX = new TextEncoder().encode("0123456789abcdef");
+const ASCII = new TextDecoder();
 
+/**
+ * Unos bytes en hexadecimal, en minúsculas. Las cifras se escriben en unos bytes, y de ellos sale el
+ * texto de una vez: escrito cifra a cifra con `+=`, dejaría una cuerda con un nodo por byte del valor
+ * (`TextoPorTrozos`).
+ */
 function hex(bytes: Uint8Array): string {
-	let s = "";
-	for (const b of bytes) s += BYTE_EN_HEX[b];
-	return s;
+	const cifras = new Uint8Array(bytes.length * 2);
+	for (let i = 0; i < bytes.length; i++) {
+		cifras[2 * i] = CIFRAS_HEX[bytes[i] >> 4];
+		cifras[2 * i + 1] = CIFRAS_HEX[bytes[i] & 15];
+	}
+	return ASCII.decode(cifras);
 }
 
 /**

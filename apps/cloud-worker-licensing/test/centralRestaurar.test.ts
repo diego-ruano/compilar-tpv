@@ -6,9 +6,10 @@
 // no atiende nunca:
 //
 //   · una copia que no vale (no existe, gzip roto, cortada, de otra versión, con una tabla que no es
-//     de la base, con una clave foránea rota) deja el objeto como estaba: sin aprovisionar, sin marca,
-//     y el error dice por qué, sin nada de lo que trae la copia (va en el `detalle` de la respuesta, y
-//     al rastro de la administración, sólo su código: `motivoDe`, en `domains/admin/central.ts`);
+//     de la base, con una línea demasiado larga, con una clave foránea rota) deja el objeto como
+//     estaba: sin aprovisionar, sin marca, y el error dice por qué, sin nada de lo que trae la copia
+//     (va en el `detalle` de la respuesta, y al rastro de la administración, sólo su código:
+//     `motivoDe`, en `domains/admin/central.ts`);
 //   · en una central aprovisionada no toca nada;
 //   · con la marca de una restauración a medias no atiende nadie, tampoco al arrancar, y la siguiente
 //     restauración la vacía entera (también lo que la de antes dio por migrado) y termina; volver a
@@ -22,6 +23,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import type { Migracion } from "../src/durableObjects/sqliteDelObjeto";
 import {
 	centralDePrueba,
@@ -197,6 +199,16 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 			["SELECT", "customer_email"],
 		],
 		[
+			"con una línea más larga que la de la fila más grande que admite un objeto",
+			(t) =>
+				conUnaFilaMas(
+					t,
+					`INSERT INTO "admin_audit" ("audit_id", "action", "detail", "at_ms") VALUES ('a', 'x', '${"x".repeat(CARACTERES_POR_LINEA)}', 1);`,
+				),
+			new RegExp(`^copia_no_valida: la línea \\d+ es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres$`),
+			[],
+		],
+		[
 			"con una clave foránea rota",
 			(t) =>
 				conUnaFilaMas(
@@ -230,18 +242,30 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 		await comoAntes(central);
 	});
 
-	it("si no existe, o la clave no es de una copia de la central", async () => {
+	it("si no existe, o la clave no es de una copia de la central, que no se repite", async () => {
 		const central = centralSinAprovisionar();
 		expect(await central.stub.aprovisionar({ claveDeCopia: claveNueva() })).toEqual({
 			ok: false,
 			error: "central_copia_inservible",
 			detalle: expect.stringMatching(/^copia_no_encontrada: /),
 		});
-		for (const clave of ["negocios/t/2026-01-01.sql.gz", "base-central/../x.sql.gz", "base-central/x.sql", "base-central/.sql.gz"]) {
-			expect(await central.stub.aprovisionar({ claveDeCopia: clave }), clave).toEqual({
+		// La que no tiene la forma de una copia es texto de quien llama, y el motivo no la repite: va en la
+		// respuesta a quien llame al objeto por RPC (la ruta ya la para con su schema). Tampoco una con la
+		// carpeta y la extensión y un nombre fuera de la gramática, que así no llega a `copia_no_encontrada`.
+		const claves = [
+			"negocios/t/2026-01-01.sql.gz",
+			"base-central/../x.sql.gz",
+			"base-central/x.sql",
+			"base-central/.sql.gz",
+			"Ana Gil ana.gil@correo.es\n",
+			"base-central/Ana Gil ana.gil@correo.es.sql.gz",
+		];
+		for (const clave of claves) {
+			const r = await central.stub.aprovisionar({ claveDeCopia: clave });
+			expect(r, clave).toEqual({
 				ok: false,
 				error: "central_copia_inservible",
-				detalle: expect.stringMatching(/^copia_no_valida: .* no es la clave de una copia de la central/),
+				detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
 			});
 		}
 		await comoAntes(central);

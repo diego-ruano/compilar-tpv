@@ -29,6 +29,7 @@ import {
 	esClaveDeCopiaDeLaCentral,
 } from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
+import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import {
 	centralDePrueba,
 	centralInterceptada,
@@ -214,6 +215,39 @@ describe("aprovisionar desde una copia", () => {
 			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_de_otra_version" },
 		]);
 		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Ana|correo/);
+	});
+
+	it("una línea más larga que el tope dice cuál es, y al rastro va el código con el que empieza el motivo", async () => {
+		const origen = await centralDePrueba();
+		const clave = `base-central/prueba-${crypto.randomUUID()}.sql.gz`;
+		const bucket = (env as any).COPIAS as R2Bucket;
+		await runInDurableObject(origen.stub, (_c, state) => copiarLaCentral(state.storage.sql, bucket, clave));
+		const texto = await new Response((await bucket.get(clave))!.body.pipeThrough(new DecompressionStream("gzip"))).text();
+		// Una fila de más, con un correo delante de lo que la hace pasar del tope (`CARACTERES_POR_LINEA`).
+		const larga = texto.replace(
+			/^-- Fin de la copia: (\d+)/m,
+			(_m, n) =>
+				`INSERT INTO "admin_audit" ("audit_id", "action", "detail", "at_ms") VALUES ('a', 'x', 'ana.gil@correo.es ${"x".repeat(CARACTERES_POR_LINEA)}', 1);\n-- Fin de la copia: ${Number(n) + 1}`,
+		);
+		const flujo = new Blob([larga]).stream().pipeThrough(new CompressionStream("gzip"));
+		await bucket.put(clave, await new Response(flujo).arrayBuffer());
+		const log = vi.spyOn(console, "log");
+
+		const central = centralSinAprovisionar();
+		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
+		expect(r).toMatchObject({
+			status: 422,
+			body: {
+				error: "central_copia_inservible",
+				detalle: expect.stringMatching(new RegExp(`^copia_no_valida: la línea \\d+ es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres$`)),
+			},
+		});
+		expect(JSON.stringify(r.body)).not.toMatch(/ana\.gil/);
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "empieza", clave },
+			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_no_valida" },
+		]);
+		expect((await central.stub.estado()).aprovisionada).toBe(false);
 	});
 
 	it("una línea que SQLite no acepta dice dónde está, y nada de lo que lleva sale en la respuesta ni en el rastro", async () => {

@@ -6,9 +6,11 @@
 // migraciones que sabe poner su worker, qué tablas puede traer la copia y cómo se prepara la base.
 //
 // La copia se lee de R2 según llega (descomprimida y partida en líneas, sin tenerla entera en
-// memoria). El esquema lo ponen las migraciones del worker, no la copia: de ella sólo cuentan las
-// líneas de datos, las que empiezan por `INSERT INTO "`, y de ninguna se ejecuta su texto. Cada una
-// se lee entera con la misma gramática, sea del tamaño que sea (`LectorDeFilas`):
+// memoria), y una línea más larga que la de la fila más grande que admite un objeto, como la escribe
+// hoy la copia, la hace inservible (`CARACTERES_POR_LINEA`). El esquema lo ponen las migraciones del
+// worker, no la copia: de ella sólo cuentan las líneas de datos, las que empiezan por
+// `INSERT INTO "`, y de ninguna se ejecuta su texto. Cada una se lee entera con la misma gramática,
+// sea corta o larga (`LectorDeFilas`):
 //
 //     INSERT INTO "<tabla>" ("<columna>", …) VALUES (<literal>, …);
 //
@@ -30,7 +32,15 @@
 
 import type { Valor } from "../lib/sql";
 import { ponerFk } from "./sqliteDelObjeto";
-import { identificador, LINEA_FIN, LINEA_MIGRACIONES, literalEnUnaLinea, PRINCIPIO_DE_INSERT } from "./volcadoSql";
+import {
+	identificador,
+	LINEA_FIN,
+	LINEA_MIGRACIONES,
+	literalEnUnaLinea,
+	PRINCIPIO_DE_INSERT,
+	reemplazarTodos,
+	TextoPorTrozos,
+} from "./volcadoSql";
 
 /**
  * Lo que se dice de una copia que no se puede devolver, y por qué. Va en el `detalle` de la respuesta
@@ -82,21 +92,63 @@ function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila):
  */
 const CARACTERES_POR_LOTE = 4 * 1024 * 1024;
 
-/** Las líneas de un gzip, de una en una, según llegan. */
-export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+/**
+ * Lo más largo que puede ser una línea de una copia, en caracteres. La fila más grande que admite el
+ * SQLite de un objeto en producción es de 8 MB (8 MiB y 34 bytes, `MAX_ROW_LENGTH` de workerd), y su
+ * línea, como la escribe hoy la copia, ocupa como mucho dos veces sus bytes, más los nombres de su
+ * tabla y de sus columnas (`literalEnUnaLinea`): 16 MiB y unos KB. Juntar una más larga podría agotar
+ * la memoria del objeto, que es de 128 MB.
+ *
+ * La copia de un negocio hecha por un worker anterior a `SALTOS_CON_CHAR` escribe con `char(10)` todos
+ * los saltos de línea de un texto, 14 caracteres cada uno: si una fila suya lleva más de 1,27 millones
+ * (o es de 8 MB y lleva más de unos 726.000), su línea pasa del tope, y esa copia no se restaura.
+ */
+export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
+
+/**
+ * Las líneas de un gzip, de una en una, según llegan. De la que no ha acabado se guardan sus trozos,
+ * y se juntan una vez, cuando llega su salto: un texto que creciera trozo a trozo se copiaría entero
+ * con cada uno (el gzip llega a trozos de 4 KB), y una línea de 16 MiB tardaría segundos en juntarse.
+ * Una de más de `tope` caracteres hace inservible la copia en cuanto se pasa, sin esperar a su final
+ * (`CARACTERES_POR_LINEA`; `tope` sólo lo cambian los tests), y se deja de leer la copia: la
+ * descompresión del runtime pide lo que llega sin esperar a que se lea, y sin cancelarla seguiría con
+ * el resto.
+ */
+export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>, tope = CARACTERES_POR_LINEA): AsyncGenerator<string> {
 	const lector = cuerpo
 		.pipeThrough(new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>)
 		.pipeThrough(new TextDecoderStream())
 		.getReader();
-	let resto = "";
+	/** Los trozos de la línea que no ha acabado, y cuántos caracteres suman. */
+	let trozos: string[] = [];
+	let caracteres = 0;
+	/** Cuántas líneas se han dado: la que se está leyendo es la siguiente. */
+	let dadas = 0;
+	const demasiadoLarga = async () => {
+		await lector.cancel().catch(() => undefined);
+		return new CopiaInservible("copia_no_valida", `la línea ${dadas + 1} es demasiado larga: pasa de ${tope} caracteres`);
+	};
 	for (;;) {
 		const { value, done } = await lector.read();
 		if (done) break;
-		const partes = (resto + value).split("\n");
-		resto = partes.pop() ?? "";
-		yield* partes;
+		const partes = value.split("\n");
+		const resto = partes.pop() ?? "";
+		for (const parte of partes) {
+			if (caracteres + parte.length > tope) throw await demasiadoLarga();
+			trozos.push(parte);
+			const linea = trozos.length === 1 ? parte : trozos.join("");
+			trozos = [];
+			caracteres = 0;
+			dadas++;
+			yield linea;
+		}
+		if (caracteres + resto.length > tope) throw await demasiadoLarga();
+		if (resto) {
+			trozos.push(resto);
+			caracteres += resto.length;
+		}
 	}
-	if (resto) yield resto;
+	if (trozos.length) yield trozos.join("");
 }
 
 /**
@@ -104,8 +156,8 @@ export async function* lineasDe(cuerpo: ReadableStream<Uint8Array>): AsyncGenera
  * texto de más de 100 KB por llamada (SQLITE_TOOBIG), y un carácter de un texto de JavaScript son, como
  * mucho, 3 bytes en UTF-8: por debajo de esto, cabe seguro. Las filas van de varias en varias porque
  * cada llamada tiene su coste fijo (también la traza de Sentry, que envuelve el SQL del objeto): una a
- * una, restaurar tarda el doble. Una fila de una línea más larga que esto (puede llegar a 2 MB) va
- * sola, con sus textos y sus bytes como argumentos (`conArgumentos`).
+ * una, restaurar tarda el doble. Una fila de una línea más larga que esto (hasta los 8 MB que admite
+ * un objeto en producción) va sola, con sus textos y sus bytes como argumentos (`conArgumentos`).
  */
 const CARACTERES_POR_LLAMADA = Math.floor(100_000 / 3);
 
@@ -176,22 +228,19 @@ class Lectura {
 
 	/**
 	 * Lo que va entre `comilla` (la simple de un texto, la doble de un nombre) desde `i`, con la comilla
-	 * doblada dentro, y deja `i` detrás; `null` si en `i` no empieza o no se cierra.
+	 * doblada dentro, y deja `i` detrás; `null` si en `i` no empieza o no se cierra. Primero se busca
+	 * dónde se cierra, y luego se desdoblan las de dentro de una vez (`reemplazarTodos`): un texto de
+	 * megas puede traer millones.
 	 */
 	entre(comilla: "'" | '"'): string | null {
 		const { linea } = this;
 		if (linea[this.i] !== comilla) return null;
-		let texto = "";
-		for (let desde = this.i + 1; ; ) {
-			const fin = linea.indexOf(comilla, desde);
-			if (fin === -1) return null;
-			if (linea[fin + 1] !== comilla) {
-				this.i = fin + 1;
-				return texto + linea.slice(desde, fin);
-			}
-			texto += linea.slice(desde, fin + 1);
-			desde = fin + 2;
-		}
+		const desde = this.i + 1;
+		let fin = linea.indexOf(comilla, desde);
+		while (fin !== -1 && linea[fin + 1] === comilla) fin = linea.indexOf(comilla, fin + 2);
+		if (fin === -1) return null;
+		this.i = fin + 1;
+		return reemplazarTodos(linea.slice(desde, fin), comilla + comilla, comilla);
 	}
 
 	/** Unos bytes en hexadecimal desde `i` hasta su comilla, y deja `i` detrás de ella; `null` si no lo son. */
@@ -218,7 +267,8 @@ class Lectura {
 	 * - un texto entre comillas simples, con la comilla doblada dentro: `'Ana O''Neil'`;
 	 * - un texto con saltos de línea, entre paréntesis: sus trozos entre comillas, unidos por
 	 *   `||char(10)||` o `||char(13)||`, uno por salto y alguno: `('a'||char(13)||''||char(10)||'b')`.
-	 *   Cuántos, da igual: la copia de un negocio anterior a `SALTOS_CON_CHAR` los escribe todos así;
+	 *   Cuántos, da igual, mientras quepan en la línea (`CARACTERES_POR_LINEA`): la copia de un negocio
+	 *   anterior a `SALTOS_CON_CHAR` los escribe todos así;
 	 * - unos bytes en hexadecimal, `X'00ff'`, o un texto en UTF-8 en hexadecimal, `CAST(X'…' AS TEXT)`
 	 *   (uno con un NUL o con muchos saltos de línea).
 	 */
@@ -229,17 +279,21 @@ class Lectura {
 			const texto = this.entre("'");
 			if (texto !== null) return texto;
 		} else if (c === ABRE) {
+			// Los trozos y sus saltos se juntan sin cuerda: una copia de antes de `SALTOS_CON_CHAR` puede
+			// traer cientos de miles.
 			this.i++;
-			let texto = this.entre("'");
+			const texto = new TextoPorTrozos();
+			let trozo = this.entre("'");
 			let saltos = 0;
-			while (texto !== null) {
+			while (trozo !== null) {
+				texto.poner(trozo);
 				const salto = this.salta("||char(10)||") ? "\n" : this.salta("||char(13)||") ? "\r" : null;
 				if (salto === null) break;
-				const trozo = this.entre("'");
-				texto = trozo === null ? null : texto + salto + trozo;
+				texto.poner(salto);
+				trozo = this.entre("'");
 				saltos++;
 			}
-			if (texto !== null && saltos > 0 && this.salta(")")) return texto;
+			if (trozo !== null && saltos > 0 && this.salta(")")) return texto.texto();
 		} else if (this.salta("NULL")) {
 			return null;
 		} else if (this.salta("X'")) {
@@ -307,6 +361,9 @@ class LectorDeFilas {
 		const valores: ValorLeido[] = [];
 		for (;;) {
 			const desde = l.i;
+			// Uno más de los que tiene la fila ya no se lee: una línea de millones de literales cortos, que
+			// cabe en `CARACTERES_POR_LINEA`, los guardaría todos antes del `)`, cientos de MB.
+			if (valores.length === cabecera.columnas) l.falla("valores_no_casan", desde);
 			valores.push(l.valor());
 			if (l.salta(", ")) continue;
 			const c = linea.charCodeAt(l.i);

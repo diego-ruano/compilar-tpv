@@ -170,6 +170,11 @@ describe("sólo sentencias de filas, una a una", () => {
 		"UPDATE OR ROLLBACK tenants SET notes = 'x';",
 		"DELETE FROM _migrations;",
 		'UPDATE "_migrations" SET hash = \'otro\';',
+		// SQLite toma por nombre también un texto entre comillas simples.
+		"DELETE FROM '_migrations';",
+		"UPDATE '_migrations' SET hash = 'otro';",
+		"DELETE FROM 'main'.'_migrations';",
+		"INSERT INTO '_migrations' (name, hash, applied_at) VALUES ('x', 'y', 1);",
 		"-- un comentario delante: la sentencia no dice qué es\nDELETE FROM tenants;",
 	];
 

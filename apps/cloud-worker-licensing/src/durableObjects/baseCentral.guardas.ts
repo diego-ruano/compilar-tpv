@@ -64,7 +64,7 @@ const VERBOS = new Set(["SELECT", "INSERT", "UPDATE", "DELETE", "WITH"]);
  * El texto de la sentencia sin los literales ni los comentarios, y si lleva algo detrás de su `;`:
  * otra sentencia, u otro `;`, o un comentario (que el SQLite de un DO toma por una sentencia vacía y
  * rechaza). Los identificadores entre comillas (`"tabla"`, `` `tabla` ``, `[tabla]`) se quedan: son
- * nombres.
+ * nombres. Uno entre comillas simples, que SQLite también admite, se va con los literales.
  */
 function leer(texto: string): { codigo: string; varias: boolean } {
 	let codigo = "";
@@ -122,7 +122,10 @@ export function motivoDeRechazo(texto: string): string | null {
 	if (/\b(INSERT|UPDATE)\s+OR\s+(REPLACE|ROLLBACK)\b/i.test(codigo) || /\bREPLACE\s+INTO\b/i.test(codigo)) {
 		return "La base central no ejecuta REPLACE ni OR REPLACE (borran y reinsertan, y disparan las cascadas) ni OR ROLLBACK (deshace por su cuenta).";
 	}
-	if (/\b_migrations\b/i.test(codigo)) return "La tabla de migraciones de la base central sólo la toca su objeto.";
+	// En el texto tal cual, con sus literales: SQLite toma por nombre también un texto entre comillas
+	// simples (`DELETE FROM '_migrations'`), que `leer` deja fuera. Ninguna sentencia que llega aquí
+	// nombra esa tabla en un valor ni en un comentario.
+	if (/\b_migrations\b/i.test(texto)) return "La tabla de migraciones de la base central sólo la toca su objeto.";
 	return null;
 }
 

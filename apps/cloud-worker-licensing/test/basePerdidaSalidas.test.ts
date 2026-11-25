@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { centralDePrueba, centralInterceptada, filasDe, type CentralDePrueba } from "./helpers/central";
 import { enElHub } from "./helpers/hub";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
+import { CARACTERES_POR_LINEA } from "../src/durableObjects/cargaDeCopias";
 import { PURGADO_HASTA } from "../src/domains/sync/cambiosJson";
 import { leerPaginaDeCambios } from "../src/domains/sync/sync.routes";
 import { claveDeCopia } from "../src/durableObjects/tenantHub.copia";
@@ -326,7 +327,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		expect(metadatos?.seq).toBe(String(numerado));
 	});
 
-	it("una copia cortada, de otra versión o con una línea que no es una fila no se restaura, el objeto se queda vacío y se dice por qué", async () => {
+	it("una copia cortada, de otra versión, con una línea que no es una fila o con una demasiado larga no se restaura, el objeto se queda vacío y se dice por qué", async () => {
 		const t = "perdida-copia-mala";
 		await negocioConCopia(t);
 		await stub(t).borrarTodo();
@@ -352,6 +353,9 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 		);
 		expect(conColumnaRetirada).not.toBe(deClientes);
 		await bucket.put(claveDeCopia(t, "2026-01-04"), await gzip(conClientes(conColumnaRetirada)));
+		// Una línea más larga que la de la fila más grande que admite un objeto: no se junta entera.
+		const demasiadoLarga = `INSERT INTO "Clientes" ("ID_Cliente", "Nombre") VALUES ('c-larga', '${"x".repeat(CARACTERES_POR_LINEA)}');`;
+		await bucket.put(claveDeCopia(t, "2026-01-05"), await gzip(conClientes(demasiadoLarga)));
 
 		const enviados: Record<string, unknown>[] = [];
 		vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
@@ -367,6 +371,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 				otra: await restaurar("2026-01-02"),
 				manipulada: await restaurar("2026-01-03"),
 				columnaRetirada: await restaurar("2026-01-04"),
+				demasiadoLarga: await restaurar("2026-01-05"),
 				noHay: await restaurar("2025-01-01"),
 			};
 		}, AXIOM).finally(() => vi.unstubAllGlobals());
@@ -378,6 +383,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			otra: `copia_de_otra_version: la copia trae ${aqui.length + 1} migraciones y este worker sabe poner ${aqui.length}, hasta ${aqui.at(-1)}`,
 			manipulada: `copia_no_valida: la línea ${enClientes + 1} no se puede cargar: sobra_texto (carácter ${deClientes.length + 1})`,
 			columnaRetirada: `copia_no_valida: la línea ${enClientes + 1} no se puede cargar: columna_desconocida (carácter ${'INSERT INTO "Clientes" ('.length + 1})`,
+			demasiadoLarga: `copia_no_valida: la línea ${enClientes + 1} es demasiado larga: pasa de ${CARACTERES_POR_LINEA} caracteres`,
 		};
 		for (const [copia, detalle] of Object.entries(porQue)) {
 			expect(r[copia as keyof typeof porQue], copia).toMatchObject({ status: 422, body: { ok: false, error: detalle.split(":")[0], detalle } });
@@ -390,6 +396,7 @@ describe("DO-PERDIDA · las salidas de la administración", () => {
 			["copia_de_otra_version", porQue.otra],
 			["copia_no_valida", porQue.manipulada],
 			["copia_no_valida", porQue.columnaRetirada],
+			["copia_no_valida", porQue.demasiadoLarga],
 			["copia_no_encontrada", undefined],
 		]);
 		expect(JSON.stringify(enviados)).not.toContain("al migrar");

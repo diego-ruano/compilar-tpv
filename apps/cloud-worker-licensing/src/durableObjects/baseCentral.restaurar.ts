@@ -57,11 +57,15 @@ function nombresDeLasMigraciones(): string[] {
 	return MIGRACIONES_DE_LA_CENTRAL.map((m) => m.name);
 }
 
-/** Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. */
+/**
+ * Las líneas de la copia, con un gzip que no se deja leer convertido en `CopiaInservible`. Una línea
+ * demasiado larga ya lo es (`lineasDe`), y sale tal cual.
+ */
 async function* leyendoElGzip(lineas: AsyncIterable<string>): AsyncGenerator<string> {
 	try {
 		yield* lineas;
 	} catch (error) {
+		if (error instanceof CopiaInservible) throw error;
 		throw new CopiaInservible("copia_no_valida", `no se puede descomprimir: ${String((error as Error)?.message ?? error)}`);
 	}
 }
@@ -76,8 +80,16 @@ export async function restaurarLaCentral(
 	bucket: R2Bucket,
 	clave: string,
 ): Promise<RespuestaDeLaCentral<CopiaRestaurada>> {
+	// La clave que no tiene la forma de una copia no se repite en el motivo: es texto de quien llama, que
+	// puede ser cualquier cosa. La ruta de la administración ya la para con su schema; esto es lo que
+	// contesta el objeto a quien lo llame por RPC. La que la tiene ha pasado una gramática cerrada
+	// (`esClaveDeCopiaDeLaCentral`), y sí sale: en la marca y en `copia_no_encontrada`.
 	if (!esClaveDeCopiaDeLaCentral(clave)) {
-		return { ok: false, error: "central_copia_inservible", detalle: `copia_no_valida: «${clave}» no es la clave de una copia de la central` };
+		return {
+			ok: false,
+			error: "central_copia_inservible",
+			detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
+		};
 	}
 	const marcas = marcasDe(storage);
 	if (!marcas.restauracion && baseAprovisionada(storage.sql)) return { ok: false, error: "central_ya_aprovisionada" };
