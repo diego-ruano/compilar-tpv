@@ -86,9 +86,10 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 - Vacía el objeto, carga la copia entera de una vez, sin atender nada mientras tanto, y le aplica
   las migraciones que le falten. Contesta las filas y las tablas que han entrado y las migraciones.
 - **Si la copia no vale** (no existe, está cortada, es de una versión que este worker no sabe poner,
-  tiene una línea que no es una fila o una de más de 17 MiB, deja una clave foránea rota…), contesta
-  `central_copia_inservible` con el motivo, que no lleva nada de la copia, y el objeto se queda como
-  estaba, sin aprovisionar: prueba con otra.
+  tiene una línea que no es una fila, una de más de 17 MiB o una que acaba en CR, deja una clave
+  foránea rota, no se descomprime…), contesta `central_copia_inservible` con el motivo, que no lleva
+  nada de la copia, y el objeto se queda como estaba, sin aprovisionar: prueba con otra. Con
+  `no se puede descomprimir`, antes repite la orden: puede ser una lectura de R2 cortada a mitad.
 - **Si se corta a mitad** (el objeto se reinicia), se queda con la marca de la restauración a medias y
   no atiende (`central_restauracion_a_medias`). Repite la orden: la siguiente restauración lo vacía y
   empieza de nuevo. Si se cortó por tiempo con una copia de más filas de las que se restauran de una
