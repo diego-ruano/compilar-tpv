@@ -161,7 +161,7 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 				commands.recoveryStatus(),
 			]);
 			// Cualquier cosa que no sea explícitamente `off` es `auto`: el valor ausente (nunca se
-			// tocó) y el legado ("offline"/"online", que Rust ya normaliza a `null`) conectan.
+			// tocó, o uno que Rust no entiende y normaliza a `null`) conecta.
 			set({
 				preferencia: p === "off" ? "off" : "auto",
 				hidratada: true,

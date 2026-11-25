@@ -17,8 +17,6 @@ type Props = {
     mesaMetaById: Record<number, MesaMetaOut>;
 
     onSelectMesa: (idMesa: string, nombreMesa: string) => void;
-
-    title?: string;
 };
 
 function computeViewToFit(
@@ -96,7 +94,6 @@ export default function ReservaMesaMapModal({
     onChangeSalon,
     mesaMetaById,
     onSelectMesa,
-    title = "SELECCIONAR MESA",
 }: Props) {
     const mapBoxRef = useRef<HTMLDivElement | null>(null);
     const [mapSize, setMapSize] = useState({ width: 900, height: 520 });
@@ -147,7 +144,7 @@ export default function ReservaMesaMapModal({
             >
                 {/* Header */}
                 <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0 truncate text-sm font-extrabold tracking-widest text-fg sm:text-base">{title}</div>
+                    <div className="min-w-0 truncate text-sm font-extrabold tracking-widest text-fg sm:text-base">SELECCIONAR MESA</div>
 
                     <button
                         type="button"

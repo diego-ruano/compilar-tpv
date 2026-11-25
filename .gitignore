@@ -16,7 +16,6 @@ packages/*/pnpm-lock.yaml
 # ── Salidas de build JS ──
 dist/
 dist-ssr/
-.turbo/
 *.tsbuildinfo
 
 # ── Rust / Cargo ──

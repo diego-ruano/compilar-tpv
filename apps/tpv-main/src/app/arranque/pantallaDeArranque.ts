@@ -21,7 +21,7 @@
 //   · SYN-INC-08: un Handy que todavía no sabe si tiene vínculo guardado no es un Handy sin vincular:
 //     mientras lo lee, la pantalla de carga, no el formulario de vincular.
 
-import type { LicenseGateResult_Serialize as LicenseGateResult } from "@tpv/contracts";
+import type { LicenseGateResult } from "@tpv/contracts";
 
 import type { MotivoRechazo } from "../../shared/stores/useMainPresence";
 import type { ModeStateValue } from "../../shared/stores/useMode";

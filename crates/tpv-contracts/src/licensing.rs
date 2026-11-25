@@ -1,8 +1,7 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **licensing / pairing / identidad de
 //! dispositivo**. No SQLite: estado en fichero (`license_state.json`), keyring y HTTP.
 //!
-//! `LicenseLocalState` se unifica aquí: serializa snake_case (lo que escribe el cliente)
-//! y acepta alias camelCase al leer (compat con ficheros antiguos / lecturas de pairing).
+//! `LicenseLocalState` se unifica aquí, en snake_case, igual al escribir que al leer.
 
 use serde::{Deserialize, Serialize};
 /* =========================================================
@@ -14,35 +13,25 @@ use serde::{Deserialize, Serialize};
 /// Nada lee el token de este fichero.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LicenseLocalState {
-    #[serde(alias = "tenantId")]
     pub tenant_id: String,
-    #[serde(alias = "deviceId")]
     pub device_id: String,
     pub status: Option<String>,
     /// Caducidad en texto ISO (informativo para la UI).
-    #[serde(alias = "expiresAt")]
     pub expires_at: Option<String>,
     /// Caducidad absoluta en ms. Es el dato con el que la UI calcula los días restantes del
     /// banner de aviso; lo fija el servidor (firmado) en cada `/status`.
-    #[serde(alias = "expiresAtMs")]
     pub expires_at_ms: Option<i64>,
     /// Plan de la licencia (`standard`). Lo refresca `/status`.
     pub plan: Option<String>,
-    #[serde(alias = "lastServerTimeMs")]
     pub last_server_time_ms: Option<i64>,
-    #[serde(alias = "lastCheckOkMs")]
     pub last_check_ok_ms: Option<i64>,
-    #[serde(alias = "lastCheckAttemptMs")]
     pub last_check_attempt_ms: Option<i64>,
-    #[serde(alias = "activatedAtMs")]
     pub activated_at_ms: i64,
     /// RI-36: tiempo sin conexión ya gastado desde la última comprobación correcta, contado de forma
     /// que atrasar el reloj del equipo no lo devuelva (`tpv_domain::licensing::sumar_tiempo_sin_conexion`).
-    /// `None` en un fichero de antes: cuenta como cero.
-    #[serde(default)]
+    /// `None` cuenta como cero.
     pub offline_consumido_ms: Option<i64>,
     /// RI-36: hora del reloj de pared de la última vez que se contó ese tiempo.
-    #[serde(default)]
     pub marca_tiempo_ms: Option<i64>,
 }
 

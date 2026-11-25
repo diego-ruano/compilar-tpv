@@ -11,14 +11,15 @@ import { cn } from "../lib/cn";
 import IconButton from "./IconButton";
 import Input, { type InputProps } from "./Input";
 
+/** El fichaje admite de 4 a 6 cifras. */
+const MAX_CIFRAS = 6;
+
 type CampoPinProps = Omit<
     InputProps,
     "type" | "value" | "onChange" | "inputMode" | "autoComplete" | "pattern" | "maxLength"
 > & {
     valor: string;
     onCambio: (valor: string) => void;
-    /** Cuántas cifras admite; el fichaje admite de 4 a 6. */
-    maxCifras?: number;
     /** Clases del contenedor (el margen va aquí, para que el ojo quede centrado en el campo). */
     claseContenedor?: string;
 };
@@ -26,7 +27,6 @@ type CampoPinProps = Omit<
 export function CampoPin({
     valor,
     onCambio,
-    maxCifras = 6,
     className,
     claseContenedor,
     disabled,
@@ -44,9 +44,9 @@ export function CampoPin({
                 // Un PIN que se elige, no uno que se recuerda: que el navegador no lo rellene ni
                 // ofrezca guardarlo.
                 autoComplete="new-password"
-                maxLength={maxCifras}
+                maxLength={MAX_CIFRAS}
                 value={valor}
-                onChange={(e) => onCambio(e.target.value.replace(/\D/g, "").slice(0, maxCifras))}
+                onChange={(e) => onCambio(e.target.value.replace(/\D/g, "").slice(0, MAX_CIFRAS))}
                 className={cn("pr-11", className)}
             />
             <IconButton

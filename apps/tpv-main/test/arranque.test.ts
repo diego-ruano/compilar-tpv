@@ -11,7 +11,7 @@
 process.env.TZ = "Europe/Madrid";
 
 import { describe, expect, it } from "vitest";
-import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
+import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
 
 import { activacionCompleta, estadoDelFormulario, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
 import { codigoParaVincular, leerCodigoDeVinculacion } from "../src/app/arranque/emparejamiento";

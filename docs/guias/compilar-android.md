@@ -15,8 +15,9 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
   `tauri-plugin-updater`, `tauri-plugin-sentry` (con el minidump) y `tauri-plugin-single-instance`. En el
   código, sus usos van con `#[cfg(desktop)]` (el job `updater`, los comandos `updater_*`, el minidump).
 - **Sus permisos van en `capabilities/desktop.json`**, con `"platforms": ["linux", "macOS", "windows"]`:
-  en Android un permiso de un plugin que no está compilado rompe el build (`Permission updater:default
-  not found`). Todo permiso de un plugin de escritorio va ahí.
+  en Android un permiso de un plugin que no está compilado rompe el build (`Permission sentry:default
+  not found`). Todo permiso de un plugin de escritorio va ahí. El updater no lleva ninguno: lo usan
+  los comandos `updater_*` desde Rust, y la webview no lo llama.
 - **Y al revés, lo que sólo existe en móvil**: el lector de QR con la cámara
   (`tauri-plugin-barcode-scanner`, para vincular una Handy escaneando el QR de la Main) va en
   `[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]`, se registra con

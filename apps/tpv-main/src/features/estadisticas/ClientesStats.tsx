@@ -50,7 +50,6 @@ function ChartCard({
     subtitle,
     cargando,
     releyendo,
-    emptyText,
     heightClass = "min-h-[320px]",
     children,
 }: {
@@ -60,7 +59,6 @@ function ChartCard({
     cargando?: boolean;
     /** Se relee con los datos de antes en pantalla: se atenúan, no se sustituyen. */
     releyendo?: boolean;
-    emptyText?: string;
     heightClass?: string;
     children: React.ReactNode;
 }) {
@@ -83,10 +81,6 @@ function ChartCard({
 
             <div className={`mt-3 flex-1 min-h-0 overflow-hidden${releyendo ? " opacity-60" : ""}`}>
                 {cargando ? null : children}
-
-                {!cargando && emptyText ? (
-                    <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div>
-                ) : null}
             </div>
         </section>
     );

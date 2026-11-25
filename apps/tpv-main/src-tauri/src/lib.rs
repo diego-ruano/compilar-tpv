@@ -115,12 +115,10 @@ enum ConnectivityMode {
     Off,
 }
 
-/// Lectura tolerante del campo: los `device_config.json` anteriores a SYNC-17 guardan
-/// `"offline"`/`"online"` (el ajuste que se ha eliminado). Un valor desconocido tiene que caer a
-/// `None` —o sea, `Auto`— y NO reventar el parseo: `load_config` hace `unwrap_or_default()`, así
-/// que un error aquí se llevaría por delante también `mode` y `printer_name` (el dispositivo
-/// olvidaría que es la Main). Que `"offline"` pase a `Auto` es justo lo que queremos: el ajuste
-/// desaparece y todo el mundo conecta solo.
+/// Lectura tolerante del campo, que se edita a mano: un valor que no sea `"off"` ni `"auto"` cae a
+/// `None` —o sea, `Auto`— y NO revienta el parseo: `load_config` hace `unwrap_or_default()`, así
+/// que un error aquí se llevaría por delante también `mode` y `printers` (el dispositivo
+/// olvidaría que es la Main).
 fn connectivity_tolerante<'de, D>(d: D) -> Result<Option<ConnectivityMode>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -138,17 +136,11 @@ struct DeviceConfig {
     mode: Option<DeviceMode>,
     #[serde(default, deserialize_with = "connectivity_tolerante")]
     connectivity: Option<ConnectivityMode>,
-    /// Impresora de tickets seleccionada en este dispositivo físico. Es una preferencia LOCAL
-    /// (la impresora está conectada a esta máquina), por eso vive en `device_config.json` y no
-    /// en la BD (que se sincroniza entre dispositivos).
-    ///
-    /// Se conserva como el destino "caja" y sigue leyéndose para no perder la selección de quien
-    /// ya la tenía puesta; lo nuevo va en `printers`.
-    #[serde(default)]
-    printer_name: Option<String>,
-    /// Impresora por DESTINO (`caja`, `cocina`, …). Hoy solo se usa `caja`; `cocina` está
-    /// declarado para que añadir la comanda de cocina no obligue a rehacer el modelo ni a migrar
-    /// la configuración de nadie. Una entrada ausente = ese destino no tiene impresora.
+    /// Impresora de tickets por DESTINO (`caja`, `cocina`, …) en este dispositivo físico. Es una
+    /// preferencia LOCAL (la impresora está conectada a esta máquina), por eso vive en
+    /// `device_config.json` y no en la BD (que se sincroniza entre dispositivos). Hoy solo se usa
+    /// `caja`; `cocina` está declarado para que añadir la comanda de cocina no obligue a rehacer el
+    /// modelo. Una entrada ausente = ese destino no tiene impresora.
     #[serde(default)]
     printers: std::collections::HashMap<String, String>,
     /// Tamaño de la interfaz fijado a mano en este equipo (`1` = 100 %). Ausente = automático,
@@ -1091,8 +1083,8 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     // `init_main_db` devuelve el `Db` ya montado: escritor único serializado + pool de lectura
     // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
-    // SIEMPRE activa (también offline): el outbox es el log de cambios local; se drena a la nube
-    // cuando el modo es "online".
+    // SIEMPRE activa (también sin red): el outbox es el log de cambios local; se drena a la nube
+    // cuando hay conexión.
     let db = tpv_infra_sqlite::connection::init_main_db(
         &app_data_dir,
         negocio_de_la_licencia(&app_data_dir).as_deref(),
@@ -1488,19 +1480,9 @@ fn destino_o_caja(v: Option<String>) -> String {
         .unwrap_or_else(|| DESTINO_CAJA.to_string())
 }
 
-/// Impresora de un destino, con el campo antiguo (`printer_name`) como respaldo de `caja`.
+/// Impresora de un destino (una en blanco es no tener ninguna).
 fn impresora_de(cfg: &DeviceConfig, destino: &str) -> Option<String> {
-    cfg.printers
-        .get(destino)
-        .cloned()
-        .or_else(|| {
-            if destino == DESTINO_CAJA {
-                cfg.printer_name.clone()
-            } else {
-                None
-            }
-        })
-        .filter(|s| !s.trim().is_empty())
+    cfg.printers.get(destino).cloned().filter(|s| !s.trim().is_empty())
 }
 
 /// Devuelve la impresora seleccionada para un destino (o `None`).
@@ -1527,16 +1509,7 @@ fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, 
     if name.is_empty() {
         cfg.printers.remove(&destino);
     } else {
-        cfg.printers.insert(destino.clone(), name.to_string());
-    }
-    // El campo antiguo se mantiene al día para `caja`: si alguien vuelve a una versión anterior,
-    // su impresora sigue estando donde esa versión la busca.
-    if destino == DESTINO_CAJA {
-        cfg.printer_name = if name.is_empty() {
-            None
-        } else {
-            Some(name.to_string())
-        };
+        cfg.printers.insert(destino, name.to_string());
     }
 
     save_config(&dir, &cfg)?;
@@ -2237,7 +2210,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::venta_rapida::vr_delete_linea_if_unpaid,
             commands::venta_rapida::vr_update_nota_detalle,
             commands::venta_rapida::vr_cobrar_fraccionado,
-            commands::venta_rapida::vr_guardar_cobro_pendiente,
             commands::venta_rapida::vr_listar_cobros_pendientes,
             commands::venta_rapida::vr_resolver_cobro_pendiente,
             commands::venta_rapida::vr_cancelar_cobro_pendiente,
@@ -2626,7 +2598,7 @@ pub fn run() {
             // anterior: se arranca sin ella, como con una ilegible, y el siguiente arranque lo repite.
             let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) && !matches!(cambio_de_negocio, Some(Err(_))) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
-                // está SIEMPRE activa (también offline); se drena en "online".
+                // está SIEMPRE activa (también sin red); se drena cuando hay conexión.
                 let abierta = tauri::async_runtime::block_on(async {
                     // AUD-06: con el negocio de la licencia guardada. Si la base es de otro, se
                     // aparta aquí, antes de abrir nada; si no se puede, se arranca sin base.
@@ -2768,15 +2740,12 @@ mod tests_entorno_de_sentry {
 mod tests_impresora_por_destino {
     //! A qué impresora sale cada cosa.
     //!
-    //! La configuración guarda una impresora **por destino** (caja, cocina). El campo antiguo
-    //! `printer_name` sigue existiendo porque las instalaciones que ya estaban lo tienen relleno:
-    //! si dejara de leerse, a esos usuarios les desaparecería la impresora sin tocar nada.
+    //! La configuración guarda una impresora **por destino** (caja, cocina).
 
     use super::*;
 
-    fn config(printers: &[(&str, &str)], antiguo: Option<&str>) -> DeviceConfig {
+    fn config(printers: &[(&str, &str)]) -> DeviceConfig {
         DeviceConfig {
-            printer_name: antiguo.map(|s| s.to_string()),
             printers: printers
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2801,44 +2770,17 @@ mod tests_impresora_por_destino {
 
     #[test]
     fn cada_destino_saca_la_suya() {
-        let cfg = config(&[("caja", "EPSON"), ("cocina", "STAR")], None);
+        let cfg = config(&[("caja", "EPSON"), ("cocina", "STAR")]);
 
         assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("EPSON"));
         assert_eq!(impresora_de(&cfg, "cocina").as_deref(), Some("STAR"));
     }
 
     #[test]
-    fn una_instalacion_antigua_sigue_imprimiendo_por_caja() {
-        // Solo tiene el campo viejo: sin el respaldo, el TPV diría "no hay impresora
-        // seleccionada" en mitad de un servicio, después de una actualización.
-        let cfg = config(&[], Some("EPSON DE SIEMPRE"));
-
-        assert_eq!(
-            impresora_de(&cfg, "caja").as_deref(),
-            Some("EPSON DE SIEMPRE")
-        );
-    }
-
-    #[test]
-    fn el_campo_antiguo_no_se_cuela_en_los_demas_destinos() {
-        // Si la cocina heredara la de caja, la comanda saldría en la barra y nadie la vería.
-        let cfg = config(&[], Some("EPSON"));
-
-        assert_eq!(impresora_de(&cfg, "cocina"), None);
-    }
-
-    #[test]
-    fn lo_nuevo_manda_sobre_lo_viejo() {
-        let cfg = config(&[("caja", "NUEVA")], Some("VIEJA"));
-
-        assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("NUEVA"));
-    }
-
-    #[test]
     fn una_impresora_en_blanco_es_no_tener_impresora() {
         // Guardar "" y tratarlo como un nombre haría que el trabajo se mandara a la nada, sin
         // error visible: el camarero se queda esperando un ticket que no va a salir.
-        let cfg = config(&[("caja", "   ")], None);
+        let cfg = config(&[("caja", "   ")]);
 
         assert_eq!(impresora_de(&cfg, "caja"), None);
     }

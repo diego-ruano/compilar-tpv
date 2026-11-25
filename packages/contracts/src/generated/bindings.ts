@@ -1568,16 +1568,9 @@ export type LicenseActivateInput = {
  *  `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
  *  es `"activated"` con el estado ya guardado.
  */
-export type LicenseActivateOutcome = LicenseActivateOutcome_Serialize | LicenseActivateOutcome_Deserialize;
-
-/**
- *  Resultado de `license_activate`. Si la licencia ya estaba en otro equipo, `outcome` es
- *  `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
- *  es `"activated"` con el estado ya guardado.
- */
-export type LicenseActivateOutcome_Deserialize = {
+export type LicenseActivateOutcome = {
 	outcome: string,
-	state: LicenseLocalState_Deserialize | null,
+	state: LicenseLocalState | null,
 	email_hint: string | null,
 	/**  La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube. */
 	cambio_de_equipo?: boolean,
@@ -1596,31 +1589,6 @@ export type LicenseActivateOutcome_Deserialize = {
 };
 
 /**
- *  Resultado de `license_activate`. Si la licencia ya estaba en otro equipo, `outcome` es
- *  `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
- *  es `"activated"` con el estado ya guardado.
- */
-export type LicenseActivateOutcome_Serialize = {
-	outcome: string,
-	state: LicenseLocalState_Serialize | null,
-	email_hint: string | null,
-	/**  La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube. */
-	cambio_de_equipo: boolean,
-	/**
-	 *  REV-13 · El código ha sumado su tiempo a la licencia que este equipo ya tenía, en vez de
-	 *  estrenar un negocio nuevo. La pantalla lo dice con otras palabras («se han añadido N
-	 *  meses») y no hay nada más que hacer.
-	 */
-	tiempo_sumado: boolean,
-	/**
-	 *  AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
-	 *  guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
-	 *  avisa y no sigue.
-	 */
-	reinicia: boolean,
-};
-
-/**
  *  Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la
  *  licencia. El `device_id` lo pone el backend (es el de este equipo).
  */
@@ -1628,25 +1596,10 @@ export type LicenseDeviceChangeInput = {
 	activation_key: string,
 };
 
-export type LicenseGateResult = LicenseGateResult_Serialize | LicenseGateResult_Deserialize;
-
-export type LicenseGateResult_Deserialize = {
+export type LicenseGateResult = {
 	allowed: boolean,
 	reason: string,
-	state: LicenseLocalState_Deserialize | null,
-	/**
-	 *  Por qué se quedó este equipo sin licencia, cuando fue el servidor quien la rechazó
-	 *  (`revoked`, `device_replaced`, `license_not_found`…). Sólo viene si NO hay `state`: es lo
-	 *  que permite que la pantalla de activación explique por qué se está ahí en vez de parecer un
-	 *  primer arranque.
-	 */
-	last_rejection: string | null,
-};
-
-export type LicenseGateResult_Serialize = {
-	allowed: boolean,
-	reason: string,
-	state: LicenseLocalState_Serialize | null,
+	state: LicenseLocalState | null,
 	/**
 	 *  Por qué se quedó este equipo sin licencia, cuando fue el servidor quien la rechazó
 	 *  (`revoked`, `device_replaced`, `license_not_found`…). Sólo viene si NO hay `state`: es lo
@@ -1661,75 +1614,7 @@ export type LicenseGateResult_Serialize = {
  *  NO está aquí: es una credencial y vive solo en el keyring del SO (ver `device::*_license_token`).
  *  Nada lee el token de este fichero.
  */
-export type LicenseLocalState = LicenseLocalState_Serialize | LicenseLocalState_Deserialize;
-
-/**
- *  Estado local NO sensible de la licencia (fichero `license_state.json`). El **token** de sesión
- *  NO está aquí: es una credencial y vive solo en el keyring del SO (ver `device::*_license_token`).
- *  Nada lee el token de este fichero.
- */
-export type LicenseLocalState_Deserialize = {
-	status: string | null,
-	/**  Plan de la licencia (`standard`). Lo refresca `/status`. */
-	plan: string | null,
-	/**
-	 *  RI-36: tiempo sin conexión ya gastado desde la última comprobación correcta, contado de forma
-	 *  que atrasar el reloj del equipo no lo devuelva (`tpv_domain::licensing::sumar_tiempo_sin_conexion`).
-	 *  `None` en un fichero de antes: cuenta como cero.
-	 */
-	offline_consumido_ms?: number | null,
-	/**  RI-36: hora del reloj de pared de la última vez que se contó ese tiempo. */
-	marca_tiempo_ms?: number | null,
-} & {
-	tenant_id: string,
-} | {
-	tenantId: string,
-} & {
-	device_id: string,
-} | {
-	deviceId: string,
-} & {
-	/**  Caducidad en texto ISO (informativo para la UI). */
-	expires_at: string | null,
-} | {
-	/**  Caducidad en texto ISO (informativo para la UI). */
-	expiresAt: string | null,
-} & {
-	/**
-	 *  Caducidad absoluta en ms. Es el dato con el que la UI calcula los días restantes del
-	 *  banner de aviso; lo fija el servidor (firmado) en cada `/status`.
-	 */
-	expires_at_ms: number | null,
-} | {
-	/**
-	 *  Caducidad absoluta en ms. Es el dato con el que la UI calcula los días restantes del
-	 *  banner de aviso; lo fija el servidor (firmado) en cada `/status`.
-	 */
-	expiresAtMs: number | null,
-} & {
-	last_server_time_ms: number | null,
-} | {
-	lastServerTimeMs: number | null,
-} & {
-	last_check_ok_ms: number | null,
-} | {
-	lastCheckOkMs: number | null,
-} & {
-	last_check_attempt_ms: number | null,
-} | {
-	lastCheckAttemptMs: number | null,
-} & {
-	activated_at_ms: number,
-} | {
-	activatedAtMs: number,
-};
-
-/**
- *  Estado local NO sensible de la licencia (fichero `license_state.json`). El **token** de sesión
- *  NO está aquí: es una credencial y vive solo en el keyring del SO (ver `device::*_license_token`).
- *  Nada lee el token de este fichero.
- */
-export type LicenseLocalState_Serialize = {
+export type LicenseLocalState = {
 	tenant_id: string,
 	device_id: string,
 	status: string | null,
@@ -1749,7 +1634,7 @@ export type LicenseLocalState_Serialize = {
 	/**
 	 *  RI-36: tiempo sin conexión ya gastado desde la última comprobación correcta, contado de forma
 	 *  que atrasar el reloj del equipo no lo devuelva (`tpv_domain::licensing::sumar_tiempo_sin_conexion`).
-	 *  `None` en un fichero de antes: cuenta como cero.
+	 *  `None` cuenta como cero.
 	 */
 	offline_consumido_ms: number | null,
 	/**  RI-36: hora del reloj de pared de la última vez que se contó ese tiempo. */

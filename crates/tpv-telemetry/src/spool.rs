@@ -41,7 +41,7 @@ pub(crate) struct Spool {
 }
 
 impl Spool {
-    /// Único inventario. Adopta también los temporales de versiones anteriores.
+    /// Único inventario. Adopta también el temporal (`.jsonl.tmp`) que dejó un proceso interrumpido.
     pub(crate) fn open(dir: &Path) -> io::Result<Self> {
         fs::create_dir_all(dir)?;
         let mut entries = fs::read_dir(dir)?.collect::<io::Result<Vec<_>>>()?;

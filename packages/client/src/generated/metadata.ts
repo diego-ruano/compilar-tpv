@@ -184,7 +184,6 @@ export const nombresComandos = {
     "vr_delete_linea_if_unpaid": "vrDeleteLineaIfUnpaid",
     "vr_update_nota_detalle": "vrUpdateNotaDetalle",
     "vr_cobrar_fraccionado": "vrCobrarFraccionado",
-    "vr_guardar_cobro_pendiente": "vrGuardarCobroPendiente",
     "vr_listar_cobros_pendientes": "vrListarCobrosPendientes",
     "vr_resolver_cobro_pendiente": "vrResolverCobroPendiente",
     "vr_cancelar_cobro_pendiente": "vrCancelarCobroPendiente",
@@ -427,7 +426,6 @@ type Argumentos = {
     "vr_delete_linea_if_unpaid": { args: Parameters<Comandos["vrDeleteLineaIfUnpaid"]>[0] };
     "vr_update_nota_detalle": { args: Parameters<Comandos["vrUpdateNotaDetalle"]>[0] };
     "vr_cobrar_fraccionado": { args: Parameters<Comandos["vrCobrarFraccionado"]>[0] };
-    "vr_guardar_cobro_pendiente": { args: Parameters<Comandos["vrGuardarCobroPendiente"]>[0] };
     "vr_listar_cobros_pendientes": {  };
     "vr_resolver_cobro_pendiente": { args: Parameters<Comandos["vrResolverCobroPendiente"]>[0] };
     "vr_cancelar_cobro_pendiente": { idPago: Parameters<Comandos["vrCancelarCobroPendiente"]>[0] };

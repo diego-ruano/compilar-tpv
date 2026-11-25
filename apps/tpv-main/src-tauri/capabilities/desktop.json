@@ -1,11 +1,10 @@
 {
     "$schema": "../gen/schemas/desktop-schema.json",
     "identifier": "desktop",
-    "description": "Permisos solo de escritorio: updater y sentry son plugins desktop-only (no existen en Android/iOS).",
+    "description": "Permisos solo de escritorio: sentry es un plugin desktop-only (no existe en Android/iOS). El updater no necesita ninguno: lo usan los comandos de Rust, no la webview.",
     "platforms": ["linux", "macOS", "windows"],
     "windows": ["main"],
     "permissions": [
-        "updater:default",
         "sentry:default"
     ]
 }

@@ -118,9 +118,6 @@ fn equipo(modo: Option<DeviceMode>, dir: Option<PathBuf>) -> Value {
     let cfg = dir.map(|d| crate::load_config(&d)).unwrap_or_default();
     // De las impresoras, sólo qué destinos tienen una: su nombre lo pone quien la instala.
     let mut impresoras: Vec<&str> = cfg.printers.keys().map(String::as_str).collect();
-    if cfg.printer_name.is_some() && !impresoras.contains(&"caja") {
-        impresoras.push("caja");
-    }
     impresoras.sort_unstable();
     json!({
         "modo": match modo {

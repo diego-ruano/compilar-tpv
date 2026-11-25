@@ -179,23 +179,10 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         Ok(true)
     }
 
-    /// El worker rechaza el cobro desde un Handy (solo cobra la Main, que es la que tiene
-    /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un número. Se
-    /// mantiene el camino por si algún día se retoma.
-    async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String> {
-        let body = json!({
-            "id_comanda": data.id_comanda,
-            "metodo": data.metodo,
-            "importe_total": data.importe_total,
-            "id_usuario_cobrador": data.id_usuario_cobrador,
-            "id_trabajador_cobrador": data.id_trabajador_cobrador,
-            "detalles": data.detalles,
-        });
-        let _: JsonValue = self
-            .client
-            .post_json("/v1/venta-rapida/cobrar-fraccionado", &body)
-            .await?;
-        Ok(String::new())
+    /// Cobra sólo la Main, que es la que tiene impresora y cajón; el worker lo veta a una Handy
+    /// (`soloLaMainCobra`). Aquí se dice lo mismo sin salir a la red (M-083).
+    async fn cobrar_fraccionado(&self, _data: CobroFraccionado) -> AppResult<String> {
+        Err(AppError::conflict(crate::mesas::COBRO_SOLO_EN_MAIN))
     }
 
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool> {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands, toAppError } from "@tpv/client";
 import { useMode } from "../../shared/stores/useMode";
-import { importarCobrosLegados } from "./cobrosLegados";
 import type { CobroPendienteDto } from "@tpv/contracts";
 
 export function useCobrosPendientes() {
@@ -18,11 +17,7 @@ export function useCobrosPendientes() {
     }, [main]);
     useEffect(() => {
         montado.current = true;
-        if (main) void (async () => {
-            try { await importarCobrosLegados(); }
-            catch (e) { if (montado.current) setError(toAppError(e).message); }
-            await recargar();
-        })();
+        if (main) void recargar();
         return () => { montado.current = false; };
     }, [main, recargar]);
     return { pendientes, recargar, error, main };

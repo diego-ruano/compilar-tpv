@@ -11,7 +11,7 @@ import { commands } from "@tpv/client";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { toAppError } from "@tpv/client";
-import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
+import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
 
 import type { ModeStateValue } from "../../shared/stores/useMode";
 
