@@ -25,7 +25,7 @@ import type {
 
 import { deCentimos } from "../../shared/lib/dinero";
 
-export type { CursorCuentas, EntradaDto, PaginaEntradas, PaginaSalidas, SalidaDto };
+export type { CursorCuentas, EntradaDto, SalidaDto };
 
 /** Un cobro anulado NO se borra (CUENTA-07): sale en la lista, marcado. */
 export function esAnulado(e: EntradaDto): boolean {

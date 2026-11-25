@@ -13,7 +13,6 @@ import { commands } from "@tpv/client";
 
 import type {
     CambioIngredienteInput,
-    CategoriaVendibleOut,
     ComandaConLineasOut,
     DestinatarioInput,
     KitchenRow,
@@ -27,7 +26,7 @@ import type {
 
 import type { Salon } from "./types";
 
-export type { CategoriaVendibleOut, KitchenRow, MesaLineaComandaRow, MesaMetaOut, ProductoVendibleOut };
+export type { KitchenRow };
 
 // Acepta el id crudo (UUID) o la clave de UI `db-mesa-<uuid>`. Devuelve el id o null.
 function parseAnyMesaId(k: string): string | null {

@@ -13,7 +13,7 @@ import type {
 type NumerosDefinidos<T> = { [K in keyof T]: number extends T[K] ? NonNullable<T[K]> : T[K] };
 export type BusinessSettings = NumerosDefinidos<NegocioDto>;
 export type TicketSettings = NumerosDefinidos<TicketDto>;
-export type { ContactSettings, BusinessSettingsPatch, TicketSettingsPatch };
+export type { ContactSettings };
 
 export async function configGetBusinessSettings(): Promise<BusinessSettings> {
     const datos = await commands.configGetBusinessSettings();
