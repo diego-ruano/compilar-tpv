@@ -46,6 +46,14 @@
 // marca, y repetir la orden en el primer caso volvería otra vez y se llevaría lo escrito desde
 // entonces. Si R2 no la recibe, la vuelta sigue: ya está pedida, y lo que falta es la constancia.
 //
+// **Lo que la plataforma no acepta vuelve como valor** (`central_vuelta_rechazada`, con lo que ha
+// contestado en `detalle`): el marcador de un instante, el de ahora o la propia vuelta pueden fallar
+// (un marcador que no es de este objeto, uno caducado, un fallo suyo). Entonces la vuelta no se ha
+// pedido: la marca vuelve a como estaba, y la central con ella, y lo que se haya subido a R2 no es de
+// ninguna vuelta (no lleva `.pedida`). Que un error al pedirla quiere decir que la plataforma no la
+// tiene es lo que dice el error: su documentación no dice otra cosa. Lanzarlo haría que quien la
+// pidió no supiera si se ha pedido, y deshiciera lo que no ha pasado.
+//
 // **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
 // plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
 // preparaciones cruzadas no pueden dejar la central abierta con una vuelta pedida, ni pedir la suya
@@ -96,6 +104,17 @@ function laQueSigueEnPie(actual: MarcaDeVuelta | null): MarcaDeVuelta | null {
 const otraALaVez = (detalle: string): FalloDeLaCentral => ({ ok: false, error: "central_vuelta_a_la_vez", detalle });
 
 /**
+ * Lo que se contesta cuando la plataforma no acepta la vuelta, una vez la marca ha vuelto a como
+ * estaba (ver la cabecera): en local, que no hay vuelta a un instante; si no, lo que ha contestado.
+ * Se avisa a Sentry: una vuelta que la plataforma no toma es una emergencia que no sale.
+ */
+function noLaAcepta(error: unknown): FalloDeLaCentral {
+	if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
+	capturarError(error, "central.vuelta");
+	return { ok: false, error: "central_vuelta_rechazada", detalle: String((error as Error)?.message ?? error) };
+}
+
+/**
  * La primera mitad de la vuelta (ver la cabecera), esté como esté la central: sana, con la copia de
  * antes; sin atender, sin ella. Una vuelta ya preparada se puede volver a preparar, a otro destino.
  */
@@ -144,8 +163,7 @@ export async function prepararVueltaDeLaCentral(
 		marcador = "marcador" in destino ? destino.marcador : await instantes.marcadorDe(destino.instanteMs);
 	} catch (error) {
 		reabrir();
-		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
-		throw error;
+		return noLaAcepta(error);
 	}
 	if (!esMia()) return sinLaMarca();
 
@@ -157,8 +175,7 @@ export async function prepararVueltaDeLaCentral(
 		deshacer = await instantes.marcadorActual();
 	} catch (error) {
 		reabrir();
-		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
-		throw error;
+		return noLaAcepta(error);
 	}
 	if (!esMia()) return sinLaMarca();
 
@@ -182,8 +199,7 @@ export async function prepararVueltaDeLaCentral(
 		await instantes.restaurarAlReiniciar(marcador);
 	} catch (error) {
 		reabrir();
-		if (esSinVueltaAUnInstante(error)) return { ok: false, error: "central_vuelta_no_disponible" };
-		throw error;
+		return noLaAcepta(error);
 	}
 	// Que la plataforma ya la tiene, al lado de con qué se deshace (ver la cabecera).
 	try {

@@ -475,6 +475,43 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 		expect(plataforma.llamadas.filter((l) => l.startsWith("restaurar:"))).toEqual([`restaurar:${objetivo}`]);
 	});
 
+	it("si la plataforma no acepta la vuelta, lo dice con su código, no como una llamada que no vuelve: no se ha pedido, la central atiende, y lo que subió a R2 no consta como pedido", async () => {
+		const alta = (id: string) => `INSERT INTO tenants (tenant_id, created_at_ms, updated_at_ms) VALUES ('${id}', 1, 1);`;
+		const central = await centralDePrueba();
+		await filasDe(central, alta("t-1"));
+		// La plataforma de mentira no acepta un marcador que no es de este objeto, aunque tenga la forma.
+		const plataforma = await conPlataformaQueVuelve(central);
+		const ajeno = "0000007b-0000b26e";
+		const deAntesDeVolver = async () => (await pedir(entornoCon(central), "GET", "/copias")).body.copias.filter((c: any) => /antes-de-volver-/.test(c.clave));
+		const antes = new Set((await deAntesDeVolver()).map((c: any) => c.clave));
+		const log = vi.spyOn(console, "log");
+		const error = vi.spyOn(console, "error");
+
+		const r = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: ajeno }) });
+		expect(r).toEqual({
+			status: 422,
+			body: {
+				ok: false,
+				error: "central_vuelta_rechazada",
+				message: expect.stringMatching(/^La plataforma no ha aceptado la vuelta: no se ha pedido/),
+				detalle: "Ese marcador no es de este objeto",
+			},
+		});
+		// Al rastro, el código: ni `sin_respuesta` ni lo que ha dicho la plataforma.
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "volver", resultado: "empieza", destino: ajeno },
+			{ accion: "volver", resultado: "central_vuelta_rechazada", destino: ajeno },
+		]);
+		expect(error).not.toHaveBeenCalled();
+		expect(plataforma.llamadas).toEqual(["actual", `restaurar:${ajeno}`]);
+
+		// La central atiende; la copia de antes que se subió no consta como pedida.
+		await central.db.execute({ sql: alta("t-2") });
+		expect(await filasDe(central, "SELECT tenant_id FROM tenants ORDER BY tenant_id;")).toEqual([{ tenant_id: "t-1" }, { tenant_id: "t-2" }]);
+		const nuevas = (await deAntesDeVolver()).filter((c: any) => !antes.has(c.clave));
+		expect(nuevas).toEqual([expect.objectContaining({ clave: expect.stringMatching(/\.sql\.gz$/), marcador: expect.any(String), pedida: null })]);
+	});
+
 	it("si la central vuelve pero no atiende, no lo da por bueno: dice por qué, con lo necesario para deshacerlo", async () => {
 		const central = await centralDePrueba();
 		// Vuelve a un instante de en medio de una restauración desde una copia: con su marca.

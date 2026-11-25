@@ -256,6 +256,16 @@
       "code": "internal"
     }
   },
+  "vuelta-rechazada": {
+    "status": 422,
+    "cuerpo": {
+      "ok": false,
+      "error": "central_vuelta_rechazada",
+      "message": "La plataforma no ha aceptado la vuelta: no se ha pedido, y la central se queda como estaba. Lo que se haya subido a R2 para ella (en pnpm central:copias, sin hora en pedida) no es de ninguna vuelta: no hay nada que deshacer.",
+      "detalle": "La plataforma no acepta ese marcador",
+      "code": "validation"
+    }
+  },
   "token-rechazado": {
     "status": 401,
     "cuerpo": {

@@ -142,13 +142,17 @@ export const MARCADORES = {
 	deshacer: "0000007c-ffffffff-0000153a-2e50a9dd59d5fd7ee740ffd15ef5db8d",
 } as const;
 
+/** Lo que contesta el doble de la plataforma cuando una llamada falla (`fallaAl`). */
+export const RECHAZO_DE_LA_PLATAFORMA = "La plataforma no acepta ese marcador";
+
 /**
  * El doble de la vuelta a un instante (`Instantes`, que en local no existe), dentro del objeto. Apunta
  * en `llamadas` lo que le piden. Al «reiniciar», el objeto queda como diga `alReiniciar`: por omisión,
  * vuelto y sin la marca de la vuelta (de después del instante, o quitada al arrancar). Con
  * `alRestaurar`, dejar preparada la vuelta espera a lo que devuelva (para retenerla a mitad). El
  * marcador de ahora (con el que se deshace) es siempre `MARCADORES.actual`, salvo que `marcadorActual`
- * dé otro: para distinguir dos preparaciones.
+ * dé otro: para distinguir dos preparaciones. Con `fallaAl`, esa llamada a la plataforma falla con
+ * `RECHAZO_DE_LA_PLATAFORMA`, como cuando no acepta un marcador.
  */
 export async function conDobleDeInstantes(
 	central: Pick<CentralDePrueba, "stub">,
@@ -157,15 +161,20 @@ export async function conDobleDeInstantes(
 		alReiniciar?: (state: DurableObjectState) => void;
 		alRestaurar?: (marcador: string) => Promise<void> | void;
 		marcadorActual?: () => string;
+		fallaAl?: "marcadorDe" | "marcadorActual" | "restaurarAlReiniciar";
 	} = {},
 ): Promise<void> {
-	const { alReiniciar = vuelto, alRestaurar, marcadorActual = () => MARCADORES.actual } = opciones;
+	const { alReiniciar = vuelto, alRestaurar, marcadorActual = () => MARCADORES.actual, fallaAl } = opciones;
+	const siFalla = (metodo: typeof fallaAl) => {
+		if (metodo === fallaAl) throw new Error(RECHAZO_DE_LA_PLATAFORMA);
+	};
 	await enElObjeto(central, (state, objeto) => {
 		(objeto as { instantes: unknown }).instantes = {
-			marcadorActual: async () => (llamadas.push("actual"), marcadorActual()),
-			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), MARCADORES.destino),
+			marcadorActual: async () => (llamadas.push("actual"), siFalla("marcadorActual"), marcadorActual()),
+			marcadorDe: async (ms: number) => (llamadas.push(`de:${typeof ms}`), siFalla("marcadorDe"), MARCADORES.destino),
 			restaurarAlReiniciar: async (m: string) => {
 				llamadas.push(`restaurar:${m}`);
+				siFalla("restaurarAlReiniciar");
 				await alRestaurar?.(m);
 				return MARCADORES.deshacer;
 			},

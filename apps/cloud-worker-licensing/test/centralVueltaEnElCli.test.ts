@@ -4,7 +4,8 @@
 // de la central a un instante (`POST /v1/admin/central/volver`) en cada desenlace que el CLI tiene
 // que saber leer: la vuelta hecha; la que ha vuelto pero no atiende, que sale como 503 `external` por
 // `completarErrores`; la que no se ha aplicado; la llamada al objeto que no vuelve (el 500 del
-// `onError`); la que no se hace porque la copia de antes no llega a R2; y los dos rechazos del token.
+// `onError`); la que no se hace porque la copia de antes no llega a R2; la que la plataforma no
+// acepta; y los dos rechazos del token.
 // Y otra orden con la central sin atender (copiar), que es el 503 `external` sin nada que deshacer; el
 // estado de una central con la vuelta preparada y sin aplicar, del que el CLI saca la orden que la
 // aplica; aplicarla con esa orden (`reiniciar`), y otra vez, ya aplicada; la lista de las copias con
@@ -111,6 +112,10 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 	await conDobleDeInstantes(sinCopia, []);
 	await conR2Caido(sinCopia);
 
+	// La plataforma no acepta la vuelta: lo dice la ruta, con su código.
+	const rechazada = await centralDePrueba();
+	await conDobleDeInstantes(rechazada, [], { fallaAl: "restaurarAlReiniciar" });
+
 	// Otra orden con la central sin atender: el 503 `external` que no trae con qué deshacer nada.
 	const aMedias = await centralDePrueba();
 	await runInDurableObject(env.BaseCentral.get(aMedias.stub.id), (_o, state) =>
@@ -157,6 +162,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"aplicar-ya-aplicada": await pedir("POST", "/volver", entornoCon(sinAplicar), { reiniciar: MARCADORES.actual }),
 		"vuelta-sin-respuesta": await volver(entornoCon(sinRespuesta)),
 		"vuelta-sin-copia-de-antes": await volver(entornoCon(sinCopia)),
+		"vuelta-rechazada": await volver(entornoCon(rechazada)),
 		"token-rechazado": await volver(entornoCon(hecha), "otro-token"),
 		"sin-token-en-el-worker": await volver(sinElTokenDelWorker),
 		"copiar-a-medias": await pedir("POST", "/copiar-ahora", entornoCon(aMedias)),
@@ -184,6 +190,7 @@ it("lo que contesta la aplicación a la vuelta, en cada desenlace, es lo que sir
 		"aplicar-ya-aplicada": { status: 409, cuerpo: { ok: false, error: "central_sin_vuelta_preparada" } },
 		"vuelta-sin-respuesta": { status: 500, cuerpo: { ok: false, error: "internal_error" } },
 		"vuelta-sin-copia-de-antes": { status: 500, cuerpo: { ok: false, error: "central_copia_fallida" } },
+		"vuelta-rechazada": { status: 422, cuerpo: { ok: false, error: "central_vuelta_rechazada", detalle: expect.any(String) } },
 		"token-rechazado": { status: 401 },
 		"sin-token-en-el-worker": { status: 503, cuerpo: { error: "admin_disabled" } },
 		"copiar-a-medias": { status: 503, cuerpo: { ok: false, code: "external", error: "central_restauracion_a_medias" } },

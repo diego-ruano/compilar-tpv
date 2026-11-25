@@ -82,6 +82,8 @@ const QUE_PASA: Partial<Record<CodigoDeLaCentral | CodigoDeLaVuelta, string>> = 
 		"Ya no hay ninguna vuelta preparada con ese marcador: o se ha aplicado (la central se ha reiniciado desde entonces), o no llegó a pedirse. No se ha reiniciado nada: mira cómo está con pnpm central:estado.",
 	central_instante_fuera_de_plazo: "Sólo se puede volver a un instante pasado de los últimos 30 días.",
 	central_vuelta_no_disponible: "Este despliegue no puede devolver un objeto a un instante (en local no existe).",
+	central_vuelta_rechazada:
+		"La plataforma no ha aceptado la vuelta: no se ha pedido, y la central se queda como estaba. Lo que se haya subido a R2 para ella (en pnpm central:copias, sin hora en pedida) no es de ninguna vuelta: no hay nada que deshacer.",
 	central_copia_fallida: "La copia no ha llegado a R2, y no se ha hecho nada. Al volver a un instante, sin la copia (o, con la central sin atender, sin su marcador) no se pide la vuelta.",
 	central_vuelta_sin_comprobar: `La vuelta está preparada y la central se ha reiniciado, pero no contesta todavía: mira cómo está con pnpm central:estado. ${SI_SE_PIERDE_EL_MARCADOR}`,
 	central_vuelta_sin_aplicar: `La vuelta está preparada pero la central no se ha reiniciado, y sigue cerrada. Se aplica con pnpm central:volver -- --reiniciar <deshacer> --si, con el deshacer de esta respuesta: sólo reinicia la central si esta vuelta sigue preparada, y si ya se ha aplicado, no hace nada. No repitas la orden de la vuelta: si la central se ha reiniciado entretanto, ya ha vuelto, y volvería otra vez. ${SI_SE_PIERDE_EL_MARCADOR}`,

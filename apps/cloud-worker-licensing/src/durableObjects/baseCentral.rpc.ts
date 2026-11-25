@@ -59,7 +59,12 @@ export type CodigoDeLaCentral =
 	/** Volver a un instante del futuro o de hace más de 30 días. */
 	| "central_instante_fuera_de_plazo"
 	/** La plataforma no devuelve objetos a un instante (en local no existe). */
-	| "central_vuelta_no_disponible";
+	| "central_vuelta_no_disponible"
+	/**
+	 * La plataforma no ha aceptado la vuelta (el marcador del instante, el de ahora o la propia
+	 * vuelta): no se ha pedido, y la central se queda como estaba. El detalle dice qué ha contestado.
+	 */
+	| "central_vuelta_rechazada";
 
 export type FalloDeLaCentral = { ok: false; error: CodigoDeLaCentral; detalle?: string };
 

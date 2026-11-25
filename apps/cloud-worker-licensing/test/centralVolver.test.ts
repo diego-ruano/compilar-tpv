@@ -27,6 +27,7 @@ import {
 	conR2Caido,
 	filasDe,
 	MARCADORES,
+	RECHAZO_DE_LA_PLATAFORMA,
 	type CentralDePrueba,
 } from "./helpers/central";
 
@@ -310,6 +311,44 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		expect(await codigoDe(central.db.execute("SELECT 1;"))).toBe("central_vuelta_en_curso");
 		expect((await central.stub.estado()).enCurso.vuelta).toEqual(primera);
 		expect(primera).toMatchObject({ destino: "m-primera" });
+	});
+});
+
+describe("lo que la plataforma no acepta vuelve como valor: la vuelta no se ha pedido", () => {
+	const deAntesDeVolver = async () => (await bucket().list({ prefix: "base-central/antes-de-volver-" })).objects.map((o) => o.key);
+
+	it.each([
+		["al sacar el marcador del instante", "marcadorDe"],
+		["al sacar el de ahora", "marcadorActual"],
+		["al pedirle la vuelta", "restaurarAlReiniciar"],
+	] as const)("si no la acepta %s, contesta central_vuelta_rechazada con lo que ha dicho; la marca se va, la central atiende y nada consta como pedido", async (_cuando, fallaAl) => {
+		const central = await sembrada();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas, { fallaAl });
+		const antes = new Set(await deAntesDeVolver());
+
+		expect(await central.stub.prepararVuelta({ instanteMs: Date.now() - HORA })).toEqual({
+			ok: false,
+			error: "central_vuelta_rechazada",
+			detalle: RECHAZO_DE_LA_PLATAFORMA,
+		});
+		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
+		expect((await central.db.execute("SELECT COUNT(*) AS n FROM tenants;")).rows[0].n).toBe(1);
+		// Sólo al pedirle la vuelta hay ya copia de antes; constancia de que se pidió, ninguna.
+		const nuevas = (await deAntesDeVolver()).filter((clave) => !antes.has(clave));
+		expect(nuevas).toEqual(fallaAl === "restaurarAlReiniciar" ? [expect.stringMatching(/\.sql\.gz$/)] : []);
+	});
+
+	it("con otra vuelta ya preparada, la que no acepta deja en pie la de antes: la central sigue cerrada", async () => {
+		const central = await sembrada();
+		await conDobleDeInstantes(central, []);
+		expect((await central.stub.prepararVuelta({ marcador: "m-primera" })).ok).toBe(true);
+		const primera = (await central.stub.estado()).enCurso.vuelta;
+		await conDobleDeInstantes(central, [], { fallaAl: "restaurarAlReiniciar" });
+
+		expect(await central.stub.prepararVuelta({ marcador: "m-segunda" })).toMatchObject({ ok: false, error: "central_vuelta_rechazada" });
+		expect((await central.stub.estado()).enCurso.vuelta).toEqual(primera);
+		expect(await codigoDe(central.db.execute("SELECT 1;"))).toBe("central_vuelta_en_curso");
 	});
 });
 

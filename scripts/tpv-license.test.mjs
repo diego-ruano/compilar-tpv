@@ -221,6 +221,15 @@ test("central:copias enseña el marcador de la copia de antes y cuándo se pidi�
 	});
 });
 
+test("la vuelta que la plataforma no acepta dice por qué y que no se ha pedido: no es «no se sabe», y no hay nada que deshacer", async () => {
+	const respuesta = RESPUESTAS["vuelta-rechazada"];
+	const r = await volverCon(enJson(respuesta));
+	assert.equal(r.codigo, 1);
+	assert.ok(r.salida.includes(`✖ 422: central_vuelta_rechazada — ${respuesta.cuerpo.message}`), r.salida);
+	assert.ok(r.salida.includes(`Motivo: ${respuesta.cuerpo.detalle}`), r.salida);
+	assert.doesNotMatch(r.salida, /No se sabe|Para deshacerla|Para aplicarla|--instante|--marcador/);
+});
+
 for (const [nombre, aviso] of [
 	["vuelta-sin-copia-de-antes", "✖ 500: central_copia_fallida — La copia no ha llegado a R2, y no se ha hecho nada."],
 	["token-rechazado", "✖ Token rechazado. ¿ADMIN_API_TOKEN es el correcto?"],
