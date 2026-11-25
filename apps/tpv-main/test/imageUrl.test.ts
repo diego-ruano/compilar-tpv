@@ -6,7 +6,7 @@ import { limpiarCacheImagenes, resolveImageUrl } from "../src/shared/lib/imageUr
 import { useMode } from "../src/shared/stores/useMode";
 // OBS-06: las rutas de imagen de la app llevan un UUID por nombre.
 const MISMA = "images/productos/0190f3a1-7b2c-4d4e-8f00-123456789abc.png";
-const LOGO = "images/logo/0190f3a1-7b2c-4d4e-8f00-0000000000aa.webp";
+const LOGO = "images/logo/0190f3a1-7b2c-4d4e-8f00-0000000000aa.png";
 const P = "images/productos/0190f3a1-7b2c-4d4e-8f00-0000000000bb.jpg";
 /** INFRA-03: lo que contesta `handy_url_imagenes` (Rust, sobre `CLOUD_API_BASE`) para un negocio. */
 const WORKER = "https://tpv-api.altarialights.workers.dev";

@@ -67,7 +67,7 @@ async function baseDeLaHandy(): Promise<string> {
  * carpeta en minúsculas, y el UUID y la extensión en cualquier caja.
  */
 const RUTA_DE_IMAGEN =
-  /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG]|[wW][eE][bB][pP])$/;
+  /^images\/(productos|categorias|proveedores|alergenos|logo)\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.([jJ][pP][eE]?[gG]|[pP][nN][gG])$/;
 
 /**
  * AUD-31: un icono de alérgeno de la propia app (`public/alergenos/`), la única imagen que no es una

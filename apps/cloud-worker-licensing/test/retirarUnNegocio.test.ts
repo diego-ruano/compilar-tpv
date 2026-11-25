@@ -153,7 +153,7 @@ describe("las imágenes de un negocio", () => {
 		const claves = [
 			"neg-1/images/productos/a.jpg",
 			"neg-1/images/logo/logo.png",
-			"neg-1/images/categorias/b.webp",
+			"neg-1/images/categorias/b.png",
 			// El id de otro negocio empieza igual: su carpeta es otra.
 			"neg-10/images/productos/c.jpg",
 			"neg-1x/images/productos/d.jpg",

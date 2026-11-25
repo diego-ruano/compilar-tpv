@@ -373,7 +373,6 @@ fn content_type_for(rel_path: &str) -> &'static str {
         .as_deref()
     {
         Some("png") => "image/png",
-        Some("webp") => "image/webp",
         _ => "image/jpeg",
     }
 }

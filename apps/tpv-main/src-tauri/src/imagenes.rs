@@ -76,7 +76,7 @@ fn con_forma_de_imagen(rel: &str) -> bool {
     if matches!(dispositivo.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (dispositivo.len() == 4 && (dispositivo.starts_with("COM") || dispositivo.starts_with("LPT"))
             && dispositivo.as_bytes()[3].is_ascii_digit()) { return false; }
-    matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png" | "webp")
+    matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png")
 }
 
 pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, String> {
@@ -170,8 +170,8 @@ mod tests {
     fn rechaza_rutas_absolutas_traversal_y_nombres_especiales() {
         for rel in ["images/../data.db", "images/logo/../a.jpg", "images/logo/C:/a.jpg", "images/logo/a.jpg:datos", "images/logo/CON.jpg", "images/logo/a.svg", "images/logo/a.jpg/otro"] { assert!(!ruta_segura(rel), "{rel}"); }
         let uuid = "0190f3a1-7b2c-4d4e-8f00-123456789abc";
-        for ext in ["jpg", "jpeg", "png", "webp", "JPG"] { assert!(ruta_segura(&format!("images/logo/{uuid}.{ext}"))); }
-        for rel in [format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg"), format!("images/LOGO/{uuid}.jpg"), format!("IMAGES/logo/{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
+        for ext in ["jpg", "jpeg", "png", "JPG"] { assert!(ruta_segura(&format!("images/logo/{uuid}.{ext}"))); }
+        for rel in [format!("images/logo/{uuid}.webp"), format!("images/logo/{uuid}.svg"), format!("images/otra/{uuid}.jpg"), format!("images/logo/../{uuid}.jpg"), format!("images/LOGO/{uuid}.jpg"), format!("IMAGES/logo/{uuid}.jpg")] { assert!(!ruta_segura(&rel), "{rel}"); }
     }
 
     // OBS-06: el nombre de una imagen viaja en la URL; sólo se admite el UUID que le pone la app. Los

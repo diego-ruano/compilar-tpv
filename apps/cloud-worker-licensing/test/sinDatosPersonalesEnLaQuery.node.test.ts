@@ -613,7 +613,7 @@ describe("OBS-06: en la ruta de una imagen no viaja ningún nombre", () => {
 
 	it("RUTA_DE_IMAGEN sólo admite una carpeta de la lista y un UUID con su extensión", () => {
 		for (const carpeta of ["productos", "categorias", "proveedores", "alergenos", "logo"]) {
-			for (const ext of ["jpg", "jpeg", "png", "webp", "JPG"]) {
+			for (const ext of ["jpg", "jpeg", "png", "JPG"]) {
 				expect(RUTA_DE_IMAGEN.test(`images/${carpeta}/${UUID}.${ext}`), `${carpeta} ${ext}`).toBe(true);
 			}
 		}
@@ -626,6 +626,8 @@ describe("OBS-06: en la ruta de una imagen no viaja ningún nombre", () => {
 			`images/productos/x${UUID}.jpg`,
 			`images/productos/${UUID}.jpg.jpg`,
 			`images/productos/${UUID}.svg`,
+			// M-081: lo guardado es siempre JPEG o PNG.
+			`images/productos/${UUID}.webp`,
 			`images/otra/${UUID}.jpg`,
 			// La carpeta y el prefijo, en minúsculas: la Main no admite otra cosa al bajarla o al imprimirla.
 			`images/PRODUCTOS/${UUID}.jpg`,

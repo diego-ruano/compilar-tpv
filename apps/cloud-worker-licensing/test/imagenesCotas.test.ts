@@ -91,6 +91,10 @@ describe("AUD-31 · PUT /v1/images", () => {
 		const { res, put } = subir(`images/productos/${UUID}.webp`, WEBP);
 		expect((await res).status).toBe(400);
 		expect(put).not.toHaveBeenCalled();
+		// Ni con la ruta de un PNG.
+		const conOtraRuta = subir(`images/productos/${UUID}.png`, WEBP);
+		expect((await conOtraRuta.res).status).toBe(400);
+		expect(conOtraRuta.put).not.toHaveBeenCalled();
 	});
 
 	it("lo que sube la app (1024 px como mucho) entra", async () => {

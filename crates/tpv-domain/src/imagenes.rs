@@ -18,7 +18,7 @@ pub const MSG_IMAGEN_NO_VALIDA: &str = "La imagen no es válida: vuelve a elegir
 
 const CARPETAS: [&str; 5] = ["productos", "categorias", "proveedores", "alergenos", "logo"];
 
-/// `images/{carpeta}/{uuid}.{jpg|jpeg|png|webp}`, con el UUID de 8-4-4-4-12 cifras hexadecimales.
+/// `images/{carpeta}/{uuid}.{jpg|jpeg|png}`, con el UUID de 8-4-4-4-12 cifras hexadecimales.
 pub fn es_ruta_de_imagen(ruta: &str) -> bool {
     let partes: Vec<&str> = ruta.split('/').collect();
     let [raiz, carpeta, nombre] = partes.as_slice() else { return false };
@@ -31,7 +31,7 @@ pub fn es_ruta_de_imagen(ruta: &str) -> bool {
             .bytes()
             .enumerate()
             .all(|(i, b)| if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() });
-    uuid && matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png" | "webp")
+    uuid && matches!(ext.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "png")
 }
 
 /// La imagen de una fila: recortada, vacía es «sin imagen» (`None`), y si no, con la forma de
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn admite_lo_que_guarda_la_app_y_nada_mas() {
         for carpeta in CARPETAS {
-            for ext in ["jpg", "jpeg", "png", "webp", "JPG", "Png"] {
+            for ext in ["jpg", "jpeg", "png", "JPG", "Png"] {
                 assert!(es_ruta_de_imagen(&format!("images/{carpeta}/{UUID}.{ext}")), "{carpeta} {ext}");
             }
         }
@@ -70,6 +70,8 @@ mod tests {
             format!("IMAGES/logo/{UUID}.png"),
             format!("images/otra/{UUID}.png"),
             format!("images/logo/{UUID}.svg"),
+            // M-081: lo guardado es siempre JPEG o PNG.
+            format!("images/logo/{UUID}.webp"),
             format!("images/logo/{UUID}.png.png"),
             format!("images/logo/../{UUID}.png"),
             format!("/images/logo/{UUID}.png"),

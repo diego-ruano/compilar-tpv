@@ -75,14 +75,15 @@ export function claveCacheImagen(request: Request): Request {
 
 function contentTypeFor(relPath: string): string {
     const ext = relPath.split(".").pop()?.toLowerCase();
-    return ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+    return ext === "png" ? "image/png" : "image/jpeg";
 }
 
-// RI-07: no confiar en el MIME enviado; el procesamiento completo ocurre en Rust.
+// RI-07: no confiar en el MIME enviado; el procesamiento completo ocurre en Rust. Sólo JPEG y PNG: un
+// WebP no lo decodifica la Main (AUD-30), y uno elegido en la pantalla lo convierte antes la webview
+// (`guardarImagen.ts`), así que lo guardado nunca lo es (M-081).
 export function tipoImagen(bytes: Uint8Array): string | null {
     if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
     if (bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((b, i) => bytes[i] === b)) return "image/png";
-    if (bytes.length >= 12 && [82,73,70,70].every((b, i) => bytes[i] === b) && [87,69,66,80].every((b, i) => bytes[i + 8] === b)) return "image/webp";
     return null;
 }
 
@@ -222,8 +223,7 @@ imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ 
 	const contentType = tipoImagen(bytes);
 	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
 	// AUD-31: lo que la Main no decodificaría (`imagenes::decodificar`) tampoco lo pinta la Handy por
-	// el GET: ni WebP (AUD-30) ni una cabecera de más de 8192 px de lado o 24 Mpx.
-	if (contentType === "image/webp") return c.json({ error: "bad_image_path" }, 400);
+	// el GET: ni WebP (AUD-30, `tipoImagen` no lo reconoce) ni una cabecera de más de 8192 px de lado o 24 Mpx.
 	if (!dentroDeLasCotas(bytes)) return c.json({ error: "image_too_large" }, 413);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
 	const key = prefijoDelNegocio(c.get("tenantId")) + relPath;
