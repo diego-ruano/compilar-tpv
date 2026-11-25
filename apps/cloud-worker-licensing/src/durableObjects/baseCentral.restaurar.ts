@@ -80,8 +80,14 @@ export async function restaurarLaCentral(
 	bucket: R2Bucket,
 	clave: string,
 ): Promise<RespuestaDeLaCentral<CopiaRestaurada>> {
+	// La clave que no tiene la forma de una copia no se repite: es texto de quien llama, y el motivo va
+	// al log y a Axiom.
 	if (!esClaveDeCopiaDeLaCentral(clave)) {
-		return { ok: false, error: "central_copia_inservible", detalle: `copia_no_valida: «${clave}» no es la clave de una copia de la central` };
+		return {
+			ok: false,
+			error: "central_copia_inservible",
+			detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
+		};
 	}
 	const marcas = marcasDe(storage);
 	if (!marcas.restauracion && baseAprovisionada(storage.sql)) return { ok: false, error: "central_ya_aprovisionada" };

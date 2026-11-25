@@ -240,18 +240,27 @@ describe("una copia que no vale deja el objeto como estaba, y dice por qué", ()
 		await comoAntes(central);
 	});
 
-	it("si no existe, o la clave no es de una copia de la central", async () => {
+	it("si no existe, o la clave no es de una copia de la central, que no se repite", async () => {
 		const central = centralSinAprovisionar();
 		expect(await central.stub.aprovisionar({ claveDeCopia: claveNueva() })).toEqual({
 			ok: false,
 			error: "central_copia_inservible",
 			detalle: expect.stringMatching(/^copia_no_encontrada: /),
 		});
-		for (const clave of ["negocios/t/2026-01-01.sql.gz", "base-central/../x.sql.gz", "base-central/x.sql", "base-central/.sql.gz"]) {
-			expect(await central.stub.aprovisionar({ claveDeCopia: clave }), clave).toEqual({
+		// La que no tiene la forma de una copia es texto de quien llama, y el motivo va al log y a Axiom.
+		const claves = [
+			"negocios/t/2026-01-01.sql.gz",
+			"base-central/../x.sql.gz",
+			"base-central/x.sql",
+			"base-central/.sql.gz",
+			"Ana Gil ana.gil@correo.es\n",
+		];
+		for (const clave of claves) {
+			const r = await central.stub.aprovisionar({ claveDeCopia: clave });
+			expect(r, clave).toEqual({
 				ok: false,
 				error: "central_copia_inservible",
-				detalle: expect.stringMatching(/^copia_no_valida: .* no es la clave de una copia de la central/),
+				detalle: "copia_no_valida: la clave no es la de una copia de la central (base-central/<nombre>.sql.gz)",
 			});
 		}
 		await comoAntes(central);
