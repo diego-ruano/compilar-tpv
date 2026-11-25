@@ -28,7 +28,9 @@ describe("TenantHub RPC", () => {
 			// Una ruta de negocio entera, ejecutada junto a la base (`lib/enElHub.ts`).
 			"ejecutarRuta",
 			// DO-03: la copia diaria (su alarma) y la administración de la base: estado, copia y vuelta a un instante.
-			"alarm", "copiarAhora", "estadoDeLaBase", "prepararVuelta", "reiniciar", "trasVolver",
+			"alarm", "copiarAhora", "estadoDeLaBase", "prepararVuelta", "trasVolver",
+			// VUELTA-REPETIR: aplicar aparte una vuelta preparada, sólo si sigue siéndolo.
+			"cierreDeLaBase", "reiniciarParaAplicar",
 			// DO-PERDIDA: darle base a un objeto vacío de un negocio que ya nació.
 			"crearBaseVacia", "restaurarDesdeCopia",
 			// DO-SUBIDA: reabrir la subida completa de la Main (administración).
