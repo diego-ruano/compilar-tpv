@@ -5,6 +5,12 @@
 // (`/v1/admin/central/copiar-ahora`), y la de antes de volver a un instante, la propia vuelta
 // (`baseCentral.instante.ts`). Se devuelven a un objeto vacío con `baseCentral.restaurar.ts`.
 //
+// La de antes de volver lleva además en sus metadatos el marcador de la central cuando se hizo
+// (`marcador`), que es con el que se deshace la vuelta: fuera del objeto, porque lo que guarda el
+// objeto vuelve con él. Si la central no se podía copiar, ese marcador va solo, en
+// `base-central/antes-de-volver-<hora>.marcador`, que no es una copia y no se restaura. Los dos salen
+// en la lista de las copias.
+//
 // La base vive en el SQLite de su objeto, y Cloudflare la puede devolver a cualquier instante de los
 // últimos 30 días. Eso no cubre que el objeto se pierda (un borrado por error, otro nombre, el propio
 // proveedor), ni lo que se descubre pasado ese plazo: para eso está esta copia, fuera del objeto.
@@ -71,8 +77,21 @@ export function claveDelDia(dia: string): string {
  * (`antes-de-volver`). La hora va en ISO con guiones en vez de dos puntos, para que la clave sirva
  * de nombre de fichero también en Windows al bajarla.
  */
-export function claveConHora(que: "a-mano" | "antes-de-volver", ahora: Date): string {
-	return `${PREFIJO_COPIAS}${que}-${ahora.toISOString().replaceAll(":", "-")}.sql.gz`;
+export function claveConHora(que: "a-mano" | "antes-de-volver", ahora: Date, extension = ".sql.gz"): string {
+	return `${PREFIJO_COPIAS}${que}-${ahora.toISOString().replaceAll(":", "-")}${extension}`;
+}
+
+/**
+ * Guarda en R2 el marcador de cómo estaba la central antes de volver a un instante, cuando no se
+ * podía copiar (ver la cabecera). Lanza si no llega.
+ */
+export async function guardarElMarcadorDeAntes(bucket: R2Bucket, ahora: Date, marcador: string): Promise<string> {
+	const clave = claveConHora("antes-de-volver", ahora, ".marcador");
+	await bucket.put(clave, `${marcador}\n`, {
+		httpMetadata: { contentType: "text/plain; charset=utf-8" },
+		customMetadata: { generada: ahora.toISOString(), marcador },
+	});
+	return clave;
 }
 
 /** Lo más largo que puede ser el nombre de una copia, entre la carpeta y `.sql.gz`. */
@@ -105,13 +124,15 @@ type Volcado = { gzip: Uint8Array; tablas: number; filas: number; migraciones: s
 
 /**
  * Copia la base central entera a `bucket`, con la clave `clave`, y devuelve qué se subió. Lanza si
- * algo falla. `tope` sólo lo cambian los tests.
+ * algo falla. `tope` sólo lo cambian los tests. `marcador`, el de la central al hacerla, va en sus
+ * metadatos (la de antes de volver a un instante: ver la cabecera).
  */
 export async function copiarLaCentral(
 	sql: SqlStorage,
 	bucket: R2Bucket,
 	clave: string,
 	tope: number = TOPE_COMPRIMIDO,
+	marcador?: string,
 ): Promise<CopiaHecha> {
 	const ahora = new Date();
 	// La foto, entera, comprimida y sin esperas. Lo que viene después ya no la toca.
@@ -124,6 +145,7 @@ export async function copiarLaCentral(
 			tablas: String(volcado.tablas),
 			filas: String(volcado.filas),
 			ultimaMigracion: volcado.migraciones.at(-1) ?? "",
+			...(marcador ? { marcador } : {}),
 		},
 		// R2 recalcula el hash al recibirlo y rechaza la subida si no coincide.
 		sha256: await crypto.subtle.digest("SHA-256", volcado.gzip),
@@ -192,9 +214,17 @@ export type CopiaGuardadaDeLaCentral = {
 	tablas: number | null;
 	/** La última migración del esquema con el que se hizo: si este worker la sabe poner, se puede restaurar. */
 	ultimaMigracion: string | null;
+	/**
+	 * El marcador de la central cuando se hizo, si lo lleva (la de antes de volver a un instante, y el
+	 * `….marcador` que va solo cuando no se podía copiar): volver a él deshace aquella vuelta.
+	 */
+	marcador: string | null;
 };
 
-/** Las copias de la central, de la más reciente a la más vieja: las `techo` primeras, y si hay más. */
+/**
+ * Las copias de la central, de la más reciente a la más vieja: las `techo` primeras, y si hay más.
+ * También los marcadores de antes de volver que van solos (`….marcador`), que no se restauran.
+ */
 export async function listarCopiasDeLaCentral(
 	bucket: R2Bucket,
 	techo: number,
@@ -215,6 +245,7 @@ export async function listarCopiasDeLaCentral(
 				filas: numero(meta.filas),
 				tablas: numero(meta.tablas),
 				ultimaMigracion: meta.ultimaMigracion || null,
+				marcador: meta.marcador || null,
 			});
 		}
 		cursor = pagina.truncated ? pagina.cursor : undefined;

@@ -16,6 +16,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
 import { BaseCentral } from "../src/durableObjects/baseCentral";
+import { esClaveDeCopiaDeLaCentral } from "../src/durableObjects/baseCentral.copia";
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import {
 	centralDePrueba,
@@ -63,6 +64,60 @@ describe("prepararVuelta, con el doble de la plataforma", () => {
 		const texto = await new Response(copia!.body.pipeThrough(new DecompressionStream("gzip"))).text();
 		expect(texto).toContain("'Bar de antes'");
 		expect(copia!.customMetadata).toMatchObject({ filas: "1" });
+	});
+
+	it("el marcador de deshacer queda fuera de la base que se devuelve antes de pedir la vuelta: en los metadatos de la copia de antes", async () => {
+		const central = await sembrada();
+		/** Lo que hay en R2 con un marcador cuando se le pide la vuelta a la plataforma. */
+		const alPedirla = new Map<string, string>();
+		await conDobleDeInstantes(central, [], {
+			alRestaurar: async () => {
+				const { objects } = await bucket().list({ prefix: "base-central/antes-de-volver-", include: ["customMetadata"] });
+				for (const o of objects) if (o.customMetadata?.marcador) alPedirla.set(o.key, o.customMetadata.marcador);
+			},
+		});
+
+		const r = await central.stub.prepararVuelta({ instanteMs: Date.now() - HORA });
+		expect(r).toMatchObject({ ok: true, valor: { deshacer: MARCADORES.actual, copiaDeAntes: expect.stringMatching(/\.sql\.gz$/) } });
+		if (!r.ok) return;
+		expect(alPedirla.get(r.valor.copiaDeAntes!)).toBe(MARCADORES.actual);
+	});
+
+	it("con la central sin atender, el marcador va solo en R2 (….marcador, que no es una copia), también antes de pedir la vuelta", async () => {
+		const central = centralSinAprovisionar();
+		await runInDurableObject(central.stub, (_o, state) =>
+			state.storage.kv.put(CLAVE_RESTAURACION_EN_CURSO, { clave: "base-central/la-de-antes.sql.gz", desdeMs: 1 }),
+		);
+		const alPedirla = new Map<string, string>();
+		await conDobleDeInstantes(central, [], {
+			alRestaurar: async () => {
+				const { objects } = await bucket().list({ prefix: "base-central/antes-de-volver-", include: ["customMetadata"] });
+				for (const o of objects) if (o.customMetadata?.marcador) alPedirla.set(o.key, o.customMetadata.marcador);
+			},
+		});
+		const antes = new Set((await bucket().list({ prefix: "base-central/" })).objects.map((o) => o.key));
+
+		const r = await central.stub.prepararVuelta({ marcador: "m-de-salida" });
+		expect(r).toMatchObject({ ok: true, valor: { deshacer: MARCADORES.actual, copiaDeAntes: null } });
+		const nuevas = [...alPedirla.keys()].filter((clave) => !antes.has(clave));
+		expect(nuevas).toEqual([expect.stringMatching(/^base-central\/antes-de-volver-.*\.marcador$/)]);
+		expect(alPedirla.get(nuevas[0])).toBe(MARCADORES.actual);
+		expect(esClaveDeCopiaDeLaCentral(nuevas[0])).toBe(false);
+		expect(await (await bucket().get(nuevas[0]))!.text()).toBe(`${MARCADORES.actual}\n`);
+	});
+
+	it("con la central sin atender y R2 caído, no pide la vuelta: sin el marcador fuera, no se hace", async () => {
+		const central = centralSinAprovisionar();
+		const llamadas: string[] = [];
+		await conDobleDeInstantes(central, llamadas);
+		await conR2Caido(central);
+		expect(await central.stub.prepararVuelta({ marcador: "m-de-salida" })).toEqual({
+			ok: false,
+			error: "central_copia_fallida",
+			detalle: "R2 no contesta",
+		});
+		expect(llamadas).toEqual(["actual"]);
+		expect((await central.stub.estado()).enCurso.vuelta).toBeNull();
 	});
 
 	it("hasta reiniciar no atiende a nadie: lo que se escribiera se perdería al volver", async () => {

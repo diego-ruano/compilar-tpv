@@ -8,8 +8,8 @@
 // 1. `prepararVuelta`: cierra la central, saca el marcador del instante (antes de copiar nada: si la
 //    plataforma no vuelve a instantes o el instante no vale, no hay copia inútil) y el de cómo está
 //    ahora, que es con el que se deshace; deja en R2 una copia de cómo está
-//    (`base-central/antes-de-volver-<hora>.sql.gz`) y deja la vuelta preparada para el siguiente
-//    arranque.
+//    (`base-central/antes-de-volver-<hora>.sql.gz`), con ese marcador en sus metadatos, y deja la
+//    vuelta preparada para el siguiente arranque.
 // 2. `reiniciar`: `ctx.abort()`. La llamada falla siempre, y es lo esperado: al arrancar, el objeto
 //    vuelve.
 //
@@ -29,6 +29,15 @@
 // de cómo estaba es su marcador (`getCurrentBookmark`), que es con el que se deshace: con él se
 // vuelve a ese estado exacto, también al averiado, que es la prueba de lo que pasó.
 //
+// **El marcador de deshacer queda fuera de la base que se devuelve, antes de pedir la vuelta.** La
+// vuelta se lleva todo lo que guarda el objeto, también sus marcas (`storage.kv` vive en una tabla de
+// su SQLite, `_cf_KV`, y la vuelta a un instante devuelve el SQLite entero: https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#pitr-point-in-time-recovery-api),
+// y la respuesta de esta llamada puede no llegar a quien la pidió: la plataforma aplica la vuelta en
+// el siguiente arranque, sea cual sea su causa. Así que va en R2: en los metadatos de la copia de
+// antes (`marcador`) o, si no se podía copiar, solo, en `base-central/antes-de-volver-<hora>.marcador`
+// (`baseCentral.copia.ts`). `pnpm central:copias` lo enseña mientras dura la ventana de 30 días. Si
+// pese a todo se perdiera, se deshace volviendo con un instante de justo antes de la vuelta.
+//
 // **Una sola preparación a la vez, y la marca es de quien la pone** (`MarcaDeVuelta.id`). La
 // plataforma guarda una sola vuelta preparada, la última que se le pide, y no dice cuál es: dos
 // preparaciones cruzadas no pueden dejar la central abierta con una vuelta pedida, ni pedir la suya
@@ -45,7 +54,7 @@
 //   otra: devuelve la que hay, con su marcador de deshacer y su copia, para reiniciar. A otro destino,
 //   prepara otra encima, como una nueva.
 
-import { copiarLaCentral, claveConHora } from "./baseCentral.copia";
+import { copiarLaCentral, claveConHora, guardarElMarcadorDeAntes, TOPE_COMPRIMIDO } from "./baseCentral.copia";
 import { CLAVE_VUELTA_EN_CURSO, marcasDe } from "./baseCentral.guardas";
 import type {
 	DestinoDeLaVuelta,
@@ -135,16 +144,20 @@ export async function prepararVueltaDeLaCentral(
 	}
 	if (!esMia()) return sinLaMarca();
 
+	// Fuera de la base que se devuelve, y antes de pedir la vuelta: con qué se deshace (ver la cabecera).
 	let copiaDeAntes: string | null = null;
-	if (sana) {
-		try {
-			copiaDeAntes = (await copiarLaCentral(storage.sql, bucket, claveConHora("antes-de-volver", new Date(ahora)))).clave;
-		} catch (error) {
-			reabrir();
-			return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
+	try {
+		if (sana) {
+			const copia = await copiarLaCentral(storage.sql, bucket, claveConHora("antes-de-volver", new Date(ahora)), TOPE_COMPRIMIDO, deshacer);
+			copiaDeAntes = copia.clave;
+		} else {
+			await guardarElMarcadorDeAntes(bucket, new Date(ahora), deshacer);
 		}
-		if (!esMia()) return sinLaMarca();
+	} catch (error) {
+		reabrir();
+		return { ok: false, error: "central_copia_fallida", detalle: String((error as Error)?.message ?? error) };
 	}
+	if (!esMia()) return sinLaMarca();
 
 	storage.kv.put(CLAVE_VUELTA_EN_CURSO, { ...marca, fase: "programando" } satisfies MarcaDeVuelta);
 	try {

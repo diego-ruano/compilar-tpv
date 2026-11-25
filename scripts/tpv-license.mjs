@@ -594,8 +594,13 @@ async function centralCopias() {
 			filas: c.filas ?? "?",
 			tablas: c.tablas ?? "?",
 			migracion: c.ultimaMigracion ?? "?",
+			marcador: c.marcador ?? "",
 		})),
 	);
+	if (r.copias.some((c) => c.marcador)) {
+		console.log("  marcador: cómo estaba la central al hacerla, antes de volver a un instante; volver a él deshace aquella vuelta.");
+		console.log("  Las que acaban en .marcador no son copias: la central no se podía copiar, y va sólo su marcador.\n");
+	}
 	if (r.hayMas) console.log("  (hay más copias de las que caben en la lista)\n");
 }
 
@@ -625,6 +630,11 @@ async function centralAprovisionar(args) {
 /** La orden que devuelve la central a un marcador: la que deshace una vuelta. */
 const centralAlMarcador = (marcador) => `pnpm central:volver -- --marcador ${marcador} --si`;
 
+/** Lo que se hace si se pierde el marcador para deshacer una vuelta pedida en `antesDeVolver` (ISO). */
+const siSePierdeElMarcador = (antesDeVolver) =>
+	"    Si se pierde este marcador, está también en pnpm central:copias (columna marcador); y si tampoco,\n" +
+	`    se deshace volviendo a justo antes de la vuelta: pnpm central:volver -- --instante ${antesDeVolver} --si\n`;
+
 async function centralVolver(args) {
 	let cuerpo;
 	/** Adónde vuelve, para decirlo: «al marcador …» o «a <instante>». */
@@ -643,12 +653,15 @@ async function centralVolver(args) {
 	}
 	confirmado(
 		args,
-		`Esto devuelve la central ENTERA ${adonde}: lo escrito después se pierde (antes se deja una copia de cómo está en R2), y mientras vuelve no atiende.`,
+		`Esto devuelve la central ENTERA ${adonde}: lo escrito después se pierde (antes se deja en R2 una copia de cómo está o, si no atiende, su marcador), y mientras vuelve no atiende.`,
 	);
+	// Justo antes de la vuelta: si se pierde el marcador para deshacerla, se vuelve aquí.
+	const antesDeVolver = new Date().toISOString();
 	const r = await api("POST", "/v1/admin/central/volver", cuerpo, { ...CENTRAL, deshacer: centralAlMarcador });
 	console.log(`\n  ✔ La central ha vuelto ${adonde}.`);
 	console.log(`    Copia de cómo estaba antes: ${r.copiaDeAntes ?? "ninguna (no atendía, y así no se copia)"}`);
 	console.log(`\n    Para deshacerlo:\n\n      ${centralAlMarcador(r.deshacer)}\n`);
+	console.log(siSePierdeElMarcador(antesDeVolver));
 }
 
 /* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */

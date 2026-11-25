@@ -9,7 +9,10 @@
 //   · la clave de una copia se valida antes de llegar al objeto;
 //   · el recorrido entero: copiar ahora, aprovisionar otra central desde esa copia y ver su estado;
 //   · volver a un instante: prepara, deja en el rastro con qué se deshace, reinicia, espera y lo
-//     devuelve; una central que vuelve pero no atiende no se da por buena;
+//     devuelve, y la lista de las copias lo enseña; una central que vuelve pero no atiende no se da
+//     por buena;
+//   · restaurar y volver dejan en el rastro que empiezan antes de llamar al objeto, y que la llamada
+//     no ha vuelto si no vuelve;
 //   · lo que no se hace dice qué pasa (`message`) y, aparte, el motivo técnico (`detalle`);
 //   · lo que cambia algo deja rastro en el log, sin datos personales ni texto que no sea nuestro: la
 //     clave y el marcador pasan una gramática cerrada antes de llegar al objeto, y el `detalle` no va
@@ -28,6 +31,7 @@ import {
 import { CLAVE_RESTAURACION_EN_CURSO, CLAVE_VUELTA_EN_CURSO } from "../src/durableObjects/baseCentral.guardas";
 import {
 	centralDePrueba,
+	centralInterceptada,
 	centralSinAprovisionar,
 	conDobleDeInstantes,
 	filasDe,
@@ -184,6 +188,7 @@ describe("aprovisionar desde una copia", () => {
 		});
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "empieza", clave },
 			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_no_encontrada" },
 		]);
 	});
@@ -204,6 +209,7 @@ describe("aprovisionar desde una copia", () => {
 		const r = await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) });
 		expect(r).toMatchObject({ status: 422, body: { error: "central_copia_inservible" } });
 		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "empieza", clave },
 			{ accion: "restaurar", resultado: "central_copia_inservible", clave, motivo: "copia_de_otra_version" },
 		]);
 		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Ana|correo/);
@@ -237,7 +243,10 @@ describe("aprovisionar desde una copia", () => {
 		});
 		expect(JSON.stringify(r.body)).not.toMatch(/Ana|ana\.gil/);
 		// El texto de SQLite no es nuestro: al rastro va sólo el código.
-		expect(rastrosDe(log)).toEqual([{ accion: "restaurar", resultado: "central_copia_inservible", clave }]);
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "empieza", clave },
+			{ accion: "restaurar", resultado: "central_copia_inservible", clave },
+		]);
 		expect((await central.stub.estado()).aprovisionada).toBe(false);
 	});
 
@@ -286,9 +295,39 @@ describe("aprovisionar desde una copia", () => {
 		// El rastro: la acción, la clave, las filas y el resultado. Sin nada de los negocios.
 		expect(rastrosDe(log)).toEqual([
 			{ accion: "copiar", resultado: "ok", clave, filas: 3, tablas: expect.any(Number) },
+			{ accion: "restaurar", resultado: "empieza", clave },
 			{ accion: "restaurar", resultado: "ok", clave, filas: 3, tablas: 2 },
 		]);
 		expect(JSON.stringify(rastrosDe(log))).not.toMatch(/Bar Uno|Bar Dos/);
+	});
+});
+
+describe("el rastro de restaurar y de volver no depende de que vuelva la llamada al objeto", () => {
+	/** La central, pero la llamada `metodo` no vuelve: el objeto se ha reiniciado a mitad. */
+	const sinVolver = (central: CentralDePrueba, metodo: string) =>
+		centralInterceptada(central, (m, _a, llamar) => (m === metodo ? Promise.reject(new Error("el objeto se ha reiniciado")) : llamar()));
+
+	it("restaurar deja que empieza antes de llamar al objeto, y que no ha vuelto", async () => {
+		const central = sinVolver(centralSinAprovisionar(), "aprovisionar");
+		const clave = "base-central/2026-11-24.sql.gz";
+		const log = vi.spyOn(console, "log");
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		expect((await pedir(entornoCon(central), "POST", "/aprovisionar", { cuerpo: json({ claveDeCopia: clave }) })).status).toBe(500);
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "restaurar", resultado: "empieza", clave },
+			{ accion: "restaurar", resultado: "sin_respuesta", clave },
+		]);
+	});
+
+	it("volver deja que empieza antes de llamar al objeto, y que no ha vuelto", async () => {
+		const central = sinVolver(await centralDePrueba(), "prepararVuelta");
+		const log = vi.spyOn(console, "log");
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		expect((await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.destino }) })).status).toBe(500);
+		expect(rastrosDe(log)).toEqual([
+			{ accion: "volver", resultado: "empieza", destino: MARCADORES.destino },
+			{ accion: "volver", resultado: "sin_respuesta", destino: MARCADORES.destino },
+		]);
 	});
 });
 
@@ -315,13 +354,18 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 			},
 		});
 		expect(llamadas).toEqual(["de:number", "actual", `restaurar:${MARCADORES.destino}`, "reiniciar"]);
-		// Con qué se deshace queda en el rastro antes de reiniciar: si la llamada no terminara, estaría ahí.
+		// Que empieza, antes de llamar al objeto; y con qué se deshace, antes de reiniciar: si la llamada no
+		// terminara, estaría ahí.
 		const destino = new Date(instanteMs).toISOString();
 		const deLaVuelta = { accion: "volver", destino, deshacer: MARCADORES.actual, copiaDeAntes: r.body.copiaDeAntes };
 		expect(rastrosDe(log)).toEqual([
+			{ accion: "volver", resultado: "empieza", destino },
 			{ ...deLaVuelta, resultado: "preparada" },
 			{ ...deLaVuelta, resultado: "ok" },
 		]);
+		// Y la lista de las copias lo enseña, en la copia de antes: está en R2.
+		const lista = await pedir(entornoCon(central), "GET", "/copias");
+		expect(lista.body.copias.find((c: any) => c.clave === r.body.copiaDeAntes)).toMatchObject({ marcador: MARCADORES.actual });
 
 		// Deshacer es volver al marcador que devolvió.
 		const deshecha = await pedir(entornoCon(central), "POST", "/volver", { cuerpo: json({ marcador: MARCADORES.actual }) });
@@ -382,7 +426,7 @@ describe("volver a un instante, con el doble de la plataforma", () => {
 				estado: { aprovisionada: false, averia: { error: "central_restauracion_a_medias" } },
 			},
 		});
-		expect(rastrosDe(log).map((r) => r.resultado)).toEqual(["preparada", "central_restauracion_a_medias"]);
+		expect(rastrosDe(log).map((r) => r.resultado)).toEqual(["empieza", "preparada", "central_restauracion_a_medias"]);
 	});
 
 	it("un instante o un marcador, uno de los dos; y el instante, de los últimos 30 días", async () => {
