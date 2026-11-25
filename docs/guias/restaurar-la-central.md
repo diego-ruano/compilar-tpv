@@ -248,6 +248,14 @@ pnpm exec wrangler r2 object put tpv-copias-control/base-central/<nombre>.sql.gz
 pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 ```
 
+### El traspaso desde Turso (2026-11-25)
+
+La base central estaba en Turso (`tpv-control`), y entra en su objeto por este mismo camino: su
+volcado, convertido a este formato, se sube como `base-central/traspaso-turso-2026-11-25.sql.gz` y se
+aprovisiona desde ahí. Al lado va el volcado en bruto, `base-central/traspaso-turso-2026-11-25.volcado-turso.gz`.
+Los dos salen en `pnpm central:copias`, sin filas ni migraciones (se subieron a mano); el segundo no
+acaba en `.sql.gz` y no se restaura. Caducan a los 30 días, como todo lo de `base-central/`.
+
 ## Después
 
 - `pnpm central:estado`: aprovisionada, sin avería ni nada a medias, con las filas que esperabas.
