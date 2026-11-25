@@ -31,16 +31,13 @@
 
 /* =========================================================================
    TOKENS LEGACY (se conservan tal cual para no romper el código existente:
-   bg-blanco, text-negro, bg-gris, text-morado, etc.). No usar en código nuevo.
+   bg-blanco, bg-negro, bg-gris y bg-verde). No usar en código nuevo.
    ========================================================================= */
 @theme {
     --color-gris: #eaf3ff;
     --color-blanco: #ffffff;
     --color-negro: #313131;
-    --color-morado: #016ffc;
     --color-verde: #0fc066;
-    --color-rojo: #ff3838;
-    --color-azul: #007bff;
 
     --breakpoint-xs: 370px;
     --breakpoint-sm: 640px;
