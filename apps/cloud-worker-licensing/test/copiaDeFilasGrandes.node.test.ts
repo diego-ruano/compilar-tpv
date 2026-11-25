@@ -11,6 +11,9 @@
 //   · Al leerla (`cargaDeCopias.ts`): el texto que sale de la línea es uno, plano, y no una cuerda con
 //     un nodo por comilla doblada o por salto escrito con `char(10)`. Se mira lo que hay vivo en el
 //     montón cuando su fila llega a SQLite, con el cargador de verdad sobre una base de node:sqlite.
+//   · Al leer una línea que no es una fila: una de millones de literales cortos, que cabe en el tope de
+//     una línea, no los guarda todos antes de decir que no casan con las columnas, cientos de MB. Corre
+//     el cargador de verdad en el Node aparte con el montón acotado.
 //
 // Por eso es de Node: en workerd no se puede acotar ni medir la memoria de un test, y en local el
 // SQLite de un objeto no admite filas de más de unos 2 MB.
@@ -22,13 +25,30 @@ import vm from "node:vm";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { cargarCopia } from "../src/durableObjects/cargaDeCopias";
+import { CARACTERES_POR_LINEA, cargarCopia } from "../src/durableObjects/cargaDeCopias";
+import fuenteDelCargador from "../src/durableObjects/cargaDeCopias.ts?raw";
 import fuente from "../src/durableObjects/volcadoSql.ts?raw";
 
+/** Un fuente de TypeScript en JavaScript, tal cual. */
+const aJavaScript = (fuenteTs: string) =>
+	ts.transpileModule(fuenteTs, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+
 /** `volcadoSql.ts` en JavaScript, tal cual. */
-const modulo = ts.transpileModule(fuente, {
-	compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-}).outputText;
+const modulo = aJavaScript(fuente);
+
+/** Un módulo en una URL, que el Node aparte importa sin que haga falta escribir ningún fichero. */
+const enUnaUrl = (codigo: string) => `data:text/javascript;base64,${Buffer.from(codigo).toString("base64")}`;
+
+/**
+ * `cargaDeCopias.ts` en JavaScript, tal cual, con su `volcadoSql.ts` y sin el resto del worker: de
+ * `sqliteDelObjeto.ts` sólo usa `ponerFk`, que enciende y apaga las claves foráneas, y aquí no hace
+ * nada. Si el cargador importa otra cosa, el Node aparte no lo puede cargar, y lo dice.
+ */
+const cargador = enUnaUrl(
+	aJavaScript(fuenteDelCargador)
+		.replace('from "./volcadoSql"', `from ${JSON.stringify(enUnaUrl(modulo))}`)
+		.replace('from "./sqliteDelObjeto"', `from ${JSON.stringify(enUnaUrl("export async function ponerFk() {}"))}`),
+);
 
 /** La mitad de la memoria de un objeto, en MiB. */
 const MONTON_MIB = 64;
@@ -37,8 +57,8 @@ const MONTON_MIB = 64;
 const OCHO_MIB = 8 * 1024 * 1024;
 
 /**
- * Corre `programa` detrás de `volcadoSql.ts` en un Node con `MONTON_MIB` de montón: lo que escribe, o
- * cómo ha terminado si no ha podido.
+ * Corre `programa`, un módulo, en un Node con `MONTON_MIB` de montón: lo que escribe, o cómo ha
+ * terminado si no ha podido.
  */
 function conElMontonAcotado(programa: string): Promise<{ codigo: number | null; salida: string; errores: string }> {
 	return new Promise((resolver, fallar) => {
@@ -51,7 +71,7 @@ function conElMontonAcotado(programa: string): Promise<{ codigo: number | null; 
 		hijo.stderr.on("data", (d) => (errores += d));
 		hijo.on("error", fallar);
 		hijo.on("close", (codigo) => resolver({ codigo, salida, errores: errores.slice(0, 600) }));
-		hijo.stdin.end(`${modulo}\n${programa}\n`);
+		hijo.stdin.end(`${programa}\n`);
 	});
 }
 
@@ -71,7 +91,7 @@ describe("la línea de la fila más grande que admite un objeto, con la mitad de
 	];
 
 	it.each(casos)("%s", async (_que, valor, largo) => {
-		const r = await conElMontonAcotado(`process.stdout.write(String(literalEnUnaLinea(${valor}).length));`);
+		const r = await conElMontonAcotado(`${modulo}\nprocess.stdout.write(String(literalEnUnaLinea(${valor}).length));`);
 		expect(r).toEqual({ codigo: 0, salida: String(largo), errores: "" });
 	}, 60_000);
 
@@ -82,6 +102,54 @@ describe("la línea de la fila más grande que admite un objeto, con la mitad de
 		);
 		expect(r.codigo).not.toBe(0);
 		expect(r.errores).toMatch(/heap out of memory/i);
+	}, 60_000);
+});
+
+describe("una línea de millones de literales cortos, que cabe en el tope, no los guarda todos antes de decir que no casan", () => {
+	/** El principio de una fila de una columna: detrás, los literales que quepan en una línea. */
+	const PRINCIPIO = 'INSERT INTO "t" ("a") VALUES (';
+
+	it.each([
+		// Cada uno, un objeto: millones son cientos de MB.
+		["unos bytes vacíos", "X''"],
+		["un número", "1"],
+	])("%s", async (_que, literal) => {
+		const n = Math.floor((CARACTERES_POR_LINEA - PRINCIPIO.length) / (literal.length + 2));
+		const largo = PRINCIPIO.length + n * (literal.length + 2);
+		// Justo por debajo del tope: `lineasDe` la deja pasar, y con otro literal ya no cabría.
+		expect(largo).toBeLessThanOrEqual(CARACTERES_POR_LINEA);
+		expect(largo + literal.length + 2).toBeGreaterThan(CARACTERES_POR_LINEA);
+		const r = await conElMontonAcotado(`
+			const { cargarCopia } = await import(${JSON.stringify(cargador)});
+			const { DatabaseSync } = await import("node:sqlite");
+			const db = new DatabaseSync(":memory:");
+			const sql = {
+				exec(consulta, ...args) {
+					const sentencia = db.prepare(consulta);
+					const filas = consulta.startsWith("SELECT") || consulta.startsWith("PRAGMA") ? sentencia.all(...args) : (sentencia.run(...args), []);
+					return { toArray: () => filas };
+				},
+			};
+			const linea = ${JSON.stringify(PRINCIPIO)} + ${JSON.stringify(`${literal}, `)}.repeat(${n - 1}) + ${JSON.stringify(`${literal});`)};
+			let motivo = "cargada";
+			try {
+				await cargarCopia(
+					{ sql, transactionSync: (cuerpo) => cuerpo() },
+					(async function* () {
+						yield "-- Migraciones: m1";
+						yield linea;
+						yield "-- Fin de la copia: 1 filas en 1 tablas";
+					})(),
+					{ migraciones: ["m1"], esTablaDeLaCopia: (t) => t === "t", prepararBase: async () => db.exec("CREATE TABLE t (a);") },
+				);
+			} catch (error) {
+				motivo = error.message;
+			}
+			process.stdout.write(JSON.stringify({ largo: linea.length, motivo }));
+		`);
+		// Falla en el segundo literal, que ya sobra, con la memoria que ocupa la línea.
+		const motivo = `copia_no_valida: la línea 2 no se puede cargar: valores_no_casan (carácter ${PRINCIPIO.length + literal.length + 3})`;
+		expect(r).toEqual({ codigo: 0, salida: JSON.stringify({ largo, motivo }), errores: "" });
 	}, 60_000);
 });
 

@@ -359,6 +359,9 @@ class LectorDeFilas {
 		const valores: ValorLeido[] = [];
 		for (;;) {
 			const desde = l.i;
+			// Uno más de los que tiene la fila ya no se lee: una línea de millones de literales cortos, que
+			// cabe en `CARACTERES_POR_LINEA`, los guardaría todos antes del `)`, cientos de MB.
+			if (valores.length === cabecera.columnas) l.falla("valores_no_casan", desde);
 			valores.push(l.valor());
 			if (l.salta(", ")) continue;
 			const c = linea.charCodeAt(l.i);

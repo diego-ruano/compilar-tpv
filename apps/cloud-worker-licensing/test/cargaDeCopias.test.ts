@@ -263,6 +263,8 @@ describe("una línea de datos que no es exactamente una fila hace inservible la 
 		["una columna repetida", `INSERT INTO "t" ("id", "a", "A") VALUES (2, 1, '${DE_LA_COPIA}');`, "columna_repetida", '"A"'],
 		["una tabla que la copia no puede traer", `INSERT INTO "sqlite_master" ("name") VALUES ('${DE_LA_COPIA}');`, "tabla_ajena", '"sqlite_master"'],
 		["menos valores que columnas", `INSERT INTO "t" ("id", "a", "b") VALUES (2, '${DE_LA_COPIA}');`, "valores_no_casan", ");"],
+		// En el primero que sobra, sin leer los demás: una línea puede traer millones.
+		["más valores que columnas", `INSERT INTO "t" ("id", "a") VALUES (2, '${DE_LA_COPIA}', 7, 8);`, "valores_no_casan", "7, 8);"],
 	];
 
 	it.each(casos)("%s", async (_que, mala, motivo, donde) => {
