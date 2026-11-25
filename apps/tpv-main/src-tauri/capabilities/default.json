@@ -13,9 +13,6 @@
         "core:window:allow-set-background-color",
 
         "dialog:default",
-        "dialog:allow-save",
-        "dialog:allow-confirm",
-        "dialog:allow-message",
 
         {
             "identifier": "fs:allow-write-file",
