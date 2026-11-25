@@ -5,7 +5,7 @@
     "packages/*/src/generated/**": ["exports", "types"]
   },
   // Herramientas no gestionadas por pnpm, invocadas desde los scripts del monorepo.
-  "ignoreBinaries": ["cargo", "python"],
+  "ignoreBinaries": ["cargo"],
   "workspaces": {
     ".": {
       // El test del generador de carga lo lanza quien lo toca (`node --test`), no CI.
