@@ -3699,17 +3699,6 @@ export type TpvServerPostJsonArgs = {
 	body: unknown,
 };
 
-export type TpvServerSignedHeadersArgs = {
-	mode: string,
-	method: string,
-	path: string,
-	/**
-	 *  Cuerpo exacto que se enviará con esas cabeceras (vacío si la petición no lleva). Entra en
-	 *  la firma (FABLE-E): pedir cabeceras para un cuerpo y mandar otro da 401 en el worker.
-	 */
-	body?: string | null,
-};
-
 export type TrabajadorCardStats = TrabajadorCardStats_Serialize | TrabajadorCardStats_Deserialize;
 
 export type TrabajadorCardStats_Deserialize = {

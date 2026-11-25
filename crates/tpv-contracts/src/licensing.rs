@@ -190,17 +190,6 @@ pub enum AccionEmparejamiento {
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct TpvServerSignedHeadersArgs {
-    pub mode: String,
-    pub method: String,
-    pub path: String,
-    /// Cuerpo exacto que se enviará con esas cabeceras (vacío si la petición no lleva). Entra en
-    /// la firma (FABLE-E): pedir cabeceras para un cuerpo y mandar otro da 401 en el worker.
-    #[serde(default)]
-    pub body: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TpvServerPostJsonArgs {
     pub mode: String,
     pub path: String,
