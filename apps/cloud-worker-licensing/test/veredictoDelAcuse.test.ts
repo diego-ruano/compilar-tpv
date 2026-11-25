@@ -124,9 +124,25 @@ describe("el acuse dice de qué clase es el fallo", () => {
 			for (const [caso, texto, args] of CASOS) {
 				const v = await aplicar(`op-${caso}`, texto, args);
 				expect(v, `${caso}: ${v.error}`).toMatchObject({ ok: false, permanente: true, transitorio: false });
+				// El de 9 MB lo rechaza la fila, no otra cosa que también sería permanente.
+				if (caso === "un valor que no cabe en una fila") expect(v.error).toMatch(/too big/);
 			}
 			// Y ninguno se ha tomado por una base llena.
 			expect(eventos.filter((e) => e.name === "base_llena")).toEqual([]);
+		});
+	});
+
+	it("una operación de más de 2 MiB que cabe en `MAX_MENSAJE` se lee y la juzga la base", async () => {
+		// Un mensaje de unos 3 MB. Con el tope del mensaje en 2 MiB se cortaba con `payload_too_large` y
+		// no llegaba ningún acuse, aunque la base de producción (filas de hasta 8 MiB y 34 bytes) la
+		// habría aceptado. El workerd local la rechaza por la fila (`sondaSqliteDo`, `valor3MB`), así
+		// que lo que se comprueba es que llega su acuse y que es la base quien la juzga, no el `ok`.
+		await enElHub("ack-3mb", async (hub: any) => {
+			const { aplicar } = await preparar(hub);
+			const v = await aplicar("op-3MB", ALTA, ["z-3mb", "a".repeat(3_000_000)]);
+			if (v.ok) return;
+			expect(v, String(v.error)).toMatchObject({ ok: false, permanente: true, transitorio: false });
+			expect(v.error).toMatch(/too big/);
 		});
 	});
 
