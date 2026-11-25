@@ -57,10 +57,13 @@ function contenido(sql: SqlStorage) {
 		.map((r) => String(r.name));
 	return Object.fromEntries(
 		tablas.map((t) => {
-			const cursor = sql.exec(`SELECT * FROM "${t}" ORDER BY rowid;`);
+			// Una tabla WITHOUT ROWID no tiene rowid: sin orden, sale por su clave, que es como la guarda.
+			const sinRowid = Boolean(sql.exec("SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?;", t).one().wr);
+			const orden = sinRowid ? "" : " ORDER BY rowid";
+			const cursor = sql.exec(`SELECT * FROM "${t}"${orden};`);
 			const columnas = [...cursor.columnNames];
 			const filas = [...cursor.raw()].map((f) => f.map((v) => (v instanceof ArrayBuffer ? { blob: hex(v) } : v)));
-			const tipos = [...sql.exec(`SELECT ${columnas.map((c) => `typeof("${c}")`).join(", ")} FROM "${t}" ORDER BY rowid;`).raw()];
+			const tipos = [...sql.exec(`SELECT ${columnas.map((c) => `typeof("${c}")`).join(", ")} FROM "${t}"${orden};`).raw()];
 			return [t, { columnas, filas, tipos }];
 		}),
 	);
@@ -263,6 +266,32 @@ describe("la copia de la base central", () => {
 			tablas: String(respuesta.valor.tablas),
 			ultimaMigracion: MIGRACIONES_DE_LA_CENTRAL.at(-1)!.name,
 		});
+	});
+
+	it("una tabla WITHOUT ROWID entra en la copia como las demás, sin hacerla fallar (copias-1)", async () => {
+		const central = await centralDePrueba();
+		await sembrar(central);
+		// Una tabla que una migración de mañana podría crear así: sin rowid por el que ordenar.
+		await enLaCentral(central, (sql) => {
+			sql.exec("CREATE TABLE sin_rowid (clave TEXT PRIMARY KEY, valor INTEGER NOT NULL) WITHOUT ROWID;");
+			sql.exec("INSERT INTO sin_rowid (clave, valor) VALUES ('b', 2), ('a', 1);");
+		});
+
+		const respuesta = await central.stub.copiar("2026-09-28");
+		if (!respuesta.ok) throw new Error(`${respuesta.error}: ${respuesta.detalle}`);
+		const lineas = (await bajar(respuesta.valor.clave)).split("\n");
+		expect(lineas).toContain("CREATE TABLE sin_rowid (clave TEXT PRIMARY KEY, valor INTEGER NOT NULL) WITHOUT ROWID;");
+		expect(lineas.filter((l) => l.startsWith('INSERT INTO "sin_rowid"')).sort()).toEqual([
+			`INSERT INTO "sin_rowid" ("clave", "valor") VALUES ('a', 1);`,
+			`INSERT INTO "sin_rowid" ("clave", "valor") VALUES ('b', 2);`,
+		]);
+		// Todas las filas de la central, las de esa tabla también.
+		const origen = await enLaCentral(central, contenido);
+		expect(origen.sin_rowid.filas).toEqual([
+			["a", 1],
+			["b", 2],
+		]);
+		expect(respuesta.valor.filas).toBe(Object.values(origen).reduce((n, t) => n + t.filas.length, 0));
 	});
 
 	it("a mano: con la hora en la clave, sin pisar la del día", async () => {

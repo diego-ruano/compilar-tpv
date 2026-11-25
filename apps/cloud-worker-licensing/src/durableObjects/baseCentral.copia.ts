@@ -214,7 +214,9 @@ export function volcarLaCentral(sql: SqlStorage, opciones: { ahora: Date; tope?:
 	for (const t of objetos.filter((o) => o.tipo === "table")) {
 		gz.linea(`${t.sql};`);
 		tablas++;
-		filas += volcarFilas(sql, t.nombre, gz, { porRowid: true });
+		// Por rowid, en el orden en que entraron; una tabla `WITHOUT ROWID` no lo tiene, y va sin orden,
+		// como en la copia de un negocio (copias-1).
+		filas += volcarFilas(sql, t.nombre, gz, { porRowid: !esSinRowid(sql, t.nombre) });
 	}
 	for (const o of objetos.filter((o) => o.tipo !== "table")) {
 		gz.linea(`${o.sql};`);
@@ -222,6 +224,11 @@ export function volcarLaCentral(sql: SqlStorage, opciones: { ahora: Date; tope?:
 
 	terminarVolcado(gz, { filas, tablas });
 	return { gzip: gz.cerrar().gzip, tablas, filas, migraciones };
+}
+
+/** ¿Es `tabla` una tabla `WITHOUT ROWID`? Entonces no tiene rowid por el que ordenar sus filas. */
+function esSinRowid(sql: SqlStorage, tabla: string): boolean {
+	return Boolean(sql.exec("SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?;", tabla).toArray()[0]?.wr);
 }
 
 /** Una copia de la central en R2, con lo que dicen sus metadatos. */
