@@ -13,8 +13,7 @@ la subida completa de la Main a una nube devuelta (`_Sync_Subida*`, DO-SUBIDA,
 equipo, escritas por `raw()`, que en la nube existen vacías; y `0006_facturas_pdf.sql`, el estado
 local del PDF de cada factura completa (`_Facturas_Pdf`, [abajo](#el-andamiaje-local-16-de-0001-y-0002))
 y el índice con el que se buscan.
-(La base central de licencias es otra cosa y no se migra desde el código:
-[worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
+(La base central del worker es otra base, con sus propias migraciones: [abajo](#la-base-central).)
 
 | Pieza | Archivo | Rol |
 |---|---|---|
@@ -23,7 +22,7 @@ y el índice con el que se buscan.
 | Runner de la nube | `apps/cloud-worker-licensing/src/server/tenantMigrations.ts` | El mismo control sobre cada base de tenant; registro a mano |
 | Foto anti-deriva | `packages/database/schema.snapshot.sql` | El esquema resultante, comparado en un test |
 | Esquema de los tests del worker | `apps/cloud-worker-licensing/test/helpers/esquemaTenant.ts` | Aplica las mismas migraciones sobre el SQLite del DO |
-| Guardia del registro | `scripts/check-migration-registry.mjs` | En CI: todo `.sql` está registrado en `tenantMigrations.ts` |
+| Guardia del registro | `scripts/check-migration-registry.mjs` | En CI: todo `.sql` está registrado en `tenantMigrations.ts` (y los de la base central, en el suyo) |
 
 ## Cómo se aplica
 
@@ -93,6 +92,31 @@ En los dos casos:
 
 Cargo vigila la carpeta de migraciones mediante `tpv-infra-sqlite/build.rs`: al editar, añadir o
 eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.rs`.
+
+## La base central
+
+La base central del worker (licencias, negocios, dispositivos…) no es este esquema: vive en el
+SQLite de su objeto `BaseCentral` y tiene sus propias migraciones, en
+`apps/cloud-worker-licensing/src/server/central/migraciones/`, registradas en orden en
+`server/central/migraciones.ts` ([worker.md](worker.md#su-esquema-migraciones-en-código)). Las aplica
+el propio objeto al arrancar, con el mismo runner que la base de cada negocio (`migrarBase`) y el mismo
+control: `_migrations` con el nombre y el hash del texto entero, comentarios incluidos; una aplicada
+que cambia deja la central sin atender (`central_migracion_alterada`). No se replica, y no sigue las
+reglas de abajo.
+
+Para cambiarla:
+
+1. Una migración **nueva** en esa carpeta (`0002_….sql`), sin abrir ni cerrar transacciones: las abre
+   el runner. Una aplicada no se toca, tampoco sus comentarios.
+2. **Aditiva**: tablas, columnas que admiten `NULL` o llevan `DEFAULT`, índices. Nada de lo que el
+   código de antes lee o escribe desaparece, se renombra ni cambia de sentido: durante un despliegue,
+   un isolate con el código de antes puede hablar con el objeto ya migrado.
+3. Registrarla en `migraciones.ts`, en orden (lo vigila `scripts/check-migration-registry.mjs`).
+4. Regenerar la foto, `src/server/central/esquema.snapshot.sql`, con
+   `pnpm --filter tpv-api exec vitest run test/centralEsquema.test.ts -u`, y revisar su diferencia con
+   la de la migración.
+5. **Desplegarla antes que el código que la usa**, en un despliegue aparte: un Worker nuevo puede
+   hablar un rato con el objeto de antes, que todavía no la tiene.
 
 ## Reglas del esquema
 
