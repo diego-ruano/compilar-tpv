@@ -4,7 +4,7 @@
 // papeles distintos, y la diferencia es la de RI-29:
 //
 //   - **El ticket de un cobro.** Lo compone Rust desde la base (`printer_ticket_de_pago`): las
-//     líneas que cobró ese pago y su factura —número, fecha, QR, desglose y total—. Aquí no se elige
+//     líneas que cobró ese pago y su factura —número, fecha, desglose y total—. Aquí no se elige
 //     nada: un papel con número tiene que ser exactamente su factura.
 //   - **La precuenta.** La compone la pantalla con las líneas de la comanda (todas, las pendientes o
 //     las que se marquen) y sale sin número: no es un ticket de venta.

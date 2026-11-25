@@ -627,7 +627,7 @@ mod tests {
 
     #[tokio::test]
     async fn la_factura_del_cobro_sale_del_registro() {
-        // RI-29: el número, la fecha, el QR, el desglose y el total del papel son los declarados.
+        // RI-29: el número, la fecha, el desglose y el total del papel son los declarados.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
         sembrar(&db, FACTURA_DE_LA_VENTA).await;

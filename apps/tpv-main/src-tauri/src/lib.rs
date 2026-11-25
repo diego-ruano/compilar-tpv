@@ -1783,7 +1783,7 @@ async fn imprimir_ticket(
 }
 
 /// Imprime una **precuenta**: lo que se le enseña al cliente antes de cobrar, compuesto en la
-/// pantalla. Sale sin número, sin QR y sin marca de copia aunque la pantalla los mande
+/// pantalla. Sale sin número y sin marca de copia aunque la pantalla los mande
 /// (`como_precuenta`, RI-29): el ticket de un cobro sólo sale de `printer_imprimir_pago`.
 #[tauri::command]
 #[specta::specta]

@@ -98,7 +98,7 @@ export async function printerImprimirPago(
     await commands.printerImprimirPago(args);
 }
 
-/** Imprime una precuenta. Aunque el payload trajera un número o un QR, Rust se los quita. */
+/** Imprime una precuenta. Aunque el payload trajera un número o la marca de copia, Rust se los quita. */
 export async function printerImprimirPrecuenta(payload: PrintTicketPayload): Promise<void> {
     await commands.printerImprimirPrecuenta(payload);
 }
@@ -107,7 +107,7 @@ export async function printerImprimirPrecuenta(payload: PrintTicketPayload): Pro
 
 /**
  * La precuenta de unas líneas (cada unidad por separado), con la personalización actual de los
- * stores. Es lo único que compone la pantalla: sin número, sin QR y sin copia, porque una
+ * stores. Es lo único que compone la pantalla: sin número y sin copia, porque una
  * precuenta no es una factura. La vista previa de Configuración la usa también, para que lo que se
  * ve al tocar una casilla cambie al momento.
  *

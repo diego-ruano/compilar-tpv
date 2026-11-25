@@ -2495,7 +2495,7 @@ export type PrintTicketLine_Serialize = {
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.
@@ -2506,7 +2506,7 @@ export type PrintTicketPayload = PrintTicketPayload_Serialize | PrintTicketPaylo
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.
@@ -2617,7 +2617,7 @@ export type PrintTicketPayload_Deserialize = {
  *  Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
  *
  *  **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
- *  de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ *  de `Pago_Detalles`, y el número, la fecha, el desglose y el total del registro de
  *  facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
  *  **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
  *  con número no puede salir de lo que diga la pantalla.

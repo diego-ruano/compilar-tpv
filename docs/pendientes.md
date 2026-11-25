@@ -34,7 +34,10 @@ Esta rama no remite a la AEAT. Veri\*factu entero —remisión, certificado, QR 
 anomalías, exportación, declaración responsable y modo prueba— está en `con-verifactu` (Windows 10
 y 11) y `con-verifactu-windows-7`, tal como estaba el 25-10-2026. La retirada es un solo commit de
 `main` (`git log --oneline --grep "sin Veri"`): volver a ponerlo empieza por revertirlo sobre la
-rama de trabajo y resolver lo que haya cambiado desde entonces.
+rama de trabajo y resolver lo que haya cambiado desde entonces. Lo que se ha escrito después para
+esta rama no lo devuelve la reversión: [tickets.md](arquitectura/tickets.md) y los comentarios del
+papel (`impresion.rs`, `printing.rs`, `printerApis.ts`, `PrintTicketModal.tsx`) describen un ticket
+sin el QR, y hay que volver a ponerlo en ellos.
 
 Con él vuelve lo que estaba pendiente allí:
 
