@@ -22,6 +22,15 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [CENTRAL-AUTH](#central-auth--tenantauth-lee-la-central-en-tres-viajes) | 🔵 | `tenantAuth` lee la base central en tres viajes, que podrían ser uno | Sin decidir; hacia los 1.000 negocios |
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano | Lo decide el responsable |
+| [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
+| [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
+| [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
+| [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
+| [CUPO-SATURADA](#cupo-saturada--el-cupo-diario-de-correo-no-se-aplica-con-la-central-saturada) | 🔵 | Con la central saturada, el cupo diario de correo de pedidos no se aplica | Lo decide el responsable |
+| [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
+| [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
+| [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
+| [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Caducan solas |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -269,6 +278,20 @@ por encima.
 En local no se puede comprobar (no hay vuelta a un instante). Toca en el simulacro de vuelta en
 producción: volver, deshacer y ver si el negocio atiende.
 
+### VUELTA-REPETIR · Repetir la vuelta de un negocio puede volver dos veces
+
+`POST /v1/admin/negocios/instante` (`basesDeNegocios.ts`, `pnpm negocio:instante`) prepara la vuelta
+(`MotorTenantHub.prepararVuelta`), abre el log en la central y reinicia el objeto. Si se queda a medias,
+contesta `log_sin_reservar` (la central no ha contestado) o `vuelta_sin_aplicar` (el objeto no ha
+vuelto todavía), los dos con «Repite la misma orden». Repetirla vuelve a preparar la vuelta sin mirar
+si la de antes ya se ha aplicado: si el objeto se ha reiniciado por su cuenta entre el «sin aplicar» y
+la repetición, ya ha vuelto, y la repetición prepara otra vuelta al mismo destino, que se lleva lo
+escrito entre medias.
+
+La base central lo resuelve así (`domains/admin/central.ts::aplicarLaPreparada`,
+`baseCentral.instante.ts`): la respuesta da el `deshacer`, y `--reiniciar <deshacer>` sólo reinicia si
+esa vuelta sigue preparada; si ya se ha aplicado, no hace nada. El arreglo es el mismo para el negocio.
+
 ### CENTRAL-RESTAURAR · La central se restaura en una sola llamada
 
 Restaurar la central desde una copia (`baseCentral.restaurar.ts`) va entero dentro de un
@@ -316,6 +339,99 @@ a `NULL`, que es lo que `pnpm license:list` enseña como pendiente y `pnpm licen
 
 Lo decide el responsable (G7): que la entrega que encuentra la sesión cumplida con licencias sin
 `key_email_sent_at_ms` reenvíe las claves, que avise a Sentry, o dejarlo a mano como hasta ahora.
+
+### TRASLADO-REINTENTO · Un traslado de licencia que falla a medias
+
+Activar en otro equipo con su código (`/v1/license/activate`, `licensing.routes.ts`) gasta el código
+del correo (`consumeDeviceOtp`) antes de dar de alta el equipo y de mover la licencia
+(`reassignMainDevice`, `licenseStore.ts`). Lo que ya está en el código (E7a-1): la licencia y su traza
+(`license_device_swaps`) se mueven en un solo lote, y si ese viaje no vuelve, la traza dice si ha
+entrado, y entonces la ruta sigue con los avisos (`test/licenciaTraslado.test.ts`). Lo que queda:
+
+- Un fallo después de gastar el código (la central, el alta del equipo) obliga a pedir otro.
+- Si el 200 se pierde camino del equipo, o el lote entra y la central no contesta a la lectura de su
+  traza (`licenciaTraslado.test.ts`, «si tampoco se puede mirar la traza…»), el reintento de ese
+  equipo ya no es un traslado: la licencia ya está en él, y contesta `cambioDeEquipo: false`. No salen
+  los avisos (al titular y al `TenantHub`), y la Main no sabe que su base es de antes del traslado,
+  que es lo que decide `cambioDeEquipo`.
+
+Arreglo posible: que gastar el código y mover la licencia sean una sola operación de la central, o
+reconocer el reintento: con el código de este equipo ya gastado y una traza reciente hacia él,
+contestar `cambioDeEquipo: true` y avisar otra vez.
+
+### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
+
+- `/v1/login/correo-recuperacion/confirmar` (`correoRecuperacion.ts::confirmarCambioCorreo`) gasta el
+  código (`comprobarCodigo`) y después cambia el correo (`setTenantRecoveryEmail`), en dos escrituras.
+  Si la segunda falla, el código está gastado y el correo sigue siendo el de antes: hay que pedir
+  otro.
+- Al pedirlo (`/solicitar`), si la reserva del envío entra en la central pero su respuesta no vuelve,
+  la petición falla sin mandar el correo, y la siguiente choca con la espera de un minuto que ha puesto
+  esa reserva: «Acabamos de enviarte un código» (`codigosPorCorreo.ts::porQueNoSeEnvia`) sin que haya
+  salido ninguno.
+
+Lo que ya está en el código (E7a-2): recuperar el PIN lee a quién avisar antes de gastar el código
+(`recuperarPin.ts`). Arreglo posible: gastar el código y cambiar el correo en un solo lote, y que la
+espera sólo cuente desde un envío que ha salido.
+
+### EMPAREJAR-TOKEN · Recoger el token de una Handy son tres escrituras sueltas
+
+`/v1/pair/fetch-token` (`pairing.handy.ts`) gasta el reto (`device_challenges`), gasta el código
+(`pair_requests`) y da de alta la Handy (`devices`) en tres sentencias seguidas, no en un lote. Si
+falla el alta, el reto y el código ya están gastados y hay que emparejar otra vez; si se pierde la
+respuesta, queda un dispositivo dado de alta que no tiene su token. Arreglo posible: las tres en un
+lote todo o nada, con la condición de cada una dentro de su sentencia, como ya van.
+
+### CUPO-SATURADA · El cupo diario de correo no se aplica con la central saturada
+
+El correo de un pedido sale aunque la central no conteste (`email.routes.ts::reservarCupo`,
+`sin_base`): una caída nuestra no impide mandar un pedido. Pero una central saturada
+(`hub_overloaded`) también es `sin_base`, y la puede saturar quien tenga un dispositivo dado de alta:
+mientras dure, sus pedidos salen sin contar en el cupo. Lo fija `test/correoTopeDiario.test.ts` («con
+la central saturada, también…»). Lo decide el responsable: contestar 503 con la central saturada
+(el pedido se repite después), o dejarlo así.
+
+### AVISO-CADUCIDAD · Un aviso de caducidad que no sale nunca
+
+El cron de avisos de caducidad (`avisosDeCaducidad.ts`) pone una marca por licencia y peldaño
+(`marcarAvisoEnviado`) antes de mandar el correo, y la suelta si no sale (`olvidarAvisoEnviado`). Lo
+que ya está en el código (E7a-7): una licencia que falla no corta a las demás. Lo que queda: si la
+central falla al soltar la marca, o después de ponerla (la marca entra y su respuesta no vuelve), la
+marca se queda y ese peldaño no sale nunca (`test/avisoDeCaducidad.test.ts`, «al soltar la marca de un
+aviso que no ha salido…»). Arreglo posible: una marca «enviando» con caducidad, que el ciclo de otro
+día pueda retomar.
+
+### MAX-MENSAJE · El tope de un mensaje de la Main, por debajo de lo que admite la base
+
+`MAX_MENSAJE` (`tenantHub.mensajes.ts`) es de 4 MiB: un mensaje mayor de la Main se rechaza
+(`payload_too_large`) antes de leerlo. Una operación va sola en su lote aunque sea grande, y el SQLite
+de un objeto admite en producción valores y filas de hasta 8 MB
+([worker.md](arquitectura/worker.md#la-base-del-negocio-dentro-de-su-tenanthub)): una operación cuyo
+mensaje pasa de 4 MiB por un valor que la base admite se rechaza, y la Main la aparta. Lo decide el
+responsable: subir el tope (antes, mirar en la página de límites de Cloudflare el de un mensaje de
+WebSocket que recibe un Durable Object), o dejarlo.
+
+### RESTAURAR-CONTRAPRESION · La descompresión de una copia no espera a la carga
+
+Restaurar una copia, de la central o de un negocio, lee el gzip de R2 con `DecompressionStream` y
+`TextDecoderStream` (`cargaDeCopias.ts::lineasDe`), y entre lote y lote la carga escribe en el SQLite
+del objeto. La descompresión de workerd no espera a que se lea lo que da: una sonda (un gzip sin fin
+hecho a mano; se leen 256 KiB y se para 300 ms) vio que, mientras tanto, pedía a la fuente 64 MiB. Si
+la carga va más despacio que R2, lo descomprimido se acumula en la memoria del objeto (128 MB). La
+sonda no se ha quedado en el repositorio. Falta medir una restauración grande en producción; si se
+confirma, descomprimir a demanda (pidiendo a R2 sólo cuando se ha cargado lo anterior).
+
+### COPIAS-SALTOS · Copias de negocio de antes con muchos saltos en una fila
+
+Las copias diarias de negocio que hizo el worker antes de `SALTOS_CON_CHAR` (`volcadoSql.ts`) escriben
+cada salto de línea de un texto como `'||char(10)||'`, 14 caracteres. Una fila con más de 1,27
+millones de saltos (o de 8 MB con más de unos 726.000) da una línea de más de 17 MiB
+(`CARACTERES_POR_LINEA`, `cargaDeCopias.ts`), y esa copia no se restaura (`copia_no_valida: la línea N
+es demasiado larga`); el worker de antes tampoco la restauraba. Lo fija `test/cargaDeCopias.test.ts`
+(«la de una copia de un negocio de antes de SALTOS_CON_CHAR…»). Esas copias se van solas: se guardan
+las 30 últimas de cada negocio (`COPIAS_QUE_SE_GUARDAN`), así que a los 30 días del despliegue no
+queda ninguna, salvo las que proteja una subida completa sin terminar (`copiasProtegidasDesde`). Leerlas
+sin juntar la línea entera sería otro lector.
 
 ---
 
