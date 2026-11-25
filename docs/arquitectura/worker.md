@@ -378,6 +378,7 @@ cuando el Worker la hacía con una transacción abierta por la red:
 | Operación | La pide | Lo que hace el Worker antes y después |
 |---|---|---|
 | `canjearClave` | `/v1/license/activate`, al sumar una clave (`licensing.routes.ts`) | Antes, la DEK y el token; después, la frase de una clave ya usada y el recibo por correo |
+| `trasladarLicencia` | `/v1/license/activate`, al trasladar la licencia con el código del correo | Antes, comparar el código con su huella (con sus topes) y el id de la traza; después, si la respuesta se pierde, mirar la traza, y los avisos al `TenantHub` y al titular |
 | `emitirCobro` | El webhook de Stripe (`stripe.routes.ts`) | Antes, si la sesión ya se cumplió, con la consulta de la operación (`COBROS_DE_LA_SESION`: si lo está, sale sin preparar nada), y las claves (su huella, su forma corta y cifradas: la clave en claro no viaja), los ids y la hora; después, el correo con las claves y su marca |
 | `revertirCobro` | El webhook: reembolsos y disputas | Después, marcar el evento y avisar al `TenantHub` de las altas anuladas |
 | `revocarAMano`, `desrevocar` | `/v1/admin/licenses/:id/revoke` y `/unrevoke` | Antes, que la licencia exista; después, la auditoría y el aviso al `TenantHub` |
@@ -413,14 +414,14 @@ cuando el Worker la hacía con una transacción abierta por la red:
 Lo cubren `test/centralOperar.test.ts`, `test/centralCarreras.test.ts` (la misma operación pedida a la
 vez: un canje, una sesión de Stripe, un cargo revertido muchas veces), `test/centralFalloInyectado.test.ts`
 (un fallo tras cada sentencia de cada operación, y la central entera tiene que quedar como estaba) y el
-oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las siete operaciones conducidos
+oráculo de equivalencia, `test/oraculoCentral.test.ts`: escenarios de las otras siete operaciones conducidos
 sólo por HTTP, con Stripe, el correo y los `TenantHub` sustituidos, cuya foto de cada respuesta, cada
 efecto y cada cambio en la central (`test/oraculo/central/`) se tomó con la central de antes de estar
 en su objeto, y se compara entera. Se regeneran, a sabiendas de que lo que hace la central cambia, con
-`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. El traslado de licencia, que
-desde E7a-1 es un lote, lo compara `test/licenciaTraslado.test.ts` con el de antes: las mismas
-columnas en su traza, la misma hora en la licencia y en la traza (`updated_at_ms` y `at_ms`) y
-ninguna otra fila cambiada.
+`pnpm --filter tpv-api exec vitest run test/oraculoCentral.test.ts -u`. El traslado de licencia, que no
+lleva escenario del oráculo, lo fija `test/licenciaTraslado.test.ts`: lo que escribe su operación (el
+código gastado, el equipo nuevo, la licencia y su traza, todo con la misma hora) y ninguna otra
+fila cambiada.
 
 ### Cuando no puede atender
 

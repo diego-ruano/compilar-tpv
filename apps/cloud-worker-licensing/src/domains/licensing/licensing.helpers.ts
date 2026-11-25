@@ -56,6 +56,13 @@ export const OTP_VENTANA_MS = 24 * 60 * 60 * 1000;
 export const OTP_CODIGOS_AL_DIA = 5;
 export const OTP_FALLOS_AL_DIA = 10;
 
+/**
+ * TRASLADO-REINTENTO · Hasta cuándo, después de un traslado, el equipo al que fue puede repetir su
+ * activación con el mismo código y recibir otra vez `cambioDeEquipo: true` y los avisos: es el
+ * reintento de un traslado cuya respuesta no le llegó. Un día, como los topes del código.
+ */
+export const REINTENTO_DE_TRASLADO_MS = 24 * 60 * 60 * 1000;
+
 // ---------------- Env / utilidades genéricas ----------------
 
 export function assertEnv(env: Env, names: (keyof Env)[]): string | null {

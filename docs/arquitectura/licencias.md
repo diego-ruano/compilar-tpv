@@ -29,7 +29,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Compra | `…/domains/stripe/{stripe.routes,stripe.helpers}.ts` | Webhook: emitir, revertir, restaurar |
 | Administración | `…/domains/admin/admin.routes.ts` + `scripts/tpv-license.mjs` | Emitir, listar, reenviar, revocar, desrevocar, extender, acortar |
 | Almacén | `…/src/server/licenseStore.ts` | Las lecturas y las escrituras de una sentencia en la base central |
-| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el cobro y su reversión (`emitirCobro`, `revertirCobro`) y lo que la administración hace con una licencia ([worker.md](worker.md#las-operaciones)) |
+| Operaciones | `…/src/server/central/operaciones/` | Lo que escribe en más de una sentencia, entero o nada, dentro del objeto `BaseCentral`: el canje (`canjearClave`), el traslado (`trasladarLicencia`), el cobro y su reversión (`emitirCobro`, `revertirCobro`) y lo que la administración hace con una licencia ([worker.md](worker.md#las-operaciones)) |
 | Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
 | Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
@@ -386,15 +386,22 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
 2. `POST /v1/license/device-change/request` manda el código: hash guardado en `license_device_otp`,
    ligado a ese `deviceId`, 10 minutos y 5 intentos, como mucho uno por minuto. Responde siempre lo
    mismo, exista o no la clave.
-3. Activar con el código: se verifica (tiempo constante), se consume de forma atómica,
-   `reassignMainDevice` cambia la Main y deja su traza en `license_device_swaps` **en un solo lote**
-   (entran las dos o ninguna, E7a-1), **conservando el tenant**, y se avisa al `TenantHub` y por correo
-   al titular. Si el lote no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
+3. Activar con el código: se compara con su huella (tiempo constante, con sus topes) y, después,
+   gastar el código, dar de alta el equipo nuevo en el negocio y mover la Main con su traza en
+   `license_device_swaps` son **una sola operación de la central** (`trasladarLicencia`,
+   `server/central/operaciones/traslado.ts`), todo o nada, **conservando el tenant**. Si falla, el
+   código sigue valiendo y basta con repetir. Después se avisa al `TenantHub` y por correo al titular.
+   Si la operación no vuelve con su respuesta, se mira su traza (su `swap_id` es sólo suyo): si
    está, ha entrado, y la ruta sigue con los avisos y `cambioDeEquipo: true`, y el viaje que no
    volvió queda en Axiom (`central_no_disponible`; en Sentry, sólo si no es carga ni un fallo
-   pasajero); si no está, o la central
-   tampoco contesta a esa lectura, el 503 de siempre y ningún aviso. El código ya está gastado: lo
-   que queda está en [TRASLADO-REINTENTO](../pendientes.md#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias).
+   pasajero); si no está, o la central tampoco contesta a esa lectura, el 503 de siempre.
+4. **El reintento del mismo traslado** (TRASLADO-REINTENTO). Si el 200 se pierde camino del equipo, o
+   la central no contestó a la lectura de la traza, el equipo repite con el mismo código, y la
+   licencia ya está en él. Se le reconoce: con ese código, ya gastado por él, y el último traslado de
+   la licencia hacia él a la misma hora, hace menos de un día (`REINTENTO_DE_TRASLADO_MS`,
+   `trasladoQueSeRepite`), se le contesta `cambioDeEquipo: true` y se repiten los avisos, que no
+   hacen daño repetidos (el `TenantHub` vuelve a leer quién es la Main; el titular puede recibir el
+   correo dos veces). Con otro código, o más tarde, es el mismo equipo de siempre.
 
 **Qué pasa con el equipo anterior** (AUD-02). Su fila de `devices` no se toca (sigue con rol `tpv`
 y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
@@ -449,8 +456,8 @@ no comparan más códigos que los del tope, y quien no reserva sale sin que se c
 es el tope lo que se lo impide. Primero el intento del código, que devuelve la huella con la que
 comparar, y después el fallo del día. Si el día no concede el suyo, el intento del código se devuelve:
 un rechazo sin comparación no gasta intentos, y el código sigue valiendo cuando el día se libera. Si
-el código es el bueno, el fallo reservado se devuelve y se consume justo el código que se comparó,
-siempre que no haya caducado. Un código caducado no gasta intento.
+el código es el bueno, el fallo reservado se devuelve, y el traslado (`trasladarLicencia`) gasta justo
+el código que se comparó, siempre que no haya caducado. Un código caducado no gasta intento.
 
 El traslado va siempre al correo de la compra, no al de recuperación: si siguiera a éste, quien sepa
 el PIN de un administrador podría cambiarlo y llevarse la licencia.
@@ -461,14 +468,15 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
   ([arriba](#activar)).
 - Dan de alta el dispositivo, o mudan su fila, con `ensureDevice`: **una sola sentencia, que escribe
   la fila con su clave** y sólo toca una que ya existe si su clave registrada es la presentada. Un
-  corte a mitad de la activación no deja una fila sin clave.
+  corte a mitad de la activación no deja una fila sin clave. En un cambio de equipo, el alta va en la
+  operación del traslado (`trasladarLicencia`), con la misma condición.
 - **Límite conocido.** La comparación de la clave y el alta no son un lote. Si la clave registrada de
   ese mismo `device_id` cambia justo entre las dos —sólo puede hacerlo un emparejamiento suyo que
   recoja el token en ese instante, en el negocio donde está su fila—, se rechaza
-  (`device_key_mismatch`) sin escribir la fila ni entregar credenciales, pero lo anterior ya está
-  hecho: en un cambio de equipo el código queda consumido y hay que pedir otro, y si la fila era de
-  ese mismo negocio, su `updated_at_ms` ya se ha movido. El negocio se crea o se toca después de
-  `exigirClaveSiEsDeOtroNegocio`, así que un rechazo suyo no deja un negocio recién creado.
+  (`device_key_mismatch`) sin escribir la fila ni entregar credenciales. Si la fila era de ese mismo
+  negocio, su `updated_at_ms` ya se ha movido; en un cambio de equipo no queda nada hecho y el código
+  sigue valiendo. El negocio se crea o se toca después de `exigirClaveSiEsDeOtroNegocio`, así que un
+  rechazo suyo no deja un negocio recién creado.
 - Justo antes, `exigirClaveSiEsDeOtroNegocio`, la regla que comparten con el emparejamiento: una
   fila de **otro** negocio no se mueve con otra clave (`device_key_mismatch`) ni si no tiene clave
   registrada (`device_key_missing`). Toda puerta que dé de alta un dispositivo comprueba la firma de

@@ -1,12 +1,11 @@
 // src/server/licenseStore.ts
 //
 // Lo que el Worker lee y escribe en la base central (control-plane) sentencia a sentencia: las
-// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Dos
-// sentencias fijas que tienen que entrar juntas van en un lote (el traslado de la Main y su traza,
-// `reassignMainDevice`). Lo que tiene que entrar entero y decide por el camino (el canje, el cobro y
-// su reversión, lo que la administración hace con una licencia) son operaciones de la central y vive
-// en `server/central/operaciones/`, que corre dentro de su objeto; las sentencias que comparten las
-// dos partes salen de allí. Las reglas (¿está caducada? ¿avisa? ¿bloquea?) NO están aquí: son de
+// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Lo que tiene
+// que entrar entero y decide por el camino (el canje, el traslado, el cobro y su reversión, lo que la
+// administración hace con una licencia) son operaciones de la central y vive en
+// `server/central/operaciones/`, que corre dentro de su objeto; las sentencias que comparten las dos
+// partes salen de allí. Las reglas (¿está caducada? ¿avisa? ¿bloquea?) NO están aquí: son de
 // `licensing.helpers.ts` (`computeLicenseState`).
 //
 // La estructura de esta base sólo la cambian sus migraciones (`server/central/migraciones/`).
@@ -20,9 +19,10 @@ import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
-import type { Base, Sql } from "../lib/sql";
-import { CentralNoDisponible } from "./central/cliente";
+import type { Sql } from "../lib/sql";
+import { CentralNoDisponible, type ClienteCentral } from "./central/cliente";
 import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
+import type { ResultadoDelTraslado } from "./central/operaciones/traslado";
 import {
 	addMonths,
 	argumentosDeLaAuditoria,
@@ -394,51 +394,51 @@ export async function activateLicenseFirstTime(
 }
 
 /**
- * Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría, en un solo lote: entran las
- * dos o ninguna (E7a-1). Vuelve cuando el traslado ha entrado, y la ruta sigue con los avisos (al
- * `TenantHub` y al titular). Lanza si no ha entrado o no se sabe, y la ruta no avisa de nada.
+ * TRASLADO-REINTENTO · Traslada la licencia a otro equipo con el código del correo: gastar el código,
+ * dar de alta el equipo nuevo y mover la licencia con su traza van en una sola operación de la
+ * central (`operaciones/traslado.ts`), todo o nada. Devuelve lo que contesta la operación y, si su
+ * respuesta se perdió por el camino pero había entrado, el fallo del viaje, para que la ruta lo deje
+ * registrado (`registrarSinLaCentral`).
  *
  * Un viaje que no vuelve con su respuesta (`CentralNoDisponible`) puede haber entrado: la plataforma
  * da el mismo fallo cuando la respuesta se pierde por el camino. Lo dice la traza, cuyo `swap_id`
- * sólo lo tiene este traslado: si está, vuelve como si la respuesta hubiera llegado, con el fallo del
- * viaje para que la ruta lo deje registrado (`registrarSinLaCentral`); si la respuesta llegó, con
- * `null`. Si no está
- * cuando se mira, o la central tampoco contesta a esa lectura, lanza el fallo del viaje; si aun así
- * había entrado, la licencia queda en el equipo nuevo con su traza y sin los avisos, y el reintento
- * de ese equipo ya no es un traslado (`cambioDeEquipo: false`): TRASLADO-REINTENTO, en
- * docs/pendientes.md.
+ * sólo lo tiene este traslado. Si no está cuando se mira, o la central tampoco contesta a esa
+ * lectura, lanza el fallo del viaje; si aun así había entrado, el reintento del mismo equipo con el
+ * mismo código lo reconoce (`trasladoQueSeRepite`).
  */
-export async function reassignMainDevice(
-	db: Base,
-	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
-): Promise<CentralNoDisponible | null> {
-	const now = Date.now();
+export async function trasladarLicencia(
+	db: ClienteCentral,
+	args: {
+		licenseId: string;
+		fromDeviceId: string | null;
+		toDeviceId: string;
+		devicePubKey: string;
+		tenantId: string;
+		codeHash: string;
+	},
+): Promise<{ resultado: ResultadoDelTraslado["resultado"]; respuestaPerdida: CentralNoDisponible | null }> {
 	const swapId = crypto.randomUUID();
-
 	try {
-		await db.batch([
-			{
-				sql: `UPDATE licenses SET main_device_id=?, updated_at_ms=? WHERE license_id=?;`,
-				args: [args.toDeviceId, now, args.licenseId],
-			},
-			{
-				sql: `
-    INSERT INTO license_device_swaps (swap_id, license_id, from_device_id, to_device_id, at_ms)
-    VALUES (?, ?, ?, ?, ?);
-    `,
-				args: [swapId, args.licenseId, args.fromDeviceId, args.toDeviceId, now],
-			},
-		]);
-		return null;
+		const { resultado } = await db.operar("trasladarLicencia", {
+			licenciaId: args.licenseId,
+			deDeviceId: args.fromDeviceId,
+			aDeviceId: args.toDeviceId,
+			devicePubKey: args.devicePubKey,
+			tenantId: args.tenantId,
+			codeHash: args.codeHash,
+			swapId,
+			ahoraMs: Date.now(),
+		});
+		return { resultado, respuestaPerdida: null };
 	} catch (error) {
 		if (!(error instanceof CentralNoDisponible) || !(await hayTrazaDelTraslado(db, swapId, error))) throw error;
-		return error;
+		return { resultado: "trasladada", respuestaPerdida: error };
 	}
 }
 
 /**
  * ¿Está la traza `swapId`, o sea, ha entrado su traslado? Si la central tampoco contesta a esto, no se
- * sabe: lanza `falloDelViaje`, el del lote. Cualquier otro fallo de la lectura sale tal cual.
+ * sabe: lanza `falloDelViaje`, el de la operación. Cualquier otro fallo de la lectura sale tal cual.
  */
 async function hayTrazaDelTraslado(db: Sql, swapId: string, falloDelViaje: unknown): Promise<boolean> {
 	try {
@@ -447,6 +447,36 @@ async function hayTrazaDelTraslado(db: Sql, swapId: string, falloDelViaje: unkno
 	} catch (e) {
 		throw laCentralNoAtiende(e) ? falloDelViaje : e;
 	}
+}
+
+/**
+ * TRASLADO-REINTENTO · ¿Es esta activación del equipo que ya es la Main el reintento de un traslado
+ * hacia él cuya respuesta no le llegó? Lo es si trae el código con el que se hizo (gastado, de este
+ * equipo) y el último traslado de la licencia es ese, hacia él, desde `desdeMs`: el código y la
+ * traza se escriben juntos, con la misma hora (`operaciones/traslado.ts`). Entonces la base del
+ * equipo es de antes del traslado (`cambioDeEquipo: true`), y los avisos se repiten.
+ */
+export async function trasladoQueSeRepite(
+	db: Sql,
+	args: { licenseId: string; deviceId: string; codeHash: string; desdeMs: number },
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`
+    SELECT 1 AS si
+      FROM license_device_otp o
+      JOIN license_device_swaps s
+        ON s.license_id = o.license_id AND s.to_device_id = o.new_device_id AND s.at_ms = o.consumed_at_ms
+     WHERE o.license_id = ? AND o.new_device_id = ? AND o.code_hash = ? AND o.consumed_at_ms >= ?
+       AND NOT EXISTS (
+         SELECT 1 FROM license_device_swaps posterior
+          WHERE posterior.license_id = s.license_id AND posterior.at_ms > s.at_ms
+       )
+     LIMIT 1;
+    `,
+		[args.licenseId, args.deviceId, args.codeHash, args.desdeMs],
+	);
+	return r.rows.length > 0;
 }
 
 type LicensePaymentKind = "issue" | "renewal";
@@ -856,36 +886,6 @@ export async function devolverIntentoDeOtp(
     `,
 		[args.licenseId, args.newDeviceId, args.codeHash],
 	);
-}
-
-/**
- * Consume el OTP de forma **atómica**: solo consume si sigue sin consumir. Devuelve `false`
- * si otro intento se le adelantó (anti-replay ante peticiones concurrentes).
- *
- * AUD-04: consume sólo el código de esa huella (`codeHash`, la que devolvió `reservarIntentoDeOtp` y
- * con la que se comparó) y sólo si no ha caducado a la hora de consumir. Si entre la comparación y
- * esto se pidió otro código, el nuevo sigue vivo. No comprueba que quien llama tenga una reserva ni
- * mira `attempts`: de eso responde la ruta, que sólo llega aquí después de reservar y comparar.
- */
-export async function consumeDeviceOtp(
-	db: Sql,
-	licenseId: string,
-	newDeviceId: string,
-	codeHash: string,
-): Promise<boolean> {
-	const ahora = Date.now();
-	const r = await exec(
-		db,
-		`
-    UPDATE license_device_otp
-    SET consumed_at_ms = ?
-    WHERE license_id=? AND new_device_id=? AND consumed_at_ms IS NULL AND code_hash=?
-      AND expires_at_ms >= ?
-    RETURNING license_id;
-    `,
-		[ahora, licenseId, newDeviceId, codeHash, ahora],
-	);
-	return (r.rows?.length ?? 0) > 0;
 }
 
 /* ============================================================

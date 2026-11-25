@@ -24,7 +24,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SOCKET-DISPERSION](#socket-dispersion--el-reintento-del-socket-casi-sin-dispersión) | 🔵 | Tras una caída o un despliegue, todos los equipos reconectan a la vez | Sin decidir; hacia los 1.000 negocios |
 | [CLAVES-SIN-CORREO](#claves-sin-correo--las-claves-de-un-cobro-que-no-llegaron-a-salir) | 🔵 | Un comprador puede quedarse sin el correo de sus claves, que se reenvía a mano tras el aviso en Sentry | Lo decide el responsable |
 | [VUELTA-REPETIR](#vuelta-repetir--repetir-la-vuelta-de-un-negocio-puede-volver-dos-veces) | 🔵 | Repetir la vuelta a un instante de un negocio que no se aplicó puede volver otra vez y perder lo escrito entre medias | Sin hacer; la central ya lo resuelve |
-| [TRASLADO-REINTENTO](#traslado-reintento--un-traslado-de-licencia-que-falla-a-medias) | 🔵 | Un traslado de licencia que falla a medias pide otro código, o se queda sin sus avisos | Sin decidir |
 | [CORREO-CONFIRMAR](#correo-confirmar--el-código-del-correo-de-recuperación-se-gasta-sin-cambiarlo) | 🔵 | El código del correo de recuperación se puede gastar sin cambiarlo, y «Acabamos de enviarte un código» sin que haya salido | Sin decidir |
 | [EMPAREJAR-TOKEN](#emparejar-token--recoger-el-token-de-una-handy-son-tres-escrituras-sueltas) | 🔵 | Recoger el token de una Handy son tres escrituras sueltas | Sin decidir |
 | [EMPAREJAR-ESPERA](#emparejar-espera--la-handy-deja-de-esperar-la-aprobación-al-primer-503-o-429) | 🔵 | La Handy deja de esperar la aprobación de la Main al primer 503 o 429 | Sin hacer |
@@ -346,25 +345,6 @@ una más reciente puede ser de otra entrega que está mandando el correo), lo av
 (`stripe.correo_de_claves`, `stripe.routes.ts::avisarSiFaltaElCorreoDeClaves`), con las licencias y
 la orden que las reenvía. No las reenvía: dos entregas a la vez mandarían dos correos. Lo decide el
 responsable (G7): que se reenvíen solas, o dejarlo a mano tras el aviso, como ahora.
-
-### TRASLADO-REINTENTO · Un traslado de licencia que falla a medias
-
-Activar en otro equipo con su código (`/v1/license/activate`, `licensing.routes.ts`) gasta el código
-del correo (`consumeDeviceOtp`) antes de dar de alta el equipo y de mover la licencia
-(`reassignMainDevice`, `licenseStore.ts`). Lo que ya está en el código (E7a-1): la licencia y su traza
-(`license_device_swaps`) se mueven en un solo lote, y si ese viaje no vuelve, la traza dice si ha
-entrado, y entonces la ruta sigue con los avisos (`test/licenciaTraslado.test.ts`). Lo que queda:
-
-- Un fallo después de gastar el código (la central, el alta del equipo) obliga a pedir otro.
-- Si el 200 se pierde camino del equipo, o el lote entra y la central no contesta a la lectura de su
-  traza (`licenciaTraslado.test.ts`, «si tampoco se puede mirar la traza…»), el reintento de ese
-  equipo ya no es un traslado: la licencia ya está en él, y contesta `cambioDeEquipo: false`. No salen
-  los avisos (al titular y al `TenantHub`), y la Main no sabe que su base es de antes del traslado,
-  que es lo que decide `cambioDeEquipo`.
-
-Arreglo posible: que gastar el código y mover la licencia sean una sola operación de la central, o
-reconocer el reintento: con el código de este equipo ya gastado y una traza reciente hacia él,
-contestar `cambioDeEquipo: true` y avisar otra vez.
 
 ### CORREO-CONFIRMAR · El código del correo de recuperación se gasta sin cambiarlo
 

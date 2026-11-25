@@ -44,7 +44,7 @@ const { licenseRoutes } = await import("../src/domains/licensing/licensing.route
 const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
-const { activateLicenseFirstTime, ensureDevice, getLicenseById, reassignMainDevice } = await import(
+const { activateLicenseFirstTime, getLicenseById, putDeviceOtp, trasladarLicencia } = await import(
 	"../src/server/licenseStore"
 );
 const { cifrar } = await import("../src/server/crypto");
@@ -507,12 +507,22 @@ describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio"
 				} else {
 					// Lo que hace `/activate` en un cambio de equipo con el código del correo.
 					const otra = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
-					await ensureDevice(e.db, "tenant-del-bar", "equipo-nuevo-del-bar", "tpv", otra);
-					await reassignMainDevice(e.db, {
+					const codeHash = "huella-del-codigo";
+					await putDeviceOtp(e.db, {
+						licenseId: viejaId,
+						newDeviceId: "equipo-nuevo-del-bar",
+						codeHash,
+						expiresAtMs: Date.now() + 60_000,
+					});
+					const traslado = await trasladarLicencia(e.db, {
 						licenseId: viejaId,
 						fromDeviceId: EQUIPO,
 						toDeviceId: "equipo-nuevo-del-bar",
+						devicePubKey: otra,
+						tenantId: "tenant-del-bar",
+						codeHash,
 					});
+					expect(traslado.resultado).toBe("trasladada");
 				}
 				const nueva = await e.emitir(12);
 

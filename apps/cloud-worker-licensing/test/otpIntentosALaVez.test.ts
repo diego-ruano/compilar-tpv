@@ -29,11 +29,11 @@ import {
 	otpHash,
 } from "../src/domains/licensing/licensing.helpers";
 import {
-	consumeDeviceOtp,
 	devolverIntentoDeOtp,
 	issueLicense,
 	putDeviceOtp,
 	reservarIntentoDeOtp,
+	trasladarLicencia,
 } from "../src/server/licenseStore";
 
 vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
@@ -59,6 +59,7 @@ const ENV = {
 // AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
 const PUB_A = await clavePublica(1);
 const PUB_B = await clavePublica(2);
+const PUB_C = await clavePublica(3);
 const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
 /** La primera sentencia de cada tope: la reserva. */
@@ -475,7 +476,7 @@ describe("AUD-04 · las reservas del almacén", () => {
 		});
 	});
 
-	it("consumir sólo consume el código de la huella que se le pasa, y sólo si no ha caducado", async () => {
+	it("el traslado sólo gasta el código de la huella que se le pasa, y sólo si no ha caducado", async () => {
 		await conLicenciaActivada(async ({ licenseId, central }) => {
 			const reservar = () =>
 				reservarIntentoDeOtp(central.db, {
@@ -484,29 +485,55 @@ describe("AUD-04 · las reservas del almacén", () => {
 					ahoraMs: Date.now(),
 					maximo: OTP_MAX_ATTEMPTS,
 				});
+			const [{ tenant_id: tenantId }] = await filasDe(
+				central,
+				`SELECT tenant_id FROM licenses WHERE license_id = ?;`,
+				licenseId,
+			);
+			const trasladar = async (deviceId: string, devicePubKey: string, codeHash: string) =>
+				(
+					await trasladarLicencia(central.db, {
+						licenseId,
+						fromDeviceId: "equipo-a",
+						toDeviceId: deviceId,
+						devicePubKey,
+						tenantId,
+						codeHash,
+					})
+				).resultado;
+			/** Dónde está la licencia y qué equipos tiene la central: un traslado rechazado no toca nada. */
+			const comoEsta = async () => ({
+				main: (await filasDe(central, `SELECT main_device_id FROM licenses WHERE license_id = ?;`, licenseId))[0]
+					.main_device_id,
+				equipos: (await filasDe(central, `SELECT device_id FROM devices ORDER BY device_id;`)).map((f) => f.device_id),
+			});
 
 			await codigoConocido(central, licenseId, "equipo-b", "222222");
 			const reserva = await reservar();
 			expect(reserva?.codeHash).toBe(await otpHash("222222"));
 
-			// Entre la comparación y el consumo se pide otro código para el mismo equipo: con la huella
-			// del anterior no se consume nada, y el nuevo sigue vivo.
+			// Entre la comparación y el traslado se pide otro código para el mismo equipo: con la huella
+			// del anterior no se gasta nada ni se traslada, y el nuevo sigue vivo.
 			await codigoConocido(central, licenseId, "equipo-b", "333333");
-			expect(await consumeDeviceOtp(central.db, licenseId, "equipo-b", reserva!.codeHash)).toBe(false);
+			expect(await trasladar("equipo-b", PUB_B, reserva!.codeHash)).toBe("codigo_invalido");
 			expect(await codigoDe(central, licenseId, "equipo-b")).toEqual({ attempts: 0, consumido: false });
+			expect(await comoEsta()).toEqual({ main: "equipo-a", equipos: ["equipo-a"] });
 
-			// Un código caducado tampoco se consume, aunque la huella sea la suya.
+			// Un código caducado tampoco se gasta, aunque la huella sea la suya.
 			await codigoConocido(central, licenseId, "equipo-c", "444444", -1000);
-			expect(await consumeDeviceOtp(central.db, licenseId, "equipo-c", await otpHash("444444"))).toBe(false);
+			expect(await trasladar("equipo-c", PUB_C, await otpHash("444444"))).toBe("codigo_invalido");
 			expect((await codigoDe(central, licenseId, "equipo-c")).consumido).toBe(false);
+			expect(await comoEsta()).toEqual({ main: "equipo-a", equipos: ["equipo-a"] });
 
-			// Con la huella del código vivo sí, y una sola vez. `consumeDeviceOtp` no mira si quien
-			// llama reservó un intento: que a ella sólo se llegue con reserva lo fijan los casos de la
-			// ruta («el tope por código frena al sexto intento y el código bueno ya no se consume»).
+			// Con la huella del código vivo sí, y una sola vez: repetido, la licencia ya no está en el
+			// equipo del que se trasladaba. `trasladarLicencia` no mira si quien llama reservó un intento:
+			// que a ella sólo se llegue con reserva lo fijan los casos de la ruta («el tope por código
+			// frena al sexto intento y el código bueno ya no se consume»).
 			const nueva = await reservar();
-			expect(await consumeDeviceOtp(central.db, licenseId, "equipo-b", nueva!.codeHash)).toBe(true);
-			expect(await consumeDeviceOtp(central.db, licenseId, "equipo-b", nueva!.codeHash)).toBe(false);
-			// Y un código consumido no admite más reservas.
+			expect(await trasladar("equipo-b", PUB_B, nueva!.codeHash)).toBe("trasladada");
+			expect(await trasladar("equipo-b", PUB_B, nueva!.codeHash)).toBe("movida");
+			expect(await comoEsta()).toEqual({ main: "equipo-b", equipos: ["equipo-a", "equipo-b"] });
+			// Y un código gastado no admite más reservas.
 			expect(await reservar()).toBeNull();
 		});
 	});

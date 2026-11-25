@@ -23,6 +23,7 @@ import type { SqlSync } from "../../../lib/sql";
 import { acortarAMano, desrevocar, extenderAMano, revocarAMano } from "./administracion";
 import { canjearClave } from "./canje";
 import { emitirCobro, revertirCobro } from "./cobros";
+import { trasladarLicencia } from "./traslado";
 
 /**
  * Una operación de la central: recibe la base, sin esperas, y sus datos, y devuelve su resultado.
@@ -33,6 +34,7 @@ export type Operacion = (sql: SqlSync, datos: never) => unknown;
 
 export const OPERACIONES = {
 	canjearClave,
+	trasladarLicencia,
 	emitirCobro,
 	revertirCobro,
 	revocarAMano,

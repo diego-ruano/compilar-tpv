@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { centralDePrueba, filasDe, fotoDeLaCentral, operarConFallo, type CentralDePrueba } from "./helpers/central";
 import { cumplir, revertir } from "../src/domains/stripe/stripe.routes";
 import type { Operaciones } from "../src/server/central/operaciones/registro";
-import { activateLicenseFirstTime, claveNueva } from "../src/server/licenseStore";
+import { activateLicenseFirstTime, claveNueva, putDeviceOtp } from "../src/server/licenseStore";
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = { LICENSE_STORE_KEY: STORE_KEY } as any;
@@ -79,6 +79,32 @@ const CASOS = [
 			await activar(central, viva);
 			const [clave] = await comprar(central, "cs_clave");
 			return { claveId: clave, licenciaId: viva, deviceId: "equipo-del-bar", meses: 12, ahoraMs: Date.now() };
+		},
+	}),
+	caso({
+		que: "el traslado de una licencia a otro equipo con el código del correo",
+		nombre: "trasladarLicencia",
+		sentencias: 7,
+		async preparar(central) {
+			const [lic] = await comprar(central, "cs_traslado");
+			await activar(central, lic);
+			const codeHash = "huella-del-codigo";
+			await putDeviceOtp(central.db, {
+				licenseId: lic,
+				newDeviceId: "equipo-nuevo",
+				codeHash,
+				expiresAtMs: Date.now() + 60_000,
+			});
+			return {
+				licenciaId: lic,
+				deDeviceId: "equipo-del-bar",
+				aDeviceId: "equipo-nuevo",
+				devicePubKey: "clave-del-equipo-nuevo",
+				tenantId: "t-1",
+				codeHash,
+				swapId: crypto.randomUUID(),
+				ahoraMs: Date.now(),
+			};
 		},
 	}),
 	caso({
