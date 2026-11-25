@@ -1,11 +1,13 @@
 // src/server/licenseStore.ts
 //
 // Lo que el Worker lee y escribe en la base central (control-plane) sentencia a sentencia: las
-// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Lo que tiene
-// que entrar entero (el canje, el cobro y su reversión, lo que la administración hace con una
-// licencia) son operaciones de la central y vive en `server/central/operaciones/`, que corre dentro
-// de su objeto; las sentencias que comparten las dos partes salen de allí. Las reglas (¿está
-// caducada? ¿avisa? ¿bloquea?) NO están aquí: son de `licensing.helpers.ts` (`computeLicenseState`).
+// licencias, el OTP de cambio de dispositivo, los dispositivos y los eventos de webhook. Dos
+// sentencias fijas que tienen que entrar juntas van en un lote (el traslado de la Main y su traza,
+// `reassignMainDevice`). Lo que tiene que entrar entero y decide por el camino (el canje, el cobro y
+// su reversión, lo que la administración hace con una licencia) son operaciones de la central y vive
+// en `server/central/operaciones/`, que corre dentro de su objeto; las sentencias que comparten las
+// dos partes salen de allí. Las reglas (¿está caducada? ¿avisa? ¿bloquea?) NO están aquí: son de
+// `licensing.helpers.ts` (`computeLicenseState`).
 //
 // La estructura de esta base sólo la cambian sus migraciones (`server/central/migraciones/`).
 //
@@ -18,7 +20,7 @@ import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
-import type { Sql } from "../lib/sql";
+import type { Base, Sql } from "../lib/sql";
 import { COBROS_DE_LA_SESION } from "./central/operaciones/cobros";
 import {
 	addMonths,
@@ -389,27 +391,30 @@ export async function activateLicenseFirstTime(
 	return Number((r as any)?.rowsAffected ?? 0) > 0 ? expiresAt : null;
 }
 
-/** Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría. */
+/**
+ * Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría, en un solo lote: entran las
+ * dos o ninguna (E7a-1). Si la central falla, la licencia no queda en el equipo nuevo sin su traza, y
+ * la ruta no sigue hasta los avisos (al `TenantHub` y al titular).
+ */
 export async function reassignMainDevice(
-	db: Sql,
+	db: Pick<Base, "batch">,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
 ): Promise<void> {
 	const now = Date.now();
 
-	await exec(
-		db,
-		`UPDATE licenses SET main_device_id=?, updated_at_ms=? WHERE license_id=?;`,
-		[args.toDeviceId, now, args.licenseId],
-	);
-
-	await exec(
-		db,
-		`
+	await db.batch([
+		{
+			sql: `UPDATE licenses SET main_device_id=?, updated_at_ms=? WHERE license_id=?;`,
+			args: [args.toDeviceId, now, args.licenseId],
+		},
+		{
+			sql: `
     INSERT INTO license_device_swaps (swap_id, license_id, from_device_id, to_device_id, at_ms)
     VALUES (?, ?, ?, ?, ?);
     `,
-		[crypto.randomUUID(), args.licenseId, args.fromDeviceId, args.toDeviceId, now],
-	);
+			args: [crypto.randomUUID(), args.licenseId, args.fromDeviceId, args.toDeviceId, now],
+		},
+	]);
 }
 
 type LicensePaymentKind = "issue" | "renewal";
