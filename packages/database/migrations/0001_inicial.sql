@@ -1352,17 +1352,10 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- hosteleria esta en la lista del art. 4.2 y sube a 3.000. La AEAT lo valida en el servicio web
   -- (error 1150). Va aqui y no incrustado porque es un numero que la norma puede mover.
   Limite_Simplif INTEGER NOT NULL DEFAULT 300000 CHECK (typeof(Limite_Simplif) IN ('integer','null')),
-  -- 'produccion' | 'pruebas'. Cambia A LA VEZ el endpoint del servicio web y la URL del QR que se
-  -- imprime en el papel. Un ticket emitido en pruebas lleva un QR que apunta a prewww2.aeat.es: la
-  -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,
-  -- porque produccion y pruebas se distinguen en tres caracteres (www1 / prewww1).
+  -- 'produccion' | 'pruebas'. Decide la base de la URL de cotejo (QR_Url) que guarda cada registro
+  -- de facturacion. En esta rama no se cambia (ni pantalla ni ajuste, M-082): vale 'produccion'.
+  -- Con Veri*factu (rama con-verifactu) decide tambien el endpoint del servicio web de la AEAT.
   Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
-  -- MODO-PRUEBA (temporal): con 1, los cobros numeran en la serie PRUEBA y NO emiten registro de
-  -- facturacion: sin QR, sin envio a la AEAT y sin necesitar NIF ni certificado. Sirve para probar
-  -- el programa mientras Veri*factu no es obligatorio, y se quita entero antes de que lo sea (la
-  -- fecha, en docs/pendientes.md, VF-MODO-PRUEBA): un interruptor que deja de declarar ventas no
-  -- puede existir en un TPV que se venda.
-  Modo_Prueba INTEGER NOT NULL DEFAULT 0,
   -- RI-61: lo que dura una reserva que no elige su duracion (minutos), y que pasa cuando dos
   -- reservas de la misma mesa se pisan: 'avisar' (se guarda si quien reserva lo confirma) o
   -- 'prohibir'. Una comanda abierta en la mesa cuenta como ocupada desde que se abrio.
@@ -1670,9 +1663,6 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   Tipo_Huella           TEXT NOT NULL DEFAULT '01',
   Fecha_Hora_Huso       TEXT NOT NULL,
   Subsanacion           TEXT,
-  Rechazo_Previo        TEXT,
-  Sin_Registro_Previo   TEXT,
-  Subsana_ID_Registro   TEXT,
   Sistema_Json          TEXT NOT NULL,
   QR_Url                TEXT NOT NULL,
   Incidencia            TEXT NOT NULL DEFAULT 'N',
@@ -1684,8 +1674,6 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   CHECK (Tipo_Rectificativa IS NULL OR Tipo_Rectificativa IN ('S','I')),
   CHECK (Primer_Registro IS NULL OR Primer_Registro = 'S'),
   CHECK (Subsanacion IS NULL OR Subsanacion IN ('S','N')),
-  CHECK (Rechazo_Previo IS NULL OR Rechazo_Previo IN ('N','S','X')),
-  CHECK (Sin_Registro_Previo IS NULL OR Sin_Registro_Previo IN ('N','S')),
   CHECK (Macrodato IS NULL OR Macrodato IN ('N','S')),
   CHECK (Incidencia IN ('N','S')),
   CHECK (Tipo_Huella = '01')
@@ -1874,7 +1862,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
    16. Andamiaje LOCAL del dispositivo (prefijo `_`)
 
    Estado que describe lo que le pasa a ESTE equipo: que le falta por subir, que se
-   trajo, cuando corrio cada job, como va el envio a la AEAT. Nada de esto es un dato
+   trajo, cuando corrio cada job. Nada de esto es un dato
    de negocio y nada de esto viaja: sus escrituras van por `WriteGuard::raw()`, que no
    captura en `_Sync_Outbox`.
 
@@ -2032,61 +2020,6 @@ CREATE TABLE IF NOT EXISTS _Verificacion_Nube (
     Fallos INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO _Verificacion_Nube (Id, Fallos) VALUES (1, 0);
-
--- FISCAL-01 (Veri*factu): estado del envio a la AEAT.
---
--- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad
--- no esta en nuestra nube sino en la AEAT, a la que se le puede preguntar
--- (ConsultaFactuSistemaFacturacion). Replicarlo daria una respuesta que parece buena y no
--- lo es.
---
--- Estado:
---   PENDIENTE              -> generado, aun no aceptado por la AEAT.
---   ACEPTADO               -> EstadoRegistro 'Correcto' (o duplicado: ya lo teniamos alli).
---   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
---   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
-CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
-    ID_Registro       TEXT NOT NULL PRIMARY KEY,
-    Estado            TEXT NOT NULL,
-    Intentos          INTEGER NOT NULL DEFAULT 0,
-    Ultimo_Intento_Ms INTEGER,
-    Codigo_Error      TEXT,
-    Descripcion_Error TEXT,
-    CSV               TEXT,
-    Creado_En_Ms      INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_verifactu_envios_estado
-ON _Verifactu_Envios(Estado);
-
--- Anomalias de la cadena detectadas por la comprobacion previa del art. 7.i) de la Orden
--- HAC/1177/2024. Es estado LOCAL de diagnostico: describe lo que le ha pasado a ESTE
--- equipo.
---
--- No es el "registro de eventos" del RRSIF: ese solo es obligatorio para los SIF que pueden
--- actuar en modalidad NO VERI*FACTU, y este es SOLO VERI*FACTU (lo confirma la NOTA 1 del
--- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
--- una anomalia no se quede solo en un log que nadie abre.
-CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
-    ID_Anomalia     TEXT NOT NULL PRIMARY KEY,
-    Clase           TEXT NOT NULL,
-    Mensaje         TEXT NOT NULL,
-    ID_Registro     TEXT,
-    Detectada_En_Ms INTEGER NOT NULL,
-    Reconocida      INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_verifactu_anomalias_pend
-ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
-
--- Control de flujo obligatorio (art. 16.2 Orden HAC/1177/2024): el siguiente envio no puede
--- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
--- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
--- en cada respuesta (`TiempoEsperaEnvio`).
-CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
-    ID               INTEGER PRIMARY KEY CHECK (ID = 1),
-    Espera_Segundos  INTEGER NOT NULL DEFAULT 60,
-    Ultimo_Envio_Ms  INTEGER
-);
-INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
 
 -- Reservas desde la web (docs/estudios/reservas-web.md): los correos al cliente que esta Main ha
 -- pedido al cambiar o cancelar una reserva web y todavia no ha entregado al worker. Los saca el

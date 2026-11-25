@@ -127,7 +127,7 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   es escritura lo decide la cabeza de la sentencia **sin los comentarios de delante**
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
-- **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
+- **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`,
   `_Backfill_Historico`, `_Recovery_State`, `_Verificacion_Nube`, `_Negocio`, el backfill. Por
   `execute()` se replicaría a la nube.
 - **Lo que sube tiene que caber en el SQLite del DO**, que admite 100 parámetros y 100 KB por

@@ -397,6 +397,32 @@ mod tests {
         assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reserva_Web_Franjas;"), 1);
     }
 
+    /// M-086: el esquema de `main` no trae lo de Veri\*factu que sólo usaba la remisión a la AEAT
+    /// (la cola de envío, las anomalías, el control de flujo, las marcas de una subsanación de un
+    /// rechazo y el modo prueba). Vuelven con la rama `con-verifactu` (VF-VUELTA).
+    #[test]
+    fn el_esquema_no_trae_lo_de_la_remision_a_la_aeat() {
+        let (conn, _dir) = open_temp();
+        run(&conn).unwrap();
+        assert_eq!(
+            scalar_i64(&conn, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '\\_Verifactu\\_%' ESCAPE '\\';"),
+            0,
+            "las tablas _Verifactu_* son de la remisión a la AEAT"
+        );
+        for (tabla, columna) in [
+            ("Registros_Facturacion", "Rechazo_Previo"),
+            ("Registros_Facturacion", "Sin_Registro_Previo"),
+            ("Registros_Facturacion", "Subsana_ID_Registro"),
+            ("Business_Settings", "Modo_Prueba"),
+        ] {
+            let n = scalar_i64(
+                &conn,
+                &format!("SELECT COUNT(*) FROM pragma_table_info('{tabla}') WHERE name = '{columna}';"),
+            );
+            assert_eq!(n, 0, "{tabla}.{columna} es de la remisión a la AEAT");
+        }
+    }
+
     /// 1) Creación limpia: BD vacía → se construye el esquema y quedan registradas todas las
     ///    migraciones, cada una con su hash SHA-256 y timestamp > 0.
     #[test]
@@ -636,7 +662,7 @@ mod tests {
         (
             "Business_Settings",
             &[
-                "Modo_Prueba", "Reserva_Duracion_Min", "Reserva_Web_Activa", "Reserva_Web_Dias_Min",
+                "Reserva_Duracion_Min", "Reserva_Web_Activa", "Reserva_Web_Dias_Min",
                 "Reserva_Web_Dias_Max", "Reserva_Web_Margen_Min", "Reserva_Web_Margen_Plazas",
                 "Reserva_No_Vino_Min",
             ],

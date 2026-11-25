@@ -66,6 +66,12 @@ reversión vuelve a usar; hay que volver a ponerlo al traer la rama:
   (`configuracion.schemas.ts`) (M-082). Sin `es_pruebas` la reversión no compila; sin el campo
   compila, pero el cambio de entorno de `Fiscal.tsx` lo rechazan `deny_unknown_fields` y el
   `.strict()` del worker.
+- El esquema de la remisión (M-086), que la retirada no tocó y la reversión no repone: las tablas
+  `_Verifactu_Envios`, `_Verifactu_Anomalias` y `_Verifactu_Flujo` y las columnas
+  `Rechazo_Previo`, `Sin_Registro_Previo` y `Subsana_ID_Registro` de `Registros_Facturacion`, tal
+  como están en la `0001` de `con-verifactu`. Va en la `0001` o en una migración nueva según haya ya
+  negocios, con lo que pide [esquema.md](arquitectura/esquema.md). Una base de `con-verifactu` no
+  abre en esta rama ni al revés: las dos `0001` ya no son la misma.
 
 Con él vuelve lo que estaba pendiente allí:
 
@@ -73,13 +79,14 @@ Con él vuelve lo que estaba pendiente allí:
   el productor será un autónomo o una sociedad, y confirmar `PRODUCTOR_NOMBRE_RAZON`,
   `PRODUCTOR_NOMBRE_SISTEMA` y `PRODUCTOR_ID_SISTEMA`.
 - **El texto de la declaración responsable** (art. 13 RRSIF), que es un borrador.
-- **Quitar el modo prueba**, que vuelve con la reversión.
+- **Quitar el modo prueba**, que vuelve con la reversión. Su columna, `Business_Settings.Modo_Prueba`,
+  ya no está en el esquema (M-086): el código que la lee falla hasta que se quite.
 - **Qué se hace con lo emitido en esta rama.** Esos registros tienen su huella y su QR, pero no fila
   en `_Verifactu_Envios`: tras revertir, `resembrar_cola_de_envio` los encolaría todos para remitir.
   Hay que decidir entonces si se remiten.
-- **`Registros_Facturacion.Sin_Registro_Previo`**: `verifactu.rs` la lee y la lleva al XML, pero
-  ningún camino la rellena. Decidir cuándo vale `S` (la anulación de un registro que nunca llegó a
-  la AEAT) o quitarla.
+- **`Registros_Facturacion.Sin_Registro_Previo`**: en `con-verifactu`, `verifactu.rs` la lee y la
+  lleva al XML, pero ningún camino la rellena. Al volver a poner la columna, decidir cuándo vale
+  `S` (la anulación de un registro que nunca llegó a la AEAT) o dejarla fuera.
 
 La fecha la anunció Hacienda el 5 de octubre de 2026
 ([nota informativa](https://www.hacienda.gob.es/sgt/gabsehacienda/nota-informativa-verifactu.pdf)):

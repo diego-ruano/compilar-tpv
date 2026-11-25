@@ -960,9 +960,8 @@ impl Db {
         // nuevas y pone al día las existentes. Ver `migrations.rs`.
         //
         // Aquí ya NO se crea nada más a mano. El andamiaje local del dispositivo (`_Sync_*`,
-        // `_Jobs_State`, `_Verifactu_*`, `_Recovery_State`, `_Backfill_Historico`,
-        // `_Verificacion_Nube`) vive en §16 del
-        // `0001`, con el resto del esquema: dos funciones que creaban tablas por su cuenta eran un
+        // `_Jobs_State`, `_Recovery_State`, `_Backfill_Historico`, `_Verificacion_Nube`) vive en §16
+        // del `0001`, con el resto del esquema: dos funciones que creaban tablas por su cuenta eran un
         // segundo esquema, sin versión, sin hash y fuera del snapshot anti-drift.
         crate::migrations::run(&write_conn)?;
 
