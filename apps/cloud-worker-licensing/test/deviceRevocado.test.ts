@@ -21,7 +21,7 @@ import {
 	type CentralDePrueba,
 } from "./helpers/central";
 import type { SentenciaEnlazada } from "../src/durableObjects/baseCentral.rpc";
-import { estaRevocado, tieneRol } from "../src/lib/deviceAuth";
+import { cargarDevice, estaRevocado, normalizarRol } from "../src/lib/deviceAuth";
 import { verifyDeviceProofOrThrow } from "../src/server/middleware/auth";
 import { ensureDevice } from "../src/server/licenseStore";
 
@@ -90,17 +90,25 @@ describe("criterio único de revocación", () => {
 		expect(estaRevocado({ revoked_at_ms: 1782219539854 })).toBe(true);
 	});
 
-	it("un dispositivo revocado no tiene rol para nadie", async () => {
+	// Lo que pregunta el middleware que firma las peticiones (`verifyDeviceProofOrThrow`): cargar la
+	// fila sin filtrar, mirar la revocación y luego el rol.
+	it("un dispositivo revocado no tiene rol para nadie: se carga, pero cuenta como revocado", async () => {
 		const { db } = await centralConUnDispositivo("tpv", { revocado: true });
 
-		expect(await tieneRol(db, "t1", "d1", "tpv")).toBe(false);
+		const fila = await cargarDevice(db, "t1", "d1");
+		expect(fila).not.toBeNull();
+		expect(estaRevocado(fila!)).toBe(true);
 	});
 
 	it("y uno vivo sí, sin que una mayúscula lo estropee", async () => {
 		// La base sólo admite `tpv` y `handy`: la mayúscula la pone el stub en lo que contesta.
 		const { db } = await centralConUnDispositivo("tpv", { contestar: "TPV" });
 
-		expect(await tieneRol(db, "t1", "d1", "tpv")).toBe(true);
+		const fila = await cargarDevice(db, "t1", "d1");
+		expect(fila).not.toBeNull();
+		expect(estaRevocado(fila!)).toBe(false);
+		expect(fila!.role).toBe("TPV");
+		expect(normalizarRol(fila!.role)).toBe("tpv");
 	});
 });
 

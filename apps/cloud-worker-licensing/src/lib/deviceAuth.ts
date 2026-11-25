@@ -22,9 +22,6 @@
 
 import type { Base } from "./sql";
 
-import type { Env } from "../env";
-import { getDb } from "../server/db";
-
 /**
  * Fragmento SQL del WHERE: "este dispositivo no está revocado".
  *
@@ -85,36 +82,4 @@ export async function cargarDevice(
 		device_pubkey_b64:
 			row.device_pubkey_b64 == null ? null : String(row.device_pubkey_b64),
 	};
-}
-
-/**
- * ¿Existe el dispositivo, sigue vivo y tiene exactamente este rol?
- *
- * Es la pregunta que hacían por su cuenta —cada una con su propio SQL— las seis copias de
- * `isTpvDevice`/`isMainDevice` repartidas por pairing y dominios.
- */
-export async function tieneRol(
-	db: Base,
-	tenantId: string,
-	deviceId: string,
-	rol: "tpv" | "handy",
-): Promise<boolean> {
-	const fila = await cargarDevice(db, tenantId, deviceId);
-	if (!fila) return false;
-	if (estaRevocado(fila)) return false;
-
-	return normalizarRol(fila.role) === rol;
-}
-
-/**
- * Devuelve `true` si el dispositivo (tenant_id + device_id) está emparejado con
- * rol `tpv` y no ha sido revocado. Usado para restringir endpoints que solo la
- * Main debe consumir.
- */
-export async function isTpvDevice(
-	env: Env,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	return tieneRol(getDb(env), tenantId, deviceId, "tpv");
 }
