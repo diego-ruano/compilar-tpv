@@ -534,7 +534,8 @@ llamada escribe después) y `test/elHubPuedeHibernar.test.ts`.
   en `server/central/migraciones.ts` (`MIGRACIONES_DE_LA_CENTRAL`): el bundler no recoge una carpeta
   entera. `scripts/check-migration-registry.mjs` comprueba en CI que la carpeta y el registro
   coinciden y que ninguna abre o cierra transacciones. La primera, `0001_inicial.sql`, es el esquema
-  entero.
+  de partida; las siguientes lo amplían (`0002_avisos_enviando.sql`: la marca «enviando» de los
+  avisos de caducidad).
 - Las aplica el objeto con el mismo runner que la base de cada negocio
   (`sqliteDelObjeto.ts::migrarBase`, [esquema.md](esquema.md#cómo-se-aplica)): cada una en su
   transacción, con las claves foráneas apagadas alrededor de la tanda y `foreign_key_check` antes de
