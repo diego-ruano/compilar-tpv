@@ -152,7 +152,7 @@ const CARACTERES_POR_LOTE = 4 * 1024 * 1024;
  * La copia de un negocio hecha por un worker anterior a `SALTOS_CON_CHAR` escribe con `char(10)` todos
  * los saltos de línea de un texto, 14 caracteres cada uno: si una fila suya lleva más de 1,27 millones
  * (o es de 8 MB y lleva más de unos 726.000), su línea pasa del tope, y esa copia no se restaura
- * (COPIAS-SALTOS, en docs/pendientes.md).
+ * (COPIAS-SALTOS: decidido así; leerla sin juntar la línea entera sería otro lector).
  */
 export const CARACTERES_POR_LINEA = 17 * 1024 * 1024;
 

@@ -33,7 +33,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [AVISO-CADUCIDAD](#aviso-caducidad--un-aviso-de-caducidad-que-no-sale-nunca) | 🔵 | Un fallo de la central alrededor de la marca de un aviso de caducidad deja ese aviso sin salir | Sin hacer |
 | [MAX-MENSAJE](#max-mensaje--el-tope-de-un-mensaje-de-la-main-por-debajo-de-lo-que-admite-la-base) | 🔵 | Una operación de la Main con un valor de entre 4 y 8 MB se rechaza aunque la base la admite | Lo decide el responsable |
 | [RESTAURAR-CONTRAPRESION](#restaurar-contrapresion--la-descompresión-de-una-copia-no-espera-a-la-carga) | 🔵 | Al restaurar una copia, lo descomprimido se acumula si la carga va más despacio que R2 | Medir en producción |
-| [COPIAS-SALTOS](#copias-saltos--copias-de-negocio-de-antes-con-muchos-saltos-en-una-fila) | 🔵 | Una copia de negocio de antes con más de 1,27 millones de saltos en una fila no se restaura | Se van con las copias nuevas; las de un negocio que ya no copia, no |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker-y-la-autoría-ri-28-aud) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable; con RI-28-AUD (autoría de apertura/líneas y tareas ajenas) | Aplazado; se hacen juntos más adelante |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
@@ -465,21 +464,6 @@ sonda no se ha quedado en el repositorio. Lo que ya está en el código: si la c
 final (una copia que no vale, unas filas que SQLite no acepta), se cancelan la lectura y la
 descompresión (`cargarCopia` cierra el iterador, y `lineasDe` cancela la copia). Falta medir una restauración grande en producción; si se
 confirma, descomprimir a demanda (pidiendo a R2 sólo cuando se ha cargado lo anterior).
-
-### COPIAS-SALTOS · Copias de negocio de antes con muchos saltos en una fila
-
-Las copias diarias de negocio que hizo el worker antes de `SALTOS_CON_CHAR` (`volcadoSql.ts`) escriben
-cada salto de línea de un texto como `'||char(10)||'`, 14 caracteres. Una fila con más de 1,27
-millones de saltos (o de 8 MB con más de unos 726.000) da una línea de más de 17 MiB
-(`CARACTERES_POR_LINEA`, `cargaDeCopias.ts`), y esa copia no se restaura (`copia_no_valida: la línea N
-es demasiado larga`); el worker de antes tampoco la restauraba. Lo fija `test/cargaDeCopias.test.ts`
-(«la de una copia de un negocio de antes de SALTOS_CON_CHAR…»). Esas copias se van a medida
-que cada negocio sube copias nuevas: al subir una se borran las que pasan de las 30 últimas
-(`COPIAS_QUE_SE_GUARDAN`, `tenantHub.copia.ts::subirCopia`), salvo las que proteja una subida
-completa sin terminar (`copiasProtegidasDesde`). Las de un negocio que ya no hace copias (retirado, o
-cuyo objeto se ha perdido, que es cuando se restaura una vieja) no se van nunca
-([COPIAS-RETENCION](#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca)).
-Leerlas sin juntar la línea entera sería otro lector.
 
 ---
 
