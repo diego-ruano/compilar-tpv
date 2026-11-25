@@ -2491,8 +2491,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         .typ::<tpv_contracts::socket_handy::AvisoSocketHandy>()
         .typ::<tpv_contracts::sync::SqlStatement>()
         .typ::<tpv_contracts::sync::SyncChange>()
-        .typ::<tpv_contracts::sync::ApplySyncChangesArgs>()
-        .typ::<tpv_contracts::sync::AplicacionSync>()
         .typ::<tpv_contracts::sync::OutboxEntry>()
         .typ::<tpv_contracts::sync::OutboxFallo>()
         .typ::<tpv_contracts::sync::BootstrapTabla>()

@@ -82,33 +82,12 @@ export type ApiSignedHeaders = {
 	xDeviceSig: string,
 };
 
-/**
- *  Resultado de aplicar un lote de cambios.
- *
- *  Lo importante es `aplicadas`: los `op_id` que se aplicaron **de verdad**. El frontend reacciona
- *  (invalidar caché, recargar el POS, releer ajustes) sólo a esos. Antes reaccionaba a todo lo que
- *  RECIBÍA, incluidas sus propias operaciones que vuelven de la nube y las que el gate de
- *  idempotencia descarta — así que una sola vuelta del catch-up recargaba media aplicación sin que
- *  nada hubiera cambiado, y en el caso de los ajustes eso realimentaba un bucle.
- */
-export type AplicacionSync = {
-	/**  `op_id` de las operaciones aplicadas en esta llamada (sin las ya aplicadas ni las saltadas). */
-	aplicadas: string[],
-	/**  Checkpoint local tras el lote (último `seq` aplicado). */
-	last_seq: number,
-};
-
 /**  Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri. */
 export type AppErrorDto = {
 	/**  Código estable. Es lo único por lo que se debe ramificar. */
 	code: ErrorCode,
 	/**  Texto diagnóstico, legible. Se muestra y se registra; nunca se compara. */
 	message: string,
-};
-
-/**  Args del comando que aplica un lote de cambios en orden de `seq`. */
-export type ApplySyncChangesArgs = {
-	changes: SyncChange[],
 };
 
 export type AsignacionCreateInput = {

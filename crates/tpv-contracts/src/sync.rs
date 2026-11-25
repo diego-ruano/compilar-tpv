@@ -23,27 +23,6 @@ pub struct SyncChange {
     pub statements: Vec<SqlStatement>,
 }
 
-/// Args del comando que aplica un lote de cambios en orden de `seq`.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct ApplySyncChangesArgs {
-    pub changes: Vec<SyncChange>,
-}
-
-/// Resultado de aplicar un lote de cambios.
-///
-/// Lo importante es `aplicadas`: los `op_id` que se aplicaron **de verdad**. El frontend reacciona
-/// (invalidar caché, recargar el POS, releer ajustes) sólo a esos. Antes reaccionaba a todo lo que
-/// RECIBÍA, incluidas sus propias operaciones que vuelven de la nube y las que el gate de
-/// idempotencia descarta — así que una sola vuelta del catch-up recargaba media aplicación sin que
-/// nada hubiera cambiado, y en el caso de los ajustes eso realimentaba un bucle.
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct AplicacionSync {
-    /// `op_id` de las operaciones aplicadas en esta llamada (sin las ya aplicadas ni las saltadas).
-    pub aplicadas: Vec<String>,
-    /// Checkpoint local tras el lote (último `seq` aplicado).
-    pub last_seq: i64,
-}
-
 /// Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct OutboxEntry {
