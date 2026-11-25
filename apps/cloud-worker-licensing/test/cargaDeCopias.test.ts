@@ -474,7 +474,7 @@ describe("las líneas de una copia (lineasDe)", () => {
 			await new Promise((r) => setTimeout(r, 300));
 			adelanto = Math.max(adelanto, pedido.bytes - leido);
 		}
-		await lineas.return?.();
+		await lineas.return(undefined);
 		await vi.waitFor(() => expect(pedido.cancelado).toBe(true));
 		expect(adelanto).toBeLessThan(ADELANTO_MAXIMO);
 	});
