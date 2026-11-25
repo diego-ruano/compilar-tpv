@@ -12,6 +12,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LEGAL-01](#legal-01--rgpd) | 🟠 | Papeleo RGPD de encargado del tratamiento | Sin empezar |
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
+| [COBRO-RUTAS](#cobro-rutas--las-rutas-de-cobro-del-worker-no-las-llama-nadie) | 🔵 | Las rutas de cobro del worker (`cobrar-detalles`, `cobrar-fraccionado`) ya no tienen cliente | Lo decide el responsable |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [CENTRAL-RETENCION](#central-retencion--nada-purga-webhook_events-ni-admin_audit) | 🟡 | Nada purga `webhook_events` ni `admin_audit` de la base central | Sin decidir |
 | [COPIAS-RETENCION](#copias-retencion--las-copias-de-un-negocio-que-ya-no-copia-no-se-borran-nunca) | 🟡 | Las copias de un negocio retirado o cuyo objeto se ha perdido no se borran nunca | Lo decide el responsable |
@@ -576,3 +577,14 @@ Opciones, de menos a más ambiciosas:
 
 Decisión: refactor gradual después del lanzamiento, por (2) y luego (3) si la duplicación sigue
 doliendo.
+
+### COBRO-RUTAS · Las rutas de cobro del worker no las llama nadie
+
+`POST /v1/mesas/cobrar-detalles` y `POST /v1/venta-rapida/cobrar-fraccionado` siguen en el worker
+detrás de `soloLaMainCobra`, pero no tienen cliente: la Main cobra en su SQLite y la Handy contesta
+`cobro_solo_en_main` sin salir a la red (M-083, `tpv-infra-http`). Con ellas viven sus comandos
+(`cobrarDetalles`, `cobrarFraccionado`), sus planes, sus schemas con su drift-guard, los casos de
+`tests/contract/casos/mesas/cobrar_detalles_*` y `venta_rapida/cobro_fraccionado_*` del arnés del
+worker, las dos rutas en `cobroSoloMain` y `vetoAntesDelCuerpo`, y la de mesa en `rolEnLaIdentidad`. Quitarlas deja
+el cobro sin su segunda implementación (ARCH-01) y esos tests sin objeto; mantenerlas es código que
+sólo ejercitan los tests. Lo decide el responsable.
