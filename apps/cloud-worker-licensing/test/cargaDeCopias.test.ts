@@ -13,7 +13,10 @@
 //     función, una subconsulta, varias filas, una columna que no es de la tabla, un número que SQLite
 //     guardaría como infinito…) hace inservible la copia: dice en qué línea y carácter y por qué, sin
 //     nada de lo que lleva, y no se ejecuta nada;
+//   · una línea que se lee y acaba en CR (fines de línea de Windows) lo dice, y no que la copia sea
+//     de otra versión; en el esquema, que no se lee, no estorba;
 //   · una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido;
+//   · si la carga se para antes del final, deja de leer la copia y de pedirla;
 //   · las líneas del gzip (`lineasDe`): la de la fila más grande que admite un objeto en producción,
 //     como la escribe hoy la copia, sale entera, y una más larga que el tope hace inservible la copia
 //     en cuanto se pasa, sin esperar a su final. También la de una copia de un negocio de antes, con
@@ -178,6 +181,33 @@ describe("el cargador de las copias", () => {
 		const { filas, ...resto } = r as { filas?: { b: string; ld: number }[] };
 		expect(resto).toEqual({ cargada: { filas: 1, tablas: 1 } });
 		expect(filas?.map((f) => [f.b === texto, f.ld])).toEqual([[true, 3]]);
+	});
+
+	it("una línea que se lee y acaba en CR dice que la copia tiene fines de línea de Windows; en el esquema, que no se lee, no estorba", async () => {
+		const crlf = (n: number) =>
+			`copia_no_valida: la línea ${n} acaba en CR: la copia tiene fines de línea de Windows (CRLF); conviértela a LF`;
+		const bien = linea("1", "1", "'bien'", "NULL", "NULL", "NULL");
+		expect(await cargar([bien, `${bien}\r`])).toMatchObject({ error: crlf(5), enT: 0 });
+
+		const { stub } = centralSinAprovisionar();
+		const cargarLineas = (lineas: string[]) =>
+			runInDurableObject(stub, async (_objeto, state) => {
+				await state.storage.deleteAll();
+				return cargarCopia(state.storage, (async function* () { yield* lineas; })(), {
+					migraciones: ["m1"],
+					esTablaDeLaCopia: (t) => t === "t",
+					prepararBase: async () => {
+						state.storage.sql.exec(TABLA);
+					},
+				}).catch((e) => String((e as Error).message));
+			});
+		const fin = "-- Fin de la copia: 1 filas en 1 tablas";
+		expect(await cargarLineas(["-- Copia de prueba", "-- Migraciones: m1\r", bien, fin])).toBe(crlf(2));
+		// Un CREATE con sus saltos de Windows dentro, como lo deja un volcado de una base que los traía.
+		expect(await cargarLineas(["-- Copia de prueba", "-- Migraciones: m1", "CREATE TABLE t (\r", "  id INTEGER PRIMARY KEY\r", ");", bien, fin])).toEqual({
+			filas: 1,
+			tablas: 1,
+		});
 	});
 
 	it("una fila que SQLite no acepta dice en qué líneas de la copia y de qué tabla, sin su contenido", async () => {

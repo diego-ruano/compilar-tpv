@@ -86,6 +86,22 @@ function filaInservible(numero: number, caracter: number, motivo: MotivoDeFila):
 }
 
 /**
+ * Que una línea que se lee (la de las migraciones, una de datos) no acabe en CR, el `\r` que queda de
+ * una copia con fines de línea de Windows (CRLF) partida por los `\n`. Sin esto se diría otra cosa:
+ * que la copia es de otra versión (el `\r` se pega al nombre de la última migración) o que a una fila
+ * le sobra texto. Las líneas que no se leen, como las del esquema, no se miran: un CREATE con sus
+ * saltos de Windows dentro, como lo deja un volcado de una base que los traía, no estorba.
+ */
+function sinCr(linea: string, numero: number): void {
+	if (linea.endsWith("\r")) {
+		throw new CopiaInservible(
+			"copia_no_valida",
+			`la línea ${numero} acaba en CR: la copia tiene fines de línea de Windows (CRLF); conviértela a LF`,
+		);
+	}
+}
+
+/**
  * Cuánto entra por transacción: las líneas que se juntan, en caracteres (unos 8 MB en memoria). Entre
  * lote y lote se espera a R2, y cada espera con algo escrito confirma lo escrito, que es lo que más
  * cuesta: con lotes de 500 filas, restaurar 150.000 tarda tres veces más.
@@ -571,6 +587,7 @@ async function cargarDe(storage: DurableObjectStorage, iterador: AsyncIterator<s
 		const { value, done } = await siguiente();
 		if (done) throw new CopiaInservible("copia_cortada", "sin datos");
 		if (value.startsWith(LINEA_MIGRACIONES)) {
+			sinCr(value, numero);
 			migraciones = value.slice(LINEA_MIGRACIONES.length).split(",").filter(Boolean);
 			break;
 		}
@@ -626,6 +643,7 @@ async function cargarDe(storage: DurableObjectStorage, iterador: AsyncIterator<s
 				continue;
 			}
 			if (!linea.startsWith(PRINCIPIO_DE_INSERT)) continue;
+			sinCr(linea, numero);
 			const fila = lector.leer(linea, numero);
 			lote.push(fila);
 			caracteresDelLote += linea.length;
