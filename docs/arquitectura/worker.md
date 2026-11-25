@@ -1001,15 +1001,20 @@ central con datos malos no se restaura: [vuelve a un instante](#volver-a-un-inst
   mientras entran las filas.
 - **En este orden**: vacía el objeto (`deleteAll`) y pone la marca de restauración; mira que la copia
   sea de un esquema que este worker sabe poner (sus migraciones, un principio de las de aquí); pone
-  ese esquema con las migraciones de la copia; ejecuta sólo sus `INSERT`, en tablas de la base (una
-  de otra tabla la hace inservible) y en lotes de unos 4 millones de caracteres por transacción; mira
-  que esté entera (su línea del fin, con las mismas filas) y que no deje ninguna clave foránea rota;
-  aplica sobre sus datos las migraciones que le falten, y quita la marca en la misma transacción que
-  da la central por buena.
+  ese esquema con las migraciones de la copia; carga sus filas, en tablas de la base y en lotes de
+  unos 4 millones de caracteres por transacción, sin ejecutar ningún texto de la copia: cada línea de
+  datos se lee entera con la gramática cerrada del cargador (`INSERT INTO "<tabla>" ("<columna>", …)
+  VALUES (<literal>, …);` y nada más, como la de [un negocio](#las-copias-de-la-base-de-cada-negocio-do-03)),
+  y se ejecuta la sentencia que escribe él con lo leído (una línea que no se lee así, o de otra
+  tabla, la hace inservible); mira que esté entera (su línea del fin, con las mismas filas) y que no
+  deje ninguna clave foránea rota; aplica sobre sus datos las migraciones que le falten, y quita la
+  marca en la misma transacción que da la central por buena.
 - **Si falla, como estaba**: vacía el objeto entero, marca incluida, y contesta
   `central_copia_inservible` con el motivo (`copia_no_encontrada`, `copia_no_valida`, `copia_cortada`,
   `copia_de_otra_version`, o que no se ha podido cargar, que va además a Sentry: `central.restaurar`).
-  El motivo dice en qué líneas y de qué tabla, nunca lo que llevan.
+  El motivo no lleva nada de la copia: de una línea que no se lee, su número, el carácter y un código
+  (`tabla_ajena`, `columna_desconocida`, `valor_no_literal`…); de unas filas que SQLite no acepta, sus
+  líneas, sus tablas y el código de SQLite, cuyo texto va sólo a Sentry, como causa.
 - **Si el objeto se reinicia a mitad**, al arrancar la marca sigue ahí: no atiende
   (`central_restauracion_a_medias`) ni se pone al día con sus migraciones, y la siguiente restauración
   empieza vaciándolo.

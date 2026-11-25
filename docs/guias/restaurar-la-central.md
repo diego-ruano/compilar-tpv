@@ -81,8 +81,9 @@ pnpm central:aprovisionar -- --copia base-central/<nombre>.sql.gz --si
 - Vacía el objeto, carga la copia entera de una vez, sin atender nada mientras tanto, y le aplica
   las migraciones que le falten. Contesta las filas y las tablas que han entrado y las migraciones.
 - **Si la copia no vale** (no existe, está cortada, es de una versión que este worker no sabe poner,
-  deja una clave foránea rota…), contesta `central_copia_inservible` con el motivo, y el objeto se
-  queda como estaba, sin aprovisionar: prueba con otra.
+  tiene una línea que no es una fila, deja una clave foránea rota…), contesta
+  `central_copia_inservible` con el motivo, que no lleva nada de la copia, y el objeto se queda como
+  estaba, sin aprovisionar: prueba con otra.
 - **Si se corta a mitad** (el objeto se reinicia), se queda con la marca de la restauración a medias y
   no atiende (`central_restauracion_a_medias`). Repite la orden: la siguiente restauración lo vacía y
   empieza de nuevo.
@@ -170,11 +171,19 @@ copia ([worker.md](../arquitectura/worker.md#la-copia-diaria)):
 - En la cabecera, entre los comentarios del principio, la línea de las migraciones con las que se
   hizo, en orden y separadas por comas: `-- Migraciones: 0001_inicial.sql`. Tienen que ser las de
   este worker o un principio de ellas.
-- Una sentencia por línea, `INSERT INTO "<tabla>" (<columnas>) VALUES (…);`, sólo en tablas de la
-  central y con los valores escritos como los escribe la copia (`volcadoSql.ts::literalEnUnaLinea`:
-  un salto de línea dentro de un texto, como `char(10)`). Las demás líneas se leen y no se ejecutan:
-  el esquema lo ponen las migraciones. Un `INSERT` con otra forma (sin comillas en la tabla, o sin
-  columnas, como los de `sqlite3 .dump`) tampoco se ejecuta: hay que convertirlo.
+- Una fila por línea, exactamente `INSERT INTO "<tabla>" ("<columna>", …) VALUES (<valor>, …);`: la
+  tabla y las columnas entre comillas dobles, separadas por una coma y un espacio, y nada detrás del
+  `;`. La tabla, de la central; las columnas, de esa tabla y sin repetir, y un valor por columna,
+  escrito como lo escribe la copia (`volcadoSql.ts::literalEnUnaLinea`): `NULL`, un número (`-3`,
+  `12.5`, `1e+21`), un texto entre comillas simples con la comilla doblada (`'Ana O''Neil'`), uno con
+  saltos de línea como `('a'||char(10)||'b')`, unos bytes en hexadecimal (`X'00ff'`) o un texto en
+  hexadecimal (`CAST(X'…' AS TEXT)`). De la copia no se ejecuta nada: el cargador lee cada fila y
+  escribe él la sentencia. Una línea que empieza por `INSERT INTO "` y no se lee así hace inservible
+  la copia (`copia_no_valida`, con su número, el carácter y un código: `tabla_ajena`,
+  `columna_desconocida`, `valor_no_literal`…).
+- Las líneas que no empiezan por `INSERT INTO "` no se cargan: el esquema lo ponen las migraciones.
+  Tampoco un `INSERT` sin comillas en la tabla, como los de `sqlite3 .dump`, que además no llevan las
+  columnas: hay que convertirlo.
 - Al final, la línea del fin, con las filas que trae: `-- Fin de la copia: <N> filas en <T> tablas`.
   Sin ella, o con otro número, está cortada.
 
