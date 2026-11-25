@@ -4,7 +4,6 @@ import { createBrowserRouter } from "react-router-dom";
 import App from "./App";
 import VentaRapida from "./pages/VentaRapida";
 import Mesas from "./pages/Mesas";
-import Logout from "./pages/Logout";
 import NotFound from "./pages/errorPages/NotFound";
 
 // RI-23: sólo las pantallas de servicio forman parte del arranque. Sus imports estáticos
@@ -41,8 +40,6 @@ export const appRouter = createBrowserRouter([
             { path: "Cuentas", lazy: pantalla(() => import("./pages/Cuentas")) },
             { path: "Notificaciones", lazy: pantalla(() => import("./pages/Notificaciones")) },
             { path: "Configuracion", lazy: pantalla(() => import("./pages/Configuracion")) },
-
-            { path: "Logout", element: <Logout /> },
         ],
     },
     { path: "*", element: <NotFound /> },
